@@ -62,7 +62,7 @@ Update status is a text notice in the Baseboard, the always-visible bottom strip
 | No pending update | — (`installPendingUpdate` not called) |
 | Vite dev mode | Skips `install()`, which would replace the dev executable directory |
 
-**The app relaunches only on a restart** (`docs/specs/standalone.md` → "Restart"), which Vite dev mode refuses — except that a Windows install always relaunches, by NSIS (`/R`).
+**The app relaunches only on a restart** (`docs/specs/standalone.md` → "Restart"), which a debug build refuses — except that a Windows install always relaunches, by NSIS (`/R`).
 
 ## localStorage
 

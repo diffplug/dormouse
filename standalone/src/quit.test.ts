@@ -73,7 +73,7 @@ const oneNotedSurface = () => ["pane-a"];
 // (`quit-cancelled`), and walks them one at a time (`quit-teardown`).
 const listeners = new Map<string, (event: { payload?: unknown }) => void>();
 const fire = (event: string, payload?: unknown) => listeners.get(event)?.({ payload });
-const quitRequested = () => fire("dormouse://quit-requested", { restart: false });
+const quitRequested = () => fire("dormouse://quit-requested", { restart: false, requester: null });
 const quitTeardown = (last = true) => fire("dormouse://quit-teardown", { last });
 const quitCancelled = () => fire("dormouse://quit-cancelled");
 const voted = () => mocks.invoke.mock.calls.some((call) => call[0] === "quit_vote");

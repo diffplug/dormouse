@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
-import type { UpdateBannerState } from './UpdateBanner';
 
 // --- Mocks ---
 
@@ -63,7 +62,7 @@ import {
   restartToUpdate,
   _resetForTesting,
 } from './updater';
-import { UpdateBanner } from './UpdateBanner';
+import { UpdateBanner, type UpdateBannerState } from './UpdateBanner';
 
 function readBannerState(): UpdateBannerState {
   let state!: UpdateBannerState;

@@ -321,7 +321,7 @@ describe('dor app verbs', () => {
   const previous = getPlatformOrNull();
   afterEach(() => setPlatform(previous as PlatformAdapter));
 
-  function withRestart(requestAppRestart?: (requester?: string | null) => Promise<boolean>): void {
+  function withRestart(requestAppRestart?: (requester?: string) => Promise<boolean>): void {
     setPlatform({ requestAppRestart } as unknown as PlatformAdapter);
   }
 
@@ -338,7 +338,7 @@ describe('dor app verbs', () => {
   // in the restart's confirmation.
   it('requests the restart for the caller first, then answers with whether it will relaunch', async () => {
     let settle!: (relaunch: boolean) => void;
-    const requestAppRestart = vi.fn((_requester?: string | null) => new Promise<boolean>((resolve) => { settle = resolve; }));
+    const requestAppRestart = vi.fn((_requester?: string) => new Promise<boolean>((resolve) => { settle = resolve; }));
     withRestart(requestAppRestart);
     const release = installDorControlRouter();
     const detail = request({ method: 'app.restart', surfaceId: 'pane-a' });

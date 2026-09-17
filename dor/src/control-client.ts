@@ -2,8 +2,8 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypt
 import { createConnection } from 'node:net';
 import type {
   AgentBrowserSurfaceRequest,
-  AppRestartResponse,
   AgentBrowserSurfaceResponse,
+  AppRestartResponse,
   AwaitSurfaceRequest,
   AwaitSurfaceResponse,
   ControlClient,

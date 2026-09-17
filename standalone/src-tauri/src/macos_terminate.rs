@@ -35,9 +35,9 @@ const SHOULD_TERMINATE_TYPES: &[u8] = b"L@:@\0";
 /// `app.exit(0)` never comes back through here — tao stops the run loop with
 /// `[NSApp stop:]`, not `terminate:` — so an approved pass is the OS asking
 /// again (Dock Quit, logout) while the exit waits on the bounded hand-back
-/// cleanup gate: it answers `Now` once the gate permits, and a terminate the
-/// OS asked for never relaunches. Panic-free by construction: the release
-/// profile aborts on unwind, and this runs inside AppKit's stack.
+/// cleanup gate, and it answers `Now` once the gate permits. Panic-free by
+/// construction: the release profile aborts on unwind, and this runs inside
+/// AppKit's stack.
 unsafe extern "C-unwind" fn should_terminate(
     _this: *mut AnyObject,
     _cmd: Sel,
@@ -48,9 +48,8 @@ unsafe extern "C-unwind" fn should_terminate(
         return NSApplicationTerminateReply::TerminateNow;
     };
     if quit_approved(app) {
-        // Whichever way this answers, the OS asked to end the app; a Cancel
-        // here aborts a logout, and the gated exit that follows must not
-        // relaunch into it.
+        // A terminate the OS asked for never relaunches, whichever way this
+        // answers: a Cancel aborts a logout the gated exit must not undo.
         forget_restart(app);
         return if exit_after_cleanup(app) {
             NSApplicationTerminateReply::TerminateNow

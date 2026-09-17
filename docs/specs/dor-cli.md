@@ -485,8 +485,10 @@ Source of truth: `dor/src/commands/workspace.ts`, `WORKSPACE_CONTROL_METHODS` /
 
 ## dor app
 
-**`dor app` verbs act on the running app, so the router answers them before
-resolving any Workspace, Surface, or Window param.** `restart` is the only one:
+**`dor app` verbs act on the running app, so the webview's control router
+answers them before resolving any Workspace, Surface, or Window param**; Rust
+still delivers them by the caller's Surface ([Standalone](#standalone)).
+`restart` is the only one:
 it asks the host for the quit that relaunches (`docs/specs/standalone.md` →
 "Restart"), so the running-work confirmation still applies and the relaunch
 restores what any quit restores (`docs/specs/transport.md` → "The governing
@@ -495,9 +497,8 @@ rule").
 - **Must request the restart before answering**, so the caller sees a host
   refusal (a dev build) and whether the request joined a quit already in
   progress, which exits without relaunching. The CLI fails on the latter.
-- **The caller's `DORMOUSE_SURFACE_ID` is the restart's requester**, which
-  that confirmation never counts as running work (`docs/specs/standalone.md` →
-  "Restart"). An agent's pane that runs the command is its requester too.
+- The caller's `DORMOUSE_SURFACE_ID` is the restart's requester
+  (`docs/specs/standalone.md` → "Restart").
 - **A host without `PlatformAdapter.requestAppRestart` refuses** with `dor app
   restart is available only in Dormouse Standalone` — VS Code and the
   browser-dev harness.

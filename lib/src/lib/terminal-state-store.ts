@@ -82,14 +82,17 @@ export function getRunningCommandArgv0(id: string): string | null {
 // `except` is a Session that does not count — a restart's requester
 // (docs/specs/standalone.md → "Restart").
 export function countRunningSessions(except?: string | null): number {
-  return countRunningSessionsIn(null, except);
+  return countRunning(null, except);
 }
 
 /** The same count restricted to `ids` — the Workspace close confirmation asks it
  *  of one Workspace's member Surfaces (`docs/specs/layout.md` → "Workspaces").
  *  `null` means every Session in the Window. */
-export function countRunningSessionsIn(ids: Iterable<string> | null, except?: string | null): number {
-  const scope = ids === null ? null : new Set(ids);
+export function countRunningSessionsIn(ids: Iterable<string> | null): number {
+  return countRunning(ids === null ? null : new Set(ids), null);
+}
+
+function countRunning(scope: ReadonlySet<string> | null, except: string | null | undefined): number {
   let count = 0;
   for (const [id, state] of paneStates) {
     if ((scope && !scope.has(id)) || id === except) continue;

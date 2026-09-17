@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { flushWindowSession } from "dormouse-lib/lib/window-session-aggregator";
 import { DEFAULT_RECOVERY_WAIT_MS } from "dormouse-lib/host/recovery-capture";
 import type { TauriAdapter } from "./tauri-adapter";
-import { dismissQuitConfirm } from "./quit-confirm-store";
+import { dismissQuitConfirm, quitRunningWork } from "./quit-confirm-store";
 import { createTeardownFlow, type TeardownConfirmGate } from "./teardown-flow";
 import { hasPendingUpdate, installPendingUpdate } from "./updater";
 import { withTimeout } from "./with-timeout";
@@ -42,6 +42,7 @@ const flow = createTeardownFlow({
   ack: "quit_ack",
   cancelCommand: "quit_cancel",
   gate: () => quitConfirmGate,
+  mustConfirm: (intent) => quitRunningWork(intent) > 0,
   // This window is ready to be torn down. The last vote starts the walk; the
   // teardown itself arrives later, when the walk reaches this window.
   proceed: () => void invoke("quit_vote").catch(() => {}),
@@ -50,8 +51,8 @@ const flow = createTeardownFlow({
 export function initQuitFlow(adapter: TauriAdapter): void {
   quitAdapter = adapter;
   // The intent is Rust's (docs/specs/standalone.md → "Restart").
-  void listenToWindow<{ restart: boolean; requester?: string | null }>("dormouse://quit-requested", (event) => {
-    const { restart, requester = null } = event.payload;
+  void listenToWindow<{ restart: boolean; requester: string | null }>("dormouse://quit-requested", (event) => {
+    const { restart, requester } = event.payload;
     flow.request({ kind: "quit", restart, requester });
   });
   // Another window said no. Nothing was destroyed; drop this window's dialog

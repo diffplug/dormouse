@@ -7,6 +7,7 @@
 //! to perform; `lib.rs` owns the emitting, destroying and exiting.
 
 use crate::routing::{quit_order, Arrivals};
+use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
 
@@ -19,8 +20,8 @@ use std::ops::{Deref, DerefMut};
 #[derive(Default)]
 pub struct ArrivalQueue {
     records: Arrivals,
-    /// The queued quit, if any, with its intent. The first request to queue
-    /// fixes it, as leaving `Idle` does for `QuitMachine`.
+    /// The queued quit, if any, with its intent; the first request to queue
+    /// fixes it.
     quit: Option<QuitIntent>,
     closes: HashSet<String>,
 }
@@ -36,12 +37,12 @@ impl DerefMut for ArrivalQueue {
 
 impl ArrivalQueue {
     /// Queue a quit while anything is in flight. `None` means nothing is in
-    /// flight and the quit runs now; otherwise the queued quit's intent.
-    pub fn defer_quit(&mut self, intent: &QuitIntent) -> Option<QuitIntent> {
+    /// flight and the quit runs now; otherwise whether the queued quit relaunches.
+    pub fn defer_quit(&mut self, intent: &QuitIntent) -> Option<bool> {
         if self.records.is_empty() { return None; }
-        let queued = self.quit.get_or_insert_with(|| intent.clone()).clone();
+        let restart = self.quit.get_or_insert_with(|| intent.clone()).restart;
         self.closes.clear();
-        Some(queued)
+        Some(restart)
     }
     /// Queue `label`'s close while it is either end of a transfer; whether it
     /// was queued (a queued quit absorbs it).
@@ -100,8 +101,9 @@ impl CleanupGate {
     }
 }
 
-/// What a quit does once it exits (docs/specs/standalone.md -> "Restart").
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+/// What a quit does once it exits (docs/specs/standalone.md -> "Restart"). It
+/// is the `dormouse://quit-requested` payload as is.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub struct QuitIntent {
     /// Relaunch after the exit.
     pub restart: bool,
@@ -175,16 +177,14 @@ pub struct QuitMachine {
     /// Cleared to exit: gates the `CloseRequested` / `ExitRequested` arms so the
     /// flow's own `app.exit(0)` is not re-caught.
     pub approved: bool,
-    /// Fixed by the trigger that leaves `Idle` before approval; a repeat trigger
-    /// keeps it, and a cancel clears it (docs/specs/standalone.md -> "Restart").
+    /// docs/specs/standalone.md -> "Restart".
     intent: QuitIntent,
     pub phase: QuitPhase,
     pub windows: HashMap<String, WindowQuit>,
 }
 
 impl QuitMachine {
-    /// A quit trigger over the live windows, with the intent only the trigger
-    /// leaving `Idle` unapproved may set.
+    /// A quit trigger over the live windows.
     ///
     /// Clears `voted` only from `Idle`. A vote already cast stands through a
     /// repeat trigger: the webview that cast it is committed and answers the
@@ -195,8 +195,9 @@ impl QuitMachine {
     pub fn request(&mut self, labels: &[String], intent: QuitIntent) -> (u64, Vec<QuitAction>) {
         self.seq += 1;
         let idle = self.phase == QuitPhase::Idle;
-        // An approved exit parked on the cleanup gate is `Idle` too, and a
-        // Cmd+Q landing there must not rewrite what that exit does.
+        // Only the trigger leaving `Idle` unapproved sets the intent: a repeat
+        // keeps it, and an approved exit parked on the cleanup gate is `Idle`
+        // too, where a Cmd+Q must not rewrite what that exit does.
         if idle && !self.approved {
             self.intent = intent;
         }
@@ -232,9 +233,9 @@ impl QuitMachine {
         self.approved && self.intent.restart
     }
 
-    /// The OS terminated the app itself (Dock Quit, logout), which never
+    /// The OS is ending the app itself (Dock Quit, logout), which never
     /// relaunches.
-    pub fn os_terminated(&mut self) {
+    pub fn forget_restart(&mut self) {
         self.intent = QuitIntent::default();
     }
 
@@ -494,7 +495,7 @@ mod tests {
         assert_eq!(queue.take_ready(quiet), (None, vec![]));
         queue.push(settled);
         queue.defer_close("ws-2");
-        assert_eq!(queue.defer_quit(&QuitIntent::default()), Some(QuitIntent::default())); // quit supersedes queued window closes
+        assert_eq!(queue.defer_quit(&QuitIntent::default()), Some(false)); // quit supersedes queued window closes
         assert!(queue.defer_close("ws-2"));
         assert!(queue.blocks_transfer("ws-3", "main"));
         assert_eq!(queue.take_ready(live), (None, vec![]));
@@ -840,7 +841,7 @@ mod tests {
     fn an_os_terminate_never_relaunches() {
         let mut quit = QuitMachine::default();
         quit.request(&labels(&[]), restart_by("pane-1"));
-        quit.os_terminated();
+        quit.forget_restart();
         assert!(quit.approved && !quit.relaunches());
     }
 
@@ -850,9 +851,9 @@ mod tests {
         let live = || HashSet::from(["main".to_string()]);
         assert_eq!(queue.defer_quit(&restart_by("pane-1")), None, "nothing in flight: the restart runs now");
         queue.push(arrival("main", "ws-2"));
-        assert_eq!(queue.defer_quit(&restart_by("pane-1")), Some(restart_by("pane-1")));
-        // The first request to queue fixes the intent.
-        assert_eq!(queue.defer_quit(&QuitIntent::default()), Some(restart_by("pane-1")));
+        assert_eq!(queue.defer_quit(&restart_by("pane-1")), Some(true));
+        // The first request to queue fixes the intent, requester and all.
+        assert_eq!(queue.defer_quit(&QuitIntent::default()), Some(true));
         let settled = queue.pop().unwrap();
         assert_eq!(queue.take_ready(live), (Some(restart_by("pane-1")), vec![]));
         assert_eq!(queue.take_ready(live), (None, vec![]));
@@ -860,11 +861,7 @@ mod tests {
         queue.push(settled);
         queue.defer_quit(&restart_by("pane-1"));
         queue.cancel_deferred();
-        assert_eq!(
-            queue.defer_quit(&QuitIntent::default()),
-            Some(QuitIntent::default()),
-            "a cancel forgets the queued intent"
-        );
+        assert_eq!(queue.defer_quit(&QuitIntent::default()), Some(false), "a cancel forgets the queued intent");
     }
 
     #[test]

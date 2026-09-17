@@ -304,7 +304,7 @@ export interface PlatformAdapter {
    * never counts as running work in its confirmation
    * (`docs/specs/standalone.md` → "Restart"). Absent where a host cannot.
    */
-  requestAppRestart?(requester?: string | null): Promise<boolean>;
+  requestAppRestart?(requester?: string): Promise<boolean>;
 
   /** Explicit live Workspace handoff, never a persistence reader. */
   alertPauseForTransfer?(id: string): AlertRuntimeSnapshot | null;

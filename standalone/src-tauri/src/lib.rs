@@ -616,10 +616,7 @@ fn apply_quit_actions(app: &AppHandle, actions: Vec<QuitAction>) {
     for action in actions {
         match action {
             QuitAction::RequestAll { intent } => {
-                let _ = app.emit(
-                    "dormouse://quit-requested",
-                    serde_json::json!({ "restart": intent.restart, "requester": intent.requester }),
-                );
+                let _ = app.emit("dormouse://quit-requested", &intent);
             }
             QuitAction::CancelAll => {
                 let _ = app.emit("dormouse://quit-cancelled", ());
@@ -693,10 +690,10 @@ fn request_quit(app: &AppHandle, intent: QuitIntent) -> bool {
         // between this check and beginning the vote.
         let windows = app.state::<WindowState>();
         let mut arrivals = guard(&windows.arrivals);
-        if let Some(queued) = arrivals.defer_quit(&intent) {
+        if let Some(relaunches) = arrivals.defer_quit(&intent) {
             drop(arrivals);
             append_log("[quit] transfer in progress; quit queued until settlement");
-            return queued.restart;
+            return relaunches;
         }
         let labels = window_labels(app);
         let mut machine = guard(&state.machine);
@@ -3616,7 +3613,7 @@ fn relaunch_requested(app: &AppHandle) -> bool {
 #[cfg(target_os = "macos")]
 fn forget_restart(app: &AppHandle) {
     if let Some(state) = app.try_state::<QuitState>() {
-        guard(&state.machine).os_terminated();
+        guard(&state.machine).forget_restart();
     }
 }
 

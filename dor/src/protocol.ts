@@ -48,9 +48,8 @@ export const WORKSPACE_CONTROL_METHODS = {
 export type WorkspaceControlMethod = (typeof WORKSPACE_CONTROL_METHODS)[keyof typeof WORKSPACE_CONTROL_METHODS];
 
 /**
- * The wire identifier for each app control operation. These act on the whole
- * running app, so the window-level router answers them before resolving any
- * Workspace or Surface (`docs/specs/dor-cli.md` → "dor app").
+ * The wire identifier for each app control operation — verbs on the running
+ * app itself (`docs/specs/dor-cli.md` → "dor app").
  */
 export const APP_CONTROL_METHODS = {
   restart: 'app.restart',

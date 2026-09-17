@@ -1146,9 +1146,9 @@ with only the exit changed.
 - **`dormouse://quit-requested` carries `{ restart, requester }`**, and the
   dialog then says Claude and Codex sessions resume.
 - **The requester never counts as running work in the restart's confirmation**
-  (`countRunningSessions(except)`): it is the `dor app restart` still waiting on
-  its answer. Every other running Session still asks, and Workspace and window
-  closes count everything.
+  (`quitRunningWork`): it is the `dor app restart` still waiting on its answer.
+  Every other running Session still asks, and Workspace and window closes count
+  everything.
 - **Every approved exit stays `app.exit(0)`; the relaunch runs in
   `RunEvent::Exit`, after `shutdown_sidecar_and_wait`**, as `cleanup_before_exit`
   then `tauri::process::restart`, which on macOS re-reads `Info.plist`, so a
@@ -1159,21 +1159,17 @@ with only the exit changed.
 - **`quit_restart` refuses a debug build and an executable
   `tauri::process::current_binary` cannot resolve**, where `restart` would exit
   without relaunching (rationale).
-- A Windows quit holding an update never reaches the relaunch: the updater exits
-  the process and NSIS relaunches it (`docs/specs/auto-update.md` → "Platform
-  behavior at quit").
+- A Windows quit holding an update relaunches by its installer instead
+  (`docs/specs/auto-update.md` → "Platform behavior at quit").
 
 Source of truth: `quit_restart`, `relaunch_requested` and the `RunEvent::Exit`
 arm in `standalone/src-tauri/src/lib.rs`; `QuitIntent`, `QuitMachine::request` and
-`ArrivalQueue::defer_quit` in `standalone/src-tauri/src/quit_state.rs`; the
-default `mustConfirm` in `standalone/src/teardown-flow.ts`. Pinned by
-`the_trigger_leaving_idle_fixes_the_restart_intent`,
-`a_trigger_after_approval_cannot_rewrite_the_exit`,
-`an_os_terminate_never_relaunches` and `a_deferred_quit_carries_its_intent` in
-`standalone/src-tauri/src/quit_state.rs`,
+`ArrivalQueue::defer_quit` in `standalone/src-tauri/src/quit_state.rs`;
+`quitRunningWork` in `standalone/src/quit-confirm-store.ts`. Pinned by the
+restart-intent tests in `standalone/src-tauri/src/quit_state.rs`,
 `a_restart_relaunches_only_after_the_sidecar_shuts_down` in
-`standalone/src-tauri/src/lib.rs`, and `does not count the restart's requester as
-running work` in `standalone/src/WorkspaceTeardownModal.test.ts`.
+`standalone/src-tauri/src/lib.rs`, and the restart cases in
+`standalone/src/quit.test.ts` and `standalone/src/WorkspaceTeardownModal.test.ts`.
 
 ## File drop
 
