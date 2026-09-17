@@ -24,18 +24,42 @@ Where `docs/specs/security.md` says a risk is accepted ("What is not defended")
 or a gap is known ("Known gaps"), do not re-report it as a finding — report
 only if the situation has changed or is worse than described.
 
-Write your findings to the file named in your own prompt. **Its very first
-line must be literally `VERDICT: PASS`, `VERDICT: FAIL`, or `VERDICT: INCONCLUSIVE`** — nothing else on
-that line. The reporting step reads it, so it is the one part of your
-report a machine reads: a `FAIL` there cannot be lost in a merge, and it is
-what stops an optimistic summary from overriding you. Then two sections:
-`### FAIL IF results` (one line per check) and `### Qualitative findings`
-(severity-tagged). **Write that file before you return** — your caller reads
-the file, not your reply, and a fragment that does not exist fails the whole
-audit. Then return a single line: `PASS`, `FAIL`, or `INCONCLUSIVE`, followed by a one-sentence
-rationale. FAIL if any `FAIL IF` in your scope is violated or any of your
-qualitative findings is BLOCKER. Otherwise INCONCLUSIVE if any check is
-`UNVERIFIABLE` or unfinished; PASS only when every check was determined.
+Write your findings to the file named in your own prompt, and write them **as
+you determine them — never buffered in your context for one write-up at the
+end.** Open the file before your first check:
+
+```sh
+printf 'VERDICT: INCONCLUSIVE\n\n### FAIL IF results\n\n' > <your fragment>
+```
+
+Then append each check's line as you determine it, and each finding as you
+rate it, under `### FAIL IF results` (one line per check) and
+`### Qualitative findings` (severity-tagged). **Append; never rewrite the file
+whole.** What is in that file is the whole of what the audit publishes from
+you: run 35205193090's `application-security` domain had every one of its work
+streams reported and lost all of them, because it was holding them for a final
+write-up it never reached.
+
+**Its very first line must be literally `VERDICT: PASS`, `VERDICT: FAIL`, or
+`VERDICT: INCONCLUSIVE`** — nothing else on that line. The reporting step reads
+it, so it is the one part of your report a machine reads: a `FAIL` there cannot
+be lost in a merge, and it is what stops an optimistic summary from overriding
+you. It opens as `INCONCLUSIVE` so a fragment you never finish fails closed on
+its own. Rewrite that one line at the end, with Edit rather than `sed -i`
+(whose in-place flag differs between GNU and BSD), then close the file:
+
+```sh
+printf '\n<!-- END OF REPORT -->\n' >> <your fragment>
+```
+
+**That sentinel is what tells your caller the fragment is finished**, so write
+it last, once, and only when the verdict line above it is the one you reached.
+Your caller blocks on it rather than on the file existing, because a fragment
+that exists is a fragment still being filled in. Then return a single line:
+`PASS`, `FAIL`, or `INCONCLUSIVE`, followed by a one-sentence rationale. FAIL
+if any `FAIL IF` in your scope is violated or any of your qualitative findings
+is BLOCKER. Otherwise INCONCLUSIVE if any check is `UNVERIFIABLE` or
+unfinished; PASS only when every check was determined.
 
 Never print a secret value. `$AUDIT_PAT` is passed only as an unexpanded
 `GH_TOKEN=` prefix; do not echo it, do not run `printenv` or `set -x`, and do

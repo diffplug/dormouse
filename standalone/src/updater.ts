@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { IS_WINDOWS, PLATFORM_STRING } from 'dormouse-lib/lib/platform';
+import { getPlatformOrNull, IS_WINDOWS, PLATFORM_STRING } from 'dormouse-lib/lib/platform';
 import type { UpdateBannerState } from './UpdateBanner';
 import type { Update } from '@tauri-apps/plugin-updater';
 
@@ -77,6 +77,27 @@ export function dismissBanner(): void {
 
 export function approveUpdate(): void {
   void downloadApprovedUpdate();
+}
+
+/** Quit now and relaunch; the quit installs the pending update on its way out
+ *  (docs/specs/auto-update.md → "Quit-time install"). A host refusal becomes
+ *  `restart-refused`, leaving the update pending. */
+export function restartToUpdate(): void {
+  getPlatformOrNull()?.requestAppRestart?.()
+    .then((relaunches) => {
+      if (!relaunches) console.warn('[updater] Joined a quit already under way; Dormouse will not relaunch.');
+    })
+    .catch((e) => {
+      console.error('[updater] Restart failed:', e);
+      // Honor a dismissal that arrived while the host was answering.
+      if (state.status === 'downloaded') {
+        setState({
+          status: 'restart-refused',
+          version: state.version,
+          reason: e instanceof Error ? e.message : String(e),
+        });
+      }
+    });
 }
 
 export function openChangelog(): void {
@@ -268,7 +289,7 @@ export async function installPendingUpdate(): Promise<void> {
   }
 
   try {
-    // Write success marker BEFORE install — on Windows, NSIS force-kills the process
+    // Write success marker BEFORE install — on Windows install() never returns
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       from: currentVersion,
       to: update.version,

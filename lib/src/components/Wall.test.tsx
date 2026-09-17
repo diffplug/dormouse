@@ -1230,7 +1230,7 @@ describe('Wall on the Lath engine', () => {
       });
       await flush();
 
-      expect(container.textContent).toContain('Confirm kill');
+      expect(document.body.textContent).toContain('Confirm kill');
       expect(container.querySelector('[data-lath-leaf="tool-a"]')).not.toBeNull();
     } finally {
       untouchedSpy.mockRestore();
@@ -1829,7 +1829,7 @@ describe('Wall on the Lath engine', () => {
       if (fresh || archiveFails) {
         expect(container.querySelector(`[data-lath-leaf="${ids[1]}"]`)).not.toBeNull();
         expect(getNotes(ids[1])).toHaveLength(1);
-        if (archiveFails) expect(container.querySelector('[aria-labelledby="notepad-archive-failure-title"]')).not.toBeNull();
+        if (archiveFails) expect(document.body.querySelector('[aria-labelledby="notepad-archive-failure-title"]')).not.toBeNull();
       } else {
         expect(container.querySelector(`[data-lath-leaf="${ids[1]}"]`)).toBeNull();
         const archive = (await fake.notepadArchive.load())?.raw as NotepadArchiveV1;
@@ -3109,7 +3109,7 @@ describe('Wall on the Lath engine', () => {
 
   /** The Keep open / Close anyway prompt, when it is up. */
   function archiveFailureModal(): HTMLElement | null {
-    return container.querySelector<HTMLElement>('[aria-labelledby="notepad-archive-failure-title"]');
+    return document.body.querySelector<HTMLElement>('[aria-labelledby="notepad-archive-failure-title"]');
   }
 
   /** Answer the prompt and settle the closure it starts. `Close anyway` runs an async
@@ -3120,7 +3120,7 @@ describe('Wall on the Lath engine', () => {
    *  the leaf is still mid-fade when the assertion runs. (`Keep open` only shifts the
    *  prompt queue, so it needs no ordering — one helper still covers both.) */
   async function clickButton(label: string): Promise<void> {
-    const button = Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
+    const button = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button'))
       .find((candidate) => candidate.textContent?.trim() === label);
     expect(button, `no "${label}" button`).toBeDefined();
     await act(async () => { button!.click(); });
@@ -3186,7 +3186,7 @@ describe('Wall on the Lath engine', () => {
   });
 
   // The kill gesture (`requestKill`): docs/specs/layout.md → "Kill confirmation".
-  const confirmKillOverlay = () => Array.from(container.querySelectorAll('h2')).find(h => h.textContent === 'Confirm kill') ?? null;
+  const confirmKillOverlay = () => Array.from(document.body.querySelectorAll('h2')).find(h => h.textContent === 'Confirm kill') ?? null;
 
   it('closes an untouched pane at once and stages the confirm overlay for a touched one', async () => {
     const untouched = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(true);
@@ -3258,7 +3258,7 @@ describe('Wall on the Lath engine', () => {
     if (confirm) {
       expect(confirmKillOverlay()).not.toBeNull();
       expect(container.querySelector(`[data-lath-leaf="${target}"]`)).not.toBeNull();
-      await press(container.querySelector('.text-xl')!.textContent!);
+      await press(document.body.querySelector('.text-xl')!.textContent!);
       await flush();
     }
     expect(container.querySelector(`[data-lath-leaf="${target}"]`)).toBeNull();

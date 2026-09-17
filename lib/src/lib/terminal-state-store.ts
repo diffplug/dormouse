@@ -78,19 +78,24 @@ export function getRunningCommandArgv0(id: string): string | null {
 
 // Count sessions whose latest activity is a live/running command (not an idle
 // shell at a prompt). The standalone quit orchestrator uses this to decide
-// whether a quit needs a confirmation (docs/specs/standalone.md §Quit flow).
-export function countRunningSessions(): number {
-  return countRunningSessionsIn(null);
+// whether a quit needs a confirmation (docs/specs/standalone.md §Quit flow);
+// `except` is a Session that does not count — a restart's requester
+// (docs/specs/standalone.md → "Restart").
+export function countRunningSessions(except?: string | null): number {
+  return countRunning(null, except);
 }
 
 /** The same count restricted to `ids` — the Workspace close confirmation asks it
  *  of one Workspace's member Surfaces (`docs/specs/layout.md` → "Workspaces").
  *  `null` means every Session in the Window. */
 export function countRunningSessionsIn(ids: Iterable<string> | null): number {
-  const scope = ids === null ? null : new Set(ids);
+  return countRunning(ids === null ? null : new Set(ids), null);
+}
+
+function countRunning(scope: ReadonlySet<string> | null, except: string | null | undefined): number {
   let count = 0;
   for (const [id, state] of paneStates) {
-    if (scope && !scope.has(id)) continue;
+    if ((scope && !scope.has(id)) || id === except) continue;
     const entry = registry.get(id);
     if (state.activity.kind === 'running' || (entry?.helper && !entry.exited && entry.helperBusy !== false)) count++;
   }

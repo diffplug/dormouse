@@ -332,6 +332,10 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       const target = fixtureWorkspace(request.workspace);
       return { status: 'moved', workspaceId: target.id, workspaceRef: target.ref, name: target.name };
     },
+    async restartApp() {
+      this.requests.push({ method: 'restartApp' });
+      return { relaunch: true };
+    },
     async resolveOpenTarget(request) {
       this.requests.push({ method: 'resolveOpenTarget', request });
       // Mirror the host: surface:1 owns port 5173; surface:2 owns nothing.
@@ -1415,6 +1419,8 @@ const listEnv = {
   DORMOUSE_CONTROL_SOCKET: '/tmp/dormouse-control.sock',
 };
 
+const standaloneEnv = { ...listEnv, DORMOUSE_HOST: 'standalone', DORMOUSE_HOST_WORKSPACE: undefined };
+
 test('list text output', async () => {
   const client = fixtureClient();
   const result = await runCli(['list'], { client, env: listEnv });
@@ -1554,6 +1560,40 @@ test('workspace usage errors name the action', async () => {
   await snapshot('workspace-list-action', await runCli(['workspace', 'list'], { client: fixtureClient(), env: listEnv }));
   await snapshot('workspace-rename-arity', await runCli(['workspace', 'rename', 'workspace:2'], { client: fixtureClient(), env: listEnv }));
   await snapshot('workspace-force-misuse', await runCli(['workspace', 'switch', '2', '--force'], { client: fixtureClient(), env: listEnv }));
+});
+
+test('app restart asks the host once', async () => {
+  const client = fixtureClient();
+  await snapshot('app-restart', await runCli(['app', 'restart'], { client, env: standaloneEnv }));
+  await snapshot('app-restart-json', await runCli(['app', 'restart', '--json'], { client, env: standaloneEnv }));
+  assert.deepEqual(client.requests, [{ method: 'restartApp' }, { method: 'restartApp' }]);
+});
+
+test('app restart that joins a quit in progress fails, since nothing will relaunch', async () => {
+  const client = { async restartApp() { return { relaunch: false }; } };
+  await snapshot('app-restart-joined-quit', await runCli(['app', 'restart'], { client, env: standaloneEnv }));
+});
+
+// A host from before `app.*` answers with its Wall's catch-all refusal. Only a
+// standalone terminal gets the quit-and-reopen hint; VS Code refuses the same
+// way, and the hint would be wrong there.
+test('app restart against a Dormouse that predates it', async () => {
+  const client = {
+    async restartApp() { throw new Error("unsupported Dormouse control method 'app.restart'"); },
+  };
+  await snapshot('app-restart-predates', await runCli(['app', 'restart'], { client, env: standaloneEnv }));
+  await snapshot('app-restart-predates-vscode', await runCli(['app', 'restart'], { client, env: listEnv }));
+});
+
+test('app restart passes a host refusal through', async () => {
+  const client = { async restartApp() { throw new Error('Restart needs a packaged build'); } };
+  await snapshot('app-restart-refused', await runCli(['app', 'restart'], { client, env: standaloneEnv }));
+});
+
+test('app usage errors name the action', async () => {
+  await snapshot('app-missing-action', await runCli(['app'], { client: fixtureClient(), env: standaloneEnv }));
+  await snapshot('app-unknown-action', await runCli(['app', 'quit'], { client: fixtureClient(), env: standaloneEnv }));
+  await snapshot('app-restart-arity', await runCli(['app', 'restart', 'now'], { client: fixtureClient(), env: standaloneEnv }));
 });
 
 test('every action command forwards --workspace to the host', async () => {

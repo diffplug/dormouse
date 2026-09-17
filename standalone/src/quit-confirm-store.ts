@@ -2,6 +2,7 @@ import { randomKillChar } from '../../lib/src/components/KillConfirm';
 import { acquireChromeKeyboardLease } from '../../lib/src/components/wall/chrome-keyboard-lease';
 import { getWorkspacesSnapshot, subscribeToWorkspaces } from 'dormouse-lib/lib/workspace-store';
 import { resetWorkspaceUi } from 'dormouse-lib/lib/workspace-ui-store';
+import { countRunningSessions } from 'dormouse-lib/lib/terminal-registry';
 import type { TeardownConfirmContext } from "./teardown-flow";
 
 /**
@@ -24,6 +25,15 @@ export interface QuitConfirmIntent {
    *  the download lives in the webview, so nothing else can install it
    *  (docs/specs/auto-update.md). Never set on a quit, which installs it. */
   discardsUpdate?: boolean;
+  /** The Surface that asked for a restart, which never counts as running work
+   *  here (docs/specs/standalone.md → "Restart"). Only ever set on a quit. */
+  requester?: string | null;
+}
+
+/** The running work a teardown asks about: this window's, less a restart's
+ *  requester. Both the gate's decision and the dialog's live count read it. */
+export function quitRunningWork({ requester }: Pick<QuitConfirmIntent, "requester">): number {
+  return countRunningSessions(requester);
 }
 
 const QUIT_INTENT: QuitConfirmIntent = { kind: "quit" };

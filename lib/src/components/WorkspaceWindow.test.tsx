@@ -83,9 +83,10 @@ function wallFor(workspaceId: string): HTMLElement {
   return container.querySelector<HTMLElement>(`[data-workspace-wall="${workspaceId}"]`)!;
 }
 
-/** Every mounted kill confirmation, whichever Wall rendered it. */
+/** Every mounted kill confirmation, whichever Wall rendered it. Modals render
+ *  into `document.body`, outside every Wall. */
 function killConfirms(): HTMLElement[] {
-  return [...container.querySelectorAll<HTMLElement>('#kill-confirm-title')];
+  return [...document.body.querySelectorAll<HTMLElement>('#kill-confirm-title')];
 }
 
 function leafIdsIn(workspaceId: string): string[] {
@@ -590,7 +591,6 @@ describe('WorkspaceWindow', () => {
     // Stage the confirmation in ws-2 while it is the visible Workspace.
     await press('x');
     expect(killConfirms()).toHaveLength(1);
-    expect(wallFor('ws-2').contains(killConfirms()[0])).toBe(true);
 
     // Hidden: the overlay is unmounted, so its Escape trap hears nothing…
     await act(async () => { setActiveWorkspace(first); });

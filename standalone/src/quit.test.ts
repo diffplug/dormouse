@@ -73,7 +73,7 @@ const oneNotedSurface = () => ["pane-a"];
 // (`quit-cancelled`), and walks them one at a time (`quit-teardown`).
 const listeners = new Map<string, (event: { payload?: unknown }) => void>();
 const fire = (event: string, payload?: unknown) => listeners.get(event)?.({ payload });
-const quitRequested = () => fire("dormouse://quit-requested");
+const quitRequested = () => fire("dormouse://quit-requested", { requester: null });
 const quitTeardown = (last = true) => fire("dormouse://quit-teardown", { last });
 const quitCancelled = () => fire("dormouse://quit-cancelled");
 const voted = () => mocks.invoke.mock.calls.some((call) => call[0] === "quit_vote");
@@ -368,6 +368,29 @@ describe("quit orchestrator", () => {
 
     expect(gate).toHaveBeenCalledTimes(1);
     expect(adapter.requestSessionFlush).toHaveBeenCalled();
+    expect(mocks.invoke).toHaveBeenCalledWith("quit_proceed");
+  });
+
+  it("hands the gate the requester Rust sent, and leaves it out of the count", async () => {
+    mocks.countRunningSessions.mockReturnValue(1);
+    const gate = vi.fn();
+    setQuitConfirmGate(gate);
+    initQuitFlow(fakeAdapter());
+
+    fire("dormouse://quit-requested", { requester: "pane-7" });
+    expect(gate).toHaveBeenLastCalledWith(expect.anything(), { kind: "quit", requester: "pane-7" });
+    expect(mocks.countRunningSessions).toHaveBeenLastCalledWith("pane-7");
+
+    quitCancelled();
+    quitRequested();
+    expect(gate).toHaveBeenLastCalledWith(expect.anything(), { kind: "quit", requester: null });
+    expect(mocks.countRunningSessions).toHaveBeenLastCalledWith(null);
+
+    // The teardown itself does not change: the relaunch is Rust's.
+    gate.mock.lastCall![0].confirm();
+    await settle();
+    quitTeardown();
+    await settle();
     expect(mocks.invoke).toHaveBeenCalledWith("quit_proceed");
   });
 

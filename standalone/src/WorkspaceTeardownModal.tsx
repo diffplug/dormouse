@@ -1,13 +1,10 @@
-import { useRef, useSyncExternalStore } from 'react';
+import { useCallback, useRef, useSyncExternalStore } from 'react';
 // Standalone reaches into the lib source directly (same relative form as the
 // sibling UpdateDebugModal.tsx). The terminal registry comes in via the
 // `dormouse-lib` alias, matching quit.ts.
 import { ModalFrame, modalActionButton } from '../../lib/src/components/design';
 import { WorkspaceKillConfirm } from '../../lib/src/components/WorkspaceKillConfirm';
-import {
-  countRunningSessions,
-  subscribeToTerminalPaneState,
-} from 'dormouse-lib/lib/terminal-registry';
+import { subscribeToTerminalPaneState } from 'dormouse-lib/lib/terminal-registry';
 import {
   cancelQuit,
   confirmQuit,
@@ -16,6 +13,7 @@ import {
   getQuitConfirmChar,
   getQuitConfirmWorkspaceNames,
   getQuitConfirmPhase,
+  quitRunningWork,
   subscribeQuitConfirm,
   type QuitConfirmIntent,
 } from './quit-confirm-store';
@@ -62,13 +60,15 @@ export function WorkspaceTeardownModal({
    *  and this dialog now asks only whether to lose the notes. */
   archiveError?: string | null;
   /** Whether this tears down the whole app or one window, and whether that
-   *  discards a downloaded update. */
+   *  discards a downloaded update. A quit and a restart read the same. */
   intent?: QuitConfirmIntent;
 }) {
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
   const progressRef = useRef<HTMLParagraphElement>(null);
   // Live count — the dialog stays open even if it drops to 0 (see spec).
-  const runningCount = useSyncExternalStore(subscribeToTerminalPaneState, countRunningSessions);
+  const { requester } = intent;
+  const getRunningCount = useCallback(() => quitRunningWork({ requester }), [requester]);
+  const runningCount = useSyncExternalStore(subscribeToTerminalPaneState, getRunningCount);
   const hasRunning = runningCount > 0;
 
   if (confirming) {
@@ -86,7 +86,9 @@ export function WorkspaceTeardownModal({
     const scope = names ? `Workspaces: ${names}. ` : '';
     const count = hasRunning ? `${runningCount} running command${runningCount === 1 ? '' : 's'} will be stopped.` : 'No commands are still running.';
     const update = intent.discardsUpdate ? ' The downloaded update will be discarded.' : '';
-    return <WorkspaceKillConfirm char={char} detail={`${scope}${count}${update}`} onConfirm={confirmQuit} onCancel={cancelQuit}
+    // A quit captures agent resumes; a window close ends its Sessions for good.
+    const resume = intent.kind === 'quit' ? ' Claude and Codex sessions resume when Dormouse reopens.' : '';
+    return <WorkspaceKillConfirm char={char} detail={`${scope}${count}${update}${resume}`} onConfirm={confirmQuit} onCancel={cancelQuit}
       layer="critical" />;
   }
   // Note loss needs its own decision even after process termination was approved.
