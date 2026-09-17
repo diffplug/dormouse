@@ -10,7 +10,7 @@
 |-----|--------|-------------|
 | Left ⌘ → Right ⌘ (within 500 ms) | Enter command mode | Only exits passthrough; inert in command mode. |
 | Left ⇧ → Right ⇧ (within 500 ms) | Enter command mode | Independent of the ⌘ track; the gesture for keyboards with no right ⌘. |
-| `Enter` (command) | Enter passthrough mode | Focus the selected pane; reattach a door; activate a highlighted Workspace or create one from `+` and focus its pane. |
+| `Enter` (command) | Enter passthrough mode | Focus the selected pane; reattach a door; `+` creates a Workspace, focusing its pane. A tab activates, or renames if active, in command mode. |
 
 A focused cross-origin iframe surface swallows the gesture; the proxy shim detects it in-frame and re-posts it to the Wall (`docs/specs/dor-browser.md`).
 

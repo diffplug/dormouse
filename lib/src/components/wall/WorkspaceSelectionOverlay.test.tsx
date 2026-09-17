@@ -169,18 +169,17 @@ function twoPanes(a: Rectish = A, b: Rectish = B): Map<string, HTMLElement> {
 }
 
 describe('WorkspaceSelectionOverlay ring travel', () => {
-  it('pauses during workspace rename and restarts the burst when editing finishes', async () => {
+  it('pauses only while a workspace is renamed, then resumes marching', async () => {
     const store = makeStore();
     const panes = twoPanes();
     await act(async () => root.render(<Harness selectedId="a" mode="command" store={store} panes={panes} />));
+    const path = container.querySelector<SVGPathElement>('[data-ring="outline"]')!;
     await act(async () => setRenamingWorkspace('ws-a'));
-    const editing = container.querySelector<SVGPathElement>('[data-ring="outline"]')!;
-    expect(editing.style.animationPlayState).toBe('paused');
+    expect(path.style.animationPlayState).toBe('paused');
     await act(async () => setRenamingWorkspace(null));
-    const resumed = container.querySelector<SVGPathElement>('[data-ring="outline"]')!;
-    expect(resumed).not.toBe(editing);
-    expect(resumed.style.animationPlayState).toBe('running');
-    expect(resumed.style.animation).toContain('marching-ants');
+    expect(container.querySelector('[data-ring="outline"]')).toBe(path);
+    expect(path.style.animationPlayState).toBe('running');
+    expect(path.style.animation).toContain('marching-ants');
   });
 
   it('carries the last visible ring across Walls instead of their stale pane positions', async () => {
@@ -366,26 +365,24 @@ describe('SelectionRing settled render', () => {
     expect(path!.getAttribute('stroke-opacity')).toBeNull();
   });
 
-  // The finite burst starts when command mode adds the animation, and a selection
-  // change restarts it by remounting only the keyed outline.
-  it('starts a finite burst on command entry and remounts the outline on a selection change', async () => {
+  it('marches for as long as command mode lasts, across selection changes', async () => {
     const store = makeStore();
     const panes = twoPanes();
     await act(async () => root.render(<Harness selectedId="a" mode="passthrough" store={store} panes={panes} />));
 
-    const passthroughPath = container.querySelector('[data-ring="outline"]') as SVGPathElement;
-    expect(passthroughPath.style.animation).toBe('');
-
-    await act(async () => root.render(<Harness selectedId="a" mode="command" store={store} panes={panes} />));
-
     const path = container.querySelector('[data-ring="outline"]') as SVGPathElement;
-    expect(path).toBe(passthroughPath);
-    expect(path.style.animation).toBe(
-      `marching-ants ${cfg.marchingAnts.cycleDuration}s linear ${cfg.marchingAnts.cyclesPerSelection}`,
-    );
+    expect(path.style.animation).toBe('');
 
+    const marching = `marching-ants ${cfg.marchingAnts.cycleDuration}s linear infinite`;
+    await act(async () => root.render(<Harness selectedId="a" mode="command" store={store} panes={panes} />));
+    expect(container.querySelector('[data-ring="outline"]')).toBe(path);
+    expect(path.style.animation).toBe(marching);
+    expect(path.style.animationPlayState).toBe('running');
+
+    // One outline for the whole of command mode: nothing remounts it to restart.
     await act(async () => root.render(<Harness selectedId="b" mode="command" store={store} panes={panes} />));
-    expect(container.querySelector('[data-ring="outline"]')).not.toBe(path);
+    expect(container.querySelector('[data-ring="outline"]')).toBe(path);
+    expect(path.style.animation).toBe(marching);
   });
 
   // The dash is an imperative write React never reconciles away, so the reverse

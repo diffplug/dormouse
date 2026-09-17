@@ -22,11 +22,23 @@ export function workspaceNeedsCloseConfirmation(id: WorkspaceId): boolean {
   return !!handle && (handle.hasTouchedSurfaces() || handle.runningCount() > 0);
 }
 
-/** Keyboard Enter on a tab/+ waits for a fresh Wall just like close does. */
+/** Keyboard Enter on `+` waits for the fresh Wall just like close does. */
 export async function enterWorkspace(id: WorkspaceId): Promise<void> {
   setActiveWorkspace(id);
   const handle = await awaitWallHandle(id);
   if (getActiveWorkspaceId() === id) handle?.enterSelectedPane();
+}
+
+/**
+ * Keyboard Enter on an inactive tab: activate it in command mode with the ring
+ * still on its tab, as a click leaves the user in command mode. Selecting in the
+ * same tick as activation keeps the ring from gliding to the Wall's pane first.
+ */
+export async function activateWorkspaceTab(id: WorkspaceId): Promise<void> {
+  const handle = await awaitWallHandle(id);
+  if (!handle) return;
+  setActiveWorkspace(id);
+  handle.selectWorkspaceTab();
 }
 
 const CLOSE_IN_FLIGHT_REFUSAL = 'another Workspace is closing';

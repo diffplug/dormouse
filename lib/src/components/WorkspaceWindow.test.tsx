@@ -6,6 +6,7 @@
  * "Workspaces").
  */
 import { StrictMode, act } from 'react';
+import { flushSync } from 'react-dom';
 import { type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
@@ -218,13 +219,20 @@ describe('WorkspaceWindow', () => {
     expect(focused()).toBe(mode === 'passthrough');
   });
 
-  it('highlights tabs without switching and Enter activates or creates into a live pane', async () => {
+  it('highlights tabs without switching; Enter activates in command mode, renames the active tab, or creates into a live pane', async () => {
     const first = getActiveWorkspaceId();
     createWorkspace({ id: 'ws-2', activate: false });
     await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
     const press = async (key: string, location = 0) => {
       await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key, location, bubbles: true, cancelable: true })); });
       await flush();
+    };
+    const renaming = () => container.querySelector<HTMLInputElement>('[data-workspace-rename-for]')?.dataset.workspaceRenameFor;
+    const cancelRename = async () => {
+      const input = container.querySelector<HTMLInputElement>('[data-workspace-rename-for]')!;
+      await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+      await flush();
+      expect(renaming()).toBeUndefined();
     };
     await press('ArrowUp');
     await press('ArrowRight');
@@ -237,14 +245,21 @@ describe('WorkspaceWindow', () => {
     await press('Shift', 1);
     await press('Shift', 2);
     await press('ArrowUp');
+    await press('Enter');
+    expect(renaming()).toBe(first);
+    expect(wallFor(first).querySelector('[data-focused="true"]')).toBeNull();
+    await cancelRename();
+
     await press('ArrowRight');
     await press('Enter');
     expect(getActiveWorkspaceId()).toBe('ws-2');
-    expect(wallFor('ws-2').querySelector('[data-focused="true"]')).not.toBeNull();
+    expect(renaming()).toBeUndefined();
+    expect(wallFor('ws-2').querySelector('[data-focused="true"]')).toBeNull();
+    // The ring stayed on the now-active tab, so a second Enter renames it.
+    await press('Enter');
+    expect(renaming()).toBe('ws-2');
+    await cancelRename();
 
-    await press('Shift', 1);
-    await press('Shift', 2);
-    await press('ArrowUp');
     await press('ArrowRight'); // +
     expect(getWorkspacesSnapshot().workspaces).toHaveLength(2);
     await press('Enter');
@@ -252,6 +267,30 @@ describe('WorkspaceWindow', () => {
     expect(getWorkspacesSnapshot().workspaces).toHaveLength(3);
     expect(created).not.toBe('ws-2');
     expect(wallFor(created).querySelector('[data-focused="true"]')).not.toBeNull();
+  });
+
+  it('answers a key from one Wall even when that key activates another', async () => {
+    // A browser runs a microtask checkpoint between listeners, which is where
+    // React commits the newly active Wall. Synchronous dispatch skips it, so each
+    // keydown listener commits pending renders before the next one runs.
+    const committing = new WeakMap<EventListenerOrEventListenerObject, EventListener>();
+    const add = window.addEventListener.bind(window);
+    const remove = window.removeEventListener.bind(window);
+    vi.spyOn(window, 'addEventListener').mockImplementation(((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) => {
+      if (type !== 'keydown' || typeof listener !== 'function') return add(type, listener, options);
+      const commit: EventListener = (e) => { listener(e); flushSync(() => {}); };
+      committing.set(listener, commit);
+      return add(type, commit, options);
+    }) as typeof window.addEventListener);
+    vi.spyOn(window, 'removeEventListener').mockImplementation(((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions) =>
+      remove(type, committing.get(listener) ?? listener, options)) as typeof window.removeEventListener);
+
+    createWorkspace({ id: 'ws-2', activate: false });
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
+    await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', bubbles: true, cancelable: true })); });
+    await flush();
+    // The Wall that `n` activated must not answer it too and switch straight back.
+    expect(getActiveWorkspaceId()).toBe('ws-2');
   });
 
   it('returns to a live pane when the highlighted Workspace disappears', async () => {
