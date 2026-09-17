@@ -3979,10 +3979,7 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
     // and a bare `node` in a dev pane would otherwise find a node with no
     // console. Only this side knows which binary was patched; the sidecar
     // also runs under the VS Code pty host, where nothing is.
-    let gui_node_dir = node_path
-        .parent()
-        .map(|dir| dir.to_string_lossy().into_owned())
-        .unwrap_or_default();
+    let gui_node_dir = node_path.parent().unwrap_or_else(|| Path::new(""));
     let dor_control_token = dor_control_token();
     let state_dir = burrow_state_dir(app);
     let recovery_dir = recovery_state_dir(app);

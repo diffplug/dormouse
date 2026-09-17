@@ -238,11 +238,11 @@ because the sidecar and the `dor` CLI have opposite console requirements:
   that copy can never cause a stray window.
 
 - **Never leave the GUI node's directory on a pane's PATH.** A child of that
-  node.exe gets no console — stdin already at EOF, no `setRawMode`, output
-  dropped — so a bare `node` in a dev pane, where `cargo run` adds that
-  directory for DLL resolution, fails silently. `start_sidecar` passes it as
-  `DORMOUSE_GUI_NODE_DIR`; the sidecar drops it from the PATH each pane
-  inherits, matching the installed app, which never has it on PATH.
+  node.exe gets no console, so a bare `node` in a dev pane — where `cargo run`
+  puts that directory for DLL resolution — fails silently in both directions
+  (rationale). `start_sidecar` passes it as `DORMOUSE_GUI_NODE_DIR`; the sidecar
+  drops it from the PATH each pane inherits, matching the installed app, which
+  never has it on PATH.
 
 The byte-flip lives in `standalone/src-tauri/src/pe_subsystem.rs`, shared with
 `build.rs`, so the load-bearing PE offsets are in one place; the mechanism is in
