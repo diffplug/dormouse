@@ -78,7 +78,7 @@ Source of truth: `registerTerminalSource`, `resolveTerminalSource` and `revealRe
 
 **Must retain one notepad per Tool Surface.** Context changes its presentation only (`docs/specs/terminal-context.md` → Tool context); following a source pin reveals that same terminal.
 
-**The header notepad icon sits after the mouse-override icon and before the split controls** (`docs/specs/layout.md` → "Pane header"), filled while the Surface has notes and regular otherwise. **At the minimal tier an empty notepad yields its space to the title; one with notes stays, and the tiny tier drops it either way.**
+**The header notepad icon sits after the mouse-override icon and before the split controls** (`docs/specs/layout.md` → "Pane header"), filled while the Surface has notes and regular otherwise. **At the minimal tier an empty notepad yields its space to the title; one with notes stays until the width can no longer hold it beside the pane-action group** (`docs/specs/layout.md` → "Pane header responsive sizing" owns that boundary)**.**
 
 - **The attached notepad is a panel in the top-right of the Surface body, three quarters of it wide and tall.** It closes on its close control, Escape, or an outside click.
 - **Only one Surface notepad is open per Wall.** The store holds a single open id, and opening a Door's popover closes the attached panel.

@@ -16,6 +16,7 @@ import { commandArgv0, cwdFromOsc633 } from '../lib/terminal-state';
 import { flattenScenario, SCENARIO_SHELL_PROMPT } from '../lib/platform';
 import { removeMouseSelectionState, setMouseReporting, setOverride } from '../lib/mouse-selection';
 import { addPlainNote, clearAllNotepads } from '../lib/notepad/notepad-store';
+import { recordToolDirty, resetToolDirty } from '../lib/tool-dirty-store';
 import { requireElement, settleTerminals, waitForCondition, waitForPrimedState } from './settle-terminals';
 
 const SESSION_ID = 'tab-story';
@@ -126,6 +127,7 @@ function TabStory({
   reducedMotion = false,
   mouseCaptured = false,
   noteCount = 0,
+  dirty = false,
   actions = noopActions,
 }: {
   mode?: WallMode;
@@ -137,6 +139,9 @@ function TabStory({
   mouseCaptured?: boolean;
   /** Notes on this Surface — the notepad icon fills, and survives the minimal tier. */
   noteCount?: number;
+  /** A Tool terminal face reporting unsaved changes — the dot takes its own
+   *  12px at the header root, outside the region that clips. */
+  dirty?: boolean;
   actions?: WallActions;
 }) {
   useEffect(() => {
@@ -151,6 +156,12 @@ function TabStory({
     return () => clearAllNotepads();
   }, [noteCount]);
 
+  useEffect(() => {
+    if (!dirty) return;
+    recordToolDirty(SESSION_ID, true);
+    return () => resetToolDirty();
+  }, [dirty]);
+
   return (
     <ModeContext.Provider value={mode}>
       <SelectedIdContext.Provider value={isSelected ? SESSION_ID : null}>
@@ -161,7 +172,7 @@ function TabStory({
               style={{ width }}
             >
               <div className="bg-app-bg" style={{ height: 26 }}>
-                <TerminalPaneHeader id={SESSION_ID} title={undefined} params={undefined} />
+                <TerminalPaneHeader id={SESSION_ID} title={undefined} params={dirty ? { surfaceType: 'tool' } : undefined} />
               </div>
             </div>
           </RenamingIdContext.Provider>
@@ -387,6 +398,7 @@ const meta: Meta<typeof TabStory> = {
     isSelected: { control: 'boolean' },
     isRenaming: { control: 'boolean' },
     width: { control: 'number' },
+    dirty: { control: 'boolean' },
     reducedMotion: { control: 'boolean' },
     mouseCaptured: { control: 'boolean' },
     noteCount: { control: 'number' },
@@ -570,6 +582,19 @@ export const NarrowWithNotesControlsVisible: Story = {
   args: {
     width: 100,
     noteCount: 2,
+  },
+  parameters: primedPane({ status: 'NOTHING_TO_SHOW' }),
+  play: assertPaneActions(PANE_ACTIONS),
+};
+
+// The unsaved-change dot sits at the header root, outside the clipping region,
+// so it costs the group 12px that the title cannot give back. 120px is inside
+// the `minimal-tight` band: with notes and a dot the notepad must yield.
+export const NarrowDirtyWithNotesControlsVisible: Story = {
+  args: {
+    width: 120,
+    noteCount: 2,
+    dirty: true,
   },
   parameters: primedPane({ status: 'NOTHING_TO_SHOW' }),
   play: assertPaneActions(PANE_ACTIONS),

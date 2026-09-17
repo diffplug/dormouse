@@ -115,9 +115,9 @@ Both layers wear the leaf's own rounding (header radius on top, terminal radius 
 
 - **Full** (>293px): everything.
 - **Compact** (>173px): split hidden.
-- **Minimal** (>116px): also hides the TODO pill and the mouse-override icon. **The notepad icon survives this tier only while the Surface has notes** (`docs/specs/notepad.md` → "Notepad UI"). The label truncates with ellipsis.
-- **Bare** (>86px): the notepad goes unconditionally — it is the last element that could push the group off the right edge.
-- **Tiny** (≤86px): minimize and kill go too.
+- **Minimal** (>116px): also hides the TODO pill and the mouse-override icon. **The notepad icon survives this tier only while the Surface has notes** (`docs/specs/notepad.md` → "Notepad UI"). The label truncates with ellipsis. **Between 117 and 128px it additionally needs the Surface to be clean**, the unsaved-change dot costing the same 12px at the header root.
+- **Bare** (>98px): the notepad goes unconditionally — it is the last element that could push the group off the right edge.
+- **Tiny** (≤98px): minimize and kill go too.
 
 A browser header, including a Tool's (Terminal Context sits outside the measured width), collapses by border-box width:
 

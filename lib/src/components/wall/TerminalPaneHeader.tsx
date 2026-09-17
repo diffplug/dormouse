@@ -63,14 +63,22 @@ const tabVariant = tv({
   },
 });
 
-type TerminalHeaderTier = 'full' | 'compact' | 'minimal' | 'bare' | 'tiny';
+type TerminalHeaderTier = 'full' | 'compact' | 'minimal' | 'minimal-tight' | 'bare' | 'tiny';
 // Border-box widths, so they include the header's 8px left + 5px right padding
 // (`docs/specs/layout.rationale.md` derives each boundary). Measuring the
-// border box also tells a narrow header from a hidden one. The bottom two
-// boundaries are the widths at which the pane-action group stops fitting —
-// with a notepad icon beside it, then without one.
+// border box also tells a narrow header from a hidden one. The bottom three
+// boundaries are the widths at which the pane-action group stops fitting: with
+// a notepad icon beside it, then without one. `minimal-tight` is the band where
+// the notepad fits only while no unsaved-change dot is taking its own 12px —
+// the tier stays a pure function of width so it survives a dirty report that
+// arrives without a resize, exactly as the browser header's `tight` does.
 const terminalHeaderTier = (width: number): TerminalHeaderTier =>
-  width > 293 ? 'full' : width > 173 ? 'compact' : width > 116 ? 'minimal' : width > 86 ? 'bare' : 'tiny';
+  width > 293 ? 'full'
+    : width > 173 ? 'compact'
+      : width > 128 ? 'minimal'
+        : width > 116 ? 'minimal-tight'
+          : width > 98 ? 'bare'
+            : 'tiny';
 
 // WATCHING is a rule on the running command, so the bell says which command it
 // would act on rather than naming an abstract toggle (`docs/specs/alert.md`).
@@ -138,10 +146,10 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
   const [renameWarning, setRenameWarning] = useState<{ rect: DOMRect; reason: RenameRejection; value: string } | null>(null);
   const todoPill = useTodoPillContent(activity.todo);
   // Named once so inserting a tier does not mean re-deriving a band at every
-  // site that tests one. `roomForNotepad` is the spec's "minimal+": below it
-  // the notepad would push the pane-action group off the header's right edge.
+  // site that tests one. Below `roomForNotepad` the notepad would push the
+  // pane-action group off the header's right edge, so it goes first.
   const compactOrWider = tier === 'full' || tier === 'compact';
-  const roomForNotepad = compactOrWider || tier === 'minimal';
+  const roomForNotepad = compactOrWider || tier === 'minimal' || (tier === 'minimal-tight' && !dirty);
   const tiny = tier === 'tiny';
   const showTodoPill = todoPill.visible && compactOrWider;
   const runningArgv0 = paneState.currentCommand?.rawCommandLine
@@ -307,7 +315,7 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
               </HeaderActionButton>
             </div>
           )}
-          {roomForNotepad && <NotepadHeaderButton surfaceId={id} hideWhenEmpty={tier === 'minimal'} />}
+          {roomForNotepad && <NotepadHeaderButton surfaceId={id} hideWhenEmpty={!compactOrWider} />}
           {tier === 'full' && (
             <div className="ml-1 flex shrink-0 items-center gap-0.5">
               <HeaderActionButton

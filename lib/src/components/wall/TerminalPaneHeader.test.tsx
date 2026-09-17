@@ -13,6 +13,7 @@ import { setPlatform } from '../../lib/platform';
 import { setNativeFieldValue } from '../../lib/dom';
 import { removeTerminalPaneState } from '../../lib/terminal-registry';
 import { removeMouseSelectionState, setMouseReporting } from '../../lib/mouse-selection';
+import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
 import {
   addPlainNote,
   clearAllNotepads,
@@ -42,8 +43,8 @@ afterEach(() => {
   removeTerminalPaneState('term-1');
 });
 
-function renderHeader(actions: WallActions, renamingId: string | null): void {
-  const props: PaneProps = { id: 'term-1', title: 'my-title', params: undefined };
+function renderHeader(actions: WallActions, renamingId: string | null, override?: Partial<PaneProps>): void {
+  const props: PaneProps = { id: 'term-1', title: 'my-title', params: undefined, ...override };
   act(() => {
     root.render(
       <StrictMode>
@@ -168,6 +169,7 @@ describe('TerminalPaneHeader — notepad icon', () => {
     act(() => {
       clearAllNotepads();
       removeMouseSelectionState('term-1');
+      resetToolDirty();
     });
   });
 
@@ -225,6 +227,20 @@ describe('TerminalPaneHeader — notepad icon', () => {
     expect(notepadButton()).not.toBeNull();
   });
 
+  it('gives the notepad band back to an unsaved-change dot', () => {
+    // 117–128px holds the notepad only while the header carries no dot; the dot
+    // is a root-level sibling outside the clipping region, so it costs the same
+    // 12px the notepad would. Above the band both fit.
+    renderHeader(stubActions(), null, { params: { surfaceType: 'tool' } });
+    act(() => { addPlainNote('term-1', 'a note'); });
+    act(() => resizeHeader(120));
+    expect(notepadButton()).not.toBeNull();
+    act(() => recordToolDirty('term-1', true));
+    expect(notepadButton()).toBeNull();
+    act(() => resizeHeader(129));
+    expect(notepadButton()).not.toBeNull();
+  });
+
   it('preserves visual breakpoints and the previous tier while hidden', () => {
     renderHeader(stubActions(), null);
     const split = () => container.querySelector('[aria-label="Split left/right"]');
@@ -247,14 +263,14 @@ describe('TerminalPaneHeader — notepad icon', () => {
     const label = (name: string) => container.querySelector(`[aria-label="${name}"]`);
     // Zoom left the split group, so it now outlives the splits it used to ride
     // with, and then outlives minimize and kill too.
-    for (const width of [294, 200, 100, 87, 40]) {
+    for (const width of [294, 200, 120, 99, 40]) {
       act(() => resizeHeader(width));
       expect(label('Zoom'), `${width}px`).not.toBeNull();
     }
-    act(() => resizeHeader(87));
+    act(() => resizeHeader(99));
     expect(label('Minimize')).not.toBeNull();
     expect(label('Kill')).not.toBeNull();
-    act(() => resizeHeader(86));
+    act(() => resizeHeader(98));
     expect(label('Minimize')).toBeNull();
     expect(label('Kill')).toBeNull();
   });
