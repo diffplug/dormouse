@@ -304,7 +304,9 @@ export function LathHost({
   const [size, setSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
 
   // Measure before the ancestor's entrance layout effect, then use the observer's
-  // untransformed content box while workspace presentation is moving.
+  // untransformed content box while workspace presentation is moving (equal to the
+  // border box: `.lath-host` has no padding or border). The direct call keeps
+  // `getBoundingClientRect`, which jsdom tests can stub.
   // Reporting geometry from the measurement itself — not a passive effect reading
   // the rendered `size` — is load-bearing: this runs in the layout phase with the
   // real laid-out rect, so it is set before the Wall's seed passive effect reads it

@@ -86,6 +86,7 @@ function Tip({ label, children }: { label: string; children: React.ReactNode }) 
 function WinControls() {
   const [appWindow, setAppWindow] = useState<AppWindow | null>(null);
   const [maximized, setMaximized] = useState(false);
+  const windowFocused = useAppWindowFocused();
 
   useEffect(() => {
     let cancelled = false;
@@ -107,7 +108,7 @@ function WinControls() {
   if (!appWindow) return null;
 
   return (
-    <div className="flex items-stretch self-stretch">
+    <div className={`flex items-stretch self-stretch ${windowFocused ? '' : 'opacity-60'}`}>
       <Tip label="Minimize">
         <button
           className={chromeButton({ kind: 'window' })}
@@ -144,8 +145,6 @@ function WinControls() {
 // ── AppBar ─────────────────────────────────────────────────────────────────
 
 export function AppBar() {
-  const windowFocused = useAppWindowFocused();
-
   return (
     <div
       data-tauri-drag-region
@@ -179,7 +178,7 @@ export function AppBar() {
           bottom-right of the window (docs/specs/theme.md,
           docs/specs/standalone.md), so the titlebar carries only the
           native-style window controls on Windows/Linux. */}
-      {!IS_MAC && <div className={`flex self-stretch ${windowFocused ? '' : 'opacity-60'}`}><WinControls /></div>}
+      {!IS_MAC && <WinControls />}
       {/* Reserve the gradient's own band above the Wall's focus-ring gutter. */}
       <div
         aria-hidden="true"

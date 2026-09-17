@@ -5,6 +5,7 @@ import {
   getActiveWorkspaceId,
 } from '../../../lib/workspace-store';
 import { enterWorkspace, requestWorkspaceClose, requestWorkspaceRename } from '../workspace-lifecycle';
+import { isWorkspaceSelection } from '../wall-types';
 import type { WallKeyboardCtx } from './types';
 
 /**
@@ -30,7 +31,7 @@ export function handleWorkspaceShortcuts(e: KeyboardEvent, ctx: WallKeyboardCtx)
 
   if (e.key === 'Enter') {
     const kind = ctx.selectedTypeRef.current;
-    if (kind === 'workspace' || kind === 'workspace-new') {
+    if (isWorkspaceSelection(kind)) {
       return run(() => {
         const id = kind === 'workspace-new' ? createWorkspace().id : ctx.selectedIdRef.current;
         if (id) void enterWorkspace(id);

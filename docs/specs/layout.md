@@ -156,7 +156,7 @@ Source of truth: `DOOR_TAB_CLASS` in `lib/src/components/design.tsx`; `Workspace
 ### Workspace motion
 
 - **Must expand the visible Workspace from its tab on activation, creation, and arrival**, using `LATH_MOTION_MS` and `LATH_EASING`, including opacity. Keep its layout box full-size throughout; skip motion without a measurable tab or under `motionIsInstant()`.
-- **Must keep the outgoing Workspace visible and inert beneath the incoming Workspace during a switch**, dimming linearly to 50% opacity over `LATH_MOTION_MS`. Hide it and detach its terminal elements when the incoming expansion finishes; a rapid switch back resumes from the displayed frame.
+- **Must keep the outgoing Workspace visible and inert beneath the incoming Workspace during a switch**, dimming linearly to 50% opacity over `LATH_MOTION_MS`. Hide it and detach its terminal elements when its fade finishes; a rapid switch back resumes from the displayed frame.
 - **Must collapse a closing Workspace before disposing its Surfaces or removing its tab**, then expand the successor. Hidden departures finish instantly; refused closure restores the Workspace. Hold the closure guard during collapse and omit the subsequent pane exit delay. Transfer sequencing is `docs/specs/standalone.md` → Transfer.
 - **Must reverse interrupted motion from its displayed progress and settle departures even when backgrounded frames stop.** Disposal cancels callbacks. Pinned by `lib/src/components/workspace-motion.test.ts` and `lib/src/components/WorkspaceWindow.test.tsx`.
 - **Must render the selection ring outside the transformed Workspace and remeasure on its animation frames.** Its opacity follows the selected target's Workspace.

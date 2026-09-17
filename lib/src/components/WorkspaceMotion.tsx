@@ -16,15 +16,17 @@ export function WorkspaceMotion({ id, active, children }: { id: string; active: 
     if (active) motion.current?.expand();
     else motion.current?.fade();
   }, [active, id]);
+  // `active` covers the render before the layout effect reports visibility.
+  const shown = active || visible;
   return (
     <div
       ref={element}
       data-workspace-wall={id}
       data-workspace-active={active ? 'true' : 'false'}
       inert={!active}
-      className={clsx('col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col', active ? 'z-10' : 'pointer-events-none', !active && !visible && 'invisible')}
+      className={clsx('col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col', active ? 'z-10' : 'pointer-events-none', !shown && 'invisible')}
     >
-      <WorkspaceVisibleContext.Provider value={active || visible}>{children}</WorkspaceVisibleContext.Provider>
+      <WorkspaceVisibleContext.Provider value={shown}>{children}</WorkspaceVisibleContext.Provider>
     </div>
   );
 }

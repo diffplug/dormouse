@@ -61,8 +61,6 @@ export async function closeWorkspaceWithSurfaces(
   const handle = getWallHandle(id);
   if (!handle) return mountingRefusal(workspaceRefFor(id));
   closeInFlight = true;
-  /** A refusal returns to its prompt if the user navigated away during close. */
-  const revealForPrompt = () => { if (mode === 'prompt') setActiveWorkspace(id); };
   try {
     if (mode === 'prompt') {
       // Commit visibility before collapse measures the Wall, even for an
@@ -71,7 +69,8 @@ export async function closeWorkspaceWithSurfaces(
     }
     const refusal = await handle.closeAll(mode);
     if (refusal) {
-      revealForPrompt();
+      // A refusal returns to its prompt if the user navigated away during close.
+      if (mode === 'prompt') setActiveWorkspace(id);
       return refusal;
     }
     let closed = false;
@@ -109,9 +108,10 @@ async function closeOnceWallRegisters(id: WorkspaceId, forceConfirm: boolean): P
   const handle = await awaitWallHandle(id);
   if (closeInFlight || isWorkspaceTransferPending(id)) return;
   if (!handle) return;
-  setActiveWorkspace(id);
-  handle.selectWorkspaceTab();
   if (forceConfirm || workspaceNeedsCloseConfirmation(id)) {
+    // An immediate close reveals the Workspace itself.
+    setActiveWorkspace(id);
+    handle.selectWorkspaceTab();
     setPendingWorkspaceClose({ id, char: randomKillChar() });
     return;
   }

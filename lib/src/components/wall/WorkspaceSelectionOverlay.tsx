@@ -24,7 +24,7 @@ import {
 } from '../../lib/rect-tween';
 import { useFocusRingColor } from '../../lib/themes/use-focus-ring-color';
 import { resolvePaneElement } from './resolve-pane-element';
-import type { WallMode, WallSelectionKind } from './wall-types';
+import { isWorkspaceSelection, workspaceIdOfSelection, type WallMode, type WallSelectionKind } from './wall-types';
 import { DoorElementsContext, PaneElementsContext, RingHandoffContext, WindowFocusedContext } from './wall-context';
 import { workspaceTabElement } from '../workspace-tab-elements';
 import { getWorkspacesSnapshot, subscribeToWorkspaces } from '../../lib/workspace-store';
@@ -386,9 +386,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     const instant = motionIsInstant();
 
     const target = () => {
-      if (selectedType === 'workspace' || selectedType === 'workspace-new') {
-        return workspaceTabElement(selectedType === 'workspace-new' ? null : selectedId);
-      }
+      if (isWorkspaceSelection(selectedType)) return workspaceTabElement(workspaceIdOfSelection(selectedType, selectedId));
       return selectedType === 'door' ? doorElements.get(selectedId) : resolvePaneElement(paneElements.get(selectedId));
     };
     const update = () => {

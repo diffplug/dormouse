@@ -32,6 +32,13 @@ export type WallMode = 'command' | 'passthrough';
 
 export type WallSelectionKind = 'pane' | 'door' | 'workspace' | 'workspace-new';
 
+/** Whether the selection sits in the Workspace strip (a tab or the New Workspace button). */
+export const isWorkspaceSelection = (kind: WallSelectionKind): boolean => kind === 'workspace' || kind === 'workspace-new';
+
+/** The selected tab's Workspace id; null denotes the New Workspace button. */
+export const workspaceIdOfSelection = (kind: WallSelectionKind, id: string | null): string | null =>
+  kind === 'workspace-new' ? null : id;
+
 /** How a Surface closure answers the archive: `prompt` raises the Keep open /
  *  Close anyway prompt on refusal, `silent` only returns the refusal, `discard`
  *  drops the notes instead of archiving them (docs/specs/notepad.md → "Closure"). */

@@ -42,6 +42,7 @@ import {
   subscribeToWorkspaces,
 } from '../lib/workspace-store';
 import type { WorkspaceId } from '../lib/session-types';
+import { revealWorkspaceTab } from './workspace-tab-elements';
 
 /**
  * The Window's Workspace tabs. Store-driven end to end (Workspaces, membership,
@@ -87,7 +88,7 @@ export function WorkspaceStrip({
   // Activation changes the close button and therefore the intrinsic tab width.
   // Reveal it after layout, including activation through a shortcut or create.
   useLayoutEffect(() => {
-    tabElementsRef.current.get(activeId)?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    revealWorkspaceTab(tabElementsRef.current.get(activeId) ?? null);
   }, [activeId]);
 
   // Stable across renders: the tab's own `data-workspace-tab` says which entry

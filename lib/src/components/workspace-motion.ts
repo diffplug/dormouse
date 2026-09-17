@@ -64,8 +64,9 @@ export function createWorkspaceMotion(element: HTMLElement, id: string, onVisibi
     const transform = element.style.transform;
     element.style.transform = '';
     const rect = element.getBoundingClientRect();
-    element.style.transform = transform;
+    // The tab sits outside this subtree: read it under the same layout flush.
     const tab = workspaceTabElement(id)?.getBoundingClientRect();
+    element.style.transform = transform;
     if (!tab || tab.width <= 0 || tab.height <= 0 || rect.width <= 0 || rect.height <= 0) return false;
     anchor = { x: tab.left - rect.left, y: tab.top - rect.top, sx: tab.width / rect.width, sy: tab.height / rect.height };
     return true;
@@ -74,8 +75,9 @@ export function createWorkspaceMotion(element: HTMLElement, id: string, onVisibi
     cancel();
     // Keep the same anchor when reversing a partial transform: tab widths can
     // change on activation, but the frame already on screen must not jump.
-    const measurable = (progress > 0 && progress < 1) || measure();
-    if (!measurable || motionIsInstant() || (progress === to && alpha === toAlpha)) {
+    // Measuring forces layout, so it runs last, only when a tween will start.
+    const measurable = () => (progress > 0 && progress < 1) || measure();
+    if (motionIsInstant() || (progress === to && alpha === toAlpha) || !measurable()) {
       progress = to;
       alpha = toAlpha;
       paint();

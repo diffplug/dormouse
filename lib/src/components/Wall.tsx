@@ -8,7 +8,7 @@ import { isHelperSession } from '../lib/terminal-store';
 import { useRef, useState, useEffect, useCallback, useMemo, useSyncExternalStore, lazy, Suspense, type ReactNode } from 'react';
 import { clsx } from 'clsx';
 import { Baseboard } from './Baseboard';
-import { workspaceTabElement } from './workspace-tab-elements';
+import { revealWorkspaceTab, workspaceTabElement } from './workspace-tab-elements';
 import { collapseWorkspace, restoreWorkspaceMotion, workspaceIsCollapsed } from './workspace-motion';
 import { ExternalLinkModalHost } from './ExternalLinkModalHost';
 import { AgentBrowserScreenModalHost } from './AgentBrowserScreenModalHost';
@@ -121,6 +121,7 @@ import {
   type PaneWriteActions,
   type WallActions,
 } from './wall/wall-context';
+import { isWorkspaceSelection } from './wall/wall-types';
 import type { CloseSurfaceMode, DoorAfterRestoreAction, DoorChip, DooredItem, WallBootProps, WallEvent, WallMode, WallSelectionKind } from './wall/wall-types';
 
 type ShellSpawnRequest = {
@@ -553,11 +554,16 @@ export function Wall({
     setSelectedType('door');
   }, [releaseZoomExcept]);
 
-  const returnToPane = useCallback(() => {
+  /** The last selected pane while it is still live, else the first live pane. */
+  const livePaneId = useCallback((): string | undefined => {
     const last = lastPaneIdRef.current;
-    const id = last && nav.hasPane(last) ? last : nav.panes()[0];
+    return last && nav.hasPane(last) ? last : nav.panes()[0];
+  }, [nav]);
+
+  const returnToPane = useCallback(() => {
+    const id = livePaneId();
     if (id) selectPane(id);
-  }, [nav, selectPane]);
+  }, [livePaneId, selectPane]);
 
   const selectWorkspace = useCallback((id: string | null) => {
     doorKillReturnRef.current = null;
@@ -568,7 +574,7 @@ export function Wall({
     selectedTypeRef.current = id === null ? 'workspace-new' : 'workspace';
     setSelectedId(selectedIdRef.current);
     setSelectedType(selectedTypeRef.current);
-    element.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    revealWorkspaceTab(element);
   }, [workspaceId, releaseZoomExcept]);
 
   useEffect(() => subscribeToWorkspaces(() => {
@@ -1072,8 +1078,8 @@ export function Wall({
 
   /** Abandon a `closeAll`: the Workspace stays, so the Wall's "always one pane"
    *  rule is re-armed and an emptied tree refilled. Every path that gives up on
-   *  a close — a refused Surface, the exit deadline, a `closeWorkspace` the
-   *  store refuses — ends here (`docs/specs/layout.md` → "Workspaces"). */
+   *  a close — a refused Surface, the exit deadline — ends here
+   *  (`docs/specs/layout.md` → "Workspaces"). */
   const cancelClose = useCallback(() => {
     closingWorkspaceRef.current = false;
     if (workspaceIsCollapsed(effectiveWorkspaceId)) restoreWorkspaceMotion(effectiveWorkspaceId);
@@ -1622,8 +1628,7 @@ export function Wall({
     }),
     runningCount: () => countRunningSessionsIn(memberSurfaceIds()),
     enterSelectedPane: () => {
-      const last = lastPaneIdRef.current;
-      const id = last && nav.hasPane(last) ? last : nav.panes()[0];
+      const id = livePaneId();
       if (id) enterTerminalMode(id);
     },
     enterCommandMode: exitTerminalMode,
@@ -1638,7 +1643,6 @@ export function Wall({
       hasTerminal: surfaceHasTerminal,
     }),
     closeAll,
-    cancelClose,
     handleDorControl,
   };
   const handleRef = useRef<WallHandle | null>(null);
@@ -1668,7 +1672,7 @@ export function Wall({
     if (!active) {
       focusSelected(false);
       // Chrome selection is a command-mode cursor in the visible Window only.
-      if (selectedTypeRef.current === 'workspace' || selectedTypeRef.current === 'workspace-new') returnToPane();
+      if (isWorkspaceSelection(selectedTypeRef.current)) returnToPane();
       return;
     }
     const frame = requestAnimationFrame(() => focusSelected(true));

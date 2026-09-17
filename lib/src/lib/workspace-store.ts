@@ -176,12 +176,18 @@ export function activateWorkspaceAt(index: number): void {
   if (target) setActiveWorkspace(target.id);
 }
 
+/** A generated id no Workspace in the list holds, the closing one included. */
+function freshWorkspaceId(): WorkspaceId {
+  let id = generateWorkspaceId();
+  while (state.workspaces.some((workspace) => workspace.id === id)) id = generateWorkspaceId();
+  return id;
+}
+
 export function createWorkspace(opts?: { id?: WorkspaceId; name?: string; activate?: boolean; alertDelivery?: AlertDeliveryOverrides }): WorkspaceMeta {
-  let id = opts?.id ?? generateWorkspaceId();
-  while (state.workspaces.some((workspace) => workspace.id === id)) {
-    if (opts?.id !== undefined) throw new Error(`Duplicate Workspace id: ${id}`);
-    id = generateWorkspaceId();
+  if (opts?.id !== undefined && state.workspaces.some((workspace) => workspace.id === opts.id)) {
+    throw new Error(`Duplicate Workspace id: ${opts.id}`);
   }
+  const id = opts?.id ?? freshWorkspaceId();
   const meta: WorkspaceMeta = { id, name: opts?.name ?? nextDefaultName(), ...(opts?.alertDelivery ? { alertDelivery: normalizeAlertDeliveryOverrides(opts.alertDelivery) } : {}) };
   const activeId = opts?.activate === false ? state.activeId : meta.id;
   emit({ workspaces: [...state.workspaces, meta], activeId });
@@ -200,18 +206,14 @@ export function renameWorkspace(id: WorkspaceId, name: string): void {
 
 /**
  * Remove a Workspace, atomically replacing the last one with a fresh Workspace.
- * Closing the active one
- * activates its next neighbor (previous at the end). Returns whether one was removed.
+ * Closing the active one activates its next neighbor (previous at the end).
+ * Returns whether one was removed.
  */
 export function closeWorkspace(id: WorkspaceId): boolean {
   const index = state.workspaces.findIndex((ws) => ws.id === id);
   if (index === -1) return false;
   const workspaces = state.workspaces.filter((ws) => ws.id !== id);
-  if (workspaces.length === 0) {
-    let replacementId = generateWorkspaceId();
-    while (replacementId === id) replacementId = generateWorkspaceId();
-    workspaces.push({ id: replacementId, name: nextDefaultName() });
-  }
+  if (workspaces.length === 0) workspaces.push({ id: freshWorkspaceId(), name: nextDefaultName() });
   const activeId = state.activeId === id ? workspaces[Math.min(index, workspaces.length - 1)].id : state.activeId;
   emit({ workspaces, activeId });
   return true;

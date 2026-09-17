@@ -40,10 +40,6 @@ export interface WallHandle {
    *  once the Wall is empty, else the first refusal's message with the Workspace
    *  left as it was. */
   closeAll(mode?: CloseSurfaceMode): Promise<string | null>;
-  /** Abandon a close the Wall has already emptied for: the Workspace survives,
-   *  so its "always one pane" rule is re-armed and the tree refilled. The close
-   *  verb calls it when the store refuses to drop the Workspace after all. */
-  cancelClose(): void;
   handleDorControl(detail: DorControlRequest): void;
 }
 
@@ -111,7 +107,6 @@ export function stubWallHandle(workspaceId: WorkspaceId, overrides: Partial<Wall
       commit: () => {},
     }),
     closeAll: async () => null,
-    cancelClose: () => {},
     handleDorControl: () => {},
     ...overrides,
   };

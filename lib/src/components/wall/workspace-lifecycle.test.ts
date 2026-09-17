@@ -72,15 +72,12 @@ describe('closeWorkspaceWithSurfaces', () => {
   it('replaces the last Workspace even when a sibling disappears during closure', async () => {
     const [first] = ids();
     createWorkspace({ id: 'ws-2' });
-    const cancelClose = vi.fn();
     // A sibling disappears while this close is walking its Surfaces.
     handleFor('ws-2', {
       closeAll: async () => { closeWorkspace(first); return null; },
-      cancelClose,
     });
 
     expect(await closeWorkspaceWithSurfaces('ws-2')).toBeNull();
-    expect(cancelClose).not.toHaveBeenCalled();
     expect(ids()).toHaveLength(1);
     expect(ids()).not.toContain('ws-2');
   });

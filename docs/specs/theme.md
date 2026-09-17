@@ -88,7 +88,7 @@ cancel queued resolution on disposal.** Pinned by
 
 **Selection backgrounds are flattened to opaque.** Theme authors give
 `list.activeSelectionBackground` / `list.inactiveSelectionBackground` alpha;
-Dormouse uses them as solid header/AppBar fills, so `applyTheme()` composites
+Dormouse uses them as solid header and Workspace-tab fills, so `applyTheme()` composites
 them over `sideBar.background` first (rationale).
 
 **A same-theme `applyTheme()` call is a no-op only while the expected inline
@@ -270,7 +270,7 @@ each pinned by the test beside it except `getThemePreview`, covered by
 
 **Must scan `standalone/src` in `lib/.storybook/preview.css`** for host utilities.
 
-`lib/.storybook/themes.ts` builds switcher colors from `bundled.json`
+`lib/.storybook/themes.ts` builds the switcher's color maps from `bundled.json`
 and **must run them through `completeThemeVars()` and `flattenSelectionAlpha()`**
 (with `applyTheme()`'s host typography defaults) so isolated stories see the
 materialized `--vscode-*` set the app sees. The preview decorator writes them to
@@ -278,7 +278,7 @@ both `html` (VSCode's host globals) and `body` (matching `applyTheme()`), and
 publishes the dynamic palette through `computeDynamicPalette()` so stories
 outside a full Wall — doors, focus rings, ringing bells — still get the runtime
 picks. `PREFERRED_STORYBOOK_THEME` in `lib/.storybook/preview.ts` names
-the default theme, **falling back to the first bundled theme** so
+the default simulated host theme, **falling back to the first bundled theme** so
 a renamed or removed bundle cannot leave stories without theme vars.
 
 ## Theme debugger
