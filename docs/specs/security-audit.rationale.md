@@ -74,6 +74,8 @@ Without the transcript a run that produces no verdict is undiagnosable: `claude-
 
 Two weakenings found by the audit's own first run were covered by no example in the judgement bullet, and both became their own bullets.
 
+Publishing the fragments when no merged report exists is the same "a prompt is not a control" split as the guards above. Run 34581574869 (2026-09-11) ended its turn before the merge, so this step's report section was one line saying no report was produced — while `supply-chain` and `ci-and-secrets` had finished `VERDICT: PASS` fragments in the working directory, already redacted and already read twice by the guard loops. `.github/audit/orchestrator.md` §4 now forbids ending the turn there, but the run's findings should not depend on that sentence being followed. Verbatim and unmerged, because §3's merge is the only thing entitled to characterise a fragment and the notes already name which domains were cut off.
+
 ## Environment and `AUDIT_PAT`
 
 A bot-pushed feature branch cannot reach the audit job at all — GitHub rejects the run before any step starts — so `AUDIT_PAT` cannot be exfiltrated through a hand-authored workflow on a non-admin-gated ref.

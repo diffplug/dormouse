@@ -57,6 +57,13 @@ const cases = [
   // names every marker the merge can leave there. Drop one and the reader is
   // told to look for two shapes in a report that has three.
   { name: 'the no-verdict note names every report marker', verdicts: ['PASS', 'PASS', 'PASS'], unfinished: [2], expected: 'INCONCLUSIVE', notes: ['`UNVERIFIABLE`', '`_Incomplete …_`', '`_No report …_`'] },
+  // Run 34581574869 ended its turn before §3, so no merged report existed and
+  // this arm published a single line — while two domains' finished `VERDICT:
+  // PASS` fragments sat in the working directory and reached a human only
+  // through the artifact. The fragments are what the run found; the absence of
+  // a merge is not a reason to drop them.
+  { name: 'no merged report publishes the fragments verbatim', report: null, verdicts: ['PASS', 'PASS', null], expected: 'INCONCLUSIVE',
+    notes: ['the merge never ran', '## audit-supply-chain.md', 'VERDICT: PASS', '## audit-application.md', '_No report — this domain produced no fragment._'] },
 ];
 for (const scenario of cases) {
   test(`reporting: ${scenario.name}`, (t) => {
@@ -68,7 +75,7 @@ for (const scenario of cases) {
       if (args[0] === 'issue' && args[1] === 'list') process.stdout.write('23\\n');
     `);
     if (scenario.status !== undefined) writeFileSync(join(dir, 'audit-status.txt'), scenario.status);
-    writeFileSync(join(dir, 'audit-report.md'), '# Fixture report\n');
+    if (scenario.report !== null) writeFileSync(join(dir, 'audit-report.md'), '# Fixture report\n');
     scenario.verdicts.forEach((verdict, i) => {
       if (verdict === null) return;
       const sentinel = scenario.unfinished?.includes(i)
