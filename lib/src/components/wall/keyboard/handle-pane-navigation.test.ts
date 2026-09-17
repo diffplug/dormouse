@@ -61,8 +61,9 @@ describe('workspace row navigation', () => {
   it.each(['workspace', 'workspace-new'] as const)('does not dispatch pane actions against a %s selection', kind => {
     const ctx = context();
     ctx.selectedTypeRef.current = kind;
+    // Independent of the production filter so an omitted binding fails here.
     // Context deliberately has no pane action callbacks: none may be reached.
-    for (const key of ['|', '-', 'x', 'k', ',', 'm', 'd', 'z', 'a', 't', '>']) {
+    for (const key of ['Enter', '|', '%', '-', '"', 'k', 'x', ',', 'm', 'd', 't', 'a', 'z', '>']) {
       const event = new KeyboardEvent('keydown', { key, cancelable: true });
       expect(handlePaneShortcuts(event, ctx, { current: null })).toBe(true);
       expect(event.defaultPrevented).toBe(true);

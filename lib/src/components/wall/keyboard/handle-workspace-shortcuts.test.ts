@@ -76,8 +76,8 @@ describe('handleWorkspaceShortcuts', () => {
 
       // No Wall has registered yet — `&` right after `c` — so the close waits
       // for it rather than being refused unseen; nothing in the Wall is
-      // touched, so it then goes straight through — but the last Workspace
-      // still cannot be closed.
+      // touched, so it then goes straight through. Closing the final Workspace
+      // replaces it with a fresh identity.
       handleWorkspaceShortcuts(keydown('&'), ctx);
       expect(ids()).toEqual([first, 'ws-2']);
       registerWallHandle(stubWallHandle(first));
@@ -87,6 +87,8 @@ describe('handleWorkspaceShortcuts', () => {
       handleWorkspaceShortcuts(keydown('&'), ctx);
       await vi.advanceTimersByTimeAsync(0);
       expect(ids()).toHaveLength(1);
+      expect(ids()).not.toContain(first);
+      expect(getActiveWorkspaceId()).toBe(ids()[0]);
     } finally {
       vi.useRealTimers();
     }

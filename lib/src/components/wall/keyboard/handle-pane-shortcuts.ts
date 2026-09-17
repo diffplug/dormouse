@@ -16,8 +16,9 @@ function findPaneHeaderForSession(id: string): HTMLElement | null {
   return document.querySelector<HTMLElement>(`[data-pane-header-for="${CSS.escape(id)}"]`);
 }
 
-/** Every bare key `handlePaneShortcuts` dispatches below; the two move together,
- *  so a Workspace-strip selection swallows each pane verb instead of leaking it. */
+/** Keep aligned with the pane handlers below. Workspace selections consume
+ *  these keys; an omitted key returns unhandled without dispatching a pane action.
+ *  Pinned by the independent key list in handle-pane-navigation.test.ts. */
 const PANE_VERB_KEYS: ReadonlySet<string> = new Set(['Enter', '|', '%', '-', '"', 'k', 'x', ',', 'm', 'd', 't', 'a', 'z', '>']);
 
 /** Command-mode shortcuts acting on the selected pane or Door. The binding
