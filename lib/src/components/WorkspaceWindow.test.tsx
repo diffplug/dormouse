@@ -10,6 +10,10 @@ import { type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { WorkspaceWindow } from './WorkspaceWindow';
+import { WorkspaceStrip } from './WorkspaceStrip';
+import * as workspaceMotion from './workspace-motion';
+import * as uiGeometry from '../lib/ui-geometry';
+import { LATH_MOTION_MS } from '../lib/lath/animator';
 import { closeWorkspaceWithSurfaces } from './wall/workspace-lifecycle';
 import * as terminalRegistry from '../lib/terminal-registry';
 import { setPlatform } from '../lib/platform';
@@ -22,7 +26,7 @@ import { resetWorkspaceBootPlans, setWorkspaceBootPlan } from './wall/workspace-
 import { mountWallHarness, type WallHarness } from './wall/wall-test-utils';
 import { getWorkspaceSurfacesSnapshot, resetWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { previousWorkspaceSession, publishWorkspaceSession, resetWindowSessionAggregator, seedWindowSession, setWorkspaceTransferPending } from '../lib/window-session-aggregator';
-import { resetWorkspaceUi } from '../lib/workspace-ui-store';
+import { getWorkspaceUiSnapshot, resetWorkspaceUi } from '../lib/workspace-ui-store';
 import {
   closeWorkspace,
   createWorkspace,
@@ -94,6 +98,176 @@ async function render(node = <WorkspaceWindow initialPaneIds={['pane-a']} />): P
 }
 
 describe('WorkspaceWindow', () => {
+  it('keeps the outgoing Wall inert and visible beneath the incoming Wall until its fade ends', async () => {
+    const first = getActiveWorkspaceId();
+    createWorkspace({ id: 'ws-2', activate: false });
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
+    vi.spyOn(uiGeometry, 'motionIsInstant').mockReturnValue(false);
+    for (const wall of walls()) {
+      wall.getBoundingClientRect = () => ({ left: 0, top: 40, width: 1000, height: 600 }) as DOMRect;
+    }
+    for (const tab of container.querySelectorAll<HTMLElement>('[data-workspace-tab]')) {
+      tab.getBoundingClientRect = () => ({ left: 0, top: 0, width: 100, height: 24 }) as DOMRect;
+    }
+    await act(async () => { setActiveWorkspace('ws-2'); });
+    expect(wallFor(first).hasAttribute('inert')).toBe(true);
+    expect(wallFor(first).classList.contains('invisible')).toBe(false);
+    expect(wallFor('ws-2').hasAttribute('inert')).toBe(false);
+    expect(wallFor('ws-2').classList.contains('z-10')).toBe(true);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, LATH_MOTION_MS + 30)); });
+    expect(wallFor(first).classList.contains('invisible')).toBe(true);
+    expect(wallFor('ws-2').classList.contains('invisible')).toBe(false);
+  });
+
+  it('reveals and confirms x on a highlighted workspace, then selects the next tab for repeated deletion', async () => {
+    const first = getActiveWorkspaceId();
+    createWorkspace({ id: 'ws-2', activate: false });
+    createWorkspace({ id: 'ws-3', activate: false });
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
+    const press = async (key: string) => {
+      await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); });
+      await flush();
+    };
+    await press('ArrowUp');
+    await press('ArrowRight');
+    expect(getActiveWorkspaceId()).toBe(first);
+    await press('x');
+    expect(getActiveWorkspaceId()).toBe('ws-2');
+    expect(getWorkspaceUiSnapshot().pendingClose?.id).toBe('ws-2');
+    expect(leafIdsIn('ws-2')).toHaveLength(1);
+    await press('Escape');
+    expect(getWorkspacesSnapshot().workspaces).toHaveLength(3);
+    await press('x');
+    await press(getWorkspaceUiSnapshot().pendingClose!.char);
+    await flush();
+    expect(getActiveWorkspaceId()).toBe('ws-3');
+    expect(getWorkspacesSnapshot().workspaces.map(workspace => workspace.id)).toEqual([first, 'ws-3']);
+    // No Up required: selection stayed on the workspace row, not a pane.
+    await press('x');
+    expect(getWorkspaceUiSnapshot().pendingClose?.id).toBe('ws-3');
+    await press(getWorkspaceUiSnapshot().pendingClose!.char);
+    await flush();
+    expect(getActiveWorkspaceId()).toBe(first);
+    await press('x');
+    expect(getWorkspaceUiSnapshot().pendingClose?.id).toBe(first);
+    await press(getWorkspaceUiSnapshot().pendingClose!.char);
+    const replacement = getActiveWorkspaceId();
+    expect(replacement).not.toBe(first);
+    expect(getWorkspacesSnapshot().workspaces).toHaveLength(1);
+    expect(leafIdsIn(replacement)).toHaveLength(1);
+    expect(getWallHandle(first)).toBeNull();
+    expect(leafIdsIn(replacement)).not.toContain('pane-a');
+    await press('x');
+    expect(getWorkspaceUiSnapshot().pendingClose?.id).toBe(replacement);
+  });
+
+  it('keeps the closing tab and its Surfaces until the workspace collapse finishes', async () => {
+    createWorkspace({ id: 'ws-2' });
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
+    let finish!: () => void;
+    vi.spyOn(workspaceMotion, 'collapseWorkspace').mockImplementation(() => new Promise<void>(resolve => { finish = resolve; }));
+    let closing!: Promise<string | null>;
+    await act(async () => { closing = closeWorkspaceWithSurfaces('ws-2'); });
+    expect(container.querySelector('[data-workspace-tab="ws-2"]')).not.toBeNull();
+    expect(getWallHandle('ws-2')!.surfaceIds()).toEqual(['pane-a']);
+    await act(async () => { finish(); expect(await closing).toBeNull(); });
+    await flush();
+    expect(container.querySelector('[data-workspace-tab="ws-2"]')).toBeNull();
+    expect(getWallHandle('ws-2')).toBeNull();
+  });
+
+  it('clicking an inactive tab activates it in command mode even if it was left in passthrough', async () => {
+    const first = getActiveWorkspaceId();
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
+    await act(async () => { getWallHandle(first)!.enterSelectedPane(); });
+    await flush();
+    expect(wallFor(first).querySelector('[data-focused="true"]')).not.toBeNull();
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await flush();
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(`[data-workspace-tab="${first}"] button`)!.click();
+    });
+    await flush();
+    expect(getActiveWorkspaceId()).toBe(first);
+    expect(wallFor(first).querySelector('[data-focused="true"]')).toBeNull();
+    expect(container.querySelector('[data-workspace-rename-for]')).toBeNull();
+    await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: '|', bubbles: true })); });
+    await flush();
+    expect(leafIdsIn(first)).toHaveLength(2);
+  });
+
+  it.each(['command', 'passthrough'] as const)('clicking the active tab renames without leaving %s mode', async mode => {
+    const first = getActiveWorkspaceId();
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
+    if (mode === 'passthrough') {
+      await act(async () => { getWallHandle(first)!.enterSelectedPane(); });
+      await flush();
+    }
+    const focused = () => wallFor(first).querySelector('[data-focused="true"]') !== null;
+    expect(focused()).toBe(mode === 'passthrough');
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(`[data-workspace-tab="${first}"] button`)!.click();
+    });
+    const input = container.querySelector<HTMLInputElement>('[data-workspace-rename-for]')!;
+    expect(document.activeElement).toBe(input);
+    expect(focused()).toBe(mode === 'passthrough');
+    await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+    await flush();
+    expect(container.querySelector('[data-workspace-rename-for]')).toBeNull();
+    expect(focused()).toBe(mode === 'passthrough');
+  });
+
+  it('highlights tabs without switching and Enter activates or creates into a live pane', async () => {
+    const first = getActiveWorkspaceId();
+    createWorkspace({ id: 'ws-2', activate: false });
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
+    const press = async (key: string, location = 0) => {
+      await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key, location, bubbles: true, cancelable: true })); });
+      await flush();
+    };
+    await press('ArrowUp');
+    await press('ArrowRight');
+    expect(getActiveWorkspaceId()).toBe(first);
+    await press('ArrowDown');
+    await press('Enter');
+    expect(getActiveWorkspaceId()).toBe(first);
+    expect(wallFor(first).querySelector('[data-session-id="pane-a"][data-focused="true"]')).not.toBeNull();
+
+    await press('Shift', 1);
+    await press('Shift', 2);
+    await press('ArrowUp');
+    await press('ArrowRight');
+    await press('Enter');
+    expect(getActiveWorkspaceId()).toBe('ws-2');
+    expect(wallFor('ws-2').querySelector('[data-focused="true"]')).not.toBeNull();
+
+    await press('Shift', 1);
+    await press('Shift', 2);
+    await press('ArrowUp');
+    await press('ArrowRight'); // +
+    expect(getWorkspacesSnapshot().workspaces).toHaveLength(2);
+    await press('Enter');
+    const created = getActiveWorkspaceId();
+    expect(getWorkspacesSnapshot().workspaces).toHaveLength(3);
+    expect(created).not.toBe('ws-2');
+    expect(wallFor(created).querySelector('[data-focused="true"]')).not.toBeNull();
+  });
+
+  it('returns to a live pane when the highlighted Workspace disappears', async () => {
+    const first = getActiveWorkspaceId();
+    createWorkspace({ id: 'ws-2', activate: false });
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
+    for (const key of ['ArrowUp', 'ArrowRight']) {
+      await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })); });
+    }
+    await act(async () => { closeWorkspace('ws-2'); });
+    await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+    await flush();
+    expect(getActiveWorkspaceId()).toBe(first);
+    expect(wallFor(first).querySelector('[data-session-id="pane-a"][data-focused="true"]')).not.toBeNull();
+  });
+
   it('mounts one Wall per Workspace with exactly one active, and seeds only the boot Workspace', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await render();
@@ -211,9 +385,10 @@ describe('WorkspaceWindow', () => {
     expect(leafIdsIn('ws-2')).toEqual([]);
   });
 
-  it('a refused closure leaves the Workspace intact and re-arms its auto-spawn', async () => {
+  it.each([true, false])('a refused closure preserves Workspace visibility (active: %s) and re-arms its auto-spawn', async (activate) => {
+    const first = getActiveWorkspaceId();
     await render();
-    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await act(async () => { createWorkspace({ id: 'ws-2', activate }); });
     await flush();
     const handle = getWallHandle('ws-2')!;
     const [paneId] = handle.surfaceIds();
@@ -225,6 +400,9 @@ describe('WorkspaceWindow', () => {
     await flush();
     expect(refusal).toContain('notepad archive failed');
     expect(handle.surfaceIds()).toEqual([paneId]);
+    expect(workspaceMotion.workspaceIsCollapsed('ws-2')).toBe(false);
+    expect(getActiveWorkspaceId()).toBe(activate ? 'ws-2' : first);
+    expect(wallFor('ws-2').classList.contains('invisible')).toBe(!activate);
 
     // The flag is cleared, so the Wall's "always one pane" rule works again.
     vi.mocked(fake.notepadArchive.save).mockResolvedValue(undefined);
@@ -416,14 +594,6 @@ describe('WorkspaceWindow', () => {
     // Exactly one Wall dispatches, so two mounted Walls create one Workspace.
     await press('c');
     expect(ids()).toHaveLength(3);
-  });
-
-  it('refuses to close the last Workspace', async () => {
-    const first = getWorkspacesSnapshot().workspaces[0].id;
-    await render();
-    expect(closeWorkspace(first)).toBe(false);
-    expect(getWorkspacesSnapshot().workspaces).toHaveLength(1);
-    expect(walls()).toHaveLength(1);
   });
 
   it('reports a fresh Workspace as untouched with nothing running', async () => {

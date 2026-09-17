@@ -312,8 +312,10 @@ export function LathHost({
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
 
-  // Measure the container and track resizes. `getBoundingClientRect` (not
-  // `entry.contentRect`) so the measurement is trivially stubbable in jsdom.
+  // Measure before the ancestor's entrance layout effect, then use the observer's
+  // untransformed content box while workspace presentation is moving (equal to the
+  // border box: `.lath-host` has no padding or border). The direct call keeps
+  // `getBoundingClientRect`, which jsdom tests can stub.
   // Reporting geometry from the measurement itself — not a passive effect reading
   // the rendered `size` — is load-bearing: this runs in the layout phase with the
   // real laid-out rect, so it is set before the Wall's seed passive effect reads it
@@ -323,8 +325,9 @@ export function LathHost({
   useLayoutEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const measure = () => {
-      const r = el.getBoundingClientRect();
+    const measure = (entries?: ResizeObserverEntry[]) => {
+      // Workspace presentation can scale this subtree; layout stays full-size.
+      const r = entries?.[0]?.contentRect ?? el.getBoundingClientRect();
       store.setLayoutGeometry({ x: 0, y: 0, width: r.width, height: r.height }, LATH_LAYOUT_OPTS);
       setSize((prev) => (prev.width === r.width && prev.height === r.height ? prev : { width: r.width, height: r.height }));
     };

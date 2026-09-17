@@ -5,6 +5,7 @@ import {
 } from '../../../lib/terminal-registry';
 import { hasTerminal } from 'dor/commands/types';
 import { surfaceKindFromParams } from '../browser-surface';
+import { isWorkspaceSelection } from '../wall-types';
 import { ARROW_OPPOSITES, isArrowKey, type NavHistoryRef, type WallKeyboardCtx } from './types';
 
 function findAlertButtonForSession(id: string): HTMLButtonElement | null {
@@ -15,6 +16,11 @@ function findPaneHeaderForSession(id: string): HTMLElement | null {
   return document.querySelector<HTMLElement>(`[data-pane-header-for="${CSS.escape(id)}"]`);
 }
 
+/** Keep aligned with the pane handlers below. Workspace selections consume
+ *  these keys; an omitted key returns unhandled without dispatching a pane action.
+ *  Pinned by the independent key list in handle-pane-navigation.test.ts. */
+const PANE_VERB_KEYS: ReadonlySet<string> = new Set(['Enter', '|', '%', '-', '"', 'k', 'x', ',', 'm', 'd', 't', 'a', 'z', '>']);
+
 /** Command-mode shortcuts acting on the selected pane or Door. The binding
  *  table is `docs/specs/shortcuts.md`; the behavior is `docs/specs/layout.md`. */
 export function handlePaneShortcuts(
@@ -23,6 +29,13 @@ export function handlePaneShortcuts(
   navHistory: NavHistoryRef,
 ): boolean {
   const sid = ctx.selectedIdRef.current;
+  // Workspace chrome has its own Enter and navigation paths, never pane verbs.
+  if (isWorkspaceSelection(ctx.selectedTypeRef.current)) {
+    if (!PANE_VERB_KEYS.has(e.key) && !(isArrowKey(e.key) && (e.metaKey || e.ctrlKey))) return false;
+    e.preventDefault();
+    e.stopPropagation();
+    return true;
+  }
 
   if (e.key === 'Enter' && sid) {
     e.preventDefault();

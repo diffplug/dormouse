@@ -88,7 +88,6 @@ describe('workspace-store', () => {
       })).toThrow('Duplicate Workspace id');
       expect(getWorkspacesSnapshot()).toBe(initial);
       expect(listener).not.toHaveBeenCalled();
-      expect(closeWorkspace(DEFAULT_WORKSPACE_ID)).toBe(false);
     } finally {
       unsubscribe();
     }
@@ -111,16 +110,27 @@ describe('workspace-store', () => {
     expect(getWorkspacesSnapshot().workspaces).toHaveLength(1);
   });
 
-  it('closeWorkspace refuses to close the last Workspace', () => {
-    expect(closeWorkspace(DEFAULT_WORKSPACE_ID)).toBe(false);
-    expect(getWorkspacesSnapshot().workspaces).toHaveLength(1);
+  it('closeWorkspace atomically replaces the last Workspace with a fresh identity', () => {
+    const changed = vi.fn(() => {
+      const { workspaces, activeId } = getWorkspacesSnapshot();
+      expect(workspaces).toHaveLength(1);
+      expect(workspaces[0].id).toBe(activeId);
+      expect(activeId).not.toBe(DEFAULT_WORKSPACE_ID);
+    });
+    const unsubscribe = subscribeToWorkspaces(changed);
+    expect(closeWorkspace(DEFAULT_WORKSPACE_ID)).toBe(true);
+    expect(changed).toHaveBeenCalledTimes(1);
+    unsubscribe();
   });
 
-  it('closeWorkspace removes a non-last Workspace and activates the previous neighbor', () => {
+  it('closeWorkspace activates the next neighbor, falling back to the previous at the end', () => {
     createWorkspace({ id: 'ws-2' });
-    createWorkspace({ id: 'ws-3' }); // active = ws-3
+    createWorkspace({ id: 'ws-3' });
+    createWorkspace({ id: 'ws-4', activate: false });
     expect(closeWorkspace('ws-3')).toBe(true);
-    expect(getActiveWorkspaceId()).toBe('ws-2'); // previous neighbor
+    expect(getActiveWorkspaceId()).toBe('ws-4');
+    expect(closeWorkspace('ws-4')).toBe(true);
+    expect(getActiveWorkspaceId()).toBe('ws-2');
     expect(getWorkspacesSnapshot().workspaces.map((w) => w.id)).toEqual([DEFAULT_WORKSPACE_ID, 'ws-2']);
   });
 

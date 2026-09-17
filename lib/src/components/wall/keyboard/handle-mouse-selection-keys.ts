@@ -8,6 +8,7 @@ import {
   setSelection as setMouseSelection,
 } from '../../../lib/mouse-selection';
 import { addSelectionToNotepad, isNotepadChordBound } from '../../../lib/notepad/capture';
+import { isWorkspaceSelection } from '../wall-types';
 import { hasCopyModifier, hasPasteModifier } from './chords';
 import { hasTerminal } from 'dor/commands/types';
 import { surfaceKindFromParams, toolFace } from '../browser-surface';
@@ -29,6 +30,7 @@ export function handleMouseSelectionKeys(e: KeyboardEvent, ctx: WallKeyboardCtx)
 
   const sid = ctx.selectedIdRef.current;
   if (!sid) return false;
+  if (isWorkspaceSelection(ctx.selectedTypeRef.current)) return false;
 
   // These chords copy/paste against a terminal's pty and mouse selection.
   // Non-terminal surfaces (agent-browser, iframe) own their clipboard keys —

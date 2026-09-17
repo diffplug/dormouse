@@ -1,5 +1,5 @@
-import { useEffect, useSyncExternalStore, type ReactNode } from 'react';
-import { clsx } from 'clsx';
+import { useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react';
+import { WorkspaceMotion } from './WorkspaceMotion';
 import { Wall } from './Wall';
 import { listWallHandles } from './wall/wall-handles';
 import { getWorkspaceBootPlan, seedWorkspaceBootPlans } from './wall/workspace-boot-plans';
@@ -7,6 +7,8 @@ import { getPlatform } from '../lib/platform';
 import { getWorkspacesSnapshot, subscribeToWorkspaces } from '../lib/workspace-store';
 import type { SessionFlushRequest } from '../lib/platform/types';
 import type { WallBootPlans, WallBootProps } from './wall/wall-types';
+import { RingHandoffContext } from './wall/wall-context';
+import type { RingFrame } from '../lib/rect-tween';
 
 /**
  * One Window's Workspaces: a mounted `<Wall>` each, all in the same grid cell so
@@ -31,6 +33,7 @@ export function WorkspaceWindow({
   initialPlans?: WallBootPlans;
 }) {
   const { workspaces, activeId } = useSyncExternalStore(subscribeToWorkspaces, getWorkspacesSnapshot);
+  const ringHandoff = useRef<RingFrame | null>(null);
   // One shape for both callers, fixed at first render: without per-Workspace
   // plans the single boot record belongs to the Workspace that was active then.
   // Every later read — including a Workspace arriving from another Window, which
@@ -57,38 +60,32 @@ export function WorkspaceWindow({
   return (
     // One grid cell holds every Wall, so each keeps the same box whether or not
     // it is the visible one. The strip anchors its close confirmation here.
-    <div
-      data-workspace-content
-      className="grid min-h-0 flex-1 grid-cols-1 grid-rows-1 overflow-hidden"
-    >
-      {workspaces.map((workspace) => {
-        const isActive = workspace.id === activeId;
-        const plan = getWorkspaceBootPlan(workspace.id);
-        return (
-          <div
-            key={workspace.id}
-            data-workspace-wall={workspace.id}
-            data-workspace-active={isActive ? 'true' : 'false'}
-            // `visibility: hidden` (not `display: none`) keeps the box laid out,
-            // so a hidden Workspace's reattached xterms find an unchanged grid. `inert` is
-            // defense-in-depth: `visibility: hidden` already removes focusability.
-            inert={!isActive}
-            className={clsx(
-              'col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col',
-              !isActive && 'invisible pointer-events-none',
-            )}
-          >
-            <Wall
-              {...plan}
-              workspaceId={workspace.id}
+    <RingHandoffContext.Provider value={ringHandoff}>
+      <div
+        data-workspace-content
+        className="grid min-h-0 flex-1 grid-cols-1 grid-rows-1 overflow-hidden bg-app-bg"
+      >
+        {workspaces.map((workspace) => {
+          const isActive = workspace.id === activeId;
+          const plan = getWorkspaceBootPlan(workspace.id);
+          return (
+            <WorkspaceMotion
+              key={workspace.id}
+              id={workspace.id}
               active={isActive}
-              baseboardNotice={isActive ? baseboardNotice : undefined}
-              dialogHost={isActive ? dialogHost : undefined}
-              enableBurrow={enableBurrow}
-            />
-          </div>
-        );
-      })}
-    </div>
+            >
+              <Wall
+                {...plan}
+                workspaceId={workspace.id}
+                active={isActive}
+                baseboardNotice={isActive ? baseboardNotice : undefined}
+                dialogHost={isActive ? dialogHost : undefined}
+                enableBurrow={enableBurrow}
+              />
+            </WorkspaceMotion>
+          );
+        })}
+      </div>
+    </RingHandoffContext.Provider>
   );
 }

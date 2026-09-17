@@ -1,0 +1,14 @@
+{
+  "commit": "c14097cabbbef8d670234354014e41ae4fc9470a",
+  "dirty": true,
+  "files": [
+    {
+      "filename": "pgstencil-0.1.0.tgz",
+      "sha256": "88601626740565b3ad8660ebdf8ec06f3d5f553288ec7ea5549f6d3e7c8a293d"
+    },
+    {
+      "filename": "pgstencil-auth-0.1.0.tgz",
+      "sha256": "111892277b8bd4a6ff5b758ccb0e1bce3997ccf5493c8f9fdb98fedf7f6eab5a"
+    }
+  ]
+}

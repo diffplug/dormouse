@@ -29,6 +29,7 @@ vi.mock('../../../lib/notepad/capture', () => ({
 function makeCtx(params?: Record<string, unknown>): WallKeyboardCtx {
   return {
     selectedIdRef: { current: 'pane-a' },
+    selectedTypeRef: { current: 'pane' },
     // Surface-type lookup now flows through the engine-neutral `nav` seam; an
     // absent params reads as a terminal.
     nav: {

@@ -11,7 +11,7 @@ import { SelectionOverlay } from './SelectionOverlay';
 import { SelectionPopup } from './SelectionPopup';
 import { MouseOverrideBanner } from './wall/MouseOverrideBanner';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from './design';
-import { TerminalResizeContext, WorkspaceActiveContext } from './wall/wall-context';
+import { TerminalResizeContext, WorkspaceActiveContext, WorkspaceVisibleContext } from './wall/wall-context';
 
 interface TerminalPaneProps {
   id: string;
@@ -32,6 +32,7 @@ export function TerminalPane({ id, isFocused = true }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const resize = useContext(TerminalResizeContext);
   const workspaceActive = useContext(WorkspaceActiveContext);
+  const workspaceVisible = useContext(WorkspaceVisibleContext) ?? workspaceActive;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -42,7 +43,7 @@ export function TerminalPane({ id, isFocused = true }: TerminalPaneProps) {
     // the element stays detached so xterm stops rasterizing and holds no GL
     // context (docs/specs/layout.md → "Workspaces"). Activation re-runs this
     // effect, and the reattach fit finds the box the hidden Wall kept.
-    if (!workspaceActive) return;
+    if (!workspaceVisible) return;
     mountElement(id, container);
     // The one fit path, whatever wakes it: the layout coordinator when it has painted
     // committed geometry, a debounced container resize otherwise. Both drop a pending
@@ -69,7 +70,7 @@ export function TerminalPane({ id, isFocused = true }: TerminalPaneProps) {
       clearTimeout(timer);
       unmountElement(id, container);
     };
-  }, [id, resize, workspaceActive]);
+  }, [id, resize, workspaceVisible]);
 
   useEffect(() => {
     // A Tool's browser can retain its focus handle until its exit effect runs.

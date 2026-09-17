@@ -3233,6 +3233,40 @@ describe('Wall on the Lath engine', () => {
     expect(confirmKillOverlay()).not.toBeNull();
   });
 
+  it.each([
+    ['pane-a', 'pane-b', true],
+    ['pane-b', 'pane-c', true],
+    ['pane-c', 'pane-b', true],
+    ['pane-b', 'pane-c', false],
+  ] as const)('returns keyboard focus from deleted Door %s to %s (confirm: %s)', async (target, next, confirm) => {
+    vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(!confirm);
+    const onEvent = vi.fn();
+    await act(async () => root.render(<Wall initialPaneIds={['pane-live', 'pane-a', 'pane-b', 'pane-c']} initialMode="command" showBaseboard onEvent={onEvent} />));
+    await flush();
+    for (const id of ['pane-a', 'pane-b', 'pane-c']) {
+      await act(async () => { container.querySelector<HTMLElement>(`[data-lath-leaf="${id}"] [aria-label="Minimize"]`)!.click(); });
+      await flush();
+    }
+    const press = async (key: string) => {
+      await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })); });
+      await flush();
+    };
+    for (let i = ['pane-a', 'pane-b', 'pane-c'].indexOf(target); i < 2; i++) await press('ArrowLeft');
+    await press('x');
+    await flushFrame();
+    await flush();
+    if (confirm) {
+      expect(confirmKillOverlay()).not.toBeNull();
+      expect(container.querySelector(`[data-lath-leaf="${target}"]`)).not.toBeNull();
+      await press(container.querySelector('.text-xl')!.textContent!);
+      await flush();
+    }
+    expect(container.querySelector(`[data-lath-leaf="${target}"]`)).toBeNull();
+    expect(onEvent.mock.calls.filter(([event]) => event.type === 'selectionChange').at(-1)?.[0])
+      .toEqual({ type: 'selectionChange', id: next, kind: 'door' });
+    expect(container.querySelector('[data-focused="true"]')).toBeNull();
+  });
+
   it('drops a kill gesture whose Helper inspection outlives the pane', async () => {
     vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
     const helper: helpers.HelperTerminal = { id: 'helper-a', parentId: 'pane-a', command: '', status: 'off' };

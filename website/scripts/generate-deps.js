@@ -27,9 +27,9 @@ const productDependencyFilters = [
   "dormouse-sidecar",
   "relay",
 ];
-// Neither package installs an artifact on a user's disk. Any new workspace
+// These packages do not install an artifact on a user's disk. Any new workspace
 // requires classification here or a runtime edge from a product root.
-const excludedWorkspacePackages = ["canopy", "dormouse-website"];
+const excludedWorkspacePackages = ["canopy", "dormouse-website", "dormouse-hosted"];
 
 function readJson(path) {
   return JSON.parse(readFileSync(path, "utf-8"));

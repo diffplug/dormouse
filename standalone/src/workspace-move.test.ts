@@ -4,6 +4,7 @@ import { applyTerminalSemanticEvents, snapshotTerminalState, removeTerminalPaneS
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PlatformAdapter, PtyInfo } from "dormouse-lib/lib/platform/types";
+import * as workspaceMotion from 'dormouse-lib/components/workspace-motion';
 import type {
   PreparedWorkspaceTransfer,
   WorkspaceTransferPayload,
@@ -244,12 +245,36 @@ beforeEach(() => {
 
 /** Fire the listener `initWorkspaceMoves` registered for `event`. */
 const emit = async (event: string, data: unknown) => {
-  const calls = mocks.listen.mock.calls as unknown as Array<[string, (e: { payload: unknown }) => void]>;
-  calls.find(([name]) => name === event)![1]({ payload: data });
+  const calls = mocks.listen.mock.calls as unknown as Array<[string, (e: { payload: unknown }) => void | Promise<void>]>;
+  await calls.find(([name]) => name === event)![1]({ payload: data });
   await new Promise((r) => setTimeout(r, 0));
 };
 
 describe("the source half", () => {
+  it('collapses only after adoption and keeps the source until its animation finishes', async () => {
+    createWorkspace({ id: WORKSPACE_ID });
+    const commit = vi.fn();
+    registerWallHandle(stubWallHandle(WORKSPACE_ID, { prepareWorkspaceTransfer: async () => prepared(commit) }));
+    initWorkspaceMoves(fakePlatform());
+    let finish!: () => void;
+    const collapse = vi.spyOn(workspaceMotion, 'collapseWorkspace').mockImplementation(() => new Promise<void>(resolve => { finish = resolve; }));
+    try {
+      const moved = transferWorkspaceTo(WORKSPACE_ID, 'ws-2');
+      await contentSent();
+      expect(collapse).not.toHaveBeenCalled();
+      const departure = emit('dormouse://workspace-departed', { workspaceId: WORKSPACE_ID });
+      expect(collapse).toHaveBeenCalledWith(WORKSPACE_ID);
+      expect(commit).not.toHaveBeenCalled();
+      expect(getWorkspacesSnapshot().workspaces.some(workspace => workspace.id === WORKSPACE_ID)).toBe(true);
+      finish();
+      await departure;
+      expect(commit).toHaveBeenCalledOnce();
+      await expect(moved).resolves.toEqual({ moved: true });
+    } finally {
+      collapse.mockRestore();
+    }
+  });
+
   it("prepares the Workspace, tells the host, and commits only when it lands", async () => {
     const order: string[] = [];
     registerWallHandle(stubWallHandle(WORKSPACE_ID, {

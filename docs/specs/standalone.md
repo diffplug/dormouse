@@ -279,11 +279,8 @@ window-focus tracking). **Neither a theme picker nor a shell picker belongs here
 both live in the Settings dialog at the bottom-right of the window
 (`docs/specs/theme.md`).
 
-The strip is one tab per Workspace: click activates, double-click renames,
-middle-click or the tab's `×` closes, `+` creates, and a drag past the shared
-threshold reorders. Behavior is `docs/specs/layout.md` → Workspaces and its
-indicators `docs/specs/alert.md` → Workspace union; tabs shrink to a floor and
-then the strip scrolls, with no overflow arrows.
+The strip's gestures and appearance are `docs/specs/layout.md` → Workspace tabs;
+its indicators are `docs/specs/alert.md` → Workspace union.
 
 - **Never put `data-tauri-drag-region` on a tab or anything inside one.** Tauri
   matches that attribute on the event target alone, so a tab carrying it would
@@ -579,6 +576,7 @@ The protocol and every failure path are §Arrival queue; what a move *is*:
 
 - **A window whose last Workspace left closes itself**, with no confirmation, no
   archive and no kill: nothing ended.
+- **Must collapse the source only after `workspace-departed` confirms adoption, before committing its release and removing its tab or closing its Window.** The pending guard spans the animation; `workspace-move.test.ts` pins this order. Presentation is `docs/specs/layout.md` → Workspace motion.
 - **A pane's helper Session travels with it.** A helper is not a member Surface,
   so nothing else in the payload names it, and one left behind is a leaked shell
   plus a stray pane on the source's next reload. It rides directly after its

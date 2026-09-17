@@ -10,8 +10,10 @@ import {
   type WallMode,
   type WallActions,
 } from '../components/Wall';
-import type { ActivityNotification } from '../lib/alert-manager';
+import type { ActivityNotification, SessionStatus } from '../lib/alert-manager';
 import { summarizeCommandLine, type SetTerminalUserTitleResult } from '../lib/terminal-registry';
+import { commandArgv0, cwdFromOsc633 } from '../lib/terminal-state';
+import { flattenScenario, SCENARIO_SHELL_PROMPT } from '../lib/platform';
 import { removeMouseSelectionState, setMouseReporting, setOverride } from '../lib/mouse-selection';
 import { addPlainNote, clearAllNotepads } from '../lib/notepad/notepad-store';
 import { requireElement, settleTerminals, waitForCondition, waitForPrimedState } from './settle-terminals';
@@ -41,58 +43,82 @@ function actionsRejecting(reason: 'empty' | 'reserved'): WallActions {
   return { ...noopActions, onFinishRename: () => rejection };
 }
 
-function primedState(state: Record<string, unknown>) {
-  return {
-    primedSessionState: {
-      byId: {
-        [SESSION_ID]: state,
-      },
-    },
-  };
+const LONG_TITLE = 'my-extremely-long-running-background-process-with-a-very-descriptive-name';
+// Where the fake helper terminal opens, so the context finds the two directories
+// comparable instead of warning that one never reported.
+const PANE_CWD = cwdFromOsc633('/home/demo/projects/dormouse', 0);
+
+// Whether a status is public only while WATCHING is on — the detector states
+// (`docs/specs/alert.md` -> Public State). Exhaustive, so a new status must
+// decide here.
+const SHOWN_ONLY_WHILE_WATCHING: Readonly<Record<SessionStatus, boolean>> = {
+  NOTHING_TO_SHOW: true,
+  MIGHT_BE_BUSY: true,
+  BUSY: true,
+  MIGHT_NEED_ATTENTION: true,
+  WATCHING_DISABLED: false,
+  ALERT_RINGING: false,
+  OSC_NOTIF_BUSY: false,
+  COMMAND_EXIT_ARMED: false,
+};
+
+interface PanePriming {
+  status: SessionStatus;
+  todo?: boolean;
+  notification?: ActivityNotification;
+  /**
+   * The foreground command, reported the way shell integration would; `null` is
+   * a pane at its prompt. WATCHING is keyed on its name, so without one the bell
+   * has no rule to name and every dialog renders its "nothing is running" variant.
+   */
+  command?: string | null;
+  /**
+   * The title a rename pins; `null` lets the header derive one. The header's
+   * `title` prop is only the fallback for a bare `shell` label, so an unprimed
+   * pane reads `<idle>` whatever that prop says.
+   */
+  userTitle?: string | null;
 }
 
 /**
- * Report a foreground command the way shell integration would. WATCHING is keyed
- * on the running command's name (`docs/specs/alert.md`), so without this the
- * bell has no rule to name and every dialog renders its "nothing is running"
- * variant. `startedAt` is fixed rather than `Date.now()` for deterministic
- * Chromatic snapshots.
+ * Prime one pane's Activity and semantic state as a coherent pair: a detector
+ * status comes with a running command and a WATCHING rule for it. Timestamps are
+ * fixed rather than `Date.now()` for deterministic Chromatic snapshots.
  */
-function primedRunningCommand(rawCommandLine: string) {
+function primedPane({ status, todo = false, notification, command = 'pnpm dev', userTitle = 'build-server' }: PanePriming) {
+  const watching = SHOWN_ONLY_WHILE_WATCHING[status];
+  const argv0 = command ? commandArgv0(command) : null;
+  if (watching && !argv0) throw new Error(`${status} is public only while a watched command runs`);
   return {
+    primedSessionState: {
+      byId: {
+        [SESSION_ID]: { status, todo, watchingEnabled: watching, ...(notification ? { notification } : {}) },
+      },
+    },
     primedTerminalState: {
       byId: {
         [SESSION_ID]: {
-          activity: { kind: 'running' as const },
-          currentCommand: {
-            id: 'story-run',
-            rawCommandLine,
-            displayCommand: summarizeCommandLine(rawCommandLine),
-            cwdAtStart: null,
-            startedAt: 0,
-            source: 'osc633_E' as const,
-          },
+          cwd: PANE_CWD,
+          ...(userTitle ? { title: { title: userTitle, source: 'user' as const, updatedAt: 0 } } : {}),
+          ...(command ? {
+            activity: { kind: 'running' as const },
+            currentCommand: {
+              id: 'story-run',
+              rawCommandLine: command,
+              displayCommand: summarizeCommandLine(command),
+              cwdAtStart: PANE_CWD,
+              startedAt: 0,
+              source: 'osc633_E' as const,
+            },
+          } : {}),
         },
       },
     },
-  };
-}
-
-function primedNotificationState(notification: ActivityNotification, status = 'WATCHING_DISABLED') {
-  return {
-    // A program that rang was, by definition, running something — so these
-    // dialogs show the rule switch alongside the notification detail.
-    ...primedRunningCommand('pnpm test'),
-    ...primedState({
-      status,
-      todo: true,
-      notification,
-    }),
+    primedWatchedCommands: watching && argv0 ? [argv0] : [],
   };
 }
 
 function TabStory({
-  title = 'my-terminal',
   mode = 'command' as WallMode,
   isSelected = true,
   isRenaming = false,
@@ -102,7 +128,6 @@ function TabStory({
   noteCount = 0,
   actions = noopActions,
 }: {
-  title?: string;
   mode?: WallMode;
   isSelected?: boolean;
   isRenaming?: boolean;
@@ -136,7 +161,7 @@ function TabStory({
               style={{ width }}
             >
               <div className="bg-app-bg" style={{ height: 26 }}>
-                <TerminalPaneHeader id={SESSION_ID} title={title} params={undefined} />
+                <TerminalPaneHeader id={SESSION_ID} title={undefined} params={undefined} />
               </div>
             </div>
           </RenamingIdContext.Provider>
@@ -155,9 +180,28 @@ function wait(ms: number) {
  *  patience budget. */
 const RETRY_BUDGET_MS = 4000;
 
-/** Context interactions need the full Wall, which owns the unified menu. */
+/**
+ * Context interactions need the full Wall, which owns the unified menu. The
+ * frame is a flex column because the Wall's root is `flex-1`: in a block frame
+ * it collapses to the Baseboard's height, and the pane and dialog render but
+ * are never seen.
+ */
 function ContextWallStory() {
-  return <div style={{ width: 900, height: 680 }}><Wall initialPaneIds={[SESSION_ID]} initialMode="command" /></div>;
+  return <div className="flex flex-col" style={{ width: 900, height: 680 }}><Wall initialPaneIds={[SESSION_ID]} initialMode="command" /></div>;
+}
+
+/** Open the terminal context from the bell of a Wall whose one pane is `pane`. */
+function contextDialogStory(pane: PanePriming): Story {
+  return {
+    render: ContextWallStory,
+    parameters: {
+      // The derived title is part of what the context's Title row explains.
+      ...primedPane({ userTitle: null, ...pane }),
+      // Output for the pane's terminal, which `settleTerminals` waits on.
+      fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) },
+    },
+    play: openAlertRightClickDialog,
+  };
 }
 
 /** Wait for priming before opening the source's alert controls in context. */
@@ -334,14 +378,12 @@ const meta: Meta<typeof TabStory> = {
     mode: { control: 'radio', options: ['command', 'passthrough'] },
     isSelected: { control: 'boolean' },
     isRenaming: { control: 'boolean' },
-    title: { control: 'text' },
     width: { control: 'number' },
     reducedMotion: { control: 'boolean' },
     mouseCaptured: { control: 'boolean' },
     noteCount: { control: 'number' },
   },
   args: {
-    title: 'build-server',
     mode: 'command',
     isSelected: true,
     isRenaming: false,
@@ -356,51 +398,27 @@ export default meta;
 type Story = StoryObj<typeof TabStory>;
 
 export const AlertDisabled: Story = {
-  parameters: primedState({
-    status: 'WATCHING_DISABLED',
-
-    todo: false,
-  }),
+  parameters: primedPane({ status: 'WATCHING_DISABLED' }),
 };
 
 export const AlertEnabled: Story = {
-  parameters: primedState({
-    status: 'NOTHING_TO_SHOW',
-
-    todo: false,
-  }),
+  parameters: primedPane({ status: 'NOTHING_TO_SHOW' }),
 };
 
 export const AlertMightBeBusy: Story = {
-  parameters: primedState({
-    status: 'MIGHT_BE_BUSY',
-
-    todo: false,
-  }),
+  parameters: primedPane({ status: 'MIGHT_BE_BUSY' }),
 };
 
 export const AlertBusy: Story = {
-  parameters: primedState({
-    status: 'BUSY',
-
-    todo: false,
-  }),
+  parameters: primedPane({ status: 'BUSY' }),
 };
 
 export const AlertMightNeedAttention: Story = {
-  parameters: primedState({
-    status: 'MIGHT_NEED_ATTENTION',
-
-    todo: false,
-  }),
+  parameters: primedPane({ status: 'MIGHT_NEED_ATTENTION' }),
 };
 
 export const AlertRinging: Story = {
-  parameters: primedState({
-    status: 'ALERT_RINGING',
-
-    todo: false,
-  }),
+  parameters: primedPane({ status: 'ALERT_RINGING' }),
 };
 
 // --- Command-keyed WATCHING (docs/specs/alert.md) --------------------------
@@ -408,55 +426,41 @@ export const AlertRinging: Story = {
 // The bell acts on the *running command's* rule, not on this pane, so what it
 // offers depends on what the pane is running and whether a rule already exists.
 
-export const AlertRightClickDialog: Story = {
-  render: ContextWallStory,
-  parameters: {
-    ...primedRunningCommand('claude --resume'),
-    ...primedState({ status: 'NOTHING_TO_SHOW', todo: false, watchingEnabled: true }),
-    primedWatchedCommands: ['claude'],
-  },
-  play: openAlertRightClickDialog,
-};
+export const AlertRightClickDialog: Story = contextDialogStory({
+  status: 'NOTHING_TO_SHOW',
+  command: 'claude --resume',
+});
 
 /** A pane at a prompt: no argv0, so the dialog explains instead of offering a switch. */
-export const AlertDialogNoCommandRunning: Story = {
-  render: ContextWallStory,
-  parameters: primedState({ status: 'WATCHING_DISABLED', todo: false }),
-  play: openAlertRightClickDialog,
-};
+export const AlertDialogNoCommandRunning: Story = contextDialogStory({
+  status: 'WATCHING_DISABLED',
+  command: null,
+});
 
 export const BellTooltipOffersRule: Story = {
-  parameters: {
-    ...primedRunningCommand('claude --resume'),
-    ...primedState({ status: 'WATCHING_DISABLED', todo: false }),
-    primedWatchedCommands: [],
-  },
+  parameters: primedPane({ status: 'WATCHING_DISABLED', command: 'claude --resume' }),
   play: hoverAlertButton,
 };
 
 export const BellTooltipRemovesRule: Story = {
-  parameters: {
-    ...primedRunningCommand('claude --resume'),
-    ...primedState({ status: 'NOTHING_TO_SHOW', todo: false, watchingEnabled: true }),
-    primedWatchedCommands: ['claude'],
-  },
+  parameters: primedPane({ status: 'NOTHING_TO_SHOW', command: 'claude --resume' }),
   play: hoverAlertButton,
 };
 
 export const BellTooltipNoCommandRunning: Story = {
-  parameters: primedState({ status: 'WATCHING_DISABLED', todo: false }),
+  parameters: primedPane({ status: 'WATCHING_DISABLED', command: null }),
   play: hoverAlertButton,
 };
 
 export const TodoOnly: Story = {
-  parameters: primedState({
-    status: 'WATCHING_DISABLED',
-    todo: true,
-  }),
+  parameters: primedPane({ status: 'WATCHING_DISABLED', todo: true }),
 };
 
+// A program that rang was, by definition, running something — so the
+// notification dialogs show the rule switch alongside the notification detail.
+
 export const TodoWithNotificationPreview: Story = {
-  parameters: primedNotificationState(NOTIFICATIONS.osc777TitleAndBody),
+  parameters: primedPane({ status: 'WATCHING_DISABLED', todo: true, notification: NOTIFICATIONS.osc777TitleAndBody, command: 'pnpm test' }),
   play: openTodoNotificationPreview,
 };
 
@@ -464,97 +468,73 @@ export const TodoWithLongNotificationPreview: Story = {
   args: {
     width: 320,
   },
-  parameters: primedNotificationState(NOTIFICATIONS.longBody),
+  parameters: primedPane({ status: 'WATCHING_DISABLED', todo: true, notification: NOTIFICATIONS.longBody, command: 'pnpm test' }),
   play: openTodoNotificationPreview,
 };
 
-export const NotificationDialogTitleAndBody: Story = {
-  render: ContextWallStory,
-  parameters: primedNotificationState(NOTIFICATIONS.osc777TitleAndBody, 'ALERT_RINGING'),
-  play: openAlertRightClickDialog,
-};
+export const NotificationDialogTitleAndBody: Story = contextDialogStory({
+  status: 'ALERT_RINGING',
+  todo: true,
+  notification: NOTIFICATIONS.osc777TitleAndBody,
+  command: 'pnpm test',
+});
 
-export const NotificationDialogBodyOnly: Story = {
-  render: ContextWallStory,
-  parameters: primedNotificationState(NOTIFICATIONS.osc9BodyOnly, 'ALERT_RINGING'),
-  play: openAlertRightClickDialog,
-};
+export const NotificationDialogBodyOnly: Story = contextDialogStory({
+  status: 'ALERT_RINGING',
+  todo: true,
+  notification: NOTIFICATIONS.osc9BodyOnly,
+  command: 'pnpm test',
+});
 
-export const NotificationDialogTitleOnly: Story = {
-  render: ContextWallStory,
-  parameters: primedNotificationState(NOTIFICATIONS.osc99TitleOnly, 'ALERT_RINGING'),
-  play: openAlertRightClickDialog,
-};
+export const NotificationDialogTitleOnly: Story = contextDialogStory({
+  status: 'ALERT_RINGING',
+  todo: true,
+  notification: NOTIFICATIONS.osc99TitleOnly,
+  command: 'pnpm test',
+});
 
-export const NotificationDialogLongBody: Story = {
-  render: ContextWallStory,
-  args: {
-    width: 320,
-  },
-  parameters: primedNotificationState(NOTIFICATIONS.longBody, 'ALERT_RINGING'),
-  play: openAlertRightClickDialog,
-};
+export const NotificationDialogLongBody: Story = contextDialogStory({
+  status: 'ALERT_RINGING',
+  todo: true,
+  notification: NOTIFICATIONS.longBody,
+  command: 'pnpm test',
+});
 
 export const TodoAndAlertEnabled: Story = {
-  parameters: primedState({
-    status: 'NOTHING_TO_SHOW',
-
-    todo: true,
-  }),
+  parameters: primedPane({ status: 'NOTHING_TO_SHOW', todo: true }),
 };
 
 export const TodoAndAlertRinging: Story = {
-  parameters: primedState({
-    status: 'ALERT_RINGING',
-
-    todo: true,
-  }),
+  parameters: primedPane({ status: 'ALERT_RINGING', todo: true }),
 };
 
 export const CompactWidthWithAlert: Story = {
   args: {
     width: 220,
   },
-  parameters: primedState({
-    status: 'NOTHING_TO_SHOW',
-
-    todo: false,
-  }),
+  parameters: primedPane({ status: 'NOTHING_TO_SHOW' }),
 };
 
 export const MinimalWidthWithAlert: Story = {
   args: {
     width: 150,
   },
-  parameters: primedState({
-    status: 'NOTHING_TO_SHOW',
-
-    todo: false,
-  }),
+  parameters: primedPane({ status: 'NOTHING_TO_SHOW' }),
 };
 
 export const LongTitleWithAlertAndTodo: Story = {
   args: {
-    title: 'my-extremely-long-running-background-process-with-a-very-descriptive-name',
     width: 360,
   },
-  parameters: primedState({
-    status: 'ALERT_RINGING',
-
-    todo: true,
-  }),
+  parameters: primedPane({ status: 'ALERT_RINGING', todo: true, userTitle: LONG_TITLE }),
 };
 
 export const RenameRejectedReserved: Story = {
   args: {
-    title: 'build-server',
     isRenaming: true,
     actions: actionsRejecting('reserved'),
   },
-  parameters: primedState({
-    status: 'NOTHING_TO_SHOW',
-    todo: false,
-  }),
+  parameters: primedPane({ status: 'NOTHING_TO_SHOW' }),
   play: submitReservedRename,
 };
 
@@ -569,10 +549,7 @@ export const NarrowControlsVisible: Story = {
   args: {
     width: 110,
   },
-  parameters: primedState({
-    status: 'NOTHING_TO_SHOW',
-    todo: false,
-  }),
+  parameters: primedPane({ status: 'NOTHING_TO_SHOW' }),
   play: assertControlsVisible,
 };
 
@@ -580,10 +557,7 @@ export const ExtremelyNarrowControlsVisible: Story = {
   args: {
     width: 76,
   },
-  parameters: primedState({
-    status: 'ALERT_RINGING',
-    todo: true,
-  }),
+  parameters: primedPane({ status: 'ALERT_RINGING', todo: true }),
   play: assertControlsVisible,
 };
 
@@ -592,10 +566,7 @@ export const NarrowWithMouseCaptureControlsVisible: Story = {
     width: 120,
     mouseCaptured: true,
   },
-  parameters: primedState({
-    status: 'NOTHING_TO_SHOW',
-    todo: false,
-  }),
+  parameters: primedPane({ status: 'NOTHING_TO_SHOW' }),
   play: assertControlsVisible,
 };
 
@@ -603,27 +574,23 @@ export const NarrowWithMouseCaptureControlsVisible: Story = {
 // AlertEnabled and MinimalWidthWithAlert cover the empty notepad.
 export const NotepadWithNotes: Story = {
   args: { noteCount: 3 },
-  parameters: primedState({ status: 'NOTHING_TO_SHOW', todo: false }),
+  parameters: primedPane({ status: 'NOTHING_TO_SHOW' }),
 };
 
 export const NotepadCompactWidth: Story = {
   args: { width: 220, noteCount: 3 },
-  parameters: primedState({ status: 'NOTHING_TO_SHOW', todo: false }),
+  parameters: primedPane({ status: 'NOTHING_TO_SHOW' }),
 };
 
 export const NotepadMinimalWidthWithNotes: Story = {
   args: { width: 150, noteCount: 2 },
-  parameters: primedState({ status: 'NOTHING_TO_SHOW', todo: false }),
+  parameters: primedPane({ status: 'NOTHING_TO_SHOW' }),
 };
 
 export const NarrowLongTitleControlsVisible: Story = {
   args: {
-    title: 'my-extremely-long-running-background-process-with-a-very-descriptive-name',
     width: 130,
   },
-  parameters: primedState({
-    status: 'ALERT_RINGING',
-    todo: true,
-  }),
+  parameters: primedPane({ status: 'ALERT_RINGING', todo: true, userTitle: LONG_TITLE }),
   play: assertControlsVisible,
 };

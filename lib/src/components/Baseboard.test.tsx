@@ -17,7 +17,7 @@ import { recordToolDirty, resetToolDirty } from '../lib/tool-dirty-store';
 import { Baseboard } from './Baseboard';
 import { installLocalStorageStub } from '../lib/test-local-storage';
 import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS, getAlertSettings } from '../lib/alert-settings';
-import { DialogKeyboardContext } from './wall/wall-context';
+import { DialogKeyboardContext, SelectedIdContext } from './wall/wall-context';
 import {
   addInstalledTheme,
   getActiveThemeId,
@@ -76,6 +76,20 @@ afterEach(() => {
 });
 
 describe('Baseboard settings controls', () => {
+  it('reveals a selected overflow Door and keeps it visible after its predecessor is deleted', () => {
+    const items = ['a', 'b', 'c'].map(id => ({ id, title: id, kind: 'terminal' as const }));
+    const render = (selected: string, doors = items) => act(() => root.render(
+      <SelectedIdContext.Provider value={selected}><Baseboard items={doors} onReattach={() => {}} /></SelectedIdContext.Provider>,
+    ));
+    // The zero-width test viewport fits exactly one Door.
+    render('a');
+    render('c');
+    expect(container.querySelector('[data-door-id="c"]')).not.toBeNull();
+    render('c', items.slice(1));
+    expect(container.querySelector('[data-door-id="c"]')).not.toBeNull();
+    expect(container.querySelector('[data-door-id="b"]')).toBeNull();
+  });
+
   it('keeps separate speech, push, and general settings buttons', () => {
     act(() => root.render(<Baseboard items={[]} onReattach={() => {}} />));
 

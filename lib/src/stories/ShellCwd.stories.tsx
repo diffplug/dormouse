@@ -27,6 +27,7 @@ import {
   type TerminalTitle,
 } from '../lib/terminal-registry';
 import { createTerminalPaneState } from '../lib/terminal-state';
+import { flattenScenario, SCENARIO_SHELL_PROMPT } from '../lib/platform';
 import { requireElement, settleTerminals, waitForPrimedState } from './settle-terminals';
 
 const HEADER_WIDTH = 380;
@@ -125,16 +126,24 @@ export const TitleFallbacksAndPinnedTitles: Story = storyFor([
   caseState('title-long-user', 'Long user title', idle({ cwd: manual('/repo/app'), title: terminalTitle('my-extremely-long-running-background-process-with-a-very-descriptive-name', 'user') }), 'Truncates before controls'),
 ]);
 
+const titleCandidatesInHeaderMenu = storyFor([
+  caseState(
+    'title-candidates-popup',
+    'Title candidates in header menu',
+    titleCandidateState(),
+    'The context title explanation shows the latest title per channel',
+  ),
+]);
+
 export const TitleCandidatesInHeaderMenu: Story = {
-  ...storyFor([
-    caseState(
-      'title-candidates-popup',
-      'Title candidates in header menu',
-      titleCandidateState(),
-      'The context title explanation shows the latest title per channel',
-    ),
-  ]),
-  render: () => <div style={{ width: 900, height: 680 }}><Wall initialPaneIds={['title-candidates-popup']} /></div>,
+  ...titleCandidatesInHeaderMenu,
+  parameters: {
+    ...titleCandidatesInHeaderMenu.parameters,
+    // Output for the Wall's terminal, which `settleTerminals` waits on.
+    fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) },
+  },
+  // A flex column, or the `flex-1` Wall collapses to its Baseboard and hides the pane.
+  render: () => <div className="flex flex-col" style={{ width: 900, height: 680 }}><Wall initialPaneIds={['title-candidates-popup']} /></div>,
   play: openHeaderContextMenu,
 };
 
