@@ -16,7 +16,7 @@ import { AlertBell } from './AlertBell';
 import { InlineEditInput } from './wall/InlineEditInput';
 import { WorkspaceKillConfirm } from './WorkspaceKillConfirm';
 import { useTodoPillContent } from './TodoPillBody';
-import { chromeButton, DOOR_TAB_CLASS, HEADER_PALETTE_TRANSITION_CLASS, ModalFrame, modalActionButton, OVERLAY_MAX_HEIGHT, TODO_PILL_TRACKING_CLASS } from './design';
+import { chromeButton, DOOR_TAB_CLASS, HEADER_PALETTE_TRANSITION_CLASS, ModalFrame, modalActionButton, OVERLAY_MAX_HEIGHT, TAB_INACTIVE_FADE_STYLE, TODO_PILL_TRACKING_CLASS } from './design';
 import { createWorkspaceStripDrag, type StripDragHost } from './workspace-strip-drag';
 import { acquireChromeKeyboardLease } from './wall/chrome-keyboard-lease';
 import { getWallHandle } from './wall/wall-handles';
@@ -302,12 +302,9 @@ const WorkspaceTab = memo(function WorkspaceTab({
         HEADER_PALETTE_TRANSITION_CLASS,
         'w-max shrink',
         active ? 'bg-header-active-bg text-header-active-fg' : 'bg-header-inactive-bg text-header-inactive-fg',
+        dragging && 'opacity-60',
       )}
-      style={{
-        opacity: dragging ? 0.6 : undefined,
-        // Keep the label on solid color, then fade below its baseline toward the app ground.
-        backgroundImage: active ? undefined : 'linear-gradient(to bottom, var(--color-header-inactive-bg) 70%, color-mix(in srgb, var(--color-header-inactive-bg) 30%, var(--color-app-bg)) 100%)',
-      }}
+      style={active ? undefined : TAB_INACTIVE_FADE_STYLE}
       onPointerDown={(event) => {
         // The close button has its own click, and a press inside the open rename
         // editor is a text selection — neither may start a reorder drag.

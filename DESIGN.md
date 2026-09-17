@@ -240,7 +240,7 @@ The system uses **raised surfaces**, not "cards." There are no nested cards. The
 ### Navigation
 
 The system has no traditional product top-nav. Three surfaces play navigational roles:
-- **Workspace strip** (standalone app bar, top): Door geometry, pane-header palettes, and a gradient joining the selected tab to the Wall — `docs/specs/layout.md` → Workspace tabs. Union indicators belong to `docs/specs/alert.md` → Workspace union; VS Code uses its native chrome (`docs/specs/vscode.md`).
+- **Workspace strip** (standalone app bar, top): Door geometry, pane-header palettes, and the gradients seating the selected tab against the Wall and fading the rest into the app ground — `docs/specs/layout.md` → Workspace tabs. Union indicators belong to `docs/specs/alert.md` → Workspace union; VS Code uses its native chrome (`docs/specs/vscode.md`).
 - **Baseboard** (bottom of the app): horizontal strip of doors representing minimized panes plus chrome action buttons. Doors are the primary navigation affordance to a minimized terminal. Buttons use `chromeButton` with 24px height, muted text, and `hover:text-foreground`; Settings icons use square buttons with 2px gaps, while labeled overflow buttons keep horizontal padding.
 - **Pane Header (TerminalPaneHeader)**: the tab-replacing strip at the top of each pane. Lath is a headless tiling engine with no tab-bar chrome of its own; the React header IS the tab.
 
