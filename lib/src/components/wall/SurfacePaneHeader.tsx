@@ -310,10 +310,19 @@ function BrowserHeaderPopover({ anchorRef, onClose, children }: {
   usePopoverFocusTrap(ref, onClose);
   useDismissOverlay(onClose, ref);
   useLayoutEffect(() => {
-    const anchor = anchorRef.current!.getBoundingClientRect();
-    const rect = ref.current!.getBoundingClientRect();
-    setPosition(clampOverlayPosition({ left: anchor.left, top: anchor.bottom + POPOVER_GAP_PX, width: rect.width, height: rect.height }));
-    ref.current!.querySelector<HTMLElement>(POPOVER_FOCUSABLE_SELECTOR)?.focus();
+    const element = ref.current!;
+    const positionPopover = () => {
+      const anchor = anchorRef.current!.getBoundingClientRect();
+      const rect = element.getBoundingClientRect();
+      setPosition(clampOverlayPosition({ left: anchor.left, top: anchor.bottom + POPOVER_GAP_PX, width: rect.width, height: rect.height }));
+    };
+    positionPopover();
+    const observer = new ResizeObserver(positionPopover);
+    observer.observe(element, { box: 'border-box' });
+    // Content resizing (URL editing, notes, or connection labels) changes only
+    // geometry. Moving focus again would cancel the URL editor on its blur.
+    element.querySelector<HTMLElement>(POPOVER_FOCUSABLE_SELECTOR)?.focus();
+    return () => observer.disconnect();
   }, [anchorRef]);
   return createPortal(
     <div ref={ref} role="dialog" aria-label="Browser controls"

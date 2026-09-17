@@ -58,6 +58,7 @@ afterEach(() => {
   act(() => root.unmount());
   container.remove();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 function renderHeader(
@@ -184,6 +185,53 @@ describe('SurfacePaneHeader — browser chrome', () => {
     expect(popup()).toBeNull();
     expect(overflowTrigger().getAttribute('aria-expanded')).toBe('false');
     registration.dispose();
+  });
+
+  it('reclamps changing popup content near the viewport edge without moving editor focus', () => {
+    const registration = register('pane-popup-geometry');
+    vi.stubGlobal('innerWidth', 300);
+    vi.stubGlobal('innerHeight', 300);
+    const originalRect = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.getAttribute('role') === 'dialog') {
+        return new DOMRect(0, 0, 276, this.querySelector('input') ? 40 : 80);
+      }
+      if (this.getAttribute('aria-label')?.startsWith('Browser controls')) return new DOMRect(280, 240, 20, 20);
+      return originalRect.call(this);
+    });
+    renderHeader(headerProps('pane-popup-geometry', 'Browser'), stubActions());
+    act(() => resizeHeader(79));
+    let resizePopup: () => void;
+    const disconnect = vi.fn();
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+      observe(target: Element) {
+        resizePopup = () => this.callback([{ target } as ResizeObserverEntry], this as unknown as ResizeObserver);
+      }
+      disconnect = disconnect;
+    });
+    try {
+      openPopup();
+      expect(popup()!.style.top).toBe('208px');
+      expect(popup()!.style.left).toBe('12px');
+      expect(popup()!.style.maxWidth).toBe('calc(100vw - 24px)');
+      act(() => inPopup('[role="button"]')!.click());
+      const input = inPopup('input')!;
+      expect(document.activeElement).toBe(input);
+      act(() => resizePopup());
+      expect(popup()!.style.top).toBe('248px');
+      expect(document.activeElement).toBe(input);
+      act(() => inPopup('[aria-label="Back"]')!.focus());
+      expect(inPopup('input')).toBeNull();
+      act(() => resizePopup());
+      expect(popup()!.style.top).toBe('208px');
+      expect(Number.parseFloat(popup()!.style.top) + 80).toBe(288);
+      act(() => overflowTrigger().click());
+      expect(popup()).toBeNull();
+      expect(disconnect).toHaveBeenCalled();
+    } finally {
+      registration.dispose();
+    }
   });
 
   it('names notes on the trigger and opens the notepad from the popover', async () => {
