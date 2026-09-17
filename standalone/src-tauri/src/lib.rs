@@ -10,7 +10,7 @@ mod workspaces;
 // interception).
 #[cfg(target_os = "macos")]
 mod macos_terminate;
-use quit_state::{ArrivalQueue, CleanupGate, CloseMachine, QuitAction, QuitMachine};
+use quit_state::{ArrivalQueue, CleanupGate, CloseMachine, QuitAction, QuitIntent, QuitMachine};
 use routing::{Route, RouteView};
 use std::{
     collections::{HashMap, HashSet},
@@ -615,8 +615,11 @@ fn window_labels(app: &AppHandle) -> Vec<String> {
 fn apply_quit_actions(app: &AppHandle, actions: Vec<QuitAction>) {
     for action in actions {
         match action {
-            QuitAction::RequestAll => {
-                let _ = app.emit("dormouse://quit-requested", ());
+            QuitAction::RequestAll { requester } => {
+                let _ = app.emit(
+                    "dormouse://quit-requested",
+                    serde_json::json!({ "requester": requester }),
+                );
             }
             QuitAction::CancelAll => {
                 let _ = app.emit("dormouse://quit-cancelled", ());
@@ -657,7 +660,7 @@ fn redrive_deferred_teardown(app: &AppHandle) {
         let Some(windows) = retry.try_state::<WindowState>() else { return; };
         let (quit, closes) =
             guard(&windows.arrivals).take_ready(|| window_labels(&retry).into_iter().collect());
-        if quit { request_quit(&retry); }
+        if let Some(intent) = quit { request_quit(&retry, intent); }
         else {
             for label in closes {
                 if retry.get_webview_window(&label).is_some() { request_close_or_quit(&retry, &label); }
@@ -673,28 +676,32 @@ fn request_close_or_quit(app: &AppHandle, label: &str) {
     if app.webview_windows().len() > 1 {
         request_window_close(app, label);
     } else {
-        request_quit(app);
+        request_quit(app, QuitIntent::default());
     }
 }
 
-fn request_quit(app: &AppHandle) {
+/// Start (or join) a quit with `intent` (docs/specs/standalone.md -> "Restart").
+/// Returns whether the quit this trigger landed in relaunches.
+fn request_quit(app: &AppHandle, intent: QuitIntent) -> bool {
     let Some(state) = app.try_state::<QuitState>() else {
-        return;
+        return false;
     };
-    let (my_seq, actions) = {
+    let (my_seq, actions, relaunches) = {
         // Lock order: arrivals, quit machine, close machine. No disk I/O or
         // event emission under these locks. Arrival admission takes this same
         // lock before checking the quit phase, so membership cannot change
         // between this check and beginning the vote.
         let windows = app.state::<WindowState>();
         let mut arrivals = guard(&windows.arrivals);
-        if arrivals.defer_quit() {
+        if let Some(relaunches) = arrivals.defer_quit(&intent) {
             drop(arrivals);
             append_log("[quit] transfer in progress; quit queued until settlement");
-            return;
+            return relaunches;
         }
         let labels = window_labels(app);
-        guard(&state.machine).request(&labels)
+        let mut machine = guard(&state.machine);
+        let (seq, actions) = machine.request(&labels, intent);
+        (seq, actions, machine.intent().restart)
     };
     apply_quit_actions(app, actions);
 
@@ -754,6 +761,7 @@ fn request_quit(app: &AppHandle) {
             }
         }
     });
+    relaunches
 }
 
 /// Read the quit machine on behalf of a watchdog spawned for `seq`. `None`
@@ -3583,6 +3591,36 @@ fn quit_proceed(app: AppHandle, state: tauri::State<'_, QuitState>) {
     apply_quit_actions(&app, actions);
 }
 
+// ── Restart (docs/specs/standalone.md -> "Restart") ─────────────────────────
+//
+// A quit whose approved `app.exit(0)` ends in a relaunch from the
+// `RunEvent::Exit` arm — never `AppHandle::request_restart` (see the spec).
+
+// The update notice's "Restart now" and `dor app restart`, from any window.
+// `Ok(false)`: it joined a quit already under way, which will not relaunch.
+#[tauri::command]
+fn quit_restart(app: AppHandle, requester: Option<String>) -> Result<bool, String> {
+    if cfg!(debug_assertions) {
+        return Err("Restart needs a packaged build; restart the dev command instead".into());
+    }
+    tauri::process::current_binary(&app.env())
+        .map_err(|err| format!("Dormouse cannot find its own executable to relaunch: {err}"))?;
+    append_log("[quit] restart requested");
+    Ok(request_quit(&app, QuitIntent::restart(requester)))
+}
+
+fn relaunch_requested(app: &AppHandle) -> bool {
+    app.try_state::<QuitState>()
+        .is_some_and(|state| guard(&state.machine).relaunches())
+}
+
+#[cfg(target_os = "macos")]
+fn forget_restart(app: &AppHandle) {
+    if let Some(state) = app.try_state::<QuitState>() {
+        guard(&state.machine).forget_restart();
+    }
+}
+
 // ── Per-window close (docs/specs/standalone.md §Per-window close) ─────────────
 
 // This window's close orchestrator is alive; stand its ack watchdog down.
@@ -4180,7 +4218,7 @@ pub fn run() {
         })
         .on_menu_event(|app, event| {
             if event.id() == QUIT_MENU_ITEM_ID {
-                request_quit(app);
+                request_quit(app, QuitIntent::default());
             }
         })
         .on_window_event(|window, event| {
@@ -4403,6 +4441,7 @@ pub fn run() {
             quit_cancel,
             quit_window_done,
             quit_proceed,
+            quit_restart,
             window_close_ack,
             window_close_cancel,
             close_window,
@@ -4446,13 +4485,13 @@ pub fn run() {
                 // The delegate exists by now, which is what this splices onto.
                 macos_terminate::install(app);
             }
-            // Cmd+Q / app-menu / dock quit / interceptable OS logout (§Quit flow).
-            // The flow's own app.exit(0) re-enters here with approved=true and
-            // passes; `code` (None = user-initiated) is deliberately ignored.
+            // A window-level exit request (§Trigger interception). The flow's own
+            // app.exit(0) re-enters here with approved=true and passes; `code`
+            // (None = user-initiated) is deliberately ignored.
             RunEvent::ExitRequested { api, .. } => {
                 if !quit_approved(app) {
                     api.prevent_exit();
-                    request_quit(app);
+                    request_quit(app, QuitIntent::default());
                 } else if !exit_after_cleanup(app) {
                     api.prevent_exit();
                 }
@@ -4463,6 +4502,13 @@ pub fn run() {
                 if let Some(state) = app.try_state::<SidecarState>() {
                     append_log("[app] exit — shutting down sidecar");
                     shutdown_sidecar_and_wait(&state);
+                }
+                // Relaunch once the old sidecar is gone
+                // (docs/specs/standalone.md -> "Restart"). Never returns.
+                if relaunch_requested(app) {
+                    append_log("[app] relaunching");
+                    app.cleanup_before_exit();
+                    tauri::process::restart(&app.env());
                 }
             }
             _ => {}
@@ -4813,7 +4859,7 @@ mod tests {
         assert!(!admitted(&arrivals, &machine, &close, &closing, "ws-2", "main"));
         closing.clear();
         assert!(admitted(&arrivals, &machine, &close, &closing, "main", "ws-2"));
-        machine.request(&["main".into(), "ws-2".into()]);
+        machine.request(&["main".into(), "ws-2".into()], super::QuitIntent::default());
         assert!(!admitted(&arrivals, &machine, &close, &closing, "main", "ws-2"));
         machine.vote("main");
         machine.vote("ws-2");
@@ -4835,6 +4881,20 @@ mod tests {
         let delegate = macos.split("if quit_approved(app) {").nth(1).unwrap().split("append_log(").next().unwrap();
         assert!(delegate.contains("exit_after_cleanup(app)"));
         assert!(delegate.contains("TerminateCancel"));
+        // An OS terminate never relaunches (docs/specs/standalone.md -> "Restart").
+        assert!(delegate.contains("forget_restart(app)"));
+    }
+
+    /// docs/specs/standalone.md -> "Restart".
+    #[test]
+    fn a_restart_relaunches_only_after_the_sidecar_shuts_down() {
+        let source = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        assert!(!source.contains(".request_restart("));
+        let exit = source.split("RunEvent::Exit => {").nth(1).unwrap().split("_ => {}").next().unwrap();
+        let shutdown = exit.find("shutdown_sidecar_and_wait(").unwrap();
+        let relaunch = exit.find("tauri::process::restart(").unwrap();
+        assert!(shutdown < relaunch);
+        assert!(exit.contains("relaunch_requested(app)"));
     }
 
     #[test]

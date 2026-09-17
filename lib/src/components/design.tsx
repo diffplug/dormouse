@@ -2,6 +2,7 @@ import { clsx } from 'clsx';
 import { tv, type VariantProps } from 'tailwind-variants';
 import { XIcon } from '@phosphor-icons/react';
 import { forwardRef, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { ButtonHTMLAttributes, ComponentProps, CSSProperties, HTMLAttributes, InputHTMLAttributes, ReactNode, RefObject } from 'react';
 import { stepFocus } from './focus-step';
 import { OVERLAY_VIEWPORT_MARGIN_PX } from '../lib/ui-geometry';
@@ -30,6 +31,22 @@ export const DOOR_TAB_CLASS = clsx(
   'relative flex h-6 max-w-[220px] min-w-[68px] items-center overflow-hidden text-sm font-medium font-mono',
   TERMINAL_TOP_RADIUS_CLASS,
 );
+
+// The Workspace strip's two halves of one idea: the selected tab is seated
+// against the Wall, and the rest recede into the app ground. Keep them
+// together so a palette change can't move one endpoint without the other.
+export const TAB_WALL_JOIN_GRADIENT = 'linear-gradient(to bottom, var(--color-header-active-bg), var(--color-app-bg))';
+
+// The inactive tab's fade, starting at 70% of the 24px tab — just below the
+// label's baseline — and ending at 70% app background, i.e. a 30/70 sRGB mix
+// with the header color under it. Deliberately TRANSLUCENT rather than a
+// gradient between the two tokens: it composites over the `bg-header-*` class,
+// so HEADER_PALETTE_TRANSITION_CLASS still crossfades beneath it. A gradient
+// naming the header token would paint over that crossfade, which
+// `transition-colors` cannot tween.
+export const TAB_INACTIVE_FADE_STYLE = {
+  backgroundImage: 'linear-gradient(to bottom, transparent 70%, color-mix(in srgb, var(--color-app-bg) 70%, transparent))',
+} as const;
 
 // The gutter between panes (and around the wall's top/sides — the baseboard
 // side stays a tight 2px). Deliberately ODD: the passthrough ring is a 1px
@@ -152,8 +169,13 @@ export interface ModalRect {
   height: number;
 }
 
+/** The selection ring's z-index. Under `WorkspaceWindow` it paints from
+ *  `document.body`, where every modal layer must sit above it
+ *  (docs/specs/layout.md → "Selection overlay"). */
+export const SELECTION_RING_Z_INDEX = 50;
+
 export const MODAL_LAYERS = {
-  app: 50,
+  app: 60,
   pane: 100,
   critical: 9999,
 } as const;
@@ -530,7 +552,7 @@ export function ModalOverlay({
       }
     : { zIndex: resolvedZIndex, ...style };
 
-  return (
+  const overlay = (
     <div
       className={clsx(modalOverlay({ scope: rect ? 'target' : 'viewport', backdrop }), className)}
       style={overlayStyle}
@@ -539,6 +561,10 @@ export function ModalOverlay({
       {children}
     </div>
   );
+  // In `document.body`, so no Workspace's stacking context or presentation
+  // transform holds it under the selection ring (docs/specs/layout.md ->
+  // "Selection overlay"). The server renderer has no portals.
+  return typeof document === 'undefined' ? overlay : createPortal(overlay, document.body);
 }
 
 export type ModalSurfaceProps = HTMLAttributes<HTMLDivElement> & ModalSurfaceVariants;

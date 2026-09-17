@@ -42,7 +42,7 @@ So do not end your turn. Block inside a Bash call instead, waiting for the
 files the subagents write:
 
 ```sh
-# 25 minutes, counted from the first time this loop runs — i.e. after
+# 32 minutes, counted from the first time this loop runs — i.e. after
 # checkout, setup-node, and the install have already spent runner time.
 # Persisted to a file because the prose below tells you to re-issue this
 # block past the ten-minute Bash cap: a fresh shell would otherwise
@@ -58,7 +58,7 @@ files the subagents write:
 # deadline without raising that one puts the runner's cancellation first
 # again, and this graceful path stops being reachable at all.
 DEADLINE_FILE="$RUNNER_TEMP/audit-deadline"
-[ -f "$DEADLINE_FILE" ] || echo $(( $(date +%s) + 1500 )) > "$DEADLINE_FILE"
+[ -f "$DEADLINE_FILE" ] || echo $(( $(date +%s) + 1920 )) > "$DEADLINE_FILE"
 DEADLINE=$(cat "$DEADLINE_FILE")
 # A fragment that exists is a fragment being filled in. The domains append
 # findings as they determine them, so `[ -s ]` goes true minutes before any
@@ -67,24 +67,51 @@ DEADLINE=$(cat "$DEADLINE_FILE")
 # Last non-blank line, not `tail -n1`: a fragment ending `-->\n\n` is finished,
 # and reading it as cut off would report this PR's own bug back at you.
 finished() { [ -s "$1" ] && [ "$(sed -e '/^[[:space:]]*$/d' "$1" | tail -n1)" = "<!-- END OF REPORT -->" ]; }
+# Every call ends itself while it can still print. A Bash call that reaches
+# the harness's ten-minute cap is moved to the background instead of
+# returning, handing back no answer at all — which is how run 34581574869
+# ended its turn four minutes short of the deadline and published no report.
+# 540 leaves a minute of margin under the cap.
+CALL_END=$(( $(date +%s) + 540 ))
+ANSWER="ALL FINISHED"
 until finished audit-supply-chain.md && finished audit-ci-secrets.md && finished audit-application.md; do
-  [ "$(date +%s)" -ge "$DEADLINE" ] && { echo "DEADLINE"; break; }
+  NOW=$(date +%s)
+  [ "$NOW" -ge "$DEADLINE" ] && { ANSWER="DEADLINE"; break; }
+  [ "$NOW" -ge "$CALL_END" ] && { ANSWER="STILL WAITING"; break; }
   sleep 10
 done
-ls -la audit-*.md
+for f in audit-supply-chain.md audit-ci-secrets.md audit-application.md; do
+  if finished "$f"; then echo "$f: finished"
+  elif [ -s "$f" ]; then echo "$f: still writing"
+  else echo "$f: not started"; fi
+done
+echo "$ANSWER"
 ```
 
 A single Bash call is capped at ten minutes, and a domain can legitimately take
 longer than that. Issue this call with the maximum Bash timeout
-(`timeout: 600000`) — the harness default is two minutes, and at that length
-the 25 minutes take a dozen re-issues instead of three. A timed-out wait is
-**not** a failure — re-issue the same loop until either every fragment carries
-its sentinel or the 25-minute deadline passes. Re-issuing the wait is the whole technique;
-treating the first Bash timeout as "the subagents died" throws away work that
-was still running. Re-issue the block **verbatim**, including the
-`DEADLINE_FILE` lines: they read back the deadline the first call wrote, so the
-25 minutes accumulate across re-issues and the `DEADLINE` branch fires on the
-third call instead of never.
+(`timeout: 600000`) — at the harness default of two minutes every call is
+backgrounded before the loop's own 540-second break can print, so no answer
+comes back at all. **The call's last line is its answer, and it is what you act
+on:**
+
+- `STILL WAITING` — nine minutes elapsed and a domain has not finished.
+  Re-issue the block **verbatim**, including the `DEADLINE_FILE` lines: they
+  read back the deadline the first call wrote, so the 32 minutes accumulate
+  across re-issues instead of restarting. This is not a failure, and it is the
+  whole technique — treating it as "the subagents died" throws away work that
+  was still running.
+- `DEADLINE` or `ALL FINISHED` — stop waiting and go to §3. Nothing more will
+  arrive.
+
+The lines above the answer say where each domain stands. A domain `still
+writing` has a fragment but no sentinel yet; that is a reason to keep waiting,
+never a reason to stop.
+
+If a call ever comes back saying it was moved to the background, it printed
+no answer: the block was edited or its `timeout` was short. Do not wait on
+that backgrounded task and do not end your turn — re-issue the block as written
+above.
 
 Never poll by ending your turn, and never substitute a bare `sleep` — the
 harness blocks it. The `until` loop above is the sanctioned form.
@@ -170,3 +197,9 @@ running short: a partial report reaches a human through the INCONCLUSIVE issue,
 while a status file with no report behind it reaches nobody. Write
 `audit-status.txt` only once the rules above establish a verdict. Do not call
 `exit` — the workflow inspects the status file.
+
+**Never end your turn while `audit-report.md` does not exist.** Ending it is
+what ends the run, so a run that stops there publishes nothing at all — not
+even the domains that did report, whose fragments then reach a human only
+through a 14-day artifact. If you have nothing left to wait on, merge §3 with
+whatever fragments exist and let its markers say the rest.

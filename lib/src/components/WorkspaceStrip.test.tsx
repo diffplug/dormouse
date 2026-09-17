@@ -179,9 +179,9 @@ describe('WorkspaceStrip', () => {
       tabFor('ws-2').dispatchEvent(new MouseEvent('auxclick', { button: 1, bubbles: true }));
     });
     expect(getActiveWorkspaceId()).toBe('ws-2');
-    expect(container.querySelector('#kill-confirm-title')).not.toBeNull();
+    expect(document.body.querySelector('#kill-confirm-title')).not.toBeNull();
     expect(chromeKeyboardHeld()).toBe(true);
-    const char = container.querySelector('.text-xl')!.textContent!;
+    const char = document.body.querySelector('.text-xl')!.textContent!;
 
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: char, bubbles: true }));
@@ -305,13 +305,13 @@ describe('WorkspaceStrip', () => {
       else setPendingWorkspaceMove({ id: 'ws-2', char: 'q', iframeCount: 1, proceed });
     });
     const input = container.querySelector<HTMLInputElement>(`[data-workspace-rename-for="${first}"]`)!;
-    expect(container.querySelector('#kill-confirm-title')).toBeNull();
+    expect(document.body.querySelector('#kill-confirm-title')).toBeNull();
     const typing = new KeyboardEvent('keydown', { key: 'q', bubbles: true, cancelable: true });
     await act(async () => { input.dispatchEvent(typing); });
     expect(typing.defaultPrevented).toBe(false);
     expect(proceed).not.toHaveBeenCalled();
     await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
-    expect(container.querySelector('#kill-confirm-title')).not.toBeNull();
+    expect(document.body.querySelector('#kill-confirm-title')).not.toBeNull();
     await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'q', bubbles: true })); });
     expect(proceed).toHaveBeenCalledOnce();
   });
@@ -325,7 +325,7 @@ describe('WorkspaceStrip', () => {
     await render();
     const proceed = vi.fn();
     await act(async () => { setPendingWorkspaceMove({ id: first, char: 'k', iframeCount: 1, proceed }); });
-    expect(container.querySelector('#kill-confirm-title')).not.toBeNull();
+    expect(document.body.querySelector('#kill-confirm-title')).not.toBeNull();
 
     // A bare modifier or a chord is never an answer, even on the gate's letter.
     await act(async () => {
@@ -414,7 +414,7 @@ describe('WorkspaceStrip', () => {
     stubHandle('ws-2', { hasTouchedSurfaces: () => true, closeAll });
     await render();
     await act(async () => { setPendingWorkspaceClose({ id: 'ws-2', char: 'q' }); });
-    expect(container.querySelector('#kill-confirm-title')?.textContent).toBe('Confirm kill workspace');
+    expect(document.body.querySelector('#kill-confirm-title')?.textContent).toBe('Confirm kill workspace');
     expect(chromeKeyboardHeld()).toBe(true);
     setWorkspaceTransferPending('ws-2', true);
     await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'q', bubbles: true })); });
@@ -423,7 +423,7 @@ describe('WorkspaceStrip', () => {
     // A failed transfer leaves this prompt usable; successful commit dismisses it.
     setWorkspaceTransferPending('ws-2', false);
     await act(async () => { dismissWorkspaceUi('ws-2'); });
-    expect(container.querySelector('#kill-confirm-title')).toBeNull();
+    expect(document.body.querySelector('#kill-confirm-title')).toBeNull();
     expect(chromeKeyboardHeld()).toBe(false);
     await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'q', bubbles: true })); });
     expect(closeAll).not.toHaveBeenCalled();
@@ -436,19 +436,19 @@ describe('WorkspaceStrip', () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-workspace-tab-close="ws-2"]')!.click();
     });
-    expect(container.querySelector('#kill-confirm-title')).not.toBeNull();
+    expect(document.body.querySelector('#kill-confirm-title')).not.toBeNull();
 
     for (const key of ['Shift', 'Meta']) {
       await act(async () => {
         window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
       });
-      expect(container.querySelector('#kill-confirm-title')).not.toBeNull();
+      expect(document.body.querySelector('#kill-confirm-title')).not.toBeNull();
     }
     // Any other key still answers.
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     });
-    expect(container.querySelector('#kill-confirm-title')).toBeNull();
+    expect(document.body.querySelector('#kill-confirm-title')).toBeNull();
     expect(getWorkspacesSnapshot().workspaces).toHaveLength(2);
   });
 });

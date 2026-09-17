@@ -10,6 +10,7 @@ import {
   getActiveWorkspaceId,
   getWorkspacesSnapshot,
   resetWorkspaces,
+  setActiveWorkspace,
 } from '../../../lib/workspace-store';
 import type { WallKeyboardCtx } from './types';
 
@@ -89,6 +90,37 @@ describe('handleWorkspaceShortcuts', () => {
       expect(ids()).toHaveLength(1);
       expect(ids()).not.toContain(first);
       expect(getActiveWorkspaceId()).toBe(ids()[0]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('activates a highlighted tab whose Wall is still registering, then selects it', async () => {
+    vi.useFakeTimers();
+    try {
+      const first = getActiveWorkspaceId();
+      createWorkspace({ id: 'ws-2', activate: false });
+      createWorkspace({ id: 'ws-3', activate: false });
+      const selected: string[] = [];
+      const onTab = (id: string) => ({ ...ctx, selectedTypeRef: { current: 'workspace' }, selectedIdRef: { current: id } }) as unknown as WallKeyboardCtx;
+
+      const enter = keydown('Enter');
+      expect(handleWorkspaceShortcuts(enter, onTab('ws-2'))).toBe(true);
+      expect(enter.defaultPrevented).toBe(true);
+      // Activation does not wait on the Wall, as a click does not.
+      expect(getActiveWorkspaceId()).toBe('ws-2');
+      registerWallHandle(stubWallHandle('ws-2', { selectWorkspaceTab: () => { selected.push('ws-2'); } }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(selected).toEqual(['ws-2']);
+
+      // A user who moves on before the Wall registers is not pulled back.
+      handleWorkspaceShortcuts(keydown('Enter'), onTab('ws-3'));
+      expect(getActiveWorkspaceId()).toBe('ws-3');
+      setActiveWorkspace(first);
+      registerWallHandle(stubWallHandle('ws-3', { selectWorkspaceTab: () => { selected.push('ws-3'); } }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(getActiveWorkspaceId()).toBe(first);
+      expect(selected).toEqual(['ws-2']);
     } finally {
       vi.useRealTimers();
     }

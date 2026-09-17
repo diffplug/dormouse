@@ -47,10 +47,34 @@ export const WORKSPACE_CONTROL_METHODS = {
 
 export type WorkspaceControlMethod = (typeof WORKSPACE_CONTROL_METHODS)[keyof typeof WORKSPACE_CONTROL_METHODS];
 
+/**
+ * The wire identifier for each app control operation — verbs on the running
+ * app itself (`docs/specs/dor-cli.md` → "dor app").
+ */
+export const APP_CONTROL_METHODS = {
+  restart: 'app.restart',
+} as const;
+
+export type AppControlMethod = (typeof APP_CONTROL_METHODS)[keyof typeof APP_CONTROL_METHODS];
+
 /** Every method the control channel carries. */
-export type DorControlMethod = SurfaceControlMethod | WorkspaceControlMethod;
+export type DorControlMethod = SurfaceControlMethod | WorkspaceControlMethod | AppControlMethod;
 
 const WORKSPACE_METHOD_SET: ReadonlySet<string> = new Set(Object.values(WORKSPACE_CONTROL_METHODS));
+const APP_METHOD_SET: ReadonlySet<string> = new Set(Object.values(APP_CONTROL_METHODS));
+
+/**
+ * A host's refusal of a method it does not know. **Frozen text:** a newer `dor`
+ * recognizes an older host by it (`docs/specs/dor-cli.md` → "dor app").
+ */
+export function unsupportedControlMethodMessage(method: string): string {
+  return `unsupported Dormouse control method '${method}'`;
+}
+
+/** Whether this method acts on the running app rather than on any Workspace. */
+export function isAppControlMethod(method: string): method is AppControlMethod {
+  return APP_METHOD_SET.has(method);
+}
 
 /** Whether this method is a container verb — answered by the Window rather than
  *  by one Workspace's Wall. */

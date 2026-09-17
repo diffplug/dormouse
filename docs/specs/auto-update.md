@@ -32,13 +32,14 @@ Update status is a text notice in the Baseboard, the always-visible bottom strip
 |-------|---------|---------|--------------|
 | `available` | "Update available" | "Changelog", "Install when I quit" | No |
 | `downloading` | "Downloading update v0.5.0" | "Changelog" | No |
-| `downloaded` | "Update downloaded (v0.5.0) — will install when you quit" | "Changelog" | No |
+| `downloaded` | "Update downloaded (v0.5.0) — will install when you quit" | "Changelog", "Restart now" | No |
+| `restart-refused` | "Update downloaded (v0.5.0) — will install when you quit (couldn't restart: `<reason>`)" | "Changelog" | No |
 | `post-update-success` | "Updated to v0.5.0 — from v0.4.0" | "Changelog" | 10 seconds |
 | `post-update-failure` | "Update failed" | "Click here to debug" | No |
 
-"Install when I quit" is the approval; "Changelog" opens `https://dormouse.sh/changelog/after/<getVersion()>`. ` · ` separates the message from the action labels.
+"Install when I quit" is the approval; "Changelog" opens `https://dormouse.sh/changelog/after/<getVersion()>`. **"Restart now" calls `quit_restart`** (`docs/specs/standalone.md` → "Restart"): the quit installs on its way out, then relaunches. **A refusal turns a still-shown `downloaded` into `restart-refused`, carrying the host's reason and never "Restart now"**, since the refusal holds until relaunch; the update stays pending. ` · ` separates the message from the action labels.
 
-**Every state is dismissible via [×].** Dismissing an unapproved `available` notice means no download and no install that session; dismissing `downloading` or `downloaded` hides the notice only and **never cancels** an approved download/install.
+**Every state is dismissible via [×].** Dismissing an unapproved `available` notice means no download and no install that session; dismissing `downloading`, `downloaded`, or `restart-refused` hides the notice only and **never cancels** an approved download/install.
 
 **The notice carries the Baseboard's own text style (`text-sm font-mono text-muted`), in its single right-hand `ml-auto` cluster** — clear of doors and the shortcut hint.
 
@@ -56,11 +57,13 @@ Update status is a text notice in the Baseboard, the always-visible bottom strip
 
 | Platform | Install step |
 |----------|--------------|
-| Windows | Awaits `kill_sidecar_now`, then `install()` runs the NSIS installer in passive mode (progress bar, no interaction), which force-kills the app before `quit_proceed` is reached |
+| Windows | Awaits `kill_sidecar_now`, then `install()` starts the NSIS installer in passive mode (progress bar, no interaction) and exits the process itself, before `quit_proceed` is reached |
 | macOS | `install()` replaces the `.app` bundle in place |
 | Linux | `install()` replaces the AppImage in place |
 | No pending update | — (`installPendingUpdate` not called) |
 | Vite dev mode | Skips `install()`, which would replace the dev executable directory |
+
+**The app relaunches only on a restart** (`docs/specs/standalone.md` → "Restart"), which a debug build refuses — except that a Windows install always relaunches, by NSIS (`/R`).
 
 ## localStorage
 
@@ -71,7 +74,7 @@ Single key: `dormouse:update-result`
 | Successful install | `{ "from": "0.4.0", "to": "0.5.0" }` | On next launch, after reading |
 | Failed install | `{ "failed": true, "version": "0.5.0", "error": "..." }` | On next launch, after reading |
 
-**Must write the success marker *before* `install()`** — Windows NSIS force-kills the process. **Must confirm its target against the running app version on next launch**; a mismatch becomes a failure notice and suppresses the update check. **A throwing `install()` overwrites it with a failure entry.** An unapproved update writes nothing. **Must ignore corrupt markers**, including invalid field types. `standalone/src/updater.test.ts` pins marker validation and confirmation.
+**Must write the success marker *before* `install()`** — on Windows `install()` never returns. **Must confirm its target against the running app version on next launch**; a mismatch becomes a failure notice and suppresses the update check. **A throwing `install()` overwrites it with a failure entry.** An unapproved update writes nothing. **Must ignore corrupt markers**, including invalid field types. `standalone/src/updater.test.ts` pins marker validation and confirmation.
 
 ## Files
 
@@ -84,7 +87,7 @@ Single key: `dormouse:update-result`
 | [`standalone/src/quit.ts`](../../standalone/src/quit.ts) | Quit orchestrator (`docs/specs/standalone.md` §Quit flow); calls `installPendingUpdate()` last |
 | [`standalone/src/main.tsx`](../../standalone/src/main.tsx) | `<ConnectedUpdateBanner />` (banner + modal) as `<App />`'s `baseboardNotice`; `startUpdateCheck()` after restore |
 | [`standalone/src-tauri/tauri.conf.json`](../../standalone/src-tauri/tauri.conf.json) | Updater endpoint, public key, artifact mode, Windows install mode |
-| [`standalone/src-tauri/src/lib.rs`](../../standalone/src-tauri/src/lib.rs) | Plugin registration, sidecar teardown, update-log tail |
+| [`standalone/src-tauri/src/lib.rs`](../../standalone/src-tauri/src/lib.rs) | Plugin registration, sidecar teardown, update-log tail, `quit_restart` |
 | [`standalone/src-tauri/capabilities/default.json`](../../standalone/src-tauri/capabilities/default.json) | Shell and window permissions, for `main` and every `ws-*` window |
 | [`standalone/src-tauri/capabilities/main-only.json`](../../standalone/src-tauri/capabilities/main-only.json) | Updater and app-version permissions, scoped to `main` alone |
 

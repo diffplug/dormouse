@@ -8,6 +8,7 @@ function UpdateBannerStory({ state, expectedNullReason }: { state: UpdateBannerS
         state={state}
         onDismiss={() => console.log('Dismiss')}
         onApproveUpdate={() => console.log('Install when I quit')}
+        onRestart={() => console.log('Restart now')}
         onOpenChangelog={() => console.log('Open changelog')}
         onOpenDebug={() => console.log('Open debug')}
       />
@@ -43,6 +44,16 @@ export const Downloading: Story = {
 export const Downloaded: Story = {
   args: {
     state: { status: 'downloaded', version: '0.5.0' },
+  },
+};
+
+export const RestartRefused: Story = {
+  args: {
+    state: {
+      status: 'restart-refused',
+      version: '0.5.0',
+      reason: 'Dormouse cannot find its own executable to relaunch: No such file or directory (os error 2)',
+    },
   },
 };
 

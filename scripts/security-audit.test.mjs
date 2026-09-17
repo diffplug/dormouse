@@ -57,6 +57,24 @@ const cases = [
   // names every marker the merge can leave there. Drop one and the reader is
   // told to look for two shapes in a report that has three.
   { name: 'the no-verdict note names every report marker', verdicts: ['PASS', 'PASS', 'PASS'], unfinished: [2], expected: 'INCONCLUSIVE', notes: ['`UNVERIFIABLE`', '`_Incomplete …_`', '`_No report …_`'] },
+  // Run 34581574869 ended its turn before §3, so no merged report existed and
+  // this arm published a single line — while two domains' finished `VERDICT:
+  // PASS` fragments sat in the working directory and reached a human only
+  // through the artifact. The fragments are what the run found; the absence of
+  // a merge is not a reason to drop them.
+  // Cut off, not absent: this arm runs the same sentinel test the guard loop
+  // above does, so all three domain states read the same here as in a merged
+  // report. Without the `_Incomplete …_` marker the no-verdict note sends the
+  // reader after a third marker the body does not carry, and the cut-off
+  // domain's fragment is published looking finished.
+  // Anchored to its heading and counted, because a bare `notes` entry is
+  // satisfied by the marker appearing anywhere: dropping the sentinel test
+  // marks every fragment and inverting it marks the finished one, and both
+  // read as a pass. Those are the inverse of the bug this arm fixes.
+  { name: 'no merged report publishes the fragments, marking cut-off and absent domains', report: null, verdicts: ['PASS', 'PASS', null], unfinished: [1], expected: 'INCONCLUSIVE',
+    notes: ['the merge never ran', '## audit-supply-chain.md', 'VERDICT: PASS', '## audit-application.md', '_No report — this domain produced no fragment._',
+      '## audit-ci-secrets.md\n\n_Incomplete — this domain was still writing'],
+    counts: { '_Incomplete — this domain was still writing': 1 } },
 ];
 for (const scenario of cases) {
   test(`reporting: ${scenario.name}`, (t) => {
@@ -68,7 +86,7 @@ for (const scenario of cases) {
       if (args[0] === 'issue' && args[1] === 'list') process.stdout.write('23\\n');
     `);
     if (scenario.status !== undefined) writeFileSync(join(dir, 'audit-status.txt'), scenario.status);
-    writeFileSync(join(dir, 'audit-report.md'), '# Fixture report\n');
+    if (scenario.report !== null) writeFileSync(join(dir, 'audit-report.md'), '# Fixture report\n');
     scenario.verdicts.forEach((verdict, i) => {
       if (verdict === null) return;
       const sentinel = scenario.unfinished?.includes(i)
@@ -84,6 +102,9 @@ for (const scenario of cases) {
       const body = readFileSync(join(dir, 'audit-comment.md'), 'utf8');
       assert.match(body, scenario.expected === 'FAIL' ? /Audit failed/ : /Audit reached no usable verdict/);
       for (const note of scenario.notes ?? []) assert.ok(body.includes(note), `missing note: ${note}`);
+      for (const [note, n] of Object.entries(scenario.counts ?? {})) {
+        assert.equal(body.split(note).length - 1, n, `wrong occurrence count for: ${note}`);
+      }
     }
   });
 }
@@ -168,8 +189,6 @@ test('the preamble tells domains to write the sentinel every reader waits for', 
   assert.equal(written.length, 1, 'expected exactly one closing `printf` in the preamble');
   assert.match(written[0][0], new RegExp(SENTINEL.replace(/[-[\]{}()*+?.,\\^$|#]/g, '\\$&')));
 });
-// Just the predicate, not the loop around it: the loop blocks for 25 minutes
-// by design, and what needs pinning is what it blocks on.
 const finishedFn = orchestrator.match(/^finished\(\) \{.*$/m)[0];
 
 for (const [name, body, expected] of [
@@ -190,6 +209,64 @@ for (const [name, body, expected] of [
     assert.equal(result.stdout.trim(), expected ? 'YES' : 'NO', result.stderr);
   });
 }
+
+// The whole wait block, with only its per-call cap and poll interval shrunk so
+// a nine-minute call takes a second. Each substitution must hit exactly once,
+// so a reshaped block fails here rather than running unshrunk.
+const waitBlock = [[/\+ 540 \)\)/g, '+ 1 ))'], [/sleep 10$/gm, 'sleep 0.1']].reduce((block, [from, to]) => {
+  assert.equal(block.match(from)?.length, 1, `expected exactly one ${from} in the wait block`);
+  return block.replace(from, to);
+}, promptShellBlock(orchestrator, 'audit-deadline'));
+
+/** Runs the wait block in a fresh fragment dir; `deadline` pre-seeds the persisted file. */
+function runWait(t, { finished = [], writing = [], deadline } = {}) {
+  const dir = tempDir(t, 'dormouse-audit-wait-');
+  for (const f of finished) writeFileSync(join(dir, f), `VERDICT: PASS\n\n${SENTINEL}\n`);
+  for (const f of writing) writeFileSync(join(dir, f), 'VERDICT: INCONCLUSIVE\n\n### FAIL IF results\n\n');
+  if (deadline !== undefined) writeFileSync(join(dir, 'audit-deadline'), `${deadline}\n`);
+  const result = spawnSync('bash', ['-c', waitBlock], { cwd: dir, encoding: 'utf8', env: { ...process.env, RUNNER_TEMP: dir }, timeout: 10_000 });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, '');
+  const lines = result.stdout.trim().split('\n');
+  return { dir, lines, answer: lines.at(-1), persisted: Number(readFileSync(join(dir, 'audit-deadline'), 'utf8')) };
+}
+const now = () => Math.floor(Date.now() / 1000);
+
+// Run 34581574869: a call that outlived the Bash cap returned nothing to act on.
+test('orchestrator wait: a call with nothing reported ends itself and says so', (t) => {
+  const before = now();
+  const { lines, answer, persisted } = runWait(t);
+  assert.equal(answer, 'STILL WAITING');
+  assert.deepEqual(lines.slice(0, -1), fragments.map((f) => `${f}: not started`));
+  // Persisted on the first call, 32 minutes out.
+  assert.ok(persisted >= before + 1920 && persisted <= now() + 1920, String(persisted));
+});
+
+// Appended fragments exist long before they are finished; existence must not end the wait.
+test('orchestrator wait: fragments still being written keep the wait going', (t) => {
+  const [first, ...rest] = fragments;
+  const { lines, answer } = runWait(t, { finished: [first], writing: rest });
+  assert.equal(answer, 'STILL WAITING');
+  assert.deepEqual(lines.slice(0, -1), [`${first}: finished`, ...rest.map((f) => `${f}: still writing`)]);
+});
+
+test('orchestrator wait: a re-issued call reads back the persisted deadline', (t) => {
+  const deadline = now() + 600;
+  const { answer, persisted } = runWait(t, { deadline });
+  assert.equal(answer, 'STILL WAITING');
+  assert.equal(persisted, deadline);
+});
+
+test('orchestrator wait: a passed deadline ends the wait', (t) => {
+  const { answer } = runWait(t, { writing: fragments, deadline: now() - 1 });
+  assert.equal(answer, 'DEADLINE');
+});
+
+test('orchestrator wait: every domain finished ends the wait', (t) => {
+  const { lines, answer } = runWait(t, { finished: fragments, deadline: now() - 1 });
+  assert.equal(answer, 'ALL FINISHED');
+  assert.deepEqual(lines.slice(0, -1), fragments.map((f) => `${f}: finished`));
+});
 
 const merge = promptShellBlock(orchestrator, 'audit-report.md');
 

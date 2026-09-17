@@ -6,7 +6,7 @@ import { getPlatform, PLATFORM_STRING } from '../../lib/platform';
 import { currentWindowRef, getActiveWorkspaceId } from '../../lib/workspace-store';
 import type { WorkspaceId } from '../../lib/session-types';
 import type { DorControlRequestPayload, DorControlResult } from 'dor/protocol';
-import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
+import { SURFACE_CONTROL_METHODS, unsupportedControlMethodMessage } from 'dor/protocol';
 import type {
   Surface as DorSurface,
   SplitDirection as DorSplitDirection,
@@ -1653,7 +1653,7 @@ export function useDorControl({
       return;
     }
 
-    detail.respond({ ok: false, error: `unsupported Dormouse control method '${detail.method}'` });
+    detail.respond({ ok: false, error: unsupportedControlMethodMessage(detail.method) });
   }, [buildDorSurfaces, buildDorSurfaceList, closeSurface, createContentSurface, createSplitSurface, ensureAgentBrowserSurface, findSurfaceIdRunningCommand, findSurfaceByParams, revealSurface, isClosingWorkspace, requireBrowserSurface, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav, workspaceRef, workspaceScope]);
 
   return { findSurfaceByParams, updateSurfaceParams, handleDorControl };

@@ -62,17 +62,17 @@ function archive(...batches: ArchiveBatch[]): NotepadArchiveV1 {
 }
 
 function text(): string {
-  return container.textContent ?? '';
+  return document.body.textContent ?? '';
 }
 
 function byLabel(label: string): HTMLElement {
-  const found = container.querySelector<HTMLElement>(`[aria-label="${label}"]`);
+  const found = document.body.querySelector<HTMLElement>(`[aria-label="${label}"]`);
   if (!found) throw new Error(`no element labeled ${label}`);
   return found;
 }
 
 function buttons(label: string): HTMLButtonElement[] {
-  return [...container.querySelectorAll('button')].filter(
+  return [...document.body.querySelectorAll('button')].filter(
     (button) => (button.textContent ?? '').trim() === label,
   );
 }
@@ -85,7 +85,7 @@ function byText(label: string): HTMLButtonElement {
 
 /** Every batch title in render order — the assertion for newest-first. */
 function batchTitles(): string[] {
-  return [...container.querySelectorAll('section > div > span:first-child')].map(
+  return [...document.body.querySelectorAll('section > div > span:first-child')].map(
     (span) => span.textContent ?? '',
   );
 }
@@ -171,7 +171,7 @@ describe('NotepadArchiveView', () => {
     expect(text()).toContain('delete me');
 
     // Second note row: the buttons render in note order.
-    const deletes = () => [...container.querySelectorAll<HTMLButtonElement>('[aria-label="Delete note"]')];
+    const deletes = () => [...document.body.querySelectorAll<HTMLButtonElement>('[aria-label="Delete note"]')];
     await act(async () => deletes()[1]?.click());
     expect(text()).not.toContain('delete me');
     expect(text()).toContain('keep me');
@@ -218,7 +218,7 @@ describe('NotepadArchiveView', () => {
 
     await render({ onBack });
     await act(async () => byText('Delete batch').click());
-    const deletes = [...container.querySelectorAll<HTMLButtonElement>('[aria-label="Delete note"]')];
+    const deletes = [...document.body.querySelectorAll<HTMLButtonElement>('[aria-label="Delete note"]')];
     await act(async () => deletes[1]?.click());
 
     await act(async () => byText('Back to Settings').click());
@@ -259,7 +259,7 @@ describe('NotepadArchiveView', () => {
     const onBack = vi.fn();
 
     await render({ onBack });
-    const deletes = [...container.querySelectorAll<HTMLButtonElement>('[aria-label="Delete note"]')];
+    const deletes = [...document.body.querySelectorAll<HTMLButtonElement>('[aria-label="Delete note"]')];
     await act(async () => deletes[1]?.click());
     await act(async () => byText('Back to Settings').click());
 
@@ -312,7 +312,7 @@ describe('NotepadArchiveView', () => {
     await act(async () => byLabel('Copy note').click());
 
     expect(writeText).toHaveBeenCalledWith('one first');
-    expect(container.querySelector('[aria-label="Copied"]')).not.toBeNull();
+    expect(document.body.querySelector('[aria-label="Copied"]')).not.toBeNull();
     vi.unstubAllGlobals();
   });
 });

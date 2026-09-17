@@ -1,5 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import { countRunningSessions } from "dormouse-lib/lib/terminal-registry";
 import { notepadSurfaceIds, removeSurface } from "dormouse-lib/lib/notepad/notepad-store";
 import {
   beginQuitProgress,
@@ -97,8 +96,8 @@ export function createTeardownFlow(options: {
   /** Read at request time, never captured: the quit's gate is registered during
    *  bootstrap, in no fixed order against the flow's own wiring. */
   gate: () => TeardownConfirmGate | null;
-  /** Whether this window has something to ask about. Defaults to running work. */
-  mustConfirm?: () => boolean;
+  /** Whether this window has something to ask about. */
+  mustConfirm: (intent: QuitConfirmIntent) => boolean;
   /** Past both gates. A quit votes; a close runs its teardown. */
   proceed: () => void | Promise<void>;
 }): TeardownFlow {
@@ -203,8 +202,7 @@ export function createTeardownFlow(options: {
 
       // The registry is per webview, so this is already this window's own work.
       const gate = options.gate();
-      const mustConfirm = options.mustConfirm ?? (() => countRunningSessions() > 0);
-      if (mustConfirm() && gate) {
+      if (options.mustConfirm(intent) && gate) {
         enter("confirming");
         gate({ confirm: () => void archiveThenProceed(intent), cancel }, intent);
         return;

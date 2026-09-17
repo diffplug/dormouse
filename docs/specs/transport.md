@@ -298,7 +298,7 @@ something ends it:
 
 | Boundary | Deliberate? | Outcome |
 | --- | --- | --- |
-| Standalone quit — idle, confirmed, or update-install | No — window state is the app's contract | Restore structure + auto-resume agents |
+| Standalone quit or restart — idle, confirmed, or update-install | No — window state is the app's contract | Restore structure + auto-resume agents |
 | Standalone window reload | No | Live resume over sidecar PTYs, per Workspace |
 | Standalone per-window close, one of several | Yes | Fresh: that window's notes archived, its PTYs killed, its snapshot removed |
 | Standalone Workspace transfer between windows | Neither — nothing ended | The same Sessions, resumed in the other window |

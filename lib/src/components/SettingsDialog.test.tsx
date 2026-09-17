@@ -17,11 +17,11 @@ let root: Root;
 let platform: FakePtyAdapter;
 
 function text(): string {
-  return container.textContent ?? '';
+  return document.body.textContent ?? '';
 }
 
 function byText(label: string): HTMLButtonElement {
-  const found = [...container.querySelectorAll('button')].find(
+  const found = [...document.body.querySelectorAll('button')].find(
     (button) => (button.textContent ?? '').trim() === label,
   );
   if (!found) throw new Error(`no button reading ${label}`);
