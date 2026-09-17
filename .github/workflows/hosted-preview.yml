@@ -68,7 +68,7 @@ jobs:
           path: hosted/dist
           retention-days: 3
       - if: vars.HOSTED_PREVIEWS_ENABLED != 'true'
-        run: echo '::notice::Cloud previews are not configured yet. Follow hosted/DEPLOYMENT.md, set HOSTED_PREVIEWS_ENABLED=true, then rerun this workflow.'
+        run: echo '::notice::Cloud previews are not configured yet. Follow hosted/README.md -> Provision PR previews, set HOSTED_PREVIEWS_ENABLED=true, then rerun this workflow.'
 
   deploy:
     needs: verify

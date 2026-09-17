@@ -176,7 +176,7 @@ Source of truth: `create_release` in `scripts/sign-and-deploy.sh`; `website/scri
 
 ## Hosted account releases
 
-See `docs/specs/hosted.md` -> "Production releases" for the Hosted pipeline and `hosted/DEPLOYMENT.md` for provisioning and operator commands.
+See `docs/specs/hosted.md` -> "Production releases" for the Hosted pipeline and `hosted/README.md` for provisioning and operator commands.
 
 ## Future
 

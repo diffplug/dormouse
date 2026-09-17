@@ -54,5 +54,5 @@ for (const name of [
   console.log(`Configured ${name}`);
 }
 console.log(
-  "Next: hosted/DEPLOYMENT.md. Previews remain disabled until HOSTED_PREVIEWS_ENABLED=true.",
+  "Next: hosted/README.md -> Provision PR previews. Previews remain disabled until HOSTED_PREVIEWS_ENABLED=true.",
 );

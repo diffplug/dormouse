@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 export function required(env, name) {
-  if (!env[name]) throw new Error(`Missing ${name}; see hosted/DEPLOYMENT.md`);
+  if (!env[name])
+    throw new Error(`Missing ${name}; see hosted/README.md -> Provision PR previews`);
   return env[name];
 }
 

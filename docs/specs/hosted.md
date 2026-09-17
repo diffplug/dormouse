@@ -45,7 +45,7 @@ Source of truth: `App` in `hosted/src/App.tsx`; `restoreTheme` in `hosted/src/ma
 
 **Must verify the production Worker bundle and run the consumer's integration suite before release.** `pnpm test:hosted` needs Docker; root `pnpm test` skips it. The test entry alone injects the packed Better Auth deterministic module. Simulated callbacks do not certify provider registrations; production acceptance requires real browser login with each enabled provider and email delivery.
 
-**Must keep production, test, and preview databases and credentials separate.** The development and preview entries are email-only. Production configuration and operator steps live in `hosted/README.md` and `hosted/DEPLOYMENT.md`.
+**Must keep production, test, and preview databases and credentials separate.** The development and preview entries are email-only. Production configuration and operator steps live in `hosted/README.md`.
 
 Source of truth: `allowedDevRequest` in `hosted/server/dev-host-guard.ts`; `hosted/server/dev.ts`; `hosted/server/tests/workers.test.ts`; `hosted/wrangler.jsonc`.
 
