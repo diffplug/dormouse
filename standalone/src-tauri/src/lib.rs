@@ -3974,6 +3974,15 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
     let node_path = resolve_node_binary_path()?;
     let dor_cli_paths = resolve_dor_cli_paths(&sidecar_path, manifest_dir);
     let dor_node_path = resolve_dor_node_path(&node_path, app);
+    // The directory the GUI-subsystem node sits in, for the sidecar to drop
+    // from every pane's PATH — `cargo run` puts it there for DLL resolution
+    // and a bare `node` in a dev pane would otherwise find a node with no
+    // console. Only this side knows which binary was patched; the sidecar
+    // also runs under the VS Code pty host, where nothing is.
+    let gui_node_dir = node_path
+        .parent()
+        .map(|dir| dir.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let dor_control_token = dor_control_token();
     let state_dir = burrow_state_dir(app);
     let recovery_dir = recovery_state_dir(app);
@@ -4004,6 +4013,7 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
         c.arg(&sidecar_path)
             .env("DORMOUSE_HOST", "standalone")
             .env("DORMOUSE_NODE", &dor_node_path)
+            .env("DORMOUSE_GUI_NODE_DIR", &gui_node_dir)
             .env("DORMOUSE_CLI_BIN", &dor_cli_paths.bin_dir)
             .env("DORMOUSE_CLI_JS", &dor_cli_paths.entrypoint)
             .env("DORMOUSE_CONTROL_TOKEN", &dor_control_token)

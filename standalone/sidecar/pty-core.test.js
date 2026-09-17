@@ -151,6 +151,85 @@ test('resolveSpawnConfig keeps ORIGINAL_PATH on non-win32', () => {
   assert.equal(config.env.ORIGINAL_PATH, '/whatever');
 });
 
+test('resolveSpawnConfig drops the GUI node directory from a pane PATH on win32', () => {
+  // `cargo run` puts the dev app's target dir on PATH, and the node.exe there
+  // is patched to the GUI subsystem: a child of it gets no console at all. A
+  // pane that kept the directory would run that node on a bare `node`.
+  const config = resolveSpawnConfig(
+    { surfaceId: 'pane-1' },
+    {
+      platform: 'win32',
+      env: {
+        Path: [
+          'C:\\repo\\standalone\\src-tauri\\target\\debug',
+          'C:\\repo\\standalone\\src-tauri\\target\\debug\\deps',
+          'C:\\Users\\tester\\nodejs',
+          'C:\\Windows\\System32',
+        ].join(';'),
+        DORMOUSE_GUI_NODE_DIR: 'C:\\repo\\standalone\\src-tauri\\target\\debug',
+        DORMOUSE_CLI_BIN: 'C:\\Dormouse\\dor-cli\\bin',
+      },
+      osModule: {
+        homedir: () => 'C:\\Users\\tester',
+        tmpdir: () => 'C:\\Temp',
+      },
+    },
+  );
+
+  assert.equal(
+    config.env.Path,
+    [
+      'C:\\Dormouse\\dor-cli\\bin',
+      // `deps` is a sibling, not the GUI node's directory — it stays.
+      'C:\\repo\\standalone\\src-tauri\\target\\debug\\deps',
+      'C:\\Users\\tester\\nodejs',
+      'C:\\Windows\\System32',
+    ].join(';'),
+  );
+  assert.equal(config.env.DORMOUSE_GUI_NODE_DIR, undefined);
+});
+
+test('resolveSpawnConfig matches the GUI node directory regardless of spelling', () => {
+  const config = resolveSpawnConfig(
+    { surfaceId: 'pane-1' },
+    {
+      platform: 'win32',
+      env: {
+        Path: 'C:/Repo/Target/Debug\\;C:\\Windows\\System32',
+        DORMOUSE_GUI_NODE_DIR: 'C:\\repo\\target\\debug',
+      },
+      osModule: {
+        homedir: () => 'C:\\Users\\tester',
+        tmpdir: () => 'C:\\Temp',
+      },
+    },
+  );
+
+  assert.equal(config.env.Path, 'C:\\Windows\\System32');
+});
+
+test('resolveSpawnConfig keeps the GUI node directory on non-win32', () => {
+  // On macOS and Linux the app's own directory is never on PATH, and
+  // `DORMOUSE_GUI_NODE_DIR` could name a directory a pane needs (`/usr/bin`).
+  const config = resolveSpawnConfig(
+    { surfaceId: 'pane-1' },
+    {
+      platform: 'linux',
+      env: {
+        PATH: '/usr/bin:/bin',
+        DORMOUSE_GUI_NODE_DIR: '/usr/bin',
+      },
+      osModule: {
+        homedir: () => '/home/tester',
+        tmpdir: () => '/tmp/fallback',
+      },
+    },
+  );
+
+  assert.equal(config.env.PATH, '/usr/bin:/bin');
+  assert.equal(config.env.DORMOUSE_GUI_NODE_DIR, undefined);
+});
+
 test('withPrependedPath preserves Windows Path casing', () => {
   const env = withPrependedPath(
     { Path: 'C:\\Windows\\System32' },

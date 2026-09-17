@@ -138,8 +138,48 @@ function withPrependedPath(env, dir, platform = process.platform) {
 function withoutInternalDormouseEnv(env) {
   const next = { ...env };
   delete next.DORMOUSE_CLI_BIN;
+  delete next.DORMOUSE_GUI_NODE_DIR;
   delete next.DORMOUSE_SHELL_INTEGRATION_DIR;
   return next;
+}
+
+// Compare Windows PATH entries: case-insensitive, `/` and `\` equivalent, and
+// ignoring trailing separators and the quotes an entry may carry.
+function normalizeWindowsPathEntry(entry) {
+  return String(entry || '')
+    .trim()
+    .replace(/^"(.*)"$/, '$1')
+    .replace(/\//g, '\\')
+    .replace(/\\+$/, '')
+    .toLowerCase();
+}
+
+// Win32 only. The bundled node.exe is patched to the GUI subsystem so spawning
+// the sidecar never flashes a console window (docs/specs/standalone.md ->
+// "Windows node subsystem"; build.rs `force_windows_gui_subsystem`). A
+// GUI-subsystem process gets no console, so a *child* of it sees stdin already
+// at EOF, has no
+// `setRawMode`, and has every byte it writes dropped. `cargo run` puts the
+// directory holding it — the dev app's `target/debug` — on the app's PATH so
+// Windows resolves the app's DLLs, and panes inherit the app's env, leaving
+// that node.exe to shadow the developer's own on a bare `node`. The failure is
+// silent in both directions, so drop the directory here: the installed app
+// never has it on PATH, and a pane needs nothing from it.
+//
+// Only the host knows which directory it patched, so it passes
+// `DORMOUSE_GUI_NODE_DIR`. This module also runs under the VS Code pty host,
+// where `process.execPath` is an unrelated node whose directory (`/usr/bin`,
+// say) must stay on PATH — hence an explicit variable and not execPath.
+function withoutGuiNodeDir(env, platform = process.platform) {
+  const dir = env.DORMOUSE_GUI_NODE_DIR;
+  if (platform !== 'win32' || !dir) return env;
+  const key = pathEnvKey(env);
+  const existing = env[key];
+  if (!existing) return env;
+  const target = normalizeWindowsPathEntry(dir);
+  if (!target) return env;
+  const kept = existing.split(';').filter((entry) => normalizeWindowsPathEntry(entry) !== target);
+  return { ...env, [key]: kept.join(';') };
 }
 
 // Win32 only. Git Bash / MSYS `/etc/profile` reconstructs PATH from an
@@ -295,7 +335,9 @@ function resolveSpawnConfig(options, runtime = {}) {
   // DORMOUSE_* vars are stripped below.
   const integrationDir = resolveShellIntegrationDir(env, runtime);
   const envWithCliPath = withoutInheritedMsysOriginalPath(
-    withoutInternalDormouseEnv(withPrependedPath(env, env.DORMOUSE_CLI_BIN, platform)),
+    withoutInternalDormouseEnv(
+      withPrependedPath(withoutGuiNodeDir(env, platform), env.DORMOUSE_CLI_BIN, platform),
+    ),
     platform,
   );
   const childEnv = {
