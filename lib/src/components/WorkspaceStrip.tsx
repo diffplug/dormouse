@@ -303,7 +303,11 @@ const WorkspaceTab = memo(function WorkspaceTab({
         'w-max shrink',
         active ? 'bg-header-active-bg text-header-active-fg' : 'bg-header-inactive-bg text-header-inactive-fg',
       )}
-      style={dragging ? { opacity: 0.6 } : undefined}
+      style={{
+        opacity: dragging ? 0.6 : undefined,
+        // Keep the label on solid color, then fade below its baseline toward the app ground.
+        backgroundImage: active ? undefined : 'linear-gradient(to bottom, var(--color-header-inactive-bg) 70%, color-mix(in srgb, var(--color-header-inactive-bg) 30%, var(--color-app-bg)) 100%)',
+      }}
       onPointerDown={(event) => {
         // The close button has its own click, and a press inside the open rename
         // editor is a text selection — neither may start a reorder drag.
