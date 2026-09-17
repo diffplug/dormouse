@@ -545,13 +545,12 @@ describe('SelectionRing motion smear', () => {
 
     // Mid-travel the ring is a different size, so the dash resizes with it — but
     // the period must still be exactly one dash+gap or the keyframe jumps.
-    // Re-queried, not reused: the selection change remounted the outline (see the
-    // burst-restart case above), and the geometry lands on the replacement node.
-    const movedPath = container.querySelector('[data-ring="outline"]')!;
-    const [d2, g2] = dashOf(movedPath);
-    expect(movedPath.style.getPropertyValue('--march-offset')).toBe(`-${d2 + g2}px`);
+    // The selection change keeps the same outline node; the new geometry lands on it.
+    expect(container.querySelector('[data-ring="outline"]')).toBe(path);
+    const [d2, g2] = dashOf(path);
+    expect(path.style.getPropertyValue('--march-offset')).toBe(`-${d2 + g2}px`);
     expect(d2 / (d2 + g2)).toBeCloseTo(cfg.marchingAnts.dashFraction, 9);
-    expect(movedPath.getAttribute('transform')).toBeNull();
-    expect(movedPath.getAttribute('stroke-opacity')).toBeNull();
+    expect(path.getAttribute('transform')).toBeNull();
+    expect(path.getAttribute('stroke-opacity')).toBeNull();
   });
 });
