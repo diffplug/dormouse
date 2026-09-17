@@ -13,6 +13,7 @@ import {
 import type { ActivityNotification, SessionStatus } from '../lib/alert-manager';
 import { summarizeCommandLine, type SetTerminalUserTitleResult } from '../lib/terminal-registry';
 import { commandArgv0, cwdFromOsc633 } from '../lib/terminal-state';
+import { flattenScenario, SCENARIO_SHELL_PROMPT } from '../lib/platform';
 import { removeMouseSelectionState, setMouseReporting, setOverride } from '../lib/mouse-selection';
 import { addPlainNote, clearAllNotepads } from '../lib/notepad/notepad-store';
 import { requireElement, settleTerminals, waitForCondition, waitForPrimedState } from './settle-terminals';
@@ -47,9 +48,19 @@ const LONG_TITLE = 'my-extremely-long-running-background-process-with-a-very-des
 // comparable instead of warning that one never reported.
 const PANE_CWD = cwdFromOsc633('/home/demo/projects/dormouse', 0);
 
-// The detector states are public only while WATCHING is on
-// (`docs/specs/alert.md` -> Public State).
-const DETECTOR_STATUSES: ReadonlySet<SessionStatus> = new Set(['NOTHING_TO_SHOW', 'MIGHT_BE_BUSY', 'BUSY', 'MIGHT_NEED_ATTENTION']);
+// Whether a status is public only while WATCHING is on — the detector states
+// (`docs/specs/alert.md` -> Public State). Exhaustive, so a new status must
+// decide here.
+const SHOWN_ONLY_WHILE_WATCHING: Readonly<Record<SessionStatus, boolean>> = {
+  NOTHING_TO_SHOW: true,
+  MIGHT_BE_BUSY: true,
+  BUSY: true,
+  MIGHT_NEED_ATTENTION: true,
+  WATCHING_DISABLED: false,
+  ALERT_RINGING: false,
+  OSC_NOTIF_BUSY: false,
+  COMMAND_EXIT_ARMED: false,
+};
 
 interface PanePriming {
   status: SessionStatus;
@@ -75,7 +86,7 @@ interface PanePriming {
  * fixed rather than `Date.now()` for deterministic Chromatic snapshots.
  */
 function primedPane({ status, todo = false, notification, command = 'pnpm dev', userTitle = 'build-server' }: PanePriming) {
-  const watching = DETECTOR_STATUSES.has(status);
+  const watching = SHOWN_ONLY_WHILE_WATCHING[status];
   const argv0 = command ? commandArgv0(command) : null;
   if (watching && !argv0) throw new Error(`${status} is public only while a watched command runs`);
   return {
@@ -183,8 +194,12 @@ function ContextWallStory() {
 function contextDialogStory(pane: PanePriming): Story {
   return {
     render: ContextWallStory,
-    // The derived title is part of what the context's Title row explains.
-    parameters: primedPane({ userTitle: null, ...pane }),
+    parameters: {
+      // The derived title is part of what the context's Title row explains.
+      ...primedPane({ userTitle: null, ...pane }),
+      // Output for the pane's terminal, which `settleTerminals` waits on.
+      fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) },
+    },
     play: openAlertRightClickDialog,
   };
 }

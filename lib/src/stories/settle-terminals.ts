@@ -14,13 +14,23 @@ import type { Terminal } from '@xterm/xterm';
  *
  * Content is detected through the xterm BUFFER model (parsed synchronously on write),
  * independent of which renderer (DOM / canvas / WebGL) is painting.
+ *
+ * Throws rather than proceeding if the terminals never settle, like the gates below,
+ * so the story fails in the Interactions panel instead of snapshotting mid-paint.
  */
 export async function settleTerminals(opts?: { timeoutMs?: number }): Promise<void> {
   await waitForPrimedState(opts);
-  await waitForCondition(() => {
+  const settled = () => {
     const terms = liveTerminals();
     return terms.length > 0 && terms.every(hasContent);
-  }, opts);
+  };
+  await waitForCondition(settled, opts);
+  if (!settled()) {
+    const terms = liveTerminals();
+    throw new Error(terms.length === 0
+      ? 'no terminal ever mounted'
+      : `${terms.filter((t) => !hasContent(t)).length} of ${terms.length} terminals never wrote content`);
+  }
 }
 
 /**
