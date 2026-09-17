@@ -28,7 +28,7 @@ Mouse events belong to one of two consumers:
 
 ## 1. The Mouse Icon (Header Indicator)
 
-**Visibility.** The **Mouse icon** (Phosphor `CursorClickIcon`) marks an inside program requesting mouse reporting; the **No-Mouse icon** (`CursorTextIcon`) takes the same slot while an override is active (full matrix: §6.2). Both drop in the narrowest header tier (`docs/specs/layout.md`).
+**Visibility.** The **Mouse icon** (Phosphor `CursorClickIcon`) marks an inside program requesting mouse reporting; the **No-Mouse icon** (`CursorTextIcon`) takes the same slot while an override is active (full matrix: §6.2). Both drop below the compact tier (`docs/specs/layout.md`).
 
 **Click.** The Mouse icon starts a **temporary override** (§2); the No-Mouse icon ends any override immediately and restores mouse reporting.
 
