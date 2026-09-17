@@ -22,42 +22,42 @@
   },
   {
     "name": "@node-datachannel/darwin-arm64",
-    "version": "0.33.2",
+    "version": "0.33.4",
     "license": "MPL 2.0",
     "author": "Murat Doğan, Paul-Louis Ageneau",
     "homepage": "https://github.com/murat-dogan/node-datachannel"
   },
   {
     "name": "@node-datachannel/darwin-x64",
-    "version": "0.33.2",
+    "version": "0.33.4",
     "license": "MPL 2.0",
     "author": "Murat Doğan, Paul-Louis Ageneau",
     "homepage": "https://github.com/murat-dogan/node-datachannel"
   },
   {
     "name": "@node-datachannel/linux-arm64-gnu",
-    "version": "0.33.2",
+    "version": "0.33.4",
     "license": "MPL 2.0",
     "author": "Murat Doğan, Paul-Louis Ageneau",
     "homepage": "https://github.com/murat-dogan/node-datachannel"
   },
   {
     "name": "@node-datachannel/linux-x64-gnu",
-    "version": "0.33.2",
+    "version": "0.33.4",
     "license": "MPL 2.0",
     "author": "Murat Doğan, Paul-Louis Ageneau",
     "homepage": "https://github.com/murat-dogan/node-datachannel"
   },
   {
     "name": "@node-datachannel/win32-arm64-msvc",
-    "version": "0.33.2",
+    "version": "0.33.4",
     "license": "MPL 2.0",
     "author": "Murat Doğan, Paul-Louis Ageneau",
     "homepage": "https://github.com/murat-dogan/node-datachannel"
   },
   {
     "name": "@node-datachannel/win32-x64-msvc",
-    "version": "0.33.2",
+    "version": "0.33.4",
     "license": "MPL 2.0",
     "author": "Murat Doğan, Paul-Louis Ageneau",
     "homepage": "https://github.com/murat-dogan/node-datachannel"
@@ -110,6 +110,13 @@
     "license": "MIT",
     "author": "The xterm.js authors",
     "homepage": "https://github.com/xtermjs/xterm.js/tree/master/addons/addon-image"
+  },
+  {
+    "name": "@xterm/addon-serialize",
+    "version": "0.15.0-beta.301",
+    "license": "MIT",
+    "author": "The xterm.js authors",
+    "homepage": "https://github.com/xtermjs/xterm.js/tree/master/addons/addon-serialize"
   },
   {
     "name": "@xterm/addon-unicode-graphemes",
@@ -309,7 +316,7 @@
   },
   {
     "name": "node-datachannel",
-    "version": "0.33.2",
+    "version": "0.33.4",
     "license": "MPL 2.0",
     "author": "Murat Doğan, Paul-Louis Ageneau",
     "homepage": "https://github.com/murat-dogan/node-datachannel#readme"
@@ -330,14 +337,14 @@
   },
   {
     "name": "react",
-    "version": "19.2.8",
+    "version": "19.3.0",
     "license": "MIT",
     "author": "Meta Platforms, Inc. and affiliates",
     "homepage": "https://react.dev/"
   },
   {
     "name": "react-dom",
-    "version": "19.2.8",
+    "version": "19.3.0",
     "license": "MIT",
     "author": "Meta Platforms, Inc. and affiliates",
     "homepage": "https://react.dev/"
@@ -358,7 +365,7 @@
   },
   {
     "name": "scheduler",
-    "version": "0.27.0",
+    "version": "0.28.0",
     "license": "MIT",
     "author": "Meta Platforms, Inc. and affiliates",
     "homepage": "https://react.dev/"

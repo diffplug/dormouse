@@ -130,6 +130,12 @@ is `pty_spawn` with caller-supplied `shell`, `args`, `cwd` and `env`.
 
 Why proxy cookies are stripped in both directions. [RFC 6265 §8.5](https://www.rfc-editor.org/rfc/rfc6265#section-8.5) scopes cookies by host, not port. An inbound cookie can therefore belong to another local service, including an HttpOnly credential, rather than the fixed upstream. Forwarding it leaks that credential; forwarding an upstream Set-Cookie lets even a remote HTTP target overwrite loopback cookies. The WebSocket handshake is HTTP too, including a refused upgrade. Parsing that handshake before piping bytes closes the same boundary without filtering WebSocket payloads.
 
+The Vite listener serves modules containing the browser-dev bridge token. Vite's
+default CORS policy allows other localhost origins to read those modules
+(measured with Vite 8.3.0, 2026-09). Disabling CORS closes that read; the Host
+check separately blocks DNS rebinding, where the browser sees a same-origin
+request and CORS does not apply.
+
 What header stripping cannot protect. A proxied script runs on `127.0.0.1` and can still read or write non-HttpOnly cookies through `document.cookie`, subject to browser partitioning. The per-grant port isolates origins, not cookie storage. Full isolation needs a separate browser storage context or host namespace; cookie-backed login in the iframe renderer cannot be preserved safely by forwarding ambient cookies.
 
 ## Persisted state
@@ -146,9 +152,9 @@ the rename would leave a window where the transcript is world-readable.
 
 What the current writers actually store. `normalizeSessionV3` in
 `lib/src/lib/session-types.ts` destructures `scrollback` out of every pane on
-read, `saveSession` never emits it, and standalone's `PERSIST_SESSION` is
-`false`, so the shipped app writes no snapshot at all and clears a legacy one at
-boot.
+read and `saveSession` never emits it, so a snapshot standalone writes today
+carries structure only. What a pre-upgrade one carries is retired by the first
+save over it, or — for a `.json.tmp` no save will ever reach — by the boot sweep.
 
 Why the peer-link token is listed here. It is a `randomUUID()` in the VS Code
 extension's global storage, and its own comment says it is the only thing between

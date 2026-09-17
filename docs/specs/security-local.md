@@ -116,7 +116,7 @@ ancestor chain the webview supplies with each proxy URL request.** `'self'` allo
 same-grant nesting; any foreign ancestor fails. No request header identifies the
 embedder, and the browser checks the whole chain (rationale).
 
-- **FAIL IF** any loopback HTTP or WebSocket listener grants an unrecognized caller a privilege it could not obtain by reaching the upstream directly. Refusing the request is one way; the iframe proxy's *admits all, vouches for none, names its embedder* is another, and is not a violation (rationale). `scripts/loopback-lint.mjs` (`pnpm test`) makes the cheap half deterministic — a new loopback bind that does not reference a guard module fails the build — but only in the bind forms its `BIND_FORMS` lists, each pinned by a fixture in `scripts/loopback-lint-selftest.mjs`, which goes red on a form that has none. **Adding a server dependency means adding its bind spelling there**; a host built at runtime is invisible to a regex in any spelling. The lint sees only a guard reference, not whether every request calls it, so this bullet is still read by hand. Derive the set by searching the shipped trees for `createServer`, `.listen(`, `serve(` and `WebSocket` rather than trusting this list. Today the set is three: the iframe proxy (`lib/src/host/iframe-proxy.ts`), the VS Code agent-browser stream relay (`vscode-ext/src/agent-browser-host.ts`), and the browser-dev bridge (`standalone/scripts/dev-agent-browser.mjs`). A Unix-domain socket or named pipe is not in scope — no browser can reach one — which is why the `dor` control channel is bounded by socket permissions instead.
+- **FAIL IF** any loopback HTTP or WebSocket listener grants an unrecognized caller a privilege it could not obtain by reaching the upstream directly. Refusing the request is one way; the iframe proxy's *admits all, vouches for none, names its embedder* is another, and is not a violation (rationale). `scripts/loopback-lint.mjs` (`pnpm test`) scans all tracked JavaScript and TypeScript and prints every bind it recognizes, with tests and its own fixtures separate from non-test listeners. A new non-test listener without a guard reference fails the build, but the lint cannot tell whether every request calls that guard. **Adding a server dependency means adding its bind spelling to `BIND_FORMS`**, each form pinned by `scripts/loopback-lint-selftest.mjs`; a host built at runtime is invisible to a regex in any spelling. Search the same files for `createServer`, `.listen(`, `serve(` and `WebSocket` to cover that ceiling. The Relay is separate: no foreign browser origin may drive its API, whatever interface it binds (`docs/specs/security-remote.md` -> "Cross-origin access"). A Unix-domain socket or named pipe is out of scope — no browser can reach one — which is why the `dor` control channel is bounded by socket permissions instead.
 - **FAIL IF** the iframe proxy rewrites `Origin` to the upstream's own origin for a caller whose inbound `Origin` is not the proxy's own — in `handleRequest` **or** `handleUpgrade`. A foreign `Origin` must be forwarded untouched rather than blocked, so the upstream sees the truth and applies its own policy (rationale).
 - **FAIL IF** the iframe proxy forwards `Cookie` upstream or `Set-Cookie` downstream on HTTP or WebSocket handshakes, including refused upgrades. Pinned by `lib/src/host/iframe-proxy.test.ts` (rationale).
 - **FAIL IF** the iframe proxy stops checking that `Host` names its own grant port, on either path. Its per-grant ephemeral port and one-fixed-upstream binding are real mitigations but neither is a secret, so the `Host` check is what makes DNS rebinding fail.
@@ -124,42 +124,56 @@ embedder, and the browser checks the whole chain (rationale).
 - **FAIL IF** a request bearing a *foreign* `Origin` refreshes a grant's idle timer: a grant holds a live upstream binding, and a stranger polling it keeps a closed pane's binding open. An *absent* `Origin` must keep refreshing it — that is what a live frame's own navigations and sub-resources send.
 - **FAIL IF** the stream relay's grant stops being single-use, TTL-bounded, and pinned to one target port, or if it begins rewriting `Origin` rather than dropping it. It needs no `Host` check while the token holds (rationale).
 - **FAIL IF** the browser-dev bridge drops any of its four gates — the per-run token, the loopback `Host` check, the `application/json` content-type required of every non-GET, and the exact-origin `access-control-allow-origin`. The first three live together in the gate that runs before routing, so a route that never reads a body is covered by all of them. It is dev-only and ships in nothing, but it dispatches `pty_spawn` with caller-supplied `shell`, `args`, `cwd` and `env` — arbitrary command execution on a maintainer or CI-agent machine (`docs/specs/security-ci.md` -> "Automated Maintainer (tend)"). The content-type rule is a security control, not tidiness (rationale).
+- **FAIL IF** the browser-dev Vite server permits cross-origin reads of token-bearing modules or disables its DNS-rebinding Host check. Pinned by `standalone/scripts/dev-agent-browser.test.mjs` (rationale).
 
 **Cookie-authenticated iframe pages are unsupported.** Header stripping does not isolate `document.cookie`: proxied scripts still share the loopback hostname's non-HttpOnly cookies across grant ports. This remains a browser-pane isolation gap (rationale).
 
 Source of truth: the shared rule and predicates — `isLoopbackHost`, `isOwnOrigin`,
-`isForeignOrigin` — in `lib/src/host/loopback-guard.ts`.
+`isForeignOrigin` — in `lib/src/host/loopback-guard.ts`;
+`startDevVite` in `standalone/scripts/dev-run.mjs`.
 
 ## Persisted state
 
 The attacker is another local account reading disk; what the remote stack leaves
 behind is `docs/specs/security-remote.md` -> "Credentials at rest".
 
-**Session snapshots are owner-only before any bytes are written.**
-`restrict_to_owner` locks `<app_data_dir>/sessions/` and, *first*, the temp file
-renamed into it, applying a protected single-ACE DACL on Windows where a unix
-mode is a silent no-op (`docs/specs/standalone.md` -> "Persistence"). The same
-helper locks the whole standalone app-data directory before the sidecar spawns.
+**Session snapshots are owner-only before any bytes are written.** Standalone
+persists one window's structure per file as `<state root>/sessions/<label>.json`
+— panes, cwds, titles, doors, layout, TODO flags, never terminal text
+(`docs/specs/standalone.md` -> "Persistence"), plus a
+`<label>.geometry.json` sibling holding that window's box and nothing else, and
+`arrivals.json`, the Workspaces mid-transfer between windows, written the same way
+(`docs/specs/standalone.md` -> "Arrival queue").
+`restrict_to_owner` locks the directory and, *first*, the temp file renamed into
+it, applying a protected single-ACE DACL on Windows where a unix mode is a
+silent no-op. The same helper
+locks the whole standalone app-data directory before the sidecar spawns.
 
 **No writer persists scrollback** (`docs/specs/transport.md` -> "What is
-persisted"): `normalizeSessionV3` strips it on read, and the standalone store is
-switched off today, clearing any legacy snapshot at boot. Snapshots older
-versions left behind do carry transcripts (rationale).
+persisted"): `normalizeSessionV3` strips it on read, so the first save after an
+upgrade rewrites the snapshot without it, and a boot sweep deletes orphaned
+`*.json.tmp` files no save would ever overwrite. Snapshots older versions left
+behind do carry transcripts (rationale).
+
+**Standalone writes `recovery.json` beside its sessions directory**, under the
+state root, owner-only: one rebuilt agent-resume invocation per Surface, never a
+buffer, unlinked as it is read (`docs/specs/standalone.md` -> "Agent recovery").
 
 **The notepad archive is the one store holding terminal text on purpose** —
 excerpts the user explicitly captured, their colors, the Surface title and kind,
 and the CWD at closure, appended only by a Surface closing
 (`docs/specs/notepad.md` -> "Archive"). Standalone keeps it as
-`<app_data_dir>/notepad-archive-v1.json`, owner-only; VS Code keeps it in
+`<app_data_dir>/notepad-archive-v1.json`, owner-only and shared by builds with the
+same Tauri identifier; the dev wrapper uses a per-worktree identifier. VS Code keeps it in
 `<globalStorageUri>/notepad-archive.json`, mode `0600` on Unix and inheriting VS Code's directory ACL on Windows. Migration and Settings Sync follow `docs/specs/notepad.md` -> "VS Code lifecycle". Its live half never reaches disk.
 
 **VS Code persists pane structure in VS Code's own storage** — `workspaceState`
 under `dormouse.session`, and `vscode.setState()`, a WebviewPanel's only store —
 so the modes there are VS Code's, not ours, and no transcript reaches either
 (`docs/specs/vscode.md` -> "Serialization and restore"). Dormouse also writes
-`recovery.json` there, at the umask: one rebuilt agent-resume
-invocation per Surface, no buffer, unlinked as it is read
-(`docs/specs/vscode.md` -> "Capturing agent recovery").
+`recovery.json` under the extension's storage directory, owner-only and
+temp-then-rename: one rebuilt agent-resume invocation per Surface, no buffer,
+unlinked as it is read (`docs/specs/vscode.md` -> "Capturing agent recovery").
 
 **The VS Code peer-link token is a local credential at rest** —
 `burrow.peer-token` in the extension's global storage, written mode `0600`
@@ -173,7 +187,7 @@ lands at the umask — readable by another local account wherever `<tmpdir>` is
 shared (rationale). No log call carries PTY bytes; the `dor` control socket path
 does. A gap, not an accepted risk.
 
-- **FAIL IF** `write_file_atomically` in `standalone/src-tauri/src/lib.rs` stops restricting the directory and the file it writes to the owning user on **every** platform `restrict_to_owner` has an arm for — `0700`/`0600` on unix, and on Windows a DACL protected from inheritance carrying exactly one ACE for the current user, asserted by `restrict_to_owner_leaves_one_owner_only_ace` — or if either of its two callers, `write_session_to` (the session snapshot) and `write_notepad_archive_to` (the notepad archive), stops going through it. `session_write_tightens_directory_and_existing_temp_file` pins unix modes; `session_permission_failures_preserve_previous_snapshot_without_writing_bytes` pins both failure gates. The mode reaches the temp file *before* any bytes are written (rationale).
+- **FAIL IF** `write_file_atomically` in `standalone/src-tauri/src/lib.rs` stops restricting the directory and the file it writes to the owning user on **every** platform `restrict_to_owner` has an arm for — `0700`/`0600` on unix, and on Windows a DACL protected from inheritance carrying exactly one ACE for the current user, asserted by `restrict_to_owner_leaves_one_owner_only_ace` — or if any of its three callers — `write_session_to` (the session snapshot), the window-geometry sibling beside it, and `write_notepad_archive_to` (the notepad archive) — stops going through it. `session_write_tightens_directory_and_existing_temp_file` pins unix modes; `session_permission_failures_preserve_previous_snapshot_without_writing_bytes` pins both failure gates. The mode reaches the temp file *before* any bytes are written (rationale).
 - **FAIL IF** the VS Code notepad archive key — `NOTEPAD_ARCHIVE_KEY` in `vscode-ext/src/notepad-archive-store.ts` — is passed to `context.globalState.setKeysForSync`, directly or as part of any list. It holds captured terminal excerpts, their CWDs, and their Surface titles, and Settings Sync would copy them to every machine the account signs into. Nothing in the extension calls that API today, so the rule is kept by that call not existing; a call added for anything else must exclude this key.
 
 Source of truth: `SESSION_STATE_KEY` in `vscode-ext/src/session-state.ts`,

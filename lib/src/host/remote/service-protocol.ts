@@ -45,6 +45,14 @@ export interface BurrowCommand {
   burrowRequestId: string;
   cmd: string;
   params?: unknown;
+  /**
+   * Which webview sent this, stamped by a host that has more than one
+   * (`burrow_command` in `standalone/src-tauri/src/lib.rs`). The webview never
+   * sets it — it does not know its own label to the Burrow — and a host with one
+   * unnamed webview omits it. Read only by the N-answer collector, which settles
+   * an ask on having heard from every window rather than on a count.
+   */
+  window?: string;
 }
 
 /** Validate the untrusted edge of either Burrow bridge before routing a command. */

@@ -90,6 +90,14 @@
       "separateMajorMinor": false
     },
     {
+      "description": "node-datachannel publishes one prebuilt package per platform from one repository at one version, and the sidecar declares all six beside the core package. website/scripts/generate-deps.js describes the five platforms pnpm did not install from whichever sibling it did — matching on the exact version string — and throws when no sibling sits at that version, so a prebuild-only bump fails the `Dependency disclosure is current` CI step and cannot go green on its own (docs/specs/security-supply-chain.md -> Disclosure). The core package belongs in the group too: it declares its own optionalDependencies at its own version and the addon resolves the platform binary relative to its own directory, so bumping the platform packages alone ships a prebuild nothing loads. A core-only bump does not throw — the prebuild then resolves twice, once from the root pin and once nested under the new core, and the disclosure regenerates with every prebuild listed at both versions. The grouped PR still arrives red: Renovate does not run the generator, so website/src/data/dependencies-npm.json is stale until someone commits `node website/scripts/generate-deps.js`. That red is expected and is one commit to clear — unlike a prebuild-only bump, which throws before it can produce a snapshot at all",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["node-datachannel", "@node-datachannel/**"],
+      "groupName": "node-datachannel",
+      "groupSlug": "node-datachannel",
+      "separateMajorMinor": false
+    },
+    {
       "description": "@types/node must track the pinned Node runtime major and must not expose APIs newer than the runtime we bundle",
       "matchManagers": ["npm"],
       "matchPackageNames": ["@types/node"],
@@ -123,9 +131,9 @@
       "allowedVersions": "1.85.0"
     },
     {
-      "description": "tend manages its own action version (the tend bot opens its own update PRs); don't let Renovate bump max-sixty/tend",
+      "description": "tend-generated workflows are replaced byte-for-byte by nightly regeneration; let the generator own every dependency pin so Renovate and tend cannot alternate upgrades and downgrades",
       "matchManagers": ["github-actions"],
-      "matchPackageNames": ["max-sixty/tend"],
+      "matchFileNames": [".github/workflows/tend-*.yaml"],
       "enabled": false
     },
     {

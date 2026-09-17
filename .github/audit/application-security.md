@@ -48,9 +48,11 @@ harnesses that already exercise this are
 — read what they *do not* cover, and say so.
 
 For `## Loopback Listeners`, read `lib/src/host/loopback-guard.ts` first — it
-states the rule — then each listener it names. Derive the set of listeners by
-searching the shipped trees yourself; the section's own list is a description of
-today's tree, not the scope.
+states the rule — then run `node scripts/loopback-lint.mjs`. Inspect every non-test listener
+it prints; test listeners and self-test fixtures need no further investigation.
+The lint scans all tracked JavaScript and TypeScript. Search the same files for
+`createServer`, `.listen(`, `serve(` and `WebSocket` too, because a new API or a
+host built at runtime can escape its patterns.
 
 For the rest of `docs/specs/security-local.md`, read each section's owner first
 — `docs/specs/terminal-escapes.md`, `docs/specs/dor-browser.md`,

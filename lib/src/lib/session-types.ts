@@ -1,3 +1,4 @@
+import { normalizeAlertDeliveryOverrides, type AlertDeliveryOverrides } from './alert-delivery-model';
 import { isRecord } from './is-record';
 import type { SessionStatus } from './alert-manager';
 import { ACTIVITY_NOTIFICATION_SOURCES, type ActivityNotification, type TodoState } from './alert-manager';
@@ -68,6 +69,8 @@ export interface PersistedDoor {
 export type PersistedSurfaceRefs = Record<string, string>;
 
 export interface PersistedSession {
+  /** Workspace delivery overrides, shared by standalone and VS Code snapshots. */
+  alertDelivery?: AlertDeliveryOverrides;
   version: 3;
   panes: PersistedPane[];
   doors?: PersistedDoor[];
@@ -105,6 +108,7 @@ export const DEFAULT_WORKSPACE_NAME = 'Workspace 1';
 type PersistedPaneInput = Omit<PersistedPane, 'untouched'> & { untouched?: boolean };
 
 interface PersistedSessionV3Input {
+  alertDelivery?: unknown;
   version: 3;
   panes: PersistedPaneInput[];
   doors?: PersistedDoor[];
@@ -207,9 +211,10 @@ export function readPersistedSession(raw: unknown): PersistedSession | null {
 }
 
 function normalizeSessionV3(session: PersistedSessionV3Input): PersistedSession {
+  const alertDelivery = normalizeAlertDeliveryOverrides(session.alertDelivery);
   const surfaceRefs = normalizeSurfaceRefs(session.surfaceRefs);
   const surfaceRefsNext = normalizeSurfaceRefsNext(session.surfaceRefsNext);
-  const { surfaceRefs: _rawRefs, surfaceRefsNext: _rawNext, ...rest } = session;
+  const { alertDelivery: _rawDelivery, surfaceRefs: _rawRefs, surfaceRefsNext: _rawNext, ...rest } = session;
   // Deny-list retired fields so future PersistedPane fields pass through without
   // manual allowlist updates. Neither retired field is on PersistedPaneInput.
   const panes: PersistedPane[] = session.panes.map((pane) => {
@@ -223,6 +228,7 @@ function normalizeSessionV3(session: PersistedSessionV3Input): PersistedSession 
   return {
     ...(rest as Omit<PersistedSession, 'panes' | 'surfaceRefs' | 'surfaceRefsNext'>),
     panes,
+    ...(Object.keys(alertDelivery).length ? { alertDelivery } : {}),
     ...carrySurfaceRefs({ surfaceRefs, surfaceRefsNext }),
   };
 }
@@ -274,11 +280,20 @@ export function readPersistedWindow(raw: unknown): PersistedWindow | null {
     return null;
   }
 
+  const seen = new Set<WorkspaceId>();
   const workspaces = (value.workspaces as unknown[])
     .map((ws): PersistedWorkspace | null => {
       if (!isRecord(ws) || typeof ws.id !== 'string' || typeof ws.name !== 'string') return null;
+      // First wins. A duplicate id is rejected outright by `setWorkspaces`, and a
+      // blob that throws there would leave the app with nothing rendered at all.
+      if (seen.has(ws.id)) {
+        console.warn(`[dormouse] Ignoring a duplicate persisted Workspace id: ${ws.id}`);
+        return null;
+      }
       const session = readPersistedSession(ws.session);
-      return session ? { id: ws.id, name: ws.name, session } : null;
+      if (!session) return null;
+      seen.add(ws.id);
+      return { id: ws.id, name: ws.name, session };
     })
     .filter((ws): ws is PersistedWorkspace => ws !== null);
   if (workspaces.length === 0) return null;
@@ -288,17 +303,8 @@ export function readPersistedWindow(raw: unknown): PersistedWindow | null {
   return { version: 1, workspaces, activeWorkspaceId };
 }
 
-/** The active Workspace's session, or the first Workspace's as a fallback. */
-export function activeWorkspaceSession(window: PersistedWindow): PersistedSession {
-  const active = window.workspaces.find((ws) => ws.id === window.activeWorkspaceId);
-  return (active ?? window.workspaces[0]).session;
-}
-
-/** Return a copy of the Window with the active Workspace's session replaced,
- *  preserving every other Workspace. */
-export function replaceActiveSession(window: PersistedWindow, session: PersistedSession): PersistedWindow {
-  return {
-    ...window,
-    workspaces: window.workspaces.map((ws) => (ws.id === window.activeWorkspaceId ? { ...ws, session } : ws)),
-  };
+/** Every pane id the Window's Workspaces name, across all of them — what a boot
+ *  claims its recovery record against. */
+export function windowPaneIds(window: PersistedWindow | null): string[] {
+  return window?.workspaces.flatMap((workspace) => workspace.session.panes.map((pane) => pane.id)) ?? [];
 }

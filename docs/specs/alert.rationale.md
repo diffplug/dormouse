@@ -6,6 +6,10 @@
 
 **Why the detector outranks the command-exit arm.** A watched command is by definition running, so a WATCHING Session is almost always also command-exit armed; ranking the arm first would mask the detector's busy/quiet states for the whole run, and the detector's state is the one derived from real output.
 
+## Attention
+
+**Why attention uses the narrow reply classifier.** The prompt recorder filters every CSI/SS3 sequence because it cannot interpret them as command text. Reusing that filter for attention ignored real encoded keys, while its omission of DCS let device-query replies attend background panes; regression tests reproduced both failures in September 2026. The narrower reply classifier already used for replay and untouched-session tracking separates keys from replies without changing live PTY forwarding. Mouse-only chunks need a separate guard: the narrower classifier does not include mouse encodings, and inside programs can request hover and wheel reports without a click. Those reports otherwise dismiss a ring and cancel its pending alarms. Actual clicks already attend through the Pane’s DOM handler.
+
 ## Completion events
 
 **Why nothing is decided at the point of detection.** Dispatching before suppression lets an observer see the three-second `npm test` that finished attended and would never have rung anyone. A seam firing only the events a human would have been shown could not serve `dor await` at all.
@@ -30,7 +34,7 @@
 
 **Why a command-exit ring is gated on nothing running.** The ring latches past the run that raised it, so once another command has started it can only describe the previous one — exactly the misreport a `dor send` followed by `dor await --until exit` would act on.
 
-**Why a WATCHING ring is gated on `outputSinceWatchingRing`.** The ring legitimately describes a long-running watched command going quiet — what `--until quiet` exists for — but it is an inference from silence, and nothing clears it when the peer starts talking again; consuming it mid-turn would make the documented `await && read` idiom read a half-drawn screen. The detector cannot stand in for the flag because it never latches: it reports how output looks *now*, and its post-output `NOTHING_TO_SHOW` window (`busyCandidateGap`) is longer than the two CLI round trips between a `dor send` and the await behind it, so it would still read as settled.
+**Why a WATCHING ring is gated on `outputSinceWatchingRing`.** The ring legitimately describes a long-running watched command going quiet — what `--until quiet` exists for — but it is an inference from silence, and a brief burst does not clear it when the peer starts talking again; consuming it mid-turn would make the documented `await && read` idiom read a half-drawn screen. The detector cannot stand in for the flag because it never latches: it reports how output looks *now*, and its post-output `NOTHING_TO_SHOW` window (`busyCandidateGap`) is longer than the two CLI round trips between a `dor send` and the await behind it, so it would still read as settled.
 
 **Why an await never sets TODO.** TODO means a human owes this pane attention; after an await nobody does — a program asked to be told, was told, and acted. A stranded TODO also leaks: the last await of an orchestration would mark a fully handled event, and because TODO feeds the Workspace union, an orchestration awaiting across several panes would light the whole Workspace up. A TODO from an *unrelated* earlier event is a different debt and stays owed.
 
@@ -44,6 +48,8 @@
 
 ## WATCHING Track
 
+**Why candidate history expires on arrival rather than only on its timers.** The marked `dormouse.workspaces-2` alert (2026-09-09) followed 218 seconds of silence and two chunks 62 ms apart: unconfirmed candidate history outlived its timers, which run late in hidden views, and let that short burst confirm BUSY. Measuring the gap between accepted chunks keeps idle time from counting as sustained work.
+
 **Why WATCHING keys on the command rather than the Session.** Turning alerts on while `claude` runs is a statement about `claude`, not about the pane that happened to be focused. A per-Session enable would have to be re-established by hand in every new pane, which is the opposite of what the gesture means.
 
 **Why the alert state is retired before the PTY is killed.** A data chunk is enough to create a Session's entry, so killing first leaves output already in flight to rebuild an entry — and a `QuiesceDetector` that nothing will ever dispose. Raw output and resizes are exactly what a dying PTY emits; a semantic or protocol event may revive an id, because an id may be handed to a replacement pane and its first reported command start is evidence that somebody is home.
@@ -51,6 +57,8 @@
 **Why a mid-command enable shows the current state.** Starting a fresh detector when a rule is added would report `NOTHING_TO_SHOW` for a command that has been busy for ten minutes.
 
 **Why the keystroke fallback is not routed into the manager.** The fallback in `docs/specs/terminal-state.md` is renderer-side and lower confidence than a shell-reported command boundary. Wiring it in would buy integration-less shells a worse version of WATCHING at the price of a second command-tracking path to keep in sync.
+
+**Why resumed work withdraws an inferred WATCHING ring.** The marked `ttr.pgstencil-adopt` speech (2026-09-09 18:17:03) followed a WATCHING settle, resumed output, and confirmed BUSY before the speech deadline; the latched ring masked that activity, so the renderer spoke while the terminal was still animating. Withdrawing the ring lets the existing sink cancellation and fresh-ring delays follow the new busy/quiet cycle. Only the inference goes: explicit reports and command exits stay authoritative, and a redraw too brief to confirm BUSY never invalidates completion.
 
 ## Alarm settings
 
@@ -109,3 +117,11 @@ Guarding only completion leaves a stale `start` free to replace the active utter
 ## Text And Security
 
 **Why the cold-restore path is not re-sanitized.** Reaching it requires a corrupted or hand-edited session store, and the text is rendered as plain text everywhere, so the residual exposure is layout — a very long or control-bearing string in a preview — rather than markup.
+
+## Live Workspace transfer
+
+A persisted reminder intentionally forgets rings and detector history. Reusing it for a live move erased alert episodes and pending delivery; recreating them from public status could instead speak twice. The live snapshot and per-sink receipt distinguish this handoff from cold restore. Receipt consumption occurs at sink admission because there is no transactional acknowledgement tying audible sound or phone display to Workspace ownership (2026-09).
+
+## Workspace union
+
+The maximum child counter hides a new alert from a child with a smaller counter. Summing counters would turn adding or removing a member into a notification. Per-member observation keeps semantic union and presentation edges separate; retaining the cue's clock also prevents switching Workspaces from restarting an old burst (2026-09).

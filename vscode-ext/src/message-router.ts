@@ -23,6 +23,7 @@ import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
 import type { PersistedSession } from '../../lib/src/lib/session-types';
 import type { WebviewMessage, ExtensionMessage } from './message-types';
 import type { DorControlRequest } from './pty-manager';
+import { dorWorkspaceRefusal } from './dor-workspace-guard';
 import { createStreamRelayUrl, runAgentBrowserCommand, runAgentBrowserEdit, runAgentBrowserOpen, runAgentBrowserPopIn, runAgentBrowserPopOut, runAgentBrowserScreenshot, runAgentBrowserStreamStatus } from './agent-browser-host';
 import { createIframeProxyUrl } from './iframe-proxy-host';
 import {
@@ -246,6 +247,14 @@ ptyManager.addCallbacks({
 });
 
 ptyManager.onDorControlRequest((request) => {
+  // Refused here rather than in the webview: only the extension host knows
+  // this window holds several Dormouse webviews, each its own Workspace
+  // (`dor-workspace-guard.ts`).
+  const refusal = dorWorkspaceRefusal(request.method, request.params);
+  if (refusal) {
+    ptyManager.respondDorControl({ requestId: request.requestId, ok: false, error: refusal });
+    return;
+  }
   const routers = [...activeRouters];
   const router = request.surfaceId
     ? routers.find((candidate) => candidate.ownsPty(request.surfaceId!))

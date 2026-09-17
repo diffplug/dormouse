@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { copyFile, mkdir, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
+import { get } from 'node:http';
 import { setTimeout as delay } from 'node:timers/promises';
 import { sessionForKey } from 'dor-lib-common/agent-browser';
 import { cleanEnv, devWorkspace, runner, writeShims } from './dev-fixture.mjs';
@@ -74,10 +75,10 @@ async function fixture(t) {
   };
 }
 
-async function invoke(run, token = run.token, origin = run.app) {
+async function invoke(run, token = run.token, origin = run.app, cmd = 'pty_get_cwd', args = { id: 'test' }) {
   return fetch(`${run.bridge}/__dormouse_dev_host/invoke?t=${token}`, {
     method: 'POST', headers: { 'content-type': 'application/json', origin },
-    body: JSON.stringify({ cmd: 'pty_get_cwd', args: { id: 'test' } }),
+    body: JSON.stringify({ cmd, args }),
     signal: AbortSignal.timeout(5000),
   });
 }
@@ -104,6 +105,23 @@ test('parallel worktrees own ports, browser identities and bridges; stopping one
   for (const [run, dir, other] of [[one, a.root, two], [two, b.root, one]]) {
     const js = await (await fetch(`${run.app}/app.js`)).text();
     assert.ok(js.includes(`${run.bridge}/?t=${run.token}`));
+    // `cors: false` in dev-run.mjs, pinned here because nothing else would
+    // notice its removal: these modules carry the bridge token, and Vite's
+    // default answers every http://localhost:* origin with an acao of its own,
+    // which is a read of the token by any other page in the developer's browser.
+    const foreign = await fetch(`${run.app}/app.js`, { headers: { origin: 'http://localhost:31337' } });
+    assert.equal(foreign.status, 200);
+    assert.equal(foreign.headers.get('access-control-allow-origin'), null);
+    // DNS rebinding looks same-origin to a browser; the Host check must refuse it.
+    const reboundStatus = await new Promise((resolve, reject) => {
+      get(`${run.app}/app.js`, {
+        headers: { host: 'evil.example' }, signal: AbortSignal.timeout(5000),
+      }, response => {
+        response.resume();
+        resolve(response.statusCode);
+      }).on('error', reject);
+    });
+    assert.equal(reboundStatus, 403);
     // HMR must share this listener, even with a Tauri-specific host inherited.
     await new Promise((resolve, reject) => {
       const ws = new WebSocket(run.app.replace('http:', 'ws:'), 'vite-ping');
@@ -183,4 +201,24 @@ test('shutdown kills an owned browser launcher that ignores SIGTERM', {
       await delay(25);
     }
   }, { code: 'ESRCH' });
+});
+
+
+test('registry seeds reservations above restored IDs and mirrors canonical workspace refs', async t => {
+  const f = await fixture(t);
+  const run = await f.start().ready();
+  async function command(cmd, args = {}) {
+    const response = await invoke(run, run.token, run.app, cmd, args);
+    assert.equal(response.status, 200);
+    return (await response.json()).result;
+  }
+  const cases = JSON.parse(await readFile(path.join(scripts, 'workspace-ref-cases.json'), 'utf8'));
+  await command('workspace_report', { entries: cases.map(({ id }) => ({ id, name: id, active: false })) });
+  const registry = await command('workspace_registry');
+  assert.deepEqual(registry.windows[0].workspaces.map(({ id, ref }) => ({ id, ref })), cases);
+  await command('workspace_report', { entries: [{ id: 'workspace-400', name: 'Restored', active: true }] });
+  assert.deepEqual(await command('workspace_reserve_ids', { count: 2 }), ['workspace-401', 'workspace-402']);
+  // Repeated/lower restored reports never wind the process counter backwards.
+  await command('workspace_report', { entries: [{ id: 'workspace-400', name: 'Restored', active: true }] });
+  assert.deepEqual(await command('workspace_reserve_ids', { count: 1 }), ['workspace-403']);
 });

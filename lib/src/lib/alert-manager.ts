@@ -1,4 +1,6 @@
-import { QuiesceDetector, type QuiesceStatus } from './quiesce-detector';
+import { createAlertEpisode, type AlertEpisode } from './alert-episode';
+import { QuiesceDetector, type QuiesceStatus, type QuiesceSnapshot } from './quiesce-detector';
+import { applyTerminalProtocolEvents, collectTerminalSemanticEvents, type TerminalProtocolParseResult } from './terminal-protocol';
 import type { AlertSettings } from './alert-settings';
 import { cfg } from '../cfg';
 import {
@@ -151,6 +153,8 @@ interface AwaitGroup {
 }
 
 export interface AlertState {
+  /** Live delivery identity; absent only on older host snapshots. */
+  episode?: AlertEpisode | null;
   status: SessionStatus;
   watchingEnabled: boolean;
   todo: TodoState;
@@ -167,6 +171,7 @@ export interface AlertState {
 }
 
 export const DEFAULT_ALERT_STATE: AlertState = {
+  episode: null,
   status: 'WATCHING_DISABLED',
   watchingEnabled: false,
   todo: false,
@@ -179,6 +184,7 @@ export const DEFAULT_ALERT_STATE: AlertState = {
 /** Three independent alarm tracks plus an always-on, non-latching detector.
  * WATCHING gates detector projection; its ring latches separately. */
 interface AlertEntry {
+  episode: AlertEpisode | null;
   /** Always-on output/silence detector. Never disposed before the entry is. */
   detector: QuiesceDetector;
   /** Command rule that raised the latched WATCHING ring, even after command exit. */
@@ -206,10 +212,18 @@ interface AlertEntry {
   deferredNotificationTimer: ReturnType<typeof setTimeout> | null;
 }
 
+/** Explicit live handoff only: timers are deadlines, and no caller closures travel. */
+export interface AlertRuntimeSnapshot extends Omit<AlertEntry, 'detector' | 'deferredNotificationTimer'> {
+  detector: QuiesceSnapshot;
+}
+
 /** Portable Session Activity manager. `dispatchCompletion` is the single
  * observe→claim→ring seam, so await can claim completions before suppression. */
 export class AlertManager {
   private entries = new Map<string, AlertEntry>();
+  private suspendedForTransfer = new Set<string>();
+  /** Session → request token of the one replay that counts as live (`applyReplay`). */
+  private liveReplay = new Map<string, string>();
   /** Blocks late output/resize from recreating a removed entry. Only a semantic
    * or protocol event proves a reused id belongs to a live replacement. */
   private removed = new Set<string>();
@@ -259,7 +273,9 @@ export class AlertManager {
 
     // Turning the gate off releases news it was holding; dropping it would turn
     // a timing preference into alert loss.
-    for (const [id, entry] of this.entries) this.flushDeferredNotification(id, entry);
+    for (const [id, entry] of this.entries) {
+      if (!this.suspendedForTransfer.has(id)) this.flushDeferredNotification(id, entry);
+    }
   }
 
   /** Mark (or, on promotion, unmark) a helper Session. */
@@ -278,7 +294,7 @@ export class AlertManager {
   // --- Feed PTY events ---
 
   onData(id: string): void {
-    if (this.helpers.has(id)) return;
+    if (this.inert(id)) return;
     // The detector runs for every Session, including one that has never
     // produced a semantic or protocol event, so output creates the entry.
     const entry = this.streamEntry(id);
@@ -292,7 +308,7 @@ export class AlertManager {
   }
 
   onExit(id: string, exitCode?: number): void {
-    if (this.helpers.has(id)) return;
+    if (this.inert(id)) return;
     const entry = this.entries.get(id);
     if (entry && this.finishCommandExitWatch(id, entry, exitCode)) this.notify(id);
     // The command-exit dispatch above already resolved anything waiting on the
@@ -302,7 +318,7 @@ export class AlertManager {
   }
 
   onResize(id: string): void {
-    if (this.helpers.has(id)) return;
+    if (this.inert(id)) return;
     // Same reasoning as `onData`: the resize grace window is part of the
     // always-on detector, and a Pane's first fit usually beats any PTY event.
     this.streamEntry(id)?.detector.onResize();
@@ -320,6 +336,9 @@ export class AlertManager {
     if (next.size === this.watchedCommands.size && [...next].every((name) => this.watchedCommands.has(name))) return;
     this.watchedCommands = next;
     for (const [id, entry] of this.entries) {
+      // A suspended Session is frozen at its snapshot; `resumeFromTransfer`
+      // re-applies this rule wherever the snapshot lands.
+      if (this.suspendedForTransfer.has(id)) continue;
       // Dropping a rule is an explicit "stop alerting on this", so it also
       // silences the ring that rule already raised. The originating key stays
       // latched after command exit precisely so this still works at a prompt.
@@ -366,10 +385,25 @@ export class AlertManager {
       // transition change the projection.
       onChange: () => {
         const entry = this.entries.get(id);
-        if (entry && this.isWatching(entry)) this.notify(id);
+        if (!entry || !this.isWatching(entry)) return;
+        this.withdrawResumedWatchingRing(entry);
+        this.notify(id);
       },
       onSettled: () => this.onSettled(id),
     });
+  }
+
+  /**
+   * Watched work that resumed invalidates a ring inferred from silence, so the
+   * next settle raises a fresh one on fresh delivery delays. Not `releaseRing`:
+   * that resets the detector, which would stop this run from settling again.
+   * Callers are the WATCHING-only paths; this adds no rule-set check of its own.
+   */
+  private withdrawResumedWatchingRing(entry: AlertEntry): void {
+    if (!this.deferAlertsUntilQuiet || entry.watchingRingingCommand === null) return;
+    if (!entry.detector.isConfirmedBusy()) return;
+    entry.watchingRingingCommand = null;
+    entry.outputSinceWatchingRing = false;
   }
 
   /** A busy Session went quiet. Whether that rings is decided downstream. */
@@ -466,7 +500,7 @@ export class AlertManager {
    * attention exactly as they were.
    */
   awaitCompletion(id: string, options: AwaitOptions): AwaitHandle {
-    if (this.helpers.has(id)) return settledAwait({ kind: 'cancelled', waitedMs: 0 });
+    if (this.inert(id)) return settledAwait({ kind: 'cancelled', waitedMs: 0 });
     // The ceiling starts life as a CLI argument a process away and ends up in
     // `setTimeout`, so nonsense is rejected here rather than trusted from one
     // caller away. A rejected request settles `cancelled` — it absorbs nothing
@@ -650,7 +684,7 @@ export class AlertManager {
   // --- Terminal-report protocol track ---
 
   notifyFromProtocol(id: string, notification: ActivityNotification): void {
-    if (this.helpers.has(id)) return;
+    if (this.inert(id)) return;
     const entry = this.reportedEntry(id);
     const normalized = normalizeActivityNotification(notification);
     if (!normalized) return;
@@ -659,7 +693,7 @@ export class AlertManager {
   }
 
   updateProtocolProgress(id: string, progress: ProtocolProgressUpdate): void {
-    if (this.helpers.has(id)) return;
+    if (this.inert(id)) return;
     const entry = this.reportedEntry(id);
 
     if (progress.state === 'clear') {
@@ -737,7 +771,7 @@ export class AlertManager {
   // --- Command-exit track ---
 
   applyTerminalSemanticEvents(id: string, events: TerminalSemanticEvent[]): void {
-    if (events.length === 0 || this.helpers.has(id)) return;
+    if (events.length === 0 || this.inert(id)) return;
     const entry = this.reportedEntry(id);
     let changed = false;
 
@@ -963,6 +997,7 @@ export class AlertManager {
    * does not advance the counter — see `deferOrDeliverNotification`.
    */
   private latchRing(entry: AlertEntry, wasRinging: boolean): void {
+    if (!this.hasActiveRing(entry)) entry.episode = createAlertEpisode();
     if (!wasRinging) entry.ringSeq++;
   }
 
@@ -1021,7 +1056,7 @@ export class AlertManager {
   }
 
   attend(id: string): void {
-    if (this.helpers.has(id)) return;
+    if (this.inert(id)) return;
     const entry = this.getOrCreateEntry(id);
     this.setAttention(id);
 
@@ -1046,6 +1081,7 @@ export class AlertManager {
   // --- Alert controls ---
 
   dismissAlert(id: string): void {
+    if (this.suspendedForTransfer.has(id)) return;
     const entry = this.entries.get(id);
     if (!entry) return;
 
@@ -1062,7 +1098,7 @@ export class AlertManager {
   // --- Todo controls ---
 
   toggleTodo(id: string): void {
-    if (this.helpers.has(id)) return;
+    if (this.inert(id)) return;
     const entry = this.getOrCreateEntry(id);
     entry.todo = !entry.todo;
     if (!entry.todo) entry.notification = null;
@@ -1071,7 +1107,7 @@ export class AlertManager {
   }
 
   markTodo(id: string): void {
-    if (this.helpers.has(id)) return;
+    if (this.inert(id)) return;
     const entry = this.getOrCreateEntry(id);
     const cleared = this.clearAllRingsIfActive(entry);
     if (entry.todo && !cleared) return;
@@ -1080,7 +1116,7 @@ export class AlertManager {
   }
 
   clearTodo(id: string): void {
-    if (this.helpers.has(id)) return;
+    if (this.inert(id)) return;
     const entry = this.getOrCreateEntry(id);
     entry.todo = false;
     entry.notification = null;
@@ -1103,6 +1139,7 @@ export class AlertManager {
       attentionDismissedRing: entry.attentionDismissedRing,
       awaited: (this.awaits.get(id)?.waiters.size ?? 0) > 0,
       ringSeq: entry.ringSeq,
+      episode: this.hasActiveRing(entry) ? entry.episode : null,
     };
   }
 
@@ -1116,6 +1153,8 @@ export class AlertManager {
 
   /** Completely remove alert state for a PTY (used when PTY is destroyed) */
   remove(id: string): void {
+    this.suspendedForTransfer.delete(id);
+    this.liveReplay.delete(id);
     this.helpers.delete(id);
     this.removed.add(id);
     // Nobody parked here has anything left to wait for.
@@ -1142,7 +1181,7 @@ export class AlertManager {
    * never resurrect a ring or an in-flight progress cycle.
    */
   seed(id: string, state: { todo: unknown; notification?: unknown }): void {
-    if (this.helpers.has(id)) return;
+    if (this.inert(id)) return;
     const entry = this.getOrCreateEntry(id);
     entry.todo = state.todo === true;
     entry.notification = entry.todo ? normalizeActivityNotification(state.notification) : null;
@@ -1159,6 +1198,76 @@ export class AlertManager {
     this.notify(id);
   }
 
+  /** A helper, or a Session suspended for a live handoff, accepts nothing. */
+  private inert(id: string): boolean {
+    return this.helpers.has(id) || this.suspendedForTransfer.has(id);
+  }
+
+  /** Suspend at the output mark. Parked await callers receive an explicit cancellation. */
+  pauseForTransfer(id: string): AlertRuntimeSnapshot | null {
+    const entry = this.entries.get(id);
+    if (!entry) return null;
+    this.settleWaiters(id, 'cancelled');
+    if (this.attentionId === id) {
+      this.attentionId = null;
+      this.clearAttentionTimer();
+      this.armCommandExitOnAttentionLoss(id);
+    }
+    this.suspendedForTransfer.add(id);
+    const { detector, deferredNotificationTimer: _timer, ...state } = entry;
+    const snapshot = structuredClone({ ...state, detector: detector.snapshot() });
+    detector.dispose();
+    if (entry.deferredNotificationTimer !== null) clearTimeout(entry.deferredNotificationTimer);
+    entry.deferredNotificationTimer = null;
+    return snapshot;
+  }
+
+  /** Resume live state before replay; unlike seed, this preserves track and
+   *  episode identity. `replayRequestId` names the one since-mark replay that
+   *  `applyReplay` treats as live output. */
+  resumeFromTransfer(id: string, snapshot: AlertRuntimeSnapshot, replayRequestId?: string): void {
+    if (this.helpers.has(id)) return;
+    this.suspendedForTransfer.delete(id);
+    this.removed.delete(id);
+    if (replayRequestId === undefined) this.liveReplay.delete(id);
+    else this.liveReplay.set(id, replayRequestId);
+    const entry = this.getOrCreateEntry(id);
+    entry.detector.dispose();
+    if (entry.deferredNotificationTimer !== null) clearTimeout(entry.deferredNotificationTimer);
+    const { detector, ...state } = structuredClone(snapshot);
+    Object.assign(entry, state);
+    entry.deferredNotificationTimer = null;
+    entry.detector = this.createDetector(id);
+    entry.detector.restore(detector);
+    if (entry.watchingRingingCommand !== null && !this.watchedCommands.has(entry.watchingRingingCommand)) {
+      entry.watchingRingingCommand = null;
+      entry.outputSinceWatchingRing = false;
+    }
+    if (entry.deferredNotification) {
+      if (this.deferAlertsUntilQuiet) this.scheduleDeferredNotification(id, entry);
+      else this.flushDeferredNotification(id, entry);
+    }
+    this.notify(id);
+  }
+
+  /**
+   * Feed a `pty:replay` chunk. Historical replay applies semantic events alone;
+   * only the live since-mark replay of a Workspace handoff, matched by its
+   * request token, counts as output and fires notification events
+   * (`docs/specs/alert.md` → Live Workspace transfer). Returns the semantic
+   * events for the terminal-state store.
+   */
+  applyReplay(id: string, requestId: string | undefined, parsed: TerminalProtocolParseResult): TerminalSemanticEvent[] {
+    if (requestId !== undefined && this.liveReplay.get(id) === requestId) {
+      this.liveReplay.delete(id);
+      if (parsed.visibleData.length) this.onData(id);
+      applyTerminalProtocolEvents(this, id, parsed.events);
+    }
+    const events = collectTerminalSemanticEvents(parsed.events);
+    this.applyTerminalSemanticEvents(id, events);
+    return events;
+  }
+
   dispose(): void {
     // Settled first, while listeners are still attached: a parked caller that
     // never hears an outcome absorbed a completion it never delivered.
@@ -1168,6 +1277,8 @@ export class AlertManager {
       entry.detector.dispose();
     }
     this.entries.clear();
+    this.suspendedForTransfer.clear();
+    this.liveReplay.clear();
     this.removed.clear();
     this.helpers.clear();
     this.awaits.clear();
@@ -1187,7 +1298,7 @@ export class AlertManager {
    * was killed (see `removed`).
    */
   private streamEntry(id: string): AlertEntry | null {
-    if (this.removed.has(id)) return null;
+    if (this.removed.has(id) || this.suspendedForTransfer.has(id)) return null;
     return this.getOrCreateEntry(id);
   }
 
@@ -1221,6 +1332,7 @@ export class AlertManager {
         watchingRingingCommand: null,
         outputSinceWatchingRing: false,
         ringSeq: 0,
+        episode: null,
         protocolStatus: 'IDLE',
         progress: null,
         commandExitStatus: 'IDLE',
@@ -1260,6 +1372,7 @@ function alertStatesEqual(a: AlertState, b: AlertState): boolean {
     || a.attentionDismissedRing !== b.attentionDismissedRing
     || a.awaited !== b.awaited
     || a.ringSeq !== b.ringSeq
+    || a.episode?.id !== b.episode?.id
   ) return false;
   const an = a.notification;
   const bn = b.notification;

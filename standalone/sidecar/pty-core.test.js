@@ -7,6 +7,8 @@ const {
   detectAvailableShells,
   getCwdForPid,
   parseCwdFromLsof,
+  parseCwdsFromLsof,
+  getCwdsForPids,
   resolveSpawnConfig,
   withPrependedPath,
   canonicalizeWindowsCwd,
@@ -22,6 +24,10 @@ const {
   getDescendantPids,
   getListeningPortsForPids,
   getOpenPortsForPid,
+  getOpenPortsForPids,
+  openPortScanTimeoutMs,
+  OPEN_PORT_TIMEOUT_MS,
+  OPEN_PORT_TIMEOUT_PER_ID_MS,
 } = require('./pty-core');
 
 test('resolveSpawnConfig uses POSIX shell and home defaults', () => {
@@ -509,7 +515,7 @@ test('interrupt with no live PTYs still reports done', async () => {
   assert.deepEqual(events.at(-1), { event: 'interruptDone', data: { requestId: 'req-empty' } });
 });
 
-test('gracefulKillAll SIGTERMs live PTYs, echoes requestId, forwards final output', async () => {
+test('gracefulKill SIGTERMs the named PTYs, echoes requestId, forwards final output', async () => {
   const events = [];
   const killSignals = [];
   const listeners = {};
@@ -530,7 +536,7 @@ test('gracefulKillAll SIGTERMs live PTYs, echoes requestId, forwards final outpu
   }, { spawn() { return fakePty; } });
 
   mgr.spawn('pane-1');
-  mgr.gracefulKillAll(1, 'req-42');
+  mgr.gracefulKill(['pane-1'], 1, 'req-42');
   listeners.data?.('final output');
   await done;
 
@@ -547,7 +553,7 @@ test('gracefulKillAll SIGTERMs live PTYs, echoes requestId, forwards final outpu
   });
 });
 
-test('gracefulKillAll resolves early after exits and a final output grace tick', async () => {
+test('gracefulKill resolves early after exits and a final output grace tick', async () => {
   const listeners = {};
   const events = [];
   const fakePty = {
@@ -568,7 +574,7 @@ test('gracefulKillAll resolves early after exits and a final output grace tick',
 
   mgr.spawn('pane-1');
   const started = Date.now();
-  mgr.gracefulKillAll(60_000, 'req-1');
+  mgr.gracefulKill(['pane-1'], 60_000, 'req-1');
   listeners.exit({ exitCode: 0, signal: 15 }); // empties the live-PTY map
   // ConPTY can flush after exit. Deliver on a later tick to exercise the grace.
   setTimeout(() => listeners.data('final output'), 10);
@@ -581,7 +587,7 @@ test('gracefulKillAll resolves early after exits and a final output grace tick',
   assert.ok(Date.now() - started < 5_000);
 });
 
-test('gracefulKillAll with no live PTYs waits one grace tick', async () => {
+test('gracefulKill with nothing live waits one grace tick', async () => {
   const events = [];
   let resolveDone;
   const done = new Promise((resolve) => { resolveDone = resolve; });
@@ -592,7 +598,7 @@ test('gracefulKillAll with no live PTYs waits one grace tick', async () => {
     spawn() { throw new Error('nothing should spawn'); },
   });
 
-  mgr.gracefulKillAll(60_000, 'req-1');
+  mgr.gracefulKill(['pane-1'], 60_000, 'req-1');
   assert.deepEqual(events, []);
 
   await done;
@@ -1323,10 +1329,10 @@ test('parseNetTcpConnections filters by owning pid and detects family', () => {
     { LocalAddress: '::', LocalPort: 8080, OwningProcess: 4242 },
     { LocalAddress: '0.0.0.0', LocalPort: 9999, OwningProcess: 1 }, // not ours
   ]);
-  const ports = parseNetTcpConnections(json, new Set([4242]), new Map([[4242, 'node.exe']]));
+  const ports = parseNetTcpConnections(json, new Set([4242]));
   assert.deepEqual(ports, [
-    { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 3000, pid: 4242, processName: 'node.exe' },
-    { protocol: 'tcp', family: 'IPv6', address: '::', port: 8080, pid: 4242, processName: 'node.exe' },
+    { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 3000, pid: 4242 },
+    { protocol: 'tcp', family: 'IPv6', address: '::', port: 8080, pid: 4242 },
   ]);
 });
 
@@ -1348,8 +1354,8 @@ test('parseNetstatListening parses LISTENING TCP rows for tracked pids', () => {
   ].join('\n');
   const ports = parseNetstatListening(output, new Set([4242]));
   assert.deepEqual(ports, [
-    { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 3000, pid: 4242, processName: undefined },
-    { protocol: 'tcp', family: 'IPv6', address: '::', port: 8080, pid: 4242, processName: undefined },
+    { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 3000, pid: 4242 },
+    { protocol: 'tcp', family: 'IPv6', address: '::', port: 8080, pid: 4242 },
   ]);
 });
 
@@ -1423,6 +1429,20 @@ test('getListeningPortsForPids (darwin) runs lsof with the descendant pid list',
   ]);
 });
 
+test('getListeningPortsForPids (darwin) keeps the live pids when lsof exits non-zero over a dead one', () => {
+  // A batched scan covers every descendant of every terminal, so one child
+  // exiting between `ps` and `lsof` is the common case, not the odd one; the
+  // stdout lsof printed before its non-zero exit is the answer.
+  const execFileSync = () => {
+    const err = new Error('lsof exited 1');
+    err.status = 1;
+    err.stdout = ['p4242', 'cnode', 'tIPv4', 'n*:3000', ''].join('\n');
+    throw err;
+  };
+  const ports = getListeningPortsForPids([100, 4242, 999_999], { platform: 'darwin', execFileSync });
+  assert.deepEqual(ports.map((p) => [p.pid, p.port]), [[4242, 3000]]);
+});
+
 test('getListeningPortsForPids (win32) prefers Get-NetTCPConnection', () => {
   const execFileSync = (cmd, args) => {
     assert.equal(cmd, 'powershell.exe');
@@ -1459,6 +1479,70 @@ test('getListeningPortsForPids (win32) falls back to netstat when the cmdlet fai
   ]);
 });
 
+test('Windows port subprocesses share the socket budget, including netstat fallback', () => {
+  let now = 0;
+  const timeouts = [];
+  const execFileSync = (cmd, args, options) => {
+    timeouts.push(options.timeout);
+    const script = args.at(-1);
+    if (script.includes('ParentProcessId')) {
+      now += OPEN_PORT_TIMEOUT_MS;
+      return JSON.stringify([{ ProcessId: 4242, ParentProcessId: 1 }]);
+    }
+    if (script.includes('Win32_Process')) {
+      now += options.timeout;
+      return JSON.stringify([{ ProcessId: 4242, Name: 'node.exe' }]);
+    }
+    if (script.includes('Get-NetTCPConnection')) {
+      now += 1000;
+      throw new Error('cmdlet failed');
+    }
+    assert.equal(cmd, 'netstat');
+    now += 500;
+    return '  TCP    0.0.0.0:3000   0.0.0.0:0   LISTENING   4242\n';
+  };
+  const result = getOpenPortsForPids([4242], { platform: 'win32', execFileSync, now: () => now });
+  const budget = openPortScanTimeoutMs(1);
+  assert.deepEqual(timeouts, [OPEN_PORT_TIMEOUT_MS, budget, budget - 1000, budget - 1500]);
+  assert.equal(now, OPEN_PORT_TIMEOUT_MS + budget);
+  assert.equal(result.get(4242)[0].processName, 'node.exe');
+});
+
+test('Windows does not start netstat after the socket deadline expires', () => {
+  let now = 0;
+  const commands = [];
+  const execFileSync = (cmd, args, options) => {
+    commands.push(cmd);
+    if (args.at(-1).includes('Win32_Process')) return '[]';
+    now += options.timeout;
+    throw new Error('timed out');
+  };
+  assert.deepEqual(getListeningPortsForPids([4242], {
+    platform: 'win32', execFileSync, now: () => now, scanTimeoutMs: 3100,
+  }), []);
+  assert.deepEqual(commands, ['powershell.exe']);
+  assert.equal(now, 3100);
+});
+
+test('a slow optional Windows name lookup cannot hide already enumerated ports', () => {
+  let now = 0;
+  const execFileSync = (cmd, args, options) => {
+    if (args.at(-1).includes('Get-NetTCPConnection')) {
+      now += 10;
+      return JSON.stringify([{ LocalAddress: '0.0.0.0', LocalPort: 3000, OwningProcess: 4242 }]);
+    }
+    assert.ok(args.at(-1).includes('Win32_Process'));
+    assert.equal(options.timeout, 3090);
+    now += options.timeout;
+    throw new Error('WMI timed out');
+  };
+  const ports = getListeningPortsForPids([4242], {
+    platform: 'win32', execFileSync, now: () => now, scanTimeoutMs: 3100,
+  });
+  assert.deepEqual(ports.map(({ port, processName }) => ({ port, processName })), [{ port: 3000, processName: undefined }]);
+  assert.equal(now, 3100);
+});
+
 test('getOpenPortsForPid de-duplicates and sorts by port', () => {
   // darwin path: lsof returns a duplicate (same family/addr/port) plus an
   // out-of-order pair to exercise sorting.
@@ -1479,4 +1563,414 @@ test('getOpenPortsForPid de-duplicates and sorts by port', () => {
 
 test('getOpenPortsForPid returns [] for a non-integer pid', () => {
   assert.deepEqual(getOpenPortsForPid(undefined, { platform: 'linux' }), []);
+});
+
+test('getOpenPortsForPids answers per root pid from ONE process table and ONE socket scan', () => {
+  // Two terminals, each with a child serving a port. A listing that spans them
+  // must not pay for a `ps` + `lsof` pair per terminal.
+  const spawns = [];
+  const execFileSync = (cmd, args, options) => {
+    spawns.push(cmd);
+    if (cmd === 'ps') return '100 1\n200 100\n300 1\n400 300\n';
+    if (cmd === 'lsof') {
+      assert.ok(args.includes('100,200,300,400'), `one scan over every descendant: ${args.join(' ')}`);
+      // The socket scan is budgeted for the batch, not for one terminal.
+      assert.equal(options.timeout, openPortScanTimeoutMs(2));
+      assert.equal(options.timeout, OPEN_PORT_TIMEOUT_MS + 2 * OPEN_PORT_TIMEOUT_PER_ID_MS);
+      return [
+        'p200', 'cnode', 'tIPv4', 'n*:3000',
+        'p400', 'cnode', 'tIPv4', 'n*:5173',
+      ].join('\n');
+    }
+    throw new Error(`unexpected spawn: ${cmd}`);
+  };
+
+  const ports = getOpenPortsForPids([100, 300], { platform: 'darwin', execFileSync });
+
+  assert.deepEqual(spawns, ['ps', 'lsof']);
+  // Each root owns only what its own descendants opened.
+  assert.deepEqual(ports.get(100).map((p) => p.port), [3000]);
+  assert.deepEqual(ports.get(300).map((p) => p.port), [5173]);
+});
+
+test('getOpenPortsMany answers a key for every requested id, [] for one with no PTY', () => {
+  const events = [];
+  const mgr = create((event, data) => events.push({ event, data }), {
+    spawn() {
+      return { pid: 999_002, onData() {}, onExit() {}, resize() {}, write() {}, kill() {} };
+    },
+  }, { replay: true });
+  mgr.spawn('pane-a');
+
+  mgr.getOpenPortsMany(['pane-a', 'pane-gone'], 'req-2');
+
+  const answer = events.find((e) => e.event === 'openPortsMany');
+  assert.equal(answer.data.requestId, 'req-2');
+  assert.deepEqual(Object.keys(answer.data.ports).sort(), ['pane-a', 'pane-gone']);
+  // A pane with no live PTY is never scanned for.
+  assert.deepEqual(answer.data.ports['pane-gone'], []);
+});
+
+// The clamping arithmetic itself lives in lib/src/host/replay-buffer.ts and is
+// tested there; what belongs here is the buffer accounting this file owns and
+// hands it.
+test('receivedChars counts everything ever received, past a replay-buffer trim', () => {
+  const listeners = {};
+  const reads = [];
+  const fakePty = {
+    pid: 1,
+    onData(handler) { listeners.data = handler; },
+    onExit(handler) { listeners.exit = handler; },
+    resize() {}, write() {}, kill() {},
+  };
+  const sliceSince = (chunks, held, received, mark) => {
+    reads.push({ buffered: chunks.join(''), held, received, mark });
+    return 'sliced';
+  };
+  const mgr = create(() => {}, { spawn() { return fakePty; } }, { replay: true, sliceSince });
+  mgr.spawn('pane-1');
+
+  assert.equal(mgr.receivedChars('pane-1'), 0);
+  const mark = mgr.receivedChars('pane-1');
+  listeners.data('hello');
+  assert.equal(mgr.receivedChars('pane-1'), 5);
+  assert.equal(mgr.outputSince('pane-1', mark), 'sliced');
+  assert.deepEqual(reads.at(-1), { buffered: 'hello', held: 5, received: 5, mark: 0 });
+
+  // Overflow the 200k replay cap: the buffer trims, but the counter is the mark
+  // space and must not move backwards — so what the slicer is handed is a held
+  // length capped at 200k beside a received count that keeps climbing.
+  const before = mgr.receivedChars('pane-1');
+  for (let i = 0; i < 30; i++) listeners.data('x'.repeat(10_000));
+  const after = mgr.receivedChars('pane-1');
+  assert.equal(after, before + 300_000);
+  mgr.outputSince('pane-1', before);
+  assert.equal(reads.at(-1).held, 200_000);
+  assert.equal(reads.at(-1).received, after);
+  assert.equal(reads.at(-1).buffered.length, 200_000);
+
+  // An unknown pane never reaches the slicer at all.
+  const seen = reads.length;
+  assert.equal(mgr.outputSince('unknown-pane', 0), '');
+  assert.equal(mgr.receivedChars('unknown-pane'), 0);
+  assert.equal(reads.length, seen);
+});
+
+test('liveIds names every unexited PTY, and nothing after it exits', () => {
+  const listeners = {};
+  const fakePty = (id) => ({
+    pid: 1,
+    onData() {}, onExit(handler) { listeners[id] = handler; },
+    resize() {}, write() {}, kill() {},
+  });
+  let next = 'a';
+  const mgr = create(() => {}, { spawn() { return fakePty(next); } }, { replay: true });
+  next = 'a'; mgr.spawn('a');
+  next = 'b'; mgr.spawn('b');
+  assert.deepEqual(mgr.liveIds().sort(), ['a', 'b']);
+
+  listeners.a({ exitCode: 0, signal: undefined });
+  assert.deepEqual(mgr.liveIds(), ['b']);
+});
+
+test('outputSince returns nothing without a replay buffer', () => {
+  const listeners = {};
+  const fakePty = {
+    pid: 1,
+    onData(handler) { listeners.data = handler; },
+    onExit() {}, resize() {}, write() {}, kill() {},
+  };
+  // No `replay`, and so no slicer either: nothing is buffered to answer from.
+  const mgr = create(() => {}, { spawn() { return fakePty; } });
+  mgr.spawn('pane-1');
+  listeners.data('hello');
+  assert.equal(mgr.receivedChars('pane-1'), 0);
+  assert.equal(mgr.outputSince('pane-1', 0), '');
+});
+
+test('parseCwdsFromLsof keys every process block by its pid', () => {
+  const output = ['p100', 'fcwd', 'n/', 'p4242', 'fcwd', 'n/home/tester/project', ''].join('\n');
+  assert.deepEqual([...parseCwdsFromLsof(output)], [[100, '/'], [4242, '/home/tester/project']]);
+});
+
+test('getCwdsForPids resolves every pid in ONE lsof call', () => {
+  const calls = [];
+  const cwds = getCwdsForPids([4242, 4243], {
+    fsModule: { readlinkSync: () => { throw new Error('ENOENT'); } },
+    execFileSync(file, args, options) {
+      calls.push({ file, args, options });
+      return [
+        'p4242', 'fcwd', 'n/home/tester/one',
+        'p4243', 'fcwd', 'n/home/tester/two',
+        '',
+      ].join('\n');
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].args, ['-a', '-d', 'cwd', '-p', '4242,4243', '-Fn']);
+  assert.deepEqual([...cwds], [[4242, '/home/tester/one'], [4243, '/home/tester/two']]);
+});
+
+test('getCwdsForPids keeps the live pids when lsof exits non-zero over a dead one', () => {
+  // `lsof -p live,dead` exits 1 and still prints the live block on stdout.
+  const err = new Error('Command failed: lsof');
+  err.status = 1;
+  err.stdout = ['p4242', 'fcwd', 'n/home/tester/one', ''].join('\n');
+  const cwds = getCwdsForPids([4242, 4243], {
+    fsModule: { readlinkSync: () => { throw new Error('ENOENT'); } },
+    execFileSync() { throw err; },
+  });
+
+  assert.deepEqual([...cwds], [[4242, '/home/tester/one']]);
+});
+
+test('getCwdsForPids survives an lsof failure with no stdout at all', () => {
+  const cwds = getCwdsForPids([4242], {
+    fsModule: { readlinkSync: () => { throw new Error('ENOENT'); } },
+    execFileSync() { throw new Error('spawn ENOENT'); },
+  });
+
+  assert.equal(cwds.size, 0);
+});
+
+test('getCwdsForPids reads /proc where it can and never spawns for those pids', () => {
+  let spawned = false;
+  const cwds = getCwdsForPids([7, 8], {
+    fsModule: { readlinkSync: (p) => `/proc-cwd-for${p}` },
+    execFileSync() { spawned = true; return ''; },
+  });
+  assert.equal(spawned, false);
+  assert.deepEqual([...cwds], [[7, '/proc-cwd-for/proc/7/cwd'], [8, '/proc-cwd-for/proc/8/cwd']]);
+});
+
+test('getCwds answers a key for every requested id, null for one with no PTY', () => {
+  const events = [];
+  const fakePty = () => ({
+    pid: 999_001,
+    onData() {}, onExit() {}, resize() {}, write() {}, kill() {},
+  });
+  const mgr = create((event, data) => events.push({ event, data }), {
+    spawn() { return fakePty(); },
+  }, { replay: true });
+  mgr.spawn('pane-a');
+
+  mgr.getCwds(['pane-a', 'pane-gone'], 'req-1');
+
+  const answer = events.find((e) => e.event === 'cwds');
+  assert.equal(answer.data.requestId, 'req-1');
+  assert.deepEqual(Object.keys(answer.data.cwds).sort(), ['pane-a', 'pane-gone']);
+  // A pane with no live PTY is never scanned for.
+  assert.equal(answer.data.cwds['pane-gone'], null);
+});
+
+
+// --- Per-window list / replay / kill (docs/specs/standalone.md -> "Windows") ---
+
+function fakePtyModule() {
+  const listeners = new Map();
+  const killed = [];
+  return {
+    listeners,
+    killed,
+    module: {
+      spawn(shell, args, opts) {
+        const id = opts?.env?.DORMOUSE_SURFACE_ID;
+        const handlers = {};
+        listeners.set(id, handlers);
+        return {
+          pid: 100 + listeners.size,
+          onData(handler) { handlers.data = handler; },
+          onExit(handler) { handlers.exit = handler; },
+          resize() {},
+          write() {},
+          kill(signal) { killed.push([id, signal]); },
+        };
+      },
+    },
+  };
+}
+
+test('list(ids) lists and replays only those ids, naming the window that asked', () => {
+  const events = [];
+  const pty = fakePtyModule();
+  const mgr = create((event, data) => events.push({ event, data }), pty.module, { replay: true });
+  mgr.spawn('a');
+  mgr.spawn('b');
+  pty.listeners.get('a').data('from a');
+  pty.listeners.get('b').data('from b');
+
+  events.length = 0;
+  mgr.list(['a'], 'ws-2');
+
+  assert.equal(events.length, 2);
+  assert.equal(events[0].event, 'list');
+  assert.equal(events[0].data.forWindow, 'ws-2');
+  assert.deepEqual(events[0].data.ptys.map((entry) => entry.id), ['a']);
+  assert.deepEqual(events[1], { event: 'replay', data: { id: 'a', data: 'from a', forWindow: 'ws-2' } });
+});
+
+// One window can have two collections outstanding — a boot and a Workspace
+// arriving from another window — and every listener there sees every answer.
+// The token is what tells them apart (docs/specs/transport.md -> "Reconnection").
+test('list echoes the asking collector\'s token on the list and every replay', () => {
+  const events = [];
+  const pty = fakePtyModule();
+  const mgr = create((event, data) => events.push({ event, data }), pty.module, { replay: true });
+  mgr.spawn('a');
+  pty.listeners.get('a').data('from a');
+
+  events.length = 0;
+  mgr.list(['a'], 'ws-2', 'init-7');
+  assert.equal(events[0].data.requestId, 'init-7');
+  assert.deepEqual(events[1], {
+    event: 'replay',
+    data: { id: 'a', data: 'from a', forWindow: 'ws-2', requestId: 'init-7' },
+  });
+
+  // A host with nothing to echo carries no field at all, which every adapter
+  // that serves one webview relies on.
+  events.length = 0;
+  mgr.list(['a'], 'ws-2');
+  assert.equal('requestId' in events[0].data, false);
+  assert.equal('requestId' in events[1].data, false);
+  events.length = 0;
+  mgr.list(['a'], 'ws-2', null);
+  assert.equal('requestId' in events[0].data, false);
+});
+
+test('list omitted is every PTY; list([]) is an empty list', () => {
+  const events = [];
+  const pty = fakePtyModule();
+  const mgr = create((event, data) => events.push({ event, data }), pty.module, { replay: true });
+  mgr.spawn('a');
+  mgr.spawn('b');
+
+  events.length = 0;
+  mgr.list();
+  assert.deepEqual(events[0].data.ptys.map((p) => p.id), ['a', 'b']);
+  assert.equal('forWindow' in events[0].data, false);
+
+  // "Omitted" means omitted, never "an empty list" — the same rule `interrupt`
+  // carries. A caller forwarding a computed set that came out empty gets a
+  // no-op, not every PTY in the process.
+  events.length = 0;
+  mgr.list([], 'ws-2');
+  assert.deepEqual(events, [{ event: 'list', data: { ptys: [], forWindow: 'ws-2' } }]);
+});
+
+// The whole no-duplicate / no-loss argument for a Workspace transfer rests on
+// this ordering: `onData` appends to the replay buffer synchronously before it
+// emits, so a chunk the host suppressed the instant it saw the `data` event is
+// already in the buffer the replay behind it is built from.
+test('a chunk emitted just before list([id]) appears in the replay exactly once', () => {
+  const events = [];
+  const pty = fakePtyModule();
+  let mgr;
+  const mgrRef = () => mgr;
+  mgr = create((event, data) => {
+    events.push({ event, data });
+    // The host, on seeing this chunk, reassigns ownership (suppressing further
+    // output for this id) and immediately asks for the new owner's replay.
+    if (event === 'data' && data.data === 'mid-transfer') mgrRef().list(['a'], 'ws-2');
+  }, pty.module, { replay: true });
+  mgr.spawn('a');
+  pty.listeners.get('a').data('before\r\n');
+  pty.listeners.get('a').data('mid-transfer');
+
+  const replay = events.find((entry) => entry.event === 'replay');
+  assert.ok(replay, 'the transfer asked for a replay');
+  assert.equal(replay.data.data, 'before\r\nmid-transfer');
+  // Exactly once: the chunk is in the replay, and it was emitted as `data`
+  // exactly once — the host drops that copy, so the pane never renders it twice.
+  assert.equal(replay.data.data.split('mid-transfer').length - 1, 1);
+});
+
+// A transfer's split point: everything a reader consumed before it saw the
+// `marked` line is at or before the mark, and a replay since that mark is
+// exactly the rest — so the two halves tile the stream with nothing lost and
+// nothing twice, however the chunks fell around the request.
+test('a mark is ordered in the stream and a since-mark replay is exactly the remainder', () => {
+  const events = [];
+  const pty = fakePtyModule();
+  const sliceSince = (chunks, held, received, mark) => {
+    const skip = Math.max(0, held - (received - mark));
+    return chunks.join('').slice(skip);
+  };
+  const mgr = create((event, data) => { events.push({ event, data }); }, pty.module, { replay: true, sliceSince });
+  mgr.spawn('a');
+  pty.listeners.get('a').data('one');
+  pty.listeners.get('a').data('two');
+  mgr.mark(['a', 'gone'], 'req-1');
+  pty.listeners.get('a').data('three');
+
+  const order = events.map((entry) => entry.event === 'data' ? entry.data.data : entry.event);
+  assert.deepEqual(order.slice(0, 5), ['one', 'two', 'marked', 'marked', 'three']);
+  const marked = events.filter((entry) => entry.event === 'marked').map((entry) => entry.data);
+  assert.deepEqual(marked, [{ id: 'a', mark: 6, requestId: 'req-1' }, { id: 'gone', mark: 0, requestId: 'req-1' }]);
+
+  mgr.list(['a'], 'ws-2', 'init-1', { a: 6 });
+  const replay = events.filter((entry) => entry.event === 'replay').at(-1);
+  assert.deepEqual(replay.data, { id: 'a', data: 'three', forWindow: 'ws-2', requestId: 'init-1' });
+  // An unmarked id in the same request still gets its whole buffer.
+  mgr.list(['a'], 'ws-2', 'init-2', {});
+  assert.equal(events.filter((entry) => entry.event === 'replay').at(-1).data.data, 'onetwothree');
+});
+
+test('marked requests recover exited buffers without reviving or discovering the PTY', () => {
+  const events = [];
+  const pty = fakePtyModule();
+  const mgr = create((event, data) => events.push({ event, data }), pty.module, {
+    replay: true,
+    sliceSince: (chunks, held, received, mark) => chunks.join('').slice(Math.max(0, held - (received - mark))),
+  });
+  mgr.spawn('a');
+  pty.listeners.get('a').data('before');
+  mgr.mark(['a'], 'mark-1');
+  pty.listeners.get('a').data('after');
+  pty.listeners.get('a').exit({ exitCode: 7 });
+  assert.equal(mgr.hasPty('a'), false);
+  events.length = 0;
+  mgr.list(undefined, 'main', 'discovery');
+  assert.deepEqual(events[0].data.ptys, []);
+  assert.equal(events.length, 1);
+  events.length = 0;
+  mgr.list(['a'], 'main', 'handback-1', { a: 6 });
+  assert.deepEqual(events[0].data.ptys.map(({ id, alive, exitCode }) => ({ id, alive, exitCode })), [{ id: 'a', alive: false, exitCode: 7 }]);
+  assert.deepEqual(events[1], { event: 'replay', data: { id: 'a', data: 'after', forWindow: 'main', requestId: 'handback-1' } });
+  mgr.kill('a');
+  events.length = 0;
+  mgr.list(['a'], 'main', 'after-kill', { a: 6 });
+  assert.deepEqual(events[0].data.ptys, []);
+  assert.equal(events.length, 1);
+});
+
+test('gracefulKill targets only the named PTYs', async () => {
+  const events = [];
+  const pty = fakePtyModule();
+  let resolveDone;
+  const done = new Promise((resolve) => { resolveDone = resolve; });
+  const mgr = create((event, data) => {
+    events.push({ event, data });
+    if (event === 'gracefulKillDone') resolveDone();
+  }, pty.module, { replay: true });
+  mgr.spawn('a');
+  mgr.spawn('b');
+
+  mgr.gracefulKill(['a'], 1, 'req-1');
+  await done;
+
+  assert.deepEqual(pty.killed, [['a', 'SIGTERM']]);
+  assert.deepEqual(events.at(-1), { event: 'gracefulKillDone', data: { requestId: 'req-1' } });
+});
+
+test('gracefulKill([]) kills nothing and still answers', async () => {
+  const pty = fakePtyModule();
+  let resolveDone;
+  const done = new Promise((resolve) => { resolveDone = resolve; });
+  const mgr = create((event) => { if (event === 'gracefulKillDone') resolveDone(); }, pty.module);
+  mgr.spawn('a');
+  mgr.gracefulKill([], 1, 'req-1');
+  await done;
+  assert.deepEqual(pty.killed, []);
 });

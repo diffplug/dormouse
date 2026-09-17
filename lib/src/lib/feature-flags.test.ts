@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { isWorkspacesEnabled, setWorkspacesEnabled, WORKSPACES_FLAG_KEY } from './feature-flags';
+import { AB_DEBUG_LOGS_FLAG_KEY, isAbDebugLogsEnabled } from './feature-flags';
 
 function stubLocalStorage(): Map<string, string> {
   const store = new Map<string, string>();
@@ -11,29 +11,35 @@ function stubLocalStorage(): Map<string, string> {
   return store;
 }
 
-describe('feature-flags: workspaces', () => {
+describe('feature-flags: agent-browser debug logs', () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it('is off by default (dormant)', () => {
+  it('is off by default', () => {
     stubLocalStorage();
-    expect(isWorkspacesEnabled()).toBe(false);
+    expect(isAbDebugLogsEnabled()).toBe(false);
   });
 
-  it('round-trips via localStorage', () => {
+  it('reads the flag out of localStorage', () => {
     const store = stubLocalStorage();
-    setWorkspacesEnabled(true);
-    expect(store.get(WORKSPACES_FLAG_KEY)).toBe('true');
-    expect(isWorkspacesEnabled()).toBe(true);
-    setWorkspacesEnabled(false);
-    expect(store.has(WORKSPACES_FLAG_KEY)).toBe(false);
-    expect(isWorkspacesEnabled()).toBe(false);
+    store.set(AB_DEBUG_LOGS_FLAG_KEY, 'true');
+    expect(isAbDebugLogsEnabled()).toBe(true);
+    store.set(AB_DEBUG_LOGS_FLAG_KEY, 'yes');
+    expect(isAbDebugLogsEnabled()).toBe(false);
   });
 
   describe('without localStorage', () => {
     beforeEach(() => vi.stubGlobal('localStorage', undefined));
     it('treats the flag as disabled and never throws', () => {
-      expect(isWorkspacesEnabled()).toBe(false);
-      expect(() => setWorkspacesEnabled(true)).not.toThrow();
+      expect(isAbDebugLogsEnabled()).toBe(false);
+    });
+  });
+
+  describe('with a throwing localStorage', () => {
+    beforeEach(() => vi.stubGlobal('localStorage', {
+      get getItem(): never { throw new Error('blocked by site settings'); },
+    }));
+    it('treats the flag as disabled and never throws', () => {
+      expect(isAbDebugLogsEnabled()).toBe(false);
     });
   });
 });
