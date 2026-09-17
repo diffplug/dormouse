@@ -121,7 +121,7 @@ A browser header, including a Tool's (Terminal Context sits outside the measured
 |---|---|
 | 420px | Split and zoom hidden. |
 | 360px | Navigation hidden. |
-| 180px | Chrome moves into a viewport-clamped popover behind one trigger; minimize and kill stay inline. |
+| 180px | Chrome moves behind one trigger into a viewport-clamped popover, remeasured on content resize; minimize/kill stay inline. |
 | 72px (80px with an unsaved-change dot) | Minimize and kill join the popover. |
 
 **Must keep the popover keyboard reachable** (focus enters on open, Tab stays inside, Escape returns it to the trigger) **and dismiss it on resize, when a dirty report moves focused controls (restoring trigger focus), or when its Surface is hidden (without restoring focus)**; `lib/src/components/wall/use-dismiss-overlay.ts` handles other dismissal, and controls dismiss only after acting. The trigger shows a filled notepad glyph and count with notes; long keys and connection labels truncate before controls.
