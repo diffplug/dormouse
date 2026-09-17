@@ -10,7 +10,9 @@ In the same run, real clicks exposed premature popup dismissal before the action
 
 Terminal border-box thresholds of 293/173 pixels preserve the former 280/160 content-box thresholds plus 13 pixels of horizontal padding. A content box can clamp to zero in a visible tiny leaf; treating that as hidden retained the full tier. Positive border-box width distinguishes that case from a hidden leaf.
 
-The terminal's 80-pixel boundary is where the pane-action group stops fitting beside that padding: a 4-pixel offset, three 20-pixel buttons, two 2-pixel gaps. The browser's 94/102 pair is the former 72/80 pair plus the zoom button and its gap, zoom having moved into the group; the 8-pixel spread is the unsaved-change dot and its gap.
+The terminal's two lowest boundaries are where the pane-action group stops fitting with its 5-pixel right padding intact. The group is 68 pixels (a 4-pixel `ml-1`, three 20-pixel buttons, two 2-pixel gaps) and the header root puts its own 6-pixel `gap-1.5` before it, so a bare header needs 8 + 6 + 68 + 5 = 87 and one carrying a notepad icon another 6 + 24 = 117. Both were measured in Storybook at 1-pixel steps (2026-09): the group sits flush at 82 and 112 respectively and clips only below that, so 86/116 buy back padding rather than avert a clip — but the flush widths are one pixel from real clipping, which is no margin against a font or icon change.
+
+The browser's 94/102 pair is the former 72/80 pair plus the zoom button and its gap, zoom having moved into the group; the 8-pixel spread is the unsaved-change dot and its gap. Its collapsed root is `gap-0.5 px-1`, already counted, so it needs no equivalent correction.
 
 ## Pane body
 

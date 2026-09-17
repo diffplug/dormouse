@@ -563,6 +563,18 @@ export const NarrowControlsVisible: Story = {
   play: assertPaneActions(PANE_ACTIONS),
 };
 
+// A Surface with notes at 100px: the notepad has to yield, or it pushes kill
+// past the header's right edge. Only a live-geometry check catches that — jsdom
+// has no layout, so the unit test can pin presence but not clipping.
+export const NarrowWithNotesControlsVisible: Story = {
+  args: {
+    width: 100,
+    noteCount: 2,
+  },
+  parameters: primedPane({ status: 'NOTHING_TO_SHOW' }),
+  play: assertPaneActions(PANE_ACTIONS),
+};
+
 // 76px is the tiny tier: minimize and kill are gone and zoom carries the header.
 export const ExtremelyNarrowControlsVisible: Story = {
   args: {

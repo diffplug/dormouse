@@ -109,14 +109,15 @@ Both layers wear the leaf's own rounding (header radius on top, terminal radius 
 
 ### Pane header responsive sizing
 
-**Must measure each header's own border-box width, never the viewport, retaining its tier at zero width** (rationale).
+**Must measure each header's own border-box width, never the viewport, retaining its tier at zero width** (rationale). **Each terminal boundary below compact is the width at which the next-lowest-priority element would start eating the group's padding** (rationale).
 
 **The pane-action group yields last, and zoom last within it** (to the popover where there is one), since zooming restores everything the header dropped. Terminal tiers:
 
 - **Full** (>293px): everything.
 - **Compact** (>173px): split hidden.
-- **Minimal** (>80px): also hides the TODO pill and the mouse-override icon. **The notepad icon survives this tier only while the Surface has notes** (`docs/specs/notepad.md` → "Notepad UI"). The label truncates with ellipsis.
-- **Tiny** (≤80px): notepad, minimize, and kill go too.
+- **Minimal** (>116px): also hides the TODO pill and the mouse-override icon. **The notepad icon survives this tier only while the Surface has notes** (`docs/specs/notepad.md` → "Notepad UI"). The label truncates with ellipsis.
+- **Bare** (>86px): the notepad goes unconditionally — it is the last element that could push the group off the right edge.
+- **Tiny** (≤86px): minimize and kill go too.
 
 A browser header, including a Tool's (Terminal Context sits outside the measured width), collapses by border-box width:
 

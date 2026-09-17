@@ -207,20 +207,21 @@ describe('TerminalPaneHeader — notepad icon', () => {
     expect(notepadButton()!.getAttribute('aria-label')).toBe('Notepad · 2 notes');
   });
 
-  it('keeps its place at the compact tier, yields it at minimal when empty, and at tiny even for notes', () => {
+  it('keeps its place at the compact tier, yields it at minimal when empty, and below that even for notes', () => {
     renderHeader(stubActions(), null);
     act(() => resizeHeader(200));
     expect(notepadButton()).not.toBeNull();
 
-    act(() => resizeHeader(100));
+    act(() => resizeHeader(150));
     expect(notepadButton()).toBeNull();
 
-    // Notes are never invisible — until tiny, where only zoom fits.
+    // Notes are never invisible — until the notepad would push the pane-action
+    // group off the right edge, which is what the `bare` tier exists to stop.
     act(() => { addPlainNote('term-1', 'a note'); });
     expect(notepadButton()).not.toBeNull();
-    act(() => resizeHeader(80));
+    act(() => resizeHeader(116));
     expect(notepadButton()).toBeNull();
-    act(() => resizeHeader(81));
+    act(() => resizeHeader(117));
     expect(notepadButton()).not.toBeNull();
   });
 
@@ -246,14 +247,14 @@ describe('TerminalPaneHeader — notepad icon', () => {
     const label = (name: string) => container.querySelector(`[aria-label="${name}"]`);
     // Zoom left the split group, so it now outlives the splits it used to ride
     // with, and then outlives minimize and kill too.
-    for (const width of [294, 200, 100, 81, 40]) {
+    for (const width of [294, 200, 100, 87, 40]) {
       act(() => resizeHeader(width));
       expect(label('Zoom'), `${width}px`).not.toBeNull();
     }
-    act(() => resizeHeader(81));
+    act(() => resizeHeader(87));
     expect(label('Minimize')).not.toBeNull();
     expect(label('Kill')).not.toBeNull();
-    act(() => resizeHeader(80));
+    act(() => resizeHeader(86));
     expect(label('Minimize')).toBeNull();
     expect(label('Kill')).toBeNull();
   });

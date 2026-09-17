@@ -63,12 +63,14 @@ const tabVariant = tv({
   },
 });
 
-type TerminalHeaderTier = 'full' | 'compact' | 'minimal' | 'tiny';
+type TerminalHeaderTier = 'full' | 'compact' | 'minimal' | 'bare' | 'tiny';
 // Border-box widths, so they include the header's 8px left + 5px right padding
 // (`docs/specs/layout.rationale.md` derives each boundary). Measuring the
-// border box also tells a narrow header from a hidden one.
+// border box also tells a narrow header from a hidden one. The bottom two
+// boundaries are the widths at which the pane-action group stops fitting —
+// with a notepad icon beside it, then without one.
 const terminalHeaderTier = (width: number): TerminalHeaderTier =>
-  width > 293 ? 'full' : width > 173 ? 'compact' : width > 80 ? 'minimal' : 'tiny';
+  width > 293 ? 'full' : width > 173 ? 'compact' : width > 116 ? 'minimal' : width > 86 ? 'bare' : 'tiny';
 
 // WATCHING is a rule on the running command, so the bell says which command it
 // would act on rather than naming an abstract toggle (`docs/specs/alert.md`).
@@ -135,9 +137,11 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
   const [todoPreviewRect, setTodoPreviewRect] = useState<DOMRect | null>(null);
   const [renameWarning, setRenameWarning] = useState<{ rect: DOMRect; reason: RenameRejection; value: string } | null>(null);
   const todoPill = useTodoPillContent(activity.todo);
-  // The spec's "compact+" and its narrowest tier, named once so inserting a
-  // tier does not mean re-deriving a band at every site that tests one.
+  // Named once so inserting a tier does not mean re-deriving a band at every
+  // site that tests one. `roomForNotepad` is the spec's "minimal+": below it
+  // the notepad would push the pane-action group off the header's right edge.
   const compactOrWider = tier === 'full' || tier === 'compact';
+  const roomForNotepad = compactOrWider || tier === 'minimal';
   const tiny = tier === 'tiny';
   const showTodoPill = todoPill.visible && compactOrWider;
   const runningArgv0 = paneState.currentCommand?.rawCommandLine
@@ -303,7 +307,7 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
               </HeaderActionButton>
             </div>
           )}
-          {!tiny && <NotepadHeaderButton surfaceId={id} hideWhenEmpty={tier === 'minimal'} />}
+          {roomForNotepad && <NotepadHeaderButton surfaceId={id} hideWhenEmpty={tier === 'minimal'} />}
           {tier === 'full' && (
             <div className="ml-1 flex shrink-0 items-center gap-0.5">
               <HeaderActionButton
