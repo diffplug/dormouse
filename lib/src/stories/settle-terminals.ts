@@ -1,6 +1,9 @@
 import { getActivitySnapshot, getTerminalInstance } from '../lib/terminal-registry';
 import type { Terminal } from '@xterm/xterm';
 
+/** How long each gate below waits before it gives up. */
+const DEFAULT_TIMEOUT_MS = 4000;
+
 /**
  * A Chromatic readiness gate for terminal-bearing stories.
  *
@@ -24,7 +27,13 @@ export async function settleTerminals(opts?: { timeoutMs?: number }): Promise<vo
     const terms = liveTerminals();
     return terms.length > 0 && terms.every(hasContent);
   };
-  await waitForCondition(settled, opts);
+  // Unlike the gates below, `settled` is not monotonic: a terminal that mounts
+  // during `waitForCondition`'s trailing paint frames flips it back to false. So
+  // re-poll until it holds after those frames, within the one budget.
+  const deadline = performance.now() + (opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  do {
+    await waitForCondition(settled, { timeoutMs: Math.max(0, deadline - performance.now()) });
+  } while (!settled() && performance.now() < deadline);
   if (!settled()) {
     const terms = liveTerminals();
     throw new Error(terms.length === 0
@@ -70,7 +79,12 @@ export async function requireElement<T extends Element = HTMLElement>(
   what: string,
   opts?: { timeoutMs?: number },
 ): Promise<T> {
-  const find = () => document.querySelector<T>(selector);
+  // The first visible match, so a clipped sibling cannot mask it; else any match,
+  // so the error below tells "never rendered" from "never on screen".
+  const find = (): T | null => {
+    const all = [...document.querySelectorAll<T>(selector)];
+    return all.find((candidate) => visibleArea(candidate) > 0) ?? all[0] ?? null;
+  };
   await waitForCondition(() => {
     const el = find();
     return !!el && visibleArea(el) > 0;
@@ -144,7 +158,7 @@ function containsFixed(style: CSSStyleDeclaration): boolean {
  */
 export async function waitForCondition(
   predicate: () => boolean,
-  { timeoutMs = 4000 }: { timeoutMs?: number } = {},
+  { timeoutMs = DEFAULT_TIMEOUT_MS }: { timeoutMs?: number } = {},
 ): Promise<void> {
   const deadline = performance.now() + timeoutMs;
   while (performance.now() < deadline && !predicate()) {
