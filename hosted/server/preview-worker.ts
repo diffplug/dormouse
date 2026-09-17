@@ -10,6 +10,16 @@ const auth = createBetterAuthWorker<Env>({
 });
 const app = workerApp(
   (request, env, ctx) => auth.fetch(request, env, ctx),
+  // Ignore stale production/OAuth bindings on an existing preview Worker.
+  (env) => ({
+    HYPERDRIVE: env.HYPERDRIVE,
+    ASSETS: env.ASSETS,
+    APP_ORIGIN: env.APP_ORIGIN,
+    AUTH_SECRET: env.AUTH_SECRET,
+    BUILD_SHA: env.BUILD_SHA,
+    EMAIL_FROM: "",
+    POSTMARK_SERVER_TOKEN: "",
+  }),
   (app) => {
     app.get("/api/dev/emails", async (c) =>
       c.json(await postgresInbox(c.env.HYPERDRIVE.connectionString).all()),
@@ -31,19 +41,6 @@ const app = workerApp(
 );
 export default {
   fetch(request: Request, env: Env, ctx: Parameters<typeof app.fetch>[2]) {
-    // Ignore stale production/OAuth bindings on an existing preview Worker.
-    return app.fetch(
-      request,
-      {
-        HYPERDRIVE: env.HYPERDRIVE,
-        ASSETS: env.ASSETS,
-        APP_ORIGIN: env.APP_ORIGIN,
-        AUTH_SECRET: env.AUTH_SECRET,
-        BUILD_SHA: env.BUILD_SHA,
-        EMAIL_FROM: "",
-        POSTMARK_SERVER_TOKEN: "",
-      },
-      ctx,
-    );
+    return app.fetch(request, env, ctx);
   },
 };

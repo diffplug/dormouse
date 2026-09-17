@@ -153,9 +153,11 @@ jobs:
     timeout-minutes: 10
     environment: hosted-preview
     steps:
+      # Cleanup holds deployment credentials and is not path-gated: run the base
+      # branch's script, never the closed PR's, which may not even contain it.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: refs/heads/main
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:

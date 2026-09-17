@@ -8,7 +8,7 @@
 
 - **FAIL IF** Hosted accepts a request URL outside configured `APP_ORIGIN`, grants marketing-origin credentialed CORS, or permits a state-changing auth request without exact Origin and CSRF checks; inspect `hosted/server/worker-app.ts` and the packed adapter.
 - **FAIL IF** authentication cookies have a Domain attribute, lack `__Host-`, Secure, HttpOnly, or Path=/ in HTTPS, or session tokens appear in browser JSON or persistent browser storage; inspect the adapter and `hosted/src/api.ts`.
-- **FAIL IF** the production HTML permits third-party scripts, framing, inline script execution, or caching account API responses; inspect `secureHeaders` in `hosted/server/headers.ts` and Worker asset routing in `hosted/wrangler.jsonc`.
+- **FAIL IF** the production HTML permits third-party scripts, framing, inline script execution, or caching account API responses, or any response, including a misconfigured deployment's error, bypasses `secureHeaders`; inspect `secureHeaders` in `hosted/server/headers.ts`, binding resolution in `hosted/server/worker-app.ts`, and Worker asset routing in `hosted/wrangler.jsonc`.
 - **FAIL IF** marketing scripts, analytics, provider avatars, or remote fonts enter the Hosted frontend; inspect the frontend import graph and deployed response when available. Cloudflare script injection must be excluded for the Hosted hostname at provisioning.
 
 Pinned by `hosted/server/tests/workers.test.ts`.

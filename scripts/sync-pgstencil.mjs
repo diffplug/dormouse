@@ -15,6 +15,19 @@ if (!process.argv.includes("--packed")) run("pnpm", ["packages:pack"]);
 const manifest = JSON.parse(
   readFileSync(resolve(root, "hosted/package.json"), "utf8"),
 );
+// pnpm resolves `overrides:` ahead of hosted/package.json, so a bump that edits
+// only the manifest would still install the previous tarball while build.json
+// below records the new one. Read the block by line rather than adding a YAML
+// dependency to a root that has no devDependencies at all.
+const workspace = readFileSync(resolve(root, "pnpm-workspace.yaml"), "utf8");
+const overrides = new Map(
+  (/^overrides:\n((?:[ \t].*\n?|\n)*)/m.exec(workspace)?.[1] ?? "")
+    .split("\n")
+    .flatMap((line) => {
+      const entry = /^ {2}['"]?([^'":]+)['"]?: *(\S+)$/.exec(line);
+      return entry ? [[entry[1], entry[2]]] : [];
+    }),
+);
 mkdirSync(resolve(root, "vendor"), { recursive: true });
 const files = [];
 for (const [directory, name] of [
@@ -29,8 +42,10 @@ for (const [directory, name] of [
   );
   const filename = `${name.replace("@", "").replace("/", "-")}-${pkg.version}.tgz`;
   if (manifest.dependencies[name] !== `file:../vendor/${filename}`)
+    throw new Error(`Update hosted/package.json for ${filename}`);
+  if (overrides.get(name) !== `file:vendor/${filename}`)
     throw new Error(
-      `Update hosted/package.json and pnpm overrides for ${filename}`,
+      `Update the pnpm-workspace.yaml override for ${name} to file:vendor/${filename}`,
     );
   const target = resolve(root, "vendor", filename);
   copyFileSync(resolve(repository, "dist/packages", filename), target);

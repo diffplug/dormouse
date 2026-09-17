@@ -198,6 +198,61 @@ test("cleanup only deletes this PR's resources and can run twice", async (t) => 
   );
 });
 
+test("deployment smoke compares enabled providers as a set, not a sequence", async () => {
+  const origin = "https://hosted.example.test";
+  // Every request the production smoke makes before its first POST; the POST
+  // throws so a rejection distinguishes "passed the provider check" from
+  // "failed it".
+  const fetcher = (providers) => async (url) => {
+    const { pathname } = new URL(url);
+    if (pathname === "/api/health")
+      return Response.json({ ok: true, revision: env.BUILD_SHA });
+    if (pathname === "/api/auth/csrf")
+      return Response.json(
+        { csrf: "csrf-token" },
+        {
+          headers: {
+            "cache-control": "no-store",
+            "set-cookie":
+              "__Host-session=1; Path=/; Secure; HttpOnly; SameSite=Lax",
+          },
+        },
+      );
+    if (pathname === "/api/auth/get-session") return Response.json(null);
+    if (pathname === "/api/providers") return Response.json(providers);
+    if (pathname === "/api/ready") return new Response(null, { status: 200 });
+    throw new Error(`past-providers:${pathname}`);
+  };
+  // The packed adapter emits its own fixed order, not the configured one.
+  await assert.rejects(
+    smoke(origin, env.BUILD_SHA, fetcher(["google", "github"]), false, [
+      "github",
+      "google",
+    ]),
+    /past-providers/,
+  );
+  for (const enabled of [["google"], ["github", "google", "apple"], []])
+    await assert.rejects(
+      smoke(origin, env.BUILD_SHA, fetcher(enabled), false, [
+        "github",
+        "google",
+      ]),
+      /Unexpected enabled OAuth providers/,
+    );
+});
+
+test("preview cleanup runs the base branch's script, never the closed PR's", async () => {
+  const workflow = await readFile(
+    new URL("../../.github/workflows/hosted-preview.yml", import.meta.url),
+    "utf8",
+  );
+  const cleanup = workflow.slice(workflow.indexOf("\n  cleanup:"));
+  assert.ok(cleanup.includes("preview.mjs cleanup"), "Found the cleanup job");
+  assert.match(cleanup, /\n {10}ref: refs\/heads\/main\n/);
+  assert.doesNotMatch(cleanup, /pull_request\.head\.sha/);
+  assert.match(cleanup, /\n {10}persist-credentials: false\n/);
+});
+
 test("deployment smoke fails on a stale revision before making any auth requests", async () => {
   let requests = 0;
   await assert.rejects(

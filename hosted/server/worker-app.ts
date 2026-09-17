@@ -9,10 +9,17 @@ export function workerApp(
     env: Env,
     ctx: ExecutionContext,
   ) => Response | Promise<Response>,
+  bindings: (env: Env) => Env,
   configure?: (app: Hono<{ Bindings: Env }>) => void,
 ) {
   const app = new Hono<{ Bindings: Env }>();
   secureHeaders(app);
+  // The mapper alone decides which bindings reach auth and the routes; resolving
+  // it in the request keeps a misconfigured deployment on onError, headers and all.
+  app.use("*", async (c, next) => {
+    c.env = bindings(c.env);
+    await next();
+  });
   app.use("*", async (c, next) => {
     // A candidate/preview hostname must never act as an alias for production auth.
     if (new URL(c.req.url).origin !== c.env.APP_ORIGIN)

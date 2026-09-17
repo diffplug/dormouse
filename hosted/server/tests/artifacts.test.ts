@@ -37,3 +37,22 @@ test("consumed package bytes match the recorded source snapshot", () => {
     expect(readFileSync(file)).toEqual(packed);
   }
 });
+
+// pnpm resolves the workspace override ahead of hosted/package.json, so a bump
+// that edits only one of them installs a build the snapshot above never saw.
+test("both pinned specifiers name the recorded archives", () => {
+  const { dependencies } = JSON.parse(
+    readFileSync("package.json", "utf8"),
+  ) as { dependencies: Record<string, string> };
+  const workspace = readFileSync("../pnpm-workspace.yaml", "utf8");
+  for (const [name, filename] of [
+    ["pgstencil", "pgstencil-0.1.0.tgz"],
+    ["@pgstencil/auth", "pgstencil-auth-0.1.0.tgz"],
+  ]) {
+    expect(dependencies[name]).toBe(`file:../vendor/${filename}`);
+    const override = workspace.match(
+      new RegExp(`^ {2}'?${name}'?: (\\S+)$`, "m"),
+    )?.[1];
+    expect(override).toBe(`file:vendor/${filename}`);
+  }
+});

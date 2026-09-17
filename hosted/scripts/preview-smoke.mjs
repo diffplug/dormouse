@@ -41,9 +41,13 @@ export async function smoke(
   assert.match(start.headers.get("cache-control"), /no-store/);
   const state = await start.json();
   assert.equal(await (await request("/api/auth/get-session")).json(), null);
+  // The packed adapter emits its own fixed provider order, not the configured
+  // one, so compare the enabled set rather than the sequence.
+  const providers = await (await request("/api/providers")).json();
+  assert.ok(Array.isArray(providers), "Provider list must be an array");
   assert.deepEqual(
-    await (await request("/api/providers")).json(),
-    preview ? [] : expectedProviders,
+    [...providers].sort(),
+    [...(preview ? [] : expectedProviders)].sort(),
     "Unexpected enabled OAuth providers",
   );
   assert.ok(state.csrf);

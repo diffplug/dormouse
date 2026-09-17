@@ -1,6 +1,7 @@
 import { mkdtemp, writeFile, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { required, hyperdriveOrigin } from "./preview.mjs";
@@ -128,7 +129,11 @@ try {
     "--exit-on-error",
     "/tmp/restored.dump",
   ]);
-  const output = resolve("hosted/.wrangler/production-backup");
+  // Anchored on this file, not the working directory: the release workflow
+  // uploads hosted/.wrangler/production-backup/*.age from the repository root.
+  const output = fileURLToPath(
+    new URL("../.wrangler/production-backup/", import.meta.url),
+  );
   await mkdir(output, { recursive: true, mode: 0o700 });
   const { copyFile } = await import("node:fs/promises");
   await copyFile(

@@ -55,6 +55,8 @@ Source of truth: `allowedDevRequest` in `hosted/server/dev-host-guard.ts`; `host
 
 **Must isolate each PR in a persistent Worker, uncached Hyperdrive, and Neon branch from an empty dedicated preview project.** Reuse `dormouse-hosted-pr-N` until close. No production database is copied. The preview config excludes production routes and credentials; runtime bindings cannot enable OAuth or Postmark.
 
+**Must run cleanup from the base branch's checkout, never the closed PR's.**
+
 **Must capture preview mail in Postgres and expose escaped text only.** The public inbox shows the newest 100 messages from the last 24 hours, prunes expired rows on capture, and accepts only the preview's configured origin. No test clock is deployed. Preview data is disposable; it is not access-controlled.
 
 Source of truth: `touchesHosted` in `hosted/scripts/changed.mjs`; `.github/workflows/hosted-preview.yml`; `previewConfig` / `cleanup` in `hosted/scripts/preview.mjs`; `postgresInbox` in `hosted/server/preview-inbox.ts`; `hosted/server/preview-worker.ts`. Pinned by `hosted/scripts/preview.test.mjs`, `hosted/scripts/changed.test.mjs`, and `hosted/server/tests/workers.test.ts`.

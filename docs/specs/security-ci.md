@@ -87,7 +87,7 @@ Source of truth: `WINDOW` and `is_tend_regen` in `.github/workflows/workflow-aud
 - **FAIL IF** a Hosted environment lacks those branch restrictions, required reviewers, or disabled administrator bypass; inspect all three environments and their deployment policies.
 - **FAIL IF** Hosted credentials appear at repository/org scope, production credentials appear in `hosted-preview`, or preview credentials can reach production/TTR/marketing resources. Inspect GitHub secret placement and Cloudflare/Neon token scope; names alone do not isolate resources.
 - **FAIL IF** `HOSTED_TAG_TOKEN` appears outside `hosted-release-tag`, or that environment is used by a job other than `tag` in `.github/workflows/hosted-production.yml`. Its admin identity's repository-scoped Contents-write PAT can write code and bypass tag protection; it must never enter a deployment job or PR execution.
-- **FAIL IF** a Hosted preview deploy accepts a fork or a failing verification, or a Hosted production tag can run before live verification succeeds; inspect the workflow dependency/condition graph.
+- **FAIL IF** a Hosted preview deploy accepts a fork or a failing verification, preview cleanup checks out a PR ref rather than `main`, or a Hosted production tag can run before live verification succeeds; inspect the workflow dependency/condition graph.
 
 Source of truth: `hosted/scripts/setup-github.mjs`; `.github/workflows/hosted-preview.yml`; `.github/workflows/hosted-production.yml`.
 

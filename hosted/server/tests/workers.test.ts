@@ -62,6 +62,7 @@ type Result = Awaited<ReturnType<Miniflare["dispatchFetch"]>>;
 async function fixture(
   production: boolean | "preview" = false,
   enabled = providerIds.join(","),
+  overrides: Record<string, string> = {},
 ) {
   const context = await createTestContext({
     migrations: production === "preview" ? previewMigrations : migrations,
@@ -82,6 +83,7 @@ async function fixture(
     bindings[`${id.toUpperCase()}_CLIENT_ID`] = credentials.clientId;
     bindings[`${id.toUpperCase()}_CLIENT_SECRET`] = credentials.clientSecret;
   }
+  Object.assign(bindings, overrides);
   const worker = new Miniflare(
     convertV4MiniflareOptions({
       modules: true,
@@ -394,6 +396,29 @@ test("same-site marketing requests fail; production excludes dev endpoints and u
     'ALTER TABLE "session" DROP COLUMN "emailAuthenticated"',
   );
   expect((await browser.request("/api/ready")).status).toBe(503);
+});
+
+test("an enabled provider missing its credential fails closed with the secure headers", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture(true, "github", { GITHUB_CLIENT_SECRET: "" });
+  onTestFinished(f.close);
+  const browser = f.browser();
+  for (const path of ["/login", "/api/providers", "/api/auth/csrf"]) {
+    const response = await browser.request(path);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      message: "Sign-in is temporarily unavailable. Please try again.",
+    });
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("x-frame-options")).toBe("DENY");
+    expect(response.headers.get("strict-transport-security")).toBe(
+      "max-age=31536000",
+    );
+    expect(response.headers.get("content-security-policy")).toContain(
+      "frame-ancestors 'none'",
+    );
+  }
 });
 
 test("explicit connection callback cannot outlive its initiating login", async ({
