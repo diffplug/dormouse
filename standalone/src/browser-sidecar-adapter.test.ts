@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { getToolDirty, resetToolDirty } from 'dormouse-lib/lib/tool-dirty-store';
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AlertStateDetail, PlatformAdapter, PtyDataDetail } from "dormouse-lib/lib/platform/types";
 import { getTerminalPaneState } from "dormouse-lib/lib/terminal-state-store";
 
@@ -104,6 +105,8 @@ describe("BrowserSidecarAdapter session persistence", () => {
 // The harness rides the same sidecar, so the parse boundary is the same one
 // TauriAdapter has: forward the pair, apply the events, push the theme.
 describe("BrowserSidecarAdapter terminal stream", () => {
+  afterEach(resetToolDirty);
+
   async function listening() {
     const host = new BrowserSidecarHost("http://localhost:1234");
     let emit: (event: { event: string; data: unknown }) => void = () => {};
@@ -135,6 +138,26 @@ describe("BrowserSidecarAdapter terminal stream", () => {
       deliver: (event: string, data: unknown) => emit({ event, data }),
     };
   }
+
+  it("applies dirty live/replay reports in order and preserves explicit clean across exit", async () => {
+    const { deliver } = await listening();
+    const id = 'dirty-stream';
+    deliver('terminal:protocolEvents', { id, events: [
+      { kind: 'toolState', state: { dirty: true } },
+      { kind: 'semantic', event: { type: 'commandStart', source: 'osc633_boundaries' } },
+      { kind: 'toolState', state: { dirty: false } },
+    ] });
+    deliver('terminal:semanticEvents', { id, events: [{ type: 'commandStart', source: 'osc633_boundaries' }] });
+    expect(getToolDirty(id)).toBe(false);
+    deliver('pty:exit', { id, exitCode: 0 });
+    expect(getToolDirty(id)).toBe(false);
+    deliver('pty:replay', { id, data: '\x1b]633;C\x07\x1b]367;state;{"v":1,"dirty":true}\x07' });
+    expect(getToolDirty(id)).toBe(true);
+    deliver('pty:replay', { id, data: 'since-mark output without a new command' });
+    expect(getToolDirty(id)).toBe(true);
+    deliver('pty:replay', { id, data: '\x1b]633;C\x07' });
+    expect(getToolDirty(id)).toBeNull();
+  });
 
   it("forwards the projection pair it was handed, parsing nothing again", async () => {
     const { adapter, send, deliver } = await listening();

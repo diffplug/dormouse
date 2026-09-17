@@ -8,6 +8,8 @@ import {
   type WallActions,
 } from '../components/wall/wall-context';
 import { SurfacePaneHeader } from '../components/wall/SurfacePaneHeader';
+import { recordToolDirty } from '../lib/tool-dirty-store';
+import { ToolPaneHeader } from '../components/wall/ToolPaneHeader';
 import {
   registerAgentBrowserScreen,
   type ChromeSnapshot,
@@ -47,6 +49,7 @@ const loggingActions: WallActions = {
   onCancelRename: () => {},
   onSwapRenderMode: (id, mode) => console.log('[story] swap render', id, mode),
   resolveSurfaceRef: (id) => id,
+  onResolveToolApproval: () => {},
 };
 
 interface StoryArgs {
@@ -68,6 +71,9 @@ interface StoryArgs {
   hostCapable: boolean;
   /** Header width — shrink past 420/360 to watch split-zoom then nav collapse. */
   width: number;
+  /** Include the Tool Terminal Context button beside the browser header. */
+  tool: boolean;
+  dirty: 'unknown' | 'clean' | 'dirty';
   /** Whether the surface is the selected/active pane (header highlight). */
   selected: boolean;
 }
@@ -77,6 +83,10 @@ function BrowserChromeStory(args: StoryArgs) {
   // collide on one registry id.
   const surfaceId = useId();
   const registrationRef = useRef<ScreenRegistration | null>(null);
+  useEffect(() => {
+    recordToolDirty(surfaceId, args.dirty === 'unknown' ? null : args.dirty === 'dirty');
+    return () => recordToolDirty(surfaceId, null);
+  }, [surfaceId, args.dirty]);
 
   const screenSnapshot: ScreenSnapshot = useMemo(() => ({
     state: args.state,
@@ -141,6 +151,7 @@ function BrowserChromeStory(args: StoryArgs) {
     setDevServerResolution(port, label ? { paneId: 'term-dev', label } : null);
   }, [port, args.devServerLabel]);
 
+  const Header = args.tool ? ToolPaneHeader : SurfacePaneHeader;
   return (
     <ModeContext.Provider value="passthrough">
       <SelectedIdContext.Provider value={args.selected ? surfaceId : null}>
@@ -149,11 +160,12 @@ function BrowserChromeStory(args: StoryArgs) {
               story's un-zoomed header. */}
           <WallActionsContext.Provider value={loggingActions}>
             <div style={{ width: args.width }}>
+              {/* Preserve the compact 26px visual baseline for these isolated headers. */}
               <div className="bg-app-bg" style={{ height: 26 }}>
-                <SurfacePaneHeader
+                <Header
                   id={surfaceId}
                   title={args.htmlTitle || hostPathDisplay(args.url)}
-                  params={undefined}
+                  params={args.tool ? { surfaceType: 'tool', url: args.url } : undefined}
                 />
               </div>
             </div>
@@ -176,8 +188,10 @@ const meta: Meta<typeof BrowserChromeStory> = {
     paneKey: { control: 'select', options: ['', 'default', 'storybook'] },
     devServerLabel: { control: 'text' },
     hostCapable: { control: 'boolean' },
-    width: { control: { type: 'range', min: 200, max: 900, step: 10 } },
+    width: { control: { type: 'range', min: 80, max: 900, step: 10 } },
     selected: { control: 'boolean' },
+    tool: { control: 'boolean' },
+    dirty: { control: 'inline-radio', options: ['unknown', 'clean', 'dirty'], if: { arg: 'tool' } },
   },
   args: {
     renderMode: 'ab-screencast',
@@ -189,6 +203,8 @@ const meta: Meta<typeof BrowserChromeStory> = {
     devServerLabel: 'pnpm dev',
     hostCapable: true,
     width: 620,
+    tool: false,
+    dirty: 'unknown',
     selected: true,
   },
 };
@@ -234,3 +250,20 @@ export const RawSession: Story = {
 export const Narrow: Story = {
   args: { width: 340 },
 };
+
+/** Real narrow split: the Tool context button leaves 79px for browser chrome,
+ *  so the chrome sits behind one trigger while minimize/kill stay inline. */
+export const TinyTool: Story = {
+  args: { width: 103, tool: true, paneKey: 'a-very-long-tool-identity', devServerLabel: 'pnpm --filter a-very-long-project-name dev' },
+};
+
+/** Below 72px minimize/kill join the popover too. */
+export const SmallestTool: Story = {
+  args: { width: 80, tool: true },
+};
+
+
+export const DirtyTool: Story = { args: { tool: true, dirty: 'dirty' } };
+// Clean and unknown render the same chrome; the tri-state is pinned by tool-state.test.ts.
+export const CleanTool: Story = { args: { tool: true, dirty: 'clean' } };
+export const NarrowDirtyTool: Story = { args: { tool: true, dirty: 'dirty', width: 103 } };

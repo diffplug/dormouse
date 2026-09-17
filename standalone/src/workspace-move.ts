@@ -1,3 +1,7 @@
+import { clearToolDirty, recordToolDirty } from 'dormouse-lib/lib/tool-dirty-store';
+import { dismissWorkspaceUi } from 'dormouse-lib/lib/workspace-ui-store';
+import { restoreToolParams } from 'dormouse-lib/components/wall/tool-transfer';
+import { recordToolAnnounce } from 'dormouse-lib/lib/tool-announce-store';
 import { pauseAlertDelivery, resumeAlertDelivery, snapshotAlertDelivery, restoreAlertDelivery, forgetAlertDelivery } from 'dormouse-lib/lib/alert-delivery-state';
 import { setIncomingAlertPolicy } from 'dormouse-lib/lib/alert-delivery-policy';
 import type { AlertRuntimeSnapshot } from 'dormouse-lib/lib/alert-manager';
@@ -133,7 +137,7 @@ async function startMove(
     prepared = await handle.prepareWorkspaceTransfer();
   } catch (error) {
     setWorkspaceTransferPending(workspaceId, false);
-    throw error;
+    return { moved: false, reason: reasonOf(error) };
   }
   return handOff(prepared, command, args(prepared.payload));
 }
@@ -189,6 +193,7 @@ async function handOff(
     const marks = await pendingMarks;
     if (inFlight.get(workspaceId)?.prepared === prepared) { // else handed back while we waited: nothing to send
       const content = await captureTransferContent(terminalIds, marks);
+      if (prepared.tools) content.tools = prepared.tools;
       if (inFlight.get(workspaceId)?.prepared === prepared) { // else handed back while serializing
         const alertRuntime = new Map<string, AlertRuntimeSnapshot>();
         inFlight.get(workspaceId)!.alertRuntime = alertRuntime;
@@ -423,6 +428,8 @@ async function planArrival(
   for (const [id, terminal] of transferred) {
     if (terminal.alertDelivery) restoreAlertDelivery(id, terminal.alertDelivery);
     if (terminal.semanticState) restoreTransferredTerminalState(id, terminal.semanticState);
+    if (terminal.toolAnnounce) recordToolAnnounce(id, terminal.toolAnnounce);
+    recordToolDirty(id, terminal.toolDirty ?? null);
   }
   const live = await collectLivePtys(platform, {
     // The token rides through Rust to the sidecar's `list` and comes back on the
@@ -460,6 +467,7 @@ async function planArrival(
     ptyIds,
     terminalGrids,
   });
+  if (payload.tools) restoreToolParams(result, payload.tools);
   // The notes travelled in the payload rather than through the archive: a move
   // is not a closure (`docs/specs/notepad.md` → "Closure").
   hydrateNotepadFromVolatile(payload.notepad, payload.allIds);
@@ -478,12 +486,14 @@ async function planArrival(
  * Workspace this window never owned.
  */
 function discardArrival(platform: PlatformAdapter, payload: MovePayload): void {
+  dismissWorkspaceUi(payload.workspaceId);
   for (const id of payload.allIds) { removeSurface(id); forgetHelper(id); }
   for (const id of new Set([...payload.terminalIds, ...payload.workspace.session.panes.map((pane) => pane.id)])) {
     if (terminalRegistry.has(id)) releaseSession(id);
     else platform.alertRemove(id);
     clearTerminalActivity(id);
     removeTerminalPaneState(id);
+    clearToolDirty(id);
   }
   closeWorkspace(payload.workspaceId);
   forgetWorkspaceSession(payload.workspaceId);
@@ -534,11 +544,9 @@ async function adoptWorkspace(platform: PlatformAdapter, payload: MovePayload): 
       // The `ARRIVAL_MAX` watchdog had already expired the record and handed
       // the shells back, and the source kept the Workspace. Left mounted here
       // too, it would be live in two windows and persisted by both. A mounted
-      // Wall releases through its own transfer commit; the rest is the same
-      // unwind an unmounted arrival gets.
+      // or unmounted arrival releases from the received payload: preparing a
+      // new move here can fail on a Tool that is still starting.
       console.error("[workspace-move] adopt_done refused; unwinding the mount", err);
-      const handle = getWallHandle(id);
-      if (handle) (await handle.prepareWorkspaceTransfer()).commit();
       discardArrival(platform, payload);
     }
   } catch (err) {

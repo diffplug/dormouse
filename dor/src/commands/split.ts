@@ -148,7 +148,7 @@ async function runSplitCommand(this: DorCommandContext, flags: SplitFlags, ...co
       // Only a bare `dor split` (no `--`, no command) steals focus; a `--` tail
       // and an initial command alike leave it on the caller. The CLI owns the
       // whole decision so the host can honor the field as sent.
-      focusNeutral: this.hasArgumentEscape || command !== undefined,
+      focusNeutral: this.commandArgs.includes('--') || command !== undefined,
       ...workspaceParam(flags.workspace),
     });
     writeStdout(this, renderSplitResponse(response, flags.json === true));

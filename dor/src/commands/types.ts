@@ -7,17 +7,20 @@ import type {
 export type IdFormat = 'refs' | 'ids' | 'both';
 export type SplitDirection = 'left' | 'right' | 'up' | 'down' | 'auto';
 export type ResolvedSplitDirection = 'left' | 'right' | 'up' | 'down';
-export type SurfaceKind = 'terminal' | 'browser';
+export type SurfaceKind = 'terminal' | 'browser' | 'tool';
 export type SurfaceRenderMode = 'iframe' | 'ab-screencast' | 'ab-popout';
 
 /** What each kind is backed by (`docs/specs/glossary.md` → Panes and Surfaces).
  *  The single source of capability gating; kind switches elsewhere go through
  *  the predicates below. `Record<SurfaceKind, ...>` on purpose: adding a kind
- *  (the staged `tool`, which has both) must be a compile error here, not a
- *  silent `false`. */
+ *  must be a compile error here, not a silent `false`. */
 const KIND_CAPABILITIES: Record<SurfaceKind, { terminal: boolean; browser: boolean }> = {
   terminal: { terminal: true, browser: false },
   browser: { terminal: false, browser: true },
+  // A tool is one Session with both: the PTY running the command, and the
+  // browser it grows once it serves (`docs/specs/dor-tool.md`). Verbs gate on
+  // the capability they need, so both sides of a row populate.
+  tool: { terminal: true, browser: true },
 };
 
 /** Every kind, derived from the table so `--kind` parsing and its help
@@ -243,6 +246,56 @@ export interface EnsureSurfaceResponse {
   minimized: boolean;
 }
 
+/**
+ * `dor tool`. Two forms, differing only in whether the tool has an identity:
+ * `name` runs a `dormouse.yml` entry with whatever `prespawn_dedupe` it
+ * declares; `command` designates an arbitrary command as a tool with no key.
+ * Exactly one is set. Host-resolved on purpose — the CLI never reads the tool
+ * file, so a caller cannot hand the host a command while claiming the file
+ * authorized it (`docs/specs/dor-tool.md` -> Trust).
+ */
+export interface ToolSurfaceRequest extends WorkspaceScopedRequest {
+  /** Local-file dispatch; never eligible for caller takeover. */
+  file?: string;
+  tool?: string;
+  /** Registered tool name (`dor tool <name>`). */
+  name?: string;
+  args?: string[];
+  global?: boolean;
+  /** Raw argv (`dor tool -- <command>`); the host quotes it for the shell. */
+  command?: string[];
+  /** Ignore any declared key and always create — `--fresh`. */
+  fresh: boolean;
+  minimized: boolean;
+  /** Working directory: resolves the tool file and runs the command. */
+  cwd: string;
+  /** Surface to split when creating. */
+  surface?: string;
+}
+
+export interface ToolSurfaceResponse {
+  /**
+   * `existing` is a key match on a live tool: the redundant spawn never
+   * started. `adopted` is a key match whose command had exited — the Surface is
+   * reused and the command re-run in place, keeping its position and scrollback.
+   * On the calling pane's own match it is answered before the re-run is typed,
+   * for the same reason `takeover` is. `takeover` is the calling pane itself
+   * becoming the tool, answered before the command is typed — `dor` has to exit
+   * before its own shell is free to run it.
+   */
+  status: 'created' | 'existing' | 'adopted' | 'pending' | 'takeover';
+  surfaceId: string;
+  surfaceRef: string;
+  /** The rendered command, as typed into the shell. */
+  command: string;
+  cwd: string;
+  minimized: boolean;
+  /** The resolved dedupe key, or null when the tool has no identity. */
+  key: string[] | null;
+  /** Non-fatal `dormouse.yml` lint output, printed to stderr by the CLI. */
+  warnings?: string[];
+}
+
 export interface SendSurfaceRequest extends WorkspaceScopedRequest {
   surface: string;
   input: string;
@@ -395,6 +448,7 @@ export interface ControlClient {
   listSurfaces(request: ListSurfacesRequest): Promise<ListSurfacesResponse>;
   splitSurface(request: SplitSurfaceRequest): Promise<SplitSurfaceResponse>;
   ensureSurface(request: EnsureSurfaceRequest): Promise<EnsureSurfaceResponse>;
+  toolSurface(request: ToolSurfaceRequest): Promise<ToolSurfaceResponse>;
   sendSurface(request: SendSurfaceRequest): Promise<SendSurfaceResponse>;
   readSurface(request: ReadSurfaceRequest): Promise<ReadSurfaceResponse>;
   awaitSurface(request: AwaitSurfaceRequest): Promise<AwaitSurfaceResponse>;
@@ -448,11 +502,12 @@ export interface DorCommandContext extends CommandContext {
    *  command's wins. */
   readonly process: StricliProcess;
   readonly options: CliOptions;
-  /** Whether the raw argv carried the `--` argument-escape sequence. stricli
-   *  consumes `--` and leaves no trace in the parsed positionals, so this is the
-   *  only way a command can tell `dor split --` (empty tail) from a bare
-   *  `dor split`. Computed once in `cli.ts` from the pre-parse argv. */
-  readonly hasArgumentEscape: boolean;
+  /** The raw argv after the command name, as `cli.ts` saw it before stricli
+   *  parsed it. stricli consumes `--` and leaves no trace in the parsed
+   *  positionals, so this is the only way a command can tell `dor split --`
+   *  (empty tail) from a bare `dor split`, or a named `dor tool` from an
+   *  anonymous one. */
+  readonly commandArgs: readonly string[];
 }
 
 export interface Command {

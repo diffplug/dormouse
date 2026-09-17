@@ -6,6 +6,7 @@ import { TerminalContextView, type TerminalContextViewProps } from './TerminalCo
 import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { TerminalPanel } from './TerminalPanel';
 import { TerminalContext } from './TerminalContext';
+import * as terminalRegistry from '../../lib/terminal-registry';
 import * as helpers from '../../lib/helper-terminal';
 import { addPlainNote, clearAllNotepads, getNotes, getOpenNotepadId } from '../../lib/notepad/notepad-store';
 import { TerminalContextContext } from './wall-context';
@@ -189,4 +190,24 @@ it('opens the parent notepad from the Helper control and keeps edits on that par
     get.mockRestore(); open.mockRestore();
     act(() => clearAllNotepads());
   }
+});
+
+
+it('uses the Tool primary terminal without creating a helper or offering helper lifecycle actions', async () => {
+  const openHelper = vi.spyOn(helpers, 'openHelper');
+  const focusTerminal = vi.fn();
+  const terminal = vi.spyOn(terminalRegistry, 'getTerminalInstance').mockReturnValue({ focus: focusTerminal } as unknown as ReturnType<typeof terminalRegistry.getTerminalInstance>);
+  const focusSurface = vi.spyOn(terminalRegistry, 'focusSession');
+  await act(async () => { root.render(<TerminalContext id="tool-source" title="Storybook" tool />); });
+  expect(openHelper).not.toHaveBeenCalled();
+  expect(container.querySelector('[data-context-terminal="tool-source"]')).not.toBeNull();
+  expect(container.querySelector('[data-helper-terminal]')).toBeNull();
+  expect(container.querySelector('[aria-label="Tool terminal status"]')).not.toBeNull();
+  expect(container.querySelector('[aria-label="Modify autorun command"]')).toBeNull();
+  expect(container.querySelector('[aria-label="Reset helper terminal"]')).toBeNull();
+  expect(container.querySelector('[aria-label="Move this terminal into a new pane"]')).toBeNull();
+  act(() => container.querySelector('[data-context-terminal]')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
+  expect(focusTerminal).toHaveBeenCalledOnce();
+  expect(focusSurface).not.toHaveBeenCalled();
+  openHelper.mockRestore(); terminal.mockRestore(); focusSurface.mockRestore();
 });

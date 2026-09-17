@@ -1,5 +1,5 @@
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
+import { PaneMessage, TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
 import { getPlatform } from '../../lib/platform';
 import { registerProxyOrigin } from '../../lib/iframe-proxy-registry';
 import { registerSurfaceFocusHandle } from '../../lib/terminal-registry';
@@ -14,6 +14,7 @@ import {
   type ScreenActions,
   type ScreenRegistration,
 } from './agent-browser-screen';
+import { isToolParams } from './browser-surface';
 import { browserSurfaceUrl, hostPathDisplay } from './browser-url';
 
 // Sandbox every framed page, proxied or raw, so a tool's
@@ -105,6 +106,7 @@ export function IframePanel({ id, title, params }: PaneProps) {
   // URL has no normalized form, so it survives raw and the refusal below fires.
   const framedUrl = browserSurfaceUrl(rawUrl);
   const sourceUrl = framedUrl ?? rawUrl;
+  const isTool = isToolParams(params);
   const [liveUrl, setLiveUrl] = useState(sourceUrl);
   // A new-tab/window request from the proxy shim, pending the user's choice to
   // open it as a new pane (docs/specs/dor-browser.md → "Iframe Shim").
@@ -257,12 +259,15 @@ export function IframePanel({ id, title, params }: PaneProps) {
       chromeActions,
       hostCapable: false,
       // embed→popout spawns the new agent-browser headed and mounts it
-      // popped-out, so it needs both spawn and pop-out host capabilities.
-      canPopOut: !!getPlatform().agentBrowserPopOut,
+      // popped-out, so it needs both spawn and pop-out host capabilities. Never
+      // for a tool, which has no third renderer to land in
+      // (docs/specs/dor-tool.md -> Declaring tools); the other registration
+      // site is `agent-browser-surface-controller.ts`.
+      canPopOut: !isTool && !!getPlatform().agentBrowserPopOut,
     });
     registrationRef.current = registration;
     return () => { registration.dispose(); registrationRef.current = null; };
-  }, [id, swapCapable, screenActions, chromeActions]);
+  }, [id, swapCapable, screenActions, chromeActions, isTool]);
   // Keep the header's URL current as navigation and in-frame location changes
   // land. The iframe src is still driven only by sourceUrl.
   useEffect(() => {
@@ -420,13 +425,11 @@ export function IframePanel({ id, title, params }: PaneProps) {
 }
 
 function PanelMessage({ resolution, url }: { resolution: Resolution; url: string }) {
-  const base = 'flex h-full w-full items-center justify-center bg-terminal-bg px-6 text-center text-sm text-muted';
-
   if (resolution.kind === 'resolving') {
-    return <div className={base}>Connecting to <span className="ml-1 font-semibold">{url}</span>…</div>;
+    return <PaneMessage className="text-muted">Connecting to <span className="ml-1 font-semibold">{url}</span>…</PaneMessage>;
   }
   if (resolution.kind === 'empty') {
-    return <div className={base}>No iframe URL was provided.</div>;
+    return <PaneMessage className="text-muted">No iframe URL was provided.</PaneMessage>;
   }
   // proxied/raw render the iframe itself, never this fallback.
   if (resolution.kind !== 'error') return null;
@@ -437,14 +440,14 @@ function PanelMessage({ resolution, url }: { resolution: Resolution; url: string
   // can't front it. It refuses a non-http(s) target too (`normalizeConcreteOpenUrl`),
   // so pointing a refused scheme at it would be a dead end.
   return (
-    <div className={`${base} flex-col gap-2`}>
+    <PaneMessage className="text-muted" contentClassName="flex flex-col gap-2">
       <div>{messageFor(resolution)}</div>
       <div className="text-xs text-muted/80">
         {resolution.reason === 'non-http'
           ? 'Enter an http:// or https:// address in the URL bar above.'
           : <>For arbitrary web pages, use <code className="rounded bg-app-bg px-1 py-0.5">dor ab open {url}</code></>}
       </div>
-    </div>
+    </PaneMessage>
   );
 }
 

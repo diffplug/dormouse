@@ -4,10 +4,6 @@
 import { errorMessage, workspaceParam } from './shared.js';
 import type { ControlClient, ParseResult } from './types.js';
 
-declare const URL: {
-  new(input: string): { href: string; protocol: string };
-};
-
 // A bare `:port` (optionally trailed by a path/query/hash) — localhost sugar.
 const BARE_PORT = /^:\d{1,5}(?:[/?#].*)?$/;
 // A schemeless host:port (optional path): `localhost:5173`, `box.ts.net:3000`,

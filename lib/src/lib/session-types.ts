@@ -1,6 +1,8 @@
 import { normalizeAlertDeliveryOverrides, type AlertDeliveryOverrides } from './alert-delivery-model';
 import { isRecord } from './is-record';
+import { isToolKeyScope, type ToolKeyScope } from './platform/tool-types';
 import type { SessionStatus } from './alert-manager';
+import { hasShellInputControls } from 'dor/commands/shell-quote';
 import { ACTIVITY_NOTIFICATION_SOURCES, type ActivityNotification, type TodoState } from './alert-manager';
 
 /** Only TODO/detail restore; `status` is diagnostic and never resurrects a ring. */
@@ -11,7 +13,20 @@ export interface PersistedAlertState {
 }
 
 /** Absent means terminal; browser panes rebuild from the persisted layout. */
-export type PersistedSurfaceType = 'terminal' | 'browser';
+export type PersistedSurfaceType = 'terminal' | 'browser' | 'tool';
+
+/** Stable declaration/runtime identity needed to rebuild a tool after its PTY
+ * is respawned. Derived browser state (URL/session/port conflict) never enters
+ * this projection. */
+export interface PersistedToolMetadata {
+  /** Resolved arguments, re-quoted for the shell selected at cold restore. */
+  argv?: string[];
+  scope?: ToolKeyScope;
+  name?: string;
+  render: 'iframe' | 'ab-screencast';
+  port: 'announced' | 'auto';
+  key?: string[];
+}
 
 /** Durable pane structure, never scrollback. Single-use recovery commands travel
  * out of band through `PlatformAdapter.getRecoveryCommands`. */
@@ -22,6 +37,11 @@ export interface PersistedPane {
   untouched: boolean;
   alert?: PersistedAlertState | null;
   surfaceType?: PersistedSurfaceType;
+  /** Tool-only command, re-run on cold restore. This is separate from the
+   * host-owned, single-use agent recovery command. */
+  command?: string;
+  /** Tool-only stable metadata; browser state is re-derived after respawn. */
+  tool?: PersistedToolMetadata;
 }
 
 /**
@@ -146,9 +166,30 @@ function isPersistedPaneShape(value: unknown): boolean {
     // them and stay readable, new ones never do, and `normalizeSessionV3` strips
     // both either way.
     (value.untouched === undefined || typeof value.untouched === 'boolean') &&
-    (value.surfaceType === undefined || value.surfaceType === 'terminal' || value.surfaceType === 'browser') &&
+    (value.surfaceType === undefined || value.surfaceType === 'terminal' || value.surfaceType === 'browser' || value.surfaceType === 'tool') &&
+    (value.command === undefined || (value.surfaceType === 'tool' && typeof value.command === 'string')) &&
+    (value.tool === undefined || (value.surfaceType === 'tool' && isPersistedToolMetadataShape(value.tool))) &&
     (value.alert === undefined || isPersistedAlertShape(value.alert))
   );
+}
+
+function isPersistedToolMetadataShape(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return (
+    (value.argv === undefined || isToolCommandArgv(value.argv)) &&
+    (value.name === undefined || typeof value.name === 'string') &&
+    (value.scope === undefined || isToolKeyScope(value.scope)) &&
+    (value.render === 'iframe' || value.render === 'ab-screencast') &&
+    (value.port === 'announced' || value.port === 'auto') &&
+    (value.key === undefined || (Array.isArray(value.key) && value.key.every((part) => typeof part === 'string')))
+  );
+}
+
+/** Typed into a terminal after quoting: controls cannot be made safe by quotes. */
+export function isToolCommandArgv(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length > 0
+    && value.every(arg => typeof arg === 'string' && !hasShellInputControls(arg))
+    && value[0].trim().length > 0;
 }
 
 function isPersistedDoor(value: unknown): value is PersistedDoor {

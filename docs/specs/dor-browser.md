@@ -116,8 +116,7 @@ Header contract:
 - **Must keep back/forward/reload enabled.** Agent-browser uses native commands;
   iframe uses parent history and re-resolves its proxy.
 - **Must show non-default managed `--key` as a badge, never a title prefix.**
-- **Must hide split/zoom below `420px` and nav below `360px`;** minimize and kill
-  remain.
+- Width tiers and the narrow-pane popover: `docs/specs/layout.md` → "Pane header responsive sizing".
 
 Source of truth: `lib/src/components/wall/SurfacePaneHeader.tsx`,
 `lib/src/components/wall/agent-browser-screen.ts`,
@@ -455,12 +454,15 @@ Header rewriting:
 | request | `Accept-Encoding` | deleted, so HTML comes back identity for rewriting |
 | request | `Cookie` | dropped, including WebSocket handshakes |
 | response | `Set-Cookie` | dropped, including successful and refused WebSocket handshakes |
-| response | `X-Frame-Options`, `Content-Security-Policy`, `Content-Security-Policy-Report-Only` | with validated chain, replaced **whole** by `frame-ancestors 'self' <validated chain>` (rationale) |
+| response | `X-Frame-Options`, CSP headers | with validated chain, replaced by `frame-ancestors 'self' <validated chain>`; opted-in CSP policies remain alongside it (rationale) |
+| response | `X-Dormouse-Preserve-CSP: 1` | consumed; preserves upstream CSP headers and meta policies |
 | response | hop-by-hop (RFC 7230 §6.1) | dropped |
 | response | `Location` | upstream origin rewritten back to the proxy origin, so a redirect stays inside the proxy |
-| response body | `<meta http-equiv="content-security-policy">` | removed, like the header |
+| response body | `<meta http-equiv="content-security-policy">` | removed unless the response opts into CSP preservation |
 
 **Must update this table whenever header rewriting changes.**
+
+**Must preserve enforced and report-only CSP verbatim when the upstream response sends `X-Dormouse-Preserve-CSP: 1`.** Add the validated ancestor policy separately, for every MIME type; preserve meta policies during HTML instrumentation. Never infer this opt-in from request headers. Additional upstream restrictions may prevent framing or shim execution. (rationale)
 
 **One dedicated `127.0.0.1:0` server per grant, with no token in the path** — the
 origin itself is the grant boundary (rationale). Grants have a sliding idle TTL
@@ -556,7 +558,7 @@ Security boundaries:
 - no user script is injected,
 - link-local/cloud-metadata ranges are blocked,
 - every other user-supplied `http://` target is trusted as the user's command,
-  at the cost of the upstream's own XSS policy inside the frame.
+  at the cost of the upstream's own XSS policy unless it opts into preservation.
 
 **Must replace framing controls with exactly `frame-ancestors 'self'
 <validated embedder chain>`.** `'self'` permits same-grant nesting; foreign

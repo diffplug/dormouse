@@ -56,6 +56,7 @@ const noopActions: WallActions = {
   onCancelRename: () => {},
   onSwapRenderMode: () => {},
   resolveSurfaceRef: (id) => id,
+  onResolveToolApproval: () => {},
 };
 
 const meta: Meta<typeof ShellCwdMatrix> = {

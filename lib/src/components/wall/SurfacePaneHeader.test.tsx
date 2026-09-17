@@ -5,7 +5,12 @@ import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PaneProps } from './pane-props';
+import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
 import { SurfacePaneHeader } from './SurfacePaneHeader';
+import { ToolPaneHeader } from './ToolPaneHeader';
+import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
+import { setPlatform } from '../../lib/platform';
+import { addPlainNote, clearAllNotepads, getOpenNotepadId } from '../../lib/notepad/notepad-store';
 import {
   registerAgentBrowserScreen,
   type ChromeSnapshot,
@@ -14,13 +19,14 @@ import {
 import { setDevServerResolution } from './agent-browser-ports';
 import {
   ModeContext,
+  WorkspaceActiveContext,
   SelectedIdContext,
   WallActionsContext,
   WindowFocusedContext,
   ZoomedIdContext,
   type WallActions,
 } from './wall-context';
-import { registerStubScreen, STUB_CHROME, STUB_SCREEN, stubWallActions as stubActions } from './wall-test-utils';
+import { registerStubScreen, STUB_CHROME, STUB_SCREEN, stubResizeObserver, stubWallActions as stubActions } from './wall-test-utils';
 import { setNativeFieldValue } from '../../lib/dom';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -38,43 +44,387 @@ function headerProps(id: string, title: string): PaneProps {
 
 let container: HTMLDivElement;
 let root: Root;
+let resizeHeader: (width: number) => void;
 
 beforeEach(() => {
+  setPlatform(new FakePtyAdapter());
+  clearAllNotepads();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+  resizeHeader = stubResizeObserver(620);
 });
 
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  vi.unstubAllGlobals();
+  resetToolDirty();
+  vi.restoreAllMocks();
 });
 
 function renderHeader(
   props: PaneProps,
   actions: WallActions,
-  state: { active?: boolean; zoomedId?: string | null } = {},
+  state: { active?: boolean; zoomedId?: string | null; tool?: boolean; workspaceActive?: boolean } = {},
 ) {
   act(() => {
     root.render(
       <StrictMode>
-        <ModeContext.Provider value={state.active ? 'passthrough' : 'command'}>
-          <SelectedIdContext.Provider value={state.active ? props.id : null}>
-            <WindowFocusedContext.Provider value={true}>
-              <ZoomedIdContext.Provider value={state.zoomedId ?? null}>
-                <WallActionsContext.Provider value={actions}>
-                  <SurfacePaneHeader {...props} />
-                </WallActionsContext.Provider>
-              </ZoomedIdContext.Provider>
-            </WindowFocusedContext.Provider>
-          </SelectedIdContext.Provider>
-        </ModeContext.Provider>
+        <WorkspaceActiveContext.Provider value={state.workspaceActive ?? true}>
+          <ModeContext.Provider value={state.active ? 'passthrough' : 'command'}>
+            <SelectedIdContext.Provider value={state.active ? props.id : null}>
+              <WindowFocusedContext.Provider value={true}>
+                <ZoomedIdContext.Provider value={state.zoomedId ?? null}>
+                  <WallActionsContext.Provider value={actions}>
+                    {state.tool ? <ToolPaneHeader {...props} /> : <SurfacePaneHeader {...props} />}
+                  </WallActionsContext.Provider>
+                </ZoomedIdContext.Provider>
+              </WindowFocusedContext.Provider>
+            </SelectedIdContext.Provider>
+          </ModeContext.Provider>
+        </WorkspaceActiveContext.Provider>
       </StrictMode>,
     );
   });
 }
 
+/** The compact header's popover, portaled to `document.body`. */
+const popup = () => document.querySelector<HTMLElement>('[role="dialog"][aria-label="Browser controls"]');
+/** The compact header's trigger; its label grows a note count. */
+const overflowTrigger = () => container.querySelector<HTMLButtonElement>('[aria-label^="Browser controls"]')!;
+const inPopup = (selector: string) => popup()?.querySelector<HTMLElement>(selector) ?? null;
+/** Click, then let the popover's deferred dismissal (a 0ms task) run. */
+async function clickAndSettle(element: HTMLElement) {
+  await act(async () => { element.click(); await new Promise(resolve => setTimeout(resolve, 0)); });
+}
+function openPopup() {
+  act(() => overflowTrigger().click());
+  expect(popup()).not.toBeNull();
+}
+
 describe('SurfacePaneHeader — browser chrome', () => {
+  it.each([
+    ['terminal', {}],
+    ['port conflict', { toolPortConflict: [3000, 4000] }],
+    ['browser', { url: CHROME.url }],
+  ])('shows live unsaved changes on the Tool %s face at narrow widths', (_face, params) => {
+    const id = 'dirty-tool-header';
+    const registration = register(id);
+    try {
+      renderHeader({ ...headerProps(id, 'Tool'), params: { surfaceType: 'tool', ...params } }, stubActions(), { tool: true });
+      act(() => resizeHeader(100));
+      const indicator = () => container.querySelector('[role="img"][aria-label="Unsaved changes"]');
+      expect(indicator()).toBeNull();
+      act(() => recordToolDirty(id, true));
+      expect(indicator()).not.toBeNull();
+      expect(container.querySelector('[aria-label="Kill"]')).not.toBeNull();
+      act(() => addPlainNote(id, 'Keep this note'));
+      expect(indicator()).not.toBeNull();
+      act(() => recordToolDirty(id, false));
+      expect(indicator()).toBeNull();
+      act(() => recordToolDirty(id, true));
+      expect(indicator()).not.toBeNull();
+      act(() => recordToolDirty(id, null));
+      expect(indicator()).toBeNull();
+    } finally {
+      registration.dispose();
+    }
+  });
+
+  it('keeps the dirty dot outside the browser overflow menu that Kill joins at 79px', () => {
+    // A 103px Tool has only 79px of browser chrome: the dot stays inline and
+    // essential controls join the menu before overflowing.
+    const id = 'dirty-tool-header-narrow';
+    const registration = register(id);
+    try {
+      recordToolDirty(id, true);
+      addPlainNote(id, 'Keep this note');
+      renderHeader({ ...headerProps(id, 'Tool'), params: { surfaceType: 'tool', url: CHROME.url } }, stubActions(), { tool: true });
+      act(() => resizeHeader(79));
+      const indicator = () => container.querySelector('[role="img"][aria-label="Unsaved changes"]');
+      expect(indicator()).not.toBeNull();
+      expect(container.querySelector('[aria-label="Kill"]')).toBeNull();
+      act(() => container.querySelector<HTMLButtonElement>('[aria-label="Browser controls, 1 note"]')!.click());
+      expect(document.querySelector('[role="dialog"] [aria-label="Kill"]')).not.toBeNull();
+      expect(container.contains(indicator())).toBe(true);
+    } finally {
+      registration.dispose();
+    }
+  });
+
+  it.each([72, 79, 80])('repositions essential actions on dirty updates at a fixed %spx width', width => {
+    const id = 'dirty-fixed-width';
+    const registration = register(id);
+    try {
+      renderHeader({ ...headerProps(id, 'Tool'), params: { surfaceType: 'tool', url: CHROME.url } }, stubActions(), { tool: true });
+      act(() => resizeHeader(width));
+      const inlineKill = container.querySelector<HTMLButtonElement>('[aria-label="Kill"]')!;
+      act(() => inlineKill.focus());
+      expect(document.activeElement).toBe(inlineKill);
+      act(() => recordToolDirty(id, true));
+      expect(container.querySelector('[aria-label="Unsaved changes"]')).not.toBeNull();
+      if (width < 80) {
+        expect(container.querySelector('[aria-label="Kill"]')).toBeNull();
+        expect(document.activeElement).toBe(overflowTrigger());
+        openPopup();
+        expect(inPopup('[aria-label="Kill"]')).not.toBeNull();
+        act(() => inPopup('[aria-label="Kill"]')!.focus());
+        expect(document.activeElement).toBe(inPopup('[aria-label="Kill"]'));
+      } else {
+        expect(document.activeElement).toBe(inlineKill);
+      }
+      act(() => recordToolDirty(id, false));
+      expect(container.querySelector('[aria-label="Unsaved changes"]')).toBeNull();
+      expect(container.querySelector('[aria-label="Kill"]')).not.toBeNull();
+      expect(inPopup('[aria-label="Kill"]')).toBeNull();
+      if (width < 80) {
+        expect(popup()).toBeNull();
+        expect(document.activeElement).toBe(overflowTrigger());
+      }
+    } finally {
+      registration.dispose();
+    }
+  });
+
+  it.each([null, false].flatMap(initial =>
+    (['inline', 'elsewhere', 'hidden'] as const).map(focus => ({ initial, focus })),
+  ))('handles $initial → dirty with $focus focus at a fixed narrow width', ({ initial, focus }) => {
+    const id = 'dirty-inline-focus';
+    const registration = register(id);
+    const props = { ...headerProps(id, 'Tool'), params: { surfaceType: 'tool', url: CHROME.url } };
+    const actions = stubActions();
+    const other = document.createElement('button');
+    document.body.appendChild(other);
+    try {
+      recordToolDirty(id, initial);
+      renderHeader(props, actions, { tool: true });
+      act(() => resizeHeader(79));
+      act(() => container.querySelector<HTMLButtonElement>('[aria-label="Minimize"]')!.focus());
+      if (focus === 'elsewhere') act(() => other.focus());
+      if (focus === 'hidden') renderHeader(props, actions, { tool: true, workspaceActive: false });
+      act(() => recordToolDirty(id, true));
+      expect(container.querySelector('[aria-label="Minimize"]')).toBeNull();
+      expect(popup()).toBeNull();
+      expect(document.activeElement).toBe(focus === 'inline' ? overflowTrigger() : focus === 'elsewhere' ? other : document.body);
+    } finally {
+      other.remove();
+      registration.dispose();
+    }
+  });
+
+  it.each(['terminal', 'browser'] as const)('ignores dirty reports on an ordinary %s', kind => {
+    const id = 'dirty-non-tool-header';
+    const registration = register(id);
+    try {
+      act(() => recordToolDirty(id, true));
+      renderHeader({ ...headerProps(id, 'Ordinary'), params: { surfaceType: kind, url: CHROME.url } }, stubActions(), { tool: kind === 'terminal' });
+      expect(container.querySelector('[aria-label="Unsaved changes"]')).toBeNull();
+    } finally {
+      registration.dispose();
+    }
+  });
+
+  it.each(['workspace', 'parked'] as const)('dismisses compact controls without stealing focus when hidden by %s', hiddenBy => {
+    const id = 'pane-hidden-controls';
+    const registration = register(id);
+    const props = headerProps(id, 'Browser');
+    const actions = stubActions();
+    const otherWorkspaceControl = document.createElement('button');
+    document.body.appendChild(otherWorkspaceControl);
+    try {
+      renderHeader(props, actions);
+      act(() => resizeHeader(79));
+      openPopup();
+      otherWorkspaceControl.focus();
+      renderHeader({ ...props, parked: hiddenBy === 'parked' }, actions, { workspaceActive: hiddenBy !== 'workspace' });
+      expect(popup()).toBeNull();
+      expect(document.activeElement).toBe(otherWorkspaceControl);
+      renderHeader(props, actions);
+      expect(popup()).toBeNull();
+      expect(overflowTrigger().getAttribute('aria-expanded')).toBe('false');
+    } finally {
+      otherWorkspaceControl.remove();
+      registration.dispose();
+    }
+  });
+
+  it('collapses chrome by its own width, excluding the Tool context button', () => {
+    const registration = register('pane-resize', { ...CHROME, key: 'a'.repeat(300) });
+    renderHeader({ ...headerProps('pane-resize', 'Browser'), params: { surfaceType: 'tool', url: CHROME.url } }, stubActions(), { tool: true });
+    expect(container.querySelector('[aria-label="Terminal context"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="Back"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="Zoom"]')).not.toBeNull();
+    act(() => resizeHeader(400));
+    expect(container.querySelector('[aria-label="Back"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="Zoom"]')).toBeNull();
+    act(() => resizeHeader(340));
+    expect(container.querySelector('[aria-label="Back"]')).toBeNull();
+    // A 103px Tool leaves 79px beside its Terminal Context button.
+    act(() => resizeHeader(79));
+    expect(overflowTrigger()).not.toBeNull();
+    expect(container.querySelector('[aria-label="Kill"]')).not.toBeNull();
+    act(() => resizeHeader(56));
+    expect(container.querySelector('[aria-label="Kill"]')).toBeNull();
+    act(() => resizeHeader(620));
+    expect(container.querySelector('[aria-label^="Browser controls"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Back"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="Zoom"]')).not.toBeNull();
+    registration.dispose();
+  });
+
+  it('keeps the popover keyboard reachable and hands focus back to its trigger', async () => {
+    const registration = register('pane-popup');
+    const actions = stubActions();
+    renderHeader(headerProps('pane-popup', 'Browser'), actions);
+    act(() => resizeHeader(79));
+    openPopup();
+    expect(popup()!.contains(document.activeElement)).toBe(true);
+    const firstControl = document.activeElement!;
+    act(() => firstControl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true })));
+    expect(document.activeElement).not.toBe(firstControl);
+    expect(popup()!.contains(document.activeElement)).toBe(true);
+    expect(inPopup('[aria-label="Back"]')).not.toBeNull();
+    await clickAndSettle(inPopup('[aria-label="Split left/right"]')!);
+    expect(actions.onSplitH).toHaveBeenCalledWith('pane-popup');
+    expect(popup()).toBeNull();
+
+    openPopup();
+    const url = inPopup('[role="button"]')!;
+    act(() => { url.focus(); url.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+    expect(inPopup('input')).not.toBeNull();
+    act(() => inPopup('input')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(popup()).toBeNull();
+    expect(document.activeElement).toBe(overflowTrigger());
+
+    openPopup();
+    act(() => document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+    expect(popup()).toBeNull();
+
+    openPopup();
+    // Separate acts: a browser flushes the pointerdown's state before the click.
+    act(() => overflowTrigger().dispatchEvent(new Event('pointerdown', { bubbles: true })));
+    act(() => overflowTrigger().click());
+    expect(popup()).toBeNull();
+    expect(overflowTrigger().getAttribute('aria-expanded')).toBe('false');
+    registration.dispose();
+  });
+
+  it('reclamps changing popup content near the viewport edge without moving editor focus', () => {
+    const registration = register('pane-popup-geometry');
+    vi.stubGlobal('innerWidth', 300);
+    vi.stubGlobal('innerHeight', 300);
+    const originalRect = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.getAttribute('role') === 'dialog') {
+        return new DOMRect(0, 0, 276, this.querySelector('input') ? 40 : 80);
+      }
+      if (this.getAttribute('aria-label')?.startsWith('Browser controls')) return new DOMRect(280, 240, 20, 20);
+      return originalRect.call(this);
+    });
+    renderHeader(headerProps('pane-popup-geometry', 'Browser'), stubActions());
+    act(() => resizeHeader(79));
+    let resizePopup: () => void;
+    const disconnect = vi.fn();
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+      observe(target: Element) {
+        resizePopup = () => this.callback([{ target } as ResizeObserverEntry], this as unknown as ResizeObserver);
+      }
+      disconnect = disconnect;
+    });
+    try {
+      openPopup();
+      expect(popup()!.style.top).toBe('208px');
+      expect(popup()!.style.left).toBe('12px');
+      expect(popup()!.style.maxWidth).toBe('calc(100vw - 24px)');
+      act(() => inPopup('[role="button"]')!.click());
+      const input = inPopup('input')!;
+      expect(document.activeElement).toBe(input);
+      act(() => resizePopup());
+      expect(popup()!.style.top).toBe('248px');
+      expect(document.activeElement).toBe(input);
+      act(() => inPopup('[aria-label="Back"]')!.focus());
+      expect(inPopup('input')).toBeNull();
+      act(() => resizePopup());
+      expect(popup()!.style.top).toBe('208px');
+      expect(Number.parseFloat(popup()!.style.top) + 80).toBe(288);
+      const disconnectsBeforeClose = disconnect.mock.calls.length;
+      act(() => overflowTrigger().click());
+      expect(popup()).toBeNull();
+      expect(disconnect.mock.calls.length).toBeGreaterThan(disconnectsBeforeClose);
+    } finally {
+      registration.dispose();
+    }
+  });
+
+  it('names notes on the trigger and opens the notepad from the popover', async () => {
+    const registration = register('pane-notes');
+    renderHeader(headerProps('pane-notes', 'Browser'), stubActions());
+    act(() => resizeHeader(79));
+    act(() => addPlainNote('pane-notes', 'A saved note'));
+    expect(overflowTrigger().getAttribute('aria-label')).toBe('Browser controls, 1 note');
+    openPopup();
+    expect(inPopup('input')).toBeNull();
+    await clickAndSettle(inPopup('button[aria-label^="Notepad"]')!);
+    expect(getOpenNotepadId()).toBe('pane-notes');
+    registration.dispose();
+  });
+
+  it('closes the popover from Minimize and Kill wherever they render', async () => {
+    const registration = register('pane-actions');
+    const actions = stubActions();
+    renderHeader(headerProps('pane-actions', 'Browser'), actions);
+    act(() => resizeHeader(79));
+    for (const label of ['Minimize', 'Kill']) {
+      openPopup();
+      act(() => container.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!.click());
+      expect(popup()).toBeNull();
+    }
+    act(() => resizeHeader(56));
+    for (const label of ['Minimize', 'Kill']) {
+      openPopup();
+      await clickAndSettle(inPopup(`[aria-label="${label}"]`)!);
+      expect(popup()).toBeNull();
+    }
+    expect(actions.onMinimize).toHaveBeenCalledTimes(2);
+    expect(actions.onKill).toHaveBeenCalledTimes(2);
+    expect(actions.onKill).toHaveBeenCalledWith('pane-actions');
+    registration.dispose();
+  });
+
+  it('runs popup Zoom, Reload and Display before dismissal and preserves modal focus', async () => {
+    const modalControl = document.createElement('button');
+    document.body.appendChild(modalControl);
+    const stillOwnsFocus = () => expect(popup()?.contains(document.activeElement)).toBe(true);
+    const onZoom = vi.fn(stillOwnsFocus);
+    const reload = vi.fn(stillOwnsFocus);
+    const openModal = vi.fn(() => { stillOwnsFocus(); modalControl.focus(); });
+    const registration = registerAgentBrowserScreen('pane-popup-actions', {
+      snapshot: SCREEN, chrome: CHROME, hostCapable: true,
+      actions: { engageSync: vi.fn(), applyDevice: vi.fn(), applyViewport: vi.fn(), openModal },
+      chromeActions: { navigate: vi.fn(), back: vi.fn(), forward: vi.fn(), reload },
+    });
+    try {
+      renderHeader(headerProps('pane-popup-actions', 'Browser'), stubActions({ onZoom }));
+      act(() => resizeHeader(79));
+      for (const selector of ['[aria-label="Zoom"]', '[aria-label="Reload"]', '[data-browser-display-trigger]']) {
+        openPopup();
+        const action = inPopup(selector)!;
+        action.focus();
+        await clickAndSettle(action);
+        expect(popup()).toBeNull();
+      }
+      expect(onZoom).toHaveBeenCalledWith('pane-popup-actions');
+      expect(reload).toHaveBeenCalledOnce();
+      expect(openModal).toHaveBeenCalledOnce();
+      expect(document.activeElement).toBe(modalControl);
+    } finally {
+      registration.dispose();
+      modalControl.remove();
+    }
+  });
+
   it('uses the shared capability-first icon pair for every browser display mode', () => {
     const cases = [
       [{ ...SCREEN, renderMode: 'ab-screencast', syncEngaged: true }, 'ab-resize', 2],

@@ -64,6 +64,13 @@ describe('instrumentHtml', () => {
     expect(out).not.toMatch(/http-equiv=["']?content-security-policy/i);
   });
 
+  it('retains an opted-in document policy while injecting the shim', () => {
+    const policy = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'">';
+    const out = instrumentHtml(`<head>${policy}</head>`, APP, true);
+    expect(out).toContain(policy);
+    expect(out).toContain('__dormouse');
+  });
+
   it('forwards the leader chord and a pointerdown select signal', () => {
     expect(IFRAME_SHIM).toContain('__dormouse');
     expect(IFRAME_SHIM).toContain("'leader'");

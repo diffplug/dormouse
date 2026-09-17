@@ -1,3 +1,4 @@
+import { recordToolDirty } from './tool-dirty-store';
 import { registry } from './terminal-store';
 import {
   commandArgv0,
@@ -204,6 +205,8 @@ export function recordTerminalUserInput(id: string, input: string, reader?: Prom
   const shape = promptShapes.get(id) ?? null;
   const commandLine = renderedLine && shape ? extractCommand(renderedLine, shape) : null;
   if (commandLine) {
+    // A synthetic start has no protocol event to retire the Tool's last report.
+    recordToolDirty(id, null);
     applyTerminalSemanticEvents(id, [
       { type: 'commandLine', commandLine },
       { type: 'commandStart', source: 'user_input' },
@@ -221,6 +224,7 @@ export function seedLaunchedCommand(id: string, command: string, cwdPath?: strin
   if (cwd) events.push({ type: 'cwd', cwd });
   events.push({ type: 'commandLine', commandLine: command });
   events.push({ type: 'commandStart', source: 'user_input' });
+  recordToolDirty(id, null);
   applyTerminalSemanticEvents(id, events);
 }
 

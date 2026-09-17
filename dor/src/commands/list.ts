@@ -163,7 +163,7 @@ function buildListCommand(): Command['command'] {
     docs: {
       brief: 'List Dormouse Surfaces.',
       customUsage: [
-        '[--workspace ref|--all] [--window label] [--kind terminal|browser] [--view paned|zoomed|minimized] [--command text] [--cwd path] [--port number] [--ports] [--json] [--id-format refs|ids|both]',
+        `[--workspace ref|--all] [--window label] [--kind ${SURFACE_KINDS.join('|')}] [--view paned|zoomed|minimized] [--command text] [--cwd path] [--port number] [--ports] [--json] [--id-format refs|ids|both]`,
         '--workspaces [--window label] [--json]',
       ],
       fullDescription: FULL_DESCRIPTION,

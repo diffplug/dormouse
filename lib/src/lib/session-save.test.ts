@@ -224,6 +224,51 @@ describe('saveSession', () => {
     expect(platform.getCwd).not.toHaveBeenCalledWith('door-web');
   });
 
+  it('persists a tool command and stable metadata for cold respawn', async () => {
+    const platform = createPlatform(null);
+
+    await saveSession(platform, [{
+      id: 'pane-tool',
+      title: 'storybook',
+      surfaceType: 'tool',
+      params: {
+        surfaceType: 'tool',
+        command: 'pnpm storybook',
+        toolName: 'storybook',
+        toolRender: 'ab-screencast',
+        toolPort: 'auto',
+        toolKey: ['storybook', '/repo'],
+        // Derived state must stay in the Lath projection, never this row.
+        url: 'http://localhost:6006/',
+        session: 'dormouse.1.tool',
+      },
+    }]);
+
+    const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
+    expect(saved.panes.find((pane) => pane.id === 'pane-tool')).toMatchObject({
+      surfaceType: 'tool',
+      command: 'pnpm storybook',
+      tool: {
+        name: 'storybook',
+        render: 'ab-screencast',
+        port: 'auto',
+        key: ['storybook', '/repo'],
+      },
+    });
+  });
+
+  it('keeps resolved argv independently of the live shell command for panes and Doors', async () => {
+    const platform = createPlatform(null);
+    const toolArgv = ['program path', "it's.txt", '$(literal)'];
+    const params = { surfaceType: 'tool', command: "& 'program path' 'it''s.txt' '$(literal)'", toolArgv };
+    await saveSession(platform, [{ id: 'visible', title: 'Viewer', surfaceType: 'tool', params }], [
+      { id: 'hidden', title: 'Viewer', component: 'tool', params },
+    ]);
+    const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
+    expect(saved.panes.map(pane => pane.tool?.argv)).toEqual([toolArgv, toolArgv]);
+    expect(saved.panes.every(pane => pane.command === params.command)).toBe(true);
+  });
+
   it('persists neither a transcript nor a recovery command', async () => {
     // Both are absent by construction now: `PlatformAdapter` has no scrollback
     // reader, and the recovery command is host-owned and rides the boot payload

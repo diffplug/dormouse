@@ -12,10 +12,12 @@ import {
   SplitVerticalIcon,
   XIcon,
 } from '@phosphor-icons/react';
+import { ToolDirtyIndicator, useToolDirty } from '../ToolDirtyIndicator';
 import { HeaderActionButton } from '../HeaderActionButton';
 import { HEADER_PALETTE_TRANSITION_CLASS, paneZoomButtonClass, POPUP_SURFACE_CLASS, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from '../design';
 import { AlertBell } from '../AlertBell';
 import { useTodoPillContent } from '../TodoPillBody';
+import { useHeaderTier } from './use-header-tier';
 import { NotepadHeaderButton } from './NotepadHeaderButton';
 import type { PaneProps } from './pane-props';
 import { IllegalRenameWarning, type RenameRejection } from './IllegalRenameWarning';
@@ -55,7 +57,7 @@ import {
 const tabVariant = tv({
   // The active/inactive palette swap crossfades in step with the focus ring's
   // travel (HEADER_PALETTE_TRANSITION_CLASS); children inherit via `text-inherit`.
-  base: `flex h-full w-full cursor-grab items-center gap-1.5 ${TERMINAL_TOP_RADIUS_CLASS} pl-2 pr-[5px] text-sm leading-none font-mono select-none active:cursor-grabbing ${HEADER_PALETTE_TRANSITION_CLASS}`,
+  base: `flex h-full min-w-0 flex-1 cursor-grab items-center gap-1.5 ${TERMINAL_TOP_RADIUS_CLASS} pl-2 pr-[5px] text-sm leading-none font-mono select-none active:cursor-grabbing ${HEADER_PALETTE_TRANSITION_CLASS}`,
   variants: {
     state: {
       active: 'bg-header-active-bg text-header-active-fg',
@@ -64,7 +66,10 @@ const tabVariant = tv({
   },
 });
 
-type HeaderTier = 'full' | 'compact' | 'minimal';
+type TerminalHeaderTier = 'full' | 'compact' | 'minimal';
+// Includes the header's 8px left + 5px right padding; the former content-box
+// boundaries were 280/160px. Border-box width distinguishes tiny from hidden.
+const terminalHeaderTier = (width: number): TerminalHeaderTier => width > 293 ? 'full' : width > 173 ? 'compact' : 'minimal';
 
 // WATCHING is a rule on the running command, so the bell says which command it
 // would act on rather than naming an abstract toggle (`docs/specs/alert.md`).
@@ -80,7 +85,8 @@ function alertButtonLabelsFor(status: SessionStatus, argv0: string | null): { ar
 const TODO_PREVIEW_GAP = 6;
 const TODO_PREVIEW_MARGIN = 8;
 
-export function TerminalPaneHeader({ id, title }: PaneProps) {
+export function TerminalPaneHeader({ id, title, params }: PaneProps) {
+  const dirty = useToolDirty(id, params);
   const mode = useContext(ModeContext);
   const selectedId = useContext(SelectedIdContext);
   const renamingId = useContext(RenamingIdContext);
@@ -126,7 +132,7 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
   const isRenaming = renamingId === id;
   const tabRef = useRef<HTMLDivElement>(null);
   const suppressAlertClickRef = useRef(false);
-  const [tier, setTier] = useState<HeaderTier>('full');
+  const tier = useHeaderTier(tabRef, terminalHeaderTier);
   const [todoPreviewRect, setTodoPreviewRect] = useState<DOMRect | null>(null);
   const [renameWarning, setRenameWarning] = useState<{ rect: DOMRect; reason: RenameRejection; value: string } | null>(null);
   const todoPill = useTodoPillContent(activity.todo);
@@ -170,19 +176,6 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
   }, [actions, id, context]);
 
   useEffect(() => {
-    const el = tabRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(([entry]) => {
-      const w = entry.contentRect.width;
-      if (w > 280) setTier('full');
-      else if (w > 160) setTier('compact');
-      else setTier('minimal');
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  useEffect(() => {
     if (!activity.notification) setTodoPreviewRect(null);
   }, [activity.notification]);
 
@@ -199,6 +192,7 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
         context.open(id, { origin: { x: e.clientX, y: e.clientY } });
       }}
     >
+      <ToolDirtyIndicator dirty={dirty} />
       <div className="flex flex-1 min-w-0 items-center gap-1.5 overflow-hidden">
         {isRenaming ? (
           <InlineEditInput

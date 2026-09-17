@@ -103,6 +103,74 @@ describe('revealNoteSource', () => {
     expect(markersOf(src).every((marker) => !marker.isDisposed)).toBe(true);
   });
 
+  it('uses the current marker rows after opening the source view', () => {
+    const lines = [...LINES];
+    const { terminal, scrollToLine } = makeTerminal(lines, { viewportY: 40, baseY: 40 });
+    mocks.getTerminalInstance.mockReturnValue(terminal);
+    const { noteId, source: src } = pinnedNote();
+    const target = new EventTarget();
+    target.addEventListener('dormouse:reveal-note-source', () => {
+      // Model a row shift during the view change, without rewrapping content.
+      lines.unshift('new wrapped row');
+      for (const marker of markersOf(src)) marker.line += 1;
+    });
+    vi.stubGlobal('window', target);
+    try {
+      expect(revealNoteSource('term-1', noteId)).toEqual({ ok: true });
+      expect(scrollToLine).toHaveBeenCalledWith(1);
+      expect(getMouseSelectionState('term-1').selection).toMatchObject({ startRow: 1, endRow: 2 });
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('keeps a previously valid pin when opening the view rewraps its text', () => {
+    const { terminal, scrollToLine } = makeTerminal(['alpha one br', 'avo two']);
+    mocks.getTerminalInstance.mockReturnValue(terminal);
+    const { noteId, source: src } = pinnedNote(source({
+      endColumn: 6,
+      expectedRawText: 'alpha one br\navo two',
+    }));
+    const target = new EventTarget();
+    const reveal = vi.fn(() => {
+      // Widening joins the two display rows and moves the end marker. The
+      // characters survive, but the stored columns and raw proof no longer fit.
+      Object.assign(terminal, makeTerminal(['alpha one bravo two', '']).terminal);
+      markersOf(src)[1].line = 0;
+    });
+    target.addEventListener('dormouse:reveal-note-source', reveal);
+    vi.stubGlobal('window', target);
+    try {
+      expect(revealNoteSource('term-1', noteId)).toEqual({ ok: false, reason: 'layout-changed', kept: true });
+      expect(reveal).toHaveBeenCalledOnce();
+      expect(getNotes('term-1')[0].source).toBe(src);
+      expect(markersOf(src).every(marker => !marker.isDisposed)).toBe(true);
+      expect(getMouseSelectionState('term-1').selection).toBeNull();
+      expect(scrollToLine).not.toHaveBeenCalled();
+      expect(terminal.scrollToLine).not.toHaveBeenCalled();
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it.each(['no-source', 'no-terminal', 'alternate-buffer', 'disposed', 'missing-rows', 'mismatch'] as const)(
+    'does not open the source view when the initial resolution fails with %s', reason => {
+      const src = source();
+      const { noteId } = pinnedNote(src);
+      if (reason === 'no-source') clearAllNotepads();
+      if (reason === 'disposed') markersOf(src)[0].dispose();
+      mocks.getTerminalInstance.mockReturnValue(reason === 'no-terminal' ? null : makeTerminal(
+        reason === 'missing-rows' ? ['alpha one'] : reason === 'mismatch' ? ['changed', 'rows'] : LINES,
+        { type: reason === 'alternate-buffer' ? 'alternate' : 'normal' },
+      ).terminal);
+      const target = new EventTarget();
+      const reveal = vi.fn();
+      target.addEventListener('dormouse:reveal-note-source', reveal);
+      vi.stubGlobal('window', target);
+      try {
+        expect(revealNoteSource('term-1', noteId)).toEqual({ ok: false, reason, kept: reason === 'alternate-buffer' });
+        expect(reveal).not.toHaveBeenCalled();
+        expect(getMouseSelectionState('term-1').selection).toBeNull();
+      } finally { vi.unstubAllGlobals(); }
+    },
+  );
+
   it('reports a note that has no pin', () => {
     const noteId = addPlainNote('term-1', 'typed by hand');
     expect(revealNoteSource('term-1', noteId)).toEqual({ ok: false, reason: 'no-source', kept: false });
