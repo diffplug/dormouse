@@ -16,7 +16,7 @@ import { AlertBell } from './AlertBell';
 import { InlineEditInput } from './wall/InlineEditInput';
 import { WorkspaceKillConfirm } from './WorkspaceKillConfirm';
 import { useTodoPillContent } from './TodoPillBody';
-import { chromeButton, DOOR_TAB_CLASS, TODO_PILL_TRACKING_CLASS } from './design';
+import { chromeButton, DOOR_TAB_CLASS, HEADER_PALETTE_TRANSITION_CLASS, TODO_PILL_TRACKING_CLASS } from './design';
 import { createWorkspaceStripDrag, type StripDragHost } from './workspace-strip-drag';
 import { acquireChromeKeyboardLease } from './wall/chrome-keyboard-lease';
 import { useDialogKeyboardOwner } from './wall/wall-context';
@@ -290,6 +290,7 @@ const WorkspaceTab = memo(function WorkspaceTab({
       role="group"
       className={clsx(
         DOOR_TAB_CLASS,
+        HEADER_PALETTE_TRANSITION_CLASS,
         'w-max shrink',
         active ? 'bg-header-active-bg text-header-active-fg' : 'bg-header-inactive-bg text-header-inactive-fg',
       )}
