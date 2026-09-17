@@ -1,6 +1,8 @@
+// @ts-check
 // The OAuth provider allowlist, shared by the Worker, the frontend bundle, and
-// the plain-node deploy scripts. Plain JavaScript with no imports so `node`
-// can load it directly; tsconfig's allowJs gives TypeScript the JSDoc types.
+// the plain-node deploy scripts. Plain JavaScript with no imports so `node` can
+// load it directly; tsconfig's allowJs gives TypeScript the JSDoc types, and the
+// pragma checks them here, which project-wide checkJs would not do safely.
 
 export const providerIds = /** @type {const} */ ([
   "github",
