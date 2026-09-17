@@ -202,14 +202,14 @@ export function renameWorkspace(id: WorkspaceId, name: string): void {
 /**
  * Remove a Workspace. The last remaining Workspace cannot be closed (there is
  * always one active Workspace — glossary lifecycle). Closing the active one
- * activates its previous neighbor. Returns whether a Workspace was removed.
+ * activates its next neighbor (previous at the end). Returns whether one was removed.
  */
 export function closeWorkspace(id: WorkspaceId): boolean {
   if (state.workspaces.length <= 1) return false;
   const index = state.workspaces.findIndex((ws) => ws.id === id);
   if (index === -1) return false;
   const workspaces = state.workspaces.filter((ws) => ws.id !== id);
-  const activeId = state.activeId === id ? workspaces[Math.max(0, index - 1)].id : state.activeId;
+  const activeId = state.activeId === id ? workspaces[Math.min(index, workspaces.length - 1)].id : state.activeId;
   emit({ workspaces, activeId });
   return true;
 }

@@ -38,6 +38,7 @@ Standalone only — a bare Wall (VS Code, the website playground) leaves every k
 | `n` / `p` | Next / previous | Wraps at both ends. |
 | `1`–`9` | Select by position | The nth Workspace in strip order; out of range is a consumed no-op. |
 | `&` | Close Workspace | Runs the close flow; confirms first when the Workspace holds work, and the last Workspace never closes. |
+| `x` (Workspace selected) | Close Workspace | Reveal and confirm, then select the next tab (previous at the end). Inert on `+` and the last Workspace. |
 | `$` | Rename Workspace | Opens the strip's inline editor on the active tab. |
 
 ## Navigation (command mode)

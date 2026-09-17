@@ -24,7 +24,7 @@ import { resetWorkspaceBootPlans, setWorkspaceBootPlan } from './wall/workspace-
 import { mountWallHarness, type WallHarness } from './wall/wall-test-utils';
 import { getWorkspaceSurfacesSnapshot, resetWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { previousWorkspaceSession, publishWorkspaceSession, resetWindowSessionAggregator, seedWindowSession } from '../lib/window-session-aggregator';
-import { resetWorkspaceUi } from '../lib/workspace-ui-store';
+import { getWorkspaceUiSnapshot, resetWorkspaceUi } from '../lib/workspace-ui-store';
 import {
   closeWorkspace,
   createWorkspace,
@@ -96,6 +96,40 @@ async function render(node = <WorkspaceWindow initialPaneIds={['pane-a']} />): P
 }
 
 describe('WorkspaceWindow', () => {
+  it('reveals and confirms x on a highlighted workspace, then selects the next tab for repeated deletion', async () => {
+    const first = getActiveWorkspaceId();
+    createWorkspace({ id: 'ws-2', activate: false });
+    createWorkspace({ id: 'ws-3', activate: false });
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
+    const press = async (key: string) => {
+      await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); });
+      await flush();
+    };
+    await press('ArrowUp');
+    await press('ArrowRight');
+    expect(getActiveWorkspaceId()).toBe(first);
+    await press('x');
+    expect(getActiveWorkspaceId()).toBe('ws-2');
+    expect(getWorkspaceUiSnapshot().pendingClose?.id).toBe('ws-2');
+    expect(leafIdsIn('ws-2')).toHaveLength(1);
+    await press('Escape');
+    expect(getWorkspacesSnapshot().workspaces).toHaveLength(3);
+    await press('x');
+    await press(getWorkspaceUiSnapshot().pendingClose!.char);
+    await flush();
+    expect(getActiveWorkspaceId()).toBe('ws-3');
+    expect(getWorkspacesSnapshot().workspaces.map(workspace => workspace.id)).toEqual([first, 'ws-3']);
+    // No Up required: selection stayed on the workspace row, not a pane.
+    await press('x');
+    expect(getWorkspaceUiSnapshot().pendingClose?.id).toBe('ws-3');
+    await press(getWorkspaceUiSnapshot().pendingClose!.char);
+    await flush();
+    expect(getActiveWorkspaceId()).toBe(first);
+    await press('x');
+    expect(getWorkspaceUiSnapshot().pendingClose).toBeNull();
+    expect(getWorkspacesSnapshot().workspaces).toHaveLength(1);
+  });
+
   it('keeps the closing tab and its Surfaces until the workspace collapse finishes', async () => {
     createWorkspace({ id: 'ws-2' });
     await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);

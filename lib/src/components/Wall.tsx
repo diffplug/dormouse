@@ -399,6 +399,7 @@ export function Wall({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<WallSelectionKind>('pane');
   const lastPaneIdRef = useRef<string | null>(null);
+  const doorKillReturnRef = useRef<{ id: string; neighbors: string[] } | null>(null);
 
   const windowFocused = useWindowFocused();
   useDynamicPalette();
@@ -510,6 +511,7 @@ export function Wall({
   const rejectKill = useCallback(() => {
     const ck = confirmKillRef.current;
     if (!ck || ck.exit) return;
+    doorKillReturnRef.current = null;
     setConfirmKill({ ...ck, exit: 'shake' });
     shakeTimerRef.current = setTimeout(() => setConfirmKill(null), KILL_SHAKE_MS);
   }, []);
@@ -532,12 +534,23 @@ export function Wall({
   /** Select a pane: the Wall state is the sole selection authority (Lath has no
    *  concept of selection/activation). */
   const selectPane = useCallback((id: string) => {
+    if (doorKillReturnRef.current?.id !== id) doorKillReturnRef.current = null;
     releaseZoomExcept(id);
     lastPaneIdRef.current = id;
     selectedIdRef.current = id;
     selectedTypeRef.current = 'pane';
     setSelectedId(id);
     setSelectedType('pane');
+  }, [releaseZoomExcept]);
+
+  /** Select a door in the baseboard */
+  const selectDoor = useCallback((id: string) => {
+    if (doorKillReturnRef.current?.id !== id) doorKillReturnRef.current = null;
+    releaseZoomExcept();
+    selectedIdRef.current = id;
+    selectedTypeRef.current = 'door';
+    setSelectedId(id);
+    setSelectedType('door');
   }, [releaseZoomExcept]);
 
   const returnToPane = useCallback(() => {
@@ -547,6 +560,7 @@ export function Wall({
   }, [nav, selectPane]);
 
   const selectWorkspace = useCallback((id: string | null) => {
+    doorKillReturnRef.current = null;
     const element = workspaceTabElement(id);
     if (workspaceId === undefined || !element) return;
     releaseZoomExcept();
@@ -637,6 +651,8 @@ export function Wall({
     // A second kill for a pane already mid-fade is a no-op (idempotent) — it must
     // not re-fire the event, re-dispose, or schedule a second removal.
     if (lath.isDying(id)) return;
+    const doorNeighbors = doorKillReturnRef.current?.id === id ? doorKillReturnRef.current.neighbors : null;
+    if (doorNeighbors) doorKillReturnRef.current = null;
     const isVisiblePane = nav.hasPane(id);
     if (!isVisiblePane) {
       // A doored surface has no visible pane but still owns a live session
@@ -696,6 +712,10 @@ export function Wall({
       // fresh ref for the dying pane.
       forgetSurfaceRef(id);
       if (wasSelectedPane) {
+        const nextDoor = modeRef.current === 'command' && doorNeighbors
+          ? doorNeighbors.find(neighbor => doorsRef.current.some(door => door.id === neighbor)) ?? doorsRef.current[0]?.id
+          : null;
+        if (nextDoor) { selectDoor(nextDoor); return; }
         const survivorId = lath.listPanes()[0]?.id ?? null;
         if (survivorId) selectPane(survivorId);
         else setSelectedId(null);
@@ -703,7 +723,7 @@ export function Wall({
     }, exitMs);
     clearLocalSurfaceActivity(id);
     fireEvent({ type: 'kill', id });
-  }, [fireEvent, forgetSurfaceRef, selectPane, lath, nav]);
+  }, [fireEvent, forgetSurfaceRef, selectPane, selectDoor, lath, nav]);
 
   /**
    * A permanent, user-visible Surface closure: helper guard, archive, helper
@@ -741,6 +761,7 @@ export function Wall({
       killPaneImmediately(id);
       return null;
     } finally {
+      if (doorKillReturnRef.current?.id === id) doorKillReturnRef.current = null;
       release();
       pendingSurfaceCloses.current.delete(id);
     }
@@ -758,12 +779,18 @@ export function Wall({
     const stage = () => {
       const door = doorsRef.current.find(item => item.id === id);
       if (door) {
+        const index = doorsRef.current.indexOf(door);
+        doorKillReturnRef.current = {
+          id,
+          neighbors: [...doorsRef.current.slice(index + 1), ...doorsRef.current.slice(0, index).reverse()].map(item => item.id),
+        };
         handleReattachRef.current(door, { enterPassthrough: false, afterRestore: isUntouched(id) ? 'close' : 'confirm-kill' });
         return;
       }
       // The helper inspection below can outlive the Surface (an exit, a `dor
       // kill`); a confirm overlay for a gone pane would never clear itself.
       if (!nav.hasPane(id) || lath.isDying(id)) return;
+      doorKillReturnRef.current = null;
       if (isUntouched(id)) { void closeSurface(id); return; }
       setConfirmKill({ id, char: randomKillChar() });
     };
@@ -789,15 +816,6 @@ export function Wall({
     void closeSurface(ck.id);
     confirmTimerRef.current = setTimeout(() => setConfirmKill(null), KILL_CONFIRM_MS);
   }, [closeSurface]);
-
-  /** Select a door in the baseboard */
-  const selectDoor = useCallback((id: string) => {
-    releaseZoomExcept();
-    selectedIdRef.current = id;
-    selectedTypeRef.current = 'door';
-    setSelectedId(id);
-    setSelectedType('door');
-  }, [releaseZoomExcept]);
 
   /** Enter terminal mode for the given panel */
   const enterTerminalMode = useCallback((id: string) => {
@@ -1609,6 +1627,7 @@ export function Wall({
       if (id) enterTerminalMode(id);
     },
     enterCommandMode: exitTerminalMode,
+    selectWorkspaceTab: () => { exitTerminalMode(); selectWorkspace(effectiveWorkspaceId); },
     flushPersistence: (options) => persistence.flush(options),
     prepareWorkspaceTransfer: () => prepareWorkspaceTransfer({
       workspaceId: effectiveWorkspaceId,

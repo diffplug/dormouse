@@ -116,11 +116,14 @@ describe('workspace-store', () => {
     expect(getWorkspacesSnapshot().workspaces).toHaveLength(1);
   });
 
-  it('closeWorkspace removes a non-last Workspace and activates the previous neighbor', () => {
+  it('closeWorkspace activates the next neighbor, falling back to the previous at the end', () => {
     createWorkspace({ id: 'ws-2' });
-    createWorkspace({ id: 'ws-3' }); // active = ws-3
+    createWorkspace({ id: 'ws-3' });
+    createWorkspace({ id: 'ws-4', activate: false });
     expect(closeWorkspace('ws-3')).toBe(true);
-    expect(getActiveWorkspaceId()).toBe('ws-2'); // previous neighbor
+    expect(getActiveWorkspaceId()).toBe('ws-4');
+    expect(closeWorkspace('ws-4')).toBe(true);
+    expect(getActiveWorkspaceId()).toBe('ws-2');
     expect(getWorkspacesSnapshot().workspaces.map((w) => w.id)).toEqual([DEFAULT_WORKSPACE_ID, 'ws-2']);
   });
 

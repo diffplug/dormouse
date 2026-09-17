@@ -38,6 +38,13 @@ export function handleWorkspaceShortcuts(e: KeyboardEvent, ctx: WallKeyboardCtx)
     }
   }
 
+  if (e.key === 'x' && ctx.selectedTypeRef.current === 'workspace') {
+    return run(() => {
+      const id = ctx.selectedIdRef.current;
+      if (id) requestWorkspaceClose(id, { forceConfirm: true });
+    });
+  }
+
   // Targets resolve through the ACTIVE Workspace, never the Wall that heard the
   // key, so a stale keystroke from a hidden one could not act on the wrong one.
   if (e.key === 'c') return run(() => { createWorkspace(); });

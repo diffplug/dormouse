@@ -177,6 +177,7 @@ describe('WorkspaceStrip', () => {
     await act(async () => {
       tabFor('ws-2').dispatchEvent(new MouseEvent('auxclick', { button: 1, bubbles: true }));
     });
+    expect(getActiveWorkspaceId()).toBe('ws-2');
     expect(container.querySelector('#kill-confirm-title')).not.toBeNull();
     expect(chromeKeyboardHeld()).toBe(true);
     const char = container.querySelector('.text-xl')!.textContent!;

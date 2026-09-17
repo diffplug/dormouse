@@ -1,4 +1,5 @@
 import { randomKillChar } from '../KillConfirm';
+import { flushSync } from 'react-dom';
 import { awaitWallHandle, mountingRefusal } from './dor-control-shared';
 import { getWallHandle } from './wall-handles';
 import { forgetWorkspaceSession, isWorkspaceTransferPending } from '../../lib/window-session-aggregator';
@@ -72,9 +73,14 @@ export async function closeWorkspaceWithSurfaces(
   const handle = getWallHandle(id);
   if (!handle) return mountingRefusal(workspaceRefFor(id));
   closeInFlight = true;
-  /** Put the user in front of the prompt a refusal left behind — and only then. */
+  /** A refusal returns to its prompt if the user navigated away during close. */
   const revealForPrompt = () => { if (mode === 'prompt') setActiveWorkspace(id); };
   try {
+    if (mode === 'prompt') {
+      // Commit visibility before collapse measures the Wall, even for an
+      // untouched Workspace whose close skips the confirmation.
+      flushSync(() => { setActiveWorkspace(id); handle.selectWorkspaceTab(); });
+    }
     const refusal = await handle.closeAll(mode);
     if (refusal) {
       revealForPrompt();
@@ -90,6 +96,7 @@ export async function closeWorkspaceWithSurfaces(
     // Clear only this Workspace's chrome: a stranded editor or confirmation
     // holds the keyboard lease after its Workspace disappears.
     dismissWorkspaceUi(id);
+    if (mode === 'prompt') getWallHandle(getActiveWorkspaceId())?.selectWorkspaceTab();
     return null;
   } finally {
     closeInFlight = false;
@@ -98,13 +105,13 @@ export async function closeWorkspaceWithSurfaces(
 
 /**
  * Begin closing a Workspace: the last one never closes (there is always one
- * active Workspace), one holding work raises the typed confirmation, and any
- * other goes immediately.
+ * active Workspace). Reveal it first; work or forceConfirm raises the typed
+ * confirmation, otherwise close immediately.
  */
-export function requestWorkspaceClose(id: WorkspaceId): void {
+export function requestWorkspaceClose(id: WorkspaceId, options: { forceConfirm?: boolean } = {}): void {
   if (closeInFlight || isWorkspaceTransferPending(id)) return;
   if (getWorkspacesSnapshot().workspaces.length <= 1) return;
-  void closeOnceWallRegisters(id);
+  void closeOnceWallRegisters(id, options.forceConfirm ?? false);
 }
 
 /**
@@ -114,10 +121,13 @@ export function requestWorkspaceClose(id: WorkspaceId): void {
  * handle that is one effect away and having the close refused where nobody
  * reads the refusal (`docs/specs/layout.md` → "Workspaces").
  */
-async function closeOnceWallRegisters(id: WorkspaceId): Promise<void> {
-  await awaitWallHandle(id);
+async function closeOnceWallRegisters(id: WorkspaceId, forceConfirm: boolean): Promise<void> {
+  const handle = await awaitWallHandle(id);
   if (closeInFlight || isWorkspaceTransferPending(id)) return;
-  if (workspaceNeedsCloseConfirmation(id)) {
+  if (!handle || getWorkspacesSnapshot().workspaces.length <= 1) return;
+  setActiveWorkspace(id);
+  handle.selectWorkspaceTab();
+  if (forceConfirm || workspaceNeedsCloseConfirmation(id)) {
     setPendingWorkspaceClose({ id, char: randomKillChar() });
     return;
   }

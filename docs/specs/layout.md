@@ -134,7 +134,7 @@ Doors are measured in a hidden off-screen container first, then fitted:
 - **Subtract the measured right cluster and its gap before fitting anything** — that space is never available to doors. Measure only its always-present part (notice + the three settings controls): **never the overflow arrow**, whose presence is an *output* of the fit.
 - Add doors until no more fit, reserving room for a `N more →` button whenever items remain after the current one. **At least one door is always shown**, even if it overflows.
 - If scrolled, show `← N more` on the left and/or `N more →` on the right. Overflow counts are assumed single-digit (the hidden measurement button is `9 more`).
-- Clicking an overflow arrow reveals one door in that direction; a longer title may push more doors off the opposite side.
+- Clicking an overflow arrow reveals one door in that direction; a longer title may push more doors off the opposite side. **Must reveal the selected Door when selection or membership changes**, without overriding manual overflow scrolling (`Baseboard.test.tsx`).
 - Extreme case — one door with a very long title and more doors on both sides: show both arrows with counts and as much title as fits, ellipsis for the rest.
 
 Source of truth: `lib/src/components/Baseboard.tsx`, `lib/src/components/Door.tsx`.
@@ -148,7 +148,8 @@ Source of truth: `lib/src/components/Baseboard.tsx`, `lib/src/components/Door.ts
 - **Must show `×` only on the active tab**, only with multiple Workspaces and outside rename. Middle-click may close an inactive tab. Reveal the active tab after its width changes on activation.
 - **Must reuse `HEADER_PALETTE_TRANSITION_CLASS` for tab palette tweening and reduced motion.**
 - **Must activate inactive tabs in command mode on click; clicking the active tab renames without changing mode.** Pinned by `WorkspaceWindow.test.tsx`.
-- **Must separate highlighting from activation.** `Enter` activates the highlighted Workspace and enters passthrough on its last live selected pane (first live pane if unavailable); `+` creates a Workspace and enters its pane after mount. Deactivation restores a Wall's chrome selection to its last live pane. Removing the highlighted Workspace selects a live pane.
+- **Must separate highlighting from activation.** `Enter` activates the highlighted Workspace and enters passthrough on its last live selected pane (first live pane if unavailable); `+` creates a Workspace and enters its pane after mount. Deactivation restores a Wall's chrome selection to its last live pane. External removal of the highlighted Workspace selects a live pane.
+- **Must reveal a Workspace in command mode before a user close or its confirmation.** `x` on a highlighted Workspace always confirms, including untouched Workspaces; `+` is inert. Successful user closure selects the next Workspace tab in command mode (previous at the end). Silent command closures remain focus-neutral. Pinned by `reveals and confirms x on a highlighted workspace, then selects the next tab for repeated deletion` in `lib/src/components/WorkspaceWindow.test.tsx`.
 
 Source of truth: `DOOR_TAB_CLASS` in `lib/src/components/design.tsx`; `WorkspaceStrip` in `lib/src/components/WorkspaceStrip.tsx`; `AppBar` in `standalone/src/AppBar.tsx`. Close visibility: `activates on click` in `lib/src/components/WorkspaceStrip.test.tsx`.
 
@@ -258,6 +259,8 @@ The source cwd is read from `getTerminalPaneState(sourceId).cwd`. **Never inheri
 
 **Confirmation must be staged in a ref synchronously, not only in React state** — a second confirm keydown arriving before React flushes would otherwise pass the guard and kill twice (`lath.isDying` is the second line of defense).
 
+**Must return keyboard selection to the next surviving Door after killing a revealed Door**, falling back to previous Doors, then a pane only if no Doors remain. Apply this to confirmed and untouched kills only while the revealed pane is still selected in command mode; cancellation, refusal, or navigating away discards the return target. Pinned by `returns keyboard focus from deleted Door %s to %s (confirm: %s)` in `lib/src/components/Wall.test.tsx`.
+
 **Every kill routes through the notepad close coordinator**, confirmed and untouched-fast-path alike, which archives the Surface's notes before teardown and can refuse the close (`docs/specs/notepad.md` → "Closure"; that spec also names who may still tear a Surface down immediately).
 
 **Untouched sessions skip this confirmation.** A newly spawned shell starts `untouched: true`; the first user-originated PTY input flips it to false. Counted: printable keys, Enter, control keys, keyboard CSI such as arrows/history, paste, file-drop path insertion, forwarded mouse reports. Not counted: replay-shaped terminal reports and mouse reports removed by an override. Killing an untouched pane runs the normal kill animation/dispose path immediately; killing an untouched door first reattaches it only far enough to reuse that removal path, then kills it with no overlay.
@@ -324,7 +327,7 @@ Source of truth: `lib/src/components/wall/WorkspaceSelectionOverlay.tsx`, `lib/s
 
 **Must let Up from a top-edge pane highlight the active Workspace tab when a strip is mounted.** Left/Right traverses tabs in strip order and then `+`, stopping at either end; Down returns to the originating live pane, or the first live pane if it disappeared. Clear pane backtracking on entry to either chrome row. Scroll highlighted tabs into view; highlighting changes neither the active Workspace nor DOM focus.
 
-**Must keep workspace tabs and `+` command-mode-only selection targets.** Pane actions and terminal clipboard operations are inert there; Workspace shortcuts retain their active-Workspace scope. Every passthrough entry selects a live pane. Navigation is pinned by `lib/src/components/wall/keyboard/handle-pane-navigation.test.ts`; activation by `highlights tabs without switching and Enter activates or creates into a live pane` in `lib/src/components/WorkspaceWindow.test.tsx`.
+**Must keep workspace tabs and `+` command-mode-only selection targets.** Pane actions and terminal clipboard operations are inert there, except Workspace `x` ([Workspace tabs](#workspace-tabs)); other Workspace shortcuts retain their active-Workspace scope. Every passthrough entry selects a live pane. Navigation is pinned by `lib/src/components/wall/keyboard/handle-pane-navigation.test.ts`; activation by `highlights tabs without switching and Enter activates or creates into a live pane` in `lib/src/components/WorkspaceWindow.test.tsx`.
 
 **`Cmd/Ctrl+Arrow` swap.** Swaps Surface **content** between two panes, leaving the layout shape unchanged. One Lath `swap` op trades the two leaf identities, and because per-leaf metadata and terminal-registry entries are keyed by id, title/params/session follow automatically — **never write a companion title swap** — with no DOM reattach. Selection stays on the moved Surface, so **the breadcrumb records the *partner*** (the pane now holding the old slot): the opposite `Cmd+Arrow` swaps back exactly and a plain opposite arrow selects the partner.
 
