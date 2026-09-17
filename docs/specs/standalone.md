@@ -576,6 +576,7 @@ The protocol and every failure path are §Arrival queue; what a move *is*:
 
 - **A window whose last Workspace left closes itself**, with no confirmation, no
   archive and no kill: nothing ended.
+- **Must collapse the source only after `workspace-departed` confirms adoption, before committing its release and removing its tab or closing its Window.** The pending guard spans the animation; `workspace-move.test.ts` pins this order. Presentation is `docs/specs/layout.md` → Workspace motion.
 - **A pane's helper Session travels with it.** A helper is not a member Surface,
   so nothing else in the payload names it, and one left behind is a leaked shell
   plus a stray pane on the source's next reload. It rides directly after its

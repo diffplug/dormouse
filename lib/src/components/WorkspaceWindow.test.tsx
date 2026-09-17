@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { WorkspaceWindow } from './WorkspaceWindow';
 import { WorkspaceStrip } from './WorkspaceStrip';
+import * as workspaceMotion from './workspace-motion';
 import { closeWorkspaceWithSurfaces } from './wall/workspace-lifecycle';
 import * as terminalRegistry from '../lib/terminal-registry';
 import { setPlatform } from '../lib/platform';
@@ -95,6 +96,21 @@ async function render(node = <WorkspaceWindow initialPaneIds={['pane-a']} />): P
 }
 
 describe('WorkspaceWindow', () => {
+  it('keeps the closing tab and its Surfaces until the workspace collapse finishes', async () => {
+    createWorkspace({ id: 'ws-2' });
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
+    let finish!: () => void;
+    vi.spyOn(workspaceMotion, 'collapseWorkspace').mockImplementation(() => new Promise<void>(resolve => { finish = resolve; }));
+    let closing!: Promise<string | null>;
+    await act(async () => { closing = closeWorkspaceWithSurfaces('ws-2'); });
+    expect(container.querySelector('[data-workspace-tab="ws-2"]')).not.toBeNull();
+    expect(getWallHandle('ws-2')!.surfaceIds()).toEqual(['pane-a']);
+    await act(async () => { finish(); expect(await closing).toBeNull(); });
+    await flush();
+    expect(container.querySelector('[data-workspace-tab="ws-2"]')).toBeNull();
+    expect(getWallHandle('ws-2')).toBeNull();
+  });
+
   it('clicking an inactive tab activates it in command mode even if it was left in passthrough', async () => {
     const first = getActiveWorkspaceId();
     await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
@@ -318,6 +334,7 @@ describe('WorkspaceWindow', () => {
     await flush();
     expect(refusal).toContain('notepad archive failed');
     expect(handle.surfaceIds()).toEqual([paneId]);
+    expect(workspaceMotion.workspaceIsCollapsed('ws-2')).toBe(false);
 
     // The flag is cleared, so the Wall's "always one pane" rule works again.
     vi.mocked(fake.notepadArchive.save).mockResolvedValue(undefined);

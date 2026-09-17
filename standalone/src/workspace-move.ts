@@ -10,6 +10,7 @@ import { restoreTransferredTerminalState, removeTerminalPaneState } from "dormou
 import { registry as terminalRegistry } from "dormouse-lib/lib/terminal-store";
 import { hydrateNotepadFromVolatile, removeSurface } from "dormouse-lib/lib/notepad/notepad-store";
 import { getWallHandle } from "dormouse-lib/components/wall/wall-handles";
+import { collapseWorkspace } from "dormouse-lib/components/workspace-motion";
 import { forgetWorkspaceBootPlan, setWorkspaceBootPlan } from "dormouse-lib/components/wall/workspace-boot-plans";
 import { wallBootFromResult, type WallBootPlans } from "dormouse-lib/components/wall/wall-types";
 import {
@@ -287,13 +288,14 @@ export async function tearOutWorkspace(
  * kill one — they are running in the other Window now), drop the notes, and take
  * the Workspace out of the strip.
  */
-function handleDeparted(workspaceId: WorkspaceId): void {
+async function handleDeparted(workspaceId: WorkspaceId): Promise<void> {
   const move = inFlight.get(workspaceId);
   if (!move) {
     console.warn("[workspace-move] a departure for a Workspace that was not in flight", workspaceId);
     return;
   }
   inFlight.delete(workspaceId);
+  await collapseWorkspace(workspaceId);
   move.prepared.commit();
   forgetAlertDelivery(move.prepared.payload.terminalIds);
   move.settle({ moved: true });
@@ -579,7 +581,7 @@ export function initWorkspaceMoves(platform: PlatformAdapter): void {
     void adoptQueued();
   });
   void listenToWindow<{ workspaceId: WorkspaceId }>("dormouse://workspace-departed", (event) => {
-    handleDeparted(event.payload.workspaceId);
+    return handleDeparted(event.payload.workspaceId);
   });
   void listenToWindow<{ workspaceId: WorkspaceId; reason?: string; replayIds?: string[] }>(
     "dormouse://workspace-arrival-failed",

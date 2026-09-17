@@ -24,12 +24,13 @@ import { FOCUS_MOTION_MS } from '../design';
 // marching dash) is NEVER in this JSX. A selection change remounts only the keyed
 // outline; the overlay's layout effect reapplies its geometry pre-paint.
 export function SelectionRing({
-  variant, animationKey, color, windowFocused, containerRef, pathRef, smearRef,
+  variant, animationKey, color, windowFocused, paused = false, containerRef, pathRef, smearRef,
 }: {
   variant: 'ants' | 'solid';
   animationKey: string;
   color: string;
   windowFocused: boolean;
+  paused?: boolean;
   containerRef: Ref<HTMLDivElement>;
   pathRef: Ref<SVGPathElement>;
   smearRef: Ref<SVGGElement>;
@@ -90,7 +91,7 @@ export function SelectionRing({
           strokeWidth={isAnts ? ma.strokeWidth : 1}
           style={isAnts ? {
             animation: `marching-ants ${ma.cycleDuration}s linear ${ma.cyclesPerSelection}`,
-            animationPlayState: (ma.paused || !windowFocused) ? 'paused' : 'running',
+            animationPlayState: (ma.paused || paused || !windowFocused) ? 'paused' : 'running',
           } : undefined}
         />
       </svg>

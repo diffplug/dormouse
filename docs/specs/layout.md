@@ -152,12 +152,21 @@ Source of truth: `lib/src/components/Baseboard.tsx`, `lib/src/components/Door.ts
 
 Source of truth: `DOOR_TAB_CLASS` in `lib/src/components/design.tsx`; `WorkspaceStrip` in `lib/src/components/WorkspaceStrip.tsx`; `AppBar` in `standalone/src/AppBar.tsx`. Close visibility: `activates on click` in `lib/src/components/WorkspaceStrip.test.tsx`.
 
+### Workspace motion
+
+- **Must expand the visible Workspace from its tab on activation, creation, and arrival**, using `LATH_MOTION_MS` and `LATH_EASING`, including opacity. Keep its layout box full-size throughout; skip motion without a measurable tab or under `motionIsInstant()`.
+- **Must collapse a closing Workspace before disposing its Surfaces or removing its tab**, then expand the successor. Hidden departures finish instantly; refused closure restores the Workspace. Hold the closure guard during collapse and omit the subsequent pane exit delay. Transfer sequencing is `docs/specs/standalone.md` → Transfer.
+- **Must reverse interrupted motion from its displayed progress and settle departures even when backgrounded frames stop.** Disposal cancels callbacks. Pinned by `lib/src/components/workspace-motion.test.ts` and `lib/src/components/WorkspaceWindow.test.tsx`.
+- **Must render the selection ring outside the transformed Workspace and remeasure on its animation frames.** Its opacity follows the selected target's Workspace.
+
+Source of truth: `createWorkspaceMotion` in `lib/src/components/workspace-motion.ts`; `WorkspaceMotion` in `lib/src/components/WorkspaceMotion.tsx`; `closeAll` in `lib/src/components/Wall.tsx`.
+
 ### Workspace lifecycle
 
 Each Wall renders one Workspace's Content (Lath layout) and Baseboard (doors). Standalone mounts one Wall **per Workspace**; VS Code and the website playground mount a bare Wall with no Workspace id, which behaves exactly as a single-Workspace Window (VS Code's per-webview mapping is `docs/specs/vscode.md`).
 
 - **Must mount every Workspace's Wall in one grid cell**, inactive Walls `visibility:hidden` (plus `inert`) and never `display:none` (rationale).
-- **Must switch by flipping `active` alone**: no re-seed, no re-parent, no leaf unmount, and no `resumeTerminal` / `restoreTerminal`; the only mount work is the terminal reattach below, which replays nothing, so I8 holds by construction (`WorkspaceWindow.test.tsx`).
+- **Must preserve mounted leaves across switches**: no re-seed, no re-parent, no leaf unmount, and no `resumeTerminal` / `restoreTerminal`; the only mount work is the terminal reattach below, which replays nothing, so I8 holds by construction (`WorkspaceWindow.test.tsx`).
 - **A hidden Wall's terminals hold no element and no GL context**: deactivation runs `unmountElement` on every terminal pane, exactly as minimize does ([Renderer](#renderer)); activation runs `mountElement` and fits through the [Animations](#animations) gate, so an unchanged grid sends no PTY resize (`TerminalPane.test.tsx`). Browser Surfaces keep their live documents (rationale).
 - **A hidden Wall consumes no window input**: every listener it keeps is gated on `active`, so nothing it hears is dispatched, forwarded, or `preventDefault`ed. **Only the active Wall renders the modal hosts and the overlays that trap keys** — the kill confirmation, the refused-archive prompt, a terminal's selection popup (rationale): a staged prompt survives the switch and is answered only where the user can see it.
 - **Exactly one Wall answers a `dor` request**, chosen by `docs/specs/dor-cli.md` → "Handle Model". Every Wall registers a handle, a bare one under `DEFAULT_WORKSPACE_ID`, so the router always finds one.
@@ -262,6 +271,7 @@ A fixed-positioned element on top of the Lath host, covering the active element'
 - **Exactly one pane or door is active at a time**, drawn by one SVG renderer (`SelectionRing`, `variant: 'ants' | 'solid'`).
 - **Passthrough:** `variant='solid'` — a 1px solid SVG stroke, centerline `strokeWidth/2` inside the div edge for panes and doors alike, no glow (rationale).
 - **Command:** `variant='ants'` — marching-ants border (`cfg.marchingAnts`: 10px segment, 60% dash, four 0.4s cycles, 2px stroke). **Run the burst on command entry or identity change, then hold still** (test: `starts a finite burst on command entry and remounts the outline on a selection change` in `lib/src/components/wall/WorkspaceSelectionOverlay.test.tsx`; rationale). Keep it unchanged during travel and draw the smear separately ([Ring travel](#ring-travel)). **While unfocused, pause it and apply `saturate(0.3)` to the ring.**
+- **Must pause the ants during Workspace title editing and restart their burst when editing ends**, without changing mode. Pinned by `pauses during workspace rename and restarts the burst when editing finishes` in `lib/src/components/wall/WorkspaceSelectionOverlay.test.tsx`.
 - Border radius follows DESIGN.md's Concentric-Corners Rule: the pane ring's radius is the pane radius plus the inflate (`PANE_SELECTION_RING_RADIUS_PX`), with the marching-ants path inset so its stroke centerline sits on the same gutter midline; doors sit at zero offset and keep `0.5rem 0.5rem 0 0`.
 - Color is the resolved `--color-focus-ring`, **re-read whenever `document.body`'s class/style changes**, because the dynamic palette publishes it there (`useFocusRingColor`).
 - `z-index: 50`, `pointer-events: none`.

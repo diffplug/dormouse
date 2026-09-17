@@ -1,4 +1,7 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
+import { getWorkspaceUiSnapshot, subscribeToWorkspaceUi } from '../../lib/workspace-ui-store';
+import { subscribeWorkspaceMotionFrames } from '../workspace-motion';
 import {
   FOCUS_MOTION_MS,
   PANE_GUTTER_PX,
@@ -208,6 +211,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
   const activeRef = useRef(active);
   activeRef.current = active;
   const workspaces = useSyncExternalStore(subscribeToWorkspaces, getWorkspacesSnapshot);
+  const { renamingId } = useSyncExternalStore(subscribeToWorkspaceUi, getWorkspaceUiSnapshot);
 
   // The ring shell mounts when there's a measured frame to show; per-frame geometry
   // is written imperatively (below), never via React state — so a travelling ring
@@ -227,6 +231,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
   // `modeRef` mirrors the current mode so any `applyRing` closure derives the right
   // variant without a stale capture.
   const frameRef = useRef<DisplayedRing | null>(null);
+  const opacityRef = useRef('');
   const modeRef = useRef(mode);
   modeRef.current = mode;
 
@@ -255,6 +260,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     container.style.left = `${rect.left}px`;
     container.style.width = `${rect.width}px`;
     container.style.height = `${rect.height}px`;
+    container.style.opacity = opacityRef.current;
 
     const isAnts = modeRef.current !== 'passthrough';
     const strokeWidth = isAnts ? cfg.marchingAnts.strokeWidth : 1;
@@ -392,6 +398,8 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
 
       const next = measureFrame(targetEl, selectedType);
       if (!next) return;
+      const wall = targetEl.closest<HTMLElement>('[data-workspace-wall]');
+      opacityRef.current = wall?.style.opacity ?? '';
 
       // A newly visible Wall continues from the other Wall's painted frame,
       // never from its own stale selection history. Hidden Walls publish nothing.
@@ -450,10 +458,12 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     // While the wall streams animator frames the leaf divs carry the interpolated
     // inline geometry, so re-measuring each frame tracks the tween frame-accurately.
     const unsubFrames = subscribeLathFrames?.(() => update());
+    const unsubWorkspaceFrames = subscribeWorkspaceMotionFrames(update);
 
     return () => {
       ro.disconnect();
       unsubFrames?.();
+      unsubWorkspaceFrames();
       window.removeEventListener('resize', update);
       document.removeEventListener('scroll', update, true);
     };
@@ -478,10 +488,11 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
 
   if (!active || !visible || !selectedId) return null;
 
-  return (
+  const ring = (
     <SelectionRing
       variant={mode === 'passthrough' ? 'solid' : 'ants'}
-      animationKey={ringIdentity(selectedType, selectedId)}
+      animationKey={`${ringIdentity(selectedType, selectedId)}:${renamingId ?? ''}`}
+      paused={renamingId !== null}
       color={selectionColor}
       windowFocused={windowFocused}
       containerRef={containerRef}
@@ -489,4 +500,6 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
       smearRef={smearRef}
     />
   );
+  // Fixed coordinates must not inherit the workspace presentation transform.
+  return handoff ? createPortal(ring, document.body) : ring;
 }

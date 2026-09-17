@@ -1,5 +1,5 @@
 import { useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react';
-import { clsx } from 'clsx';
+import { WorkspaceMotion } from './WorkspaceMotion';
 import { Wall } from './Wall';
 import { listWallHandles } from './wall/wall-handles';
 import { getWorkspaceBootPlan, seedWorkspaceBootPlans } from './wall/workspace-boot-plans';
@@ -69,18 +69,10 @@ export function WorkspaceWindow({
           const isActive = workspace.id === activeId;
           const plan = getWorkspaceBootPlan(workspace.id);
           return (
-            <div
+            <WorkspaceMotion
               key={workspace.id}
-              data-workspace-wall={workspace.id}
-              data-workspace-active={isActive ? 'true' : 'false'}
-              // `visibility: hidden` (not `display: none`) keeps the box laid out,
-              // so a hidden Workspace's reattached xterms find an unchanged grid. `inert` is
-              // defense-in-depth: `visibility: hidden` already removes focusability.
-              inert={!isActive}
-              className={clsx(
-                'col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col',
-                !isActive && 'invisible pointer-events-none',
-              )}
+              id={workspace.id}
+              active={isActive}
             >
               <Wall
                 {...plan}
@@ -90,7 +82,7 @@ export function WorkspaceWindow({
                 dialogHost={isActive ? dialogHost : undefined}
                 enableBurrow={enableBurrow}
               />
-            </div>
+            </WorkspaceMotion>
           );
         })}
       </div>

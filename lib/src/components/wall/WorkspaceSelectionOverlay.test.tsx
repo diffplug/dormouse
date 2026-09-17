@@ -21,6 +21,7 @@ import type { WallMode, WallSelectionKind } from './wall-types';
 import { cfg } from '../../cfg';
 import { ringPerimeter } from '../../lib/ring-geometry';
 import type { RingFrame } from '../../lib/rect-tween';
+import { resetWorkspaceUi, setRenamingWorkspace } from '../../lib/workspace-ui-store';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -90,7 +91,7 @@ function Harness({ selectedId, selectedType = 'pane', mode, store, panes, doors 
 
 /** The overlay's root (fixed-position) div, or null when the ring is hidden. */
 function ring(): HTMLElement | null {
-  return container.querySelector('div');
+  return document.querySelector('[data-ring="outline"]')?.closest('svg')?.parentElement ?? null;
 }
 function ringRect() {
   const el = ring();
@@ -125,6 +126,7 @@ const B: Rectish = { top: 200, left: 300, width: 160, height: 60 };
 const INFLATE = 4; // SELECTION_RING_INFLATE_PX for panes
 
 beforeEach(() => {
+  resetWorkspaceUi();
   clock = 0;
   rafSeq = 0;
   rafCbs = new Map();
@@ -167,6 +169,20 @@ function twoPanes(a: Rectish = A, b: Rectish = B): Map<string, HTMLElement> {
 }
 
 describe('WorkspaceSelectionOverlay ring travel', () => {
+  it('pauses during workspace rename and restarts the burst when editing finishes', async () => {
+    const store = makeStore();
+    const panes = twoPanes();
+    await act(async () => root.render(<Harness selectedId="a" mode="command" store={store} panes={panes} />));
+    await act(async () => setRenamingWorkspace('ws-a'));
+    const editing = container.querySelector<SVGPathElement>('[data-ring="outline"]')!;
+    expect(editing.style.animationPlayState).toBe('paused');
+    await act(async () => setRenamingWorkspace(null));
+    const resumed = container.querySelector<SVGPathElement>('[data-ring="outline"]')!;
+    expect(resumed).not.toBe(editing);
+    expect(resumed.style.animationPlayState).toBe('running');
+    expect(resumed.style.animation).toContain('marching-ants');
+  });
+
   it('carries the last visible ring across Walls instead of their stale pane positions', async () => {
     const store = makeStore();
     const panes = twoPanes();

@@ -9,6 +9,7 @@ import { useRef, useState, useEffect, useCallback, useMemo, useSyncExternalStore
 import { clsx } from 'clsx';
 import { Baseboard } from './Baseboard';
 import { workspaceTabElement } from './workspace-tab-elements';
+import { collapseWorkspace, restoreWorkspaceMotion, workspaceIsCollapsed } from './workspace-motion';
 import { ExternalLinkModalHost } from './ExternalLinkModalHost';
 import { AgentBrowserScreenModalHost } from './AgentBrowserScreenModalHost';
 // Remote-host code (relay/WebSocket/enrollment + the window.dormouseBurrow
@@ -680,6 +681,8 @@ export function Wall({
     // don't restore).
     const lastLeaf = lath.store.leafIds().length === 1;
     lath.markDying(id, { shrinkTowardBottomRight: lastLeaf });
+    // The Workspace already completed its visible exit; no second pane fade.
+    const exitMs = closingWorkspaceRef.current && workspaceIsCollapsed(effectiveWorkspaceId) ? 0 : lath.exitMs;
     setTimeout(() => {
       if (!lath.store.has(id)) return; // superseded meanwhile (e.g. replaced)
       disposeSession(id);
@@ -697,7 +700,7 @@ export function Wall({
         if (survivorId) selectPane(survivorId);
         else setSelectedId(null);
       }
-    }, lath.exitMs);
+    }, exitMs);
     clearLocalSurfaceActivity(id);
     fireEvent({ type: 'kill', id });
   }, [fireEvent, forgetSurfaceRef, selectPane, lath, nav]);
@@ -1055,6 +1058,7 @@ export function Wall({
    *  store refuses — ends here (`docs/specs/layout.md` → "Workspaces"). */
   const cancelClose = useCallback(() => {
     closingWorkspaceRef.current = false;
+    if (workspaceIsCollapsed(effectiveWorkspaceId)) restoreWorkspaceMotion(effectiveWorkspaceId);
     refillEmptyTree();
   }, [refillEmptyTree]);
 
@@ -1079,6 +1083,7 @@ export function Wall({
    */
   const closeAll = useCallback(async (mode: CloseSurfaceMode = 'prompt'): Promise<string | null> => {
     closingWorkspaceRef.current = true;
+    await collapseWorkspace(effectiveWorkspaceId);
     // Walked until nothing new turns up rather than over one snapshot: a member
     // pane's `dor` request can create a Surface during the awaits, and one
     // created after the walk had passed it would ride the unmount out as an
