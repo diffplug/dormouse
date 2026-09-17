@@ -67,7 +67,9 @@ const tabVariant = tv({
 });
 
 type TerminalHeaderTier = 'full' | 'compact' | 'minimal';
-const terminalHeaderTier = (width: number): TerminalHeaderTier => width > 280 ? 'full' : width > 160 ? 'compact' : 'minimal';
+// Includes the header's 8px left + 5px right padding; the former content-box
+// boundaries were 280/160px. Border-box width distinguishes tiny from hidden.
+const terminalHeaderTier = (width: number): TerminalHeaderTier => width > 293 ? 'full' : width > 173 ? 'compact' : 'minimal';
 
 // WATCHING is a rule on the running command, so the bell says which command it
 // would act on rather than naming an abstract toggle (`docs/specs/alert.md`).
@@ -130,7 +132,7 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
   const isRenaming = renamingId === id;
   const tabRef = useRef<HTMLDivElement>(null);
   const suppressAlertClickRef = useRef(false);
-  const tier = useHeaderTier(tabRef, terminalHeaderTier, { box: 'content-box' });
+  const tier = useHeaderTier(tabRef, terminalHeaderTier);
   const [todoPreviewRect, setTodoPreviewRect] = useState<DOMRect | null>(null);
   const [renameWarning, setRenameWarning] = useState<{ rect: DOMRect; reason: RenameRejection; value: string } | null>(null);
   const todoPill = useTodoPillContent(activity.todo);

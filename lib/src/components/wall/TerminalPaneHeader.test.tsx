@@ -157,7 +157,7 @@ describe('TerminalPaneHeader — notepad icon', () => {
   let resizeHeader: (width: number) => void;
 
   beforeEach(() => {
-    resizeHeader = stubResizeObserver(400, 13);
+    resizeHeader = stubResizeObserver(400);
   });
 
   afterEach(() => {
@@ -220,32 +220,51 @@ describe('TerminalPaneHeader — notepad icon', () => {
     expect(notepadButton()).not.toBeNull();
   });
 
-  it('preserves content-box breakpoints and the previous tier while hidden', () => {
+  it('preserves visual breakpoints and the previous tier while hidden', () => {
     renderHeader(stubActions(), null);
     const split = () => container.querySelector('[aria-label="Split left/right"]');
-    act(() => resizeHeader(280));
+    act(() => resizeHeader(293));
     expect(split()).toBeNull();
     expect(notepadButton()).not.toBeNull();
     act(() => resizeHeader(0));
     expect(split()).toBeNull();
     expect(notepadButton()).not.toBeNull();
-    act(() => resizeHeader(281));
+    act(() => resizeHeader(294));
     expect(split()).not.toBeNull();
-    act(() => resizeHeader(160));
+    act(() => resizeHeader(173));
     expect(notepadButton()).toBeNull();
-    act(() => resizeHeader(161));
+    act(() => resizeHeader(174));
     expect(notepadButton()).not.toBeNull();
   });
 
-  it('measures the initial content width before ResizeObserver delivers', () => {
+  it('measures the initial border width before ResizeObserver delivers', () => {
     stubResizeObserver(0);
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 293, 30));
-    vi.spyOn(window, 'getComputedStyle').mockReturnValue({
-      paddingLeft: '8px', paddingRight: '5px', borderLeftWidth: '0px', borderRightWidth: '0px',
-    } as CSSStyleDeclaration);
     renderHeader(stubActions(), null);
     expect(container.querySelector('[aria-label="Split left/right"]')).toBeNull();
     expect(notepadButton()).not.toBeNull();
+  });
+
+  it.each([true, false])('handles zero content width with borderBoxSize available=%s', (hasBorderBox) => {
+    let resize: (width: number) => void;
+    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 400, 30));
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+      observe(target: Element) {
+        resize = (width) => this.callback([{
+          target,
+          borderBoxSize: hasBorderBox ? [{ inlineSize: width, blockSize: 30 }] : undefined,
+          contentRect: { width: Math.max(0, width - 13) },
+        } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
+      }
+      disconnect() {}
+    });
+    renderHeader(stubActions(), null);
+    expect(container.querySelector('[aria-label="Split left/right"]')).not.toBeNull();
+    rect.mockReturnValue(new DOMRect(0, 0, 8, 30));
+    act(() => resize(8));
+    expect(container.querySelector('[aria-label="Split left/right"]')).toBeNull();
+    expect(notepadButton()).toBeNull();
   });
 
   it('toggles the one open notepad', () => {
