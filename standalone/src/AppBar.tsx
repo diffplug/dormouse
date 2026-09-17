@@ -152,6 +152,7 @@ export function AppBar() {
       className={`relative flex h-[30px] shrink-0 select-none items-center bg-app-bg text-app-fg text-xs ${
         IS_MAC ? 'pl-[78px]' : ''
       }`}
+      style={{ marginBottom: PANE_GUTTER_PX }}
     >
       {/* On macOS, native traffic lights are shown by titleBarStyle "Overlay" —
           we just leave padding on the left (pl-[78px]) to avoid overlapping them. */}
@@ -179,7 +180,7 @@ export function AppBar() {
           docs/specs/standalone.md), so the titlebar carries only the
           native-style window controls on Windows/Linux. */}
       {!IS_MAC && <div className={`flex self-stretch ${windowFocused ? '' : 'opacity-60'}`}><WinControls /></div>}
-      {/* Paint into the Wall's existing top gutter, preserving its geometry. */}
+      {/* Reserve the gradient's own band above the Wall's focus-ring gutter. */}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-x-0 top-full z-10"
