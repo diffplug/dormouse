@@ -416,7 +416,7 @@ The spec keeps the behavior help cannot express:
 |---|---|
 | `split` | **Only a bare split focuses the new Surface.** A `--` marker or command tail leaves the caller focused; pre-parse preserves the marker stricli discards. |
 | `ensure` | **Must have a `--` command tail.** Matching uses the exact OSC 633 command plus resolved CWD; `cmd.exe` without integration fails immediately, other unintegrated shells time out after 8s and close through the notepad coordinator. `--restart` drives the live PTY in place, preserving layout and minimized/visible state, so it works on Doors too. |
-| `send` | **Must select exactly one input mode.** Text then key is the only mixed order; duplicate flags require the explicit sequence form. Input is paced ([transport.md → Paced input](transport.md#paced-input)), so `sent` means queued, not read. |
+| `send` | **Must select exactly one input mode.** Text then key is the only mixed order; duplicate flags require the explicit sequence form. Input is paced, `sent` meaning queued ([transport.md → Paced input](transport.md#paced-input)). |
 | `read` | Clean, ANSI-free rendered lines; line limits count rendered lines. |
 | `await` | **Must name `--until quiet\|exit`; never infer it.** Timeout 1–86400 whole seconds, default 600; `alert.md` owns wake semantics. |
 | `kill` | **Must select exactly one confirmation mode.** Conditional text needs four non-whitespace characters and must match `read`; browser Surfaces are killable. |

@@ -1264,7 +1264,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
     inputs.delete(id);
   }
 
-  function drainInput(p, input) {
+  function drainInput(id, p, input) {
     input.timer = undefined;
     while (input.steps.length > 0) {
       const step = input.steps[0];
@@ -1274,16 +1274,26 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
           : input.at + PACED_CHUNK_GAP_MS;
         const wait = dueAt - Date.now();
         if (wait > 0) {
-          input.timer = setTimeout(() => drainInput(p, input), wait);
+          input.timer = setTimeout(() => drainInput(id, p, input), wait);
           return;
         }
       }
       input.steps.shift();
-      p.write(step.data);
-      if (step.paced) {
-        input.at = Date.now();
-        if (!step.key) input.textAt = input.at;
+      try {
+        p.write(step.data);
+      } catch {
+        // A PTY can die between its last write and the `onExit` that cancels
+        // its input. Drop the rest rather than throw from a timer, which has
+        // no caller to catch it and would take down every PTY in the process.
+        cancelInput(id);
+        return;
       }
+      // Every write paces what follows it, so a keystroke or paste queued
+      // mid-send cannot share a read with the run after it; only paced text
+      // settles a key. Unpaced steps drain in the same millisecond as the
+      // paced step they follow, so no test pins this.
+      input.at = Date.now();
+      if (step.paced && !step.key) input.textAt = input.at;
     }
   }
 
@@ -1380,8 +1390,9 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
     const p = ptys.get(id);
     if (!p) return;
     // An interrupt skips the line and discards what waits in it, as the tty
-    // flushes its own input queue on one.
-    if (!paced && data === '\x03') cancelInput(id);
+    // flushes its own input queue on one. `dor send --key ctrl-c` is paced and
+    // is the interrupt agents are taught, so this cannot test for unpaced.
+    if (data === '\x03') cancelInput(id);
     let input = inputs.get(id);
     if (!paced && !input?.steps.length) {
       p.write(data);
@@ -1396,7 +1407,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
     } else {
       input.steps.push({ data, key: false, paced: false });
     }
-    if (input.timer === undefined) drainInput(p, input);
+    if (input.timer === undefined) drainInput(id, p, input);
   }
 
   function resize(id, cols, rows, repaint = false) {

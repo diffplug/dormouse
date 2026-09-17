@@ -344,6 +344,7 @@ function ptyHarness(t) {
   const resizes = [];
   const writes = [];
   const exits = [];
+  const dead = new Set();
   let serial = 0;
   const mgr = create(() => {}, {
     spawn() {
@@ -353,13 +354,18 @@ function ptyHarness(t) {
         onData() {},
         onExit(handler) { exits.push(handler); },
         resize(cols, rows) { resizes.push({ generation, cols, rows }); },
-        write(data) { writes.push(generation === 1 ? data : `${generation}:${data}`); },
+        write(data) {
+          if (dead.has(generation)) throw new Error('write EOF');
+          writes.push(generation === 1 ? data : `${generation}:${data}`);
+        },
         kill() {},
       };
     },
   });
   mgr.spawn('pane-1');
-  return { mgr, resizes, writes, exits };
+  // `dead` makes the PTY throw on write without going through `onExit`, the
+  // window in which node-pty rejects a write to a process that is already gone.
+  return { mgr, resizes, writes, exits, dead };
 }
 
 for (const rows of [1, 24]) {
@@ -451,6 +457,18 @@ test('input written during a pace joins it in order', (t) => {
   assert.equal(writes.at(-1), 'free');
 });
 
+test('a PTY that throws mid-drain drops the rest instead of throwing from the timer', (t) => {
+  const { mgr, writes, dead } = ptyHarness(t);
+  mgr.write('pane-1', `${'f'.repeat(300)}\r`, { paced: true });
+  assert.deepEqual(writes, ['f'.repeat(256)]);
+  dead.add(1);
+  t.mock.timers.tick(1000);
+  assert.deepEqual(writes, ['f'.repeat(256)]);
+  dead.delete(1);
+  mgr.write('pane-1', 'after');
+  assert.deepEqual(writes, ['f'.repeat(256), 'after'], 'the dropped queue leaves later input unblocked');
+});
+
 test('a key sent by a later paced write still settles after earlier text', (t) => {
   const { mgr, writes } = ptyHarness(t);
   mgr.write('pane-1', 'prompt', { paced: true });
@@ -464,7 +482,7 @@ test('a key sent by a later paced write still settles after earlier text', (t) =
   assert.equal(writes.at(-1), 'next');
 });
 
-for (const retire of ['exit', 'kill', 'killAll', 'replace', 'interrupt', 'typed ^C']) {
+for (const retire of ['exit', 'kill', 'killAll', 'replace', 'interrupt', 'typed ^C', 'dor send --key ctrl-c']) {
   test(`pending paced input is discarded on ${retire}`, (t) => {
     const { mgr, writes, exits } = ptyHarness(t);
     mgr.write('pane-1', `${'c'.repeat(300)}\r`, { paced: true });
@@ -472,12 +490,13 @@ for (const retire of ['exit', 'kill', 'killAll', 'replace', 'interrupt', 'typed 
     else if (retire === 'replace') mgr.spawn('pane-1');
     else if (retire === 'interrupt') mgr.interrupt(['pane-1']);
     else if (retire === 'typed ^C') mgr.write('pane-1', '\x03');
+    else if (retire === 'dor send --key ctrl-c') mgr.write('pane-1', '\x03', { paced: true });
     else mgr[retire]('pane-1');
     t.mock.timers.tick(1000);
     if (retire === 'replace') mgr.write('pane-1', '\r', { paced: true });
     assert.deepEqual(writes, [
       'c'.repeat(256),
-      ...(retire === 'interrupt' || retire === 'typed ^C' ? ['\x03'] : []),
+      ...(retire.includes('^C') || retire.includes('ctrl-c') || retire === 'interrupt' ? ['\x03'] : []),
       ...(retire === 'replace' ? ['2:\r'] : []),
     ]);
   });
