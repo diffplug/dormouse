@@ -66,10 +66,13 @@ const tabVariant = tv({
   },
 });
 
-type TerminalHeaderTier = 'full' | 'compact' | 'minimal';
+type TerminalHeaderTier = 'full' | 'compact' | 'minimal' | 'tiny';
 // Includes the header's 8px left + 5px right padding; the former content-box
 // boundaries were 280/160px. Border-box width distinguishes tiny from hidden.
-const terminalHeaderTier = (width: number): TerminalHeaderTier => width > 293 ? 'full' : width > 173 ? 'compact' : 'minimal';
+// 81px is where the 3-button pane-action group stops fitting beside that
+// padding (4px offset + 3x20px + 2x2px gaps).
+const terminalHeaderTier = (width: number): TerminalHeaderTier =>
+  width > 293 ? 'full' : width > 173 ? 'compact' : width > 80 ? 'minimal' : 'tiny';
 
 // WATCHING is a rule on the running command, so the bell says which command it
 // would act on rather than naming an abstract toggle (`docs/specs/alert.md`).
@@ -136,7 +139,7 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
   const [todoPreviewRect, setTodoPreviewRect] = useState<DOMRect | null>(null);
   const [renameWarning, setRenameWarning] = useState<{ rect: DOMRect; reason: RenameRejection; value: string } | null>(null);
   const todoPill = useTodoPillContent(activity.todo);
-  const showTodoPill = todoPill.visible && tier !== 'minimal';
+  const showTodoPill = todoPill.visible && (tier === 'full' || tier === 'compact');
   const runningArgv0 = paneState.currentCommand?.rawCommandLine
     ? commandArgv0(paneState.currentCommand.rawCommandLine)
     : null;
@@ -278,7 +281,7 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
       </div>
       {!isRenaming && (
         <>
-          {showMouseIcon && tier !== 'minimal' && (
+          {showMouseIcon && (tier === 'full' || tier === 'compact') && (
             <div className="ml-1 shrink-0">
               <HeaderActionButton
                 className="flex h-5 min-w-5 items-center justify-center rounded transition-colors shrink-0 hover:bg-current/10"
@@ -300,7 +303,7 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
               </HeaderActionButton>
             </div>
           )}
-          <NotepadHeaderButton surfaceId={id} hideWhenEmpty={tier === 'minimal'} />
+          {tier !== 'tiny' && <NotepadHeaderButton surfaceId={id} hideWhenEmpty={tier === 'minimal'} />}
           {tier === 'full' && (
             <div className="ml-1 flex shrink-0 items-center gap-0.5">
               <HeaderActionButton
@@ -315,35 +318,40 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
                 ariaLabel="Split top/bottom"
                 tooltip={'Split top/bottom [-] or ["]'}
               ><SplitVerticalIcon size={14} /></HeaderActionButton>
-              <HeaderActionButton
-                className={paneZoomButtonClass(zoomed, isActiveHeader)}
-                onClick={(e) => { e.stopPropagation(); actions.onZoom(id); }}
-                ariaLabel={zoomed ? 'Unzoom' : 'Zoom'}
-                tooltip={zoomed ? 'Unzoom' : 'Zoom [z]'}
-              >{zoomed ? <ArrowsInIcon size={14} /> : <ArrowsOutIcon size={14} />}</HeaderActionButton>
             </div>
           )}
           {/*
-            Minimize + close are the highest-priority controls: they must stay
-            visible no matter how narrow the header gets. They sit last (so
-            nothing fixed-width is to their right to push them off) and every
-            other element yields first — the title/bell region clips via
-            `overflow-hidden`, split/zoom drop below the `full` tier, and the
-            mouse icon drops at the `minimal` tier.
+            Zoom + minimize + close are the highest-priority controls: they sit
+            last (so nothing fixed-width is to their right to push them off) and
+            every other element yields first — the title/bell region clips via
+            `overflow-hidden`, the splits drop below the `full` tier, and the
+            TODO pill, mouse icon, and notepad drop at `minimal`/`tiny`. At
+            `tiny` even minimize and kill go: zoom is the last control standing,
+            because zooming is how you get back everything the header dropped.
           */}
           <div className="ml-1 flex shrink-0 items-center gap-0.5">
             <HeaderActionButton
-              className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
-              onClick={(e) => { e.stopPropagation(); actions.onMinimize(id); }}
-              ariaLabel="Minimize"
-              tooltip="Minimize [m] or [d]"
-            ><ArrowLineDownIcon size={14} /></HeaderActionButton>
-            <HeaderActionButton
-              className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-error/10 hover:text-error"
-              onClick={(e) => { e.stopPropagation(); actions.onKill(id); }}
-              ariaLabel="Kill"
-              tooltip="Kill [k] or [x]"
-            ><XIcon size={14} /></HeaderActionButton>
+              className={paneZoomButtonClass(zoomed, isActiveHeader)}
+              onClick={(e) => { e.stopPropagation(); actions.onZoom(id); }}
+              ariaLabel={zoomed ? 'Unzoom' : 'Zoom'}
+              tooltip={zoomed ? 'Unzoom' : 'Zoom [z]'}
+            >{zoomed ? <ArrowsInIcon size={14} /> : <ArrowsOutIcon size={14} />}</HeaderActionButton>
+            {tier !== 'tiny' && (
+              <>
+                <HeaderActionButton
+                  className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
+                  onClick={(e) => { e.stopPropagation(); actions.onMinimize(id); }}
+                  ariaLabel="Minimize"
+                  tooltip="Minimize [m] or [d]"
+                ><ArrowLineDownIcon size={14} /></HeaderActionButton>
+                <HeaderActionButton
+                  className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-error/10 hover:text-error"
+                  onClick={(e) => { e.stopPropagation(); actions.onKill(id); }}
+                  ariaLabel="Kill"
+                  tooltip="Kill [k] or [x]"
+                ><XIcon size={14} /></HeaderActionButton>
+              </>
+            )}
           </div>
         </>
       )}

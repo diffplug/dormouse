@@ -49,7 +49,7 @@ import {
 type BrowserInlineTier = 'full' | 'compact' | 'minimal';
 type BrowserHeaderTier = BrowserInlineTier | 'overflow' | 'tight' | 'tiny';
 const browserHeaderTier = (width: number): BrowserHeaderTier =>
-  width >= 420 ? 'full' : width >= 360 ? 'compact' : width >= 180 ? 'minimal' : width >= 80 ? 'overflow' : width >= 72 ? 'tight' : 'tiny';
+  width >= 420 ? 'full' : width >= 360 ? 'compact' : width >= 180 ? 'minimal' : width >= 102 ? 'overflow' : width >= 94 ? 'tight' : 'tiny';
 
 export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
   const dirty = useToolDirty(id, params);
@@ -116,7 +116,7 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
   }, []);
   const tier = useHeaderTier(headerRef, browserHeaderTier, { onResize: () => closeMenu(false) });
   const inline: BrowserInlineTier | null = tier === 'overflow' || tier === 'tight' || tier === 'tiny' ? null : tier;
-  // Keep 72–79px distinct so a dirty report can move actions without a resize.
+  // Keep 94–101px distinct so a dirty report can move actions without a resize.
   const inlinePaneActions = tier !== 'tiny' && (tier !== 'tight' || !dirty);
   const paneActionsFocused = useRef(false);
   const previousInlinePaneActions = useRef(inlinePaneActions);
@@ -255,19 +255,14 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
           ariaLabel="Split top/bottom"
           tooltip={'Split top/bottom [-] or ["]'}
         ><SplitVerticalIcon size={14} /></HeaderActionButton>
-        <HeaderActionButton
-          className={paneZoomButtonClass(zoomed, isActiveHeader)}
-          onClick={(e) => { e.stopPropagation(); actions.onZoom(id); }}
-          ariaLabel={zoomed ? 'Unzoom' : 'Zoom'}
-          tooltip={zoomed ? 'Unzoom' : 'Zoom [z]'}
-        >{zoomed ? <ArrowsInIcon size={14} /> : <ArrowsOutIcon size={14} />}</HeaderActionButton>
       </div>}
     </>
   );
 
-  // Preserve the 4px separation with inline chrome; collapsed controls align right.
-  const paneActions = (
-    <div className={`${inline ? 'ml-1' : 'ml-auto'} flex shrink-0 items-center gap-0.5`}
+  // Minimize + kill are the pair that can still be pushed into the popover; the
+  // wrapper tracks focus so a dirty report moving them takes focus with it.
+  const minimizeAndKill = (
+    <div className="flex shrink-0 items-center gap-0.5"
       onFocus={() => { paneActionsFocused.current = true; }}
       onBlur={() => { paneActionsFocused.current = false; }}>
       <HeaderActionButton
@@ -282,6 +277,22 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
         ariaLabel="Kill"
         tooltip="Kill [k] or [x]"
       ><XIcon size={14} /></HeaderActionButton>
+    </div>
+  );
+
+  // Zoom leads the pane-action group and never leaves the header: it is the one
+  // control that survives the narrowest width, because zooming is how you get
+  // back everything the header dropped.
+  // Preserve the 4px separation with inline chrome; collapsed controls align right.
+  const paneActions = (
+    <div className={`${inline ? 'ml-1' : 'ml-auto'} flex shrink-0 items-center gap-0.5`}>
+      <HeaderActionButton
+        className={paneZoomButtonClass(zoomed, isActiveHeader)}
+        onClick={(e) => { e.stopPropagation(); closeMenu(); actions.onZoom(id); }}
+        ariaLabel={zoomed ? 'Unzoom' : 'Zoom'}
+        tooltip={zoomed ? 'Unzoom' : 'Zoom [z]'}
+      >{zoomed ? <ArrowsInIcon size={14} /> : <ArrowsOutIcon size={14} />}</HeaderActionButton>
+      {inlinePaneActions && minimizeAndKill}
     </div>
   );
 
@@ -304,10 +315,10 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
           {noteCount ? <NotepadIcon size={14} weight="fill" /> : <DotsThreeIcon size={14} />}
         </button>
       )}
-      {inlinePaneActions && paneActions}
+      {paneActions}
       {popoverOpen && <BrowserHeaderPopover anchorRef={overflowRef} onClose={closeMenu}>
         {renderBrowserControls('popover')}
-        {!inlinePaneActions && paneActions}
+        {!inlinePaneActions && minimizeAndKill}
       </BrowserHeaderPopover>}
     </div>
   );

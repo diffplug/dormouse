@@ -52,7 +52,7 @@ A 30px header doubling as a drag handle: **a `pointerdown` past a 5px threshold 
 
 **Must use browser chrome for a serving Tool, with a Terminal Context disclosure for its serving terminal.** Tool composition belongs to `docs/specs/dor-tool.md` → Lifecycle.
 
-Elements left to right: derived label; alert bell; TODO pill (compact+); flexible gap; mouse-reporting override icon (compact+, only while the inside program requests mouse reporting); notepad icon (`docs/specs/notepad.md` → "Notepad UI"); split left/right, split top/bottom, zoom/unzoom (full only); minimize; kill (hover turns error-red).
+Elements left to right: derived label; alert bell; TODO pill (compact+); flexible gap; mouse-reporting override icon (compact+, only while the inside program requests mouse reporting); notepad icon (`docs/specs/notepad.md` → "Notepad UI"); split left/right, split top/bottom (full only); then the pane-action group: zoom/unzoom, minimize, kill (hover turns error-red).
 
 The label is the `DerivedHeader` from `deriveHeader(...)`; `docs/specs/terminal-state.md` owns the priority chain and disambiguator. Layout renders it: primary truncates with ellipsis, secondary muted beside it, a failed last command appends an error-colored glyph. Click renames/pins; right-click — or `>` in command mode — opens the header context menu.
 
@@ -109,20 +109,23 @@ Both layers wear the leaf's own rounding (header radius on top, terminal radius 
 
 ### Pane header responsive sizing
 
-**Must measure each header's own border-box width, never the viewport, retaining its tier at zero width** (rationale). Terminal tiers:
+**Must measure each header's own border-box width, never the viewport, retaining its tier at zero width** (rationale).
+
+**The pane-action group — zoom, minimize, kill — yields last, and zoom last within it**: a header too narrow for all three keeps zoom alone, since zooming restores everything the header dropped. Terminal tiers:
 
 - **Full** (>293px): everything.
-- **Compact** (>173px): split, zoom, and unzoom hidden.
-- **Minimal** (≤173px): also hides the TODO pill and the mouse-override icon, leaving alert, minimize, and kill. **The notepad icon survives this tier only while the Surface has notes** (`docs/specs/notepad.md` → "Notepad UI"). The label truncates with ellipsis.
+- **Compact** (>173px): split hidden.
+- **Minimal** (>80px): also hides the TODO pill and the mouse-override icon, leaving alert and the pane-action group. **The notepad icon survives this tier only while the Surface has notes** (`docs/specs/notepad.md` → "Notepad UI"). The label truncates with ellipsis.
+- **Tiny** (≤80px): notepad, minimize, and kill go too, leaving the clipped label/alert region and zoom.
 
 A browser header, including a Tool's (Terminal Context sits outside the measured width), collapses by border-box width:
 
 | Below | Change |
 |---|---|
-| 420px | Split and zoom hidden. |
+| 420px | Split hidden. |
 | 360px | Navigation hidden. |
-| 180px | Chrome moves into a viewport-clamped popover behind one trigger; minimize/kill stay inline. |
-| 72px (80px with an unsaved-change dot) | Minimize and kill join the popover. |
+| 180px | Chrome moves into a viewport-clamped popover behind one trigger; the group stays inline. |
+| 94px (102px with an unsaved-change dot) | Minimize and kill join the popover; zoom stays inline. |
 
 **Must reclamp the popover on content resize and keep it keyboard reachable** (focus enters on open, Tab stays inside, Escape returns it to the trigger) **and dismiss it on resize, when a dirty report moves minimize/kill controls (restoring trigger focus), or when its Surface is hidden (without restoring focus)**; `lib/src/components/wall/use-dismiss-overlay.ts` handles other dismissal, and controls dismiss only after acting. With notes, the trigger shows a filled notepad glyph and count; keys and connection labels truncate before controls.
 

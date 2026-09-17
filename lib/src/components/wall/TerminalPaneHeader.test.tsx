@@ -237,6 +237,27 @@ describe('TerminalPaneHeader — notepad icon', () => {
     expect(notepadButton()).not.toBeNull();
   });
 
+  it('keeps zoom to the last, dropping minimize and kill at the tiny tier', () => {
+    renderHeader(stubActions(), null);
+    const label = (name: string) => container.querySelector(`[aria-label="${name}"]`);
+    // Zoom left the split group, so it now outlives the splits it used to ride
+    // with, and then outlives minimize and kill too.
+    for (const width of [294, 200, 100, 81, 40]) {
+      act(() => resizeHeader(width));
+      expect(label('Zoom'), `${width}px`).not.toBeNull();
+    }
+    act(() => resizeHeader(81));
+    expect(label('Minimize')).not.toBeNull();
+    expect(label('Kill')).not.toBeNull();
+    act(() => resizeHeader(80));
+    expect(label('Minimize')).toBeNull();
+    expect(label('Kill')).toBeNull();
+    act(() => { addPlainNote('term-1', 'a note'); });
+    expect(notepadButton()).toBeNull();
+    act(() => resizeHeader(81));
+    expect(notepadButton()).not.toBeNull();
+  });
+
   it('measures the initial border width before ResizeObserver delivers', () => {
     stubResizeObserver(0);
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 293, 30));

@@ -246,24 +246,27 @@ export const RawSession: Story = {
   args: { paneKey: '', devServerLabel: '', url: 'https://example.com/docs' },
 };
 
-/** Narrow header: split/zoom collapse first (≤420px), then nav (≤360px). */
+/** Narrow header: the splits collapse first (≤420px), then nav (≤360px); the
+ *  zoom/minimize/kill group rides on. */
 export const Narrow: Story = {
   args: { width: 340 },
 };
 
-/** Real narrow split: the Tool context button leaves 79px for browser chrome,
- *  so the chrome sits behind one trigger while minimize/kill stay inline. */
+/** Real narrow split: the Tool context button leaves 102px for browser chrome,
+ *  so the chrome sits behind one trigger while the whole zoom/minimize/kill
+ *  group stays inline. */
 export const TinyTool: Story = {
-  args: { width: 103, tool: true, paneKey: 'a-very-long-tool-identity', devServerLabel: 'pnpm --filter a-very-long-project-name dev' },
+  args: { width: 126, tool: true, paneKey: 'a-very-long-tool-identity', devServerLabel: 'pnpm --filter a-very-long-project-name dev' },
 };
 
-/** Below 72px minimize/kill join the popover too. */
+/** Below 94px minimize/kill join the popover; zoom is the last control the
+ *  header keeps. */
 export const SmallestTool: Story = {
-  args: { width: 80, tool: true },
+  args: { width: 110, tool: true },
 };
 
 
 export const DirtyTool: Story = { args: { tool: true, dirty: 'dirty' } };
 // Clean and unknown render the same chrome; the tri-state is pinned by tool-state.test.ts.
 export const CleanTool: Story = { args: { tool: true, dirty: 'clean' } };
-export const NarrowDirtyTool: Story = { args: { tool: true, dirty: 'dirty', width: 103 } };
+export const NarrowDirtyTool: Story = { args: { tool: true, dirty: 'dirty', width: 126 } };
