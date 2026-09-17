@@ -111,12 +111,12 @@ Both layers wear the leaf's own rounding (header radius on top, terminal radius 
 
 **Must measure each header's own border-box width, never the viewport, retaining its tier at zero width** (rationale).
 
-**The pane-action group — zoom, minimize, kill — yields last, and zoom last within it**: a header too narrow for all three keeps zoom alone, since zooming restores everything the header dropped. Terminal tiers:
+**The pane-action group yields last, and zoom last within it** (to the popover where there is one), since zooming restores everything the header dropped. Terminal tiers:
 
 - **Full** (>293px): everything.
 - **Compact** (>173px): split hidden.
-- **Minimal** (>80px): also hides the TODO pill and the mouse-override icon, leaving alert and the pane-action group. **The notepad icon survives this tier only while the Surface has notes** (`docs/specs/notepad.md` → "Notepad UI"). The label truncates with ellipsis.
-- **Tiny** (≤80px): notepad, minimize, and kill go too, leaving the clipped label/alert region and zoom.
+- **Minimal** (>80px): also hides the TODO pill and the mouse-override icon. **The notepad icon survives this tier only while the Surface has notes** (`docs/specs/notepad.md` → "Notepad UI"). The label truncates with ellipsis.
+- **Tiny** (≤80px): notepad, minimize, and kill go too.
 
 A browser header, including a Tool's (Terminal Context sits outside the measured width), collapses by border-box width:
 
@@ -124,12 +124,12 @@ A browser header, including a Tool's (Terminal Context sits outside the measured
 |---|---|
 | 420px | Split hidden. |
 | 360px | Navigation hidden. |
-| 180px | Chrome moves into a viewport-clamped popover behind one trigger; the group stays inline. |
-| 94px (102px with an unsaved-change dot) | Minimize and kill join the popover; zoom stays inline. |
+| 180px | Chrome moves into a viewport-clamped popover behind one trigger. |
+| 94px (102px with an unsaved-change dot) | Minimize and kill join the popover. |
 
 **Must reclamp the popover on content resize and keep it keyboard reachable** (focus enters on open, Tab stays inside, Escape returns it to the trigger) **and dismiss it on resize, when a dirty report moves minimize/kill controls (restoring trigger focus), or when its Surface is hidden (without restoring focus)**; `lib/src/components/wall/use-dismiss-overlay.ts` handles other dismissal, and controls dismiss only after acting. With notes, the trigger shows a filled notepad glyph and count; keys and connection labels truncate before controls.
 
-Source of truth: `SurfacePaneHeader` in `lib/src/components/wall/SurfacePaneHeader.tsx`; `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHeader.tsx`; `useHeaderTier` in `lib/src/components/wall/use-header-tier.ts`; `lib/src/components/wall/SurfacePaneHeader.test.tsx`; `lib/src/components/wall/TerminalPaneHeader.test.tsx`; `lib/src/stories/BrowserChromeHeader.stories.tsx`.
+Source of truth: `SurfacePaneHeader` in `lib/src/components/wall/SurfacePaneHeader.tsx`; `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHeader.tsx`; `PaneActionGroup` in `lib/src/components/wall/PaneActionButtons.tsx`; `useHeaderTier` in `lib/src/components/wall/use-header-tier.ts`; `lib/src/components/wall/SurfacePaneHeader.test.tsx`; `lib/src/components/wall/TerminalPaneHeader.test.tsx`; `lib/src/stories/BrowserChromeHeader.stories.tsx`.
 
 ## Baseboard
 

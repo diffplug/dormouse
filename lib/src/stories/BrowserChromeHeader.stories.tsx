@@ -69,7 +69,7 @@ interface StoryArgs {
   devServerLabel: string;
   /** Whether the host can run agent-browser commands (false ⇒ nav/resize inert). */
   hostCapable: boolean;
-  /** Header width — shrink past 420/360 to watch split-zoom then nav collapse. */
+  /** Header width — shrink past 420/360 to watch the splits then nav collapse. */
   width: number;
   /** Include the Tool Terminal Context button beside the browser header. */
   tool: boolean;
@@ -269,4 +269,6 @@ export const SmallestTool: Story = {
 export const DirtyTool: Story = { args: { tool: true, dirty: 'dirty' } };
 // Clean and unknown render the same chrome; the tri-state is pinned by tool-state.test.ts.
 export const CleanTool: Story = { args: { tool: true, dirty: 'clean' } };
-export const NarrowDirtyTool: Story = { args: { tool: true, dirty: 'dirty', width: 126 } };
+// 118px leaves 94px of chrome — the tight band, where the dot is what pushes
+// minimize/kill into the popover.
+export const NarrowDirtyTool: Story = { args: { tool: true, dirty: 'dirty', width: 118 } };

@@ -207,7 +207,7 @@ describe('TerminalPaneHeader — notepad icon', () => {
     expect(notepadButton()!.getAttribute('aria-label')).toBe('Notepad · 2 notes');
   });
 
-  it('keeps its place at the compact tier and yields it at minimal only when empty', () => {
+  it('keeps its place at the compact tier, yields it at minimal when empty, and at tiny even for notes', () => {
     renderHeader(stubActions(), null);
     act(() => resizeHeader(200));
     expect(notepadButton()).not.toBeNull();
@@ -215,8 +215,12 @@ describe('TerminalPaneHeader — notepad icon', () => {
     act(() => resizeHeader(100));
     expect(notepadButton()).toBeNull();
 
-    // Notes are never invisible: the icon comes back to carry them.
+    // Notes are never invisible — until tiny, where only zoom fits.
     act(() => { addPlainNote('term-1', 'a note'); });
+    expect(notepadButton()).not.toBeNull();
+    act(() => resizeHeader(80));
+    expect(notepadButton()).toBeNull();
+    act(() => resizeHeader(81));
     expect(notepadButton()).not.toBeNull();
   });
 
@@ -252,10 +256,6 @@ describe('TerminalPaneHeader — notepad icon', () => {
     act(() => resizeHeader(80));
     expect(label('Minimize')).toBeNull();
     expect(label('Kill')).toBeNull();
-    act(() => { addPlainNote('term-1', 'a note'); });
-    expect(notepadButton()).toBeNull();
-    act(() => resizeHeader(81));
-    expect(notepadButton()).not.toBeNull();
   });
 
   it('measures the initial border width before ResizeObserver delivers', () => {

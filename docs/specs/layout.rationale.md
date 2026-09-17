@@ -10,6 +10,8 @@ In the same run, real clicks exposed premature popup dismissal before the action
 
 Terminal border-box thresholds of 293/173 pixels preserve the former 280/160 content-box thresholds plus 13 pixels of horizontal padding. A content box can clamp to zero in a visible tiny leaf; treating that as hidden retained the full tier. Positive border-box width distinguishes that case from a hidden leaf.
 
+The terminal's 80-pixel boundary is where the pane-action group stops fitting beside that padding: a 4-pixel offset, three 20-pixel buttons, two 2-pixel gaps. The browser's 94/102 pair is the former 72/80 pair plus the zoom button and its gap, zoom having moved into the group; the 8-pixel spread is the unsaved-change dot and its gap.
+
 ## Pane body
 
 xterm.js paints only its own rendered surface, and integer row fitting leaves a sub-row remainder at the bottom of the pane: a host background differing from the terminal screen shows as a stripe under the last row, and an unclipped host squares off the rounded bottom corners.
