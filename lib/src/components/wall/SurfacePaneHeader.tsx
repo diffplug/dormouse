@@ -11,18 +11,15 @@ import {
   NotepadIcon,
   ArrowClockwiseIcon,
   ArrowLeftIcon,
-  ArrowLineDownIcon,
   ArrowRightIcon,
-  ArrowsInIcon,
-  ArrowsOutIcon,
   SplitHorizontalIcon,
   SplitVerticalIcon,
-  XIcon,
 } from '@phosphor-icons/react';
 import { ToolDirtyIndicator, useToolDirty } from '../ToolDirtyIndicator';
 import { HeaderActionButton } from '../HeaderActionButton';
-import { chromeButton, HEADER_PALETTE_TRANSITION_CLASS, OVERLAY_MAX_HEIGHT, POPUP_SURFACE_CLASS, paneZoomButtonClass, TERMINAL_TOP_RADIUS_CLASS } from '../design';
+import { chromeButton, HEADER_PALETTE_TRANSITION_CLASS, OVERLAY_MAX_HEIGHT, POPUP_SURFACE_CLASS, TERMINAL_TOP_RADIUS_CLASS } from '../design';
 import { NotepadHeaderButton } from './NotepadHeaderButton';
+import { MinimizeKillButtons, PaneActionGroup } from './PaneActionButtons';
 import {
   useAgentBrowserChromeSnapshot,
   useAgentBrowserScreenController,
@@ -48,8 +45,9 @@ import {
  *  popover, where it renders at `full`. */
 type BrowserInlineTier = 'full' | 'compact' | 'minimal';
 type BrowserHeaderTier = BrowserInlineTier | 'overflow' | 'tight' | 'tiny';
+// Border-box widths; `docs/specs/layout.rationale.md` derives each boundary.
 const browserHeaderTier = (width: number): BrowserHeaderTier =>
-  width >= 420 ? 'full' : width >= 360 ? 'compact' : width >= 180 ? 'minimal' : width >= 80 ? 'overflow' : width >= 72 ? 'tight' : 'tiny';
+  width >= 420 ? 'full' : width >= 360 ? 'compact' : width >= 180 ? 'minimal' : width >= 102 ? 'overflow' : width >= 94 ? 'tight' : 'tiny';
 
 export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
   const dirty = useToolDirty(id, params);
@@ -116,17 +114,18 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
   }, []);
   const tier = useHeaderTier(headerRef, browserHeaderTier, { onResize: () => closeMenu(false) });
   const inline: BrowserInlineTier | null = tier === 'overflow' || tier === 'tight' || tier === 'tiny' ? null : tier;
-  // Keep 72–79px distinct so a dirty report can move actions without a resize.
-  const inlinePaneActions = tier !== 'tiny' && (tier !== 'tight' || !dirty);
-  const paneActionsFocused = useRef(false);
-  const previousInlinePaneActions = useRef(inlinePaneActions);
+  // Zoom stays in the header at every width, so only its two companions move.
+  // Keep 94–101px distinct so a dirty report can move them without a resize.
+  const inlineMinimizeKill = tier !== 'tiny' && (tier !== 'tight' || !dirty);
+  const minimizeKillFocused = useRef(false);
+  const previousInlineMinimizeKill = useRef(inlineMinimizeKill);
   useLayoutEffect(() => {
-    if (previousInlinePaneActions.current !== inlinePaneActions) {
-      if (menuOpen || (!inlinePaneActions && paneActionsFocused.current)) closeMenu();
-      paneActionsFocused.current = false;
+    if (previousInlineMinimizeKill.current !== inlineMinimizeKill) {
+      if (menuOpen || (!inlineMinimizeKill && minimizeKillFocused.current)) closeMenu();
+      minimizeKillFocused.current = false;
     }
-    previousInlinePaneActions.current = inlinePaneActions;
-  }, [inlinePaneActions, menuOpen, closeMenu]);
+    previousInlineMinimizeKill.current = inlineMinimizeKill;
+  }, [inlineMinimizeKill, menuOpen, closeMenu]);
   const popoverOpen = visible && inline === null && menuOpen;
   const noteCount = useNoteCount(id);
   const overflowLabel = `Browser controls${noteCount ? `, ${noteCountPhrase(noteCount)}` : ''}`;
@@ -154,7 +153,7 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
 
           {/* Back / forward / refresh — native agent-browser commands; always
               enabled (no canGoBack/Forward in the stream). Collapse before the
-              URL but after split/zoom. */}
+              URL but after the splits. */}
           {placement !== 'minimal' && <div className="flex shrink-0 items-center gap-0.5">
             <HeaderActionButton
               className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
@@ -255,34 +254,23 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
           ariaLabel="Split top/bottom"
           tooltip={'Split top/bottom [-] or ["]'}
         ><SplitVerticalIcon size={14} /></HeaderActionButton>
-        <HeaderActionButton
-          className={paneZoomButtonClass(zoomed, isActiveHeader)}
-          onClick={(e) => { e.stopPropagation(); actions.onZoom(id); }}
-          ariaLabel={zoomed ? 'Unzoom' : 'Zoom'}
-          tooltip={zoomed ? 'Unzoom' : 'Zoom [z]'}
-        >{zoomed ? <ArrowsInIcon size={14} /> : <ArrowsOutIcon size={14} />}</HeaderActionButton>
       </div>}
     </>
   );
 
+  const minimizeKillFocus = {
+    onFocus: () => { minimizeKillFocused.current = true; },
+    onBlur: () => { minimizeKillFocused.current = false; },
+  };
   // Preserve the 4px separation with inline chrome; collapsed controls align right.
   const paneActions = (
-    <div className={`${inline ? 'ml-1' : 'ml-auto'} flex shrink-0 items-center gap-0.5`}
-      onFocus={() => { paneActionsFocused.current = true; }}
-      onBlur={() => { paneActionsFocused.current = false; }}>
-      <HeaderActionButton
-        className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
-        onClick={(e) => { e.stopPropagation(); closeMenu(); actions.onMinimize(id); }}
-        ariaLabel="Minimize"
-        tooltip="Minimize [m] or [d]"
-      ><ArrowLineDownIcon size={14} /></HeaderActionButton>
-      <HeaderActionButton
-        className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-error/10 hover:text-error"
-        onClick={(e) => { e.stopPropagation(); closeMenu(); actions.onKill(id); }}
-        ariaLabel="Kill"
-        tooltip="Kill [k] or [x]"
-      ><XIcon size={14} /></HeaderActionButton>
-    </div>
+    <PaneActionGroup
+      surfaceId={id} zoomed={zoomed} activeHeader={isActiveHeader}
+      className={inline ? 'ml-1' : 'ml-auto'}
+      showMinimizeKill={inlineMinimizeKill}
+      beforeAct={closeMenu}
+      minimizeKillFocus={minimizeKillFocus}
+    />
   );
 
   return (
@@ -304,10 +292,10 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
           {noteCount ? <NotepadIcon size={14} weight="fill" /> : <DotsThreeIcon size={14} />}
         </button>
       )}
-      {inlinePaneActions && paneActions}
+      {paneActions}
       {popoverOpen && <BrowserHeaderPopover anchorRef={overflowRef} onClose={closeMenu}>
         {renderBrowserControls('popover')}
-        {!inlinePaneActions && paneActions}
+        {!inlineMinimizeKill && <MinimizeKillButtons surfaceId={id} beforeAct={closeMenu} {...minimizeKillFocus} />}
       </BrowserHeaderPopover>}
     </div>
   );

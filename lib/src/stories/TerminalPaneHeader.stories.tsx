@@ -16,6 +16,7 @@ import { commandArgv0, cwdFromOsc633 } from '../lib/terminal-state';
 import { flattenScenario, SCENARIO_SHELL_PROMPT } from '../lib/platform';
 import { removeMouseSelectionState, setMouseReporting, setOverride } from '../lib/mouse-selection';
 import { addPlainNote, clearAllNotepads } from '../lib/notepad/notepad-store';
+import { recordToolDirty, resetToolDirty } from '../lib/tool-dirty-store';
 import { requireElement, settleTerminals, waitForCondition, waitForPrimedState } from './settle-terminals';
 
 const SESSION_ID = 'tab-story';
@@ -126,6 +127,7 @@ function TabStory({
   reducedMotion = false,
   mouseCaptured = false,
   noteCount = 0,
+  dirty = false,
   actions = noopActions,
 }: {
   mode?: WallMode;
@@ -137,6 +139,9 @@ function TabStory({
   mouseCaptured?: boolean;
   /** Notes on this Surface — the notepad icon fills, and survives the minimal tier. */
   noteCount?: number;
+  /** A Tool terminal face reporting unsaved changes — the dot takes its own
+   *  12px at the header root, outside the region that clips. */
+  dirty?: boolean;
   actions?: WallActions;
 }) {
   useEffect(() => {
@@ -151,6 +156,12 @@ function TabStory({
     return () => clearAllNotepads();
   }, [noteCount]);
 
+  useEffect(() => {
+    if (!dirty) return;
+    recordToolDirty(SESSION_ID, true);
+    return () => resetToolDirty();
+  }, [dirty]);
+
   return (
     <ModeContext.Provider value={mode}>
       <SelectedIdContext.Provider value={isSelected ? SESSION_ID : null}>
@@ -161,7 +172,7 @@ function TabStory({
               style={{ width }}
             >
               <div className="bg-app-bg" style={{ height: 26 }}>
-                <TerminalPaneHeader id={SESSION_ID} title={undefined} params={undefined} />
+                <TerminalPaneHeader id={SESSION_ID} title={undefined} params={dirty ? { surfaceType: 'tool' } : undefined} />
               </div>
             </div>
           </RenamingIdContext.Provider>
@@ -306,46 +317,54 @@ async function submitReservedRename() {
   await requireElement('[data-testid="illegal-rename-warning"]', 'illegal-rename warning');
 }
 
+const PANE_ACTIONS = ['Zoom', 'Minimize', 'Kill'] as const;
+type PaneAction = typeof PANE_ACTIONS[number];
+
 /**
- * Confirms the minimize + close controls are the top-priority elements of the
- * header: they must render and stay fully inside the header bounds (never
- * clipped or pushed out) no matter how narrow it gets. Throws — so the failure
- * surfaces in Storybook's Interactions panel — if either control is missing,
- * collapsed to zero size, or sticking outside the header's horizontal extent.
+ * Confirms the pane-action group is the top-priority element of the header:
+ * whatever a width still affords must render and stay fully inside the header
+ * bounds (never clipped or pushed out), and what that width drops must actually
+ * be gone rather than merely pushed off. Zoom outlives the other two, so the
+ * tiny tier passes `['Zoom']`. Throws — so the failure surfaces in Storybook's
+ * Interactions panel — if a control is missing, collapsed to zero size, sticking
+ * outside the header's horizontal extent, or present when it should have gone.
  */
-async function assertControlsVisible({ canvasElement }: { canvasElement: HTMLElement }) {
-  const CONTROLS = [
-    ['Minimize', '[aria-label="Minimize"]'],
-    ['Kill', '[aria-label="Kill"]'],
-  ] as const;
-  const EPS = 0.5;
+function assertPaneActions(expected: readonly PaneAction[]) {
+  return async ({ canvasElement }: { canvasElement: HTMLElement }) => {
+    const EPS = 0.5;
 
-  // Returns a human-readable reason the controls aren't fully visible yet, or
-  // null once every control is rendered and sits inside the header bounds.
-  const violation = (): string | null => {
-    const header = canvasElement.querySelector<HTMLElement>('.bg-app-bg');
-    if (!header) return 'header container not found';
-    const bounds = header.getBoundingClientRect();
-    for (const [name, selector] of CONTROLS) {
-      const el = canvasElement.querySelector<HTMLElement>(selector);
-      if (!el) return `${name} button is not rendered`;
-      const r = el.getBoundingClientRect();
-      if (r.width <= 0 || r.height <= 0) return `${name} button collapsed to zero size (hidden)`;
-      if (r.left < bounds.left - EPS || r.right > bounds.right + EPS) {
-        return `${name} button is clipped: button x=[${r.left.toFixed(1)}, ${r.right.toFixed(1)}] `
-          + `exceeds header x=[${bounds.left.toFixed(1)}, ${bounds.right.toFixed(1)}]`;
+    // Returns a human-readable reason the controls aren't as expected yet, or
+    // null once every expected one sits inside the header bounds and the rest
+    // have left.
+    const violation = (): string | null => {
+      const header = canvasElement.querySelector<HTMLElement>('.bg-app-bg');
+      if (!header) return 'header container not found';
+      const bounds = header.getBoundingClientRect();
+      for (const name of PANE_ACTIONS) {
+        const el = canvasElement.querySelector<HTMLElement>(`[aria-label="${name}"]`);
+        if (!expected.includes(name)) {
+          if (el) return `${name} button should have been dropped at this width`;
+          continue;
+        }
+        if (!el) return `${name} button is not rendered`;
+        const r = el.getBoundingClientRect();
+        if (r.width <= 0 || r.height <= 0) return `${name} button collapsed to zero size (hidden)`;
+        if (r.left < bounds.left - EPS || r.right > bounds.right + EPS) {
+          return `${name} button is clipped: button x=[${r.left.toFixed(1)}, ${r.right.toFixed(1)}] `
+            + `exceeds header x=[${bounds.left.toFixed(1)}, ${bounds.right.toFixed(1)}]`;
+        }
       }
-    }
-    return null;
-  };
+      return null;
+    };
 
-  // Poll until the primed state (two rAFs) and the ResizeObserver-driven tier
-  // have settled, instead of guessing a fixed delay. Surface the last reason if
-  // it never settles within the timeout.
-  await waitForPrimedState();
-  await waitForCondition(() => violation() === null, { timeoutMs: 1000 });
-  const reason = violation();
-  if (reason) throw new Error(reason);
+    // Poll until the primed state (two rAFs) and the ResizeObserver-driven tier
+    // have settled, instead of guessing a fixed delay. Surface the last reason
+    // if it never settles within the timeout.
+    await waitForPrimedState();
+    await waitForCondition(() => violation() === null, { timeoutMs: 1000 });
+    const reason = violation();
+    if (reason) throw new Error(reason);
+  };
 }
 
 const NOTIFICATIONS = {
@@ -379,6 +398,7 @@ const meta: Meta<typeof TabStory> = {
     isSelected: { control: 'boolean' },
     isRenaming: { control: 'boolean' },
     width: { control: 'number' },
+    dirty: { control: 'boolean' },
     reducedMotion: { control: 'boolean' },
     mouseCaptured: { control: 'boolean' },
     noteCount: { control: 'number' },
@@ -538,27 +558,55 @@ export const RenameRejectedReserved: Story = {
   play: submitReservedRename,
 };
 
-// --- Minimize + close stay visible as the header shrinks -------------------
+// --- The pane-action group stays visible as the header shrinks -------------
 //
-// These stories drive the header down to (and below) the `minimal` tier and
-// assert in their play function that the minimize and close controls remain
-// rendered and fully inside the header bounds. The assertion uses live layout
-// geometry, so it confirms the controls in the real Storybook browser.
+// These stories drive the header down through the `minimal` tier and into
+// `tiny`, asserting in their play function that whatever the width still
+// affords stays rendered and fully inside the header bounds. Zoom is the last
+// to go (`docs/specs/layout.md` → "Pane header responsive sizing"), so the
+// 76px story expects it alone. The assertion uses live layout geometry, so it
+// confirms the controls in the real Storybook browser.
 
 export const NarrowControlsVisible: Story = {
   args: {
     width: 110,
   },
   parameters: primedPane({ status: 'NOTHING_TO_SHOW' }),
-  play: assertControlsVisible,
+  play: assertPaneActions(PANE_ACTIONS),
 };
 
+// A Surface with notes at 100px: the notepad has to yield, or it pushes kill
+// past the header's right edge. Only a live-geometry check catches that — jsdom
+// has no layout, so the unit test can pin presence but not clipping.
+export const NarrowWithNotesControlsVisible: Story = {
+  args: {
+    width: 100,
+    noteCount: 2,
+  },
+  parameters: primedPane({ status: 'NOTHING_TO_SHOW' }),
+  play: assertPaneActions(PANE_ACTIONS),
+};
+
+// The unsaved-change dot sits at the header root, outside the clipping region,
+// so it costs the group 12px that the title cannot give back. 120px is inside
+// the `minimal-tight` band: with notes and a dot the notepad must yield.
+export const NarrowDirtyWithNotesControlsVisible: Story = {
+  args: {
+    width: 120,
+    noteCount: 2,
+    dirty: true,
+  },
+  parameters: primedPane({ status: 'NOTHING_TO_SHOW' }),
+  play: assertPaneActions(PANE_ACTIONS),
+};
+
+// 76px is the tiny tier: minimize and kill are gone and zoom carries the header.
 export const ExtremelyNarrowControlsVisible: Story = {
   args: {
     width: 76,
   },
   parameters: primedPane({ status: 'ALERT_RINGING', todo: true }),
-  play: assertControlsVisible,
+  play: assertPaneActions(['Zoom']),
 };
 
 export const NarrowWithMouseCaptureControlsVisible: Story = {
@@ -567,7 +615,7 @@ export const NarrowWithMouseCaptureControlsVisible: Story = {
     mouseCaptured: true,
   },
   parameters: primedPane({ status: 'NOTHING_TO_SHOW' }),
-  play: assertControlsVisible,
+  play: assertPaneActions(PANE_ACTIONS),
 };
 
 // Notepad icons with notes across the full, compact, and minimal tiers.
@@ -592,5 +640,5 @@ export const NarrowLongTitleControlsVisible: Story = {
     width: 130,
   },
   parameters: primedPane({ status: 'ALERT_RINGING', todo: true, userTitle: LONG_TITLE }),
-  play: assertControlsVisible,
+  play: assertPaneActions(PANE_ACTIONS),
 };

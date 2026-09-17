@@ -3,22 +3,19 @@ import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, u
 import { createPortal } from 'react-dom';
 import { tv } from 'tailwind-variants';
 import {
-  ArrowLineDownIcon,
-  ArrowsInIcon,
-  ArrowsOutIcon,
   CursorClickIcon,
   CursorTextIcon,
   SplitHorizontalIcon,
   SplitVerticalIcon,
-  XIcon,
 } from '@phosphor-icons/react';
 import { ToolDirtyIndicator, useToolDirty } from '../ToolDirtyIndicator';
 import { HeaderActionButton } from '../HeaderActionButton';
-import { HEADER_PALETTE_TRANSITION_CLASS, paneZoomButtonClass, POPUP_SURFACE_CLASS, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from '../design';
+import { HEADER_PALETTE_TRANSITION_CLASS, POPUP_SURFACE_CLASS, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from '../design';
 import { AlertBell } from '../AlertBell';
 import { useTodoPillContent } from '../TodoPillBody';
 import { useHeaderTier } from './use-header-tier';
 import { NotepadHeaderButton } from './NotepadHeaderButton';
+import { PaneActionGroup } from './PaneActionButtons';
 import type { PaneProps } from './pane-props';
 import { IllegalRenameWarning, type RenameRejection } from './IllegalRenameWarning';
 import { InlineEditInput } from './InlineEditInput';
@@ -66,10 +63,22 @@ const tabVariant = tv({
   },
 });
 
-type TerminalHeaderTier = 'full' | 'compact' | 'minimal';
-// Includes the header's 8px left + 5px right padding; the former content-box
-// boundaries were 280/160px. Border-box width distinguishes tiny from hidden.
-const terminalHeaderTier = (width: number): TerminalHeaderTier => width > 293 ? 'full' : width > 173 ? 'compact' : 'minimal';
+type TerminalHeaderTier = 'full' | 'compact' | 'minimal' | 'minimal-tight' | 'bare' | 'tiny';
+// Border-box widths, so they include the header's 8px left + 5px right padding
+// (`docs/specs/layout.rationale.md` derives each boundary). Measuring the
+// border box also tells a narrow header from a hidden one. The bottom three
+// boundaries are the widths at which the pane-action group stops fitting: with
+// a notepad icon beside it, then without one. `minimal-tight` is the band where
+// the notepad fits only while no unsaved-change dot is taking its own 12px —
+// the tier stays a pure function of width so it survives a dirty report that
+// arrives without a resize, exactly as the browser header's `tight` does.
+const terminalHeaderTier = (width: number): TerminalHeaderTier =>
+  width > 293 ? 'full'
+    : width > 173 ? 'compact'
+      : width > 128 ? 'minimal'
+        : width > 116 ? 'minimal-tight'
+          : width > 98 ? 'bare'
+            : 'tiny';
 
 // WATCHING is a rule on the running command, so the bell says which command it
 // would act on rather than naming an abstract toggle (`docs/specs/alert.md`).
@@ -136,7 +145,13 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
   const [todoPreviewRect, setTodoPreviewRect] = useState<DOMRect | null>(null);
   const [renameWarning, setRenameWarning] = useState<{ rect: DOMRect; reason: RenameRejection; value: string } | null>(null);
   const todoPill = useTodoPillContent(activity.todo);
-  const showTodoPill = todoPill.visible && tier !== 'minimal';
+  // Named once so inserting a tier does not mean re-deriving a band at every
+  // site that tests one. Below `roomForNotepad` the notepad would push the
+  // pane-action group off the header's right edge, so it goes first.
+  const compactOrWider = tier === 'full' || tier === 'compact';
+  const roomForNotepad = compactOrWider || tier === 'minimal' || (tier === 'minimal-tight' && !dirty);
+  const tiny = tier === 'tiny';
+  const showTodoPill = todoPill.visible && compactOrWider;
   const runningArgv0 = paneState.currentCommand?.rawCommandLine
     ? commandArgv0(paneState.currentCommand.rawCommandLine)
     : null;
@@ -278,7 +293,7 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
       </div>
       {!isRenaming && (
         <>
-          {showMouseIcon && tier !== 'minimal' && (
+          {showMouseIcon && compactOrWider && (
             <div className="ml-1 shrink-0">
               <HeaderActionButton
                 className="flex h-5 min-w-5 items-center justify-center rounded transition-colors shrink-0 hover:bg-current/10"
@@ -300,7 +315,7 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
               </HeaderActionButton>
             </div>
           )}
-          <NotepadHeaderButton surfaceId={id} hideWhenEmpty={tier === 'minimal'} />
+          {roomForNotepad && <NotepadHeaderButton surfaceId={id} hideWhenEmpty={!compactOrWider} />}
           {tier === 'full' && (
             <div className="ml-1 flex shrink-0 items-center gap-0.5">
               <HeaderActionButton
@@ -315,36 +330,12 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
                 ariaLabel="Split top/bottom"
                 tooltip={'Split top/bottom [-] or ["]'}
               ><SplitVerticalIcon size={14} /></HeaderActionButton>
-              <HeaderActionButton
-                className={paneZoomButtonClass(zoomed, isActiveHeader)}
-                onClick={(e) => { e.stopPropagation(); actions.onZoom(id); }}
-                ariaLabel={zoomed ? 'Unzoom' : 'Zoom'}
-                tooltip={zoomed ? 'Unzoom' : 'Zoom [z]'}
-              >{zoomed ? <ArrowsInIcon size={14} /> : <ArrowsOutIcon size={14} />}</HeaderActionButton>
             </div>
           )}
-          {/*
-            Minimize + close are the highest-priority controls: they must stay
-            visible no matter how narrow the header gets. They sit last (so
-            nothing fixed-width is to their right to push them off) and every
-            other element yields first — the title/bell region clips via
-            `overflow-hidden`, split/zoom drop below the `full` tier, and the
-            mouse icon drops at the `minimal` tier.
-          */}
-          <div className="ml-1 flex shrink-0 items-center gap-0.5">
-            <HeaderActionButton
-              className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
-              onClick={(e) => { e.stopPropagation(); actions.onMinimize(id); }}
-              ariaLabel="Minimize"
-              tooltip="Minimize [m] or [d]"
-            ><ArrowLineDownIcon size={14} /></HeaderActionButton>
-            <HeaderActionButton
-              className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-error/10 hover:text-error"
-              onClick={(e) => { e.stopPropagation(); actions.onKill(id); }}
-              ariaLabel="Kill"
-              tooltip="Kill [k] or [x]"
-            ><XIcon size={14} /></HeaderActionButton>
-          </div>
+          {/* The title/bell region clips via `overflow-hidden` so this group
+              never has to (`docs/specs/layout.md` → "Pane header responsive
+              sizing"). */}
+          <PaneActionGroup surfaceId={id} zoomed={zoomed} activeHeader={isActiveHeader} showMinimizeKill={!tiny} />
         </>
       )}
       {todoPreviewRect && activity.notification && context.id !== id && (
