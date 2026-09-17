@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   shellOpen: vi.fn(),
   invoke: vi.fn(),
   requestAppRestart: vi.fn(),
+  platform: null as { requestAppRestart?: () => Promise<boolean> } | null,
 }));
 
 vi.mock('@tauri-apps/plugin-updater', () => ({
@@ -35,7 +36,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 vi.mock('dormouse-lib/lib/platform', () => ({
   PLATFORM_STRING: 'Windows',
   IS_WINDOWS: true,
-  getPlatformOrNull: () => ({ requestAppRestart: mocks.requestAppRestart }),
+  getPlatformOrNull: () => mocks.platform,
 }));
 
 // --- Helpers ---
@@ -54,6 +55,7 @@ function makeUpdate(version = '0.5.0') {
 import {
   startUpdateCheck,
   approveUpdate,
+  dismissBanner,
   openChangelog,
   buildDebugReport,
   useUpdateState,
@@ -86,7 +88,18 @@ describe('updater', () => {
     mocks.check.mockResolvedValue(null);
     mocks.shellOpen.mockResolvedValue(undefined);
     mocks.invoke.mockResolvedValue('');
+    mocks.platform = { requestAppRestart: mocks.requestAppRestart };
   });
+
+  // Drive check → approve → download so an approved, downloaded update is pending.
+  async function reachDownloadedUpdate(update: ReturnType<typeof makeUpdate>) {
+    mocks.check.mockResolvedValue(update);
+    startUpdateCheck();
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(0);
+    approveUpdate();
+    await vi.advanceTimersByTimeAsync(0);
+  }
 
   afterEach(() => {
     vi.useRealTimers();
@@ -258,16 +271,6 @@ describe('updater', () => {
   // interception now. The updater just exposes hasPendingUpdate/installPendingUpdate
   // for the orchestrator to call as the last step of its teardown.
   describe('quit-time install', () => {
-    // Drive check → approve → download so an approved, downloaded update is pending.
-    async function reachDownloadedUpdate(update: ReturnType<typeof makeUpdate>) {
-      mocks.check.mockResolvedValue(update);
-      startUpdateCheck();
-      await vi.advanceTimersByTimeAsync(5_000);
-      await vi.advanceTimersByTimeAsync(0);
-      approveUpdate();
-      await vi.advanceTimersByTimeAsync(0);
-    }
-
     it('reports no pending update until one is approved and downloaded', async () => {
       const update = makeUpdate('0.5.0');
       mocks.check.mockResolvedValue(update);
@@ -373,7 +376,71 @@ describe('updater', () => {
       expect(mocks.requestAppRestart).toHaveBeenCalledExactlyOnceWith();
     });
 
-    it('offers Restart now only once the update is downloaded', () => {
+    it.each([
+      ['a Tauri string', 'Restart needs a packaged build; restart the dev command instead'],
+      ['an Error', new Error('Restart needs a packaged build; restart the dev command instead')],
+    ])('a restart the host refuses with %s becomes restart-refused and still installs at quit', async (_kind, rejection) => {
+      const update = makeUpdate('0.5.0');
+      await reachDownloadedUpdate(update);
+      mocks.requestAppRestart.mockRejectedValue(rejection);
+
+      restartToUpdate();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(readBannerState()).toEqual({
+        status: 'restart-refused',
+        version: '0.5.0',
+        reason: 'Restart needs a packaged build; restart the dev command instead',
+      });
+      expect(hasPendingUpdate()).toBe(true);
+
+      // Dismissing hides the notice only, like `downloaded`.
+      dismissBanner();
+      expect(readBannerState()).toEqual({ status: 'dismissed' });
+      expect(hasPendingUpdate()).toBe(true);
+      await installPendingUpdate();
+      expect(update.install).toHaveBeenCalledOnce();
+    });
+
+    it('keeps a dismissal that lands before the refusal', async () => {
+      await reachDownloadedUpdate(makeUpdate('0.5.0'));
+      let refuse!: (reason: string) => void;
+      mocks.requestAppRestart.mockReturnValue(new Promise<boolean>((_resolve, reject) => { refuse = reject; }));
+
+      restartToUpdate();
+      dismissBanner();
+      refuse('Dormouse cannot find its own executable to relaunch');
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(readBannerState()).toEqual({ status: 'dismissed' });
+      expect(hasPendingUpdate()).toBe(true);
+    });
+
+    it('leaves the notice as is when the restart joins a plain quit', async () => {
+      await reachDownloadedUpdate(makeUpdate('0.5.0'));
+      mocks.requestAppRestart.mockResolvedValue(false);
+
+      restartToUpdate();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(readBannerState()).toEqual({ status: 'downloaded', version: '0.5.0' });
+    });
+
+    it.each([
+      ['no restart method', {}],
+      ['no platform', null],
+    ])('restartToUpdate is a no-op on a host with %s', async (_kind, platform) => {
+      await reachDownloadedUpdate(makeUpdate('0.5.0'));
+      mocks.platform = platform;
+
+      restartToUpdate();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mocks.requestAppRestart).not.toHaveBeenCalled();
+      expect(readBannerState()).toEqual({ status: 'downloaded', version: '0.5.0' });
+    });
+
+    it('offers Restart now only on a downloaded update the host has not refused', () => {
       const onRestart = vi.fn();
       const render = (state: UpdateBannerState) => {
         const container = document.createElement('div');
@@ -399,6 +466,14 @@ describe('updater', () => {
       restartButton(downloaded.container)!.click();
       expect(onRestart).toHaveBeenCalledOnce();
       downloaded.unmount();
+
+      const refused = render({ status: 'restart-refused', version: '0.5.0', reason: 'no executable' });
+      expect(refused.container.textContent).toContain(
+        "Update downloaded (v0.5.0) — will install when you quit (couldn't restart: no executable)",
+      );
+      expect(restartButton(refused.container)).toBeUndefined();
+      expect([...refused.container.querySelectorAll('button')].map((b) => b.textContent)).toContain('Changelog');
+      refused.unmount();
     });
 
     it('openChangelog reads the current app version and opens release notes after it', async () => {

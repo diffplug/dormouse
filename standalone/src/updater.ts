@@ -80,13 +80,24 @@ export function approveUpdate(): void {
 }
 
 /** Quit now and relaunch; the quit installs the pending update on its way out
- *  (docs/specs/auto-update.md → "Quit-time install"). */
+ *  (docs/specs/auto-update.md → "Quit-time install"). A host refusal becomes
+ *  `restart-refused`, leaving the update pending. */
 export function restartToUpdate(): void {
   getPlatformOrNull()?.requestAppRestart?.()
     .then((relaunches) => {
       if (!relaunches) console.warn('[updater] Joined a quit already under way; Dormouse will not relaunch.');
     })
-    .catch((e) => console.error('[updater] Restart failed:', e));
+    .catch((e) => {
+      console.error('[updater] Restart failed:', e);
+      // Honor a dismissal that arrived while the host was answering.
+      if (state.status === 'downloaded') {
+        setState({
+          status: 'restart-refused',
+          version: state.version,
+          reason: e instanceof Error ? e.message : String(e),
+        });
+      }
+    });
 }
 
 export function openChangelog(): void {

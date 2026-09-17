@@ -6,6 +6,7 @@ export type UpdateBannerState =
   | { status: 'available'; version: string }
   | { status: 'downloading'; version: string }
   | { status: 'downloaded'; version: string }
+  | { status: 'restart-refused'; version: string; reason: string }
   | { status: 'dismissed' }
   | { status: 'post-update-success'; from: string; to: string }
   | { status: 'post-update-failure'; version: string; error?: string };
@@ -26,6 +27,7 @@ export function UpdateBanner({ state, onDismiss, onApproveUpdate, onRestart, onO
   if (state.status === 'idle' || state.status === 'dismissed') return null;
 
   let message: ReactNode;
+  let title: string | undefined;
   let links: { label: string; onClick: () => void }[];
 
   switch (state.status) {
@@ -56,6 +58,12 @@ export function UpdateBanner({ state, onDismiss, onApproveUpdate, onRestart, onO
         { label: 'Restart now', onClick: onRestart },
       ];
       break;
+    case 'restart-refused':
+      // No "Restart now": the host's refusal holds until Dormouse relaunches.
+      title = `Update downloaded (v${state.version}) — will install when you quit (couldn't restart: ${state.reason})`;
+      message = title;
+      links = [{ label: 'Changelog', onClick: onOpenChangelog }];
+      break;
     case 'post-update-success':
       message = `Updated to v${state.to} — from v${state.from}`;
       links = [{ label: 'Changelog', onClick: onOpenChangelog }];
@@ -72,7 +80,7 @@ export function UpdateBanner({ state, onDismiss, onApproveUpdate, onRestart, onO
 
   return (
     <span className="flex items-center gap-1.5 pb-1 text-sm font-mono text-muted">
-      <span className="truncate">{message}</span>
+      <span className="truncate" title={title}>{message}</span>
       {links.map((link) => (
         <span key={link.label} className="contents">
           <span className="shrink-0">·</span>

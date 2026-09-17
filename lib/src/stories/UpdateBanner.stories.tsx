@@ -47,6 +47,16 @@ export const Downloaded: Story = {
   },
 };
 
+export const RestartRefused: Story = {
+  args: {
+    state: {
+      status: 'restart-refused',
+      version: '0.5.0',
+      reason: 'Dormouse cannot find its own executable to relaunch: No such file or directory (os error 2)',
+    },
+  },
+};
+
 export const PostUpdateSuccess: Story = {
   args: {
     state: { status: 'post-update-success', from: '0.4.0', to: '0.5.0' },

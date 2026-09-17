@@ -33,12 +33,13 @@ Update status is a text notice in the Baseboard, the always-visible bottom strip
 | `available` | "Update available" | "Changelog", "Install when I quit" | No |
 | `downloading` | "Downloading update v0.5.0" | "Changelog" | No |
 | `downloaded` | "Update downloaded (v0.5.0) — will install when you quit" | "Changelog", "Restart now" | No |
+| `restart-refused` | "Update downloaded (v0.5.0) — will install when you quit (couldn't restart: `<reason>`)" | "Changelog" | No |
 | `post-update-success` | "Updated to v0.5.0 — from v0.4.0" | "Changelog" | 10 seconds |
 | `post-update-failure` | "Update failed" | "Click here to debug" | No |
 
-"Install when I quit" is the approval; "Changelog" opens `https://dormouse.sh/changelog/after/<getVersion()>`. **"Restart now" calls `quit_restart`** (`docs/specs/standalone.md` → "Restart"): the quit installs on its way out, then relaunches. ` · ` separates the message from the action labels.
+"Install when I quit" is the approval; "Changelog" opens `https://dormouse.sh/changelog/after/<getVersion()>`. **"Restart now" calls `quit_restart`** (`docs/specs/standalone.md` → "Restart"): the quit installs on its way out, then relaunches. **A refusal turns a still-shown `downloaded` into `restart-refused`, carrying the host's reason and never "Restart now"**, since the refusal holds until relaunch; the update stays pending. ` · ` separates the message from the action labels.
 
-**Every state is dismissible via [×].** Dismissing an unapproved `available` notice means no download and no install that session; dismissing `downloading` or `downloaded` hides the notice only and **never cancels** an approved download/install.
+**Every state is dismissible via [×].** Dismissing an unapproved `available` notice means no download and no install that session; dismissing `downloading`, `downloaded`, or `restart-refused` hides the notice only and **never cancels** an approved download/install.
 
 **The notice carries the Baseboard's own text style (`text-sm font-mono text-muted`), in its single right-hand `ml-auto` cluster** — clear of doors and the shortcut hint.
 
