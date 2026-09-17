@@ -289,7 +289,7 @@ export async function installPendingUpdate(): Promise<void> {
   }
 
   try {
-    // Write success marker BEFORE install — on Windows, NSIS force-kills the process
+    // Write success marker BEFORE install — on Windows install() never returns
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       from: currentVersion,
       to: update.version,
