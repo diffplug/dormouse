@@ -6,6 +6,9 @@
  * stubbed `getBoundingClientRect`; time and rAF are a controllable fake clock so
  * the tween is stepped deterministically without real timers.
  */
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -365,17 +368,18 @@ describe('SelectionRing settled render', () => {
     expect(path!.getAttribute('stroke-opacity')).toBeNull();
   });
 
+  // jsdom applies no stylesheet, so the gate is pinned where it lives. It must
+  // outrank the inline `animation` and leave the dash in place.
   it('holds the ants still under reduced motion', async () => {
-    globalThis.matchMedia = ((query: string) => ({
-      matches: query.includes('prefers-reduced-motion'), media: query, onchange: null,
-      addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent() { return false; },
-    })) as unknown as typeof matchMedia;
+    const css = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../index.css'), 'utf8');
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\[data-ring='outline'\] \{ animation: none !important; \}/);
+
     const store = makeStore();
     const panes = twoPanes();
     await act(async () => root.render(<Harness selectedId="a" mode="command" store={store} panes={panes} />));
     const path = container.querySelector<SVGPathElement>('[data-ring="outline"]')!;
     expect(path.getAttribute('stroke-dasharray')).not.toBeNull();
-    expect(path.style.animationPlayState).toBe('paused');
+    expect(path.style.animation).toContain('marching-ants');
   });
 
   it('marches for as long as command mode lasts, across selection changes', async () => {
