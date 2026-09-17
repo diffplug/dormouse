@@ -46,7 +46,7 @@ export function ensureResizeObserver(): void {
  * all of them. Stubbed through `vi.stubGlobal`, so `vi.unstubAllGlobals()` in
  * `afterEach` restores jsdom.
  */
-export function stubResizeObserver(initialWidth: number, borderInset = 0): (width: number) => void {
+export function stubResizeObserver(initialWidth: number): (width: number) => void {
   let width = initialWidth;
   const deliveries = new Set<() => void>();
   vi.stubGlobal('ResizeObserver', class {
@@ -55,7 +55,7 @@ export function stubResizeObserver(initialWidth: number, borderInset = 0): (widt
     observe(target: Element): void {
       const deliver = () => this.callback([{
         target,
-        borderBoxSize: [{ inlineSize: width + borderInset, blockSize: 0 }],
+        borderBoxSize: [{ inlineSize: width, blockSize: 0 }],
         contentRect: { width },
       } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
       this.delivery.add(deliver);
