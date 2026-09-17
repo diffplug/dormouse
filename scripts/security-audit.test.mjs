@@ -67,8 +67,14 @@ const cases = [
   // report. Without the `_Incomplete …_` marker the no-verdict note sends the
   // reader after a third marker the body does not carry, and the cut-off
   // domain's fragment is published looking finished.
+  // Anchored to its heading and counted, because a bare `notes` entry is
+  // satisfied by the marker appearing anywhere: dropping the sentinel test
+  // marks every fragment and inverting it marks the finished one, and both
+  // read as a pass. Those are the inverse of the bug this arm fixes.
   { name: 'no merged report publishes the fragments, marking cut-off and absent domains', report: null, verdicts: ['PASS', 'PASS', null], unfinished: [1], expected: 'INCONCLUSIVE',
-    notes: ['the merge never ran', '## audit-supply-chain.md', 'VERDICT: PASS', '## audit-ci-secrets.md', '_Incomplete — this domain was still writing', '## audit-application.md', '_No report — this domain produced no fragment._'] },
+    notes: ['the merge never ran', '## audit-supply-chain.md', 'VERDICT: PASS', '## audit-application.md', '_No report — this domain produced no fragment._',
+      '## audit-ci-secrets.md\n\n_Incomplete — this domain was still writing'],
+    counts: { '_Incomplete — this domain was still writing': 1 } },
 ];
 for (const scenario of cases) {
   test(`reporting: ${scenario.name}`, (t) => {
@@ -96,6 +102,9 @@ for (const scenario of cases) {
       const body = readFileSync(join(dir, 'audit-comment.md'), 'utf8');
       assert.match(body, scenario.expected === 'FAIL' ? /Audit failed/ : /Audit reached no usable verdict/);
       for (const note of scenario.notes ?? []) assert.ok(body.includes(note), `missing note: ${note}`);
+      for (const [note, n] of Object.entries(scenario.counts ?? {})) {
+        assert.equal(body.split(note).length - 1, n, `wrong occurrence count for: ${note}`);
+      }
     }
   });
 }
