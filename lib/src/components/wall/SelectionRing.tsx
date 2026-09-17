@@ -1,6 +1,7 @@
 import { type Ref } from 'react';
 import { cfg } from '../../cfg';
 import { RING_PIECES } from '../../lib/ring-geometry';
+import { prefersReducedMotion } from '../../lib/ui-geometry';
 import { FOCUS_MOTION_MS } from '../design';
 
 // SelectionRing owns a stable structural shell and hands its nodes back through
@@ -10,7 +11,7 @@ import { FOCUS_MOTION_MS } from '../design';
 //
 //  - `variant='ants'`: 2px dashed stroke, marching for as long as command mode
 //    lasts (the dash geometry and `--march-offset` are written imperatively).
-//    Command-mode ring.
+//    Command-mode ring. Reduced motion holds it as a still dashed ring.
 //  - `variant='solid'`: 1px stroke, no dash/animation. Passthrough ring, replacing
 //    the retired 1px CSS border (pixel-identical stroke placement).
 //
@@ -88,7 +89,7 @@ export function SelectionRing({
           strokeWidth={isAnts ? ma.strokeWidth : 1}
           style={isAnts ? {
             animation: `marching-ants ${ma.cycleDuration}s linear infinite`,
-            animationPlayState: (ma.paused || paused || !windowFocused) ? 'paused' : 'running',
+            animationPlayState: (ma.paused || paused || !windowFocused || prefersReducedMotion()) ? 'paused' : 'running',
           } : undefined}
         />
       </svg>

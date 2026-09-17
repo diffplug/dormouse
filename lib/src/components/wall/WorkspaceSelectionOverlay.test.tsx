@@ -169,7 +169,7 @@ function twoPanes(a: Rectish = A, b: Rectish = B): Map<string, HTMLElement> {
 }
 
 describe('WorkspaceSelectionOverlay ring travel', () => {
-  it('pauses only while a workspace is renamed, then resumes marching', async () => {
+  it('pauses while a workspace is renamed, then resumes marching', async () => {
     const store = makeStore();
     const panes = twoPanes();
     await act(async () => root.render(<Harness selectedId="a" mode="command" store={store} panes={panes} />));
@@ -363,6 +363,19 @@ describe('SelectionRing settled render', () => {
     // A settled ring carries neither smear attribute (deterministic snapshots).
     expect(path!.getAttribute('transform')).toBeNull();
     expect(path!.getAttribute('stroke-opacity')).toBeNull();
+  });
+
+  it('holds the ants still under reduced motion', async () => {
+    globalThis.matchMedia = ((query: string) => ({
+      matches: query.includes('prefers-reduced-motion'), media: query, onchange: null,
+      addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent() { return false; },
+    })) as unknown as typeof matchMedia;
+    const store = makeStore();
+    const panes = twoPanes();
+    await act(async () => root.render(<Harness selectedId="a" mode="command" store={store} panes={panes} />));
+    const path = container.querySelector<SVGPathElement>('[data-ring="outline"]')!;
+    expect(path.getAttribute('stroke-dasharray')).not.toBeNull();
+    expect(path.style.animationPlayState).toBe('paused');
   });
 
   it('marches for as long as command mode lasts, across selection changes', async () => {
