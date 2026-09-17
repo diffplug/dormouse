@@ -1,4 +1,6 @@
 import type { AuthAppOptions } from "@pgstencil/auth/better-auth";
+import { providerIds } from "./providers.js";
+import type { ProviderId } from "./providers.js";
 
 export const authPolicy = {
   appName: "Dormouse Hosted",
@@ -10,8 +12,9 @@ export const authPolicy = {
   errorPath: "/login",
 } satisfies Partial<AuthAppOptions>;
 
-export const providerIds = ["github", "google", "microsoft", "apple"] as const;
-export type ProviderId = (typeof providerIds)[number];
+// The allowlist itself lives in ./providers.js, which the frontend and the
+// plain-node deploy scripts import without this module's dependencies.
+export { providerIds, type ProviderId };
 
 // Only an explicit deployment allowlist enables a provider; stale secrets do not.
 export function providerBindings(env: Record<string, unknown>) {

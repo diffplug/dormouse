@@ -19,7 +19,7 @@ Source of truth: `auth` in `hosted/server/worker.ts`; `workerApp` in `hosted/ser
 
 **Must require explicit provider connection from a login less than ten minutes old.** The callback must retain that same live login. Matching email alone never connects an unbound OAuth identity. Different verified provider emails are allowed; an identity already attached to another account cannot be claimed.
 
-**May create provider-only accounts without verified email.** Public email is null; pgstencil's internal placeholder is never a delivery address. Email-code login remains an access path to an account's canonical verified mailbox. There is no merge, email adoption, unlink, or account-recovery interface.
+**May create provider-only accounts without verified email.** Public email is null; pgstencil's internal placeholder is never a delivery address. Email-code login remains an access path to an account's canonical verified mailbox. No merge, email adoption, unlink, or account-recovery interface exists.
 
 **Must identify accounts by immutable user ID, never email.** Provider-only accounts keep their identity when a provider subsequently supplies email.
 
@@ -27,7 +27,7 @@ Source of truth: `auth` in `hosted/server/worker.ts`; `workerApp` in `hosted/ser
 
 **Must discard provider tokens after identity verification and omit login tokens from browser JSON.** Cookies and upstream identity verification follow the packed adapter; `hosted/server/tests/workers.test.ts` pins the consumer's browser contract in workerd with real Postgres and simulated providers.
 
-Source of truth: `authPolicy` / `providerBindings` in `hosted/server/policy.ts`; `App` in `hosted/src/App.tsx`.
+Source of truth: `hosted/server/providers.js`; `authPolicy` / `providerBindings` in `hosted/server/policy.ts`; `App` in `hosted/src/App.tsx`.
 
 ## Interface
 

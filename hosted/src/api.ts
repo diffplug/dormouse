@@ -1,11 +1,9 @@
-export const providers = ["github", "google", "microsoft", "apple"] as const;
-export type Provider = (typeof providers)[number];
-export const providerNames: Record<Provider, string> = {
-  github: "GitHub",
-  google: "Google",
-  microsoft: "Microsoft",
-  apple: "Apple",
-};
+import { providerIds, providerNames } from "../server/providers.js";
+import type { ProviderId } from "../server/providers.js";
+
+export const providers = providerIds;
+export type Provider = ProviderId;
+export { providerNames };
 export interface Session {
   user: { id: string; email: string | null; name: string };
   session: { createdAt: string; expiresAt: string };

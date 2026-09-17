@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { providerAuthorizationOrigins } from "../server/providers.js";
 
 /** @param {{ text: string }} email */
 export const codeFrom = (email) => email.text.match(/\b\d{8}\b/)?.[0];
@@ -92,16 +93,7 @@ export async function smoke(
     });
     assert.equal(started.status, 200, `${provider} authorization must start`);
     const authorization = new URL((await started.json()).url);
-    assert.equal(
-      authorization.origin,
-      {
-        github: "https://github.com",
-        google: "https://accounts.google.com",
-        apple: "https://appleid.apple.com",
-        facebook: "https://www.facebook.com",
-        microsoft: "https://login.microsoftonline.com",
-      }[provider],
-    );
+    assert.equal(authorization.origin, providerAuthorizationOrigins[provider]);
     assert.equal(
       authorization.searchParams.get("redirect_uri"),
       `${authOrigin}/api/auth/callback/${provider}`,

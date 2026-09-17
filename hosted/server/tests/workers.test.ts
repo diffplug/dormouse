@@ -12,7 +12,6 @@ import { queryDatabase } from "pgstencil/postgres";
 import { migrations } from "../migrations";
 import { previewMigrations } from "../preview-migrations";
 import { postgresInbox } from "../preview-inbox";
-// @ts-expect-error Deployment smoke is shared with the Node CLI.
 import { smoke } from "../../scripts/preview-smoke.mjs";
 import { providerIds } from "../policy";
 import {
@@ -99,13 +98,19 @@ async function fixture(
       bindings,
       hyperdrives: { HYPERDRIVE: context.database.url },
       serviceBindings: {
-        ASSETS: () =>
-          new WorkerResponse(
-            "<!doctype html><html><title>Dormouse Hosted</title></html>",
-            {
-              headers: { "content-type": "text/html" },
-            },
-          ),
+        // Vite's content-hashed build output, with the SPA fallback answering
+        // every other path — including an unknown one under /assets/ — with the shell.
+        ASSETS: (request) =>
+          new URL(request.url).pathname === "/assets/app-abc123.js"
+            ? new WorkerResponse("export const build = 1;\n", {
+                headers: { "content-type": "text/javascript" },
+              })
+            : new WorkerResponse(
+                "<!doctype html><html><title>Dormouse Hosted</title></html>",
+                {
+                  headers: { "content-type": "text/html" },
+                },
+              ),
       },
       async outboundService(request) {
         if (production === "preview")
@@ -374,6 +379,26 @@ test("same-site marketing requests fail; production excludes dev endpoints and u
   );
   expect(shell.headers.get("cache-control")).toBe("no-store");
   expect(shell.headers.get("access-control-allow-origin")).toBeNull();
+  expect(
+    (await browser.request("/api/auth/csrf")).headers.get("cache-control"),
+  ).toBe("no-store");
+  const asset = await browser.request("/assets/app-abc123.js");
+  expect(asset.headers.get("cache-control")).toBe(
+    "public, max-age=31536000, immutable",
+  );
+  expect(asset.headers.get("x-frame-options")).toBe("DENY");
+  expect(asset.headers.get("strict-transport-security")).toBe(
+    "max-age=31536000",
+  );
+  expect(asset.headers.get("content-security-policy")).toContain(
+    "frame-ancestors 'none'",
+  );
+  // The SPA fallback serves the shell for an unknown asset path; it must stay uncached.
+  expect(
+    (await browser.request("/assets/missing-abc123.js")).headers.get(
+      "cache-control",
+    ),
+  ).toBe("no-store");
   for (const path of [
     "/api/dev/emails",
     "/dev/emails",
@@ -447,8 +472,9 @@ test("preview runs cloud smoke against real auth, ignores stale providers, and p
   await smoke(
     origin,
     "a".repeat(40),
-    (url: string, init: Parameters<typeof f.worker.dispatchFetch>[1]) =>
-      f.worker.dispatchFetch(url, init),
+    // Miniflare's Response type is not the DOM's; the smoke reads only the shared surface.
+    ((url: string, init?: Parameters<typeof f.worker.dispatchFetch>[1]) =>
+      f.worker.dispatchFetch(url, init)) as unknown as typeof fetch,
     true,
   );
   const inbox = postgresInbox(f.database.url);

@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { required, cloudflare, hyperdriveOrigin } from "./preview.mjs";
 import { smoke } from "./preview-smoke.mjs";
+import { providerIds } from "../server/providers.js";
 
 const root = new URL("../", import.meta.url);
 export function productionConfig(base, env) {
@@ -87,10 +88,7 @@ export async function preflight(env, config, api = cloudflare(env)) {
   for (const provider of config.vars.OAUTH_PROVIDERS.split(",")
     .map((s) => s.trim())
     .filter(Boolean)) {
-    assert.ok(
-      ["github", "google", "microsoft", "apple"].includes(provider),
-      "Unknown OAuth provider",
-    );
+    assert.ok(providerIds.includes(provider), "Unknown OAuth provider");
     requiredSecrets.push(
       `${provider.toUpperCase()}_CLIENT_ID`,
       `${provider.toUpperCase()}_CLIENT_SECRET`,
