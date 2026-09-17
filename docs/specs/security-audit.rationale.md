@@ -44,6 +44,8 @@ The sentinel exists because the same run showed that existence is the wrong pred
 
 The sentinel is checked in the reporting step too, not only in the orchestrator's wait. A domain rewrites its verdict line and then writes the sentinel, so a death between those two writes leaves `VERDICT: PASS` on line 1 of a report that stopped early — the one state where every other guard is satisfied and `PASS` closes the failure issue and opens the release gate.
 
+Every reader compares the last *non-blank* line rather than `tail -n1`: a fragment ending `-->\n\n` is finished, and reading it as cut off would report the lost-report bug the sentinel exists to catch.
+
 Run 35205193090's `## Summary` also inverted the placeholder it was reading: "two of seven work streams ... had not reported" was published as "completed only two of seven planned work streams", describing five audited streams as unaudited. A summary that repeats a cut-off fragment's account of its own progress is reporting a moment, not the run.
 
 ## Outcomes and reporting

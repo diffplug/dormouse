@@ -361,7 +361,9 @@ jobs:
             # `.github/audit/orchestrator.md` §4 for the same reason as every
             # other guard in this loop: a prompt is not a control, and this is
             # the one that decides whether the release gate opens.
-            if [ "$(tail -n1 "$f")" != "<!-- END OF REPORT -->" ]; then
+            # Last non-blank line, not `tail -n1`: a trailing blank line after the
+            # sentinel still ends a finished report.
+            if [ "$(sed -e '/^[[:space:]]*$/d' "$f" | tail -n1)" != "<!-- END OF REPORT -->" ]; then
               echo "::warning::$f has no completion sentinel; its domain was cut off mid-report."
               UNFINISHED="${UNFINISHED:+$UNFINISHED, }$f"
             fi

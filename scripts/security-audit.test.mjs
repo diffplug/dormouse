@@ -29,6 +29,10 @@ function stub(dir, name, source) {
   writeFileSync(join(dir, 'bin', name), `#!${process.execPath}\n${source}\n`, { mode: 0o755 });
 }
 
+// The one literal every reader waits for and every fixture writes. The
+// producer copy in `.github/audit/_preamble.md` is pinned against it below.
+const SENTINEL = '<!-- END OF REPORT -->';
+
 const reporting = runBlock('Surface result, file or close issue');
 const cases = [
   { name: 'all checks pass', status: 'PASS\n', verdicts: ['PASS', 'PASS', 'PASS'], expected: 'PASS' },
@@ -48,6 +52,7 @@ const cases = [
   // release gate.
   { name: 'PASS without a sentinel is a cut-off domain', status: 'PASS', verdicts: ['PASS', 'PASS', 'PASS'], unfinished: [2], expected: 'INCONCLUSIVE', notes: ['cut off mid-report'] },
   { name: 'a cut-off FAIL is still a finding', status: 'PASS', verdicts: ['PASS', 'PASS', 'FAIL'], unfinished: [2], expected: 'FAIL', notes: ['returned `FAIL`', 'cut off mid-report'] },
+  { name: 'a trailing blank line still ends a report', status: 'PASS', verdicts: ['PASS', 'PASS', 'PASS'], trailingBlank: true, expected: 'PASS' },
 ];
 for (const scenario of cases) {
   test(`reporting: ${scenario.name}`, (t) => {
@@ -62,7 +67,9 @@ for (const scenario of cases) {
     writeFileSync(join(dir, 'audit-report.md'), '# Fixture report\n');
     scenario.verdicts.forEach((verdict, i) => {
       if (verdict === null) return;
-      const sentinel = scenario.unfinished?.includes(i) ? '' : '<!-- END OF REPORT -->\n';
+      const sentinel = scenario.unfinished?.includes(i)
+        ? ''
+        : `${SENTINEL}\n${scenario.trailingBlank ? '\n' : ''}`;
       writeFileSync(join(dir, fragments[i]), `VERDICT: ${verdict}\nEvidence\n${sentinel}`);
     });
     const result = spawnSync('bash', ['-c', reporting], { cwd: dir, env, encoding: 'utf8' });
@@ -143,7 +150,16 @@ function promptShellBlock(markdown, containing) {
   return hit[0];
 }
 
-const SENTINEL = '<!-- END OF REPORT -->';
+// The producer side. Every consumer below is pinned by executing the shipped
+// text, but the literal the domains are told to write lives only in
+// `_preamble.md` — so without this the producer could be renamed and the whole
+// suite would stay green against a sentinel nothing writes.
+test('the preamble tells domains to write the sentinel every reader waits for', () => {
+  const preamble = readFileSync(join(repo, '.github/audit/_preamble.md'), 'utf8');
+  const written = [...preamble.matchAll(/^printf '[^']*' >> <your fragment>$/gm)];
+  assert.equal(written.length, 1, 'expected exactly one closing `printf` in the preamble');
+  assert.match(written[0][0], new RegExp(SENTINEL.replace(/[-[\]{}()*+?.,\\^$|#]/g, '\\$&')));
+});
 // Just the predicate, not the loop around it: the loop blocks for 25 minutes
 // by design, and what needs pinning is what it blocks on.
 const finishedFn = orchestrator.match(/^finished\(\) \{.*$/m)[0];
@@ -154,6 +170,9 @@ for (const [name, body, expected] of [
   ['still being filled in', 'VERDICT: INCONCLUSIVE\n\n### FAIL IF results\n\n- one check\n', false],
   ['sentinel not on the last line', `VERDICT: PASS\n${SENTINEL}\ntrailing\n`, false],
   ['finished', `VERDICT: PASS\n\n${SENTINEL}\n`, true],
+  // A domain that appends one more newline has still finished. Read as cut off,
+  // this would report the very bug the sentinel exists to catch.
+  ['finished with trailing blank lines', `VERDICT: PASS\n\n${SENTINEL}\n\n\n`, true],
 ]) {
   test(`orchestrator wait predicate: ${name}`, (t) => {
     const dir = tempDir(t, 'dormouse-audit-wait-');

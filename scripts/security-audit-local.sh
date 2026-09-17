@@ -76,7 +76,9 @@ run_domain() {
     # Same sentinel CI reads, for the same reason: the domain appends findings
     # as it determines them, so a fragment without its last line is one whose
     # domain stopped early — and its first line may already say PASS.
-    if [ "$(tail -n1 "$out")" != "<!-- END OF REPORT -->" ]; then
+    # Last non-blank line, not `tail -n1`: a trailing blank line after the
+    # sentinel still ends a finished report.
+    if [ "$(sed -e '/^[[:space:]]*$/d' "$out" | tail -n1)" != "<!-- END OF REPORT -->" ]; then
       echo "==> $domain was cut off before finishing $out — findings kept, verdict does not stand" >&2
       return 1
     fi

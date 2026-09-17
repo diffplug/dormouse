@@ -64,7 +64,9 @@ DEADLINE=$(cat "$DEADLINE_FILE")
 # findings as they determine them, so `[ -s ]` goes true minutes before any
 # report is finished; the sentinel each domain writes as its last line is
 # what "reported" means here.
-finished() { [ -s "$1" ] && [ "$(tail -n1 "$1")" = "<!-- END OF REPORT -->" ]; }
+# Last non-blank line, not `tail -n1`: a fragment ending `-->\n\n` is finished,
+# and reading it as cut off would report this PR's own bug back at you.
+finished() { [ -s "$1" ] && [ "$(sed -e '/^[[:space:]]*$/d' "$1" | tail -n1)" = "<!-- END OF REPORT -->" ]; }
 until finished audit-supply-chain.md && finished audit-ci-secrets.md && finished audit-application.md; do
   [ "$(date +%s)" -ge "$DEADLINE" ] && { echo "DEADLINE"; break; }
   sleep 10
@@ -112,7 +114,7 @@ emit() {
   if [ ! -s "$2" ]; then
     echo "_No report — this domain produced no fragment._"
   else
-    [ "$(tail -n1 "$2")" = "<!-- END OF REPORT -->" ] ||
+    [ "$(sed -e '/^[[:space:]]*$/d' "$2" | tail -n1)" = "<!-- END OF REPORT -->" ] ||
       echo "_Incomplete — this domain was still writing when the deadline passed. What follows is what it had recorded, not a finished report._"
     cat "$2"
   fi
@@ -149,8 +151,12 @@ FAIL if any subagent returned FAIL. That is a finding, and it stays a finding
 whether or not the other domains reported.
 
 If no subagent returned FAIL but any domain returned INCONCLUSIVE, or a fragment
-is missing, empty, or has no exact verdict line, **write no status file at all.** A
-domain that produced no report did not pass, but it did not fail either:
+is missing, empty, has no exact verdict line, or carries no sentinel,
+**write no status file at all.** The sentinel belongs in that list because a
+domain cut off just after rewriting its verdict line leaves `VERDICT: PASS` on
+line 1 of a report that stopped early — the one state where the verdict line
+alone reads clean. A domain that produced no report did not pass, but it did
+not fail either:
 `FAIL` publishes it as `[security-audit] FAIL`, relabels an open issue upward,
 and files a run that merely ran out of time as a security finding. That is the
 conflation the workflow's three outcomes exist to prevent. With no status file
