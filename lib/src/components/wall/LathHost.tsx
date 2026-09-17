@@ -28,6 +28,9 @@ import { nowMs, type LathWallEngine } from './lath-wall-engine';
 import { type DragController, createDragController } from './lath-drag-controller';
 import { TerminalPanel } from './TerminalPanel';
 import { BrowserPanel } from './BrowserPanel';
+import { ToolPanel } from './ToolPanel';
+import { isToolParams } from './browser-surface';
+import { ToolPaneHeader } from './ToolPaneHeader';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { SurfacePaneHeader } from './SurfacePaneHeader';
 import { AlertSpeechIndicator } from './AlertSpeechIndicator';
@@ -95,21 +98,25 @@ export type LathComponentsOverride = {
 const BODY_COMPONENTS: Record<string, ComponentType<PaneProps>> = {
   terminal: TerminalPanel,
   browser: BrowserPanel,
+  // A tool is both, one Session deep; ToolPanel keeps each mounted and flips
+  // visibility (docs/specs/dor-tool.md).
+  tool: ToolPanel,
 };
 const TAB_COMPONENTS: Record<string, ComponentType<PaneProps>> = {
   terminal: TerminalPaneHeader,
   surface: SurfacePaneHeader,
+  tool: ToolPaneHeader,
 };
 
 /** For a terminal Surface the pane id is its session id (docs/specs/layout.md).
  *  The terminal context floats over the whole leaf, so it lives here rather than
  *  in the body, whose clipping box it must escape. */
-function TerminalLeafOverlay({ id, title }: PaneProps) {
+function TerminalLeafOverlay({ id, title, params }: PaneProps) {
   const { mounted } = useContext(TerminalContextContext);
   return (
     <>
       <AlertSpeechIndicator sessionId={id} />
-      {mounted?.id === id && <TerminalContext {...mounted} title={title} />}
+      {mounted?.id === id && <TerminalContext {...mounted} title={title} tool={isToolParams(params)} />}
     </>
   );
 }
@@ -120,6 +127,8 @@ function TerminalLeafOverlay({ id, title }: PaneProps) {
 // surface-kind branch in the render path.
 const OVERLAY_COMPONENTS: Record<string, ComponentType<PaneProps>> = {
   terminal: TerminalLeafOverlay,
+  // A tool has a PTY, so it rings like a terminal whichever half is forward.
+  tool: TerminalLeafOverlay,
 };
 
 type DragState = {

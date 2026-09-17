@@ -18,6 +18,7 @@ import {
   resetWorkspaceUi,
   setPendingWorkspaceClose,
   setPendingWorkspaceMove,
+  setWorkspaceMoveError,
 } from '../lib/workspace-ui-store';
 import {
   createWorkspace,
@@ -450,4 +451,18 @@ describe('WorkspaceStrip', () => {
     expect(container.querySelector('#kill-confirm-title')).toBeNull();
     expect(getWorkspacesSnapshot().workspaces).toHaveLength(2);
   });
+});
+
+
+it('keeps a move refusal visible and releases the keyboard when dismissed', async () => {
+  await render();
+  await act(async () => setWorkspaceMoveError({ id: 'ws-1', reason: 'Wait for the Tool browser to connect before moving this Workspace' }));
+  expect(document.querySelector('[role="alert"]')?.textContent).toContain('Wait for the Tool browser');
+  expect(chromeKeyboardHeld()).toBe(true);
+  await act(async () => {
+    (document.querySelector('[role="dialog"] button') as HTMLButtonElement).click();
+  });
+  expect(document.querySelector('[role="alert"]')).toBeNull();
+  expect(getWorkspaceUiSnapshot().moveError).toBeNull();
+  expect(chromeKeyboardHeld()).toBe(false);
 });

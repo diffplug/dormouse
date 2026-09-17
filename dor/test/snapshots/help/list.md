@@ -4,7 +4,7 @@ Invocation: `dor list --help`
 
 ```text
 USAGE
-  dor list [--workspace ref|--all] [--window label] [--kind terminal|browser] [--view paned|zoomed|minimized] [--command text] [--cwd path] [--port number] [--ports] [--json] [--id-format refs|ids|both]
+  dor list [--workspace ref|--all] [--window label] [--kind terminal|browser|tool] [--view paned|zoomed|minimized] [--command text] [--cwd path] [--port number] [--ports] [--json] [--id-format refs|ids|both]
   dor list --workspaces [--window label] [--json]
   dor list --help
 

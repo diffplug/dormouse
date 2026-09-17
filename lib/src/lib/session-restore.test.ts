@@ -197,6 +197,70 @@ describe('restoreSession', () => {
     expect(result?.paneIds).toEqual(['pane-term', 'pane-web']);
   });
 
+  it('respawns a restored tool command with integration gating', () => {
+    const saved: PersistedSession = {
+      version: 3,
+      panes: [{
+        id: 'pane-tool',
+        title: 'storybook',
+        cwd: '/repo',
+        untouched: true,
+        surfaceType: 'tool',
+        command: 'pnpm storybook',
+        tool: { name: 'storybook', render: 'iframe', port: 'announced' },
+      }],
+    };
+
+    restoreSession(createPlatform(saved, { 'pane-tool': 'claude --resume should-not-win' }));
+
+    expect(terminalRegistryMocks.restoreTerminal).toHaveBeenCalledWith('pane-tool', expect.objectContaining({
+      command: 'pnpm storybook',
+      requireIntegration: true,
+      resumeCommand: null,
+    }));
+  });
+
+  it.each([
+    { shell: '/bin/bash', oldCommand: "& 'program path' 'it''s.txt'", command: "'program path' 'it'\\''s.txt'" },
+    { shell: 'pwsh.exe', oldCommand: "'program path' 'it'\\''s.txt'", command: "& 'program path' 'it''s.txt'" },
+  ])('re-quotes a Tool from another shell for cold restore with $shell', ({ shell, oldCommand, command }) => {
+    terminalRegistryMocks.getDefaultShellOpts.mockReturnValue({ shell });
+    const argv = ['program path', "it's.txt"];
+    for (const placement of ['layout', 'fallback', 'door']) {
+      const saved: PersistedSession = {
+        version: 3,
+        panes: [{ id: 'tool', title: 'Viewer', cwd: '/repo', untouched: false, surfaceType: 'tool', command: oldCommand,
+          tool: { render: 'iframe', port: 'announced', argv } }],
+        ...(placement === 'layout' ? { lathLayout: {
+          version: 1, tree: { root: { kind: 'leaf', id: 'tool' } },
+          leafMeta: { tool: { component: 'tool', tabComponent: 'tool', title: 'Viewer', params: { surfaceType: 'tool', command: oldCommand, toolArgv: argv } } },
+        } } : {}),
+        ...(placement === 'door' ? { doors: [{ id: 'tool', title: 'Viewer', component: 'tool', params: { surfaceType: 'tool', command: oldCommand, toolArgv: argv } }] } : {}),
+      };
+      const before = JSON.stringify(saved);
+      const result = restoreSession(createPlatform(saved));
+      expect(terminalRegistryMocks.restoreTerminal).toHaveBeenLastCalledWith('tool', expect.objectContaining({ shell, command, requireIntegration: true }));
+      const params = placement === 'door' ? result?.doors[0].params : result?.lathLayout?.leafMeta.tool.params;
+      expect(params).toMatchObject({ command, toolArgv: argv });
+      expect(JSON.stringify(saved)).toBe(before); // rebuilding must not change the durable record
+    }
+  });
+
+  it('retains literal shell commands when the selected restore shell changes', () => {
+    terminalRegistryMocks.getDefaultShellOpts.mockReturnValue({ shell: 'pwsh.exe' });
+    const command = 'echo "$HOME" | cat';
+    restoreSession(createPlatform({ version: 3, panes: [{ id: 'tool', title: 'Literal', cwd: '/repo', untouched: false, surfaceType: 'tool', command }] }));
+    expect(terminalRegistryMocks.restoreTerminal).toHaveBeenCalledWith('tool', expect.objectContaining({ command, shell: 'pwsh.exe' }));
+  });
+
+  it.each(['\t', '\n', '\r', '\x1b'])('rejects control-bearing saved Tool argv before any terminal is restored (%j)', control => {
+    const saved: PersistedSession = { version: 3, panes: [{ id: 'tool', title: 'Unsafe', cwd: '/repo', untouched: false, surfaceType: 'tool', command: 'safe fallback',
+      tool: { render: 'iframe', port: 'announced', argv: ['program', `file${control}command`] } }] };
+    expect(restoreSession(createPlatform(saved))).toBeNull();
+    expect(restoreSession(createPlatform(null), { savedSession: saved })).toBeNull();
+    expect(terminalRegistryMocks.restoreTerminal).not.toHaveBeenCalled();
+  });
+
   it.each([undefined, { version: 1 }, {
     version: 1,
     tree: { root: { kind: 'leaf', id: 'stale-pane' } },
@@ -313,6 +377,17 @@ describe('restoreSession', () => {
       }),
     );
   });
+});
+
+
+it('recovers Tool metadata from pane rows when its layout is unusable', () => {
+  const restored = restoreSession(createPlatform({ version: 3, panes: [
+    { id: 'tool', title: 'Storybook', cwd: '/repo', untouched: false, surfaceType: 'tool', command: 'pnpm storybook', tool: { render: 'iframe', port: 'auto', name: 'storybook', key: ['storybook', '/repo'] } },
+    { id: 'web', title: 'Web', cwd: null, untouched: false, surfaceType: 'browser' },
+  ] }));
+  expect(restored?.paneIds).toEqual(['tool']);
+  expect(restored?.lathLayout?.leafMeta.tool).toMatchObject({ component: 'tool', tabComponent: 'tool', params: { command: 'pnpm storybook', toolRender: 'iframe', toolPort: 'auto', toolName: 'storybook' } });
+  expect(restored?.lathLayout?.leafMeta.tool.params?.url).toBeUndefined();
 });
 
 describe('restoreSession alert seeding', () => {

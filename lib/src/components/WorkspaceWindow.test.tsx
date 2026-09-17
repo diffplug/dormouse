@@ -25,7 +25,7 @@ import { getWallHandle, listWallHandles, resetWallHandles } from './wall/wall-ha
 import { resetWorkspaceBootPlans, setWorkspaceBootPlan } from './wall/workspace-boot-plans';
 import { mountWallHarness, type WallHarness } from './wall/wall-test-utils';
 import { getWorkspaceSurfacesSnapshot, resetWorkspaceSurfaces } from '../lib/workspace-surfaces';
-import { previousWorkspaceSession, publishWorkspaceSession, resetWindowSessionAggregator, seedWindowSession } from '../lib/window-session-aggregator';
+import { previousWorkspaceSession, publishWorkspaceSession, resetWindowSessionAggregator, seedWindowSession, setWorkspaceTransferPending } from '../lib/window-session-aggregator';
 import { getWorkspaceUiSnapshot, resetWorkspaceUi } from '../lib/workspace-ui-store';
 import {
   closeWorkspace,
@@ -477,7 +477,7 @@ describe('WorkspaceWindow', () => {
     expect(leafIdsIn(survivors[0].id)).toHaveLength(1);
   });
 
-  it('refuses a Surface-creating dor request while its Workspace is closing', async () => {
+  it.each([SURFACE_CONTROL_METHODS.split, SURFACE_CONTROL_METHODS.tool])('refuses %s while its Workspace is closing', async (method) => {
     await render();
     await act(async () => { createWorkspace({ id: 'ws-2' }); });
     await flush();
@@ -491,7 +491,7 @@ describe('WorkspaceWindow', () => {
       const closing = handle.closeAll('silent');
       handle.handleDorControl({
         requestId: 'r1',
-        method: SURFACE_CONTROL_METHODS.split,
+        method,
         surfaceId: paneId,
         params: { direction: 'right' },
         respond,
@@ -600,4 +600,91 @@ describe('WorkspaceWindow', () => {
     expect(handle.hasTouchedSurfaces()).toBe(false);
     expect(handle.runningCount()).toBe(0);
   });
+});
+
+
+it.each([
+  ['switched', true],
+  ['transferring', false],
+  ['closed', false],
+] as const)('respects Workspace lifecycle after takeover acceptance: %s', async (change, launches) => {
+  const controller = new AbortController();
+  const typed: string[] = [];
+  const first = getActiveWorkspaceId();
+  try {
+    await render();
+    act(() => fake.spawnPty('pane-a'));
+    fake.setInputHandler('pane-a', data => typed.push(data));
+    terminalRegistry.seedTerminalManualCwd('pane-a', '/repo');
+    terminalRegistry.applyTerminalSemanticEvents('pane-a', [
+      { type: 'commandLine', commandLine: 'dor tool -- pnpm dev' },
+      { type: 'commandStart', source: 'osc633_boundaries' },
+    ]);
+    const respond = vi.fn();
+    await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+      method: SURFACE_CONTROL_METHODS.tool, surfaceId: 'pane-a',
+      params: { command: ['pnpm', 'dev'], cwd: '/repo' }, signal: controller.signal, respond,
+    } })));
+    expect(respond).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'takeover' }) }));
+    await act(async () => {
+      if (change === 'transferring') setWorkspaceTransferPending(first, true);
+      else createWorkspace({ id: 'ws-2' });
+    });
+    if (change === 'closed') {
+      await act(async () => {
+        expect(await closeWorkspaceWithSurfaces(first, 'silent')).toBeNull();
+      });
+    }
+    await act(async () => {
+      terminalRegistry.applyTerminalSemanticEvents('pane-a', [{ type: 'promptStart' }]);
+    });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
+    expect(typed).toEqual(launches ? ['pnpm dev\r'] : []);
+    if (change === 'closed') {
+      expect(getWallHandle(first)).toBeNull();
+      expect(getWorkspacesSnapshot().workspaces.map(workspace => workspace.id)).toEqual(['ws-2']);
+    } else {
+      expect(leafIdsIn(first)).toEqual(['pane-a']);
+      const prepared = await getWallHandle(first)!.prepareWorkspaceTransfer();
+      expect(prepared.payload.workspace.session.panes[0]?.surfaceType === 'tool').toBe(launches);
+    }
+    if (change !== 'transferring') expect(getActiveWorkspaceId()).toBe('ws-2');
+  } finally {
+    controller.abort();
+    setWorkspaceTransferPending(first, false);
+    fake.clearInputHandler('pane-a');
+    act(() => terminalRegistry.removeTerminalPaneState('pane-a'));
+  }
+});
+
+it('routes Tools to the requested Workspace and never launches after lookup races closure', async () => {
+  const lookup = { status: 'untrusted' as const, projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'storybook', run: 'pnpm storybook', upstreamUrl: null };
+  const gate = Promise.withResolvers<typeof lookup>();
+  const toolControl = vi.fn().mockResolvedValueOnce(lookup).mockImplementationOnce(() => gate.promise);
+  Object.assign(fake, { toolControl });
+  await render();
+  const first = getActiveWorkspaceId();
+  await act(async () => { createWorkspace({ id: 'ws-2' }); });
+  await flush();
+  const respond = vi.fn();
+  await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+    requestId: 'tool-route', surfaceId: 'pane-a', method: SURFACE_CONTROL_METHODS.tool,
+    params: { workspace: 'workspace:2', name: 'storybook', cwd: '/repo' }, respond,
+  } })));
+  await flush();
+  expect(respond).toHaveBeenCalledWith(expect.objectContaining({ ok: true, result: expect.objectContaining({ status: 'pending' }) }));
+  expect(leafIdsIn(first)).toEqual(['pane-a']);
+  expect(leafIdsIn('ws-2')).toHaveLength(2);
+  expect(getActiveWorkspaceId()).toBe('ws-2');
+
+  const handle = getWallHandle('ws-2')!;
+  const late = vi.fn();
+  act(() => handle.handleDorControl({ requestId: 'late-tool', method: SURFACE_CONTROL_METHODS.tool,
+    params: { name: 'storybook', cwd: '/repo' }, respond: late }));
+  await flush();
+  await act(async () => { await handle.closeAll('discard'); });
+  await act(async () => gate.resolve(lookup));
+  await flush();
+  expect(late).toHaveBeenCalledWith({ ok: false, error: 'this workspace is closing' });
+  expect(handle.surfaceIds()).toEqual([]);
 });

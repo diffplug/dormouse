@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { getToolDirty, resetToolDirty } from 'dormouse-lib/lib/tool-dirty-store';
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 // The in-process session-flush handshake and drain wrappers on TauriAdapter are
 // pure webview-side logic — they never invoke Tauri — so we only need to stub the
@@ -376,6 +377,8 @@ describe("TauriAdapter remote host link", () => {
 // location"), so this adapter forwards what it is given and never re-derives
 // it. What is covered here is exactly that boundary.
 describe("TauriAdapter terminal stream", () => {
+  afterEach(resetToolDirty);
+
   async function listening() {
     const handlers = new Map<string, (event: { payload: unknown }) => void>();
     vi.mocked(listen).mockImplementation((async (
@@ -399,6 +402,26 @@ describe("TauriAdapter terminal stream", () => {
       deliver: (event: string, payload: unknown) => void handlers.get(event)?.({ payload }),
     };
   }
+
+  it("applies dirty live/replay reports in order and preserves explicit clean across exit", async () => {
+    const { deliver } = await listening();
+    const id = 'dirty-stream';
+    deliver('terminal:protocolEvents', { id, events: [
+      { kind: 'toolState', state: { dirty: true } },
+      { kind: 'semantic', event: { type: 'commandStart', source: 'osc633_boundaries' } },
+      { kind: 'toolState', state: { dirty: false } },
+    ] });
+    deliver('terminal:semanticEvents', { id, events: [{ type: 'commandStart', source: 'osc633_boundaries' }] });
+    expect(getToolDirty(id)).toBe(false);
+    deliver('pty:exit', { id, exitCode: 0 });
+    expect(getToolDirty(id)).toBe(false);
+    deliver('pty:replay', { id, data: '\x1b]633;C\x07\x1b]367;state;{"v":1,"dirty":true}\x07' });
+    expect(getToolDirty(id)).toBe(true);
+    deliver('pty:replay', { id, data: 'since-mark output without a new command' });
+    expect(getToolDirty(id)).toBe(true);
+    deliver('pty:replay', { id, data: '\x1b]633;C\x07' });
+    expect(getToolDirty(id)).toBeNull();
+  });
 
   it("forwards the projection pair it was handed, parsing nothing again", async () => {
     const { adapter, deliver, invoke } = await listening();

@@ -111,3 +111,8 @@ export const NotepadPopover: StoryObj<typeof NotedDoorStory> = {
   args: { noteCount: 2 },
   play: openDoorNotepad,
 };
+
+
+export const DirtyTool: Story = {
+  args: { title: 'Editor', toolDirty: true, noteCount: 2, speechState: 'spoken' },
+};

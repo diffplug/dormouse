@@ -63,6 +63,8 @@ and Tauri's `resource_dir()` hands out a verbatim prefix (rationale).
 misparses LF-only batch files (rationale), and staging copies bytes verbatim.
 `.gitattributes` pins it (`*.cmd text eol=crlf`; the POSIX launcher `eol=lf`).
 
+**Must keep browser-shared CLI modules free of Node runtime dependencies**, even though the CLI package uses Node types. `dor/test/browser-shared.test.mjs` bundles their dependency graphs for the browser. (rationale)
+
 ### Git Bash PATH survival
 
 **On Windows the `PATH` prepend must survive Git Bash / MSYS login:** the PTY
@@ -642,6 +644,12 @@ Source of truth: `dor/src/commands/skill.ts`, `scripts/generate-dor-skill.mjs`,
 **Must exclude unpromoted helpers from discovery and control**, including direct internal-id targets and helper-origin requests. Promotion assigns the ordinary public Surface ref without changing Session identity; subsequent CLI operations use ordinary Surface semantics.
 
 Source of truth: `buildDorSurfacesInternal` in `lib/src/components/Wall.tsx`; `dispatchDorControlRequest` in `lib/src/lib/platform/dor-control-dispatch.ts`.
+
+## Dor Tools
+
+**Must route `dor tool` and `dor open` through the Tool launch contract**, including approval, explicit-key reuse, and placement (`docs/specs/dor-tool.md` → CLI). Generated help owns syntax.
+
+Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `openCommand` in `dor/src/commands/open.ts`; `ToolSurfaceResponse` in `dor/src/commands/types.ts`.
 
 ## Future
 

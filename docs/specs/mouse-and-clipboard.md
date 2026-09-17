@@ -8,6 +8,8 @@
 
 Owns terminal selection, copy, paste, mouse override, and their chrome across platforms. Header placement: `docs/specs/layout.md`; sequence registry: `docs/specs/terminal-escapes.md`.
 
+For tools, these rules apply while the terminal is forward; the browser or conflict view owns the keys otherwise.
+
 ## Background: The Two Mouse Regimes
 
 Mouse events belong to one of two consumers:

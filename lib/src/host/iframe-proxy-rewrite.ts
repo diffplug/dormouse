@@ -38,6 +38,10 @@ export const FRAMING_RESPONSE_HEADERS = new Set([
   'x-frame-options', 'content-security-policy', 'content-security-policy-report-only',
 ]);
 
+/** Upstreams that supply their own content boundary opt into retaining it.
+ * This only preserves restrictions; it grants no additional authority. */
+export const PRESERVE_CSP_HEADER = 'x-dormouse-preserve-csp';
+
 // A serialized origin: scheme, host, optional port, nothing else. Deliberately
 // strict — the value ends up inside a CSP header we emit, so anything that
 // could carry a `;` or a space is refused rather than escaped. It covers the
@@ -71,7 +75,7 @@ export function normalizeEmbedderOrigins(value: unknown): string[] | null {
 }
 
 /**
- * The `Content-Security-Policy` the proxy serves in place of the upstream's.
+ * The proxy's framing policy, replacing or supplementing the upstream's CSP.
  * `'self'` permits nested documents within this one per-grant origin; every
  * external ancestor must still be in the validated app chain.
  */
@@ -81,7 +85,7 @@ export function frameAncestorsCsp(embedderOrigins: string[]): string {
 
 // The fixed, Dormouse-owned shim — like agent-browser's EDIT_SCRIPTS, never
 // user-supplied, so it is not an eval vector. Injected inline into served HTML;
-// this is why the upstream CSP is dropped whole rather than per-directive (an
+// this is why the default drops upstream CSP whole rather than per-directive (an
 // inline script needs `script-src` gone as much as the frame needs
 // `frame-ancestors` gone). It posts four message kinds to the Wall and nothing
 // else (every other keystroke flows to the tool). A nested document relays the
@@ -179,8 +183,8 @@ export function iframeShim(embedderOrigin: string): string {
 })();`;
 }
 
-// Drop any in-document CSP and inject the shim before </head> so it runs before
-// the tool's own scripts. Applies to every framed http upstream, loopback or
+// Drop in-document CSP unless the upstream opted into preservation, then
+// inject the shim before </head>. Applies to framed http upstreams, loopback or
 // remote — the trade is stated in docs/specs/dor-browser.md → "Iframe Host
 // Capability And CSP". The response-header CSP is replaced separately via
 // FRAMING_RESPONSE_HEADERS.
@@ -188,8 +192,8 @@ export function iframeShim(embedderOrigin: string): string {
 // `embedderOrigin` is the document that frames us, and it is required: without
 // one there is nobody to address the shim's messages to, so the caller must not
 // instrument at all rather than fall back to `'*'`.
-export function instrumentHtml(body: string, embedderOrigin: string): string {
-  const html = body.replace(
+export function instrumentHtml(body: string, embedderOrigin: string, preserveCsp = false): string {
+  const html = preserveCsp ? body : body.replace(
     /<meta[^>]+http-equiv=["']?content-security-policy["']?[^>]*>/gi,
     '',
   );

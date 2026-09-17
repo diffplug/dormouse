@@ -1,3 +1,5 @@
+import { getToolDirty, recordToolDirty, resetToolDirty } from 'dormouse-lib/lib/tool-dirty-store';
+import { getToolAnnounce, resetToolAnnounces } from 'dormouse-lib/lib/tool-announce-store';
 import { applyTerminalSemanticEvents, snapshotTerminalState, removeTerminalPaneState, countRunningSessionsIn, getTerminalPaneState, isPaneOscDriven } from 'dormouse-lib/lib/terminal-state-store';
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -228,6 +230,7 @@ beforeEach(() => {
   mocks.serialize.mockReset().mockReturnValue("");
   mocks.writes.length = 0;
   arrivals = [];
+  resetToolDirty();
   disposeAllSessions();
   mocks.invoke.mockResolvedValue(undefined);
   mocks.listen.mockResolvedValue(() => {});
@@ -765,7 +768,7 @@ describe("the target half", () => {
     }
   });
 
-  it("unwinds the mount when adopt_done is refused, releasing the Sessions rather than killing them", async () => {
+  it("unwinds an expired arrival without preparing another move, even while a Tool is starting", async () => {
     const platform = fakePlatform();
     const killPty = vi.spyOn(platform, "killPty");
     const host = mocks.invoke.getMockImplementation()!;
@@ -773,14 +776,14 @@ describe("the target half", () => {
       // The `ARRIVAL_MAX` watchdog retired the record while this window was
       // wedged between the drain and the mount: Rust has handed the shells
       // back to the source, so `adopt_done` finds no arrival to settle.
-      if (cmd === "adopt_done") arrivals = [];
+      if (cmd === "adopt_done") {
+        expect(getTerminalInstance("pane-a")).not.toBeNull();
+        arrivals = [];
+      }
       return host(cmd, args);
     });
-    // The Wall this window mounts for the arrival, with its release observable.
-    const released = vi.fn();
-    registerWallHandle(stubWallHandle(WORKSPACE_ID, {
-      prepareWorkspaceTransfer: async () => prepared(released),
-    }));
+    const prepare = vi.fn(async () => { throw new Error("Wait for the Tool browser to connect before moving this Workspace"); });
+    registerWallHandle(stubWallHandle(WORKSPACE_ID, { prepareWorkspaceTransfer: prepare }));
     arrivals = [payload()];
     initWorkspaceMoves(platform);
     await settle();
@@ -794,7 +797,8 @@ describe("the target half", () => {
     expect(getWorkspaceBootPlan(WORKSPACE_ID)).toEqual({});
     // Its Sessions were released — the shells are the source's again — and
     // nothing was killed.
-    expect(released).toHaveBeenCalledTimes(1);
+    expect(prepare).not.toHaveBeenCalled();
+    expect(getTerminalInstance("pane-a")).toBeNull();
     expect(killPty).not.toHaveBeenCalled();
     expect(mocks.invoke).not.toHaveBeenCalledWith("adopt_failed", expect.anything());
   });
@@ -858,7 +862,7 @@ describe("the target half", () => {
 });
 
 describe("a transfer's content", () => {
-  it("guards close during preparation and releases the guard if preparation fails", async () => {
+  it.each(['probe failed', 'Approve or decline pending Tools before moving this Workspace', 'Wait for the Tool browser to connect before moving this Workspace'])("returns a preparation refusal without retaining the close guard (%s)", async reason => {
     let rejectPrepare!: (error: Error) => void;
     registerWallHandle(stubWallHandle(WORKSPACE_ID, {
       prepareWorkspaceTransfer: () => new Promise((_, reject) => { rejectPrepare = reject; }),
@@ -866,8 +870,8 @@ describe("a transfer's content", () => {
     const moving = transferWorkspaceTo(WORKSPACE_ID, "ws-2");
     expect(isWorkspaceTransferPending(WORKSPACE_ID)).toBe(true);
     expect(await tearOutWorkspace(WORKSPACE_ID, { x: 0, y: 0 })).toEqual({ moved: false, reason: "Workspace is already in flight" });
-    const rejected = expect(moving).rejects.toThrow("probe failed");
-    rejectPrepare(new Error("probe failed"));
+    const rejected = expect(moving).resolves.toEqual({ moved: false, reason });
+    rejectPrepare(new Error(reason));
     await rejected;
     expect(isWorkspaceTransferPending(WORKSPACE_ID)).toBe(false);
   });
@@ -1045,4 +1049,41 @@ describe("workspaceDropTarget", () => {
     expect(workspaceTabRect("w1")?.left).toBe(100);
     expect(workspaceTabRect("gone")).toBeNull();
   });
+});
+
+
+it.each([true, false])('restores volatile Tool browser/dirty state (%s) without publishing it in the durable Workspace', async dirty => {
+  resetToolAnnounces();
+  const move = payload();
+  const stable = { surfaceType: 'tool', command: 'pnpm storybook', toolRender: 'ab-screencast', toolPort: 'announced' };
+  move.workspace.session.panes[0] = { ...move.workspace.session.panes[0], surfaceType: 'tool', command: 'pnpm storybook' };
+  move.workspace.session.lathLayout = {
+    version: 1, tree: { root: { kind: 'leaf', id: 'pane-a' } },
+    leafMeta: { 'pane-a': { component: 'tool', tabComponent: 'tool', title: 'Storybook', params: stable } },
+  };
+  const browser = { ...stable, url: 'http://localhost:6006/edited', session: 'browser-to-keep', renderMode: 'ab-screencast', toolAnnouncedPort: 6006 };
+  const announce = { port: 6006, name: null, key: null, dehydrate: false, persist: null };
+  arrivals = [Object.assign(move, { tools: { 'pane-a': browser }, terminals: { 'pane-a': { serialized: '', toolAnnounce: announce, toolDirty: dirty } } })];
+  const plans = await bootFromTearOut(fakePlatform());
+  expect(plans?.[WORKSPACE_ID].restoredLathLayout).toMatchObject({ leafMeta: { 'pane-a': { params: browser } } });
+  expect(getToolAnnounce('pane-a')).toEqual(announce);
+  expect(getToolDirty('pane-a')).toBe(dirty);
+  expect(JSON.stringify(move.workspace.session)).not.toContain('toolDirty');
+  expect(move.workspace.session.lathLayout).toMatchObject({ leafMeta: { 'pane-a': { params: stable } } });
+  expect(JSON.stringify(move.workspace.session)).not.toContain('browser-to-keep');
+  resetToolAnnounces();
+});
+
+it('sends Tool browser bindings and explicit clean only with volatile transfer content', async () => {
+  recordToolDirty('pane-a', false);
+  initWorkspaceMoves(fakePlatform([], { marks: { 'pane-a': 42 } }));
+  const move = { ...prepared(), tools: { 'pane-a': { surfaceType: 'tool', session: 'browser-to-keep' } } };
+  registerWallHandle(stubWallHandle(WORKSPACE_ID, { prepareWorkspaceTransfer: async () => move }));
+  void transferWorkspaceTo(WORKSPACE_ID, 'ws-2');
+  await contentSent();
+  const [, args] = mocks.invoke.mock.calls.find(([cmd]) => cmd === 'transfer_workspace_content')!;
+  expect(args).toMatchObject({ content: { tools: move.tools, terminals: { 'pane-a': { toolDirty: false } } } });
+  const [, persisted] = mocks.invoke.mock.calls.find(([cmd]) => cmd === 'transfer_workspace')!;
+  expect(JSON.stringify(persisted)).not.toContain('browser-to-keep');
+  expect(JSON.stringify(persisted)).not.toContain('toolDirty');
 });

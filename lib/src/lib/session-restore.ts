@@ -1,5 +1,8 @@
+import type { LathNode } from './lath/model';
 import { type LathPersistedLayout, isLathPersistedLayout } from './lath/persistence';
 import type { PlatformAdapter } from './platform/types';
+import { PLATFORM_STRING } from './platform';
+import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';
 import { carrySurfaceRefs, readPersistedSession, type PersistedDoor, type PersistedSession, type PersistedSurfaceRefs } from './session-types';
 import { getDefaultShellOpts, restoreBrowserSurfaceTodo, restoreTerminal } from './terminal-registry';
 
@@ -30,19 +33,55 @@ export interface RestoreSources {
 }
 
 export function restoreSession(platform: PlatformAdapter, sources: RestoreSources = {}): RestoredSession | null {
-  const saved = sources.savedSession !== undefined
+  const saved = readPersistedSession(sources.savedSession !== undefined
     ? sources.savedSession
-    : readPersistedSession(platform.getState());
+    : platform.getState());
   if (!saved || !saved.panes || saved.panes.length === 0) return null;
-  const doors = saved.doors ?? [];
+  const shellOpts = getDefaultShellOpts();
+  const shellKind = shellCommandKind(shellOpts?.shell, PLATFORM_STRING);
+  // The saved string belongs to the previous Session's shell. Preserve literal
+  // commands, but quote saved argv anew for the shell this restore will spawn.
+  const panes = saved.panes.map(pane => pane.surfaceType === 'tool' && pane.tool?.argv
+    ? { ...pane, command: buildShellCommandForKind(shellKind, pane.tool.argv) } : pane);
+  const panesById = new Map(panes.map(pane => [pane.id, pane]));
+  const doors = (saved.doors ?? []).map(door => {
+    const pane = panesById.get(door.id);
+    return pane?.surfaceType === 'tool' && pane.tool?.argv
+      ? { ...door, params: { ...door.params, command: pane.command, toolArgv: pane.tool.argv } } : door;
+  });
   const doorIds = new Set(doors.map((item) => item.id));
-  const visiblePanes = saved.panes.filter((pane) => !doorIds.has(pane.id));
+  const visiblePanes = panes.filter((pane) => !doorIds.has(pane.id));
   const visibleIds = new Set(visiblePanes.map((pane) => pane.id));
   const candidateLayout = persistedLathLayout(saved);
   const leafIds = candidateLayout ? Object.keys(candidateLayout.leafMeta) : [];
-  const lathLayout = candidateLayout && leafIds.length === visibleIds.size && leafIds.every((id) => visibleIds.has(id))
+  let lathLayout = candidateLayout && leafIds.length === visibleIds.size && leafIds.every((id) => visibleIds.has(id))
     ? candidateLayout : undefined;
-  const shellOpts = getDefaultShellOpts();
+  if (lathLayout) {
+    const leafMeta = { ...lathLayout.leafMeta };
+    for (const pane of visiblePanes) {
+      if (pane.surfaceType !== 'tool' || !pane.tool?.argv) continue;
+      const meta = leafMeta[pane.id];
+      leafMeta[pane.id] = { ...meta, params: { ...meta.params, command: pane.command, toolArgv: pane.tool.argv } };
+    }
+    lathLayout = { ...lathLayout, leafMeta };
+  }
+  // Tool commands remain runnable when geometry is corrupt. Rebuild their kind
+  // and stable metadata from the pane projection instead of seeding plain shells.
+  if (!lathLayout && visiblePanes.some(pane => pane.surfaceType === 'tool')) {
+    const recoverable = visiblePanes.filter(pane => pane.surfaceType !== 'browser');
+    const nodes: LathNode[] = recoverable.map(pane => ({ kind: 'leaf', id: pane.id }));
+    lathLayout = {
+      version: 1,
+      tree: { root: nodes.length === 1 ? nodes[0] : { kind: 'split', dir: 'row', children: nodes.map(node => ({ node, weight: 1 })) } },
+      leafMeta: Object.fromEntries(recoverable.map(pane => [pane.id, pane.surfaceType === 'tool' ? {
+        component: 'tool', tabComponent: 'tool', title: pane.title,
+        params: { surfaceType: 'tool', command: pane.command, cwd: pane.cwd,
+          ...(pane.tool?.argv ? { toolArgv: pane.tool.argv } : {}),
+          toolScope: pane.tool?.scope, toolName: pane.tool?.name, toolRender: pane.tool?.render ?? 'iframe',
+          toolPort: pane.tool?.port ?? 'announced', toolKey: pane.tool?.key },
+      } : { component: 'terminal', tabComponent: 'terminal', title: pane.title }])),
+    };
+  }
   // Host-owned and single-use, and read here rather than off the pane: the
   // session blob the webview saves must never carry one, or a later restore
   // would replay it (docs/specs/transport.md -> "Consuming it"). Restore-only —
@@ -50,7 +89,7 @@ export function restoreSession(platform: PlatformAdapter, sources: RestoreSource
   // agent is still Live and has nothing to resume.
   const recoveryCommands = platform.getRecoveryCommands?.() ?? {};
 
-  for (const pane of saved.panes) {
+  for (const pane of panes) {
     // Browser surfaces have no PTY or xterm; the persisted layout recreates them
     // (docs/specs/transport.md). Calling restoreTerminal here would mint a stray
     // PTY + xterm for the pane id that never gets mounted.
@@ -64,7 +103,11 @@ export function restoreSession(platform: PlatformAdapter, sources: RestoreSource
       shell: shellOpts?.shell,
       args: shellOpts?.args,
       untouched: pane.untouched,
-      resumeCommand: recoveryCommands[pane.id] ?? null,
+      // A tool command is durable, approved Session state and wins over the
+      // host's unrelated single-use agent recovery channel.
+      ...(pane.surfaceType === 'tool'
+        ? { command: pane.command ?? null, requireIntegration: true, resumeCommand: null }
+        : { resumeCommand: recoveryCommands[pane.id] ?? null }),
     });
     // The fresh PTY inherits the pane's persisted TODO/alert, on the hosts whose
     // AlertManager lives in the webview. Seeded after `restoreTerminal` so the
@@ -77,7 +120,7 @@ export function restoreSession(platform: PlatformAdapter, sources: RestoreSource
     // Without a usable layout Wall seeds terminal metadata for each id. Browser
     // render params live only in that layout (or a door), so omit visible browser
     // ids instead of silently restoring them as shells.
-    paneIds: visiblePanes.filter((pane) => lathLayout || pane.surfaceType !== 'browser').map((pane) => pane.id),
+    paneIds: visiblePanes.filter((pane) => lathLayout ? !!lathLayout.leafMeta[pane.id] : pane.surfaceType !== 'browser').map((pane) => pane.id),
     lathLayout,
     doors,
     ...carrySurfaceRefs(saved),

@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TerminalPane } from './TerminalPane';
+import { focusSession } from '../lib/terminal-registry';
 import { LathHost } from './wall/LathHost';
 import { createLathWallEngine, terminalLeafMeta, type LathWallEngine } from './wall/lath-wall-engine';
 import { createLathWallStore, type LathWallStore } from './wall/lath-wall-store';
@@ -332,4 +333,12 @@ describe('a hidden Workspace minimizes its terminals', () => {
     // The first fit of any Session, hidden-born or not: one transition per terminal.
     expect(registry.resizes.map(e => e.id).sort()).toEqual(['a', 'b']);
   });
+});
+
+// A retiring Tool iframe may still own the Surface focus handle this commit.
+it('targets xterm when the terminal becomes focused again', () => {
+  act(() => root.render(<TerminalPane id="tool" isFocused={false} />));
+  vi.mocked(focusSession).mockClear();
+  act(() => root.render(<TerminalPane id="tool" isFocused />));
+  expect(focusSession).toHaveBeenCalledWith('tool', true, 'terminal');
 });

@@ -36,7 +36,8 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
       const context = (e.target as HTMLElement | null)?.closest?.('[data-terminal-context]');
       if (context) {
         if (handleEditableClipboard(e)) return;
-        const helperId = (e.target as HTMLElement).closest<HTMLElement>('[data-helper-terminal]')?.dataset.helperTerminal;
+        const terminalElement = (e.target as HTMLElement).closest<HTMLElement>('[data-helper-terminal], [data-context-terminal]');
+        const helperId = terminalElement?.dataset.helperTerminal ?? terminalElement?.dataset.contextTerminal;
         if (helperId) handleMouseSelectionKeys(e, { ...c, selectedIdRef: { current: helperId } });
         return;
       }

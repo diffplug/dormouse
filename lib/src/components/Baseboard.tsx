@@ -1,3 +1,4 @@
+import { getToolDirtySnapshot, subscribeToToolDirty } from '../lib/tool-dirty-store';
 import { setWorkspaceAlertDelivery } from '../lib/workspace-store';
 import { useWorkspaceAlertPolicy } from './wall/use-workspace-alert-policy';
 import { useCallback, useRef, useState, useMemo, useLayoutEffect, useContext, useSyncExternalStore, type ReactNode } from 'react';
@@ -71,6 +72,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   // props component and never asks the platform anything.
   const notepadNotes = useSyncExternalStore(subscribeToNotepad, getNotepadSnapshot);
   const notepadAvailable = hasNotepadArchive();
+  const dirtyTools = useSyncExternalStore(subscribeToToolDirty, getToolDirtySnapshot);
   const appTitleForPane = useMemo(
     () => buildAppTitleResolver(terminalStates, activityStates),
     [terminalStates, activityStates],
@@ -158,7 +160,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
     if (arrowMeasureEl.current) {
       layoutMetrics.current.arrowWidth = arrowMeasureEl.current.offsetWidth;
     }
-  }, [items, activityStates, speechStates, terminalStates, notepadNotes]);
+  }, [items, activityStates, speechStates, terminalStates, notepadNotes, dirtyTools]);
 
   const itemKey = useMemo(() => items.map(i => i.id).join('\0'), [items]);
   const previousItems = useRef(itemKey);
@@ -253,6 +255,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
         ? deriveSurfaceLabel(terminalStates.get(item.id) ?? createTerminalPaneState(), appTitleForPane, item.title)
         : item.title,
       browserDisplay: item.browserDisplay,
+      toolDirty: item.kind === 'tool' && dirtyTools.get(item.id) === true,
       status: activity.status,
       ringSeq: activity.ringSeq,
       todo: activity.todo,

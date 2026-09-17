@@ -121,6 +121,7 @@ import {
   dismissOrToggleAlert,
   dismissSessionAlert,
   focusSession,
+  registerSurfaceFocusHandle,
   getOrCreateTerminal,
   getActivity,
   getLivePersistedAlertState,
@@ -536,6 +537,20 @@ describe('terminal-registry alert behavior', () => {
 
     await vi.advanceTimersByTimeAsync(20_000);
     expect(received).toEqual(['claude --resume 4f2c9b1e-6a03\r']);
+  });
+
+  it('auto-runs a restored tool command once shell integration is ready', async () => {
+    const id = 'restored-tool-command';
+    const received: string[] = [];
+    fakePlatform.setInputHandler(id, (data) => received.push(data));
+
+    restoreTerminal(id, { command: 'pnpm storybook', requireIntegration: true });
+    expect(getTerminalPaneState(id).currentCommand?.rawCommandLine).toBe('pnpm storybook');
+    expect(received).toEqual([]);
+
+    applyTerminalSemanticEvents(id, [{ type: 'promptStart' }]);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(received).toEqual(['pnpm storybook\r']);
   });
 
   it('announces the resume in the pane instead of replaying a transcript', () => {
@@ -1263,6 +1278,26 @@ describe('terminal-registry alert behavior', () => {
       status: 'NOTHING_TO_SHOW',
       todo: true,
     });
+  });
+
+  it('focuses a Tool terminal while its retiring browser handle is still registered', () => {
+    const id = 'retiring-tool-browser';
+    const session = createSession(id);
+    const focus = vi.spyOn(session.terminal, 'focus');
+    const blur = vi.spyOn(session.terminal, 'blur');
+    const browser = { focus: vi.fn(), blur: vi.fn() };
+    const unregister = registerSurfaceFocusHandle(id, browser);
+    try {
+      focusSession(id, true);
+      expect(browser.focus).toHaveBeenCalledOnce();
+      expect(focus).not.toHaveBeenCalled();
+      focusSession(id, true, 'terminal');
+      expect(focus).toHaveBeenCalledOnce();
+      expect(browser.focus).toHaveBeenCalledOnce();
+      focusSession(id, false, 'terminal');
+      expect(blur).toHaveBeenCalledOnce();
+      expect(browser.blur).not.toHaveBeenCalled();
+    } finally { unregister(); }
   });
 
   it('programmatic terminal focus does not count as attention', () => {

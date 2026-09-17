@@ -1,3 +1,4 @@
+import { setWorkspaceMoveError } from '../lib/workspace-ui-store';
 import { useEffect } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { WorkspaceStrip } from '../components/WorkspaceStrip';
@@ -112,5 +113,15 @@ export const CloseConfirm: Story = {
     );
     close.click();
     await requireElement('#kill-confirm-title', 'kill confirmation');
+  },
+};
+
+
+export const MoveRefused: Story = {
+  parameters: { primedWorkspaces: primed(['Workspace 1', 'Deploys'], 1) },
+  play: async () => {
+    await requireElement('[data-workspace-tab]', 'workspace tab');
+    setWorkspaceMoveError({ id: ws(1), reason: 'Approve or decline pending Tools before moving this Workspace' });
+    await requireElement('#workspace-move-error', 'move refusal');
   },
 };

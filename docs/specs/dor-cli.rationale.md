@@ -4,6 +4,8 @@
 
 ## Bundling And PATH
 
+The file viewer needs Node types, but the renderer imports CLI protocol and shell helpers as values. A browser-platform bundle check rejects Node imports in those helpers and their dependencies without splitting the CLI into separate TypeScript projects.
+
 **What a missing `ELECTRON_RUN_AS_NODE` looks like.** Under VS Code `DORMOUSE_NODE` is the editor's Electron binary — Node only when that variable is set, and terminals routinely strip it from the ambient env. Without it Electron launches its GUI, ignores the script, and exits 0: no error, no output, success exit code, reading as "the command did nothing" rather than as a launcher bug.
 
 **Why the standalone's bundled node is GUI-subsystem.** A console-subsystem node pops a stray terminal window every time Rust spawns the sidecar, so the bundled binary is patched to the GUI subsystem — and that same patch leaves it no console to inherit.

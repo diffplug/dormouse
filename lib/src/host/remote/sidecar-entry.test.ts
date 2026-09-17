@@ -487,6 +487,24 @@ describe('the webview’s half of the parse', () => {
     ]);
   });
 
+  it('forwards dirty state and command resets separately from serve metadata', () => {
+    bridge.onPtyEvent('data', { id: 'pty-1', data: '\x1b]367;state;{"v":1,"dirty":true}\x07\x1b]633;C\x07\x1b]367;state;{"v":1,"dirty":false}\x07' });
+    expect(emitted<{ events: unknown[] }>('terminal:protocolEvents')[0]?.events).toEqual([
+      { kind: 'toolState', state: { dirty: true } },
+      { kind: 'semantic', event: { type: 'commandStart', source: 'osc633_boundaries' } },
+      { kind: 'toolState', state: { dirty: false } },
+    ]);
+  });
+
+  it('preserves command-start resets between forwarded Tool announcements', () => {
+    bridge.onPtyEvent('data', { id: 'pty-1', data: '\x1b]367;serve;{"port":6006}\x07\x1b]633;C\x07\x1b]367;serve;{"port":6007}\x07' });
+    expect(emitted<{ events: unknown[] }>('terminal:protocolEvents')[0]?.events).toEqual([
+      { kind: 'toolAnnounce', announce: { port: 6006, name: null, key: null, dehydrate: false, persist: null } },
+      { kind: 'semantic', event: { type: 'commandStart', source: 'osc633_boundaries' } },
+      { kind: 'toolAnnounce', announce: { port: 6007, name: null, key: null, dehydrate: false, persist: null } },
+    ]);
+  });
+
   it('still sends the chunk when the reply write throws', () => {
     // A PTY that died between the read and the reply write throws out of
     // `mgr.write`; the webview must still get what the parse produced.

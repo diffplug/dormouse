@@ -1,6 +1,7 @@
+import { isToolKeyScope } from './platform/tool-types';
 import { normalizeAlertDeliveryOverrides, type AlertDeliveryOverrides } from './alert-delivery-model';
 import type { PlatformAdapter } from './platform/types';
-import { browserPersistedPane, readPersistedSession, toPersistedAlertState, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceRefs, type PersistedSurfaceType } from './session-types';
+import { browserPersistedPane, isToolCommandArgv, readPersistedSession, toPersistedAlertState, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceRefs, type PersistedToolMetadata, type PersistedSurfaceType } from './session-types';
 import { getActivity, getLivePersistedAlertState, getTerminalPaneState, isUntouched } from './terminal-registry';
 import { UNNAMED_PANEL_TITLE } from './terminal-state';
 
@@ -27,6 +28,7 @@ export interface SavePaneInput {
   id: string;
   title: string;
   surfaceType?: PersistedSurfaceType;
+  params?: Record<string, unknown>;
 }
 
 /** What one save may skip. See `SessionFlushRequest.probeCwd`. */
@@ -78,16 +80,26 @@ export async function buildPersistedSession(
   options: SaveOptions = {},
 ): Promise<PersistedSession> {
   const previousPanes = previousPaneMap(previous ?? null);
-  const allPanes = new Map<string, { id: string; title: string; surfaceType: PersistedSurfaceType }>();
+  const allPanes = new Map<string, { id: string; title: string; surfaceType: PersistedSurfaceType; params?: Record<string, unknown> }>();
   for (const pane of panes) {
-    allPanes.set(pane.id, { id: pane.id, title: persistedVisiblePaneTitle(pane.title), surfaceType: pane.surfaceType ?? 'terminal' });
+    allPanes.set(pane.id, {
+      id: pane.id,
+      title: persistedVisiblePaneTitle(pane.title),
+      surfaceType: pane.surfaceType ?? 'terminal',
+      params: pane.params,
+    });
   }
   const persistedDoors = doors.map((door) => ({
     ...door,
     title: persistedDoorTitle(door.id, door.title, door.component),
   }));
   for (const item of persistedDoors) {
-    allPanes.set(item.id, { id: item.id, title: item.title, surfaceType: item.component === 'browser' ? 'browser' : 'terminal' });
+    // A Door's component is the leaf's kind: a minimized tool must persist as
+    // 'tool', or its row round-trips as a plain terminal.
+    const doorSurfaceType = item.component === 'browser' || item.component === 'tool'
+      ? item.component
+      : 'terminal';
+    allPanes.set(item.id, { id: item.id, title: item.title, surfaceType: doorSurfaceType, params: item.params });
   }
 
   // One probe for the whole set, before the per-pane build: a terminal pane's cwd
@@ -108,12 +120,21 @@ export async function buildPersistedSession(
     }
 
     const liveAlert = getLivePersistedAlertState(pane.id);
-    return {
+    const terminalPane: PersistedPane = {
       id: pane.id,
       title: pane.title,
       cwd: cwds?.[pane.id] ?? previousPane?.cwd ?? null,
       untouched: isUntouched(pane.id),
       alert: liveAlert ?? previousPane?.alert ?? null,
+    };
+    if (pane.surfaceType !== 'tool') return terminalPane;
+    const command = toolCommandFromParams(pane.params) ?? previousPane?.command;
+    const tool = toolMetadataFromParams(pane.params) ?? previousPane?.tool;
+    return {
+      ...terminalPane,
+      surfaceType: 'tool',
+      ...(command ? { command } : {}),
+      ...(tool ? { tool } : {}),
     };
   });
   const alertDelivery = normalizeAlertDeliveryOverrides(options.alertDelivery ?? previous?.alertDelivery);
@@ -150,6 +171,25 @@ export async function saveSession(
   const session = await buildPersistedSession(platform, panes, doors, lathLayout, surfaceRefs, surfaceRefsNext, previous, options);
   if (sink) sink.publish(session);
   else platform.saveState(session);
+}
+
+/** The command a tool Surface was given, or null when it has none yet — what
+ *  persistence records and what a dedupe match re-runs. */
+export function toolCommandFromParams(params: Record<string, unknown> | undefined): string | null {
+  const command = params?.command;
+  return typeof command === 'string' && command.trim() ? command : null;
+}
+
+function toolMetadataFromParams(params: Record<string, unknown> | undefined): PersistedToolMetadata | null {
+  if (!params) return null;
+  const name = typeof params.toolName === 'string' && params.toolName ? params.toolName : undefined;
+  const render = params.toolRender === 'ab-screencast' ? 'ab-screencast' : 'iframe';
+  const port = params.toolPort === 'auto' ? 'auto' : 'announced';
+  const key = Array.isArray(params.toolKey) && params.toolKey.every((part) => typeof part === 'string')
+    ? params.toolKey as string[]
+    : undefined;
+  const argv = isToolCommandArgv(params.toolArgv) ? [...params.toolArgv] : undefined;
+  return { ...(argv ? { argv } : {}), ...(name ? { name } : {}), ...(isToolKeyScope(params.toolScope) ? { scope: params.toolScope } : {}), render, port, ...(key ? { key } : {}) };
 }
 
 function persistedVisiblePaneTitle(title: string): string {

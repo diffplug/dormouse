@@ -40,6 +40,7 @@ standalone/sidecar/alert-store.cjs
 # Kept beside it: a checkout that built before the Burrow rename still holds
 # the old bundle, and `bundle.resources` would ship it.
 standalone/sidecar/remote-host.cjs
+standalone/sidecar/tool-host.cjs
 standalone/sidecar/node_modules/
 standalone/node_modules/
 
