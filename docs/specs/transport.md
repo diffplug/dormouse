@@ -94,7 +94,7 @@ VS Code's `pty-manager` keeps two buffers plus one counter per PTY. **Must cap e
 - **Must hold a key until 100 ms after the paced text before it**, even when a later request sends the key (rationale). A key is one escape sequence, DEL, or a C0 control other than tab and line feed; tab and line feed are text.
 - **Never split a code point or an escape sequence across writes.**
 - **Must queue any write that arrives while paced input is pending**, so input keeps its order.
-- **Must discard pending paced input when its PTY exits, is killed, or is respawned, and on any lone `^C`** — typed, `interrupt`, or the `dor send --key ctrl-c` that `dor-cli.md` teaches — which is then written at once.
+- **Must discard pending paced input when its PTY exits, is killed, or is respawned, and on any lone `^C`** — typed, `interrupt`, or the `dor send --key ctrl-c` that `dor/skill.md` teaches — which is then written at once.
 - **Never pace in the webview**; the PTY owner paces (rationale).
 
 Source of truth: `pacedInputSegments` and `write` in `standalone/sidecar/pty-core.js`, pinned by `standalone/sidecar/pty-core.test.js`.

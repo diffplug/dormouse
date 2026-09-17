@@ -1288,10 +1288,9 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
         cancelInput(id);
         return;
       }
-      // Every write paces what follows it, so a keystroke or paste queued
-      // mid-send cannot share a read with the run after it; only paced text
-      // settles a key. Unpaced steps drain in the same millisecond as the
-      // paced step they follow, so no test pins this.
+      // Every write paces what follows it; only paced text settles a key. An
+      // unpaced step drains in the same millisecond as the paced one before
+      // it, so only a write straddling a millisecond can show the difference.
       input.at = Date.now();
       if (step.paced && !step.key) input.textAt = input.at;
     }
