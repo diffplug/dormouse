@@ -31,7 +31,7 @@ Human-driven, in order:
    - GitHub Release assets are correct
    - On a Mac: extract the `.tar.gz`, open the `.app`, no Gatekeeper warning
    - On Windows: run the `.exe` installer, no SmartScreen warning
-   - The Tauri auto-updater picks up the new version, tested from a previous one
+   - The Tauri auto-updater picks up the new version, tested from a previous one with a Claude or Codex session open: its "Restart now" relaunches into the new version and resumes the agent
    - The VSCode extension is live on Marketplace and OpenVSX
 
 ## Versioning

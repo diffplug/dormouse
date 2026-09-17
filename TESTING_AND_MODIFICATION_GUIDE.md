@@ -181,7 +181,9 @@ User-run results are recorded under "Transfer findings" below. Items marked
 - Two windows, one with a running command. Cmd+Q, then Cmd+Q again while the
   dialog is up, then confirm: the app quits (this was the wedge).
 - Relaunch: both windows and their Workspaces come back; the interrupted agent
-  is offered its resume command.
+  resumes on its own.
+- `dor app restart` (packaged build) runs the same quit, restart-worded, and
+  relaunches into whatever bundle is installed.
 
 **Harness alert stores**
 - In `innerdogfood`, toggle a watched command and change alarm settings: they

@@ -43,7 +43,7 @@ pnpm dev:standalone # tauri hotreload
 pnpm dev:relay      # selfhost Relay + Pocket, for remote control
 
 pnpm dogfood:vscode # builds the VSCode extension and installs it into your local VSCode
-pnpm dogfood:standalone              # installs your local build overtop of your existing system installation
+pnpm dogfood:standalone              # installs your local build overtop of your existing system installation (then `dor app restart`)
 pnpm dogfood:standalone --no-install # builds and runs the standalone app from the build dir, without installing
 
 pnpm storybook    # http://localhost:6006
