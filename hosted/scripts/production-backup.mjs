@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile, mkdir, rm } from "node:fs/promises";
+import { copyFile, mkdtemp, writeFile, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -135,7 +135,6 @@ try {
     new URL("../.wrangler/production-backup/", import.meta.url),
   );
   await mkdir(output, { recursive: true, mode: 0o700 });
-  const { copyFile } = await import("node:fs/promises");
   await copyFile(
     encrypted,
     join(output, `${new Date().toISOString().replaceAll(":", "-")}.dump.age`),
