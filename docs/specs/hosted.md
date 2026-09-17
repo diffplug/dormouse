@@ -43,7 +43,7 @@ Source of truth: `App` in `hosted/src/App.tsx`; `restoreTheme` in `hosted/src/ma
 
 **Must run local development with `dor ensure -- pnpm dev:hosted` inside Dormouse.** A single loopback origin serves Vite and Node auth, with a disposable development database. Host, Origin, and Fetch Metadata checks guard the local captured-email inbox; the production entry imports no inbox or test-control handler.
 
-**Must verify the production Worker bundle and run the consumer's integration suite before release.** The test entry alone injects the actual packed Better Auth deterministic module. Simulated callbacks do not certify provider registrations; production acceptance requires real browser login with each enabled provider and email delivery.
+**Must verify the production Worker bundle and run the consumer's integration suite before release.** `pnpm test:hosted` needs Docker; root `pnpm test` skips it. The test entry alone injects the packed Better Auth deterministic module. Simulated callbacks do not certify provider registrations; production acceptance requires real browser login with each enabled provider and email delivery.
 
 **Must keep production, test, and preview databases and credentials separate.** The development and preview entries are email-only. Production configuration and operator steps live in `hosted/README.md` and `hosted/DEPLOYMENT.md`.
 
@@ -53,7 +53,7 @@ Source of truth: `allowedDevRequest` in `hosted/server/dev-host-guard.ts`; `host
 
 **Must deploy only verified same-repository PR merge revisions touching Hosted or its shared build inputs.** Drafts qualify; forks receive no deployment credentials. Changed paths include rename sources and all API pages. Deployment runs serialize per PR without cancellation; close/merge cleanup ignores path filtering and tolerates absent resources.
 
-**Must isolate each PR in a persistent Worker, uncached Hyperdrive, and Neon branch from an empty dedicated preview project.** Reuse `dormouse-hosted-pr-N` until close. No production database is copied. The preview config excludes production routes and credentials; runtime bindings cannot enable OAuth or Postmark.
+**Must isolate each PR in a persistent Worker, uncached Hyperdrive, and Neon branch from an empty dedicated preview project.** Reuse `dormouse-hosted-pr-N` until close. The preview config excludes production routes and credentials; runtime bindings cannot enable OAuth or Postmark.
 
 **Must run cleanup from the base branch's checkout, never the closed PR's.**
 
