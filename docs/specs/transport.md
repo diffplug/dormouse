@@ -86,6 +86,19 @@ VS Code's `pty-manager` keeps two buffers plus one counter per PTY. **Must cap e
 - **scrollbackChunks** — never cleared short of `kill`/`killAll`; used for repeat resumes (a re-serving router's replay buffer is already spent) and for recovery capture at teardown. Host-side only — no adapter exposes it to the renderer.
 - **receivedChars** — every char ever buffered, never decremented by a trim ("A position in a pane's output is a received count", below).
 
+### Paced input
+
+`writePty(id, data, { paced: true })` delivers input the way a person types it; every host carries the flag to `pty-core.write`. `surface.send` (`dor send`) is the only paced writer — keystrokes, pastes, and launched commands are written as one burst.
+
+- **Must write paced text in runs of at most 256 UTF-8 bytes, 10 ms apart**, so no read by the program crosses a TUI's paste threshold (rationale).
+- **Must hold a key until 100 ms after the paced text before it**, even when a later request sends the key (rationale). A key is one escape sequence, DEL, or a C0 control other than tab and line feed; tab and line feed are text.
+- **Never split a code point or an escape sequence across writes.**
+- **Must queue any write that arrives while paced input is pending**, so input keeps its order.
+- **Must discard pending paced input when its PTY exits, is killed, or is respawned.** `interrupt` discards it too and writes its `^C` at once.
+- **Pacing lives in the PTY owner, never the webview** (rationale).
+
+Source of truth: `pacedInputSegments` and `write` in `standalone/sidecar/pty-core.js`, pinned by `standalone/sidecar/pty-core.test.js`.
+
 ### Reconnection protocol
 
 ```

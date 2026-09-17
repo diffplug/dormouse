@@ -28,6 +28,9 @@ const {
   openPortScanTimeoutMs,
   OPEN_PORT_TIMEOUT_MS,
   OPEN_PORT_TIMEOUT_PER_ID_MS,
+  pacedInputSegments,
+  PACED_CHUNK_GAP_MS,
+  PACED_KEY_SETTLE_MS,
 } = require('./pty-core');
 
 test('resolveSpawnConfig uses POSIX shell and home defaults', () => {
@@ -393,6 +396,105 @@ for (const retire of ['exit', 'kill', 'killAll', 'replace']) {
     else mgr[retire]('pane-1');
     t.mock.timers.tick(60);
     assert.deepEqual(resizes, [{ generation: 1, cols: 80, rows: 23 }]);
+  });
+}
+
+test('pacedInputSegments splits text by UTF-8 bytes and keeps keys whole', () => {
+  const segments = pacedInputSegments(`${'a'.repeat(255)}é\tline\n😀\r\x1b[B\x1bOP\x1bx\x7f\x03\x1b[1`);
+  assert.deepEqual(segments, [
+    { data: 'a'.repeat(255), key: false }, // é would be byte 257
+    { data: 'é\tline\n😀', key: false },
+    { data: '\r', key: true },
+    { data: '\x1b[B', key: true },
+    { data: '\x1bOP', key: true },
+    { data: '\x1bx', key: true },
+    { data: '\x7f', key: true },
+    { data: '\x03', key: true },
+    { data: '\x1b[1', key: true },
+  ]);
+  assert.deepEqual(pacedInputSegments('\x1b[200~hi\x1b[201~'), [
+    { data: '\x1b[200~', key: true },
+    { data: 'hi', key: false },
+    { data: '\x1b[201~', key: true },
+  ]);
+  assert.deepEqual(pacedInputSegments('😀'.repeat(65)).map(({ data }) => data), ['😀'.repeat(64), '😀']);
+  assert.deepEqual(pacedInputSegments('\x1b'), [{ data: '\x1b', key: true }]);
+});
+
+function inputHarness(t) {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const writes = [];
+  const exits = [];
+  let serial = 0;
+  const mgr = create(() => {}, {
+    spawn() {
+      const generation = ++serial;
+      return {
+        pid: generation,
+        onData() {},
+        onExit(handler) { exits.push(handler); },
+        resize() {},
+        write(data) { writes.push(generation === 1 ? data : `${generation}:${data}`); },
+        kill() {},
+      };
+    },
+  });
+  mgr.spawn('pane-1');
+  return { mgr, writes, exits };
+}
+
+test('paced input writes bounded text runs apart and settles before a key', (t) => {
+  const { mgr, writes } = inputHarness(t);
+  mgr.write('pane-1', `${'a'.repeat(600)}\r`, { paced: true });
+  assert.deepEqual(writes, ['a'.repeat(256)]);
+  t.mock.timers.tick(PACED_CHUNK_GAP_MS);
+  t.mock.timers.tick(PACED_CHUNK_GAP_MS);
+  assert.deepEqual(writes, ['a'.repeat(256), 'a'.repeat(256), 'a'.repeat(88)]);
+  t.mock.timers.tick(PACED_KEY_SETTLE_MS - 1);
+  assert.equal(writes.length, 3);
+  t.mock.timers.tick(1);
+  assert.equal(writes.at(-1), '\r');
+});
+
+test('input written during a pace joins it in order', (t) => {
+  const { mgr, writes } = inputHarness(t);
+  mgr.write('pane-1', 'b'.repeat(300), { paced: true });
+  mgr.write('pane-1', 'typed');
+  assert.deepEqual(writes, ['b'.repeat(256)]);
+  t.mock.timers.tick(PACED_CHUNK_GAP_MS);
+  assert.deepEqual(writes, ['b'.repeat(256), 'b'.repeat(44), 'typed']);
+  mgr.write('pane-1', 'free');
+  assert.equal(writes.at(-1), 'free');
+});
+
+test('a key sent by a later paced write still settles after earlier text', (t) => {
+  const { mgr, writes } = inputHarness(t);
+  mgr.write('pane-1', 'prompt', { paced: true });
+  t.mock.timers.tick(50);
+  mgr.write('pane-1', '\r', { paced: true });
+  assert.deepEqual(writes, ['prompt']);
+  t.mock.timers.tick(PACED_KEY_SETTLE_MS - 50);
+  assert.deepEqual(writes, ['prompt', '\r']);
+  t.mock.timers.tick(1000);
+  mgr.write('pane-1', 'next', { paced: true });
+  assert.equal(writes.at(-1), 'next');
+});
+
+for (const retire of ['exit', 'kill', 'killAll', 'replace', 'interrupt']) {
+  test(`pending paced input is discarded on ${retire}`, (t) => {
+    const { mgr, writes, exits } = inputHarness(t);
+    mgr.write('pane-1', `${'c'.repeat(300)}\r`, { paced: true });
+    if (retire === 'exit') exits[0]({ exitCode: 0 });
+    else if (retire === 'replace') mgr.spawn('pane-1');
+    else if (retire === 'interrupt') mgr.interrupt(['pane-1']);
+    else mgr[retire]('pane-1');
+    t.mock.timers.tick(1000);
+    if (retire === 'replace') mgr.write('pane-1', '\r', { paced: true });
+    assert.deepEqual(writes, [
+      'c'.repeat(256),
+      ...(retire === 'interrupt' ? ['\x03'] : []),
+      ...(retire === 'replace' ? ['2:\r'] : []),
+    ]);
   });
 }
 

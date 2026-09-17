@@ -443,8 +443,8 @@ export function getOpenPorts(id: string): Promise<OpenPort[]> {
     .then((msg) => msg.ports || [], () => []);
 }
 
-export function write(id: string, data: string): void {
-  sendToChild({ type: 'input', id, data });
+export function write(id: string, data: string, paced = false): void {
+  sendToChild({ type: 'input', id, data, ...(paced ? { paced } : {}) });
 }
 
 export function resize(id: string, cols: number, rows: number, repaint?: boolean): void {

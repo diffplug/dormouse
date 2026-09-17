@@ -17,7 +17,7 @@ import type { VolatileNotepadSnapshot } from '../../lib/src/lib/notepad/types';
 export type WebviewMessage =
   | { type: 'pty:context'; request: TerminalContextRequest; requestId: string }
   | { type: 'pty:spawn'; id: string; options?: { cols?: number; rows?: number; cwd?: string; shell?: string; args?: string[]; helper?: HelperIdentity } }
-  | { type: 'pty:input'; id: string; data: string }
+  | { type: 'pty:input'; id: string; data: string; paced?: boolean }
   | { type: 'pty:resize'; id: string; cols: number; rows: number }
   | { type: 'pty:kill'; id: string }
   | { type: 'pty:getCwd'; id: string; requestId?: string }

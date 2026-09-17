@@ -25,6 +25,7 @@ import type {
   ToolControlResult,
   ToolHostRequest,
   SessionFlushRequest,
+  WritePtyOptions,
 } from "dormouse-lib/lib/platform/types";
 import type {
   NotepadArchiveLoadResult,
@@ -347,8 +348,8 @@ export class TauriAdapter implements PlatformAdapter {
     invoke("pty_spawn", { id, options });
   }
 
-  writePty(id: string, data: string): void {
-    invoke("pty_write", { id, data });
+  writePty(id: string, data: string, options?: WritePtyOptions): void {
+    invoke("pty_write", { id, data, paced: options?.paced === true });
   }
 
   resizePty(id: string, cols: number, rows: number): void {

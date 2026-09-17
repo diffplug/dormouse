@@ -21,6 +21,7 @@ import type {
   BurrowLink,
   ToolControlResult,
   ToolHostRequest,
+  WritePtyOptions,
 } from "dormouse-lib/lib/platform/types";
 import {
   answerAskCommand,
@@ -183,8 +184,8 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     this.host.send("pty_spawn", { id, options });
   }
 
-  writePty(id: string, data: string): void {
-    this.host.send("pty_write", { id, data });
+  writePty(id: string, data: string, options?: WritePtyOptions): void {
+    this.host.send("pty_write", { id, data, paced: options?.paced === true });
   }
 
   resizePty(id: string, cols: number, rows: number): void {

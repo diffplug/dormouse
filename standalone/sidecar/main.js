@@ -149,7 +149,7 @@ function handleLine(line) {
       // Told before the spawn: the id may be a live PTY's, and the parser for
       // that generation must not carry a half-read sequence into the new one.
       case 'pty:spawn':   burrow.onPtySpawn(data.id); mgr.spawn(data.id, data.options); break;
-      case 'pty:input':   mgr.write(data.id, data.data); break;
+      case 'pty:input':   mgr.write(data.id, data.data, { paced: data.paced === true }); break;
       case 'pty:resize':  mgr.resize(data.id, data.cols, data.rows); break;
       case 'pty:kill':    mgr.kill(data.id); break;
       // One window's own PTYs, and the answer names it so the host can route

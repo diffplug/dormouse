@@ -2405,6 +2405,20 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('writes dor send input paced', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
+    await flush();
+    const write = vi.spyOn(fake, 'writePty');
+    const respond = vi.fn();
+    await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+      method: SURFACE_CONTROL_METHODS.send, params: { surface: 'surface:1', input: '/simplify\r', inputCount: 2 }, respond,
+    } })));
+    expect(write.mock.calls).toEqual([['pane-a', '/simplify\r', { paced: true }]]);
+    expect(respond).toHaveBeenCalledWith({
+      ok: true, result: { status: 'sent', surfaceId: 'pane-a', surfaceRef: 'surface:1', inputCount: 2 },
+    });
+  });
+
   it('rejects anonymous Tool argv containing terminal editing controls before launching', async () => {
     await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
     await flush();

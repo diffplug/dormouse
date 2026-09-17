@@ -628,7 +628,7 @@ export function attachRouter(
         break;
       }
       case 'pty:input':
-        ptyManager.write(msg.id, msg.data);
+        ptyManager.write(msg.id, msg.data, msg.paced === true);
         break;
       case 'pty:resize':
         ptyManager.resize(msg.id, msg.cols, msg.rows);

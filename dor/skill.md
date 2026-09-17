@@ -132,7 +132,9 @@ Exactly one input mode per call: `--text`/`--key` (only in that order, text
 first), `--stdin`, or `--sequence` for anything more complex. Special keys go
 through `--key` (`enter`, `escape`, `tab`, `backspace`, `delete`, arrows,
 `ctrl-a`..`ctrl-z`) so they are never confused with literal text. `--text`
-interprets `\n` `\r` `\t` `\\` unless `--raw`.
+interprets `\n` `\r` `\t` `\\` unless `--raw`. Input arrives at typing pace,
+so a long prompt plus `--key enter` submits whole in one call, but `sent` means
+queued: the program may still be reading it.
 
 ### `dor read` — read a terminal's screen
 

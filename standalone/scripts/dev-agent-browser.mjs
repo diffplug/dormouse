@@ -102,7 +102,7 @@ function requestSidecar(event, data, responseEvent, pick, timeoutMs = 10000) {
 
 const fireAndForget = {
   pty_spawn: ({ id, options }) => writeSidecar('pty:spawn', { id, options }),
-  pty_write: ({ id, data }) => writeSidecar('pty:input', { id, data }),
+  pty_write: ({ id, data, paced }) => writeSidecar('pty:input', { id, data, paced }),
   pty_resize: ({ id, cols, rows }) => writeSidecar('pty:resize', { id, cols, rows }),
   pty_theme_colors: ({ colors }) => writeSidecar('pty:themeColors', colors),
   pty_kill: ({ id }) => writeSidecar('pty:kill', { id }),
