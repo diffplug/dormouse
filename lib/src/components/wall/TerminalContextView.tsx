@@ -43,6 +43,7 @@ const DETAILS = {
 } as const;
 type Detail = keyof typeof DETAILS;
 export interface TerminalContextViewProps {
+  terminalRole?: 'helper' | 'tool';
   /** Exit in progress: the view is inert, and `onClose` is not called again. */
   closing?: boolean;
   /** Viewport coordinates the reveal grows from; absent, the top-left corner. */
@@ -166,12 +167,13 @@ export function TerminalContextView(p: TerminalContextViewProps) {
   /** A detail-dialog action: closes the dialog on success and holds the buttons meanwhile. */
   const submit = async (action: Action) => { setBusy(true); if (await attempt(action)) setDetail(null); setBusy(false); };
   const status = HELPER_STATUS[p.status];
-  const statusLabel = status.label(p.command);
+  const isTool = p.terminalRole === 'tool';
+  const statusLabel = isTool ? (p.status === 'running' ? `Running ${p.command}…` : 'At prompt') : status.label(p.command);
   return <section ref={surface} aria-label="Terminal context" data-terminal-context tabIndex={-1} inert={p.closing} aria-hidden={p.closing || undefined} style={SURFACE_STYLE}
     className={`${TERMINAL_CONTEXT_SURFACE_CLASS} ${motionClass} ${p.closing ? 'pointer-events-none' : ''} absolute inset-4 flex flex-col overflow-hidden text-sm`}
     onContextMenu={event => event.preventDefault()}
     onKeyDown={event => {
-      if ((event.target as HTMLElement).closest('[data-helper-terminal]') && !detail) return;
+      if ((event.target as HTMLElement).closest('[data-helper-terminal], [data-context-terminal]') && !detail) return;
       if (detail && event.key === 'Tab') {
         event.preventDefault();
         stepFocus(Array.from(detailRoot.current?.querySelectorAll<HTMLElement>('button:not(:disabled),input,select') ?? []), event.shiftKey ? -1 : 1);
@@ -205,12 +207,12 @@ export function TerminalContextView(p: TerminalContextViewProps) {
         {p.notification && <div className="ml-16 mt-2 border-l-2 border-border py-1 pl-3"><div>{p.notification.title}</div><div className="whitespace-pre-wrap text-muted">{p.notification.body}</div></div>}
       </div>
       <div className="@container flex min-h-0 flex-1 flex-col border-t border-border">
-        <div aria-label="Helper terminal status" className="flex h-9 shrink-0 items-center gap-3 whitespace-nowrap px-3">
-          <span className="hidden shrink-0 items-center gap-2 font-semibold @[48rem]:flex"><TerminalIcon size={15} />Helper terminal</span>
+        <div aria-label={isTool ? 'Tool terminal status' : 'Helper terminal status'} className="flex h-9 shrink-0 items-center gap-3 whitespace-nowrap px-3">
+          <span className="hidden shrink-0 items-center gap-2 font-semibold @[48rem]:flex"><TerminalIcon size={15} />{isTool ? 'Tool terminal' : 'Helper terminal'}</span>
           <div className="flex min-w-0 items-center gap-2 text-muted">{status.icon}<span className="truncate" title={statusLabel}>{statusLabel}</span>
-            {status.reset ? <ContextAction label="Reset helper terminal" onClick={() => setDetail('reset')}><ArrowCounterClockwiseIcon size={13} />Reset…</ContextAction> : <ContextAction label="Modify autorun command" onClick={() => { setCommand(p.defaultCommand ?? p.command); setDetail('modify'); }}><SlidersHorizontalIcon size={15} />Modify</ContextAction>}
+            {!isTool && (status.reset ? <ContextAction label="Reset helper terminal" onClick={() => setDetail('reset')}><ArrowCounterClockwiseIcon size={13} />Reset…</ContextAction> : <ContextAction label="Modify autorun command" onClick={() => { setCommand(p.defaultCommand ?? p.command); setDetail('modify'); }}><SlidersHorizontalIcon size={15} />Modify</ContextAction>)}
           </div>
-          <div className="ml-auto flex shrink-0 items-center gap-2">{p.notepadAction}<ContextAction label="Move this terminal into a new pane" busy={busy} onClick={() => void submit(p.onPromote)}><ArrowLineUpIcon size={15} />Promote</ContextAction></div>
+          <div className="ml-auto flex shrink-0 items-center gap-2">{p.notepadAction}{!isTool && <ContextAction label="Move this terminal into a new pane" busy={busy} onClick={() => void submit(p.onPromote)}><ArrowLineUpIcon size={15} />Promote</ContextAction>}</div>
         </div>
         {p.mismatch && <div role="alert" className="mx-3 mb-2 flex shrink-0 items-start gap-2 border-l-4 border-error bg-error/10 px-3 py-2"><WarningIcon size={18} weight="fill" className="shrink-0 text-error" /><div><div className="font-semibold">Helper directory differs from parent</div><div className="mt-1 grid grid-cols-[4rem_1fr] gap-x-2"><span className="text-muted">Helper</span><strong>{p.helperCwd}</strong><span className="text-muted">Parent</span><span>{p.cwd}</span></div></div></div>}
         {(p.warning || (!detail && error)) && <div role="alert" className="mx-3 mb-2 border-l-4 border-error bg-error/10 px-3 py-2">{p.warning || error}</div>}

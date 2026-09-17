@@ -35,6 +35,8 @@ function ring(id: string): void {
 /** Start the watcher after any pre-existing state has been staged. */
 function start(): void {
   stop = watchUnattendedRings({
+    sink: 'speech',
+    subscribe: () => () => {},
     enabled: () => enabled,
     delayMs: () => delayMs,
     fire: (id) => fired.push(id),

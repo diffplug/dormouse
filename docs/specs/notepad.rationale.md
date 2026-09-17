@@ -67,6 +67,10 @@ first sixteen are the user's and the rest are a fixed formula xterm itself appli
 
 ## Source links
 
+In Tauri manual testing (2026-09-11), a transferred pin remained visible but failed
+its text proof on use. Rebuilt buffers do not guarantee identical absolute row
+positions. Transfers therefore retain notes without presenting unusable pins.
+
 The pin could have stored a scrollback line number. It stores two xterm markers
 because a marker is the only handle xterm keeps correct as the buffer scrolls, and
 scrolling is the normal case — a capture is usually of something that has already
@@ -80,11 +84,14 @@ scrollback, a program that overwrote the rows — into one honest outcome instea
 scrolling the user to plausible-looking wrong output. It is why column restoration
 is allowed to be best effort at all.
 
-Failure removes the pin rather than leaving it to fail again. A pin the user can
-see is one that resolved the last time it was asked, which is a more useful promise
-than a button that sometimes apologizes.
+An initial proof failure removes the pin rather than leaving it to fail again.
+Opening Tool context is different: its narrower grid can change wrapping after
+the same pin has just passed its proof. A second proof prevents stale-coordinate
+selection, while keeping the link avoids treating our own layout change as lost
+content. This bounded exception does not reconstruct columns or soft-wrap proof;
+trying again while the grid still differs can fail the ordinary initial check.
 
-The alternate buffer is the one failure that is not about the capture. A
+The alternate buffer also fails for a reason unrelated to the capture. A
 full-screen program covers the normal buffer rather than rewriting it, so the
 markers stay live and the range is still there underneath; the earlier code let
 the out-of-range rows fall through to the same removal as a dead pin, which meant
@@ -203,7 +210,7 @@ who had just been told the notes were not stored and had chosen Cancel.
 quit they already asked for; a slower answer is a failure worth surfacing.
 
 The file is a sibling of `sessions/` rather than a member of it because the two have
-different lifetimes: session snapshots are per window and swept by `clear_session`,
+different lifetimes: session snapshots are per window and swept with it,
 while archived notes outlive the window that produced them and must survive that
 sweep. They share `write_file_atomically` because both carry user text and both
 must survive a crash mid-write; that is one implementation, not two.

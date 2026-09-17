@@ -91,6 +91,44 @@ export function browserLeafMeta(title: string, params: Record<string, unknown>):
   return { component: 'browser', tabComponent: 'surface', title, params };
 }
 
+/** Meta for a `tool` leaf — one Session with a terminal and, once it serves, a
+ *  browser (`docs/specs/dor-tool.md`). Its own tab component, because the
+ *  header follows whichever half is forward. */
+export function toolLeafMeta(title: string, params: Record<string, unknown>): LeafMeta {
+  return { component: 'tool', tabComponent: 'tool', title, params };
+}
+
+/**
+ * A tool's browser is derived, never restored: its port is whatever the command
+ * bound *this* run, so a persisted `url` would frame a dead address — and a
+ * persisted agent-browser `session` would name a daemon that is gone
+ * (`docs/specs/dor-tool.md` -> Persistence and hosts). A restored tool is a
+ * terminal running its command until it serves again, which is the same state a
+ * cold spawn passes through. Everything else about the leaf persists.
+ */
+export function persistableLeafMeta(meta: LeafMeta): LeafMeta {
+  if (meta.component !== 'tool' || !meta.params) return meta;
+  // A tool still awaiting approval persists as a plain empty terminal. Keeping
+  // it a tool would restore a pane that spawns a shell in a repo nobody
+  // approved, with no gesture at all — and the prompt cannot be restored either,
+  // since the grant it was asking for was never made
+  // (`docs/specs/dor-tool.md` -> Trust rule 3).
+  if (meta.params.toolPending !== undefined) {
+    return { component: 'terminal', tabComponent: 'terminal', title: meta.title };
+  }
+  const {
+    url: _url,
+    session: _session,
+    wsPort: _wsPort,
+    renderMode: _renderMode,
+    toolPortConflict: _toolPortConflict,
+    toolAnnouncedPort: _toolAnnouncedPort,
+    toolAnnouncedPath: _toolAnnouncedPath,
+    ...rest
+  } = meta.params;
+  return { ...meta, params: rest };
+}
+
 /** Hydration-only Door-row projection; runtime metadata stays in the store. */
 export function leafMetaFromPersistedDoor(item: PersistedDoor): LeafMeta {
   return {
@@ -106,7 +144,9 @@ export function leafMetaFromPersistedDoor(item: PersistedDoor): LeafMeta {
  *  screencast canvas); terminals do not — the registry retains their xterm instance
  *  and remounts it (docs/specs/tiling-engine.md → "Parked leaves"). */
 export function shouldParkOnMinimize(meta: LeafMeta): boolean {
-  return meta.component === 'browser';
+  // A tool parks for the same reason a browser does: once it serves, its
+  // framed document lives in the pane's DOM and no registry can replay it.
+  return meta.component === 'browser' || meta.component === 'tool';
 }
 
 export type LathWallEngine = {
@@ -149,8 +189,8 @@ export type LathWallEngine = {
 
   /** Hydration: a persisted Lath layout when usable, else a fresh tree from
    *  `initialPaneIds` (or one generated id). Returns the resulting pane ids
-   *  (pre-order) and whether the fresh path was taken (so the Wall knows to prime
-   *  default-shell opts, mirroring `addTerminalPanel`). */
+   *  (pre-order) and whether the fresh path was taken, which is what tells the
+   *  Wall's seed effect to prime default-shell opts for the generated ids. */
   seed(
     lathBlob: unknown,
     initialPaneIds: string[] | undefined,
@@ -213,7 +253,13 @@ export function createLathWallEngine(
     },
     getMeta: (id) => snapshot().leafMeta.get(id),
 
-    serializeLayout: () => lathLayoutFromStore(snapshot()),
+    serializeLayout: () => {
+      const snap = snapshot();
+      return lathLayoutFromStore({
+        tree: snap.tree,
+        leafMeta: new Map([...snap.leafMeta].map(([id, meta]) => [id, persistableLeafMeta(meta)])),
+      });
+    },
 
     seed(lathBlob, initialPaneIds, generatePaneId, doors) {
       // Doors ride into `leafMeta` beside the tree's leaves: a restored Door is a
@@ -233,7 +279,8 @@ export function createLathWallEngine(
       }
 
       // 2. Fresh tree from the restored session ids (or one generated id), splitting
-      //    successive panes via the store's autoEdge (as `addTerminalPanel` does).
+      //    successive panes via the store's autoEdge — the `null` position every
+      //    Wall-level add without a reference pane uses.
       const ids = initialPaneIds && initialPaneIds.length > 0 ? initialPaneIds : [generatePaneId()];
       store.seed(leafTree(ids[0]), [[ids[0], terminalLeafMeta()], ...doorMeta]);
       for (let i = 1; i < ids.length; i++) {

@@ -1,3 +1,5 @@
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
 import { vi } from 'vitest';
 import type { WallActions } from './wall-context';
 import {
@@ -36,6 +38,87 @@ export function ensureResizeObserver(): void {
     unobserve() {}
     disconnect() {}
   } as unknown as typeof ResizeObserver;
+}
+
+/**
+ * A ResizeObserver whose width the test drives: every observed element is told
+ * `initialWidth` on observe, and the returned setter re-delivers a new width to
+ * all of them. Stubbed through `vi.stubGlobal`, so `vi.unstubAllGlobals()` in
+ * `afterEach` restores jsdom.
+ */
+export function stubResizeObserver(initialWidth: number): (width: number) => void {
+  let width = initialWidth;
+  const deliveries = new Set<() => void>();
+  vi.stubGlobal('ResizeObserver', class {
+    private readonly delivery = new Set<() => void>();
+    constructor(private readonly callback: ResizeObserverCallback) {}
+    observe(target: Element): void {
+      const deliver = () => this.callback([{
+        target,
+        borderBoxSize: [{ inlineSize: width, blockSize: 0 }],
+        contentRect: { width },
+      } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
+      this.delivery.add(deliver);
+      deliveries.add(deliver);
+      deliver();
+    }
+    unobserve(): void {}
+    disconnect(): void {
+      for (const deliver of this.delivery) deliveries.delete(deliver);
+    }
+  });
+  return (next) => {
+    width = next;
+    for (const deliver of deliveries) deliver();
+  };
+}
+
+export interface WallHarness {
+  container: HTMLDivElement;
+  root: Root;
+  /** Drain queued microtasks and 0ms timers inside `act`. */
+  flush: () => Promise<void>;
+  dispose: () => void;
+}
+
+/**
+ * The jsdom setup any Wall composition needs: the browser APIs jsdom lacks, plus
+ * a mounted root. Call from `beforeEach` and `dispose()` from `afterEach`; a
+ * test file adds only its own platform and store resets.
+ */
+export function mountWallHarness(): WallHarness {
+  ensureResizeObserver();
+  // Reduced motion so the Lath engine runs a 0 duration: the two-phase kill's
+  // deferred removal fires on a setTimeout(0) and completes within `flush()` — the
+  // instant path is also stage 3's "reduced motion" acceptance requirement.
+  globalThis.matchMedia = ((query: string) => ({
+    matches: query.includes('prefers-reduced-motion'),
+    media: query,
+    onchange: null,
+    addEventListener() {},
+    removeEventListener() {},
+    addListener() {},
+    removeListener() {},
+    dispatchEvent() { return false; },
+  })) as unknown as typeof matchMedia;
+  // Baseboard / dynamic-palette read a 2d context; jsdom has none.
+  Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
+    configurable: true,
+    value: vi.fn(() => null),
+  });
+
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  return {
+    container,
+    root,
+    flush: async () => { await act(async () => { await new Promise((r) => setTimeout(r, 0)); }); },
+    dispose: () => {
+      act(() => root.unmount());
+      container.remove();
+    },
+  };
 }
 
 export const STUB_SCREEN: ScreenSnapshot = {

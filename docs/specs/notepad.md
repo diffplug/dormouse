@@ -62,16 +62,21 @@ Source of truth: `extractRichRuns` and `captureRichSelection` in `lib/src/lib/no
 A pin is the runtime link from a captured note back to the scrollback it came from.
 
 - **Pin an ordinary Session's normal-buffer capture with two xterm markers plus the normalized endpoint columns and the raw text.** Markers ride the buffer as it scrolls; the columns and text rebuild and prove the range.
-- Clicking a pin runs five steps: close the notepad; reattach a minimized Surface; resolve both markers and rebuild the range from their current lines and the stored columns; read it back and compare **exactly** with the captured raw text; on success scroll it into view and restore the Dormouse selection, outline and finalized popup included, plus the selection baseline a drag would leave — render-tick invalidation applies to a restored selection as to a dragged one.
+- **Must prove a pin before opening Tool context.** Close the notepad, reattach a minimized Surface, rebuild the range from markers and columns, and compare it exactly with the captured raw text. On success open context, prove the displayed range again, then scroll and restore the Dormouse selection, popup, and render-invalidation baseline.
 - **Column restoration after a resize is best effort**; the raw-text equality is what prevents navigating to the wrong output. Trimmed scrollback is discovered only when a pin is used.
 - **While the alternate buffer is active a pin is temporarily unavailable and kept** — the markers belong to the normal buffer and resolve again once the program exits; the notepad says to exit it.
-- **Every other pin failure removes the pin and keeps the note.** Disposed markers, rows out of range, and a text mismatch all report that the source is no longer available, the notepad kept or reopened to say so.
+- **Must retain a pin that resolves before opening context but fails after its synchronous refit**, reporting that the layout changed without selecting stale coordinates. This does not remap wrapped text; subsequent attempts use ordinary proof and failure rules (rationale).
+- **Every other pin failure removes the pin and keeps the note.** Disposed markers, rows out of range, and a text mismatch report that the source is unavailable; the notepad stays or reopens with the notice.
 - **Disposing or replacing a terminal instance drops its pins immediately**, notes untouched — a marker belongs to one xterm instance.
+- **Must drop source pins when a Workspace moves between windows**, keeping the
+  notes (rationale).
 - **Pins never affect ordering and are not user-controlled favorites.**
 
-Source of truth: `registerTerminalSource`, `resolveTerminalSource` and `revealResolvedSource` in `lib/src/lib/notepad/source-link.ts`; `revealNoteSource` in `lib/src/lib/notepad/pin.ts`; `setTerminalSelectionBaseline` in `lib/src/lib/terminal-store.ts`; `dropSourcesForTerminal` in `lib/src/lib/notepad/notepad-store.ts`, called from `disposeSession` in `lib/src/lib/terminal-lifecycle.ts`.
+Source of truth: `registerTerminalSource`, `resolveTerminalSource` and `revealResolvedSource` in `lib/src/lib/notepad/source-link.ts`; `revealNoteSource` in `lib/src/lib/notepad/pin.ts` (tested in `lib/src/lib/notepad/pin.test.ts`); `setTerminalSelectionBaseline` in `lib/src/lib/terminal-store.ts`; `dropSourcesForTerminal` in `lib/src/lib/notepad/notepad-store.ts`, called from `disposeSession` in `lib/src/lib/terminal-lifecycle.ts`.
 
 ## Notepad UI
+
+**Must retain one notepad per Tool Surface.** Context changes its presentation only (`docs/specs/terminal-context.md` → Tool context); following a source pin reveals that same terminal.
 
 **The header notepad icon sits after the mouse-override icon and before the split controls** (`docs/specs/layout.md` → "Pane header"), filled while the Surface has notes and regular otherwise. **At the minimal tier an empty notepad yields its space to the title; one with notes stays**, so notes are never invisible.
 
@@ -130,22 +135,28 @@ On a failed archive:
 
 **An in-place replacement keeps the notepad instead of archiving it.** Renderer swaps, browser/terminal mode changes, and shell replacement each mint a new Surface id, so the notes migrate with the ref wherever `transferSurfaceRef` runs; pins into the disposed terminal are dropped on the way.
 
-Reserved: Workspace and Window closure has no live code path today (`closeWorkspace` has only test callers and the workspaces flag is dormant), so nothing is wired to it; routing it through the coordinator belongs to the **workspaces-rollout** scope.
+**A Workspace closure routes every member Surface through the coordinator**, one at a time, in the closure mode its caller gives, and the first refusal stops it with that Workspace intact (`docs/specs/layout.md` → Workspaces). A user gesture — the strip, the command-mode key — closes in `prompt` mode and a refusal **reveals** the Workspace, the archive-failure prompt being on its Wall. `dor workspace close` closes in `silent` mode: like `dor kill`, **it raises no prompt, leaves the Workspace open and un-revealed, and returns the error to the caller** (`docs/specs/dor-cli.md` → "dor workspace", the `close` row).
 
-Source of truth: `archiveSurfaceNotes` in `lib/src/lib/notepad/close-coordinator.ts`; `closeSurface` and `killPaneImmediately` in `lib/src/components/Wall.tsx`; `NotepadArchiveFailureModal` in `lib/src/components/NotepadArchiveFailure.tsx`; `beginClosing` and `transferNotepad` in `lib/src/lib/notepad/notepad-store.ts`; `useSurfaceClosing` in `lib/src/components/use-notepad.ts`.
+**Each mounted Wall registers one Surface-metadata resolver**, and a Wall answers `null` for a Surface it does not own, so the first non-null answer is the owning Workspace's — a batch and the volatile mirror describe a Surface identically no matter which Workspace holds it.
+
+Source of truth: `archiveSurfaceNotes` in `lib/src/lib/notepad/close-coordinator.ts`; `closeSurface` / `killPaneImmediately` / `closeAll` in `lib/src/components/Wall.tsx`; `closeWorkspaceWithSurfaces` in `lib/src/components/wall/workspace-lifecycle.ts`; `NotepadArchiveFailureModal` in `lib/src/components/NotepadArchiveFailure.tsx`; `beginClosing`, `transferNotepad` and `registerNotepadSurfaceMetaResolver` in `lib/src/lib/notepad/notepad-store.ts`; `useSurfaceClosing` in `lib/src/components/use-notepad.ts`.
 
 ## Standalone quit
 
 **Archiving is a gate step before teardown**: after the running-work confirmation, or immediately on an all-idle quit, and **before the first `quit_progress`** (`docs/specs/standalone.md` → "Quit flow"; rationale). **It is bounded at 3 s.**
+
+**Both deliberate endings run the same gate**, over their own window's Surfaces: a quit, and closing one window of several (`docs/specs/standalone.md` → "Per-window close"). **Moving a Workspace to another window runs neither** — nothing ended, so the target hydrates the notes; pin behavior follows [Source links](#source-links). **Several windows archiving at once contend through the archive's own file lock and compare-and-swap retry** ([The archive port](#the-archive-port)), so a window whose write lost the race retries against fresh bytes rather than dropping the other window's batches.
+
+**Standalone still archives at quit even though it now restores its windows** (`docs/specs/transport.md` → "The governing rule"): VS Code's live notes survive a Reload only through the extension host's in-memory mirror ([Live resume](#live-resume)), and quitting standalone leaves no such survivor.
 
 - **A failure or timeout leaves the quit pending in Rust**, whose phase-2 wait is unbounded for exactly this (`docs/specs/standalone.md` → "Quit flow"), and the dialog shows the error with **Cancel** (default) and **Quit anyway**, which discards the notes. **Only Cancel calls `quit_cancel`**: Quit anyway must reach teardown with the watchdog still armed.
 - **A timeout aborts the archive it stopped waiting for** ([Closure](#closure)).
 - **Must include Surfaces with pending batch IDs even after their last note is deleted**, both when archiving and discarding on Quit anyway; pinned by `standalone/src/quit-notepad.test.ts`.
 - **Teardown's own rule is untouched**: once teardown begins, no failing step prevents exit.
 
-The store is `<app_data_dir>/notepad-archive-v1.json`, **a sibling of `sessions/`, never inside it** — a Surface's notes outlive the window whose closure archived them, so they must not ride the per-window session blob or be swept by `clear_session`. **It is written owner-only and atomically through the same `write_file_atomically` the session snapshot uses** (`docs/specs/security-local.md` → "Persisted state"). **The revision is a hash of the stored bytes, and every load, save and reset holds an exclusive lock on the sidecar `notepad-archive-v1.lock`** — a second Dormouse sharing `app_data_dir()`, a dev build beside the installed app, then conflicts instead of overwriting batches it never read. **Recovery renames it to `notepad-archive-v1.unreadable-<unix-millis>.json` beside the original**, disambiguating rather than overwriting an earlier quarantine; only a temp file a crash left behind is dropped.
+The store is `<app_data_dir>/notepad-archive-v1.json`, **outside `sessions/` and outside the state root**, so every build shares one — a Surface's notes outlive the window whose closure archived them, so they must not ride the per-window session blob or the sweep over its directory. **It is written owner-only and atomically through the same `write_file_atomically` the session snapshot uses** (`docs/specs/security-local.md` → "Persisted state"). **The revision is a hash of the stored bytes, and every load, save and reset holds an exclusive lock on the sidecar `notepad-archive-v1.lock`** — a second Dormouse sharing `app_data_dir()`, a dev build beside the installed app, then conflicts instead of overwriting batches it never read. **Recovery renames it to `notepad-archive-v1.unreadable-<unix-millis>.json` beside the original**, disambiguating rather than overwriting an earlier quarantine; only a temp file a crash left behind is dropped.
 
-Source of truth: `archiveNotesBeforeQuit` in `standalone/src/quit.ts`, the `'archive-failed'` phase in `standalone/src/quit-confirm-store.ts`; `write_notepad_archive_to`, `lock_notepad_archive` and `reset_notepad_archive_at` in `standalone/src-tauri/src/lib.rs`; the port in `standalone/src/tauri-adapter.ts`.
+Source of truth: `archiveNotesBeforeTeardown` in `standalone/src/teardown-archive.ts`, the `'archive-failed'` phase in `standalone/src/quit-confirm-store.ts`; `write_notepad_archive_to`, `lock_notepad_archive` and `reset_notepad_archive_at` in `standalone/src-tauri/src/lib.rs`; the port in `standalone/src/tauri-adapter.ts`.
 
 ## VS Code lifecycle
 

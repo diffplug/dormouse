@@ -25,6 +25,12 @@ export const TERMINAL_TOP_RADIUS_CLASS = 'rounded-t-lg';
 export const TERMINAL_BOTTOM_RADIUS_CLASS = 'rounded-b-lg';
 export const TERMINAL_SELECTION_BORDER_RADIUS = `${TERMINAL_BORDER_RADIUS_REM}rem`;
 
+/** Shared shape, size bounds, and type for Baseboard Doors and Workspace tabs. */
+export const DOOR_TAB_CLASS = clsx(
+  'relative flex h-6 max-w-[220px] min-w-[68px] items-center overflow-hidden text-sm font-medium font-mono',
+  TERMINAL_TOP_RADIUS_CLASS,
+);
+
 // The gutter between panes (and around the wall's top/sides — the baseboard
 // side stays a tight 2px). Deliberately ODD: the passthrough ring is a 1px
 // stroke, and a 1px stroke can only sit dead-center of a gutter on whole
@@ -32,6 +38,12 @@ export const TERMINAL_SELECTION_BORDER_RADIUS = `${TERMINAL_BORDER_RADIUS_REM}re
 // mirrored by the Tailwind inset classes in Wall.tsx / Baseboard.tsx
 // (`*-1.75` = 7px) — keep them in sync.
 export const PANE_GUTTER_PX = 7;
+
+/** Pointer travel before a press becomes a drag; below it the element's own
+ *  click behavior (select / enter passthrough / rename / activate) is untouched.
+ *  Shared by the pane/Door drag and the Workspace strip's reorder, so both feel
+ *  like one gesture vocabulary. */
+export const DRAG_THRESHOLD_PX = 5;
 
 // Concentric-corners rule: when a rounded outline wraps a rounded edge, both
 // arcs must share a corner center — outer radius = inner radius + offset.
@@ -79,6 +91,28 @@ export const ALERT_SPEECH_TRACKING_CLASS = 'tracking-[0.12em]';
 // context menu, rename warning). Text size and padding vary per popover and
 // stay at the call site; the surface recipe is shared so they can't drift.
 export const POPUP_SURFACE_CLASS = 'z-[1000] rounded border border-border bg-surface-raised font-mono text-foreground shadow-md';
+
+// Message-only panes use the terminal ground because they stand in for a
+// Surface, not chrome. PaneMessage pairs this scrollable root with content that
+// stays centered when it fits and fully reachable when the pane is small.
+const PANE_MESSAGE_CLASS = 'flex h-full min-h-0 w-full min-w-0 flex-col overflow-auto bg-terminal-bg px-6 py-6 text-center text-sm';
+
+export function PaneMessage({
+  children,
+  className,
+  contentClassName,
+  ...props
+}: ComponentProps<'div'> & { contentClassName?: string }) {
+  return (
+    <div {...props} className={clsx(PANE_MESSAGE_CLASS, className)}>
+      {/* Auto margins center only spare space; overflowing content starts at the
+          scroll origin instead of being centered beyond its reachable bounds. */}
+      <div className={clsx('my-auto w-full min-w-0 max-w-[30rem] shrink-0 self-center [overflow-wrap:anywhere]', contentClassName)}>
+        {children}
+      </div>
+    </div>
+  );
+}
 
 // `ComponentProps<'div'>` rather than `HTMLAttributes<HTMLDivElement>` so `ref`
 // is among the props (React 19 ref-as-prop): an anchored menu needs the row

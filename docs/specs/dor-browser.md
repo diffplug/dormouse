@@ -116,8 +116,7 @@ Header contract:
 - **Must keep back/forward/reload enabled.** Agent-browser uses native commands;
   iframe uses parent history and re-resolves its proxy.
 - **Must show non-default managed `--key` as a badge, never a title prefix.**
-- **Must hide split/zoom below `420px` and nav below `360px`;** minimize and kill
-  remain.
+- Width tiers and the narrow-pane popover: `docs/specs/layout.md` → "Pane header responsive sizing".
 
 Source of truth: `lib/src/components/wall/SurfacePaneHeader.tsx`,
 `lib/src/components/wall/agent-browser-screen.ts`,
@@ -130,10 +129,13 @@ Source of truth: `lib/src/components/wall/SurfacePaneHeader.tsx`,
 ## Dev-Server Chip
 
 For loopback URLs (`localhost`, `*.localhost`, `127.0.0.1`, `::1`) the header
-registers interest in the port. The Wall scans terminal panes and minimized doors
-via `PlatformAdapter.getOpenPorts(id)` and **shows a chip only when exactly one
-terminal owns that port**; zero or two-plus leave it unsettled, so a dev server
-that starts later still matches. **Match only binds that serve localhost** —
+registers interest in the port. **One scan loop per Window, over every mounted
+Wall's terminal panes and minimized doors** — each Wall registers its Surfaces as
+a candidate source, since the wanted-port store and the resolutions are
+window-wide. It reads `PlatformAdapter.getOpenPorts(id)` and **shows a chip only
+when exactly one terminal owns that port**; zero or two-plus leave it unsettled,
+so a dev server that starts later still matches, and a Wall arriving or leaving
+re-validates what had settled. **Match only binds that serve localhost** —
 loopback or any-interface (`0.0.0.0`, `::`), never a specific non-loopback bind.
 Scanning is debounced, idle-scheduled, and polls only while a wanted port is
 unmatched; reload revalidates optimistically.
@@ -206,12 +208,28 @@ PATH. **Both `dor ab` and the host must spawn `agent-browser` through
 `.cmd`-shim recipe applies even to that absolute path (`docs/specs/dor-cli.md` →
 Spawning External Binaries).
 
-Managed identity:
+### Managed identity
 
-- Default is `--key default`; `--key <name>` maps to `dormouse.1.<name>` and must
-  match `[A-Za-z0-9._-]+`. `--key`, raw `--session`, `--surface` are mutually
-  exclusive.
-- GUI-spawned sessions use `dormouse.1.gui-<hex>`, which no `--key` names; they
+- Default is `--key default`; `--key <name>` must match `[A-Za-z0-9._-]+`.
+  `--key`, raw `--session`, `--surface` are mutually exclusive.
+- **A key is namespaced by the Workspace that holds the browser** —
+  `dormouse.<workspaceId>.<name>`, the Workspace's *stable* id so a strip reorder
+  renames nothing — and `dormouse.1.<name>` for a bare Wall, which has no
+  Workspace id (VS Code, the website, Pocket). The same key in two Workspaces is
+  therefore two browsers, which is what keeps one Surface per session (below)
+  once several Workspaces each run `dor ab --key default`. **Only the answering Workspace can name it**,
+  so `dor ab` asks the host (`surface.resolveAgentBrowser` with `key`) before it
+  forwards anything, and namespaces the key itself only when there is no control
+  endpoint at all — outside Dormouse, where `dor ab` is a pure passthrough.
+  **Every managed `dor ab` invocation depends on the host answering** — a
+  passthrough verb included — with no CLI-side fallback: a refusal (a Wall still
+  mounting, a webview mid-reload, the VS Code guard) fails the command with the
+  host's message before the binary runs, and the router answers the no-Wall
+  case after its bounded retry rather than leaving `dor ab` to its deadline
+  (`docs/specs/dor-cli.md` → "Handle Model"). A CLI-namespaced fallback would
+  name the wrong Workspace's browser.
+- GUI-spawned sessions use `dormouse.1.gui-<hex>`, minted host-wide (the Window's
+  one agent-browser host, not a Workspace), which no `--key` names; they
   are reachable by `dor ab --surface <handle>` (`docs/specs/dor-cli.md` →
   Agent-Browser Surface Addressing). **The host answers only for an
   agent-browser-rendered Surface** — an `iframe`-rendered Surface has a browser
@@ -222,7 +240,8 @@ Managed identity:
   or render-swapped mid-command leaves the trailing request to mint a fresh pane
   (rationale).
 
-Source of truth: `dor/src/commands/agent-browser.ts`, `dor/src/commands/types.ts`
+Source of truth: `sessionForKey` in `dor-lib-common/src/agent-browser.ts`,
+`resolveSession` in `dor/src/commands/agent-browser.ts`, `dor/src/commands/types.ts`
 (`AgentBrowserSurfaceRequest`, `ResolveAgentBrowserSessionRequest`), `lib/src/components/Wall.tsx` /
 `lib/src/components/wall/use-dor-control.ts` (`findAgentBrowserSurface`, `surface.agentBrowser`,
 `surface.resolveAgentBrowser`).
@@ -435,12 +454,15 @@ Header rewriting:
 | request | `Accept-Encoding` | deleted, so HTML comes back identity for rewriting |
 | request | `Cookie` | dropped, including WebSocket handshakes |
 | response | `Set-Cookie` | dropped, including successful and refused WebSocket handshakes |
-| response | `X-Frame-Options`, `Content-Security-Policy`, `Content-Security-Policy-Report-Only` | with validated chain, replaced **whole** by `frame-ancestors 'self' <validated chain>` (rationale) |
+| response | `X-Frame-Options`, CSP headers | with validated chain, replaced by `frame-ancestors 'self' <validated chain>`; opted-in CSP policies remain alongside it (rationale) |
+| response | `X-Dormouse-Preserve-CSP: 1` | consumed; preserves upstream CSP headers and meta policies |
 | response | hop-by-hop (RFC 7230 §6.1) | dropped |
 | response | `Location` | upstream origin rewritten back to the proxy origin, so a redirect stays inside the proxy |
-| response body | `<meta http-equiv="content-security-policy">` | removed, like the header |
+| response body | `<meta http-equiv="content-security-policy">` | removed unless the response opts into CSP preservation |
 
 **Must update this table whenever header rewriting changes.**
+
+**Must preserve enforced and report-only CSP verbatim when the upstream response sends `X-Dormouse-Preserve-CSP: 1`.** Add the validated ancestor policy separately, for every MIME type; preserve meta policies during HTML instrumentation. Never infer this opt-in from request headers. Additional upstream restrictions may prevent framing or shim execution. (rationale)
 
 **One dedicated `127.0.0.1:0` server per grant, with no token in the path** — the
 origin itself is the grant boundary (rationale). Grants have a sliding idle TTL
@@ -536,7 +558,7 @@ Security boundaries:
 - no user script is injected,
 - link-local/cloud-metadata ranges are blocked,
 - every other user-supplied `http://` target is trusted as the user's command,
-  at the cost of the upstream's own XSS policy inside the frame.
+  at the cost of the upstream's own XSS policy unless it opts into preservation.
 
 **Must replace framing controls with exactly `frame-ancestors 'self'
 <validated embedder chain>`.** `'self'` permits same-grant nesting; foreign

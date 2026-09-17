@@ -4,17 +4,21 @@ Invocation: `dor --help`
 
 ```text
 USAGE
-  dor split [--left|--right|--up|--down|--auto] [--json] [--minimize] [--surface id|ref] [-- <command>...]
-  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] -- <command>...
+  dor split [--left|--right|--up|--down|--auto] [--json] [--minimize] [--surface id|ref] [--workspace ref] [-- <command>...]
+  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] [--workspace ref] -- <command>...
+  dor tool [--global] [--json] [--minimize] [--fresh] [--surface id|ref] [--cwd path] [--workspace ref] <name> [args...]
+  dor tool [--json] [--minimize] [--surface id|ref] [--cwd path] [--workspace ref] -- <command>...
+  dor open [--json] [--minimize] [--fresh] [--surface id|ref] [--workspace ref] [--cwd path] [--tool name] <file>
   dor version [--json]
   dor skill [--install] [--json]
-  dor send <surface> ([--text value] [--key value] | --stdin | --sequence json) [--json] [--raw]
-  dor read <surface> [--json] [--lines count] [--scrollback]
-  dor await <surface> --until condition [--json] [--timeout seconds]
-  dor kill <surface> [--confirm-if-read text|--confirm-dangerously] [--json]
-  dor iframe [--json] [--minimize] [--surface id|ref] <target>
-  dor agent-browser [--key name|--session name|--surface handle] [args...]
-  dor list [--command text] [--cwd path] [--id-format refs|ids|both] [--json] [--kind terminal|browser] [--port number] [--ports] [--view paned|zoomed|minimized]
+  dor send <surface> ([--text value] [--key value] | --stdin | --sequence json) [--json] [--raw] [--workspace ref]
+  dor read <surface> [--json] [--lines count] [--scrollback] [--workspace ref]
+  dor await <surface> --until condition [--json] [--timeout seconds] [--workspace ref]
+  dor kill <surface> [--confirm-if-read text|--confirm-dangerously] [--json] [--workspace ref]
+  dor iframe [--json] [--minimize] [--surface id|ref] [--workspace ref] <target>
+  dor agent-browser [--key name|--session name|--surface handle] [--workspace ref] [args...]
+  dor list [--all] [--command text] [--cwd path] [--id-format refs|ids|both] [--json] [--kind terminal|browser|tool] [--port number] [--ports] [--view paned|zoomed|minimized] [--workspace ref] [--workspaces] [--window label]
+  dor workspace new|rename|close|switch|move [args...] [flags...]
   dor --help
 
 Dormouse bundles the dor CLI into every terminal it launches.
@@ -26,6 +30,8 @@ FLAGS
 COMMANDS
   split          Create a new terminal surface by splitting an existing surface.
   ensure         Ensure one surface is running a command.
+  tool           Run a command as a Dor Tool.
+  open           Open a local file with a Dor Tool.
   version        Print the dor CLI version.
   skill          Print the Dormouse agent skill, or install its bootstrap stub.
   send           Send text or key input to a terminal surface.
@@ -35,5 +41,6 @@ COMMANDS
   iframe         Open a target in an iframe surface.
   agent-browser  Drive a browser surface via your agent-browser install (alias: dor ab).
   list           List Dormouse Surfaces.
+  workspace      Create, rename, close, switch, or move Workspaces.
 
 ```

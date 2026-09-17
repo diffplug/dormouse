@@ -24,6 +24,7 @@ import {
   PaneWriteContext,
   SelectedIdContext,
   WallActionsContext,
+  WorkspaceActiveContext,
 } from './wall-context';
 
 type AgentBrowserPanelParams = AgentBrowserSurfaceParams;
@@ -67,7 +68,12 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   const snapshot = useSyncExternalStore(controller.subscribe, controller.snapshot);
   const { tabs, status, connectionLost, hasFrame, poppedOut, relaunching, streamPort } = snapshot;
 
-  const interactive = mode === 'passthrough' && selectedId === id;
+  // Gated on the same Workspace-aware visibility the streaming body reads, so a
+  // Workspace left in passthrough on a browser pane stops forwarding (and
+  // preventDefault-ing) window keystrokes the moment it is hidden. `parked` is
+  // deliberately not part of it: a parked leaf is never the selected pane.
+  const workspaceActive = useContext(WorkspaceActiveContext);
+  const interactive = workspaceActive && mode === 'passthrough' && selectedId === id;
   const interactiveRef = useRef(interactive);
   interactiveRef.current = interactive;
   // A direct mouse click on the canvas should reach the page even when this pane
@@ -249,7 +255,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
     };
     canvas.addEventListener('wheel', onWheel, { passive: false });
     return () => canvas.removeEventListener('wheel', onWheel);
-  }, [controller, toDevice]);
+  }, [controller, id, toDevice]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (!interactiveRef.current) return;
@@ -283,7 +289,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
       // A screen modal (or any dialog) renders outside the pane element, so the
       // contains() check above misses it; without this, typing into the modal's
       // Custom W/H/DPI fields would be swallowed and forwarded to the browser.
-      if (e.target instanceof Element && e.target.closest('[role="dialog"]')) return;
+      if (e.target instanceof Element && e.target.closest('[role="dialog"], [data-terminal-context]')) return;
       // Likewise never hijack keystrokes destined for an editable field that
       // lives outside the pane — notably the header's URL editor.
       if (isEditableTarget(e.target)) return;
@@ -297,7 +303,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
       window.removeEventListener('keydown', forward, true);
       window.removeEventListener('keyup', forward, true);
     };
-  }, [controller, interactive]);
+  }, [controller, id, interactive]);
 
   // Focus the swap-confirm overlay when it appears so it captures the typed
   // confirm/cancel keys (the pane's key-forwarder skips in-pane targets).

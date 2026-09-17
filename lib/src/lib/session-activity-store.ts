@@ -1,3 +1,4 @@
+import { createAlertEpisode } from './alert-episode';
 import type { AlertState, SessionStatus } from './alert-manager';
 import type { AlertStateDetail } from './platform/types';
 import { applyAlertSettingsFromHost, publishAlertSettings } from './alert-settings';
@@ -30,7 +31,7 @@ export const DEFAULT_ACTIVITY_STATE: ActivityState = {
   ringSeq: 0,
 };
 
-const activityListeners = new Set<() => void>();
+const activityListeners = new Set<(changedId?: string) => void>();
 let cachedSnapshot: Map<string, ActivityState> | null = null;
 
 // Terminal activity keeps the same home before and after xterm initialization.
@@ -42,12 +43,15 @@ const terminalActivity = new Map<string, { state: ActivityState; attentionDismis
 // terminal activity never removes a browser TODO.
 const localSurfaceActivity = new Map<string, ActivityState>();
 
-export function notifyActivityListeners(): void {
+/** `changedId` names the one Surface whose activity moved, so a listener scoped
+ *  to a subset of the Window can ignore the rest. Omitting it means a store-wide
+ *  change every listener must take. */
+export function notifyActivityListeners(changedId?: string): void {
   cachedSnapshot = null;
-  activityListeners.forEach((listener) => listener());
+  activityListeners.forEach((listener) => listener(changedId));
 }
 
-export function subscribeToActivity(listener: () => void): () => void {
+export function subscribeToActivity(listener: (changedId?: string) => void): () => void {
   activityListeners.add(listener);
   return () => activityListeners.delete(listener);
 }
@@ -83,11 +87,17 @@ export function getLivePersistedAlertState(id: string): PersistedAlertState | nu
 /** Install a host snapshot, including one received before xterm initialization. */
 export function setTerminalActivity(id: string, state: Partial<AlertState>): void {
   const { attentionDismissedRing = false, ...activity } = state;
+  const previous = terminalActivity.get(id)?.state;
+  // Older hosts and local fixtures have no episode field. Hydrate their status
+  // edges here; consumers still seed first-observed rings without delivery.
+  const episode = state.status === 'ALERT_RINGING'
+    ? state.episode ?? (previous?.status === 'ALERT_RINGING' ? previous.episode : null) ?? createAlertEpisode()
+    : null;
   terminalActivity.set(id, {
-    state: { ...DEFAULT_ACTIVITY_STATE, ...activity },
+    state: { ...DEFAULT_ACTIVITY_STATE, ...activity, episode },
     attentionDismissedRing,
   });
-  notifyActivityListeners();
+  notifyActivityListeners(id);
 }
 
 /** Called after registry removal, or without an id to reset the terminal cache. */
@@ -98,7 +108,7 @@ export function clearTerminalActivity(id?: string): void {
   } else {
     terminalActivity.delete(id);
   }
-  notifyActivityListeners();
+  notifyActivityListeners(id);
 }
 
 /**
@@ -108,7 +118,7 @@ export function clearTerminalActivity(id?: string): void {
  */
 export function clearLocalSurfaceActivity(id: string): void {
   if (!localSurfaceActivity.delete(id)) return;
-  notifyActivityListeners();
+  notifyActivityListeners(id);
 }
 
 function setLocalSurfaceTodo(id: string, todo: boolean): void {
@@ -118,7 +128,7 @@ function setLocalSurfaceTodo(id: string, todo: boolean): void {
   }
 
   localSurfaceActivity.set(id, { ...DEFAULT_ACTIVITY_STATE, todo: true });
-  notifyActivityListeners();
+  notifyActivityListeners(id);
 }
 
 /**

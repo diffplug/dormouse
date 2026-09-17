@@ -1,4 +1,7 @@
+import { recordToolEvents } from '../../lib/src/lib/tool-events';
+import type { AlertRuntimeSnapshot } from 'dormouse-lib/lib/alert-manager';
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
+import { installWorkspaceRegistry, type WorkspaceRegistrySnapshot } from "./workspace-registry";
 import type {
   AgentBrowserCommandResult,
   AgentBrowserEditOp,
@@ -12,8 +15,12 @@ import type {
   OpenPort,
   PlatformAdapter,
   PtyDataDetail,
-  PtyInfo,
+  PtyListDetail,
+  PtyMarkedDetail,
+  PtyReplayDetail,
   BurrowLink,
+  ToolControlResult,
+  ToolHostRequest,
 } from "dormouse-lib/lib/platform/types";
 import {
   answerAskCommand,
@@ -34,10 +41,11 @@ import type { AwaitHandle, AwaitOptions } from "dormouse-lib/lib/alert-manager";
 import type { AlertSettings } from "dormouse-lib/lib/alert-settings";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
 import { createMemoryNotepadArchivePort } from "dormouse-lib/lib/notepad/memory-archive-port";
-import { loadSessionState, saveSessionState } from "dormouse-lib/lib/window-persistence";
+import type { PersistedAlertState, PersistedWindow } from "dormouse-lib/lib/session-types";
+import { claimRecoveryCommands, windowStateSlot } from "./window-recovery";
+import { coalesceCwds } from "./coalesce-cwds";
 import {
   applyTerminalProtocolEvents,
-  collectTerminalSemanticEvents,
   TerminalProtocolParser,
   type TerminalProtocolEvent,
 } from "dormouse-lib/lib/terminal-protocol";
@@ -63,11 +71,25 @@ function decodeBase64Bytes(base64: string): Uint8Array {
 export class BrowserSidecarAdapter implements PlatformAdapter {
   private dataHandlers = new Set<(detail: PtyDataDetail) => void>();
   private exitHandlers = new Set<(detail: { id: string; exitCode: number }) => void>();
-  private listHandlers = new Set<(detail: { ptys: PtyInfo[] }) => void>();
-  private replayHandlers = new Set<(detail: { id: string; data: string }) => void>();
+  private listHandlers = new Set<(detail: PtyListDetail) => void>();
+  private replayHandlers = new Set<(detail: PtyReplayDetail) => void>();
+  private markedHandlers = new Set<(detail: PtyMarkedDetail) => void>();
   private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
+  private watchedCommandHandlers = new Set<(names: string[]) => void>();
+  private alertSettingsHandlers = new Set<(settings: AlertSettings) => void>();
   private alertManager = new AlertManager();
   private unlistenHost: (() => void) | null = null;
+  private unlistenReconnect: (() => void) | null = null;
+  private unlistenRegistry: (() => void) | null = null;
+  // The seeds this renderer last offered, keyed by op. The SSE stream is the
+  // only way a store's snapshot reaches this adapter, and a dropped stream
+  // takes the bridge's fan-out entry with it; re-offering the seeds after a
+  // reconnect makes the sidecar republish both stores (a repeat seed is
+  // ignored as a seed but still answered with the canonical snapshot).
+  private readonly alertSeeds = new Map<string, Record<string, unknown>>();
+  private onRegistrySnapshot: ((snapshot: WorkspaceRegistrySnapshot) => void) | null = null;
+  private static STATE_KEY = 'dormouse.browser-sidecar.session';
+  private windowSlot = windowStateSlot(localStorage, BrowserSidecarAdapter.STATE_KEY, 'browser-sidecar');
   // Remote-host bridge, identical in shape to TauriAdapter's — the dev harness
   // forwards the same `burrow:*` messages over its own transport.
   private readonly burrowClient = createBurrowLinkClient({
@@ -92,6 +114,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     // drops `this` and makes the internal `this.host` access throw. The VS Code
     // adapter binds for the same reason; mirror it so any call style is safe.
     this.createIframeProxyUrl = this.createIframeProxyUrl.bind(this);
+    this.toolControl = this.toolControl.bind(this);
     this.agentBrowserCommand = this.agentBrowserCommand.bind(this);
     this.agentBrowserEdit = this.agentBrowserEdit.bind(this);
     this.agentBrowserScreenshot = this.agentBrowserScreenshot.bind(this);
@@ -102,16 +125,36 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   }
 
   async init(): Promise<void> {
-    this.clearPersistedState();
     await this.host.init();
     this.unlistenHost = this.host.onEvent(({ event, data }) => this.handleHostEvent(event, data));
+    this.unlistenReconnect = this.host.onReconnect(() => {
+      for (const payload of this.alertSeeds.values()) this.host.send("alert_command", { payload });
+    });
     this.installConsoleForwarder();
+    this.unlistenRegistry = await installWorkspaceRegistry({
+      invoke: (cmd, args) => this.host.invoke(cmd, args),
+      // Through the one host subscription above, not a second one.
+      onSnapshot: (handler) => {
+        this.onRegistrySnapshot = handler;
+        return () => { this.onRegistrySnapshot = null; };
+      },
+    });
+    // Started, not awaited — see TauriAdapter.
+    this.recoveryReady = claimRecoveryCommands(
+      (paneIds) => this.host.invoke<Record<string, string>>("take_recovery_commands", { paneIds }),
+      this.windowSlot.read(),
+      'browser-sidecar',
+    ).then((commands) => { this.recoveryCommands = commands; });
   }
 
   shutdown(): void {
     this.alertManager.dispose();
     this.unlistenHost?.();
     this.unlistenHost = null;
+    this.unlistenReconnect?.();
+    this.unlistenReconnect = null;
+    this.unlistenRegistry?.();
+    this.unlistenRegistry = null;
     this.burrowClient.dispose();
     this.host.send("kill_sidecar_now");
     this.host.close();
@@ -156,8 +199,44 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     try { return await this.host.invoke("pty_get_cwd", { id }); } catch { return null; }
   }
 
+  /** See TauriAdapter: one round trip, one process scan, for the whole save —
+   *  coalesced the same way, because the harness runs the same Walls. */
+  private readonly cwdBatch = coalesceCwds(async (ids) => {
+    try { return await this.host.invoke<Record<string, string | null>>("pty_get_cwds", { ids }); } catch { return {}; }
+  });
+
+  getCwds(ids: string[]): Promise<Record<string, string | null>> {
+    return this.cwdBatch(ids);
+  }
+
+  /** See TauriAdapter: claimed once during `init()`, read synchronously by the
+   *  cold restore. */
+  private recoveryCommands: Record<string, string> = {};
+  recoveryReady: Promise<void> = Promise.resolve();
+
+  getRecoveryCommands(): Record<string, string> {
+    return this.recoveryCommands;
+  }
+
+  // No `captureAgentRecovery` here. Capture is a quit-only step, and this
+  // harness has no quit: a reload is a live resume over PTYs that survive it, so
+  // sending `^C` to every agent would interrupt work that is still running. What
+  // a reload does exercise is the claim above, against whatever the app's own
+  // quit last wrote (docs/specs/standalone.md -> "Agent recovery").
+
+  alertSeed(id: string, state: PersistedAlertState): void {
+    this.alertManager.seed(id, state);
+  }
+
   async getOpenPorts(id: string): Promise<OpenPort[]> {
     try { return await this.host.invoke("pty_get_open_ports", { id }); } catch { return []; }
+  }
+
+  /** See TauriAdapter: one round trip, one process scan, for a whole listing. */
+  async getOpenPortsMany(ids: string[]): Promise<Record<string, OpenPort[]>> {
+    try {
+      return await this.host.invoke<Record<string, OpenPort[]>>("pty_get_open_ports_many", { ids });
+    } catch { return {}; }
   }
 
   async readClipboardFilePaths(): Promise<string[] | null> {
@@ -170,6 +249,14 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
 
   async readClipboardText(): Promise<string | null> {
     try { return await this.host.invoke("read_clipboard_text"); } catch { return null; }
+  }
+
+  async toolControl(request: ToolHostRequest): Promise<ToolControlResult> {
+    try {
+      return await this.host.invoke("tool_control", { request });
+    } catch (err) {
+      return { status: "error", message: errMessage(err) };
+    }
   }
 
   async createIframeProxyUrl(targetUrl: string): Promise<IframeProxyResult> {
@@ -241,22 +328,45 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   offPtyData(handler: (detail: PtyDataDetail) => void): void { this.dataHandlers.delete(handler); }
   onPtyExit(handler: (detail: { id: string; exitCode: number }) => void): void { this.exitHandlers.add(handler); }
   offPtyExit(handler: (detail: { id: string; exitCode: number }) => void): void { this.exitHandlers.delete(handler); }
-  requestInit(): void {
-    this.host.send("pty_request_init");
+  requestInit(requestId?: string): void {
+    this.host.send("pty_request_init", { requestId: requestId ?? null });
     this.pushThemeColors();
   }
-  onPtyList(handler: (detail: { ptys: PtyInfo[] }) => void): void { this.listHandlers.add(handler); }
-  offPtyList(handler: (detail: { ptys: PtyInfo[] }) => void): void { this.listHandlers.delete(handler); }
-  onPtyReplay(handler: (detail: { id: string; data: string }) => void): void { this.replayHandlers.add(handler); }
-  offPtyReplay(handler: (detail: { id: string; data: string }) => void): void { this.replayHandlers.delete(handler); }
+  onPtyList(handler: (detail: PtyListDetail) => void): void { this.listHandlers.add(handler); }
+  offPtyList(handler: (detail: PtyListDetail) => void): void { this.listHandlers.delete(handler); }
+  onPtyReplay(handler: (detail: PtyReplayDetail) => void): void { this.replayHandlers.add(handler); }
+  offPtyReplay(handler: (detail: PtyReplayDetail) => void): void { this.replayHandlers.delete(handler); }
+  onPtyMarked(handler: (detail: PtyMarkedDetail) => void): () => void {
+    this.markedHandlers.add(handler);
+    return () => { this.markedHandlers.delete(handler); };
+  }
   onRequestSessionFlush(_handler: (detail: { requestId: string }) => void): void {}
   offRequestSessionFlush(_handler: (detail: { requestId: string }) => void): void {}
   notifySessionFlushComplete(_requestId: string): void {}
 
+  alertPauseForTransfer(id: string): AlertRuntimeSnapshot | null { return this.alertManager.pauseForTransfer(id); }
+  alertResumeFromTransfer(id: string, snapshot: AlertRuntimeSnapshot, replayRequestId?: string): void {
+    this.alertManager.resumeFromTransfer(id, snapshot, replayRequestId);
+  }
+
   alertRemove(id: string): void { this.alertManager.remove(id); }
-  alertSetWatchedCommands(names: string[]): void { this.alertManager.setWatchedCommands(names); }
-  alertSetCommandWatched(name: string, watched: boolean): void { this.alertManager.setCommandWatched(name, watched); }
-  alertPublishSettings(settings: AlertSettings): void { this.alertManager.applySettings(settings); }
+  // Through the sidecar's app-global stores and back as their broadcasts, the
+  // path the shipped app takes (see TauriAdapter), so the harness exercises
+  // the seed-once and delta rules rather than a private copy of the state.
+  alertSetWatchedCommands(names: string[]): void {
+    this.sendAlertSeed({ op: "initializeWatchedCommands", names });
+  }
+  alertSetCommandWatched(name: string, watched: boolean): void {
+    this.host.send("alert_command", { payload: { op: "setCommandWatched", name, watched } });
+  }
+  alertPublishSettings(settings: AlertSettings, opts: { seed: boolean }): void {
+    if (opts.seed) this.sendAlertSeed({ op: "initializeSettings", settings });
+    else this.host.send("alert_command", { payload: { op: "updateSettings", settings } });
+  }
+  private sendAlertSeed(payload: { op: string } & Record<string, unknown>): void {
+    this.alertSeeds.set(payload.op, payload);
+    this.host.send("alert_command", { payload });
+  }
   alertDismiss(id: string): void { this.alertManager.dismissAlert(id); }
   alertAttend(id: string): void { this.alertManager.attend(id); }
   alertResize(id: string): void { this.alertManager.onResize(id); }
@@ -266,34 +376,25 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   alertClearTodo(id: string): void { this.alertManager.clearTodo(id); }
   alertAwait(id: string, options: AwaitOptions): AwaitHandle { return this.alertManager.awaitCompletion(id, options); }
   onAlertState(handler: (detail: AlertStateDetail) => void): void { this.alertStateHandlers.add(handler); }
-  // See TauriAdapter: single webview, so nothing is broadcast back.
-  onWatchedCommands(_handler: (names: string[]) => void): void {}
-  onAlertSettings(_handler: (settings: AlertSettings) => void): void {}
+  onWatchedCommands(handler: (names: string[]) => void): void { this.watchedCommandHandlers.add(handler); }
+  onAlertSettings(handler: (settings: AlertSettings) => void): void { this.alertSettingsHandlers.add(handler); }
 
-  private static STATE_KEY = 'dormouse.browser-sidecar.session';
+  // The harness mirrors the shipped persistence answer, so a reload here
+  // exercises what the app does (docs/specs/transport.md -> "The governing rule").
+  readonly persistsSession = true;
 
-  // Mirrors TauriAdapter's gate (docs/specs/standalone.md -> "Standalone persists
-  // no Session state"); flip both flags together.
-  private static PERSIST_SESSION = false;
+  // See TauriAdapter: no bare-Session slot on this host.
+  saveState(_state: unknown): void {}
+  getState(): unknown { return null; }
 
-  readonly persistsSession = BrowserSidecarAdapter.PERSIST_SESSION;
-
-  // See TauriAdapter: PersistedWindow when the workspaces flag is on, bare
-  // PersistedSession when off; the helpers own the translation + JSON/storage
-  // plumbing (docs/specs/transport.md).
-  saveState(state: unknown): void {
-    if (!BrowserSidecarAdapter.PERSIST_SESSION) return;
-    try { saveSessionState(localStorage, BrowserSidecarAdapter.STATE_KEY, state); }
-    catch { console.error('[browser-sidecar] Failed to save session state'); }
+  // See TauriAdapter: one `PersistedWindow` per window, in `localStorage` rather
+  // than the Rust file store (docs/specs/transport.md).
+  saveWindowState(snapshot: PersistedWindow): void {
+    this.windowSlot.write(snapshot);
   }
 
-  getState(): unknown {
-    if (!BrowserSidecarAdapter.PERSIST_SESSION) return null;
-    try {
-      return loadSessionState(localStorage, BrowserSidecarAdapter.STATE_KEY);
-    } catch {
-      return null;
-    }
+  getWindowState(): PersistedWindow | null {
+    return this.windowSlot.read();
   }
 
   // The notepad archive as memory, not the Tauri file: this harness is a browser
@@ -307,15 +408,24 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   // adapter sets this. The shipped Tauri build owns its keyboard and does not.
   readonly browserReservesNotepadChord = true;
 
-  // Delete (not just ignore) pre-gate blobs: they carry transcripts and localStorage
-  // outlives the harness's per-run temp state dir.
-  private clearPersistedState(): void {
-    if (BrowserSidecarAdapter.PERSIST_SESSION) return;
-    try { localStorage.removeItem(BrowserSidecarAdapter.STATE_KEY); }
-    catch { /* private-mode storage: nothing to clear */ }
-  }
-
   private handleHostEvent(event: string, data: unknown): void {
+    if (event === "dormouse://workspaces") {
+      this.onRegistrySnapshot?.(data as WorkspaceRegistrySnapshot);
+      return;
+    }
+    if (event === "alert:watchedCommands") {
+      const names = (data as { names?: string[] } | undefined)?.names ?? [];
+      this.alertManager.setWatchedCommands(names);
+      for (const handler of this.watchedCommandHandlers) handler(names);
+      return;
+    }
+    if (event === "alert:settings") {
+      const settings = (data as { settings?: AlertSettings } | undefined)?.settings;
+      if (!settings) return;
+      this.alertManager.applySettings(settings);
+      for (const handler of this.alertSettingsHandlers) handler(settings);
+      return;
+    }
     if (event === "pty:data") {
       // Already parsed by the sidecar, which owns the PTY; its events arrive as
       // the two messages below (docs/specs/terminal-escapes.md).
@@ -334,15 +444,18 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
       this.alertManager.onExit(payload.id, payload.exitCode);
       for (const handler of this.exitHandlers) handler(payload);
     } else if (event === "pty:list") {
-      for (const pty of (data as { ptys: PtyInfo[] }).ptys) if (pty.helper) this.alertManager.setHelper(pty.id, true);
-      for (const handler of this.listHandlers) handler(data as { ptys: PtyInfo[] });
+      for (const pty of (data as PtyListDetail).ptys) if (pty.helper) this.alertManager.setHelper(pty.id, true);
+      for (const handler of this.listHandlers) handler(data as PtyListDetail);
+    } else if (event === "pty:marked") {
+      for (const handler of this.markedHandlers) handler(data as PtyMarkedDetail);
     } else if (event === "pty:replay") {
       // The one stream the sidecar does not parse; see TauriAdapter, including
       // why the one-shot parser still needs the theme.
-      const { id, data: text } = data as { id: string; data: string };
+      const { id, data: text, requestId } = data as PtyReplayDetail;
       const parsed = new TerminalProtocolParser(themeColorProvider).process(text);
-      applyTerminalSemanticEvents(id, collectTerminalSemanticEvents(parsed.events));
-      for (const handler of this.replayHandlers) handler({ id, data: parsed.visibleData });
+      recordToolEvents(id, parsed.events);
+      applyTerminalSemanticEvents(id, this.alertManager.applyReplay(id, requestId, parsed));
+      for (const handler of this.replayHandlers) handler({ id, data: parsed.visibleData, requestId });
     } else if (event === BURROW_RESULT_EVENT) {
       this.burrowClient.onResult(data as BurrowResult);
     } else if (event === BURROW_ASK_EVENT) {

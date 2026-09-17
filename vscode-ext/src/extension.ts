@@ -6,6 +6,7 @@ import { attachRouter, flushAllSessions, getAlertStates } from './message-router
 import { closePoppedOutSessions } from './agent-browser-host';
 import { serveWebview } from './webview-messaging';
 import { log } from './log';
+import { initToolHost } from './tool-host';
 import { forgetRetiredState } from './retired-state';
 import { captureAgentRecoveryCommands, mergeAlertStates, refreshSavedSessionStateFromPtys, takeRecoveryCommands } from './session-state';
 import { readPersistedSession } from '../../lib/src/lib/session-types';
@@ -91,6 +92,7 @@ export function activate(context: vscode.ExtensionContext) {
   // The Burrow runs here, in the extension host that owns the PTYs — in
   // whichever window wins the bind (burrow.ts).
   context.subscriptions.push(initBurrow(context));
+  initToolHost(context.globalStorageUri?.fsPath);
   log.init();
   extensionContext = context;
   ptyManager.setExtensionPath(context.extensionPath);

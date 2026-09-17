@@ -407,10 +407,17 @@ export function summarizeCommandLine(raw: string): string {
  * This is the key WATCHING rules are stored under — see `docs/specs/alert.md`.
  */
 export function commandArgv0(raw: string): string | null {
-  const commandTokens = takePrimaryCommandTokens(tokenizeCommand(raw.trim()));
-  const command = commandTokens[0];
-  if (!command) return null;
-  return commandProgramName(command) || null;
+  return commandProgramName(primaryCommandTokens(raw)[0] ?? '') || null;
+}
+
+/**
+ * The tokens of the first command on a line: quote- and escape-aware, truncated
+ * at the first pipeline/compound boundary, with leading `VAR=value` assignments
+ * and a leading `env` skipped. `commandArgv0` is `commandProgramName` of the
+ * first of these.
+ */
+export function primaryCommandTokens(raw: string): string[] {
+  return takePrimaryCommandTokens(tokenizeCommand(raw.trim()));
 }
 
 export interface ResolvedCommandStart {
@@ -465,6 +472,19 @@ function canonicalizeCwdForMatch(path: string): string {
 }
 
 /**
+ * Whether two reported paths name the same directory. The CLI sends a
+ * path.resolve'd cwd (trailing slashes, `..`, `.` collapsed), so the only
+ * remaining divergence to bridge is the Windows/MSYS dialect split (see
+ * canonicalizeCwdForMatch). Symlinks and true case differences are still
+ * treated as distinct, matching the exact-key intent. A missing path on either
+ * side never matches.
+ */
+export function cwdPathsEqual(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false;
+  return canonicalizeCwdForMatch(a) === canonicalizeCwdForMatch(b);
+}
+
+/**
  * The idempotency predicate for `dor ensure`: true when the pane is *currently
  * running* `command` in `cwdPath`. It matches only while the command is live
  * (`currentCommand` is set between commandStart and commandFinish) and only on
@@ -480,13 +500,7 @@ export function surfaceRunsCommand(
   const run = state.currentCommand;
   if (!run || run.rawCommandLine === null) return false;
   if (run.rawCommandLine !== command) return false;
-  // The CLI sends a path.resolve'd cwd (trailing slashes, `..`, `.` collapsed),
-  // so the only remaining divergence to bridge is the Windows/MSYS dialect split
-  // (see canonicalizeCwdForMatch). Symlinks and true case differences are still
-  // treated as distinct, matching the exact-key intent.
-  const runCwd = run.cwdAtStart?.path ?? state.cwd?.path;
-  if (runCwd === undefined) return false;
-  return canonicalizeCwdForMatch(runCwd) === canonicalizeCwdForMatch(cwdPath);
+  return cwdPathsEqual(run.cwdAtStart?.path ?? state.cwd?.path, cwdPath);
 }
 
 export function deriveFallbackCommandTitle(
@@ -1003,7 +1017,7 @@ export const WINDOWS_EXECUTABLE_SUFFIX = /\.(?:exe|cmd|bat|com|ps1)$/i;
  * suffix. The single answer to "which program is this", so the header, the
  * WATCHING rule row and the bell tooltip cannot disagree about it.
  */
-function commandProgramName(command: string): string {
+export function commandProgramName(command: string): string {
   return commandBasename(command).replace(WINDOWS_EXECUTABLE_SUFFIX, '');
 }
 

@@ -643,6 +643,9 @@ framed as application messages on the Noise session (below).
   reorder (which Noise's counter turns into a decrypt failure), or a framing
   violation destroys it and every later call throws — there is no
   resynchronization point in a stream cipher.
+- **The control messages are the two ceremonies' outcomes and the direct path's
+  four signals** ([remote-api.md](./remote-api.md) → Direct path), which the
+  Relay routes without reading, like every other ciphertext.
 - **Prologues are `lengthPrefixedConcat`** of `dormouse/e2e/v1`, the ceremony
   kind, the `burrowId`, and — for a connection — the connection id; for a pairing,
   every field of its invitation in QR order ("Setup tokens and the pairing QR"
@@ -1067,9 +1070,10 @@ single-owner selfhost Relay and a multi-tenant SaaS on `*.dormouse.sh`,
 including the Bring-Your-Own-Tailnet (BYOT) posture that puts the relay inside a
 customer's own tailnet without a custom client build. The wire API and security
 model are unchanged from selfhost ([remote-api.md](./remote-api.md), Transport);
-everything here is deployment and relay plumbing beneath them. The SaaS account
-model (email + passkey self-serve signup) is this scope's own — **Accounts**
-below. Front-door work staged elsewhere and not restated: CloudFlare routing +
+everything here is deployment and relay plumbing beneath them. Hosted account
+identity lives in [hosted.md](./hosted.md); this scope adds Relay tenant ownership
+and passkey enrollment — **Accounts** below. Front-door work staged elsewhere
+and not restated: CloudFlare routing +
 Pocket static serving in [pocket-app.md](./pocket-app.md) `## Future`.
 
 Framing invariant: Tailscale is network-layer defense-in-depth *under* the
@@ -1087,8 +1091,8 @@ Selfhost (everything above the fold) stays as-is; SaaS is a parallel deployment
 that lifts each single-tenant simplification, every one chosen to be liftable:
 
 * **Accounts.** One `accountId: "owner"` behind a shared setup password becomes
-  many accounts, each created by email +
-  passkey. The two hand-edited JSON files (`account.json`, `burrows.json`) become
+  many Hosted account IDs with enrolled passkeys. The two hand-edited JSON files
+  (`account.json`, `burrows.json`) become
   a real per-tenant store with per-tenant revocation, and Burrow enrollment moves
   from the global setup password to the authenticated account.
 * **Relay tenant-scoping (an invariant, not a check).** The relay binds one Burrow

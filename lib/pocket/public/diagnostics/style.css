@@ -1,0 +1,9 @@
+:root { color-scheme: light dark; font: 16px/1.5 system-ui, sans-serif; background: Canvas; color: CanvasText; }
+body { margin: 0; }
+main { max-width: 48rem; margin: auto; padding: 1.25rem; }
+h1 { font-size: 1.6rem; }
+button { font: inherit; min-height: 44px; padding: .5rem .8rem; margin: .25rem .25rem .25rem 0; }
+li { margin: .6rem 0; overflow-wrap: anywhere; }
+li strong { display: block; }
+textarea { box-sizing: border-box; width: 100%; min-height: 18rem; font: .85rem/1.4 monospace; }
+a { color: LinkText; }

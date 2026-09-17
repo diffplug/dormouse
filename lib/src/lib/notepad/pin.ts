@@ -1,8 +1,7 @@
 // Following a note's source pin back to its scrollback (docs/specs/notepad.md
-// → Source links). Every failure but an active alternate buffer is terminal for
-// the pin: the markers are released and the link removed, so a pin the user can
-// see is one that resolved the last time it was asked — or one waiting for a
-// full-screen program to exit. The note itself is never touched.
+// → Source links). Validate before changing the view, then prove the displayed
+// range again: opening Tool context can reflow a previously valid source. The
+// note itself is never touched.
 import { getTerminalInstance } from '../terminal-registry';
 import { dropSource, getNotes } from './notepad-store';
 import { resolveTerminalSource, revealResolvedSource } from './source-link';
@@ -11,6 +10,7 @@ export type PinFailureReason =
   | 'no-source'
   | 'no-terminal'
   | 'alternate-buffer'
+  | 'layout-changed'
   | 'disposed'
   | 'missing-rows'
   | 'mismatch';
@@ -20,16 +20,14 @@ export type PinOutcome =
   | {
       ok: false;
       reason: PinFailureReason;
-      /** Whether the pin survived — true only for `alternate-buffer`, the one
-       *  failure that can resolve later. Everything downstream reads this
-       *  rather than the reason: dropping the source, and the notice a row
-       *  shows (`sourceNoticeFor` in `lib/src/components/NoteList.tsx`). */
+      /** Whether the pin survived. Covered sources and sources invalidated by
+       *  this reveal's layout change are retained. */
       kept: boolean;
     };
 
 /** The single place a failure reason decides whether the pin lives. */
 function failed(reason: PinFailureReason): Extract<PinOutcome, { ok: false }> {
-  return { ok: false, reason, kept: reason === 'alternate-buffer' };
+  return { ok: false, reason, kept: reason === 'alternate-buffer' || reason === 'layout-changed' };
 }
 
 /** Resolve the note's pin against the live buffer; on success scroll the range
@@ -60,6 +58,12 @@ export function revealNoteSource(surfaceId: string, noteId: string): PinOutcome 
     return outcome;
   }
 
-  revealResolvedSource(source.terminalId, resolved.selection);
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('dormouse:reveal-note-source', { detail: { surfaceId, terminalId: source.terminalId } }));
+  // Context mounts and refits synchronously during the event. Never select the
+  // old coordinates or destroy a source that our own view change invalidated.
+  const displayed = resolveTerminalSource(terminal, source);
+  if (!displayed.ok) return failed('layout-changed');
+
+  revealResolvedSource(source.terminalId, displayed.selection);
   return { ok: true };
 }

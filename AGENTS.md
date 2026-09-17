@@ -27,13 +27,14 @@ marking a PR ready for review is what spends them.
 - **`lib/`** — Shared React + TailwindCSS frontend library: components, tests, Storybook.
   - `lib/src/lib/platform/` — platform abstraction (`PlatformAdapter` interface, fake + VSCode adapters)
   - `lib/src/host/` — Node-side host modules bundled into both hosts: the iframe proxy, the agent-browser host, and `remote/` (the `BurrowService` that runs in the Tauri sidecar and the VS Code extension host)
-  - `lib/src/remote/` — remote control: `burrow/` (laptop side: protocol-v1 session, security, the webview's responder + pairing UI), `client/` (phone-side protocol + `RemotePtyAdapter`), `pocket-app/` (Pocket shell), `ws.ts` (shared socket surface)
+  - `lib/src/remote/` — remote control: `burrow/` (laptop side: protocol-v1 session, security, the webview's responder + pairing UI), `client/` (phone-side protocol + `RemotePtyAdapter`), `pocket-app/` (Pocket shell), `direct/` (the WebRTC direct path both ends run), `ws.ts` (shared socket surface)
 - **`standalone/`** — Tauri desktop app (Rust + Vite frontend).
-  - `standalone/sidecar/` — Node.js PTY manager (native PTY via node-pty), bundled as the Tauri sidecar
+  - `standalone/sidecar/` — Node.js PTY manager (native PTY via node-pty, direct-path WebRTC via node-datachannel), bundled as the Tauri sidecar
   - `standalone/src-tauri/` — Rust backend bridging webview ↔ sidecar
 - **`vscode-ext/`** — VS Code extension wrapping the lib in a webview (esbuild; node-pty via forked child process)
 - **`website/`** — Marketing site (Vite) bundling part of the lib as an interactive demo on `FakePtyAdapter`
 - **`relay/`** — Selfhost coordinating Relay for remote control (Hono): accounts + passkey auth in local JSON files (no database), WebSocket routing between Clients and Burrows, serves the built Pocket app
+- **`hosted/`** — Separate Hosted account frontend and Hono Worker; packed pgstencil Better Auth, Postgres, and provider configuration.
 - **`dor/`** — The `dor` CLI (stricli) staged onto the `PATH` of every Dormouse-launched terminal; talks to its host over a private control socket
 - **`remote-lib-common/`** — Security primitives + remote wire contract shared by `relay`, the Burrow module in `lib`, and the Pocket app (bare ES2022 — no DOM or Node types)
 - **`dor-lib-common/`** — Cross-platform external-process spawning (`spawnAndCapture`) shared by `dor` and the `lib` host. Despite the parallel names, the two `*-lib-common` packages are unrelated: `remote-lib-common` is remote security/wire, `dor-lib-common` is spawn plumbing.
@@ -48,7 +49,7 @@ A spec is the accurate reference for the current code: it states the invariants 
 **May combine a concise `Files` / `Code Map` section with section-local `Source of truth:` pointers.** The map gives readers key entrypoints to follow through imports; the pointers locate the implementation of a particular rule. Map the useful starting points, not every file. Short specs need no map when their local pointers already make navigation clear. Keep behavior and invariants in their owning sections, rather than repeating them in map descriptions.
 
 - **`docs/specs/glossary.md`** — Canonical vocabulary: the Surface model, Session layers, `Window ⊃ Workspace ⊃ Pane ⊃ Surface`, transition verbs, invariants I1–I10. Read first; every spec defers to it for state, kind, and verb names.
-- **`docs/specs/layout.md`** — The interaction model over the tiling engine: modes, command-mode dispatch, navigation, minimize/reattach, kill/rename, session lifecycle and persistence recovery, the workspaces-rollout ledger. Read before touching keyboard/navigation/mode/workspace behavior.
+- **`docs/specs/layout.md`** — The interaction model over the tiling engine: modes, command-mode dispatch, navigation, minimize/reattach, kill/rename, session lifecycle and persistence recovery, the Workspace model. Read before touching keyboard/navigation/mode/workspace behavior.
 - **`docs/specs/shortcuts.md`** — Quick-reference table of every shortcut by mode/context; layout.md owns the behavior — update both when a binding changes.
 - **`docs/specs/tiling-engine.md`** — **Lath**, the in-house headless tiling engine: pure split-tree core, never-re-parent LathHost adapter, wall store + engine, Lath-only persistence.
 - **`docs/specs/alert.md`** — The Activity layer: alert tracks, attention model, TODO lifecycle, notification protocols with their sanitization rules, the Workspace union projection.
@@ -61,7 +62,7 @@ A spec is the accurate reference for the current code: it states the invariants 
 - **`docs/specs/theme.md`** — The two-layer CSS variable strategy, consumed-token resolver, terminal color contract, theme debugger.
 - **`docs/specs/dor-cli.md`** — The `dor` CLI on every Dormouse terminal's `PATH`: bundling and env contract, `spawnAndCapture` rules, control-socket plumbing, the Surface handle model, the command set.
 - **`docs/specs/dor-browser.md`** — The browser surface: `BrowserPanel` with swappable `renderMode`, browser chrome, the agent-browser stack, the iframe proxy and CSP boundaries.
-- **`docs/specs/dor-tool.md`** — Dor Tools (design-stage): the `tool` Surface — a terminal and a browser on one Session spine — its capability-gated verbs and OSC 367 contract. Only capability gating is built.
+- **`docs/specs/dor-tool.md`** — Dor Tools: the `tool` Surface — a terminal and a browser on one Session spine — its capability-gated verbs, OSC 367 contract, designation, trust, serving, and persistence.
 - **`docs/specs/vscode.md`** — VS Code host: webview hosting, webview ↔ Workspace mapping, persistence ordering, theme integration, CSP, the build/dogfood pipeline.
 - **`docs/specs/standalone.md`** — Tauri host: the Rust ↔ Node-sidecar bridge, boot sequence, AppBar, persistence, shutdown ordering, the build/dev workflow.
 - **`docs/specs/auto-update.md`** — Standalone auto-update: check → approved download → install-on-quit, the Baseboard notice, Windows sidecar teardown, per-platform quit behavior.
@@ -72,6 +73,8 @@ A spec is the accurate reference for the current code: it states the invariants 
 - **`docs/specs/remote-security-model.md`** — Remote-control trust model: one Noise channel per ceremony, passkeys proving presence inside it, per-Burrow Client statics, the Burrow (not the Relay) authorizing the pair. Read first for anything remote.
 - **`docs/specs/remote-api.md`** — What an authorized Client speaks: the shipped terminal-only **protocol-v1** and the staged remainder.
 - **`docs/specs/relay.md`** — The selfhost coordinating Relay and shared Burrow-service runtime: env config, JSON-file state, WebAuthn without a library, HTTP API, relay flow, enrollment, running it end to end.
+- **`docs/specs/hosted.md`** — Hosted accounts: application boundary, login/linking policy, local development, and staged paid services.
+- **`docs/specs/security-hosted.md`** — Hosted account origin, identity, and deployment security checks.
 - **`SELF_HOST.md`** (repo root) — Self-host deployment: the assistant-run install runbook plus the Installer contract that `docs/specs/security-remote.md`'s `FAIL IF` lines and `scripts/deploy-lint.mjs` audit.
 - **`docs/specs/pocket-app.md`** — Pocket: the remote session is a `PlatformAdapter` (`RemotePtyAdapter`), so Pocket is auth screens plus the mobile composition; owns the same-origin deployment rule.
 - **`docs/specs/deploy.md`** — Release process: artifact matrix, release checklist, two-stage sign-and-release pipeline, updater manifest, changelog flow.
@@ -101,7 +104,7 @@ Specs are written ahead of the code: a new component's spec starts as a full des
 
 - **The fold.** Everything above `## Future` describes the code as it is — present tense, anchored with `Source of truth:` pointers. Everything unbuilt lives under `## Future`, always the last section; a spec with no unbuilt design has none.
 - **Design-stage specs.** A spec for a component that does not exist yet keeps its whole design under `## Future`, opens with `> Status: design — nothing here is implemented yet.`, and is indexed above like any other.
-- **Named scopes.** A cut is recorded as a named scope at the top of `## Future` (`**Scope: workspaces-rollout**`), listing what remains in staged order. A scope is defined in exactly one spec; other specs link it by name and never restate it. Rollout ledgers live in the owning spec's `## Future`, nowhere else.
+- **Named scopes.** A cut is recorded as a named scope at the top of `## Future` (`**Scope: dor-tools**`), listing what remains in staged order. A scope is defined in exactly one spec; other specs link it by name and never restate it. Rollout ledgers live in the owning spec's `## Future`, nowhere else.
 - **Reservations.** Unbuilt design that constrains present code — a reserved wire field, a reserved ref grammar, an additive-evolution guarantee — is stated in the body, marked `Reserved:`, pointing at the `## Future` item it serves. Test: if deleting the sentence would let someone break future compatibility today, it belongs in the body.
 - **Promotion is part of done.** A staged item is finished only when its text moves above the fold — "will" rewritten to "is", `Source of truth:` added — and the built portion is deleted from `## Future`. Never leave completed plan text (build orders, phase lists) below the fold; git keeps the record.
 

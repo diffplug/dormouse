@@ -224,6 +224,51 @@ describe('saveSession', () => {
     expect(platform.getCwd).not.toHaveBeenCalledWith('door-web');
   });
 
+  it('persists a tool command and stable metadata for cold respawn', async () => {
+    const platform = createPlatform(null);
+
+    await saveSession(platform, [{
+      id: 'pane-tool',
+      title: 'storybook',
+      surfaceType: 'tool',
+      params: {
+        surfaceType: 'tool',
+        command: 'pnpm storybook',
+        toolName: 'storybook',
+        toolRender: 'ab-screencast',
+        toolPort: 'auto',
+        toolKey: ['storybook', '/repo'],
+        // Derived state must stay in the Lath projection, never this row.
+        url: 'http://localhost:6006/',
+        session: 'dormouse.1.tool',
+      },
+    }]);
+
+    const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
+    expect(saved.panes.find((pane) => pane.id === 'pane-tool')).toMatchObject({
+      surfaceType: 'tool',
+      command: 'pnpm storybook',
+      tool: {
+        name: 'storybook',
+        render: 'ab-screencast',
+        port: 'auto',
+        key: ['storybook', '/repo'],
+      },
+    });
+  });
+
+  it('keeps resolved argv independently of the live shell command for panes and Doors', async () => {
+    const platform = createPlatform(null);
+    const toolArgv = ['program path', "it's.txt", '$(literal)'];
+    const params = { surfaceType: 'tool', command: "& 'program path' 'it''s.txt' '$(literal)'", toolArgv };
+    await saveSession(platform, [{ id: 'visible', title: 'Viewer', surfaceType: 'tool', params }], [
+      { id: 'hidden', title: 'Viewer', component: 'tool', params },
+    ]);
+    const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
+    expect(saved.panes.map(pane => pane.tool?.argv)).toEqual([toolArgv, toolArgv]);
+    expect(saved.panes.every(pane => pane.command === params.command)).toBe(true);
+  });
+
   it('persists neither a transcript nor a recovery command', async () => {
     // Both are absent by construction now: `PlatformAdapter` has no scrollback
     // reader, and the recovery command is host-owned and rides the boot payload
@@ -343,5 +388,57 @@ describe('saveSession', () => {
     await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }]);
 
     expect(platform.saveState).toHaveBeenCalled();
+  });
+
+  describe('cwd probe', () => {
+    it('prefers the batch, in one call for every terminal pane', async () => {
+      const platform = createPlatform(null);
+      platform.getCwds = vi.fn(async () => ({ 'pane-a': '/a', 'pane-b': '/b' }));
+
+      await saveSession(platform, [
+        { id: 'pane-a', title: 'Pane A' },
+        { id: 'pane-b', title: 'Pane B' },
+        // A browser Surface has no PTY, so it is never probed.
+        { id: 'pane-web', title: 'localhost', surfaceType: 'browser' },
+      ]);
+
+      expect(platform.getCwds).toHaveBeenCalledTimes(1);
+      expect(platform.getCwds).toHaveBeenCalledWith(['pane-a', 'pane-b']);
+      expect(platform.getCwd).not.toHaveBeenCalled();
+      const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
+      expect(saved.panes.map((pane) => [pane.id, pane.cwd])).toEqual([
+        ['pane-a', '/a'], ['pane-b', '/b'], ['pane-web', null],
+      ]);
+    });
+
+    it('falls back to one getCwd per pane where the host has no batch', async () => {
+      const platform = createPlatform(null);
+
+      await saveSession(platform, [
+        { id: 'pane-a', title: 'Pane A' },
+        { id: 'pane-b', title: 'Pane B' },
+      ]);
+
+      expect(platform.getCwd).toHaveBeenCalledTimes(2);
+      const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
+      expect(saved.panes.map((pane) => pane.cwd)).toEqual(['/tmp/live', '/tmp/live']);
+    });
+
+    it('probes nothing and keeps the previous cwd when the flush says not to', async () => {
+      // The post-kill flush: every probe would answer null and be discarded for
+      // the previous record's value anyway.
+      const platform = createPlatform({
+        version: 3,
+        panes: [{ id: 'pane-a', title: 'Pane A', cwd: '/before-the-kill', untouched: false }],
+      });
+      platform.getCwds = vi.fn(async () => ({}));
+
+      await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }], [], undefined, undefined, undefined, undefined, { probeCwd: false });
+
+      expect(platform.getCwds).not.toHaveBeenCalled();
+      expect(platform.getCwd).not.toHaveBeenCalled();
+      const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
+      expect(saved.panes[0].cwd).toBe('/before-the-kill');
+    });
   });
 });

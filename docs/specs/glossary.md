@@ -4,9 +4,10 @@
 
 ## The core idea
 
-A **Surface** is the durable occupant of a Pane — the content in a slot. Two kinds:
+A **Surface** is the durable occupant of a Pane — the content in a slot. Three kinds:
 
 - a **terminal Surface**, which Dormouse calls a **Session**: a PTY-backed shell with scrollback and semantic terminal state. The six-axis model below describes this kind.
+- a **tool Surface**: a Session with terminal and browser capabilities (`docs/specs/dor-tool.md`).
 - a **browser Surface**: a web view (`docs/specs/dor-browser.md`), taking only a subset of the axes ([Panes and Surfaces](#panes-and-surfaces)).
 
 **Unless a passage says "Surface" or "browser Surface," it describes a Session.** A Session's state lives on six distinct axes; an operation can change several together. Their separate preconditions define the **[Liskov contract](#liskov-contract)**.
@@ -22,18 +23,20 @@ A Pane holds exactly one Surface today, but the model reserves several (a future
 | Kind | Sub-kinds | Backed by |
 |---|---|---|
 | `terminal` | — | a PTY + xterm.js instance — a **Session** |
+| `tool` | — | a PTY and an optional browser on the same Session |
 | `browser` | `iframe`, `ab-screencast`, `ab-popout` | an iframe proxy grant, or an agent-browser daemon session (`docs/specs/dor-browser.md`) |
 
 **For a browser Surface `renderMode` is canonical**; the CLI `render_mode` is derived from it and never stored.
 
 | Surface | Persisted `surfaceType` (`docs/specs/transport.md`) | `renderMode` (`docs/specs/dor-browser.md`) | CLI `kind` | CLI `render_mode` |
 |---|---|---|---|---|
+| tool Session | `'tool'` | `iframe` or `ab-screencast` when serving | `tool` | renderer or `null` |
 | terminal Session | `'terminal'` (default, omitted) | — | `terminal` | `null` |
 | browser · iframe | `'browser'` | `iframe` | `browser` | `iframe` |
 | browser · screencast | `'browser'` | `ab-screencast` | `browser` | `ab-screencast` |
 | browser · popped out | `'browser'` | `ab-popout` | `browser` | `ab-popout` |
 
-**Kinds are capability sets, not exclusive categories** — the two above carry one capability each, the staged `tool` (`docs/specs/dor-tool.md`) both. **Operations gate on the capability they need, never on the kind enum** ([Liskov contract](#liskov-contract)): `read` / `send` / `await` / port scans need the terminal, nav / render-mode / agent-browser verbs the browser. **`dor list --json` rows always emit `has_terminal` and `has_browser`** (rationale). **Must declare each kind's capabilities in the `hasTerminal` / `hasBrowser` table.** Persistence keeps its own `PersistedSurfaceType` discriminant (`docs/specs/transport.md`).
+**Kinds are capability sets, not exclusive categories** — terminal and browser carry one capability each, `tool` both. **Operations gate on the capability they need, never on the kind enum** ([Liskov contract](#liskov-contract)): `read` / `send` / `await` / port scans need the terminal, nav / render-mode / agent-browser verbs the browser. **`dor list --json` rows always emit `has_terminal` and `has_browser`** (rationale). **Must declare each kind's capabilities in the `hasTerminal` / `hasBrowser` table.** Persistence keeps its own `PersistedSurfaceType` discriminant (`docs/specs/transport.md`).
 
 Source of truth: `hasTerminal` / `hasBrowser` in `dor/src/commands/types.ts`; `surfaceKindFromParams` in `lib/src/components/wall/browser-surface.ts`.
 
@@ -64,12 +67,12 @@ Workspace and Window are containers, not Session layers — they group Surfaces 
 
 | Container | Holds | Owner |
 |---|---|---|
-| **Window** | One or more Workspaces; the OS frame (the standalone Tauri window) or the host frame (a VS Code window). | host (Tauri / VS Code) |
+| **Window** | One or more Workspaces; the OS frame (a standalone Tauri window) or the host frame (a VS Code window). A host may hold several, and a Workspace may move between them. Its **Tauri label is its persistence identity** — one snapshot per label (`docs/specs/standalone.md` → Windows). | host (Tauri / VS Code) |
 | **Workspace** | "A window's worth of panes": a `WorkspaceId`, a user-facing `name`, its Panes and Surfaces, and the layout arranging them (Lath snapshot + doors). Exactly one **Wall** renders one Workspace. | `lib/src/lib/workspace-store.ts` (the model), `lib/src/components/Wall.tsx` at render time; persisted per `docs/specs/transport.md` |
 
 How many Workspaces a Window shows at once is host-specific:
 
-- **Standalone** renders one implicit Workspace. Multiple-Workspace presentation is staged (`docs/specs/layout.md` → Future, workspaces-rollout).
+- **Standalone** mounts every Workspace's Wall at once and shows one, switching between them (`docs/specs/layout.md` → Workspaces); a Window may be one of several.
 - **VS Code** maps one Workspace to one webview, several visible at once: the sidebar/panel `WebviewView` is the default Workspace, each `dormouse.open` editor-tab `WebviewPanel` an independent one owning its Sessions' PTYs and browser Surfaces (`docs/specs/vscode.md`).
 
 ### Wall chrome
@@ -88,7 +91,7 @@ A Workspace's **union status** is its display projection of member Surfaces' Act
 
 ### Implementation status
 
-The Pane / Surface model and surface kinds are live. The Workspace model is unwired; `dormouse.flags.workspaces` controls the dormant standalone Window wrapper (`docs/specs/layout.md` → Workspaces), so the app runs one implicit Workspace. Ledger: `docs/specs/layout.md` `## Future` (**Scope: workspaces-rollout**); this glossary does not track it.
+The Pane / Surface model, surface kinds, the Workspace model, per-Workspace persistence, several Windows each holding several Workspaces, and the `dor workspace` verbs over them are all live (`docs/specs/layout.md` → Workspaces); this glossary tracks no rollout.
 
 ## Roles
 
@@ -143,7 +146,7 @@ A **Session** is the tuple of its `SessionId` plus one state per layer (I1).
 |---|---|
 | `Unregistered` | No entry in `terminal-registry` |
 | `Mounted` | Entry present, DOM element in the document tree |
-| `Orphaned` | Entry present, element detached. Not transient — a `Doored` terminal Surface sits here as long as it stays minimized (I4) |
+| `Orphaned` | Entry present, element detached. Not transient — a `Doored` terminal Surface sits here as long as it stays minimized, and so does a `Paned` one in a hidden Workspace (I4) |
 | `Disposed` | Entry removed, xterm disposed |
 
 ### View
@@ -153,7 +156,7 @@ A **Session** is the tuple of its `SessionId` plus one state per layer (I1).
 | `Paned` | Rendered in the content area: a primary Lath leaf or its shown auxiliary helper |
 | `Zoomed` | Subset of `Paned` — the passthrough-focused pane is maximized; acquiring zoom gives focus, losing focus returns it to `Paned` |
 | `Doored` | Rendered as a door on the baseboard. DOM survival is a rendering decision, not part of this state: browser DOM retention follows **parking** (`docs/specs/tiling-engine.md` → "Parked leaves"); a terminal Surface unmounts its element (Registry: `Orphaned`) and remounts the same xterm on reattach — nothing replays |
-| `Hidden` | In neither pane nor door — webview closed or mid-transition; inactive-Workspace presentation is staged (`docs/specs/layout.md` → Future). Process and Activity unaffected. |
+| `Hidden` | In neither pane nor door — webview closed or mid-transition. A Surface in a hidden Workspace is **not** `Hidden`: it stays `Paned` or `Doored`, mounted and live. Process and Activity unaffected. |
 
 ### Link
 
@@ -197,12 +200,15 @@ A user verb is an intentional action that produces a single observable change.
 | `rename` | Update title; layer-agnostic |
 | `zoom` / `unzoom` | Paned ↔ Zoomed |
 | `swap` | Exchange two Surfaces' layout slots; ids travel with them, so Registry entries, Processes, and titles are untouched |
-| `switchWorkspace` | Set the model's active Workspace (`setActiveWorkspace`); no Surface or rendering change yet. |
-| `createWorkspace` | Add Workspace metadata; activate by default, unless `activate: false`. |
-| `closeWorkspace` | Remove Workspace metadata; the last remaining Workspace cannot be closed. |
+| `switchWorkspace` | Set the active Workspace (`setActiveWorkspace`), revealing its Wall and hiding the outgoing one. Terminal elements reattach; nothing resumes or restores; I8 holds by construction. |
+| `createWorkspace` | Add a Workspace and mount its Wall, which spawns one pane; activate by default, unless `activate: false`. |
+| `closeWorkspace` | `kill` each member Surface, then remove the Workspace; closing the last Workspace atomically creates a fresh replacement. |
 | `renameWorkspace` | Update a Workspace's `name`; touches no Session |
+| `moveWorkspace` | Reorder a Workspace within its Window; a minted ref renames nothing (a host with no registry still numbers by position) and touches no Session |
+| `transferWorkspace` | Move a Workspace to another Window, Surfaces and Sessions intact: `release` each member Session (detached, Process still Live) and resume it there. Kills nothing and archives nothing — not a `closeWorkspace`. |
+| `tearOut` | `transferWorkspace` into a Window created for it. A Window whose last Workspace leaves closes itself. |
 
-Source of truth: `setActiveWorkspace` / `createWorkspace` / `closeWorkspace` / `renameWorkspace` in `lib/src/lib/workspace-store.ts`; Surface lifecycle integration is staged in `docs/specs/layout.md` → Future, workspaces-rollout.
+Source of truth: `setActiveWorkspace` / `createWorkspace` / `closeWorkspace` / `renameWorkspace` / `moveWorkspace` in `lib/src/lib/workspace-store.ts`; `closeAll` in `lib/src/components/Wall.tsx`; `prepareWorkspaceTransfer` in `lib/src/components/wall/workspace-transfer.ts`.
 
 ### System verbs
 
@@ -211,6 +217,7 @@ A system verb is a lifecycle transition driven by the runtime.
 | Verb | Effect |
 |---|---|
 | `register` / `dispose` | Create / destroy a Registry entry |
+| `release` | Destroy a Registry entry **without** killing its Process (Registry: Mounted → Disposed, Process: Live → Live). The one verb a `transferWorkspace` runs, and never reachable from an unmount. |
 | `mount` / `unmount` | Attach / detach the persistent DOM element (low-level op; the Registry entry survives `unmount`). A **parked** leaf stays mounted while `Doored` or `Hidden` (`docs/specs/tiling-engine.md` → "Parked leaves") |
 | `exit` | Host observes process death (Process: Live → Exited) |
 | `resume` | Webview reopens over retained PTYs (Link: Severed → Resuming → Live; Registry rebuilt from replay data; Process stays Live/Exited) |
@@ -239,11 +246,11 @@ Source of truth: `focusSession` / `refitSession` in `lib/src/lib/terminal-lifecy
 - I1: `SessionId` is immutable for the life of a Session and stable across `resume` / `restore`.
 - I2: Process state is independent of Registry, View, and Link. A `Live` process may be `Doored` or `Hidden`; an `Exited` process may still be `Paned`.
 - I3: Activity state survives `minimize` / `reattach`. `ALERT_RINGING` fires only on a *fresh* transition, never on `mount` or `reattach`.
-- I4: `Registry: Orphaned` outlives no Session state except `View: Doored` — at rest every other entry is `Mounted` or `Disposed`, so an `Orphaned` entry that is not `Doored` is a leak.
+- I4: `Registry: Orphaned` outlives no Session state except `View: Doored` or a Surface in a hidden Workspace — at rest every other entry is `Mounted` or `Disposed`, so an `Orphaned` entry that is neither is a leak.
 - I5: `kill` is universally valid and always ends at `View: Hidden`; its per-kind effects are the [User verbs](#user-verbs) row.
 - I6: `rename` is universally valid including when `Process = Exited` and `View = Doored`.
 - I7: Every Surface sits in exactly one Pane; every Pane and its Surfaces belong to exactly one Workspace; every Workspace belongs to one Window.
-- I8: Reserved: **Must preserve Process and Activity during `switchWorkspace`, without firing a fresh ring on mount** (I3; `docs/specs/layout.md` → Future, workspaces-rollout).
+- I8: **Must preserve Process and Activity during `switchWorkspace`, without firing a fresh ring** (I3). A switch reattaches terminal elements but resumes and restores nothing, so no ring can fire (`docs/specs/layout.md` → Workspaces).
 - I9: A Workspace's union status is a pure projection of its members' Activity: no independent state, destroyed with the Workspace.
 - I10: **Must preserve a terminal Surface's `SessionId`** (I1). **Must transfer the `surface:N` CLI ref when replacing a browser Surface**, minting a new id in the same layout slot with its target URL. An `ab-screencast` ⇄ `ab-popout` relaunch keeps the Surface id; render-mode changes do not universally imply replacement (rationale; `docs/specs/dor-browser.md` → Display Modal And Render Swaps).
 
@@ -257,7 +264,7 @@ Use glossary names instead. A left-column term retains meaning only where noted.
 | **reconnect** | Retired: live-PTY case → **resume**; cold start → **restore**. |
 | **restore** | Keeps its cold-start rehydrate meaning. Never for Door→Pane (**reattach**) or alert-manager seeding (**seed**). |
 | **attach** | Retired at the DOM layer (`attachTerminal`) → **mount**; user-level **reattach** (Door→Pane) keeps the `re-` prefix. |
-| **session** | The durable identity of a **terminal Surface**. Never for the Activity projection (`ActivityState`, not `SessionUiState`), nor for the agent-browser daemon's lowercase `session` string (`dormouse.1.<key>`) — not a Dormouse durable unit. |
+| **session** | The durable identity of a **terminal Surface**. Never for the Activity projection (`ActivityState`, not `SessionUiState`), nor for the agent-browser daemon's lowercase `session` string (`dormouse.<workspace>.<key>`) — not a Dormouse durable unit. |
 | **terminal** | Keeps its meaning for the `xterm.Terminal` instance; prose meaning "the whole thing" is **Session**. |
 | **surface** | Not retired. **Session** names only the terminal kind; **Surface** covers both. |
 | **panel / pane / leaf** | Prefer **pane** for the layout slot; **leaf** is Lath's tree node for it (1:1). "panel" survives only in React component names (`TerminalPanel`, `BrowserPanel`, `IframePanel`, `AgentBrowserPanel`). |

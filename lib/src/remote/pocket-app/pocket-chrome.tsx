@@ -51,6 +51,9 @@ export const PK = {
   header:
     'flex shrink-0 items-center gap-2 bg-header-active-bg px-4 pb-2.5 pt-[max(0.625rem,env(safe-area-inset-top))] text-header-active-fg',
   headerTitle: 'm-0 min-w-0 flex-1 truncate text-[13px] font-semibold tracking-[0.01em]',
+  // A settled fact about the band it sits in — which path carries the session —
+  // captioned in alpha-on-fg rather than coloured: it reports, never alerts.
+  headerNote: 'shrink-0 text-[11px] text-header-active-fg/70',
   body:
     'flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pt-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]',
   // Safe centering: the first-run screen (install notice + the scan action + the

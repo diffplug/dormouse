@@ -4,12 +4,18 @@
 
 - `docs/specs/security-local.md`
 - `docs/specs/security-remote.md`
+- `docs/specs/security-hosted.md`
 
 **Output file:** `audit-application.md`
 
 This is a code-and-specs audit of the product's own boundaries — the remote
 control stack, and the local application. You need no GitHub API access and no
 PAT — do not use one.
+
+For Hosted accounts, read `docs/specs/hosted.md`, `hosted/server/`, the packed
+core/auth modules in `vendor/`, and `hosted/src/`. Verify the archive hashes
+against `vendor/build.json`. Distinguish tested code from pending production
+configuration; do not treat local provider simulations as live OAuth acceptance.
 
 Read, at minimum: `docs/specs/remote-security-model.md` **and its paired
 `docs/specs/remote-security-model.rationale.md`**, `docs/specs/relay.md`,
@@ -25,8 +31,11 @@ in one and quietly absent from another is a finding.
 The end-to-end boundary is where the depth goes. Its modules are
 `remote-lib-common/src/security/noise.ts`, `noise-transport.ts`,
 `e2e-ceremony.ts`, `e2e-bounds.ts`, `token-bucket.ts`, `push-seal.ts`,
-`pairing-invitation.ts`, `presence.ts` and `acl.ts`;
+`pairing-invitation.ts`, `presence.ts`, `acl.ts` and `direct-path.ts`;
 `remote-lib-common/src/remote/wire.ts` (the frame shapes and their guards);
+`lib/src/remote/direct/direct-endpoint.ts` and `direct-peer.ts` (the data
+channel the same session may move onto, and the one switching policy both ends
+run — `docs/specs/security-remote.md` -> "Direct path");
 `lib/src/remote/burrow/burrow-runtime.ts` (both ceremonies, every Burrow bound);
 `lib/src/remote/burrow/push-delivery.ts`; `lib/src/remote/client/pocket-client.ts`
 and `lib/src/remote/pocket-app/sw.ts` (the phone, and the render sink);
@@ -39,9 +48,14 @@ harnesses that already exercise this are
 — read what they *do not* cover, and say so.
 
 For `## Loopback Listeners`, read `lib/src/host/loopback-guard.ts` first — it
-states the rule — then each listener it names. Derive the set of listeners by
-searching the shipped trees yourself; the section's own list is a description of
-today's tree, not the scope.
+states the rule — then run `node scripts/loopback-lint.mjs`. Inspect every non-test listener
+it prints; test listeners and self-test fixtures need no further investigation.
+The lint scans all tracked JavaScript and TypeScript. Search the same files for
+`createServer`, `.listen(`, `serve(` and `WebSocket` too, because a new API or a
+host built at runtime can escape its patterns.
+The Local-file viewer subsection adds a tokenized file grant: read
+`dor/src/file-viewer.ts` and `dor/src/file-viewer-loopback-guard.ts`, including
+its static asset discovery, descriptor lifetime, and every request gate.
 
 For the rest of `docs/specs/security-local.md`, read each section's owner first
 — `docs/specs/terminal-escapes.md`, `docs/specs/dor-browser.md`,

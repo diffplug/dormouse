@@ -1,17 +1,30 @@
-import { useCallback, useEffect, useRef, type RefObject } from 'react';
+import { DEFAULT_WORKSPACE_ID, readPersistedSession } from '../../lib/session-types';
+import { useCallback, useEffect, useMemo, useRef, type RefObject } from 'react';
 import { pasteFilePaths } from '../../lib/clipboard';
 import { getPlatform } from '../../lib/platform';
-import { saveSession } from '../../lib/session-save';
+import { buildPersistedSession, saveSession, type SaveOptions, type SaveSink } from '../../lib/session-save';
 import { createSessionDirtyTracker } from '../../lib/session-dirty';
+import { previousWorkspaceSession, publishWorkspaceSession, SESSION_SAVE_DEBOUNCE_MS } from '../../lib/window-session-aggregator';
+import { getWorkspace, setWorkspaceAlertDelivery, subscribeToWorkspaces, hasWorkspace } from '../../lib/workspace-store';
 import {
   subscribeToActivity,
   subscribeToTerminalPaneState,
   UNNAMED_PANEL_TITLE,
 } from '../../lib/terminal-registry';
 import { surfaceKindFromParams } from './browser-surface';
+import { persistableLeafMeta } from './lath-wall-engine';
 import type { LathWallEngine } from './lath-wall-engine';
 import type { DooredItem, WallSelectionKind } from './wall-types';
-import type { PersistedDoor, PersistedSurfaceRefs } from '../../lib/session-types';
+import type { PersistedDoor, PersistedSession, PersistedSurfaceRefs, WorkspaceId } from '../../lib/session-types';
+import type { SessionFlushRequest } from '../../lib/platform/types';
+
+export interface SessionPersistenceHandle {
+  /** Persist immediately, awaiting the whole queued pipeline. */
+  flush: (options?: SaveOptions) => Promise<void>;
+  /** Build this Workspace's record without publishing it — what a Workspace
+   *  leaving for another Window carries with it. */
+  serialize: (options?: SaveOptions) => Promise<PersistedSession>;
+}
 
 export function useSessionPersistence({
   lath,
@@ -19,7 +32,9 @@ export function useSessionPersistence({
   doorsRef,
   selectedIdRef,
   selectedTypeRef,
+  ownsSurface,
   surfaceRefsForSave,
+  workspaceId,
 }: {
   /** The Lath engine — the layout authority written on every commit, and the source
    *  of the visible-pane projection (`lath.listPanes()`). Stable identity, so the
@@ -33,45 +48,109 @@ export function useSessionPersistence({
   doorsRef: RefObject<DooredItem[]>;
   selectedIdRef: RefObject<string | null>;
   selectedTypeRef: RefObject<WallSelectionKind>;
+  /** Whether a Surface belongs to this Wall — panes AND Doors. The adapter fans
+   *  every Session's traffic to every mounted Wall, so this is what keeps one
+   *  Workspace from persisting on another's keystroke. Must be stable: the
+   *  subscription effect closes over it. */
+  ownsSurface: (id: string) => boolean;
   surfaceRefsForSave?: () => { refs: PersistedSurfaceRefs; next: number };
-}): void {
+  /** Present when this Wall belongs to a Workspace: its record then goes to the
+   *  Window collector instead of the platform slot, and is compared against its
+   *  own Workspace's previous record. It also hands the host's flush request to
+   *  `WorkspaceWindow`, which owns the one subscription for the whole Window —
+   *  the adapter's first `notifySessionFlushComplete` wins, so N Walls answering
+   *  would let a quit proceed after the first had written. */
+  workspaceId?: WorkspaceId;
+}): SessionPersistenceHandle {
+  const ownsHostFlush = workspaceId === undefined;
+  const effectiveWorkspaceId = workspaceId ?? DEFAULT_WORKSPACE_ID;
+  // A host with no Window aggregator (VS Code, a bare Wall) keeps the Workspace's
+  // delivery overrides in the one session it owns: seeded from it here, saved
+  // back below. Under an aggregator the Window blob carries them from the store.
+  useEffect(() => {
+    if (ownsHostFlush) setWorkspaceAlertDelivery(effectiveWorkspaceId, readPersistedSession(getPlatform().getState())?.alertDelivery ?? {});
+  }, [ownsHostFlush, effectiveWorkspaceId]);
+  const saveOptions = useCallback((options?: SaveOptions): SaveOptions => ({
+    ...options,
+    alertDelivery: getWorkspace(effectiveWorkspaceId)?.alertDelivery ?? {},
+  }), [effectiveWorkspaceId]);
   const sessionSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionSavePromiseRef = useRef<Promise<void> | null>(null);
   const pendingSaveNeededRef = useRef(false);
   // See session-dirty.ts for the conservative-under-races generation model.
   const trackerRef = useRef(createSessionDirtyTracker());
+  // This Workspace's own previous record, which is where a dead PTY's retained
+  // cwd and alert live. The aggregator holds it because the first save after a
+  // restore has to read the record BOOT seeded, not the (still empty) one this
+  // Wall has published.
+  const sink = useMemo<SaveSink | undefined>(() => {
+    if (workspaceId === undefined) return undefined;
+    return {
+      previous: () => previousWorkspaceSession(workspaceId),
+      publish: (session) => publishWorkspaceSession(workspaceId, session),
+    };
+  }, [workspaceId]);
 
-  const doSave = useCallback((): Promise<void> => {
-    const panes = lath.listPanes().map((p) => ({
-      id: p.id,
-      title: p.title ?? UNNAMED_PANEL_TITLE,
-      surfaceType: surfaceKindFromParams(p.params),
-    }));
+  const collect = useCallback(() => {
+    const panes = lath.listPanes().map((p) => {
+      // Apply the same projection used by the saved Lath layout. In particular,
+      // a still-pending approval becomes a plain terminal and a running tool
+      // loses only its derived browser state.
+      const meta = lath.getMeta(p.id);
+      const persistable = meta ? persistableLeafMeta(meta) : undefined;
+      return {
+        id: p.id,
+        title: persistable?.title ?? p.title ?? UNNAMED_PANEL_TITLE,
+        surfaceType: surfaceKindFromParams(persistable?.params),
+        params: persistable?.params,
+      };
+    });
     // The runtime Door is id + token; its metadata is materialized HERE, from the
     // store that owned it all along, so a Surface persists where it navigated to
     // rather than where it was minimized and a restart cold-loads it there.
     const doors: PersistedDoor[] = (doorsRef.current ?? []).map((door) => {
+      // A Doored leaf is excluded from the tree snapshot and persisted as its
+      // own row, so it never passes through `serializeLayout` — run the same
+      // projection here, or a minimized tool round-trips its dead `url` and a
+      // daemon session that died with the previous process
+      // (docs/specs/dor-tool.md -> Persistence and hosts).
       const meta = lath.getMeta(door.id);
+      const persistable = meta ? persistableLeafMeta(meta) : undefined;
       return {
         id: door.id,
-        title: meta?.title?.trim() || UNNAMED_PANEL_TITLE,
-        component: meta?.component,
-        tabComponent: meta?.tabComponent,
-        params: meta?.params,
+        title: persistable?.title?.trim() || UNNAMED_PANEL_TITLE,
+        component: persistable?.component,
+        tabComponent: persistable?.tabComponent,
+        params: persistable?.params,
         token: door.token,
       };
     });
     const surfaceRefs = surfaceRefsForSave?.();
     // The Lath tree is the sole persisted layout; doors ride through with their tokens.
-    return saveSession(getPlatform(), panes, doors, lath.serializeLayout(), surfaceRefs?.refs, surfaceRefs?.next);
+    return { panes, doors, lathLayout: lath.serializeLayout(), surfaceRefs };
   }, [lath, doorsRef, surfaceRefsForSave]);
 
-  const persistSessionNow = useCallback(async (): Promise<void> => {
+  const doSave = useCallback((options?: SaveOptions): Promise<void> => {
+    const { panes, doors, lathLayout, surfaceRefs } = collect();
+    return saveSession(getPlatform(), panes, doors, lathLayout, surfaceRefs?.refs, surfaceRefs?.next, sink, saveOptions(options));
+  }, [collect, sink, saveOptions]);
+
+  /** The same record a save would publish, handed back instead. The Workspace
+   *  is leaving, so nothing here may touch this Window's aggregator. */
+  const serialize = useCallback((options?: SaveOptions): Promise<PersistedSession> => {
+    const { panes, doors, lathLayout, surfaceRefs } = collect();
+    return buildPersistedSession(
+      getPlatform(), panes, doors, lathLayout, surfaceRefs?.refs, surfaceRefs?.next,
+      sink?.previous() ?? null, saveOptions(options),
+    );
+  }, [collect, sink, saveOptions]);
+
+  const persistSessionNow = useCallback(async (options?: SaveOptions): Promise<void> => {
     const runSave = (): Promise<void> => {
       pendingSaveNeededRef.current = false;
       // Clear dirty only on a fulfilled write (.then, not .finally).
       const token = trackerRef.current.beginSave();
-      const savePromise = doSave()
+      const savePromise = doSave(options)
         .then(() => {
           trackerRef.current.completeSave(token);
         })
@@ -108,12 +187,12 @@ export function useSessionPersistence({
 
   // Never gated on the dirty tracker — the correctness net for dirty-trigger
   // gaps (e.g. a program calling chdir() silently produces no event).
-  const flushSessionSave = useCallback((): Promise<void> => {
+  const flushSessionSave = useCallback((options?: SaveOptions): Promise<void> => {
     if (sessionSaveTimerRef.current) {
       clearTimeout(sessionSaveTimerRef.current);
       sessionSaveTimerRef.current = null;
     }
-    return persistSessionNow();
+    return persistSessionNow(options);
   }, [persistSessionNow]);
 
   const scheduleSessionSave = useCallback(() => {
@@ -122,20 +201,28 @@ export function useSessionPersistence({
     sessionSaveTimerRef.current = setTimeout(() => {
       sessionSaveTimerRef.current = null;
       void persistSessionNow().catch(() => undefined);
-    }, 500);
+    }, SESSION_SAVE_DEBOUNCE_MS);
   }, [persistSessionNow]);
 
   useEffect(() => {
     const platform = getPlatform();
     const { markDirty, isDirty } = trackerRef.current;
 
+    // Both PTY triggers are ownership-filtered over MEMBERS, panes and Doors
+    // alike: a minimized Session's `untouched` flip rides the pty echo of the
+    // keystroke, so filtering on visible panes would never persist it.
+    const handlePtyData = (detail: { id: string }) => {
+      if (ownsSurface(detail.id)) markDirty();
+    };
     const handlePtyExit = (detail: { id: string }) => {
-      const ownsPane = lath.listPanes().some((p) => p.id === detail.id);
-      if (!ownsPane) return;
+      if (!ownsSurface(detail.id)) return;
       void flushSessionSave().catch(() => undefined);
     };
-    const handleSessionFlushRequest = (detail: { requestId: string }) => {
-      void flushSessionSave()
+    // Only a bare Wall answers the host directly; a Workspace Wall's answer is
+    // `WorkspaceWindow`'s, which flushes every Workspace before notifying (the
+    // adapter completes on the first notification).
+    const handleSessionFlushRequest = (detail: SessionFlushRequest) => {
+      void flushSessionSave({ probeCwd: detail.probeCwd })
         .catch(() => undefined)
         .finally(() => {
           platform.notifySessionFlushComplete(detail.requestId);
@@ -148,21 +235,33 @@ export function useSessionPersistence({
     // One subscription: every store commit (add/remove/resize/swap/meta, including
     // the active-pane the serialized layout records) schedules a save.
     const unsubscribeStore = lath.store.subscribe(scheduleSessionSave);
+    let savedOverrides = getWorkspace(effectiveWorkspaceId)?.alertDelivery;
+    const stopPolicies = ownsHostFlush ? subscribeToWorkspaces(() => {
+      const next = getWorkspace(effectiveWorkspaceId)?.alertDelivery;
+      if (next === savedOverrides) return;
+      savedOverrides = next;
+      scheduleSessionSave();
+    }) : () => {};
 
     // Content inputs mark dirty but never schedule — the heartbeat persists them
-    // (docs/specs/layout.md → "Session persistence"). Untouched flips ride
-    // the pty echo of the keystroke, not the pane-state store (the registry mutates
-    // silently).
-    platform.onPtyData(markDirty);
-    const unsubActivity = subscribeToActivity(markDirty);
-    const unsubPaneState = subscribeToTerminalPaneState(markDirty);
+    // (docs/specs/layout.md → "Session persistence"). An untouched flip has no
+    // store of its own to report it (the registry mutates silently), which is
+    // why the pty echo above is what marks it.
+    platform.onPtyData(handlePtyData);
+    // Keyed like the PTY triggers: both stores are Window-global, so an
+    // unfiltered listener would rebuild every idle Workspace's record — a
+    // `getCwd` per pane — whenever any Workspace changed. A notification with no
+    // id is a store-wide reset, which every Wall must take.
+    const markDirtyFor = (id?: string) => { if (id === undefined || ownsSurface(id)) markDirty(); };
+    const unsubActivity = subscribeToActivity(markDirtyFor);
+    const unsubPaneState = subscribeToTerminalPaneState(markDirtyFor);
 
     // Heartbeat: idle sessions no longer write (only when something marked dirty).
     const interval = setInterval(() => {
       if (isDirty()) scheduleSessionSave();
     }, 30_000);
     platform.onPtyExit(handlePtyExit);
-    platform.onRequestSessionFlush(handleSessionFlushRequest);
+    if (ownsHostFlush) platform.onRequestSessionFlush(handleSessionFlushRequest);
     window.addEventListener('pagehide', handlePageHide);
 
     // Inert in Tauri standalone today; see diffplug/dormouse#38 and tauri-apps/tauri#14373.
@@ -170,7 +269,7 @@ export function useSessionPersistence({
       if (paths.length === 0) return;
       const sid = selectedTypeRef.current === 'pane' ? selectedIdRef.current : null;
       if (!sid) return;
-      if (!lath.listPanes().some((p) => p.id === sid)) return;
+      if (!ownsSurface(sid)) return;
       pasteFilePaths(sid, paths);
     });
 
@@ -181,21 +280,35 @@ export function useSessionPersistence({
       }
       window.removeEventListener('pagehide', handlePageHide);
       unsubFilesDropped?.();
-      platform.offRequestSessionFlush(handleSessionFlushRequest);
+      if (ownsHostFlush) platform.offRequestSessionFlush(handleSessionFlushRequest);
       platform.offPtyExit(handlePtyExit);
-      platform.offPtyData(markDirty);
+      platform.offPtyData(handlePtyData);
       unsubActivity();
       unsubPaneState();
       unsubscribeStore();
+      stopPolicies();
       clearInterval(interval);
-      void persistSessionNow().catch(() => undefined);
+      // A Wall unmounting because its Workspace was closed must not publish on
+      // the way out: `closeWorkspaceWithSurfaces` has already forgotten the
+      // record, and re-publishing would put the closed Workspace back in the next
+      // Window blob (with its Surfaces gone) for the next launch to restore.
+      if (workspaceId === undefined || hasWorkspace(workspaceId)) {
+        void persistSessionNow().catch(() => undefined);
+      }
     };
   }, [
+    effectiveWorkspaceId,
+    ownsHostFlush,
+    workspaceId,
     lath,
     flushSessionSave,
+    ownsSurface,
+    ownsHostFlush,
     persistSessionNow,
     scheduleSessionSave,
     selectedIdRef,
     selectedTypeRef,
   ]);
+
+  return { flush: flushSessionSave, serialize };
 }

@@ -51,7 +51,12 @@ export function useOpenNotepadId(): string | null {
  *  filled icon says how filled it is. */
 export function notepadLabel(count: number): string {
   if (count === 0) return 'Notepad';
-  return `Notepad · ${count} ${count === 1 ? 'note' : 'notes'}`;
+  return `Notepad · ${noteCountPhrase(count)}`;
+}
+
+/** "1 note" / "3 notes" — the one plural rule every notepad trigger shares. */
+export function noteCountPhrase(count: number): string {
+  return `${count} ${count === 1 ? 'note' : 'notes'}`;
 }
 
 /** Fire-and-forget: the clipboard write is best effort by contract, and the

@@ -320,9 +320,11 @@ prepare_artifact() {
     fi
 }
 
+# The signed executable is not passed in: `patch-nsis-paths.pl` rewrites the
+# .nsi's CI-runner paths to point at "$SIGN_DIR/standalone-win-x64", which is
+# where `sign_windows` signed it in place.
 rebuild_windows_installer() {
-    local signed_exe="$1"
-    local installer_path="$2"
+    local installer_path="$1"
 
     check_command makensis "Install NSIS: brew install makensis"
 
@@ -629,6 +631,12 @@ sign_macos_app() {
         || error "Signed Node sidecar failed to launch"
     (cd "$sidecar_dir" && "$node_sidecar" -e "require('node-pty')") \
         || error "Signed Node sidecar failed to load node-pty"
+    # The direct path's addon, loaded through the same bare specifier the
+    # sidecar uses. Its own `.node` is signed by the sweep above, but only a
+    # load proves the hardened runtime lets it open one — and nothing before a
+    # phone's first `direct-offer` on a user's machine would otherwise find out.
+    (cd "$sidecar_dir" && "$node_sidecar" -e "require('node-datachannel/polyfill')") \
+        || error "Signed Node sidecar failed to load node-datachannel"
 
     log "macOS signing complete ($arch_label)"
 }
@@ -746,7 +754,7 @@ sign_windows() {
     local installer_path
     installer_path=$(windows_installer_path "$version")
 
-    rebuild_windows_installer "$exe_path" "$installer_path"
+    rebuild_windows_installer "$installer_path"
     log "Signing installer: $installer_path"
     EV_SIGN_PIN="$EV_SIGN_PIN" jsign \
         --storetype PIV \

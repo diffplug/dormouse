@@ -1,4 +1,5 @@
 import { useRef, type PointerEvent as ReactPointerEvent } from 'react';
+import { ToolDirtyIndicator } from './ToolDirtyIndicator';
 import { clsx } from 'clsx';
 import { NotepadIcon, SpeakerHighIcon } from '@phosphor-icons/react';
 import type { AlertSpeechState, SessionStatus, TodoState } from '../lib/terminal-registry';
@@ -10,7 +11,7 @@ import { AlertBell } from './AlertBell';
 import { notepadLabel } from './use-notepad';
 import {
   ALERT_SPEECH_TRACKING_CLASS,
-  TERMINAL_TOP_RADIUS_CLASS,
+  DOOR_TAB_CLASS,
   TODO_PILL_TRACKING_CLASS,
 } from './design';
 
@@ -21,6 +22,8 @@ export interface DoorProps {
    *  Chrome). Door draws the glyph pair and names it, so the visible and
    *  accessible meanings cannot drift apart. */
   browserDisplay?: BrowserDisplayMode;
+  /** Set only for a Tool whose last report says it has unsaved changes. */
+  toolDirty?: boolean;
   status?: SessionStatus;
   /** `ActivityState.ringSeq`; a change replays the ringing burst. */
   ringSeq: number;
@@ -52,6 +55,7 @@ export function Door({
   doorId,
   title,
   browserDisplay,
+  toolDirty = false,
   status = 'WATCHING_DISABLED',
   ringSeq,
   todo = false,
@@ -67,7 +71,8 @@ export function Door({
   const speaking = speechState === 'speaking';
   const spoken = speechState === 'spoken';
   const detail = browserDisplay ? BROWSER_DISPLAY_LABEL[browserDisplay] : undefined;
-  const nameParts = [title, detail, speechState].filter(Boolean);
+  const extras = [detail, speechState, toolDirty && 'Unsaved changes'].filter(Boolean);
+  const nameParts = [title, ...extras];
   const doorRef = useRef<HTMLDivElement>(null);
   const showNotepad = noteCount > 0;
 
@@ -88,9 +93,7 @@ export function Door({
       // display/speech detail belongs to the Door, not to either button.
       role="group"
       className={clsx(
-        'relative flex h-6 max-w-[220px] min-w-[68px] items-center overflow-hidden',
-        'text-sm font-medium font-mono',
-        TERMINAL_TOP_RADIUS_CLASS,
+        DOOR_TAB_CLASS,
         speaking
           ? clsx('bg-alarm-vs-door text-door-bg', alertSpeakingAnimationClass())
           : 'bg-door-bg text-door-fg',
@@ -98,7 +101,7 @@ export function Door({
       )}
       onPointerDown={onPointerDown}
       title={nameParts.join(' — ')}
-      aria-label={detail || speechState ? nameParts.join(', ') : undefined}
+      aria-label={extras.length ? nameParts.join(', ') : undefined}
       data-alert-speech-state={speechState}
     >
       <button
@@ -109,6 +112,7 @@ export function Door({
         )}
         onClick={onClick}
       >
+        <ToolDirtyIndicator dirty={toolDirty} />
         {browserDisplay && <BrowserDisplayIcon mode={browserDisplay} size={12} />}
         <span className="min-w-0 flex-1 truncate">
           {title}

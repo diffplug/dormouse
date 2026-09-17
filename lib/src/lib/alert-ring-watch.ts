@@ -1,79 +1,72 @@
+import type { AlertEpisode } from './alert-episode';
 import { getActivity, getActivitySnapshot, subscribeToActivity } from './session-activity-store';
+import { getAlertDeliveryReceipts, isAlertDeliveryPaused, subscribeToAlertDeliveryOwnership, type AlertSink } from './alert-delivery-state';
 
-/** Shared renderer-side fresh-ring→delay→recheck machine for alarm sinks. */
+/** Shared renderer-side episode→delay→recheck machine for alarm sinks. */
 export interface UnattendedRingWatch {
-  /**
-   * Whether this sink is switched on. Read when a ring is scheduled *and*
-   * again when the timer fires, so toggling the setting mid-delay drops the
-   * pending alarm.
-   */
-  readonly enabled: () => boolean;
-  /** How long a ring must stay unattended before firing, read at schedule time. */
-  readonly delayMs: () => number;
-  /** Act on a ring that survived the delay. Must not throw. */
-  readonly fire: (sessionId: string) => void;
+  readonly sink: AlertSink;
+  readonly enabled: (sessionId: string) => boolean;
+  /** Read on admission; changing a delay never moves an existing deadline. */
+  readonly delayMs: (sessionId: string) => number;
+  readonly fire: (sessionId: string, episode: AlertEpisode) => void;
+  /** Policy changes that must re-run the scan, beside activity and ownership. */
+  readonly subscribe: (listener: () => void) => () => void;
+  /** Runs after every scan, on the same notifications, so a sink needs no subscriptions of its own. */
+  readonly afterScan?: () => void;
 }
 
-/**
- * Watch the activity store and fire on unattended rings. Returns a disposer
- * that cancels everything pending.
- */
 export function watchUnattendedRings(watch: UnattendedRingWatch): () => void {
-  // Absence means never observed, so restore/reconnect cannot turn an existing
-  // ring into a fresh transition.
-  const lastStatus = new Map<string, string>();
+  const observed = new Map<string, string | null>();
+  const receipts = getAlertDeliveryReceipts(watch.sink);
   const pending = new Map<string, ReturnType<typeof setTimeout>>();
-
   const cancel = (id: string): void => {
     const timer = pending.get(id);
-    if (timer === undefined) return;
-    clearTimeout(timer);
+    if (timer !== undefined) clearTimeout(timer);
     pending.delete(id);
   };
-
   const onActivityChange = (): void => {
     const snapshot = getActivitySnapshot();
-
     for (const [id, state] of snapshot) {
-      const previous = lastStatus.get(id);
-      lastStatus.set(id, state.status);
-
-      if (state.status !== 'ALERT_RINGING') {
-        // Attended, dismissed, or never ringing — either way nothing to do.
+      const episode = state.status === 'ALERT_RINGING' ? state.episode : null;
+      const previous = observed.get(id);
+      observed.set(id, episode?.id ?? null);
+      if (!episode) { cancel(id); receipts.delete(id); continue; }
+      let receipt = receipts.get(id);
+      if (receipt?.episodeId !== episode.id) {
         cancel(id);
-        continue;
+        // Fresh means observed after a different episode. First sight seeds
+        // silently, and a forgotten receipt on the same episode never re-arms.
+        const fresh = previous !== undefined && previous !== episode.id;
+        receipt = { episodeId: episode.id, dueAt: episode.startedAt + watch.delayMs(id),
+          phase: fresh && watch.enabled(id) ? 'pending' : 'consumed' };
+        receipts.set(id, receipt);
       }
-      // Already ringing, or seen for the first time already ringing.
-      if (previous === 'ALERT_RINGING' || previous === undefined) continue;
-
-      if (!watch.enabled()) continue;
-
+      // Disabling consumes the receipt even while suspended for a move.
+      if (!watch.enabled(id)) { receipt.phase = 'consumed'; cancel(id); continue; }
+      if (isAlertDeliveryPaused(id)) { cancel(id); continue; }
+      if (receipt.phase !== 'pending' || pending.has(id)) continue;
+      const delivery = receipt;
       pending.set(id, setTimeout(() => {
         pending.delete(id);
-        // Re-read rather than trusting the closure: the user may have attended
-        // or dismissed during the delay, and the setting may have been toggled.
-        if (getActivity(id).status !== 'ALERT_RINGING') return;
-        if (!watch.enabled()) return;
-        watch.fire(id);
-      }, watch.delayMs()));
+        if (getActivity(id).episode?.id !== episode.id || !watch.enabled(id) || isAlertDeliveryPaused(id)) return;
+        delivery.phase = 'queued';
+        watch.fire(id, episode);
+      }, Math.max(0, receipt.dueAt - Date.now())));
     }
-
-    // A Session that left the store entirely (pane killed) must not fire.
-    for (const id of [...lastStatus.keys()]) {
+    // Receipts outlive a watcher, so prune ids that left while none ran too.
+    for (const id of new Set([...observed.keys(), ...receipts.keys()])) {
       if (snapshot.has(id)) continue;
-      lastStatus.delete(id);
+      observed.delete(id);
       cancel(id);
+      if (!isAlertDeliveryPaused(id)) receipts.delete(id);
     }
+    watch.afterScan?.();
   };
-
-  // Seed from the current snapshot so nothing already on screen counts as fresh.
   onActivityChange();
-  const unsubscribe = subscribeToActivity(onActivityChange);
-
+  const stops = [subscribeToActivity(onActivityChange), subscribeToAlertDeliveryOwnership(onActivityChange), watch.subscribe(onActivityChange)];
   return () => {
-    unsubscribe();
+    stops.forEach((stop) => stop());
     for (const timer of pending.values()) clearTimeout(timer);
     pending.clear();
-    lastStatus.clear();
   };
 }

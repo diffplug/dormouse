@@ -34,18 +34,17 @@ const noopActions: WallActions = {
   onCancelRename: () => {},
   onSwapRenderMode: () => {},
   resolveSurfaceRef: (id) => id,
+  onResolveToolApproval: () => {},
 };
 
 function MouseIconStoryFrame({
   mouseReporting = 'none' as MouseTrackingMode,
   override = 'off' as OverrideState,
-  title = 'build-server',
   mode = 'command' as WallMode,
   width = 360,
 }: {
   mouseReporting?: MouseTrackingMode;
   override?: OverrideState;
-  title?: string;
   mode?: WallMode;
   width?: number;
 }) {
@@ -64,11 +63,7 @@ function MouseIconStoryFrame({
           <RenamingIdContext.Provider value={null}>
             <div style={{ width }}>
               <div className="bg-app-bg" style={{ height: 26 }}>
-                <TerminalPaneHeader
-                  id={SESSION_ID}
-                  title={title}
-                  params={undefined}
-                />
+                <TerminalPaneHeader id={SESSION_ID} title={undefined} params={undefined} />
               </div>
               <div className="relative" style={{ height: 40 }}>
                 <MouseOverrideBanner terminalId={SESSION_ID} />
@@ -84,6 +79,13 @@ function MouseIconStoryFrame({
 const meta: Meta<typeof MouseIconStoryFrame> = {
   title: 'Components/MouseHeaderIcon',
   component: MouseIconStoryFrame,
+  // The header's `title` prop is only the fallback for a bare `shell` label, so
+  // an unprimed pane reads `<idle>`; a user title is what a rename pins.
+  parameters: {
+    primedTerminalState: {
+      byId: { [SESSION_ID]: { title: { title: 'build-server', source: 'user', updatedAt: 0 } } },
+    },
+  },
   argTypes: {
     mouseReporting: { control: 'radio', options: ['none', 'x10', 'vt200', 'drag', 'any'] },
     override: { control: 'radio', options: ['off', 'temporary', 'permanent'] },

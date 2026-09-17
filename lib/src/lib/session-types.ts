@@ -1,5 +1,8 @@
+import { normalizeAlertDeliveryOverrides, type AlertDeliveryOverrides } from './alert-delivery-model';
 import { isRecord } from './is-record';
+import { isToolKeyScope, type ToolKeyScope } from './platform/tool-types';
 import type { SessionStatus } from './alert-manager';
+import { hasShellInputControls } from 'dor/commands/shell-quote';
 import { ACTIVITY_NOTIFICATION_SOURCES, type ActivityNotification, type TodoState } from './alert-manager';
 
 /** Only TODO/detail restore; `status` is diagnostic and never resurrects a ring. */
@@ -10,7 +13,20 @@ export interface PersistedAlertState {
 }
 
 /** Absent means terminal; browser panes rebuild from the persisted layout. */
-export type PersistedSurfaceType = 'terminal' | 'browser';
+export type PersistedSurfaceType = 'terminal' | 'browser' | 'tool';
+
+/** Stable declaration/runtime identity needed to rebuild a tool after its PTY
+ * is respawned. Derived browser state (URL/session/port conflict) never enters
+ * this projection. */
+export interface PersistedToolMetadata {
+  /** Resolved arguments, re-quoted for the shell selected at cold restore. */
+  argv?: string[];
+  scope?: ToolKeyScope;
+  name?: string;
+  render: 'iframe' | 'ab-screencast';
+  port: 'announced' | 'auto';
+  key?: string[];
+}
 
 /** Durable pane structure, never scrollback. Single-use recovery commands travel
  * out of band through `PlatformAdapter.getRecoveryCommands`. */
@@ -21,6 +37,11 @@ export interface PersistedPane {
   untouched: boolean;
   alert?: PersistedAlertState | null;
   surfaceType?: PersistedSurfaceType;
+  /** Tool-only command, re-run on cold restore. This is separate from the
+   * host-owned, single-use agent recovery command. */
+  command?: string;
+  /** Tool-only stable metadata; browser state is re-derived after respawn. */
+  tool?: PersistedToolMetadata;
 }
 
 /**
@@ -68,6 +89,8 @@ export interface PersistedDoor {
 export type PersistedSurfaceRefs = Record<string, string>;
 
 export interface PersistedSession {
+  /** Workspace delivery overrides, shared by standalone and VS Code snapshots. */
+  alertDelivery?: AlertDeliveryOverrides;
   version: 3;
   panes: PersistedPane[];
   doors?: PersistedDoor[];
@@ -105,6 +128,7 @@ export const DEFAULT_WORKSPACE_NAME = 'Workspace 1';
 type PersistedPaneInput = Omit<PersistedPane, 'untouched'> & { untouched?: boolean };
 
 interface PersistedSessionV3Input {
+  alertDelivery?: unknown;
   version: 3;
   panes: PersistedPaneInput[];
   doors?: PersistedDoor[];
@@ -142,9 +166,30 @@ function isPersistedPaneShape(value: unknown): boolean {
     // them and stay readable, new ones never do, and `normalizeSessionV3` strips
     // both either way.
     (value.untouched === undefined || typeof value.untouched === 'boolean') &&
-    (value.surfaceType === undefined || value.surfaceType === 'terminal' || value.surfaceType === 'browser') &&
+    (value.surfaceType === undefined || value.surfaceType === 'terminal' || value.surfaceType === 'browser' || value.surfaceType === 'tool') &&
+    (value.command === undefined || (value.surfaceType === 'tool' && typeof value.command === 'string')) &&
+    (value.tool === undefined || (value.surfaceType === 'tool' && isPersistedToolMetadataShape(value.tool))) &&
     (value.alert === undefined || isPersistedAlertShape(value.alert))
   );
+}
+
+function isPersistedToolMetadataShape(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return (
+    (value.argv === undefined || isToolCommandArgv(value.argv)) &&
+    (value.name === undefined || typeof value.name === 'string') &&
+    (value.scope === undefined || isToolKeyScope(value.scope)) &&
+    (value.render === 'iframe' || value.render === 'ab-screencast') &&
+    (value.port === 'announced' || value.port === 'auto') &&
+    (value.key === undefined || (Array.isArray(value.key) && value.key.every((part) => typeof part === 'string')))
+  );
+}
+
+/** Typed into a terminal after quoting: controls cannot be made safe by quotes. */
+export function isToolCommandArgv(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length > 0
+    && value.every(arg => typeof arg === 'string' && !hasShellInputControls(arg))
+    && value[0].trim().length > 0;
 }
 
 function isPersistedDoor(value: unknown): value is PersistedDoor {
@@ -207,9 +252,10 @@ export function readPersistedSession(raw: unknown): PersistedSession | null {
 }
 
 function normalizeSessionV3(session: PersistedSessionV3Input): PersistedSession {
+  const alertDelivery = normalizeAlertDeliveryOverrides(session.alertDelivery);
   const surfaceRefs = normalizeSurfaceRefs(session.surfaceRefs);
   const surfaceRefsNext = normalizeSurfaceRefsNext(session.surfaceRefsNext);
-  const { surfaceRefs: _rawRefs, surfaceRefsNext: _rawNext, ...rest } = session;
+  const { alertDelivery: _rawDelivery, surfaceRefs: _rawRefs, surfaceRefsNext: _rawNext, ...rest } = session;
   // Deny-list retired fields so future PersistedPane fields pass through without
   // manual allowlist updates. Neither retired field is on PersistedPaneInput.
   const panes: PersistedPane[] = session.panes.map((pane) => {
@@ -223,6 +269,7 @@ function normalizeSessionV3(session: PersistedSessionV3Input): PersistedSession 
   return {
     ...(rest as Omit<PersistedSession, 'panes' | 'surfaceRefs' | 'surfaceRefsNext'>),
     panes,
+    ...(Object.keys(alertDelivery).length ? { alertDelivery } : {}),
     ...carrySurfaceRefs({ surfaceRefs, surfaceRefsNext }),
   };
 }
@@ -274,11 +321,20 @@ export function readPersistedWindow(raw: unknown): PersistedWindow | null {
     return null;
   }
 
+  const seen = new Set<WorkspaceId>();
   const workspaces = (value.workspaces as unknown[])
     .map((ws): PersistedWorkspace | null => {
       if (!isRecord(ws) || typeof ws.id !== 'string' || typeof ws.name !== 'string') return null;
+      // First wins. A duplicate id is rejected outright by `setWorkspaces`, and a
+      // blob that throws there would leave the app with nothing rendered at all.
+      if (seen.has(ws.id)) {
+        console.warn(`[dormouse] Ignoring a duplicate persisted Workspace id: ${ws.id}`);
+        return null;
+      }
       const session = readPersistedSession(ws.session);
-      return session ? { id: ws.id, name: ws.name, session } : null;
+      if (!session) return null;
+      seen.add(ws.id);
+      return { id: ws.id, name: ws.name, session };
     })
     .filter((ws): ws is PersistedWorkspace => ws !== null);
   if (workspaces.length === 0) return null;
@@ -288,17 +344,8 @@ export function readPersistedWindow(raw: unknown): PersistedWindow | null {
   return { version: 1, workspaces, activeWorkspaceId };
 }
 
-/** The active Workspace's session, or the first Workspace's as a fallback. */
-export function activeWorkspaceSession(window: PersistedWindow): PersistedSession {
-  const active = window.workspaces.find((ws) => ws.id === window.activeWorkspaceId);
-  return (active ?? window.workspaces[0]).session;
-}
-
-/** Return a copy of the Window with the active Workspace's session replaced,
- *  preserving every other Workspace. */
-export function replaceActiveSession(window: PersistedWindow, session: PersistedSession): PersistedWindow {
-  return {
-    ...window,
-    workspaces: window.workspaces.map((ws) => (ws.id === window.activeWorkspaceId ? { ...ws, session } : ws)),
-  };
+/** Every pane id the Window's Workspaces name, across all of them — what a boot
+ *  claims its recovery record against. */
+export function windowPaneIds(window: PersistedWindow | null): string[] {
+  return window?.workspaces.flatMap((workspace) => workspace.session.panes.map((pane) => pane.id)) ?? [];
 }

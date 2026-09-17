@@ -1,0 +1,6 @@
+exitCode: 0
+stdout:
+* workspace:1  Workspace 1
+  workspace:2  build        [ringing]  [todo]  [attention 2]
+
+stderr:

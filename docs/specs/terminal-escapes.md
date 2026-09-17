@@ -40,7 +40,7 @@ Source of truth: `oscDispositionAt` in `lib/src/lib/terminal-protocol.ts`, `boun
 
 Each chunk is also classified for the quiesce detector: **the activity monitor's `onData()` fires only when `visibleData` is non-empty**, so a chunk of nothing but notification/progress OSCs is not meaningful output, while one carrying visible output alongside them is.
 
-Replay (`pty:replay`) is the one raw stream and the one legitimate re-parse: **the webview runs a one-shot parser over the buffered bytes**, so semantic state repopulates and OSCs are stripped before xterm sees them. **Replay must not re-fire** alerts, quiesce events, protocol notifications, or query responses — it applies the semantic events and drops the rest (rationale). **Every parser in a realm holding the theme takes `themeColorProvider`**, one-shot replay parsers included: a *declined* query stays in `visibleData` for the receiving renderer to answer, and answering is the owner's alone (rationale).
+Replay (`pty:replay`) is the raw stream requiring re-parse: **the webview runs a one-shot parser over the buffered bytes**, so semantic state repopulates and OSCs are stripped before xterm sees them. **Historical replay must not re-fire** alerts, quiesce events, protocol notifications, or query responses — it applies the semantic events and drops the rest (rationale). Live since-mark alert replay follows `docs/specs/alert.md` → Live Workspace transfer. **Every parser in a realm holding the theme takes `themeColorProvider`**, one-shot replay parsers included: a *declined* query stays in `visibleData` for the receiving renderer to answer, and answering is the owner's alone (rationale).
 
 ## Supported OSCs
 
@@ -61,6 +61,9 @@ Replay (`pty:replay`) is the one raw stream and the one legitimate re-parse: **t
 | `OSC 633 ; E ; <commandline> [; <nonce>] ST` | VS Code command line | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 633 ; P ; Cwd=<cwd> ST` | CWD (VS Code) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 777 ; notify ; <title> ; <body> ST` | rxvt/WezTerm notification | [alert.md](alert.md#terminal-reports) |
+| `OSC 367 ; serve ; <json> ST` | Dor Tool announcement: selects a bound port and optional same-origin path, plus a reserved name and runtime re-key | [dor-tool.md](dor-tool.md#osc-367) |
+| `OSC 367 ; state ; <json> ST` | Tool-reported unsaved state | [dor-tool.md](dor-tool.md#unsaved-changes) |
+| `OSC 367 ; <any other verb> ST` | Includes the reserved `dehydrate` verb; consumed and ignored. | [dor-tool.md](dor-tool.md#osc-367) |
 | `OSC 1337 ; CurrentDir=<cwd> ST` | CWD (iTerm2 compatibility) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 1337 ; File=...:<data> ST` / `MultipartFile=...` / `FilePart=...` / `FileEnd` | iTerm2 inline image protocol (IIP); passed through to ImageAddon. | [Inline graphics](#inline-graphics) |
 | `OSC 1337 ; ReportCellSize ST` | iTerm2 cell-size query; passed through and answered by the owner's ImageAddon. | [Inline graphics](#inline-graphics) |
@@ -121,11 +124,11 @@ Source of truth: `getWebviewHtml` in `vscode-ext/src/webview-html.ts`, `app.secu
 
 ### Report filtering on the input side
 
-Everything xterm.js emits on `onData` is candidate PTY input, its own *replies* included. **The two classifiers below require every token of a chunk to match**, so a report glued onto real keystrokes is never mistaken for one.
+`onData` includes xterm.js *replies*. **Both classifiers require every chunk token to match**, so a report glued onto real keystrokes is never mistaken for one.
 
-- **`inputIsReplayTerminalReport`** — dropped outright while `isReplaying` (rationale). Shapes: cursor-position / device-status (`CSI [?]<params> R` / `n`), device attributes (`CSI [?>=]<params> c`), window-manipulation reports (`CSI <params> t` / `x`), DECRQSS and XTSMGRAPHICS reports (`CSI [?]<params> $y` / `S`), focus in/out (`CSI I` / `CSI O`), and OSC, DCS, or APC replies of any shape. It also gates the untouched-session flag ([layout.md](layout.md)).
-- **`inputIsSyntheticTerminalReport`** — the broader machine-generated check (any chunk built only of CSI, SS3 `ESC O <final>`, OSC, or APC tokens). **Not dropped** — it suppresses input recording and alert attention for that chunk.
-- **`stripMouseReportsFromInput`** — removes X10 (`CSI M <3 bytes>`), SGR (`CSI < b;x;y M/m`) and urxvt (`CSI b;x;y M`) mouse reports while a mouse-mode override is active, so a report slipping past the DOM-level intercept never reaches the PTY ([mouse-and-clipboard.md](mouse-and-clipboard.md)).
+- **`inputIsReplayTerminalReport`** — dropped outright while `isReplaying` (rationale). Shapes: cursor-position / device-status (`CSI [?]<params> R` / `n`), device attributes (`CSI [?>=]<params> c`), window-manipulation reports (`CSI <params> t` / `x`), DECRQSS and XTSMGRAPHICS reports (`CSI [?]<params> $y` / `S`), focus in/out (`CSI I` / `CSI O`), kitty keyboard-query replies (`CSI ? <flags> u`), and OSC, DCS, or APC replies of any shape. Also gates recording, attention ([alert.md](alert.md)), and untouched state ([layout.md](layout.md)).
+- **`inputIsSyntheticTerminalReport`** — the broader prompt-recording guard (any chunk built only of CSI, SS3 `ESC O <final>`, OSC, or APC tokens). **Never dropped, and must suppress input recording alone** — these sequences can encode real keys.
+- **`stripMouseReportsFromInput`** — removes X10 (`CSI M <3 bytes>`), SGR (`CSI < b;x;y M/m`) and urxvt (`CSI b;x;y M`) mouse reports during mouse-mode override, so reports bypassing DOM interception never reach the PTY ([mouse-and-clipboard.md](mouse-and-clipboard.md)). Keyboard-attention gating: `docs/specs/alert.md` → Attention.
 
 **No filter may swallow user keyboard escape sequences** — arrows, function keys, bracketed paste, kitty modified-key reports, win32-input-mode key records (`CSI …_`). Source of truth: `lib/src/lib/terminal-report-filter.ts`.
 

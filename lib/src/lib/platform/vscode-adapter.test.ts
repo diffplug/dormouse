@@ -1,3 +1,5 @@
+import { getToolDirty, resetToolDirty } from '../tool-dirty-store';
+import { getToolAnnounce, resetToolAnnounces } from '../tool-announce-store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const terminalStateStoreMocks = vi.hoisted(() => ({
@@ -85,6 +87,7 @@ describe('VSCodeAdapter PTY exit handling', () => {
   beforeEach(stubWebviewEnv);
 
   afterEach(() => {
+    resetToolDirty();
     vi.unstubAllGlobals();
     vi.clearAllMocks();
   });
@@ -221,6 +224,40 @@ describe('VSCodeAdapter PTY exit handling', () => {
     windowTarget.dispatchEvent(hostMessage({ type: 'alert:watchedCommands', names: ['claude', 'npm'] }));
 
     expect(snapshots).toEqual([['claude', 'npm']]);
+  });
+
+  it('receives dirty state/reset messages and retains ordered replay reports through the semantic batch', () => {
+    new VSCodeAdapter();
+    const id = 'dirty-vscode';
+    windowTarget.dispatchEvent(hostMessage({ type: 'terminal:toolState', id, dirty: true }));
+    expect(getToolDirty(id)).toBe(true);
+    windowTarget.dispatchEvent(hostMessage({ type: 'terminal:toolState', id, dirty: null }));
+    expect(getToolDirty(id)).toBeNull();
+    const before = postMessage.mock.calls.length;
+    windowTarget.dispatchEvent(hostMessage({ type: 'pty:replay', id, data: '\x1b]633;C\x07\x1b]367;state;{"v":1,"dirty":false}\x07\x1b]633;D;0\x07' }));
+    expect(getToolDirty(id)).toBe(false);
+    expect(postMessage.mock.calls).toHaveLength(before);
+    windowTarget.dispatchEvent(hostMessage({ type: 'pty:replay', id, data: 'tail without state' }));
+    expect(getToolDirty(id)).toBe(false);
+    windowTarget.dispatchEvent(hostMessage({ type: 'pty:replay', id, data: '\x1b]633;C\x07' }));
+    expect(getToolDirty(id)).toBeNull();
+  });
+
+  it('receives owner-parsed Tool announcements and reconstructs them on replay', () => {
+    resetToolAnnounces();
+    const adapter = new VSCodeAdapter();
+    windowTarget.dispatchEvent(hostMessage({ type: 'terminal:toolAnnounce', id: 'tool-1', announce: { port: 6006, name: null, key: null, dehydrate: false, persist: null } }));
+    expect(getToolAnnounce('tool-1')?.port).toBe(6006);
+    windowTarget.dispatchEvent(hostMessage({ type: 'terminal:toolAnnounce', id: 'tool-1', announce: null }));
+    expect(getToolAnnounce('tool-1')).toBeNull();
+    const repliesBeforeReplay = postMessage.mock.calls.length;
+    windowTarget.dispatchEvent(hostMessage({ type: 'pty:replay', id: 'tool-1', data: '\x1b]367;serve;{"port":6007}\x1b\\' }));
+    expect(getToolAnnounce('tool-1')?.port).toBe(6007);
+    expect(postMessage.mock.calls).toHaveLength(repliesBeforeReplay);
+    windowTarget.dispatchEvent(hostMessage({ type: 'pty:replay', id: 'tool-1', data: '\x1b]633;C\x07' }));
+    expect(getToolAnnounce('tool-1')).toBeNull();
+    windowTarget.dispatchEvent(hostMessage({ type: 'pty:replay', id: 'tool-1', data: '\x1b]633;C\x07\x1b]367;serve;{"port":6008}\x07' }));
+    expect(getToolAnnounce('tool-1')?.port).toBe(6008);
   });
 
   it('parses replay buffers into semantic events and strips OSCs before forwarding', () => {
@@ -665,5 +702,21 @@ describe('VSCodeAdapter remote host link', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+
+describe('VSCodeAdapter port deadline', () => {
+  beforeEach(stubWebviewEnv);
+  afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+  it('allows both scans and the child hop before the host reply', async () => {
+    vi.useFakeTimers();
+    const adapter = new VSCodeAdapter();
+    const answer = adapter.getOpenPorts('pane-1');
+    const request = postMessage.mock.calls.at(-1)![0];
+    await vi.advanceTimersByTimeAsync(7500);
+    const ports = [{ address: '127.0.0.1', port: 5173, pid: 1 }];
+    windowTarget.dispatchEvent(hostMessage({ type: 'pty:openPorts', requestId: request.requestId, ports }));
+    expect(await answer).toEqual(ports);
   });
 });

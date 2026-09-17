@@ -62,8 +62,9 @@ This repository runs the [tend](https://github.com/max-sixty/tend) agent harness
 - **FAIL IF** `.github/workflows/workflow-audit.yaml` starts deriving its lower bound from anything the pusher controls; it must stay the previous successful run's server-set `created_at` (rationale). The `--since` filter is the known evasion above.
 - **FAIL IF** either admin-gating ruleset is missing or weakened. `Merge access` must target `~DEFAULT_BRANCH`, block nothing beyond `update`, and carry admin (`RepositoryRole` actor `5`) as its sole bypass actor; `Tag operations` must target `~ALL` tags, block both `creation` and `update`, and carry the same admin-only bypass.
 - **FAIL IF** `dormouse-bot` holds `maintain` or `admin` on this repository. `GET /collaborators/dormouse-bot/permission` spells `push` as `write` in both `permission` and `role_name`, so check that neither of those two roles appears rather than string-comparing against `push`.
-- **FAIL IF** any GitHub environment's deployment-branch-policies admit a ref that is not admin-gated by the `Tag operations` or `Merge access` rulesets. Today: `vscode-extension-publish` and `release-attest` (`v*` tag, admin-only via `Tag operations`); `security-audit` (`main` admin-only via `Merge access`, plus `v*` tag); `tend` (`main` only, admin-only via `Merge access`).
+- **FAIL IF** any GitHub environment except `hosted-preview` admits a ref that is not admin-gated by the `Tag operations` or `Merge access` rulesets. Hosted environments follow "Hosted Deployments" below. Today: `vscode-extension-publish` and `release-attest` (`v*` tag, admin-only via `Tag operations`); `security-audit` (`main` admin-only via `Merge access`, plus `v*` tag); `tend` (`main` only, admin-only via `Merge access`).
 - **FAIL IF** the secret inventory departs from this placement (rationale). One pass over `actions/secrets`, `actions/organization-secrets`, and each environment's secret listing answers every line:
+  - `CHROMATIC_PROJECT_TOKEN` — repo level, the only secret there; accepted with rotation (see "Reachable repo-level secrets").
   - `AUDIT_PAT` — in `security-audit`, absent at repo level.
   - `TEND_BOT_TOKEN` — in `tend`, absent at repo level.
   - `CLAUDE_CODE_OAUTH_TOKEN` — in **both** `tend` and `security-audit`, absent at repo level. Environments do not inherit each other's secrets, so a rotation must set both.
@@ -73,12 +74,24 @@ This repository runs the [tend](https://github.com/max-sixty/tend) agent harness
   - No org-level secret visible to this repository at all (see "Org-level secrets").
 - **FAIL IF** `CHROMATIC_PROJECT_TOKEN` is missing from `secrets.allowed` in `.config/tend.yaml` (rationale).
 - **FAIL IF** `.github/workflows/workflow-audit.yaml` is missing, disabled, or has not produced a successful run in the last 48 hours. Treat one skipped run as a signal rather than as slack in the window (rationale).
+- **FAIL IF** Renovate's `github-actions` manager can update `.github/workflows/tend-*.yaml`; the tend generator owns every dependency pin (rationale).
 - **FAIL IF** any `tend-*.yaml` pins `max-sixty/tend` below `0.1.19`, the release that pins instruction files by glob at any depth (rationale).
 - **FAIL IF** any `tend-*.yaml` workflow uses an unpinned action reference (e.g. `@main`, no version). Tag pins are accepted inside `tend-*.yaml` alone, the file being owned by the upstream generator; every other workflow — agent-managed or not — must SHA-pin per "GitHub Actions Policies".
 - **FAIL IF** any job in an agent-managed workflow has **effective** `GITHUB_TOKEN` permissions beyond `contents: write`, `pull-requests: write`, `issues: write`, `id-token: write`, `actions: read`, or any `read` permission. Effective, not declared: apply job permissions over workflow permissions over the repository default; omitted scopes in an explicit block become `none` (rationale).
 - **FAIL IF** `default_workflow_permissions` for this repository is not `read`, or `can_approve_pull_request_reviews` is not `false` (`gh api repos/diffplug/dormouse/actions/permissions/workflow`) — the backstop for every permission bullet in this spec (rationale).
 
-Source of truth: `WINDOW` and `is_tend_regen` in `.github/workflows/workflow-audit.yaml`.
+Source of truth: `packageRules` in `.github/renovate.json`; `WINDOW` and `is_tend_regen` in `.github/workflows/workflow-audit.yaml`.
+
+## Hosted Deployments
+
+**Must keep Hosted credentials in dedicated environments.** `hosted-production` and `hosted-release-tag` admit only `main`; `hosted-preview` admits only `main` and `refs/pull/*/merge`. All require Ned or Edgar's review with administrator bypass disabled; self-review is allowed. Preview approval authorizes the PR code to receive test-resource credentials only.
+
+- **FAIL IF** a Hosted environment lacks those branch restrictions, required reviewers, or disabled administrator bypass; inspect all three environments and their deployment policies.
+- **FAIL IF** Hosted credentials appear at repository/org scope, production credentials appear in `hosted-preview`, or preview credentials can reach production/TTR/marketing resources. Inspect GitHub secret placement and Cloudflare/Neon token scope; names alone do not isolate resources.
+- **FAIL IF** `HOSTED_TAG_TOKEN` appears outside `hosted-release-tag`, or that environment is used by a job other than `tag` in `.github/workflows/hosted-production.yml`. Its admin identity's repository-scoped Contents-write PAT can write code and bypass tag protection; it must never enter a deployment job or PR execution.
+- **FAIL IF** a Hosted preview deploy accepts a fork or a failing verification, preview cleanup checks out a PR ref rather than `main`, or a Hosted production tag can run before live verification succeeds; inspect the workflow dependency/condition graph.
+
+Source of truth: `hosted/scripts/setup-github.mjs`; `.github/workflows/hosted-preview.yml`; `.github/workflows/hosted-production.yml`.
 
 ## VS Code Extension Releases
 

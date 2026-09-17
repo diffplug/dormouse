@@ -1,6 +1,8 @@
+import type { WorkspaceId } from '../../lib/session-types';
 import type { PortMode } from './TerminalContextView';
 import type { PortUrlEntry } from './port-url';
-import { createContext, useContext, useEffect } from 'react';
+import { createContext, useContext, useEffect, type RefObject } from 'react';
+import type { RingFrame } from '../../lib/rect-tween';
 import type { AlertButtonActionResult, SessionStatus, SetTerminalUserTitleResult } from '../../lib/terminal-registry';
 import type { WallMode } from './wall-types';
 import type { RenderMode } from './agent-browser-screen';
@@ -13,6 +15,9 @@ export interface PaneElementsState {
 
 export const ModeContext = createContext<WallMode>('command');
 export const SelectedIdContext = createContext<string | null>(null);
+
+/** The last visible ring frame, carried between active Walls in one Window. */
+export const RingHandoffContext = createContext<RefObject<RingFrame | null> | null>(null);
 
 /** Terminal fitting waits for committed, fully painted geometry. Standalone
  *  terminal mounts have no layout coordinator and use their resize observer. */
@@ -61,6 +66,9 @@ export interface WallActions {
   /** The stable `surface:N` ref for a pane/door id (minted lazily, exactly as
    *  `dor list` assigns refs). Used by the pane context menu to show the handle. */
   resolveSurfaceRef: (id: string) => string;
+  /** Resolve a pending tool's approval: grant and start it, or close its pane
+   *  (docs/specs/dor-tool.md -> Trust). */
+  onResolveToolApproval: (id: string, choice: 'upstream' | 'folder' | 'decline' | 'retry') => void;
 }
 
 export const WallActionsContext = createContext<WallActions>({
@@ -79,6 +87,7 @@ export const WallActionsContext = createContext<WallActions>({
   onSwapRenderMode: () => {},
   onOpenBrowserPane: () => {},
   resolveSurfaceRef: (id: string) => id,
+  onResolveToolApproval: () => {},
 });
 
 /** Engine-directed writes from a pane/header (title + params). The read side is
@@ -95,6 +104,20 @@ export const PaneWriteContext = createContext<PaneWriteActions>({
   setTitle: () => {},
   updateParams: () => {},
 });
+
+/** The Workspace this Wall renders, for Workspace-scoped settings such as
+ *  alarm delivery overrides. Null outside a Wall. */
+export const WorkspaceIdContext = createContext<WorkspaceId | null>(null);
+
+/** Whether this Wall's Workspace is the visible one. A hidden Workspace stays
+ *  mounted and live, so streaming bodies read this to idle
+ *  (`docs/specs/layout.md` → "Workspaces"). Default true: a bare Wall, and any
+ *  component rendered outside one, is always active. */
+export const WorkspaceActiveContext = createContext(true);
+
+/** Presentation can outlive activation while the outgoing Workspace fades.
+ * Null outside WorkspaceMotion: bare Walls follow their active state. */
+export const WorkspaceVisibleContext = createContext<boolean | null>(null);
 
 export const RenamingIdContext = createContext<string | null>(null);
 /** Exact zoom owner for pane-local chrome. Pane chrome compares against its own id

@@ -53,6 +53,14 @@ describe('computeWorkspaceUnion', () => {
     expect(union).toEqual({ ringing: false, todo: true, count: 1 });
   });
 
+  it('keeps presentation generations out of the semantic union', () => {
+    const union = computeWorkspaceUnion(
+      ['a', 'b'],
+      activity({ a: { status: 'ALERT_RINGING', ringSeq: 3 }, b: { status: 'ALERT_RINGING', ringSeq: 7 } }),
+    );
+    expect(union).toEqual({ ringing: true, todo: false, count: 2 });
+  });
+
   it('is empty for an empty surface set', () => {
     expect(computeWorkspaceUnion([], activity({ a: { todo: true } }))).toEqual(EMPTY_WORKSPACE_UNION);
   });

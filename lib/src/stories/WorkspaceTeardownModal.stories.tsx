@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { QuitConfirmModal } from '../../../standalone/src/QuitConfirmModal';
+import { WorkspaceTeardownModal } from '../../../standalone/src/WorkspaceTeardownModal';
 
 // The modal reads its live running-session count from the terminal-state store
 // (it tracks commands finishing while the dialog is up), so stories prime the
@@ -16,51 +16,41 @@ function runningPanes(count: number) {
   };
 }
 
-function QuitConfirmModalStory({ confirming, archiveError }: { confirming: boolean; archiveError?: string | null }) {
+function WorkspaceTeardownModalStory({ archiveError }: { archiveError?: string | null }) {
   // Cancel/Quit call the quit-confirm store's actions, which no-op without an
   // active quit context — the buttons are safely inert here.
   return (
     <div className="relative h-[420px] w-[720px] overflow-hidden rounded bg-app-bg p-4 font-mono text-sm text-terminal-fg">
       <div>dev@dormouse:~/repo$ pnpm test --watch</div>
       <div className="text-muted">RUN v4.1.9 …</div>
-      <QuitConfirmModal confirming={confirming} archiveError={archiveError} />
+      <WorkspaceTeardownModal confirming={false} archiveError={archiveError} />
     </div>
   );
 }
 
-const meta: Meta<typeof QuitConfirmModalStory> = {
-  title: 'Modals/QuitConfirmModal',
-  component: QuitConfirmModalStory,
+const meta: Meta<typeof WorkspaceTeardownModalStory> = {
+  title: 'Modals/WorkspaceTeardownModal',
+  component: WorkspaceTeardownModalStory,
 };
 
 export default meta;
-type Story = StoryObj<typeof QuitConfirmModalStory>;
+type Story = StoryObj<typeof WorkspaceTeardownModalStory>;
 
-// Plural copy + "Quit and stop N" primary action.
+// All termination paths use the same typed-letter Workspace confirmation.
 export const RunningCommands: Story = {
-  args: { confirming: false },
   parameters: { primedTerminalState: runningPanes(3) },
 };
 
 // Singular copy ("1 running command will be stopped.").
 export const OneRunningCommand: Story = {
-  args: { confirming: false },
   parameters: { primedTerminalState: runningPanes(1) },
 };
 
 // The dialog stays open when the count drops to 0 (auto-quitting out from
 // under the user would surprise); copy flips to "No commands are still
-// running." and the primary action to a plain "Quit".
+// running." and the confirmation letter stays the same.
 export const NoRunningCommands: Story = {
-  args: { confirming: false },
   parameters: { primedTerminalState: runningPanes(0) },
-};
-
-// Post-confirm state: both buttons disabled, Escape inert, "Quitting…" copy
-// until the process exits.
-export const Quitting: Story = {
-  args: { confirming: true },
-  parameters: { primedTerminalState: runningPanes(2) },
 };
 
 // The archive gate refused the quit (docs/specs/notepad.md → "Standalone
@@ -68,7 +58,6 @@ export const Quitting: Story = {
 // only whether to lose the notes. Cancel is the default action.
 export const ArchiveFailed: Story = {
   args: {
-    confirming: false,
     archiveError: 'The notepad archive could not be written: no space left on device.',
   },
   parameters: { primedTerminalState: runningPanes(2) },

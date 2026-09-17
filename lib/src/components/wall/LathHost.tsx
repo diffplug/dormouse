@@ -28,6 +28,9 @@ import { nowMs, type LathWallEngine } from './lath-wall-engine';
 import { type DragController, createDragController } from './lath-drag-controller';
 import { TerminalPanel } from './TerminalPanel';
 import { BrowserPanel } from './BrowserPanel';
+import { ToolPanel } from './ToolPanel';
+import { isToolParams } from './browser-surface';
+import { ToolPaneHeader } from './ToolPaneHeader';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { SurfacePaneHeader } from './SurfacePaneHeader';
 import { AlertSpeechIndicator } from './AlertSpeechIndicator';
@@ -95,21 +98,25 @@ export type LathComponentsOverride = {
 const BODY_COMPONENTS: Record<string, ComponentType<PaneProps>> = {
   terminal: TerminalPanel,
   browser: BrowserPanel,
+  // A tool is both, one Session deep; ToolPanel keeps each mounted and flips
+  // visibility (docs/specs/dor-tool.md).
+  tool: ToolPanel,
 };
 const TAB_COMPONENTS: Record<string, ComponentType<PaneProps>> = {
   terminal: TerminalPaneHeader,
   surface: SurfacePaneHeader,
+  tool: ToolPaneHeader,
 };
 
 /** For a terminal Surface the pane id is its session id (docs/specs/layout.md).
  *  The terminal context floats over the whole leaf, so it lives here rather than
  *  in the body, whose clipping box it must escape. */
-function TerminalLeafOverlay({ id, title }: PaneProps) {
+function TerminalLeafOverlay({ id, title, params }: PaneProps) {
   const { mounted } = useContext(TerminalContextContext);
   return (
     <>
       <AlertSpeechIndicator sessionId={id} />
-      {mounted?.id === id && <TerminalContext {...mounted} title={title} />}
+      {mounted?.id === id && <TerminalContext {...mounted} title={title} tool={isToolParams(params)} />}
     </>
   );
 }
@@ -120,6 +127,8 @@ function TerminalLeafOverlay({ id, title }: PaneProps) {
 // surface-kind branch in the render path.
 const OVERLAY_COMPONENTS: Record<string, ComponentType<PaneProps>> = {
   terminal: TerminalLeafOverlay,
+  // A tool has a PTY, so it rings like a terminal whichever half is forward.
+  tool: TerminalLeafOverlay,
 };
 
 type DragState = {
@@ -303,8 +312,10 @@ export function LathHost({
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
 
-  // Measure the container and track resizes. `getBoundingClientRect` (not
-  // `entry.contentRect`) so the measurement is trivially stubbable in jsdom.
+  // Measure before the ancestor's entrance layout effect, then use the observer's
+  // untransformed content box while workspace presentation is moving (equal to the
+  // border box: `.lath-host` has no padding or border). The direct call keeps
+  // `getBoundingClientRect`, which jsdom tests can stub.
   // Reporting geometry from the measurement itself — not a passive effect reading
   // the rendered `size` — is load-bearing: this runs in the layout phase with the
   // real laid-out rect, so it is set before the Wall's seed passive effect reads it
@@ -314,8 +325,9 @@ export function LathHost({
   useLayoutEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const measure = () => {
-      const r = el.getBoundingClientRect();
+    const measure = (entries?: ResizeObserverEntry[]) => {
+      // Workspace presentation can scale this subtree; layout stays full-size.
+      const r = entries?.[0]?.contentRect ?? el.getBoundingClientRect();
       store.setLayoutGeometry({ x: 0, y: 0, width: r.width, height: r.height }, LATH_LAYOUT_OPTS);
       setSize((prev) => (prev.width === r.width && prev.height === r.height ? prev : { width: r.width, height: r.height }));
     };

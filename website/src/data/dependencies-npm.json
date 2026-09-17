@@ -21,6 +21,48 @@
     "homepage": "https://paulmillr.com/noble/"
   },
   {
+    "name": "@node-datachannel/darwin-arm64",
+    "version": "0.33.4",
+    "license": "MPL 2.0",
+    "author": "Murat Doğan, Paul-Louis Ageneau",
+    "homepage": "https://github.com/murat-dogan/node-datachannel"
+  },
+  {
+    "name": "@node-datachannel/darwin-x64",
+    "version": "0.33.4",
+    "license": "MPL 2.0",
+    "author": "Murat Doğan, Paul-Louis Ageneau",
+    "homepage": "https://github.com/murat-dogan/node-datachannel"
+  },
+  {
+    "name": "@node-datachannel/linux-arm64-gnu",
+    "version": "0.33.4",
+    "license": "MPL 2.0",
+    "author": "Murat Doğan, Paul-Louis Ageneau",
+    "homepage": "https://github.com/murat-dogan/node-datachannel"
+  },
+  {
+    "name": "@node-datachannel/linux-x64-gnu",
+    "version": "0.33.4",
+    "license": "MPL 2.0",
+    "author": "Murat Doğan, Paul-Louis Ageneau",
+    "homepage": "https://github.com/murat-dogan/node-datachannel"
+  },
+  {
+    "name": "@node-datachannel/win32-arm64-msvc",
+    "version": "0.33.4",
+    "license": "MPL 2.0",
+    "author": "Murat Doğan, Paul-Louis Ageneau",
+    "homepage": "https://github.com/murat-dogan/node-datachannel"
+  },
+  {
+    "name": "@node-datachannel/win32-x64-msvc",
+    "version": "0.33.4",
+    "license": "MPL 2.0",
+    "author": "Murat Doğan, Paul-Louis Ageneau",
+    "homepage": "https://github.com/murat-dogan/node-datachannel"
+  },
+  {
     "name": "@phosphor-icons/react",
     "version": "2.1.10",
     "license": "MIT",
@@ -68,6 +110,13 @@
     "license": "MIT",
     "author": "The xterm.js authors",
     "homepage": "https://github.com/xtermjs/xterm.js/tree/master/addons/addon-image"
+  },
+  {
+    "name": "@xterm/addon-serialize",
+    "version": "0.15.0-beta.301",
+    "license": "MIT",
+    "author": "The xterm.js authors",
+    "homepage": "https://github.com/xtermjs/xterm.js/tree/master/addons/addon-serialize"
   },
   {
     "name": "@xterm/addon-unicode-graphemes",
@@ -159,6 +208,13 @@
     "license": "MIT",
     "author": "Josh Junon (https://github.com/qix-)",
     "homepage": "https://github.com/debug-js/debug"
+  },
+  {
+    "name": "detect-libc",
+    "version": "2.1.2",
+    "license": "Apache-2.0",
+    "author": "Lovell Fuller <npm@lovell.info>",
+    "homepage": "https://github.com/lovell/detect-libc"
   },
   {
     "name": "ecdsa-sig-formatter",
@@ -259,6 +315,13 @@
     "homepage": "https://github.com/nodejs/node-addon-api"
   },
   {
+    "name": "node-datachannel",
+    "version": "0.33.4",
+    "license": "MPL 2.0",
+    "author": "Murat Doğan, Paul-Louis Ageneau",
+    "homepage": "https://github.com/murat-dogan/node-datachannel#readme"
+  },
+  {
     "name": "node-pty",
     "version": "1.2.0-beta.15",
     "license": "MIT",
@@ -273,15 +336,22 @@
     "homepage": "https://github.com/sindresorhus/path-key"
   },
   {
+    "name": "picomatch",
+    "version": "4.0.7",
+    "license": "MIT",
+    "author": "Jon Schlinkert (https://github.com/jonschlinkert)",
+    "homepage": "https://github.com/micromatch/picomatch"
+  },
+  {
     "name": "react",
-    "version": "19.2.8",
+    "version": "19.3.0",
     "license": "MIT",
     "author": "Meta Platforms, Inc. and affiliates",
     "homepage": "https://react.dev/"
   },
   {
     "name": "react-dom",
-    "version": "19.2.8",
+    "version": "19.3.0",
     "license": "MIT",
     "author": "Meta Platforms, Inc. and affiliates",
     "homepage": "https://react.dev/"
@@ -302,7 +372,7 @@
   },
   {
     "name": "scheduler",
-    "version": "0.27.0",
+    "version": "0.28.0",
     "license": "MIT",
     "author": "Meta Platforms, Inc. and affiliates",
     "homepage": "https://react.dev/"
@@ -383,5 +453,12 @@
     "license": "MIT",
     "author": "Einar Otto Stangvik <einaros@gmail.com> (http://2x.io)",
     "homepage": "https://github.com/websockets/ws"
+  },
+  {
+    "name": "yaml",
+    "version": "2.9.0",
+    "license": "ISC",
+    "author": "Eemeli Aro <eemeli@gmail.com>",
+    "homepage": "https://eemeli.org/yaml/"
   }
 ]
