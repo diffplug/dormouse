@@ -1422,6 +1422,24 @@ fn iframe_create_proxy_url(
     Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
 }
 
+// Resolves a `dor tool <name>` against the nearest dormouse.yml, or records a
+// trust decision, in the sidecar (shared lib/src/host/tool-host.ts). Bridge
+// only — the parsing, the closed substitution set, and the trust record all
+// live in lib so the two hosts cannot drift. See docs/specs/dor-tool.md.
+#[tauri::command(async)]
+fn tool_control(
+    state: tauri::State<'_, SidecarState>,
+    request: JsonValue,
+) -> Result<JsonValue, String> {
+    let response = request_from_sidecar_timeout(
+        &state,
+        "tool:control",
+        serde_json::json!({ "request": request }),
+        Duration::from_secs(5),
+    )?;
+    Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
+}
+
 // ── agent-browser host (docs/specs/dor-browser.md → "Agent-Browser Host Capabilities").
 // Thin forwarders to the Node sidecar, which runs the shared
 // lib/src/host/agent-browser-host.ts — the very same module the VS Code
@@ -4372,6 +4390,7 @@ pub fn run() {
             capture_agent_recovery,
             take_recovery_commands,
             iframe_create_proxy_url,
+            tool_control,
             pty_request_init,
             dor_control_response,
             burrow_command,

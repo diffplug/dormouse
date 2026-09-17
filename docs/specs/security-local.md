@@ -132,6 +132,16 @@ Source of truth: the shared rule and predicates — `isLoopbackHost`, `isOwnOrig
 `isForeignOrigin` — in `lib/src/host/loopback-guard.ts`;
 `startDevVite` in `standalone/scripts/dev-run.mjs`.
 
+### Local-file viewer
+
+**FAIL IF** `dor/src/file-viewer.ts` serves any request without the fresh 256-bit URL capability, its own case-insensitive loopback `Host`, an absent or same-listener `Origin`, and a GET/HEAD method. Compare capability prefixes by SHA-256 then `timingSafeEqual`, including malformed lengths. `allowsFileViewerRequest` in `dor/src/file-viewer-loopback-guard.ts` gates every route. Never grant CORS access to foreign origins, cache responses, or send the capability as a referrer.
+
+**FAIL IF** the local-file viewer exposes directory listings, arbitrary path reads, writes, or a file outside its opened-document grant. Grant construction permits only regular files, rejects symlinks escaping the canonical document directory, bounds static dependency discovery, and retains descriptors so later path replacement cannot widen the grant. Viewer resource loads are restricted by CSP to its own origin plus inline scripts/styles and data images, including through the iframe proxy; escaped text previews execute no document markup. The viewer opts into the proxy's upstream-policy preservation (`docs/specs/dor-browser.md` → Iframe Renderer).
+
+**Must not describe the viewer CSP as confining active documents' navigation.** HTML/SVG scripts can navigate their frame to external URLs, including with granted contents; the resource policy is not a no-egress boundary. (rationale)
+
+Source of truth: `startFileViewer` in `dor/src/file-viewer.ts`; `allowsFileViewerRequest` in `dor/src/file-viewer-loopback-guard.ts`; `sanitizeResponseHeaders` in `lib/src/host/iframe-proxy.ts`. Tests: `dor/test/file-viewer.test.mjs`, `lib/src/host/file-viewer-proxy.test.ts`.
+
 ## Persisted state
 
 The attacker is another local account reading disk; what the remote stack leaves
@@ -199,3 +209,19 @@ Source of truth: `SESSION_STATE_KEY` in `vscode-ext/src/session-state.ts`,
 **Must validate context directory arguments as existing absolute directories and pass the canonical path as one process argument without shell interpretation.** Keep this capability separate from the external-URL allowlist. VS Code per-terminal context requests and helper ownership updates remain scoped to the owning router.
 
 Source of truth: `context` in `standalone/sidecar/pty-core.js`; `attachRouter` in `vscode-ext/src/message-router.ts`. Test: `standalone/sidecar/helper-terminal.test.js`.
+
+## Dor Tool configuration
+
+**Must keep repo-local named Tools inert until the user grants trust through Dormouse chrome.** The control socket exposes lookup and launch, never a trust-grant verb. Pending approval spawns neither its terminal nor a helper. Approval workflow belongs to `docs/specs/dor-tool.md` → Trust.
+
+**Must keep named-tool inputs as argv until the renderer quotes them for the target shell.** User configuration is the local user's authority; a project name cannot replace a user Tool during user-only lookup. Resolution belongs to `docs/specs/dor-tool.md` → Declaring tools.
+
+**Must reject C0 and DEL characters in Tool argv, substituted argv, and local-file targets before launch**, including controls exposed by canonicalizing symlinks. Shell quotes do not protect terminal editing keys. String `run` remains explicit shell code. Source of truth: `hasShellInputControls` in `dor/src/commands/shell-quote.ts`; `resolveToolInput` in `lib/src/host/tool-input.ts`; `useDorControl` in `lib/src/components/wall/use-dor-control.ts`. Tests: `lib/src/host/tool-input.test.ts`, `lib/src/components/Wall.test.tsx`.
+
+**Must derive the grant key in the host**, using the canonical upstream URL or project-root folder; a renderer request cannot supply an arbitrary grant URL. **Must bound config reads and refuse repo-config symlinks on every host.** The user config may follow a dotfiles symlink; its opened descriptor must still be a bounded regular file.
+
+**An upstream grant trusts the claimed URL, not authenticated checkout provenance.** A supplied directory containing its own `.git/config` can claim an already-granted upstream; folder-only grants limit this sharing. **Must not describe the chrome gesture as a boundary against other processes running as the user**; the local account model is The dor control socket above.
+
+**Must restrict announced ports to the designated command's Session process tree** (`docs/specs/dor-tool.md` → Serving). Process output may select among that tree's discovered ports; it cannot turn an ordinary terminal into a Tool.
+
+Source of truth: `createToolHost` in `lib/src/host/tool-host.ts`; `lookupTool` / `FileToolTrustStore` in `lib/src/host/tool-trust.ts`; `useToolServing` in `lib/src/components/wall/use-tool-serving.ts`. Tests: `lib/src/host/tool-host.test.ts`, `lib/src/host/tool-trust.test.ts`, `lib/src/components/wall/use-tool-serving.test.tsx`.

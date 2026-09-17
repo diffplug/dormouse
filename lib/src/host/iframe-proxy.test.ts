@@ -338,6 +338,35 @@ describe('iframe proxy — the proxy never vouches for a stranger', () => {
 });
 
 describe('iframe proxy — the two privileges are the embedder’s, not the port’s', () => {
+  it.each([NO_LOG, NO_EMBEDDER])('preserves opted-in CSP policies without weakening them (%j)', async opts => {
+    const policies = ["default-src 'none'; script-src 'self' 'unsafe-inline'", "frame-ancestors 'none'; connect-src 'none'"];
+    const meta = '<meta http-equiv="Content-Security-Policy" content="img-src \'none\'">';
+    const port = await upstream((_q, s) => {
+      s.writeHead(200, {
+        'content-type': 'text/html',
+        'x-dormouse-preserve-csp': '1',
+        'x-frame-options': 'DENY',
+        'content-security-policy': policies,
+        'content-security-policy-report-only': "default-src 'none'",
+      });
+      s.end(`<html><head>${meta}</head><body>kept</body></html>`);
+    });
+    const res = await get(await frame(`http://127.0.0.1:${port}/`, opts));
+    expect(res.headers['content-security-policy']).toBe(policies.join(', ')
+      + (opts === NO_LOG ? ", frame-ancestors 'self' vscode-webview://abc-123 vscode-file://vscode-app" : ''));
+    expect(res.headers['content-security-policy-report-only']).toBe("default-src 'none'");
+    expect(res.headers['x-dormouse-preserve-csp']).toBeUndefined();
+    expect(res.headers['x-frame-options']).toBe(opts === NO_LOG ? undefined : 'DENY');
+    expect(res.body).toContain(meta);
+    expect(res.body.includes('__dormouse')).toBe(opts === NO_LOG);
+  });
+
+  it('does not let a request header opt an ordinary upstream into CSP preservation', async () => {
+    const port = await upstream((_q, s) => DENY_HTML(s));
+    const res = await request(await frame(`http://127.0.0.1:${port}/`), { headers: { 'X-Dormouse-Preserve-CSP': '1' } });
+    expect(res.headers['content-security-policy']).toBe("frame-ancestors 'self' vscode-webview://abc-123 vscode-file://vscode-app");
+  });
+
   // The loopback port is not a secret, and no request header separates our
   // webview from an attacker page: an iframe navigation carries no `Origin`,
   // and `Sec-Fetch-Site` reads `cross-site` for both. So the framing-header

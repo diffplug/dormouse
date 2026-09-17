@@ -86,6 +86,28 @@ export const ALERT_SPEECH_TRACKING_CLASS = 'tracking-[0.12em]';
 // stay at the call site; the surface recipe is shared so they can't drift.
 export const POPUP_SURFACE_CLASS = 'z-[1000] rounded border border-border bg-surface-raised font-mono text-foreground shadow-md';
 
+// Message-only panes use the terminal ground because they stand in for a
+// Surface, not chrome. PaneMessage pairs this scrollable root with content that
+// stays centered when it fits and fully reachable when the pane is small.
+const PANE_MESSAGE_CLASS = 'flex h-full min-h-0 w-full min-w-0 flex-col overflow-auto bg-terminal-bg px-6 py-6 text-center text-sm';
+
+export function PaneMessage({
+  children,
+  className,
+  contentClassName,
+  ...props
+}: ComponentProps<'div'> & { contentClassName?: string }) {
+  return (
+    <div {...props} className={clsx(PANE_MESSAGE_CLASS, className)}>
+      {/* Auto margins center only spare space; overflowing content starts at the
+          scroll origin instead of being centered beyond its reachable bounds. */}
+      <div className={clsx('my-auto w-full min-w-0 max-w-[30rem] shrink-0 self-center [overflow-wrap:anywhere]', contentClassName)}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 // `ComponentProps<'div'>` rather than `HTMLAttributes<HTMLDivElement>` so `ref`
 // is among the props (React 19 ref-as-prop): an anchored menu needs the row
 // itself measured, not a wrapper around it.

@@ -57,6 +57,39 @@ export function parseIdFormat(value: string): IdFormat {
   throw new SyntaxError(`invalid --id-format '${value}'`);
 }
 
+export interface PreDelimiterArgSpec {
+  /** Flags taking no value. */
+  readonly booleans: ReadonlySet<string>;
+  /** Flags consuming the next argument. */
+  readonly valued: ReadonlySet<string>;
+  /** `'reject'` fails on the first non-flag argument; `'collect'` returns them all. */
+  readonly positionals: 'collect' | 'reject';
+}
+
+/**
+ * The argv-head shape check `dor ensure` and `dor tool` share. stricli cannot
+ * express "only these flags may precede `--`", so `cli.ts` runs this before it
+ * parses; each command supplies its own flag sets and keeps them beside its
+ * `parameters.flags`.
+ */
+export function scanPreDelimiterArgs(head: readonly string[], spec: PreDelimiterArgSpec): ParseResult<string[]> {
+  const positionals: string[] = [];
+  for (let index = 0; index < head.length; index += 1) {
+    const arg = head[index];
+    if (spec.booleans.has(arg)) continue;
+    if (spec.valued.has(arg)) {
+      const value = head[index + 1];
+      if (!value || value.startsWith('-')) return { ok: false, message: `${arg} requires a value` };
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith('-')) return { ok: false, message: `unknown option '${arg}'` };
+    if (spec.positionals === 'reject') return { ok: false, message: `unexpected argument '${arg}' before --` };
+    positionals.push(arg);
+  }
+  return { ok: true, value: positionals };
+}
+
 function resolveControlClient(options: CliOptions, timeoutMs?: number): ParseResult<ControlClient> {
   if (options.client) return { ok: true, value: options.client };
 

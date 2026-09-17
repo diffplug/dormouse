@@ -6,7 +6,7 @@ import { currentWindowLabel } from "./window-label";
 import { tearOutWorkspace, transferWorkspaceTo } from "./workspace-move";
 import { getWallHandle } from "dormouse-lib/components/wall/wall-handles";
 import { randomKillChar } from "dormouse-lib/components/KillConfirm";
-import { setPendingWorkspaceMove } from "dormouse-lib/lib/workspace-ui-store";
+import { setPendingWorkspaceMove, setWorkspaceMoveError } from "dormouse-lib/lib/workspace-ui-store";
 import { workspaceTabRect } from "./workspace-tabs";
 
 /**
@@ -165,9 +165,15 @@ export function onDropOnOtherWindow(
     // Probed fresh rather than reusing the throttled answer: up to
     // HIT_TEST_THROTTLE_MS of pointer travel could otherwise choose the window.
     const hit = await probe();
-    const move = hit && hit.label !== currentWindowLabel()
-      ? () => void transferWorkspaceTo(id, hit.label, { x: hit.x, y: hit.y })
-      : () => void tearOutWorkspace(id, grab);
+    const move = () => {
+      setWorkspaceMoveError(null);
+      const moving = hit && hit.label !== currentWindowLabel()
+        ? transferWorkspaceTo(id, hit.label, { x: hit.x, y: hit.y })
+        : tearOutWorkspace(id, grab);
+      void moving.then(outcome => {
+        if (!outcome.moved) setWorkspaceMoveError({ id, reason: outcome.reason });
+      }).catch(error => setWorkspaceMoveError({ id, reason: error instanceof Error ? error.message : String(error) }));
+    };
     // The one thing a move cannot carry is a plain iframe's document, Doored
     // ones included; it reopens at its saved URL. The user says so first, with
     // the same typed letter a kill takes (docs/specs/layout.md → Workspaces).

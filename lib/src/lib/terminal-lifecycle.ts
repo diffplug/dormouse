@@ -1,3 +1,5 @@
+import { clearToolAnnounce } from './tool-announce-store';
+import { clearToolDirty } from './tool-dirty-store';
 import { serializeTransferTerminal, type TerminalGrid } from './terminal-transfer';
 import { Terminal, type IBufferRange } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -485,7 +487,16 @@ export function resumeTerminal(
 // agent the host interrupted on its way down, which this pane re-runs itself.
 export function restoreTerminal(
   id: string,
-  opts: { cwd?: string | null; title?: string | null; cwdWarning?: string | null; shell?: string; args?: string[]; untouched?: boolean; resumeCommand?: string | null },
+  opts: {
+    cwd?: string | null;
+    title?: string | null;
+    shell?: string;
+    args?: string[];
+    untouched?: boolean;
+    resumeCommand?: string | null;
+    command?: string | null;
+    requireIntegration?: boolean;
+  },
 ): TerminalEntry {
   const existing = registry.get(id);
   if (existing) return existing;
@@ -501,10 +512,6 @@ export function restoreTerminal(
     setTerminalUserTitle(id, trimmedTitle);
   }
 
-  if (opts.cwdWarning) {
-    entry.terminal.write(`\r\n\x1b[33m${opts.cwdWarning}\x1b[0m\r\n`);
-  }
-
   const dims = entry.fit.proposeDimensions();
   getPlatform().spawnPty(id, {
     cols: dims?.cols || 80,
@@ -517,17 +524,19 @@ export function restoreTerminal(
 
   // Revalidated rather than trusted: the snapshot may have been written by an
   // older detector, and this string is about to be executed.
-  const resume = opts.resumeCommand ? normalizeResumeCommand(opts.resumeCommand) : null;
-  if (resume) {
+  const restoredCommand = opts.command?.trim() ? opts.command : null;
+  const resume = !restoredCommand && opts.resumeCommand ? normalizeResumeCommand(opts.resumeCommand) : null;
+  const command = restoredCommand ?? resume;
+  if (command) {
     // A passive notice, not a dialog: the pane has no transcript, so without it
     // an agent simply appears. It also states the discontinuity the resume hides
     // — the interrupted turn did not continue.
-    entry.terminal.write(`${DIM}⟲ resuming agent session: ${resume}${RESET}\r\n`);
+    if (resume) entry.terminal.write(`${DIM}⟲ resuming agent session: ${resume}${RESET}\r\n`);
     // Seeded before the write because this bypasses xterm's keystroke fallback,
     // and typed only once the fresh shell reaches a prompt — spawn-then-type is
     // exactly the window shell startup swallows keystrokes in.
-    seedLaunchedCommand(id, resume, opts.cwd ?? undefined);
-    typeCommandWhenPromptReady(id, resume, false);
+    seedLaunchedCommand(id, command, opts.cwd ?? undefined);
+    typeCommandWhenPromptReady(id, command, opts.requireIntegration === true);
   }
 
   return entry;
@@ -632,6 +641,8 @@ function teardownSession(id: string, { kill }: { kill: boolean }): void {
   registry.delete(id);
   removeTerminalPaneState(id);
   removeMouseSelectionState(id);
+  clearToolAnnounce(id);
+  clearToolDirty(id);
   clearTerminalActivity(id);
 }
 
@@ -730,10 +741,10 @@ export function registerSurfaceFocusHandle(id: string, handle: SurfaceFocusHandl
   };
 }
 
-export function focusSession(id: string, focused: boolean): void {
+export function focusSession(id: string, focused: boolean, target: 'surface' | 'terminal' = 'surface'): void {
   // Non-terminal surfaces (iframe) aren't in the xterm registry — route to
   // their focus handle so onClickPanel → enterTerminalMode focuses them too.
-  const handle = surfaceFocusHandles.get(id);
+  const handle = target === 'surface' ? surfaceFocusHandles.get(id) : undefined;
   if (handle) {
     if (focused) handle.focus();
     else handle.blur();

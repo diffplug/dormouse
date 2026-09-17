@@ -12,13 +12,15 @@ export interface WorkspaceUiState {
   /** The Workspace awaiting its typed close confirmation, and the letter that
    *  accepts it (minted once, so a re-render cannot change the letter on screen). */
   pendingClose: { id: WorkspaceId; char: string } | null;
+  /** A refused move stays visible until dismissed or retried. */
+  moveError: { id: WorkspaceId; reason: string } | null;
   /** A move between Windows awaiting its typed confirmation, because it would
    *  destroy the page state of `iframeCount` iframe Surfaces; `proceed` runs the
    *  move (`docs/specs/layout.md` → "Workspaces"). */
   pendingMove: { id: WorkspaceId; char: string; iframeCount: number; proceed: () => void } | null;
 }
 
-const EMPTY: WorkspaceUiState = { renamingId: null, pendingClose: null, pendingMove: null };
+const EMPTY: WorkspaceUiState = { renamingId: null, pendingClose: null, pendingMove: null, moveError: null };
 
 let state: WorkspaceUiState = EMPTY;
 const listeners = new Set<() => void>();
@@ -55,6 +57,10 @@ export function setPendingWorkspaceMove(pending: WorkspaceUiState['pendingMove']
   emit({ ...state, pendingMove: pending });
 }
 
+export function setWorkspaceMoveError(error: WorkspaceUiState['moveError']): void {
+  emit({ ...state, moveError: error });
+}
+
 /** Clear every transient Workspace UI state in one notification: the host's
  *  teardown dialog taking the window, and tests. */
 export function resetWorkspaceUi(): void {
@@ -64,11 +70,12 @@ export function resetWorkspaceUi(): void {
 
 /** Forget only the departing Workspace's chrome, preserving sibling dialogs. */
 export function dismissWorkspaceUi(id: WorkspaceId): void {
-  const { renamingId, pendingClose, pendingMove } = state;
-  if (renamingId !== id && pendingClose?.id !== id && pendingMove?.id !== id) return;
+  const { renamingId, pendingClose, pendingMove, moveError } = state;
+  if (renamingId !== id && pendingClose?.id !== id && pendingMove?.id !== id && moveError?.id !== id) return;
   emit({
     renamingId: renamingId === id ? null : renamingId,
     pendingClose: pendingClose?.id === id ? null : pendingClose,
     pendingMove: pendingMove?.id === id ? null : pendingMove,
+    moveError: moveError?.id === id ? null : moveError,
   });
 }

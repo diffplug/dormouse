@@ -10,12 +10,19 @@ import {
   type RenderMode,
 } from './agent-browser-screen';
 import type { SurfaceKind } from 'dor/commands/types';
+import { isToolKeyScope, type ToolKeyScope } from '../../lib/platform/tool-types';
 
 type BrowserParamsLike = {
   surfaceType?: unknown;
   renderMode?: unknown;
   session?: unknown;
   url?: unknown;
+  /** Tool only: the ports found when autobind refused to choose. */
+  toolPortConflict?: unknown;
+  /** Tool only: `user` when the user-global config declared it. */
+  toolScope?: unknown;
+  /** Tool only: the approval this Surface is waiting on before it runs. */
+  toolPending?: unknown;
   syncEngaged?: unknown;
 };
 
@@ -36,10 +43,132 @@ export function isAgentBrowserParams(params: unknown): boolean {
   return p.renderMode === 'ab-screencast' || p.renderMode === 'ab-popout';
 }
 
-/** Whether params describe any browser surface (vs a terminal): the unified
- *  'browser' type, or anything carrying a renderMode. */
+/** Whether params describe a `tool` Surface — one Session with a terminal and,
+ *  once it serves, a browser (`docs/specs/dor-tool.md`). Checked before the
+ *  browser test below, because a serving tool also carries a `renderMode`. */
+export function isToolParams(params: unknown): params is Record<string, unknown> {
+  return asParams(params).surfaceType === 'tool';
+}
+
+/** The ports autobind found when it refused to choose among them, or null.
+ *  Derived state, never persisted — see `persistableLeafMeta`. */
+export function toolPortConflictFromParams(params: unknown): number[] | null {
+  const value = asParams(params).toolPortConflict;
+  return Array.isArray(value) && value.length > 0 && value.every((p) => typeof p === 'number')
+    ? (value as number[])
+    : null;
+}
+
+/** What a pending tool is waiting to be allowed to run. */
+export interface ToolPending {
+  readonly name: string;
+  readonly run: string;
+  /** Inputs as invoked; approval re-resolves them. */
+  readonly args?: string[];
+  /** Why the last approval attempt launched nothing; the prompt stays up. */
+  readonly error?: string;
+  /** The host confirmed the grant; subsequent attempts only repeat lookup. */
+  readonly trustRecorded?: boolean;
+  readonly path: string;
+  readonly projectRoot: string;
+  /** Requested at launch; applied after approval, since a pane the user cannot
+   *  see is a pane they cannot approve. */
+  readonly minimized: boolean;
+  /** Preserve the launch request across the trust gate. */
+  readonly fresh?: boolean;
+  readonly upstreamUrl: string | null;
+}
+
+/** The approval a tool Surface is waiting on, or null once it may run. */
+export function toolPendingFromParams(params: unknown): ToolPending | null {
+  const value = asParams(params).toolPending;
+  if (!value || typeof value !== 'object') return null;
+  const pending = value as Record<string, unknown>;
+  const strings = ['name', 'run', 'path', 'projectRoot'] as const;
+  if (!strings.every((field) => typeof pending[field] === 'string')) return null;
+  if (typeof pending.minimized !== 'boolean') return null;
+  if (pending.fresh !== undefined && typeof pending.fresh !== 'boolean') return null;
+  if (pending.upstreamUrl !== null && typeof pending.upstreamUrl !== 'string') return null;
+  if (pending.args !== undefined && !(Array.isArray(pending.args) && pending.args.every((arg) => typeof arg === 'string'))) return null;
+  if (pending.error !== undefined && typeof pending.error !== 'string') return null;
+  if (pending.trustRecorded !== undefined && typeof pending.trustRecorded !== 'boolean') return null;
+  return pending as unknown as ToolPending;
+}
+
+/**
+ * Which of a tool's faces is forward. A three-state answer rather than a
+ * boolean because the header and the body must agree: a port conflict occupies
+ * the browser's place (there is nothing to frame, so the pane shows *why*
+ * where the browser would have been) but has no URL to edit, so it must not
+ * get browser chrome. Which halves are *mounted* never changes; see
+ * `ToolPanel.tsx`.
+ *
+ * `browser` and `port-conflict` are mutually exclusive by construction —
+ * autobind writes a conflict only when it declined to write a URL.
+ */
+export type ToolFace = 'terminal' | 'browser' | 'port-conflict' | 'pending-approval';
+
+/** What occupies the tool's second half, or null when it has none yet.
+ *  `toolFace` reads the conflict/browser mutual exclusion from this one place. */
+function toolSecondFace(params: unknown): 'browser' | 'port-conflict' | null {
+  if (!isToolParams(params)) return null;
+  if (toolPortConflictFromParams(params) !== null) return 'port-conflict';
+  return browserUrlFromParams(params) !== null ? 'browser' : null;
+}
+
+export function toolFace(params: unknown): ToolFace {
+  if (!isToolParams(params)) return 'terminal';
+  // Checked before everything: until the human
+  // approves, there is no terminal to show — nothing has spawned.
+  if (toolPendingFromParams(params) !== null) return 'pending-approval';
+  return toolSecondFace(params) ?? 'terminal';
+}
+
+/** Whether a tool Surface's params carry `key`. A null or absent key never
+ *  matches — not even another null: a tool has an identity if and only if it
+ *  was given one, so two identityless tools are two tools
+ *  (`docs/specs/dor-tool.md` -> Identity and dedupe). */
+export function toolKeysEqual(paramsKey: unknown, key: readonly string[] | null): boolean {
+  if (key === null || !Array.isArray(paramsKey)) return false;
+  return paramsKey.length === key.length && paramsKey.every((element, index) => element === key[index]);
+}
+
+/**
+ * Namespace a declared key under the tool identity the *host* resolved from the
+ * spawn (`docs/specs/dor-tool.md` -> Identity and dedupe).
+ *
+ * Two things depend on this, and both break without it. Scope-only keys are
+ * legal — the spec calls the declared list "scope inside that namespace" — so
+ * `docs` and `api` both declaring `[$PROJECT_ROOT]` must stay distinct. And a
+ * key that arrives at runtime over OSC 367 comes from process output: without a
+ * namespace it could name another tool's key, and the next `dor tool <that
+ * tool>` would adopt — and Ctrl+C and re-run — the announcing pane instead.
+ *
+ * `null` for an identityless tool, which never matches anything, so an OSC
+ * re-key cannot mint an identity for a `dor tool -- <command>`.
+ */
+export function namespacedToolKey(
+  toolName: string | null,
+  key: readonly string[] | null,
+): string[] | null {
+  if (!toolName || key === null) return null;
+  return [toolName, ...key];
+}
+
+/** Tool reuse scope: `user` for user-global config, undefined for project
+ *  `dormouse.yml`, and `builtin` for the built-in viewer. Dedupe compares the
+ *  scope alongside the key (`docs/specs/dor-tool.md` -> Declaring tools). */
+export function toolScopeFromParams(params: unknown): ToolKeyScope | undefined {
+  const scope = asParams(params).toolScope;
+  return isToolKeyScope(scope) ? scope : undefined;
+}
+
+/** Whether params describe a plain browser surface (vs a terminal): the unified
+ *  'browser' type, or anything carrying a renderMode. A tool is neither — it is
+ *  its own kind, and `isToolParams` answers for it. */
 export function isBrowserParams(params: unknown): boolean {
   const p = asParams(params);
+  if (isToolParams(params)) return false;
   return p.surfaceType === 'browser' || typeof p.renderMode === 'string';
 }
 
@@ -63,6 +192,7 @@ export function browserDisplayModeFromParams(params: unknown): BrowserDisplayMod
  *  kind is `use-session-persistence.ts`, where this return flows into the
  *  narrower `PersistedSurfaceType`. */
 export function surfaceKindFromParams(params: unknown): SurfaceKind {
+  if (isToolParams(params)) return 'tool';
   return isBrowserParams(params) ? 'browser' : 'terminal';
 }
 

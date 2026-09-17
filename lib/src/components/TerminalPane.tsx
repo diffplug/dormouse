@@ -72,7 +72,9 @@ export function TerminalPane({ id, isFocused = true }: TerminalPaneProps) {
   }, [id, resize, workspaceActive]);
 
   useEffect(() => {
-    focusSession(id, isFocused);
+    // A Tool's browser can retain its focus handle until its exit effect runs.
+    // This mount owns the terminal capability, including during that transition.
+    focusSession(id, isFocused, 'terminal');
   }, [id, isFocused]);
 
   return (

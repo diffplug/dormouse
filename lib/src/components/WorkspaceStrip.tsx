@@ -15,7 +15,7 @@ import { AlertBell } from './AlertBell';
 import { InlineEditInput } from './wall/InlineEditInput';
 import { WorkspaceKillConfirm } from './WorkspaceKillConfirm';
 import { useTodoPillContent } from './TodoPillBody';
-import { chromeButton, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from './design';
+import { chromeButton, ModalFrame, modalActionButton, OVERLAY_MAX_HEIGHT, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from './design';
 import { createWorkspaceStripDrag, type StripDragHost } from './workspace-strip-drag';
 import { acquireChromeKeyboardLease } from './wall/chrome-keyboard-lease';
 import { useDialogKeyboardOwner } from './wall/wall-context';
@@ -28,6 +28,7 @@ import {
   getWorkspaceUiSnapshot,
   setPendingWorkspaceClose,
   setPendingWorkspaceMove,
+  setWorkspaceMoveError,
   setRenamingWorkspace,
   subscribeToWorkspaceUi,
 } from '../lib/workspace-ui-store';
@@ -67,7 +68,7 @@ export function WorkspaceStrip({
   const { workspaces, activeId } = useSyncExternalStore(subscribeToWorkspaces, getWorkspacesSnapshot);
   const membership = useSyncExternalStore(subscribeToWorkspaceSurfaces, getWorkspaceSurfacesSnapshot);
   const activity = useSyncExternalStore(subscribeToActivity, getActivitySnapshot);
-  const { renamingId, pendingClose, pendingMove } = useSyncExternalStore(subscribeToWorkspaceUi, getWorkspaceUiSnapshot);
+  const { renamingId, pendingClose, pendingMove, moveError } = useSyncExternalStore(subscribeToWorkspaceUi, getWorkspaceUiSnapshot);
   const [draggingId, setDraggingId] = useState<WorkspaceId | null>(null);
 
   const stripRef = useRef<HTMLDivElement>(null);
@@ -75,7 +76,7 @@ export function WorkspaceStrip({
 
   // The editor and the confirmation both sit outside every Wall, so a
   // capture-phase command-mode shortcut would still fire behind them.
-  useDialogKeyboardOwner(renamingId !== null || pendingClose !== null || pendingMove !== null, acquireChromeKeyboardLease);
+  useDialogKeyboardOwner(renamingId !== null || pendingClose !== null || pendingMove !== null || moveError !== null, acquireChromeKeyboardLease);
 
   const activate = useCallback((id: WorkspaceId) => {
     setActiveWorkspace(id);
@@ -130,8 +131,8 @@ export function WorkspaceStrip({
   // confirmation lands in the same place whichever Workspace it is about. No
   // Window (Storybook) leaves it viewport-centered.
   const confirmTarget = useMemo(
-    () => (pendingClose || pendingMove ? document.querySelector<HTMLElement>('[data-workspace-content]') : null),
-    [pendingClose, pendingMove],
+    () => (pendingClose || pendingMove || moveError ? document.querySelector<HTMLElement>('[data-workspace-content]') : null),
+    [pendingClose, pendingMove, moveError],
   );
 
   // Cues observe the active Workspace too, so switching tabs cannot create one.
@@ -201,6 +202,14 @@ export function WorkspaceStrip({
           The move gate is the same typed letter (the page state it destroys is
           as gone as a killed pane's process) and waits behind a close, so only
           one gate ever listens for the letter on screen. */}
+      {moveError && !pendingClose && !pendingMove && !renamingId && (
+        <ModalFrame titleId="workspace-move-error" targetElement={confirmTarget}
+          onEscape={() => setWorkspaceMoveError(null)} className={clsx("w-80 max-w-full overflow-auto text-sm", OVERLAY_MAX_HEIGHT.modal)}>
+          <h2 id="workspace-move-error" className="mb-2 font-semibold">Workspace could not move</h2>
+          <p role="alert" className="mb-3 break-words">{moveError.reason}</p>
+          <button type="button" className={modalActionButton()} onClick={() => setWorkspaceMoveError(null)}>Close</button>
+        </ModalFrame>
+      )}
       {pendingClose && !renamingId && (
         <WorkspaceKillConfirm
           char={pendingClose.char}
