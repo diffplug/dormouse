@@ -185,7 +185,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   }
 
   writePty(id: string, data: string, options?: WritePtyOptions): void {
-    this.host.send("pty_write", { id, data, paced: options?.paced === true });
+    this.host.send("pty_write", { id, data, paced: options?.paced });
   }
 
   resizePty(id: string, cols: number, rows: number): void {

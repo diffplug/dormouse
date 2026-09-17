@@ -1153,8 +1153,6 @@ module.exports.openNativeDirectory = openNativeDirectory;
 const PACED_CHUNK_BYTES = 256;
 const PACED_CHUNK_GAP_MS = 10;
 const PACED_KEY_SETTLE_MS = 100;
-module.exports.PACED_CHUNK_GAP_MS = PACED_CHUNK_GAP_MS;
-module.exports.PACED_KEY_SETTLE_MS = PACED_KEY_SETTLE_MS;
 
 // A key is one whole escape sequence, DEL, or a C0 control other than tab and
 // line feed, which stay text. Returns `i` when `data[i]` starts text.
@@ -1163,10 +1161,12 @@ function keyTokenEnd(data, i) {
   if (code === 0x1b) {
     const next = data[i + 1];
     if (next === '[') {
-      // CSI: parameter and intermediate bytes (0x20-0x3F), then one final byte.
+      // CSI: parameter and intermediate bytes (0x20-0x3F), then a final byte
+      // (0x40-0x7E); a sequence cut short ends where its valid bytes do.
       let j = i + 2;
       while (j < data.length && data.charCodeAt(j) >= 0x20 && data.charCodeAt(j) <= 0x3f) j += 1;
-      return Math.min(j + 1, data.length);
+      const final = data.charCodeAt(j);
+      return final >= 0x40 && final <= 0x7e ? j + 1 : j;
     }
     if (next === 'O') return Math.min(i + 3, data.length);
     return Math.min(i + 2, data.length);
@@ -1179,30 +1179,28 @@ function keyTokenEnd(data, i) {
  *  whole keys, never cutting a code point or an escape sequence. */
 function pacedInputSegments(data) {
   const segments = [];
-  let text = '';
+  let start = 0;
   let bytes = 0;
-  const flush = () => {
-    if (text) segments.push({ data: text, key: false });
-    text = '';
+  const flush = (end) => {
+    if (end > start) segments.push({ data: data.slice(start, end), key: false });
+    start = end;
     bytes = 0;
   };
   for (let i = 0; i < data.length;) {
     const keyEnd = keyTokenEnd(data, i);
     if (keyEnd > i) {
-      flush();
+      flush(i);
       segments.push({ data: data.slice(i, keyEnd), key: true });
-      i = keyEnd;
+      start = i = keyEnd;
       continue;
     }
     const codePoint = data.codePointAt(i);
-    const width = codePoint > 0xffff ? 2 : 1;
     const size = codePoint < 0x80 ? 1 : codePoint < 0x800 ? 2 : codePoint < 0x10000 ? 3 : 4;
-    if (bytes + size > PACED_CHUNK_BYTES) flush();
-    text += data.slice(i, i + width);
+    if (bytes + size > PACED_CHUNK_BYTES) flush(i);
     bytes += size;
-    i += width;
+    i += codePoint > 0xffff ? 2 : 1;
   }
-  flush();
+  flush(data.length);
   return segments;
 }
 module.exports.pacedInputSegments = pacedInputSegments;
@@ -1254,46 +1252,39 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
     repaintTimers.delete(id);
   }
 
-  // A queue exists only while paced steps are still due; every write for that
-  // id joins it so input keeps its order. `pacedMarks` outlives the queue: a
-  // key sent by a later request still settles after the text before it.
-  const inputQueues = new Map(); // id -> { steps: [{ data, key, paced }], timer }
-  const pacedMarks = new Map(); // id -> { at, textAt } of the last paced writes
+  // Per-PTY paced input, kept after its steps drain: `at` / `textAt` time the
+  // last paced write and paced text, so a key sent by a later request still
+  // settles. While steps are pending, every write for the id joins them, so
+  // input keeps its order. Every path that retires a PTY cancels its input
+  // first, so the `p` a drain captured is still the live one.
+  const inputs = new Map(); // id -> { steps: [{ data, key, paced }], timer, at, textAt }
 
   function cancelInput(id) {
-    clearTimeout(inputQueues.get(id)?.timer);
-    inputQueues.delete(id);
-    pacedMarks.delete(id);
+    clearTimeout(inputs.get(id)?.timer);
+    inputs.delete(id);
   }
 
-  function pacedDueAt(id, key) {
-    const mark = pacedMarks.get(id);
-    if (!mark) return 0;
-    const settled = key && mark.textAt !== undefined ? mark.textAt + PACED_KEY_SETTLE_MS : 0;
-    return Math.max(mark.at + PACED_CHUNK_GAP_MS, settled);
-  }
-
-  function drainInput(id, queue) {
-    queue.timer = undefined;
-    const p = ptys.get(id);
-    while (p && queue.steps.length > 0) {
-      const step = queue.steps[0];
-      const wait = step.paced ? pacedDueAt(id, step.key) - Date.now() : 0;
-      if (wait > 0) {
-        queue.timer = setTimeout(() => drainInput(id, queue), wait);
-        return;
+  function drainInput(p, input) {
+    input.timer = undefined;
+    while (input.steps.length > 0) {
+      const step = input.steps[0];
+      if (step.paced) {
+        const dueAt = step.key
+          ? Math.max(input.at + PACED_CHUNK_GAP_MS, input.textAt + PACED_KEY_SETTLE_MS)
+          : input.at + PACED_CHUNK_GAP_MS;
+        const wait = dueAt - Date.now();
+        if (wait > 0) {
+          input.timer = setTimeout(() => drainInput(p, input), wait);
+          return;
+        }
       }
-      queue.steps.shift();
+      input.steps.shift();
       p.write(step.data);
       if (step.paced) {
-        const now = Date.now();
-        const mark = pacedMarks.get(id) ?? {};
-        mark.at = now;
-        if (!step.key) mark.textAt = now;
-        pacedMarks.set(id, mark);
+        input.at = Date.now();
+        if (!step.key) input.textAt = input.at;
       }
     }
-    inputQueues.delete(id);
   }
 
   function validHelperOwner(id, helper) {
@@ -1388,21 +1379,24 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
   function write(id, data, { paced = false } = {}) {
     const p = ptys.get(id);
     if (!p) return;
-    let queue = inputQueues.get(id);
-    if (!paced && !queue) {
+    // An interrupt skips the line and discards what waits in it, as the tty
+    // flushes its own input queue on one.
+    if (!paced && data === '\x03') cancelInput(id);
+    let input = inputs.get(id);
+    if (!paced && !input?.steps.length) {
       p.write(data);
       return;
     }
-    if (!queue) {
-      queue = { steps: [], timer: undefined };
-      inputQueues.set(id, queue);
+    if (!input) {
+      input = { steps: [], timer: undefined, at: -Infinity, textAt: -Infinity };
+      inputs.set(id, input);
     }
     if (paced) {
-      for (const segment of pacedInputSegments(data)) queue.steps.push({ ...segment, paced: true });
+      for (const segment of pacedInputSegments(data)) input.steps.push({ ...segment, paced: true });
     } else {
-      queue.steps.push({ data, key: false, paced: false });
+      input.steps.push({ data, key: false, paced: false });
     }
-    if (queue.timer === undefined) drainInput(id, queue);
+    if (input.timer === undefined) drainInput(p, input);
   }
 
   function resize(id, cols, rows, repaint = false) {
@@ -1474,8 +1468,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
 
   function killAll() {
     for (const id of repaintTimers.keys()) cancelRepaint(id);
-    for (const id of inputQueues.keys()) cancelInput(id);
-    pacedMarks.clear();
+    for (const id of inputs.keys()) cancelInput(id);
     for (const [, p] of ptys) {
       p.kill();
     }
@@ -1670,9 +1663,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
   function interrupt(ids, requestId) {
     const targets = Array.isArray(ids) ? ids : [...ptys.keys()];
     for (const id of targets) {
-      // Guarded per id: one already-dead pty must not abort the rest. The press
-      // is immediate: input still waiting behind a pace is discarded.
-      cancelInput(id);
+      // Guarded per id: one already-dead pty must not abort the rest.
       try { write(id, '\x03'); } catch { /* already dead */ }
     }
     // Only an actual request is acked. The recovery capture presses in-process

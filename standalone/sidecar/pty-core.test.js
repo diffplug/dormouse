@@ -29,8 +29,6 @@ const {
   OPEN_PORT_TIMEOUT_MS,
   OPEN_PORT_TIMEOUT_PER_ID_MS,
   pacedInputSegments,
-  PACED_CHUNK_GAP_MS,
-  PACED_KEY_SETTLE_MS,
 } = require('./pty-core');
 
 test('resolveSpawnConfig uses POSIX shell and home defaults', () => {
@@ -338,11 +336,13 @@ test('resolveSpawnConfig skips -l for csh', () => {
   assert.deepEqual(config.shellArgs, []);
 });
 
-// The real shared owner, with only node-pty replaced: all local and remote
-// resizes reach this manager, so these races must be decided here.
-function repaintHarness(t) {
-  t.mock.timers.enable({ apis: ['setTimeout'] });
+// The real shared owner, with only node-pty replaced: every local and remote
+// resize and write reaches this manager, so these races must be decided here.
+// Writes from a respawned generation are prefixed with its number.
+function ptyHarness(t) {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const resizes = [];
+  const writes = [];
   const exits = [];
   let serial = 0;
   const mgr = create(() => {}, {
@@ -353,17 +353,18 @@ function repaintHarness(t) {
         onData() {},
         onExit(handler) { exits.push(handler); },
         resize(cols, rows) { resizes.push({ generation, cols, rows }); },
+        write(data) { writes.push(generation === 1 ? data : `${generation}:${data}`); },
         kill() {},
       };
     },
   });
   mgr.spawn('pane-1');
-  return { mgr, resizes, exits };
+  return { mgr, resizes, writes, exits };
 }
 
 for (const rows of [1, 24]) {
   test(`PTY owner restores a ${rows}-row repaint without a live Viewer`, (t) => {
-    const { mgr, resizes } = repaintHarness(t);
+    const { mgr, resizes } = ptyHarness(t);
     mgr.resize('pane-1', 80, rows, true);
     assert.deepEqual(resizes, [{ generation: 1, cols: 80, rows: rows > 1 ? rows - 1 : 2 }]);
     // A Viewer can detach/dispose; restoring the owner's temporary size still
@@ -375,7 +376,7 @@ for (const rows of [1, 24]) {
 
 for (const repaint of [false, true]) {
   test(`a later ${repaint ? 'Viewer repaint' : 'local resize'} supersedes PTY restoration`, (t) => {
-    const { mgr, resizes } = repaintHarness(t);
+    const { mgr, resizes } = ptyHarness(t);
     mgr.resize('pane-1', 80, 24, true);
     t.mock.timers.tick(30);
     mgr.resize('pane-1', 120, 40, repaint);
@@ -389,7 +390,7 @@ for (const repaint of [false, true]) {
 
 for (const retire of ['exit', 'kill', 'killAll', 'replace']) {
   test(`PTY repaint restoration stops on ${retire}`, (t) => {
-    const { mgr, resizes, exits } = repaintHarness(t);
+    const { mgr, resizes, exits } = ptyHarness(t);
     mgr.resize('pane-1', 80, 24, true);
     if (retire === 'exit') exits[0]({ exitCode: 0 });
     else if (retire === 'replace') mgr.spawn('pane-1');
@@ -419,80 +420,64 @@ test('pacedInputSegments splits text by UTF-8 bytes and keeps keys whole', () =>
   ]);
   assert.deepEqual(pacedInputSegments('😀'.repeat(65)).map(({ data }) => data), ['😀'.repeat(64), '😀']);
   assert.deepEqual(pacedInputSegments('\x1b'), [{ data: '\x1b', key: true }]);
+  assert.deepEqual(pacedInputSegments('\x1b[1\ra'), [
+    { data: '\x1b[1', key: true },
+    { data: '\r', key: true },
+    { data: 'a', key: false },
+  ]);
 });
 
-function inputHarness(t) {
-  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
-  const writes = [];
-  const exits = [];
-  let serial = 0;
-  const mgr = create(() => {}, {
-    spawn() {
-      const generation = ++serial;
-      return {
-        pid: generation,
-        onData() {},
-        onExit(handler) { exits.push(handler); },
-        resize() {},
-        write(data) { writes.push(generation === 1 ? data : `${generation}:${data}`); },
-        kill() {},
-      };
-    },
-  });
-  mgr.spawn('pane-1');
-  return { mgr, writes, exits };
-}
-
 test('paced input writes bounded text runs apart and settles before a key', (t) => {
-  const { mgr, writes } = inputHarness(t);
+  const { mgr, writes } = ptyHarness(t);
   mgr.write('pane-1', `${'a'.repeat(600)}\r`, { paced: true });
   assert.deepEqual(writes, ['a'.repeat(256)]);
-  t.mock.timers.tick(PACED_CHUNK_GAP_MS);
-  t.mock.timers.tick(PACED_CHUNK_GAP_MS);
+  t.mock.timers.tick(10);
+  t.mock.timers.tick(10);
   assert.deepEqual(writes, ['a'.repeat(256), 'a'.repeat(256), 'a'.repeat(88)]);
-  t.mock.timers.tick(PACED_KEY_SETTLE_MS - 1);
+  t.mock.timers.tick(99);
   assert.equal(writes.length, 3);
   t.mock.timers.tick(1);
   assert.equal(writes.at(-1), '\r');
 });
 
 test('input written during a pace joins it in order', (t) => {
-  const { mgr, writes } = inputHarness(t);
+  const { mgr, writes } = ptyHarness(t);
   mgr.write('pane-1', 'b'.repeat(300), { paced: true });
   mgr.write('pane-1', 'typed');
   assert.deepEqual(writes, ['b'.repeat(256)]);
-  t.mock.timers.tick(PACED_CHUNK_GAP_MS);
+  t.mock.timers.tick(10);
   assert.deepEqual(writes, ['b'.repeat(256), 'b'.repeat(44), 'typed']);
   mgr.write('pane-1', 'free');
   assert.equal(writes.at(-1), 'free');
 });
 
 test('a key sent by a later paced write still settles after earlier text', (t) => {
-  const { mgr, writes } = inputHarness(t);
+  const { mgr, writes } = ptyHarness(t);
   mgr.write('pane-1', 'prompt', { paced: true });
   t.mock.timers.tick(50);
   mgr.write('pane-1', '\r', { paced: true });
   assert.deepEqual(writes, ['prompt']);
-  t.mock.timers.tick(PACED_KEY_SETTLE_MS - 50);
+  t.mock.timers.tick(50);
   assert.deepEqual(writes, ['prompt', '\r']);
   t.mock.timers.tick(1000);
   mgr.write('pane-1', 'next', { paced: true });
   assert.equal(writes.at(-1), 'next');
 });
 
-for (const retire of ['exit', 'kill', 'killAll', 'replace', 'interrupt']) {
+for (const retire of ['exit', 'kill', 'killAll', 'replace', 'interrupt', 'typed ^C']) {
   test(`pending paced input is discarded on ${retire}`, (t) => {
-    const { mgr, writes, exits } = inputHarness(t);
+    const { mgr, writes, exits } = ptyHarness(t);
     mgr.write('pane-1', `${'c'.repeat(300)}\r`, { paced: true });
     if (retire === 'exit') exits[0]({ exitCode: 0 });
     else if (retire === 'replace') mgr.spawn('pane-1');
     else if (retire === 'interrupt') mgr.interrupt(['pane-1']);
+    else if (retire === 'typed ^C') mgr.write('pane-1', '\x03');
     else mgr[retire]('pane-1');
     t.mock.timers.tick(1000);
     if (retire === 'replace') mgr.write('pane-1', '\r', { paced: true });
     assert.deepEqual(writes, [
       'c'.repeat(256),
-      ...(retire === 'interrupt' ? ['\x03'] : []),
+      ...(retire === 'interrupt' || retire === 'typed ^C' ? ['\x03'] : []),
       ...(retire === 'replace' ? ['2:\r'] : []),
     ]);
   });

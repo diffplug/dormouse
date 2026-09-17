@@ -349,7 +349,7 @@ export class TauriAdapter implements PlatformAdapter {
   }
 
   writePty(id: string, data: string, options?: WritePtyOptions): void {
-    invoke("pty_write", { id, data, paced: options?.paced === true });
+    invoke("pty_write", { id, data, paced: options?.paced });
   }
 
   resizePty(id: string, cols: number, rows: number): void {

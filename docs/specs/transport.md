@@ -90,12 +90,12 @@ VS Code's `pty-manager` keeps two buffers plus one counter per PTY. **Must cap e
 
 `writePty(id, data, { paced: true })` delivers input the way a person types it; every host carries the flag to `pty-core.write`. `surface.send` (`dor send`) is the only paced writer — keystrokes, pastes, and launched commands are written as one burst.
 
-- **Must write paced text in runs of at most 256 UTF-8 bytes, 10 ms apart**, so no read by the program crosses a TUI's paste threshold (rationale).
+- **Must write paced text in runs of at most 256 UTF-8 bytes, 10 ms apart** (rationale).
 - **Must hold a key until 100 ms after the paced text before it**, even when a later request sends the key (rationale). A key is one escape sequence, DEL, or a C0 control other than tab and line feed; tab and line feed are text.
 - **Never split a code point or an escape sequence across writes.**
 - **Must queue any write that arrives while paced input is pending**, so input keeps its order.
-- **Must discard pending paced input when its PTY exits, is killed, or is respawned.** `interrupt` discards it too and writes its `^C` at once.
-- **Pacing lives in the PTY owner, never the webview** (rationale).
+- **Must discard pending paced input when its PTY exits, is killed, or is respawned, and on an unpaced lone `^C`**, which is then written at once — `interrupt` and a typed `^C` included.
+- **Never pace in the webview**; the PTY owner paces (rationale).
 
 Source of truth: `pacedInputSegments` and `write` in `standalone/sidecar/pty-core.js`, pinned by `standalone/sidecar/pty-core.test.js`.
 

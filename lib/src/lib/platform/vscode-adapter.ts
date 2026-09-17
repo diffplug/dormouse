@@ -352,7 +352,7 @@ export class VSCodeAdapter implements PlatformAdapter {
   }
 
   writePty(id: string, data: string, options?: WritePtyOptions): void {
-    this.vscode.postMessage({ type: 'pty:input', id, data, ...(options?.paced ? { paced: true } : {}) });
+    this.vscode.postMessage({ type: 'pty:input', id, data, paced: options?.paced });
   }
 
   resizePty(id: string, cols: number, rows: number): void {
