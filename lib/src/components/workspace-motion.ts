@@ -99,7 +99,9 @@ export function createWorkspaceMotion(element: HTMLElement, id: string, onVisibi
         const t = Math.min(1, Math.max(0, (now - start) / LATH_MOTION_MS));
         const eased = LATH_EASING(t);
         progress = from + (to - from) * eased;
-        alpha = fromAlpha + (toAlpha - fromAlpha) * eased;
+        // Outgoing content dims gradually while the new Wall covers it.
+        const alphaEase = toAlpha < fromAlpha ? t : eased;
+        alpha = fromAlpha + (toAlpha - fromAlpha) * alphaEase;
         paint();
         if (t === 1) finish();
         else raf = requestAnimationFrame(tick);
@@ -131,8 +133,8 @@ export function createWorkspaceMotion(element: HTMLElement, id: string, onVisibi
     collapsed: () => departing && progress === 0,
     fade() {
       if (!visible || departing) { motion.hide(); return; }
-      // Freeze its geometry beneath the incoming Wall; detach only after fading.
-      void animate(progress, 0, () => setVisible(false));
+      // Keep half its opacity until the incoming Wall fully covers it.
+      void animate(progress, 0.5, () => setVisible(false));
     },
     hide() {
       cancel();

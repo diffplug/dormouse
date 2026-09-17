@@ -65,7 +65,7 @@ describe('workspace motion', () => {
     expect(wall.style.opacity).toBe('');
   });
 
-  it('keeps the outgoing Wall visible through its fade, then releases its rendering', () => {
+  it('dims the outgoing Wall gradually to half opacity before releasing its rendering', () => {
     const visibility = vi.fn();
     motion.dispose();
     motion = createWorkspaceMotion(wall, 'ws-a', visibility);
@@ -75,11 +75,11 @@ describe('workspace motion', () => {
     motion.fade();
     frame(LATH_MOTION_MS / 2);
     expect(wall.style.transform).toBe('');
-    expect(Number(wall.style.opacity)).toBeCloseTo(1 - LATH_EASING(0.5));
+    expect(Number(wall.style.opacity)).toBeCloseTo(0.75);
     expect(visibility).not.toHaveBeenCalled();
     frame(LATH_MOTION_MS / 2);
     expect(visibility).toHaveBeenCalledWith(false);
-    expect(wall.style.opacity).toBe('0');
+    expect(wall.style.opacity).toBe('0.5');
   });
 
   it('reverses a rapid switch without jumping or hiding the reactivated Wall', () => {
