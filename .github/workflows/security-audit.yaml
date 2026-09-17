@@ -475,7 +475,7 @@ jobs:
             echo "- **A domain could not determine every check.** $INCONCLUSIVE_DOMAINS returned \`VERDICT: INCONCLUSIVE\`; read its \`UNVERIFIABLE\` checks. Those checks do not count as passing." >> "$NOTES"
           fi
           if [ "$STATUS_FILE_VERDICT" = "none" ]; then
-            echo "- **The audit wrote no verdict.** \`audit-status.txt\` was absent, empty, or not \`PASS\`/\`FAIL\`, so the run ended without deciding. Start at the report's own markers: \`UNVERIFIABLE\` is a check the agent could not determine, while a domain section reading \`_No report …_\` is one that never reported — which is what an expired wait deadline looks like." >> "$NOTES"
+            echo "- **The audit wrote no verdict.** \`audit-status.txt\` was absent, empty, or not \`PASS\`/\`FAIL\`, so the run ended without deciding. Start at the report's own markers: \`UNVERIFIABLE\` is a check the agent could not determine, \`_Incomplete …_\` heads a domain that was cut off mid-report, and a domain section reading \`_No report …_\` is one that never reported — which is what an expired wait deadline looks like." >> "$NOTES"
           fi
 
           if [ "$STATUS" = "FAIL" ]; then

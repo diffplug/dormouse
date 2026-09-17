@@ -53,6 +53,10 @@ const cases = [
   { name: 'PASS without a sentinel is a cut-off domain', status: 'PASS', verdicts: ['PASS', 'PASS', 'PASS'], unfinished: [2], expected: 'INCONCLUSIVE', notes: ['cut off mid-report'] },
   { name: 'a cut-off FAIL is still a finding', status: 'PASS', verdicts: ['PASS', 'PASS', 'FAIL'], unfinished: [2], expected: 'FAIL', notes: ['returned `FAIL`', 'cut off mid-report'] },
   { name: 'a trailing blank line still ends a report', status: 'PASS', verdicts: ['PASS', 'PASS', 'PASS'], trailingBlank: true, expected: 'PASS' },
+  // The no-verdict note is the reader's index into the merged report, so it
+  // names every marker the merge can leave there. Drop one and the reader is
+  // told to look for two shapes in a report that has three.
+  { name: 'the no-verdict note names every report marker', verdicts: ['PASS', 'PASS', 'PASS'], unfinished: [2], expected: 'INCONCLUSIVE', notes: ['`UNVERIFIABLE`', '`_Incomplete …_`', '`_No report …_`'] },
 ];
 for (const scenario of cases) {
   test(`reporting: ${scenario.name}`, (t) => {
@@ -109,7 +113,7 @@ test('redactor failure removes every published sink', (t) => {
 // The `false` rows write no sentinel: the local runner rejects a fragment its
 // domain stopped short of finishing, exactly as CI's reporting step does, so a
 // PASS on line 1 of a cut-off report does not exit zero here either.
-for (const [verdict, cliExit, expected, sentinel = true] of [['PASS', 0, 0], ['FAIL', 0, 1], ['FAIL \u2014 explained', 0, 1], ['INCONCLUSIVE', 0, 1], ['PASS extra', 0, 1], ['PASS', 7, 1], ['PASS', 0, 1, false]]) {
+for (const [verdict, cliExit, expected, sentinel = true] of [['PASS', 0, 0], ['FAIL', 0, 1], ['FAIL \u2014 explained', 0, 1], ['INCONCLUSIVE', 0, 1], ['PASS extra', 0, 1], ['PASS', 7, 1], ['PASS', 0, 1, false], ['FAIL', 0, 1, false]]) {
   test(`local runner: ${verdict}, CLI exit ${cliExit}${sentinel ? '' : ', no sentinel'}`, (t) => {
     const { dir, env } = fixture(t);
     copyFileSync(join(repo, 'scripts/security-audit-local.sh'), join(dir, 'scripts/security-audit-local.sh'));
@@ -130,6 +134,10 @@ for (const [verdict, cliExit, expected, sentinel = true] of [['PASS', 0, 0], ['F
     assert.equal(result.status, expected, result.stderr);
     if (verdict.startsWith('FAIL')) {
       assert.ok(!result.stderr.includes('no readable verdict'), result.stderr);
+      // A dissent is reported as one whether or not the fragment finished. CI
+      // records both conditions and escalates to FAIL; reporting only the
+      // cut-off here would hide a finding the domain did write.
+      assert.match(result.stderr, /reports FAIL/);
     }
     if (!sentinel) assert.match(result.stderr, /cut off before finishing/);
     for (const fragment of fragments) assert.ok(existsSync(join(dir, fragment)), fragment);

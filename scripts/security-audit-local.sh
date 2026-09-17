@@ -79,7 +79,8 @@ run_domain() {
     # Last non-blank line, not `tail -n1`: a trailing blank line after the
     # sentinel still ends a finished report.
     if [ "$(sed -e '/^[[:space:]]*$/d' "$out" | tail -n1)" != "<!-- END OF REPORT -->" ]; then
-      echo "==> $domain was cut off before finishing $out — findings kept, verdict does not stand" >&2
+      echo "==> $domain was cut off before finishing $out — findings kept, its verdict line covers less than it appears to" >&2
+      case "$(head -n1 "$out")" in 'VERDICT: FAIL'*) echo "==> $domain reports FAIL" >&2 ;; esac
       return 1
     fi
     # The same grammar CI applies in .github/workflows/security-audit.yaml, and
