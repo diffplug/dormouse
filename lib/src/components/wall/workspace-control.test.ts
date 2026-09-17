@@ -260,14 +260,13 @@ describe('workspace.close', () => {
     expect(getWorkspacesSnapshot().workspaces).toHaveLength(2);
   });
 
-  it('refuses the last Workspace', async () => {
+  it('closes and replaces the last Workspace', async () => {
     const only = getWorkspacesSnapshot().workspaces[0].id;
     handleFor(only);
     const detail = request('workspace.close', { workspace: 'workspace:1' });
     await handleWorkspaceControl(detail);
-    expect(answer(detail)).toBe(
-      "workspace 'workspace:1' was not closed: the last Workspace cannot be closed",
-    );
+    expect(answer(detail)).toMatchObject({ status: 'closed', workspaceId: only });
+    expect(getWorkspacesSnapshot().activeId).not.toBe(only);
     expect(getWorkspacesSnapshot().workspaces).toHaveLength(1);
   });
 

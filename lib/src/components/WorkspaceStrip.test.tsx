@@ -108,8 +108,12 @@ describe('WorkspaceStrip', () => {
     await act(async () => { createWorkspace({ id: 'ws-2' }); });
     await render();
     expect(getActiveWorkspaceId()).toBe('ws-2');
+    expect(tabFor(first).querySelector('[data-workspace-tab-close]')).toBeNull();
+    expect(tabFor('ws-2').querySelector('[data-workspace-tab-close]')).not.toBeNull();
     await act(async () => { activateButton(first).click(); });
     expect(getActiveWorkspaceId()).toBe(first);
+    expect(tabFor(first).querySelector('[data-workspace-tab-close]')).not.toBeNull();
+    expect(tabFor('ws-2').querySelector('[data-workspace-tab-close]')).toBeNull();
   });
 
   it('shows indicators for a hidden Workspace only, counting them in its label', async () => {
@@ -129,13 +133,13 @@ describe('WorkspaceStrip', () => {
     expect(tabFor('ws-2').querySelector('.todo-pill-shell')).toBeNull();
   });
 
-  it('renames on double-click, holding the chrome keyboard lease while the editor is open', async () => {
+  it('renames the active tab on click, holding the chrome keyboard lease while the editor is open', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await render();
     expect(chromeKeyboardHeld()).toBe(false);
 
     await act(async () => {
-      activateButton(first).dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+      activateButton(first).click();
     });
     const input = container.querySelector<HTMLInputElement>(`[data-workspace-rename-for="${first}"]`)!;
     expect(chromeKeyboardHeld()).toBe(true);
@@ -148,10 +152,10 @@ describe('WorkspaceStrip', () => {
     expect(chromeKeyboardHeld()).toBe(false);
   });
 
-  it('hides the close button with one Workspace and closes an untouched one outright', async () => {
+  it('shows the close button with one Workspace and closes an untouched one outright', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await render();
-    expect(container.querySelector('[data-workspace-tab-close]')).toBeNull();
+    expect(container.querySelector('[data-workspace-tab-close]')).not.toBeNull();
 
     await act(async () => { createWorkspace({ id: 'ws-2' }); });
     const closed = vi.fn(async () => null);
@@ -172,8 +176,9 @@ describe('WorkspaceStrip', () => {
     await act(async () => { activateButton(first).click(); });
 
     await act(async () => {
-      container.querySelector<HTMLButtonElement>('[data-workspace-tab-close="ws-2"]')!.click();
+      tabFor('ws-2').dispatchEvent(new MouseEvent('auxclick', { button: 1, bubbles: true }));
     });
+    expect(getActiveWorkspaceId()).toBe('ws-2');
     expect(container.querySelector('#kill-confirm-title')).not.toBeNull();
     expect(chromeKeyboardHeld()).toBe(true);
     const char = container.querySelector('.text-xl')!.textContent!;
@@ -360,7 +365,7 @@ describe('WorkspaceStrip', () => {
     await render();
 
     await act(async () => {
-      activateButton('ws-2').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+      activateButton('ws-2').click();
     });
     expect(chromeKeyboardHeld()).toBe(true);
     // Removing the focused input fires no `blur`, so neither submit nor cancel

@@ -13,12 +13,15 @@ import { WorkspaceSelectionOverlay, type LathOverlayStore } from './WorkspaceSel
 import {
   DoorElementsContext,
   PaneElementsContext,
+  RingHandoffContext,
   WindowFocusedContext,
   type PaneElementsState,
 } from './wall-context';
-import type { WallMode } from './wall-types';
+import type { WallMode, WallSelectionKind } from './wall-types';
 import { cfg } from '../../cfg';
 import { ringPerimeter } from '../../lib/ring-geometry';
+import type { RingFrame } from '../../lib/rect-tween';
+import { resetWorkspaceUi, setRenamingWorkspace } from '../../lib/workspace-ui-store';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -59,22 +62,26 @@ function paneCtx(elements: Map<string, HTMLElement>): PaneElementsState {
   return { elements, version: 0, bumpVersion: () => {} };
 }
 
-function Harness({ selectedId, mode, store, panes }: {
+function Harness({ selectedId, selectedType = 'pane', mode, store, panes, doors = new Map(), active = true }: {
   selectedId: string | null;
+  selectedType?: WallSelectionKind;
   mode: WallMode;
   store: LathOverlayStore;
   panes: Map<string, HTMLElement>;
+  doors?: Map<string, HTMLElement>;
+  active?: boolean;
 }) {
   return (
     <PaneElementsContext.Provider value={paneCtx(panes)}>
-      <DoorElementsContext.Provider value={paneCtx(new Map())}>
+      <DoorElementsContext.Provider value={paneCtx(doors)}>
         <WindowFocusedContext.Provider value={true}>
           <WorkspaceSelectionOverlay
             lathStore={store}
             subscribeLathFrames={null}
             selectedId={selectedId}
-            selectedType="pane"
+            selectedType={selectedType}
             mode={mode}
+            active={active}
           />
         </WindowFocusedContext.Provider>
       </DoorElementsContext.Provider>
@@ -84,7 +91,7 @@ function Harness({ selectedId, mode, store, panes }: {
 
 /** The overlay's root (fixed-position) div, or null when the ring is hidden. */
 function ring(): HTMLElement | null {
-  return container.querySelector('div');
+  return document.querySelector('[data-ring="outline"]')?.closest('svg')?.parentElement ?? null;
 }
 function ringRect() {
   const el = ring();
@@ -119,6 +126,7 @@ const B: Rectish = { top: 200, left: 300, width: 160, height: 60 };
 const INFLATE = 4; // SELECTION_RING_INFLATE_PX for panes
 
 beforeEach(() => {
+  resetWorkspaceUi();
   clock = 0;
   rafSeq = 0;
   rafCbs = new Map();
@@ -161,6 +169,98 @@ function twoPanes(a: Rectish = A, b: Rectish = B): Map<string, HTMLElement> {
 }
 
 describe('WorkspaceSelectionOverlay ring travel', () => {
+  it('pauses during workspace rename and restarts the burst when editing finishes', async () => {
+    const store = makeStore();
+    const panes = twoPanes();
+    await act(async () => root.render(<Harness selectedId="a" mode="command" store={store} panes={panes} />));
+    await act(async () => setRenamingWorkspace('ws-a'));
+    const editing = container.querySelector<SVGPathElement>('[data-ring="outline"]')!;
+    expect(editing.style.animationPlayState).toBe('paused');
+    await act(async () => setRenamingWorkspace(null));
+    const resumed = container.querySelector<SVGPathElement>('[data-ring="outline"]')!;
+    expect(resumed).not.toBe(editing);
+    expect(resumed.style.animationPlayState).toBe('running');
+    expect(resumed.style.animation).toContain('marching-ants');
+  });
+
+  it('carries the last visible ring across Walls instead of their stale pane positions', async () => {
+    const store = makeStore();
+    const panes = twoPanes();
+    const handoff = { current: null as RingFrame | null };
+    const tab = document.createElement('div');
+    tab.dataset.workspaceTab = 'ws-b';
+    const tabRect = { top: 6, left: 160, width: 100, height: 24 };
+    stubRect(tab, tabRect);
+    document.body.append(tab);
+    const render = (firstActive: boolean, onTab = false) => act(async () => root.render(
+      <RingHandoffContext.Provider value={handoff}>
+        <Harness selectedId={onTab ? 'ws-b' : 'a'} selectedType={onTab ? 'workspace' : 'pane'} mode="command" store={store} panes={panes} active={firstActive} />
+        <Harness selectedId="b" mode="passthrough" store={store} panes={panes} active={!firstActive} />
+      </RingHandoffContext.Provider>,
+    ));
+    await render(false); // the second Wall has a stale pane frame to return to
+    await render(true, true);
+    await frame(300);
+    expect(ringRect()).toEqual(tabRect);
+    await render(false);
+    expect(ringRect()).toEqual(tabRect);
+    await frame(80);
+    expect(ringRect()!.top).toBeGreaterThan(tabRect.top);
+    expect(ringRect()!.top).toBeLessThan(B.top - INFLATE);
+    await frame(200);
+    expect(ringRect()!.top).toBe(B.top - INFLATE);
+    tab.remove();
+  });
+
+  it('moves onto + and follows its horizontal scroll position', async () => {
+    const store = makeStore();
+    const panes = twoPanes();
+    const plus = document.createElement('button');
+    plus.dataset.workspaceNew = '';
+    stubRect(plus, { top: 8, left: 400, width: 20, height: 20 });
+    document.body.append(plus);
+    await act(async () => root.render(<Harness selectedId="a" mode="command" store={store} panes={panes} />));
+    await act(async () => root.render(<Harness selectedId="+" selectedType="workspace-new" mode="command" store={store} panes={panes} />));
+    await frame(300);
+    expect(ringRect()).toEqual({ top: 8, left: 400, width: 20, height: 20 });
+    stubRect(plus, { top: 8, left: 200, width: 20, height: 20 });
+    await act(async () => document.dispatchEvent(new Event('scroll')));
+    expect(ringRect()!.left).toBe(200);
+    plus.remove();
+  });
+
+  it.each(['detached', 'empty'])('restores from the last painted Door through a %s target', async (missing) => {
+    const store = makeStore();
+    const panes = twoPanes();
+    const door = document.createElement('div');
+    const doorRect = { top: 500, left: 10, width: 100, height: 24 };
+    stubRect(door, doorRect);
+    document.body.append(door);
+    const doors = new Map([['b', door]]);
+    const render = (selectedType: WallSelectionKind) => act(async () => root.render(
+      <Harness selectedId="b" selectedType={selectedType} mode={selectedType === 'door' ? 'command' : 'passthrough'} store={store} panes={panes} doors={doors} />,
+    ));
+    await render('pane');
+    await render('door');
+    await frame(250);
+    expect(ringRect()).toEqual(doorRect);
+
+    // A stale observer/store notification arrives before the Door unregisters.
+    if (missing === 'detached') door.remove();
+    else stubRect(door, { top: 0, left: 0, width: 0, height: 0 });
+    await act(async () => store.commit());
+    expect(ringRect()).toEqual(doorRect);
+
+    await render('pane');
+    expect(ringRect()).toEqual(doorRect);
+    await frame(80);
+    expect(ringRect()!.top).toBeLessThan(doorRect.top);
+    expect(ringRect()!.top).toBeGreaterThan(B.top - INFLATE);
+    await frame(200);
+    expect(ringRect()!.top).toBe(B.top - INFLATE);
+    door.remove();
+  });
+
   it('tweens A→B through a strictly-intermediate rect, landing exactly on B', async () => {
     const store = makeStore();
     const panes = twoPanes();

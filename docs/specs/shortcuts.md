@@ -10,7 +10,7 @@
 |-----|--------|-------------|
 | Left ⌘ → Right ⌘ (within 500 ms) | Enter command mode | Only exits passthrough; inert in command mode. |
 | Left ⇧ → Right ⇧ (within 500 ms) | Enter command mode | Independent of the ⌘ track; the gesture for keyboards with no right ⌘. |
-| `Enter` (command) | Enter passthrough mode | Focus the selected pane; reattach the selected door and focus it. |
+| `Enter` (command) | Enter passthrough mode | Focus the selected pane; reattach a door; activate a highlighted Workspace or create one from `+` and focus its pane. |
 
 A focused cross-origin iframe surface swallows the gesture; the proxy shim detects it in-frame and re-posts it to the Wall (`docs/specs/dor-browser.md`).
 
@@ -37,15 +37,17 @@ Standalone only — a bare Wall (VS Code, the website playground) leaves every k
 | `c` | Create Workspace | Adds `Workspace N`, activates it, and spawns its one pane. |
 | `n` / `p` | Next / previous | Wraps at both ends. |
 | `1`–`9` | Select by position | The nth Workspace in strip order; out of range is a consumed no-op. |
-| `&` | Close Workspace | Runs the close flow; confirms first when the Workspace holds work, and the last Workspace never closes. |
+| `&` | Close Workspace | Confirms when the Workspace holds work; replaces the last Workspace. |
+| `x` (Workspace selected) | Close Workspace | Reveal and confirm, then select the next tab (previous at the end). Inert on `+`; the last Workspace gets a fresh replacement. |
 | `$` | Rename Workspace | Opens the strip's inline editor on the active tab. |
 
 ## Navigation (command mode)
 
 | Key | Action | Description |
 |-----|--------|-------------|
-| `↑` / `↓` / `←` / `→` | Move selection | Navigate panes and doors; opposite directions backtrack between panes. Down with no pane below selects the first door; Up from a door selects the last pane. |
-| `⌘`+arrows or `Ctrl`+arrows | Swap surfaces | Swap the two panes' Surfaces; the opposite chord swaps back exactly. Either modifier, every platform; consumed no-op on doors. |
+| `↑` / `↓` / `←` / `→` | Move selection | Navigate panes and doors; opposite directions backtrack between panes. Down with no pane below selects the first door; Up from a door selects the last pane. Up with no pane above highlights the active Workspace tab when a strip exists. |
+| `←` / `→` (Workspace strip) | Highlight tab / `+` | Move through tabs and then `+`, stopping at either end, without activation. Down returns to the originating pane (first live pane if gone). |
+| `⌘`+arrows or `Ctrl`+arrows | Swap surfaces | Swap the two panes' Surfaces; the opposite chord swaps back exactly. Either modifier, every platform; consumed no-op on non-pane chrome. |
 
 ## Terminal selection & clipboard
 

@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { WorkspaceStrip } from '../components/WorkspaceStrip';
+import { AppBar } from '../../../standalone/src/AppBar';
 import { WorkspaceWindow } from '../components/WorkspaceWindow';
 import { flattenScenario, SCENARIO_LS_OUTPUT } from '../lib/platform';
 import { requireElement, settleTerminals, waitForCondition } from './settle-terminals';
@@ -15,9 +15,7 @@ const WORKSPACES = [
 function WorkspaceWindowStory() {
   return (
     <div className="flex h-[520px] flex-col">
-      <div className="bg-header-active-bg text-header-active-fg flex h-[30px] shrink-0 items-center">
-        <WorkspaceStrip className="min-w-0 pl-2" />
-      </div>
+      <AppBar />
       <WorkspaceWindow initialPaneIds={['workspace-window-story']} />
     </div>
   );
@@ -55,3 +53,25 @@ export const TwoWorkspaces: Story = {
     await settleTerminals();
   },
 };
+
+async function selectWorkspaceChrome(next: number) {
+  await settleTerminals();
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+  for (let i = 0; i < next; i++) {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+  }
+  const target = await requireElement<HTMLElement>(
+    next === WORKSPACES.length ? '[data-workspace-new]' : `[data-workspace-tab="${WORKSPACES[next].id}"]`,
+    'command selection target',
+  );
+  await waitForCondition(() => {
+    const ring = document.querySelector('[data-ring="outline"]')?.closest('svg')?.parentElement;
+    if (!ring) return false;
+    const from = ring.getBoundingClientRect();
+    const to = target.getBoundingClientRect();
+    return Math.abs(from.left - to.left) < 0.1 && Math.abs(from.width - to.width) < 0.1;
+  });
+}
+
+export const WorkspaceSelected: Story = { play: () => selectWorkspaceChrome(1) };
+export const NewWorkspaceSelected: Story = { play: () => selectWorkspaceChrome(WORKSPACES.length) };

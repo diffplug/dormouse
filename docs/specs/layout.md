@@ -155,24 +155,48 @@ Doors are measured in a hidden off-screen container first, then fitted:
 - **Subtract the measured right cluster and its gap before fitting anything** — that space is never available to doors. Measure only its always-present part (notice + the three settings controls): **never the overflow arrow**, whose presence is an *output* of the fit.
 - Add doors until no more fit, reserving room for a `N more →` button whenever items remain after the current one. **At least one door is always shown**, even if it overflows.
 - If scrolled, show `← N more` on the left and/or `N more →` on the right. Overflow counts are assumed single-digit (the hidden measurement button is `9 more`).
-- Clicking an overflow arrow reveals one door in that direction; a longer title may push more doors off the opposite side.
+- Clicking an overflow arrow reveals one door in that direction; a longer title may push more doors off the opposite side. **Must reveal the selected Door when selection or membership changes**, without overriding manual overflow scrolling (`Baseboard.test.tsx`).
 - Extreme case — one door with a very long title and more doors on both sides: show both arrows with counts and as much title as fits, ellipsis for the rest.
 
 Source of truth: `lib/src/components/Baseboard.tsx`, `lib/src/components/Door.tsx`.
 
 ## Workspaces
 
-Each Wall renders one Workspace's Content and Baseboard. Standalone mounts one Wall **per Workspace**; VS Code and the website playground mount a bare Wall with no Workspace id, which behaves exactly as a single-Workspace Window (VS Code's per-webview mapping is `docs/specs/vscode.md`).
+### Workspace tabs
 
-- **Must mount every Workspace's Wall in one grid cell**, inactive Walls `visibility:hidden` (plus `inert`) and never `display:none` (rationale).
-- **Must switch by flipping `active` alone**: no re-seed, no re-parent, no leaf unmount, and no `resumeTerminal` / `restoreTerminal`; the only mount work is the terminal reattach below, which replays nothing, so I8 holds by construction (`WorkspaceWindow.test.tsx`).
-- **A hidden Wall's terminals hold no element and no GL context**: deactivation runs `unmountElement` on every terminal pane, exactly as minimize does ([Renderer](#renderer)); activation runs `mountElement` and fits through the [Animations](#animations) gate, so an unchanged grid sends no PTY resize (`TerminalPane.test.tsx`). Browser Surfaces keep their live documents (rationale).
+- **Must size tabs to their contents using the shared Door geometry**: 24px high, 68–220px wide, terminal top radius, Door typography and label/action padding, with 6px gaps. Shrink to the minimum before scrolling.
+- **Must use active and inactive pane-header foreground/background pairs** on the corresponding tabs, over the app background. **Must join the active tab directly to a full-width vertical gradient**, active-header background at the top to app background at the bottom. Reserve one `PANE_GUTTER_PX` band for the gradient above the Wall's normal top gutter, keeping it clear of the focus ring.
+- **Must show `×` only on the active tab**, outside rename. Middle-click may close an inactive tab. Reveal the active tab after its width changes on activation.
+- **Must reuse `HEADER_PALETTE_TRANSITION_CLASS` for tab palette tweening and reduced motion.**
+- **Must activate inactive tabs in command mode on click; clicking the active tab renames without changing mode.** Pinned by `WorkspaceWindow.test.tsx`.
+- **Must separate highlighting from activation.** `Enter` activates the highlighted Workspace and enters passthrough on its last live selected pane (first live pane if unavailable); `+` creates a Workspace and enters its pane after mount. Deactivation restores a Wall's chrome selection to its last live pane. External removal of the highlighted Workspace selects a live pane.
+- **Must reveal a Workspace in command mode before a user close or its confirmation.** `x` on a highlighted Workspace always confirms, including untouched Workspaces; `+` is inert. Successful user closure selects the next Workspace tab in command mode (previous at the end). Silent command closures remain focus-neutral. Pinned by `reveals and confirms x on a highlighted workspace, then selects the next tab for repeated deletion` in `lib/src/components/WorkspaceWindow.test.tsx`.
+
+Source of truth: `DOOR_TAB_CLASS` in `lib/src/components/design.tsx`; `WorkspaceStrip` in `lib/src/components/WorkspaceStrip.tsx`; `AppBar` in `standalone/src/AppBar.tsx`. Close visibility: `activates on click` in `lib/src/components/WorkspaceStrip.test.tsx`.
+
+### Workspace motion
+
+- **Must expand the visible Workspace from its tab on activation, creation, and arrival**, using `LATH_MOTION_MS` and `LATH_EASING`, including opacity. Keep its layout box full-size throughout; skip motion without a measurable tab or under `motionIsInstant()`.
+- **Must keep the outgoing Workspace visible and inert beneath the incoming Workspace during a switch**, dimming linearly to 50% opacity over `LATH_MOTION_MS`. Hide it and detach its terminal elements when its fade finishes; a rapid switch back resumes from the displayed frame.
+- **Must collapse a closing Workspace before disposing its Surfaces or removing its tab**, then expand the successor. Hidden departures finish instantly; refusal restores active Workspaces; inactive ones stay hidden until activation. Hold the closure guard during collapse and omit the subsequent pane exit delay. Transfer sequencing is `docs/specs/standalone.md` → Transfer.
+- **Must reverse interrupted motion from its displayed progress and settle departures even when backgrounded frames stop.** Disposal cancels callbacks. Pinned by `lib/src/components/workspace-motion.test.ts` and `lib/src/components/WorkspaceWindow.test.tsx`.
+- **Must render the selection ring outside the transformed Workspace and remeasure on its animation frames.** Its opacity follows the selected target's Workspace.
+
+Source of truth: `createWorkspaceMotion` in `lib/src/components/workspace-motion.ts`; `WorkspaceMotion` in `lib/src/components/WorkspaceMotion.tsx`; `closeAll` in `lib/src/components/Wall.tsx`.
+
+### Workspace lifecycle
+
+Each Wall renders one Workspace's Content and Baseboard (doors). Standalone mounts one Wall **per Workspace**; VS Code and the website playground mount a bare Wall with no Workspace id, which behaves exactly as a single-Workspace Window (VS Code's per-webview mapping is `docs/specs/vscode.md`).
+
+- **Must mount every Workspace's Wall in one grid cell**, inactive Walls `inert`, then `visibility:hidden` after their fade and never `display:none` (rationale).
+- **Must preserve mounted leaves across switches**: no re-seed, no re-parent, no leaf unmount, and no `resumeTerminal` / `restoreTerminal`; the only mount work is the terminal reattach below, which replays nothing, so I8 holds by construction (`WorkspaceWindow.test.tsx`).
+- **A hidden Wall's terminals hold no element and no GL context**: completion of the outgoing fade runs `unmountElement` on every terminal pane, exactly as minimize does ([Renderer](#renderer)); activation runs `mountElement` and fits through the [Animations](#animations) gate, so an unchanged grid sends no PTY resize (`TerminalPane.test.tsx`). Browser Surfaces keep their live documents (rationale).
 - **A hidden Wall consumes no window input**: every listener it keeps is gated on `active`, so nothing it hears is dispatched, forwarded, or `preventDefault`ed. **Only the active Wall renders the modal hosts and the overlays that trap keys** — the kill confirmation, the refused-archive prompt, a terminal's selection popup (rationale): a staged prompt survives the switch and is answered only where the user can see it.
 - **Exactly one Wall answers a `dor` request**, chosen by `docs/specs/dor-cli.md` → "Handle Model". Every Wall registers a handle, a bare one under `DEFAULT_WORKSPACE_ID`, so the router always finds one.
 - **Never unmount a Wall before its Surfaces are disposed** — `closeAll` waits for the kill fade to commit, bounded by the engine's exit duration, since unmounting mid-fade would leave `Orphaned` Registry entries (`docs/specs/glossary.md` → "Invariants" I4). **The deadline refuses rather than reporting clean**, and the walk re-reads membership until nothing is left, so a Surface born behind it is closed too.
 - **A closing Workspace takes no new Surfaces**: while `closeAll` walks, this Wall answers every Surface-creating `dor` verb with an error (`docs/specs/dor-cli.md` → "Handle Model").
-- **Must reject duplicate Workspace IDs before mutating the model**, preserving the last-Workspace close guard (`workspace-store.test.ts`).
-- Each Wall keeps its own mode and selection across switches: deactivating blurs its selected pane, activating focuses it a frame later, since focus into a hidden subtree is a no-op.
+- **Must reject duplicate Workspace IDs before mutating the model** (`workspace-store.test.ts`).
+- **Must retain mode and selection across switches unless the [activation gesture](#workspace-tabs) changes them.** Deactivation blurs the pane; activation focuses it one frame later.
 
 **A Workspace may leave the Window and arrive in another one** — torn out into
 its own window, or dropped onto an existing one — carrying its Surfaces, its
@@ -187,7 +211,7 @@ nothing (`iframeSurfaceIds` on the Wall handle; `workspace-drag.test.ts`).
 
 **Must show drag refusals over Window content in a dialog** until dismissal, retry, or Workspace departure. Source of truth: `onDropOnOtherWindow` in `standalone/src/workspace-drag.ts`; `lib/src/components/WorkspaceStrip.test.tsx`.
 
-**Create** adds a Workspace named `Workspace N`, makes it active, and gives its Wall no restored record, so Lath's fresh branch spawns one default-shell pane. **Close** confirms first when the Workspace holds touched Surfaces or running work, with a kill-confirm letter over the Window's content area, then routes every member Surface through the closure coordinator; **the last remaining Workspace cannot be closed** — there is always one active Workspace, as there is always one visible pane (corner case #5). **One close runs at a time for the whole Window**, with the count re-checked after the confirmation, so two of them cannot empty two Walls between them; **a close the store then refuses hands the Wall back its auto-spawn** rather than leaving it mounted and empty. **A Workspace whose Wall has not registered is refused** (`workspace '<ref>' is still mounting`, one wording for every caller), never closed past — the Wall walks the member Surfaces, so dropping it would leave its Sessions running unheld (`docs/specs/glossary.md` → "Invariants" I4); **a gesture waits out the registration gap first**, as `dor workspace close` does, so `×` or `&` right after a create closes rather than silently doing nothing. **Rename** edits the Workspace `name` only — no Surface title, and not the per-pane inline rename. **Reorder** moves a tab in the strip and renumbers `workspace:<n>` refs with it only where they are positional (`docs/specs/dor-cli.md` → "Handle Model"); **a press inside the open rename editor never starts a reorder**. **Must drop the closing Workspace’s rename editor and pending confirmation, and no other’s** (`releases the rename lease when the tab being renamed is middle-clicked closed` in `lib/src/components/WorkspaceStrip.test.tsx`; `preserves another Workspace’s rename and close confirmation when closing a sibling` in `lib/src/components/wall/workspace-lifecycle.test.ts`). **Every Workspace verb runs outside the strip**, which renders the rename editor and confirmation from a store, so a tab gesture and a command-mode key take one path.
+**Create** adds a Workspace named `Workspace N`, makes it active, and gives its Wall no restored record, so Lath's fresh branch spawns one default-shell pane. **Close** confirms first when the Workspace holds touched Surfaces or running work, with a kill-confirm letter over the Window's content area, then routes every member Surface through the closure coordinator; **Must atomically replace the last closed Workspace with a fresh Workspace and select its tab**, after disposing the old Surfaces (`WorkspaceWindow.test.tsx`). **Must serialize closes across the Window.** **A Workspace whose Wall has not registered is refused** (`workspace '<ref>' is still mounting`, one wording for every caller), never closed past — the Wall walks the member Surfaces, so dropping it would leave its Sessions running unheld (`docs/specs/glossary.md` → "Invariants" I4); **a gesture waits out the registration gap first**, as `dor workspace close` does, so `×` or `&` right after a create closes rather than silently doing nothing. **Rename** edits the Workspace `name` only — no Surface title, and not the per-pane inline rename. **Reorder** moves a tab in the strip and renumbers `workspace:<n>` refs with it only where they are positional (`docs/specs/dor-cli.md` → "Handle Model"); **a press inside the open rename editor never starts a reorder**. **Must drop the closing Workspace’s rename editor and pending confirmation, and no other’s** (`releases the rename lease when the tab being renamed is middle-clicked closed` in `lib/src/components/WorkspaceStrip.test.tsx`; `preserves another Workspace’s rename and close confirmation when closing a sibling` in `lib/src/components/wall/workspace-lifecycle.test.ts`). **Every Workspace verb runs outside the strip**, which renders the rename editor and confirmation from a store, so a tab gesture and a command-mode key take one path.
 
 **Must use `WorkspaceKillConfirm` for Workspace close, the iframe move gate,
 and host termination confirmations**, titled “Confirm kill workspace” except the
@@ -259,6 +283,8 @@ The source cwd is read from `getTerminalPaneState(sourceId).cwd`. **Never inheri
 
 **Confirmation must be staged in a ref synchronously, not only in React state** — a second confirm keydown arriving before React flushes would otherwise pass the guard and kill twice (`lath.isDying` is the second line of defense).
 
+**Must return keyboard selection to the next surviving Door after killing a revealed Door**, falling back to previous Doors, then a pane only if no Doors remain. Apply this to confirmed and untouched kills only while the revealed pane is still selected in command mode; cancellation, refusal, or navigating away discards the return target. Pinned by `returns keyboard focus from deleted Door %s to %s (confirm: %s)` in `lib/src/components/Wall.test.tsx`.
+
 **Every kill routes through the notepad close coordinator**, confirmed and untouched-fast-path alike, which archives the Surface's notes before teardown and can refuse the close (`docs/specs/notepad.md` → "Closure"; that spec also names who may still tear a Surface down immediately).
 
 **Untouched plain terminal sessions skip this confirmation; Tools still require it.** A newly spawned shell starts `untouched: true`; the first user-originated PTY input flips it to false. Counted: printable keys, Enter, control keys, keyboard CSI such as arrows/history, paste, file-drop path insertion, forwarded mouse reports. Not counted: replay-shaped terminal reports and mouse reports removed by an override. Killing an untouched pane runs the normal kill animation/dispose path immediately; killing an untouched door first reattaches it only far enough to reuse that removal path, then kills it with no overlay.
@@ -272,6 +298,7 @@ A fixed-positioned element on top of the Lath host, covering the active element'
 - **Exactly one pane or door is active at a time**, drawn by one SVG renderer (`SelectionRing`, `variant: 'ants' | 'solid'`).
 - **Passthrough:** `variant='solid'` — a 1px solid SVG stroke, centerline `strokeWidth/2` inside the div edge for panes and doors alike, no glow (rationale).
 - **Command:** `variant='ants'` — marching-ants border (`cfg.marchingAnts`: 10px segment, 60% dash, four 0.4s cycles, 2px stroke). **Run the burst on command entry or identity change, then hold still** (test: `starts a finite burst on command entry and remounts the outline on a selection change` in `lib/src/components/wall/WorkspaceSelectionOverlay.test.tsx`; rationale). Keep it unchanged during travel and draw the smear separately ([Ring travel](#ring-travel)). **While unfocused, pause it and apply `saturate(0.3)` to the ring.**
+- **Must pause the ants during Workspace title editing and restart their burst when editing ends**, without changing mode. Pinned by `pauses during workspace rename and restarts the burst when editing finishes` in `lib/src/components/wall/WorkspaceSelectionOverlay.test.tsx`.
 - Border radius follows DESIGN.md's Concentric-Corners Rule: the pane ring's radius is the pane radius plus the inflate (`PANE_SELECTION_RING_RADIUS_PX`), with the marching-ants path inset so its stroke centerline sits on the same gutter midline; doors sit at zero offset and keep `0.5rem 0.5rem 0 0`.
 - Color is the resolved `--color-focus-ring`, **re-read whenever `document.body`'s class/style changes**, because the dynamic palette publishes it there (`useFocusRingColor`).
 - `z-index: 50`, `pointer-events: none`.
@@ -288,6 +315,7 @@ Per-frame writes are **imperative**: `SelectionRing` gives the overlay refs to i
 - **Snap gate.** `motionIsInstant()` — `!cfg.layout.animate` (Chromatic) or `prefersReducedMotion()` — settles the ring instantly; it is the same predicate the Lath animator's duration uses, so ring and leaves agree. **A ring appearing with nothing on screen also snaps**: there is no `from` to glide from.
 - **The unfocus-saturate fade is the one CSS transition** (`filter ${FOCUS_MOTION_MS}ms`, set inline by `SelectionRing.tsx`); neither the snap gate nor reduced motion touches it. Under Chromatic it snapshots already finished (pinned in `lib/.storybook/preview.ts`).
 - Pane↔door selection morphs the corner radii (12px all-round ⇄ `8,8,0,0`) and stroke inset through the same tween, so the shape lerps instead of popping.
+- **Must continue from the last painted frame across Workspace activation**, not the incoming Wall's stale frame. Hidden Walls neither animate nor publish ring geometry. Tabs use Door geometry; `+` uses its button rectangle and 4px corners. Pinned by `carries the last visible ring across Walls instead of their stale pane positions` in `lib/src/components/wall/WorkspaceSelectionOverlay.test.tsx`.
 
 Source of truth: `lib/src/lib/rect-tween.ts` (position and velocity), `lib/src/lib/ring-geometry.ts` (outline/smear geometry), `lib/src/components/wall/WorkspaceSelectionOverlay.tsx` (the rAF loop), `lib/src/components/wall/SelectionRing.tsx` (the SVG shell).
 
@@ -309,7 +337,7 @@ Source of truth: `lib/src/lib/ring-geometry.ts`.
 
 Each pane body registers its DOM element in a `paneElements` Map on mount and removes it on unmount (`usePaneChrome`); the overlay resolves the enclosing Lath leaf (`[data-lath-leaf]`) via `resolvePaneElement`, so the ring covers header + body. Doors are registered by the `Baseboard` through `DoorElementsContext` (`[data-door-id]`), **only the *visible* subset** — an overflowed door has no element to measure.
 
-Re-measures on: selection change, `ResizeObserver` on the target, every Lath store commit (`revision` via `useSyncExternalStore`), and — while the wall streams animator frames — every frame, so the ring tracks kills, restores and tweens frame-accurately. **If the selected leaf is momentarily absent the overlay bails and holds the last rect.**
+Re-measures on: selection change, target resize, scroll, window resize, Workspace changes, every Lath store commit, and each Lath animation frame. **Must hold the last painted frame when the target is missing, detached, or zero-sized**, including stale Door observer notifications during restore. Pinned by `restores from the last painted Door through a %s target` in `lib/src/components/wall/WorkspaceSelectionOverlay.test.tsx`.
 
 Source of truth: `lib/src/components/wall/WorkspaceSelectionOverlay.tsx`, `lib/src/components/wall/resolve-pane-element.ts`, `lib/src/components/wall/use-window-focused.ts`.
 
@@ -321,9 +349,13 @@ Source of truth: `lib/src/components/wall/WorkspaceSelectionOverlay.tsx`, `lib/s
 
 **Pane↔door.** Down from a pane with no pane below it selects the *first* door; Up from a door selects the *last* pane; Left/Right moves between doors. **Doors have no spatial query** — they are an ordered list.
 
+**Must let Up from a top-edge pane highlight the active Workspace tab when a strip is mounted.** Left/Right traverses tabs in strip order and then `+`, stopping at either end; Down returns to the originating live pane, or the first live pane if it disappeared. Clear pane backtracking on entry to either chrome row. Scroll highlighted tabs into view; highlighting changes neither the active Workspace nor DOM focus.
+
+**Must keep workspace tabs and `+` command-mode-only selection targets.** Pane actions and terminal clipboard operations are inert there, except Workspace `x` ([Workspace tabs](#workspace-tabs)); other Workspace shortcuts retain their active-Workspace scope. Every passthrough entry selects a live pane. Navigation is pinned by `lib/src/components/wall/keyboard/handle-pane-navigation.test.ts`; activation by `highlights tabs without switching and Enter activates or creates into a live pane` in `lib/src/components/WorkspaceWindow.test.tsx`.
+
 **`Cmd/Ctrl+Arrow` swap.** Swaps Surface **content** between two panes, leaving the layout shape unchanged. One Lath `swap` op trades the two leaf identities, and because per-leaf metadata and terminal-registry entries are keyed by id, title/params/session follow automatically — **never write a companion title swap** — with no DOM reattach. Selection stays on the moved Surface, so **the breadcrumb records the *partner*** (the pane now holding the old slot): the opposite `Cmd+Arrow` swaps back exactly and a plain opposite arrow selects the partner.
 
-**Must ignore swap chords while a Door is selected**, including when a prior pane move left a breadcrumb (`handle-pane-shortcuts.test.ts`). Source of truth: `handlePaneShortcuts` in `lib/src/components/wall/keyboard/handle-pane-shortcuts.ts`.
+**Must ignore swap chords while non-pane chrome is selected**, including when a prior pane move left a breadcrumb (`handle-pane-shortcuts.test.ts`). Source of truth: `handlePaneShortcuts` in `lib/src/components/wall/keyboard/handle-pane-shortcuts.ts`.
 
 ## Minimize and reattach
 

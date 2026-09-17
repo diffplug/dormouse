@@ -25,6 +25,10 @@ export interface WallHandle {
    *  gate, alongside `runningCount`). */
   hasTouchedSurfaces(): boolean;
   runningCount(): number;
+  /** Leave command selection on chrome and focus a live pane. */
+  enterSelectedPane(): void;
+  enterCommandMode(): void;
+  selectWorkspaceTab(): void;
   /** Persist now. `probeCwd: false` skips the cwd re-read (`SessionFlushRequest`). */
   flushPersistence(options?: SaveOptions): Promise<void>;
   /** Build what another Window needs to take this Workspace, without touching
@@ -36,10 +40,6 @@ export interface WallHandle {
    *  once the Wall is empty, else the first refusal's message with the Workspace
    *  left as it was. */
   closeAll(mode?: CloseSurfaceMode): Promise<string | null>;
-  /** Abandon a close the Wall has already emptied for: the Workspace survives,
-   *  so its "always one pane" rule is re-armed and the tree refilled. The close
-   *  verb calls it when the store refuses to drop the Workspace after all. */
-  cancelClose(): void;
   handleDorControl(detail: DorControlRequest): void;
 }
 
@@ -92,6 +92,9 @@ export function stubWallHandle(workspaceId: WorkspaceId, overrides: Partial<Wall
     iframeSurfaceIds: () => [],
     hasTouchedSurfaces: () => false,
     runningCount: () => 0,
+    enterSelectedPane: () => {},
+    enterCommandMode: () => {},
+    selectWorkspaceTab: () => {},
     flushPersistence: async () => {},
     prepareWorkspaceTransfer: async () => ({
       payload: {
@@ -104,7 +107,6 @@ export function stubWallHandle(workspaceId: WorkspaceId, overrides: Partial<Wall
       commit: () => {},
     }),
     closeAll: async () => null,
-    cancelClose: () => {},
     handleDorControl: () => {},
     ...overrides,
   };

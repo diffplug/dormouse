@@ -17,7 +17,7 @@ import { SettingsPreview } from './SettingsPreview';
 import { Door } from './Door';
 import { DoorNotepadPopover } from './DoorNotepadPopover';
 import { sourceNoticeFor, type SourceNotice } from './NoteList';
-import { DoorElementsContext, useDialogKeyboardOwner } from './wall/wall-context';
+import { DoorElementsContext, SelectedIdContext, useDialogKeyboardOwner } from './wall/wall-context';
 import type { DoorChip, DooredItem } from './wall/wall-types';
 import { hasTerminal } from 'dor/commands/types';
 import { IS_MAC } from '../lib/platform';
@@ -62,6 +62,7 @@ export interface BaseboardProps {
 }
 export function Baseboard({ items, onReattach, notice, onDoorDragStart }: BaseboardProps) {
   const { elements: doorElements, bumpVersion } = useContext(DoorElementsContext);
+  const selectedId = useContext(SelectedIdContext);
   const activityStates = useSyncExternalStore(subscribeToActivity, getActivitySnapshot);
   const speechStates = useSyncExternalStore(subscribeToAlertSpeech, getAlertSpeechSnapshot);
   const { workspaceId, overrides, policy: settings } = useWorkspaceAlertPolicy();
@@ -161,11 +162,8 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
     }
   }, [items, activityStates, speechStates, terminalStates, notepadNotes, dirtyTools]);
 
-  // Reset startIndex when the set of door items changes (not just count)
   const itemKey = useMemo(() => items.map(i => i.id).join('\0'), [items]);
-  useLayoutEffect(() => {
-    setStartIndex(0);
-  }, [itemKey]);
+  const previousItems = useRef(itemKey);
 
   const shortcutHint = IS_MAC
     ? 'LCmd → RCmd to enter command mode'
@@ -202,6 +200,17 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   const endIndex = startIndex + visibleCount;
   const hiddenLeft = startIndex;
   const hiddenRight = items.length - endIndex;
+
+  useLayoutEffect(() => {
+    const changed = previousItems.current !== itemKey;
+    previousItems.current = itemKey;
+    const index = items.findIndex(item => item.id === selectedId);
+    if (index >= 0) {
+      if (index < startIndex || index >= endIndex) setStartIndex(index);
+    } else if (changed) setStartIndex(0);
+    // Selection/membership changes reveal the cursor; manual overflow scrolling
+    // must remain free to move away from it without immediately being undone.
+  }, [itemKey, selectedId]);
 
   useLayoutEffect(() => {
     const container = containerRef.current;

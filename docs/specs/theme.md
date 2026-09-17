@@ -88,7 +88,7 @@ cancel queued resolution on disposal.** Pinned by
 
 **Selection backgrounds are flattened to opaque.** Theme authors give
 `list.activeSelectionBackground` / `list.inactiveSelectionBackground` alpha;
-Dormouse uses them as solid header/AppBar fills, so `applyTheme()` composites
+Dormouse uses them as solid header and Workspace-tab fills, so `applyTheme()` composites
 them over `sideBar.background` first (rationale).
 
 **A same-theme `applyTheme()` call is a no-op only while the expected inline
@@ -267,6 +267,8 @@ each pinned by the test beside it except `getThemePreview`, covered by
 `@source`, and its exclusions in `website/src/index.css`.
 
 ## Storybook simulation
+
+**Must scan `standalone/src` in `lib/.storybook/preview.css`** for host utilities.
 
 `lib/.storybook/themes.ts` builds the switcher's color maps from `bundled.json`
 and **must run them through `completeThemeVars()` and `flattenSelectionAlpha()`**

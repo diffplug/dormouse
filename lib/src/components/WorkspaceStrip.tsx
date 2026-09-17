@@ -3,6 +3,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -15,9 +16,10 @@ import { AlertBell } from './AlertBell';
 import { InlineEditInput } from './wall/InlineEditInput';
 import { WorkspaceKillConfirm } from './WorkspaceKillConfirm';
 import { useTodoPillContent } from './TodoPillBody';
-import { chromeButton, ModalFrame, modalActionButton, OVERLAY_MAX_HEIGHT, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from './design';
+import { chromeButton, DOOR_TAB_CLASS, HEADER_PALETTE_TRANSITION_CLASS, ModalFrame, modalActionButton, OVERLAY_MAX_HEIGHT, TODO_PILL_TRACKING_CLASS } from './design';
 import { createWorkspaceStripDrag, type StripDragHost } from './workspace-strip-drag';
 import { acquireChromeKeyboardLease } from './wall/chrome-keyboard-lease';
+import { getWallHandle } from './wall/wall-handles';
 import { useDialogKeyboardOwner } from './wall/wall-context';
 import { closeWorkspaceWithSurfaces, requestWorkspaceClose, requestWorkspaceRename } from './wall/workspace-lifecycle';
 import { getActivitySnapshot, subscribeToActivity } from '../lib/terminal-registry';
@@ -41,6 +43,7 @@ import {
   subscribeToWorkspaces,
 } from '../lib/workspace-store';
 import type { WorkspaceId } from '../lib/session-types';
+import { revealWorkspaceTab } from './workspace-tab-elements';
 
 /**
  * The Window's Workspace tabs. Store-driven end to end (Workspaces, membership,
@@ -79,9 +82,15 @@ export function WorkspaceStrip({
   useDialogKeyboardOwner(renamingId !== null || pendingClose !== null || pendingMove !== null || moveError !== null, acquireChromeKeyboardLease);
 
   const activate = useCallback((id: WorkspaceId) => {
+    getWallHandle(id)?.enterCommandMode();
     setActiveWorkspace(id);
-    tabElementsRef.current.get(id)?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
   }, []);
+
+  // Activation changes the close button and therefore the intrinsic tab width.
+  // Reveal it after layout, including activation through a shortcut or create.
+  useLayoutEffect(() => {
+    revealWorkspaceTab(tabElementsRef.current.get(activeId) ?? null);
+  }, [activeId]);
 
   // Stable across renders: the tab's own `data-workspace-tab` says which entry
   // it is, and the returned cleanup is what React 19 calls on detach.
@@ -162,7 +171,7 @@ export function WorkspaceStrip({
     <div
       ref={stripRef}
       data-workspace-strip
-      className={clsx('flex min-w-0 items-center gap-0.5 overflow-x-auto', className)}
+      className={clsx('flex min-w-0 items-end gap-1.5 overflow-x-auto', className)}
     >
       {workspaces.map((workspace) => {
         const isActive = workspace.id === activeId;
@@ -176,7 +185,6 @@ export function WorkspaceStrip({
             ringCue={ringCues.current.get(workspace.id)}
             renaming={renamingId === workspace.id}
             dragging={draggingId === workspace.id}
-            closable={workspaces.length > 1}
             registerElement={registerElement}
             onActivate={activate}
             onStartRename={requestWorkspaceRename}
@@ -191,7 +199,7 @@ export function WorkspaceStrip({
       <button
         type="button"
         data-workspace-new
-        className={chromeButton({ kind: 'icon' })}
+        className={chromeButton({ kind: 'icon', class: 'mb-0.5 shrink-0' })}
         aria-label="New workspace"
         title="New workspace"
         onClick={() => { createWorkspace(); }}
@@ -252,7 +260,6 @@ const WorkspaceTab = memo(function WorkspaceTab({
   ringCue,
   renaming,
   dragging,
-  closable,
   registerElement,
   onActivate,
   onStartRename,
@@ -269,7 +276,6 @@ const WorkspaceTab = memo(function WorkspaceTab({
   ringCue: WorkspaceRingCue;
   renaming: boolean;
   dragging: boolean;
-  closable: boolean;
   registerElement: (element: HTMLElement | null) => (() => void) | undefined;
   onActivate: (id: WorkspaceId) => void;
   onStartRename: (id: WorkspaceId) => void;
@@ -292,14 +298,10 @@ const WorkspaceTab = memo(function WorkspaceTab({
       data-workspace-tab-active={active ? 'true' : 'false'}
       role="group"
       className={clsx(
-        // Sized like a browser tab: 180px each until they crowd, then down to
-        // 72px, then the strip scrolls. No overflow arrows.
-        'group relative flex h-6 w-[180px] min-w-[72px] shrink items-center overflow-hidden text-xs font-medium',
-        // The tab is the top of its Workspace exactly as a Door is the bottom of
-        // its Surface, so the active one takes the terminal's top radius and the
-        // wall's own palette — background AND foreground, or the bar's white
-        // header text would sit on a light app background.
-        active ? clsx('bg-app-bg text-app-fg', TERMINAL_TOP_RADIUS_CLASS) : 'hover:bg-current/10',
+        DOOR_TAB_CLASS,
+        HEADER_PALETTE_TRANSITION_CLASS,
+        'w-max shrink',
+        active ? 'bg-header-active-bg text-header-active-fg' : 'bg-header-inactive-bg text-header-inactive-fg',
       )}
       style={dragging ? { opacity: 0.6 } : undefined}
       onPointerDown={(event) => {
@@ -310,7 +312,7 @@ const WorkspaceTab = memo(function WorkspaceTab({
         onPress(id, event);
       }}
       onAuxClick={(event) => {
-        if (event.button !== 1 || !closable) return;
+        if (event.button !== 1) return;
         event.preventDefault();
         onRequestClose(id);
       }}
@@ -319,7 +321,7 @@ const WorkspaceTab = memo(function WorkspaceTab({
         <InlineEditInput
           data-workspace-rename-for={id}
           initialValue={name}
-          className="h-full min-w-0 flex-1 bg-transparent px-2 text-xs outline-none"
+          className="h-full min-w-0 flex-1 bg-transparent px-2.5 text-sm outline-none"
           blurAction="submit"
           onSubmit={(value) => onFinishRename(id, value)}
           onCancel={onCancelRename}
@@ -327,28 +329,32 @@ const WorkspaceTab = memo(function WorkspaceTab({
       ) : (
         <button
           type="button"
-          className="flex h-full min-w-0 flex-1 items-center gap-1.5 overflow-hidden pl-2 pr-1 text-left"
+          className={clsx(
+            'flex h-full min-w-0 flex-1 items-center gap-2 overflow-hidden pl-2.5 text-left',
+            active ? 'pr-1' : 'pr-2.5',
+          )}
           aria-label={label}
           title={label}
           aria-current={active ? 'true' : undefined}
-          onClick={() => { if (!wasDragged()) onActivate(id); }}
-          onDoubleClick={() => onStartRename(id)}
+          onClick={() => {
+            if (wasDragged()) return;
+            if (active) onStartRename(id);
+            else onActivate(id);
+          }}
         >
           <span className="min-w-0 flex-1 truncate">{name}</span>
           {showIndicators && (
             <span className="flex shrink-0 items-center gap-1.5">
               {todoPill.visible && (
                 <span
-                  className={`todo-pill-shell text-[10px] font-semibold ${TODO_PILL_TRACKING_CLASS}`}
+                  className={`todo-pill-shell text-xs font-semibold ${TODO_PILL_TRACKING_CLASS}`}
                   data-flourishing={todoPill.flourishing ? 'true' : 'false'}
                 >
                   {todoPill.body}
                 </span>
               )}
-              {/* An inactive tab sits on the app bar's header palette, not on a
-                  Door, so the bell takes the header's alarm color. */}
               {union.ringing && (
-                <span className="text-alarm-vs-header-active">
+                <span className="text-alarm-vs-header-inactive">
                   <AlertBell status="ALERT_RINGING" ringSeq={ringCue.sequence} ringStartedAt={ringCue.at} size={11} />
                 </span>
               )}
@@ -356,16 +362,11 @@ const WorkspaceTab = memo(function WorkspaceTab({
           )}
         </button>
       )}
-      {closable && !renaming && (
+      {active && !renaming && (
         <button
           type="button"
           data-workspace-tab-close={id}
-          className={clsx(
-            'flex h-full shrink-0 items-center rounded px-1 hover:bg-current/10',
-            // Always on the active tab; on the others only while pointed at or
-            // focused, so a row of tabs is not a row of close buttons.
-            active ? '' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
-          )}
+          className="flex h-full shrink-0 items-center rounded pl-0.5 pr-2 hover:bg-current/10"
           aria-label={`Close ${name}`}
           title={`Close ${name}`}
           onClick={(event) => {
