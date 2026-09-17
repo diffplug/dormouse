@@ -8,8 +8,9 @@ import { FOCUS_MOTION_MS, SELECTION_RING_Z_INDEX } from '../design';
 // rAF loop. This is the same split LathHost uses: React owns structure, the frame
 // owns DOM mutations.
 //
-//  - `variant='ants'`: 2px dashed stroke, marching animation (the dash geometry and
-//    `--march-offset` are written imperatively). Command-mode ring.
+//  - `variant='ants'`: 2px dashed stroke, marching for as long as command mode
+//    lasts (the dash geometry and `--march-offset` are written imperatively).
+//    Command-mode ring. Reduced motion holds it still (`index.css`).
 //  - `variant='solid'`: 1px stroke, no dash/animation. Passthrough ring, replacing
 //    the retired 1px CSS border (pixel-identical stroke placement).
 //
@@ -21,13 +22,12 @@ import { FOCUS_MOTION_MS, SELECTION_RING_Z_INDEX } from '../design';
 // it stays exactly what it was before any smear existed.
 //
 // Geometry (`top/left/width/height`, every `d`, smear widths/opacities, and the
-// marching dash) is NEVER in this JSX. A selection change remounts only the keyed
-// outline; the overlay's layout effect reapplies its geometry pre-paint.
+// marching dash) is NEVER in this JSX; the overlay's layout effect reapplies it
+// pre-paint after every render.
 export function SelectionRing({
-  variant, animationKey, color, windowFocused, paused = false, containerRef, pathRef, smearRef,
+  variant, color, windowFocused, paused = false, containerRef, pathRef, smearRef,
 }: {
   variant: 'ants' | 'solid';
-  animationKey: string;
   color: string;
   windowFocused: boolean;
   paused?: boolean;
@@ -79,9 +79,6 @@ export function SelectionRing({
           ))}
         </g>
         <path
-          // Command entry adds the finite animation; identity changes use this
-          // key to restart it without remounting the shell or smear.
-          key={animationKey}
           ref={pathRef}
           // Stable hook: the smear group renders eight paths ahead of this one,
           // so positional selectors no longer find the ring.
@@ -90,7 +87,7 @@ export function SelectionRing({
           stroke={color}
           strokeWidth={isAnts ? ma.strokeWidth : 1}
           style={isAnts ? {
-            animation: `marching-ants ${ma.cycleDuration}s linear ${ma.cyclesPerSelection}`,
+            animation: `marching-ants ${ma.cycleDuration}s linear infinite`,
             animationPlayState: (ma.paused || paused || !windowFocused) ? 'paused' : 'running',
           } : undefined}
         />

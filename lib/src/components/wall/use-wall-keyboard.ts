@@ -10,6 +10,12 @@ import { isProxyOrigin } from '../../lib/iframe-proxy-registry';
 import { chromeKeyboardHeld } from './chrome-keyboard-lease';
 import type { NavHistoryRef, WallKeyboardCtx } from './keyboard/types';
 
+// Keystrokes an active Wall has already answered. A key that activates another
+// Workspace commits that Wall's `active` in the microtask checkpoint the browser
+// runs between listeners, so without this claim its listener would answer the
+// same key too — `n` switching straight back, `Enter` activating then renaming.
+const answeredKeys = new WeakSet<KeyboardEvent>();
+
 export function useWallKeyboard(ctx: WallKeyboardCtx): void {
   const lastCmdSide = useRef<'left' | 'right' | null>(null);
   const lastCmdTime = useRef(0);
@@ -31,7 +37,8 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
       // A hidden Workspace's Wall keeps its listeners but dispatches nothing:
       // exactly one Wall answers window input (docs/specs/layout.md →
       // "Workspaces").
-      if (!c.activeRef.current) return;
+      if (!c.activeRef.current || answeredKeys.has(e)) return;
+      answeredKeys.add(e);
 
       const context = (e.target as HTMLElement | null)?.closest?.('[data-terminal-context]');
       if (context) {

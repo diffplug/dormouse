@@ -6,6 +6,9 @@
  * stubbed `getBoundingClientRect`; time and rAF are a controllable fake clock so
  * the tween is stepped deterministically without real timers.
  */
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -169,18 +172,17 @@ function twoPanes(a: Rectish = A, b: Rectish = B): Map<string, HTMLElement> {
 }
 
 describe('WorkspaceSelectionOverlay ring travel', () => {
-  it('pauses during workspace rename and restarts the burst when editing finishes', async () => {
+  it('pauses while a workspace is renamed, then resumes marching', async () => {
     const store = makeStore();
     const panes = twoPanes();
     await act(async () => root.render(<Harness selectedId="a" mode="command" store={store} panes={panes} />));
+    const path = container.querySelector<SVGPathElement>('[data-ring="outline"]')!;
     await act(async () => setRenamingWorkspace('ws-a'));
-    const editing = container.querySelector<SVGPathElement>('[data-ring="outline"]')!;
-    expect(editing.style.animationPlayState).toBe('paused');
+    expect(path.style.animationPlayState).toBe('paused');
     await act(async () => setRenamingWorkspace(null));
-    const resumed = container.querySelector<SVGPathElement>('[data-ring="outline"]')!;
-    expect(resumed).not.toBe(editing);
-    expect(resumed.style.animationPlayState).toBe('running');
-    expect(resumed.style.animation).toContain('marching-ants');
+    expect(container.querySelector('[data-ring="outline"]')).toBe(path);
+    expect(path.style.animationPlayState).toBe('running');
+    expect(path.style.animation).toContain('marching-ants');
   });
 
   it('carries the last visible ring across Walls instead of their stale pane positions', async () => {
@@ -366,26 +368,38 @@ describe('SelectionRing settled render', () => {
     expect(path!.getAttribute('stroke-opacity')).toBeNull();
   });
 
-  // The finite burst starts when command mode adds the animation, and a selection
-  // change restarts it by remounting only the keyed outline.
-  it('starts a finite burst on command entry and remounts the outline on a selection change', async () => {
+  // jsdom applies no stylesheet, so the gate is pinned where it lives. It must
+  // outrank the inline `animation` and leave the dash in place.
+  it('holds the ants still under reduced motion', async () => {
+    const css = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../index.css'), 'utf8');
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\[data-ring='outline'\] \{ animation: none !important; \}/);
+
+    const store = makeStore();
+    const panes = twoPanes();
+    await act(async () => root.render(<Harness selectedId="a" mode="command" store={store} panes={panes} />));
+    const path = container.querySelector<SVGPathElement>('[data-ring="outline"]')!;
+    expect(path.getAttribute('stroke-dasharray')).not.toBeNull();
+    expect(path.style.animation).toContain('marching-ants');
+  });
+
+  it('marches for as long as command mode lasts, across selection changes', async () => {
     const store = makeStore();
     const panes = twoPanes();
     await act(async () => root.render(<Harness selectedId="a" mode="passthrough" store={store} panes={panes} />));
 
-    const passthroughPath = container.querySelector('[data-ring="outline"]') as SVGPathElement;
-    expect(passthroughPath.style.animation).toBe('');
-
-    await act(async () => root.render(<Harness selectedId="a" mode="command" store={store} panes={panes} />));
-
     const path = container.querySelector('[data-ring="outline"]') as SVGPathElement;
-    expect(path).toBe(passthroughPath);
-    expect(path.style.animation).toBe(
-      `marching-ants ${cfg.marchingAnts.cycleDuration}s linear ${cfg.marchingAnts.cyclesPerSelection}`,
-    );
+    expect(path.style.animation).toBe('');
 
+    const marching = `marching-ants ${cfg.marchingAnts.cycleDuration}s linear infinite`;
+    await act(async () => root.render(<Harness selectedId="a" mode="command" store={store} panes={panes} />));
+    expect(container.querySelector('[data-ring="outline"]')).toBe(path);
+    expect(path.style.animation).toBe(marching);
+    expect(path.style.animationPlayState).toBe('running');
+
+    // One outline for the whole of command mode: nothing remounts it to restart.
     await act(async () => root.render(<Harness selectedId="b" mode="command" store={store} panes={panes} />));
-    expect(container.querySelector('[data-ring="outline"]')).not.toBe(path);
+    expect(container.querySelector('[data-ring="outline"]')).toBe(path);
+    expect(path.style.animation).toBe(marching);
   });
 
   // The dash is an imperative write React never reconciles away, so the reverse
@@ -531,13 +545,12 @@ describe('SelectionRing motion smear', () => {
 
     // Mid-travel the ring is a different size, so the dash resizes with it — but
     // the period must still be exactly one dash+gap or the keyframe jumps.
-    // Re-queried, not reused: the selection change remounted the outline (see the
-    // burst-restart case above), and the geometry lands on the replacement node.
-    const movedPath = container.querySelector('[data-ring="outline"]')!;
-    const [d2, g2] = dashOf(movedPath);
-    expect(movedPath.style.getPropertyValue('--march-offset')).toBe(`-${d2 + g2}px`);
+    // The selection change keeps the same outline node; the new geometry lands on it.
+    expect(container.querySelector('[data-ring="outline"]')).toBe(path);
+    const [d2, g2] = dashOf(path);
+    expect(path.style.getPropertyValue('--march-offset')).toBe(`-${d2 + g2}px`);
     expect(d2 / (d2 + g2)).toBeCloseTo(cfg.marchingAnts.dashFraction, 9);
-    expect(movedPath.getAttribute('transform')).toBeNull();
-    expect(movedPath.getAttribute('stroke-opacity')).toBeNull();
+    expect(path.getAttribute('transform')).toBeNull();
+    expect(path.getAttribute('stroke-opacity')).toBeNull();
   });
 });
