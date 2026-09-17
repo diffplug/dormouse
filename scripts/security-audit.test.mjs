@@ -62,8 +62,13 @@ const cases = [
   // PASS` fragments sat in the working directory and reached a human only
   // through the artifact. The fragments are what the run found; the absence of
   // a merge is not a reason to drop them.
-  { name: 'no merged report publishes the fragments verbatim', report: null, verdicts: ['PASS', 'PASS', null], expected: 'INCONCLUSIVE',
-    notes: ['the merge never ran', '## audit-supply-chain.md', 'VERDICT: PASS', '## audit-application.md', '_No report — this domain produced no fragment._'] },
+  // Cut off, not absent: this arm runs the same sentinel test the guard loop
+  // above does, so all three domain states read the same here as in a merged
+  // report. Without the `_Incomplete …_` marker the no-verdict note sends the
+  // reader after a third marker the body does not carry, and the cut-off
+  // domain's fragment is published looking finished.
+  { name: 'no merged report publishes the fragments, marking cut-off and absent domains', report: null, verdicts: ['PASS', 'PASS', null], unfinished: [1], expected: 'INCONCLUSIVE',
+    notes: ['the merge never ran', '## audit-supply-chain.md', 'VERDICT: PASS', '## audit-ci-secrets.md', '_Incomplete — this domain was still writing', '## audit-application.md', '_No report — this domain produced no fragment._'] },
 ];
 for (const scenario of cases) {
   test(`reporting: ${scenario.name}`, (t) => {

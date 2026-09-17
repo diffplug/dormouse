@@ -528,8 +528,9 @@ jobs:
               # through `Redact secrets from agent output` and the loops above
               # have already read them, so publish them unmerged rather than
               # losing the run's findings. Verbatim, with no summary: §3's
-              # merge is the only thing entitled to characterise a fragment,
-              # and the notes above already name which domains were cut off.
+              # merge is the only thing entitled to characterise a fragment.
+              # The one exception is the cut-off marker below, for the reason
+              # stated there.
               echo "_No \`audit-report.md\` was produced — the merge never ran. Each domain's fragment follows verbatim and unmerged._"
               echo
               # Unquoted on purpose: `AUDIT_FRAGMENTS` is a filename list.
@@ -537,7 +538,20 @@ jobs:
               for f in $AUDIT_FRAGMENTS; do
                 echo "## $f"
                 echo
-                if [ -s "$f" ]; then cat "$f"; else echo "_No report — this domain produced no fragment._"; fi
+                if [ ! -s "$f" ]; then
+                  echo "_No report — this domain produced no fragment._"
+                else
+                  # The same sentinel test the guard loop above already ran,
+                  # and the same marker §3's `emit` writes. Not a
+                  # characterisation of the findings but the identical
+                  # mechanical check, so it is this step's to make: without it
+                  # a fragment whose domain was cut off is published looking
+                  # finished, and the no-verdict note above sends the reader
+                  # after a marker this arm never wrote.
+                  [ "$(sed -e '/^[[:space:]]*$/d' "$f" | tail -n1)" = "<!-- END OF REPORT -->" ] ||
+                    echo "_Incomplete — this domain was still writing when the run ended. What follows is what it had recorded, not a finished report._"
+                  cat "$f"
+                fi
                 echo
               done
             fi
