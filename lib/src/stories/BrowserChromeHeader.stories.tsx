@@ -9,7 +9,6 @@ import {
 } from '../components/wall/wall-context';
 import { SurfacePaneHeader } from '../components/wall/SurfacePaneHeader';
 import { ToolPaneHeader } from '../components/wall/ToolPaneHeader';
-import { PANE_HEADER_HEIGHT_PX } from '../components/design';
 import {
   registerAgentBrowserScreen,
   type ChromeSnapshot,
@@ -155,7 +154,8 @@ function BrowserChromeStory(args: StoryArgs) {
               story's un-zoomed header. */}
           <WallActionsContext.Provider value={loggingActions}>
             <div style={{ width: args.width }}>
-              <div className="bg-app-bg" style={{ height: PANE_HEADER_HEIGHT_PX }}>
+              {/* Preserve the compact 26px visual baseline for these isolated headers. */}
+              <div className="bg-app-bg" style={{ height: 26 }}>
                 <Header
                   id={surfaceId}
                   title={args.htmlTitle || hostPathDisplay(args.url)}
