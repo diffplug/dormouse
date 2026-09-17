@@ -34,6 +34,12 @@ The fix is not to stop delegating. `--allowed-tools` only auto-approves and remo
 
 The deadline is persisted because one longer than the ten-minute Bash cap cannot fire inside a single call: a re-issued loop that recomputes it from `now` never reaches it, so the bound is written down but never binds, and only the runner's cancellation ends the wait. `RUNNER_TEMP` carries no fallback on purpose — a repo-root fallback would survive between hand-runs and hand an already-expired deadline to the next one.
 
+A call that reaches the cap is *moved to the background*, not returned: it prints nothing back, so re-issuing becomes a judgement call rather than a step. Run 34457954349 happened to re-issue a third time and its deadline fell inside that call, so it merged and published two PASS domains; run 34581574869 spent one extra call checking the fragments, which shifted the phase enough that a third wait would have been needed, ended its turn instead, and published no report at all — the same two domains' PASS fragments survived only in the artifact. A loop that ends itself under the cap turns both nights into the same printed answer.
+
+The answer is the call's last line, below a per-domain status, rather than an `ls` listing: once domains append as they go, all three fragments exist within minutes, so a listing of three files no longer means three reports.
+
+The 25-minute deadline was raised to 32 after `application-security` failed to report inside it two nights running — the deadline expired on it on 2026-09-10, and on 2026-09-11 it was still sweeping when the run ended at 21 minutes — while roughly 13 of the job's 40 minutes went unused on both nights. On 2026-09-15 every domain reported in an agent step that ran 25.5 minutes, so the old deadline had little slack even on a night that finished.
+
 At `timeout-minutes: 20` the runner cancelled the job before the 25-minute deadline could fire, so the graceful "give up and report what the domains found" path was unreachable and every overrun landed as INCONCLUSIVE. The 40-minute slack also covers the merge, verdict, redact, upload, and reporting steps after the wait.
 
 A missing fragment is indistinguishable, in the merged report, from a domain that found nothing, and only one of those is safe to publish a release on.
@@ -67,6 +73,8 @@ The redaction step is the only thing between an accidental `printenv` and a worl
 Without the transcript a run that produces no verdict is undiagnosable: `claude-code-action` keeps tool output out of the step log on purpose and the runner is ephemeral. World-readable is consistent with the audit reports already posted to public issues; `***` masking applies to step logs, not to artifact contents.
 
 Two weakenings found by the audit's own first run were covered by no example in the judgement bullet, and both became their own bullets.
+
+Publishing the fragments when no merged report exists is the same "a prompt is not a control" split as the guards above. Run 34581574869 (2026-09-11) ended its turn before the merge, so this step's report section was one line saying no report was produced — while `supply-chain` and `ci-and-secrets` had finished `VERDICT: PASS` fragments in the working directory, already redacted and already read twice by the guard loops. `.github/audit/orchestrator.md` §4 now forbids ending the turn there, but the run's findings should not depend on that sentence being followed. Verbatim and unmerged, because §3's merge is the only thing entitled to characterise a fragment; the cut-off and absent markers are the exception, being the same mechanical tests the step's own guard loops already ran, and a fragment published without them reads as a finished report.
 
 ## Environment and `AUDIT_PAT`
 
