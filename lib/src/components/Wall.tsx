@@ -1603,6 +1603,7 @@ export function Wall({
       const id = last && nav.hasPane(last) ? last : nav.panes()[0];
       if (id) enterTerminalMode(id);
     },
+    enterCommandMode: exitTerminalMode,
     flushPersistence: (options) => persistence.flush(options),
     prepareWorkspaceTransfer: () => prepareWorkspaceTransfer({
       workspaceId: effectiveWorkspaceId,

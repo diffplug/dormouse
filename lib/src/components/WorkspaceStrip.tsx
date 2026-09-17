@@ -19,6 +19,7 @@ import { useTodoPillContent } from './TodoPillBody';
 import { chromeButton, DOOR_TAB_CLASS, HEADER_PALETTE_TRANSITION_CLASS, TODO_PILL_TRACKING_CLASS } from './design';
 import { createWorkspaceStripDrag, type StripDragHost } from './workspace-strip-drag';
 import { acquireChromeKeyboardLease } from './wall/chrome-keyboard-lease';
+import { getWallHandle } from './wall/wall-handles';
 import { useDialogKeyboardOwner } from './wall/wall-context';
 import { closeWorkspaceWithSurfaces, requestWorkspaceClose, requestWorkspaceRename } from './wall/workspace-lifecycle';
 import { getActivitySnapshot, subscribeToActivity } from '../lib/terminal-registry';
@@ -79,6 +80,7 @@ export function WorkspaceStrip({
   useDialogKeyboardOwner(renamingId !== null || pendingClose !== null || pendingMove !== null, acquireChromeKeyboardLease);
 
   const activate = useCallback((id: WorkspaceId) => {
+    getWallHandle(id)?.enterCommandMode();
     setActiveWorkspace(id);
   }, []);
 
@@ -327,8 +329,11 @@ const WorkspaceTab = memo(function WorkspaceTab({
           aria-label={label}
           title={label}
           aria-current={active ? 'true' : undefined}
-          onClick={() => { if (!wasDragged()) onActivate(id); }}
-          onDoubleClick={() => onStartRename(id)}
+          onClick={() => {
+            if (wasDragged()) return;
+            if (active) onStartRename(id);
+            else onActivate(id);
+          }}
         >
           <span className="min-w-0 flex-1 truncate">{name}</span>
           {showIndicators && (

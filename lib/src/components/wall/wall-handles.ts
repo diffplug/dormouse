@@ -27,6 +27,7 @@ export interface WallHandle {
   runningCount(): number;
   /** Leave command selection on chrome and focus a live pane. */
   enterSelectedPane(): void;
+  enterCommandMode(): void;
   /** Persist now. `probeCwd: false` skips the cwd re-read (`SessionFlushRequest`). */
   flushPersistence(options?: SaveOptions): Promise<void>;
   /** Build what another Window needs to take this Workspace, without touching
@@ -95,6 +96,7 @@ export function stubWallHandle(workspaceId: WorkspaceId, overrides: Partial<Wall
     hasTouchedSurfaces: () => false,
     runningCount: () => 0,
     enterSelectedPane: () => {},
+    enterCommandMode: () => {},
     flushPersistence: async () => {},
     prepareWorkspaceTransfer: async () => ({
       payload: {

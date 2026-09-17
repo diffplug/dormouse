@@ -147,7 +147,8 @@ Source of truth: `lib/src/components/Baseboard.tsx`, `lib/src/components/Door.ts
 - **Must use active and inactive pane-header foreground/background pairs** on the corresponding tabs, over the app background. **Must join the active tab directly to a full-width vertical gradient**, active-header background at the top to app background at the bottom. Reserve one `PANE_GUTTER_PX` band for the gradient above the Wall's normal top gutter, keeping it clear of the focus ring.
 - **Must show `×` only on the active tab**, only with multiple Workspaces and outside rename. Middle-click may close an inactive tab. Reveal the active tab after its width changes on activation.
 - **Must reuse `HEADER_PALETTE_TRANSITION_CLASS` for tab palette tweening and reduced motion.**
-- **Must keep tab highlighting separate from activation.** `Enter` on a highlighted tab activates that Workspace and enters passthrough on its last live selected pane (first live pane if unavailable); on `+`, create a Workspace and enter its pane after mount. Deactivation clears a Wall's chrome selection back to its last live pane. Removing the highlighted Workspace returns selection to a live pane.
+- **Must activate inactive tabs in command mode on click; clicking the active tab renames without changing mode.** Pinned by `WorkspaceWindow.test.tsx`.
+- **Must separate highlighting from activation.** `Enter` activates the highlighted Workspace and enters passthrough on its last live selected pane (first live pane if unavailable); `+` creates a Workspace and enters its pane after mount. Deactivation restores a Wall's chrome selection to its last live pane. Removing the highlighted Workspace selects a live pane.
 
 Source of truth: `DOOR_TAB_CLASS` in `lib/src/components/design.tsx`; `WorkspaceStrip` in `lib/src/components/WorkspaceStrip.tsx`; `AppBar` in `standalone/src/AppBar.tsx`. Close visibility: `activates on click` in `lib/src/components/WorkspaceStrip.test.tsx`.
 
@@ -163,7 +164,7 @@ Each Wall renders one Workspace's Content (Lath layout) and Baseboard (doors). S
 - **Never unmount a Wall before its Surfaces are disposed** — `closeAll` waits for the kill fade to commit, bounded by the engine's exit duration, since unmounting mid-fade would leave `Orphaned` Registry entries (`docs/specs/glossary.md` → "Invariants" I4). **The deadline refuses rather than reporting clean**, and the walk re-reads membership until nothing is left, so a Surface born behind it is closed too.
 - **A closing Workspace takes no new Surfaces**: while `closeAll` walks, this Wall answers every Surface-creating `dor` verb with an error (`docs/specs/dor-cli.md` → "Handle Model").
 - **Must reject duplicate Workspace IDs before mutating the model**, preserving the last-Workspace close guard (`workspace-store.test.ts`).
-- Each Wall keeps its own mode and selection across switches: deactivating blurs its selected pane, activating focuses it a frame later, since focus into a hidden subtree is a no-op.
+- **Must retain mode and selection across switches unless the [activation gesture](#workspace-tabs) changes them.** Deactivation blurs the pane; activation focuses it one frame later.
 
 **A Workspace may leave the Window and arrive in another one** — torn out into
 its own window, or dropped onto an existing one — carrying its Surfaces, its

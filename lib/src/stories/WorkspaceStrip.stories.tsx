@@ -85,8 +85,8 @@ export const Indicators: Story = {
 export const Renaming: Story = {
   parameters: { primedWorkspaces: primed(['Workspace 1', 'Deploys'], 1) },
   play: async () => {
-    const tab = await requireElement<HTMLElement>('[data-workspace-tab] button', 'workspace tab');
-    tab.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    const tab = await requireElement<HTMLElement>('[data-workspace-tab-active="true"] button', 'active workspace tab');
+    tab.click();
     await requireElement('[data-workspace-rename-for]', 'rename editor');
   },
 };

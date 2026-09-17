@@ -95,6 +95,48 @@ async function render(node = <WorkspaceWindow initialPaneIds={['pane-a']} />): P
 }
 
 describe('WorkspaceWindow', () => {
+  it('clicking an inactive tab activates it in command mode even if it was left in passthrough', async () => {
+    const first = getActiveWorkspaceId();
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
+    await act(async () => { getWallHandle(first)!.enterSelectedPane(); });
+    await flush();
+    expect(wallFor(first).querySelector('[data-focused="true"]')).not.toBeNull();
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await flush();
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(`[data-workspace-tab="${first}"] button`)!.click();
+    });
+    await flush();
+    expect(getActiveWorkspaceId()).toBe(first);
+    expect(wallFor(first).querySelector('[data-focused="true"]')).toBeNull();
+    expect(container.querySelector('[data-workspace-rename-for]')).toBeNull();
+    await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: '|', bubbles: true })); });
+    await flush();
+    expect(leafIdsIn(first)).toHaveLength(2);
+  });
+
+  it.each(['command', 'passthrough'] as const)('clicking the active tab renames without leaving %s mode', async mode => {
+    const first = getActiveWorkspaceId();
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
+    if (mode === 'passthrough') {
+      await act(async () => { getWallHandle(first)!.enterSelectedPane(); });
+      await flush();
+    }
+    const focused = () => wallFor(first).querySelector('[data-focused="true"]') !== null;
+    expect(focused()).toBe(mode === 'passthrough');
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(`[data-workspace-tab="${first}"] button`)!.click();
+    });
+    const input = container.querySelector<HTMLInputElement>('[data-workspace-rename-for]')!;
+    expect(document.activeElement).toBe(input);
+    expect(focused()).toBe(mode === 'passthrough');
+    await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+    await flush();
+    expect(container.querySelector('[data-workspace-rename-for]')).toBeNull();
+    expect(focused()).toBe(mode === 'passthrough');
+  });
+
   it('highlights tabs without switching and Enter activates or creates into a live pane', async () => {
     const first = getActiveWorkspaceId();
     createWorkspace({ id: 'ws-2', activate: false });

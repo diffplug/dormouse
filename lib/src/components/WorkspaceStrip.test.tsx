@@ -132,13 +132,13 @@ describe('WorkspaceStrip', () => {
     expect(tabFor('ws-2').querySelector('.todo-pill-shell')).toBeNull();
   });
 
-  it('renames on double-click, holding the chrome keyboard lease while the editor is open', async () => {
+  it('renames the active tab on click, holding the chrome keyboard lease while the editor is open', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await render();
     expect(chromeKeyboardHeld()).toBe(false);
 
     await act(async () => {
-      activateButton(first).dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+      activateButton(first).click();
     });
     const input = container.querySelector<HTMLInputElement>(`[data-workspace-rename-for="${first}"]`)!;
     expect(chromeKeyboardHeld()).toBe(true);
@@ -363,7 +363,7 @@ describe('WorkspaceStrip', () => {
     await render();
 
     await act(async () => {
-      activateButton('ws-2').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+      activateButton('ws-2').click();
     });
     expect(chromeKeyboardHeld()).toBe(true);
     // Removing the focused input fires no `blur`, so neither submit nor cancel
