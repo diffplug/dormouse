@@ -1,6 +1,6 @@
 import { useState, useEffect, useSyncExternalStore } from 'react';
 import { MinusIcon, CornersOutIcon, CornersInIcon, XIcon } from '@phosphor-icons/react';
-import { PANE_GUTTER_PX, PopupButtonRow, chromeButton } from '../../lib/src/components/design';
+import { PANE_GUTTER_PX, PopupButtonRow, TAB_WALL_JOIN_GRADIENT, chromeButton } from '../../lib/src/components/design';
 import { WorkspaceStrip } from '../../lib/src/components/WorkspaceStrip';
 import { IS_MAC } from '../../lib/src/lib/platform';
 import { onDragBackInsideStrip, onDragCancelled, onDragOutsideWindow, onDropOnOtherWindow } from './workspace-drag';
@@ -183,7 +183,7 @@ export function AppBar() {
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-x-0 top-full z-10"
-        style={{ height: PANE_GUTTER_PX, backgroundImage: 'linear-gradient(to bottom, var(--color-header-active-bg), var(--color-app-bg))' }}
+        style={{ height: PANE_GUTTER_PX, backgroundImage: TAB_WALL_JOIN_GRADIENT }}
       />
     </div>
   );

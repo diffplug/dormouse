@@ -165,7 +165,7 @@ Source of truth: `lib/src/components/Baseboard.tsx`, `lib/src/components/Door.ts
 ### Workspace tabs
 
 - **Must size tabs to their contents using the shared Door geometry**: 24px high, 68–220px wide, terminal top radius, Door typography and label/action padding, with 6px gaps. Shrink to the minimum before scrolling.
-- **Must use active and inactive pane-header foreground/background pairs** on the corresponding tabs, over the app background. **Must join the active tab directly to a full-width vertical gradient**, active-header background at the top to app background at the bottom. Reserve one `PANE_GUTTER_PX` band for the gradient above the Wall's normal top gutter, keeping it clear of the focus ring.
+- **Must use active and inactive pane-header foreground/background pairs** on the corresponding tabs, over the app background. **Must join the active tab directly to a full-width vertical gradient**, active-header background at the top to app background at the bottom. Reserve one `PANE_GUTTER_PX` band for the gradient above the Wall's normal top gutter, keeping it clear of the focus ring. **Must fade inactive tabs into that same app background below their label.**
 - **Must show `×` only on the active tab**, outside rename. Middle-click may close an inactive tab. Reveal the active tab after its width changes on activation.
 - **Must reuse `HEADER_PALETTE_TRANSITION_CLASS` for tab palette tweening and reduced motion.**
 - **Must activate inactive tabs in command mode on click or `Enter`; either gesture on the active tab renames without changing mode.** `Enter` keeps the selection on the activated tab. Pinned by `WorkspaceWindow.test.tsx`.

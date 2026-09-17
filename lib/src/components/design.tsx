@@ -32,6 +32,22 @@ export const DOOR_TAB_CLASS = clsx(
   TERMINAL_TOP_RADIUS_CLASS,
 );
 
+// The Workspace strip's two halves of one idea: the selected tab is seated
+// against the Wall, and the rest recede into the app ground. Keep them
+// together so a palette change can't move one endpoint without the other.
+export const TAB_WALL_JOIN_GRADIENT = 'linear-gradient(to bottom, var(--color-header-active-bg), var(--color-app-bg))';
+
+// The inactive tab's fade, starting at 70% of the 24px tab — just below the
+// label's baseline — and ending at 70% app background, i.e. a 30/70 sRGB mix
+// with the header color under it. Deliberately TRANSLUCENT rather than a
+// gradient between the two tokens: it composites over the `bg-header-*` class,
+// so HEADER_PALETTE_TRANSITION_CLASS still crossfades beneath it. A gradient
+// naming the header token would paint over that crossfade, which
+// `transition-colors` cannot tween.
+export const TAB_INACTIVE_FADE_STYLE = {
+  backgroundImage: 'linear-gradient(to bottom, transparent 70%, color-mix(in srgb, var(--color-app-bg) 70%, transparent))',
+} as const;
+
 // The gutter between panes (and around the wall's top/sides — the baseboard
 // side stays a tight 2px). Deliberately ODD: the passthrough ring is a 1px
 // stroke, and a 1px stroke can only sit dead-center of a gutter on whole
