@@ -319,7 +319,9 @@ Source of truth: the `.menu(...)` builder in `standalone/src-tauri/src/lib.rs`.
 
 The app replaces Tauri's default menu with a macOS-only App submenu (about /
 services / hide / hide-others / quit) and a Window submenu (minimize / maximize /
-close). **No Edit submenu** — its predefined Paste item binds Cmd+V natively and
+close, plus a macOS-only fullscreen toggle). **Must keep the fullscreen item** —
+it and its Ctrl+Cmd+F are the only exit from native fullscreen when AppKit does
+not reveal the overlay title bar's traffic lights. **No Edit submenu** — its predefined Paste item binds Cmd+V natively and
 would fire alongside the terminal's own DOM-level Cmd+V handling
 (`docs/specs/mouse-and-clipboard.md` §8.2). macOS therefore delivers Cmd+C/X/V to
 the webview as plain keydowns and WKWebView performs no native edit, in Dormouse's

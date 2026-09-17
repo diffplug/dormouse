@@ -4208,6 +4208,11 @@ pub fn run() {
                 &[
                     &PredefinedMenuItem::minimize(handle, None)?,
                     &PredefinedMenuItem::maximize(handle, None)?,
+                    // The only way out of native fullscreen that does not
+                    // depend on AppKit revealing the overlay title bar's
+                    // traffic lights on hover; carries Ctrl+Cmd+F.
+                    #[cfg(target_os = "macos")]
+                    &PredefinedMenuItem::fullscreen(handle, None)?,
                     #[cfg(target_os = "macos")]
                     &PredefinedMenuItem::separator(handle)?,
                     &PredefinedMenuItem::close_window(handle, None)?,
