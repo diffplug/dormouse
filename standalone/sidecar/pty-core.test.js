@@ -153,10 +153,10 @@ test('resolveSpawnConfig keeps ORIGINAL_PATH on non-win32', () => {
 
 test('resolveSpawnConfig drops the GUI node directory from a pane PATH on win32', () => {
   // `cargo run` puts the dev app's target dir on PATH, and the node.exe there
-  // is patched to the GUI subsystem: a child of it gets no console at all. The
-  // target entry is spelled with `/`, a trailing separator and a different
-  // case, pinning that matching ignores all three; `debug\deps` is a sibling,
-  // pinning that this is not prefix matching.
+  // is patched to the GUI subsystem, so it never attaches to the pane's
+  // inherited console. The target entry is spelled with `/`, a trailing
+  // separator and a different case, pinning that matching ignores all three;
+  // `debug\deps` is a sibling, pinning that this is not prefix matching.
   const config = resolveSpawnConfig(
     { surfaceId: 'pane-1' },
     {
