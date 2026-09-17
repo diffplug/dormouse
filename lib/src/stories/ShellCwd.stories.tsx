@@ -134,7 +134,8 @@ export const TitleCandidatesInHeaderMenu: Story = {
       'The context title explanation shows the latest title per channel',
     ),
   ]),
-  render: () => <div style={{ width: 900, height: 680 }}><Wall initialPaneIds={['title-candidates-popup']} /></div>,
+  // A flex column, or the `flex-1` Wall collapses to its Baseboard and hides the pane.
+  render: () => <div className="flex flex-col" style={{ width: 900, height: 680 }}><Wall initialPaneIds={['title-candidates-popup']} /></div>,
   play: openHeaderContextMenu,
 };
 
