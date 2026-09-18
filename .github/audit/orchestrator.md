@@ -142,7 +142,7 @@ emit() {
     echo "_No report — this domain produced no fragment._"
   else
     [ "$(sed -e '/^[[:space:]]*$/d' "$2" | tail -n1)" = "<!-- END OF REPORT -->" ] ||
-      echo "_Incomplete — this domain was still writing when the deadline passed. What follows is what it had recorded, not a finished report._"
+      echo "_Incomplete — this domain never closed its report. What follows is what it had recorded, not a finished report._"
     cat "$2"
   fi
   echo
@@ -163,8 +163,11 @@ domain that never reported contradicts the issue carrying it, and publishes
 an overall `PASS` covering an unaudited domain.
 
 For a domain cut off mid-report, the Summary says that and gives its verdict
-line. **Never state how much such a domain covered** — you did not watch it
-work, and its fragment's own prose is about the moment it was written. Run
+line. **Never state how much such a domain covered, nor why it stopped** — you
+did not watch it work, and its fragment's own prose is about the moment it was
+written. An unclosed fragment is not evidence of a timeout: run 35327271988's
+was published as "cut off ... at the 32-minute deadline" when that domain had
+in fact ended its own turn twenty-one minutes before the deadline. Run
 35205193090 read "two of seven work streams had not reported" and published
 "completed only two of seven", turning five audited streams into five
 unaudited ones in the one paragraph a reader starts from.

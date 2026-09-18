@@ -73,8 +73,8 @@ const cases = [
   // read as a pass. Those are the inverse of the bug this arm fixes.
   { name: 'no merged report publishes the fragments, marking cut-off and absent domains', report: null, verdicts: ['PASS', 'PASS', null], unfinished: [1], expected: 'INCONCLUSIVE',
     notes: ['the merge never ran', '## audit-supply-chain.md', 'VERDICT: PASS', '## audit-application.md', '_No report — this domain produced no fragment._',
-      '## audit-ci-secrets.md\n\n_Incomplete — this domain was still writing'],
-    counts: { '_Incomplete — this domain was still writing': 1 } },
+      '## audit-ci-secrets.md\n\n_Incomplete — this domain never closed its report'],
+    counts: { '_Incomplete — this domain never closed its report': 1 } },
 ];
 for (const scenario of cases) {
   test(`reporting: ${scenario.name}`, (t) => {
@@ -189,6 +189,26 @@ test('the preamble tells domains to write the sentinel every reader waits for', 
   assert.equal(written.length, 1, 'expected exactly one closing `printf` in the preamble');
   assert.match(written[0][0], new RegExp(SENTINEL.replace(/[-[\]{}()*+?.,\\^$|#]/g, '\\$&')));
 });
+// The delegation wait. The orchestrator carries this rule for itself in §2,
+// but a domain is given `_preamble.md` plus its own file and never reads that
+// one — so run 35327271988's `application-security` backgrounded its wait loop,
+// ended its turn, and lost four work streams that finished before the deadline.
+// The block is a template, not runnable, so the parts that make it work are
+// pinned as text: the rule, the backgrounding ban, the Bash timeout without
+// which every call is backgrounded anyway, and the two properties of its
+// deadline. Every domain shares one `$RUNNER_TEMP`, so a fixed deadline file
+// would make whichever domain delegates first set the bound for all of them;
+// and the bound that has to hold is the caller's, which is already on disk at
+// the path §2 persists it to.
+test('the preamble forbids a delegating domain from waiting by ending its turn', () => {
+  const preamble = readFileSync(join(repo, '.github/audit/_preamble.md'), 'utf8');
+  assert.match(preamble, /never end your turn to wait/i);
+  assert.match(preamble, /never\s+with `run_in_background`/);
+  assert.match(preamble, /`timeout: 600000`/);
+  assert.match(preamble, /^DEADLINE_FILE="\$RUNNER_TEMP\/delegate-deadline-<your fragment>"$/m);
+  assert.match(preamble, /^\s*CALLER=\$\(cat "\$RUNNER_TEMP\/audit-deadline"/m);
+});
+
 const finishedFn = orchestrator.match(/^finished\(\) \{.*$/m)[0];
 
 for (const [name, body, expected] of [
