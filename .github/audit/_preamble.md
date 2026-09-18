@@ -61,6 +61,30 @@ if any `FAIL IF` in your scope is violated or any of your qualitative findings
 is BLOCKER. Otherwise INCONCLUSIVE if any check is `UNVERIFIABLE` or
 unfinished; PASS only when every check was determined.
 
+**If you delegate, block for your delegates — never end your turn to wait.**
+Subagents launch in the **background**: the Task tool returns an id, not a
+report. Ending your turn ends *you*, and your caller reads that as your report
+being finished — it merges the fragment as it stands and everything your
+delegates write afterwards is lost. Block inside a Bash call instead, and never
+with `run_in_background`, which returns an id immediately and blocks nothing. A
+single Bash call is capped at ten minutes, so break the loop yourself under the
+cap, issue it with `timeout: 600000`, and re-issue it for as long as your caller
+is still waiting on you:
+
+```sh
+CALL_END=$(( $(date +%s) + 540 ))
+until <every delegate's output file is complete>; do
+  [ "$(date +%s)" -ge "$CALL_END" ] && { echo "STILL WAITING"; break; }
+  sleep 10
+done
+```
+
+Never substitute a bare `sleep` — the harness blocks it. Run 35327271988's
+`application-security` domain backgrounded exactly this loop, said it was
+holding for four outstanding work streams, and ended its turn at 09:11:56. All
+four finished by 09:19:29, fourteen minutes inside the deadline, and none of
+their results reached the report.
+
 Never print a secret value. `$AUDIT_PAT` is passed only as an unexpanded
 `GH_TOKEN=` prefix; do not echo it, do not run `printenv` or `set -x`, and do
 not paste the contents of any credential file into your report — report its
