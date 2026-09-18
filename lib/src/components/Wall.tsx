@@ -420,9 +420,9 @@ export function Wall({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<WallSelectionKind>('pane');
   const lastPaneIdRef = useRef<string | null>(null);
-  /** The Surface a minimize is detaching, set only across its `doorLeaf` commit,
-   *  so a refill that commit triggers starts in its cwd. */
-  const minimizingIdRef = useRef<string | null>(null);
+  /** The local cwd of the pane a kill or minimize is detaching, set only across
+   *  that commit, so a refill it triggers starts there. */
+  const departingCwdRef = useRef<string | undefined>(undefined);
   const doorKillReturnRef = useRef<{ id: string; neighbors: string[] } | null>(null);
 
   const windowFocused = useWindowFocused();
@@ -734,12 +734,19 @@ export function Wall({
     const exitMs = closingWorkspaceRef.current && workspaceIsCollapsed(effectiveWorkspaceId) ? 0 : lath.exitMs;
     setTimeout(() => {
       if (!lath.store.has(id)) return; // superseded meanwhile (e.g. replaced)
+      // Read before disposal drops the Session's state.
+      const cwd = inheritableCwd(id);
       disposeSession(id);
       // Live re-read at removal time: only a kill of the still-selected pane moves
       // selection; navigating away mid-fade is honored. Removing the last leaf
       // empties the tree and the auto-spawn effect fills it.
       const wasSelectedPane = selectedTypeRef.current === 'pane' && selectedIdRef.current === id;
-      lath.store.removeLeaf(id);
+      departingCwdRef.current = cwd;
+      try {
+        lath.store.removeLeaf(id);
+      } finally {
+        departingCwdRef.current = undefined;
+      }
       // Forget the ref only now — while the pane is fading it is still in
       // `listPanes()`, so an earlier delete would let a `dor` projection re-mint a
       // fresh ref for the dying pane.
@@ -876,12 +883,12 @@ export function Wall({
     if (!meta) return;
     // May auto-spawn if this was the last leaf. `doorLeaf` retains the leaf's meta in
     // the store (it keeps changing while minimized).
-    minimizingIdRef.current = id;
+    departingCwdRef.current = inheritableCwd(id);
     let token: RestoreToken | null;
     try {
       ({ token } = lath.store.doorLeaf(id, { park: shouldParkOnMinimize(meta) }));
     } finally {
-      minimizingIdRef.current = null;
+      departingCwdRef.current = undefined;
     }
     if (!token) return;
     clearSessionAttention(id);
@@ -1066,8 +1073,8 @@ export function Wall({
     const id = generatePaneId();
     surfaceRefForId(id);
     const defaults = getDefaultShellOpts();
-    // The last pane minimized: its replacement starts where it was.
-    const cwd = minimizingIdRef.current ? inheritableCwd(minimizingIdRef.current) : undefined;
+    // The last pane killed or minimized: its replacement starts where it was.
+    const cwd = departingCwdRef.current;
     if (defaults?.shell || cwd) setPendingShellOpts(id, { shell: defaults?.shell, args: defaults?.args, cwd });
     lath.store.setEnterHint(id, 'top-left'); // grows from the top-left as the killed pane shrank to the bottom-right
     lath.store.addLeaf(id, terminalLeafMeta(), null); // becomes the root
