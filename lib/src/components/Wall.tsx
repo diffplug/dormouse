@@ -45,6 +45,7 @@ import {
   toggleSessionTodo,
   setPendingShellOpts,
   getDefaultShellOpts,
+  getInheritableCwd,
   getTerminalPaneState,
   getTerminalPaneStateSnapshot,
   getActivitySnapshot,
@@ -201,6 +202,13 @@ function createSurfaceRefRegistry(
     ? initialSurfaceRefsNext
     : 0;
   return { refs, nextIndex: Math.max(persistedNext, max + 1) };
+}
+
+/** Stage `id`'s shell as the current default selection, started in `cwd`. Stages
+ *  nothing when neither is set, leaving the host's own default shell and cwd. */
+function stageDefaultShell(id: string, cwd: string | undefined): void {
+  const defaults = getDefaultShellOpts();
+  if (defaults?.shell || cwd) setPendingShellOpts(id, { shell: defaults?.shell, args: defaults?.args, cwd });
 }
 
 function compareBySurfaceRef(a: DorSurface, b: DorSurface): number {
@@ -724,12 +732,13 @@ export function Wall({
     const exitMs = closingWorkspaceRef.current && workspaceIsCollapsed(effectiveWorkspaceId) ? 0 : lath.exitMs;
     setTimeout(() => {
       if (!lath.store.has(id)) return; // superseded meanwhile (e.g. replaced)
-      disposeSession(id);
       // Live re-read at removal time: only a kill of the still-selected pane moves
       // selection; navigating away mid-fade is honored. Removing the last leaf
       // empties the tree and the auto-spawn effect fills it.
       const wasSelectedPane = selectedTypeRef.current === 'pane' && selectedIdRef.current === id;
       lath.store.removeLeaf(id);
+      // Dispose only after the removal: a refill it triggers reads this pane's cwd.
+      disposeSession(id);
       // Forget the ref only now — while the pane is fading it is still in
       // `listPanes()`, so an earlier delete would let a `dor` projection re-mint a
       // fresh ref for the dying pane.
@@ -1044,13 +1053,13 @@ export function Wall({
   );
 
   /** Restore the Wall's "always one pane" rule after a commit empties the tree
-   *  (last pane killed or minimized). A no-op while the tree is non-empty. */
-  const refillEmptyTree = useCallback(() => {
+   *  (last pane killed or minimized), starting in `departedId`'s cwd. A no-op
+   *  while the tree is non-empty. */
+  const refillEmptyTree = useCallback((departedId?: string) => {
     if (lath.store.getSnapshot().tree.root !== null) return;
     const id = generatePaneId();
     surfaceRefForId(id);
-    const defaults = getDefaultShellOpts();
-    if (defaults?.shell) setPendingShellOpts(id, { shell: defaults.shell, args: defaults.args });
+    stageDefaultShell(id, departedId ? getInheritableCwd(departedId) : undefined);
     lath.store.setEnterHint(id, 'top-left'); // grows from the top-left as the killed pane shrank to the bottom-right
     lath.store.addLeaf(id, terminalLeafMeta(), null); // becomes the root
     // Adopt selection only when it points at nothing real: null, or dangling (a
@@ -1086,7 +1095,9 @@ export function Wall({
         publishMembership();
       }
       if (closingWorkspaceRef.current) return;
-      refillEmptyTree();
+      // A commit that empties the tree took every pre-commit leaf with it.
+      const [departedId] = prevIds;
+      refillEmptyTree(departedId);
     });
   }, [lath, fireEvent, refillEmptyTree, publishMembership]);
 
@@ -1366,16 +1377,15 @@ export function Wall({
     }
 
     const newId = generatePaneId();
-    const defaults = getDefaultShellOpts();
     // An explicit cwd (dor ensure --cwd, defaulting to the caller's directory)
     // wins; otherwise inherit the reference pane's local cwd as dor split does.
-    const sourceCwd = getTerminalPaneState(referenceId).cwd;
-    const inheritedCwd = cwd ?? (sourceCwd && !sourceCwd.isRemote ? sourceCwd.path : undefined);
+    const inheritedCwd = cwd ?? getInheritableCwd(referenceId);
 
     if (deferTerminal) {
       // No pending shell opts at all: the terminal must not spawn when the leaf
       // mounts, and must not inherit a cwd it will never use.
     } else if (command) {
+      const defaults = getDefaultShellOpts();
       // Spawn a real interactive shell and type the command into it once it
       // reaches a prompt (see typeCommandWhenPromptReady in the lifecycle), rather
       // than launching `shell -c command`. A `-c` invocation has no prompt behind
@@ -1394,12 +1404,8 @@ export function Wall({
         command,
         ...(requireIntegration ? { requireIntegration: true } : {}),
       });
-    } else if (defaults?.shell || inheritedCwd) {
-      setPendingShellOpts(newId, {
-        shell: defaults?.shell,
-        args: defaults?.args,
-        cwd: inheritedCwd,
-      });
+    } else {
+      stageDefaultShell(newId, inheritedCwd);
     }
 
     if (referenceDoor) {
@@ -1855,13 +1861,7 @@ export function Wall({
     surfaceRefForId(newId);
     const ref = id && nav.hasPane(id) ? id : null;
     // Carry the currently selected shell into every manual split.
-    const defaults = getDefaultShellOpts();
-    // Remote cwds (OSC 7 over ssh) name a path on the remote host, not one the local shell can chdir to.
-    const sourceCwd = ref ? getTerminalPaneState(ref).cwd : null;
-    const inheritedCwd = sourceCwd && !sourceCwd.isRemote ? sourceCwd.path : undefined;
-    if (defaults?.shell || inheritedCwd) {
-      setPendingShellOpts(newId, { shell: defaults?.shell, args: defaults?.args, cwd: inheritedCwd });
-    }
+    stageDefaultShell(newId, ref ? getInheritableCwd(ref) : undefined);
     const panes = lath.listPanes();
     const refId = ref ?? (panes.length > 0 ? panes[panes.length - 1].id : null);
     const edge: Edge = direction === 'right' ? 'right' : 'bottom';
