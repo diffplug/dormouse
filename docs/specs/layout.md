@@ -497,7 +497,7 @@ Shell-selection replacement shows a short fixed-position notice over the resulti
 
 ### Auto-spawn refill
 
-A store commit that empties the tree (last pane killed or minimized) triggers the "always keep one pane visible" auto-spawn: a Wall effect subscribed to the store spawns one leaf into the emptied tree (`lib/src/components/Wall.tsx`), **re-entrantly on the same commit chain**, so the refill appears with no separate delay (rationale). It spawns with the current default shell selection, matching manual splits. **The refill inherits the departing pane's local cwd**, as a split does.
+A store commit that empties the tree (last pane killed or minimized) triggers the "always keep one pane visible" auto-spawn: a Wall effect subscribed to the store spawns one leaf into the emptied tree (`lib/src/components/Wall.tsx`), **re-entrantly on the same commit chain**, so the refill appears with no separate delay (rationale). Like a split, it takes the default shell selection and **the departing pane's local cwd**.
 
 **The refill adopts the replacement (`selectPane`) only when the current selection points at nothing real** — null (the kill tail cleared it after a selected last-pane kill) or dangling (still naming the just-removed pane). **A valid selection is left alone** — the just-created door on the minimize path, or a live pane after an unselected kill — because the auto-spawn exists to keep a pane visible, not to steal selection.
 

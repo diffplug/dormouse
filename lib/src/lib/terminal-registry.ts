@@ -103,6 +103,7 @@ export {
   ensureTerminalPaneState,
   fillTerminalProcessCwd,
   getRunningCommandArgv0,
+  getInheritableCwd,
   getTerminalPaneState,
   getTerminalPaneStateSnapshot,
   isPaneOscDriven,

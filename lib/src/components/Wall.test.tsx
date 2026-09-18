@@ -1086,18 +1086,17 @@ describe('Wall on the Lath engine', () => {
     expect(leafCount()).toBe(1);
   });
 
-  it.each(['Minimize', 'Kill'])('starts the refill after %s of the last pane in that pane\'s cwd', async (control) => {
-    // An untouched pane closes at once, with no confirm overlay.
-    vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(true);
+  it.each(['Minimize', 'Kill'] as const)('starts the refill after %s of the last pane in that pane\'s cwd', async (control) => {
+    // The stubbed pane has no registry entry to tear down, so disposal is made to
+    // drop the pane state as the real teardown does.
+    vi.spyOn(terminalRegistry, 'disposeSession').mockImplementation((id) => terminalRegistry.removeTerminalPaneState(id));
     terminalRegistry.seedTerminalManualCwd('pane-a', '/repo');
     await act(async () => {
       root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
     });
     await flush();
 
-    const leafA = container.querySelector('[data-lath-leaf="pane-a"]')!;
-    await act(async () => { leafA.querySelector<HTMLElement>(`[aria-label="${control}"]`)!.click(); });
-    await flush();
+    await clickHeaderControl('pane-a', control);
 
     const refillId = container.querySelector('[data-lath-leaf]')?.getAttribute('data-lath-leaf');
     try {
@@ -3165,15 +3164,15 @@ describe('Wall on the Lath engine', () => {
     await flush();
   }
 
-  /** The pane header's Kill button — a user-visible closure, which does prompt.
-   *  `isUntouched` short-circuits the kill confirmation so this is one click. */
-  async function clickHeaderKill(paneId: string): Promise<void> {
+  /** A pane header control; Kill is a user-visible closure, which does prompt.
+   *  `isUntouched` short-circuits the kill confirmation so a kill is one click. */
+  async function clickHeaderControl(paneId: string, label: 'Kill' | 'Minimize'): Promise<void> {
     const untouched = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(true);
     try {
       const button = container.querySelector<HTMLButtonElement>(
-        `[data-lath-leaf="${paneId}"] button[aria-label="Kill"]`,
+        `[data-lath-leaf="${paneId}"] button[aria-label="${label}"]`,
       );
-      expect(button, `no Kill button on ${paneId}`).not.toBeNull();
+      expect(button, `no ${label} button on ${paneId}`).not.toBeNull();
       await act(async () => {
         button!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       });
@@ -3361,7 +3360,7 @@ describe('Wall on the Lath engine', () => {
     const { dispose, setBusy } = spyOnHelper();
     vi.spyOn(fake.notepadArchive, 'save').mockRejectedValue(new Error('disk full'));
     await renderNotedPane();
-    await clickHeaderKill('pane-a');
+    await clickHeaderControl('pane-a', 'Kill');
     expect(archiveFailureModal()).not.toBeNull();
     setBusy(true);
     await clickButton('Close anyway');
@@ -3397,7 +3396,7 @@ describe('Wall on the Lath engine', () => {
     await flush();
     act(() => { addPlainNote('pane-a', 'keep me'); });
 
-    await clickHeaderKill('pane-a');
+    await clickHeaderControl('pane-a', 'Kill');
 
     expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
     expect(getNotes('pane-a')).toHaveLength(1);
@@ -3432,7 +3431,7 @@ describe('Wall on the Lath engine', () => {
     });
     await flush();
     act(() => { addPlainNote('pane-a', 'keep me'); });
-    await clickHeaderKill('pane-a');
+    await clickHeaderControl('pane-a', 'Kill');
 
     await clickButton('Keep open');
 
@@ -3448,7 +3447,7 @@ describe('Wall on the Lath engine', () => {
     });
     await flush();
     act(() => { addPlainNote('pane-a', 'expendable'); });
-    await clickHeaderKill('pane-a');
+    await clickHeaderControl('pane-a', 'Kill');
 
     await clickButton('Close anyway');
 
@@ -3477,8 +3476,8 @@ describe('Wall on the Lath engine', () => {
       addPlainNote('pane-b', 'from b');
     });
 
-    await clickHeaderKill('pane-a');
-    await clickHeaderKill('pane-b');
+    await clickHeaderControl('pane-a', 'Kill');
+    await clickHeaderControl('pane-b', 'Kill');
 
     // A's prompt is the one on screen; B's is behind it.
     expect(archiveFailureModal()?.textContent).toContain('a could not be written');

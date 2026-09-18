@@ -2,7 +2,7 @@ import { getPlatform } from './platform';
 import { registry } from './terminal-store';
 import { disposeSession, getOrCreateTerminal, parkElement, setPendingShellOpts } from './terminal-lifecycle';
 import { getDefaultShellOpts } from './shell-defaults';
-import { getTerminalPaneState, isPaneOscDriven, seedLaunchedCommand } from './terminal-state-store';
+import { getInheritableCwd, getTerminalPaneState, isPaneOscDriven, seedLaunchedCommand } from './terminal-state-store';
 import { DEFAULT_HELPER_COMMAND, type HelperIdentity } from './terminal-context-types';
 
 export type HelperStatus = 'waiting' | 'running' | 'completed' | 'preserved' | 'off' | 'unsupported' | 'exited';
@@ -160,7 +160,7 @@ export async function openHelper(parentId: string): Promise<HelperTerminal> {
     const command = settings.command ?? DEFAULT_HELPER_COMMAND;
     const helper: HelperTerminal = { id, parentId, command, status: command ? 'waiting' : 'off' };
     helpers.set(parentId, helper);
-    setPendingShellOpts(id, { ...getDefaultShellOpts(), cwd: cwd && !cwd.isRemote ? cwd.path : undefined, helper: { parentId, command } });
+    setPendingShellOpts(id, { ...getDefaultShellOpts(), cwd: getInheritableCwd(parentId), helper: { parentId, command } });
     getOrCreateTerminal(id);
     parkElement(id);
     notifyHelpers();
