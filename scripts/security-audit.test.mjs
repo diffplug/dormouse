@@ -193,14 +193,20 @@ test('the preamble tells domains to write the sentinel every reader waits for', 
 // but a domain is given `_preamble.md` plus its own file and never reads that
 // one — so run 35327271988's `application-security` backgrounded its wait loop,
 // ended its turn, and lost four work streams that finished before the deadline.
-// The block is a template, not runnable, so the three parts that make it work
-// are pinned as text: the rule, the backgrounding ban, and the Bash timeout
-// without which every call is backgrounded anyway.
+// The block is a template, not runnable, so the parts that make it work are
+// pinned as text: the rule, the backgrounding ban, the Bash timeout without
+// which every call is backgrounded anyway, and the two properties of its
+// deadline. Every domain shares one `$RUNNER_TEMP`, so a fixed deadline file
+// would make whichever domain delegates first set the bound for all of them;
+// and the bound that has to hold is the caller's, which is already on disk at
+// the path §2 persists it to.
 test('the preamble forbids a delegating domain from waiting by ending its turn', () => {
   const preamble = readFileSync(join(repo, '.github/audit/_preamble.md'), 'utf8');
   assert.match(preamble, /never end your turn to wait/i);
   assert.match(preamble, /never\s+with `run_in_background`/);
   assert.match(preamble, /`timeout: 600000`/);
+  assert.match(preamble, /^DEADLINE_FILE="\$RUNNER_TEMP\/delegate-deadline-<your fragment>"$/m);
+  assert.match(preamble, /^\s*CALLER=\$\(cat "\$RUNNER_TEMP\/audit-deadline"/m);
 });
 
 const finishedFn = orchestrator.match(/^finished\(\) \{.*$/m)[0];

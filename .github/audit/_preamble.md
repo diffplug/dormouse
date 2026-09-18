@@ -72,9 +72,17 @@ cap, issue it with `timeout: 600000`, and re-issue it under a bound of your
 own:
 
 ```sh
-# Persisted, because you re-issue this block in a fresh shell each time.
-DEADLINE_FILE="$RUNNER_TEMP/delegate-deadline"
-[ -f "$DEADLINE_FILE" ] || echo $(( $(date +%s) + 1500 )) > "$DEADLINE_FILE"
+# Persisted, because you re-issue this block in a fresh shell each time — and
+# named after your own fragment, because every domain shares one $RUNNER_TEMP.
+DEADLINE_FILE="$RUNNER_TEMP/delegate-deadline-<your fragment>"
+if [ ! -f "$DEADLINE_FILE" ]; then
+  # Your caller's own deadline, less three minutes to close your fragment. It
+  # writes that file before it starts waiting; the 25 minutes here is only the
+  # fallback for the case where it has not.
+  CALLER=$(cat "$RUNNER_TEMP/audit-deadline" 2>/dev/null || true)
+  [ -n "$CALLER" ] || CALLER=$(( $(date +%s) + 1680 ))
+  echo $(( CALLER - 180 )) > "$DEADLINE_FILE"
+fi
 DEADLINE=$(cat "$DEADLINE_FILE")
 CALL_END=$(( $(date +%s) + 540 ))
 ANSWER="ALL FINISHED"
@@ -89,8 +97,9 @@ echo "$ANSWER"
 
 **The call's last line is its answer.** Re-issue the block verbatim on `STILL
 WAITING`; on `DEADLINE` or `ALL FINISHED` stop waiting and write up what you
-have. The deadline is 25 minutes so it lands inside your caller's own bound
-with room left to rewrite your verdict line and close the fragment; an empty
+have. Your deadline is your caller's own, three minutes early, so you still
+have room to rewrite your verdict line and close the fragment; the 25 minutes
+is only the fallback for a caller that has not started waiting yet. An empty
 answer means the call was moved to the background, so re-issue it rather than
 waiting on that task.
 
