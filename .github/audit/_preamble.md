@@ -68,22 +68,38 @@ being finished — it merges the fragment as it stands and everything your
 delegates write afterwards is lost. Block inside a Bash call instead, and never
 with `run_in_background`, which returns an id immediately and blocks nothing. A
 single Bash call is capped at ten minutes, so break the loop yourself under the
-cap, issue it with `timeout: 600000`, and re-issue it for as long as your caller
-is still waiting on you:
+cap, issue it with `timeout: 600000`, and re-issue it under a bound of your
+own:
 
 ```sh
+# Persisted, because you re-issue this block in a fresh shell each time.
+DEADLINE_FILE="$RUNNER_TEMP/delegate-deadline"
+[ -f "$DEADLINE_FILE" ] || echo $(( $(date +%s) + 1500 )) > "$DEADLINE_FILE"
+DEADLINE=$(cat "$DEADLINE_FILE")
 CALL_END=$(( $(date +%s) + 540 ))
+ANSWER="ALL FINISHED"
 until <every delegate's output file is complete>; do
-  [ "$(date +%s)" -ge "$CALL_END" ] && { echo "STILL WAITING"; break; }
+  NOW=$(date +%s)
+  [ "$NOW" -ge "$DEADLINE" ] && { ANSWER="DEADLINE"; break; }
+  [ "$NOW" -ge "$CALL_END" ] && { ANSWER="STILL WAITING"; break; }
   sleep 10
 done
+echo "$ANSWER"
 ```
 
-Never substitute a bare `sleep` — the harness blocks it. Run 35327271988's
-`application-security` domain backgrounded exactly this loop, said it was
-holding for four outstanding work streams, and ended its turn at 09:11:56. All
-four finished by 09:19:29, fourteen minutes inside the deadline, and none of
-their results reached the report.
+**The call's last line is its answer.** Re-issue the block verbatim on `STILL
+WAITING`; on `DEADLINE` or `ALL FINISHED` stop waiting and write up what you
+have. The deadline is 25 minutes so it lands inside your caller's own bound
+with room left to rewrite your verdict line and close the fragment; an empty
+answer means the call was moved to the background, so re-issue it rather than
+waiting on that task.
+
+Never substitute a bare `sleep` — the harness blocks it; the `until` loop above
+is the sanctioned form. Run 35327271988's `application-security` domain
+backgrounded its own wait loop, said it was holding for four outstanding work
+streams, and ended its turn at 09:11:56. All four finished by 09:19:29,
+fourteen minutes inside the deadline, and none of their results reached the
+report.
 
 Never print a secret value. `$AUDIT_PAT` is passed only as an unexpanded
 `GH_TOKEN=` prefix; do not echo it, do not run `printenv` or `set -x`, and do

@@ -73,8 +73,8 @@ const cases = [
   // read as a pass. Those are the inverse of the bug this arm fixes.
   { name: 'no merged report publishes the fragments, marking cut-off and absent domains', report: null, verdicts: ['PASS', 'PASS', null], unfinished: [1], expected: 'INCONCLUSIVE',
     notes: ['the merge never ran', '## audit-supply-chain.md', 'VERDICT: PASS', '## audit-application.md', '_No report — this domain produced no fragment._',
-      '## audit-ci-secrets.md\n\n_Incomplete — this domain was still writing'],
-    counts: { '_Incomplete — this domain was still writing': 1 } },
+      '## audit-ci-secrets.md\n\n_Incomplete — this domain never closed its report'],
+    counts: { '_Incomplete — this domain never closed its report': 1 } },
 ];
 for (const scenario of cases) {
   test(`reporting: ${scenario.name}`, (t) => {
