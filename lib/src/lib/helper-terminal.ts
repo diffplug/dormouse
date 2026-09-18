@@ -156,15 +156,17 @@ export async function openHelper(parentId: string): Promise<HelperTerminal> {
     const settings = await platform.terminalContext({ op: 'settings' });
     if (!parentIsOpen(parentId)) throw new Error('The parent terminal has closed');
     const id = `helper-${crypto.randomUUID()}`;
-    const cwd = getTerminalPaneState(parentId).cwd;
+    // One cwd for the spawn and the launched command's record, so a remote parent
+    // leaves the helper in the host default rather than claiming the ssh path.
+    const cwd = getInheritableCwd(parentId);
     const command = settings.command ?? DEFAULT_HELPER_COMMAND;
     const helper: HelperTerminal = { id, parentId, command, status: command ? 'waiting' : 'off' };
     helpers.set(parentId, helper);
-    setPendingShellOpts(id, { ...getDefaultShellOpts(), cwd: getInheritableCwd(parentId), helper: { parentId, command } });
+    setPendingShellOpts(id, { ...getDefaultShellOpts(), cwd, helper: { parentId, command } });
     getOrCreateTerminal(id);
     parkElement(id);
     notifyHelpers();
-    watchHelper(helper, cwd?.path);
+    watchHelper(helper, cwd);
     return helper;
   })();
   pending.set(parentId, operation);

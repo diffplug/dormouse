@@ -279,7 +279,7 @@ That order is load-bearing twice: a rename input suppresses the pane shortcuts b
 
 A split from an existing pane (`|`/`%`/`-`/`"` or the header split buttons) spawns the new pane with its source pane's last-known cwd, then selects it and enters passthrough; host New Terminal actions share that focus tail (rationale). Focus-neutral control-plane creation (`dor split -- …`, `dor ensure`, `dor iframe`, `dor ab`) keeps its documented background behavior.
 
-The source cwd is read from `getTerminalPaneState(sourceId).cwd`. **Never inherit a remote cwd** (`isRemote === true`, e.g. an OSC 7 path reported over ssh) — it is not a usable local spawn cwd. The host default applies when the source cwd is unknown, remote, or absent (initial pane creation). The inherited cwd rides `setPendingShellOpts` alongside the inherited shell selection, consumed by `getOrCreateTerminal` on the next `platform.spawnPty`.
+The source cwd is read from `getInheritableCwd(sourceId)`. **Never inherit a remote cwd** (`isRemote === true`, e.g. an OSC 7 path reported over ssh) — it is not a usable local spawn cwd. The host default applies when the source cwd is unknown, remote, or absent (initial pane creation). The inherited cwd rides `setPendingShellOpts` alongside the inherited shell selection, consumed by `getOrCreateTerminal` on the next `platform.spawnPty`.
 
 ### Kill confirmation
 
