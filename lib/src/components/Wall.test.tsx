@@ -1086,6 +1086,28 @@ describe('Wall on the Lath engine', () => {
     expect(leafCount()).toBe(1);
   });
 
+  it('starts the refill for a minimized last pane in that pane\'s cwd', async () => {
+    terminalRegistry.seedTerminalManualCwd('pane-a', '/repo');
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+    });
+    await flush();
+
+    const leafA = container.querySelector('[data-lath-leaf="pane-a"]')!;
+    await act(async () => { leafA.querySelector<HTMLElement>('[aria-label="Minimize"]')!.click(); });
+    await flush();
+
+    const refillId = container.querySelector('[data-lath-leaf]')?.getAttribute('data-lath-leaf');
+    try {
+      expect(refillId).toBeTruthy();
+      expect(refillId).not.toBe('pane-a');
+      expect(pendingShellOpts.get(refillId!)?.cwd).toBe('/repo');
+    } finally {
+      if (refillId) pendingShellOpts.delete(refillId);
+      act(() => terminalRegistry.removeTerminalPaneState('pane-a'));
+    }
+  });
+
   it('retires the old ref when shell selection replaces an untouched pane', async () => {
     await act(async () => {
       root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);

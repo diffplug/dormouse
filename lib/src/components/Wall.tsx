@@ -203,6 +203,13 @@ function createSurfaceRefRegistry(
   return { refs, nextIndex: Math.max(persistedNext, max + 1) };
 }
 
+/** The cwd a new local shell may inherit from `id`. A remote cwd (OSC 7 over ssh)
+ *  names a path on the remote host, not one the local shell can chdir to. */
+function inheritableCwd(id: string): string | undefined {
+  const cwd = getTerminalPaneState(id).cwd;
+  return cwd && !cwd.isRemote ? cwd.path : undefined;
+}
+
 function compareBySurfaceRef(a: DorSurface, b: DorSurface): number {
   return (surfaceRefNumber(a.ref) ?? Number.MAX_SAFE_INTEGER)
     - (surfaceRefNumber(b.ref) ?? Number.MAX_SAFE_INTEGER);
@@ -413,6 +420,9 @@ export function Wall({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<WallSelectionKind>('pane');
   const lastPaneIdRef = useRef<string | null>(null);
+  /** The Surface a minimize is detaching, set only across its `doorLeaf` commit,
+   *  so a refill that commit triggers starts in its cwd. */
+  const minimizingIdRef = useRef<string | null>(null);
   const doorKillReturnRef = useRef<{ id: string; neighbors: string[] } | null>(null);
 
   const windowFocused = useWindowFocused();
@@ -866,7 +876,13 @@ export function Wall({
     if (!meta) return;
     // May auto-spawn if this was the last leaf. `doorLeaf` retains the leaf's meta in
     // the store (it keeps changing while minimized).
-    const { token } = lath.store.doorLeaf(id, { park: shouldParkOnMinimize(meta) });
+    minimizingIdRef.current = id;
+    let token: RestoreToken | null;
+    try {
+      ({ token } = lath.store.doorLeaf(id, { park: shouldParkOnMinimize(meta) }));
+    } finally {
+      minimizingIdRef.current = null;
+    }
     if (!token) return;
     clearSessionAttention(id);
     // The runtime Door is identity + the core restore payload only
@@ -1050,7 +1066,9 @@ export function Wall({
     const id = generatePaneId();
     surfaceRefForId(id);
     const defaults = getDefaultShellOpts();
-    if (defaults?.shell) setPendingShellOpts(id, { shell: defaults.shell, args: defaults.args });
+    // The last pane minimized: its replacement starts where it was.
+    const cwd = minimizingIdRef.current ? inheritableCwd(minimizingIdRef.current) : undefined;
+    if (defaults?.shell || cwd) setPendingShellOpts(id, { shell: defaults?.shell, args: defaults?.args, cwd });
     lath.store.setEnterHint(id, 'top-left'); // grows from the top-left as the killed pane shrank to the bottom-right
     lath.store.addLeaf(id, terminalLeafMeta(), null); // becomes the root
     // Adopt selection only when it points at nothing real: null, or dangling (a
@@ -1369,8 +1387,7 @@ export function Wall({
     const defaults = getDefaultShellOpts();
     // An explicit cwd (dor ensure --cwd, defaulting to the caller's directory)
     // wins; otherwise inherit the reference pane's local cwd as dor split does.
-    const sourceCwd = getTerminalPaneState(referenceId).cwd;
-    const inheritedCwd = cwd ?? (sourceCwd && !sourceCwd.isRemote ? sourceCwd.path : undefined);
+    const inheritedCwd = cwd ?? inheritableCwd(referenceId);
 
     if (deferTerminal) {
       // No pending shell opts at all: the terminal must not spawn when the leaf
@@ -1856,9 +1873,7 @@ export function Wall({
     const ref = id && nav.hasPane(id) ? id : null;
     // Carry the currently selected shell into every manual split.
     const defaults = getDefaultShellOpts();
-    // Remote cwds (OSC 7 over ssh) name a path on the remote host, not one the local shell can chdir to.
-    const sourceCwd = ref ? getTerminalPaneState(ref).cwd : null;
-    const inheritedCwd = sourceCwd && !sourceCwd.isRemote ? sourceCwd.path : undefined;
+    const inheritedCwd = ref ? inheritableCwd(ref) : undefined;
     if (defaults?.shell || inheritedCwd) {
       setPendingShellOpts(newId, { shell: defaults?.shell, args: defaults?.args, cwd: inheritedCwd });
     }
