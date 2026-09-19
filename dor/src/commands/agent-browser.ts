@@ -238,12 +238,23 @@ export async function runAgentBrowserCli(args: string[], options: CliOptions): P
   const binary = env[AGENT_BROWSER_BIN_ENV] || DEFAULT_AGENT_BROWSER_BIN;
   const exec = options.execAgentBrowser ?? execAgentBrowserProcess;
 
-  // Resolve the binary to an absolute path once: it both proves the install
-  // present (below) and travels to the host as `binaryPath` (a GUI host may not
-  // share this terminal's PATH). undefined means "not found on PATH" — or, for
-  // an explicit path, simply "returned verbatim", which agentBrowserIsMissing
-  // re-checks on disk.
+  // Resolve the binary to an absolute path once: it proves the install present
+  // (below), is what we spawn (see `execTarget`), and travels to the host as
+  // `binaryPath` (a GUI host may not share this terminal's PATH). undefined
+  // means "not found on PATH" — or, for an explicit path, simply "returned
+  // verbatim", which agentBrowserIsMissing re-checks on disk.
   const binaryPath = resolveBinaryPath(binary, env);
+
+  // Spawn the resolved path, never the bare name: cross-spawn resolves a bare
+  // name through `which`, which checks `process.cwd()` *before* PATH on Windows
+  // (and re-emits the bare name into cmd.exe for a `.cmd` shim, which does the
+  // same). Since `dor` inherits the pane's cwd, a bare-name spawn would let an
+  // `agent-browser.cmd` sitting in a cloned repository win the race against the
+  // real install — repo content executing with no gate, which
+  // docs/specs/dor-tool.md -> Trust treats as a boundary. Falls back to the bare
+  // name only when the PATH walk found nothing, which is the ENOENT path below.
+  // See docs/specs/dor-cli.md -> "Spawning External Binaries".
+  const execTarget = binaryPath ?? binary;
 
   // Detect a missing install deterministically, before spawning. A failed spawn
   // on Windows emits BOTH 'error' (ENOENT) and 'close' (a libuv error code); if
@@ -257,7 +268,7 @@ export async function runAgentBrowserCli(args: string[], options: CliOptions): P
 
   let result: AgentBrowserExecResult;
   try {
-    result = await exec(binary, ['--session', session, ...rest]);
+    result = await exec(execTarget, ['--session', session, ...rest]);
   } catch (error) {
     if (isMissingBinaryError(error)) {
       return fail(missingBinaryMessage(binary));
@@ -272,7 +283,7 @@ export async function runAgentBrowserCli(args: string[], options: CliOptions): P
     // passthrough rather than nagging about the missing surface.
     if (!(client instanceof Error)) {
       try {
-        const status = await exec(binary, streamStatusArgs(session));
+        const status = await exec(execTarget, streamStatusArgs(session));
         const wsPort = parseStreamPort(status.stdout);
         // Pass the absolute path resolved above so the host (which may not share
         // this terminal's PATH) can run host-side tab/close commands.

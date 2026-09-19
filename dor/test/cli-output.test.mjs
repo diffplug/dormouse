@@ -1386,7 +1386,7 @@ test('agent-browser respects DORMOUSE_AGENT_BROWSER_BIN and forwards it as binar
   assert.equal(surfaceRequest(client).binaryPath, '/opt/custom/agent-browser');
 });
 
-test('agent-browser resolves the binary on PATH to an absolute binaryPath', async () => {
+test('agent-browser spawns the PATH-resolved absolute path, never the bare name', async () => {
   await withTempDir('dor-ab-', async (dir) => {
     // On Windows a bare name isn't executable and resolveBinaryPath walks
     // PATHEXT (.cmd/.exe/.bat), so the on-disk shim must carry one of those
@@ -1403,6 +1403,11 @@ test('agent-browser resolves the binary on PATH to an absolute binaryPath', asyn
       // resolveBinaryPath splits on the same, so a POSIX-only `:` would hide dir.
       env: { PATH: ['/nonexistent', dir].join(delimiter) },
     });
+    // Both spawns take the resolved path. Spawning the bare name instead would
+    // hand the inherited cwd a code-execution primitive on Windows, where
+    // cross-spawn's `which` searches it before PATH — docs/specs/dor-cli.md ->
+    // "Spawning External Binaries".
+    assert.deepEqual(ab.calls.map((call) => call[0]), [binPath, binPath]);
     assert.equal(surfaceRequest(client).binaryPath, binPath);
   });
 });

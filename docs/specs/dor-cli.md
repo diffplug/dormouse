@@ -97,6 +97,11 @@ tab/eval/screenshot commands, and anything added later. It is the only code
   escaping, and passes through untouched on POSIX. **Never forward an argument
   containing a literal `%VAR%`** — `cmd.exe` expands it through a `.cmd` shim,
   an unavoidable batch limitation; today's forwarded arguments carry none.
+- **`dor ab` spawns the `PATH`-resolved absolute path, never the bare name** —
+  cross-spawn resolves a bare name through `which`, which searches the cwd
+  before `PATH` on Windows (rationale). It falls back to the bare name only when
+  the walk found nothing, so absence still surfaces as ENOENT. The host's
+  candidate list still ends in a bare name (`## Future`).
 - **`windowsHide`.** Without it every `.cmd` shim flashes a focus-stealing
   console window, once per screenshot stream-frame pulse (rationale).
 - **Resolve on `exit`, not `close`, with an exit-time snapshot** — the
@@ -683,6 +688,13 @@ Source of truth: `buildDorSurfacesInternal` in `lib/src/components/Wall.tsx`; `d
 Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `openCommand` in `dor/src/commands/open.ts`; `ToolSurfaceResponse` in `dor/src/commands/types.ts`.
 
 ## Future
+
+- **Resolve the host's agent-browser candidates on `PATH` too.**
+  `runWithBinaryFallback` still ends its list with the bare
+  `DEFAULT_AGENT_BROWSER_BIN`, so on Windows the extension-host or Tauri-app
+  working directory is searched first — narrower than `dor ab`'s case, since a
+  user does not clone into it. Sharing `resolveBinaryPath` means moving it to
+  `dor-lib-common` beside `spawnAndCapture`.
 
 - **Surface a dead control channel in the UI.** A lost bind leaves one
   `[dor-control]` line on the host's stderr, and all a user sees is `dor`
