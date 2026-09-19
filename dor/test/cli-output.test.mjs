@@ -1530,6 +1530,11 @@ test('the Windows candidate list mirrors which(1) on every edge', () => {
     'a customised PATHEXT is honoured verbatim, in its own order',
   );
   assert.deepEqual(
+    binaryCandidateNames('agent-browser', { PATHEXT: '.EXE;' }, true),
+    ['agent-browser.EXE', 'agent-browser'],
+    'a trailing separator keeps the empty extension, as splitting without a filter does',
+  );
+  assert.deepEqual(
     binaryCandidateNames('agent-browser.exe', {}, true)[0],
     'agent-browser.exe',
     'a name carrying an extension is tried as itself first',

@@ -122,8 +122,8 @@ tab/eval/screenshot commands, and anything added later. It is the only code
   that cannot be written that way is the POSIX executable bit, since
   `accessSync(X_OK)` reports every readable file as executable on Windows.
 
-  Source of truth: `binaryCandidateNames`, `resolveBinaryPath` and
-  `agentBrowserIsMissing` in `dor/src/commands/agent-browser.ts`; `getPathInfo`
+  Source of truth: `binaryCandidateNames`, `isExecutableFile`, `resolveBinaryPath`
+  and `agentBrowserIsMissing` in `dor/src/commands/agent-browser.ts`; `getPathInfo`
   in `which/which.js` is what they mirror; pinned in
   `dor/test/cli-output.test.mjs`.
 - **`windowsHide`.** Without it every `.cmd` shim flashes a focus-stealing

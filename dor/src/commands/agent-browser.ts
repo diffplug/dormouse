@@ -454,7 +454,11 @@ export function isExecutableFile(candidate: string, isWindows: boolean): boolean
  */
 export function binaryCandidateNames(binary: string, env: CliEnv, isWindows: boolean): string[] {
   if (!isWindows) return [binary];
-  const exts = (env.PATHEXT || WINDOWS_BIN_EXTS.join(';')).split(';').filter(Boolean);
+  // No `.filter(Boolean)`: `getPathInfo` splits without one, so a trailing
+  // separator — ordinary on Windows — leaves a final empty extension that tries
+  // the name unsuffixed. Nothing runnable lives there, but dropping it would make
+  // the walk report missing where `which` returned a path.
+  const exts = (env.PATHEXT || WINDOWS_BIN_EXTS.join(';')).split(';');
   if (binary.includes('.')) exts.unshift('');
   return exts.map((ext) => `${binary}${ext}`);
 }
