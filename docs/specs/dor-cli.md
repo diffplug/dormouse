@@ -97,6 +97,35 @@ tab/eval/screenshot commands, and anything added later. It is the only code
   escaping, and passes through untouched on POSIX. **Never forward an argument
   containing a literal `%VAR%`** — `cmd.exe` expands it through a `.cmd` shim,
   an unavoidable batch limitation; today's forwarded arguments carry none.
+- **`dor ab` spawns the `PATH`-resolved absolute path, never the bare name** —
+  cross-spawn resolves a bare name through `which`, which searches the cwd
+  before `PATH` on Windows (rationale). The host's candidate list still ends in a
+  bare name (`## Future`).
+- **Within the `PATH` directories, and only those, the walk must select the file
+  `which` would** — a divergence either runs a different binary or reports a
+  present install as missing. **Never extend the search to the cwd**, which is
+  the one place `which` looks and the rule above exists to exclude. Inside that
+  scope: skip a directory or a non-executable file rather than returning it, and
+  on Windows take the extension list from `PATHEXT` **or**, when that is unset
+  *or empty*, from `which`'s own hardcoded `.EXE;.CMD;.BAT;.COM` — npm's order,
+  not `cmd.exe`'s — trying the empty extension first when the name already
+  carries one.
+- **A bare name the walk cannot resolve is a missing install, reported before
+  the spawn** — including when there is no `PATH` to search at all, since the
+  spawn's own fallback is the bare name. That leaves `?? binary` unreachable on
+  the real path, and `isMissingBinaryError` covering only a binary that
+  disappears between the walk and the spawn.
+
+  Both Windows-only rules are pinned through an `isWindows` argument rather than
+  a `process.platform` read, because CI runs this suite on Linux only and a
+  platform-gated assertion would assert an unenforced claim. The one assertion
+  that cannot be written that way is the POSIX executable bit, since
+  `accessSync(X_OK)` reports every readable file as executable on Windows.
+
+  Source of truth: `binaryCandidateNames`, `isExecutableFile`, `resolveBinaryPath`
+  and `agentBrowserIsMissing` in `dor/src/commands/agent-browser.ts`; `getPathInfo`
+  in `which/which.js` is what they mirror; pinned in
+  `dor/test/cli-output.test.mjs`.
 - **`windowsHide`.** Without it every `.cmd` shim flashes a focus-stealing
   console window, once per screenshot stream-frame pulse (rationale).
 - **Resolve on `exit`, not `close`, with an exit-time snapshot** — the
@@ -683,6 +712,13 @@ Source of truth: `buildDorSurfacesInternal` in `lib/src/components/Wall.tsx`; `d
 Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `openCommand` in `dor/src/commands/open.ts`; `ToolSurfaceResponse` in `dor/src/commands/types.ts`.
 
 ## Future
+
+- **Resolve the host's agent-browser candidates on `PATH` too.**
+  `runWithBinaryFallback` still ends its list with the bare
+  `DEFAULT_AGENT_BROWSER_BIN`, so on Windows the extension-host or Tauri-app
+  working directory is searched first — narrower than `dor ab`'s case, since a
+  user does not clone into it. Sharing `resolveBinaryPath` means moving it to
+  `dor-lib-common` beside `spawnAndCapture`.
 
 - **Surface a dead control channel in the UI.** A lost bind leaves one
   `[dor-control]` line on the host's stderr, and all a user sees is `dor`
