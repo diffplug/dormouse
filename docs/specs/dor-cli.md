@@ -102,6 +102,12 @@ tab/eval/screenshot commands, and anything added later. It is the only code
   before `PATH` on Windows (rationale). It falls back to the bare name only when
   the walk found nothing, so absence still surfaces as ENOENT. The host's
   candidate list still ends in a bare name (`## Future`).
+- **The walk must agree with `which` on which file that is**, since its answer
+  is what executes: skip a directory or a non-executable file rather than
+  returning it, and order Windows candidates by `PATHEXT` when set, else by
+  `cmd.exe`'s default. A laxer test turns a `PATH` entry `which` walked past into
+  an EACCES/EISDIR failure. Pinned by *skips a PATH entry that is not an
+  executable file* in `dor/test/cli-output.test.mjs`.
 - **`windowsHide`.** Without it every `.cmd` shim flashes a focus-stealing
   console window, once per screenshot stream-frame pulse (rationale).
 - **Resolve on `exit`, not `close`, with an exit-time snapshot** — the

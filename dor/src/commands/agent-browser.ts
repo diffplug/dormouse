@@ -14,7 +14,7 @@ import {
   AGENT_BROWSER_BIN_ENV,
   DEFAULT_AGENT_BROWSER_BIN,
 } from 'dor-lib-common';
-import { existsSync } from 'node:fs';
+import { accessSync, constants, existsSync, statSync } from 'node:fs';
 import type {
   CliEnv,
   AgentBrowserExecResult,
@@ -35,9 +35,13 @@ import {
 const INSTALL_HINT = 'npm i -g agent-browser';
 const INSTALL_DOCS = 'https://agent-browser.dev';
 
-// Extensions a bare command name can carry on Windows, in PATH-search order.
-// Shared by resolveBinaryPath (PATH walk) and existsCandidate (explicit path).
-const WINDOWS_BIN_EXTS = ['.cmd', '.exe', '.bat'];
+// Extensions a bare command name can carry on Windows. This is cmd.exe's own
+// default PATHEXT order, which is what cross-spawn's `which` uses when the
+// variable is unset — `resolveBinaryPath` now picks the file that gets spawned,
+// so it has to agree with the resolver it replaced (docs/specs/dor-cli.md →
+// "Spawning External Binaries"). Shared by resolveBinaryPath (PATH walk) and
+// existsCandidate (explicit path, where order only affects which one we report).
+const WINDOWS_BIN_EXTS = ['.com', '.exe', '.bat', '.cmd'];
 
 /**
  * Clear, multi-line guidance shown when the user's agent-browser binary is
@@ -410,17 +414,39 @@ function shouldManageSurface(exitCode: number, rest: string[]): boolean {
   return subcommand !== undefined && subcommand !== 'close';
 }
 
+/**
+ * Whether `candidate` is a file this platform would actually run. `which` (and
+ * so cross-spawn) skips a directory or a non-executable file and keeps walking;
+ * since the walk's answer is now the spawn target, a laxer test here would turn
+ * a `PATH` entry `which` ignored into an EACCES/EISDIR failure. On Windows the
+ * extension decides executability, so being a regular file is the whole test.
+ */
+function isExecutableFile(candidate: string): boolean {
+  try {
+    if (!statSync(candidate).isFile()) return false;
+    if (process.platform === 'win32') return true;
+    accessSync(candidate, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function resolveBinaryPath(binary: string, env: CliEnv): string | undefined {
   if (binary.includes('/') || binary.includes('\\')) return binary;
   const pathVar = env.PATH;
   if (!pathVar) return undefined;
   const isWindows = process.platform === 'win32';
-  const names = isWindows ? WINDOWS_BIN_EXTS.map((ext) => `${binary}${ext}`) : [binary];
+  // Honour a customised PATHEXT, as `which` does; fall back to cmd.exe's default.
+  const exts = isWindows
+    ? (env.PATHEXT ?? WINDOWS_BIN_EXTS.join(';')).split(';').filter(Boolean)
+    : [''];
+  const names = exts.map((ext) => `${binary}${ext}`);
   for (const dir of pathVar.split(isWindows ? ';' : ':')) {
     if (!dir) continue;
     for (const name of names) {
       const candidate = `${dir}${isWindows ? '\\' : '/'}${name}`;
-      if (existsSync(candidate)) return candidate;
+      if (isExecutableFile(candidate)) return candidate;
     }
   }
   return undefined;

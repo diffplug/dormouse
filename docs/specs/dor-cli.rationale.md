@@ -38,6 +38,15 @@ bare name (`standalone/sidecar/pty-core.js`, `standalone/sidecar/clipboard-ops.j
 whose cwd is the app directory rather than a user's repository;
 `pty-core.js`'s `%SystemRoot%\System32` join is the pattern those should follow.
 
+**What promoting the walk to the spawn target changed.** Before it, the walk
+only proved the install present and travelled to the host as a hint, so its
+divergence from `which` was inert: a fixed `.cmd`/`.exe`/`.bat` order and a bare
+`existsSync`. Once it decides what runs, both diverge observably — a directory
+holding `agent-browser.exe` and `agent-browser.cmd` would switch which one runs,
+and a non-executable file or directory named `agent-browser` earlier on `PATH`
+would fail EACCES/EISDIR where `which` walked past it to the real install (that
+one is not Windows-specific). Raised on review of the fix, before it merged.
+
 **What a missing `windowsHide` looks like.** cross-spawn routes `.cmd` shims through `cmd.exe`, which owns a real console window, and the browser panel's screenshot loop spawns one per stream-frame pulse — a live page flickers focus-stealing windows several times a second.
 
 **Why none of the `exit`-vs-`close` trouble surfaced on macOS.** The `agent-browser` daemon double-forks and detaches from the inherited fds, so `close` fires normally; only on Windows, where the daemon holds the parent's stdout/stderr pipes for its whole life, does a `close`-only wait hang forever.

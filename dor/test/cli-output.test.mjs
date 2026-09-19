@@ -1412,6 +1412,31 @@ test('agent-browser spawns the PATH-resolved absolute path, never the bare name'
   });
 });
 
+test('agent-browser skips a PATH entry that is not an executable file', async () => {
+  await withTempDir('dor-ab-skip-', async (shadowRoot) => {
+    await withTempDir('dor-ab-real-', async (realRoot) => {
+      // `which` (and so cross-spawn, which the bare-name spawn used to reach)
+      // walks past a directory or a non-executable file. resolveBinaryPath now
+      // picks what gets spawned, so a laxer test would turn a PATH entry `which`
+      // ignored into an EACCES/EISDIR failure instead of finding the real
+      // install further along.
+      const ext = process.platform === 'win32' ? '.cmd' : '';
+      await mkdir(join(shadowRoot, `agent-browser${ext}`));
+      const realPath = join(realRoot, `agent-browser${ext}`);
+      await writeFile(realPath, '#!/bin/sh\n', { mode: 0o755 });
+      const ab = fakeAgentBrowser();
+      const client = fixtureClient();
+      await runCli(['ab', 'snapshot'], {
+        client,
+        execAgentBrowser: ab.exec,
+        env: { PATH: [shadowRoot, realRoot].join(delimiter) },
+      });
+      assert.equal(ab.calls[0][0], realPath);
+      assert.equal(surfaceRequest(client).binaryPath, realPath);
+    });
+  });
+});
+
 // The caller terminal (surface:2) plus the host identity `dor list --json` folds
 // in. The control socket is private host plumbing (the CLI is the public API), so
 // the host block must not echo it — the snapshot proves the field is absent.
