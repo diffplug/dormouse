@@ -45,7 +45,14 @@ divergence from `which` was inert: a fixed `.cmd`/`.exe`/`.bat` order and a bare
 holding `agent-browser.exe` and `agent-browser.cmd` would switch which one runs,
 and a non-executable file or directory named `agent-browser` earlier on `PATH`
 would fail EACCES/EISDIR where `which` walked past it to the real install (that
-one is not Windows-specific). Raised on review of the fix, before it merged.
+one is not Windows-specific). A second round found that `which@2`'s fallback list
+is npm's `.EXE;.CMD;.BAT;.COM` rather than `cmd.exe`'s `.COM;.EXE;.BAT;.CMD`, so
+copying the shell's order inverts `.com`-vs-`.exe` and `.bat`-vs-`.cmd`; that
+`which` uses `||` rather than `??` for it, so an empty `PATHEXT` falls back
+instead of yielding no candidates; and that it unshifts an empty extension when
+the command contains a `.`, so `agent-browser.exe` is searched as itself. All
+four are `getPathInfo` in `which/which.js`, read at 2.0.2. Both rounds were
+review findings on the fix, before it merged.
 
 **What a missing `windowsHide` looks like.** cross-spawn routes `.cmd` shims through `cmd.exe`, which owns a real console window, and the browser panel's screenshot loop spawns one per stream-frame pulse — a live page flickers focus-stealing windows several times a second.
 

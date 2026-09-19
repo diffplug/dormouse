@@ -7,6 +7,7 @@ import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runCli } from '../dist/cli.js';
 import { buildShellCommandForKind, shellCommandKind } from '../dist/commands/shell-quote.js';
+import { agentBrowserIsMissing, binaryCandidateNames } from '../dist/commands/agent-browser.js';
 import { msysToWindowsCwd } from '../dist/commands/shared.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -369,6 +370,17 @@ function awaitClient(outcome) {
       };
     },
   };
+}
+
+// Windows resolves a path case-insensitively and `which` returns the extension
+// as PATHEXT spells it, not as the file on disk does — so a `.cmd` install is
+// legitimately reported as `...\\agent-browser.CMD`. Compare accordingly there.
+function assertSamePath(actual, expected, message) {
+  if (process.platform === 'win32') {
+    assert.equal(String(actual).toLowerCase(), expected.toLowerCase(), message);
+  } else {
+    assert.equal(actual, expected, message);
+  }
 }
 
 function fakeAgentBrowser({ exitCode = 0, stdout = '✓ ok\n', stderr = '' } = {}) {
@@ -1407,8 +1419,9 @@ test('agent-browser spawns the PATH-resolved absolute path, never the bare name'
     // hand the inherited cwd a code-execution primitive on Windows, where
     // cross-spawn's `which` searches it before PATH — docs/specs/dor-cli.md ->
     // "Spawning External Binaries".
-    assert.deepEqual(ab.calls.map((call) => call[0]), [binPath, binPath]);
-    assert.equal(surfaceRequest(client).binaryPath, binPath);
+    assert.equal(ab.calls.length, 2);
+    for (const [target] of ab.calls) assertSamePath(target, binPath);
+    assertSamePath(surfaceRequest(client).binaryPath, binPath);
   });
 });
 
@@ -1431,10 +1444,76 @@ test('agent-browser skips a PATH entry that is not an executable file', async ()
         execAgentBrowser: ab.exec,
         env: { PATH: [shadowRoot, realRoot].join(delimiter) },
       });
-      assert.equal(ab.calls[0][0], realPath);
-      assert.equal(surfaceRequest(client).binaryPath, realPath);
+      assertSamePath(ab.calls[0][0], realPath);
+      assertSamePath(surfaceRequest(client).binaryPath, realPath);
     });
   });
+});
+
+// Windows-only: off Windows the walk uses a single empty extension, so the name
+// is already tried as itself and there is nothing to regress.
+test('agent-browser tries a name that already carries an extension as itself', {
+  skip: process.platform !== 'win32' ? 'Windows-only PATHEXT behaviour' : false,
+}, async () => {
+  await withTempDir('dor-ab-ext-', async (dir) => {
+    const binPath = join(dir, 'agent-browser.exe');
+    await writeFile(binPath, '', { mode: 0o755 });
+    const ab = fakeAgentBrowser();
+    const client = fixtureClient();
+    // `which` unshifts an empty extension when the command contains a `.`;
+    // without it the walk only ever looks for `agent-browser.exe.EXE` and
+    // reports a present install as missing.
+    await runCli(['ab', 'snapshot'], {
+      client,
+      execAgentBrowser: ab.exec,
+      env: { PATH: dir, DORMOUSE_AGENT_BROWSER_BIN: 'agent-browser.exe' },
+    });
+    assertSamePath(ab.calls[0][0], binPath);
+  });
+});
+
+test('the Windows candidate list mirrors which(1) on every edge', () => {
+  // Exercised off Windows by passing isWindows, because all three rules are
+  // Windows-only and this suite runs on Linux in CI — a platform-gated
+  // assertion here would be an unenforced claim. `which`'s own logic:
+  // `opt.pathExt || process.env.PATHEXT || '.EXE;.CMD;.BAT;.COM'`, plus an
+  // empty extension unshifted when the command contains a `.`.
+  const npmOrder = ['.EXE', '.CMD', '.BAT', '.COM'];
+  assert.deepEqual(
+    binaryCandidateNames('agent-browser', {}, true),
+    npmOrder.map((ext) => `agent-browser${ext}`),
+    'unset PATHEXT takes npm\u2019s list, not cmd.exe\u2019s .COM-first order',
+  );
+  assert.deepEqual(
+    binaryCandidateNames('agent-browser', { PATHEXT: '' }, true),
+    npmOrder.map((ext) => `agent-browser${ext}`),
+    'an empty PATHEXT falls back rather than yielding no candidates',
+  );
+  assert.deepEqual(
+    binaryCandidateNames('agent-browser', { PATHEXT: '.EXE;.PS1' }, true),
+    ['agent-browser.EXE', 'agent-browser.PS1'],
+    'a customised PATHEXT is honoured verbatim, in its own order',
+  );
+  assert.deepEqual(
+    binaryCandidateNames('agent-browser.exe', {}, true)[0],
+    'agent-browser.exe',
+    'a name carrying an extension is tried as itself first',
+  );
+  assert.deepEqual(
+    binaryCandidateNames('agent-browser', { PATHEXT: '.EXE' }, false),
+    ['agent-browser'],
+    'PATHEXT is Windows-only; off Windows the name is the only candidate',
+  );
+});
+
+test('an unresolvable bare name is a missing install, including with no PATH', () => {
+  // The bare-name fallback at the spawn is for "the walk found nothing on a PATH
+  // we searched". With no PATH there is nothing to search, and reporting
+  // "ambiguous" would fall through to cross-spawn with the bare name — cwd-first
+  // on Windows, which is what spawning the resolved path exists to prevent.
+  // Pinned on the helper because the CLI's two paths produce the same message.
+  assert.equal(agentBrowserIsMissing('agent-browser', {}, undefined), true);
+  assert.equal(agentBrowserIsMissing('agent-browser', { PATH: '/nonexistent' }, undefined), true);
 });
 
 // The caller terminal (surface:2) plus the host identity `dor list --json` folds

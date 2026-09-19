@@ -102,12 +102,26 @@ tab/eval/screenshot commands, and anything added later. It is the only code
   before `PATH` on Windows (rationale). It falls back to the bare name only when
   the walk found nothing, so absence still surfaces as ENOENT. The host's
   candidate list still ends in a bare name (`## Future`).
-- **The walk must agree with `which` on which file that is**, since its answer
-  is what executes: skip a directory or a non-executable file rather than
-  returning it, and order Windows candidates by `PATHEXT` when set, else by
-  `cmd.exe`'s default. A laxer test turns a `PATH` entry `which` walked past into
-  an EACCES/EISDIR failure. Pinned by *skips a PATH entry that is not an
-  executable file* in `dor/test/cli-output.test.mjs`.
+- **The walk must select the file `which` would**, since its answer is what
+  executes — a divergence either runs a different binary or reports a present
+  install as missing. It skips a directory or a non-executable file rather than
+  returning it, and on Windows takes its extension list from `PATHEXT` **or**,
+  when that is unset *or empty*, from `which`'s own hardcoded
+  `.EXE;.CMD;.BAT;.COM` — npm's order, not `cmd.exe`'s — trying the empty
+  extension first when the name already carries one.
+- **A bare name that cannot be resolved is a missing install, never a bare-name
+  spawn** — including when there is no `PATH` to search at all, since the
+  fallback would otherwise be the cwd-first path the rule above closes.
+
+  The Windows rules are pinned by *the Windows candidate list mirrors which(1)*,
+  which takes `isWindows` as an argument rather than reading `process.platform`
+  — CI runs this suite on Linux only, so a platform-gated assertion would assert
+  an unenforced claim.
+
+  Source of truth: `binaryCandidateNames`, `resolveBinaryPath` and
+  `agentBrowserIsMissing` in `dor/src/commands/agent-browser.ts`; `getPathInfo`
+  in `which/which.js` is what they mirror; pinned in
+  `dor/test/cli-output.test.mjs`.
 - **`windowsHide`.** Without it every `.cmd` shim flashes a focus-stealing
   console window, once per screenshot stream-frame pulse (rationale).
 - **Resolve on `exit`, not `close`, with an exit-time snapshot** — the
