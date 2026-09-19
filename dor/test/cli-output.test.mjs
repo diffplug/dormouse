@@ -7,7 +7,7 @@ import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runCli } from '../dist/cli.js';
 import { buildShellCommandForKind, shellCommandKind } from '../dist/commands/shell-quote.js';
-import { agentBrowserIsMissing, binaryCandidateNames } from '../dist/commands/agent-browser.js';
+import { agentBrowserIsMissing, binaryCandidateNames, isExecutableFile } from '../dist/commands/agent-browser.js';
 import { msysToWindowsCwd } from '../dist/commands/shared.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -1435,6 +1435,13 @@ test('agent-browser skips a PATH entry that is not an executable file', async ()
       // install further along.
       const ext = process.platform === 'win32' ? '.cmd' : '';
       await mkdir(join(shadowRoot, `agent-browser${ext}`));
+      // Off Windows a second shadow, a regular file without the executable bit:
+      // the directory above is rejected by the isFile() test alone, so this is
+      // what makes the X_OK probe load-bearing in the walk itself.
+      if (process.platform !== 'win32') {
+        await mkdir(join(shadowRoot, 'second'));
+        await writeFile(join(shadowRoot, 'second', 'agent-browser'), '', { mode: 0o644 });
+      }
       const realPath = join(realRoot, `agent-browser${ext}`);
       await writeFile(realPath, '#!/bin/sh\n', { mode: 0o755 });
       const ab = fakeAgentBrowser();
@@ -1442,7 +1449,9 @@ test('agent-browser skips a PATH entry that is not an executable file', async ()
       await runCli(['ab', 'snapshot'], {
         client,
         execAgentBrowser: ab.exec,
-        env: { PATH: [shadowRoot, realRoot].join(delimiter) },
+        env: {
+          PATH: [shadowRoot, join(shadowRoot, 'second'), realRoot].join(delimiter),
+        },
       });
       assertSamePath(ab.calls[0][0], realPath);
       assertSamePath(surfaceRequest(client).binaryPath, realPath);
@@ -1469,6 +1478,32 @@ test('agent-browser tries a name that already carries an extension as itself', {
       env: { PATH: dir, DORMOUSE_AGENT_BROWSER_BIN: 'agent-browser.exe' },
     });
     assertSamePath(ab.calls[0][0], binPath);
+  });
+});
+
+test('isExecutableFile rejects a directory on both platforms, and a non-executable file off Windows', async () => {
+  await withTempDir('dor-exec-', async (dir) => {
+    const asDirectory = join(dir, 'shadow');
+    await mkdir(asDirectory);
+    const notExecutable = join(dir, 'not-executable');
+    await writeFile(notExecutable, '', { mode: 0o644 });
+    const executable = join(dir, 'executable');
+    await writeFile(executable, '', { mode: 0o755 });
+
+    // `isWindows` is a parameter rather than a `process.platform` read so both
+    // branches are reachable from this Linux-only suite. `statSync().isFile()`
+    // alone covers the directory, so the X_OK probe is what the middle pair pins.
+    assert.equal(isExecutableFile(asDirectory, false), false);
+    assert.equal(isExecutableFile(asDirectory, true), false);
+    assert.equal(isExecutableFile(executable, false), true);
+    assert.equal(isExecutableFile(join(dir, 'absent'), false), false);
+    // On Windows the extension decides executability, so a mode-0644 regular
+    // file is runnable there and `accessSync(X_OK)` reports every readable file
+    // as executable — which is why the POSIX half cannot be asserted there.
+    assert.equal(isExecutableFile(notExecutable, true), true);
+    if (process.platform !== 'win32') {
+      assert.equal(isExecutableFile(notExecutable, false), false);
+    }
   });
 });
 

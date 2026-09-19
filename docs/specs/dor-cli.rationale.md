@@ -51,8 +51,12 @@ copying the shell's order inverts `.com`-vs-`.exe` and `.bat`-vs-`.cmd`; that
 `which` uses `||` rather than `??` for it, so an empty `PATHEXT` falls back
 instead of yielding no candidates; and that it unshifts an empty extension when
 the command contains a `.`, so `agent-browser.exe` is searched as itself. All
-four are `getPathInfo` in `which/which.js`, read at 2.0.2. Both rounds were
-review findings on the fix, before it merged.
+four are `getPathInfo` in `which/which.js`, read at 2.0.2. A third round caught
+the invariant stating the opposite of the fix in the case that motivated it —
+`which`'s Windows branch prepends `process.cwd()`, so an unscoped "select the
+file `which` would" licenses the hijack — and that the X_OK probe was unpinned
+because `statSync().isFile()` already rejected the directory the test shadowed
+with. All three rounds were review findings on the fix, before it merged.
 
 **What a missing `windowsHide` looks like.** cross-spawn routes `.cmd` shims through `cmd.exe`, which owns a real console window, and the browser panel's screenshot loop spawns one per stream-frame pulse — a live page flickers focus-stealing windows several times a second.
 

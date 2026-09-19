@@ -256,8 +256,12 @@ export async function runAgentBrowserCli(args: string[], options: CliOptions): P
   // same). Since `dor` inherits the pane's cwd, a bare-name spawn would let an
   // `agent-browser.cmd` sitting in a cloned repository win the race against the
   // real install — repo content executing with no gate, which
-  // docs/specs/dor-tool.md -> Trust treats as a boundary. Falls back to the bare
-  // name only when the PATH walk found nothing, which is the ENOENT path below.
+  // docs/specs/dor-tool.md -> Trust treats as a boundary.
+  //
+  // The `?? binary` branch is unreachable on the real path and is a type-level
+  // belt only: agentBrowserIsMissing already ends the call whenever binaryPath is
+  // undefined, and an explicit path comes back from resolveBinaryPath verbatim.
+  // Only a stub exec (tests), which skips that check, reaches it.
   // See docs/specs/dor-cli.md -> "Spawning External Binaries".
   const execTarget = binaryPath ?? binary;
 
@@ -420,12 +424,14 @@ function shouldManageSurface(exitCode: number, rest: string[]): boolean {
  * so cross-spawn) skips a directory or a non-executable file and keeps walking;
  * since the walk's answer is now the spawn target, a laxer test here would turn
  * a `PATH` entry `which` ignored into an EACCES/EISDIR failure. On Windows the
- * extension decides executability, so being a regular file is the whole test.
+ * extension decides executability, so being a regular file is the whole test —
+ * taken as an argument, like `binaryCandidateNames`, so both branches are
+ * reachable from a Linux-only CI.
  */
-function isExecutableFile(candidate: string): boolean {
+export function isExecutableFile(candidate: string, isWindows: boolean): boolean {
   try {
     if (!statSync(candidate).isFile()) return false;
-    if (process.platform === 'win32') return true;
+    if (isWindows) return true;
     accessSync(candidate, constants.X_OK);
     return true;
   } catch {
@@ -463,12 +469,15 @@ export function resolveBinaryPath(binary: string, env: CliEnv): string | undefin
     if (!dir) continue;
     for (const name of names) {
       const candidate = `${dir}${isWindows ? '\\' : '/'}${name}`;
-      if (isExecutableFile(candidate)) return candidate;
+      if (isExecutableFile(candidate, isWindows)) return candidate;
     }
   }
   return undefined;
 }
 
+// Narrow, now that an unresolvable name never reaches the spawn: this catches a
+// binary that disappeared between the PATH walk and the spawn, plus a stub exec's
+// injected ENOENT.
 function isMissingBinaryError(error: unknown): boolean {
   return !!error && typeof error === 'object' && (error as { code?: unknown }).code === 'ENOENT';
 }

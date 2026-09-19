@@ -99,24 +99,28 @@ tab/eval/screenshot commands, and anything added later. It is the only code
   an unavoidable batch limitation; today's forwarded arguments carry none.
 - **`dor ab` spawns the `PATH`-resolved absolute path, never the bare name** —
   cross-spawn resolves a bare name through `which`, which searches the cwd
-  before `PATH` on Windows (rationale). It falls back to the bare name only when
-  the walk found nothing, so absence still surfaces as ENOENT. The host's
-  candidate list still ends in a bare name (`## Future`).
-- **The walk must select the file `which` would**, since its answer is what
-  executes — a divergence either runs a different binary or reports a present
-  install as missing. It skips a directory or a non-executable file rather than
-  returning it, and on Windows takes its extension list from `PATHEXT` **or**,
-  when that is unset *or empty*, from `which`'s own hardcoded
-  `.EXE;.CMD;.BAT;.COM` — npm's order, not `cmd.exe`'s — trying the empty
-  extension first when the name already carries one.
-- **A bare name that cannot be resolved is a missing install, never a bare-name
-  spawn** — including when there is no `PATH` to search at all, since the
-  fallback would otherwise be the cwd-first path the rule above closes.
+  before `PATH` on Windows (rationale). The host's candidate list still ends in a
+  bare name (`## Future`).
+- **Within the `PATH` directories, and only those, the walk must select the file
+  `which` would** — a divergence either runs a different binary or reports a
+  present install as missing. **Never extend the search to the cwd**, which is
+  the one place `which` looks and the rule above exists to exclude. Inside that
+  scope: skip a directory or a non-executable file rather than returning it, and
+  on Windows take the extension list from `PATHEXT` **or**, when that is unset
+  *or empty*, from `which`'s own hardcoded `.EXE;.CMD;.BAT;.COM` — npm's order,
+  not `cmd.exe`'s — trying the empty extension first when the name already
+  carries one.
+- **A bare name the walk cannot resolve is a missing install, reported before
+  the spawn** — including when there is no `PATH` to search at all, since the
+  spawn's own fallback is the bare name. That leaves `?? binary` unreachable on
+  the real path, and `isMissingBinaryError` covering only a binary that
+  disappears between the walk and the spawn.
 
-  The Windows rules are pinned by *the Windows candidate list mirrors which(1)*,
-  which takes `isWindows` as an argument rather than reading `process.platform`
-  — CI runs this suite on Linux only, so a platform-gated assertion would assert
-  an unenforced claim.
+  Both Windows-only rules are pinned through an `isWindows` argument rather than
+  a `process.platform` read, because CI runs this suite on Linux only and a
+  platform-gated assertion would assert an unenforced claim. The one assertion
+  that cannot be written that way is the POSIX executable bit, since
+  `accessSync(X_OK)` reports every readable file as executable on Windows.
 
   Source of truth: `binaryCandidateNames`, `resolveBinaryPath` and
   `agentBrowserIsMissing` in `dor/src/commands/agent-browser.ts`; `getPathInfo`
