@@ -185,10 +185,16 @@ function PlaygroundDesktopExperience() {
               // report one through shell integration. Both alert panes run the
               // same fake `longtask`, which is what lets one rule light up the
               // other pane (docs/specs/alert.md).
-              // No cancel of a prior run here: TutRunner ignores `s` until the
-              // fake command's whole `commandMs` has elapsed, so a second call
-              // cannot arrive while this pump or timer is live.
               onTriggerBusyDemo: (durationMs, commandMs) => {
+                // TutRunner ignores `s` for the whole `commandMs`, but that
+                // guard is per runner while these refs are per page: exiting
+                // `tut` and re-running it, or running it in a second pane,
+                // builds a fresh runner that cannot see this pump or timer.
+                busyDemoDisposeRef.current?.();
+                if (busyDemoFinishTimerRef.current !== null) {
+                  window.clearTimeout(busyDemoFinishTimerRef.current);
+                  busyDemoFinishTimerRef.current = null;
+                }
                 for (const paneId of ALERT_DEMO_PANES) {
                   startFakeCommand(adapter, paneId, "longtask");
                 }

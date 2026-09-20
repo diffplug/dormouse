@@ -156,8 +156,8 @@ describe("TutRunner snapshots", () => {
       // silence chain has something to ring against.
       expect(commandMs).toBeGreaterThan(durationMs);
       expect(lastFrame()).toContain(`${Math.ceil(commandMs / 1000)}\x1b[0m seconds`);
-      // One guard, in the runner: a replay anywhere inside the command is
-      // ignored, so the page never has to cancel a live pump or exit timer.
+      // The runner's guard covers the whole command, so a replay anywhere
+      // inside it is ignored (the page cancels across runner instances).
       vi.advanceTimersByTime(durationMs + 1);
       sendKeys("s");
       expect(busyDemoLaunches).toBe(1);
