@@ -125,7 +125,6 @@ export {
   buildAppTitleResolver,
   DEFAULT_COMMAND_TITLE,
   DEFAULT_IDLE_TITLE,
-  deriveFallbackCommandTitle,
   deriveHeader,
   groupTerminalPanes,
   notificationDisplayTitle,

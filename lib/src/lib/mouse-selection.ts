@@ -15,6 +15,12 @@ export interface Selection {
   /** Cell column at the current drag position (or release position). */
   endCol: number;
   shape: SelectionShape;
+  /**
+   * True when this drag was armed block-mode at its start — the touch
+   * double-tap gesture, which has no Alt key to hold. The shape then stays
+   * block for the whole drag, whatever a hardware Alt does (spec §3.2).
+   */
+  blockLatched?: boolean;
   /** True while the user is still dragging; false once the mouse is released. */
   dragging: boolean;
   /**
@@ -142,7 +148,7 @@ export function setSelection(id: string, selection: Selection | null): void {
  */
 export function beginDrag(
   id: string,
-  args: { row: number; col: number; altKey: boolean; startedInScrollback: boolean },
+  args: { row: number; col: number; altKey: boolean; blockLatched?: boolean; startedInScrollback: boolean },
 ): void {
   const s = ensure(id);
   // Clear any in-flight copy flash so its timer won't null out this new
@@ -153,7 +159,8 @@ export function beginDrag(
     startCol: args.col,
     endRow: args.row,
     endCol: args.col,
-    shape: args.altKey ? 'block' : 'linewise',
+    shape: args.altKey || args.blockLatched ? 'block' : 'linewise',
+    ...(args.blockLatched ? { blockLatched: true } : {}),
     dragging: true,
     startedInScrollback: args.startedInScrollback,
   };
@@ -172,7 +179,7 @@ export function updateDrag(
   const s = ensure(id);
   const sel = s.selection;
   if (!sel || !sel.dragging) return;
-  const shape: SelectionShape = args.altKey ? 'block' : 'linewise';
+  const shape: SelectionShape = args.altKey || sel.blockLatched ? 'block' : 'linewise';
   if (sel.endRow === args.row && sel.endCol === args.col && sel.shape === shape) return;
   s.selection = { ...sel, endRow: args.row, endCol: args.col, shape };
   notify();
@@ -237,7 +244,7 @@ export function extendSelectionToToken(id: string, token: TokenHint): void {
 export function setDragAlt(id: string, altKey: boolean): void {
   const s = states.get(id);
   if (!s?.selection?.dragging) return;
-  const shape: SelectionShape = altKey ? 'block' : 'linewise';
+  const shape: SelectionShape = altKey || s.selection.blockLatched ? 'block' : 'linewise';
   if (s.selection.shape === shape) return;
   s.selection = { ...s.selection, shape };
   notify();

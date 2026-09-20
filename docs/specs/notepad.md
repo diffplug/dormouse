@@ -164,11 +164,11 @@ Source of truth: `archiveThenProceed` in `standalone/src/teardown-flow.ts`, whic
 
 VS Code can destroy a webview without asking, so the close coordinator may never run. **Every webview therefore mirrors its live notes into extension-host memory**, and a teardown archives from that mirror instead.
 
-- **The mirror holds what a close would archive minus the markers** — notes, Surface title, kind and CWD, plus its pending batch id, each terminal Surface's PTY id, and any archive deletions an open Archive view has staged. **The PTY id is mirror-only and never reaches a batch.**
+- **The mirror holds what a close would archive minus the markers** — notes, Surface title, kind and CWD, plus its pending batch id and any archive deletions an open Archive view has staged. **A terminal Surface's id is its PTY id**, which is what a teardown asks for a CWD.
 - **Must mirror pending batch identity before saving and retain it after the last note is deleted.** Teardown deletes and re-appends that batch; live resume restores its identity. Pinned by `vscode-ext/test/notepad-archive-store.test.ts` and `lib/src/lib/notepad/notepad-store.test.ts`.
 - **A teardown refreshes the mirror's process CWDs while the PTYs are alive** — bounded, and never overriding an integration-reported one — which on an editor-panel disposal is what makes the kill wait for the archive write, and in `deactivate()` puts it ahead of the session flush.
 - **The mirror is memory only, never written to disk, and cleared by an extension restart** (rationale).
-- **The mirror is sanitized on the way in**, round-tripped through the archive validator (rationale).
+- **The mirror is sanitized on the way in**, round-tripped through the archive validator, so it can hold no field that validator would reject (rationale).
 - **Editor-panel disposal (`killOnDispose: true`) and `deactivate()` archive their mirrored notes, best effort**, draining what they take so `deactivate()` cannot write a panel's notes again under a fresh batch id. In `deactivate()` the step sits between the recovery capture and the session flush, bounded (`docs/specs/vscode.md` → "Serialization and restore").
 - **Every router disposal commits and drains that router's staged archive deletions, best effort** — they were promised irreversible once this window closed, and the webview *is* the window. **A live resume is therefore never handed a pending deletion**; `hydrateNotepadFromVolatile` ignores the field.
 - **A `WebviewView` disposal is not a closure.** Its PTYs stay alive, so only its *notes* stay in the mirror for the next resolve.

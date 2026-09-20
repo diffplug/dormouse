@@ -56,15 +56,12 @@ describe('readInjectedVolatileNotepad', () => {
     }]);
   });
 
-  it('round-trips the PTY id, and drops one that is not a string', () => {
+  it('reads back no field the archive validator does not know', () => {
+    // A teardown writes the rest of the record verbatim into a batch, and the
+    // validator rejects a batch carrying a field it does not recognize.
     inject({ surfaces: [surface({ terminalId: 'pty-9' })] });
-    expect(readInjectedVolatileNotepad()!.surfaces[0].terminalId).toBe('pty-9');
-
-    // Same tolerance as the CWD: it is metadata for a teardown that has not
-    // happened, and a resuming webview derives its own anyway.
-    inject({ surfaces: [surface({ terminalId: 7 })] });
     const [read] = readInjectedVolatileNotepad()!.surfaces;
-    expect(read.terminalId).toBeUndefined();
+    expect(Object.keys(read).sort()).toEqual(['cwd', 'notes', 'surfaceId', 'surfaceKind', 'surfaceTitle']);
     expect(read.notes).toHaveLength(1);
   });
 

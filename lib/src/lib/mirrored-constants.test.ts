@@ -11,6 +11,7 @@ import { SETUP_CODE_DEAD_MESSAGE } from '../remote/client/pocket-client';
 import { PAIRING_CODE_LABEL } from '../remote/pocket-app/App';
 import { SCAN_REJECTED_MESSAGE } from '../remote/pocket-app/ScanInvitation';
 import { SCAN_LABEL } from '../remote/setup-copy';
+import { DEFAULT_HELPER_COMMAND } from './terminal-context-types';
 import { ITERM2_COMPAT_VERSION } from './terminal-protocol';
 import { OPEN_PORT_TIMEOUT_MS, OPEN_PORT_TIMEOUT_PER_ID_MS, openPortRequestTimeoutMs } from './platform/types';
 import { DEFAULT_RECOVERY_WAIT_MS } from '../host/recovery-capture';
@@ -43,6 +44,32 @@ describe('ITERM2_COMPAT_VERSION mirrors', () => {
     const file = 'standalone/sidecar/pty-core.js';
     const version = extract(readRepoFile(file), file, /^const ITERM2_COMPAT_VERSION = '([^']+)';$/m);
     expect(version).toBe(ITERM2_COMPAT_VERSION);
+  });
+});
+
+// docs/specs/terminal-context.md -> "Global autorun setting". The sidecar owns
+// the shipped preference and the fake adapter stands in for it in Storybook, the
+// website demo, and every lib test — but the sidecar is plain CJS and cannot
+// import the shared constant. A drift would let the demo accept a command the
+// shipped host refuses, or show a different factory default, with nothing failing.
+describe('helper autorun command mirrors', () => {
+  const sidecar = 'standalone/sidecar/pty-core.js';
+  const sidecarSrc = readRepoFile(sidecar);
+  const fake = 'lib/src/lib/platform/fake-adapter.ts';
+  const fakeSrc = readRepoFile(fake);
+
+  it('falls back to the shared default in the sidecar', () => {
+    const saved = extract(sidecarSrc, sidecar, /function savedCommand\(\) \{([\s\S]*?)\n {2}\}/);
+    expect(extract(saved, `${sidecar} (savedCommand)`, /return '([^']*)';/)).toBe(DEFAULT_HELPER_COMMAND);
+  });
+
+  it('bounds the command identically in the sidecar and the fake adapter', () => {
+    const validator = extract(sidecarSrc, sidecar, /function validCommand\(value\) \{\n\s*return ([^;]+);/);
+    const rejected = /\/\[([^\]]+)\]\/\.test\(/;
+    expect(extract(validator, sidecar, /value\.length <= (\d+)/))
+      .toBe(extract(fakeSrc, fake, /request\.command\.length > (\d+)/));
+    expect(extract(validator, sidecar, rejected))
+      .toBe(extract(fakeSrc, fake, /\/\[([^\]]+)\]\/\.test\(request\.command\)/));
   });
 });
 

@@ -13,7 +13,8 @@
  * webview re-resolved over PTYs this extension host still owns — never a cold
  * restore.
  */
-import { readMirrorTerminalId, readNotepadArchive } from '../../lib/src/lib/notepad/archive-model';
+import { hasTerminal } from 'dor/commands/types';
+import { readNotepadArchive } from '../../lib/src/lib/notepad/archive-model';
 import type {
   VolatileNotepadSnapshot,
   VolatileSurfaceNotes,
@@ -64,15 +65,11 @@ function sanitizeSurface(value: unknown): VolatileSurfaceNotes | null {
   });
   const batch = archive?.batches[0];
   if (!batch) return null;
-  // Mirror-only, so it goes around the batch validator rather than through it: a
-  // batch carrying this field would be rejected on the next load.
-  const terminalId = readMirrorTerminalId(surface.terminalId);
   return {
     surfaceId: surface.surfaceId,
     surfaceTitle: batch.surfaceTitle,
     surfaceKind: batch.surfaceKind,
     cwd: batch.cwd,
-    ...(terminalId ? { terminalId } : {}),
     ...(typeof surface.pendingBatchId === 'string' && surface.pendingBatchId
       ? { pendingBatchId: surface.pendingBatchId } : {}),
     notes: batch.notes,
@@ -192,16 +189,16 @@ export async function refreshMirrorCwds(
   getCwd: (terminalId: string) => Promise<string | null>,
   boundMs: number,
 ): Promise<VolatileNotepadSnapshot> {
-  const asking = mirror.surfaces.filter(
-    (surface): surface is VolatileSurfaceNotes & { terminalId: string } => (
-      !!surface.terminalId
-      && surface.notes.length > 0
-      && processCwdMayReplace(surface.cwd?.source)
-    ),
-  );
+  // Only a terminal Surface has a PTY to ask about, and its Surface id is also
+  // its PTY id — which is why the mirror carries no separate one.
+  const asking = mirror.surfaces.filter((surface) => (
+    hasTerminal(surface.surfaceKind)
+    && surface.notes.length > 0
+    && processCwdMayReplace(surface.cwd?.source)
+  ));
   const paths = await settleAllWithin(
     // `async` so a `getCwd` that throws outright is a rejection like any other.
-    asking.map(async (surface) => getCwd(surface.terminalId)),
+    asking.map(async (surface) => getCwd(surface.surfaceId)),
     boundMs,
     null,
   );

@@ -171,6 +171,30 @@ describe('terminal-mouse-router: override suppression', () => {
     cleanup();
   });
 
+  it('keeps a temporary override across a right-click', async () => {
+    // A right-click is not the paired primary click §2 ends the override on, and
+    // the context menu is swallowed while an override is active — so ending it
+    // here would cost the override and give the user nothing for it.
+    const { cleanup, element } = createHarness(windowHost);
+    setMouseReporting('t1', 'vt200');
+    setOverride('t1', 'temporary');
+
+    element.emit('mousedown', mouseEvent({ button: 2 }));
+    element.emit('contextmenu', mouseEvent({ button: 2 }));
+    windowHost.emit('mouseup', mouseEvent({ button: 2 }));
+
+    await Promise.resolve();
+    expect(getMouseSelectionState('t1').override).toBe('temporary');
+    expect(getMouseSelectionState('t1').selection).toBeNull();
+
+    // The next primary click still ends it.
+    element.emit('mousedown', mouseEvent());
+    windowHost.emit('mouseup', mouseEvent());
+    await Promise.resolve();
+    expect(getMouseSelectionState('t1').override).toBe('off');
+    cleanup();
+  });
+
   it('suppresses sticky override mousemove without clearing the override on mouseup', async () => {
     const { cleanup, element } = createHarness(windowHost);
     setMouseReporting('t1', 'vt200');

@@ -236,9 +236,14 @@ function wireXtermHandlers(
   selectionBaselineRef: { current: string | null },
 ): () => void {
   const inputDisposable = terminal.onData((data) => {
+    // One strip, two readers. While an override is active the reports must not
+    // reach the PTY at all (belt and braces behind DOM interception), so the
+    // stripped chunk *is* the input; with no override the inside program that
+    // asked for them still gets them, but they are never keystrokes either way.
+    const withoutMouseReports = stripMouseReportsFromInput(data);
     let input = data;
     if (getMouseSelectionState(id).override !== 'off') {
-      input = stripMouseReportsFromInput(input);
+      input = withoutMouseReports;
       if (input.length === 0) return;
     }
 
@@ -251,7 +256,7 @@ function wireXtermHandlers(
 
     // Inside programs can request hover and wheel reports. Mouse-only chunks
     // are not keystrokes; actual clicks attend through the Pane's DOM handler.
-    if (!isReplayTerminalReport && stripMouseReportsFromInput(input).length > 0) {
+    if (!isReplayTerminalReport && withoutMouseReports.length > 0) {
       // CSI/SS3 can encode real keys. The broader filter protects the prompt
       // recorder only; terminal replies must neither record input nor attend.
       if (!inputIsSyntheticTerminalReport(input)) {

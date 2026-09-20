@@ -444,8 +444,6 @@ describe('volatile mirror', () => {
         surfaceTitle: 'zsh',
         surfaceKind: 'terminal',
         cwd: CWD,
-        // The Session id, so a VS Code teardown can ask this PTY where it is.
-        terminalId: 's1',
         notes: [
           { id: expect.any(String), createdAt: expect.any(Number), content: { kind: 'terminal', runs: [{ text: 'boom', bold: true }] } },
           { id: expect.any(String), createdAt: expect.any(Number), content: { kind: 'plain', text: 'typed' } },
@@ -463,7 +461,7 @@ describe('volatile mirror', () => {
     expect(JSON.stringify(snapshot)).not.toContain('startMarker');
   });
 
-  it('carries the PTY id for terminal Surfaces only, resolved to the Session', async () => {
+  it('mirrors the Surface kind, which is what tells a teardown where to ask for a CWD', async () => {
     registerNotepadSurfaceMetaResolver((surfaceId) => ({
       surfaceTitle: surfaceId,
       surfaceKind: surfaceId === 's1' ? 'terminal' : 'browser',
@@ -474,10 +472,11 @@ describe('volatile mirror', () => {
     await flush();
 
     const surfaces = adapter.notepadArchive.lastVolatileSnapshot()!.surfaces;
-    expect(surfaces.map((surface) => surface.terminalId)).toEqual(['s1', undefined]);
-    // Absent, not `undefined`: the mirror is round-tripped through the archive
-    // validator on the host, which rejects a field it does not know.
-    expect(Object.keys(surfaces[1])).not.toContain('terminalId');
+    expect(surfaces.map((surface) => surface.surfaceKind)).toEqual(['terminal', 'browser']);
+    // Nothing beyond what the archive validator knows: the host round-trips the
+    // mirror through it and rejects a field it does not recognize.
+    expect(Object.keys(surfaces[0]).sort())
+      .toEqual(['cwd', 'notes', 'surfaceId', 'surfaceKind', 'surfaceTitle']);
   });
 
   it('asks every registered resolver and takes the owning one\u2019s answer', async () => {

@@ -145,16 +145,6 @@ export function readCwdState(value: unknown): CwdState | null {
   return cwd;
 }
 
-/** The mirror's PTY id: a non-empty string, or nothing. Mirror-only, so it never
- *  goes through a batch reader — a batch carrying it would be rejected on the
- *  next load — and the answer is `undefined` rather than `null` because the
- *  field is spread in, never assigned (`VolatileSurfaceNotes` in
- *  `lib/src/lib/notepad/types.ts`). A Surface without one is simply not asked
- *  where its process is. */
-export function readMirrorTerminalId(value: unknown): string | undefined {
-  return typeof value === 'string' && value ? value : undefined;
-}
-
 function readBatch(value: unknown): ArchiveBatch | null {
   if (!isRecord(value, BATCH_KEYS)) return null;
   if (typeof value.id !== 'string' || !value.id) return null;
