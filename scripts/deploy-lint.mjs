@@ -252,15 +252,41 @@ export const RULES = [
     // definition legitimately carries that path.
     //
     // Anchored on the search expression rather than on the message: the
-    // message is prose and the expression is the control.
+    // message is prose and the expression is the control. The unix expression
+    // carries the enrollment token twice because `[^_]` needs a character
+    // after the name: without the end-anchored alternative a bare
+    // `export DORMOUSE_ENROLL_TOKEN` passed on both shells while the Windows
+    // lookahead failed it, and a control present in one installer and absent
+    // from another is what this lint exists to catch.
     rule: 'Credentials at rest — manage verify searches the service definition for a credential name',
     patterns: {
       macOS:
-        /grep -qE 'DORMOUSE_SETUP_PASSWORD\|DORMOUSE_VAPID_PRIVATE_KEY\|DORMOUSE_ENROLL_TOKEN\[\^_\]' \\\n\s*"\$PLIST" "\$ROOT\/bin\/run-relay"/,
+        /grep -qE 'DORMOUSE_SETUP_PASSWORD\|DORMOUSE_VAPID_PRIVATE_KEY\|DORMOUSE_ENROLL_TOKEN\[\^_\]\|DORMOUSE_ENROLL_TOKEN\$' \\\n\s*"\$PLIST" "\$ROOT\/bin\/run-relay"/,
       Linux:
-        /grep -qE 'DORMOUSE_SETUP_PASSWORD\|DORMOUSE_VAPID_PRIVATE_KEY\|DORMOUSE_ENROLL_TOKEN\[\^_\]' \\\n\s*"\$UNIT_FILE" "\$ROOT\/bin\/run-relay"/,
+        /grep -qE 'DORMOUSE_SETUP_PASSWORD\|DORMOUSE_VAPID_PRIVATE_KEY\|DORMOUSE_ENROLL_TOKEN\[\^_\]\|DORMOUSE_ENROLL_TOKEN\$' \\\n\s*"\$UNIT_FILE" "\$ROOT\/bin\/run-relay"/,
       Windows:
         /\(\("\$taskXml" \+ "`n" \+ \$wrapperText\) -match 'DORMOUSE_SETUP_PASSWORD\|DORMOUSE_VAPID_PRIVATE_KEY\|DORMOUSE_ENROLL_TOKEN\(\?!_FILE\)'\)/,
+    },
+  },
+  {
+    // SELF_HOST.md -> "Definition of done": "a definition it cannot read at all
+    // fails rather than passes". Both searches above read the service
+    // definition and the `run-relay` wrapper, and on every platform an
+    // unreadable input reported a pass — `grep -q` exits 2 on a file it cannot
+    // open, and PowerShell's `"$null"` is the empty string, so neither could
+    // match and both took the green branch.
+    //
+    // Condition and verdict as one span, per platform: the message alone could
+    // survive the guard being deleted, and the guard alone could survive it
+    // reporting a pass.
+    rule: 'Definition of done — manage verify fails a definition it could not read',
+    patterns: {
+      macOS:
+        /if \[ "\$definition_read" = 0 \]; then\n\s*fail "the LaunchAgent or bin\/run-relay could not be read/,
+      Linux:
+        /if \[ "\$definition_read" = 0 \]; then\n\s*fail "the unit or bin\/run-relay could not be read/,
+      Windows:
+        /if \(-not \$definitionRead\) \{\n\s*Fail "the task definition or bin\\run-relay\.ps1 could not be read/,
     },
   },
   {

@@ -16,7 +16,7 @@ import {
   type Provider,
   type Session,
 } from "./api";
-import { LOGIN_FRESH_AGE_MS } from "../server/policy";
+import { LOGIN_FRESH_AGE_MS } from "../server/policy-constants";
 
 export function App() {
   const [session, setSession] = useState<Session | null>(null);

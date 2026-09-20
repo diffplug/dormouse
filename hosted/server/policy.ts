@@ -1,6 +1,7 @@
 import type { AuthAppOptions } from "@pgstencil/auth/better-auth";
 import { providerIds } from "./providers.js";
 import type { ProviderId } from "./providers.js";
+import { LOGIN_FRESH_AGE_MS } from "./policy-constants.js";
 
 export const authPolicy = {
   appName: "Dormouse Hosted",
@@ -16,13 +17,7 @@ export const authPolicy = {
 // plain-node deploy scripts import without this module's dependencies.
 export { providerIds, type ProviderId };
 
-// How long after signing in a login still counts as recent enough to connect a
-// provider. The packed adapter enforces it as Better Auth's `session.freshAge`
-// and the account screen gates its buttons on the same window, so the two would
-// desync silently on a pgstencil bump: a UI that offers "connect" for a login
-// the server has already stopped accepting 302s to /login?error=. One value,
-// and `hosted/server/tests/policy.test.ts` pins it to what the adapter builds.
-export const LOGIN_FRESH_AGE_MS = 10 * 60 * 1000;
+export { LOGIN_FRESH_AGE_MS } from "./policy-constants.js";
 
 // Only an explicit deployment allowlist enables a provider; stale secrets do not.
 export function providerBindings(env: Record<string, unknown>) {

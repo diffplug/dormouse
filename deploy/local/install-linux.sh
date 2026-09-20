@@ -1204,18 +1204,30 @@ cmd_verify() {
   # and nothing else secret (docs/specs/security-remote.md -> "Credentials at
   # rest"). A name, not a value: the installer supplies none of these, so one
   # appearing means a hand-edit or a regression put a credential where any
-  # process that can read the definition can read it.
-  if grep -qE 'DORMOUSE_SETUP_PASSWORD|DORMOUSE_VAPID_PRIVATE_KEY|DORMOUSE_ENROLL_TOKEN[^_]' \
+  # process that can read the definition can read it. The trailing alternative
+  # is the same name at end of line: `[^_]` alone exempts a bare
+  # `export DORMOUSE_ENROLL_TOKEN` that inherits its value from the
+  # environment, which the Windows `(?!_FILE)` lookahead catches.
+  #
+  # `grep -q` exits 2 on a file it cannot open, which is neither a match nor a
+  # miss, so both searches report on definition_read rather than green-ticking
+  # a definition nothing read.
+  local definition_read=0
+  if [ -r "$UNIT_FILE" ] && [ -r "$ROOT/bin/run-relay" ]; then definition_read=1; fi
+  if [ "$definition_read" = 0 ]; then
+    fail "the unit or bin/run-relay could not be read — it was searched for neither a credential nor the source checkout"
+  elif grep -qE 'DORMOUSE_SETUP_PASSWORD|DORMOUSE_VAPID_PRIVATE_KEY|DORMOUSE_ENROLL_TOKEN[^_]|DORMOUSE_ENROLL_TOKEN$' \
        "$UNIT_FILE" "$ROOT/bin/run-relay" 2>/dev/null; then
     fail "the unit or wrapper names a credential — it must carry only paths"
   else
     pass "the service definition names no credential"
   fi
 
-  # The release must not depend on the source checkout.
+  # The release must not depend on the source checkout. Unreadable inputs have
+  # already failed above, so this search stays silent rather than failing twice.
   local src
   src="$(release_field source_checkout || echo '')"
-  if [ -n "$src" ]; then
+  if [ -n "$src" ] && [ "$definition_read" = 1 ]; then
     if grep -q "$src" "$UNIT_FILE" 2>/dev/null || grep -q "$src" "$ROOT/bin/run-relay" 2>/dev/null; then
       fail "the unit or wrapper references the source checkout ($src)"
     else
