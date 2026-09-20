@@ -6,12 +6,16 @@ import type { AlertSpeechState, SessionStatus, TodoState } from '../lib/terminal
 import type { BrowserDisplayMode } from './wall/agent-browser-screen';
 import { BROWSER_DISPLAY_LABEL, BrowserDisplayIcon } from './wall/BrowserDisplayIcon';
 import { useTodoPillContent } from './TodoPillBody';
-import { alertSpeakingAnimationClass } from './bell-icon-class';
 import { AlertBell } from './AlertBell';
 import { notepadLabel } from './use-notepad';
+import type { AlertEpisode } from '../lib/alert-episode';
 import {
   ALERT_SPEECH_TRACKING_CLASS,
+  alertRingBurstClass,
+  alertRingBurstStyle,
+  alertSpeakingAnimationClass,
   DOOR_TAB_CLASS,
+  TERMINAL_TOP_RADIUS_CLASS,
   TODO_PILL_TRACKING_CLASS,
 } from './design';
 
@@ -29,6 +33,9 @@ export interface DoorProps {
   ringSeq: number;
   todo?: TodoState;
   speechState?: AlertSpeechState;
+  /** `ActivityState.episode` — the Session's current ringing interval. A new one
+   *  replays the ring's arrival burst; `null` while the Session is quiet. */
+  episode?: AlertEpisode | null;
   /** Live notes on the minimized Surface. Above zero the Door grows its second
    *  button; a Door with no notes needs none (`docs/specs/notepad.md`). The
    *  Baseboard reports zero on a host that has no notepad at all. */
@@ -60,6 +67,7 @@ export function Door({
   ringSeq,
   todo = false,
   speechState,
+  episode,
   noteCount = 0,
   onClick,
   onDragPress,
@@ -70,8 +78,15 @@ export function Door({
   const todoPill = useTodoPillContent(todo);
   const speaking = speechState === 'speaking';
   const spoken = speechState === 'spoken';
+  // A latched ring the speech sink has not touched: the perimeter ring is the
+  // whole treatment, so the burst pulses that rather than the Door.
+  const ringingOnly = alertRinging && !speechState;
   const detail = browserDisplay ? BROWSER_DISPLAY_LABEL[browserDisplay] : undefined;
-  const extras = [detail, speechState, toolDirty && 'Unsaved changes'].filter(Boolean);
+  const extras = [
+    detail,
+    speechState ?? (alertRinging ? 'needs attention' : undefined),
+    toolDirty && 'Unsaved changes',
+  ].filter(Boolean);
   const nameParts = [title, ...extras];
   const doorRef = useRef<HTMLDivElement>(null);
   const showNotepad = noteCount > 0;
@@ -103,6 +118,7 @@ export function Door({
       title={nameParts.join(' — ')}
       aria-label={extras.length ? nameParts.join(', ') : undefined}
       data-alert-speech-state={speechState}
+      data-alert-ring-state={speechState ?? (alertRinging ? 'ringing' : undefined)}
     >
       <button
         type="button"
@@ -162,6 +178,20 @@ export function Door({
         >
           <NotepadIcon size={12} weight="fill" />
         </button>
+      )}
+      {ringingOnly && (
+        <span
+          key={episode?.id}
+          data-alert-ring-burst
+          aria-hidden
+          style={alertRingBurstStyle(episode)}
+          className={clsx(
+            'pointer-events-none absolute inset-0',
+            TERMINAL_TOP_RADIUS_CLASS,
+            'shadow-[inset_0_0_0_2px_var(--color-alarm-vs-door)]',
+            alertRingBurstClass(),
+          )}
+        />
       )}
     </div>
   );

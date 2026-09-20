@@ -108,6 +108,21 @@ async function flushFrame(): Promise<void> {
 }
 
 describe('Wall on the Lath engine', () => {
+  /** The alarm treatment is the leaf overlay, so it must reach a ringing terminal
+   *  through the engine's overlay slot and leave a quiet neighbour alone. */
+  it('mounts the alarm overlay on a ringing terminal leaf', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} />));
+    await flush();
+    expect(container.querySelector('[data-alert-ring-state]')).toBeNull();
+
+    await act(async () => { setTerminalActivity('pane-a', { status: 'ALERT_RINGING' }); });
+
+    const overlays = container.querySelectorAll('[data-alert-ring-state="ringing"]');
+    expect(overlays).toHaveLength(1);
+    const leaf = overlays[0].closest('[data-lath-leaf]');
+    expect(leaf?.querySelector('[data-session-id]')?.getAttribute('data-session-id')).toBe('pane-a');
+  });
+
   it('releases input during context exit, cancels stale removal on reopen, and skips exit for reduced motion', async () => {
     await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="passthrough" />));
     await flush();

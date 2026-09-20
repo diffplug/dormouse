@@ -22,7 +22,23 @@ afterEach(() => {
   container.remove();
 });
 
-describe('Door spoken-alarm state', () => {
+describe('Door alarm state', () => {
+  it('rings with a static inset ring and no label until the speech sink acts', () => {
+    act(() => root.render(
+      <Door title="build-server" status="ALERT_RINGING" ringSeq={1} todo
+        episode={{ id: 'episode-1', startedAt: Date.now() }} />,
+    ));
+
+    const door = container.querySelector<HTMLElement>('[data-alert-ring-state="ringing"]');
+    expect(door?.className).not.toContain('bg-alarm-vs-door');
+    expect(door?.textContent).not.toContain('SPEAKING');
+    expect(door?.getAttribute('aria-label')).toBe('build-server, needs attention');
+    // The ring is the treatment, so it carries the bounded arrival burst.
+    const ring = door?.querySelector<HTMLElement>('[data-alert-ring-burst]');
+    expect(ring?.className).toContain('inset_0_0_0_2px');
+    expect(ring?.className).toContain('animate-alarm-ring-pulse');
+  });
+
   it('inverts and animates the whole Door while its Session is speaking', () => {
     act(() => root.render(
       <Door title="build-server" status="ALERT_RINGING" ringSeq={1} todo speechState="speaking" />,
@@ -31,6 +47,7 @@ describe('Door spoken-alarm state', () => {
     const door = container.querySelector<HTMLButtonElement>('[data-alert-speech-state="speaking"]');
     expect(door?.className).toContain('bg-alarm-vs-door');
     expect(door?.className).toContain('animate-speech-alarm-pulse');
+    expect(door?.className).not.toContain('animate-alarm-ring-pulse');
     expect(door?.textContent).toContain('SPEAKING');
     expect(door?.textContent).not.toContain('TODO');
     expect(door?.getAttribute('aria-label')).toBe('build-server, speaking');

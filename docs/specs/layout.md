@@ -96,16 +96,24 @@ The pane body paints `--color-terminal-bg` on the React pane wrapper and the `Te
 
 Source of truth: `PaneMessage` in `lib/src/components/design.tsx`. Visual regression cases: `lib/src/stories/ToolApproval.stories.tsx`.
 
-### Spoken-alarm overlay
+### Alarm overlay
 
-A terminal Session with transient speech-delivery state gets a pointer-transparent overlay spanning its whole Lath leaf; browser surfaces never render it. It resolves through the tiling engine's per-leaf overlay slot (`docs/specs/tiling-engine.md`) and **must never intercept pointer/focus routing or change leaf geometry**.
+A ringing terminal Session gets an overlay spanning its whole Lath leaf; browser surfaces never render it. It resolves through the tiling engine's per-leaf overlay slot (`docs/specs/tiling-engine.md`) and **must never intercept pointer/focus routing or change leaf geometry**.
 
 **Two layers straddling the header's stacking context** (`.lath-leaf-header` is `position: relative; z-index: 20`):
 
-- **Wash + label at `z-index: 19`** — above terminal content, below the header and below the `z-index: 20` pane-corner mouse-override banner, so neither is tinted (rationale). Both states wash, `SPEAKING` at 20% opacity and `SPOKEN` at half that — `SPOKEN` is an unbounded window, so its haze must stay light enough to read terminal text through. **Never use color-alpha utilities here** — their emitted `color-mix()` is unsupported by the standalone Safari 15 / Chrome 105 targets; the solid alarm color lives on a dedicated child whose element opacity supplies those strengths. The label sits `PANE_HEADER_HEIGHT_PX + 4` from the Pane top, centered, in both states.
-- **Perimeter ring at `z-index: 25`** — above the header so the treatment reads as one rounded rectangle around the whole Pane, below the `z-index: 30` sashes (rationale). 5px for `SPEAKING`, 3px for `SPOKEN`.
+- **Wash + label at `z-index: 19`** — above terminal content, below the header and the `z-index: 20` pane-corner mouse-override banner, so neither is tinted (rationale). **Never use color-alpha utilities here** — their `color-mix()` is unsupported by the standalone Safari 15 / Chrome 105 targets; the solid alarm color lives on a dedicated child whose element opacity supplies those strengths. The label sits `PANE_HEADER_HEIGHT_PX + 4` from the Pane top, centered.
+- **Perimeter ring at `z-index: 25`** — above the header so the treatment reads as one rounded rectangle around the whole Pane, below the `z-index: 30` sashes (rationale).
 
-Both layers wear the leaf's own rounding (header radius on top, terminal radius on the bottom). Under `SPEAKING` both pulse when motion is allowed and `cfg.alert.ringingPaused` is not set. Source of truth: `lib/src/components/wall/AlertSpeechIndicator.tsx`, registered as the `terminal` overlay by `lib/src/components/wall/LathHost.tsx`.
+Three strengths, by speech state over the latched ring (`docs/specs/alert.md` → Pane Header). `SPOKEN` is unbounded, so its wash stays light enough to read terminal text through:
+
+| State | Wash | Ring | Label |
+|---|---|---|---|
+| ringing only | 10% | 3px | none |
+| `SPEAKING` | 20% | 5px | `SPEAKING` + speaker icon |
+| `SPOKEN` | 10% | 3px | `SPOKEN` + speaker icon |
+
+Both layers wear the leaf's own rounding (header radius on top, terminal radius on the bottom) and carry the motion `docs/specs/alert.md` → Pane Header specifies. Source of truth: `AlertRingIndicator` in `lib/src/components/wall/AlertRingIndicator.tsx`, registered as the `terminal` overlay by `lib/src/components/wall/LathHost.tsx`.
 
 ### Pane header responsive sizing
 

@@ -41,6 +41,10 @@
   /* Animation */
   --animate-bell-ring: bell-ring 800ms ease-in-out 4;
   --animate-speech-alarm-pulse: speech-alarm-pulse 650ms ease-in-out infinite;
+  /* The unlabelled alarm treatment's arrival burst: the same keyframes, bounded,
+   * so an unattended ring leaves no animation running (docs/specs/alert.md ->
+   * Pane Header). */
+  --animate-alarm-ring-pulse: speech-alarm-pulse 650ms ease-in-out 4;
   --animate-shake-x: shake-x 400ms ease-out;
 }
 

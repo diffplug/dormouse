@@ -46,7 +46,7 @@ runtime instead:
 | `--color-focus-ring` | a chromatic `focusBorder`, else a chromatic active-header background, else the candidate furthest from `--color-app-bg`; "chromatic" is OKLab chroma ≥ `FOCUS_RING_SATURATION_FLOOR` |
 | `--color-alarm-vs-{header-active,header-inactive,door,terminal}` | plain white or black, by the OKLab lightness of the background the alert treatment sits on (rationale) |
 
-The terminal alarm tint drives the whole-Pane spoken-alarm overlay.
+The terminal alarm tint drives the whole-Pane alarm overlay.
 **Must derive the Door alarm tint from the newly chosen background in the same
 pass.** Pinned by `lib/src/lib/themes/dynamic-palette.test.ts`.
 **Must refresh dynamic picks on `body` or `html` class/style changes and repair

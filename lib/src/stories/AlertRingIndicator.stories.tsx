@@ -1,7 +1,10 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { AlertSpeechIndicator } from '../components/wall/AlertSpeechIndicator';
+import { AlertRingIndicator } from '../components/wall/AlertRingIndicator';
 
-const SESSION_ID = 'speech-indicator-story';
+const SESSION_ID = 'ring-indicator-story';
+
+/** Every row of the treatment needs a latched ring under it; speech only labels it. */
+const RINGING = { byId: { [SESSION_ID]: { status: 'ALERT_RINGING' as const } } };
 
 function IndicatorStory() {
   return (
@@ -15,28 +18,38 @@ function IndicatorStory() {
           <br />
           Build completed successfully.
         </div>
-        <AlertSpeechIndicator sessionId={SESSION_ID} />
+        <AlertRingIndicator sessionId={SESSION_ID} />
       </div>
     </div>
   );
 }
 
 const meta: Meta<typeof IndicatorStory> = {
-  title: 'Components/AlertSpeechIndicator',
+  title: 'Components/AlertRingIndicator',
   component: IndicatorStory,
 };
 
 export default meta;
 type Story = StoryObj<typeof IndicatorStory>;
 
+// `cfg.alert.ringingPaused` is on under Chromatic (lib/.storybook/preview.ts), so
+// the arrival burst is frozen out and this snapshots as the static treatment.
+export const Ringing: Story = {
+  parameters: {
+    primedSessionState: RINGING,
+  },
+};
+
 export const Speaking: Story = {
   parameters: {
+    primedSessionState: RINGING,
     primedAlertSpeech: { [SESSION_ID]: 'speaking' },
   },
 };
 
 export const HasSpoken: Story = {
   parameters: {
+    primedSessionState: RINGING,
     primedAlertSpeech: { [SESSION_ID]: 'spoken' },
   },
 };

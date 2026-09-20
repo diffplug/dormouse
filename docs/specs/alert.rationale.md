@@ -114,6 +114,8 @@ Guarding only completion leaves a stale `start` free to replace the active utter
 
 **Why `cfg.alert.ringingPaused` suppresses the burst.** It is the Chromatic freeze that pins the bell; even a bounded animation could otherwise snapshot at an arbitrary phase during its first 3.2 seconds.
 
+**Why the unlabelled treatment pulses once per episode.** The whole-Pane treatment is a per-Session animation on a surface far larger than a bell, so an infinite pulse would pay the cost measured above and pay it worse; bounding it buys the entry cue and then stops. The episode — not a track latch — is the key because the episode is the summons the sinks already work from: a second track latching inside one enriches an alarm the user was already shown, and re-flashing the whole Pane for it would read as a new alarm. Running the burst off `episode.startedAt` rather than from mount makes the CSS clock a property of the episode, so minimize → reattach or a Workspace switch lands past an expired burst instead of replaying it, the same trade the bell's mount replay makes in the other direction (its className carries no clock to start from).
+
 ## Text And Security
 
 **Why the cold-restore path is not re-sanitized.** Reaching it requires a corrupted or hand-edited session store, and the text is rendered as plain text everywhere, so the residual exposure is layout — a very long or control-bearing string in a preview — rather than markup.

@@ -385,9 +385,9 @@ Source of truth: `TerminalContext` in `lib/src/components/wall/TerminalContext.t
 
 The TODO pill always displays `TODO`; remote notification text belongs in preview/detail surfaces, not inside the pill. Clicking the pill clears TODO, and on clear the pill briefly shows the success flourish before unmounting.
 
-Spoken-alarm delivery is much louder than the bell: a pointer-transparent treatment spans the whole terminal Pane, labelled `SPEAKING` while the engine actually speaks and `SPOKEN` — quieter, and unbounded — until the ring resolves. **`prefers-reduced-motion` keeps the strong static treatment and suppresses only the pulse**, as does `cfg.alert.ringingPaused` (rationale). The layers, their strengths, placement, and sizing belong to `docs/specs/layout.md` → Spoken-alarm overlay.
+**Must wear the alarm treatment on every ringing terminal Pane** — unlabelled until the speech sink acts, then `SPEAKING` while the engine speaks and `SPOKEN` until the ring resolves. **Must bound the unlabelled pulse to one finite burst per episode, keyed on `ActivityState.episode.id` and clocked from its `startedAt`, so a remount never replays a finished burst** (rationale). **`prefers-reduced-motion` keeps the strong static treatment and suppresses only the pulse**, as does `cfg.alert.ringingPaused` (rationale). Layers, strengths, and sizing belong to `docs/specs/layout.md` → Alarm overlay.
 
-Source of truth: `AlertBell` in `lib/src/components/AlertBell.tsx`; `bellIconClass` in `lib/src/components/bell-icon-class.ts`; `latchRing` in `lib/src/lib/alert-manager.ts`; `dismissSessionAlert` in `lib/src/lib/session-activity-store.ts`; `TerminalContext` in `lib/src/components/wall/TerminalContext.tsx`; `lib/src/components/TodoPillBody.tsx`; `lib/src/components/wall/AlertSpeechIndicator.tsx`.
+Source of truth: `AlertBell` in `lib/src/components/AlertBell.tsx`; `bellIconClass` in `lib/src/components/bell-icon-class.ts`; `latchRing` in `lib/src/lib/alert-manager.ts`; `dismissSessionAlert` in `lib/src/lib/session-activity-store.ts`; `TerminalContext` in `lib/src/components/wall/TerminalContext.tsx`; `lib/src/components/TodoPillBody.tsx`; `AlertRingIndicator` in `lib/src/components/wall/AlertRingIndicator.tsx`.
 
 ### Door
 
@@ -396,6 +396,7 @@ A Door is display-only for alert state:
 - show the bell only when `status !== 'WATCHING_DISABLED'`
 - show the TODO pill when `todo === true`
 - use the same bell tilt/animation mapping as the Pane header
+- while ringing with no speech state, wear the 2px inset ring `spoken` uses, unlabelled, named `needs attention`; it carries the Pane's one burst per episode
 - while its Session is `speaking`, replace the compact bell/TODO cluster with the explicit `SPEAKING` label and invert + pulse the whole Door — that state lasts one utterance. `spoken` persists until the ring is attended, so it keeps a static high-contrast inset and adds a speaker icon *alongside* the bell and TODO pill instead of replacing them; those are the baseboard's persistent signals and **must not go dark for an unbounded window**
 - do not expose a Door-specific alert menu
 

@@ -42,7 +42,7 @@ vi.mock('../lib/terminal-registry', () => ({
     registry.resizes.push({ id, cols, rows });
   },
 }));
-vi.mock('./wall/AlertSpeechIndicator', () => ({ AlertSpeechIndicator: () => null }));
+vi.mock('./wall/AlertRingIndicator', () => ({ AlertRingIndicator: () => null }));
 vi.mock('./SelectionOverlay', () => ({ SelectionOverlay: () => null }));
 vi.mock('./SelectionPopup', () => ({ SelectionPopup: () => null }));
 vi.mock('./wall/MouseOverrideBanner', () => ({ MouseOverrideBanner: () => null }));
