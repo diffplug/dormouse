@@ -101,8 +101,9 @@ export function frameAncestorsCsp(embedderOrigins: string[]): string {
 //   - `location`: the proxied frame's current URL. The parent converts it back
 //     to the upstream URL and uses it to keep iframe Back/Forward/Reload chrome
 //     honest.
-//   - `open-window`: a `target=_blank` anchor or `window.open` the single-frame
-//     renderer can't honor; the parent offers it as a new pane instead.
+//   - `open-window`: an anchor with any target but `_self` (`_blank`, `_top`,
+//     `_parent`, a named frame) or a `window.open` the single-frame renderer
+//     can't honor; the parent offers it as a new pane instead.
 export function iframeShim(embedderOrigin: string): string {
   return `(function(){
   var P=window.parent;

@@ -454,9 +454,9 @@ Source of truth: `route` in `standalone/src-tauri/src/routing.rs`,
   broadcasting rang every sibling's AlertManager for a pane none of them shows.
   `Destroyed` SIGTERMs whatever the departing window still owned, which is what
   the close ack-timeout path never killed.
-- **A `dor` request naming a Surface no window owns is answered with an error**,
-  never handed to a sibling — acting on the wrong terminal is worse than failing
-  (`docs/specs/dor-cli.md` → Standalone).
+- **A `dor` request naming a Surface no window owns is answered with an error**
+  — `No Dormouse window owns surface '<id>'` — never handed to a sibling, since
+  acting on the wrong terminal is worse than failing.
 - **`pty_request_init`, `pty_graceful_kill` and `capture_agent_recovery` target
   the invoking window's own PTYs**, and take no ids at all: a window tearing down
   must not interrupt or kill a sibling's terminals, and a set it could name is a

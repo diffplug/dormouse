@@ -45,10 +45,10 @@ export const HIDDEN_PARK_DELAY_MS = 1000;
 export const PROVISIONAL_INPUT_WINDOW_MS = 250;
 
 // The high-rate `[ab-panel]` stream/screenshot diagnostics fire per frame
-// (~20Hz), so the flag is read ONCE at module load and cached: toggling needs a
-// reload, which is the right trade for a hot loop. The connection's always-on
-// debug ring is unaffected. `localStorage.setItem('dormouse.flags.abDebugLogs',
-// 'true')` + reload to enable.
+// (~20Hz), so the flag is read ONCE — lazily, on the first log — and memoized:
+// toggling needs a reload, which is the right trade for a hot loop. The
+// connection's always-on debug ring is unaffected.
+// `localStorage.setItem('dormouse.flags.abDebugLogs', 'true')` + reload to enable.
 let abDebugLogsEnabled: boolean | undefined;
 function abDebugLog(message: string): void {
   if (abDebugLogsEnabled === undefined) abDebugLogsEnabled = isAbDebugLogsEnabled();
@@ -804,6 +804,9 @@ export class AgentBrowserSurfaceController {
     } catch {
       return;
     }
+    // Latest-only, like the crisp loop: a newer pulse arriving while this decode
+    // is in flight bumps the sequence, and the stale bitmap is dropped rather
+    // than painted over the newer frame.
     const mySeq = ++this.frameDrawSeq;
     createImageBitmap(new Blob([bytes], { type: 'image/jpeg' })).then((bitmap) => {
       if (this.disposed || mySeq !== this.frameDrawSeq || this.sink !== sink) {
@@ -1472,11 +1475,12 @@ export class AgentBrowserSurfaceController {
       });
       return;
     }
-    // macOS native editing chords (select-all/copy/cut) don't fire over the
-    // stream input path (CDP commands field is dropped). Route the intent
-    // through the host's purpose-built edit channel instead. If the host lacks
-    // it (e.g. standalone), fall through so the page still gets the chord for
-    // its own JS shortcuts.
+    // Native editing chords (select-all/copy/cut) don't fire over the stream
+    // input path (CDP commands field is dropped), on any platform — Cmd on
+    // macOS, Ctrl elsewhere. Route the intent through the host's purpose-built
+    // edit channel instead. Every shipped host implements `agentBrowserEdit`;
+    // the fall-through covers a host that does not (the fake adapter), so the
+    // page still gets the chord for its own JS shortcuts.
     if (mod && !e.altKey && !e.shiftKey) {
       const op = EDIT_OPS[e.key.toLowerCase() as keyof typeof EDIT_OPS];
       // Call through the adapter instance — detaching the method drops `this`.
