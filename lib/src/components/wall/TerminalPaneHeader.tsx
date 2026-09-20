@@ -27,11 +27,11 @@ import {
 import {
   clearSessionTodo,
   DEFAULT_ACTIVITY_STATE,
+  dismissSessionAlert,
   getActivitySnapshot,
   getTerminalPaneStateSnapshot,
   subscribeToActivity,
   subscribeToTerminalPaneState,
-  type SessionStatus,
 } from '../../lib/terminal-registry';
 import {
   buildAppTitleResolver,
@@ -79,13 +79,6 @@ const terminalHeaderTier = (width: number): TerminalHeaderTier =>
           : width > 98 ? 'bare'
             : 'tiny';
 
-// The button dismisses and opens the terminal context; it never edits a rule,
-// so it names the action, not a toggle (`docs/specs/alert.md` -> Pane Header).
-function alertButtonLabelsFor(status: SessionStatus): { aria: string; tooltip: string } {
-  return status === 'ALERT_RINGING'
-    ? { aria: 'Alert ringing', tooltip: '[a] Dismiss alert' }
-    : { aria: 'Alert settings', tooltip: '[a] Alert settings' };
-}
 const TODO_PREVIEW_GAP = 6;
 const TODO_PREVIEW_MARGIN = 8;
 
@@ -147,10 +140,12 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
   const roomForNotepad = compactOrWider || tier === 'minimal' || (tier === 'minimal-tight' && !dirty);
   const tiny = tier === 'tiny';
   const showTodoPill = todoPill.visible && compactOrWider;
-  const alertButtonLabels = alertButtonLabelsFor(activity.status);
-  const alertButtonAriaLabel = alertButtonLabels.aria;
-  const alertButtonTooltip = alertButtonLabels.tooltip;
-  const alertButtonTooltipDetail = activity.status === 'ALERT_RINGING'
+  // The alert button dismisses and opens the terminal context; it never edits
+  // a rule, so it names that action (`docs/specs/alert.md` -> Pane Header).
+  const ringing = activity.status === 'ALERT_RINGING';
+  const alertButtonAriaLabel = ringing ? 'Dismiss alert' : 'Alert settings';
+  const alertButtonTooltip = `[a] ${alertButtonAriaLabel}`;
+  const alertButtonTooltipDetail = ringing
     ? 'Click to dismiss and show options'
     : 'Click or right-click for options';
   const todoNotificationPreview = formatNotificationPreview(activity.notification);
@@ -173,7 +168,7 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
   }, [activity.notification]);
 
   const triggerAlertButtonAction = useCallback((button: HTMLButtonElement) => {
-    actions.onAlertButton(id);
+    dismissSessionAlert(id);
     const rect = button.getBoundingClientRect();
     context.open(id, { origin: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } });
   }, [actions, id, context]);
@@ -225,7 +220,7 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
         <HeaderActionButton
           className={[
             'flex h-5 min-w-5 items-center justify-center rounded transition-colors shrink-0 hover:bg-current/10',
-            activity.status === 'ALERT_RINGING'
+            ringing
               ? (isActiveHeader ? 'text-alarm-vs-header-active' : 'text-alarm-vs-header-inactive')
               : '',
           ].join(' ')}

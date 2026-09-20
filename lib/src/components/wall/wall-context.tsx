@@ -41,9 +41,6 @@ export const DoorElementsContext = createContext<PaneElementsState>({
 export interface WallActions {
   onKill: (id: string) => void;
   onMinimize: (id: string) => void;
-  /** Dismiss a ringing Session. The caller then opens the terminal context
-   *  (`docs/specs/alert.md` -> Pane Header). */
-  onAlertButton: (id: string) => void;
   onToggleTodo: (id: string) => void;
   onSplitH: (id: string | null, source?: 'keyboard' | 'mouse') => void;
   onSplitV: (id: string | null, source?: 'keyboard' | 'mouse') => void;
@@ -76,7 +73,6 @@ export interface WallActions {
 export const WallActionsContext = createContext<WallActions>({
   onKill: () => {},
   onMinimize: () => {},
-  onAlertButton: () => {},
   onToggleTodo: () => {},
   onSplitH: () => {},
   onSplitV: () => {},

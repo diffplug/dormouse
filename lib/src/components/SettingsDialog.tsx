@@ -83,10 +83,8 @@ function describePushTargets(push: PushDevicesState, remoteControlBelow: boolean
  * (`lib/src/lib/shell-store.ts`), then the alarm settings
  * (`docs/specs/alert.md` -> Alarm settings).
  *
- * Rules are removable here but not addable: WATCHING is keyed on a running
- * command's name, so a rule is created in the terminal context of a Pane
- * running it. This dialog is the one place a rule set on a since-closed Pane
- * can be found and removed.
+ * Rules are removable here but not addable (`docs/specs/alert.md` -> Settings
+ * dialog).
  */
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const watched = useSyncExternalStore(subscribeToWatchedCommands, getWatchedCommandsSnapshot);

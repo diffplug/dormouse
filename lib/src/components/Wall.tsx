@@ -38,7 +38,6 @@ import {
   clearLocalSurfaceActivity,
   deriveSessionLabel,
   disposeSession,
-  dismissSessionAlert,
   focusSession,
   refitSession,
   markSessionAttention,
@@ -1894,9 +1893,6 @@ export function Wall({
       exitTerminalMode();
       requestKill(id);
     },
-    onAlertButton: (id: string) => {
-      dismissSessionAlert(id);
-    },
     onToggleTodo: (id: string) => {
       toggleSessionTodo(id);
     },
@@ -2222,6 +2218,7 @@ export function Wall({
     enterTerminalMode,
     exitTerminalMode,
     minimizePane,
+    openTerminalContext: (id, origin) => contextActions.open(id, { origin }),
     requestKill,
     acceptKill,
     rejectKill,

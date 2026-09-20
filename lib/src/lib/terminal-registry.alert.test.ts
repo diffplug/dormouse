@@ -141,6 +141,7 @@ import {
 } from './terminal-registry';
 import { pasteFilePaths } from './clipboard';
 import { registry } from './terminal-store';
+import { commandArgv0 } from './terminal-state';
 import { REPLAY_MODE_RESET } from './terminal-report-filter';
 import { cfg } from '../cfg';
 import { TerminalWebglRenderer } from './terminal-webgl';
@@ -258,7 +259,7 @@ function runCommand(id: string, commandLine = 'longtask'): void {
 /** Run `commandLine` and turn its WATCHING rule on, as the terminal context would. */
 function enableAlert(id: string, commandLine = 'longtask'): void {
   runCommand(id, commandLine);
-  setCommandWatched(commandLine.split(' ')[0], true);
+  setCommandWatched(commandArgv0(commandLine), true);
   expect(getActivity(id).watchingEnabled).toBe(true);
 }
 

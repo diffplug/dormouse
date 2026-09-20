@@ -20,7 +20,6 @@ import {
   setTerminalUserTitle,
   subscribeToActivity,
   subscribeToTerminalPaneState,
-  type SessionStatus,
 } from '../lib/terminal-registry';
 import {
   buildAppTitleResolver,
@@ -48,10 +47,6 @@ export interface MobileWallProps {
 
 const DEFAULT_MOBILE_SESSION: MobileWallSession = { id: 'mobile-pane' };
 
-// Mobile has no terminal context, so dismissing a ring is the button's whole
-// action; it never edits a rule (`docs/specs/alert.md` -> Pane Header).
-const alertButtonLabelFor = (status: SessionStatus): string =>
-  status === 'ALERT_RINGING' ? 'Dismiss alert' : 'Alert status';
 
 export function useMobileWallSessionItems(
   sessions: MobileWallSession[],
@@ -179,7 +174,9 @@ function MobileWallHeader({
 }) {
   const status = session.status ?? 'WATCHING_DISABLED';
   const todoPill = useTodoPillContent(session.todo === true);
-  const alertButtonLabel = alertButtonLabelFor(status);
+  // Mobile has no terminal context, so dismissing a ring is the button's whole
+  // action; it never edits a rule (`docs/specs/alert.md` -> Pane Header).
+  const alertButtonLabel = status === 'ALERT_RINGING' ? 'Dismiss alert' : 'Alert status';
   const showTodoPill = todoPill.visible;
 
   return (

@@ -46,6 +46,9 @@ export interface WallKeyboardCtx {
   enterTerminalMode: (id: string) => void;
   exitTerminalMode: () => void;
   minimizePane: (id: string) => void;
+  /** Open the terminal context for a pane, revealed from `origin`
+   *  (`docs/specs/layout.md` -> Header context menu). */
+  openTerminalContext: (id: string, origin: { x: number; y: number }) => void;
   /** The kill gesture: `requestKill` in `lib/src/components/Wall.tsx` decides
    *  between reattach, immediate closure, and the confirm overlay. */
   requestKill: (id: string) => void;

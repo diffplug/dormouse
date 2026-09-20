@@ -24,7 +24,6 @@ const SESSION_ID = 'tab-story';
 const noopActions: WallActions = {
   onKill: () => {},
   onMinimize: () => {},
-  onAlertButton: () => {},
   onToggleTodo: () => {},
   onSplitH: () => {},
   onSplitV: () => {},

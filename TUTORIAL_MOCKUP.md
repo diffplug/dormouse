@@ -35,8 +35,8 @@ Four beats. Beat 2 is the section; the rest is scaffolding around it.
 
 | id | title | hint |
 |---|---|---|
-| `al-watch-cmd` | Alert me whenever `longtask` runs | Press `s` to start a fake `longtask`, then click that pane's bell. The bell says *Alert on all "longtask"* — you are describing a command, not flagging a tab. |
-| `al-spreads` | One rule, every pane running it | The second fake task lit up too, and you never touched its bell. Any pane you open later that runs `longtask` will watch as well. |
+| `al-watch-cmd` | Alert me whenever `longtask` runs | Press `s` to start a fake `longtask`, then right-click that pane's header (or press `a`) and turn on *Watch all longtask commands* — you are describing a command, not flagging a tab. |
+| `al-spreads` | One rule, every pane running it | The second fake task lit up too, and you never touched it. Any pane you open later that runs `longtask` will watch as well. |
 
 ## Beat 2 — Attention
 
@@ -77,9 +77,9 @@ Both are rule-free, and both obey the same attention rule as Beat 2.
 
 | id | title | hint |
 |---|---|---|
-| `al-todo-auto` | A dismissed ring leaves a TODO | Click the bell, or just select the pane. The ring goes away but a TODO stays, so an alert you waved away mid-thought does not vanish. |
+| `al-todo-auto` | A dismissed ring leaves a TODO | Press `a`, or just select the pane. The ring goes away but a TODO stays, so an alert you waved away mid-thought does not vanish. |
 | `al-todo-clear` | Press `Enter` in the pane to clear it | Dealing with the pane is what clears the reminder — not looking at it. |
-| `al-todo-manual` | Add a TODO by hand | Press `t`, or right-click the bell. Same tag, no alert required. |
+| `al-todo-manual` | Add a TODO by hand | Press `t`, or right-click the header. Same tag, no alert required. |
 
 ## Full step list (10)
 

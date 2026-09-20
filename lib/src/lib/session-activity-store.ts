@@ -1,5 +1,5 @@
 import { createAlertEpisode } from './alert-episode';
-import type { AlertState } from './alert-manager';
+import { DEFAULT_ALERT_STATE, type AlertState } from './alert-manager';
 import type { AlertStateDetail } from './platform/types';
 import { applyAlertSettingsFromHost, publishAlertSettings } from './alert-settings';
 import { toPersistedAlertState, type PersistedAlertState, type PersistedPane } from './session-types';
@@ -9,14 +9,7 @@ import { registry } from './terminal-store';
 
 export type ActivityState = AlertState;
 
-export const DEFAULT_ACTIVITY_STATE: ActivityState = {
-  status: 'WATCHING_DISABLED',
-  watchingEnabled: false,
-  todo: false,
-  notification: null,
-  awaited: false,
-  ringSeq: 0,
-};
+export const DEFAULT_ACTIVITY_STATE: ActivityState = DEFAULT_ALERT_STATE;
 
 const activityListeners = new Set<(changedId?: string) => void>();
 let cachedSnapshot: Map<string, ActivityState> | null = null;

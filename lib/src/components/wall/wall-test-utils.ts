@@ -15,7 +15,6 @@ export function stubWallActions(overrides: Partial<WallActions> = {}): WallActio
   return {
     onKill: vi.fn(),
     onMinimize: vi.fn(),
-    onAlertButton: vi.fn(),
     onToggleTodo: vi.fn(),
     onSplitH: vi.fn(),
     onSplitV: vi.fn(),
