@@ -982,9 +982,9 @@ export class AlertManager {
   }
 
   /**
-   * Open a delivery episode when the first track latches. Nothing closes one:
-   * `getState` masks the episode to `null` while no track rings, so a track
-   * latching behind an already-ringing one enriches that same summons.
+   * Open a delivery episode only when no track is ringing yet, so a track
+   * latching behind an already-ringing one enriches that same summons. Nothing
+   * closes one: `getState` masks a stale episode to `null` while no track rings.
    */
   private openEpisode(entry: AlertEntry): void {
     if (!this.hasActiveRing(entry)) entry.episode = createAlertEpisode();
