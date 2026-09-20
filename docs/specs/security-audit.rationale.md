@@ -83,3 +83,9 @@ A bot-pushed feature branch cannot reach the audit job at all — GitHub rejects
 Without the PAT the audit cannot read the administration endpoints behind ruleset bypass actors, repo-level secret listing, and environment policies, so the specs it enforces would be unenforceable in their key sections.
 
 Passing the PAT only as an unexpanded `GH_TOKEN=` prefix is a convention, not a control: the agent holds unrestricted Bash and audits code that touches secrets, so one `printenv` or one `set -x` would publish an admin-read PAT for the artifact's whole retention.
+
+Provisioning the secret, for whoever has to rotate it:
+
+```bash
+gh secret set AUDIT_PAT --env security-audit --repo diffplug/dormouse --body 'github_pat_…'
+```

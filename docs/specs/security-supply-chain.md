@@ -29,7 +29,7 @@ The roots are `productDependencyFilters` in `website/scripts/generate-deps.js`. 
 **Must exclude workspaces that install no artifact:**
 
 - `canopy` — a Storybook-only rendering lab no shipped build imports.
-- `website` — runs in a visitor's browser rather than being installed anywhere, which is what makes "puts on a user's machine" the operative test (rationale).
+- `dormouse-website` — runs in a visitor's browser rather than being installed anywhere (rationale).
 - `dormouse-hosted` — runs on Workers and in the browser; no installed desktop or selfhost artifact imports it.
 
 **External binaries are outside this graph by construction** — the user's shell, and the `agent-browser` CLI `dor ab` forwards to (`npm i -g agent-browser`, a dependency of nothing here, resolved off `PATH`). **Dormouse instead ships nothing that pulls them in silently** (rationale).
@@ -38,14 +38,14 @@ The roots are `productDependencyFilters` in `website/scripts/generate-deps.js`. 
 
 **Must reject unclassified workspaces and exclusions reachable from a product root before generating disclosure.** Runtime and optional edges count; development edges do not. `website/scripts/dependency-workspaces.test.js` pins coverage.
 
-**An unresolvable dependency throws unless an optional-edge rule covers it.** `node-datachannel` — the sidecar's second native addon, beside `node-pty` — publishes one prebuilt package per platform, and pnpm installs only the host's.
+**An unresolvable dependency throws unless an optional-edge rule covers it.** `node-datachannel` publishes one prebuilt package per platform, and pnpm installs only the host's.
 
 - **Optional, declared by an external package: skipped.** The bundle copies `standalone/sidecar/node_modules`, so a prebuild the addon alone declares (android, musl) reaches nobody.
 - **Optional, declared by a product root: described from a sibling in the same `optionalDependencies` block at the same exact version string** — published in lockstep, so the disclosure is identical on every machine. No such sibling installed throws.
 
-**Bundled themes are disclosed outside that lockfile walk.** The themes compiled into every build (`lib/src/lib/themes/bundled.json`) come from OpenVSX extensions, not npm, so `website/scripts/generate-deps.js` appends the checked-in `lib/src/lib/themes/bundled-extensions.json` to the npm table instead. The two come from one run of `lib/scripts/bundle-themes.mjs` but both are committed and can drift, which the CI gate below cannot see (rationale). `lib/src/lib/themes/bundled-extensions.test.ts` pins them, joining on the `extensionId` each disclosure record carries: a bundled theme whose extension has no record, or a record with no bundled theme left, fails. **The join is on the extension set only** — `bundled.json` carries no version or license, so nothing pins a hand-edit to those published fields.
+**Bundled themes are disclosed outside that lockfile walk.** The themes compiled into every build (`lib/src/lib/themes/bundled.json`) come from OpenVSX extensions, not npm, so `website/scripts/generate-deps.js` appends the checked-in `lib/src/lib/themes/bundled-extensions.json` to the npm table instead. Both files are committed and can drift (rationale). `lib/src/lib/themes/bundled-extensions.test.ts` pins them, joining on the `extensionId` each disclosure record carries: a bundled theme whose extension has no record, or a record with no bundled theme left, fails. **The join is on the extension set only** — `bundled.json` carries no version or license, so nothing pins a hand-edit to those published fields.
 
-- **FAIL IF** `node website/scripts/generate-deps.js` changes `website/src/data/dependencies-npm.json`, `website/src/data/dependencies-cargo.json`, or `website/src/data/dependencies-runtime.json` when run against a clean working tree after `pnpm install --frozen-lockfile`. The install is a precondition: the generator walks real `node_modules` directories and throws rather than under-reporting if they are absent.
+- **FAIL IF** `node website/scripts/generate-deps.js` changes `website/src/data/dependencies-npm.json`, `website/src/data/dependencies-cargo.json`, or `website/src/data/dependencies-runtime.json` when run against a clean working tree after `pnpm install --frozen-lockfile` (rationale).
 - **FAIL IF** `.github/workflows/ci.yml` stops running that generator under that same install precondition, or stops failing on a diff (rationale).
 - **FAIL IF** the disclosure omits a shipped workspace's graph or excludes a shipped package. Derive shipping routes from `pnpm-workspace.yaml` and the builds, not the enumeration above; the generator enforces classification, but cannot establish whether an exclusion is justified (rationale).
 
@@ -58,9 +58,9 @@ Source of truth: `productDependencyFilters` / `excludedWorkspacePackages` / `opt
 - **Its version is pinned exactly in the root `package.json` under `devEngines.runtime.version`**, and the build is the authority.
 - **The supply-chain page reads the same pin**, so the disclosed version provably equals the runtime users receive (rationale).
 - **The pin is deliberate and manual** — no automated ecosystem tracks it; workflows that do not bundle the runtime may track the same pinned major.
-- Locally, pnpm honours `devEngines` (`onFail: "download"`) so scripts run under the pinned Node; CI drives `actions/setup-node` from the same field, and `node-version-file: package.json` resolves by precedence: `volta.node`, then `devEngines.runtime`, then `engines.node`.
+- Locally, pnpm honours `devEngines` (`onFail: "download"`) so scripts run under the pinned Node; CI drives `actions/setup-node` from the same field through `node-version-file: package.json` (rationale).
 
-**Must check the Windows runtime version before changing its PE Subsystem field from console (3) to GUI (2).** Only that two-byte field is patched; GUI Node preserves piped sidecar stdio but cannot serve the CLI's inherited console handles (`docs/specs/standalone.md -> "Windows node subsystem"`; rationale).
+**Must check the Windows runtime version before changing its PE Subsystem field from console (3) to GUI (2).** Only that two-byte field is patched (`docs/specs/standalone.md -> "Windows node subsystem"`; rationale).
 
 - **FAIL IF** the root `package.json` is missing `devEngines.runtime.version`, or its value is not an exact `MAJOR.MINOR.PATCH` Node.js version — a bare major such as `24` is not acceptable.
 - **FAIL IF** `standalone/src-tauri/build.rs` no longer runs `--version` on the binary it is about to bundle and fails the build unless it matches `package.json`'s `devEngines.runtime.version`, or if the check is skipped for any configuration the release matrix builds. One deliberate skip is permitted: `verify_node_version` cannot execute a foreign-arch binary, so it warns and returns when `host != target` — acceptable only while every entry in `release.yml`'s standalone matrix is host-native; a cross-compiled entry ships an unverified runtime and fails this check.
