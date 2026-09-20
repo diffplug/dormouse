@@ -11,7 +11,7 @@ pnpm build       # build lib, vscode extension, Pocket, and website
 
 **Inside Dormouse, run `innerdogfood`** — `dor ensure -- pnpm innerdogfood`.
 The harness opens its browser pane and prints its URL and browser command
-(`docs/specs/transport.md` → "Standalone browser-dev harness").
+(`docs/specs/standalone.md` → "Standalone browser-dev harness").
 
 **Open every PR as a draft.** Chromatic bills per snapshot and skips drafts, so
 marking a PR ready for review is what spends them.

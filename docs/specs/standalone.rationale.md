@@ -195,8 +195,7 @@ edges and negative rather than clamping — measured against macOS 26.6 / WKWebV
 2026-09, by synthesizing an AppKit drag whose later points fall outside a
 400×300 window and reading the page's own event log: `down` inside the element,
 then moves at client x 600 and (900, −152), then the release. So the gesture
-stays the webview's throughout and no polling loop is needed; the drag
-controller must simply not assume in-range coordinates.
+stays the webview's throughout and no polling loop is needed.
 
 ## Persistence
 
@@ -284,3 +283,11 @@ and the Vite server it loads from. `tauri::process::restart` just calls `exit(0)
 when `current_binary` fails — on macOS, for a path through a symlink
 (`tauri-utils-2.9.3/src/platform/starting_binary.rs`) — so the check turns a
 silent quit into an answer.
+
+## Standalone browser-dev harness
+
+**Why the bridge token is not the `dor` control token.** The `dor` control-API `controlToken` is handed to every shell Dormouse spawns; the bridge's circle is smaller than "every terminal on the machine", so it mints its own per-run credential.
+
+**Why the CORS origin is never `*`.** It was `*` once: the bridge's clipboard invokes were readable cross-origin under it — a foreign page could POST an invoke and read the reply.
+
+**Agent workflows were unaffected by the gate.** The token reaches the page through the `VITE_DORMOUSE_BROWSER_DEV_HOST` env var the harness already sets, and `agent-browser` drives the Vite origin, never the bridge.

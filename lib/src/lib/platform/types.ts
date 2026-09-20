@@ -442,8 +442,9 @@ export interface PlatformAdapter {
   /** Ask for the live PTY list and each one's replay. `requestId` is the asking
    *  collector's token: a host serving several windows echoes it on the answer
    *  so two collections in one webview cannot finish on each other's list
-   *  (docs/specs/transport.md -> "Reconnection"). A host with one webview may
-   *  ignore it, and its answers then carry none. */
+   *  (docs/specs/transport.md -> "Reconnection"). The hosts that do not echo it
+   *  (VS Code, Pocket, the website) run one collector per JS realm, so their
+   *  answers carry none and the collector takes them. */
   requestInit(requestId?: string): void;
   onPtyList(handler: (detail: PtyListDetail) => void): void;
   offPtyList(handler: (detail: PtyListDetail) => void): void;

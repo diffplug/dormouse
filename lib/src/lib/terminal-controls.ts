@@ -32,6 +32,7 @@ export const STRING_CONTROL_INTRODUCER_SCAN = new RegExp(
   STRING_CONTROL_INTRODUCER.source,
   'g',
 );
+// "Terminated" here tracks what the renderer honours rather than ECMA-48 alone.
 // BEL ends an OSC but is payload inside DCS/SOS/PM/APC, so the two kinds scan
 // for different sets; CAN, SUB and the C1 ST end either, and so does a bare ESC
 // — whose next byte decides between an ST terminator and a cancel.

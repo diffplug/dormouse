@@ -1670,7 +1670,7 @@ fn read_update_log() -> Result<String, String> {
 // session. A plain file we overwrite atomically has no WAL and cannot grow.
 //
 // Window identity is implicit: each command keys by the invoking window's label,
-// so the frontend stays window-agnostic and a second window (`win-2`, …) persists
+// so the frontend stays window-agnostic and a second window (`ws-2`, …) persists
 // to its own file without ever rewriting the first window's blob.
 
 fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {

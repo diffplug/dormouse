@@ -24,7 +24,7 @@ The harness:
 - opens the app in `agent-browser`
 - mirrors browser console logs as `[browser log] ...` in the harness terminal
 
-Port and session overrides are documented in `docs/specs/transport.md` → "Standalone browser-dev harness".
+Port and session overrides are documented in `docs/specs/standalone.md` → "Standalone browser-dev harness".
 
 ## Freshness
 
@@ -46,7 +46,7 @@ agent-browser --session <outer-session> eval '(()=>(!!document.querySelector("te
 
 Browser console mirroring (`[browser log] ...`) keeps working after a manual re-open, so you don't lose log visibility.
 
-Parallel worktrees are isolated automatically (`docs/specs/transport.md` → "Standalone browser-dev harness"). Inside Dormouse, use `dor ensure -- pnpm innerdogfood`; the harness opens its browser pane. Stop only your own harness with Ctrl-C after a timing run.
+Parallel worktrees are isolated automatically (`docs/specs/standalone.md` → "Standalone browser-dev harness"). Inside Dormouse, use `dor ensure -- pnpm innerdogfood`; the harness opens its browser pane. Stop only your own harness with Ctrl-C after a timing run.
 
 ## Driving Dormouse
 
