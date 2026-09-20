@@ -81,7 +81,7 @@ Source of truth: `registerTerminalSource`, `resolveTerminalSource` and `revealRe
 **The header notepad icon is filled while the Surface has notes and regular otherwise.** Its placement and its survival per density tier belong to `docs/specs/layout.md` → "Pane header".
 
 - **The attached notepad is a panel in the top-right of the Surface body, three quarters of it wide and tall.** It closes on its close control, Escape, or an outside click.
-- **Only one Surface notepad is open per window.** The store holds a single open id across every Wall in the webview, and opening a Door's popover closes the attached panel.
+- **Only one Surface notepad is open per webview.** The store holds a single open id across every Wall in it, and opening a Door's popover closes the attached panel.
 - **An open notepad owns the keyboard.** It is a `role="dialog"` with a focus trap, takes a lease on the Wall's dialog keyboard so command-mode dispatch stands down, and stops key and mouse events from reaching the Surface under it — a live browser pane's key forwarder included.
 - **A Door is a wrapper carrying `data-door-id` with one or two buttons.** The wrapper is what the selection ring and the baseboard fitting measure; the title button keeps click-to-reattach and the drag press, the notepad button does neither. **A minimized Surface with no notes gets no notepad button.**
 - **The Door popover opens above its Door, edge-clamped, capped at 30rem wide and 75% of the viewport height. Opening it never reattaches the Surface** — only following a pin from it does.
@@ -151,7 +151,7 @@ Source of truth: `archiveSurfaceNotes` in `lib/src/lib/notepad/close-coordinator
 
 - **A failure or timeout leaves the quit pending in Rust**, whose phase-2 wait is unbounded for exactly this (`docs/specs/standalone.md` → "Quit flow"), and the dialog shows the error with **Cancel** (default) and **Quit anyway**, which discards the notes. **Only Cancel calls `quit_cancel`**: Quit anyway must reach teardown with the watchdog still armed.
 - **A timeout aborts the archive it stopped waiting for** ([Closure](#closure)).
-- **Must include Surfaces with pending batch IDs even after their last note is deleted**, both when archiving (`standalone/src/quit-notepad.test.ts`) and when discarding on Quit anyway (`standalone/src/window-close.test.ts`).
+- **Must include Surfaces with pending batch IDs even after their last note is deleted**, both when archiving and when discarding on Quit anyway; pinned by `standalone/src/quit-notepad.test.ts`.
 - **Teardown's own rule is untouched**: once teardown begins, no failing step prevents exit.
 
 The store is `<app_data_dir>/notepad-archive-v1.json`, **outside `sessions/` and outside the state root**, so every build shares one (rationale). **It is written owner-only and atomically through the same `write_file_atomically` the session snapshot uses** (`docs/specs/security-local.md` → "Persisted state"). **The revision is a hash of the stored bytes, and every load, save and reset holds an exclusive lock on the sidecar `notepad-archive-v1.lock`**, so a second Dormouse sharing `app_data_dir()` conflicts instead of overwriting batches it never read (rationale). **Recovery renames it to `notepad-archive-v1.unreadable-<unix-millis>.json` beside the original**, disambiguating rather than overwriting an earlier quarantine; only a temp file a crash left behind is dropped.
