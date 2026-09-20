@@ -352,7 +352,7 @@ Source of truth: `lib/src/components/SettingsDialog.tsx`; `WorkspaceAlarmSetting
 | `count` | Number of members ringing or TODO; each Surface counts once. |
 | `ringingSince` | The earliest ringing member's episode start, else `null`. |
 
-**Must key the hidden tab's arrival burst on `ringingSince`**, held only for that ringing interval, so no later member, attended member, or Workspace switch replays it (rationale). Pinned by `keeps one burst while a Workspace stays ringing` in `lib/src/components/WorkspaceStrip.test.tsx`.
+**Must key the hidden tab's arrival burst on `ringingSince`**, held only for that ringing interval, so no later member, attended member, or Workspace switch replays it (rationale). Pinned by `keeps one burst while a Workspace stays ringing` and `clocks the burst from the ring that began while the Workspace was visible` in `lib/src/components/WorkspaceStrip.test.tsx`.
 
 **Must keep the projection display-only:** it never enters the Activity machine or fires its own ring. A Surface with no activity entry contributes nothing. Callers **must include** minimized (`Doored`) Surfaces.
 
