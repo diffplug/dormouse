@@ -87,9 +87,9 @@ Consequences:
 
 The host computes each webview's union (`ringing` / `todo`) from the module-level `AlertManager` scoped to that router's `ownedPtyIds`, delivered via `attachRouter`'s `onUnion` callback. `ownedPtyIds` are PTY-backed, so **VS Code chrome reflects terminal Session ring + TODO only** — a browser Surface's TODO stays webview-local, `alert:state` being keyed by PTY-backed Session ids (see [Future](#future)).
 
-Each hosting primitive uses the chrome it has, following the in-app `<title> <bell> [TODO]` pattern where possible:
+Each hosting primitive uses the chrome it has, following the in-app `<title> [TODO]` pattern plus the alarm ring where possible:
 
-- **Editor tab (`WebviewPanel`):** `panel.title` takes the suffix — `Dormouse` + ` 🔔` (ringing) + ` [TODO]` (todo), both when both apply; the bell is an emoji stand-in because a tab title is plain text. `panel.iconPath` stays the Dormouse mascot.
+- **Editor tab (`WebviewPanel`):** `panel.title` takes the suffix — `Dormouse` + ` 🔔` (ringing) + ` [TODO]` (todo), both when both apply; the bell emoji stands in for the Pane's alarm ring because a tab title is plain text. `panel.iconPath` stays the Dormouse mascot.
 - **Panel view (`WebviewView`):** a presence **badge** — `view.badge.value = 1` whenever anything owes attention, ring-vs-TODO in the tooltip. **Never use `view.title`** — this single-view bottom-panel container shows the static `viewsContainers[].title`, which has no runtime API (rationale). **Clear with `0`, never `undefined`** — VS Code hides a 0-value badge but does not clear an `undefined` one on a panel container. `view.description` stays the shell name.
 
 Reflection updates on every owned-PTY `AlertManager.onStateChange` and on `claim` / `release`. Source of truth: `computeWorkspaceUnion` in `lib/src/lib/workspace-union.ts`, `notifyUnion` in `vscode-ext/src/message-router.ts`, `workspaceTitle` / `workspaceBadge` in `vscode-ext/src/workspace-chrome.ts`, `setupPanel` in `vscode-ext/src/extension.ts`, `DormouseViewProvider` in `vscode-ext/src/webview-view-provider.ts`.

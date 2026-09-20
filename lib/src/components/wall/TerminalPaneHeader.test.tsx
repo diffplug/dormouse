@@ -184,7 +184,6 @@ describe('TerminalPaneHeader — notepad icon', () => {
     const labels = Array.from(container.querySelectorAll<HTMLElement>('button[aria-label]'))
       .map((button) => button.getAttribute('aria-label'));
     expect(labels).toEqual([
-      'Alert settings',
       'Override mouse capture',
       'Notepad',
       'Split left/right',

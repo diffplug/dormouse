@@ -128,9 +128,23 @@ describe('WorkspaceStrip', () => {
 
     expect(activateButton(first).getAttribute('aria-label')).toBe('Workspace 1, 2 needing attention');
     expect(tabFor(first).querySelector('.todo-pill-shell')).not.toBeNull();
-    expect(tabFor(first).querySelector('svg')).not.toBeNull();
+    expect(tabFor(first).querySelector('[data-alert-ring-inset]')).not.toBeNull();
     // The visible Workspace shows its Surfaces, so its tab stays plain.
     expect(tabFor('ws-2').querySelector('.todo-pill-shell')).toBeNull();
+    expect(tabFor('ws-2').querySelector('[data-alert-ring-inset]')).toBeNull();
+  });
+
+  /** The inset is the ring's only presence on a tab, so a Workspace whose
+   *  members merely owe a TODO must not wear it. */
+  it('leaves the alarm inset off a hidden Workspace with no ringing member', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    setWorkspaceSurfaces(first, ['pane-a']);
+    setTerminalActivity('pane-a', { todo: true });
+    await render();
+
+    expect(tabFor(first).querySelector('.todo-pill-shell')).not.toBeNull();
+    expect(tabFor(first).querySelector('[data-alert-ring-inset]')).toBeNull();
   });
 
   it('renames the active tab on click, holding the chrome keyboard lease while the editor is open', async () => {

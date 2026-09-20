@@ -11,7 +11,6 @@ import {
 import { ToolDirtyIndicator, useToolDirty } from '../ToolDirtyIndicator';
 import { HeaderActionButton } from '../HeaderActionButton';
 import { HEADER_PALETTE_TRANSITION_CLASS, POPUP_SURFACE_CLASS, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from '../design';
-import { AlertBell } from '../AlertBell';
 import { useTodoPillContent } from '../TodoPillBody';
 import { useHeaderTier } from './use-header-tier';
 import { NotepadHeaderButton } from './NotepadHeaderButton';
@@ -27,7 +26,6 @@ import {
 import {
   clearSessionTodo,
   DEFAULT_ACTIVITY_STATE,
-  dismissSessionAlert,
   getActivitySnapshot,
   getTerminalPaneStateSnapshot,
   subscribeToActivity,
@@ -128,7 +126,6 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
   const isActiveHeader = mode === 'passthrough' && isSelected && windowFocused;
   const isRenaming = renamingId === id;
   const tabRef = useRef<HTMLDivElement>(null);
-  const suppressAlertClickRef = useRef(false);
   const tier = useHeaderTier(tabRef, terminalHeaderTier);
   const [todoPreviewRect, setTodoPreviewRect] = useState<DOMRect | null>(null);
   const [renameWarning, setRenameWarning] = useState<{ rect: DOMRect; reason: RenameRejection; value: string } | null>(null);
@@ -140,14 +137,6 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
   const roomForNotepad = compactOrWider || tier === 'minimal' || (tier === 'minimal-tight' && !dirty);
   const tiny = tier === 'tiny';
   const showTodoPill = todoPill.visible && compactOrWider;
-  // The alert button dismisses and opens the terminal context; it never edits
-  // a rule, so it names that action (`docs/specs/alert.md` -> Pane Header).
-  const ringing = activity.status === 'ALERT_RINGING';
-  const alertButtonAriaLabel = ringing ? 'Dismiss alert' : 'Alert settings';
-  const alertButtonTooltip = `[a] ${alertButtonAriaLabel}`;
-  const alertButtonTooltipDetail = ringing
-    ? 'Click to dismiss and show options'
-    : 'Click or right-click for options';
   const todoNotificationPreview = formatNotificationPreview(activity.notification);
   const todoPreviewId = `todo-notification-preview-${id}`;
 
@@ -167,12 +156,6 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
     setTodoPreviewRect(button.getBoundingClientRect());
   }, [activity.notification]);
 
-  const triggerAlertButtonAction = useCallback((button: HTMLButtonElement) => {
-    dismissSessionAlert(id);
-    const rect = button.getBoundingClientRect();
-    context.open(id, { origin: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } });
-  }, [id, context]);
-
   useEffect(() => {
     if (!activity.notification) setTodoPreviewRect(null);
   }, [activity.notification]);
@@ -184,7 +167,8 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
       className={tabVariant({ state: isActiveHeader ? 'active' : 'inactive' })}
       onMouseDown={() => actions.onClickPanel(id)}
       onContextMenu={(e) => {
-        // Header and alert entry points share the terminal context.
+        // The whole header is the terminal context's entry point; `[a]` opens
+        // the same menu anchored here (`docs/specs/alert.md` -> Pane Header).
         e.preventDefault();
         e.stopPropagation();
         context.open(id, { origin: { x: e.clientX, y: e.clientY } });
@@ -217,39 +201,6 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
             )}
           </span>
         )}
-        <HeaderActionButton
-          className={[
-            'flex h-5 min-w-5 items-center justify-center rounded transition-colors shrink-0 hover:bg-current/10',
-            ringing
-              ? (isActiveHeader ? 'text-alarm-vs-header-active' : 'text-alarm-vs-header-inactive')
-              : '',
-          ].join(' ')}
-          onMouseDownCapture={(e) => {
-            if (e.button !== 0) return;
-            suppressAlertClickRef.current = true;
-            e.preventDefault();
-            e.stopPropagation();
-            e.nativeEvent.stopImmediatePropagation?.();
-            triggerAlertButtonAction(e.currentTarget);
-          }}
-          onClick={(e) => {
-            if (suppressAlertClickRef.current) {
-              suppressAlertClickRef.current = false;
-              return;
-            }
-            triggerAlertButtonAction(e.currentTarget);
-          }}
-          onContextMenu={(e) => context.open(id, { origin: { x: e.clientX, y: e.clientY } })}
-          ariaLabel={alertButtonAriaLabel}
-          tooltip={alertButtonTooltip}
-          tooltipDetail={alertButtonTooltipDetail}
-          tooltipAlign="left"
-          dataAlertButtonFor={id}
-        >
-          <span className="flex items-center justify-center">
-            <AlertBell status={activity.status} ringSeq={activity.ringSeq} size={14} />
-          </span>
-        </HeaderActionButton>
         {showTodoPill && (
           <button
             type="button"
@@ -315,7 +266,7 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
               ><SplitVerticalIcon size={14} /></HeaderActionButton>
             </div>
           )}
-          {/* The title/bell region clips via `overflow-hidden` so this group
+          {/* The title region clips via `overflow-hidden` so this group
               never has to (`docs/specs/layout.md` → "Pane header responsive
               sizing"). */}
           <PaneActionGroup surfaceId={id} zoomed={zoomed} activeHeader={isActiveHeader} showMinimizeKill={!tiny} />

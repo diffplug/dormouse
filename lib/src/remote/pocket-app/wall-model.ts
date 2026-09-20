@@ -26,9 +26,10 @@ export function directoryWallSessions(entries: DirectoryEntry[]): MobileWallSess
 
 /**
  * Map the directory snapshot onto the affordances a {@link MobileTerminalSessionItem}
- * exposes: `ringing` → `ALERT_RINGING` (the only status the session list renders
- * a bell for), `hasTODO` → the TODO pill, and `cwd`/`activity` → the secondary
- * line. `id` is the surfaceId so the registry binds each pane's xterm by it.
+ * exposes: `ringing` → `ALERT_RINGING` (the only status the session list wears
+ * the alarm inset for), `hasTODO` → the TODO pill, and `cwd`/`activity` → the
+ * secondary line. `id` is the surfaceId so the registry binds each pane's xterm
+ * by it.
  */
 export function directorySessionItems(
   entries: DirectoryEntry[],
@@ -40,9 +41,8 @@ export function directorySessionItems(
     secondary: secondaryLine(entry),
     active: entry.surfaceId === activeSurfaceId,
     status: statusFor(entry),
-    // `DirectoryEntry.ringing` is a boolean union with no per-ring edge, so a
-    // remote bell rings once on mount and then holds (`docs/specs/alert.md` ->
-    // Pane Header). Carrying the count on the wire is what would fix it.
+    // Nothing on the Pocket side renders it; `MobileTerminalSessionItem` still
+    // requires it.
     ringSeq: 0,
     todo: entry.hasTODO,
   }));

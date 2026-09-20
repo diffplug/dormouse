@@ -13,7 +13,6 @@ export interface HeaderActionButtonProps {
   onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
   onContextMenu?: (e: React.MouseEvent<HTMLButtonElement>) => void;
   children: React.ReactNode;
-  dataAlertButtonFor?: string;
 }
 
 export function HeaderActionButton({
@@ -27,7 +26,6 @@ export function HeaderActionButton({
   onClick,
   onContextMenu,
   children,
-  dataAlertButtonFor,
 }: HeaderActionButtonProps) {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [isVisible, setIsVisible] = useState(false);
@@ -64,7 +62,6 @@ export function HeaderActionButton({
         ref={buttonRef}
         type="button"
         className={className}
-        data-alert-button-for={dataAlertButtonFor}
         onMouseDownCapture={onMouseDownCapture}
         onMouseDown={(e) => {
           e.preventDefault();

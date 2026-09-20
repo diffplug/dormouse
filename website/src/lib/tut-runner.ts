@@ -49,9 +49,9 @@ const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", 
 const SPINNER_INTERVAL_MS = 100;
 
 /** Static "your turn" pointer for the active section item — deliberately not
- *  animated, so the checklist doesn't compete for attention with the bell the
- *  Alerts section is teaching. (Runner frames are written with
- *  `skipActivity`, so animation would no longer tilt the bell either way.) */
+ *  animated, so the checklist doesn't compete for attention with the alarm the
+ *  Alerts section is teaching. (Runner frames are written with `skipActivity`,
+ *  so animation would no longer move the detector either way.) */
 const ACTIVE_ITEM_GLYPH = "●";
 const STAR_PROMPT_TITLE = "Starred on GitHub";
 const FLAPPY_TITLE = "🐭 FlappyTerm 🐭";
@@ -909,7 +909,7 @@ export class TutRunner implements InteractiveProgram {
   private renderBusyDemoLines(): string[] {
     return [
       this.renderDemoLine("s", "longtask", "Fake task", this.busyDemoStart, this.busyDemoDurationMs),
-      `  ${DIM}Press \`n\` for a program that rings the bell itself.${RESET}`,
+      `  ${DIM}Press \`n\` for a program that rings on its own.${RESET}`,
       this.renderDemoLine("x", "slowbuild", "Slow build", this.commandExitDemoStart, this.commandExitDemoDurationMs),
     ];
   }
@@ -1018,7 +1018,7 @@ export class TutRunner implements InteractiveProgram {
 
   private write(data: string): void {
     // Runner frames are UI chrome, not task output — skip the activity
-    // tick so enabling WATCHING on the runner pane doesn't tilt the bell
+    // tick so enabling WATCHING on the runner pane doesn't look busy
     // every time the menu re-renders.
     this.adapter.sendOutput(this.terminalId, data, { skipActivity: true });
   }

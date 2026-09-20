@@ -330,7 +330,7 @@ describe("TutRunner snapshots", () => {
 
     expect(lastFrame()).toContain("🐭 FlappyTerm 🐭");
     expect(lastFrame()).not.toContain("???");
-    expect(lastFrame()).toContain("[LOCKED 0/21]");
+    expect(lastFrame()).toContain("[LOCKED 0/20]");
     expect(lastFrame()).toContain("Dormouse Playground Tutorial");
     dispose();
   });

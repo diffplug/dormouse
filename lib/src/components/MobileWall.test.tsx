@@ -57,13 +57,21 @@ function renderWall(showKillButton?: boolean) {
     root.render(
       <StrictMode>
         <MobileWall
-          sessions={[{ id: 'pane-a', title: 'remote shell', ringSeq: 0 }]}
+          sessions={[{ id: 'pane-a', title: 'remote shell' }]}
           activeSessionId="pane-a"
           showKillButton={showKillButton}
         />
       </StrictMode>,
     );
   });
+}
+
+function header(): HTMLElement {
+  return container.querySelector<HTMLElement>('.bg-header-active-bg')!;
+}
+
+function dismissButton(): HTMLButtonElement | null {
+  return container.querySelector<HTMLButtonElement>('[data-dismiss-alert-for="pane-a"]');
 }
 
 describe('MobileWall', () => {
@@ -78,5 +86,27 @@ describe('MobileWall', () => {
 
     expect(container.querySelector('button[aria-label="Kill"]')).toBeNull();
     expect(container.querySelector('button[aria-label="Minimize"]')).not.toBeNull();
+  });
+
+  it('leaves the header plain and offers no dismissal while the Session is quiet', () => {
+    renderWall();
+
+    expect(header().className).not.toContain('alarm-vs');
+    expect(dismissButton()).toBeNull();
+  });
+
+  /** Mobile has no terminal context, so the header carries both the alarm and
+   *  the only way off it (`docs/specs/alert.md` -> Pane Header). */
+  it('wears the alarm inset and the one dismissal while the Session rings', () => {
+    registry.activitySnapshot.set('pane-a', { status: 'ALERT_RINGING', ringSeq: 1, todo: false });
+    try {
+      renderWall();
+
+      expect(header().className).toContain('shadow-[inset_0_0_0_2px_var(--color-alarm-vs-header-active)]');
+      act(() => { dismissButton()!.click(); });
+      expect(registry.dismissSessionAlert).toHaveBeenCalledWith('pane-a');
+    } finally {
+      registry.activitySnapshot.clear();
+    }
   });
 });

@@ -1,3 +1,4 @@
+import type { AlertEpisode } from './alert-episode';
 import type { ActivityState } from './session-activity-store';
 
 /**
@@ -12,9 +13,11 @@ export interface WorkspaceUnion {
   todo: boolean;
   /** Number of member Surfaces owing attention (ringing or todo); each counts once. */
   count: number;
+  /** The earliest-started ringing member's episode, or `null` when none rings. */
+  episode: AlertEpisode | null;
 }
 
-export const EMPTY_WORKSPACE_UNION: WorkspaceUnion = { ringing: false, todo: false, count: 0 };
+export const EMPTY_WORKSPACE_UNION: WorkspaceUnion = { ringing: false, todo: false, count: 0, episode: null };
 
 /**
  * Project the union over a Workspace's member Surfaces. `surfaceIds` are the
@@ -29,6 +32,7 @@ export function computeWorkspaceUnion(
   let ringing = false;
   let todo = false;
   let count = 0;
+  let episode: AlertEpisode | null = null;
   for (const id of surfaceIds) {
     const state = activity.get(id);
     if (!state) continue;
@@ -37,6 +41,11 @@ export function computeWorkspaceUnion(
     if (isRinging) ringing = true;
     if (isTodo) todo = true;
     if (isRinging || isTodo) count += 1;
+    // The earliest start, so a second Session joining a ringing Workspace does
+    // not restart the tab's arrival burst.
+    if (isRinging && state.episode && (!episode || state.episode.startedAt < episode.startedAt)) {
+      episode = state.episode;
+    }
   }
-  return { ringing, todo, count };
+  return { ringing, todo, count, episode };
 }

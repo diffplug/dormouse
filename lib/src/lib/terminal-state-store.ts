@@ -75,8 +75,9 @@ export function getInheritableCwd(id: string): string | undefined {
 /**
  * The bare program name of the pane's foreground command, or null when the pane
  * is at a prompt (or its shell reported no command line). This is the key the
- * WATCHING rule set is stored under, so the bell and the alert dialog both use
- * it to decide which rule they are toggling — see `docs/specs/alert.md`.
+ * WATCHING rule set is stored under, so the terminal context and the alert
+ * dialog both use it to decide which rule they are toggling — see
+ * `docs/specs/alert.md`.
  */
 export function getRunningCommandArgv0(id: string): string | null {
   const raw = paneStates.get(id)?.currentCommand?.rawCommandLine;

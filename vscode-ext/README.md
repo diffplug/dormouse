@@ -38,10 +38,7 @@ Dormouse can owe you attention in three independent ways. Two of them need no se
 
 Dormouse never guesses which commands deserve an alert. Watching is a rule you create on a command name, and turning it off anywhere removes it everywhere.
 
-- <img width="22" height="22" alt="Bell icon, alerts off" src="images/alert-disabled.gif" /> no watch rule for this pane's command
-- <img width="22" height="22" alt="Bell icon, command watched" src="images/alert-enabled.gif" /> this command is watched
-- <img width="22" height="22" alt="Bell icon, watched command running" src="images/alert-armed.gif" /> a watched command is running; it will alert when it goes quiet
-- <img width="22" height="22" alt="Bell icon, ringing for attention" src="images/alert-ringing.gif" /> finished, and it needs your attention
+A ringing pane is outlined and washed in the alarm color until you attend it, so one glance across a full wall finds it. Attending the pane — or pressing `a` — puts the alarm out.
 
 Whichever way a pane rings, the ring becomes a **TODO** — a marker beside the pane's title that outlives the alert, so a ring you dismissed does not disappear without a trace. Clear it by clicking it or pressing `t` in command mode.
 

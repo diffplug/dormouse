@@ -6,7 +6,6 @@ import type { AlertSpeechState, SessionStatus, TodoState } from '../lib/terminal
 import type { BrowserDisplayMode } from './wall/agent-browser-screen';
 import { BROWSER_DISPLAY_LABEL, BrowserDisplayIcon } from './wall/BrowserDisplayIcon';
 import { useTodoPillContent } from './TodoPillBody';
-import { AlertBell } from './AlertBell';
 import { notepadLabel } from './use-notepad';
 import type { AlertEpisode } from '../lib/alert-episode';
 import { ALERT_RING_LABEL, alarmPulseClass, alertRingRow, useAlertRingBurst } from './alert-ring';
@@ -27,9 +26,6 @@ export interface DoorProps {
   /** Set only for a Tool whose last report says it has unsaved changes. */
   toolDirty?: boolean;
   status?: SessionStatus;
-  /** `ActivityState.ringSeq`; a change replays the bell's ringing burst. Dies
-   *  with the bell in the next PR. */
-  ringSeq: number;
   todo?: TodoState;
   speechState?: AlertSpeechState;
   /** `ActivityState.episode` — the Session's current ringing interval. A new one
@@ -63,7 +59,6 @@ export function Door({
   browserDisplay,
   toolDirty = false,
   status = 'WATCHING_DISABLED',
-  ringSeq,
   todo = false,
   speechState,
   episode,
@@ -72,7 +67,6 @@ export function Door({
   onDragPress,
   onOpenNotepad,
 }: DoorProps) {
-  const showBell = status !== 'WATCHING_DISABLED';
   const row = alertRingRow(status, speechState);
   const burst = useAlertRingBurst(row, episode);
   const todoPill = useTodoPillContent(todo);
@@ -142,7 +136,7 @@ export function Door({
             <SpeakerHighIcon size={13} weight="fill" />
             <span>SPEAKING</span>
           </span>
-        ) : (spoken || todoPill.visible || showBell) && (
+        ) : (spoken || todoPill.visible) && (
           <span className="flex shrink-0 items-center gap-1.5">
             {spoken && (
               <SpeakerHighIcon size={12} weight="fill" className="text-alarm-vs-door" />
@@ -153,11 +147,6 @@ export function Door({
                 data-flourishing={todoPill.flourishing ? 'true' : 'false'}
               >
                 {todoPill.body}
-              </span>
-            )}
-            {showBell && (
-              <span className={row ? 'text-alarm-vs-door' : ''}>
-                <AlertBell status={status} ringSeq={ringSeq} size={11} />
               </span>
             )}
           </span>

@@ -104,9 +104,9 @@ the `body` copy sees what `applyTheme()` writes to `body.style` (rationale).
 `lib/src/lib/themes/consumed-keys.test.ts` enforces it **per file**, because a
 host may import either layer alone. **The seven
 dynamic-palette tokens also carry body-level baselines** matching their `@theme`
-declarations, so direct CSS-var consumers (the mobile gesture SVG, a bell ringing
-before the first pass) render before `useDynamicPalette()` publishes refined
-values.
+declarations, so direct CSS-var consumers (the mobile gesture SVG, an alarm
+inset before the first pass) render before `useDynamicPalette()` publishes
+refined values.
 
 **Never put hardcoded color defaults or `var(..., fallback)` chains in
 `theme-colors.css` or `theme.css`** (Host-Theme-Only Rule): hosts plus the resolver provide every
@@ -276,7 +276,7 @@ and **must run them through `completeThemeVars()` and `flattenSelectionAlpha()`*
 materialized `--vscode-*` set the app sees. The preview decorator writes them to
 both `html` (VSCode's host globals) and `body` (matching `applyTheme()`), and
 publishes the dynamic palette through `computeDynamicPalette()` so stories
-outside a full Wall — doors, focus rings, ringing bells — still get the runtime
+outside a full Wall — doors, focus rings, alarm insets — still get the runtime
 picks. `PREFERRED_STORYBOOK_THEME` in `lib/.storybook/preview.ts` names
 the default simulated host theme, **falling back to the first bundled theme** so
 a renamed or removed bundle cannot leave stories without theme vars.

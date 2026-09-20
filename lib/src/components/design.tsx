@@ -41,6 +41,13 @@ export const DOOR_ALARM_INSET_CLASS = clsx(
   TERMINAL_TOP_RADIUS_CLASS,
 );
 
+/** The same edge on a hidden Workspace's tab, which sits on the inactive header
+ *  ground rather than the Door's, so it picks that surface's alarm token. */
+export const WORKSPACE_TAB_ALARM_INSET_CLASS = clsx(
+  'pointer-events-none absolute inset-0 shadow-[inset_0_0_0_2px_var(--color-alarm-vs-header-inactive)]',
+  TERMINAL_TOP_RADIUS_CLASS,
+);
+
 // The Workspace strip's two halves of one idea: the selected tab is seated
 // against the Wall, and the rest recede into the app ground. Keep them
 // together so a palette change can't move one endpoint without the other.

@@ -32,7 +32,7 @@ afterEach(() => {
 describe('Door alarm state', () => {
   it('rings with a static inset ring and no label until the speech sink acts', () => {
     act(() => root.render(
-      <Door title="build-server" status="ALERT_RINGING" ringSeq={1} todo episode={EPISODE} />,
+      <Door title="build-server" status="ALERT_RINGING" todo episode={EPISODE} />,
     ));
 
     const door = container.querySelector<HTMLElement>('[data-alert-ring-state="ringing"]');
@@ -49,7 +49,7 @@ describe('Door alarm state', () => {
    *  said about speech. */
   it('shows no alarm edge for a quiet Session', () => {
     act(() => root.render(
-      <Door title="build-server" ringSeq={0} speechState="spoken" episode={null} />,
+      <Door title="build-server" speechState="spoken" episode={null} />,
     ));
 
     expect(container.querySelector('[data-alert-ring-state]')).toBeNull();
@@ -58,7 +58,7 @@ describe('Door alarm state', () => {
 
   it('inverts and animates the whole Door while its Session is speaking', () => {
     act(() => root.render(
-      <Door title="build-server" status="ALERT_RINGING" ringSeq={1} todo speechState="speaking"
+      <Door title="build-server" status="ALERT_RINGING" todo speechState="speaking"
         episode={EPISODE} />,
     ));
 
@@ -73,7 +73,7 @@ describe('Door alarm state', () => {
 
   it('marks SPOKEN with a static inset ring rather than motion', () => {
     act(() => root.render(
-      <Door title="build-server" status="ALERT_RINGING" ringSeq={1} speechState="spoken"
+      <Door title="build-server" status="ALERT_RINGING" speechState="spoken"
         episode={EPISODE} />,
     ));
 
@@ -86,20 +86,20 @@ describe('Door alarm state', () => {
 
   /**
    * `spoken` is cleared only when the ring resolves, so a user who never attends
-   * leaves it set indefinitely. It may not evict the bell and TODO pill for that
-   * whole window — those are the baseboard's persistent status signals, and a
-   * Door showing neither is indistinguishable from a quiet one.
+   * leaves it set indefinitely. It may not evict the speaker glyph and TODO pill
+   * for that whole window — those are the baseboard's persistent status signals,
+   * and a Door showing neither is indistinguishable from a quiet one.
    */
-  it('keeps the bell and TODO pill visible while SPOKEN persists', () => {
+  it('keeps the speaker glyph and TODO pill visible while SPOKEN persists', () => {
     act(() => root.render(
-      <Door title="build-server" status="ALERT_RINGING" ringSeq={1} todo speechState="spoken"
+      <Door title="build-server" status="ALERT_RINGING" todo speechState="spoken"
         episode={EPISODE} />,
     ));
 
     const door = container.querySelector<HTMLElement>('[data-alert-ring-state="spoken"]');
     expect(door?.querySelector('.todo-pill-shell')).not.toBeNull();
-    // Speaker icon + bell icon, both alongside the pill.
-    expect(door?.querySelectorAll('svg').length).toBe(2);
+    // The speaker glyph alongside the pill, and no other icon with it.
+    expect(door?.querySelectorAll('svg').length).toBe(1);
   });
 });
 
@@ -111,7 +111,7 @@ describe('Door notepad button', () => {
       <Door
         doorId="pane-a"
         title="build-server"
-        ringSeq={0}
+       
         episode={null}
         onClick={onClick}
         onOpenNotepad={onOpenNotepad}
@@ -174,7 +174,7 @@ describe('Door notepad button', () => {
 
 describe('Door unsaved changes', () => {
   it.each(['speaking', 'spoken'] as const)('keeps the dirty dot beside notes and %s state', speechState => {
-    act(() => root.render(<Door doorId="dirty" title="Editor" ringSeq={1} toolDirty
+    act(() => root.render(<Door doorId="dirty" title="Editor" toolDirty
       speechState={speechState} noteCount={2} todo status="ALERT_RINGING" episode={EPISODE} />));
     const door = container.querySelector('[data-door-id="dirty"]')!;
     expect(door.querySelector('[role="img"][aria-label="Unsaved changes"]')).not.toBeNull();

@@ -161,7 +161,7 @@ Rules:
 - **Removing a rule silences its WATCHING rings**, even after the command has exited; other dismissal paths follow Clearing And TODO. A command merely ending never clears the ring.
 - **The rule set is app-global and persisted** (`dormouse:watched-commands`), starting empty, so WATCHING is off everywhere until the user turns it on. **The host is authoritative wherever one serves several webviews** — the VS Code extension host, and the standalone sidecar — so a stale webview can neither replace unrelated rules nor keep reporting an obsolete list: the first webview's persisted copy is taken as the seed, an edit is a delta, and the host broadcasts its canonical snapshot back. The seed/mutation/broadcast wire contract is `docs/specs/transport.md`.
 
-**Limitation:** WATCHING needs the shell to report command boundaries (`OSC 633` / `OSC 133`). Shells without integration (`docs/specs/terminal-escapes.md`) never report a command name, so WATCHING never engages and the bell reports "nothing is running". Terminal reports still work; command-exit alerting also requires semantic command boundaries. **Never route the keystroke fallback in `docs/specs/terminal-state.md` into the `AlertManager`** (rationale).
+**Limitation:** WATCHING needs the shell to report command boundaries (`OSC 633` / `OSC 133`). Shells without integration (`docs/specs/terminal-escapes.md`) never report a command name, so WATCHING never engages and the terminal context reports `No command running`. Terminal reports still work; command-exit alerting also requires semantic command boundaries. **Never route the keystroke fallback in `docs/specs/terminal-state.md` into the `AlertManager`** (rationale).
 
 | State | Meaning |
 |---|---|
@@ -350,36 +350,37 @@ Source of truth: `lib/src/components/SettingsDialog.tsx`; `WorkspaceAlarmSetting
 | `ringing` | Any member Session is `ALERT_RINGING`. |
 | `todo` | Any member Surface has `todo === true`. |
 | `count` | Number of members ringing or TODO; each Surface counts once. |
+| `episode` | The earliest-started ringing member's `AlertEpisode`, else `null`. |
 
-**Must keep presentation generations outside the union.** The strip tracks each existing member’s `ringSeq`; an increase while ringing starts one finite Workspace cue, including while that Workspace is active. Adding/restoring/transferring a member seeds its counter silently; removal and Workspace switching never synthesize a cue. Returning to an inactive indicator resumes its original animation clock. Pinned by `lib/src/lib/workspace-ring-cues.test.ts`.
+**Must key the hidden tab's arrival burst on the union's episode**, so it plays once when the Workspace starts ringing and neither a later member nor a Workspace switch replays it (rationale). Pinned by `lib/src/lib/workspace-union.test.ts`.
 
 **Must keep the projection display-only:** it never enters the Activity machine or fires its own ring. A Surface with no activity entry contributes nothing. Callers **must include** minimized (`Doored`) Surfaces.
 
 **Must project every Workspace, active or not.** The Activity store spans the whole Window, so what scopes it to one Workspace is the membership each mounted Wall publishes — panes ∪ doors, on every layout commit.
 
-Source of truth: `computeWorkspaceUnion` in `lib/src/lib/workspace-union.ts`; `setWorkspaceSurfaces` in `lib/src/lib/workspace-surfaces.ts`; `lib/src/lib/workspace-union.test.ts`; `WorkspaceRingCues` in `lib/src/lib/workspace-ring-cues.ts`.
+Source of truth: `computeWorkspaceUnion` in `lib/src/lib/workspace-union.ts`; `setWorkspaceSurfaces` in `lib/src/lib/workspace-surfaces.ts`; `lib/src/lib/workspace-union.test.ts`.
 
 Where it surfaces is host-specific:
 
 - **VS Code** reflects the terminal portion onto native chrome — `docs/specs/vscode.md`, which also owns why browser-surface TODO stays webview-local.
-- **Standalone** shows terminal rings/TODOs on panes and doors, and a browser Surface's `todo` on its own door. A **hidden** Workspace's tab additionally carries its union's TODO pill and bell, with `count` in the tab's accessible name; the visible Workspace's tab carries none, its panes and doors already saying it (`WorkspaceStrip` in `lib/src/components/WorkspaceStrip.tsx`).
+- **Standalone** shows terminal rings/TODOs on panes and doors, and a browser Surface's `todo` on its own door. A **hidden** Workspace's tab additionally carries its union's TODO pill and, while ringing, the alarm inset, with `count` in the tab's accessible name; the visible Workspace's tab carries none, its panes and doors already saying it (`WorkspaceStrip` in `lib/src/components/WorkspaceStrip.tsx`).
 
-**Must use `alarm-vs-header-inactive` for the hidden Workspace tab's bell**, matching its inactive-header background.
+**Must use `alarm-vs-header-inactive` for the hidden Workspace tab's inset**, matching its inactive-header background.
 
 ## UI Contract
 
 ### Pane Header
 
-The header shows an alert bell, a fixed-text `TODO` pill when `todo === true`, a hover/focus notification preview when TODO has `notification`, and the terminal context opened by right-click or by the alert button. Placement, sizing, and width tiers belong to `docs/specs/layout.md`.
+The header shows a fixed-text `TODO` pill when `todo === true`, a hover/focus notification preview when TODO has `notification`, and the terminal context opened by right-click or by `a`. **Never tint a ringing Session's header** — the Pane overlay's perimeter ring already outlines it. Placement, sizing, and width tiers belong to `docs/specs/layout.md`.
 
-Bell rotation follows public status; motion follows latch edges. **When a track latches, ring each mounted bell for four 800ms cycles, then hold 45° until the ring clears** (test: `runs a finite ringing burst and then holds the bell at 45 degrees` in `lib/src/components/bell-icon-class.test.ts`; rationale). **A newly mounted ringing bell may replay once without advancing `ringSeq`** (test: `replays the finite burst when a ringing presentation remounts` in `lib/src/components/AlertBell.test.tsx`; rationale). **A newly latched track replays the burst; further reports on that track only enrich its summons.** `AlertState.ringSeq` counts per-Session latches and is compared by `alertStatesEqual` (tests: `counts a second track ringing behind an already-latched one` and `does not count a track that is already ringing` in `lib/src/lib/alert-manager.test.ts`, `replaces the icon when the ring counter advances` in `lib/src/components/AlertBell.test.tsx`; rationale). **Remote Clients have no counter:** `DirectoryEntry.ringing` is an edgeless boolean, so Pocket rings on mount and holds.
+`AlertState.ringSeq` counts per-Session latches and is compared by `alertStatesEqual` (tests: `counts a second track ringing behind an already-latched one` and `does not count a track that is already ringing` in `lib/src/lib/alert-manager.test.ts`; rationale).
 
-- **The alert button, and `a` on the selected Pane in command mode, dismiss a ringing Session and open the terminal context, whatever the status; they never edit a WATCHING rule.** The button names that action — `Dismiss alert` while ringing, `Alert settings` otherwise — not a toggle.
+- **`a` on the selected Pane in command mode dismisses a ringing Session and opens the terminal context, whatever the status; it never edits a WATCHING rule.**
 - **A WATCHING rule is created only in the terminal context** ("Watch all `<cmd>` commands"), which offers the row whenever a foreground command is running, and removed there or in Settings. Removing it anywhere drops it for every Session running that command.
 - Right-click always opens the context. Pressing `t` toggles TODO.
-- **The mobile header's alert button only dismisses** — the mobile composition has no terminal context (`docs/specs/mobile-terminal-ui.md`).
+- **The mobile header carries the ring's only dismissal**, a plain button shown while ringing, the mobile composition having no terminal context (`docs/specs/mobile-terminal-ui.md`).
 
-**Must keep context alert controls scoped to the source**, with TODO, running-command WATCHING, and notification detail. Settings owns the global watched-command list. **Must suppress helper alerting until promotion, including after exit**, covering bell/notification protocols, watched commands, TODO, speech, push, and attention projections; semantic command/readiness state remains active. Promotion starts ordinary alert behavior without replaying suppressed events.
+**Must keep context alert controls scoped to the source**, with TODO, running-command WATCHING, and notification detail. Settings owns the global watched-command list. **Must suppress helper alerting until promotion, including after exit**, covering BEL/notification protocols, watched commands, TODO, speech, push, and attention projections; semantic command/readiness state remains active. Promotion starts ordinary alert behavior without replaying suppressed events.
 
 Source of truth: `TerminalContext` in `lib/src/components/wall/TerminalContext.tsx`; `setHelper` in `lib/src/lib/alert-manager.ts`, which every host calls at helper spawn, listing, and promotion.
 
@@ -387,17 +388,15 @@ The TODO pill always displays `TODO`; remote notification text belongs in previe
 
 **Must wear the alarm treatment on every ringing terminal Pane**, labelled only once the speech sink acts. **Must bound the unlabelled pulse to one finite burst per episode, never replayed by a remount; `SPEAKING` pulses for its utterance, `SPOKEN` never** (rationale). **`prefers-reduced-motion` keeps the strong static treatment and suppresses only the pulse**, as does `cfg.alert.ringingPaused` (rationale). The three rows, their layers, strengths, and sizing are inventoried by `docs/specs/layout.md` → Alarm overlay.
 
-Source of truth: `AlertBell` in `lib/src/components/AlertBell.tsx`; `bellIconClass` in `lib/src/components/bell-icon-class.ts`; `latchRing` in `lib/src/lib/alert-manager.ts`; `dismissSessionAlert` in `lib/src/lib/session-activity-store.ts`; `TerminalContext` in `lib/src/components/wall/TerminalContext.tsx`; `lib/src/components/TodoPillBody.tsx`; `AlertRingIndicator` in `lib/src/components/wall/AlertRingIndicator.tsx`; `alertRingRow` and `alertRingBurstProps` in `lib/src/components/alert-ring.ts`.
+Source of truth: `latchRing` in `lib/src/lib/alert-manager.ts`; `dismissSessionAlert` in `lib/src/lib/session-activity-store.ts`; `TerminalContext` in `lib/src/components/wall/TerminalContext.tsx`; `lib/src/components/TodoPillBody.tsx`; `AlertRingIndicator` in `lib/src/components/wall/AlertRingIndicator.tsx`; `alertRingRow` and `alertRingBurstProps` in `lib/src/components/alert-ring.ts`.
 
 ### Door
 
 A Door is display-only for alert state:
 
-- show the bell only when `status !== 'WATCHING_DISABLED'`
 - show the TODO pill when `todo === true`
-- use the same bell tilt/animation mapping as the Pane header
 - while ringing with no speech state, wear the ring `spoken` uses, unlabelled, named `needs attention`
-- while its Session is `speaking`, replace the compact bell/TODO cluster with the explicit `SPEAKING` label and invert + pulse the whole Door — that state lasts one utterance. `spoken` persists until the ring is attended, so it keeps a static high-contrast inset and adds a speaker icon *alongside* the bell and TODO pill instead of replacing them; those are the baseboard's persistent signals and **must not go dark for an unbounded window**
+- while its Session is `speaking`, replace the compact TODO cluster with the explicit `SPEAKING` label and invert + pulse the whole Door — that state lasts one utterance. `spoken` persists until the ring is attended, so it keeps a static high-contrast inset and adds a speaker icon *beside* the TODO pill instead of replacing it; those are the baseboard's persistent signals and **must not go dark for an unbounded window**
 - do not expose a Door-specific alert menu
 
 Click or `Enter` on a Door reattaches into passthrough and clears a ring; `d` reattaches in command mode and leaves the ring intact (Attention).

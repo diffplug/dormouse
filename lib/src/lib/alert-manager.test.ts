@@ -830,7 +830,7 @@ describe('AlertManager in isolation', () => {
     manager.attend(id);
     manager.clearAttention(id);
 
-    // Armed underneath, but the monitor's own state is what the bell shows.
+    // Armed underneath, but the monitor's own state is what is published.
     expect(manager.getState(id).status).toBe('NOTHING_TO_SHOW');
 
     manager.setWatchedCommands([]);

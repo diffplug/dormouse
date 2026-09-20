@@ -5,12 +5,12 @@ const BASE_TITLE = 'Dormouse';
 
 /**
  * Reflect a Workspace's union status onto a webview's native chrome title,
- * matching the in-app `<title> <bell> [TODO]` pattern: append ` 🔔` when any
- * terminal Session is ringing and ` [TODO]` when any surface is flagged. Both
- * can appear, bell first; clear → just the base title.
+ * matching the in-app `<title> [TODO]` pattern plus the alarm: append ` 🔔` when
+ * any terminal Session is ringing and ` [TODO]` when any surface is flagged.
+ * Both can appear, the bell first; clear → just the base title.
  *
- * A tab title is plain text, so the bell is the emoji stand-in for the in-app
- * bell icon and TODO is the bracketed word (not an emoji). See
+ * A tab title is plain text, so the bell emoji stands in for the Pane's alarm
+ * ring and TODO is the bracketed word (not an emoji). See
  * `docs/specs/vscode.md`.
  */
 export function workspaceTitle(union: WorkspaceUnion): string {

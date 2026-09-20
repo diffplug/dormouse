@@ -19,7 +19,6 @@ import {
   TextTIcon,
 } from '@phosphor-icons/react';
 import { clsx } from 'clsx';
-import { AlertBell } from './AlertBell';
 import {
   MobileGestureConfirmDialog,
   MobileGestureRadialMenu,
@@ -52,7 +51,7 @@ export interface MobileTerminalSessionItem {
   secondary?: string | null;
   active?: boolean;
   status?: SessionStatus;
-  /** `ActivityState.ringSeq`; a change replays the ringing burst. */
+  /** `ActivityState.ringSeq`. Nothing on this surface renders it. */
   ringSeq: number;
   todo?: boolean;
 }
@@ -323,7 +322,7 @@ function SessionsPane({
       <div className="grid gap-1">
         {sessions.map((session) => {
           const active = session.active === true;
-          const ringing = session.status === 'ALERT_RINGING' || session.status === 'MIGHT_NEED_ATTENTION';
+          const ringing = session.status === 'ALERT_RINGING';
           return (
             <button
               key={session.id}
@@ -338,9 +337,17 @@ function SessionsPane({
                 // Rows sit on the header-inactive reserve, so the inactive row
                 // recesses to the app pair — the guaranteed app↔inactive delta
                 // (theme.md's three-pair rule); surface-raised is unreliable here.
-                active
-                  ? 'bg-header-active-bg text-header-active-fg shadow-[inset_0_0_0_1px_var(--color-focus-ring)]'
-                  : 'bg-app-bg text-app-fg',
+                active ? 'bg-header-active-bg text-header-active-fg' : 'bg-app-bg text-app-fg',
+                // One `shadow-*` per row: a ringing row wears the alarm edge in
+                // place of the selection edge, 2px over the 1px it covers. No
+                // alarm token is computed against `app-bg`, so an inactive row
+                // borrows the Door's — the nearest recessed ground the palette
+                // does cover.
+                ringing
+                  ? (active
+                    ? 'shadow-[inset_0_0_0_2px_var(--color-alarm-vs-header-active)]'
+                    : 'shadow-[inset_0_0_0_2px_var(--color-alarm-vs-door)]')
+                  : active && 'shadow-[inset_0_0_0_1px_var(--color-focus-ring)]',
               )}
             >
               <TerminalWindowIcon size={15} weight={active ? 'bold' : 'regular'} className="shrink-0" />
@@ -354,17 +361,6 @@ function SessionsPane({
                 <span className="shrink-0 rounded border border-current px-1 py-px text-[0.55rem] font-semibold leading-none tracking-[0.08em]">
                   TODO
                 </span>
-              ) : null}
-              {ringing ? (
-                <AlertBell
-                  size={14}
-                  status={session.status ?? 'ALERT_RINGING'}
-                  ringSeq={session.ringSeq}
-                  className={clsx(
-                    'shrink-0',
-                    active ? 'text-alarm-vs-header-active' : 'text-alarm-vs-door',
-                  )}
-                />
               ) : null}
             </button>
           );

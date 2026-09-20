@@ -3,9 +3,9 @@ import {
   ArrowLineDownIcon,
   XIcon,
 } from '@phosphor-icons/react';
+import { clsx } from 'clsx';
 import { HeaderActionButton } from './HeaderActionButton';
 import { TerminalPane } from './TerminalPane';
-import { AlertBell } from './AlertBell';
 import { TODO_PILL_TRACKING_CLASS } from './design';
 import { useTodoPillContent } from './TodoPillBody';
 import type { MobileTerminalSessionItem } from './MobileTerminalUi';
@@ -172,32 +172,29 @@ function MobileWallHeader({
   onKill: () => void;
   showKillButton: boolean;
 }) {
-  const status = session.status ?? 'WATCHING_DISABLED';
   const todoPill = useTodoPillContent(session.todo === true);
-  // Mobile has no terminal context, so dismissing a ring is the button's whole
-  // action; it never edits a rule (`docs/specs/alert.md` -> Pane Header).
-  const alertButtonLabel = status === 'ALERT_RINGING' ? 'Dismiss alert' : 'Alert status';
+  const ringing = session.status === 'ALERT_RINGING';
   const showTodoPill = todoPill.visible;
 
   return (
-    <div className="flex h-8 shrink-0 items-center gap-1.5 bg-header-active-bg pl-2 pr-[5px] font-mono text-sm leading-none text-header-active-fg">
+    <div className={clsx(
+      'flex h-8 shrink-0 items-center gap-1.5 bg-header-active-bg pl-2 pr-[5px] font-mono text-sm leading-none text-header-active-fg',
+      ringing && 'shadow-[inset_0_0_0_2px_var(--color-alarm-vs-header-active)]',
+    )}>
       <div className="flex min-w-0 flex-1 items-center gap-1.5">
         <span className="min-w-0 shrink truncate font-medium">{session.title}</span>
-        <HeaderActionButton
-          className={[
-            'flex h-5 min-w-5 items-center justify-center rounded transition-colors shrink-0 hover:bg-current/10',
-            status === 'ALERT_RINGING' ? 'text-alarm-vs-header-active' : '',
-          ].join(' ')}
-          onClick={() => dismissSessionAlert(session.id)}
-          ariaLabel={alertButtonLabel}
-          tooltip={alertButtonLabel}
-          tooltipAlign="left"
-          dataAlertButtonFor={session.id}
-        >
-          <span className="flex items-center justify-center">
-            <AlertBell status={status} ringSeq={session.ringSeq} size={14} />
-          </span>
-        </HeaderActionButton>
+        {ringing ? (
+          // Mobile has no terminal context and no pane right-click, so this is
+          // the ring's only dismissal (`docs/specs/alert.md` -> Pane Header).
+          <button
+            type="button"
+            data-dismiss-alert-for={session.id}
+            className="shrink-0 rounded border border-current px-1.5 py-px text-xs font-semibold text-alarm-vs-header-active transition-colors hover:bg-current/10"
+            onClick={() => dismissSessionAlert(session.id)}
+          >
+            Dismiss alert
+          </button>
+        ) : null}
         {session.secondary ? (
           <span className="min-w-0 shrink truncate opacity-70">{session.secondary}</span>
         ) : null}

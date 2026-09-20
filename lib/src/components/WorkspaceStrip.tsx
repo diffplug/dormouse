@@ -1,4 +1,3 @@
-import { WorkspaceRingCues, type WorkspaceRingCue } from '../lib/workspace-ring-cues';
 import {
   memo,
   useCallback,
@@ -12,11 +11,11 @@ import {
 } from 'react';
 import { clsx } from 'clsx';
 import { PlusIcon, XIcon } from '@phosphor-icons/react';
-import { AlertBell } from './AlertBell';
 import { InlineEditInput } from './wall/InlineEditInput';
 import { WorkspaceKillConfirm } from './WorkspaceKillConfirm';
 import { useTodoPillContent } from './TodoPillBody';
-import { chromeButton, DOOR_TAB_CLASS, HEADER_PALETTE_TRANSITION_CLASS, ModalFrame, modalActionButton, OVERLAY_MAX_HEIGHT, TAB_INACTIVE_FADE_STYLE, TODO_PILL_TRACKING_CLASS } from './design';
+import { useAlertRingBurst } from './alert-ring';
+import { chromeButton, DOOR_TAB_CLASS, HEADER_PALETTE_TRANSITION_CLASS, ModalFrame, modalActionButton, OVERLAY_MAX_HEIGHT, TAB_INACTIVE_FADE_STYLE, TODO_PILL_TRACKING_CLASS, WORKSPACE_TAB_ALARM_INSET_CLASS } from './design';
 import { createWorkspaceStripDrag, type StripDragHost } from './workspace-strip-drag';
 import { acquireChromeKeyboardLease } from './wall/chrome-keyboard-lease';
 import { getWallHandle } from './wall/wall-handles';
@@ -144,9 +143,6 @@ export function WorkspaceStrip({
     [pendingClose, pendingMove, moveError],
   );
 
-  // Cues observe the active Workspace too, so switching tabs cannot create one.
-  const ringCues = useRef(new WorkspaceRingCues());
-  ringCues.current.update(workspaces.map(workspace => workspace.id), membership, activity);
   // One union per tab, computed in the loop it is rendered in. The visible
   // Workspace never shows indicators, so it skips the projection entirely.
   const unionsRef = useRef(new Map<WorkspaceId, WorkspaceUnion>());
@@ -162,7 +158,7 @@ export function WorkspaceStrip({
     // tab re-renders only when its own indicators do.
     const previous = unionsRef.current.get(id);
     if (previous && previous.ringing === next.ringing && previous.todo === next.todo
-      && previous.count === next.count) return previous;
+      && previous.count === next.count && previous.episode?.id === next.episode?.id) return previous;
     unionsRef.current.set(id, next);
     return next;
   };
@@ -182,7 +178,6 @@ export function WorkspaceStrip({
             name={workspace.name}
             active={isActive}
             union={unionFor(workspace.id, isActive)}
-            ringCue={ringCues.current.get(workspace.id)}
             renaming={renamingId === workspace.id}
             dragging={draggingId === workspace.id}
             registerElement={registerElement}
@@ -257,7 +252,6 @@ const WorkspaceTab = memo(function WorkspaceTab({
   name,
   active,
   union,
-  ringCue,
   renaming,
   dragging,
   registerElement,
@@ -273,7 +267,6 @@ const WorkspaceTab = memo(function WorkspaceTab({
   name: string;
   active: boolean;
   union: WorkspaceUnion;
-  ringCue: WorkspaceRingCue;
   renaming: boolean;
   dragging: boolean;
   registerElement: (element: HTMLElement | null) => (() => void) | undefined;
@@ -288,8 +281,11 @@ const WorkspaceTab = memo(function WorkspaceTab({
   const todoPill = useTodoPillContent(union.todo);
   // The visible Workspace shows its Surfaces, so its indicators would say what
   // the panes already say; only a hidden one needs them.
-  const showIndicators = !active && (union.ringing || todoPill.visible);
-  const label = showIndicators && union.count > 0 ? `${name}, ${union.count} needing attention` : name;
+  const showAlarmInset = !active && union.ringing;
+  const showTodoPill = !active && todoPill.visible;
+  const burst = useAlertRingBurst(showAlarmInset ? 'ringing' : null, union.episode);
+  const label = (showAlarmInset || showTodoPill) && union.count > 0
+    ? `${name}, ${union.count} needing attention` : name;
 
   return (
     <div
@@ -344,21 +340,12 @@ const WorkspaceTab = memo(function WorkspaceTab({
           }}
         >
           <span className="min-w-0 flex-1 truncate">{name}</span>
-          {showIndicators && (
-            <span className="flex shrink-0 items-center gap-1.5">
-              {todoPill.visible && (
-                <span
-                  className={`todo-pill-shell text-xs font-semibold ${TODO_PILL_TRACKING_CLASS}`}
-                  data-flourishing={todoPill.flourishing ? 'true' : 'false'}
-                >
-                  {todoPill.body}
-                </span>
-              )}
-              {union.ringing && (
-                <span className="text-alarm-vs-header-inactive">
-                  <AlertBell status="ALERT_RINGING" ringSeq={ringCue.sequence} ringStartedAt={ringCue.at} size={11} />
-                </span>
-              )}
+          {showTodoPill && (
+            <span
+              className={`todo-pill-shell shrink-0 text-xs font-semibold ${TODO_PILL_TRACKING_CLASS}`}
+              data-flourishing={todoPill.flourishing ? 'true' : 'false'}
+            >
+              {todoPill.body}
             </span>
           )}
         </button>
@@ -377,6 +364,15 @@ const WorkspaceTab = memo(function WorkspaceTab({
         >
           <XIcon size={11} weight="bold" aria-hidden="true" />
         </button>
+      )}
+      {showAlarmInset && (
+        <span
+          key={burst?.key}
+          data-alert-ring-inset
+          aria-hidden
+          style={burst?.style}
+          className={clsx(WORKSPACE_TAB_ALARM_INSET_CLASS, burst?.className)}
+        />
       )}
     </div>
   );

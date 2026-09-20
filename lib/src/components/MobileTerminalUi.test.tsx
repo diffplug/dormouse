@@ -4,7 +4,7 @@
 import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MobileTerminalUi, type MobileTerminalTouchMode, type MobileTerminalUiProps } from './MobileTerminalUi';
+import { MobileTerminalUi, type MobileTerminalSessionItem, type MobileTerminalTouchMode, type MobileTerminalUiProps } from './MobileTerminalUi';
 import { setNativeFieldValue } from '../lib/dom';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -355,5 +355,44 @@ describe('MobileTerminalUi touch modes', () => {
     terminal.dispatchEvent(pointerEvent('pointerup'));
 
     expect(received).toEqual([]);
+  });
+});
+
+describe('MobileTerminalUi session list', () => {
+  function renderSessions(sessions: MobileTerminalSessionItem[]): HTMLDivElement {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    roots.push(root);
+    act(() => {
+      root.render(
+        <StrictMode>
+          <MobileTerminalUi
+            activeKeyboardMode="sessions"
+            sessions={sessions}
+            terminal={<div data-testid="terminal" />}
+          />
+        </StrictMode>,
+      );
+    });
+    return container;
+  }
+
+  const row = (container: HTMLElement, title: string): HTMLButtonElement =>
+    [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(title))!;
+
+  /** The row is the alarm's only carrier now (`docs/specs/alert.md` -> Pane Header). */
+  it('wears the alarm inset only on a ringing row, per its own ground', () => {
+    const container = renderSessions([
+      { id: 'a', title: 'ringing-active', active: true, status: 'ALERT_RINGING', ringSeq: 0 },
+      { id: 'b', title: 'ringing-idle', status: 'ALERT_RINGING', ringSeq: 0 },
+      { id: 'c', title: 'quiet', status: 'BUSY', ringSeq: 0 },
+    ]);
+
+    expect(row(container, 'ringing-active').className)
+      .toContain('shadow-[inset_0_0_0_2px_var(--color-alarm-vs-header-active)]');
+    expect(row(container, 'ringing-idle').className)
+      .toContain('shadow-[inset_0_0_0_2px_var(--color-alarm-vs-door)]');
+    expect(row(container, 'quiet').className).not.toContain('alarm-vs');
   });
 });

@@ -1015,7 +1015,7 @@ export const WINDOWS_EXECUTABLE_SUFFIX = /\.(?:exe|cmd|bat|com|ps1)$/i;
 /**
  * argv[0] reduced to the one name a program answers to: no path, no launcher
  * suffix. The single answer to "which program is this", so the header, the
- * WATCHING rule row and the bell tooltip cannot disagree about it.
+ * WATCHING rule row and the terminal context cannot disagree about it.
  */
 export function commandProgramName(command: string): string {
   return commandBasename(command).replace(WINDOWS_EXECUTABLE_SUFFIX, '');
