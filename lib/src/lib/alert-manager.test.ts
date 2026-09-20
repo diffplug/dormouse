@@ -102,6 +102,9 @@ describe('AlertManager in isolation', () => {
 
   it('ALERT_RINGING latches when user has no attention (view hidden)', () => {
     const id = 'latch-test';
+    // Deferral ships on and withdraws a WATCHING ring once output resumes
+    // confirmed BUSY; latching through output is the switched-off timing.
+    manager.setDeferAlertsUntilQuiet(false);
     runWatchedCommand(id);
     manager.clearAttention(id);
 
@@ -934,6 +937,17 @@ describe('AlertManager in isolation', () => {
     });
   });
 
+  it('defers a protocol alert with no settings call, because deferral ships on', () => {
+    const id = 'defer-shipped-default';
+    driveToBusy(id);
+
+    manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Done' });
+    expect(manager.getState(id)).toMatchObject({ todo: false, notification: null });
+
+    vi.advanceTimersByTime(5_000);
+    expect(manager.getState(id)).toMatchObject({ status: 'ALERT_RINGING', todo: true });
+  });
+
   describe('defer terminal notifications until quiet', () => {
     beforeEach(() => {
       manager.setDeferAlertsUntilQuiet(true);
@@ -1489,6 +1503,8 @@ describe('AlertManager in isolation', () => {
       ['after the detector has noticed the output', 800],
     ] as const)('leaves a stale WATCHING ring alone once output has resumed, %s', async (_label, gapMs) => {
       const id = `await-stale-watching-ring-${gapMs}`;
+      // Keep the latched ring across resumed output: deferral would withdraw it.
+      manager.setDeferAlertsUntilQuiet(false);
       driveToRinging(id);
 
       // The peer was sent another turn and is talking again. Nothing clears the

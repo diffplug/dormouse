@@ -1,7 +1,7 @@
 import { createAlertEpisode, type AlertEpisode } from './alert-episode';
 import { QuiesceDetector, type QuiesceStatus, type QuiesceSnapshot } from './quiesce-detector';
 import { applyTerminalProtocolEvents, collectTerminalSemanticEvents, type TerminalProtocolParseResult } from './terminal-protocol';
-import type { AlertSettings } from './alert-settings';
+import { DEFAULT_ALERT_SETTINGS, type AlertSettings } from './alert-settings-model';
 import { cfg } from '../cfg';
 import {
   commandArgv0,
@@ -239,7 +239,9 @@ export class AlertManager {
    *  drops them here, so a host marks the id once instead of guarding each call. */
   private helpers = new Set<string>();
   private inactivityTimeoutMs = cfg.alert.userAttention;
-  private deferAlertsUntilQuiet = false;
+  /** The shipped default (platform-free module: this runs in both hosts), so a
+   *  manager that never receives a settings blob behaves like one that does. */
+  private deferAlertsUntilQuiet = DEFAULT_ALERT_SETTINGS.deferAlertsUntilQuiet;
 
   // --- Settings ---
 

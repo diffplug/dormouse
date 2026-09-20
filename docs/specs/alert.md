@@ -261,7 +261,7 @@ Application alarm defaults live beside the WATCHING rule set, edited in **Settin
 | Field | Meaning |
 |---|---|
 | `inactivityTimeoutMs` | `T_USER_ATTENTION` — the walk-away window defined under Attention. |
-| `deferAlertsUntilQuiet` | Defer eligible terminal-notification rings while the animation watcher is fully armed. Default off. (rationale) |
+| `deferAlertsUntilQuiet` | Defer eligible terminal-notification rings while the animation watcher is fully armed. Default on. (rationale) |
 | `speakEnabled` / `speakDelayMs` | Spoken alarms, below. |
 | `pushEnabled` / `pushDelayMs` | Push notifications, below. |
 
