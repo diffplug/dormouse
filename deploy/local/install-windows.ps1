@@ -1604,6 +1604,9 @@ function Invoke-Verify {
       Pass "Serve proxies / to 127.0.0.1:$PORT"
     } else {
       Fail "Serve does not proxy / to 127.0.0.1:$PORT"
+      # The remedy is one command and `verify` already knows it, so print it
+      # rather than leaving the reader to find `manage serve` in the runbook.
+      Write-Host ('      re-apply it with: "{0}\bin\manage.cmd" serve' -f $Root)
       foreach ($l in $serveText.Split("`n")) { if ($l.Trim()) { Write-Host "      $($l.TrimEnd())" } }
     }
     if ($ORIGIN -and ($serveText -match [regex]::Escape($ORIGIN.Replace('https://', '')))) {
@@ -1684,10 +1687,23 @@ function Invoke-Verify {
   $prev = Get-PreviousRelease
   if ($prev -and $prev -eq $cur) {
     Fail "previous names the same release as current -- there is no rollback target"
+  } elseif ($prev -and -not (Test-Path -LiteralPath (Join-Path $Root "releases\$prev") -PathType Container)) {
+    Fail "previous.txt points at a release that no longer exists"
   } elseif ($prev) {
     Pass "a previous release is retained for rollback"
   } else {
     Warn "no previous release retained yet -- rollback is unavailable until the next update"
+  }
+
+  # The task definition and the wrapper carry the enrollment offer's *path* and
+  # nothing else secret (docs/specs/security-remote.md -> "Credentials at
+  # rest"). A name, not a value: the installer supplies none of these, so one
+  # appearing means a hand-edit or a regression put a credential where any
+  # process that can read the definition can read it.
+  if (("$taskXml" + "`n" + $wrapperText) -match 'DORMOUSE_SETUP_PASSWORD|DORMOUSE_VAPID_PRIVATE_KEY|DORMOUSE_ENROLL_TOKEN(?!_FILE)') {
+    Fail "the Scheduled Task or wrapper names a credential -- it must carry only paths"
+  } else {
+    Pass "the service definition names no credential"
   }
 
   # The release must not depend on the source checkout.

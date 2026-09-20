@@ -16,6 +16,7 @@ import {
   type Provider,
   type Session,
 } from "./api";
+import { LOGIN_FRESH_AGE_MS } from "../server/policy";
 
 export function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -129,7 +130,8 @@ export function App() {
       );
     });
   const fresh =
-    session && Date.now() - Date.parse(session.session.createdAt) < 600_000;
+    session &&
+    Date.now() - Date.parse(session.session.createdAt) < LOGIN_FRESH_AGE_MS;
 
   return (
     <div className="shell">

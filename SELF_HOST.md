@@ -176,10 +176,9 @@ what keeps the task free of a stored password; Linux alone opts out, with
 
 - **The service is registered and running, declares the run-at-load and
   restart-on-exit of the [Mechanism map](#mechanism-map), and carries no
-  credential** — a definition it cannot read at all fails rather than passes.
-  **No `manage verify` inspects the definition for a credential today**: the
-  installers put none there, and nothing checks that they still do not.
-  Plus what only the live system shows: macOS, loaded in `gui/$UID` with a plist
+  credential** — a definition it cannot read at all fails rather than passes,
+  and `verify` searches it and the `run-relay` wrapper for every credential
+  name the installer knows. Plus what only the live system shows: macOS, loaded in `gui/$UID` with a plist
   that lints; Windows, task `Running`, no execution time limit, restarts on
   failure, unelevated, unstopped by battery or idle, `bin\run-relay.ps1` still
   carrying the supervision loop; Linux, unit known to the user manager,
@@ -191,8 +190,9 @@ what keeps the task free of a stored password; Linux alone opts out, with
 - **Port 3100 is bound only to `127.0.0.1`**, and the plaintext port is
   unreachable on the laptop's Tailscale IP.
 - **`tailscale serve` proxies `/` to `127.0.0.1:3100` at the origin recorded in
-  `config/relay.env`.** Funnel may be on or off; verification does not treat
-  public HTTPS reachability as a defect.
+  `config/relay.env`.** A failure prints the `manage serve` command that
+  re-applies it. Funnel may be on or off; verification does not treat public
+  HTTPS reachability as a defect.
 - **`config/`, `state/`, `run/` and `config/relay.env` are readable only by the
   installing user**, by the per-platform means in the
   [Mechanism map](#mechanism-map) and [Invariants](#invariants).
@@ -201,7 +201,9 @@ what keeps the task free of a stored password; Linux alone opts out, with
 - **The current release pointer resolves to a release with `RELEASE`
   metadata**, and neither the service definition nor the `run-relay` wrapper
   refers to the source checkout. The previous-release pointer is checked too:
-  absent on a first install warns, naming the same release as `current` fails.
+  absent on a first install warns, while naming the same release as `current`,
+  or a release that is no longer on disk, fails — `manage rollback` would
+  otherwise be offered a target that is not there.
 
 These cannot be proven from the laptop, and are the checkpoints below: the HTTPS
 origin answering from a second tailnet device and, when private HTTPS is intended,

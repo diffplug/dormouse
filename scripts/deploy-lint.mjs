@@ -225,6 +225,45 @@ export const RULES = [
     },
   },
   {
+    // SELF_HOST.md -> "Definition of done" states this for all three, and only
+    // Linux held it: macOS and Windows compared `previous` to `current` and
+    // stopped, so a pruned rollback target passed `verify` green and
+    // `manage rollback` then failed on a release that was not there.
+    //
+    // Condition and verdict as one span, per platform: the message alone could
+    // survive the test being deleted, and the test alone could survive the
+    // branch reporting a pass.
+    rule: 'Definition of done — manage verify fails a dangling previous-release pointer',
+    patterns: {
+      macOS:
+        /\[ -L "\$ROOT\/previous" \] && \[ ! -d "\$ROOT\/previous" \]; then\n\s*fail "the previous symlink points at a release that no longer exists"/,
+      Linux:
+        /\[ -L "\$ROOT\/previous" \] && \[ ! -d "\$ROOT\/previous" \]; then\n\s*fail "the previous symlink points at a release that no longer exists"/,
+      Windows:
+        /\$prev -and -not \(Test-Path -LiteralPath \(Join-Path \$Root "releases\\\$prev"\) -PathType Container\)\) \{\n\s*Fail "previous\.txt points at a release that no longer exists"/,
+    },
+  },
+  {
+    // SELF_HOST.md -> "Definition of done" says the service definition carries
+    // no credential, and nothing checked it: a plist or unit carrying
+    // `DORMOUSE_SETUP_PASSWORD` passed `verify`. The search is over names the
+    // installer knows from docs/specs/security-remote.md -> "Credentials at
+    // rest"; the enrollment offer is exempted by its `_FILE` suffix, since the
+    // definition legitimately carries that path.
+    //
+    // Anchored on the search expression rather than on the message: the
+    // message is prose and the expression is the control.
+    rule: 'Credentials at rest — manage verify searches the service definition for a credential name',
+    patterns: {
+      macOS:
+        /grep -qE 'DORMOUSE_SETUP_PASSWORD\|DORMOUSE_VAPID_PRIVATE_KEY\|DORMOUSE_ENROLL_TOKEN\[\^_\]' \\\n\s*"\$PLIST" "\$ROOT\/bin\/run-relay"/,
+      Linux:
+        /grep -qE 'DORMOUSE_SETUP_PASSWORD\|DORMOUSE_VAPID_PRIVATE_KEY\|DORMOUSE_ENROLL_TOKEN\[\^_\]' \\\n\s*"\$UNIT_FILE" "\$ROOT\/bin\/run-relay"/,
+      Windows:
+        /\(\("\$taskXml" \+ "`n" \+ \$wrapperText\) -match 'DORMOUSE_SETUP_PASSWORD\|DORMOUSE_VAPID_PRIVATE_KEY\|DORMOUSE_ENROLL_TOKEN\(\?!_FILE\)'\)/,
+    },
+  },
+  {
     rule: 'Network posture — the installer refuses to rewrite a mismatched DORMOUSE_ORIGIN',
     patterns: {
       macOS: /refusing to silently rewrite the origin/,

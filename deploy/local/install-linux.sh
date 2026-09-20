@@ -1146,6 +1146,9 @@ cmd_verify() {
       pass "Serve proxies / to 127.0.0.1:$PORT"
     else
       fail "Serve does not proxy / to 127.0.0.1:$PORT"
+      # The remedy is one command and `verify` already knows it, so print it
+      # rather than leaving the reader to find `manage serve` in the runbook.
+      printf '      re-apply it with: "%s/bin/manage" serve\n' "$ROOT"
       printf '%s\n' "$serve_out" | sed 's/^/      /'
     fi
     if [ -n "$ORIGIN" ] && grep -q "${ORIGIN#https://}" <<<"$serve_out"; then
@@ -1195,6 +1198,18 @@ cmd_verify() {
     pass "a previous release is retained for rollback"
   else
     warn "no previous release retained yet — rollback is unavailable until the next update"
+  fi
+
+  # The service definition and the wrapper carry the enrollment offer's *path*
+  # and nothing else secret (docs/specs/security-remote.md -> "Credentials at
+  # rest"). A name, not a value: the installer supplies none of these, so one
+  # appearing means a hand-edit or a regression put a credential where any
+  # process that can read the definition can read it.
+  if grep -qE 'DORMOUSE_SETUP_PASSWORD|DORMOUSE_VAPID_PRIVATE_KEY|DORMOUSE_ENROLL_TOKEN[^_]' \
+       "$UNIT_FILE" "$ROOT/bin/run-relay" 2>/dev/null; then
+    fail "the unit or wrapper names a credential — it must carry only paths"
+  else
+    pass "the service definition names no credential"
   fi
 
   # The release must not depend on the source checkout.
