@@ -9,7 +9,7 @@ function activity(
   todo = false,
   watchingEnabled = status !== "WATCHING_DISABLED",
 ): ActivityState {
-  return { status, watchingEnabled, todo, notification: null, awaited: false, ringSeq: 0 };
+  return { status, watchingEnabled, todo, notification: null, awaited: false };
 }
 
 function makeDetectorHarness(initialActivitySnapshot = new Map<string, ActivityState>()) {

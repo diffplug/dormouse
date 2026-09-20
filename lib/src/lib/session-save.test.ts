@@ -354,7 +354,6 @@ describe('saveSession', () => {
       todo: true,
       notification: null,
       awaited: false,
-      ringSeq: 3,
     });
 
     await saveSession(platform, [

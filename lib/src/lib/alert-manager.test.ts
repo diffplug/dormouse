@@ -430,12 +430,12 @@ describe('AlertManager in isolation', () => {
     });
   });
 
-  // `docs/specs/alert.md` -> Pane Header.
-  it('counts a second track ringing behind an already-latched one', () => {
-    const id = 'ring-seq-cross-track';
-    const seqs: number[] = [];
+  // `docs/specs/alert.md` -> Public State.
+  it('a second track latching mid-episode keeps the episode id', () => {
+    const id = 'episode-cross-track';
+    const seen: string[] = [];
     manager.onStateChange((_id, state) => {
-      if (_id === id) seqs.push(state.ringSeq);
+      if (_id === id && state.episode) seen.push(state.episode.id);
     });
 
     manager.attend(id);
@@ -450,31 +450,36 @@ describe('AlertManager in isolation', () => {
     ]);
     const rung = manager.getState(id);
     expect(rung.status).toBe('ALERT_RINGING');
+    expect(rung.episode?.id).toBeTruthy();
 
-    // The command-exit track latches behind the protocol one. Everything else the
-    // renderer could have keyed on is unchanged across this ring.
+    // The command-exit track latches behind the protocol one: one enriched
+    // summons, so no consumer keyed on the episode may deliver a second time.
     manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
     const again = manager.getState(id);
     expect(again.status).toBe(rung.status);
     expect(again.notification).toEqual(rung.notification);
-    expect(again.ringSeq).toBeGreaterThan(rung.ringSeq);
-    // And it has to reach subscribers: `alertStatesEqual` would otherwise call
-    // these two states equal and drop the update before it left the host.
-    expect(seqs).toContain(again.ringSeq);
+    expect(again.episode?.id).toBe(rung.episode?.id);
+    expect(new Set(seen)).toEqual(new Set([rung.episode!.id]));
   });
 
-  // The counter is bounded by construction: a repeated notification on a track
-  // that is already ringing enriches the standing summons rather than raising a
-  // new one, so bell spam cannot restart the burst faster than it can play.
-  it('does not count a track that is already ringing', () => {
-    const id = 'ring-seq-same-track';
+  it('re-latching after all tracks clear starts a new episode', () => {
+    const id = 'episode-restart';
     const bell = { source: 'BEL', title: 'Terminal bell', body: null } as const;
 
     applyTerminalProtocolEvents(manager, id, [{ kind: 'notification', notification: bell }]);
-    const first = manager.getState(id).ringSeq;
-    applyTerminalProtocolEvents(manager, id, [{ kind: 'notification', notification: bell }]);
+    const first = manager.getState(id).episode;
+    expect(first?.id).toBeTruthy();
 
-    expect(manager.getState(id).ringSeq).toBe(first);
+    // Bell spam on a track that is already ringing enriches the standing
+    // summons; it cannot raise a new episode, so nothing keyed on one replays.
+    applyTerminalProtocolEvents(manager, id, [{ kind: 'notification', notification: bell }]);
+    expect(manager.getState(id).episode?.id).toBe(first!.id);
+
+    manager.clearTodo(id);
+    expect(manager.getState(id).episode).toBeNull();
+
+    applyTerminalProtocolEvents(manager, id, [{ kind: 'notification', notification: bell }]);
+    expect(manager.getState(id).episode?.id).not.toBe(first!.id);
   });
 
   it('finishes an armed command-exit watch when the PTY exits without commandFinish', () => {

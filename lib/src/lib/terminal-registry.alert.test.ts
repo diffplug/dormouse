@@ -359,7 +359,7 @@ describe('terminal-registry alert behavior', () => {
 
   it('preserves pre-registration activity through terminal creation and orphaning', () => {
     const id = 'early-host-state';
-    setTerminalActivity(id, { status: 'ALERT_RINGING', ringSeq: 7, todo: true, awaited: true });
+    setTerminalActivity(id, { status: 'ALERT_RINGING', todo: true, awaited: true });
     const activity = getActivity(id);
     expect(getLivePersistedAlertState(id)).toBeNull();
 
@@ -411,11 +411,11 @@ describe('terminal-registry alert behavior', () => {
 
   it('retains a resumed exited Session TODO until disposal', () => {
     const id = 'exited-host-state';
-    setTerminalActivity(id, { todo: true, ringSeq: 3 });
+    setTerminalActivity(id, { todo: true });
     resumeTerminal(id, null, { alive: false, exitCode: 1 });
 
     expect(registry.get(id)?.exited).toBe(true);
-    expect(getActivity(id)).toMatchObject({ todo: true, ringSeq: 3 });
+    expect(getActivity(id)).toMatchObject({ todo: true });
     expect(getLivePersistedAlertState(id)).toMatchObject({ todo: true });
 
     disposeSession(id);

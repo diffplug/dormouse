@@ -9,7 +9,6 @@ function activity(entries: Record<string, Partial<ActivityState>>): Map<string, 
     todo: false,
     notification: null,
     awaited: false,
-    ringSeq: 0,
   };
   return new Map(Object.entries(entries).map(([id, partial]) => [id, { ...base, ...partial }]));
 }
