@@ -4,7 +4,7 @@
 >
 > Owns the Session Activity layer — the three alert tracks, attention, TODO, notification text and its sanitization, the two alarm sinks, and the Workspace union projection. `docs/specs/layout.md` defers here for all alert/TODO behavior.
 >
-> Defers placement and sizing to `docs/specs/layout.md`, the webview ↔ host wire contracts to `docs/specs/transport.md`, and push sealing to `docs/specs/remote-security-model.md`.
+> Defers placement and sizing to `docs/specs/layout.md`, the alert-store relay messages (`alert:state` / `alert:settings` / `alert:watchedCommands`) to `docs/specs/transport.md`, and push sealing to `docs/specs/remote-security-model.md`; the `alert:await*` contract is stated here.
 
 **Must preserve Activity across minimize/reattach** (glossary I3). **A browser Surface has no Activity machine** — it can never ring, and carries only a user-set TODO flag, destroyed with that Surface.
 
@@ -100,7 +100,7 @@ An **await** parks on one Session until it finishes what it is doing, then repor
 | At await time | Behavior |
 |---|---|
 | A foreground command is running (`commandExitWatch`) | Park, no grace window. |
-| Nothing running | Park for one grace window, then wait for a real signal. A *command start* cancels it under either `until`; under `quiet` so does *output*, under `exit` output alone does not. Neither → resolve `cause: idle`. |
+| Nothing running | Park for one grace window. A *command start* cancels it under either `until`; under `quiet` so does *output*, under `exit` output alone does not. Either way the await then waits for a real signal. Neither → resolve `cause: idle`. |
 
 **`idle` is a resolution, not a failure** (rationale). Absent shell integration "is a command running" is unanswerable, so an `exit` await there falls back to the grace window and resolves `idle` rather than erroring.
 
@@ -244,7 +244,7 @@ Clearing behavior:
 ## Live Workspace transfer
 
 - **Must transfer live alert state separately from persisted reminders:** track latches, episode, command watch, deferred notification, and detector history/deadlines travel in the marked transfer content. **Never read this content on cold restore.**
-- **Must suspend source delivery before handing ownership to the host**, freezing its detector, rule walk, and controls at content capture, and **must await host hand-back when source content capture fails**, holding that suspension until routing returns. The destination restores receipts after persisted seeding and before the runtime publishes, and enables delivery only after `adopt_done`; refusal restores the source runtime and its pending deadlines. Transaction order is `docs/specs/standalone.md` → "Arrival queue".
+- **Must suspend source delivery before handing ownership to the host**, freezing its detector, rule walk, and controls at content capture, and **must await host hand-back when source content capture fails**, holding that suspension until routing returns. The destination restores receipts after persisted seeding and before the runtime publishes, and enables delivery only after `adopt_done` succeeds; refusal restores the source runtime and its pending deadlines. Transaction order is `docs/specs/standalone.md` → "Arrival queue".
 - **Must discard imported runtime, Activity, and pane state before releasing the delivery guards on any target failure**, mount or no mount, so a watcher never re-arms on a Workspace this window never owned. A receipt forgotten on an episode already observed is consumed, never fresh.
 - **Must carry per-sink receipts with the episode:** pending/queued work retains its original deadline; engine-admitted speech and dispatched push are consumed and never replayed. Suspending cuts current speech; a partially heard utterance is not restarted after a move or refusal.
 - **Must cancel parked await callers at suspension**, carrying no claimant closures or attention lease. Source attention loss arms a running command; destination interaction establishes its own attention.
