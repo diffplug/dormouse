@@ -32,21 +32,19 @@ export const DOOR_TAB_CLASS = clsx(
   TERMINAL_TOP_RADIUS_CLASS,
 );
 
-/** The Door's alarm ring, painted by one overlay child so the ringing and
- *  `SPOKEN` rows draw the same edge. It repeats the Door's radius because the
- *  parent's `overflow-hidden` clip would otherwise notch a square ring's
- *  corners away. */
-export const DOOR_ALARM_INSET_CLASS = clsx(
-  'pointer-events-none absolute inset-0 shadow-[inset_0_0_0_2px_var(--color-alarm-vs-door)]',
-  TERMINAL_TOP_RADIUS_CLASS,
-);
+/** The surface an alarm inset is drawn on, which is what picks its token: each
+ *  `--color-alarm-vs-*` is contrast-picked against one background. */
+export type AlertRingGround = 'door' | 'header-active' | 'header-inactive';
 
-/** The same edge on a hidden Workspace's tab, which sits on the inactive header
- *  ground rather than the Door's, so it picks that surface's alarm token. */
-export const WORKSPACE_TAB_ALARM_INSET_CLASS = clsx(
-  'pointer-events-none absolute inset-0 shadow-[inset_0_0_0_2px_var(--color-alarm-vs-header-inactive)]',
-  TERMINAL_TOP_RADIUS_CLASS,
-);
+export const ALERT_RING_INSET_CLASS = 'pointer-events-none absolute inset-0';
+
+/** Spelled out per ground, never built from a template — Tailwind's scanner
+ *  reads source text, so a composed arbitrary value would never be emitted. */
+export const ALERT_RING_INSET_BY_GROUND: Record<AlertRingGround, string> = {
+  door: 'shadow-[inset_0_0_0_2px_var(--color-alarm-vs-door)]',
+  'header-active': 'shadow-[inset_0_0_0_2px_var(--color-alarm-vs-header-active)]',
+  'header-inactive': 'shadow-[inset_0_0_0_2px_var(--color-alarm-vs-header-inactive)]',
+};
 
 // The Workspace strip's two halves of one idea: the selected tab is seated
 // against the Wall, and the rest recede into the app ground. Keep them

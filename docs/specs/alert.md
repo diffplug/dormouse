@@ -350,9 +350,9 @@ Source of truth: `lib/src/components/SettingsDialog.tsx`; `WorkspaceAlarmSetting
 | `ringing` | Any member Session is `ALERT_RINGING`. |
 | `todo` | Any member Surface has `todo === true`. |
 | `count` | Number of members ringing or TODO; each Surface counts once. |
-| `episode` | The earliest-started ringing member's `AlertEpisode`, else `null`. |
+| `ringingSince` | The earliest ringing member's episode start, else `null`. |
 
-**Must key the hidden tab's arrival burst on the union's episode**, so it plays once when the Workspace starts ringing and neither a later member nor a Workspace switch replays it (rationale). Pinned by `lib/src/lib/workspace-union.test.ts`.
+**Must key the hidden tab's arrival burst on `ringingSince`**, held for the whole ringing interval, so no later member, attended member, or Workspace switch replays it (rationale). Pinned by `keeps one burst while a Workspace stays ringing` in `lib/src/components/WorkspaceStrip.test.tsx`.
 
 **Must keep the projection display-only:** it never enters the Activity machine or fires its own ring. A Surface with no activity entry contributes nothing. Callers **must include** minimized (`Doored`) Surfaces.
 
@@ -371,14 +371,14 @@ Where it surfaces is host-specific:
 
 ### Pane Header
 
-The header shows a fixed-text `TODO` pill when `todo === true`, a hover/focus notification preview when TODO has `notification`, and the terminal context opened by right-click or by `a`. **Never tint a ringing Session's header** — the Pane overlay's perimeter ring already outlines it. Placement, sizing, and width tiers belong to `docs/specs/layout.md`.
+The header shows a fixed-text `TODO` pill when `todo === true`, a hover/focus notification preview when TODO has `notification`, and the terminal context opened by right-click or by `a`. **Never tint a ringing Session's header**: the Pane overlay already outlines it. Placement, sizing, and width tiers belong to `docs/specs/layout.md`.
 
 `AlertState.ringSeq` counts per-Session latches and is compared by `alertStatesEqual` (tests: `counts a second track ringing behind an already-latched one` and `does not count a track that is already ringing` in `lib/src/lib/alert-manager.test.ts`; rationale).
 
 - **`a` on the selected Pane in command mode dismisses a ringing Session and opens the terminal context, whatever the status; it never edits a WATCHING rule.**
 - **A WATCHING rule is created only in the terminal context** ("Watch all `<cmd>` commands"), which offers the row whenever a foreground command is running, and removed there or in Settings. Removing it anywhere drops it for every Session running that command.
 - Right-click always opens the context. Pressing `t` toggles TODO.
-- **The mobile header carries the ring's only dismissal**, a plain button shown while ringing, the mobile composition having no terminal context (`docs/specs/mobile-terminal-ui.md`).
+- **The mobile composition dismisses by attention alone** — a tap or a keystroke — and wears its ring as the alarm inset, never an icon (`docs/specs/mobile-terminal-ui.md`). A Client cannot dismiss yet (`docs/specs/remote-api.md` → Future).
 
 **Must keep context alert controls scoped to the source**, with TODO, running-command WATCHING, and notification detail. Settings owns the global watched-command list. **Must suppress helper alerting until promotion, including after exit**, covering BEL/notification protocols, watched commands, TODO, speech, push, and attention projections; semantic command/readiness state remains active. Promotion starts ordinary alert behavior without replaying suppressed events.
 
@@ -388,7 +388,7 @@ The TODO pill always displays `TODO`; remote notification text belongs in previe
 
 **Must wear the alarm treatment on every ringing terminal Pane**, labelled only once the speech sink acts. **Must bound the unlabelled pulse to one finite burst per episode, never replayed by a remount; `SPEAKING` pulses for its utterance, `SPOKEN` never** (rationale). **`prefers-reduced-motion` keeps the strong static treatment and suppresses only the pulse**, as does `cfg.alert.ringingPaused` (rationale). The three rows, their layers, strengths, and sizing are inventoried by `docs/specs/layout.md` → Alarm overlay.
 
-Source of truth: `latchRing` in `lib/src/lib/alert-manager.ts`; `dismissSessionAlert` in `lib/src/lib/session-activity-store.ts`; `TerminalContext` in `lib/src/components/wall/TerminalContext.tsx`; `lib/src/components/TodoPillBody.tsx`; `AlertRingIndicator` in `lib/src/components/wall/AlertRingIndicator.tsx`; `alertRingRow` and `alertRingBurstProps` in `lib/src/components/alert-ring.ts`.
+Source of truth: `latchRing` in `lib/src/lib/alert-manager.ts`; `dismissSessionAlert` in `lib/src/lib/session-activity-store.ts`; `TerminalContext` in `lib/src/components/wall/TerminalContext.tsx`; `lib/src/components/TodoPillBody.tsx`; `AlertRingIndicator` in `lib/src/components/wall/AlertRingIndicator.tsx`; `alertRingRow`, `useAlertRingBurst`, `AlertRingInset` in `lib/src/components/alert-ring.tsx`.
 
 ### Door
 

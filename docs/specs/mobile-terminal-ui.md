@@ -39,11 +39,12 @@ Chrome rules:
 * The Touch row and its selector tray sit on `terminal-bg`; the Input row and
   the reserve area on `header-inactive-bg` / `header-inactive-fg` (rationale).
 * The mobile session header is a flush bar — **never** the desktop title corner
-  radius. Order: title, `Dismiss alert` (ringing only), secondary detail, TODO
-  pill, minimize, kill (suppressed by `showKillButton={false}`, as Pocket does).
-  **Must show a ring as the alarm inset on the bar and on its session-list row,
-  never as an icon** (`docs/specs/alert.md` -> Pane Header). Both consumers wire
-  minimize to the Sessions reserve, not a desktop Door.
+  radius. Order: title, secondary detail, TODO pill, minimize, kill (suppressed
+  by `showKillButton={false}`, as Pocket does). Both consumers wire minimize to
+  the Sessions reserve, not a desktop Door. A ring shows as the alarm inset on
+  the bar and on its session-list row, and **a tap on the terminal attends the
+  Session**, which is how it is dismissed here (`docs/specs/alert.md` -> Pane
+  Header).
 * **Must install `useDynamicPalette` in `MobileTerminalUi`** for gesture tokens;
   it never mounts the desktop `Wall`. `docs/specs/theme.md` owns publication
   and the CSS baselines available before the effect runs.

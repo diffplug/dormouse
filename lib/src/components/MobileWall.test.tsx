@@ -11,12 +11,12 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const registry = vi.hoisted(() => ({
   activitySnapshot: new Map(),
   clearSessionTodo: vi.fn(),
-  dismissSessionAlert: vi.fn(),
   disposeSession: vi.fn(),
   getActivitySnapshot: vi.fn(),
   getOrCreateTerminal: vi.fn(),
   terminalPaneStateSnapshot: new Map(),
   getTerminalPaneStateSnapshot: vi.fn(),
+  markSessionAttention: vi.fn(),
   setTerminalUserTitle: vi.fn(),
   subscribeToActivity: vi.fn(() => () => {}),
   subscribeToTerminalPaneState: vi.fn(() => () => {}),
@@ -24,7 +24,7 @@ const registry = vi.hoisted(() => ({
 
 vi.mock('../lib/terminal-registry', () => ({
   ...registry,
-  DEFAULT_ACTIVITY_STATE: { status: 'WATCHING_DISABLED', ringSeq: 0, todo: false },
+  DEFAULT_ACTIVITY_STATE: { status: 'WATCHING_DISABLED', episode: null, todo: false },
 }));
 
 vi.mock('./TerminalPane', () => ({
@@ -66,12 +66,14 @@ function renderWall(showKillButton?: boolean) {
   });
 }
 
-function header(): HTMLElement {
-  return container.querySelector<HTMLElement>('.bg-header-active-bg')!;
+function headerInset(): string | null {
+  return container.querySelector<HTMLElement>('.bg-header-active-bg')
+    ?.querySelector('[data-alert-ring-inset]')
+    ?.getAttribute('data-alert-ring-inset') ?? null;
 }
 
-function dismissButton(): HTMLButtonElement | null {
-  return container.querySelector<HTMLButtonElement>('[data-dismiss-alert-for="pane-a"]');
+function terminalPane(): HTMLElement {
+  return container.querySelector<HTMLElement>('[data-testid="terminal-pane"]')!.parentElement!;
 }
 
 describe('MobileWall', () => {
@@ -88,25 +90,33 @@ describe('MobileWall', () => {
     expect(container.querySelector('button[aria-label="Minimize"]')).not.toBeNull();
   });
 
-  it('leaves the header plain and offers no dismissal while the Session is quiet', () => {
+  it('leaves the header plain while the Session is quiet', () => {
     renderWall();
 
-    expect(header().className).not.toContain('alarm-vs');
-    expect(dismissButton()).toBeNull();
+    expect(headerInset()).toBeNull();
   });
 
-  /** Mobile has no terminal context, so the header carries both the alarm and
-   *  the only way off it (`docs/specs/alert.md` -> Pane Header). */
-  it('wears the alarm inset and the one dismissal while the Session rings', () => {
-    registry.activitySnapshot.set('pane-a', { status: 'ALERT_RINGING', ringSeq: 1, todo: false });
+  it('wears the alarm inset on the header while the Session rings', () => {
+    registry.activitySnapshot.set('pane-a', {
+      status: 'ALERT_RINGING', episode: { id: 'e1', startedAt: Date.now() }, todo: false,
+    });
     try {
       renderWall();
-
-      expect(header().className).toContain('shadow-[inset_0_0_0_2px_var(--color-alarm-vs-header-active)]');
-      act(() => { dismissButton()!.click(); });
-      expect(registry.dismissSessionAlert).toHaveBeenCalledWith('pane-a');
+      expect(headerInset()).toBe('header-active');
     } finally {
       registry.activitySnapshot.clear();
     }
+  });
+
+  /** Mobile has no terminal context and no right-click, so attention is the
+   *  whole dismissal (`docs/specs/alert.md` -> Pane Header). */
+  it('attends the Session when the terminal is touched', () => {
+    renderWall();
+
+    act(() => {
+      terminalPane().dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+    });
+
+    expect(registry.markSessionAttention).toHaveBeenCalledWith('pane-a');
   });
 });

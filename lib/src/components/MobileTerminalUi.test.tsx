@@ -7,6 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MobileTerminalUi, type MobileTerminalSessionItem, type MobileTerminalTouchMode, type MobileTerminalUiProps } from './MobileTerminalUi';
 import { setNativeFieldValue } from '../lib/dom';
 
+const EPISODE = { id: 'episode-1', startedAt: Date.now() };
+
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 function pointerEvent(
@@ -117,29 +119,32 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('MobileTerminalUi keyboard input', () => {
-  function renderInput(props: Partial<MobileTerminalUiProps> = {}) {
-    const container = document.createElement('div');
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    roots.push(root);
-    const renderWith = (nextProps: Partial<MobileTerminalUiProps>) => act(() => root.render(
-      <StrictMode>
-        <MobileTerminalUi terminal={<div data-testid="terminal" />} {...nextProps} />
-      </StrictMode>,
-    ));
-    renderWith(props);
-    return {
-      input: container.querySelector<HTMLTextAreaElement>('textarea')!,
-      terminal: container.querySelector<HTMLDivElement>('[data-testid="terminal"]')!,
-      typeButton: container.querySelector<HTMLButtonElement>('[aria-label="Type input mode"]')!,
-      renderWith,
-    };
-  }
+/** One mount of the whole composition, shared by every suite below: the input
+ *  tests reach for the textarea, the session-list ones for the container. */
+function renderUi(props: Partial<MobileTerminalUiProps> = {}) {
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  roots.push(root);
+  const renderWith = (nextProps: Partial<MobileTerminalUiProps>) => act(() => root.render(
+    <StrictMode>
+      <MobileTerminalUi terminal={<div data-testid="terminal" />} {...nextProps} />
+    </StrictMode>,
+  ));
+  renderWith(props);
+  return {
+    container,
+    input: container.querySelector<HTMLTextAreaElement>('textarea')!,
+    terminal: container.querySelector<HTMLDivElement>('[data-testid="terminal"]')!,
+    typeButton: container.querySelector<HTMLButtonElement>('[aria-label="Type input mode"]')!,
+    renderWith,
+  };
+}
 
+describe('MobileTerminalUi keyboard input', () => {
   it('leaves IME editing keys to the composition and sends committed text once', () => {
     const onSendInput = vi.fn();
-    const { input } = renderInput({ onSendInput });
+    const { input } = renderUi({ onSendInput });
     act(() => {
       input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
       setNativeFieldValue(input, '日本');
@@ -158,7 +163,7 @@ describe('MobileTerminalUi keyboard input', () => {
 
   it.each([{ isComposing: true }, { keyCode: 229 }])('ignores IME confirmation keydown with %j', (imeState) => {
     const onSendInput = vi.fn();
-    const { input } = renderInput({ onSendInput });
+    const { input } = renderUi({ onSendInput });
     const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...imeState });
     act(() => input.dispatchEvent(event));
     expect(event.defaultPrevented).toBe(false);
@@ -167,7 +172,7 @@ describe('MobileTerminalUi keyboard input', () => {
 
   it('sends software-keyboard Backspace and Enter without keydown or a textarea change', () => {
     const onSendInput = vi.fn();
-    const { input } = renderInput({ onSendInput });
+    const { input } = renderUi({ onSendInput });
     for (const inputType of ['deleteContentBackward', 'insertLineBreak', 'insertParagraph']) {
       const event = new InputEvent('beforeinput', { inputType, bubbles: true, cancelable: true });
       act(() => input.dispatchEvent(event));
@@ -179,7 +184,7 @@ describe('MobileTerminalUi keyboard input', () => {
 
   it('leaves software-keyboard deletion inside an IME composition alone', () => {
     const onSendInput = vi.fn();
-    const { input } = renderInput({ onSendInput });
+    const { input } = renderUi({ onSendInput });
     act(() => input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true })));
     const event = new InputEvent('beforeinput', { inputType: 'deleteContentBackward', bubbles: true, cancelable: true });
     act(() => input.dispatchEvent(event));
@@ -189,7 +194,7 @@ describe('MobileTerminalUi keyboard input', () => {
 
   it('cancels pending focus when a pane touch dismisses the keyboard', () => {
     vi.useFakeTimers();
-    const { input, terminal, typeButton } = renderInput();
+    const { input, terminal, typeButton } = renderUi();
     act(() => typeButton.click());
     expect(document.activeElement).toBe(input);
     act(() => terminal.dispatchEvent(pointerEvent('pointerdown')));
@@ -199,7 +204,7 @@ describe('MobileTerminalUi keyboard input', () => {
 
   it('cancels pending pane blur when Type is tapped again', () => {
     vi.useFakeTimers();
-    const { input, terminal, typeButton } = renderInput();
+    const { input, terminal, typeButton } = renderUi();
     act(() => vi.advanceTimersByTime(600));
     act(() => terminal.dispatchEvent(pointerEvent('pointerdown')));
     act(() => typeButton.click());
@@ -210,7 +215,7 @@ describe('MobileTerminalUi keyboard input', () => {
 
   it('blurs when the consumer switches from Type to Sessions', () => {
     vi.useFakeTimers();
-    const { input, typeButton, renderWith } = renderInput({ activeKeyboardMode: 'type' });
+    const { input, typeButton, renderWith } = renderUi({ activeKeyboardMode: 'type' });
     act(() => typeButton.click());
     expect(document.activeElement).toBe(input);
     renderWith({ activeKeyboardMode: 'sessions' });
@@ -359,40 +364,25 @@ describe('MobileTerminalUi touch modes', () => {
 });
 
 describe('MobileTerminalUi session list', () => {
-  function renderSessions(sessions: MobileTerminalSessionItem[]): HTMLDivElement {
-    const container = document.createElement('div');
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    roots.push(root);
-    act(() => {
-      root.render(
-        <StrictMode>
-          <MobileTerminalUi
-            activeKeyboardMode="sessions"
-            sessions={sessions}
-            terminal={<div data-testid="terminal" />}
-          />
-        </StrictMode>,
-      );
-    });
-    return container;
-  }
+  const renderSessions = (sessions: MobileTerminalSessionItem[]) =>
+    renderUi({ activeKeyboardMode: 'sessions', sessions }).container;
 
-  const row = (container: HTMLElement, title: string): HTMLButtonElement =>
-    [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(title))!;
+  const inset = (container: HTMLElement, title: string): string | null =>
+    [...container.querySelectorAll('button')]
+      .find((b) => b.textContent?.includes(title))!
+      .querySelector('[data-alert-ring-inset]')
+      ?.getAttribute('data-alert-ring-inset') ?? null;
 
   /** The row is the alarm's only carrier now (`docs/specs/alert.md` -> Pane Header). */
-  it('wears the alarm inset only on a ringing row, per its own ground', () => {
+  it('wears the alarm inset only on a ringing row, on its own ground', () => {
     const container = renderSessions([
-      { id: 'a', title: 'ringing-active', active: true, status: 'ALERT_RINGING', ringSeq: 0 },
-      { id: 'b', title: 'ringing-idle', status: 'ALERT_RINGING', ringSeq: 0 },
-      { id: 'c', title: 'quiet', status: 'BUSY', ringSeq: 0 },
+      { id: 'a', title: 'ringing-active', active: true, status: 'ALERT_RINGING', episode: EPISODE },
+      { id: 'b', title: 'ringing-idle', status: 'ALERT_RINGING', episode: EPISODE },
+      { id: 'c', title: 'quiet', status: 'BUSY', episode: null },
     ]);
 
-    expect(row(container, 'ringing-active').className)
-      .toContain('shadow-[inset_0_0_0_2px_var(--color-alarm-vs-header-active)]');
-    expect(row(container, 'ringing-idle').className)
-      .toContain('shadow-[inset_0_0_0_2px_var(--color-alarm-vs-door)]');
-    expect(row(container, 'quiet').className).not.toContain('alarm-vs');
+    expect(inset(container, 'ringing-active')).toBe('header-active');
+    expect(inset(container, 'ringing-idle')).toBe('door');
+    expect(inset(container, 'quiet')).toBeNull();
   });
 });

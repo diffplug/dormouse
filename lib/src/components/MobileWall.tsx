@@ -3,20 +3,20 @@ import {
   ArrowLineDownIcon,
   XIcon,
 } from '@phosphor-icons/react';
-import { clsx } from 'clsx';
 import { HeaderActionButton } from './HeaderActionButton';
 import { TerminalPane } from './TerminalPane';
+import { AlertRingInset, alertRingRow, useAlertRingBurst } from './alert-ring';
 import { TODO_PILL_TRACKING_CLASS } from './design';
 import { useTodoPillContent } from './TodoPillBody';
 import type { MobileTerminalSessionItem } from './MobileTerminalUi';
 import {
   clearSessionTodo,
   DEFAULT_ACTIVITY_STATE,
-  dismissSessionAlert,
   disposeSession,
   getActivitySnapshot,
   getOrCreateTerminal,
   getTerminalPaneStateSnapshot,
+  markSessionAttention,
   setTerminalUserTitle,
   subscribeToActivity,
   subscribeToTerminalPaneState,
@@ -75,7 +75,7 @@ export function useMobileWallSessionItems(
       secondary: derivedHeader.secondary,
       active: session.id === activeSessionId,
       status: activity.status,
-      ringSeq: activity.ringSeq,
+      episode: activity.episode ?? null,
       todo: activity.todo,
     };
   }), [activeSessionId, activityStates, appTitleForPane, sessions, terminalStates, visiblePaneStates]);
@@ -154,7 +154,14 @@ export function MobileWall({
         onKill={() => killSession(activeItem.id)}
         showKillButton={showKillButton}
       />
-      <div className="min-h-0 flex-1 overflow-hidden bg-terminal-bg">
+      {/* Touching the pane attends it, which is what puts a ring out here:
+          mobile has no terminal context and no right-click
+          (`docs/specs/alert.md` -> Pane Header). Keystrokes already attend
+          through `wireXtermHandlers`. */}
+      <div
+        className="min-h-0 flex-1 overflow-hidden bg-terminal-bg"
+        onPointerDown={() => markSessionAttention(activeItem.id)}
+      >
         <TerminalPane id={activeItem.id} isFocused />
       </div>
     </div>
@@ -173,33 +180,18 @@ function MobileWallHeader({
   showKillButton: boolean;
 }) {
   const todoPill = useTodoPillContent(session.todo === true);
-  const ringing = session.status === 'ALERT_RINGING';
-  const showTodoPill = todoPill.visible;
+  const row = alertRingRow(session.status, null);
+  const burst = useAlertRingBurst(row, session.episode);
 
   return (
-    <div className={clsx(
-      'flex h-8 shrink-0 items-center gap-1.5 bg-header-active-bg pl-2 pr-[5px] font-mono text-sm leading-none text-header-active-fg',
-      ringing && 'shadow-[inset_0_0_0_2px_var(--color-alarm-vs-header-active)]',
-    )}>
+    <div className="relative flex h-8 shrink-0 items-center gap-1.5 overflow-hidden bg-header-active-bg pl-2 pr-[5px] font-mono text-sm leading-none text-header-active-fg">
       <div className="flex min-w-0 flex-1 items-center gap-1.5">
         <span className="min-w-0 shrink truncate font-medium">{session.title}</span>
-        {ringing ? (
-          // Mobile has no terminal context and no pane right-click, so this is
-          // the ring's only dismissal (`docs/specs/alert.md` -> Pane Header).
-          <button
-            type="button"
-            data-dismiss-alert-for={session.id}
-            className="shrink-0 rounded border border-current px-1.5 py-px text-xs font-semibold text-alarm-vs-header-active transition-colors hover:bg-current/10"
-            onClick={() => dismissSessionAlert(session.id)}
-          >
-            Dismiss alert
-          </button>
-        ) : null}
         {session.secondary ? (
           <span className="min-w-0 shrink truncate opacity-70">{session.secondary}</span>
         ) : null}
       </div>
-      {showTodoPill ? (
+      {todoPill.visible ? (
         <button
           type="button"
           data-session-todo-for={session.id}
@@ -235,6 +227,7 @@ function MobileWallHeader({
           </HeaderActionButton>
         ) : null}
       </div>
+      {row && <AlertRingInset ground="header-active" burst={burst} />}
     </div>
   );
 }

@@ -40,9 +40,24 @@ describe('Door alarm state', () => {
     expect(door?.textContent).not.toContain('SPEAKING');
     expect(door?.getAttribute('aria-label')).toBe('build-server, needs attention');
     // The ring is the treatment, so it carries the bounded arrival burst.
-    const ring = door?.querySelector<HTMLElement>('[data-alert-ring-inset]');
-    expect(ring?.className).toContain('inset_0_0_0_2px');
+    const ring = door?.querySelector<HTMLElement>('[data-alert-ring-inset="door"]');
     expect(classes(ring)).toContain('motion-safe:animate-alarm-pulse-burst');
+  });
+
+  /** The burst rides a keyed element, so a second summons on a Door that never
+   *  unmounted has to replace it rather than let an expired animation stand. */
+  it('remounts the inset for a fresh episode', () => {
+    const render = (episode: { id: string; startedAt: number }) => act(() => root.render(
+      <Door title="build-server" status="ALERT_RINGING" episode={episode} />,
+    ));
+
+    render(EPISODE);
+    const first = container.querySelector('[data-alert-ring-inset="door"]');
+    render(EPISODE);
+    expect(container.querySelector('[data-alert-ring-inset="door"]')).toBe(first);
+
+    render({ id: 'episode-2', startedAt: Date.now() });
+    expect(container.querySelector('[data-alert-ring-inset="door"]')).not.toBe(first);
   });
 
   /** A Door that is not ringing has no alarm state, whatever the renderer last
@@ -78,8 +93,8 @@ describe('Door alarm state', () => {
     ));
 
     const door = container.querySelector<HTMLElement>('[data-alert-ring-state="spoken"]');
-    const ring = door?.querySelector<HTMLElement>('[data-alert-ring-inset]');
-    expect(ring?.className).toContain('inset_0_0_0_2px');
+    const ring = door?.querySelector<HTMLElement>('[data-alert-ring-inset="door"]');
+    expect(ring).not.toBeNull();
     expect(classes(ring).some(c => c.includes('animate-'))).toBe(false);
     expect(door?.getAttribute('aria-label')).toBe('build-server, spoken');
   });
@@ -111,7 +126,6 @@ describe('Door notepad button', () => {
       <Door
         doorId="pane-a"
         title="build-server"
-       
         episode={null}
         onClick={onClick}
         onOpenNotepad={onOpenNotepad}

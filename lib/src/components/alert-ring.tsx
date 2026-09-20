@@ -1,7 +1,9 @@
 import { useMemo, type CSSProperties } from 'react';
+import { clsx } from 'clsx';
 import { cfg } from '../cfg';
 import type { AlertEpisode } from '../lib/alert-episode';
 import type { AlertRingState, AlertSpeechState, SessionStatus } from '../lib/terminal-registry';
+import { ALERT_RING_INSET_BY_GROUND, ALERT_RING_INSET_CLASS, type AlertRingGround } from './design';
 
 /**
  * Which row of the alarm treatment a Session wears, or `null` for none.
@@ -45,11 +47,11 @@ export function alarmPulseClass(bounded: boolean): string {
 /** Starts a CSS animation on a clock that began at `startedAt`, so an element
  *  mounted later lands where that animation already is — past its end when it
  *  has already finished. */
-export function animationClockStyle(startedAt: number): CSSProperties {
+function animationClockStyle(startedAt: number): CSSProperties {
   return { animationDelay: `${-Math.max(0, Date.now() - startedAt)}ms` };
 }
 
-export interface AlertRingBurstProps {
+interface AlertRingBurstProps {
   /** A fresh episode is a fresh summons, so remounting on it replays the burst;
    *  a second track latching inside one keeps the key and only enriches. */
   key: string;
@@ -57,31 +59,69 @@ export interface AlertRingBurstProps {
   style?: CSSProperties;
 }
 
+/**
+ * What one burst is anchored to: an identity that changes exactly when a new
+ * summons begins, and the instant it began.
+ *
+ * A Session's `AlertEpisode` is one. A derived summons — a Workspace union's —
+ * has no id of its own and supplies the instant alone, which serves as both.
+ */
+export type AlertRingBurstSource = AlertEpisode | { startedAt: number };
+
+const burstKey = (source: AlertRingBurstSource): string =>
+  'id' in source ? source.id : String(source.startedAt);
+
 /** Everything one alarm element needs to move for `row`, bundled so the class,
  *  the remount key, and the clock can never be applied apart. */
-export function alertRingBurstProps(row: AlertRingState, episode: AlertEpisode): AlertRingBurstProps {
+function alertRingBurstProps(row: AlertRingState, source: AlertRingBurstSource): AlertRingBurstProps {
   const bounded = row === 'ringing';
   const className = row === 'spoken' ? '' : alarmPulseClass(bounded);
   return {
-    key: episode.id,
+    key: burstKey(source),
     className,
     // Only a burst has a clock to anchor, and only one the freeze left running.
-    style: bounded && className ? animationClockStyle(episode.startedAt) : undefined,
+    style: bounded && className ? animationClockStyle(source.startedAt) : undefined,
   };
 }
 
-/** `alertRingBurstProps` anchored once per episode: recomputing the clock on a
+/** `alertRingBurstProps` anchored once per summons: recomputing the clock on a
  *  later render would shove a live burst back to its start. */
 export function useAlertRingBurst(
   row: AlertRingState | null,
-  episode: AlertEpisode | null | undefined,
+  source: AlertRingBurstSource | null | undefined,
 ): AlertRingBurstProps | null {
-  const id = episode?.id;
-  const startedAt = episode?.startedAt;
+  const key = source == null ? undefined : burstKey(source);
+  const startedAt = source?.startedAt;
   return useMemo(
-    () => (row && id !== undefined && startedAt !== undefined
-      ? alertRingBurstProps(row, { id, startedAt })
+    () => (row && key !== undefined && startedAt !== undefined
+      ? alertRingBurstProps(row, { id: key, startedAt })
       : null),
-    [row, id, startedAt],
+    [row, key, startedAt],
+  );
+}
+
+/**
+ * The alarm's edge, as one overlay child of a `relative` box that clips.
+ *
+ * Every alarm surface draws the same 2px inset and differs only in `ground` —
+ * the background its token was contrast-picked against — so the shadow literals
+ * stay in one table and no call site restates them. `className` carries the
+ * host's own geometry (its corner radius), because the overlay has to repeat it
+ * or the parent's clip notches a square ring's corners away.
+ */
+export function AlertRingInset({ ground, burst, className }: {
+  ground: AlertRingGround;
+  /** `useAlertRingBurst`'s result; `null` leaves a static edge with no motion. */
+  burst: AlertRingBurstProps | null;
+  className?: string;
+}) {
+  return (
+    <span
+      key={burst?.key}
+      data-alert-ring-inset={ground}
+      aria-hidden
+      style={burst?.style}
+      className={clsx(ALERT_RING_INSET_CLASS, ALERT_RING_INSET_BY_GROUND[ground], burst?.className, className)}
+    />
   );
 }

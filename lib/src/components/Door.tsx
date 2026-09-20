@@ -8,11 +8,11 @@ import { BROWSER_DISPLAY_LABEL, BrowserDisplayIcon } from './wall/BrowserDisplay
 import { useTodoPillContent } from './TodoPillBody';
 import { notepadLabel } from './use-notepad';
 import type { AlertEpisode } from '../lib/alert-episode';
-import { ALERT_RING_LABEL, alarmPulseClass, alertRingRow, useAlertRingBurst } from './alert-ring';
+import { ALERT_RING_LABEL, AlertRingInset, alarmPulseClass, alertRingRow, useAlertRingBurst } from './alert-ring';
 import {
   ALERT_SPEECH_TRACKING_CLASS,
-  DOOR_ALARM_INSET_CLASS,
   DOOR_TAB_CLASS,
+  TERMINAL_TOP_RADIUS_CLASS,
   TODO_PILL_TRACKING_CLASS,
 } from './design';
 
@@ -170,15 +170,7 @@ export function Door({
           <NotepadIcon size={12} weight="fill" />
         </button>
       )}
-      {insetRing && (
-        <span
-          key={burst?.key}
-          data-alert-ring-inset
-          aria-hidden
-          style={burst?.style}
-          className={clsx(DOOR_ALARM_INSET_CLASS, burst?.className)}
-        />
-      )}
+      {insetRing && <AlertRingInset ground="door" burst={burst} className={TERMINAL_TOP_RADIUS_CLASS} />}
     </div>
   );
 }

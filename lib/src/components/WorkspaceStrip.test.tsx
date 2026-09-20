@@ -147,6 +147,26 @@ describe('WorkspaceStrip', () => {
     expect(tabFor(first).querySelector('[data-alert-ring-inset]')).toBeNull();
   });
 
+  /** The tab's summons is the Workspace's whole ringing interval, so losing the
+   *  member that started it must not remount the inset and replay its burst. */
+  it('keeps one burst while a Workspace stays ringing', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    setWorkspaceSurfaces(first, ['pane-a', 'pane-b']);
+    setTerminalActivity('pane-a', { status: 'ALERT_RINGING', episode: { id: 'older', startedAt: 1_000 } });
+    setTerminalActivity('pane-b', { status: 'ALERT_RINGING', episode: { id: 'newer', startedAt: 2_000 } });
+    await render();
+
+    const inset = tabFor(first).querySelector('[data-alert-ring-inset]');
+    expect(inset).not.toBeNull();
+
+    // The older member is attended; the Workspace is still ringing through the
+    // newer one, whose later start would otherwise become a fresh summons.
+    await act(async () => { setTerminalActivity('pane-a', { status: 'NOTHING_TO_SHOW' }); });
+
+    expect(tabFor(first).querySelector('[data-alert-ring-inset]')).toBe(inset);
+  });
+
   it('renames the active tab on click, holding the chrome keyboard lease while the editor is open', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await render();

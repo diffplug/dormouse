@@ -6,12 +6,8 @@ export interface HeaderActionButtonProps {
   className: string;
   ariaLabel: string;
   tooltip?: string | null;
-  tooltipDetail?: string;
-  tooltipAlign?: 'left' | 'right';
-  onMouseDownCapture?: (e: React.MouseEvent<HTMLButtonElement>) => void;
   onMouseDown?: (e: React.MouseEvent<HTMLButtonElement>) => void;
   onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
-  onContextMenu?: (e: React.MouseEvent<HTMLButtonElement>) => void;
   children: React.ReactNode;
 }
 
@@ -19,12 +15,8 @@ export function HeaderActionButton({
   className,
   ariaLabel,
   tooltip,
-  tooltipDetail,
-  tooltipAlign = 'right',
-  onMouseDownCapture,
   onMouseDown,
   onClick,
-  onContextMenu,
   children,
 }: HeaderActionButtonProps) {
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -40,9 +32,9 @@ export function HeaderActionButton({
       if (!rect) return;
       setTooltipStyle({
         position: 'fixed',
-        left: tooltipAlign === 'left' ? rect.left : rect.right,
+        left: rect.right,
         top: rect.bottom + 8,
-        transform: tooltipAlign === 'left' ? 'translate(0, 0)' : 'translate(-100%, 0)',
+        transform: 'translate(-100%, 0)',
       });
     };
 
@@ -53,7 +45,7 @@ export function HeaderActionButton({
       window.removeEventListener('scroll', updatePosition, true);
       window.removeEventListener('resize', updatePosition);
     };
-  }, [isVisible, tooltipAlign]);
+  }, [isVisible]);
 
   return (
     <>
@@ -62,7 +54,6 @@ export function HeaderActionButton({
         ref={buttonRef}
         type="button"
         className={className}
-        onMouseDownCapture={onMouseDownCapture}
         onMouseDown={(e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -73,11 +64,6 @@ export function HeaderActionButton({
           setIsVisible(false);
           onClick(e);
         }}
-        onContextMenu={onContextMenu ? (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          onContextMenu(e);
-        } : undefined}
         aria-label={ariaLabel}
         onMouseEnter={() => setIsVisible(true)}
         onMouseLeave={() => setIsVisible(false)}
@@ -93,10 +79,7 @@ export function HeaderActionButton({
         className="pointer-events-none z-[9999] whitespace-nowrap px-2 py-1.5"
         style={tooltipStyle}
       >
-        <div className="flex flex-col gap-0.5 leading-none">
-          <div>{renderShortcuts(tooltipPrimary)}</div>
-          {tooltipDetail && <div>{renderShortcuts(tooltipDetail)}</div>}
-        </div>
+        <div className="leading-none">{renderShortcuts(tooltipPrimary)}</div>
       </PopupButtonRow>,
       document.body,
     )}

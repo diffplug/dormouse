@@ -171,9 +171,6 @@ describe("TutDetector", () => {
     setActivitySnapshot(new Map([
       ["pane-a", activity("NOTHING_TO_SHOW")],
     ]));
-    setActivitySnapshot(new Map([
-      ["pane-a", activity("BUSY")],
-    ]));
     expect(state.isComplete("al-ring")).toBe(false);
 
     setActivitySnapshot(new Map([

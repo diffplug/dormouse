@@ -41,9 +41,9 @@ export function directorySessionItems(
     secondary: secondaryLine(entry),
     active: entry.surfaceId === activeSurfaceId,
     status: statusFor(entry),
-    // Nothing on the Pocket side renders it; `MobileTerminalSessionItem` still
-    // requires it.
-    ringSeq: 0,
+    // `DirectoryEntry.ringing` is an edgeless boolean, so a remote ring has no
+    // start to clock an arrival burst from; the row wears the static inset.
+    episode: null,
     todo: entry.hasTODO,
   }));
 }

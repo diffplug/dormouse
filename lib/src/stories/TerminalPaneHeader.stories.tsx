@@ -387,12 +387,6 @@ export const Default: Story = {
   parameters: primedPane({ status: 'NOTHING_TO_SHOW' }),
 };
 
-/** A ringing Session leaves its header untinted — the Pane overlay's perimeter
- *  ring already outlines it (`docs/specs/alert.md` -> Pane Header). */
-export const Ringing: Story = {
-  parameters: primedPane({ status: 'ALERT_RINGING' }),
-};
-
 // --- Command-keyed WATCHING (docs/specs/alert.md) --------------------------
 //
 // The context acts on the *running command's* rule, not on this pane, so what
@@ -456,10 +450,6 @@ export const NotificationDialogLongBody: Story = contextDialogStory({
   notification: NOTIFICATIONS.longBody,
   command: 'pnpm test',
 });
-
-export const TodoAndRinging: Story = {
-  parameters: primedPane({ status: 'ALERT_RINGING', todo: true }),
-};
 
 export const CompactWidth: Story = {
   args: {

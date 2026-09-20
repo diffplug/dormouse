@@ -14,8 +14,8 @@ import { PlusIcon, XIcon } from '@phosphor-icons/react';
 import { InlineEditInput } from './wall/InlineEditInput';
 import { WorkspaceKillConfirm } from './WorkspaceKillConfirm';
 import { useTodoPillContent } from './TodoPillBody';
-import { useAlertRingBurst } from './alert-ring';
-import { chromeButton, DOOR_TAB_CLASS, HEADER_PALETTE_TRANSITION_CLASS, ModalFrame, modalActionButton, OVERLAY_MAX_HEIGHT, TAB_INACTIVE_FADE_STYLE, TODO_PILL_TRACKING_CLASS, WORKSPACE_TAB_ALARM_INSET_CLASS } from './design';
+import { AlertRingInset, useAlertRingBurst } from './alert-ring';
+import { chromeButton, DOOR_TAB_CLASS, HEADER_PALETTE_TRANSITION_CLASS, ModalFrame, modalActionButton, OVERLAY_MAX_HEIGHT, TAB_INACTIVE_FADE_STYLE, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from './design';
 import { createWorkspaceStripDrag, type StripDragHost } from './workspace-strip-drag';
 import { acquireChromeKeyboardLease } from './wall/chrome-keyboard-lease';
 import { getWallHandle } from './wall/wall-handles';
@@ -153,12 +153,19 @@ export function WorkspaceStrip({
   }
   const unionFor = (id: WorkspaceId, active: boolean): WorkspaceUnion => {
     if (active) return EMPTY_WORKSPACE_UNION;
-    const next = computeWorkspaceUnion(membership.get(id) ?? [], activity);
+    const projected = computeWorkspaceUnion(membership.get(id) ?? [], activity);
+    const previous = unionsRef.current.get(id);
+    // One uninterrupted ringing interval per tab: while the Workspace stays
+    // ringing its summons is the first moment it did, so attending the member
+    // that set `ringingSince` must not advance it to a survivor's later start
+    // and re-burst the tab.
+    const next = previous?.ringing && projected.ringing
+      ? { ...projected, ringingSince: previous.ringingSince }
+      : projected;
     // Hand back the previous object when nothing in it changed, so a memoized
     // tab re-renders only when its own indicators do.
-    const previous = unionsRef.current.get(id);
     if (previous && previous.ringing === next.ringing && previous.todo === next.todo
-      && previous.count === next.count && previous.episode?.id === next.episode?.id) return previous;
+      && previous.count === next.count && previous.ringingSince === next.ringingSince) return previous;
     unionsRef.current.set(id, next);
     return next;
   };
@@ -283,7 +290,10 @@ const WorkspaceTab = memo(function WorkspaceTab({
   // the panes already say; only a hidden one needs them.
   const showAlarmInset = !active && union.ringing;
   const showTodoPill = !active && todoPill.visible;
-  const burst = useAlertRingBurst(showAlarmInset ? 'ringing' : null, union.episode);
+  const burst = useAlertRingBurst(
+    showAlarmInset ? 'ringing' : null,
+    union.ringingSince === null ? null : { startedAt: union.ringingSince },
+  );
   const label = (showAlarmInset || showTodoPill) && union.count > 0
     ? `${name}, ${union.count} needing attention` : name;
 
@@ -366,13 +376,7 @@ const WorkspaceTab = memo(function WorkspaceTab({
         </button>
       )}
       {showAlarmInset && (
-        <span
-          key={burst?.key}
-          data-alert-ring-inset
-          aria-hidden
-          style={burst?.style}
-          className={clsx(WORKSPACE_TAB_ALARM_INSET_CLASS, burst?.className)}
-        />
+        <AlertRingInset ground="header-inactive" burst={burst} className={TERMINAL_TOP_RADIUS_CLASS} />
       )}
     </div>
   );

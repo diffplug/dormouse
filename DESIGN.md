@@ -209,7 +209,7 @@ The icon-and-tooltip button used inside pane headers (kill, minimize, notepad, e
 - **Shape:** `rounded` (4px) when icon-only, also `rounded` for labeled variants.
 - **Color:** `text-inherit` — inherits the header's foreground, so it tints with the active/inactive header palette.
 - **Hover:** `hover:bg-current/10` — a 10%-opacity wash of the current text color. Theme-agnostic, works light or dark.
-- **Tooltip:** rendered through a portal as a `PopupButtonRow` 8px below the button, with `text-sm` primary line and an optional muted detail line. Keybindings inside the tooltip auto-render as `[bracketed]` shortcuts.
+- **Tooltip:** rendered through a portal as a `PopupButtonRow` 8px below the button, one `text-sm` line right-aligned to its edge. Keybindings inside the tooltip auto-render as `[bracketed]` shortcuts.
 
 #### Popup Button (`popupButton`)
 The flat segments inside a `PopupButtonRow` — the row owns the border, background, shadow, and `text-sm`, so a segment contributes only padding and state. Every segment currently inherits the row's foreground; these rows offer rather than ask, so none of them carries an emphasized action.

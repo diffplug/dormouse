@@ -1,4 +1,3 @@
-import type { AlertEpisode } from './alert-episode';
 import type { ActivityState } from './session-activity-store';
 
 /**
@@ -13,11 +12,12 @@ export interface WorkspaceUnion {
   todo: boolean;
   /** Number of member Surfaces owing attention (ringing or todo); each counts once. */
   count: number;
-  /** The earliest-started ringing member's episode, or `null` when none rings. */
-  episode: AlertEpisode | null;
+  /** When this Workspace started ringing: the earliest ringing member's episode
+   *  start, or `null` when none rings. The union's own summons, not a member's. */
+  ringingSince: number | null;
 }
 
-export const EMPTY_WORKSPACE_UNION: WorkspaceUnion = { ringing: false, todo: false, count: 0, episode: null };
+export const EMPTY_WORKSPACE_UNION: WorkspaceUnion = { ringing: false, todo: false, count: 0, ringingSince: null };
 
 /**
  * Project the union over a Workspace's member Surfaces. `surfaceIds` are the
@@ -32,7 +32,7 @@ export function computeWorkspaceUnion(
   let ringing = false;
   let todo = false;
   let count = 0;
-  let episode: AlertEpisode | null = null;
+  let ringingSince: number | null = null;
   for (const id of surfaceIds) {
     const state = activity.get(id);
     if (!state) continue;
@@ -41,11 +41,11 @@ export function computeWorkspaceUnion(
     if (isRinging) ringing = true;
     if (isTodo) todo = true;
     if (isRinging || isTodo) count += 1;
-    // The earliest start, so a second Session joining a ringing Workspace does
-    // not restart the tab's arrival burst.
-    if (isRinging && state.episode && (!episode || state.episode.startedAt < episode.startedAt)) {
-      episode = state.episode;
+    // The earliest start, so a second Session joining an already-ringing
+    // Workspace does not restart the tab's arrival burst.
+    if (isRinging && state.episode && (ringingSince === null || state.episode.startedAt < ringingSince)) {
+      ringingSince = state.episode.startedAt;
     }
   }
-  return { ringing, todo, count, episode };
+  return { ringing, todo, count, ringingSince };
 }
