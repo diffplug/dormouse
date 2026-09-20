@@ -482,7 +482,7 @@ restart result**. Do not prepare again between those steps. Finish with
 **Remove test data** in each context where you prepared a checkpoint.
 Browser and installed-app results are separate evidence; a passing test on one
 device is not certification of another. The diagnostic contract is
-`docs/specs/pocket-app.md` -> "Serving the built bundle".
+`docs/specs/pocket-app.md` -> "The capability harness".
 Harness v3 tests the production encrypted-key format, including authenticated
 context. A v1/v2 experimental checkpoint must be removed and prepared again;
 old restart reports do not establish the production-format restart result.

@@ -42,8 +42,8 @@ primitive lives in `remote-lib-common`, the terminal UI in `lib`/`standalone`.
   (`MAX_PENDING_REAUTH_NONCES_PER_SESSION`, `MAX_REAUTH_NONCE_SESSIONS` LRU
   buckets bounding the total). **The two challenge issuers are the accepted
   exception** — one flat `MAX_PENDING_CHALLENGES` map apiece, whose oldest entry
-  any unauthenticated caller can evict at the cost of one ceremony's retry
-  (WebAuthn below; rationale).
+  a caller past that route's gate can evict at the cost of one ceremony's retry,
+  and sign-in has no gate (WebAuthn below; rationale).
 
 ## Configuration
 
@@ -868,8 +868,8 @@ exists to honor:
     supersedes that sentence, the section otherwise — and **only a user action
     clears it**.
   - **The view is keyed by enrollment identity and the QR sits behind its own
-    error boundary**, so neither a Relay swap nor a refused encode reaches the
-    app-wide ErrorBoundary.
+    error boundary**: a Relay swap drops the stale code, and a refused encode
+    costs a retry rather than the app-wide ErrorBoundary.
 - **Disconnect asks first**: clearing the enrollment drops every paired phone
   until each pairs again.
 - **Status is re-read, not patched**: the service's `status` event carries only
