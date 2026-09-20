@@ -55,7 +55,9 @@ fi
 for arg in "$@"; do
   case "$arg" in
     --yes|-y) ASSUME_YES=1 ;;
-    --help|-h) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    # The whole header comment, however long it grows: a hardcoded last line
+    # silently dropped a documented environment variable when the header grew.
+    --help|-h) awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$0"; exit 0 ;;
     *) echo "unknown argument: $arg" >&2; exit 64 ;;
   esac
 done
