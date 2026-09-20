@@ -43,6 +43,7 @@ Source of truth: `surfaceKindFromParams` / `isToolParams` in `lib/src/components
 | `prespawn_dedupe` | Optional scalar or list of literal key elements with substitutions |
 
 - **Must reject unknown `prespawn_*` fields and unknown substitutions**; unknown ordinary fields produce warnings. `$PROJECT_ROOT` is the declaring directory, `$CWD` the caller's resolved directory, and `$TARGET` the canonical local file input. (rationale)
+- **Must deliver the parsed file's warnings on the untrusted answer and on a built-in open**, not only on an already-trusted lookup — those are the paths a Tool's first run takes.
 - **Must preserve scalar `prespawn_dedupe` as a one-element literal list**, never interpret it as a command to execute. Reserve separate fields for future computed keys. (rationale)
 - **Must reject an empty `prespawn_dedupe` list, and `$TARGET` in a `prespawn_dedupe` whose `run` is a shell-command string** — a string `run` takes no inputs, so there is no target to key on.
 - **Must warn when a repo-local key omits `$PROJECT_ROOT`, or a `$TARGET` run has a key without `$TARGET`.** Allow intentional cross-checkout or cross-file dedupe.
@@ -52,7 +53,7 @@ Source of truth: `surfaceKindFromParams` / `isToolParams` in `lib/src/components
 
 **Must require exactly one existing regular local file when `$TARGET` appears in the run list or dedupe key.** Resolve relative paths against the invocation CWD and follow symlinks to a canonical absolute path before substitution and reuse. Reject URLs, directories, and missing files. Validate run and key inputs before showing approval. Pending approval distinguishes the original arguments and invocation CWD; [Trust](#trust) owns re-resolution and recovery. Input control-character restrictions belong to `docs/specs/security-local.md` → Dor Tool configuration.
 
-Source of truth: `lookupTool` in `lib/src/host/tool-trust.ts`; `parseToolFile` / `resolveDedupeKey` in `lib/src/host/tool-registry.ts`; `resolveToolInput` in `lib/src/host/tool-input.ts`; `readUserToolFile` in `lib/src/host/tool-user-config.ts`; `toolRunCommand` in `lib/src/components/wall/use-dor-control.ts`; `lib/src/host/tool-host.test.ts`, `lib/src/components/Wall.test.tsx`.
+Source of truth: `lookupTool` in `lib/src/host/tool-trust.ts`; `parseToolFile` / `resolveDedupeKey` in `lib/src/host/tool-registry.ts`; `resolveToolInput` in `lib/src/host/tool-input.ts`; `readUserToolFile` in `lib/src/host/tool-user-config.ts`; `toolRunCommand` in `lib/src/components/wall/use-dor-control.ts`; `lib/src/host/tool-host.test.ts`, `lib/src/host/tool-trust.test.ts`, `lib/src/host/tool-open.test.ts`, `lib/src/components/Wall.test.tsx`.
 
 ## Identity and dedupe
 

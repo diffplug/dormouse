@@ -1282,7 +1282,7 @@ export class AgentBrowserSurfaceController {
     if (this.syncConfirmed) this.setSyncEngaged(false);
   }
 
-  // --- relaunch: pop-out / pop-in / bring-to-front + auto-revert ---
+  // --- relaunch: pop-out / pop-in + auto-revert ---
 
   private closeIfSessionMarkedClosed(targetSession: string | null | undefined = this.session): boolean {
     if (!targetSession || !isAgentBrowserSessionClosed(targetSession)) return false;

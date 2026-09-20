@@ -20,10 +20,10 @@ export const isToolKeyScope = (value: unknown): value is ToolKeyScope => value =
 /** Result of resolving a tool name. `ok` carries the rendered dedupe key: the
  *  host owns `$PROJECT_ROOT`, so the webview never sees a template.
  *
- *  Every outcome that parsed a configuration file carries that file's
- *  `warnings`, so a config lint reaches the caller on the path it hits first —
- *  an untrusted repo's `pending` answer — and not only on a later already-
- *  trusted run (`docs/specs/dor-tool.md` -> Declaring tools). */
+ *  The `ok` and `untrusted` arms carry the parsed file's `warnings`, so a
+ *  config lint reaches the caller on the path it hits first — an untrusted
+ *  repo's `pending` answer — and not only on a later already-trusted run
+ *  (`docs/specs/dor-tool.md` -> Declaring tools). */
 export type ToolLookupResult =
   | { status: 'no-file' }
   | { status: 'unknown-tool'; projectRoot: string; path: string; names: string[] }
