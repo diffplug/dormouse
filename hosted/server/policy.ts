@@ -1,7 +1,6 @@
 import type { AuthAppOptions } from "@pgstencil/auth/better-auth";
 import { providerIds } from "./providers.js";
 import type { ProviderId } from "./providers.js";
-import { LOGIN_FRESH_AGE_MS } from "./policy-constants.js";
 
 export const authPolicy = {
   appName: "Dormouse Hosted",

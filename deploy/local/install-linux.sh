@@ -1204,10 +1204,9 @@ cmd_verify() {
   # and nothing else secret (docs/specs/security-remote.md -> "Credentials at
   # rest"). A name, not a value: the installer supplies none of these, so one
   # appearing means a hand-edit or a regression put a credential where any
-  # process that can read the definition can read it. The trailing alternative
-  # is the same name at end of line: `[^_]` alone exempts a bare
-  # `export DORMOUSE_ENROLL_TOKEN` that inherits its value from the
-  # environment, which the Windows `(?!_FILE)` lookahead catches.
+  # process that can read the definition can read it. Extracting names before
+  # filtering exempts exactly DORMOUSE_ENROLL_TOKEN_FILE; a bare token or any
+  # other suffix remains a finding on every platform.
   #
   # `grep -q` exits 2 on a file it cannot open, which is neither a match nor a
   # miss, so both searches report on definition_read rather than green-ticking
@@ -1216,8 +1215,9 @@ cmd_verify() {
   if [ -r "$UNIT_FILE" ] && [ -r "$ROOT/bin/run-relay" ]; then definition_read=1; fi
   if [ "$definition_read" = 0 ]; then
     fail "the unit or bin/run-relay could not be read — it was searched for neither a credential nor the source checkout"
-  elif grep -qE 'DORMOUSE_SETUP_PASSWORD|DORMOUSE_VAPID_PRIVATE_KEY|DORMOUSE_ENROLL_TOKEN[^_]|DORMOUSE_ENROLL_TOKEN$' \
-       "$UNIT_FILE" "$ROOT/bin/run-relay" 2>/dev/null; then
+  elif grep -hEo 'DORMOUSE_SETUP_PASSWORD|DORMOUSE_VAPID_PRIVATE_KEY|DORMOUSE_ENROLL_TOKEN(_[[:alnum:]_]+)?' \
+       "$UNIT_FILE" "$ROOT/bin/run-relay" 2>/dev/null |\
+       grep -qvx 'DORMOUSE_ENROLL_TOKEN_FILE'; then
     fail "the unit or wrapper names a credential — it must carry only paths"
   else
     pass "the service definition names no credential"

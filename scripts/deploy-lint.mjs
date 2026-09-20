@@ -252,20 +252,27 @@ export const RULES = [
     // definition legitimately carries that path.
     //
     // Anchored on the search expression rather than on the message: the
-    // message is prose and the expression is the control. The unix expression
-    // carries the enrollment token twice because `[^_]` needs a character
-    // after the name: without the end-anchored alternative a bare
-    // `export DORMOUSE_ENROLL_TOKEN` passed on both shells while the Windows
-    // lookahead failed it, and a control present in one installer and absent
-    // from another is what this lint exists to catch.
+    // message is prose and the expression is the control. Unix extracts each
+    // known credential name before filtering the one allowed path variable.
     rule: 'Credentials at rest — manage verify searches the service definition for a credential name',
     patterns: {
       macOS:
-        /grep -qE 'DORMOUSE_SETUP_PASSWORD\|DORMOUSE_VAPID_PRIVATE_KEY\|DORMOUSE_ENROLL_TOKEN\[\^_\]\|DORMOUSE_ENROLL_TOKEN\$' \\\n\s*"\$PLIST" "\$ROOT\/bin\/run-relay"/,
+        /grep -hEo 'DORMOUSE_SETUP_PASSWORD\|DORMOUSE_VAPID_PRIVATE_KEY\|DORMOUSE_ENROLL_TOKEN\(_\[\[:alnum:\]_\]\+\)\?'/,
       Linux:
-        /grep -qE 'DORMOUSE_SETUP_PASSWORD\|DORMOUSE_VAPID_PRIVATE_KEY\|DORMOUSE_ENROLL_TOKEN\[\^_\]\|DORMOUSE_ENROLL_TOKEN\$' \\\n\s*"\$UNIT_FILE" "\$ROOT\/bin\/run-relay"/,
+        /grep -hEo 'DORMOUSE_SETUP_PASSWORD\|DORMOUSE_VAPID_PRIVATE_KEY\|DORMOUSE_ENROLL_TOKEN\(_\[\[:alnum:\]_\]\+\)\?'/,
       Windows:
         /\(\("\$taskXml" \+ "`n" \+ \$wrapperText\) -match 'DORMOUSE_SETUP_PASSWORD\|DORMOUSE_VAPID_PRIVATE_KEY\|DORMOUSE_ENROLL_TOKEN\(\?!_FILE\)'\)/,
+    },
+  },
+  {
+    // The service definition legitimately carries DORMOUSE_ENROLL_TOKEN_FILE,
+    // and no other name in that namespace. Pin the exact Unix filter alongside
+    // the equivalent Windows negative lookahead so the platforms cannot drift.
+    rule: 'Credentials at rest — only the enrollment token file name is exempt',
+    patterns: {
+      macOS: /grep -qvx 'DORMOUSE_ENROLL_TOKEN_FILE'/,
+      Linux: /grep -qvx 'DORMOUSE_ENROLL_TOKEN_FILE'/,
+      Windows: /DORMOUSE_ENROLL_TOKEN\(\?!_FILE\)/,
     },
   },
   {
