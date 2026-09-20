@@ -398,7 +398,8 @@ self-contained and version-matched rather than directing its instructions to
 the latest website reference — and **the generator asserts the skill names no
 site URL rather than rewriting one**, which would repair the violation instead
 of reporting it. `buildCli` lifts the intro sections out of these same block
-objects, so a site URL here would reach `/docs/dor` too.
+objects, so a site URL here would reach `/docs/dor` too. Pinned by
+`website/scripts/generate-docs.test.js`.
 
 Generation fails when an introduction heading is missing or ambiguous, or a
 command heading names no anchor in the generated CLI reference.

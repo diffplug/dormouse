@@ -749,27 +749,36 @@ async function buildCli(skill) {
   };
 }
 
-async function buildSkill() {
-  const markdown = await readFile(join(repoRoot, 'dor', 'skill.md'), 'utf8');
-  const parsed = parseMarkdown(markdown, { slug: createSlugger() });
-  // An assertion, not a rewrite: the skill ships inside an installed CLI and
-  // must stay self-contained, so it names no website URL at all
-  // (docs/specs/website-docs.md -> `/docs/agent-skill` guide). Running
-  // `localizeSiteLinks` over it would quietly repair a violation instead of
-  // reporting it — and buildCli lifts these same block objects, so a site URL
-  // here would reach /docs/dor too.
+/**
+ * An assertion, not a rewrite: the skill ships inside an installed CLI and must
+ * stay self-contained, so it names no website URL at all
+ * (docs/specs/website-docs.md -> `/docs/agent-skill` guide). Running
+ * `localizeSiteLinks` over it would quietly repair a violation instead of
+ * reporting it — and buildCli lifts these same block objects, so a site URL
+ * here would reach /docs/dor too.
+ *
+ * Exported so a test can feed it a violating block tree: `dor/skill.md` is
+ * clean, so nothing else ever drives this check red.
+ */
+export function assertNoSiteLinks(blocks, source) {
   const siteLinks = [];
-  visit(parsed.blocks, (node) => {
+  visit(blocks, (node) => {
     if (node.type === 'link' && node.href && node.href.startsWith(`${SITE_ORIGIN}/`)) {
       siteLinks.push(node.href);
     }
   });
   if (siteLinks.length > 0) {
     throw new Error(
-      `dor/skill.md links to ${SITE_ORIGIN}: ${siteLinks.join(', ')} — the bundled skill must ` +
+      `${source} links to ${SITE_ORIGIN}: ${siteLinks.join(', ')} — the bundled skill must ` +
       'stay version-matched to its own CLI rather than pointing at the latest website',
     );
   }
+}
+
+async function buildSkill() {
+  const markdown = await readFile(join(repoRoot, 'dor', 'skill.md'), 'utf8');
+  const parsed = parseMarkdown(markdown, { slug: createSlugger() });
+  assertNoSiteLinks(parsed.blocks, 'dor/skill.md');
   return { source: 'dor/skill.md', blocks: parsed.blocks, headings: parsed.headings };
 }
 
