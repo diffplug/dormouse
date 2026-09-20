@@ -110,6 +110,8 @@ Guarding only completion leaves a stale `start` free to replace the active utter
 
 **Why a presentation mount may replay.** Minimizing and reattaching move the visible cue between a Pane and a Door. Replaying once makes the cue legible in its new location without carrying the CSS animation clock through Activity state; the finite burst still expires without further input.
 
+**Why `SPEAKING` may pulse unbounded and `SPOKEN` may not.** An utterance is seconds long and stops on its own, so the pulse it carries is self-bounding. `SPOKEN` persists until the ring is attended, so animating it would be exactly the per-Session animation with no end that bounding the burst exists to remove.
+
 **Why latches and not notifications.** Counting every ring rule instead would let a Session bell-ing in a loop emit one host→webview update per PTY chunk, each restarting a 3.2s burst that never finishes — the always-running animation the finite burst exists to remove. A latch advances the counter at most once while that track remains latched; after release, relatching is a fresh summons and may replay. That matches the model `deferOrDeliverNotification` already states: an existing ring is enrichment, not a fresh summons. A timestamp floor would bound notifications too, but it would put the CSS duration in the manager.
 
 **Why `cfg.alert.ringingPaused` suppresses the burst.** It is the Chromatic freeze that pins the bell; even a bounded animation could otherwise snapshot at an arbitrary phase during its first 3.2 seconds.

@@ -70,6 +70,9 @@ afterEach(() => {
   vi.restoreAllMocks();
   __resetArchiveServiceForTests();
   clearAllNotepads();
+  // The activity store is Window-global, so a ring or TODO left on a pane id
+  // would wear its alarm overlay in every later test that renders that id.
+  clearTerminalActivity();
 });
 
 const flush = (): Promise<void> => harness.flush();
