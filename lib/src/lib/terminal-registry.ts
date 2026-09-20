@@ -1,6 +1,6 @@
 export type { SessionStatus } from './alert-manager';
 export type { TodoState } from './alert-manager';
-export type { AlertSpeechState } from './alert-speech-state';
+export type { AlertRingState, AlertSpeechState } from './alert-speech-state';
 export type { ActivityState } from './session-activity-store';
 export type { TerminalEntry, TerminalOverlayDims } from './terminal-store';
 export type {

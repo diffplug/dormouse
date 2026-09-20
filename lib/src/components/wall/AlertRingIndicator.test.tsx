@@ -40,9 +40,13 @@ afterEach(() => {
   cfg.alert.ringingPaused = false;
 });
 
-/** The ring layer is the top-level sibling that is not the labelled wash layer. */
+/** Exact class tokens: `animate-alarm-pulse` is a prefix of the burst class. */
+function classes(el: Element | null | undefined): string[] {
+  return el?.className.split(/\s+/).filter(Boolean) ?? [];
+}
+
 function ringLayer(): HTMLElement | null {
-  return container.querySelector<HTMLElement>(':scope > div:not([data-alert-ring-state])');
+  return container.querySelector<HTMLElement>('[data-alert-ring-perimeter]');
 }
 
 function washLayer(): HTMLElement | null {
@@ -71,8 +75,7 @@ describe('AlertRingIndicator', () => {
     expect(wash?.textContent).toBe('');
     expect(washLayer()?.className).toContain('opacity-10');
     expect(ringLayer()?.className).toContain('inset_0_0_0_3px');
-    expect(wash?.className).toContain('animate-alarm-ring-pulse');
-    expect(ringLayer()?.className).toContain('animate-alarm-ring-pulse');
+    expect(classes(ringLayer())).toContain('motion-safe:animate-alarm-pulse-burst');
   });
 
   it('drops the whole treatment when the ring clears', () => {
@@ -88,23 +91,30 @@ describe('AlertRingIndicator', () => {
     const wash = indicator('speaking');
     expect(wash).not.toBeNull();
     expect(wash?.textContent).toContain('SPEAKING');
-    expect(wash?.className).toContain('animate-speech-alarm-pulse');
     expect(wash?.getAttribute('aria-label')).toBe('Terminal is speaking');
     expect(ringLayer()?.className).toContain('inset_0_0_0_5px');
     // The utterance owns the motion; the arrival burst does not stack on it.
-    expect(wash?.className).not.toContain('animate-alarm-ring-pulse');
+    expect(classes(ringLayer())).toContain('motion-safe:animate-alarm-pulse');
+    expect(classes(ringLayer())).not.toContain('motion-safe:animate-alarm-pulse-burst');
   });
 
-  it('keeps a static SPOKEN treatment until the state is cleared', () => {
+  /**
+   * `spoken` lasts until the ring is attended, which is unbounded, so it goes
+   * static and keeps a wash lighter than the speaking one — present enough to
+   * read as an unhandled alarm, light enough not to fight terminal text for that
+   * whole window.
+   */
+  it('keeps a static, lighter SPOKEN treatment until the state is cleared', () => {
     ring();
     act(() => setAlertSpeechState('pty-1', 'spoken'));
 
     const wash = indicator('spoken');
     expect(wash?.textContent).toContain('SPOKEN');
-    expect(wash?.className).not.toContain('animate-speech-alarm-pulse');
-    expect(wash?.className).not.toContain('animate-alarm-ring-pulse');
+    expect(washLayer()?.className).toContain('bg-alarm-vs-terminal');
+    expect(washLayer()?.className).toContain('opacity-10');
+    expect(washLayer()?.className).not.toContain('bg-alarm-vs-terminal/');
     expect(ringLayer()?.className).toContain('inset_0_0_0_3px');
-    expect(ringLayer()?.className).not.toContain('animate-speech-alarm-pulse');
+    expect(classes(ringLayer()).some(c => c.includes('animate-'))).toBe(false);
 
     act(() => clearAllAlertSpeechStates());
     expect(indicator('ringing')).not.toBeNull();
@@ -118,29 +128,28 @@ describe('AlertRingIndicator', () => {
   it('replays the burst for a new episode and not for a re-emit inside one', () => {
     const first: AlertEpisode = { id: 'episode-1', startedAt: Date.now() };
     ring(first);
-    const before = indicator('ringing');
+    const before = ringLayer();
 
     act(() => setTerminalActivity('pty-1', { status: 'ALERT_RINGING', episode: first, todo: true }));
-    expect(indicator('ringing')).toBe(before);
+    expect(ringLayer()).toBe(before);
 
     ring({ id: 'episode-2', startedAt: Date.now() });
-    expect(indicator('ringing')).not.toBe(before);
+    expect(ringLayer()).not.toBe(before);
   });
 
   /** A remount inside an episode starts the CSS clock where the episode did, so a
    *  burst that already expired stays expired. */
   it('runs the burst off the episode clock', () => {
     ring({ id: 'episode-old', startedAt: Date.now() - 60_000 });
-    expect(indicator('ringing')?.style.animationDelay).toMatch(/^-\d+ms$/);
-    expect(Number.parseInt(indicator('ringing')!.style.animationDelay, 10)).toBeLessThan(-59_000);
+    expect(Number.parseInt(ringLayer()!.style.animationDelay, 10)).toBeLessThan(-59_000);
   });
 
-  it('suppresses the burst under the Chromatic freeze', () => {
+  it('suppresses the burst and its dead clock under the Chromatic freeze', () => {
     cfg.alert.ringingPaused = true;
     ring();
 
-    expect(indicator('ringing')?.className).not.toContain('animate-alarm-ring-pulse');
-    expect(ringLayer()?.className).not.toContain('animate-alarm-ring-pulse');
+    expect(classes(ringLayer()).some(c => c.includes('animate-'))).toBe(false);
+    expect(ringLayer()?.style.animationDelay).toBe('');
     // The static treatment survives the freeze.
     expect(ringLayer()?.className).toContain('inset_0_0_0_3px');
   });
@@ -167,21 +176,8 @@ describe('AlertRingIndicator', () => {
     expect(ringLayer()?.className).toContain('z-[25]');
     // The ring tints nothing — it is an inset border, not a fill.
     expect(ringLayer()?.className).not.toContain('bg-alarm-vs-terminal/');
-  });
-
-  /**
-   * `spoken` lasts until the ring is attended, which is unbounded, so its wash
-   * is lighter than the speaking one — present enough to read as an unhandled
-   * alarm, light enough not to fight terminal text for that whole window.
-   */
-  it('keeps a lighter wash for the unbounded SPOKEN window', () => {
-    ring();
-    act(() => setAlertSpeechState('pty-1', 'spoken'));
-
-    expect(washLayer()?.className).toContain('bg-alarm-vs-terminal');
-    expect(washLayer()?.className).toContain('opacity-10');
-    expect(washLayer()?.className).not.toContain('bg-alarm-vs-terminal/');
-    expect(ringLayer()?.className).toContain('inset_0_0_0_3px');
+    // Only the ring animates, so an alarming Pane composites one layer, not two.
+    expect(classes(indicator('speaking')).some(c => c.includes('animate-'))).toBe(false);
   });
 
   it('never intercepts pointer or focus routing', () => {

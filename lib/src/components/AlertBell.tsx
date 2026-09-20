@@ -3,6 +3,7 @@ import { BellIcon } from '@phosphor-icons/react';
 import { clsx } from 'clsx';
 import type { SessionStatus } from '../lib/terminal-registry';
 import { bellIconClass } from './bell-icon-class';
+import { animationClockStyle } from './alert-ring';
 
 /**
  * The status bell for one Session — the only place a `BellIcon` is drawn.
@@ -28,7 +29,7 @@ export function AlertBell({ status, ringSeq, ringStartedAt, size, className }: {
   const watching = status !== 'WATCHING_DISABLED';
   const animation = useMemo(() => ringStartedAt === undefined ? undefined
     : ringStartedAt === null ? { animation: 'none' }
-    : { animationDelay: `${-Math.max(0, Date.now() - ringStartedAt)}ms` }, [ringStartedAt]);
+    : animationClockStyle(ringStartedAt), [ringStartedAt]);
   return (
     <BellIcon
       key={ringSeq}

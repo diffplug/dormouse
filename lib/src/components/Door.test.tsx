@@ -6,6 +6,13 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Door } from './Door';
 
+/** Exact class tokens: `animate-alarm-pulse` is a prefix of the burst class. */
+function classes(el: Element | null | undefined): string[] {
+  return el?.className.split(/\s+/).filter(Boolean) ?? [];
+}
+
+const EPISODE = { id: 'episode-1', startedAt: Date.now() };
+
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
@@ -25,8 +32,7 @@ afterEach(() => {
 describe('Door alarm state', () => {
   it('rings with a static inset ring and no label until the speech sink acts', () => {
     act(() => root.render(
-      <Door title="build-server" status="ALERT_RINGING" ringSeq={1} todo
-        episode={{ id: 'episode-1', startedAt: Date.now() }} />,
+      <Door title="build-server" status="ALERT_RINGING" ringSeq={1} todo episode={EPISODE} />,
     ));
 
     const door = container.querySelector<HTMLElement>('[data-alert-ring-state="ringing"]');
@@ -34,20 +40,32 @@ describe('Door alarm state', () => {
     expect(door?.textContent).not.toContain('SPEAKING');
     expect(door?.getAttribute('aria-label')).toBe('build-server, needs attention');
     // The ring is the treatment, so it carries the bounded arrival burst.
-    const ring = door?.querySelector<HTMLElement>('[data-alert-ring-burst]');
+    const ring = door?.querySelector<HTMLElement>('[data-alert-ring-inset]');
     expect(ring?.className).toContain('inset_0_0_0_2px');
-    expect(ring?.className).toContain('animate-alarm-ring-pulse');
+    expect(classes(ring)).toContain('motion-safe:animate-alarm-pulse-burst');
+  });
+
+  /** A Door that is not ringing has no alarm state, whatever the renderer last
+   *  said about speech. */
+  it('shows no alarm edge for a quiet Session', () => {
+    act(() => root.render(
+      <Door title="build-server" ringSeq={0} speechState="spoken" episode={null} />,
+    ));
+
+    expect(container.querySelector('[data-alert-ring-state]')).toBeNull();
+    expect(container.querySelector('[data-alert-ring-inset]')).toBeNull();
   });
 
   it('inverts and animates the whole Door while its Session is speaking', () => {
     act(() => root.render(
-      <Door title="build-server" status="ALERT_RINGING" ringSeq={1} todo speechState="speaking" />,
+      <Door title="build-server" status="ALERT_RINGING" ringSeq={1} todo speechState="speaking"
+        episode={EPISODE} />,
     ));
 
-    const door = container.querySelector<HTMLButtonElement>('[data-alert-speech-state="speaking"]');
+    const door = container.querySelector<HTMLElement>('[data-alert-ring-state="speaking"]');
     expect(door?.className).toContain('bg-alarm-vs-door');
-    expect(door?.className).toContain('animate-speech-alarm-pulse');
-    expect(door?.className).not.toContain('animate-alarm-ring-pulse');
+    expect(classes(door)).toContain('motion-safe:animate-alarm-pulse');
+    expect(container.querySelector('[data-alert-ring-inset]')).toBeNull();
     expect(door?.textContent).toContain('SPEAKING');
     expect(door?.textContent).not.toContain('TODO');
     expect(door?.getAttribute('aria-label')).toBe('build-server, speaking');
@@ -55,12 +73,14 @@ describe('Door alarm state', () => {
 
   it('marks SPOKEN with a static inset ring rather than motion', () => {
     act(() => root.render(
-      <Door title="build-server" status="ALERT_RINGING" ringSeq={1} speechState="spoken" />,
+      <Door title="build-server" status="ALERT_RINGING" ringSeq={1} speechState="spoken"
+        episode={EPISODE} />,
     ));
 
-    const door = container.querySelector<HTMLButtonElement>('[data-alert-speech-state="spoken"]');
-    expect(door?.className).toContain('inset_0_0_0_2px');
-    expect(door?.className).not.toContain('animate-speech-alarm-pulse');
+    const door = container.querySelector<HTMLElement>('[data-alert-ring-state="spoken"]');
+    const ring = door?.querySelector<HTMLElement>('[data-alert-ring-inset]');
+    expect(ring?.className).toContain('inset_0_0_0_2px');
+    expect(classes(ring).some(c => c.includes('animate-'))).toBe(false);
     expect(door?.getAttribute('aria-label')).toBe('build-server, spoken');
   });
 
@@ -72,10 +92,11 @@ describe('Door alarm state', () => {
    */
   it('keeps the bell and TODO pill visible while SPOKEN persists', () => {
     act(() => root.render(
-      <Door title="build-server" status="ALERT_RINGING" ringSeq={1} todo speechState="spoken" />,
+      <Door title="build-server" status="ALERT_RINGING" ringSeq={1} todo speechState="spoken"
+        episode={EPISODE} />,
     ));
 
-    const door = container.querySelector<HTMLButtonElement>('[data-alert-speech-state="spoken"]');
+    const door = container.querySelector<HTMLElement>('[data-alert-ring-state="spoken"]');
     expect(door?.querySelector('.todo-pill-shell')).not.toBeNull();
     // Speaker icon + bell icon, both alongside the pill.
     expect(door?.querySelectorAll('svg').length).toBe(2);
@@ -91,6 +112,7 @@ describe('Door notepad button', () => {
         doorId="pane-a"
         title="build-server"
         ringSeq={0}
+        episode={null}
         onClick={onClick}
         onOpenNotepad={onOpenNotepad}
         {...props}
@@ -153,7 +175,7 @@ describe('Door notepad button', () => {
 describe('Door unsaved changes', () => {
   it.each(['speaking', 'spoken'] as const)('keeps the dirty dot beside notes and %s state', speechState => {
     act(() => root.render(<Door doorId="dirty" title="Editor" ringSeq={1} toolDirty
-      speechState={speechState} noteCount={2} todo status="ALERT_RINGING" />));
+      speechState={speechState} noteCount={2} todo status="ALERT_RINGING" episode={EPISODE} />));
     const door = container.querySelector('[data-door-id="dirty"]')!;
     expect(door.querySelector('[role="img"][aria-label="Unsaved changes"]')).not.toBeNull();
     expect(door.querySelector('[data-door-notepad-for="dirty"]')).not.toBeNull();

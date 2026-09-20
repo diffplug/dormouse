@@ -9,13 +9,11 @@ import { useTodoPillContent } from './TodoPillBody';
 import { AlertBell } from './AlertBell';
 import { notepadLabel } from './use-notepad';
 import type { AlertEpisode } from '../lib/alert-episode';
+import { ALERT_RING_LABEL, alarmPulseClass, alertRingRow, useAlertRingBurst } from './alert-ring';
 import {
   ALERT_SPEECH_TRACKING_CLASS,
-  alertRingBurstClass,
-  alertRingBurstStyle,
-  alertSpeakingAnimationClass,
+  DOOR_ALARM_INSET_CLASS,
   DOOR_TAB_CLASS,
-  TERMINAL_TOP_RADIUS_CLASS,
   TODO_PILL_TRACKING_CLASS,
 } from './design';
 
@@ -29,13 +27,14 @@ export interface DoorProps {
   /** Set only for a Tool whose last report says it has unsaved changes. */
   toolDirty?: boolean;
   status?: SessionStatus;
-  /** `ActivityState.ringSeq`; a change replays the ringing burst. */
+  /** `ActivityState.ringSeq`; a change replays the bell's ringing burst. Dies
+   *  with the bell in the next PR. */
   ringSeq: number;
   todo?: TodoState;
   speechState?: AlertSpeechState;
   /** `ActivityState.episode` — the Session's current ringing interval. A new one
-   *  replays the ring's arrival burst; `null` while the Session is quiet. */
-  episode?: AlertEpisode | null;
+   *  replays the alarm ring's arrival burst; `null` while the Session is quiet. */
+  episode: AlertEpisode | null;
   /** Live notes on the minimized Surface. Above zero the Door grows its second
    *  button; a Door with no notes needs none (`docs/specs/notepad.md`). The
    *  Baseboard reports zero on a host that has no notepad at all. */
@@ -74,17 +73,18 @@ export function Door({
   onOpenNotepad,
 }: DoorProps) {
   const showBell = status !== 'WATCHING_DISABLED';
-  const alertRinging = status === 'ALERT_RINGING';
+  const row = alertRingRow(status, speechState);
+  const burst = useAlertRingBurst(row, episode);
   const todoPill = useTodoPillContent(todo);
-  const speaking = speechState === 'speaking';
-  const spoken = speechState === 'spoken';
-  // A latched ring the speech sink has not touched: the perimeter ring is the
-  // whole treatment, so the burst pulses that rather than the Door.
-  const ringingOnly = alertRinging && !speechState;
+  const speaking = row === 'speaking';
+  const spoken = row === 'spoken';
+  // Unlabelled or `SPOKEN`, the alarm edge is one inset ring; only the unlabelled
+  // row moves, and the burst rides that same element.
+  const insetRing = row === 'ringing' || spoken;
   const detail = browserDisplay ? BROWSER_DISPLAY_LABEL[browserDisplay] : undefined;
   const extras = [
     detail,
-    speechState ?? (alertRinging ? 'needs attention' : undefined),
+    row ? ALERT_RING_LABEL[row].door : undefined,
     toolDirty && 'Unsaved changes',
   ].filter(Boolean);
   const nameParts = [title, ...extras];
@@ -110,15 +110,17 @@ export function Door({
       className={clsx(
         DOOR_TAB_CLASS,
         speaking
-          ? clsx('bg-alarm-vs-door text-door-bg', alertSpeakingAnimationClass())
+          ? clsx('bg-alarm-vs-door text-door-bg', alarmPulseClass(false))
           : 'bg-door-bg text-door-fg',
-        spoken && 'shadow-[inset_0_0_0_2px_var(--color-alarm-vs-door)]',
       )}
       onPointerDown={onPointerDown}
       title={nameParts.join(' — ')}
       aria-label={extras.length ? nameParts.join(', ') : undefined}
-      data-alert-speech-state={speechState}
-      data-alert-ring-state={speechState ?? (alertRinging ? 'ringing' : undefined)}
+      data-alert-ring-state={row ?? undefined}
+      // Never key this element: Baseboard caches it by `data-door-id` in a
+      // layout effect that re-runs only on item/window changes, so replacing it
+      // leaves the fitting pass measuring a detached node. Anything that must
+      // remount per episode goes on the alarm ring below.
     >
       <button
         type="button"
@@ -154,7 +156,7 @@ export function Door({
               </span>
             )}
             {showBell && (
-              <span className={alertRinging ? 'text-alarm-vs-door' : ''}>
+              <span className={row ? 'text-alarm-vs-door' : ''}>
                 <AlertBell status={status} ringSeq={ringSeq} size={11} />
               </span>
             )}
@@ -179,18 +181,13 @@ export function Door({
           <NotepadIcon size={12} weight="fill" />
         </button>
       )}
-      {ringingOnly && (
+      {insetRing && (
         <span
-          key={episode?.id}
-          data-alert-ring-burst
+          key={burst?.key}
+          data-alert-ring-inset
           aria-hidden
-          style={alertRingBurstStyle(episode)}
-          className={clsx(
-            'pointer-events-none absolute inset-0',
-            TERMINAL_TOP_RADIUS_CLASS,
-            'shadow-[inset_0_0_0_2px_var(--color-alarm-vs-door)]',
-            alertRingBurstClass(),
-          )}
+          style={burst?.style}
+          className={clsx(DOOR_ALARM_INSET_CLASS, burst?.className)}
         />
       )}
     </div>

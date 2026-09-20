@@ -61,6 +61,9 @@ const meta: Meta<typeof DoorStory> = {
     title: 'build-server',
     status: 'WATCHING_DISABLED',
     ringSeq: 0,
+    // Stories draw the static treatment; the arrival burst is frozen out by
+    // `cfg.alert.ringingPaused` under Chromatic anyway.
+    episode: null,
     todo: false,
     width: 260,
     reducedMotion: false,
@@ -114,5 +117,6 @@ export const NotepadPopover: StoryObj<typeof NotedDoorStory> = {
 
 
 export const DirtyTool: Story = {
-  args: { title: 'Editor', toolDirty: true, noteCount: 2, speechState: 'spoken' },
+  // `spoken` only exists over a latched ring (`docs/specs/alert.md` -> Pane Header).
+  args: { title: 'Editor', toolDirty: true, noteCount: 2, speechState: 'spoken', status: 'ALERT_RINGING' },
 };

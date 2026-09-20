@@ -5,8 +5,6 @@ import { forwardRef, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom';
 import type { ButtonHTMLAttributes, ComponentProps, CSSProperties, HTMLAttributes, InputHTMLAttributes, ReactNode, RefObject } from 'react';
 import { stepFocus } from './focus-step';
-import { cfg } from '../cfg';
-import type { AlertEpisode } from '../lib/alert-episode';
 import { OVERLAY_VIEWPORT_MARGIN_PX } from '../lib/ui-geometry';
 
 // App-wide type scale, color strategy, and chrome conventions: see
@@ -31,6 +29,15 @@ export const TERMINAL_SELECTION_BORDER_RADIUS = `${TERMINAL_BORDER_RADIUS_REM}re
 /** Shared shape, size bounds, and type for Baseboard Doors and Workspace tabs. */
 export const DOOR_TAB_CLASS = clsx(
   'relative flex h-6 max-w-[220px] min-w-[68px] items-center overflow-hidden text-sm font-medium font-mono',
+  TERMINAL_TOP_RADIUS_CLASS,
+);
+
+/** The Door's alarm ring, painted by one overlay child so the ringing and
+ *  `SPOKEN` rows draw the same edge. It repeats the Door's radius because the
+ *  parent's `overflow-hidden` clip would otherwise notch a square ring's
+ *  corners away. */
+export const DOOR_ALARM_INSET_CLASS = clsx(
+  'pointer-events-none absolute inset-0 shadow-[inset_0_0_0_2px_var(--color-alarm-vs-door)]',
   TERMINAL_TOP_RADIUS_CLASS,
 );
 
@@ -100,37 +107,9 @@ export const HEADER_PALETTE_TRANSITION_CLASS =
 // tiny label legible. Shared so both pill sites stay in sync.
 export const TODO_PILL_TRACKING_CLASS = 'tracking-[0.08em]';
 
-// The alarm treatment is intentionally louder than resting chrome.
-// `--color-alarm-vs-terminal` is the dynamic black/white contrast pick for the
-// terminal body behind the overlay; this is the tracking for its `SPEAKING` /
-// `SPOKEN` labels.
+// Letter-spacing for the alarm overlay's `SPEAKING` / `SPOKEN` labels — wider
+// tracking keeps the small all-caps label legible over the wash.
 export const ALERT_SPEECH_TRACKING_CLASS = 'tracking-[0.12em]';
-
-/**
- * The pulse worn by a Session the renderer is currently speaking.
- *
- * Both alarm animations need the `cfg.alert.ringingPaused` freeze: an animation
- * otherwise snapshots at whatever phase the Chromatic runner lands on, so every
- * build diffs against itself. `motion-safe:` alone covers reduced motion; a
- * `motion-reduce:` counterpart would be dead, since the animation is never
- * emitted there to override.
- */
-export function alertSpeakingAnimationClass(): string {
-  return cfg.alert.ringingPaused ? '' : 'motion-safe:animate-speech-alarm-pulse';
-}
-
-/** The unlabelled ringing treatment's arrival burst — bounded, unlike the
- *  speaking pulse (`docs/specs/alert.md` -> Pane Header). */
-export function alertRingBurstClass(): string {
-  return cfg.alert.ringingPaused ? '' : 'motion-safe:animate-alarm-ring-pulse';
-}
-
-/** Runs the burst off the episode's own clock, so an element remounted mid-episode
- *  lands past a burst that already finished instead of replaying it. */
-export function alertRingBurstStyle(episode: AlertEpisode | null | undefined): CSSProperties | undefined {
-  if (!episode) return undefined;
-  return { animationDelay: `${-Math.max(0, Date.now() - episode.startedAt)}ms` };
-}
 
 // Chrome for small anchored popovers (title candidates, TODO preview, pane
 // context menu, rename warning). Text size and padding vary per popover and
