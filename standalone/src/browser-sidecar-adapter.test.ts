@@ -191,7 +191,9 @@ describe("BrowserSidecarAdapter terminal stream", () => {
     expect(setWatched).toHaveBeenCalledWith(["cargo", "make"]);
     expect(names).toEqual([["cargo", "make"]]);
 
-    const canonical: AlertSettings = { ...DEFAULT_ALERT_SETTINGS, deferAlertsUntilQuiet: true };
+    // Not the default blob, so the assertion still distinguishes "forwarded what
+    // it was handed" from "emitted DEFAULT_ALERT_SETTINGS".
+    const canonical: AlertSettings = { ...DEFAULT_ALERT_SETTINGS, deferAlertsUntilQuiet: false };
     deliver("alert:settings", { settings: canonical });
     expect(applySettings).toHaveBeenCalledWith(canonical);
     expect(settings).toEqual([canonical]);
