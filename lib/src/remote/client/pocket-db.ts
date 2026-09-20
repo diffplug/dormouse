@@ -136,6 +136,12 @@ export async function probePocketKeyStorage(mode: PocketKeyStorageMode = 'native
   }
 }
 
+/**
+ * The one probe this page runs, shared by every caller that arrives while it is
+ * in flight. Memory only and per page: a success is evidence about this runtime
+ * now, not something to carry across an app restart, and a failure is never
+ * retained at all — the next attempt re-probes.
+ */
 let storageProbe: Promise<PocketKeyStorageMode> | undefined;
 
 /** A storage/key failure invalidates compatibility evidence for this page. */
@@ -161,6 +167,14 @@ export async function requirePocketKeyStorage(): Promise<void> {
   if (storageProbe !== pending) throw new Error(POCKET_KEY_STORAGE_ERROR);
 }
 
+/**
+ * Native first, encrypted only where native fails: the encrypted format exists
+ * for WebKit's broken X25519 key storage, not as a preference. Each attempt
+ * probes on fresh disposable keys in Pocket's own record shape, so a format is
+ * selected only once it has survived a reopen and identical key agreement; both
+ * failing leaves the caller with a compatibility error and the pairing records
+ * untouched.
+ */
 async function selectKeyStorage(): Promise<PocketKeyStorageMode> {
   try {
     await probePocketKeyStorage('native');
@@ -211,8 +225,9 @@ export interface KnownBurrowV1 {
   readonly accountId: string;
   /**
    * What to call this machine. The Burrow's own label, as it arrived inside the
-   * encrypted pairing outcome — never the Relay's copy, which a Client is not
-   * told and which stops existing in stage 4c.
+   * encrypted pairing outcome. The Relay keeps no label for a Burrow at all —
+   * `burrows.json` rows are `{burrowId, burrowToken, enrolledAt}`
+   * (`docs/specs/relay.md` -> "State files").
    */
   readonly label: string;
   /** The pinned Burrow Noise static, base64url. A change is a terminal error. */
