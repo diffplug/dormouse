@@ -587,8 +587,8 @@ export class TutRunner implements InteractiveProgram {
     this.cleanup(true);
   }
 
-  /** Spans the whole fake command, not just the countdown, so the page needs no
-   *  second guard: a replay cannot arrive while its pump or exit timer is live. */
+  /** Spans the whole fake command, not just the countdown, so a replay anywhere
+   *  inside it is ignored. Per instance — the page cancels across runners. */
   private busyDemoInProgress(): boolean {
     if (this.busyDemoStart === null) return false;
     return Date.now() - this.busyDemoStart < this.busyDemoCommandMs;

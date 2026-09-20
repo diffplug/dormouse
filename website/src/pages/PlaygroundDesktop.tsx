@@ -102,7 +102,7 @@ function PlaygroundDesktopExperience() {
   const spawnUnsubRef = useRef<(() => void) | null>(null);
   const busyDemoDisposeRef = useRef<(() => void) | null>(null);
   const busyDemoFinishTimerRef = useRef<number | null>(null);
-  const demoTimersRef = useRef<number[]>([]);
+  const commandExitDemoFinishTimerRef = useRef<number | null>(null);
 
   const handleOpenGithub = useCallback(() => {
     window.open(
@@ -230,13 +230,15 @@ function PlaygroundDesktopExperience() {
               // An unwatched command, so the command-exit track owns the ring:
               // the user attends the pane, leaves, and the exit rings.
               onTriggerCommandExitDemo: (durationMs) => {
+                if (commandExitDemoFinishTimerRef.current !== null) {
+                  window.clearTimeout(commandExitDemoFinishTimerRef.current);
+                }
                 startFakeCommand(adapter, PANE_SPLASH, "slowbuild");
-                demoTimersRef.current.push(
-                  window.setTimeout(() => {
-                    finishFakeCommand(adapter, PANE_SPLASH);
-                    shellRegistryRef.current?.ensureShell(PANE_SPLASH).reportRunningCommand();
-                  }, durationMs),
-                );
+                commandExitDemoFinishTimerRef.current = window.setTimeout(() => {
+                  commandExitDemoFinishTimerRef.current = null;
+                  finishFakeCommand(adapter, PANE_SPLASH);
+                  shellRegistryRef.current?.ensureShell(PANE_SPLASH).reportRunningCommand();
+                }, durationMs);
               },
               onTogglePlaceToPaste: () => setPlaceToPasteOpen((open) => !open),
               onOpenGithub: handleOpenGithub,
@@ -297,8 +299,10 @@ function PlaygroundDesktopExperience() {
         window.clearTimeout(busyDemoFinishTimerRef.current);
         busyDemoFinishTimerRef.current = null;
       }
-      for (const timer of demoTimersRef.current) window.clearTimeout(timer);
-      demoTimersRef.current = [];
+      if (commandExitDemoFinishTimerRef.current !== null) {
+        window.clearTimeout(commandExitDemoFinishTimerRef.current);
+        commandExitDemoFinishTimerRef.current = null;
+      }
     };
   }, [handleOpenGithub, handleOpenPocket, tryAutoStart]);
 
