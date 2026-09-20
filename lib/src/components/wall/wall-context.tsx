@@ -3,7 +3,7 @@ import type { PortMode } from './TerminalContextView';
 import type { PortUrlEntry } from './port-url';
 import { createContext, useContext, useEffect, type RefObject } from 'react';
 import type { RingFrame } from '../../lib/rect-tween';
-import type { AlertButtonActionResult, SessionStatus, SetTerminalUserTitleResult } from '../../lib/terminal-registry';
+import type { SetTerminalUserTitleResult } from '../../lib/terminal-registry';
 import type { WallMode } from './wall-types';
 import type { RenderMode } from './agent-browser-screen';
 
@@ -41,7 +41,9 @@ export const DoorElementsContext = createContext<PaneElementsState>({
 export interface WallActions {
   onKill: (id: string) => void;
   onMinimize: (id: string) => void;
-  onAlertButton: (id: string, displayedStatus: SessionStatus) => AlertButtonActionResult;
+  /** Dismiss a ringing Session. The caller then opens the terminal context
+   *  (`docs/specs/alert.md` -> Pane Header). */
+  onAlertButton: (id: string) => void;
   onToggleTodo: (id: string) => void;
   onSplitH: (id: string | null, source?: 'keyboard' | 'mouse') => void;
   onSplitV: (id: string | null, source?: 'keyboard' | 'mouse') => void;
@@ -74,7 +76,7 @@ export interface WallActions {
 export const WallActionsContext = createContext<WallActions>({
   onKill: () => {},
   onMinimize: () => {},
-  onAlertButton: () => 'noop',
+  onAlertButton: () => {},
   onToggleTodo: () => {},
   onSplitH: () => {},
   onSplitV: () => {},

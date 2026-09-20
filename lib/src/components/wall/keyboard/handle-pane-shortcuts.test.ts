@@ -9,14 +9,12 @@ import { useWallKeyboard } from '../use-wall-keyboard';
 import type { WallKeyboardCtx } from './types';
 
 const terminalRegistryMocks = vi.hoisted(() => ({
-  dismissOrToggleAlert: vi.fn(),
-  getActivity: vi.fn(() => ({ status: 'WATCHING_DISABLED' })),
+  dismissSessionAlert: vi.fn(),
   toggleSessionTodo: vi.fn(),
 }));
 
 vi.mock('../../../lib/terminal-registry', () => ({
-  dismissOrToggleAlert: terminalRegistryMocks.dismissOrToggleAlert,
-  getActivity: terminalRegistryMocks.getActivity,
+  dismissSessionAlert: terminalRegistryMocks.dismissSessionAlert,
   toggleSessionTodo: terminalRegistryMocks.toggleSessionTodo,
 }));
 

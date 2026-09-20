@@ -11,12 +11,11 @@ import {
  * The app-global WATCHING rule set, with a remove control per rule
  * (`docs/specs/alert.md` -> WATCHING Track).
  *
- * Rendered by both the bell popover and the Alarm settings dialog — the two
- * places a rule set on a since-closed Pane can be found and removed. It is one
- * list shown twice, so it lives here rather than in either dialog.
+ * Rendered only by the Alarm settings dialog — the one place a rule set on a
+ * since-closed Pane can be found and removed.
  *
  * Rules are removable but not addable: WATCHING is keyed on a running command's
- * name, so creating one stays a bell click in the tab running it.
+ * name, so creating one stays the terminal context of a Pane running it.
  */
 export function WatchedCommandList() {
   const watched = useSyncExternalStore(subscribeToWatchedCommands, getWatchedCommandsSnapshot);

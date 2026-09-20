@@ -64,9 +64,9 @@ exports[`TutRunner snapshots > renders the alert section with all items incomple
   [2m[36mEsc[39m to go back[0m
 
    [33m●[0m  [1mAlert me whenever [36mlongtask[39m runs[0m
-        [3mPress [36ms[39m to start a fake [36mlongtask[39m, then click that pane's bell (or select[0m
-        [3mit and press [36ma[39m). Alerts belong to the command, not the tab — the bell[0m
-        [3msays "Alert on all longtask".[0m
+        [3mPress [36ms[39m to start a fake [36mlongtask[39m, then right-click that pane's header[0m
+        [3m(or select it and press [36ma[39m) and turn on "Watch all longtask commands".[0m
+        [3mAlerts belong to the command, not the tab.[0m
    [2m·[0m  The rule covers every pane running that command
    [2m·[0m  The bell tilts while the command works
    [2m·[0m  It rings when the command goes quiet

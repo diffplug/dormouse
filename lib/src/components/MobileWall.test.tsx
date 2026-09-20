@@ -11,7 +11,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const registry = vi.hoisted(() => ({
   activitySnapshot: new Map(),
   clearSessionTodo: vi.fn(),
-  dismissOrToggleAlert: vi.fn(),
+  dismissSessionAlert: vi.fn(),
   disposeSession: vi.fn(),
   getActivitySnapshot: vi.fn(),
   getOrCreateTerminal: vi.fn(),

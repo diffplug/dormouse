@@ -12,7 +12,7 @@ import type { MobileTerminalSessionItem } from './MobileTerminalUi';
 import {
   clearSessionTodo,
   DEFAULT_ACTIVITY_STATE,
-  dismissOrToggleAlert,
+  dismissSessionAlert,
   disposeSession,
   getActivitySnapshot,
   getOrCreateTerminal,
@@ -48,16 +48,10 @@ export interface MobileWallProps {
 
 const DEFAULT_MOBILE_SESSION: MobileWallSession = { id: 'mobile-pane' };
 
-const ALERT_BUTTON_LABELS: Record<SessionStatus, { aria: string; tooltip: string }> = {
-  WATCHING_DISABLED: { aria: 'Enable watching', tooltip: 'Enable watching' },
-  NOTHING_TO_SHOW: { aria: 'Disable watching', tooltip: 'Disable watching' },
-  MIGHT_BE_BUSY: { aria: 'Disable watching', tooltip: 'Disable watching' },
-  BUSY: { aria: 'Disable watching', tooltip: 'Disable watching' },
-  MIGHT_NEED_ATTENTION: { aria: 'Disable watching', tooltip: 'Disable watching' },
-  ALERT_RINGING: { aria: 'Alert ringing', tooltip: 'Alert ringing' },
-  OSC_NOTIF_BUSY: { aria: 'Progress active', tooltip: 'Progress active' },
-  COMMAND_EXIT_ARMED: { aria: 'Command running', tooltip: 'Command running' },
-};
+// Mobile has no terminal context, so dismissing a ring is the button's whole
+// action; it never edits a rule (`docs/specs/alert.md` -> Pane Header).
+const alertButtonLabelFor = (status: SessionStatus): string =>
+  status === 'ALERT_RINGING' ? 'Dismiss alert' : 'Alert status';
 
 export function useMobileWallSessionItems(
   sessions: MobileWallSession[],
@@ -185,7 +179,7 @@ function MobileWallHeader({
 }) {
   const status = session.status ?? 'WATCHING_DISABLED';
   const todoPill = useTodoPillContent(session.todo === true);
-  const alertButtonLabels = ALERT_BUTTON_LABELS[status];
+  const alertButtonLabel = alertButtonLabelFor(status);
   const showTodoPill = todoPill.visible;
 
   return (
@@ -197,9 +191,9 @@ function MobileWallHeader({
             'flex h-5 min-w-5 items-center justify-center rounded transition-colors shrink-0 hover:bg-current/10',
             status === 'ALERT_RINGING' ? 'text-alarm-vs-header-active' : '',
           ].join(' ')}
-          onClick={() => dismissOrToggleAlert(session.id, status)}
-          ariaLabel={alertButtonLabels.aria}
-          tooltip={alertButtonLabels.tooltip}
+          onClick={() => dismissSessionAlert(session.id)}
+          ariaLabel={alertButtonLabel}
+          tooltip={alertButtonLabel}
           tooltipAlign="left"
           dataAlertButtonFor={session.id}
         >

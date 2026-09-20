@@ -1,26 +1,13 @@
 import { createAlertEpisode } from './alert-episode';
-import type { AlertState, SessionStatus } from './alert-manager';
+import type { AlertState } from './alert-manager';
 import type { AlertStateDetail } from './platform/types';
 import { applyAlertSettingsFromHost, publishAlertSettings } from './alert-settings';
 import { toPersistedAlertState, type PersistedAlertState, type PersistedPane } from './session-types';
 import { getPlatform } from './platform';
-import { getRunningCommandArgv0 } from './terminal-state-store';
-import {
-  applyWatchedCommandsFromHost,
-  isCommandWatched,
-  publishWatchedCommands,
-  setCommandWatched,
-} from './watched-commands';
+import { applyWatchedCommandsFromHost, publishWatchedCommands } from './watched-commands';
 import { registry } from './terminal-store';
 
-/**
- * What the bell click resolved to, so the caller knows whether to open the
- * alert dialog. `no-command` means the pane is at a prompt: WATCHING is keyed
- * on the running command, so there is nothing to enable.
- */
-export type AlertButtonActionResult = 'enabled' | 'disabled' | 'dismissed' | 'menu' | 'no-command' | 'noop';
-
-export type ActivityState = Omit<AlertState, 'attentionDismissedRing'>;
+export type ActivityState = AlertState;
 
 export const DEFAULT_ACTIVITY_STATE: ActivityState = {
   status: 'WATCHING_DISABLED',
@@ -35,8 +22,7 @@ const activityListeners = new Set<(changedId?: string) => void>();
 let cachedSnapshot: Map<string, ActivityState> | null = null;
 
 // Terminal activity keeps the same home before and after xterm initialization.
-// The dismissal flag belongs to the bell action, not the public UI snapshot.
-const terminalActivity = new Map<string, { state: ActivityState; attentionDismissedRing: boolean }>();
+const terminalActivity = new Map<string, ActivityState>();
 
 // Browser surfaces have no host alert stream. Keep their TODO separate so a
 // terminal taking the same id starts from its own activity, and clearing
@@ -76,7 +62,7 @@ export function getActivity(id: string): ActivityState {
 }
 
 function readActivity(id: string): ActivityState | null {
-  return terminalActivity.get(id)?.state
+  return terminalActivity.get(id)
     ?? (registry.has(id) ? DEFAULT_ACTIVITY_STATE : localSurfaceActivity.get(id) ?? null);
 }
 
@@ -86,17 +72,13 @@ export function getLivePersistedAlertState(id: string): PersistedAlertState | nu
 
 /** Install a host snapshot, including one received before xterm initialization. */
 export function setTerminalActivity(id: string, state: Partial<AlertState>): void {
-  const { attentionDismissedRing = false, ...activity } = state;
-  const previous = terminalActivity.get(id)?.state;
+  const previous = terminalActivity.get(id);
   // Older hosts and local fixtures have no episode field. Hydrate their status
   // edges here; consumers still seed first-observed rings without delivery.
   const episode = state.status === 'ALERT_RINGING'
     ? state.episode ?? (previous?.status === 'ALERT_RINGING' ? previous.episode : null) ?? createAlertEpisode()
     : null;
-  terminalActivity.set(id, {
-    state: { ...DEFAULT_ACTIVITY_STATE, ...activity, episode },
-    attentionDismissedRing,
-  });
+  terminalActivity.set(id, { ...DEFAULT_ACTIVITY_STATE, ...state, episode });
   notifyActivityListeners(id);
 }
 
@@ -168,53 +150,8 @@ export function initAlertStateReceiver(): void {
   publishAlertSettings();
 }
 
-/**
- * The bell-button transition table (`docs/specs/alert.md` -> UI Contract). This
- * is the only copy: WATCHING is a rule keyed on the foreground command's name,
- * so enabling and disabling both resolve to a rule-set edit, and the manager
- * learns about it through a command-level mutation like any other rule change.
- */
-export function dismissOrToggleAlert(id: string, displayedStatus: SessionStatus): AlertButtonActionResult {
-  if (displayedStatus === 'ALERT_RINGING') {
-    dismissSessionAlert(id);
-    return 'dismissed';
-  }
-
-  // An attention-based dismissal leaves a flag behind so this next click opens
-  // the dialog rather than silently editing a rule.
-  if (terminalActivity.get(id)?.attentionDismissedRing) {
-    dismissSessionAlert(id);
-    return 'dismissed';
-  }
-
-  // Everything else is "turn the rule for the running command on or off".
-  const argv0 = getRunningCommandArgv0(id);
-  if (!argv0) return 'no-command';
-
-  if (isCommandWatched(argv0)) {
-    setCommandWatched(argv0, false);
-    return 'disabled';
-  }
-
-  // A protocol/command-exit alarm needs no rule, so clicking through one would
-  // enable WATCHING by surprise. Show the detail dialog instead.
-  if (displayedStatus === 'OSC_NOTIF_BUSY' || displayedStatus === 'COMMAND_EXIT_ARMED') return 'menu';
-
-  setCommandWatched(argv0, true);
-  return 'enabled';
-}
-
-/** Turn the rule for whatever `id` is running on/off; no-op at a prompt. */
-export function toggleSessionAlert(id: string): void {
-  const argv0 = getRunningCommandArgv0(id);
-  if (argv0) setCommandWatched(argv0, !isCommandWatched(argv0));
-}
-
-export function disableSessionAlert(id: string): void {
-  const argv0 = getRunningCommandArgv0(id);
-  if (argv0) setCommandWatched(argv0, false);
-}
-
+/** The whole of the alert action: a ring goes quiet (leaving its TODO) and the
+ *  caller opens the terminal context (`docs/specs/alert.md` -> Pane Header). */
 export function dismissSessionAlert(id: string): void {
   getPlatform().alertDismiss(id);
 }

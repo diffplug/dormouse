@@ -159,8 +159,6 @@ export interface AlertState {
   watchingEnabled: boolean;
   todo: TodoState;
   notification: ActivityNotification | null;
-  /** Used by the bell transition table to detect a post-attention dismiss */
-  attentionDismissedRing: boolean;
   /** At least one `dor await` is parked on this Session. Never persisted. */
   awaited: boolean;
   /**
@@ -176,7 +174,6 @@ export const DEFAULT_ALERT_STATE: AlertState = {
   watchingEnabled: false,
   todo: false,
   notification: null,
-  attentionDismissedRing: false,
   awaited: false,
   ringSeq: 0,
 };
@@ -206,7 +203,6 @@ interface AlertEntry {
   pendingCommandLine: string | null;
   todo: TodoState;
   notification: ActivityNotification | null;
-  attentionDismissedRing: boolean;
   /** Latest terminal notification deferred behind animation; never public or persisted. */
   deferredNotification: ActivityNotification | null;
   deferredNotificationTimer: ReturnType<typeof setTimeout> | null;
@@ -600,8 +596,8 @@ export class AlertManager {
 
   /**
    * Consume the ring an await arriving right now would resolve on, if any.
-   * Only that track's latch is released: TODO, its notification detail, and
-   * `attentionDismissedRing` are the human's and stay untouched.
+   * Only that track's latch is released: TODO and its notification detail are
+   * the human's and stay untouched.
    *
    * Two of the three are gated, because their latches outlive the fact they
    * describe.
@@ -1062,10 +1058,7 @@ export class AlertManager {
     const entry = this.getOrCreateEntry(id);
     this.setAttention(id);
 
-    if (this.clearAllRingsIfActive(entry)) {
-      entry.attentionDismissedRing = true;
-      entry.todo = true;
-    }
+    if (this.clearAllRingsIfActive(entry)) entry.todo = true;
     this.markCommandExitSeen(entry);
     this.notify(id);
   }
@@ -1087,14 +1080,11 @@ export class AlertManager {
     const entry = this.entries.get(id);
     if (!entry) return;
 
-    const dismissed = this.clearAllRingsIfActive(entry);
-    if (dismissed) entry.todo = true;
-    // The flag exists so the next bell click opens the dialog instead of
-    // silently changing a rule; an explicit dismiss *is* that next click.
-    const hadFlag = entry.attentionDismissedRing;
-    entry.attentionDismissedRing = false;
-
-    if (dismissed || hadFlag) this.notify(id);
+    // Dismissing a ring leaves the TODO behind, so the summons is not lost; on a
+    // Session with nothing ringing there is nothing to do.
+    if (!this.clearAllRingsIfActive(entry)) return;
+    entry.todo = true;
+    this.notify(id);
   }
 
   // --- Todo controls ---
@@ -1138,7 +1128,6 @@ export class AlertManager {
       watchingEnabled: this.isWatching(entry),
       todo: entry.todo,
       notification: entry.notification,
-      attentionDismissedRing: entry.attentionDismissedRing,
       awaited: (this.awaits.get(id)?.waiters.size ?? 0) > 0,
       ringSeq: entry.ringSeq,
       episode: this.hasActiveRing(entry) ? entry.episode : null,
@@ -1342,7 +1331,6 @@ export class AlertManager {
         pendingCommandLine: null,
         todo: false,
         notification: null,
-        attentionDismissedRing: false,
         deferredNotification: null,
         deferredNotificationTimer: null,
       };
@@ -1371,7 +1359,6 @@ function alertStatesEqual(a: AlertState, b: AlertState): boolean {
     a.status !== b.status
     || a.watchingEnabled !== b.watchingEnabled
     || a.todo !== b.todo
-    || a.attentionDismissedRing !== b.attentionDismissedRing
     || a.awaited !== b.awaited
     || a.ringSeq !== b.ringSeq
     || a.episode?.id !== b.episode?.id

@@ -51,7 +51,6 @@ describe('VS Code session alert persistence', () => {
         status: 'ALERT_RINGING',
         watchingEnabled: true,
         todo: true,
-        attentionDismissedRing: true,
         awaited: true,
         ringSeq: 7,
       })],

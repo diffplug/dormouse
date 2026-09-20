@@ -84,9 +84,9 @@ function describePushTargets(push: PushDevicesState, remoteControlBelow: boolean
  * (`docs/specs/alert.md` -> Alarm settings).
  *
  * Rules are removable here but not addable: WATCHING is keyed on a running
- * command's name, so a rule is created by pressing `a` in the tab running it.
- * This dialog and the bell popover are the two places a rule set on a
- * since-closed Pane can be found and removed.
+ * command's name, so a rule is created in the terminal context of a Pane
+ * running it. This dialog is the one place a rule set on a since-closed Pane
+ * can be found and removed.
  */
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const watched = useSyncExternalStore(subscribeToWatchedCommands, getWatchedCommandsSnapshot);
@@ -177,8 +177,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           </div>
         ) : (
           <div className="mt-1.5 text-sm leading-relaxed text-muted">
-            Nothing yet. Start a command, then press <Shortcut>a</Shortcut> in its tab to
-            alert on every tab running it.
+            Nothing yet. Start a command, then press <Shortcut>a</Shortcut> in its tab and
+            turn on <em>Watch all …</em> to alert on every tab running it.
           </div>
         )}
         <div className="mt-3">

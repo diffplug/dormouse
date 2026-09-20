@@ -35,7 +35,6 @@ import {
 } from '../../lib/terminal-registry';
 import {
   buildAppTitleResolver,
-  commandArgv0,
   createTerminalPaneState,
   COMMAND_FAIL_GLYPH,
   deriveHeader,
@@ -80,16 +79,12 @@ const terminalHeaderTier = (width: number): TerminalHeaderTier =>
           : width > 98 ? 'bare'
             : 'tiny';
 
-// WATCHING is a rule on the running command, so the bell says which command it
-// would act on rather than naming an abstract toggle (`docs/specs/alert.md`).
-function alertButtonLabelsFor(status: SessionStatus, argv0: string | null): { aria: string; tooltip: string } {
-  if (status === 'ALERT_RINGING') return { aria: 'Alert ringing', tooltip: 'Alert ringing' };
-  if (status === 'OSC_NOTIF_BUSY') return { aria: 'Progress active', tooltip: 'Progress active' };
-  if (status === 'COMMAND_EXIT_ARMED') return { aria: 'Command running', tooltip: 'Command running' };
-  if (!argv0) return { aria: 'Alerts are per command', tooltip: '[a] Alerts are per command' };
-  return status === 'WATCHING_DISABLED'
-    ? { aria: `Alert on all ${argv0}`, tooltip: `[a] Alert on all "${argv0}"` }
-    : { aria: `Stop alerting on all ${argv0}`, tooltip: `[a] Stop alerting on all "${argv0}"` };
+// The button dismisses and opens the terminal context; it never edits a rule,
+// so it names the action, not a toggle (`docs/specs/alert.md` -> Pane Header).
+function alertButtonLabelsFor(status: SessionStatus): { aria: string; tooltip: string } {
+  return status === 'ALERT_RINGING'
+    ? { aria: 'Alert ringing', tooltip: '[a] Dismiss alert' }
+    : { aria: 'Alert settings', tooltip: '[a] Alert settings' };
 }
 const TODO_PREVIEW_GAP = 6;
 const TODO_PREVIEW_MARGIN = 8;
@@ -152,15 +147,12 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
   const roomForNotepad = compactOrWider || tier === 'minimal' || (tier === 'minimal-tight' && !dirty);
   const tiny = tier === 'tiny';
   const showTodoPill = todoPill.visible && compactOrWider;
-  const runningArgv0 = paneState.currentCommand?.rawCommandLine
-    ? commandArgv0(paneState.currentCommand.rawCommandLine)
-    : null;
-  const alertButtonLabels = alertButtonLabelsFor(activity.status, runningArgv0);
+  const alertButtonLabels = alertButtonLabelsFor(activity.status);
   const alertButtonAriaLabel = alertButtonLabels.aria;
   const alertButtonTooltip = alertButtonLabels.tooltip;
   const alertButtonTooltipDetail = activity.status === 'ALERT_RINGING'
     ? 'Click to dismiss and show options'
-    : 'Right-click for options';
+    : 'Click or right-click for options';
   const todoNotificationPreview = formatNotificationPreview(activity.notification);
   const todoPreviewId = `todo-notification-preview-${id}`;
 
@@ -180,14 +172,10 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
     setTodoPreviewRect(button.getBoundingClientRect());
   }, [activity.notification]);
 
-  const triggerAlertButtonAction = useCallback((displayedStatus: SessionStatus, button: HTMLButtonElement) => {
-    const result = actions.onAlertButton(id, displayedStatus);
-    // 'no-command' opens the dialog too — it is where we explain that alerts are
-    // keyed on the running command and there is nothing running here.
-    if (result === 'dismissed' || result === 'menu' || result === 'no-command') {
-      const rect = button.getBoundingClientRect();
-      context.open(id, { origin: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } });
-    }
+  const triggerAlertButtonAction = useCallback((button: HTMLButtonElement) => {
+    actions.onAlertButton(id);
+    const rect = button.getBoundingClientRect();
+    context.open(id, { origin: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } });
   }, [actions, id, context]);
 
   useEffect(() => {
@@ -247,14 +235,14 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
             e.preventDefault();
             e.stopPropagation();
             e.nativeEvent.stopImmediatePropagation?.();
-            triggerAlertButtonAction(activity.status, e.currentTarget);
+            triggerAlertButtonAction(e.currentTarget);
           }}
           onClick={(e) => {
             if (suppressAlertClickRef.current) {
               suppressAlertClickRef.current = false;
               return;
             }
-            triggerAlertButtonAction(activity.status, e.currentTarget);
+            triggerAlertButtonAction(e.currentTarget);
           }}
           onContextMenu={(e) => context.open(id, { origin: { x: e.clientX, y: e.clientY } })}
           ariaLabel={alertButtonAriaLabel}

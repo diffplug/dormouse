@@ -24,7 +24,7 @@ const SESSION_ID = 'tab-story';
 const noopActions: WallActions = {
   onKill: () => {},
   onMinimize: () => {},
-  onAlertButton: () => 'noop',
+  onAlertButton: () => {},
   onToggleTodo: () => {},
   onSplitH: () => {},
   onSplitV: () => {},
@@ -236,9 +236,8 @@ async function openAlertRightClickDialog() {
 }
 
 /**
- * Hover the bell so its tooltip renders — the tooltip is what carries the
- * command-scoped wording, e.g. `Alert on all "claude"` vs `Alerts are per
- * command`.
+ * Hover the bell so its tooltip renders — the tooltip is what names the action,
+ * e.g. `[a] Dismiss alert` vs `[a] Alert settings`.
  *
  * Hover rather than focus: a programmatic `.focus()` does not reliably drive
  * React's `onFocus` here, while `mouseover` is exactly what React synthesizes

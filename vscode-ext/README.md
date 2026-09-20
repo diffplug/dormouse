@@ -34,7 +34,7 @@ Dormouse can owe you attention in three independent ways. Two of them need no se
 
 **A command finishes while you are away.** If a foreground command was running while you were watching, you left, and it exited after you had been gone a while, that pane is ringing when you come back. Also no configuration.
 
-**A watched command goes quiet.** This one is opt-in, and it is the one for coding agents. Click the bell in a pane running `claude` — or press `a` in command mode — and Dormouse watches *that command name*. Every pane running `claude` is then watched, the ones open now and the ones you open later. When a watched command's output goes busy and then falls quiet while you are not looking, it rings.
+**A watched command goes quiet.** This one is opt-in, and it is the one for coding agents. Right-click the header of a pane running `claude` — or press `a` in command mode — and turn on **Watch all claude commands**; Dormouse then watches *that command name*. Every pane running `claude` is then watched, the ones open now and the ones you open later. When a watched command's output goes busy and then falls quiet while you are not looking, it rings.
 
 Dormouse never guesses which commands deserve an alert. Watching is a rule you create on a command name, and turning it off anywhere removes it everywhere.
 

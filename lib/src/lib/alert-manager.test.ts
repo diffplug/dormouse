@@ -309,44 +309,30 @@ describe('AlertManager in isolation', () => {
     });
   });
 
-  it('attending a ring leaves attentionDismissedRing for the bell table to consume', () => {
-    const id = 'attention-dismissed-watching-disabled';
+  it('attending a ring clears it and leaves the TODO behind', () => {
+    const id = 'attention-clears-ring';
 
-    // A protocol ring needs no WATCHING; attending it dismisses the ring and
-    // sets attentionDismissedRing while status falls back to WATCHING_DISABLED.
+    // A protocol ring needs no WATCHING, so status falls back to
+    // WATCHING_DISABLED once attention clears the latch.
     manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Build finished' });
     expect(manager.getState(id).status).toBe('ALERT_RINGING');
-    manager.attend(id);
-    expect(manager.getState(id)).toMatchObject({
-      status: 'WATCHING_DISABLED',
-      todo: true,
-      attentionDismissedRing: true,
-    });
 
-    // An explicit dismiss is the click that consumes the flag.
-    manager.dismissAlert(id);
-    expect(manager.getState(id).attentionDismissedRing).toBe(false);
+    manager.attend(id);
+    expect(manager.getState(id)).toMatchObject({ status: 'WATCHING_DISABLED', todo: true });
   });
 
-  it('keeps attentionDismissedRing when a watched command starts before bell dismissal', () => {
-    const id = 'attention-dismissed-then-watched-command';
-    manager.setWatchedCommands(['claude']);
+  it('dismissing a Session with nothing ringing changes nothing and notifies no one', () => {
+    const id = 'dismiss-without-ring';
     manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Build finished' });
-    manager.attend(id);
-
-    manager.applyTerminalSemanticEvents(id, [
-      { type: 'commandLine', commandLine: 'claude --resume' },
-      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
-    ]);
-
-    expect(manager.getState(id)).toMatchObject({
-      watchingEnabled: true,
-      todo: true,
-      attentionDismissedRing: true,
-    });
-
     manager.dismissAlert(id);
-    expect(manager.getState(id).attentionDismissedRing).toBe(false);
+    const quiet = manager.getState(id);
+
+    const states: string[] = [];
+    manager.onStateChange((changed) => states.push(changed));
+    manager.dismissAlert(id);
+
+    expect(states).toEqual([]);
+    expect(manager.getState(id)).toEqual(quiet);
   });
 
   it('protocol completion is suppressed while the user has attention', () => {
@@ -1427,7 +1413,6 @@ describe('AlertManager in isolation', () => {
         status: 'WATCHING_DISABLED',
         todo: true,
         notification: { source: 'OSC 9', title: null, body: 'Build finished' },
-        attentionDismissedRing: false,
         awaited: false,
       });
     });
