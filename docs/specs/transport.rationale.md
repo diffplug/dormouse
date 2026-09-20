@@ -2,10 +2,6 @@
 
 > Informative companion to [transport.md](transport.md): the evidence, symptoms, and dead-approach history behind its rules, keyed by that spec's headings (AGENTS.md → "What, not why"). Nothing here is normative.
 
-## Adapter model
-
-**What `persistsSession: false` actually saves.** The expensive half of a save is the record build, not the write: one `getCwd` round trip per pane (`docs/specs/standalone.md` → "Persistence", whose rationale prices it). No shipped adapter answers `false` today; the gate stays because a host that persists nothing must not pay for a record it discards.
-
 ## Paced input
 
 Measured on macOS 27 with Claude Code 2.1.274 and Codex 0.154.0, 2026-09 (issue #679).

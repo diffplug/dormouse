@@ -54,15 +54,6 @@ describe("BrowserSidecarAdapter session persistence", () => {
     activeWorkspaceId: "ws-1",
   };
 
-  it("reports the same persistsSession as TauriAdapter", () => {
-    const harness: PlatformAdapter = new BrowserSidecarAdapter(
-      new BrowserSidecarHost("http://localhost:1234"),
-    );
-    const tauri: PlatformAdapter = new TauriAdapter();
-    expect(harness.persistsSession).toBe(tauri.persistsSession);
-    expect(harness.persistsSession).toBe(true);
-  });
-
   it("round-trips a Window through localStorage", () => {
     localStorage.removeItem(KEY);
     const adapter = new BrowserSidecarAdapter(new BrowserSidecarHost("http://localhost:1234"));

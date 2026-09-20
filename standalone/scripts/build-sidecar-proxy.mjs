@@ -34,9 +34,16 @@ const remoteSrc = resolveRemoteConnectSrc(process.env, 'sidecar');
 // installed package under `sidecar/node_modules` and be required by name —
 // inlining one here would leave that loader looking beside `burrow.cjs`.
 // Derived rather than listed, so declaring a dependency is what keeps it out.
-const SIDECAR_RUNTIME_DEPS = Object.keys(
-  JSON.parse(readFileSync(path.resolve(sidecar, 'package.json'), 'utf8')).dependencies ?? {},
-);
+//
+// Both keys: the addon's six `@node-datachannel/<platform>` packages are
+// `optionalDependencies` because only one of them installs on any given
+// machine, and reading `dependencies` alone left them neither `external` nor
+// covered by `assertNothingInlined`.
+const sidecarManifest = JSON.parse(readFileSync(path.resolve(sidecar, 'package.json'), 'utf8'));
+const SIDECAR_RUNTIME_DEPS = Object.keys({
+  ...sidecarManifest.dependencies,
+  ...sidecarManifest.optionalDependencies,
+});
 // Each package by name, plus every subpath export of it (`node-datachannel/polyfill`).
 const NATIVE_DIRECT = SIDECAR_RUNTIME_DEPS.flatMap((name) => [name, `${name}/*`]);
 // The list `assertNothingInlined` checks is this same one, so a manifest that

@@ -380,11 +380,9 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   onWatchedCommands(handler: (names: string[]) => void): void { this.watchedCommandHandlers.add(handler); }
   onAlertSettings(handler: (settings: AlertSettings) => void): void { this.alertSettingsHandlers.add(handler); }
 
-  // The harness mirrors the shipped persistence answer, so a reload here
-  // exercises what the app does (docs/specs/transport.md -> "The governing rule").
-  readonly persistsSession = true;
-
-  // See TauriAdapter: no bare-Session slot on this host.
+  // See TauriAdapter: no bare-Session slot on this host. The harness mirrors the
+  // shipped persistence answer, so a reload here exercises what the app does
+  // (docs/specs/transport.md -> "The governing rule").
   saveState(_state: unknown): void {}
   getState(): unknown { return null; }
 

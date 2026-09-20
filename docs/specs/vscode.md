@@ -325,7 +325,7 @@ The service owns the PTYs but not the *view* of them: each webview is its own JS
 | Operation schema | `(op, params) → zero or more results`; `op` opaque to the transport, the typed map only in `peer-surfaces.ts`. | Same seam; only a reserved `ptyId` is interpreted, for routing. |
 | Ownership / miss | Presence is ownership; every webview answers, including with no results. | Every peer answers; disconnect settles its pending asks empty. |
 | Fan-out order | All webviews in parallel. | `askBothTiers` runs local and all peers in parallel, local concatenated first. |
-| Budget | `ASK_BUDGET_MS` (1s); disposal removes that webview from the outstanding set. | `PEER_REPLY_BUDGET_MS` covers the inner ask plus socket hops and **must remain larger** (pinned by `peer-link-protocol.test.ts`). |
+| Budget | `ASK_BUDGET_MS` (1s); disposal removes that webview from the outstanding set. | `PEER_REPLY_BUDGET_MS` covers the inner ask plus socket hops, and **is defined as `ASK_BUDGET_MS + 2_000`** so it cannot fall under it. |
 | Invalidation | `peer:notify` carries no subject; pane/activity/focus bursts coalesce before crossing. | `notify`, webview membership, and peer membership each trigger a fresh directory collect. |
 | PTY stream | One window-wide keyed registry distributes already-processed data/exit. | Opaque routed handles select one peer; `subscribe` is reference-counted, streaming the same processed data/exit. |
 | Burrow command | This window calls its service, broadcasting the uniquely correlated result to its webviews. | `command` goes to the broker, `commandResult` returns only to its origin window, `uiEvent` broadcasts. |

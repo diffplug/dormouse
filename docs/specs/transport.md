@@ -20,7 +20,6 @@ Optional booleans:
 
 | Member | Absent reads | Set by | Effect when set |
 |---|---|---|---|
-| `persistsSession?` | `true` | The two standalone adapters → `true` | `saveSession` skips the whole record build, not just the write, on a host that answers `false` (rationale) |
 | `hostOwnsTheme?` | `false` | `VSCodeAdapter` → `true` | Settings hides its theme picker (`docs/specs/theme.md` → "Where the user picks a theme") |
 | `hostOwnsShells?` | `false` | `VSCodeAdapter` → `true` | Settings hides its Shell row for the native QuickPick (`docs/specs/vscode.md` → "Shell selection") |
 

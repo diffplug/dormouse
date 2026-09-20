@@ -163,7 +163,6 @@ describe("TauriAdapter window persistence", () => {
   it("persists, and never clears the snapshot at boot", async () => {
     const { adapter, invoke } = await booted((cmd) => (cmd === "load_session" ? JSON.stringify(windowBlob) : undefined));
 
-    expect(adapter.persistsSession).toBe(true);
     expect(adapter.getWindowState()).toEqual(windowBlob);
     expect(invoke.mock.calls.map(([cmd]) => cmd)).not.toContain("clear_session");
     adapter.shutdown();

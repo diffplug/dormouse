@@ -254,18 +254,6 @@ export interface PlatformAdapter {
   killPty(id: string): void;
 
   /**
-   * Whether this host keeps a Session snapshot across a restart. `false` means
-   * `saveSession` does no work at all rather than building a record for a
-   * `saveState` that discards it — the gate belongs above the per-pane `getCwd`
-   * round trips, not below them.
-   *
-   * Absent reads as `true`. Standalone sets it `false`: quitting is a deliberate
-   * ending and a crash captured nothing, so every launch starts fresh
-   * (docs/specs/transport.md -> "The governing rule").
-   */
-  persistsSession?: boolean;
-
-  /**
    * Whether the host owns the color theme, so Dormouse must not offer a theme
    * picker of its own. Absent reads as `false`.
    *

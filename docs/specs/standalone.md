@@ -159,9 +159,11 @@ realm**. Against the shared store contract (`docs/specs/relay.md` → "Burrow si
 `node-datachannel`'s W3C polyfill. **A sidecar package's transitive dependencies
 do not ship** — the Tauri bundle copies `standalone/sidecar/node_modules` and
 nothing else — so the addon's platform package and `detect-libc` are declared in
-`standalone/sidecar/package.json` directly. **Every `dependencies` entry that
-manifest declares stays `external` to `burrow.cjs`**, the `external` list being
-derived from that key rather than listed beside it. The build fails if the
+`standalone/sidecar/package.json` directly — the addon's six platform packages
+under `optionalDependencies`, since only one installs anywhere. **Every entry
+that manifest declares, under either key, stays `external` to `burrow.cjs`**,
+the `external` list being derived from those keys rather than listed beside
+them. The build fails if the
 manifest stops declaring the addon, and asserts from esbuild's metafile that
 none of those packages was inlined: the addon resolves its `.node`
 relative to its own `__dirname`, and inlining would move that out of the
