@@ -335,6 +335,22 @@ describe('AlertManager in isolation', () => {
     expect(manager.getState(id)).toEqual(quiet);
   });
 
+  it('leaves a notification still deferred behind animation pending when dismissed', () => {
+    const id = 'dismiss-keeps-deferral';
+    driveToBusy(id);
+    manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Build finished' });
+    expect(manager.getState(id)).toMatchObject({ status: 'WATCHING_DISABLED', todo: false, notification: null });
+
+    manager.dismissAlert(id);
+
+    vi.advanceTimersByTime(5_000);
+    expect(manager.getState(id)).toMatchObject({
+      status: 'ALERT_RINGING',
+      todo: true,
+      notification: { source: 'OSC 9', title: null, body: 'Build finished' },
+    });
+  });
+
   it('protocol completion is suppressed while the user has attention', () => {
     const id = 'osc-progress-attention';
 

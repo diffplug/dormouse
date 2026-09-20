@@ -1080,9 +1080,11 @@ export class AlertManager {
     const entry = this.entries.get(id);
     if (!entry) return;
 
-    // Dismissing a ring leaves the TODO behind, so the summons is not lost; on a
-    // Session with nothing ringing there is nothing to do.
-    if (!this.clearAllRingsIfActive(entry)) return;
+    // Dismissing a ring leaves the TODO behind, so the summons is not lost. A
+    // Session with nothing ringing has nothing to dismiss, and must keep any
+    // notification still deferred behind animation.
+    if (!this.hasActiveRing(entry)) return;
+    this.clearAllRingsIfActive(entry);
     entry.todo = true;
     this.notify(id);
   }

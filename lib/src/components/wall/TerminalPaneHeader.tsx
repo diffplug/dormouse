@@ -171,7 +171,7 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
     dismissSessionAlert(id);
     const rect = button.getBoundingClientRect();
     context.open(id, { origin: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } });
-  }, [actions, id, context]);
+  }, [id, context]);
 
   useEffect(() => {
     if (!activity.notification) setTodoPreviewRect(null);
