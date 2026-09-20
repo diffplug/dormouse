@@ -22,7 +22,7 @@ Source of truth: `create_release` in `scripts/sign-and-deploy.sh`; `publish-vsco
 Human-driven, in order:
 
 1. **Update dependency snapshots** — run `node website/scripts/generate-deps.js`, review the diffs in `website/src/data/dependencies-{npm,cargo,runtime}.json`, commit if changed.
-2. **Draft release notes and bump version** — run `/release-notes` at the repo root ([.claude/commands/release-notes.md](../../.claude/commands/release-notes.md)): it recommends a `breaking.added.bugfix` bump from the merge commits and squash-merged PRs since the last tag, runs `./scripts/bump-version.sh X.Y.Z`, and edits `CHANGELOG.md` for that version. Review the diff.
+2. **Draft release notes and bump version** — run `/release-notes` at the repo root ([.claude/commands/release-notes.md](../../.claude/commands/release-notes.md)), which owns the steps. Review the diff.
 3. **Commit and tag** — `git commit -am "Release vX.Y.Z"` then `git tag vX.Y.Z`.
 4. **Push** — `git push && git push origin vX.Y.Z`, which triggers CI (Stage 1).
 5. **Run local signing** — plug in the PIV USB key, then `./scripts/sign-and-deploy.sh all X.Y.Z`: it waits for CI, verifies and signs artifacts, writes the website update manifest, and creates the GitHub Release. Secrets follow [Environment / secrets](#environment--secrets). **Must reject a dirty tree, untracked files, or commits ahead of the configured upstream**; without an upstream the script warns that push status is unknown.
@@ -36,7 +36,7 @@ Human-driven, in order:
 
 ## Versioning
 
-**Must synchronize the version files and Cargo.lock's `dormouse` entry with `scripts/bump-version.sh`** (`cargo check --offline`).
+**Must synchronize the four version files — `lib/package.json`, `vscode-ext/package.json`, `standalone/src-tauri/Cargo.toml`, `standalone/src-tauri/tauri.conf.json` — and Cargo.lock's `dormouse` entry with `scripts/bump-version.sh`** (`cargo check --offline`).
 
 **A release is triggered by pushing one tag (`v0.1.0`)** — never separate `vscode-ext/v*` and `standalone/v*` tags, because one changelog entry covers both.
 
@@ -46,8 +46,8 @@ Source of truth: `scripts/bump-version.sh`; `on.push.tags` in `.github/workflows
 
 **Both signing steps must run locally** — Windows code signing requires a physical USB hardware key (EV cert via PIV), macOS a local Developer ID cert.
 
-- **Stage 1 (CI)** — build the unsigned Tauri apps (win, mac, linux) and the VSCode extension, generate and attest their artifact manifests, upload the unsigned Tauri artifacts, publish the extension after protected-environment approval.
-- **Stage 2 (local, `sign-and-deploy.sh`)** — download the CI artifacts → verify attestations and hashes → sign macOS (codesign + notarize) → sign Windows (jsign + PIV hardware key) → generate the Tauri update manifest with signatures → upload the signed artifacts to the GitHub Release.
+- **Stage 1 (CI)** — build, attest, and upload the unsigned artifacts: the three Tauri bundles and the `.vsix`, which Stage 2 verifies but never signs.
+- **Stage 2 (local, `sign-and-deploy.sh`)** — verify, sign, and release.
 
 ## Stage 1: CI workflow
 
@@ -55,11 +55,11 @@ Triggered by tag push `v*`: `build-standalone`, `build-vscode`, and `security-au
 
 Environment protection, secret placement, and token permissions follow `docs/specs/security-ci.md` → "GitHub Actions Policies", "Automated Maintainer (tend)", and "VS Code Extension Releases".
 
-**Must create `release-attest` before referencing it in both build jobs**, with no required reviewer (rationale); GitHub otherwise auto-creates an unprotected environment.
+**Must create `release-attest` before referencing it in both build jobs**, with no required reviewer (rationale).
 
 **Never use `tauri-action`'s built-in GitHub Release creation** — the release is created locally, after signing.
 
-**The `build-standalone` artifact upload must set `include-hidden-files: true`** — `actions/upload-artifact` v4.4+ silently drops dotfiles, and the zsh shell integration ships as ZDOTDIR dotfiles (rationale). The `vscode-extension` upload keeps the safer default — only `*.vsix` and the manifest.
+**The `build-standalone` artifact upload must set `include-hidden-files: true`** (rationale). The `vscode-extension` upload keeps the safer default — only `*.vsix` and the manifest.
 
 **Must hash `artifact-executables.txt` into each standalone artifact manifest and upload it alongside the files**, recording their executable paths before ZIP transport loses permissions (rationale).
 
@@ -74,6 +74,8 @@ Dispatches `security-audit.yaml` on the release tag (`gh workflow run`), polls f
 ### Job: `publish-vscode`
 
 Runs in CI because Marketplace publishing uses PAT tokens, no hardware key. **The `vscode-extension-publish` environment must require reviewer approval and admit deployments only from `v*` tags**, and **`VSCE_PAT` / `OVSX_PAT` must be environment secrets there**, never broad repository secrets.
+
+Those three, and the `Tag operations` ruleset behind `v*`, are GitHub repository settings: nothing in the tree carries them and no lint can read them, so a checkout cannot prove the release path is gated. Verify them in the repository's settings when auditing it.
 
 ## Stage 2: Local script
 
@@ -91,7 +93,7 @@ Downloaded CI artifacts must pass three checks before any signing step:
 
 **Never select release artifacts with a broad `find | head`** — use strict expected paths or exactly-one matching. Release upload rejects unexpected local files or existing remote asset names.
 
-When rebuilding the Windows installer locally, the script rewrites the CI-runner absolute paths baked into the Tauri-generated `.nsi` (via `scripts/patch-nsis-paths.pl`) and repoints the `ADDITIONALPLUGINSPATH` and `OUTFILE` defines at the local plugin directory and installer path before `makensis`.
+**Must repoint the Tauri-generated `.nsi` at local paths before `makensis`** — it is baked with CI-runner absolutes; `rebuild_windows_installer` documents the rewrite.
 
 **Runs on macOS only** — it uses `codesign` / `xcrun notarytool` / `ditto`, and its in-place `sed -i ''` edits are BSD form.
 
@@ -118,10 +120,7 @@ pnpm --dir standalone exec tauri signer generate  # creates the Tauri update sig
 
 **Must OS-sign the inner executable, package it, then Tauri-sign the final bundle.** Embed the generated `.sig` in the website manifest and remove the sidecar signature file before upload.
 
-Two macOS packaging edge cases the script enforces; each would ship a release that fails only on the user's machine:
-
-- **Never `--deep`-sign the outer `.app`** — it would re-sign the Node sidecar and drop the hardened-runtime entitlements it needs. Nested binaries (the Node sidecar, the node-pty and node-datachannel prebuilds, `spawn-helper`) are signed individually first, and the script then launches the signed sidecar and requires both native addons from it.
-- **Build the `.tar.gz` with `COPYFILE_DISABLE=1`** and re-scan the result for `._*` entries — AppleDouble resource-fork files make the Tauri updater's extraction fail with `failed to unpack ._Dormouse.app`.
+Two macOS packaging edge cases the script enforces, each of which would ship a release that fails only on the user's machine: **never `--deep`-sign the outer `.app`** — nested binaries (the Node sidecar, the node-pty and node-datachannel prebuilds, `spawn-helper`) are signed individually first, and the script then launches the signed sidecar and requires both native addons from it — and **build the `.tar.gz` with `COPYFILE_DISABLE=1`**, re-scanning the result for `._*`. Both carry their reasoning at `sign_macos_app` and `notarize_macos` in the script.
 
 ### Packaged app logging
 
@@ -129,7 +128,7 @@ Packaged-app log paths and `DORMOUSE_LOG_FILE` follow `docs/specs/standalone.md`
 
 ## Artifact filenames
 
-**All release assets use stable filenames** (no version in the name), so dormouse.sh can hotlink through GitHub's `/latest/download/` redirect with no server-side logic — e.g. `https://github.com/diffplug/dormouse/releases/latest/download/Dormouse-macos-aarch64.tar.gz`. The stable names are the `FNAME_*` constants in `scripts/sign-and-deploy.sh`.
+**All release assets use stable filenames** (no version in the name) — the `FNAME_*` constants in `scripts/sign-and-deploy.sh` — so a bundle URL differs only in its version path segment.
 
 ## Tauri auto-updater
 
@@ -146,7 +145,7 @@ Config lives in [tauri.conf.json](../../standalone/src-tauri/tauri.conf.json) (`
 
 Shape: `version`, `notes` (a link to the GitHub release tag, not the changelog body), `pub_date`, and a `platforms` map keyed `darwin-aarch64` / `windows-x86_64` / `linux-x86_64`, each with `url` and `signature` (that bundle's `.sig`, verbatim). **The script fails rather than emit a platform with an empty signature.**
 
-Manifest URLs carry the version in the *path* (`/v0.1.0/`) while the *filenames* stay stable (rationale).
+Manifest URLs carry the version in the *path* (`/v0.1.0/`) while the *filenames* stay stable. **The homepage's download buttons read their URLs from this same committed manifest**, so a release is only downloadable once step 6 has deployed it (`website/src/pages/Home.tsx`).
 
 Source of truth: `sign_updates` in `scripts/sign-and-deploy.sh`; `plugins.updater` in `standalone/src-tauri/tauri.conf.json`.
 
@@ -180,4 +179,4 @@ See `docs/specs/hosted.md` -> "Production releases" for the Hosted pipeline and 
 
 ## Future
 
-**Analytics-backed download URLs.** The `/latest/download/` hotlinks could move to `dormouse.sh/download/...` behind Cloudflare R2. Changing website links and manifest bundle URLs needs no app update while the manifest endpoint remains stable.
+**Analytics-backed download URLs.** The GitHub release URLs could move to `dormouse.sh/download/...` behind Cloudflare R2. Changing website links and manifest bundle URLs needs no app update while the manifest endpoint remains stable.

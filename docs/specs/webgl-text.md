@@ -19,10 +19,11 @@
   `sdf` (the default) carries our changes; upstreamable fixes branch off
   `master` and cherry-pick into `sdf`.
 - **Versioning**: `@diffplug/xterm-addon-webgl-sdf`, versions shaped
-  `<addon-version>-sdf<coreBeta>.<iteration>` (`0.20.0-sdf301.1` ⇒
-  `@xterm/xterm@6.1.0-beta.301`, iteration 1). **Consumers must pin the exact
-  core beta named by the tarball's peer dependency**, not the `-sdfNNN`
-  counter — the addon bundles core internals (rationale).
+  `<addon-version>-sdf<coreBeta>.<iteration>` (`0.20.0-sdf304.0` ⇒
+  `@xterm/xterm@6.1.0-beta.304`, iteration 0). **Consumers must pin the exact
+  core beta named by the tarball's peer dependency** — the addon bundles core
+  internals (rationale); the `-sdfNNN` counter is a convenience the lint holds
+  to that same pin.
 - **Distribution**: a pnpm tarball-URL dependency on GitHub Release assets,
   never an npm registry (rationale). **Never replace a published asset**; the
   lockfile records a sha512 integrity hash, so cut a new iteration.
@@ -35,11 +36,10 @@
   behavior and standalone drift repair.
 - **Every pin must be exact, and every addon's core peer must equal its
   workspace's core pin** — the first-party `@xterm/*` packages share a repo but carry
-  independent beta counters (rationale). `scripts/xterm-lint.mjs` also requires
-  `lib` ≡ `standalone` and checks the canopy tarball's tag, filename, counter
-  and peer as one set; `scripts/xterm-bump.mjs` (`pnpm bump:xterm`) writes the
-  newest coherent per-commit set for both `lib` and `standalone`, even when only
-  one has drifted.
+  independent beta counters (rationale). `scripts/xterm-lint.mjs` owns the full
+  check list in its header comment; `scripts/xterm-bump.mjs` (`pnpm bump:xterm`)
+  writes the newest coherent per-commit set for both `lib` and `standalone`,
+  even when only one has drifted.
 - **Releases are hand-cut today** per FORK.md; automating this is staged in
   `## Future`.
 - **Dev loop**: `pnpm link ~/projects/xterm.js/addons/addon-webgl` from

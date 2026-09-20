@@ -730,8 +730,8 @@ async function buildCli(skill) {
 
   // Emitted, not assembled in the page: every docs page reads `toc` off its own
   // data file, so the table of contents has one owner for all three. The
-  // commands nest one level down, so the rail shows this page as four entries
-  // rather than fourteen.
+  // commands nest one level down, so the rail shows this page as a handful of
+  // top-level entries rather than one per command.
   const entry = ({ id, title }) => ({ id, text: title, children: [] });
   const toc = [
     ...intro.map(entry),

@@ -23,7 +23,3 @@ The 2026-09-05 audit found that standalone resume commands reset every working a
 ## Two signing layers
 
 **What each layer actually proves.** OS signing proves the executable is from DiffPlug; Tauri signing proves the update bundle was not tampered with in transit.
-
-## Update manifest (`standalone-latest.json`)
-
-**Why two URL schemes name the same asset.** The manifest points at versioned release paths (`/v0.1.0/`) while the website hotlinks the `/latest/download/` redirect; with no version in the filenames, both resolve to the same file.

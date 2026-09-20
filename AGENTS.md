@@ -110,7 +110,7 @@ Specs are written ahead of the code: a new component's spec starts as a full des
 
 `scripts/spec-lint.mjs` (`pnpm lint:specs`, the first step of the root `pnpm test`) enforces the mechanically checkable conventions above — its header comment lists the checks — and ratchets size: every spec, this file, `SECURITY.md`, and `SELF_HOST.md` carry a word budget in `scripts/spec-word-budgets.json`, its size rounded up to the nearest 50. Rationale files carry none; evidence may grow without limit. Over budget: cut to fit, or re-baseline with `node scripts/spec-lint.mjs --ratchet <spec>` in the same PR. `SECURITY.md` and `SELF_HOST.md` ride the same checks. Advisory prose reviews follow `docs/prose-audit.md` (`pnpm audit:prose`).
 
-Six sibling lints run in `pnpm test`. Five enforce one invariant a spec states in prose, each naming the line it enforces and failing if that line is gone; `ps1-cmdlet-lint` guards the one shipped file nothing else can parse:
+Six sibling lints run in `pnpm test`. Five enforce one invariant a spec states in prose and name the line they enforce; only `public-docs-lint` and `e2e-lint` read that prose and fail when the line is gone. `ps1-cmdlet-lint` guards the one shipped file nothing else can parse:
 
 | Lint | Enforces |
 |---|---|
@@ -118,10 +118,10 @@ Six sibling lints run in `pnpm test`. Five enforce one invariant a spec states i
 | `scripts/xterm-lint.mjs` (`pnpm lint:xterm`) | The `@xterm/*` version lockstep in `docs/specs/webgl-text.md`. |
 | `scripts/loopback-lint.mjs` (`pnpm lint:loopback`) | `docs/specs/security-local.md` -> "Loopback Listeners": a loopback bind is not an access control — a new listener references a guard module or is allowlisted with a reason. |
 | `scripts/deploy-lint.mjs` (`pnpm lint:deploy`) | `docs/specs/security-remote.md` -> "Credentials at rest" and "Network posture (self-hosted)": the installer controls binding all three of `deploy/local/install-{macos,windows,linux}`. |
-| `scripts/ps1-cmdlet-lint.mjs` (`pnpm lint:deploy`) | Every `Verb-Noun` call in `deploy/local/install-windows.ps1` uses an approved verb and a noun that is not this project's vocabulary. No job has a PowerShell, so this is the Windows installer's only syntax gate — a repo-wide rename once turned all 147 `Write-Host` calls into `Write-Burrow`. |
+| `scripts/ps1-cmdlet-lint.mjs` (`pnpm lint:deploy`) | Every `Verb-Noun` call in `deploy/local/install-windows.ps1` uses an approved verb and a noun that is not this project's vocabulary. No job has a PowerShell, so this is the Windows installer's only syntax gate. |
 | `scripts/e2e-lint.mjs` (`pnpm lint:e2e`) | The structural half of `docs/specs/security-remote.md` -> "Remote Control": one Noise suite with no selector, no JavaScript curve, no legacy relay discriminant, no Relay-side protocol-v1 type, no checked-in service worker, no optional field on a ciphertext or transcript. |
 
-`scripts/spec-lint-selftest.mjs` plants one defect per finding check in the spec lint. The `deploy` and `e2e` lints carry self-tests that mutate each rule in whichever direction it points: a present-control rule has its control deleted (and, for exact-count rules, a copy added), a `forbidden` rule has the banned text appended. `scripts/e2e-lint-selftest.mjs` is wholly the second kind; `scripts/deploy-lint-selftest.mjs` is mostly the first. Either way the lint must go red. **A rule added to one of these lints without its self-test case is not enforced** — it is a claim that something is checked. They share plumbing, and only that, through `scripts/lint-kit.mjs`. `scripts/installer-verify-test.mjs` (also `pnpm lint:deploy`) runs the installer shell helpers lint can only read, extracted from the shipped files; `scripts/ps1-cmdlet-lint-selftest.mjs` carries the `ps1-cmdlet` lint's mutations. `pnpm test` also runs `scripts/clamp-issue-body-selftest.mjs`, the test for `scripts/clamp-issue-body.mjs` (the helper the audit workflows use to keep an issue body postable); it lives at the repo root because its callers do.
+`scripts/spec-lint-selftest.mjs` plants one defect per finding check in the spec lint. The `deploy`, `e2e`, and `loopback` lints carry self-tests that mutate each rule in whichever direction it points: a present-control rule has its control deleted (and, for exact-count rules, a copy added), a `forbidden` rule has the banned text appended. `scripts/e2e-lint-selftest.mjs` is mostly the second kind; `scripts/deploy-lint-selftest.mjs` mostly the first. Either way the lint must go red. **A rule added to one of these lints without its self-test case is not enforced** — it is a claim that something is checked. They share plumbing, and only that, through `scripts/lint-kit.mjs`. `scripts/installer-verify-test.mjs` (also `pnpm lint:deploy`) runs the installer shell helpers lint can only read, extracted from the shipped files; `scripts/ps1-cmdlet-lint-selftest.mjs` carries the `ps1-cmdlet` lint's mutations. `pnpm test` also runs `scripts/clamp-issue-body-selftest.mjs`, the test for `scripts/clamp-issue-body.mjs` (the helper the audit workflows use to keep an issue body postable); it lives at the repo root because its callers do.
 
 
 ## Design
@@ -137,11 +137,8 @@ See [PRODUCT.md](PRODUCT.md) for users, brand personality, and aesthetic directi
 The concrete type scale, color strategy (surfaces, foregrounds, header palette, dynamic door bg, selection ring), and shared chrome constants live in
 [`lib/src/components/design.tsx`](lib/src/components/design.tsx) — read it
 before adding or changing any `text-*`, `bg-*`, `text-color-*`, or border
-class anywhere in `lib/src/`. The `@theme` token definitions are split: colors
-in [`lib/src/theme-colors.css`](lib/src/theme-colors.css), which a host can
-import on its own, and the type scale, fonts, and animation tokens in
-[`lib/src/theme.css`](lib/src/theme.css). When adding or removing a color
-token, update `theme-colors.css` and `design.tsx` together.
+class anywhere in `lib/src/`. `docs/specs/theme.md` → "Runtime model" owns how
+the token files are split; `DESIGN.md` → "Don't" owns what adding one costs.
 
 <!-- dor-skill:begin — managed by `dor skill --install`; edits inside are overwritten -->
 ## Running inside Dormouse

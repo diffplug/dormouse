@@ -25,15 +25,15 @@ Both `tut` profiles open inside their `initialSectionId`:
 Browser-side xterm alt-screen behind `FakePtyAdapter`, **never Node `terminal-kit`**:
 
 - **`tut-runner.ts`** (`TutRunner`) — profile-aware alt-screen TUI; subscribes to `TutorialState`, re-renders on progress, takes input from `TutorialShell`.
-- **`tut-detector.ts`** (`TutDetector`) — wires app events to `TutorialState.markComplete(id)` and **must never touch the tiling engine**. `start()` seeds its prev-state maps and subscribes to `subscribeToActivity` + `subscribeToWatchedCommands` (`dormouse-lib/lib/terminal-registry`), `subscribeToMouseSelection` (`dormouse-lib/lib/mouse-selection`), `subscribeToActiveTheme` (`dormouse-lib/lib/themes`); everything else arrives on the `WallEvent` stream (`handleWallEvent`). **A keyboard split is credited before the split's automatic passthrough transition** (rationale), and **the `kb-arrows` hint that follows must tell the user to re-enter command mode** — the split left them in passthrough. **`kb-arrows` is credited from `selectionChange`** — to a distinct pane, in command mode — so an arrow key *or* a click counts. **Must credit `al-spreads` only when newly enabled WATCHING shares a command key with another live pane.** Transition guards live in that file’s comments, pinned by `website/src/lib/tut-detector.test.ts`.
+- **`tut-detector.ts`** (`TutDetector`) — wires app events to `TutorialState.markComplete(id)` and **must never touch the tiling engine**. `start()` seeds its prev-state maps and subscribes to `subscribeToActivity` + `subscribeToWatchedCommands` (`dormouse-lib/lib/terminal-registry`), `subscribeToMouseSelection` (`dormouse-lib/lib/mouse-selection`), `subscribeToActiveTheme` (`dormouse-lib/lib/themes`); everything else arrives on the `WallEvent` stream (`handleWallEvent`). **A keyboard split is credited before the split's automatic passthrough transition** (rationale), and **the `kb-arrows` hint that follows must tell the user to re-enter command mode** — the split left them in passthrough. **`kb-arrows` is credited from `selectionChange`** — to a distinct pane, in command mode — so an arrow key *or* a click counts. **Must credit `al-spreads` only when newly enabled WATCHING shares a command key with another live pane.** Each transition guard is commented where it lives, pinned by `website/src/lib/tut-detector.test.ts`.
 - **`tutorial-state.ts`** (`TutorialState`) — in-memory progress store ([Storage](#storage)); profile totals come from the section list handed to the constructor.
-- **`tut-items.ts`** — sections, items, and both profiles; shared by runner and detector.
+- **`tut-items.ts`** — sections, items, and both profiles; read by the runner and by `TutorialState` (the detector reaches ids only through `ItemId`).
 
 ## Layout
 
 - Desktop `SiteHeader` at top, `themeAware` so `--vscode-*` variables drive its chrome, **carrying no controls**: **the page must restore its own theme** with `useRestoredTheme(POCKET_THEME_ID)` (`lib/src/lib/themes/use-restored-theme.ts`), which also declares the host fallback the Settings picker re-resolves through (rationale). `th-theme` walks the user to the Wall's Settings dialog (`docs/specs/theme.md` → "Where the user picks a theme"); Pocket renders the `compact` picker over the mobile terminal or in the desktop marketing header.
 - `<main>` is a flex container so Wall's `flex-1 min-h-0` root gets a real height.
-- `/playground/desktop` runs `Wall` (`FakePtyAdapter`, `initialMode="passthrough"`). **Must seed its three-pane L-shape as an explicit Lath snapshot** — `restoredLathLayout` from `DESKTOP_PLAYGROUND_LAYOUT` (`website/src/lib/playground-desktop-layout.ts`) — never the synchronous `initialPaneIds` path (rationale). Seeds: **`tut-main`** (left ~50%, "tutorial", `TutRunner`); **`tut-boxed`** (right-top ~25%, "changelog", `ChangelogRunner`, and the Copy Rewrapped + `cp-override` target); **`tut-splash`** (right-bottom ~25%, "ascii-splash", `AsciiSplashRunner`). **Titles are seeded as pending shell opts** (`setPendingShellOpts(id, { title })`) before the Wall mounts; the lib pins each at first spawn, after the pane's state reset, and a user-pin outranks the engine fallback (`docs/specs/terminal-state.md` → "Header Derivation").
+- `/playground/desktop` runs `Wall` (`FakePtyAdapter`, `initialMode="passthrough"`). **Must seed its three-pane L-shape as an explicit Lath snapshot** — `restoredLathLayout` from `DESKTOP_PLAYGROUND_LAYOUT` — never the synchronous `initialPaneIds` path (rationale); `website/src/lib/playground-desktop-layout.test.ts` pins it. `DESKTOP_PANES` in the same file owns each seed's id, command, and title; **`tut-boxed` is the Copy Rewrapped + `cp-override` target** (rationale). **Titles are seeded as pending shell opts** (`setPendingShellOpts(id, { title })`) before the Wall mounts; the lib pins each at first spawn, after the pane's state reset, and a user-pin outranks the engine fallback (`docs/specs/terminal-state.md` → "Header Derivation").
 
 Every visible pane gets a `TutorialShell` via `PlaygroundShellRegistry`. **`ensureShell` must stay idempotent** — `paneAdded` covers every pane that becomes visible, and `FakePtyAdapter.onPtySpawn` covers the seed panes again, auto-launching each seed's command exactly once (rationale). The page’s `startProgram` factory dispatches: `tut` → `TutRunner`, `ascii-splash`/`splash` → `AsciiSplashRunner`, `changelog` → `ChangelogRunner`. **Spawned terminals use `SCENARIO_SHELL_PROMPT`; seed panes get an empty scenario**, so no delayed `user@dormouse:~$` write lands inside a runner's alt-screen.
 
@@ -41,7 +41,7 @@ Every visible pane gets a `TutorialShell` via `PlaygroundShellRegistry`. **`ensu
 
 ## Menu and navigation behavior
 
-Esc / `q` pop back one screen (section → menu → exit); Ctrl+C exits the runner from any screen; re-running `tut` re-enters. **Must consume unsupported CSI/SS3 key sequences without treating their prefix as Esc**; arrows accept CSI and application-mode SS3. Pinned by `website/src/lib/tut-runner.test.ts`. The menu shows `[N/M complete]` per section; drilling in lists that section's items, each `✓` complete, `●` active, or `·` later. **`Reset progress` requires the user type `reset`**, then clears all three storage keys and returns to the profile's initial screen.
+Esc pops back one screen (section → menu → exit), and so does `q` everywhere the screen is not consuming typed characters — on the reset screen `q` is confirm-buffer input. Ctrl+C exits the runner from any screen; re-running `tut` re-enters. **Must consume unsupported CSI/SS3 key sequences without treating their prefix as Esc**; arrows accept CSI and application-mode SS3. Pinned by `website/src/lib/tut-runner.test.ts`. The menu shows `[N/M complete]` per section; drilling in lists that section's items, each `✓` complete, `●` active, or `·` later. **`Reset progress` requires the user type `reset`**, then clears all three storage keys and returns to the profile's initial screen.
 
 Extras: `Starred on GitHub` (persisted separately, `onOpenGithub`), `🐭 FlappyTerm 🐭`, `Reset progress` — **none of the three ever counts toward `N/M`**. Flappy stays `[LOCKED N/M]` until every section checklist item is complete, then shows `[High score: N]` and unlocks a runner-local mini-game whose game-over screen cross-links the other surface (desktop `p` → `onOpenPocket`; Pocket `n` → `onNotifyPocket` → `/hosted/#remote-control`, wired by the pages).
 
@@ -87,7 +87,7 @@ Hooks in `dormouse-lib` / `MobileTerminalUi` that exist for tutorial observabili
 
 - **`WallEvent.kill` / `move` / `paneAdded`** — discriminants on the `WallEvent` union. `kill` fires from `killPaneImmediately`, so every kill path (confirm dialog, tmux `x`, door kill, `dor kill`) credits `kb-kill`. **`move` must fire from both** the Cmd/Ctrl-Arrow swap in `lib/src/components/wall/keyboard/handle-pane-shortcuts.ts` **and** the center-drop swap in `Wall.onProposeMove` (rationale). **`paneAdded` fires once per pane that becomes visible** — seed ids, splits, dor surfaces, restores, auto-spawn — via Lath’s leaf-id diff, with seeds announced explicitly.
 - **`FakePtyAdapter.pumpActivity(id, durationMs, intervalMs)`** — drives the alert manager for a fixed duration with no data output (the `s` demo). Returns a cancel handle; stops on its own if the pty dies mid-duration.
-- **`FakePtyAdapter.sendOutput(id, data, { skipActivity })`** — pushes data through the real protocol parser as if the PTY produced it — `alertManager.onData()` for visible bytes, the notification/semantic-event paths for OSCs (rationale). **Unlike `writePty` it is not suppressed while a scenario is playing.** `TutRunner` passes `skipActivity: true` for every frame, so redrawing the TUI never rings its own pane.
+- **`FakePtyAdapter.sendOutput(id, data, { skipActivity })`** — pushes data through the real protocol parser as if the PTY produced it (rationale). **Unlike `writePty` it is not suppressed while a scenario is playing.** `TutRunner` passes `skipActivity: true` for every frame.
 - **`FakePtyAdapter.onPtySpawn`** — fires synchronously inside `spawnPty`, before the scenario plays, so a page attaches a shell without racing `TerminalPane`'s mount.
 - **`subscribeToWatchedCommands` / `getWatchedCommands`** (`lib/src/lib/watched-commands.ts`, re-exported from `terminal-registry`) — the WATCHING rule set, watched to credit `al-watch-cmd`.
 - **`MobileTerminalUi.onGestureInput(input, data)`** — optional, fired only for radial-menu actions, so Pocket credits gesture items without mistaking native keyboard input for a gesture.
@@ -95,21 +95,11 @@ Hooks in `dormouse-lib` / `MobileTerminalUi` that exist for tutorial observabili
 
 ## Mouse and Clipboard Feature Coverage
 
-Primary dogfood surface for `docs/specs/mouse-and-clipboard.md`; the three-pane layout covers:
-
-| Status | Spec coverage |
-|---|---|
-| ✅ Exercisable | §§1–2 (mouse reporting + override), §§3.1–3.3 (drag, block shape, block hint), §§3.6–3.7 (drag keys + popup), §§4.1–4.3 (raw/rewrapped copy, shortcuts, dismissal). |
-| ⚠️ Partial | §3.4 exposes change/resize cancellation but not pure scroll; §3.5 lacks enough scrollback; §8.2 writes paste chords to the fake PTY, whose shell ignores bracket markers. |
-| ❌ Missing | §§3.3 and 5 lack smart tokens and therefore `e` extension; §8.5 lacks a scenario that enables bracketed paste. |
-
-Auto-scroll during a drag and right-click paste are deferred in the implementation ([§9. Future](mouse-and-clipboard.md#9-future)), not Playground gaps.
+Primary dogfood surface for `docs/specs/mouse-and-clipboard.md`. What the three-pane layout exercises, partly exercises, and cannot reach today is audited in the rationale; the two gaps worth closing are the `## Future` scenarios below.
 
 ## Files
 
 - Routes + pages — `website/src/routes.ts`, `website/src/pages/Playground.tsx`, `website/src/pages/PlaygroundDesktop.tsx`, `website/src/pages/PocketPlayground.tsx`, `website/src/pages/Pocket.tsx`
-- Pocket composition + modal — `website/src/components/PocketTerminalExperience.tsx`, `website/src/components/PlaceToPaste.tsx`
-- Tutorial engine — `website/src/lib/tut-items.ts`, `website/src/lib/tut-runner.ts`, `website/src/lib/tut-detector.ts`, `website/src/lib/tutorial-state.ts`
 - Playground plumbing — `website/src/lib/playground-routing.ts`, `website/src/lib/playground-desktop-layout.ts`, `website/src/lib/playground-shells.ts`, `website/src/lib/tutorial-shell.ts`
 - Fake programs — `website/src/lib/ascii-splash-runner.ts`, `website/src/lib/changelog-runner.ts`
 - Lib contracts this spec owns — `WallEvent` in `lib/src/components/wall/wall-types.ts`; `sendOutput` / `pumpActivity` / `onPtySpawn` in `lib/src/lib/platform/fake-adapter.ts`
