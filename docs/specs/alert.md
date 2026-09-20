@@ -2,7 +2,9 @@
 
 > See `docs/specs/glossary.md` for Session / Pane / Door vocabulary.
 >
-> Owns the Session Activity layer — the three alert tracks, attention, TODO, notification text and its sanitization, the two alarm sinks, and the Workspace union projection. `docs/specs/layout.md` defers here for all alert/TODO behavior and owns placement and sizing.
+> Owns the Session Activity layer — the three alert tracks, attention, TODO, notification text and its sanitization, the two alarm sinks, and the Workspace union projection. `docs/specs/layout.md` defers here for all alert/TODO behavior.
+>
+> Defers placement and sizing to `docs/specs/layout.md`, the webview ↔ host wire contracts to `docs/specs/transport.md`, and push sealing to `docs/specs/remote-security-model.md`.
 
 **Must preserve Activity across minimize/reattach** (glossary I3). **A browser Surface has no Activity machine** — it can never ring, and carries only a user-set TODO flag, destroyed with that Surface.
 
@@ -34,7 +36,7 @@ Public `status` is a projection — first match wins:
 4. `COMMAND_EXIT_ARMED` if command-exit alerting is armed.
 5. Otherwise `WATCHING_DISABLED`.
 
-**Must identify each uninterrupted ringing interval with an `episode` id and start time.** The first track to latch creates it; the last track clearing ends it. Additional track latches join the episode; they never start another delivery episode or replay the alarm burst. **Never persist episodes.** Older host snapshots receive a renderer-local identity on their first ringing transition. Tests: `a second track latching mid-episode keeps the episode id` and `re-latching after all tracks clear starts a new episode` in `lib/src/lib/alert-manager.test.ts`.
+**Must identify each uninterrupted ringing interval with an `episode` id and start time.** The first track to latch creates it; the last track clearing ends it. Additional track latches join the episode; they never start another delivery episode. **Never persist episodes.** Older host snapshots receive a renderer-local identity on their first ringing transition. Tests: `a second track latching mid-episode keeps the episode id` and `re-latching after all tracks clear starts a new episode` in `lib/src/lib/alert-manager.test.ts`.
 
 `awaited` sits beside `status`: true while at least one `dor await` is parked on the Session (Await). It is derived from live waiters and **never persisted**.
 
@@ -80,9 +82,9 @@ Source of truth: `registerCompletionClaimant` / `dispatchCompletion` / `deferOrD
 
 ## Await
 
-An **await** parks on one Session until it finishes what it is doing, then reports why the wait ended — the claimant the seam above exists for, called by a program. **Where a human and a program want different things, an await serves the program and leaves the human's channels alone.**
+An **await** parks on one Session until it finishes what it is doing, then reports why the wait ended — the claimant the Completion events seam exists for. **Where a human and a program want different things, an await serves the program and leaves the human's channels alone.**
 
-`until` (`dor await`'s required `--until`) names how much evidence of completion the caller accepts — a permissiveness ladder, not orthogonal modes.
+`until` (`dor await`'s required `--until`) names how much evidence of completion the caller accepts — a permissiveness ladder.
 
 | `until` | Resolves on | `cause` | For |
 |---|---|---|---|
@@ -93,25 +95,25 @@ An **await** parks on one Session until it finishes what it is doing, then repor
 - **`--until` has no default and is never inferred from the WATCHING rule set** (rationale).
 - **Silent is not settled.** Settling comes from the always-on detector (WATCHING Track), which needs no shell integration and cannot fire until it has been BUSY (rationale).
 
-**Is there anything to wait for?** Silence cannot separate a peer that answered long ago from one working quietly.
+**Is there anything to wait for?**
 
 | At await time | Behavior |
 |---|---|
-| A foreground command is running (`commandExitWatch`) | Park, no grace window; a silent build resolves on its exit rather than being guessed at. |
-| Nothing running | Park for one grace window. A *command start* cancels it under either `until`; under `quiet` so does *output*, under `exit` output alone does not. Either way the await then waits for a real signal. Neither → resolve `cause: idle`. |
+| A foreground command is running (`commandExitWatch`) | Park, no grace window. |
+| Nothing running | Park for one grace window, then wait for a real signal. A *command start* cancels it under either `until`; under `quiet` so does *output*, under `exit` output alone does not. Neither → resolve `cause: idle`. |
 
 **`idle` is a resolution, not a failure** (rationale). Absent shell integration "is a command running" is unanswerable, so an `exit` await there falls back to the grace window and resolves `idle` rather than erroring.
 
-**Resolution consumes only the ring it resolved on**, its cause named by *that ring's own source*: protocol → `bell`, command-exit → `exit`, WATCHING → `quiet`. An await arriving mid-ring resolves immediately; under `exit` only a command-exit ring counts, the others being the human's and the await keeps waiting. Two are gated, their latches outliving the fact they describe:
+**Resolution consumes only the ring it resolved on**, its `cause` from *that ring's own source*: protocol → `bell`, command-exit → `exit`, WATCHING → `quiet`. An await arriving mid-ring resolves immediately; under `exit` only a command-exit ring counts and the await keeps waiting on the others. Two are gated:
 
 - **Skip a command-exit ring while a foreground command is running** (rationale).
 - **Skip a WATCHING ring once output has resumed since it latched** (`outputSinceWatchingRing`), and **never stand the detector in for that flag** (rationale).
-- **Never skip the bell**: an `OSC 9` is a discrete "I need input" that stays true until it is answered.
-- **Consuming releases that one track's latch and nothing else** — `todo` is neither set nor cleared, no `ActivityNotification` is dropped, and `attentionId` is never set.
+- **Never skip the bell** — an `OSC 9` stays true until it is answered.
+- **Consuming releases that one track's latch and nothing else** — no `ActivityNotification` is dropped and `attentionId` is never set.
 
 **Absorption: absorb the summons, keep the receipt.**
 
-- **A consumed completion never latches a ring**, so it does not ring the bell, speak an alarm, or push to a paired phone; nothing quieter is substituted (rationale).
+- **A consumed completion never latches a ring** — no alarm treatment, no spoken alarm, no push; nothing quieter is substituted (rationale).
 - **Absorption is per-signal, not per-Session** — a human's own WATCHING rule on that Session still rings on the next settle.
 - **A failed await absorbs nothing.** A timeout, a death, or a cancel claims no completion, so a crashed orchestration cannot silently eat the human's signal.
 - **An await never sets TODO, and never clears a pre-existing one** (rationale).
@@ -125,20 +127,18 @@ An **await** parks on one Session until it finishes what it is doing, then repor
 | Settle — "has it stopped?" | 5000ms | `mightNeedAttention` + `needsAttentionConfirm` |
 | Ceiling | `timeoutMs` | `dor await`'s `--timeout` (seconds, default 600), the only number not derived from `cfg.alert` |
 
-`timeoutMs` is the safety rail on a blocking call inside an agent loop, not an alert-tuning knob.
-
-- **Enforce it host-side**, with the grace and settle windows, so no hop can reap a parked await early and no caller can park forever by lying about its deadline.
+- **Enforce all three host-side**, so no hop reaps a parked await early and no caller parks forever by lying about its deadline.
 - The host's `MAX_AWAIT_TIMEOUT_MS` matches the CLI's 1–86400 whole-second range (`docs/specs/dor-cli.md`); a ceiling exists at all because `setTimeout` overflows past ~24.9 days (rationale).
 - **Reject a non-finite, non-positive, or over-ceiling request rather than clamping it** — it settles `cancelled`, absorbing nothing; the webview handler rejects the same values with a visible error.
 
-**Several awaits may park on one Session**, sharing one claimant: a completion goes to every await whose condition it satisfies, not only to whoever registered first, each resolving on the first qualifying signal after it registered.
+**Several awaits may park on one Session**, sharing one claimant: a completion goes to every await whose condition it satisfies, each resolving on the first qualifying signal after it registered.
 
 **In VS Code an await crosses the webview -> extension-host boundary**, and the wait itself never leaves the host:
 
-- The webview posts `alert:await` and, if it gives up, `alert:awaitCancel`; **the host answers exactly one `alert:awaitResult` per request**, a cancel included, so a claim is never released twice.
+- The webview posts `alert:await` and, if it gives up, `alert:awaitCancel`; **the host answers exactly one `alert:awaitResult` per request**, a cancel included.
 - **A disposing webview must cancel everything it had parked, and must answer those requests itself *synchronously*** (rationale).
 - `cancelled` has no wire outcome of its own: the webview reports it to `dor` as an error, which is also what forgets the in-flight control request.
-- Other hosts call `awaitCompletion` in-process. The Pocket phone adapter has no `dor` and protocol-v1 carries no await, so it settles any request `cancelled` at once.
+- Other hosts call `awaitCompletion` in-process. The Pocket phone adapter has no `dor` and protocol-v1 carries no await, so it settles every request `cancelled` at once.
 
 **A PTY exit or Session removal resolves every waiter still parked as `died`**, after command-finish dispatch gets first chance to resolve normally. Manager disposal and live transfer suspension resolve every waiter as `cancelled`.
 
@@ -193,8 +193,8 @@ Sequence syntax lives in `docs/specs/terminal-escapes.md`; what each means here:
 
 - **Standalone `BEL`** — stripped from visible output and creates `TERMINAL_BELL_NOTIFICATION`. If the same parse batch also holds a richer OSC notification or progress event, **drop the generic bells** so they cannot overwrite useful preview text; multiple bells in one batch collapse to one notification.
 - **`OSC 9`** — the message becomes the body, title null. Empty sanitized messages are ignored. It also feeds title-candidate derivation (`docs/specs/terminal-state.md`), with no alert effect.
-- **`OSC 777`** — only the `notify` subcommand is supported. The first field after `notify` is the title; everything after the next semicolon is body, preserving semicolons there. Unsupported subcommands and empty sanitized notifications are ignored.
-- **`OSC 99`** (kitty) — metadata keys are single ASCII letters separated by `:`; unknown keys are ignored. `i` groups chunks of one pending notification, `d` is the done flag (default `1`), `e` selects plain or base64 payload encoding, `p` selects the payload type (default `title`). `title`/`body` chunks append; completion rings once if the sanitized title or body is nonempty. Without `i`, only a complete single-sequence notification is meaningful. **Management payloads contribute no content and are consumed**: `p=?` sends `OSC99_SUPPORT_PAYLOAD`; `p=close` / `p=alive` are dropped outright, touching no pending notification. Any *other* unknown payload type still obeys the done flag: with the default `d=1` it completes a pending same-`i` notification, which may then ring on its accumulated title/body. Incomplete chunk state is capped and expired.
+- **`OSC 777`** — only the `notify` subcommand is supported; unsupported subcommands and empty sanitized notifications are ignored.
+- **`OSC 99`** (kitty) — chunked notifications keyed by `i`; completion rings once if the sanitized title or body is nonempty. **Management payloads (`p=?`, `p=close`, `p=alive`) contribute no content.** Incomplete chunk state is capped and expired.
 - **`OSC 9;4` progress** — progress only: no title, body, urgency, id, app name, or action fields.
 
   | Input | Behavior |
@@ -207,7 +207,7 @@ Sequence syntax lives in `docs/specs/terminal-escapes.md`; what each means here:
   | invalid state, missing percent for `1`/`4`, out-of-range percent | ignored |
   | completion or error while attended | clears the progress, no TODO or ring |
 
-Source of truth: parsing, sanitization limits, and OSC 99 chunk state in `lib/src/lib/terminal-protocol.ts`; `completeProtocolProgress` / `finishProtocolProgressCycle` in `lib/src/lib/alert-manager.ts`.
+Source of truth: the OSC 777 and OSC 99 grammars, parsing, sanitization limits, and OSC 99 chunk state in `lib/src/lib/terminal-protocol.ts`; `completeProtocolProgress` / `finishProtocolProgressCycle` in `lib/src/lib/alert-manager.ts`.
 
 ## Command-exit Track
 
@@ -244,7 +244,7 @@ Clearing behavior:
 ## Live Workspace transfer
 
 - **Must transfer live alert state separately from persisted reminders:** track latches, episode, command watch, deferred notification, and detector history/deadlines travel in the marked transfer content. **Never read this content on cold restore.**
-- **Must suspend source delivery before handing ownership to the host and freeze its detector, rule walk, and controls at content capture.** The destination restores receipts after persisted seeding and before the runtime publishes, then enables delivery only after `adopt_done` succeeds. Refusal restores the source runtime and pending deadlines; source removal follows adoption. **Must await host hand-back after source content capture fails**, retaining delivery suspension until routing returns.
+- **Must suspend source delivery before handing ownership to the host**, freezing its detector, rule walk, and controls at content capture, and **must await host hand-back when source content capture fails**, holding that suspension until routing returns. The destination restores receipts after persisted seeding and before the runtime publishes, and enables delivery only after `adopt_done`; refusal restores the source runtime and its pending deadlines. Transaction order is `docs/specs/standalone.md` → "Arrival queue".
 - **Must discard imported runtime, Activity, and pane state before releasing the delivery guards on any target failure**, mount or no mount, so a watcher never re-arms on a Workspace this window never owned. A receipt forgotten on an episode already observed is consumed, never fresh.
 - **Must carry per-sink receipts with the episode:** pending/queued work retains its original deadline; engine-admitted speech and dispatched push are consumed and never replayed. Suspending cuts current speech; a partially heard utterance is not restarted after a move or refusal.
 - **Must cancel parked await callers at suspension**, carrying no claimant closures or attention lease. Source attention loss arms a running command; destination interaction establishes its own attention.
@@ -254,7 +254,7 @@ Source of truth: `pauseForTransfer` / `resumeFromTransfer` / `applyReplay` in `l
 
 ## Alarm settings
 
-Application alarm defaults live beside the WATCHING rule set, edited in **Settings** (below), which also carries the theme picker ([theme.md](./theme.md)), the shell picker ([standalone.md](./standalone.md)), and the remote-control section ([relay.md](./relay.md)). **Each of those keeps its own store — never fold one into `AlertSettings`**, which is relayed wholesale to the host. **A host revalidates the blob before installing it** (`normalizeAlertSettings`): a webview must never be able to hand it a NaN or an absurd timer. Both stores run the same two classes in either host (`lib/src/lib/watched-command-host.ts`, `lib/src/lib/alert-settings-host.ts`), bound for standalone by `lib/src/host/alert-store-host.ts`; the shape, its defaults and its validation are the platform-free `lib/src/lib/alert-settings-model.ts`.
+Application alarm defaults live beside the WATCHING rule set, edited in **Settings** (below). **Every other store reached from Settings stays its own — never fold one into `AlertSettings`**, which is relayed wholesale to the host. **A host revalidates the blob before installing it** (`normalizeAlertSettings`): a webview must never be able to hand it a NaN or an absurd timer. Both stores run the same two classes in either host (`lib/src/lib/watched-command-host.ts`, `lib/src/lib/alert-settings-host.ts`), bound for standalone by `lib/src/host/alert-store-host.ts`; the shape, its defaults and its validation are the platform-free `lib/src/lib/alert-settings-model.ts`.
 
 | Field | Meaning |
 |---|---|
@@ -303,9 +303,8 @@ Source of truth: `AlertSettings` in `lib/src/lib/alert-settings.ts` (renderer mi
 - **Delivery state follows actual engine callbacks, not queue admission.** `AlertSpeechState` is a renderer-local `speaking | spoken` map keyed by Session: `start` publishes `speaking`; `end`, or `error` after a real start, publishes `spoken`; an utterance that never starts publishes neither. **Must check delivery identity before accepting `start` or completion**, including after cancellation, timeout, or teardown. Pinned by `ignores an older ring starting after a newer ring has begun speaking` and `recovers from a callback-less engine without accepting its later callbacks` in `lib/src/lib/alert-speech.test.ts`.
 - **Nothing in the settle path may assume the callback arrives after `speak()` returns** — an engine may dispatch `start` then `end`/`error` *synchronously* inside `speechSynthesis.speak()` (rationale). Handlers therefore close over the utterance itself and registration happens before dispatch. A dispatch the engine refuses outright settles too.
 - **Attending mid-sentence cuts the utterance off** — silence the engine, not merely un-render the overlay. "Mid-sentence" is the sink's own record that an utterance started — its generation token — never the rendered `speaking` state.
-- **Must admit only one utterance at a time to Web Speech per renderer**, including Settings tests; pending jobs remain in Dormouse. **Must remove resolved, disabled, or suspended pending jobs before engine admission**, without cutting another pane's current utterance. Pinned by `never admits a resolved queued alarm to the speech engine` in `lib/src/lib/alert-speech.test.ts`.
-- **Must bound pending jobs at 64**, rejecting later admissions while full. **Must cancel an engine attempt after 60 seconds without completion** and advance the queue; detached late callbacks cannot change the new attempt. No automatic retry follows failed, expired, or overflowed delivery.
-- **Must revoke callback identity before engine cancellation**, including synchronous callbacks. Teardown cancels the current engine utterance and drops pending jobs.
+- **Must admit only one utterance at a time to Web Speech per renderer**, Settings tests included, and **must remove resolved, disabled, or suspended pending jobs before engine admission** without cutting another pane's current utterance. Pinned by `never admits a resolved queued alarm to the speech engine` in `lib/src/lib/alert-speech.test.ts`.
+- **No automatic retry follows failed, expired, or overflowed delivery**, and teardown cancels the current engine utterance and drops pending jobs. Queue bounds, the engine timeout, and callback-identity revocation live at `SpeechQueue`.
 - `speaking` / `spoken` remains only while the originating Session is still `ALERT_RINGING`: any action that resolves the ring (Clearing And TODO) clears it, killing the Session included, while visibility, hover, and command-mode selection do not. **Never persist it or send it to the host**, so restore/reconnect cannot recreate it.
 
 Source of truth: `toSpokenText` in `lib/src/lib/alert-speech.ts`, armed by `lib/src/components/wall/use-alert-speech.ts`; `SpeechQueue` in `lib/src/lib/speech-queue.ts`; `redactHighEntropyTokens` in `lib/src/lib/redact-high-entropy.ts`; label derivation in `lib/src/lib/session-label.ts`; `AlertSpeechState` in `lib/src/lib/alert-speech-state.ts`.
@@ -317,8 +316,7 @@ Source of truth: `toSpokenText` in `lib/src/lib/alert-speech.ts`, armed by `lib/
 - **The label is sanitized by `toPushText` at send time, in the delivery half, and not by `toSpokenText`'s rule** (rationale). It keeps angle brackets and instead strips control characters and the Unicode bidi and zero-width format characters (including the Arabic letter mark), which can visually reorder or hide text in an OS notification; the cap counts code points, so a cut never ships half a surrogate pair. `toPushText` is only this sink's limit and fallback over `boundedPushText` in `remote-lib-common/src/security/push.ts`.
 - **The Burrow bounds, then seals; the worker re-bounds at the render sink.** Title, body, and tag are sealed to each recipient's own Client static and the Relay forwards ciphertext, so the second pass runs in `lib/src/remote/pocket-app/sw.ts`, which imports the *same* `boundedPushText` rather than mirroring it (`docs/specs/remote-security-model.md` -> Push sealing).
 - **The Burrow names its targets; the Relay rejects a send that does not.** Targets are the Burrow's *active* ACL records, read at send time so a revocation during the delay takes effect, and the Relay intersects them with its own subscriptions. **One sealed envelope per recipient** — a Client static is not a group key — so a send names each `deliveryId` beside the ciphertext only that phone can open, **clamped to `MAX_PUSH_QUERY_DELIVERY_IDS`** because the route refuses the whole POST past it. Nothing propagates a revocation today (`docs/specs/remote-security-model.md` -> Future), so a Relay that chose recipients itself would keep pushing to a de-authorized phone (rationale). The Burrow does **not** ask which devices are subscribed first (rationale).
-- **The settings dialog re-reads the device list when it opens** (`refreshPushDevicesNow`) — a phone can enable alerts long after this machine booted. **Must keep the transient preview on the cached list without refreshing.** The list is the Burrow's join of the Relay's subscriptions against its own ACL labels, arriving over the same bridge as a `pushDevices` command and answering `null` — rendered `no-burrow` — when no Burrow is running.
-- **Writes are fenced on request order** (latest-request-wins), and the enrolled gate's disarm both invalidates in-flight refreshes and clears the list, so nothing already on the wire can repopulate the dialog with phones there is no longer anything to push to. `clearPushDevices` keeps the refresher installed — an un-enrolled machine may still ask and be told `no-burrow` — while `resetPushDevices` drops it too and is full teardown.
+- **The settings dialog re-reads the device list when it opens; the transient preview never refreshes.** The list is the Burrow's join of the Relay's subscriptions against its own ACL labels. **A disarmed enrolled gate invalidates every in-flight refresh and clears the list**, so nothing already on the wire can repopulate the dialog with phones there is no longer anything to push to.
 
 Source of truth: `watchPushRings` / `invalidatePushDeviceRefreshes` in `lib/src/remote/burrow/alert-push.ts`; `sendPush` / `toPushText` in `lib/src/remote/burrow/push-delivery.ts`; `refreshPushDevicesNow` / `clearPushDevices` / `resetPushDevices` in `lib/src/lib/push-devices.ts`.
 
