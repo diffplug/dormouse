@@ -417,8 +417,6 @@ export interface PlatformAdapter {
   // Relaunch headless (pop back in) reopening `url`, resuming the screencast;
   // returns the new stream port. Pairs with agentBrowserPopOut.
   agentBrowserPopIn?(session: string, opts: { url?: string }, binaryPath?: string): Promise<AgentBrowserPopResult>;
-  // Best-effort raise the session's headed window to the front.
-  agentBrowserBringToFront?(session: string, binaryPath?: string): Promise<void>;
 
   // PTY event listeners
   onPtyData(handler: (detail: PtyDataDetail) => void): void;

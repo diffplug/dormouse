@@ -988,6 +988,10 @@ export function useDorControl({
               return;
             case 'untrusted': {
               const pendingCommand = toolRunCommand(lookup.run);
+              // The config lint runs before the trust gate, and the `pending`
+              // answer below is the only one the first run of a tool ever sees
+              // — the approval that follows has no `dor` left to answer to.
+              warnings = lookup.warnings;
               if (refuseCmdShell()) return;
               // The pane appears now and asks; the command spawns only on
               // approval (docs/specs/dor-tool.md -> Trust). Nothing from the
@@ -1166,7 +1170,9 @@ export function useDorControl({
             respondTool(idle ? 'adopted' : 'existing', {
               surfaceId: match.id,
               command: matchedCommand,
-              cwd,
+              // The match's own directory, not the caller's: an `adopted`
+              // restart ran there, and an `existing` match is running there.
+              cwd: matchedCwd,
               minimized: !revealed,
             });
             return;

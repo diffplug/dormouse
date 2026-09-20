@@ -162,13 +162,13 @@ describe('workspace.move', () => {
   it('refuses to move a Workspace holding iframes unless told to destroy their page state', async () => {
     const second = createWorkspace({ id: 'workspace-7', name: 'build', activate: false }).id;
     handleFor(getWorkspacesSnapshot().workspaces[0].id);
-    handleFor(second, { iframeSurfaceIds: () => ['browser-1'] });
+    handleFor(second, { iframeSurfaceRefs: () => ['surface:4'] });
     const transferWorkspace = vi.fn(async () => {});
     setPlatform({ transferWorkspace } as unknown as PlatformAdapter);
 
     const refused = request('workspace.move', { workspace: 'workspace:7', toWindow: 'window:ws-2' });
     await handleWorkspaceControl(refused);
-    expect(answer(refused)).toMatch(/1 iframe Surface\(s\).*surface:browser-1.*--dangerously-destroy-iframe-page-state/);
+    expect(answer(refused)).toMatch(/1 iframe Surface\(s\).*surface:4.*--dangerously-destroy-iframe-page-state/);
     expect(transferWorkspace).not.toHaveBeenCalled();
 
     const forced = request('workspace.move', {

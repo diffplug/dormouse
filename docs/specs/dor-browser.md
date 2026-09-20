@@ -44,6 +44,9 @@ Invariants on the flat persisted `BrowserPanelParams`:
 - **Agent-browser session state is flat** (`session`, `wsPort`, `binaryPath`,
   `syncEngaged`, `key`), never nested. Pop-out is not a param — it derives from
   `renderMode` once, at controller construction.
+- **`contextPortKey` is declared and persisted like any other param.** Only a
+  Surface the pane context menu opened for a port carries it, and reuse looks
+  one up by it ([Pane Context Menu Connect](#pane-context-menu-connect)).
 - **Never move a browser Surface's DOM, and never let a minimize unmount it**
   (rationale): Lath never re-parents its leaf div, and a minimize **parks** it
   (`docs/specs/tiling-engine.md` → "Parked leaves"), so the document returns with
@@ -339,10 +342,9 @@ shared by the stream and `tab list --json`).
 ### Pop-Out
 
 `ab-popout` relaunches the same session headed, because Chrome fixes
-headed/headless at daemon launch. The pane becomes a stub with Pop back in, plus
-Bring to front where a host implements `agentBrowserBringToFront`; while the
-window is still opening (a relaunch in flight, or an eager pane without its
-session) the stub offers neither. **State carried in v1 is only the active
+headed/headless at daemon launch. The pane becomes a stub with Pop back in;
+while the window is still opening (a relaunch in flight, or an eager pane
+without its session) the stub offers nothing. **State carried in v1 is only the active
 non-blank URL**: other tabs, DOM state, scroll, form inputs, session storage,
 cookies/logins do not survive.
 
@@ -384,7 +386,6 @@ sidecar/Rust adapter.
 | `getAgentBrowserStreamUrl` | Direct stream URL, or the VS Code relay URL. |
 | `agentBrowserOpen` | Spawn a GUI-owned session for iframe -> agent-browser; resolves when the daemon is up, not when the page loads ([Pop-Out](#pop-out)). |
 | `agentBrowserPopOut` / `agentBrowserPopIn` | Headed/headless relaunch. |
-| `agentBrowserBringToFront` | Optional; no host implements it today. |
 
 **Host-side validation is the security boundary:** every `agentBrowserCommand`
 implementation must enforce the shared allowlist; the CLI is not trusted to

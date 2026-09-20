@@ -53,7 +53,6 @@ export function isIdFormat(value: string): value is IdFormat {
 
 export function parseIdFormat(value: string): IdFormat {
   if (isIdFormat(value)) return value;
-  if (value === 'uuids') return 'ids';
   throw new SyntaxError(`invalid --id-format '${value}'`);
 }
 

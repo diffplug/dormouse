@@ -237,6 +237,9 @@ export type ToolLookup =
       /** Canonical upstream URL, or null when there is no resolvable remote —
        *  the approval UI then offers only the folder grant. */
       upstreamUrl: string | null;
+      /** The parsed file's lint warnings, the same set the `ok` arm carries:
+       *  the untrusted answer is the one the first run of a tool sees. */
+      warnings: string[];
     }
   | { status: 'error'; message: string }
   | { status: 'ok'; projectRoot: string; path: string; file: ToolFile; entry: ToolEntry; input: ToolInput };
@@ -314,5 +317,6 @@ export async function lookupTool(
     name: entry.name,
     run: input.run,
     upstreamUrl,
+    warnings: [...file.warnings],
   };
 }

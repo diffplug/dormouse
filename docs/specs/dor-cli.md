@@ -291,7 +291,7 @@ Invariants:
 - **Bare numeric targets and `pane:N` are not Surface handles.** Pane refs stay
   reserved for future layout-only commands.
 - Text list output defaults to refs; commands that list handles accept
-  `--id-format refs|ids|both` (`uuids` is a compatibility alias for `ids`). JSON
+  `--id-format refs|ids|both`. JSON
   list output always includes both refs and stable ids.
 - `workspace:<n>` selects a container and is **stable**: `n` is the number of
   the Workspace's registry-minted id (`docs/specs/standalone.md` → "Workspace

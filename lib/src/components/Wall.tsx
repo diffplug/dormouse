@@ -1015,14 +1015,15 @@ export function Wall({
     [lath],
   );
 
-  /** The members whose live document a move between Windows cannot carry. */
-  const iframeSurfaceIds = useCallback(
+  /** The members whose live document a move between Windows cannot carry, by
+   *  the ref a `dor` caller can act on. */
+  const iframeSurfaceRefs = useCallback(
     (): string[] => memberSurfaceIds().filter((id) => {
       const params = lath.getMeta(id)?.params;
       return (isBrowserParams(params) || (isToolParams(params) && browserUrlFromParams(params) !== null))
         && resolveRenderMode(params) === 'iframe';
-    }),
-    [lath, memberSurfaceIds],
+    }).map(surfaceRefForId),
+    [lath, memberSurfaceIds, surfaceRefForId],
   );
 
   /** Whether a member Surface has a PTY behind it, as against a browser view. */
@@ -1701,6 +1702,8 @@ export function Wall({
         // withholds `render` / `port` / `key` — they live only in the `ok` arm — so
         // asking again is what gives an approved tool the config its dormouse.yml
         // declared, rather than silently running it as a keyless default iframe.
+        // `resolved.warnings` is not re-reported: the untrusted answer carried
+        // the same set to the `dor` that asked, and that process has exited.
         const cwd = typeof meta?.params?.cwd === 'string' ? meta.params.cwd : pending.projectRoot;
         const resolved = await platform.toolControl?.({ op: 'lookup', name: pending.name, cwd, args: pending.args });
         if (resolved?.status !== 'ok') {
@@ -1783,7 +1786,7 @@ export function Wall({
   const methods: Omit<WallHandle, 'workspaceId'> = {
     surfaceIds: memberSurfaceIds,
     ownsSurface,
-    iframeSurfaceIds,
+    iframeSurfaceRefs,
     hasTouchedSurfaces: () => memberSurfaceIds().some((id) => {
       // A browser Surface has no "untouched" notion and always holds a page, so
       // it counts; so does a Tool, before its terminal exists to be asked. A

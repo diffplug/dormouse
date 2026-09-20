@@ -179,7 +179,7 @@ export function onDropOnOtherWindow(
     // The one thing a move cannot carry is a plain iframe's document, Doored
     // ones included; it reopens at its saved URL. The user says so first, with
     // the same typed letter a kill takes (docs/specs/layout.md → Workspaces).
-    const iframes = getWallHandle(id)?.iframeSurfaceIds() ?? [];
+    const iframes = getWallHandle(id)?.iframeSurfaceRefs() ?? [];
     if (iframes.length > 0) {
       setPendingWorkspaceMove({ id, char: randomKillChar(), iframeCount: iframes.length, proceed: move });
       return;

@@ -217,7 +217,7 @@ not a create: a Workspace that arrives mounts from the record it brought.
 plain iframe or serving iframe Tool's document cannot leave its webview, so it reopens at its
 saved URL, and a Workspace holding one — Doored ones included — asks with the
 Close's typed confirmation before it leaves; agent-browser Surfaces reconnect and ask
-nothing (`iframeSurfaceIds` on the Wall handle; `standalone/src/workspace-drag.test.ts`).
+nothing (`iframeSurfaceRefs` on the Wall handle; `standalone/src/workspace-drag.test.ts`).
 
 **Must show drag refusals over Window content in a dialog** until dismissal, retry, or Workspace departure. Source of truth: `onDropOnOtherWindow` in `standalone/src/workspace-drag.ts`; `lib/src/components/WorkspaceStrip.test.tsx`.
 

@@ -1370,12 +1370,6 @@ export class AgentBrowserSurfaceController {
     });
   }
 
-  bringToFront(): void {
-    const session = this.session;
-    if (!session) return;
-    getPlatform().agentBrowserBringToFront?.(session, this.binaryPath)?.catch(() => {});
-  }
-
   // Auto-revert: once the headed stream has connected, a later disconnect means
   // the window closed → relaunch headless and resume streaming. But a disconnect
   // also happens when Dormouse itself closes the session (pane kill, or a

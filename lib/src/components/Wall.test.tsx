@@ -1629,7 +1629,7 @@ describe('Wall on the Lath engine', () => {
     const toolControl = vi.fn(async (request: { op: string }) => {
       if (request.op === 'trust') return { status: 'trust-recorded' };
       const common = { projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'viewer', run: ['view', '/repo/file.md'] };
-      if (calls++ === 0) return { ...common, status: 'untrusted', upstreamUrl: null };
+      if (calls++ === 0) return { ...common, status: 'untrusted', upstreamUrl: null, warnings: [] };
       if (calls === 2) return { status: 'error', message: 'The selected file is missing' };
       return { ...common, status: 'ok', render: 'iframe', port: 'auto', key: null, warnings: [] };
     });
@@ -1678,7 +1678,7 @@ describe('Wall on the Lath engine', () => {
         if (failure === 'throws') throw new Error('Permission storage is unavailable');
         return failure === 'missing' ? undefined : { status: 'error', message: 'Permission storage is unavailable' };
       }
-      return { status: 'untrusted', projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'viewer', run: 'view', upstreamUrl: 'https://example.com/repo.git' };
+      return { status: 'untrusted', projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'viewer', run: 'view', upstreamUrl: 'https://example.com/repo.git', warnings: [] };
     });
     Object.assign(fake, { toolControl });
     await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
@@ -1706,7 +1706,7 @@ describe('Wall on the Lath engine', () => {
       if (request.op === 'trust') { trusted = true; return { status: 'trust-recorded' as const }; }
       const common = { projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'viewer', run: ['view', ...(request.args ?? [])] };
       return trusted ? { ...common, status: 'ok' as const, render: 'iframe' as const, port: 'auto' as const, key: request.args ?? [], warnings: [] }
-        : { ...common, status: 'untrusted' as const, upstreamUrl: null };
+        : { ...common, status: 'untrusted' as const, upstreamUrl: null, warnings: [] };
     });
     Object.assign(fake, { toolControl });
     await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
@@ -1820,7 +1820,7 @@ describe('Wall on the Lath engine', () => {
       if (request.op === 'trust') { trusted = true; return { status: 'trust-recorded' as const }; }
       return trusted
         ? { ...config, status: 'ok' as const, render: 'iframe' as const, port: 'announced' as const, key: ['/repo'], warnings: [] }
-        : { ...config, status: 'untrusted' as const, upstreamUrl: null };
+        : { ...config, status: 'untrusted' as const, upstreamUrl: null, warnings: [] };
     });
     (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = toolControl;
     try {
@@ -1888,6 +1888,7 @@ describe('Wall on the Lath engine', () => {
     (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = vi.fn(async () => ({
       status: 'untrusted' as const, projectRoot: '/repo', path: '/repo/dormouse.yml',
       name: 'storybook', run: 'pnpm storybook', upstreamUrl: null,
+      warnings: [],
     }));
     const ring = () => container.querySelector('[data-ring="outline"]')?.closest('svg')?.parentElement;
     await act(async () => { root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />); });
@@ -1914,7 +1915,7 @@ describe('Wall on the Lath engine', () => {
   it.each(['', ' \t\n'])('shows a useful fallback for a blank grant failure (%j)', async message => {
     const toolControl = vi.fn(async (request: { op: string }) => request.op === 'trust'
       ? { status: 'error', message }
-      : { status: 'untrusted', projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'storybook', run: 'pnpm storybook', upstreamUrl: null });
+      : { status: 'untrusted', projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'storybook', run: 'pnpm storybook', upstreamUrl: null, warnings: [] });
     Object.assign(fake, { toolControl });
     await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
     await flush();
@@ -1931,7 +1932,7 @@ describe('Wall on the Lath engine', () => {
   });
 
   it.each(['read error', 'unknown tool'])('retains a failed post-grant lookup with retry and quiet stale completion (%s)', async failure => {
-    const untrusted = { status: 'untrusted', projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'storybook', run: 'pnpm storybook', upstreamUrl: null };
+    const untrusted = { status: 'untrusted', projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'storybook', run: 'pnpm storybook', upstreamUrl: null, warnings: [] };
     const failed = failure === 'read error'
     ? { status: 'error', message: 'configuration temporarily unreadable' }
     : { status: 'unknown-tool', projectRoot: '/repo', path: '/repo/dormouse.yml', names: [] };
@@ -2001,6 +2002,7 @@ describe('Wall on the Lath engine', () => {
           name: 'storybook',
           run: 'pnpm storybook',
           upstreamUrl: null,
+          warnings: [],
         });
       }
       return resolvedGate.promise;
@@ -2132,6 +2134,7 @@ describe('Wall on the Lath engine', () => {
           name: 'storybook',
           run: 'pnpm storybook',
           upstreamUrl: null,
+          warnings: [],
         };
       }
       return okToolLookup(null);
@@ -2190,6 +2193,7 @@ describe('Wall on the Lath engine', () => {
       name: 'storybook',
       run: 'pnpm storybook',
       upstreamUrl: null,
+      warnings: [],
     }));
 
     await act(async () => {
@@ -2237,6 +2241,7 @@ describe('Wall on the Lath engine', () => {
       name: 'storybook',
       run: 'pnpm storybook',
       upstreamUrl: null,
+      warnings: [],
     }));
 
     await act(async () => {
@@ -2346,6 +2351,9 @@ describe('Wall on the Lath engine', () => {
   it('reports a reused minimized tool as visible after reattaching it', async () => {
     const toolId = 'tool-door';
     terminalRegistry.applyTerminalSemanticEvents(toolId, [
+      // The match runs in its own directory, not the caller's: the response has
+      // to name that one (docs/specs/dor-tool.md -> Identity and dedupe).
+      { type: 'cwd', cwd: terminalRegistry.cwdFromOsc633('/repo/packages/ui')! },
       { type: 'commandLine', commandLine: 'pnpm storybook' },
       { type: 'commandStart' },
     ]);
@@ -2378,7 +2386,7 @@ describe('Wall on the Lath engine', () => {
       await flush();
       expect(container.querySelector(`[data-door-id="${toolId}"]`)).not.toBeNull();
 
-      let response: { ok: boolean; result?: { status: string; surfaceId: string; minimized: boolean } } | undefined;
+      let response: { ok: boolean; result?: { status: string; surfaceId: string; minimized: boolean; cwd: string } } | undefined;
       await act(async () => {
         window.dispatchEvent(new CustomEvent('dormouse:control-request', {
           detail: {
@@ -2392,7 +2400,7 @@ describe('Wall on the Lath engine', () => {
 
       expect(response).toMatchObject({
         ok: true,
-        result: { status: 'existing', surfaceId: toolId, minimized: false },
+        result: { status: 'existing', surfaceId: toolId, minimized: false, cwd: '/repo/packages/ui' },
       });
       expect(container.querySelector(`[data-door-id="${toolId}"]`)).toBeNull();
       expect(container.querySelector(`[data-lath-leaf="${toolId}"]`)).not.toBeNull();
@@ -2766,6 +2774,7 @@ describe('Wall on the Lath engine', () => {
       name: 'storybook',
       run: 'pnpm storybook',
       upstreamUrl: null,
+      warnings: [],
     }));
     (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = toolControl;
 
