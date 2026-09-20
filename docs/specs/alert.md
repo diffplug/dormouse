@@ -69,7 +69,7 @@ With `deferAlertsUntilQuiet` enabled:
 - **Must fold a pending terminal notification into an eligible command-finish ring immediately**, so protocol detail enriches that ring instead of publishing stale later.
 - **Must defer after claimants and ring eligibility, never redispatch the historical `CompletionEvent`** (rationale).
 - **Keep pending intent live-only and bounded** to the latest protocol notification. Meaningful output moves its quiet deadline; command-boundary detector resets do not drop it.
-- **Cancel pending delivery on attendance, dismissal, TODO changes, removal, seeding, or teardown.** Disabling the setting releases it immediately; otherwise confirmed quiet latches the protocol track in one fresh ring, after which speech/push begin their own delays. Continuous output may defer forever.
+- **Cancel pending delivery on attendance, a dismissal that clears a ring, TODO changes, removal, seeding, or teardown.** A dismiss on a quiet Session keeps it: a cancelled deferral was never visible to dismiss. Disabling the setting releases it immediately; otherwise confirmed quiet latches the protocol track in one fresh ring, after which speech/push begin their own delays. Continuous output may defer forever.
 
 Two ordering rules:
 
