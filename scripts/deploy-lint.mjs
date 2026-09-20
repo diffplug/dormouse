@@ -261,18 +261,19 @@ export const RULES = [
       Linux:
         /grep -hEo 'DORMOUSE_SETUP_PASSWORD\|DORMOUSE_VAPID_PRIVATE_KEY\|DORMOUSE_ENROLL_TOKEN\(_\[\[:alnum:\]_\]\+\)\?'/,
       Windows:
-        /\(\("\$taskXml" \+ "`n" \+ \$wrapperText\) -match 'DORMOUSE_SETUP_PASSWORD\|DORMOUSE_VAPID_PRIVATE_KEY\|DORMOUSE_ENROLL_TOKEN\(\?!_FILE\)'\)/,
+        /\(\("\$taskXml" \+ "`n" \+ \$wrapperText\) -match 'DORMOUSE_SETUP_PASSWORD\|DORMOUSE_VAPID_PRIVATE_KEY\|DORMOUSE_ENROLL_TOKEN\(\?!_FILE\\b\)'\)/,
     },
   },
   {
     // The service definition legitimately carries DORMOUSE_ENROLL_TOKEN_FILE,
     // and no other name in that namespace. Pin the exact Unix filter alongside
-    // the equivalent Windows negative lookahead so the platforms cannot drift.
+    // the equivalent Windows negative lookahead (word-bounded, so a name that
+    // merely extends _FILE is a finding there too) so the platforms cannot drift.
     rule: 'Credentials at rest — only the enrollment token file name is exempt',
     patterns: {
       macOS: /grep -qvx 'DORMOUSE_ENROLL_TOKEN_FILE'/,
       Linux: /grep -qvx 'DORMOUSE_ENROLL_TOKEN_FILE'/,
-      Windows: /DORMOUSE_ENROLL_TOKEN\(\?!_FILE\)/,
+      Windows: /DORMOUSE_ENROLL_TOKEN\(\?!_FILE\\b\)/,
     },
   },
   {

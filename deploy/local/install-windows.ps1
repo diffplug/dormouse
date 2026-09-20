@@ -1699,7 +1699,7 @@ function Invoke-Verify {
   # process that can read the definition can read it.
   if (-not $definitionRead) {
     Fail "the task definition or bin\run-relay.ps1 could not be read -- it was searched for neither a credential nor the source checkout"
-  } elseif (("$taskXml" + "`n" + $wrapperText) -match 'DORMOUSE_SETUP_PASSWORD|DORMOUSE_VAPID_PRIVATE_KEY|DORMOUSE_ENROLL_TOKEN(?!_FILE)') {
+  } elseif (("$taskXml" + "`n" + $wrapperText) -match 'DORMOUSE_SETUP_PASSWORD|DORMOUSE_VAPID_PRIVATE_KEY|DORMOUSE_ENROLL_TOKEN(?!_FILE\b)') {
     Fail "the Scheduled Task or wrapper names a credential -- it must carry only paths"
   } else {
     Pass "the service definition names no credential"
