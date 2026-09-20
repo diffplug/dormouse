@@ -14,7 +14,7 @@ A Wall renders one Workspace's Surfaces as Panes in Content or Doors on the Base
 
 ## Shell layout
 
-Two areas: **Content**, the tiling layout of Panes rendered by the **Lath** engine, and **Baseboard**, the bottom strip of Doors and shortcut hints — always present in the app shell, suppressible with `Wall showBaseboard={false}`.
+Two areas: **Content**, the tiling layout of Panes rendered by the **Lath** engine, and **Baseboard**, the bottom strip of Doors and shortcut hints, always present in the app shell.
 
 ```
 Wall
@@ -42,7 +42,7 @@ Each pane is one **leaf** in Lath's split tree — a stable, absolutely-position
 
 Panes are separated by a 7px gap (`PANE_GUTTER_PX`), odd so the 1px selection ring centers in it on whole pixels ([Selection overlay](#selection-overlay)).
 
-**A pane drag's depth model — center swap, edge split, ancestor levels by scroll wheel — belongs to `docs/specs/tiling-engine.md` → "Hierarchical drag and drop"**; the Wall owns only the op commit and the selection policy after it, a center drop landing exactly where `Cmd/Ctrl+Arrow` would ([Spatial navigation](#spatial-navigation)). **A baseboard drop is a no-op when `showBaseboard={false}`** — there is nowhere to minimize into. Source of truth: `onProposeMove` / `onProposeMinimize` / `onExternalDrop` in `lib/src/components/Wall.tsx`.
+**A pane drag's depth model — center swap, edge split, ancestor levels by scroll wheel — belongs to `docs/specs/tiling-engine.md` → "Hierarchical drag and drop"**; the Wall owns only the op commit and the selection policy after it, a center drop landing exactly where `Cmd/Ctrl+Arrow` would ([Spatial navigation](#spatial-navigation)). Source of truth: `onProposeMove` / `onProposeMinimize` / `onExternalDrop` in `lib/src/components/Wall.tsx`.
 
 ### Pane header
 
@@ -142,9 +142,7 @@ Source of truth: `SurfacePaneHeader` in `lib/src/components/wall/SurfacePaneHead
 
 ## Baseboard
 
-The baseboard (`h-7`, 28px) sits below content, visible by default, with no top divider. A 2px theme-colored gap preserves pane corners; 7px horizontal padding aligns doors with panes. With no doors above 350px wide, it shows `LCmd → RCmd to enter command mode` on macOS and `LShift → RShift to enter command mode` elsewhere.
-
-`Wall showBaseboard={false}` serves an embedder with no door/minimize workflow: no strip, the content wrapper's bottom inset grown from 2px to 7px, a baseboard drop a no-op. **It is a seam, not a shipped configuration** — no production host passes it (rationale), so the app shell always has a baseboard.
+The baseboard (`h-7`, 28px) sits below content, with no top divider. A 2px theme-colored gap preserves pane corners; 7px horizontal padding aligns doors with panes. With no doors above 350px wide, it shows `LCmd → RCmd to enter command mode` on macOS and `LShift → RShift to enter command mode` elsewhere.
 
 **Must group the right-hand controls**: the `N more →` overflow arrow, the host-supplied `notice` slot, then three always-present 24px square Settings buttons with 2px gaps. Their 16px icons are speaker/slashed-speaker for spoken alarms, filled `VibrateIcon`/`DeviceMobileSlashIcon` for push, and sliders for Settings. **Must expose each state through shape and `aria-pressed`.** The status buttons toggle their respective alarm settings; sliders opens Settings (`docs/specs/alert.md` → Settings dialog). **Must use the shared `chromeButton` hover treatment** for Settings and overflow buttons.
 

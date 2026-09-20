@@ -44,10 +44,6 @@ xterm.js paints only its own rendered surface, and integer row fitting leaves a 
 
 **Why the modal hosts are gated rather than hoisted.** Each calls `useDialogKeyboardOwner`, which reads the *active* Wall's `DialogKeyboardContext`; hoisting them above `WorkspaceWindow` would leave them with no coordinator to suppress command-mode dispatch through. The cost is that a modal's React-local state resets on a switch — accepted, since every modal that matters keeps its state in a store.
 
-## Baseboard
-
-**Why `showBaseboard={false}` is a seam.** The mobile Pocket composition — the obvious candidate — is a separate `MobileWall` (`docs/specs/mobile-terminal-ui.md`), not a baseboard-less Wall.
-
 ## Mode switching
 
 **Why both gesture tracks stay live everywhere.** Keyboards with no right Meta key are common on Windows and Linux laptops, so the Shift track is the only available gesture there. Keeping both live on every platform avoids a platform switch inside the detector and leaves macOS users a fallback when a hand is already on Shift.
