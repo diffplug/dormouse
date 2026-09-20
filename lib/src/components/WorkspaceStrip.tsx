@@ -152,7 +152,13 @@ export function WorkspaceStrip({
     if (!workspaces.some((workspace) => workspace.id === id)) unionsRef.current.delete(id);
   }
   const unionFor = (id: WorkspaceId, active: boolean): WorkspaceUnion => {
-    if (active) return EMPTY_WORKSPACE_UNION;
+    // A visible Workspace shows no indicators, and its cached union must not
+    // outlive the ring it described: a ring that ends while the Workspace is
+    // active would otherwise carry its `ringingSince` into the next one.
+    if (active) {
+      unionsRef.current.delete(id);
+      return EMPTY_WORKSPACE_UNION;
+    }
     const projected = computeWorkspaceUnion(membership.get(id) ?? [], activity);
     const previous = unionsRef.current.get(id);
     // One uninterrupted ringing interval per tab: while the Workspace stays

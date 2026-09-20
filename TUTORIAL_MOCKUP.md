@@ -96,9 +96,7 @@ al-todo-clear     Press `Enter` in the pane to clear it
 al-todo-manual    Add a TODO by hand
 ```
 
-Changes from today's nine: `al-busy` (the pane's in-progress feedback)
-is **cut** as a step — it is feedback, not a concept, and it is what the user is
-already staring at during Beat 2. `al-ring` is **split into three** so each
+Changes from today's eight: `al-ring` is **split into three** so each
 attention mechanism gets its own line. Everything else keeps its id.
 
 ## Two things the mockup has to solve

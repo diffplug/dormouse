@@ -124,3 +124,5 @@ A persisted reminder intentionally forgets rings and detector history. Reusing i
 ## Workspace union
 
 A Workspace-level counter was tried first and dropped: the maximum child counter hides a new alert from a child with a smaller counter, and summing counters turns adding or removing a member into a notification. The earliest ringing member's episode replaces it because a hidden tab shows one alarm however many members are behind it, and because switching Workspaces re-derives the union from scratch — an `episode.startedAt` survives that, while a locally tracked generation had to be retained alongside it (2026-09).
+
+"Only that interval" is load-bearing because the tab's memory of a ring is a cache the visible Workspace never refreshes. The retired `WorkspaceRingCues` observed the active Workspace too, so a ring that started and ended while its tab was visible could not leave anything behind; the union cache that replaced it can. Left in place, the stale `ringingSince` is carried forward into the next ring, whose `animationDelay` is then already past the burst's end — the tab wears a static edge for a summons that should have flashed (2026-09).

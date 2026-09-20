@@ -167,6 +167,33 @@ describe('WorkspaceStrip', () => {
     expect(tabFor(first).querySelector('[data-alert-ring-inset]')).toBe(inset);
   });
 
+  /** The cache is the tab's memory of one ring, so a ring that ends while its
+   *  Workspace is visible must not leave its start behind for the next one. */
+  it('clocks the burst from the ring that began while the Workspace was visible', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    setWorkspaceSurfaces(first, ['pane-a']);
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    setTerminalActivity('pane-a', { status: 'ALERT_RINGING', episode: { id: 'first', startedAt: 1_000 } });
+    await render();
+    expect(tabFor(first).querySelector('[data-alert-ring-inset]')).not.toBeNull();
+
+    // Attend that ring from its own tab, then let the member ring again while
+    // the Workspace is the visible one and wears no inset.
+    await act(async () => { activateButton(first).click(); });
+    await act(async () => { setTerminalActivity('pane-a', { status: 'NOTHING_TO_SHOW' }); });
+    await act(async () => {
+      setTerminalActivity('pane-a', { status: 'ALERT_RINGING', episode: { id: 'second', startedAt: 9_000 } });
+    });
+
+    // Leaving reveals the summons: a burst 100ms old, not one clocked from the
+    // ring that ended eight seconds ago and already past the animation's end.
+    now.mockReturnValue(9_100);
+    await act(async () => { activateButton('ws-2').click(); });
+    const inset = tabFor(first).querySelector<HTMLElement>('[data-alert-ring-inset]')!;
+    expect(inset.style.animationDelay).toBe('-100ms');
+  });
+
   it('renames the active tab on click, holding the chrome keyboard lease while the editor is open', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await render();

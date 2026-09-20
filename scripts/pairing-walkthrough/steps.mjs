@@ -1262,7 +1262,7 @@ function wallReadyExpr() {
  * The session list as the reserve renders it, found by position rather than by
  * class: it is the block directly under the input-mode selector, and each row is
  * one button carrying the pane's title, its TODO pill, and — when the Burrow says
- * the pane is ringing — an inset in one of the `alarm-vs-*` tokens
+ * the pane is ringing — an alarm inset, an overlay span inside the button
  * (`lib/src/components/MobileTerminalUi.tsx`).
  *
  * A statement, not an expression: it leaves the rows in `rows` (falsy while the
@@ -1274,7 +1274,7 @@ function sessionRowsExpr() {
     const rows = reserve && [...reserve.querySelectorAll('button')].map((row) => ({
       text: row.innerText.trim(),
       todo: [...row.querySelectorAll('span')].some((el) => el.textContent.trim() === 'TODO'),
-      ringing: /alarm-vs/.test(row.className),
+      ringing: row.querySelector('[data-alert-ring-inset]') !== null,
     }));`;
 }
 
