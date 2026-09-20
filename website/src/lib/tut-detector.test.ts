@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_MOUSE_SELECTION_STATE, type MouseSelectionState } from "dormouse-lib/lib/mouse-selection";
 import type { ActivityState } from "dormouse-lib/lib/terminal-registry";
+import { DESKTOP_SECTIONS } from "./tut-items";
 import { TutDetector } from "./tut-detector";
 import { TutorialState } from "./tutorial-state";
 
@@ -22,7 +23,7 @@ function makeDetectorHarness(initialActivitySnapshot = new Map<string, ActivityS
   let mouseSnapshot = new Map<string, MouseSelectionState>();
   let themeListener: (() => void) | null = null;
   let activeThemeId = "vscode.theme-defaults.dark_vs";
-  const state = new TutorialState();
+  const state = new TutorialState(DESKTOP_SECTIONS);
   const detector = new TutDetector({
     state,
     activityStore: {

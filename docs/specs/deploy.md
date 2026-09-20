@@ -36,7 +36,7 @@ Human-driven, in order:
 
 ## Versioning
 
-**Must synchronize the four version files — `lib/package.json`, `vscode-ext/package.json`, `standalone/src-tauri/Cargo.toml`, `standalone/src-tauri/tauri.conf.json` — and Cargo.lock's `dormouse` entry with `scripts/bump-version.sh`** (`cargo check --offline`).
+**Must synchronize the four version files — `lib/package.json`, `vscode-ext/package.json`, `standalone/src-tauri/Cargo.toml`, `standalone/src-tauri/tauri.conf.json` — and Cargo.lock's `dormouse` entry with `scripts/bump-version.sh`** (`cargo check --offline`). **A version is `X.Y.Z`**: both the bump script and `sign-and-deploy.sh` reject a prerelease suffix, rather than one of them discovering it after the tag is pushed.
 
 **A release is triggered by pushing one tag (`v0.1.0`)** — never separate `vscode-ext/v*` and `standalone/v*` tags, because one changelog entry covers both.
 

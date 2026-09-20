@@ -3,8 +3,8 @@ import { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 import * as alertSettings from "dormouse-lib/lib/alert-settings";
 import type { AlertStateDetail } from "dormouse-lib/lib/platform/types";
 import {
+  DESKTOP_SECTIONS as SECTIONS,
   POCKET_TUTORIAL_PROFILE,
-  SECTIONS,
   type ItemId,
   type TutorialProfile,
 } from "./tut-items";
@@ -52,7 +52,7 @@ function mountRunner(
   adapter.onPtyData(({ data }) => frames.push(data));
 
   const profile = options.profile;
-  const state = new TutorialState(profile?.sections);
+  const state = new TutorialState(profile?.sections ?? SECTIONS);
   for (const itemId of completedIds) state.markComplete(itemId);
   let pocketTouchMode = options.pocketTouchMode ?? "gestures";
   const pocketTouchModeListeners = new Set<() => void>();
@@ -112,12 +112,16 @@ describe("TutRunner snapshots", () => {
     const demoId = "demo-target";
     let currentTimeoutMs = alertSettings.DEFAULT_ALERT_SETTINGS.inactivityTimeoutMs;
     let durationMs = 0;
+    let commandMs = 0;
+    let busyDemoLaunches = 0;
     let finishTimer: ReturnType<typeof setTimeout> | undefined;
     let cancelPump: (() => void) | undefined;
     const { adapter, sendKeys, lastFrame, dispose } = mountRunner([], {
       getInactivityTimeoutMs: () => currentTimeoutMs,
       onTriggerBusyDemo: (duration, commandDuration) => {
         durationMs = duration;
+        commandMs = commandDuration;
+        busyDemoLaunches += 1;
         adapter.sendOutput(demoId, "\x1b]633;E;longtask\x07\x1b]633;C\x07");
         cancelPump = adapter.pumpActivity(demoId, duration, BUSY_DEMO_INTERVAL_MS);
         finishTimer = setTimeout(() => adapter.sendOutput(demoId, "\x1b]633;D;0\x07"), commandDuration);
@@ -148,9 +152,20 @@ describe("TutRunner snapshots", () => {
       adapter.alertSetCommandWatched("longtask", true);
       events.length = 0;
       sendKeys("s");
-      vi.advanceTimersByTime(durationMs + 7_000);
+      // `s` counts down its fake command, which outlives the pump so WATCHING's
+      // silence chain has something to ring against.
+      expect(commandMs).toBeGreaterThan(durationMs);
+      expect(lastFrame()).toContain(`${Math.ceil(commandMs / 1000)}\x1b[0m seconds`);
+      // One guard, in the runner: a replay anywhere inside the command is
+      // ignored, so the page never has to cancel a live pump or exit timer.
+      vi.advanceTimersByTime(durationMs + 1);
+      sendKeys("s");
+      expect(busyDemoLaunches).toBe(1);
+      vi.advanceTimersByTime(commandMs - durationMs + 7_000);
       expect(events.some((event) => event.status === "BUSY")).toBe(true);
       expect(events.some((event) => event.status === "ALERT_RINGING")).toBe(true);
+      sendKeys("s");
+      expect(busyDemoLaunches).toBe(2);
     } finally {
       clearTimeout(finishTimer);
       cancelPump?.();

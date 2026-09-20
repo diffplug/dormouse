@@ -26,8 +26,8 @@ foreground/background pairs and nothing else (rationale):
 
 **Hierarchy is the background swap between pairs**; secondary text is alpha on
 the same pair's own foreground (`text-app-fg/70`), never a separate token.
-`DESIGN.md`'s Do/Don't lists own the rest — bg-only chrome, no pass-through
-`--mt-*` layer or one-off tokens, header hover — with the `text-alarm-vs-*`
+`DESIGN.md`'s Do/Don't lists own the rest — bg-only chrome, **no pass-through
+`--mt-*` layer** or one-off tokens, header hover — with the `text-alarm-vs-*`
 ringing tint and destructive-action error styling as the semantic exceptions.
 
 **Never carry resting structure** with `surface-raised`, `border` (panel.border),
@@ -139,6 +139,13 @@ resolver materializes the VSCode terminal defaults first — when unset,
 inherits `terminal.foreground`, `terminal.selectionBackground` inherits
 `editor.selectionBackground`, and `terminal.foreground` takes VSCode's terminal
 foreground registry default.
+
+**`getTerminalTheme()` carries no per-key default** — `REGISTRY_DEFAULTS` is the
+one such table, and every shipping host materializes these keys first; an unset
+key is omitted so xterm.js applies its own. Two exceptions: the
+background/foreground pair, rostered under `DESIGN.md` → "Fixed Exceptions", and
+`cursor`, which falls back to the resolved foreground because **the three colors
+pushed to a DOM-less host must all be present** or the push is dropped whole.
 
 A `MutationObserver` re-reads these on class or style mutations of `body` or
 `html`, so applying a theme updates existing terminals. **Adapters must use the

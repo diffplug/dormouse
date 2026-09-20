@@ -2,9 +2,9 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Link } from "react-router";
 import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "../components/SiteHeader";
 import { PlaceToPaste } from "../components/PlaceToPaste";
-import { POCKET_THEME_ID } from "../components/PocketTerminalExperience";
 import { useRestoredTheme } from "dormouse-lib/lib/themes";
 import { PlaygroundShellRegistry } from "../lib/playground-shells";
+import { DESKTOP_TUTORIAL_PROFILE } from "../lib/tut-items";
 import { TutorialState } from "../lib/tutorial-state";
 import { TutDetector } from "../lib/tut-detector";
 import {
@@ -21,6 +21,7 @@ import {
   type DesktopPaneSpec,
 } from "../lib/playground-desktop-layout";
 import { SITE_LINK_CLASS } from "../components/site-tokens";
+import { WEBSITE_DEFAULT_THEME_ID } from "../lib/website-theme";
 
 type FakePtyAdapter = import("dormouse-lib/lib/platform/fake-adapter").FakePtyAdapter;
 type WallEvent = import("dormouse-lib/components/Wall").WallEvent;
@@ -86,7 +87,7 @@ function PlaygroundDesktopExperience() {
   // The navbar picker used to theme this page as a side effect of its own
   // render-time restore. The picker now lives in the Settings dialog and only
   // mounts when opened, so the page restores its own theme.
-  useRestoredTheme(POCKET_THEME_ID);
+  useRestoredTheme(WEBSITE_DEFAULT_THEME_ID);
 
   const [WallModule, setWallModule] = useState<{
     Wall: React.ComponentType<any>;
@@ -159,7 +160,7 @@ function PlaygroundDesktopExperience() {
         adapter.setScenario(pane.id, { name: "none", chunks: [] });
       }
 
-      const tutorialState = new TutorialState();
+      const tutorialState = new TutorialState(DESKTOP_TUTORIAL_PROFILE.sections);
       stateRef.current = tutorialState;
       const detector = new TutDetector({
         state: tutorialState,
@@ -184,12 +185,10 @@ function PlaygroundDesktopExperience() {
               // report one through shell integration. Both alert panes run the
               // same fake `longtask`, which is what lets one rule light up the
               // other pane (docs/specs/alert.md).
+              // No cancel of a prior run here: TutRunner ignores `s` until the
+              // fake command's whole `commandMs` has elapsed, so a second call
+              // cannot arrive while this pump or timer is live.
               onTriggerBusyDemo: (durationMs, commandMs) => {
-                busyDemoDisposeRef.current?.();
-                if (busyDemoFinishTimerRef.current !== null) {
-                  window.clearTimeout(busyDemoFinishTimerRef.current);
-                  busyDemoFinishTimerRef.current = null;
-                }
                 for (const paneId of ALERT_DEMO_PANES) {
                   startFakeCommand(adapter, paneId, "longtask");
                 }

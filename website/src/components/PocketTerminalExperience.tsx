@@ -14,11 +14,7 @@ import { POCKET_TUTORIAL_PROFILE, type ItemId } from "../lib/tut-items";
 import { ChangelogRunner } from "../lib/changelog-runner";
 import { useRestoredTheme } from "dormouse-lib/lib/themes";
 
-// The default theme is defined by the real Pocket app so this playground —
-// whose whole purpose is proving out that experience — cannot drift from it.
-import { POCKET_THEME_ID } from "dormouse-lib/remote/pocket-app/pocket-theme";
-
-export { POCKET_THEME_ID };
+import { WEBSITE_DEFAULT_THEME_ID } from "../lib/website-theme";
 
 type FakePtyAdapter = import("dormouse-lib/lib/platform/fake-adapter").FakePtyAdapter;
 type MobileGestureInputId = import("dormouse-lib/lib/mobile-gesture-menu").MobileGestureInputId;
@@ -50,7 +46,7 @@ export function PocketTerminalExperience({
   interactive: boolean;
   fillViewport?: boolean;
 }) {
-  useRestoredTheme(POCKET_THEME_ID);
+  useRestoredTheme(WEBSITE_DEFAULT_THEME_ID);
   const [terminalReady, setTerminalReady] = useState(false);
   const adapterRef = useRef<FakePtyAdapter | null>(null);
   const shellRegistryRef = useRef<PlaygroundShellRegistry | null>(null);

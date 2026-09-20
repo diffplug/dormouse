@@ -12,7 +12,7 @@
 
 ## Layout
 
-**Why the page restores its own theme.** Theme selection moved out of `SiteHeader` into the Wall's Settings dialog, so nothing on the page guarantees a picker ever mounts. `useRestoredTheme(POCKET_THEME_ID)` makes the restore unconditional, and declares the host fallback the Settings picker later re-resolves through.
+**Why the page restores its own theme.** Theme selection moved out of `SiteHeader` into the Wall's Settings dialog, so nothing on the page guarantees a picker ever mounts. `useRestoredTheme(WEBSITE_DEFAULT_THEME_ID)` makes the restore unconditional, and declares the host fallback the Settings picker later re-resolves through.
 
 **Why the desktop layout is an explicit Lath seed.** The synchronous `initialPaneIds` path creates its leaves before the later ones have measured geometry, so it cannot reliably choose alternating split axes — the L-shape comes out however the measurements land. A valid Lath snapshot fixes the shape, and with it the one vertical and one horizontal divider.
 

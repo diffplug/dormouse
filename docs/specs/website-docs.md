@@ -195,11 +195,10 @@ delta is structural:
 8. Mark same-site and external navigation appropriately.
 
 Operations 1–5 live in the generator; 6–8 live in the page components.
-Operations 1–4 run in `buildDocument`, so they apply to the guide, which has no
-page today, the self-host runbook, and the security spec; operation 5 runs over
-those three and `dor/skill.md`, the last before `/docs/dor` lifts its
-introduction out of those same blocks, so every published page inherits one
-rewrite.
+Operations 1–5 run in `buildDocument`, so they apply to the guide, which has no
+page today, the self-host runbook, and the security spec. `dor/skill.md` is
+exempt from operation 5 and asserted instead
+([`/docs/agent-skill` guide](#docsagent-skill-guide)).
 
 **Never** publish a relative repository link as-is; `resolveRepoLinks` sends it
 to the publishing page or the canonical file and fails the build when the
@@ -393,10 +392,13 @@ use the first token with a matching CLI section and label it with the first
 authored spelling. Targeting and Surface handles match by heading prefix and
 link to the corresponding CLI introductions.
 
-These links are presentation adjacent to the skill body. Website URLs are never
-injected into `dor/skill.md`: an older installed CLI must remain self-contained
-and version-matched rather than directing its instructions to the latest
-website reference.
+These links are presentation adjacent to the skill body. **Website URLs are
+never injected into `dor/skill.md`** — an older installed CLI must remain
+self-contained and version-matched rather than directing its instructions to
+the latest website reference — and **the generator asserts the skill names no
+site URL rather than rewriting one**, which would repair the violation instead
+of reporting it. `buildCli` lifts the intro sections out of these same block
+objects, so a site URL here would reach `/docs/dor` too.
 
 Generation fails when an introduction heading is missing or ambiguous, or a
 command heading names no anchor in the generated CLI reference.
@@ -468,12 +470,18 @@ website data module:
 website/scripts/generate-docs.js
 website/scripts/docs-parser.js
 website/scripts/help-parser.js
-website/src/data/docs.guide.json    generated, no page consumes it today
 website/src/data/docs.selfhost.json
 website/src/data/docs.security.json
 website/src/data/docs.cli.json
 website/src/data/docs.skill.json
 ```
+
+**Only a document with a page is written.** The guide is parsed and validated
+on every build, and its media synced, but writing its data file shipped 48 KB
+nothing imports; `Scope: guide-page-return` restores the write. **The fields
+the generator derives for its own assertions — the applied delta and the three
+rewrite logs — are stripped at the write** and kept on the in-memory result,
+which is what the tests and the public-doc lint read.
 
 One file per document rather than one combined module: a shared import made
 every docs route pull the others' content into one chunk.
@@ -488,7 +496,7 @@ dor/test/snapshots/help/*.md
 dor/skill.md
 ```
 
-The generated data contains the canonical product-guide blocks and heading
+The generated data contains each published document's blocks and heading
 inventory with the explicit fixed delta applied, ordered semantic CLI nodes
 plus exact raw help, and the skill blocks plus validated heading-to-reference
 links. The raw skill Markdown is deliberately not emitted.
@@ -623,10 +631,10 @@ Remaining work, in staged order:
 A hosted rendering of the general product guide was built, shipped at `/docs`,
 and then withdrawn — the guide reads well enough where it is already published,
 and the page did not earn its place in the site's navigation. The pipeline is
-whole, not a stub: `docs.guide.json` is written on every build with no
-consumer.
+whole, not a stub: `buildGuide` runs on every build, and only the write of its
+data file was dropped once nothing imported it.
 
-Reviving it needs a page component and an entry in `docs-pages.ts` — not new
-pipeline work. Whoever does it should first answer the question that removed
+Reviving it needs a page component, an entry in `docs-pages.ts`, and
+`PUBLISHED_PAGES` gaining `guide` — not new pipeline work. Whoever does it should first answer the question that removed
 the page: what this rendering gives a reader that the Marketplace and GitHub
 renderings do not.
