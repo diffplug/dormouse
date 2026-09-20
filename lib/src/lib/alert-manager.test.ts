@@ -479,7 +479,9 @@ describe('AlertManager in isolation', () => {
     expect(manager.getState(id).episode).toBeNull();
 
     applyTerminalProtocolEvents(manager, id, [{ kind: 'notification', notification: bell }]);
-    expect(manager.getState(id).episode?.id).not.toBe(first!.id);
+    const second = manager.getState(id).episode;
+    expect(second?.id).toBeTruthy();
+    expect(second?.id).not.toBe(first!.id);
   });
 
   it('finishes an armed command-exit watch when the PTY exits without commandFinish', () => {

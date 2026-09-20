@@ -3,7 +3,7 @@ import { isRecord } from './is-record';
 import { isToolKeyScope, type ToolKeyScope } from './platform/tool-types';
 import type { SessionStatus } from './alert-manager';
 import { hasShellInputControls } from 'dor/commands/shell-quote';
-import { ACTIVITY_NOTIFICATION_SOURCES, type ActivityNotification, type TodoState } from './alert-manager';
+import { ACTIVITY_NOTIFICATION_SOURCES, type ActivityNotification, type AlertState, type TodoState } from './alert-manager';
 
 /** Only TODO/detail restore; `status` is diagnostic and never resurrects a ring. */
 export interface PersistedAlertState {
@@ -46,11 +46,13 @@ export interface PersistedPane {
 
 /**
  * Narrow live Activity down to what may reach disk. An explicit projection, not
- * a structurally-assignable pass-through: `ActivityState` is a superset, and
+ * a structurally-assignable pass-through: `AlertState` is a superset, and
  * `JSON.stringify` writes every extra field it grows
- * (`docs/specs/alert.md` -> Public State, "Persist only").
+ * (`docs/specs/alert.md` -> Public State, "Persist only"). A stale record read
+ * back off disk takes the second arm — it may itself carry live fields an older
+ * build wrote, and re-projecting is what strips them.
  */
-export function toPersistedAlertState(state: PersistedAlertState): PersistedAlertState {
+export function toPersistedAlertState(state: AlertState | PersistedAlertState): PersistedAlertState {
   return {
     status: state.status,
     todo: state.todo,

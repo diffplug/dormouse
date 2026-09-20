@@ -346,14 +346,16 @@ describe('saveSession', () => {
 
   it('persists local browser surface TODO state in the browser pane alert field', async () => {
     const platform = createPlatform(null);
-    // A full live ActivityState, so the assertion below shows the projection
-    // dropping the fields `docs/specs/alert.md` -> Public State forbids on disk.
+    // A full live ActivityState, episode included, so the assertion below shows
+    // the projection dropping every field `docs/specs/alert.md` -> Public State
+    // keeps off disk.
     terminalRegistryMocks.getActivity.mockReturnValue({
       status: 'WATCHING_DISABLED',
       watchingEnabled: false,
       todo: true,
       notification: null,
       awaited: false,
+      episode: { id: 'episode-web', startedAt: 0 },
     });
 
     await saveSession(platform, [

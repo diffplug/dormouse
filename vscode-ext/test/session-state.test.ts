@@ -52,6 +52,7 @@ describe('VS Code session alert persistence', () => {
         watchingEnabled: true,
         todo: true,
         awaited: true,
+        episode: { id: 'episode-live', startedAt: 0 },
       })],
     ])) as PersistedSession;
 
@@ -69,6 +70,7 @@ describe('VS Code session alert persistence', () => {
       notification: null,
       watchingEnabled: true,
       awaited: true,
+      episode: { id: 'episode-stale', startedAt: 0 },
     };
     const store = contextWithState({
       version: 3,

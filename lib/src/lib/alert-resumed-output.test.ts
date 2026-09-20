@@ -67,6 +67,7 @@ describe('WATCHING output resuming before alarm delivery', () => {
     busy();
     settle();
     const firstEpisode = manager.getState(ID).episode;
+    expect(firstEpisode?.id).toBeTruthy();
     expect(manager.getState(ID).status).toBe('ALERT_RINGING');
     vi.advanceTimersByTime(1_000);
     busy();
@@ -81,8 +82,10 @@ describe('WATCHING output resuming before alarm delivery', () => {
     expect(pushed).not.toHaveBeenCalled();
 
     settle();
-    expect(manager.getState(ID).status).toBe('ALERT_RINGING');
-    expect(manager.getState(ID).episode?.id).not.toBe(firstEpisode?.id);
+    const relatched = manager.getState(ID);
+    expect(relatched.status).toBe('ALERT_RINGING');
+    expect(relatched.episode?.id).toBeTruthy();
+    expect(relatched.episode?.id).not.toBe(firstEpisode?.id);
     vi.advanceTimersByTime(DELAY - 1);
     expect(spoken).not.toHaveBeenCalled();
     expect(pushed).not.toHaveBeenCalled();

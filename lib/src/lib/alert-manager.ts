@@ -449,7 +449,7 @@ export class AlertManager {
         // it right now. The originating command key latches here so the ring
         // outlives the command that raised it.
         if (!this.isWatching(entry) || this.hasAttention(id)) break;
-        this.latchRing(entry);
+        this.openEpisode(entry);
         entry.watchingRingingCommand = entry.commandExitWatch?.argv0 ?? null;
         entry.outputSinceWatchingRing = false;
         this.notify(id);
@@ -751,7 +751,7 @@ export class AlertManager {
   }
 
   private applyProtocolRinging(entry: AlertEntry, notification: ActivityNotification): void {
-    this.latchRing(entry);
+    this.openEpisode(entry);
     entry.notification = notification;
     entry.todo = true;
     entry.protocolStatus = 'ALERT_RINGING';
@@ -878,7 +878,7 @@ export class AlertManager {
     displayCommand: string,
     exitCode: number | undefined,
   ): void {
-    this.latchRing(entry);
+    this.openEpisode(entry);
     entry.commandExitStatus = 'ALERT_RINGING';
     entry.todo = true;
     // A protocol ring carries richer text; never overwrite it with the generic one.
@@ -982,11 +982,11 @@ export class AlertManager {
   }
 
   /**
-   * Open a delivery episode when the first track latches. The mirror of
-   * `releaseRing`: a track latching behind an already-ringing one enriches the
-   * same summons, so its episode — and everything keyed on it — stands.
+   * Open a delivery episode when the first track latches. Nothing closes one:
+   * `getState` masks the episode to `null` while no track rings, so a track
+   * latching behind an already-ringing one enriches that same summons.
    */
-  private latchRing(entry: AlertEntry): void {
+  private openEpisode(entry: AlertEntry): void {
     if (!this.hasActiveRing(entry)) entry.episode = createAlertEpisode();
   }
 
