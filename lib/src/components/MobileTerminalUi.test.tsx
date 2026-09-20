@@ -4,7 +4,7 @@
 import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MobileTerminalUi, type MobileTerminalSessionItem, type MobileTerminalTouchMode, type MobileTerminalUiProps } from './MobileTerminalUi';
+import { MobileTerminalUi, paneMouseOverride, type MobileTerminalSessionItem, type MobileTerminalTouchMode, type MobileTerminalUiProps } from './MobileTerminalUi';
 import { setNativeFieldValue } from '../lib/dom';
 
 const EPISODE = { id: 'episode-1', startedAt: Date.now() };
@@ -384,5 +384,24 @@ describe('MobileTerminalUi session list', () => {
     expect(inset(container, 'ringing-active')).toBe('header-active');
     expect(inset(container, 'ringing-idle')).toBe('door');
     expect(inset(container, 'quiet')).toBeNull();
+  });
+});
+
+describe('paneMouseOverride', () => {
+  it('overrides a reporting pane only in Select mode', () => {
+    expect(paneMouseOverride('selection', 'vt200')).toBe('permanent');
+    expect(paneMouseOverride('selection', 'any')).toBe('permanent');
+  });
+
+  it('leaves a pane that reports nothing alone, Select mode included', () => {
+    expect(paneMouseOverride('selection', 'none')).toBe('off');
+  });
+
+  it('never overrides outside Select mode', () => {
+    for (const mode of ['gestures', 'cursor'] as const) {
+      for (const reporting of ['none', 'x10', 'vt200', 'drag', 'any'] as const) {
+        expect(paneMouseOverride(mode, reporting)).toBe('off');
+      }
+    }
   });
 });

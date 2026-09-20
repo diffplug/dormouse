@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { MobileTerminalUi, type MobileTerminalKeyboardMode, type MobileTerminalTouchMode } from "dormouse-lib/components/MobileTerminalUi";
+import { MobileTerminalUi, paneMouseOverride, type MobileTerminalKeyboardMode, type MobileTerminalTouchMode } from "dormouse-lib/components/MobileTerminalUi";
 import { MobileWall, useMobileWallSessionItems, type MobileWallSession } from "dormouse-lib/components/MobileWall";
 import {
   getMouseSelectionSnapshot,
@@ -228,16 +228,13 @@ export function PocketTerminalExperience({
     };
   }, [getPocketTouchMode, handleNotifyPocket, handleOpenGithub, subscribeToPocketTouchMode, tryAutoStart]);
 
-  // Touch mode is a single global UI state, so each pane's mouse override is a
-  // pure function of (touch mode) × (that pane's own reporting) — not of which
-  // pane happens to be active. Configuring every pane prevents a pane the user
-  // switched away from being left stuck in a stale override (e.g. a
-  // mouse-reporting pane left "permanent" after leaving Select mode).
+  // Every pane, not just the active one: `paneMouseOverride` is a function of
+  // touch mode and that pane's own reporting, so a pane the user switched away
+  // from would otherwise be left stuck in a stale override.
   useEffect(() => {
     for (const session of POCKET_SESSIONS) {
       const reporting = mouseStates.get(session.id)?.mouseReporting ?? "none";
-      const override = touchMode === "selection" && reporting !== "none" ? "permanent" : "off";
-      setMouseOverride(session.id, override);
+      setMouseOverride(session.id, paneMouseOverride(touchMode, reporting));
     }
   }, [mouseStates, touchMode]);
 

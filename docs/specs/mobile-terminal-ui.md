@@ -74,7 +74,7 @@ Touch mode is global, so **each mounted pane's mouse override is a pure function
 of that mode and the pane's *own* mouse-reporting state** (`selection` +
 reporting ≠ `none` → `permanent`, else `off`), recomputed for **every** pane,
 not just the active one — a pane switched away from must not keep a stale
-override. The consumer owns this wiring.
+override. `lib` exports the function; the consumer owns the loop.
 
 Select mode **must route touch and pen drags through the shared terminal
 mouse-selection router**, never a mobile-only one, so every selection and copy
@@ -102,8 +102,9 @@ the pointer, and **must never reach xterm or the pane** for focus, selection,
 or pane interaction. **Non-primary mouse buttons
 are ignored**, so their browser or host behavior continues.
 
-Source of truth: `TOUCH_MODES` in `lib/src/components/MobileTerminalUi.tsx`;
-per-pane override wiring in `lib/src/remote/pocket-app/PocketWall.tsx` and
+Source of truth: `TOUCH_MODES` and `paneMouseOverride` in
+`lib/src/components/MobileTerminalUi.tsx`; per-pane wiring in
+`lib/src/remote/pocket-app/PocketWall.tsx` and
 `website/src/components/PocketTerminalExperience.tsx`.
 
 ## Gesture mode
@@ -237,7 +238,7 @@ same rule as the touch selector.
 | Draft | Draft reserve copy, filling the reserve. |
 
 Default input mode is **Type**. Recent and Draft are placeholder-only today and
-say so in the reserve — the real features are staged (see [Future](#future)).
+say so in the reserve ([Future](#future)).
 
 **Must focus the hidden input synchronously inside the Type selector's tap/click
 handler** (rationale). A follow-up effect retries via rAF and staggered timers

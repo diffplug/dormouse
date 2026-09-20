@@ -124,8 +124,8 @@ than staying relayed. (rationale)
 overtakes a frame encrypted before it. **A frame is written once or not at all** —
 the implementation's send either consumes a message or throws, and a retry would
 put counted ciphertext on the wire twice. Overflowing
-`MAX_DIRECT_OUTBOUND_FRAMES` / `MAX_DIRECT_OUTBOUND_BYTES` disposes the session,
-as the receiver's hold does. **Each failure is reported in its own words** — a
+`MAX_DIRECT_PENDING_FRAMES` / `MAX_DIRECT_PENDING_BYTES` — the one pair both
+directions use — disposes the session, as the receiver's hold does. **Each failure is reported in its own words** — a
 queue overrun and a refused write are opposite diagnoses in a burrow-loss log.
 
 **The switch preserves order per direction:**

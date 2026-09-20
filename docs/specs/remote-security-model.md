@@ -351,8 +351,7 @@ omits `client-gone`, invents client IDs, or reorders frames.
 | `DIRECT_SETUP_TIMEOUT_MS` / `DIRECT_ANSWER_TIMEOUT_MS` / `DIRECT_GATHER_TIMEOUT_MS` | 15 000 / 10 000 / 3 000 | `remote-lib-common/src/security/direct-path.ts` |
 | `DIRECT_HANDOFF_TIMEOUT_MS` / `DIRECT_DISCONNECTED_GRACE_MS` | `= DIRECT_SETUP_TIMEOUT_MS` (15 000) / 5 000 | same |
 | `MAX_DIRECT_SDP_LENGTH` | 2 000 characters | same |
-| `MAX_DIRECT_PENDING_FRAMES` / `MAX_DIRECT_PENDING_BYTES` | 8 192 frames / 4 MiB, bytes binding first (rationale) | same |
-| `MAX_DIRECT_OUTBOUND_FRAMES` / `MAX_DIRECT_OUTBOUND_BYTES` | the same pair, for what a sender holds | same |
+| `MAX_DIRECT_PENDING_FRAMES` / `MAX_DIRECT_PENDING_BYTES` | 8 192 frames / 4 MiB, bytes binding first; one pair for a receiver's hold and a sender's queue alike (rationale) | same |
 | `DIRECT_BUFFER_HIGH` / `DIRECT_BUFFER_LOW` | 256 KiB / 64 KiB | same |
 
 - **Must bound waiting relay frames before enqueueing**, by count and cumulative
