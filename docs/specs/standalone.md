@@ -1189,9 +1189,8 @@ restart-intent tests in `standalone/src-tauri/src/quit_state.rs`,
 The `WindowEvent::DragDrop` handler in `lib.rs` emits the dropped paths as
 `dormouse://files-dropped`; `TauriAdapter` fans that out to `onFilesDropped` for
 the Wall. The whole path is **inert today**: `tauri.conf.json` sets
-`dragDropEnabled: false` to keep in-webview HTML5 drag-and-drop working, so the
-native handler never fires. Behavior and status:
-`docs/specs/mouse-and-clipboard.md` (§8.7 Drag-to-Paste).
+`dragDropEnabled: false`, so the native handler never fires. Behavior and
+status: `docs/specs/mouse-and-clipboard.md` (§8.7 Drag-to-Paste).
 
 ## Logging
 

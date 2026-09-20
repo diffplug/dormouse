@@ -4233,7 +4233,11 @@ pub fn run() {
         .on_window_event(|window, event| {
             let app = window.app_handle();
             match event {
-                // Inert while tauri.conf.json sets dragDropEnabled=false (needed for HTML5 pane drag). See diffplug/dormouse#38 and tauri-apps/tauri#14373.
+                // Inert while tauri.conf.json sets dragDropEnabled=false. Nothing
+                // needs the flag off any more — Lath's pane drag is pointer-based —
+                // so flipping it is a deliberate, separate change
+                // (docs/specs/mouse-and-clipboard.md -> "8.7 Drag-to-Paste").
+                // See diffplug/dormouse#38 and tauri-apps/tauri#14373.
                 WindowEvent::DragDrop(DragDropEvent::Drop { paths, .. }) => {
                     let payload: Vec<String> = paths
                         .iter()

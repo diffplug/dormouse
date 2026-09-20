@@ -246,9 +246,9 @@ export function applyArchiveMutation(archive: NotepadArchiveV1, mutation: Notepa
   // replacement is appended.
   const present = new Set(batches.map((b) => b.id));
   // Every note id already stored. A note id is a UUID, so "already archived" is
-  // exact, which is what keeps the VS Code mirror path — the one appender that
-  // still mints a fresh batch id per teardown — from duplicating notes an
-  // earlier write stored.
+  // exact, which is what keeps the VS Code mirror path — whose teardown mints a
+  // fresh batch id for any mirrored Surface carrying no pending one — from
+  // duplicating notes an earlier write stored.
   const stored = new Set<string>();
   for (const batch of batches) for (const note of batch.notes) stored.add(note.id);
   for (const batch of mutation.append ?? []) {

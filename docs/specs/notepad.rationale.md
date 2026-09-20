@@ -30,9 +30,10 @@ Remembering the id and deleting it in the very mutation that re-appends it repla
 the batch wholesale instead, so edits, additions, and the user's own deletions all
 survive. That is why deletes apply before appends, and why the note-id dedupe is
 computed after them — otherwise the batch being replaced would still count as
-storing its own notes. The dedupe stays because the VS Code mirror path mints a
-fresh id per teardown and has nothing to address an earlier write by; a note id is
-a UUID, so "already stored" is an exact test there rather than a heuristic.
+storing its own notes. The dedupe stays for the VS Code mirror path: a mirrored
+Surface carrying no pending batch id still mints a fresh one at teardown, leaving
+that batch nothing to address an earlier write by; a note id is a UUID, so
+"already stored" is an exact test there rather than a heuristic.
 
 `MAX_SAVE_ATTEMPTS` is 5. An unbounded retry against an archive somebody else is
 rewriting in a loop would spin instead of telling the user, and the closure paths

@@ -17,19 +17,11 @@
 - **Must retain exited output**, offer Reset, and avoid automatic restart loops.
 - **Must pause status and process-inspection polling while the context is hidden**, invalidating cached idle results. Reopening publishes current terminal status; source closure inspects work on demand.
 
-| State | Status and action |
-|---|---|
-| Starting | Waiting for shell…; Modify |
-| Autorun executing | Running the captured command; Modify |
-| Untouched completion | Captured command autoran; Modify |
-| User input | Skipping autorun to preserve user keystrokes; Reset |
-| Empty default | Autorun off; Modify |
-| No readiness | Autorun skipped: shell readiness unavailable; Modify |
-| Exited | Helper exited; Reset |
+**Must carry one status line per helper state**, offering Reset in place of Modify only after user input and after exit.
 
 **Must make Reset an explicit discard**, confirming loss of scrollback, unfinished input, running programs, and unsaved edits. Cancellation changes nothing; confirmation disposes the old helper and launches a fresh one using the source's current directory and current global setting. Stale timers cannot write to the replacement.
 
-Source of truth: `openHelper` / `helperHasWork` / `disposeHelper` / `closeHelperParent` in `lib/src/lib/helper-terminal.ts`; `markSessionTouched` / `parkElement` in `lib/src/lib/terminal-lifecycle.ts`; `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`. Tests: `lib/src/lib/helper-terminal.test.ts`.
+Source of truth: `openHelper` / `helperHasWork` / `disposeHelper` / `closeHelperParent` in `lib/src/lib/helper-terminal.ts`; `markSessionTouched` / `parkElement` in `lib/src/lib/terminal-lifecycle.ts`; `HELPER_STATUS` — the state, its status line, and whether it offers Reset — in `lib/src/components/wall/TerminalContextView.tsx`. Tests: `lib/src/lib/helper-terminal.test.ts`.
 
 Notepad sharing and pin restrictions follow `docs/specs/notepad.md` → "Helper terminals".
 

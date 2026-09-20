@@ -378,7 +378,8 @@ export function clearAllNotepads(): void {
 
 // --- Open panel ---
 //
-// Only one Surface notepad is open per Wall, so this is a single id rather than
+// Only one Surface notepad is open per window — this module is per webview, so
+// the id is shared by every Wall in it — hence a single id rather than
 // per-Surface open state. Its own listener set: a note edit must not re-render
 // every header that only cares about which panel is open, and vice versa.
 

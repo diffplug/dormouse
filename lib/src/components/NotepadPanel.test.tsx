@@ -64,7 +64,7 @@ function FirstDialogOwner() {
   return null;
 }
 
-/** Both panels a Wall would mount, so "one notepad per Wall" is observable. */
+/** Both panels a Wall would mount, so "one notepad open per window" is observable. */
 function renderPanels(ids: string[] = [SURFACE]): void {
   act(() => {
     root.render(

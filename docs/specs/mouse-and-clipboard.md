@@ -48,13 +48,13 @@ It ends on the **next mouse-up inside the terminal content area** paired with a 
 
 - **Counts:** a plain click (down/up that never crossed the drag threshold) or a completed drag.
 - **Does not count:** clicks on the No-Mouse icon or the banner buttons, and an orphan mouse-up from a drag that started outside the terminal.
-- **On end** — or on **Cancel**, immediately — reporting is restored, banner dismissed, Mouse icon back. **No timeout:** absent any mouse action the override stays indefinitely.
+- **On end** — or on **Cancel**, after that button's 260 ms confirmation flash — reporting is restored, banner dismissed, Mouse icon back. **No timeout:** absent any mouse action the override stays indefinitely.
 
-**Sticky override.** **Make sticky** converts it (the store calls this state `permanent`): banner dismissed, No-Mouse icon kept with its "click to restore" hover text, mouse and wheel still going to the terminal. It persists until the user clicks the No-Mouse icon.
+**Sticky override.** **Make sticky** converts it after the same flash (the store calls this state `permanent`): banner dismissed, No-Mouse icon kept with its "click to restore" hover text, mouse and wheel still going to the terminal. It persists until the user clicks the No-Mouse icon.
 
 **Auto-clear on reporting off.** **Either override clears when the inside program stops requesting mouse reporting** (it exits, or DECRSTs `?1000l`/`?1002l`/`?1003l`); icon and banner go with it. A **dead** session's replay ends in the `REPLAY_MODE_RESET` tail that DECRSTs mouse tracking (`docs/specs/terminal-escapes.md`), so a mode latched by a dead TUI cannot block selection in the restored pane.
 
-**No keyboard path is designed** for the icons or banner buttons; as plain buttons, focus-based activation is not actively prevented — §9.1.
+**No keyboard path is designed** for the icons or banner buttons, and focus-based activation is not actively prevented.
 
 ---
 
@@ -64,7 +64,7 @@ Selection is available whenever the terminal handles the mouse (§3.5, §6.1).
 
 ### 3.1 Initiating a Selection
 
-- **Must begin selection after a click-and-drag crosses ~4px**; plain clicks shift pane focus or activate hyperlinks. **Must capture mouse presses on xterm’s screen immediately** (rationale). Pinned by `lib/src/lib/terminal-mouse-router.test.ts`.
+- **Must begin selection after a click-and-drag crosses ~4px**; plain clicks shift pane focus or activate hyperlinks. **Must capture mouse presses on xterm’s screen immediately** (rationale); that capture, and the plain click it must not break, are pinned by `lib/src/lib/terminal-mouse-router.test.ts`.
 - On touch or pen, a primary pointer tap-and-drag takes the same path; non-primary touch pointers are ignored.
 - The selection draws as a single perimeter outline tracing the union of selected cells (§7 owns rendering). Color is `--color-focus-ring` (`docs/specs/theme.md`), with a hardcoded cornflower-blue final fallback in `SelectionOverlay.tsx`.
 - **A drag whose button comes up outside the webview iframe must still finalize**, by captured `pointerup` or the window-`mousemove` backstop (rationale).
@@ -111,7 +111,7 @@ Source of truth: `lib/src/components/wall/keyboard/handle-mouse-selection-keys.t
 
 ## 4. Selection Popup
 
-A finalized selection gets a popup of action buttons adjacent to it, on the side opposite the drag direction — mirroring where the drag hint sat.
+A finalized selection gets a popup of action buttons anchored where §3.3's drag hint sat.
 
 ### 4.1 Copy Buttons
 
@@ -205,7 +205,7 @@ Source of truth: `terminalOwnsEvent` in `lib/src/lib/terminal-mouse-router.ts`, 
 
 - **Must render outlines, hints, and popups above the cell grid**, isolated from inside-program output and redraws; header icons and banners remain persistent chrome.
 - **Geometry comes from the *measured* xterm cell grid** (`cellWidth`/`cellHeight`/`gridLeft`/`gridTop`), never element-width ÷ cols, so the outline stays aligned across xterm's internal padding.
-- **Must remeasure both overlay and popup on every shared render tick** (scroll, resize, output), even when the selection is unchanged; the popup dismisses if the selection is canceled. Pinned by `lib/src/components/SelectionPopup.test.tsx`.
+- **Must remeasure both overlay and popup on every shared render tick** (scroll, resize, output), even when the selection is unchanged; the popup dismisses if the selection is canceled. Pinned for the popup by `lib/src/components/SelectionPopup.test.tsx`.
 
 Source of truth: `lib/src/lib/selection-text.ts` (extraction and normalization), `lib/src/lib/selection-geometry.ts` (perimeter construction), `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHeader.tsx` and `MouseOverrideBanner` in `lib/src/components/wall/MouseOverrideBanner.tsx` — tested in `lib/src/components/wall/mouse-chrome.test.tsx`.
 
@@ -229,7 +229,7 @@ Because Ctrl+V is intercepted everywhere, a literal control character goes in th
 
 ### 8.4 Platform Detection
 
-**`IS_MAC` (`lib/src/lib/platform/index.ts`) is computed once at startup** from `navigator.userAgentData.platform`, else `navigator.platform`, else the user-agent string, matched against `/Mac|iPhone|iPad/i`. It gates only the copy chord (§4.2) and hint strings — the paste chord is platform-independent (§8.2).
+**`IS_MAC` (`lib/src/lib/platform/index.ts`) is computed once at startup** from `navigator.userAgentData.platform`, else `navigator.platform`, matched against `/Mac|iPhone|iPad/i`. It gates the copy chord (§4.2), every platform-dependent label, and the app's own macOS chrome (the AppBar's traffic-light inset, the VS Code workbench chord map) — **the paste chord alone is platform-independent** (§8.2).
 
 ### 8.5 Bracketed Paste
 
@@ -246,7 +246,7 @@ Source of truth: `defangPasteEscapes` in `lib/src/lib/clipboard.ts`.
 Paste reads the clipboard in three tiers, preferred in order:
 
 1. **File references** (a Finder/Explorer Copy of a file). Each path is shell-escaped; the space-joined list is written to the PTY with a trailing space, so the next token starts cleanly.
-2. **Plain text.** The adapter's native `readClipboardText` where it has one, else `navigator.clipboard.readText()`. **Never reverse that order:** on macOS WKWebView the `navigator` call pops a confirmation menu at the cursor on every invocation (rationale). A non-empty string goes to the PTY (bracket-wrapped, §8.5).
+2. **Plain text.** The adapter's native `readClipboardText` where it has one, else `navigator.clipboard.readText()`. **Never reverse that order** (rationale). A non-empty string goes to the PTY (bracket-wrapped, §8.5).
 3. **Raw image data.** Only when both of the above come back empty and the clipboard holds image bytes (e.g. a `Cmd+Shift+4` screenshot): the bytes are written to a newly-created private temp directory as `<uuid>-clipboard.png`, and that path is pasted as in tier 1. **On Unix-like systems the temp directory is owner-only and the image file owner-read/write**, so clipboard screenshots are not exposed to other local users. File and directory are unlinked ~5 minutes later (rationale).
 
 **Tiers 1 and 2 are read in parallel** (independent IPC roundtrips) and the file reference wins; tier 3 is sequential because it allocates a temp file. Every tier empty ⇒ silent no-op.
@@ -259,21 +259,21 @@ One shared Node module, `standalone/sidecar/clipboard-ops.js`, serves both hosts
 | Windows | `powershell` — `Get-Clipboard -Format FileDropList` / `-Raw`, `System.Windows.Forms.Clipboard` |
 | Linux | `wl-paste` and `xclip`, in whichever order `WAYLAND_DISPLAY` suggests, each falling through to the other |
 
-**Every spawn must pass `windowsHide`** (CREATE_NO_WINDOW), or each Windows subprocess allocates a console window that flickers and steals focus, several per paste (rationale).
+**Every spawn must pass `windowsHide`** (CREATE_NO_WINDOW; rationale).
 
 **The standalone/Tauri build on Windows reads the Win32 clipboard directly in Rust**, dropping the subprocess: `CF_HDROP` for file paths, `CF_UNICODETEXT` for text, `CF_DIB` for an image saved as a `.bmp` temp file — the extension differs from the sidecar path's `.png`, and the same ~5-minute cleanup applies. Non-Windows Tauri stays on the sidecar path.
 
-**Path escaping (tiers 1 and 3, and §8.7). Quote a pasted path for the Session's launch shell** — never for the host platform, never for the app-global shell selected for future terminals; they diverge on Windows, where several shell kinds run side by side and the wrong parser is a code-execution bug (rationale). Each terminal registry entry captures its `shellKind` at spawn; a live reconnect's `pty:list` row carries the launch-shell path so the rebuilt entry keeps that kind; a cold restore launches every terminal with the current default and captures it. **Only a missing registry entry falls back** — to the app-global selected shell, then the platform (`cmd` on Windows, posix elsewhere). Classification uses the same `shellCommandKind` `dor` uses to quote commands (`docs/specs/dor-cli.md`). Three rules:
+**Path escaping (tiers 1 and 3, and §8.7). Quote a pasted path for the Session's launch shell** — never for the host platform, never for the app-global shell selected for future terminals (rationale). Each terminal registry entry captures its `shellKind` at spawn and keeps it across a live reconnect (the `pty:list` row carries the launch-shell path) and a cold restore. **Only a missing registry entry falls back** — to the app-global selected shell, then the platform (`cmd` on Windows, posix elsewhere). Classification uses the same `shellCommandKind` `dor` uses to quote commands (`docs/specs/dor-cli.md`). Three rules:
 
 - **posix** — backslash-escape each metacharacter, matching macOS Terminal's drag-and-drop format (rationale). Newline/CR paths are single-quote-wrapped instead, since bash swallows `\<newline>` as a line continuation.
 - **cmd** — double-quote-wrap, doubling embedded `"`. cmd's own `%NAME%` (and `!NAME!` under delayed expansion) remains a parser limitation of this legacy path.
-- **powershell** — bare when every character is inert in argument mode, else single-quote-wrapped with embedded `'` doubled, reusing `dor`'s `quotePowerShellArg`. **Never reuse the cmd rule here:** PowerShell's *double*-quoted strings are expandable (rationale). The bare set excludes `,` (array operator in argument mode) and `@` (splatting, or another expression form at a token's start).
+- **powershell** — bare when every character is inert in argument mode, else single-quote-wrapped with embedded `'` doubled, reusing `dor`'s `quotePowerShellArg`. **Never reuse the cmd rule here** (rationale). The bare set excludes `,` (array operator in argument mode) and `@` (splatting, or another expression form at a token's start).
 
-Source of truth: `lib/src/lib/clipboard.ts` (Session-kind selection), `lib/src/lib/shell-escape.ts` (dispatch + posix/cmd rules, pinned by `lib/src/lib/shell-escape.test.ts`), `lib/src/lib/terminal-lifecycle.ts` (captured `shellKind`), `dor/src/commands/shell-quote.ts` (`shellCommandKind`, `quotePowerShellArg`), `standalone/src-tauri/src/clipboard_win.rs` (Win32 read), and the live-PTY list contract in `docs/specs/transport.md`.
+Source of truth: `lib/src/lib/clipboard.ts` (Session-kind selection), `lib/src/lib/shell-escape.ts` (dispatch + posix/cmd rules, pinned by `lib/src/lib/shell-escape.test.ts`) over `POSIX_ESCAPABLE` in `lib/src/lib/posix-escape.ts` (the escapable set, shared with the command tokenizer), `lib/src/lib/terminal-lifecycle.ts` (captured `shellKind`), `dor/src/commands/shell-quote.ts` (`shellCommandKind`, `quotePowerShellArg`), `standalone/src-tauri/src/clipboard_win.rs` (Win32 read), and the live-PTY list contract in `docs/specs/transport.md`.
 
 ### 8.7 Drag-to-Paste
 
-Dropping files on a terminal pane types their escaped paths at the current prompt, exactly as tier 1 does (§8.6). Tauri takes the drop natively via `WindowEvent::DragDrop` and routes the paths to the selected pane (dropped if the selection is a Door or has left the layout) — but **the wiring is inert today**: `tauri.conf.json` sets `dragDropEnabled: false` so HTML5 drag-and-drop keeps working inside the webview (tauri-apps/tauri#14373, dormouse#38), so the native handler never fires. Flipping the flag is a live option, and a deliberate, separate change (rationale).
+Dropping files on a terminal pane types their escaped paths at the current prompt, exactly as tier 1 does (§8.6). Tauri takes the drop natively via `WindowEvent::DragDrop` and routes the paths to the selected pane (dropped if the selection is a Door or has left the layout) — but **the wiring is inert today**: `tauri.conf.json` sets `dragDropEnabled: false` (tauri-apps/tauri#14373, dormouse#38), so the native handler never fires. **Nothing in the layout stack needs the flag off any more** — Lath's pane drag is pointer-based — so flipping it is a live option, and a deliberate, separate change (rationale).
 
 **Drag-to-paste is not supported in the VSCode build**: the workbench excludes `WebviewView` (sidebar/panel) from external-file drop routing, so the iframe never receives `dragover`/`drop` for OS files (§9.2). VSCode users paste instead (§8.1/§8.5).
 
@@ -285,7 +285,7 @@ Right-click and OS Edit-menu paste are not implemented; users paste via §8.2's 
 
 Dormouse's own `<input>`s — pane rename, the browser URL editor, dialog fields — have no *native* clipboard chords in the menu-less standalone build (`docs/specs/standalone.md` → "Application menu"). `handleEditableClipboard` (`lib/src/components/wall/keyboard/handle-editable-clipboard.ts`) supplies them in JS, **ahead of the wall's mode and rename gates** so a focused field wins whatever the wall is doing:
 
-- **Paste** reads through `readTextFromClipboard` (the §8.6 tier-2 preference, so no "Paste from <App>" popup) and replaces the field's selection. **Copy** and **cut** write the selected substring with `navigator.clipboard.writeText`; a collapsed selection copies nothing. **Text only** — the file-reference and image tiers stay terminal-only.
+- **Paste** reads through `readTextFromClipboard` (the §8.6 tier-2 preference, so no "Paste from <App>" popup) and replaces the field's selection. **Copy** and **cut** write the selected substring through `writeTextToClipboard`, whose false return is what stops a cut deleting; a collapsed selection copies nothing. **Text only** — the file-reference and image tiers stay terminal-only.
 - The edit goes through `document.execCommand('insertText')` where the webview allows it (native undo), else **the prototype `value` setter plus a synthetic `input` event** — a plain `value` assignment desyncs a React-controlled field.
 - Chords are §8.2's: paste takes either modifier on every platform, copy/cut take `⌘` on macOS and `Ctrl` elsewhere.
 - **Scope is narrow.** Excluded: xterm's `.xterm-helper-textarea` (the terminal owns its chords), read-only and disabled fields. The handler runs only where the adapter implements the optional `readClipboardText` — today the two standalone adapters, slightly over-reaching the menu-less macOS build it is written for (rationale). Elsewhere — VS Code, the website, Pocket — it never fires and the webview's own chords are untouched.
@@ -295,9 +295,9 @@ Dormouse's own `<input>`s — pane rename, the browser URL editor, dialog fields
 
 ## Terminal context input
 
-**Must give application-captured right-click to the terminal program**, retaining header right-click as the context entry point. Do not add a Shift-right-click override gesture. A helper never opens a recursive context.
+**Must give application-captured right-click to the terminal program**, retaining header right-click as the context entry point. Do not add a Shift-right-click override gesture.
 
-**Must route clipboard chords and selection operations to the focused helper**, while leaving its Escape, Tab, arrows, and digits with xterm. Copying and selection do not disarm autorun; terminal input, paste, drops, and application mouse reports do.
+**Must route clipboard chords and selection operations to the focused helper**, while leaving its Escape, Tab, arrows, and digits with xterm. Which of those disarm autorun follows `docs/specs/terminal-context.md` → "Helper lifecycle".
 
 Source of truth: `TerminalPanel` in `lib/src/components/wall/TerminalPanel.tsx`; `useWallKeyboard` in `lib/src/components/wall/use-wall-keyboard.ts`; `markSessionTouched` in `lib/src/lib/terminal-lifecycle.ts`.
 
