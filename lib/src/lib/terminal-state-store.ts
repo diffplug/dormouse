@@ -65,6 +65,13 @@ export function getTerminalPaneState(id: string): TerminalPaneState {
   return paneStates.get(id) ?? createTerminalPaneState();
 }
 
+/** The cwd a new local shell may inherit from `id`. A remote cwd (OSC 7 over ssh)
+ *  names a path on the remote host, not one the local shell can chdir to. */
+export function getInheritableCwd(id: string): string | undefined {
+  const cwd = paneStates.get(id)?.cwd;
+  return cwd && !cwd.isRemote ? cwd.path : undefined;
+}
+
 /**
  * The bare program name of the pane's foreground command, or null when the pane
  * is at a prompt (or its shell reported no command line). This is the key the
