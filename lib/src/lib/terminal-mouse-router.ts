@@ -83,7 +83,6 @@ export function attachTerminalMouseRouter({
     altKey: boolean;
     block: boolean;
     startedInScrollback: boolean;
-    button: number;
     clientX: number;
     clientY: number;
     touchLike: boolean;
@@ -137,7 +136,6 @@ export function attachTerminalMouseRouter({
       altKey: ev.altKey,
       block: opts.block ?? false,
       startedInScrollback: cell.startedInScrollback,
-      button: ev.button,
       clientX: ev.clientX,
       clientY: ev.clientY,
       touchLike: opts.touchLike,
@@ -153,7 +151,6 @@ export function attachTerminalMouseRouter({
         consumePointerEvent(ev, true);
         consumed = true;
       }
-      if (pendingDrag.button !== 0) return;
       const dx = ev.clientX - pendingDrag.clientX;
       const dy = ev.clientY - pendingDrag.clientY;
       if (dx * dx + dy * dy < DRAG_THRESHOLD_PX_SQ) return;
@@ -189,8 +186,12 @@ export function attachTerminalMouseRouter({
   };
 
   const finishPendingOrActiveDrag = (ev: MouseEvent | PointerEvent) => {
+    // Only the primary button leaves a pendingDrag (see beginPendingDrag), and an
+    // active drag only ever grows out of one — so neither path below is ever
+    // finished by a non-primary button. The window-mousemove backstop reaches
+    // both: a mousemove reports button 0.
+    if (ev.button !== 0) return;
     if (pendingDrag) {
-      if (ev.button !== pendingDrag.button) return;
       const suppressNativeMouse = stateRequiresNativeMouseSuppression(getMouseSelectionState(id));
       if (suppressNativeMouse || pendingDrag.touchLike) consumePointerEvent(ev, true);
       // A touch press that releases without ever dragging is a tap — remember it
@@ -202,7 +203,6 @@ export function attachTerminalMouseRouter({
       pendingDrag = null;
       return;
     }
-    if (ev.button !== 0) return;
     if (!isDragging(id)) return;
     const suppressNativeMouse = stateRequiresNativeMouseSuppression(getMouseSelectionState(id));
     endDrag(id);
