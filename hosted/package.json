@@ -20,13 +20,13 @@
   "dependencies": {
     "@pgstencil/auth": "file:../vendor/pgstencil-auth-0.1.0.tgz",
     "pgstencil": "file:../vendor/pgstencil-0.1.0.tgz",
-    "hono": "4.13.7",
-    "@hono/node-server": "2.0.10",
+    "hono": "^4.13.8",
+    "@hono/node-server": "^2.0.10",
     "react": "^19.2.6",
     "react-dom": "^19.2.6"
   },
   "devDependencies": {
-    "@types/node": "24.13.6",
+    "@types/node": "^24.13.6",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.2",
@@ -34,7 +34,7 @@
     "vite": "^8.0.14",
     "vitest": "^4.1.6",
     "tsx": "4.23.15",
-    "esbuild": "0.28.2",
+    "esbuild": "^0.28.2",
     "wrangler": "4.130.0",
     "miniflare": "5.20260908.0-alpha"
   }

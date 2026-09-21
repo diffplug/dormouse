@@ -232,7 +232,7 @@
   },
   {
     "name": "hono",
-    "version": "4.13.7",
+    "version": "4.13.8",
     "license": "MIT",
     "author": "Yusuke Wada <yusuke@kamawada.com> (https://github.com/yusukebe)",
     "homepage": "https://hono.dev"
@@ -456,7 +456,7 @@
   },
   {
     "name": "yaml",
-    "version": "2.9.0",
+    "version": "2.9.1",
     "license": "ISC",
     "author": "Eemeli Aro <eemeli@gmail.com>",
     "homepage": "https://eemeli.org/yaml/"

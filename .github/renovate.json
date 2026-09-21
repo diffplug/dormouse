@@ -21,6 +21,7 @@
   },
   "packageRules": [
     {
+      "description": "Declare a dependency the same way in every workspace: under update-lockfile, an exact pin beside a caret splits one release into a package.json rewrite and a lockfile-only update on a separate `-lockfile` branch, so it arrives as two PRs that each move one workspace (#727/#728, #732/#733)",
       "matchManagers": ["npm", "cargo"],
       "rangeStrategy": "update-lockfile"
     },
@@ -95,6 +96,14 @@
       "matchPackageNames": ["node-datachannel", "@node-datachannel/**"],
       "groupName": "node-datachannel",
       "groupSlug": "node-datachannel",
+      "separateMajorMinor": false
+    },
+    {
+      "description": "The @hono adapters peer on hono (`^4`), so bump them in one PR and a hono major never lands without the adapter releases that admit it",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["hono", "@hono/**"],
+      "groupName": "hono",
+      "groupSlug": "hono",
       "separateMajorMinor": false
     },
     {
