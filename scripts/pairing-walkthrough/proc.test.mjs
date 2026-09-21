@@ -5,7 +5,7 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -47,5 +47,6 @@ test('stdout and stderr do not complete each other\'s partial characters or line
     assert.ok(handle.lines.includes('warn: x'), `stderr line was spliced: ${JSON.stringify(handle.lines)}`);
   } finally {
     await killTree(handle);
+    await rm(dir, { recursive: true, force: true });
   }
 });
