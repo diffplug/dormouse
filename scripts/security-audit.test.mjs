@@ -193,13 +193,12 @@ test('the preamble tells domains to write the sentinel every reader waits for', 
 // but a domain is given `_preamble.md` plus its own file and never reads that
 // one — so run 35327271988's `application-security` backgrounded its wait loop,
 // ended its turn, and lost four work streams that finished before the deadline.
-// The block is a template, not runnable, so the parts that make it work are
-// pinned as text: the rule, the backgrounding ban, the Bash timeout without
-// which every call is backgrounded anyway, and the two properties of its
-// deadline. Every domain shares one `$RUNNER_TEMP`, so a fixed deadline file
-// would make whichever domain delegates first set the bound for all of them;
-// and the bound that has to hold is the caller's, which is already on disk at
-// the path §2 persists it to.
+// The prose half is pinned as text: the rule, the backgrounding ban, the Bash
+// timeout without which every call is backgrounded anyway, and the two
+// properties of its deadline. Every domain shares one `$RUNNER_TEMP`, so a
+// fixed deadline file would make whichever domain delegates first set the bound
+// for all of them; and the bound that has to hold is the caller's, which is
+// already on disk at the path §2 persists it to.
 test('the preamble forbids a delegating domain from waiting by ending its turn', () => {
   const preamble = readFileSync(join(repo, '.github/audit/_preamble.md'), 'utf8');
   assert.match(preamble, /never end your turn to wait/i);
@@ -207,6 +206,34 @@ test('the preamble forbids a delegating domain from waiting by ending its turn',
   assert.match(preamble, /`timeout: 600000`/);
   assert.match(preamble, /^DEADLINE_FILE="\$RUNNER_TEMP\/delegate-deadline-<your fragment>"$/m);
   assert.match(preamble, /^\s*CALLER=\$\(cat "\$RUNNER_TEMP\/audit-deadline"/m);
+});
+
+// And run it: the regexes above pin the rule's wording, not the bound. Filling
+// the block's two placeholders makes it the same runnable text §2's wait is
+// tested as, which is what catches the margin pointing the wrong way or the
+// `DEADLINE` break going missing.
+test('the delegate wait bounds itself by its caller\'s deadline', (t) => {
+  const block = promptShellBlock(readFileSync(join(repo, '.github/audit/_preamble.md'), 'utf8'), 'delegate-deadline-')
+    .replace('<your fragment>', 'audit-application.md')
+    .replace("<every delegate's output file is complete>", '[ -f delegates-done ]');
+  const runDelegateWait = (caller, done) => {
+    const dir = tempDir(t, 'dormouse-audit-delegate-');
+    if (caller !== undefined) writeFileSync(join(dir, 'audit-deadline'), `${caller}\n`);
+    if (done) writeFileSync(join(dir, 'delegates-done'), '');
+    const r = spawnSync('bash', ['-c', block], { cwd: dir, encoding: 'utf8', env: { ...process.env, RUNNER_TEMP: dir }, timeout: 10_000 });
+    assert.equal(r.status, 0, r.stderr);
+    return { answer: r.stdout.trim().split('\n').at(-1),
+      persisted: Number(readFileSync(join(dir, 'delegate-deadline-audit-application.md'), 'utf8')) };
+  };
+  const now = Math.floor(Date.now() / 1000);
+  // The caller's own bound, three minutes early — not the domain's own clock.
+  assert.deepEqual(runDelegateWait(now + 1920, true), { answer: 'ALL FINISHED', persisted: now + 1920 - 180 });
+  // No caller deadline on disk yet: 25 minutes from here, give or take the
+  // second the shell's `date` may have ticked past `now`.
+  const fallback = runDelegateWait(undefined, true).persisted - now;
+  assert.ok(fallback === 1500 || fallback === 1501, `fallback deadline was now + ${fallback}`);
+  // An expired caller means stop now and write up, not wait out the call cap.
+  assert.equal(runDelegateWait(now - 1, false).answer, 'DEADLINE');
 });
 
 const finishedFn = orchestrator.match(/^finished\(\) \{.*$/m)[0];
