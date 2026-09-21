@@ -400,7 +400,7 @@
   },
   {
     "name": "tailwind-merge",
-    "version": "3.6.0",
+    "version": "3.7.0",
     "license": "MIT",
     "author": "Dany Castillo",
     "homepage": "https://github.com/dcastil/tailwind-merge"
