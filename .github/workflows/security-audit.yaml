@@ -77,7 +77,7 @@ jobs:
           exit 1
 
       - name: Audit against the security specs
-        uses: anthropics/claude-code-action@bf38e86e58df9ebf3420326d019f955bb3be64dd # v1
+        uses: anthropics/claude-code-action@cfc3eb22bfed5c26ef66e3223c982af27e4524de # v1
         env:
           # `claude-code-action` resets `GH_TOKEN` to its own internal
           # workflow token, so setting `GH_TOKEN` at this scope is
