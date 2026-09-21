@@ -6,8 +6,8 @@ body {
   margin: 0;
   padding: 0;
   overflow: hidden;
-  font-size: var(--mt-font-size);
-  font-family: var(--mt-font-family);
+  font-size: var(--vscode-font-size);
+  font-family: var(--vscode-editor-font-family);
 }
 
 #root {

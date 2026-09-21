@@ -24,7 +24,6 @@ const SESSION_ID = 'tab-story';
 const noopActions: WallActions = {
   onKill: () => {},
   onMinimize: () => {},
-  onAlertButton: () => 'noop',
   onToggleTodo: () => {},
   onSplitH: () => {},
   onSplitV: () => {},
@@ -69,8 +68,8 @@ interface PanePriming {
   notification?: ActivityNotification;
   /**
    * The foreground command, reported the way shell integration would; `null` is
-   * a pane at its prompt. WATCHING is keyed on its name, so without one the bell
-   * has no rule to name and every dialog renders its "nothing is running" variant.
+   * a pane at its prompt. WATCHING is keyed on its name, so without one there is
+   * no rule to name and every dialog renders its "nothing is running" variant.
    */
   command?: string | null;
   /**
@@ -201,7 +200,7 @@ function ContextWallStory() {
   return <div className="flex flex-col" style={{ width: 900, height: 680 }}><Wall initialPaneIds={[SESSION_ID]} initialMode="command" /></div>;
 }
 
-/** Open the terminal context from the bell of a Wall whose one pane is `pane`. */
+/** Open the terminal context from the header of a Wall whose one pane is `pane`. */
 function contextDialogStory(pane: PanePriming): Story {
   return {
     render: ContextWallStory,
@@ -211,20 +210,20 @@ function contextDialogStory(pane: PanePriming): Story {
       // Output for the pane's terminal, which `settleTerminals` waits on.
       fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) },
     },
-    play: openAlertRightClickDialog,
+    play: openHeaderRightClickDialog,
   };
 }
 
 /** Wait for priming before opening the source's alert controls in context. */
-async function openAlertRightClickDialog() {
+async function openHeaderRightClickDialog() {
   await waitForPrimedState();
-  const alertButton = await requireElement<HTMLButtonElement>(
-    `[data-alert-button-for="${SESSION_ID}"]`,
-    'alert bell',
+  const header = await requireElement<HTMLElement>(
+    `[data-pane-header-for="${SESSION_ID}"]`,
+    'pane header',
   );
 
-  const rect = alertButton.getBoundingClientRect();
-  alertButton.dispatchEvent(new MouseEvent('contextmenu', {
+  const rect = header.getBoundingClientRect();
+  header.dispatchEvent(new MouseEvent('contextmenu', {
     bubbles: true,
     cancelable: true,
     button: 2,
@@ -236,39 +235,6 @@ async function openAlertRightClickDialog() {
 }
 
 /**
- * Hover the bell so its tooltip renders — the tooltip is what carries the
- * command-scoped wording, e.g. `Alert on all "claude"` vs `Alerts are per
- * command`.
- *
- * Hover rather than focus: a programmatic `.focus()` does not reliably drive
- * React's `onFocus` here, while `mouseover` is exactly what React synthesizes
- * `onMouseEnter` from. Retried because the primed-state decorator applies over
- * two rAFs and can re-render the header out from under an early hover; throws
- * if the tooltip never appears, so a regression surfaces in the Interactions
- * panel instead of as a silently empty snapshot.
- */
-async function hoverAlertButton() {
-  await waitForPrimedState();
-  const start = performance.now();
-  while (performance.now() - start < RETRY_BUDGET_MS) {
-    const bell = document.querySelector<HTMLButtonElement>(`[data-alert-button-for="${SESSION_ID}"]`);
-    const rect = bell?.getBoundingClientRect();
-    if (bell && rect) {
-      bell.dispatchEvent(new MouseEvent('mouseover', {
-        bubbles: true,
-        cancelable: true,
-        relatedTarget: document.body,
-        clientX: rect.left + rect.width / 2,
-        clientY: rect.top + rect.height / 2,
-      }));
-    }
-    await wait(50);
-    if (document.querySelector('[role="tooltip"]')) return;
-  }
-  throw new Error('alert bell tooltip never rendered');
-}
-
-/**
  * Open the TODO pill's notification preview.
  *
  * The pill opens it on both focus and hover, and this drives both: a programmatic
@@ -276,8 +242,8 @@ async function hoverAlertButton() {
  * is exactly what React synthesizes `onMouseEnter` from — neither adds a visual
  * state of its own (the pill's hover tint is CSS `:hover`, which a synthetic
  * event never sets). Retried, and throws if the preview never appears, for the
- * same reason as `hoverAlertButton`: silently snapshotting a header with no
- * preview is the failure this story exists to catch.
+ * same reason as `openHeaderRightClickDialog`: silently snapshotting a header
+ * with no preview is the failure this story exists to catch.
  */
 async function openTodoNotificationPreview() {
   await waitForPrimedState();
@@ -417,34 +383,14 @@ const meta: Meta<typeof TabStory> = {
 export default meta;
 type Story = StoryObj<typeof TabStory>;
 
-export const AlertDisabled: Story = {
-  parameters: primedPane({ status: 'WATCHING_DISABLED' }),
-};
-
-export const AlertEnabled: Story = {
+export const Default: Story = {
   parameters: primedPane({ status: 'NOTHING_TO_SHOW' }),
-};
-
-export const AlertMightBeBusy: Story = {
-  parameters: primedPane({ status: 'MIGHT_BE_BUSY' }),
-};
-
-export const AlertBusy: Story = {
-  parameters: primedPane({ status: 'BUSY' }),
-};
-
-export const AlertMightNeedAttention: Story = {
-  parameters: primedPane({ status: 'MIGHT_NEED_ATTENTION' }),
-};
-
-export const AlertRinging: Story = {
-  parameters: primedPane({ status: 'ALERT_RINGING' }),
 };
 
 // --- Command-keyed WATCHING (docs/specs/alert.md) --------------------------
 //
-// The bell acts on the *running command's* rule, not on this pane, so what it
-// offers depends on what the pane is running and whether a rule already exists.
+// The context acts on the *running command's* rule, not on this pane, so what
+// it offers depends on what the pane is running and whether a rule exists.
 
 export const AlertRightClickDialog: Story = contextDialogStory({
   status: 'NOTHING_TO_SHOW',
@@ -456,21 +402,6 @@ export const AlertDialogNoCommandRunning: Story = contextDialogStory({
   status: 'WATCHING_DISABLED',
   command: null,
 });
-
-export const BellTooltipOffersRule: Story = {
-  parameters: primedPane({ status: 'WATCHING_DISABLED', command: 'claude --resume' }),
-  play: hoverAlertButton,
-};
-
-export const BellTooltipRemovesRule: Story = {
-  parameters: primedPane({ status: 'NOTHING_TO_SHOW', command: 'claude --resume' }),
-  play: hoverAlertButton,
-};
-
-export const BellTooltipNoCommandRunning: Story = {
-  parameters: primedPane({ status: 'WATCHING_DISABLED', command: null }),
-  play: hoverAlertButton,
-};
 
 export const TodoOnly: Story = {
   parameters: primedPane({ status: 'WATCHING_DISABLED', todo: true }),
@@ -520,29 +451,21 @@ export const NotificationDialogLongBody: Story = contextDialogStory({
   command: 'pnpm test',
 });
 
-export const TodoAndAlertEnabled: Story = {
-  parameters: primedPane({ status: 'NOTHING_TO_SHOW', todo: true }),
-};
-
-export const TodoAndAlertRinging: Story = {
-  parameters: primedPane({ status: 'ALERT_RINGING', todo: true }),
-};
-
-export const CompactWidthWithAlert: Story = {
+export const CompactWidth: Story = {
   args: {
     width: 220,
   },
   parameters: primedPane({ status: 'NOTHING_TO_SHOW' }),
 };
 
-export const MinimalWidthWithAlert: Story = {
+export const MinimalWidth: Story = {
   args: {
     width: 150,
   },
   parameters: primedPane({ status: 'NOTHING_TO_SHOW' }),
 };
 
-export const LongTitleWithAlertAndTodo: Story = {
+export const LongTitleWithTodoAndRinging: Story = {
   args: {
     width: 360,
   },
@@ -619,7 +542,7 @@ export const NarrowWithMouseCaptureControlsVisible: Story = {
 };
 
 // Notepad icons with notes across the full, compact, and minimal tiers.
-// AlertEnabled and MinimalWidthWithAlert cover the empty notepad.
+// Default and MinimalWidth cover the empty notepad.
 export const NotepadWithNotes: Story = {
   args: { noteCount: 3 },
   parameters: primedPane({ status: 'NOTHING_TO_SHOW' }),

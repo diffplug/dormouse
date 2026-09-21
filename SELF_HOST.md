@@ -74,7 +74,7 @@ installed release, which the installer and `manage status` both print.
 - **A tailnet** with MagicDNS and HTTPS certificates enabled, Tailscale running
   on this laptop and on the phone that will run Pocket. Whether the HTTPS origin
   stays private is a deployment choice, not a security premise
-  (`docs/specs/security-remote.md` → "Network posture").
+  (`docs/specs/security-remote.md` → "Network posture (self-hosted)").
 - **macOS, Windows or Linux.** Each installer refuses the others. On a fourth
   OS, or Linux without systemd, design the native service manager with the user
   rather than translating LaunchAgent, Scheduled Task or unit-file commands
@@ -110,7 +110,7 @@ installed release, which the installer and `manage status` both print.
 
   Both bake it into their Node Burrow bundles, and the relay socket is in neither
   webview, so no webview CSP change widens the allowlist
-  (`docs/specs/relay.md` → "Where a Burrow may reach a Relay").
+  (`docs/specs/relay.md` → "Where a Burrow may reach a Relay (self-host builds)").
 
 ## What the installer does
 
@@ -142,6 +142,7 @@ administrator rights:
     account.json
     burrows.json
     push-subscriptions.json
+    setup-password.json
     vapid.json
 ```
 
@@ -175,8 +176,9 @@ what keeps the task free of a stored password; Linux alone opts out, with
 
 - **The service is registered and running, declares the run-at-load and
   restart-on-exit of the [Mechanism map](#mechanism-map), and carries no
-  credential** — a definition it cannot read at all fails rather than passes.
-  Plus what only the live system shows: macOS, loaded in `gui/$UID` with a plist
+  credential** — a definition it cannot read at all fails rather than passes,
+  and `verify` searches it and the `run-relay` wrapper for every credential
+  name the installer knows. Plus what only the live system shows: macOS, loaded in `gui/$UID` with a plist
   that lints; Windows, task `Running`, no execution time limit, restarts on
   failure, unelevated, unstopped by battery or idle, `bin\run-relay.ps1` still
   carrying the supervision loop; Linux, unit known to the user manager,
@@ -188,8 +190,9 @@ what keeps the task free of a stored password; Linux alone opts out, with
 - **Port 3100 is bound only to `127.0.0.1`**, and the plaintext port is
   unreachable on the laptop's Tailscale IP.
 - **`tailscale serve` proxies `/` to `127.0.0.1:3100` at the origin recorded in
-  `config/relay.env`.** Funnel may be on or off; verification does not treat
-  public HTTPS reachability as a defect.
+  `config/relay.env`.** A failure prints the `manage serve` command that
+  re-applies it. Funnel may be on or off; verification does not treat public
+  HTTPS reachability as a defect.
 - **`config/`, `state/`, `run/` and `config/relay.env` are readable only by the
   installing user**, by the per-platform means in the
   [Mechanism map](#mechanism-map) and [Invariants](#invariants).
@@ -198,7 +201,9 @@ what keeps the task free of a stored password; Linux alone opts out, with
 - **The current release pointer resolves to a release with `RELEASE`
   metadata**, and neither the service definition nor the `run-relay` wrapper
   refers to the source checkout. The previous-release pointer is checked too:
-  absent on a first install warns, naming the same release as `current` fails.
+  absent on a first install warns, while naming the same release as `current`,
+  or a release that is no longer on disk, fails — `manage rollback` would
+  otherwise be offered a target that is not there.
 
 These cannot be proven from the laptop, and are the checkpoints below: the HTTPS
 origin answering from a second tailnet device and, when private HTTPS is intended,
@@ -231,8 +236,9 @@ Establish with the user what the script cannot:
   installer installs exactly what is checked out.
 - **Their phone runs Tailscale** and is signed in to the same tailnet.
 - **Port 3100 is free.** Unchecked before installation; a stale listener blocks
-  the new Relay from binding and fails the post-install identity check
-  (`PORT=3000 pnpm dev:relay` pins the dev Relay to 3000):
+  the new Relay from binding and fails the post-install identity check. A dev
+  Relay is not normally the culprit: `pnpm dev:relay` takes any free port unless
+  `PORT` names one.
 
   ```sh
   # macOS
@@ -317,12 +323,14 @@ pkill -f 'Dormouse Relay/current/relay/dist/index.js'
 ```
 
 ```powershell
-# Windows — run-relay.ps1's supervision loop restarts after its 10s throttle,
-# so wait ~15s before reading status.
-Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
-  Where-Object { $_.CommandLine -like '*Dormouse Relay*' } |
+# Windows — select by image path and command line, never image name (see the
+# traps). run-relay.ps1's supervision loop restarts after its 10s throttle, so
+# wait ~15s before reading status.
+$root = "$env:LOCALAPPDATA\Dormouse Relay"
+Get-CimInstance Win32_Process |
+  Where-Object { $_.ExecutablePath -like "$root\*" -or $_.CommandLine -like "*$root*" } |
   ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
-& "$env:LOCALAPPDATA\Dormouse Relay\bin\manage.cmd" status
+& "$root\bin\manage.cmd" status
 ```
 
 ```sh
@@ -482,7 +490,7 @@ restart result**. Do not prepare again between those steps. Finish with
 **Remove test data** in each context where you prepared a checkpoint.
 Browser and installed-app results are separate evidence; a passing test on one
 device is not certification of another. The diagnostic contract is
-`docs/specs/pocket-app.md` -> "Serving the built bundle".
+`docs/specs/pocket-app.md` -> "The capability harness".
 Harness v3 tests the production encrypted-key format, including authenticated
 context. A v1/v2 experimental checkpoint must be removed and prepared again;
 old restart reports do not establish the production-format restart result.
@@ -585,14 +593,11 @@ install.
 installed release from the current checkout; it never pulls, fetches, switches
 branches, or schedules an updater.
 
-The security properties this deployment is audited against are the "Network
-posture (self-hosted)" and "Credentials at rest" `FAIL IF` lines in
-`docs/specs/security-remote.md`. **Those lines bind all three installers** — a control present in
-one and absent from another is a finding — and `scripts/deploy-lint.mjs`
-(`pnpm lint:deploy`, part of `pnpm test`) checks each one textually against each
-installer, with `scripts/deploy-lint-selftest.mjs` deleting each matched control
-in turn to keep that honest. On Windows, which nothing in CI executes, the lint
-is the only automated signal at all.
+The security properties this deployment is audited against, and everything
+that enforces them, are the "Network posture (self-hosted)" and "Credentials at
+rest" `FAIL IF` lines in `docs/specs/security-remote.md`. **Those lines bind all
+three installers** — a control present in one and absent from another is a
+finding.
 
 **Each release is self-contained**: the production Relay tree,
 `lib/dist-pocket`, and a copy of the exact Node binary the build ran under, so
@@ -618,15 +623,12 @@ service-definition paths are under "What the installer does".
 | Entry | `/bin/bash bin/run-relay` | `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File bin\run-relay.ps1`, at an absolute interpreter path | `ExecStart=/bin/bash "<root>/bin/run-relay"` |
 
 Two rows are load-bearing Windows deviations, both because the macOS mechanism
-has no unprivileged Windows equivalent. **The release pointer is a file**: no
-unprivileged replaceable directory symlink exists (a junction cannot be renamed
-over a junction, and delete-then-create leaves `current` naming nothing), while
-a file swaps atomically with `MoveFileEx(MOVEFILE_REPLACE_EXISTING)`; the switch
-still asserts the pointer advanced. **KeepAlive lives in the wrapper**: Task
-Scheduler restarts a task that *fails*, not one that exits 0, so
-`run-relay.ps1` is a supervision loop with the plist's own 10-second throttle,
-and `manage verify` checks that loop is present rather than trusting task
-settings. Linux's one deviation: **lingering is the availability knob, and it is
+has no unprivileged Windows equivalent. **The release pointer is a file**,
+swapped atomically, and the switch still asserts the pointer advanced
+(rationale). **KeepAlive lives in the wrapper**: `run-relay.ps1` is a
+supervision loop with the plist's own 10-second throttle, and `manage verify`
+checks that loop is present rather than trusting task settings (rationale).
+Linux's one deviation: **lingering is the availability knob, and it is
 opt-in** (`--linger`, Prerequisites) — a user manager stops at logout like a
 LaunchAgent, the installer never changes that silently, and `manage verify`
 reports which mode is live rather than asserting either.
@@ -640,41 +642,39 @@ reports which mode is live rather than asserting either.
   release id fails without deleting its contents.
 - **State outlives code.** `config/` and `state/` sit outside `releases/`, are
   readable only by the installing user, and survive every update, prune and
-  uninstall; purging is separate and explicitly confirmed. The Relay generates
-  `state/setup-password.json` once from 32 CSPRNG bytes, validates it on every
-  boot, and never accepts an operator-supplied setup credential.
-  `config/relay.env` is generated once, then preserved byte-for-byte.
+  uninstall; purging is separate and explicitly confirmed. `config/relay.env`
+  is generated once, then preserved byte-for-byte.
   **Must read its last assignment for each key**, stripping only one matched
   pair of double quotes, in the installer, service wrapper, and management
   commands. `scripts/installer-verify-test.mjs` exercises the unix readers
   against the shipped wrapper parser.
   **A preserved file missing installer-owned keys is half-written**: name them
-  and stop, never rewrite values that cannot be proven stale. **`manage verify`
-  walks every file in `state\` on Windows**, where Node's modes are a no-op.
+  and stop, never rewrite values that cannot be proven stale. The setup
+  credential the Relay generates into `state/`, and what `manage verify` walks
+  on Windows, are `docs/specs/security-remote.md` → "Credentials at rest".
 - **The enrollment offer rotates on every run before the first Burrow enrolls**,
-  including updates that preserve `relay.env`; `state/burrows.json` then disables
-  it permanently until a state purge. **Minted last** — after release, Serve and
-  pruning succeed — so a failure leaves the previous offer unspent.
-  `run-relay` exports `DORMOUSE_ENROLL_TOKEN_FILE`; unset, the Relay refuses
-  every offer (`docs/specs/relay.md` → Configuration). Generation and
-  protection: `docs/specs/security-remote.md` → "Credentials at rest".
+  and is **minted last** — after release, Serve and pruning succeed — so a
+  failure leaves the previous offer unspent. `run-relay` exports
+  `DORMOUSE_ENROLL_TOKEN_FILE`; unset, the Relay refuses every offer
+  (`docs/specs/relay.md` → Configuration). Rotation, the `state/burrows.json`
+  marker that ends it, generation and protection:
+  `docs/specs/security-remote.md` → "Credentials at rest".
 - **Loopback backend, publicly safe HTTPS origin.** The install pins
   `DORMOUSE_BIND_HOST=127.0.0.1` and refuses to proceed without it
-  (`docs/specs/relay.md` → Configuration). Port 3100 lets the service
-  coexist with `PORT=3000 pnpm dev:relay`. Serve is the private default; Funnel is safe
-  to enable because the application controls, not network privacy, govern
-  admission (`docs/specs/security-remote.md` → "Network posture").
+  (`docs/specs/relay.md` → Configuration). Port 3100 keeps the installed
+  service off the dev Relay's default (rationale). Serve is the private
+  default; Funnel is safe to enable because the application controls, not
+  network privacy, govern admission
+  (`docs/specs/security-remote.md` → "Network posture (self-hosted)").
 - **`DORMOUSE_ORIGIN` is durable WebAuthn identity**, derived from the node's
-  MagicDNS name. An installation recording a different origin stops the
-  installer, because rewriting silently invalidates the registered passkey and
-  every enrolled Burrow.
+  MagicDNS name; an installation recording a different origin stops the
+  installer rather than rewriting it
+  (`docs/specs/security-remote.md` → "Network posture (self-hosted)").
 - **The install belongs to one user account.** Every installer refuses to run
   privileged — root on macOS/Linux, elevated on Windows — because that account
-  owning `config/` and `state/` is the whole credential posture. **On unix the
-  property is mode *and* owner**. Both unix `manage verify` implementations
-  assert them on `config/`, `state/`, `run/`, `config/relay.env`, and an unspent
-  enrollment offer. Windows checks the owning SID and DACL, rejecting a missing
-  access-rule set (`docs/specs/security-remote.md` → "Credentials at rest").
+  owning `config/` and `state/` is the whole credential posture. Which paths
+  `manage verify` asserts that on, and by what per-platform means, is
+  `docs/specs/security-remote.md` → "Credentials at rest".
 - **A failed update is a failure.** The candidate release is health-checked on
   an ephemeral port against a throwaway state dir *before* `current` moves; if
   the live service then fails to answer, `current` is restored to `previous` and
@@ -716,15 +716,14 @@ reports which mode is live rather than asserting either.
 
 Each fails silently unless encoded in the scripts:
 
-- **`pnpm deploy --prod --legacy` poisons the workspace.** (All three.) It
-  rewrites pnpm's workspace-state file to production mode. **Snapshot and
-  restore that file on every exit**, including failed installs.
-- **`mv -f tmp link` follows a symlink to a directory.** (macOS, Linux.) Used
-  to swap `current`, it silently leaves the old release selected. **Use
-  `rename(2)` on the link path and assert that `current` advanced.**
-- **`pnpm` resolves to a `.ps1` before its `.CMD`.** (Windows.) The shim cannot
-  be launched as a process, so **take the first `Application`-typed resolution**,
-  not `(Get-Command pnpm).Source`.
+- **`pnpm deploy --prod --legacy` poisons the workspace.** (All three.)
+  **Snapshot and restore pnpm's workspace-state file on every exit**, including
+  failed installs (rationale).
+- **`mv -f tmp link` follows a symlink to a directory.** (macOS, Linux.) **Use
+  `rename(2)` on the link path and assert that `current` advanced** (rationale).
+- **`pnpm` resolves to a `.ps1` before its `.CMD`.** (Windows.) **Take the
+  first `Application`-typed resolution**, not `(Get-Command pnpm).Source`
+  (rationale).
 - **Redirecting a native command's stderr inline sets `$?` to false.**
   (Windows, PowerShell 5.1.) **Route control-flow commands through
   `Invoke-Native`**; only the candidate probe and `run-relay.ps1` append
@@ -746,14 +745,11 @@ Each fails silently unless encoded in the scripts:
   reports the install as unserved and points at `manage serve`. Test mode skips
   this unstable CLI probe.
 - **`systemctl --user` needs a real login session, not just a shell.** (Linux.)
-  Under `su`, or wherever no user manager runs, its `DBUS_SESSION_BUS_ADDRESS`
-  failure does not say what to do, so preflight checks
-  `systemctl --user show-environment` and names the fix — log in properly, or
-  `machinectl shell $USER@`.
-- **`StandardOutput=append:` is systemd 240 or newer.** (Linux.) Older systemd
-  truncates the log on every restart, so `manage logs` would show only the
-  current run. Parse `systemctl --version` and refuse below 240 rather than
-  installing a unit whose logging silently lies.
+  Preflight checks `systemctl --user show-environment` and names the fix — log
+  in properly, or `machinectl shell $USER@` (rationale).
+- **`StandardOutput=append:` is systemd 240 or newer.** (Linux.) **Parse
+  `systemctl --version` and refuse below 240** rather than installing a unit
+  whose logging silently lies (rationale).
 
 ### Operator surface and test hooks
 

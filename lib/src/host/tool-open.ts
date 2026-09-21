@@ -23,8 +23,11 @@ export async function resolveOpenTool(
   })?.tool;
   const entry = name && file?.tools.get(name);
   if ((!name || name === BUILTIN_FILE_TOOL) && fileViewerFormat(target)) {
+    // The built-in viewer runs no user entry, but the user file was still
+    // parsed to get here — its lint warnings are the user's to see.
     return { status: 'ok', projectRoot: request.cwd, path: '<built-in>', name: 'file', scope: 'builtin',
-      run: ['dor', VIEW_FILE_ARGV, target], key: [target], render: 'iframe', port: 'announced', warnings: [] };
+      run: ['dor', VIEW_FILE_ARGV, target], key: [target], render: 'iframe', port: 'announced',
+      warnings: file ? [...file.warnings] : [] };
   }
   if (name === BUILTIN_FILE_TOOL) return { status: 'error',
     message: `the built-in viewer does not support '${basename(target)}'; add an open rule to ${path} naming a user Tool` };

@@ -9,6 +9,10 @@
 
 export type AlertSpeechState = 'speaking' | 'spoken';
 
+/** The row of the alarm treatment one ringing Session wears: the speech sink's
+ *  state when it has acted, else the bare latched ring. */
+export type AlertRingState = AlertSpeechState | 'ringing';
+
 let snapshot = new Map<string, AlertSpeechState>();
 const listeners = new Set<() => void>();
 

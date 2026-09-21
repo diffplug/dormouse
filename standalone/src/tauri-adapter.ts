@@ -773,14 +773,6 @@ export class TauriAdapter implements PlatformAdapter {
 
   // --- State persistence ---
 
-  /**
-   * Read by `saveSession`, which skips the whole record build — not just the
-   * write — when a host persists nothing (`PlatformAdapter.persistsSession`).
-   * Standalone persists window state (`docs/specs/transport.md` ->
-   * "The governing rule").
-   */
-  readonly persistsSession = true;
-
   // No bare-Session slot on this host: the stored blob is a Window, and
   // standalone boots per Workspace so nothing shared ever reaches these
   // (`standalone/src/main.tsx`). The pair below is the real one.

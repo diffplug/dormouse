@@ -365,7 +365,11 @@ async function openAgentBrowser() {
       ? resolve()
       : reject(new Error(`${binary} exited code=${code} signal=${signal}`)));
   });
-  log(`agent-browser session: ${browserSession}`);
+  // Name what was actually passed. `dor ab --key` is namespaced by the Workspace
+  // that will hold the browser, which only the host can resolve
+  // (docs/specs/dor-browser.md -> "Managed identity"), so printing a
+  // `sessionForKey` guess here would name a bare-Wall session nothing created.
+  log(`agent-browser ${identity[0] === '--key' ? 'key' : 'session'}: ${identity[1]}`);
   log(`try: ${command} snapshot -i`);
 }
 

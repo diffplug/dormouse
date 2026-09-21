@@ -24,8 +24,8 @@ import {
   DIRECT_GATHER_TIMEOUT_MS,
   DIRECT_SETUP_TIMEOUT_MS,
   DirectFrameQueue,
-  MAX_DIRECT_OUTBOUND_BYTES,
-  MAX_DIRECT_OUTBOUND_FRAMES,
+  MAX_DIRECT_PENDING_BYTES,
+  MAX_DIRECT_PENDING_FRAMES,
   NOISE_MAX_MESSAGE_LENGTH,
   isDirectSdp,
 } from 'remote-lib-common';
@@ -143,7 +143,7 @@ export class DirectPeer {
   readonly #setTimer: RemoteTimer;
   #channel: DirectChannelLike | null = null;
   /** Ciphertext waiting on the channel to drain; see {@link send}. */
-  readonly #outbound = new DirectFrameQueue(MAX_DIRECT_OUTBOUND_FRAMES, MAX_DIRECT_OUTBOUND_BYTES);
+  readonly #outbound = new DirectFrameQueue(MAX_DIRECT_PENDING_FRAMES, MAX_DIRECT_PENDING_BYTES);
   #cancelSetup: (() => void) | null = null;
   /** Cancels the grace a `disconnected` connection is given, if one is running. */
   #cancelDisconnected: (() => void) | null = null;

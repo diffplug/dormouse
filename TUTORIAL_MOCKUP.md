@@ -28,15 +28,15 @@ Four beats. Beat 2 is the section; the rest is scaffolding around it.
 
 1. **A rule, not a switch** — alerts belong to a command, not a tab.
 2. **Attention** — three runs of the same task, three outcomes.
-3. **Two more ways the bell rings** — neither needs a rule.
+3. **Two more ways a pane rings** — neither needs a rule.
 4. **Nothing gets lost** — the TODO receipt.
 
 ## Beat 1 — A rule, not a switch
 
 | id | title | hint |
 |---|---|---|
-| `al-watch-cmd` | Alert me whenever `longtask` runs | Press `s` to start a fake `longtask`, then click that pane's bell. The bell says *Alert on all "longtask"* — you are describing a command, not flagging a tab. |
-| `al-spreads` | One rule, every pane running it | The second fake task lit up too, and you never touched its bell. Any pane you open later that runs `longtask` will watch as well. |
+| `al-watch-cmd` | Alert me whenever `longtask` runs | Press `s` to start a fake `longtask`, then right-click that pane's header (or press `a`) and turn on *Watch all longtask commands* — you are describing a command, not flagging a tab. |
+| `al-spreads` | One rule, every pane running it | The second fake task lit up too, and you never touched it. Any pane you open later that runs `longtask` will watch as well. |
 
 ## Beat 2 — Attention
 
@@ -64,22 +64,22 @@ Reference table (candidate for the section prose or the dialog, not a step):
 | typing into it | hovering it |
 | clicking a door, or `Enter` on a door | a door sitting in the baseboard |
 
-## Beat 3 — Two more ways the bell rings
+## Beat 3 — Two more ways a pane rings
 
 Both are rule-free, and both obey the same attention rule as Beat 2.
 
 | id | title | hint |
 |---|---|---|
-| `al-notif` | A program can ring the bell itself | Press `n` for a fake build that sends a notification. No rule needed — any program that asks for attention gets it, and its message rides along on the TODO tag. |
+| `al-notif` | A program can ring on its own | Press `n` for a fake build that sends a notification. No rule needed — any program that asks for attention gets it, and its message rides along on the TODO tag. |
 | `al-cmd-exit` | A long command finished while you were away | Dormouse noticed you watched this command start, then left. Anything that ran longer than 15 seconds and finished after you walked away is worth a word. |
 
 ## Beat 4 — Nothing gets lost
 
 | id | title | hint |
 |---|---|---|
-| `al-todo-auto` | A dismissed ring leaves a TODO | Click the bell, or just select the pane. The ring goes away but a TODO stays, so an alert you waved away mid-thought does not vanish. |
+| `al-todo-auto` | A dismissed ring leaves a TODO | Press `a`, or just select the pane. The ring goes away but a TODO stays, so an alert you waved away mid-thought does not vanish. |
 | `al-todo-clear` | Press `Enter` in the pane to clear it | Dealing with the pane is what clears the reminder — not looking at it. |
-| `al-todo-manual` | Add a TODO by hand | Press `t`, or right-click the bell. Same tag, no alert required. |
+| `al-todo-manual` | Add a TODO by hand | Press `t`, or right-click the header. Same tag, no alert required. |
 
 ## Full step list (10)
 
@@ -89,16 +89,14 @@ al-spreads        One rule, every pane running it
 al-quiet-attended Sit in the pane — it finishes silently
 al-ring-switch    Look away — the same task rings
 al-ring-idle      Stay put but idle — it rings anyway
-al-notif          A program can ring the bell itself
+al-notif          A program can ring on its own
 al-cmd-exit       A long command finished while you were away
 al-todo-auto      A dismissed ring leaves a TODO
 al-todo-clear     Press `Enter` in the pane to clear it
 al-todo-manual    Add a TODO by hand
 ```
 
-Changes from today's nine: `al-busy` ("the bell tilts while the command works")
-is **cut** as a step — it is feedback, not a concept, and it is what the user is
-already staring at during Beat 2. `al-ring` is **split into three** so each
+Changes from today's eight: `al-ring` is **split into three** so each
 attention mechanism gets its own line. Everything else keeps its id.
 
 ## Two things the mockup has to solve

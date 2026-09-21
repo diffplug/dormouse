@@ -295,8 +295,9 @@ prepare_sign_dir() {
     log "Preparing working copies from downloaded artifacts..."
     rm -rf "$SIGN_DIR"
     mkdir -p "$SIGN_DIR"
-    # Copy only the artifact directories (not marker files)
-    invalidate_updates
+    # Copy only the artifact directories (not marker files). `prepare_artifact`
+    # invalidates the updater output itself, because it is also called on its
+    # own to refresh one platform.
     for name in "${ARTIFACT_NAMES[@]}"; do
         prepare_artifact "$name"
     done

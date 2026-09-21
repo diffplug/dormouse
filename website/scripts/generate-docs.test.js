@@ -2,8 +2,10 @@ import { describe, it, expect } from 'vitest';
 import {
   REPO_BLOB_BASE,
   SECURITY_AUDIENCES,
+  SITE_ORIGIN,
   SITE_ROUTES,
   applyDelta,
+  assertNoSiteLinks,
   assertRouteFragments,
   generateDocs,
   resolveRepoLinks,
@@ -357,6 +359,16 @@ describe('agent skill', () => {
   it('does not ship the raw skill markdown to the browser', () => {
     // Nothing renders it, and it is ~10 KB on every docs page.
     expect(data.skill.markdown).toBeUndefined();
+  });
+
+  it('rejects a site link in the skill', () => {
+    // dor/skill.md is clean, so the build never drives this check red; a
+    // finding check that cannot fail is a claim rather than a control.
+    const offending = [
+      { type: 'paragraph', children: [{ type: 'link', href: `${SITE_ORIGIN}/docs/dor/` }] },
+    ];
+    expect(() => assertNoSiteLinks(offending, 'dor/skill.md')).toThrow(SITE_ORIGIN);
+    expect(() => assertNoSiteLinks(data.skill.blocks, 'dor/skill.md')).not.toThrow();
   });
 
   it('resolves every reference into an existing CLI anchor', () => {

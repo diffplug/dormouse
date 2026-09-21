@@ -3,7 +3,7 @@ import type { PortMode } from './TerminalContextView';
 import type { PortUrlEntry } from './port-url';
 import { createContext, useContext, useEffect, type RefObject } from 'react';
 import type { RingFrame } from '../../lib/rect-tween';
-import type { AlertButtonActionResult, SessionStatus, SetTerminalUserTitleResult } from '../../lib/terminal-registry';
+import type { SetTerminalUserTitleResult } from '../../lib/terminal-registry';
 import type { WallMode } from './wall-types';
 import type { RenderMode } from './agent-browser-screen';
 
@@ -41,7 +41,6 @@ export const DoorElementsContext = createContext<PaneElementsState>({
 export interface WallActions {
   onKill: (id: string) => void;
   onMinimize: (id: string) => void;
-  onAlertButton: (id: string, displayedStatus: SessionStatus) => AlertButtonActionResult;
   onToggleTodo: (id: string) => void;
   onSplitH: (id: string | null, source?: 'keyboard' | 'mouse') => void;
   onSplitV: (id: string | null, source?: 'keyboard' | 'mouse') => void;
@@ -74,7 +73,6 @@ export interface WallActions {
 export const WallActionsContext = createContext<WallActions>({
   onKill: () => {},
   onMinimize: () => {},
-  onAlertButton: () => 'noop',
   onToggleTodo: () => {},
   onSplitH: () => {},
   onSplitV: () => {},

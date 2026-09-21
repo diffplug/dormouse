@@ -50,6 +50,10 @@ describe('normalizeAlertSettings', () => {
     expect(DEFAULT_ALERT_SETTINGS.inactivityTimeoutMs).toBe(cfg.alert.userAttention);
   });
 
+  it('ships animation deferral on', () => {
+    expect(normalizeAlertSettings({}).deferAlertsUntilQuiet).toBe(true);
+  });
+
   it('fills in missing keys and drops unknown ones', () => {
     const result = normalizeAlertSettings({ speakEnabled: true, bogus: 'x' });
     expect(result).toEqual({ ...DEFAULT_ALERT_SETTINGS, speakEnabled: true });
@@ -76,7 +80,8 @@ describe('normalizeAlertSettings', () => {
   it('rejects non-boolean flags', () => {
     expect(normalizeAlertSettings({ speakEnabled: 'yes' }).speakEnabled).toBe(false);
     expect(normalizeAlertSettings({ speakEnabled: 1 }).speakEnabled).toBe(false);
-    expect(normalizeAlertSettings({ deferAlertsUntilQuiet: 'yes' }).deferAlertsUntilQuiet).toBe(false);
+    // Falsy non-booleans must not switch the on-by-default flag off either.
+    expect(normalizeAlertSettings({ deferAlertsUntilQuiet: 0 }).deferAlertsUntilQuiet).toBe(true);
   });
 });
 

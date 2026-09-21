@@ -188,7 +188,7 @@ describe("releasing the drag", () => {
   it("asks first when the Workspace holds an iframe, and moves only on the typed letter", async () => {
     resetWallHandles();
     resetWorkspaceUi();
-    registerWallHandle(stubWallHandle("ws-1", { iframeSurfaceIds: () => ["browser-1", "browser-2"] }));
+    registerWallHandle(stubWallHandle("ws-1", { iframeSurfaceRefs: () => ["browser-1", "browser-2"] }));
     hit = { label: "ws-2", x: 120, y: 9 };
     onDropOnOtherWindow("ws-1", { clientX: 900, clientY: 9 }, false);
     await settle();
@@ -205,7 +205,7 @@ describe("releasing the drag", () => {
 
   it("does not ask for a Workspace of terminals and agent-browser Surfaces", async () => {
     resetWallHandles();
-    registerWallHandle(stubWallHandle("ws-1", { iframeSurfaceIds: () => [] }));
+    registerWallHandle(stubWallHandle("ws-1", { iframeSurfaceRefs: () => [] }));
     hit = null;
     onDropOnOtherWindow("ws-1", { clientX: 2000, clientY: 800 }, false);
     await settle();

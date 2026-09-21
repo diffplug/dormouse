@@ -1,19 +1,18 @@
-import {
-  dismissOrToggleAlert,
-  getActivity,
-  toggleSessionTodo,
-} from '../../../lib/terminal-registry';
+import { dismissSessionAlert, toggleSessionTodo } from '../../../lib/terminal-registry';
 import { hasTerminal } from 'dor/commands/types';
 import { surfaceKindFromParams } from '../browser-surface';
 import { isWorkspaceSelection } from '../wall-types';
 import { ARROW_OPPOSITES, isArrowKey, type NavHistoryRef, type WallKeyboardCtx } from './types';
 
-function findAlertButtonForSession(id: string): HTMLButtonElement | null {
-  return document.querySelector<HTMLButtonElement>(`[data-alert-button-for="${CSS.escape(id)}"]`);
-}
-
-function findPaneHeaderForSession(id: string): HTMLElement | null {
-  return document.querySelector<HTMLElement>(`[data-pane-header-for="${CSS.escape(id)}"]`);
+/** Open the terminal context revealed from the pane header's bottom-left
+ *  corner. Browser-surface panes carry no `data-pane-header-for`, so the lookup
+ *  misses and the caller's key is a consumed no-op — the spec'd behavior for
+ *  surfaces with no header context menu. */
+function openHeaderContext(ctx: WallKeyboardCtx, id: string): void {
+  const header = document.querySelector<HTMLElement>(`[data-pane-header-for="${CSS.escape(id)}"]`);
+  if (!header) return;
+  const rect = header.getBoundingClientRect();
+  ctx.openTerminalContext(id, { x: rect.left, y: rect.bottom });
 }
 
 /** Keep aligned with the pane handlers below. Workspace selections consume
@@ -132,9 +131,8 @@ export function handlePaneShortcuts(
     if (ctx.dialogKeyboardActiveRef.current) return true;
     e.preventDefault();
     e.stopPropagation();
-    const alertButton = findAlertButtonForSession(sid);
-    if (alertButton) alertButton.click();
-    else dismissOrToggleAlert(sid, getActivity(sid).status);
+    dismissSessionAlert(sid);
+    openHeaderContext(ctx, sid);
     return true;
   }
 
@@ -148,21 +146,7 @@ export function handlePaneShortcuts(
   if (e.key === '>' && sid && ctx.selectedTypeRef.current === 'pane') {
     e.preventDefault();
     e.stopPropagation();
-    // Reuse the header's own onContextMenu path: dispatch a synthetic
-    // contextmenu at the header's bottom-left corner as the reveal origin.
-    // Browser-surface panes carry no
-    // `data-pane-header-for`, so the lookup misses and the key is a consumed
-    // no-op — the spec'd behavior for surfaces with no header context menu.
-    const header = findPaneHeaderForSession(sid);
-    if (header) {
-      const rect = header.getBoundingClientRect();
-      header.dispatchEvent(new MouseEvent('contextmenu', {
-        bubbles: true,
-        cancelable: true,
-        clientX: rect.left,
-        clientY: rect.bottom,
-      }));
-    }
+    openHeaderContext(ctx, sid);
     return true;
   }
 

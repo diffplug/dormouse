@@ -14,9 +14,9 @@ A notepad is one ordered list of notes per Surface, held in renderer memory for 
 - **A run keeps bold, italic, foreground, and background, and nothing else.** Colors are normalized lowercase `#rrggbb`; a missing color means the theme default, so an excerpt stays theme-adaptive. **Underline, dim, blink, strike-through, and hyperlinks are dropped at capture**, never later.
 - **A note's source pin is runtime-only.** `RuntimeTerminalSource` holds live xterm markers, so `ArchivedNote` is `LiveNote` minus that field and no marker ever reaches a store.
 - **A closure appends one `ArchiveBatch` per Surface** — `id`, `closedAt`, `surfaceTitle`, `surfaceKind`, `cwd`, and the notes in creation order.
-- **`ArchiveBatch.cwd` is required and nullable.** It is the whole canonical `CwdState` snapshotted before teardown — path, URI, host, path kind, source, observation time — or `null` for a browser Surface and a terminal that never reported one. **Never persist a preformatted CWD label beside it**; the Archive renders path and remote host through `cwdDisplay`.
-- **A batch id is remembered per Surface across its closure attempts and forgotten once one lands**, and **every attempt deletes and re-appends that id in one mutation**, so an attempt that landed and *then* reported failure is replaced by the next, carrying the edits, additions, and deletions made in between. **`closedAt` is minted per attempt.**
-- **A mutation applies its deletes before its appends**, which is what makes that pair a replacement. Appends stay idempotent by batch and note id — an already-stored note is dropped from an appended batch and a batch left empty is skipped — and deleting something already gone is a no-op.
+- **`ArchiveBatch.cwd` is required and nullable.** It is the whole canonical `CwdState` snapshotted before teardown, or `null` for a browser Surface and a terminal that never reported one. **Never persist a preformatted CWD label beside it**; the Archive renders path and remote host through `cwdDisplay`.
+- **A batch id is remembered per Surface across its closure attempts and forgotten once one lands**, and **every attempt deletes and re-appends that id in one mutation**. **`closedAt` is minted per attempt.**
+- **A mutation applies its deletes before its appends.** Appends stay idempotent by batch and note id — an already-stored note is dropped from an appended batch and a batch left empty is skipped — and deleting something already gone is a no-op.
 
 Source of truth: `lib/src/lib/notepad/types.ts`; `applyArchiveMutation`, `buildArchiveBatch`, `readNotepadArchive` and `toArchivedNote` in `lib/src/lib/notepad/archive-model.ts`; `pendingBatchId` in `lib/src/lib/notepad/notepad-store.ts`.
 
@@ -52,7 +52,7 @@ Source of truth: `NotepadArchivePort` in `lib/src/lib/notepad/types.ts`; `mutate
 - **Capture is not Copy Rewrapped**: no paragraph joining and no box-drawing stripping (`docs/specs/mouse-and-clipboard.md` §4.1.2; rationale).
 - **Retain the raw selected text separately.** `extractSelectionText` over the same selection is the pin's validation key, read from the buffer rather than rebuilt from the runs.
 - **Colors record what xterm drew.** Walk buffer cells over the normalized selection, skip width-zero continuation cells, emit a wide character once, resolve palette and RGB colors, swap inverse ones to explicit values, and merge adjacent runs of identical styling. **Bold text on palette entries 0–7 resolves to the bright entry while `drawBoldTextInBrightColors` is on.** Entries 0–15 come from the live theme, 16–255 from xterm's computed table.
-- **An alternate-buffer capture gets no pin.** A full-screen program rewrites its grid in place, so there is nothing stable to point at.
+- **An alternate-buffer capture gets no pin**, a full-screen program rewriting its grid in place.
 - **A capture flashes in place and dismisses the selection; it never opens the notepad.**
 
 Source of truth: `extractRichRuns` and `captureRichSelection` in `lib/src/lib/notepad/rich-extract.ts`; `addSelectionToNotepad` in `lib/src/lib/notepad/capture.ts`.
@@ -63,8 +63,8 @@ A pin is the runtime link from a captured note back to the scrollback it came fr
 
 - **Pin an ordinary Session's normal-buffer capture with two xterm markers plus the normalized endpoint columns and the raw text.** Markers ride the buffer as it scrolls; the columns and text rebuild and prove the range.
 - **Must prove a pin before opening Tool context.** Close the notepad, reattach a minimized Surface, rebuild the range from markers and columns, and compare it exactly with the captured raw text. On success open context, prove the displayed range again, then scroll and restore the Dormouse selection, popup, and render-invalidation baseline.
-- **Column restoration after a resize is best effort**; the raw-text equality is what prevents navigating to the wrong output. Trimmed scrollback is discovered only when a pin is used.
-- **While the alternate buffer is active a pin is temporarily unavailable and kept** — the markers belong to the normal buffer and resolve again once the program exits; the notepad says to exit it.
+- **Column restoration after a resize is best effort**; the raw-text equality is what prevents navigating to the wrong output (rationale). Trimmed scrollback is discovered only when a pin is used.
+- **While the alternate buffer is active a pin is temporarily unavailable and kept**, the notepad saying to exit it (rationale).
 - **Must retain a pin that resolves before opening context but fails after its synchronous refit**, reporting that the layout changed without selecting stale coordinates. This does not remap wrapped text; subsequent attempts use ordinary proof and failure rules (rationale).
 - **Every other pin failure removes the pin and keeps the note.** Disposed markers, rows out of range, and a text mismatch report that the source is unavailable; the notepad stays or reopens with the notice.
 - **Disposing or replacing a terminal instance drops its pins immediately**, notes untouched — a marker belongs to one xterm instance.
@@ -72,19 +72,19 @@ A pin is the runtime link from a captured note back to the scrollback it came fr
   notes (rationale).
 - **Pins never affect ordering and are not user-controlled favorites.**
 
-Source of truth: `registerTerminalSource`, `resolveTerminalSource` and `revealResolvedSource` in `lib/src/lib/notepad/source-link.ts`; `revealNoteSource` in `lib/src/lib/notepad/pin.ts` (tested in `lib/src/lib/notepad/pin.test.ts`); `setTerminalSelectionBaseline` in `lib/src/lib/terminal-store.ts`; `dropSourcesForTerminal` in `lib/src/lib/notepad/notepad-store.ts`, called from `disposeSession` in `lib/src/lib/terminal-lifecycle.ts`.
+Source of truth: `registerTerminalSource`, `resolveTerminalSource` and `revealResolvedSource` in `lib/src/lib/notepad/source-link.ts`; `revealNoteSource` in `lib/src/lib/notepad/pin.ts` (tested in `lib/src/lib/notepad/pin.test.ts`); `setTerminalSelectionBaseline` in `lib/src/lib/terminal-store.ts`; `dropSourcesForTerminal` in `lib/src/lib/notepad/notepad-store.ts`, called from `teardownSession` in `lib/src/lib/terminal-lifecycle.ts` — so a release drops pins as surely as a dispose.
 
 ## Notepad UI
 
 **Must retain one notepad per Tool Surface.** Context changes its presentation only (`docs/specs/terminal-context.md` → Tool context); following a source pin reveals that same terminal.
 
-**The header notepad icon sits after the mouse-override icon and before the split controls** (`docs/specs/layout.md` → "Pane header"), filled while the Surface has notes and regular otherwise. **At the minimal tier an empty notepad yields its space to the title; one with notes stays until the width can no longer hold it beside the pane-action group** (`docs/specs/layout.md` → "Pane header responsive sizing" owns that boundary)**.**
+**The header notepad icon is filled while the Surface has notes and regular otherwise.** Its placement and its survival per density tier belong to `docs/specs/layout.md` → "Pane header".
 
 - **The attached notepad is a panel in the top-right of the Surface body, three quarters of it wide and tall.** It closes on its close control, Escape, or an outside click.
-- **Only one Surface notepad is open per Wall.** The store holds a single open id, and opening a Door's popover closes the attached panel.
+- **Only one Surface notepad is open per webview.** The store holds a single open id across every Wall in it, and opening a Door's popover closes the attached panel.
 - **An open notepad owns the keyboard.** It is a `role="dialog"` with a focus trap, takes a lease on the Wall's dialog keyboard so command-mode dispatch stands down, and stops key and mouse events from reaching the Surface under it — a live browser pane's key forwarder included.
 - **A Door is a wrapper carrying `data-door-id` with one or two buttons.** The wrapper is what the selection ring and the baseboard fitting measure; the title button keeps click-to-reattach and the drag press, the notepad button does neither. **A minimized Surface with no notes gets no notepad button.**
-- **The Door popover opens above its Door, edge-clamped, capped at 30rem wide and 75% of the Wall height. Opening it never reattaches the Surface** — only following a pin from it does.
+- **The Door popover opens above its Door, edge-clamped, capped at 30rem wide and 75% of the viewport height. Opening it never reattaches the Surface** — only following a pin from it does.
 
 Editing and copying:
 
@@ -94,7 +94,7 @@ Editing and copying:
 - **Rich runs render as escaped spans in a whitespace-preserving container**, never as injected HTML.
 - **Copy always writes `text/plain`.** A terminal note adds a `text/html` flavor built only from escaped text and the four supported attributes — never by serializing rendered DOM. **Anything the rich clipboard refuses falls back to the plain-text write**, best effort by contract.
 
-Source of truth: `NotepadBody` in `lib/src/components/NotepadBody.tsx`, placed by `lib/src/components/NotepadPanel.tsx` and `lib/src/components/DoorNotepadPopover.tsx`; `applyPlainEdit` in `lib/src/components/NoteList.tsx`; `lib/src/components/Door.tsx`; `noteToHtml` and `copyNoteToClipboard` in `lib/src/lib/notepad/rich-clipboard.ts`.
+Source of truth: `NotepadHeaderButton` in `lib/src/components/wall/NotepadHeaderButton.tsx`, placed by `lib/src/components/wall/SurfacePaneHeader.tsx`; `NotepadBody` in `lib/src/components/NotepadBody.tsx`, placed by `lib/src/components/NotepadPanel.tsx` and `lib/src/components/DoorNotepadPopover.tsx`; `applyPlainEdit` in `lib/src/components/NoteList.tsx`; `lib/src/components/Door.tsx`; `noteToHtml` and `copyNoteToClipboard` in `lib/src/lib/notepad/rich-clipboard.ts`.
 
 The popup's third action and the `⌘N` / `Ctrl+N` chord belong to `docs/specs/mouse-and-clipboard.md` §4.1 and §4.2. Two rules are the notepad's own: **intercept the chord only while that terminal has a finalized Dormouse selection**, so with none it reaches the program unchanged; and **a host whose browser reserves the chord shows no shortcut and binds none**, gated by `browserReservesNotepadChord`, which the website demo and the standalone browser-dev harness set (rationale). Source of truth: `isNotepadChordBound` in `lib/src/lib/notepad/capture.ts`, `lib/src/components/SelectionPopup.tsx`.
 
@@ -109,7 +109,7 @@ A **Notepad archive** entry in Settings replaces that dialog's content with a ro
 - **Back, Escape, and the close control commit the staged set as one mutation before leaving. A failed commit keeps the view open with its staged set intact and shows the error**; pressing the same control again is the retry.
 - **Stored data that fails validation is reported as unreadable and never silently replaced.** Every append fails meanwhile, and closures take the failure path in [Closure](#closure). **Exactly one user-initiated recovery moves the stored data aside — never deletes it — and starts an empty archive** (rationale).
 - **Must revalidate a VS Code recovery inside the storage transaction**; a now-valid or absent archive stays untouched (`vscode-ext/test/notepad-archive-store.test.ts`).
-- **An unknown field anywhere in stored data fails validation**, because every mutation rewrites the whole archive, so a field this build does not know would be erased on the next save (rationale).
+- **An unknown field anywhere in stored data fails validation** (rationale).
 - **Archived entries stay until explicitly deleted.** No age limit and no count limit.
 
 Source of truth: `lib/src/components/NotepadArchiveView.tsx`; the Settings entry in `lib/src/components/SettingsDialog.tsx`.
@@ -118,7 +118,7 @@ Source of truth: `lib/src/components/NotepadArchiveView.tsx`; the Settings entry
 
 **Every user-visible permanent Surface closure routes through the close coordinator**, which builds stable-id batches from whatever notes exist and appends them in one mutation *before* teardown. Routed: the header kill button, keyboard kills both confirmed and on the untouched fast path, `dor kill`, the Door-restore kill path, and controlled application quit. **A multi-Surface closure appends every batch in one mutation**, and a closure with no notes writes nothing — **unless an earlier attempt of that Surface landed a batch, which the same mutation then deletes**, its notes having been deleted after the user was told none were stored.
 
-**A Surface's notes are frozen from the moment its closure snapshots them until the write settles** — adds, edits, and deletes are refused, a refused capture releases its own markers, and the panel renders read-only behind an "Archiving notes…" line — so nothing taken during the write can be archived stale or dropped unarchived by the forget step (rationale). The freeze is counted, so overlapping closures of one Surface thaw it once. **Empty plain notes are never archived**: an untouched Add New still on screen when the kill lands is not a note, and a Surface holding only those closes as if it held none.
+**A Surface's notes are frozen from the moment its closure snapshots them until the write settles** — adds, edits, and deletes are refused, a refused capture releases its own markers, and the panel renders read-only behind an "Archiving notes…" line (rationale). The freeze is counted, so overlapping closures of one Surface thaw it once. **Empty plain notes are never archived**: an untouched Add New still on screen when the kill lands is not a note, and a Surface holding only those closes as if it held none.
 
 **A terminal Surface's process CWD is refreshed immediately before its batch is built** — every such Surface at once, bounded as one batch at `PROCESS_CWD_REFRESH_MS`, a timeout, refusal, or synchronous lookup error keeping whatever the Session last reported, and **never overriding, or even asking about, a CWD the shell integration reported** — so a shell with no CWD escapes still archives where it was, and no Surface pays for an answer that would be discarded.
 
@@ -151,12 +151,12 @@ Source of truth: `archiveSurfaceNotes` in `lib/src/lib/notepad/close-coordinator
 
 - **A failure or timeout leaves the quit pending in Rust**, whose phase-2 wait is unbounded for exactly this (`docs/specs/standalone.md` → "Quit flow"), and the dialog shows the error with **Cancel** (default) and **Quit anyway**, which discards the notes. **Only Cancel calls `quit_cancel`**: Quit anyway must reach teardown with the watchdog still armed.
 - **A timeout aborts the archive it stopped waiting for** ([Closure](#closure)).
-- **Must include Surfaces with pending batch IDs even after their last note is deleted**, both when archiving and discarding on Quit anyway; pinned by `standalone/src/quit-notepad.test.ts`.
+- **Must include Surfaces with pending batch IDs even after their last note is deleted**, both when archiving and when discarding on Quit anyway; pinned by `standalone/src/quit-notepad.test.ts`.
 - **Teardown's own rule is untouched**: once teardown begins, no failing step prevents exit.
 
-The store is `<app_data_dir>/notepad-archive-v1.json`, **outside `sessions/` and outside the state root**, so every build shares one — a Surface's notes outlive the window whose closure archived them, so they must not ride the per-window session blob or the sweep over its directory. **It is written owner-only and atomically through the same `write_file_atomically` the session snapshot uses** (`docs/specs/security-local.md` → "Persisted state"). **The revision is a hash of the stored bytes, and every load, save and reset holds an exclusive lock on the sidecar `notepad-archive-v1.lock`** — a second Dormouse sharing `app_data_dir()`, a dev build beside the installed app, then conflicts instead of overwriting batches it never read. **Recovery renames it to `notepad-archive-v1.unreadable-<unix-millis>.json` beside the original**, disambiguating rather than overwriting an earlier quarantine; only a temp file a crash left behind is dropped.
+The store is `<app_data_dir>/notepad-archive-v1.json`, **outside `sessions/` and outside the state root**, so every build shares one (rationale). **It is written owner-only and atomically through the same `write_file_atomically` the session snapshot uses** (`docs/specs/security-local.md` → "Persisted state"). **The revision is a hash of the stored bytes, and every load, save and reset holds an exclusive lock on the sidecar `notepad-archive-v1.lock`**, so a second Dormouse sharing `app_data_dir()` conflicts instead of overwriting batches it never read (rationale). **Recovery renames it to `notepad-archive-v1.unreadable-<unix-millis>.json` beside the original**, disambiguating rather than overwriting an earlier quarantine; only a temp file a crash left behind is dropped.
 
-Source of truth: `archiveNotesBeforeTeardown` in `standalone/src/teardown-archive.ts`, the `'archive-failed'` phase in `standalone/src/quit-confirm-store.ts`; `write_notepad_archive_to`, `lock_notepad_archive` and `reset_notepad_archive_at` in `standalone/src-tauri/src/lib.rs`; the port in `standalone/src/tauri-adapter.ts`.
+Source of truth: `archiveThenProceed` in `standalone/src/teardown-flow.ts`, which awaits `archiveNotesBeforeTeardown` in `standalone/src/teardown-archive.ts` and raises the `'archive-failed'` phase in `standalone/src/quit-confirm-store.ts`; `write_notepad_archive_to`, `lock_notepad_archive` and `reset_notepad_archive_at` in `standalone/src-tauri/src/lib.rs`; the port in `standalone/src/tauri-adapter.ts`.
 
 ## VS Code lifecycle
 
@@ -164,11 +164,11 @@ Source of truth: `archiveNotesBeforeTeardown` in `standalone/src/teardown-archiv
 
 VS Code can destroy a webview without asking, so the close coordinator may never run. **Every webview therefore mirrors its live notes into extension-host memory**, and a teardown archives from that mirror instead.
 
-- **The mirror holds what a close would archive minus the markers** — notes, Surface title, kind and CWD, plus its pending batch id, each terminal Surface's PTY id, and any archive deletions an open Archive view has staged. **The PTY id is mirror-only and never reaches a batch.**
+- **The mirror holds what a close would archive minus the markers** — notes, Surface title, kind and CWD, plus its pending batch id and any archive deletions an open Archive view has staged. **A terminal Surface's id is its PTY id**, which is what a teardown asks for a CWD.
 - **Must mirror pending batch identity before saving and retain it after the last note is deleted.** Teardown deletes and re-appends that batch; live resume restores its identity. Pinned by `vscode-ext/test/notepad-archive-store.test.ts` and `lib/src/lib/notepad/notepad-store.test.ts`.
 - **A teardown refreshes the mirror's process CWDs while the PTYs are alive** — bounded, and never overriding an integration-reported one — which on an editor-panel disposal is what makes the kill wait for the archive write, and in `deactivate()` puts it ahead of the session flush.
-- **The mirror is memory only, never written to disk, and cleared by an extension restart.** It is a bridge across one disposal, not a draft store.
-- **The mirror is sanitized on the way in**, round-tripped through the archive validator, because a teardown writes it verbatim with no webview left to ask.
+- **The mirror is memory only, never written to disk, and cleared by an extension restart** (rationale).
+- **The mirror is sanitized on the way in**, round-tripped through the archive validator, so it can hold no field that validator would reject (rationale).
 - **Editor-panel disposal (`killOnDispose: true`) and `deactivate()` archive their mirrored notes, best effort**, draining what they take so `deactivate()` cannot write a panel's notes again under a fresh batch id. In `deactivate()` the step sits between the recovery capture and the session flush, bounded (`docs/specs/vscode.md` → "Serialization and restore").
 - **Every router disposal commits and drains that router's staged archive deletions, best effort** — they were promised irreversible once this window closed, and the webview *is* the window. **A live resume is therefore never handed a pending deletion**; `hydrateNotepadFromVolatile` ignores the field.
 - **A `WebviewView` disposal is not a closure.** Its PTYs stay alive, so only its *notes* stay in the mirror for the next resolve.

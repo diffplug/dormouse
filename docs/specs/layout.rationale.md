@@ -20,7 +20,7 @@ The browser's 94/102 pair is the former 72/80 pair plus the zoom button and its 
 
 xterm.js paints only its own rendered surface, and integer row fitting leaves a sub-row remainder at the bottom of the pane: a host background differing from the terminal screen shows as a stripe under the last row, and an unclipped host squares off the rounded bottom corners.
 
-## Spoken-alarm overlay
+## Alarm overlay
 
 **Why the wash sits below the header.** `--color-alarm-vs-terminal` is picked for contrast against the *terminal body*, so it carries no contrast guarantee over the header band.
 
@@ -43,10 +43,6 @@ xterm.js paints only its own rendered surface, and integer row fitting leaves a 
 **Why the close confirmation anchors to the Wall, not the tab.** `ModalOverlay` centers inside the target's box and does not clamp to the viewport, so a 24px tab at the top of the window left the dialog clipped. Every Wall shares one grid cell, so the anchor lands in the same place whether or not that Workspace is visible.
 
 **Why the modal hosts are gated rather than hoisted.** Each calls `useDialogKeyboardOwner`, which reads the *active* Wall's `DialogKeyboardContext`; hoisting them above `WorkspaceWindow` would leave them with no coordinator to suppress command-mode dispatch through. The cost is that a modal's React-local state resets on a switch — accepted, since every modal that matters keeps its state in a store.
-
-## Baseboard
-
-**Why `showBaseboard={false}` is a seam.** The mobile Pocket composition — the obvious candidate — is a separate `MobileWall` (`docs/specs/mobile-terminal-ui.md`), not a baseboard-less Wall.
 
 ## Mode switching
 

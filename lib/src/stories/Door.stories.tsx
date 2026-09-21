@@ -60,14 +60,18 @@ const meta: Meta<typeof DoorStory> = {
   args: {
     title: 'build-server',
     status: 'WATCHING_DISABLED',
-    ringSeq: 0,
+    // Stories draw the static treatment; the arrival burst is frozen out by
+    // `cfg.alert.ringingPaused` under Chromatic anyway.
+    episode: null,
     todo: false,
     width: 260,
     reducedMotion: false,
   },
   argTypes: {
     title: { control: 'text' },
-    status: { control: 'radio', options: ['WATCHING_DISABLED', 'NOTHING_TO_SHOW', 'MIGHT_BE_BUSY', 'BUSY', 'OSC_NOTIF_BUSY', 'COMMAND_EXIT_ARMED', 'MIGHT_NEED_ATTENTION', 'ALERT_RINGING'] },
+    // Only the latched ring reaches the Door; every other status draws the same
+    // plain pill (`docs/specs/alert.md` -> Door).
+    status: { control: 'radio', options: ['WATCHING_DISABLED', 'ALERT_RINGING'] },
     todo: { control: 'boolean' },
     speechState: { control: 'radio', options: [undefined, 'speaking', 'spoken'] },
     width: { control: 'number' },
@@ -78,28 +82,23 @@ const meta: Meta<typeof DoorStory> = {
 export default meta;
 type Story = StoryObj<typeof DoorStory>;
 
-export const AlertDisabled: Story = {};
-export const AlertEnabled: Story = { args: { status: 'NOTHING_TO_SHOW' } };
-export const AlertMightBeBusy: Story = { args: { status: 'MIGHT_BE_BUSY' } };
-export const AlertBusy: Story = { args: { status: 'BUSY' } };
-export const AlertMightNeedAttention: Story = { args: { status: 'MIGHT_NEED_ATTENTION' } };
-export const AlertRinging: Story = { args: { status: 'ALERT_RINGING' } };
+export const Default: Story = {};
+export const Ringing: Story = { args: { status: 'ALERT_RINGING' } };
 export const TodoOnly: Story = { args: { todo: true } };
-export const TodoAndAlertEnabled: Story = { args: { todo: true, status: 'NOTHING_TO_SHOW' } };
-export const TodoAndAlertRinging: Story = { args: { todo: true, status: 'ALERT_RINGING' } };
+export const TodoAndRinging: Story = { args: { todo: true, status: 'ALERT_RINGING' } };
 export const Speaking: Story = { args: { status: 'ALERT_RINGING', todo: true, speechState: 'speaking' } };
 export const HasSpoken: Story = { args: { status: 'ALERT_RINGING', todo: true, speechState: 'spoken' } };
 export const LongTitleWithIndicators: Story = {
   args: {
     title: 'my-extremely-long-running-background-process-with-a-very-descriptive-name',
     todo: true,
-    status: 'NOTHING_TO_SHOW',
+    status: 'ALERT_RINGING',
   },
 };
 
 /** A Door carrying notes: a second button, filled, that never reattaches. */
 export const WithNotes: Story = {
-  args: { noteCount: 3, status: 'NOTHING_TO_SHOW' },
+  args: { noteCount: 3 },
 };
 
 export const WithNotesAndIndicators: Story = {
@@ -114,5 +113,6 @@ export const NotepadPopover: StoryObj<typeof NotedDoorStory> = {
 
 
 export const DirtyTool: Story = {
-  args: { title: 'Editor', toolDirty: true, noteCount: 2, speechState: 'spoken' },
+  // `spoken` only exists over a latched ring (`docs/specs/alert.md` -> Pane Header).
+  args: { title: 'Editor', toolDirty: true, noteCount: 2, speechState: 'spoken', status: 'ALERT_RINGING' },
 };

@@ -28,6 +28,12 @@ export type BrowserPanelParams = {
   wsPort?: number;
   binaryPath?: string;
   syncEngaged?: boolean;
+  /** Set only on a Surface the pane context menu opened for a port, as
+   *  `<sourceSurfaceId>:<port>:<iframe|agent>`. Reuse looks a Surface up by it,
+   *  so a second "open this port" reveals the pane the first one made rather
+   *  than stacking another (`docs/specs/dor-browser.md` → Pane Context Menu
+   *  Connect). */
+  contextPortKey?: string;
 };
 
 export function BrowserPanel(props: PaneProps & { renderNotepad?: boolean }) {

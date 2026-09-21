@@ -53,7 +53,6 @@ export function isIdFormat(value: string): value is IdFormat {
 
 export function parseIdFormat(value: string): IdFormat {
   if (isIdFormat(value)) return value;
-  if (value === 'uuids') return 'ids';
   throw new SyntaxError(`invalid --id-format '${value}'`);
 }
 
@@ -170,7 +169,7 @@ export function msysToWindowsCwd(pwd: string, platform: string): string {
 // travel in the request. Prefer the shell's PWD (injectable, matches what the
 // user sees) and fall back to the process cwd. resolvePath canonicalizes both the
 // default and a relative/absolute path into one absolute path the host can key on.
-// Shared by `dor ensure --cwd` and `dor list --cwd`.
+// Shared by `ensure`, `list`, `tool`, `open`, and `skill`.
 export function callerWorkingDirectory(flag: string | undefined, env: CliEnv | undefined): string {
   const base = msysToWindowsCwd(env?.PWD ?? process.cwd(), process.platform);
   return resolvePath(base, flag ?? '.');

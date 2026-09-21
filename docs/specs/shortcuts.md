@@ -24,7 +24,7 @@ A focused cross-origin iframe surface swallows the gesture; the proxy shim detec
 | `m` or `d` | Minimize / reattach | Stays in command mode, unlike `Enter` on a door. |
 | `k` or `x` | Kill | Kills the selected pane or door behind a random-letter prompt; an untouched Surface skips it. |
 | `,` | Rename | Inline rename of the selected terminal pane's title; consumed no-op on browser surfaces and doors. |
-| `a` | Toggle alert | Dismiss or toggle the bell alert. Terminal Surfaces only; doors excluded. |
+| `a` | Alert | Dismiss the ring if any, then open the terminal context. Terminal Surfaces only; doors excluded. |
 | `t` | Toggle todo | Toggle the TODO marker on the selected Surface, terminal or browser; doors excluded. |
 | `>` | Terminal context | Terminal panes only; consumed no-op on browser panes, inert on doors. |
 

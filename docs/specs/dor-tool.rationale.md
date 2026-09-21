@@ -42,42 +42,16 @@ A hardcoded Storybook port can disagree with the port it obtains under contentio
 
 ### September 2026 innerdogfood QC record
 
-The `dor-tool-qc` run began at `4c7f9012` and used the real standalone sidecar,
-staged CLI, PTYs, and iframe proxy. At that historical baseline the Tools flag
-could reject creation and standalone `dor open` split; both behaviors were
-subsequently superseded by always-enabled Tools and eligible inline opening.
-
-Observed passes covered project approval (pending dedupe, decline/re-prompt,
-folder-only permission, failed spawn without a PTY, repair and Retry); literal
-argv and canonical symlink targets; three concurrent keyed invocations sharing
-one Tool, fresh instances, idle/fast-command restart with stable refs; automatic
-single-port serving, three-port refusal, and announced port/path selection.
-User-rule ordering and explicit overrides worked; malformed user configuration
-failed, and project associations did not intercept file opens. Text/Markdown
-source, HTML/CSS/image, SVG, audio, and awkward filenames rendered; URL,
-directory, missing/unsupported-file and oversized-text cases failed usefully.
-
-Approval controls remained usable at 249×203 pixels. Terminal Context,
-minimize/reveal, exit/refocus, and iframe/screencast round trips passed. A clean
-harness reload preserved every ID, kind, URL, and Workspace; cross-Workspace
-identity stayed scoped. The four final viewer processes and earlier fixture
-listeners exited when their Tools closed; both owned harnesses stopped and
-private credential captures were deleted.
-
-Full `pnpm test` and `pnpm build` passed during the run, plus 139 focused UI
-checks. The PDF-policy follow-up passed 168 CLI tests, 20 host dispatch/proxy
-tests, and spec/public-doc lints; staged hosts contained no PDF renderer assets.
-These counts describe that run, not the current test inventory.
-
-One development-state reset made Tools appear as terminals while root tests
-and builds ran beside the harness. Investigation confirmed that
-`e2e-lint-selftest` temporarily mutates Vite inputs, including invalid root
-package JSON; the exact metadata-loss trigger was not captured. A clean
-restart and stable-build reload passed. This run did not exercise Tool transfer,
-native-window movement, native Tauri/VS Code rendering, Windows shells, or cold
-restore. Screenshots and raw JSON were local ignored artifacts, not portable
-verification evidence. The reusable recipe is `docs/testing/dor-tool-qc.md`.
-
+The `dor-tool-qc` run (from `4c7f9012`, on the real standalone sidecar, staged
+CLI, PTYs, and iframe proxy) exercised project approval, keyed reuse, serving,
+open-rule dispatch, and the built-in viewer's formats and failures. Two findings
+constrain later edits: at that baseline the Tools feature flag could reject
+creation and standalone `dor open` split, both since superseded by
+always-enabled Tools and eligible inline opening; and Chromium's native PDF
+plugin failed inside the normal iframe sandbox (see "Opening local files"). The
+run did not cover Tool transfer, native-window movement, native Tauri/VS Code
+rendering, Windows shells, or cold restore. The reusable recipe is
+`docs/testing/dor-tool-qc.md`.
 
 The September 2026 integration reuses Terminal Context for the Tool's primary terminal. The auxiliary helper's automatic refresh, Reset, and Promote semantics do not describe a serving command, whose Session also owns the browser and remote terminal identity. Sharing the presentation avoids introducing a second navigation mechanism or a second shell.
 
@@ -89,8 +63,7 @@ A CSS source preview escapes its contents, so its URLs cannot load assets. Scann
 
 Keeping the built-in viewer in the Tool's process tree reuses port discovery, kill, restart, and Workspace transfer. An OSC path carries the per-run URL capability without saving that secret in the restart command. Holding the selected file descriptors bounds what the server can read after launch; it trades automatic replacement-file refresh for a grant whose contents cannot widen through path replacement.
 
-
-The VS Code host supports Node 18, which lacks native glob matching. Bundled picomatch keeps association behavior the same across hosts. Patterns with separators test both the CWD-relative and canonical absolute path: files above the CWD otherwise start with `../` and can miss patterns intended to cover an absolute directory. Canonicalization also gives symlink aliases one matching identity.
+The VS Code host supports Node 18, which lacks native glob matching. Bundled picomatch keeps association behavior the same across hosts. Patterns with separators test both the CWD-relative and canonical absolute path: files above the CWD otherwise start with `../` and can miss patterns intended to cover an absolute directory. Canonicalization also gives symlink aliases one matching identity. Canonicalizing only the target mixed physical and logical paths under a symlinked CWD, so relative slash patterns missed files inside that directory. An absolute target can still be opened after its caller's CWD disappears; matching falls back to the supplied directory in that case.
 
 ## Take-over
 
@@ -115,7 +88,3 @@ A derived URL or browser daemon binding belongs to one execution. Reusing it aft
 Routing `dor tool` to a native editor on one host would change its result from a Surface handle to a host-specific side effect. Native file opening remains a separate operation.
 
 A Workspace transfer carries the live browser binding separately from its durable record. The arrival record can reach disk while the windows coordinate, whereas the content channel stays in memory; reusing the saved-record projection alone would reopen a Tool browser and lose its current page state. Pending approvals and unfinished browser startup still own asynchronous work in the source window, so the move waits for the user to resolve the approval or retry after startup.
-
-## Opening local files
-
-The VS Code host supports Node 18, which lacks native glob matching. Bundled picomatch keeps association behavior the same across hosts. Patterns with separators test both the CWD-relative and canonical absolute path: files above the CWD otherwise start with `../` and can miss patterns intended to cover an absolute directory. Canonicalization also gives symlink aliases one matching identity. Canonicalizing only the target mixed physical and logical paths under a symlinked CWD, so relative slash patterns missed files inside that directory. An absolute target can still be opened after its caller's CWD disappears; matching falls back to the supplied directory in that case.

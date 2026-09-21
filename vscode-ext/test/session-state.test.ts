@@ -51,9 +51,8 @@ describe('VS Code session alert persistence', () => {
         status: 'ALERT_RINGING',
         watchingEnabled: true,
         todo: true,
-        attentionDismissedRing: true,
         awaited: true,
-        ringSeq: 7,
+        episode: { id: 'episode-live', startedAt: 0 },
       })],
     ])) as PersistedSession;
 
@@ -71,7 +70,7 @@ describe('VS Code session alert persistence', () => {
       notification: null,
       watchingEnabled: true,
       awaited: true,
-      ringSeq: 4,
+      episode: { id: 'episode-stale', startedAt: 0 },
     };
     const store = contextWithState({
       version: 3,

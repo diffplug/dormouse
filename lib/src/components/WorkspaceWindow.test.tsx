@@ -373,7 +373,8 @@ describe('WorkspaceWindow', () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await render();
     setTerminalActivity('pane-a', { status: 'ALERT_RINGING' });
-    const ringBefore = getActivitySnapshot().get('pane-a')!.ringSeq;
+    const episodeBefore = getActivitySnapshot().get('pane-a')!.episode;
+    expect(episodeBefore?.id).toBeTruthy();
     const leafBefore = wallFor(first).querySelector('[data-lath-leaf="pane-a"]');
     const paneBefore = wallFor(first).querySelector('[data-session-id="pane-a"]');
 
@@ -383,11 +384,11 @@ describe('WorkspaceWindow', () => {
     await flush();
 
     // A switch flips a prop; it never unmounts a leaf, so nothing calls
-    // mountElement / resumeTerminal / restoreTerminal and `ringSeq` cannot
-    // advance (docs/specs/glossary.md → "Invariants" I8).
+    // mountElement / resumeTerminal / restoreTerminal and the delivery episode
+    // cannot restart (docs/specs/glossary.md → "Invariants" I8).
     expect(wallFor(first).querySelector('[data-lath-leaf="pane-a"]')).toBe(leafBefore);
     expect(wallFor(first).querySelector('[data-session-id="pane-a"]')).toBe(paneBefore);
-    expect(getActivitySnapshot().get('pane-a')!.ringSeq).toBe(ringBefore);
+    expect(getActivitySnapshot().get('pane-a')!.episode?.id).toBe(episodeBefore?.id);
   });
 
   it('gives host New Terminal and the dialog hosts to the visible Workspace only', async () => {
@@ -700,7 +701,7 @@ it.each([
 });
 
 it('routes Tools to the requested Workspace and never launches after lookup races closure', async () => {
-  const lookup = { status: 'untrusted' as const, projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'storybook', run: 'pnpm storybook', upstreamUrl: null };
+  const lookup = { status: 'untrusted' as const, projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'storybook', run: 'pnpm storybook', upstreamUrl: null, warnings: [] };
   const gate = Promise.withResolvers<typeof lookup>();
   const toolControl = vi.fn().mockResolvedValueOnce(lookup).mockImplementationOnce(() => gate.promise);
   Object.assign(fake, { toolControl });

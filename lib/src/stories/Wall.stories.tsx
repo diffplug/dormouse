@@ -99,8 +99,8 @@ async function minimizeFirstVisiblePane() {
 }
 
 async function openAlertDialog() {
-  const alertButton = await requireElement<HTMLButtonElement>('[data-alert-button-for]', 'alert bell');
-  alertButton.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
+  const header = await requireElement<HTMLElement>('[data-pane-header-for]', 'pane header');
+  header.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
   await requireElement('[data-terminal-context]', 'terminal context');
   await settleTerminals();
 }
@@ -161,9 +161,8 @@ export const AlertModalOpen: Story = {
     }),
   },
   play: async () => {
-    // Settle first: the bell only offers the context once the primed ALERT_RINGING
-    // status has landed, so clicking it earlier is a no-op and the story
-    // snapshots a wall with no context.
+    // Settle first: the context reports the primed ALERT_RINGING status, so
+    // opening it earlier would snapshot a wall whose alert rows are still cold.
     await settleTerminals();
     await openAlertDialog();
   },

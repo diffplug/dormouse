@@ -264,7 +264,10 @@ export function useSessionPersistence({
     if (ownsHostFlush) platform.onRequestSessionFlush(handleSessionFlushRequest);
     window.addEventListener('pagehide', handlePageHide);
 
-    // Inert in Tauri standalone today; see diffplug/dormouse#38 and tauri-apps/tauri#14373.
+    // Never fires in Tauri standalone today: `dragDropEnabled: false` keeps the
+    // native drop handler from ever emitting
+    // (docs/specs/mouse-and-clipboard.md -> "8.7 Drag-to-Paste").
+    // See diffplug/dormouse#38 and tauri-apps/tauri#14373.
     const unsubFilesDropped = platform.onFilesDropped?.((paths) => {
       if (paths.length === 0) return;
       const sid = selectedTypeRef.current === 'pane' ? selectedIdRef.current : null;

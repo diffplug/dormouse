@@ -86,7 +86,7 @@ const fakePlatform = initPlatform('fake');
 // Ask `isChromatic()`, never the user agent: Chromatic only rewrites the UA on
 // its Chrome runner, and identifies every other browser (Safari, Firefox, Edge)
 // with a `chromatic=true` query parameter instead. A UA sniff therefore left
-// every guard below OFF in Safari — a bell ringing on an 800ms infinite loop, a
+// every guard below OFF in Safari — an alarm pulsing on a 650ms infinite loop, a
 // blinking cursor, terminals on WebGL, and mid-tween pane geometry — which is
 // what made the Safari snapshots unstable while Chrome's stayed clean.
 if (isChromatic()) {
@@ -112,10 +112,10 @@ if (isChromatic()) {
   // Zero every CSS transition. Unlike the keyframe animations above, each of
   // which has a static substitute, transitions are started by state that lands
   // AFTER first paint — the primed-state decorator applies two rAFs in, which
-  // kicks off the bell's `transition-transform` rotation — so a capture can land
-  // mid-tween. Only the duration is overridden, so the resting appearance is
-  // unchanged; it is simply reached on the first frame. An author `!important`
-  // outranks even inline transition declarations (the selection ring's
+  // kicks off the header palette's `transition-colors` crossfade — so a capture
+  // can land mid-tween. Only the duration is overridden, so the resting
+  // appearance is unchanged; it is simply reached on the first frame. An author
+  // `!important` outranks even inline transition declarations (the selection ring's
   // unfocus-saturate fade), so a snapshot showing such a fade already finished
   // is expected, not a regression.
   const instantTransitions = document.createElement('style');
@@ -415,8 +415,8 @@ const preview: Preview = {
         // alone. A renderer that is not painting (a hidden or occluded tab, a
         // throttled background window) never fires rAF at all, which would leave
         // every primed story rendering its unprimed default: no TODO pill, no
-        // notification, a bell with nothing to show. `settle-terminals.ts` holds
-        // the same rule for the same reason.
+        // notification, no alarm treatment. `settle-terminals.ts` holds the same
+        // rule for the same reason.
         const afterFrame = (fn: () => void) => {
           let done = false;
           const run = () => {

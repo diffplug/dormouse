@@ -407,7 +407,7 @@ describe('notepad archive requests', () => {
     webview.send({ type: 'pty:spawn', id: 'pty-1', options: { cwd: '/tmp' } } as never);
     webview.send({
       type: 'notepad:volatile',
-      snapshot: { surfaces: [{ ...mirrored, terminalId: 'pty-1' }], stagedDeletions: {} },
+      snapshot: { surfaces: [{ ...mirrored, surfaceId: 'pty-1' }], stagedDeletions: {} },
     } as never);
     disposable.dispose();
 
@@ -427,7 +427,7 @@ describe('notepad archive requests', () => {
     const first = router.attachRouter(closing.channel, { context, killOnDispose: true });
     closing.send({ type: 'pty:spawn', id: 'closing-pty', options: { cwd: '/tmp' } } as never);
     closing.send({ type: 'notepad:volatile', snapshot: {
-      surfaces: [{ ...mirrored, terminalId: 'closing-pty' }], stagedDeletions: {},
+      surfaces: [{ ...mirrored, surfaceId: 'closing-pty' }], stagedDeletions: {},
     } } as never);
     first.dispose();
     const reopening = fakeWebview();
@@ -464,7 +464,7 @@ describe('notepad archive requests', () => {
     webview.send({ type: 'pty:spawn', id: 'pty-1', options: { cwd: '/tmp' } } as never);
     webview.send({
       type: 'notepad:volatile',
-      snapshot: { surfaces: [{ ...mirrored, terminalId: 'pty-1' }], stagedDeletions: {} },
+      snapshot: { surfaces: [{ ...mirrored, surfaceId: 'pty-1' }], stagedDeletions: {} },
     } as never);
     disposable.dispose();
 

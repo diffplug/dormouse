@@ -212,17 +212,11 @@ export class TutDetector {
         this.queueSpreadCheck(id);
       }
 
-      // Gate al-busy / al-ring on a true status transition. Without the
-      // prev.status check, a pane already in BUSY or ALERT_RINGING at the
-      // moment its first activity event fires (e.g. restored state, or a
-      // pane spawned after start() that arrives mid-task) would credit
-      // the user for work they did not do this session.
-      if (
-        prev.status !== current.status &&
-        (current.status === "BUSY" || current.status === "MIGHT_BE_BUSY")
-      ) {
-        this.state.markComplete("al-busy");
-      }
+      // Gate al-ring on a true status transition. Without the prev.status
+      // check, a pane already in ALERT_RINGING at the moment its first
+      // activity event fires (e.g. restored state, or a pane spawned after
+      // start() that arrives mid-task) would credit the user for work they
+      // did not do this session.
       if (prev.status !== "ALERT_RINGING" && current.status === "ALERT_RINGING") {
         this.state.markComplete("al-ring");
       }

@@ -59,7 +59,9 @@ async function fixture(t) {
           this.app = (await this.wait(/app URL: (http:\/\/localhost:\d+)/))[1];
           this.bridge = (await this.wait(/starting browser dev host on (http:\/\/127.0.0.1:\d+)/))[1];
           this.token = (await this.wait(/bridge token: ([a-f0-9]+)/))[1];
-          this.session = (await this.wait(/agent-browser session: (\S+)/))[1];
+          const identity = await this.wait(/agent-browser (session|key): (\S+)/);
+          this.identityKind = identity[1];
+          this.session = identity[2];
           this.args = JSON.parse((await this.wait(/BROWSER_ARGS (.+)/))[1]);
           return this;
         },
@@ -100,7 +102,13 @@ test('parallel worktrees own ports, browser identities and bridges; stopping one
   const key = one.args[2];
   assert.match(key, /^innerdogfood-[a-f0-9]{16}$/);
   assert.deepEqual(one.args, ['ab', '--key', key, 'open', one.app]);
-  assert.equal(one.session, sessionForKey(key));
+  // Inside Dormouse the harness names the key, not a session: the Workspace that
+  // takes the browser is what namespaces it, so `sessionForKey`'s bare-Wall scope
+  // would be a session nothing ever created.
+  assert.equal(one.identityKind, 'key');
+  assert.equal(one.session, key);
+  assert.notEqual(one.session, sessionForKey(key));
+  assert.equal(two.identityKind, 'session');
   assert.deepEqual(two.args, ['--session', two.session, 'open', two.app]);
   for (const [run, dir, other] of [[one, a.root, two], [two, b.root, one]]) {
     const js = await (await fetch(`${run.app}/app.js`)).text();
@@ -139,8 +147,11 @@ test('parallel worktrees own ports, browser identities and bridges; stopping one
   assert.equal((await one.stop()).code, 0);
   await assertClosed(one);
   assert.equal((await invoke(two)).status, 200);
+  // Stable across restarts: the identity is derived from the canonical worktree
+  // path. This run is outside Dormouse, so it resolves the same key and prints
+  // it namespaced.
   const restarted = await a.start().ready();
-  assert.equal(restarted.session, one.session);
+  assert.equal(restarted.session, sessionForKey(one.session));
 });
 
 test('explicit ports and raw browser sessions are honored; occupied ports fail without adopting a peer', { timeout: 60000 }, async t => {

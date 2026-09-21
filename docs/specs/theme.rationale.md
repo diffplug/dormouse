@@ -42,8 +42,6 @@ showed the stored theme.
 
 **Why `useRestoredTheme()` latches the fallback ahead of any child render.** On the desktop Pocket page the header's picker mounts before the component that calls the hook, so a latch deferred to an effect would let the picker re-resolve against no fallback at all.
 
-**Why `window.confirm` cannot gate the uninstall.** Uninstall was gated on `confirm`; on the desktop app the call returned without ever showing a dialog, so uninstalling silently did nothing.
-
 **Why the picker row's `X` keeps a gap from the select target.** The two paths above do not recover symmetrically: `Remove` leaves the extension row on screen to re-install, while the `X` means re-finding the extension through an OpenVSX search. The gap prices in the harder undo.
 
 **Why a story, not only a unit test, pins the short-viewport cap.** A unit test can stub the trigger and menu rectangles to pin side selection and resize recomputation, including a visual viewport shrinking while the layout viewport stays fixed, but it cannot prove that the real list yields height while the footer survives. `lib/src/components/design.test.ts` pins the viewport inset, `lib/src/components/use-anchored-menu.test.tsx` the geometry, and the Chromatic story the rendered result.

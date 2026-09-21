@@ -54,15 +54,6 @@ describe("BrowserSidecarAdapter session persistence", () => {
     activeWorkspaceId: "ws-1",
   };
 
-  it("reports the same persistsSession as TauriAdapter", () => {
-    const harness: PlatformAdapter = new BrowserSidecarAdapter(
-      new BrowserSidecarHost("http://localhost:1234"),
-    );
-    const tauri: PlatformAdapter = new TauriAdapter();
-    expect(harness.persistsSession).toBe(tauri.persistsSession);
-    expect(harness.persistsSession).toBe(true);
-  });
-
   it("round-trips a Window through localStorage", () => {
     localStorage.removeItem(KEY);
     const adapter = new BrowserSidecarAdapter(new BrowserSidecarHost("http://localhost:1234"));
@@ -191,7 +182,9 @@ describe("BrowserSidecarAdapter terminal stream", () => {
     expect(setWatched).toHaveBeenCalledWith(["cargo", "make"]);
     expect(names).toEqual([["cargo", "make"]]);
 
-    const canonical: AlertSettings = { ...DEFAULT_ALERT_SETTINGS, deferAlertsUntilQuiet: true };
+    // Not the default blob, so the assertion still distinguishes "forwarded what
+    // it was handed" from "emitted DEFAULT_ALERT_SETTINGS".
+    const canonical: AlertSettings = { ...DEFAULT_ALERT_SETTINGS, deferAlertsUntilQuiet: false };
     deliver("alert:settings", { settings: canonical });
     expect(applySettings).toHaveBeenCalledWith(canonical);
     expect(settings).toEqual([canonical]);

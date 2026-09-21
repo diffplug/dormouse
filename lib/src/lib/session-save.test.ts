@@ -346,15 +346,16 @@ describe('saveSession', () => {
 
   it('persists local browser surface TODO state in the browser pane alert field', async () => {
     const platform = createPlatform(null);
-    // A full live ActivityState, so the assertion below shows the projection
-    // dropping the fields `docs/specs/alert.md` -> Public State forbids on disk.
+    // A full live ActivityState, episode included, so the assertion below shows
+    // the projection dropping every field `docs/specs/alert.md` -> Public State
+    // keeps off disk.
     terminalRegistryMocks.getActivity.mockReturnValue({
       status: 'WATCHING_DISABLED',
       watchingEnabled: false,
       todo: true,
       notification: null,
       awaited: false,
-      ringSeq: 3,
+      episode: { id: 'episode-web', startedAt: 0 },
     });
 
     await saveSession(platform, [
@@ -369,20 +370,7 @@ describe('saveSession', () => {
     });
   });
 
-  it('does no work at all for a host that persists nothing', async () => {
-    // The gate is above the record build, not at the write: `getCwd` is a
-    // per-pane round trip that lands on a synchronous `lsof` in the standalone
-    // sidecar, and it would otherwise run on every debounced save, every 30s
-    // heartbeat, and twice more per quit, for a blob that is then dropped.
-    const platform = { ...createPlatform(null), persistsSession: false };
-
-    await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }]);
-
-    expect(platform.getCwd).not.toHaveBeenCalled();
-    expect(platform.saveState).not.toHaveBeenCalled();
-  });
-
-  it('still saves for a host that does not declare the flag', async () => {
+  it('saves for a host that declares nothing beyond the state slot', async () => {
     const platform = createPlatform(null);
 
     await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }]);

@@ -49,9 +49,9 @@ const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", 
 const SPINNER_INTERVAL_MS = 100;
 
 /** Static "your turn" pointer for the active section item — deliberately not
- *  animated, so the checklist doesn't compete for attention with the bell the
- *  Alerts section is teaching. (Runner frames are written with
- *  `skipActivity`, so animation would no longer tilt the bell either way.) */
+ *  animated, so the checklist doesn't compete for attention with the alarm the
+ *  Alerts section is teaching. (Runner frames are written with `skipActivity`,
+ *  so animation would no longer move the detector either way.) */
 const ACTIVE_ITEM_GLYPH = "●";
 const STAR_PROMPT_TITLE = "Starred on GitHub";
 const FLAPPY_TITLE = "🐭 FlappyTerm 🐭";
@@ -167,6 +167,9 @@ export class TutRunner implements InteractiveProgram {
   private resizeUnsub: (() => void) | null = null;
   private busyDemoStart: number | null = null;
   private busyDemoDurationMs = 0;
+  /** How long the fake `longtask` runs — the countdown and the re-press guard.
+   *  Longer than the pump, which stops so the pane can go silent and ring. */
+  private busyDemoCommandMs = 0;
   private commandExitDemoStart: number | null = null;
   private commandExitDemoDurationMs = 0;
   private disposed = false;
@@ -584,15 +587,18 @@ export class TutRunner implements InteractiveProgram {
     this.cleanup(true);
   }
 
+  /** Spans the whole fake command, not just the countdown, so a replay anywhere
+   *  inside it is ignored. Per instance — the page cancels across runners. */
   private busyDemoInProgress(): boolean {
     if (this.busyDemoStart === null) return false;
-    return Date.now() - this.busyDemoStart < this.busyDemoDurationMs;
+    return Date.now() - this.busyDemoStart < this.busyDemoCommandMs;
   }
 
   private startBusyDemo(): void {
     this.busyDemoStart = Date.now();
     this.busyDemoDurationMs = getDemoDurationMs(this.getInactivityTimeoutMs());
-    this.onTriggerBusyDemo?.(this.busyDemoDurationMs, getWatchCommandDurationMs(this.busyDemoDurationMs));
+    this.busyDemoCommandMs = getWatchCommandDurationMs(this.busyDemoDurationMs);
+    this.onTriggerBusyDemo?.(this.busyDemoDurationMs, this.busyDemoCommandMs);
     this.startSpinnerTicks();
     this.render();
   }
@@ -823,7 +829,10 @@ export class TutRunner implements InteractiveProgram {
     lines.push(`  ${DIM}\`Esc\` to cancel${RESET}`);
     lines.push("");
     lines.push(
-      `  This will clear all checkmarks and the GitHub star prompt.`,
+      `  This will clear all checkmarks, the GitHub star prompt, and your`,
+    );
+    lines.push(
+      `  FlappyTerm high score.`,
     );
     lines.push(
       `  ${DIM}Type \`reset\` and press \`Enter\` to confirm.${RESET}`,
@@ -908,8 +917,10 @@ export class TutRunner implements InteractiveProgram {
 
   private renderBusyDemoLines(): string[] {
     return [
-      this.renderDemoLine("s", "longtask", "Fake task", this.busyDemoStart, this.busyDemoDurationMs),
-      `  ${DIM}Press \`n\` for a program that rings the bell itself.${RESET}`,
+      // Counts down the fake command, not the pump: `longtask` keeps running
+      // after `tut-boxed` goes quiet, which is the whole point of the demo.
+      this.renderDemoLine("s", "longtask", "Fake task", this.busyDemoStart, this.busyDemoCommandMs),
+      `  ${DIM}Press \`n\` for a program that rings on its own.${RESET}`,
       this.renderDemoLine("x", "slowbuild", "Slow build", this.commandExitDemoStart, this.commandExitDemoDurationMs),
     ];
   }
@@ -1018,7 +1029,7 @@ export class TutRunner implements InteractiveProgram {
 
   private write(data: string): void {
     // Runner frames are UI chrome, not task output — skip the activity
-    // tick so enabling WATCHING on the runner pane doesn't tilt the bell
+    // tick so enabling WATCHING on the runner pane doesn't look busy
     // every time the menu re-renders.
     this.adapter.sendOutput(this.terminalId, data, { skipActivity: true });
   }

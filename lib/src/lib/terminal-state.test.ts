@@ -175,7 +175,7 @@ describe('terminal command state reducer', () => {
   });
 
   it('handles OSC 133 lifecycle without command line and finish without current command', () => {
-    let state = createTerminalPaneState({ title: { title: 'zsh', source: 'osc0', updatedAt: 1 } });
+    let state = createTerminalPaneState({ titleCandidates: { osc0: { title: 'zsh', source: 'osc0', updatedAt: 1 } } });
     state = reduceTerminalState(state, { type: 'commandStart', source: 'osc133_boundaries' }, {
       now: () => 2,
       createId: () => 'cmd-2',
@@ -202,7 +202,6 @@ describe('terminal command state reducer', () => {
     state = reduceTerminalState(state, { type: 'title', title: { title: 'vim', source: 'osc2', updatedAt: 2 } });
     state = reduceTerminalState(state, { type: 'title', title: { title: 'dormouse', source: 'osc0', updatedAt: 3 } });
 
-    expect(state.title).toEqual({ title: 'dormouse', source: 'osc0', updatedAt: 3 });
     expect(state.titleCandidates.osc0).toEqual({ title: 'dormouse', source: 'osc0', updatedAt: 3 });
     expect(state.titleCandidates.osc2).toEqual({ title: 'vim', source: 'osc2', updatedAt: 2 });
     expect(titleCandidatesForDisplay(state).map((candidate) => [candidate.source, candidate.title])).toEqual([
@@ -322,7 +321,7 @@ describe('command title summarizer', () => {
   });
 
   // One name per program: the launcher suffix is dropped everywhere, so the
-  // header reads the same name as the WATCHING rule row and the bell tooltip.
+  // header reads the same name as the WATCHING rule row and the terminal context.
   it('reads a Windows launcher as the program it launches', () => {
     expect(summarizeCommandLine('vim.exe notes.txt')).toBe('vim');
     expect(summarizeCommandLine('cargo.exe watch -x test')).toBe('cargo watch -x test');
@@ -523,7 +522,9 @@ describe('header and grouping derivation', () => {
   });
 
   it.each(['osc99', 'osc777'] as const)('keeps %s diagnostics out of command-start fallbacks', (source) => {
-    const pane = createTerminalPaneState({ title: { title: 'Finished tests', source, updatedAt: 1 } });
+    const pane = createTerminalPaneState({
+      titleCandidates: { [source]: { title: 'Finished tests', source, updatedAt: 1 } },
+    });
     const running = reduceTerminalState(pane, { type: 'commandStart', source: 'osc133_boundaries' }, { now: () => 2 });
     expect(running.currentCommand?.displayCommand).toBe('shell');
     expect(deriveHeader(running, [running]).primary).toBe('shell');

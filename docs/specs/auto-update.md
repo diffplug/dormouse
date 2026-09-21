@@ -45,7 +45,7 @@ Update status is a text notice in the Baseboard, the always-visible bottom strip
 
 ### Debug report on failure
 
-**"Click here to debug" opens `UpdateDebugModal`, which snapshots the failure** (version + error string) so a later state change cannot alter it. Two steps (rationale): a GitHub issue *search* seeded with the error's first 80 characters **unquoted**, so GitHub can fuzzy-match; and a copyable markdown report from `buildDebugReport()` — app version, `PLATFORM_STRING`, the error, and the log tail. The tail is `read_update_log`'s last 10 KB of `dormouse.log`, sliced on a char boundary; **a failed read is embedded as a placeholder, never aborts the report**.
+**"Click here to debug" opens `UpdateDebugModal`, which snapshots the failure** (version + error string) so a later state change cannot alter it. Two steps (rationale): a GitHub issue *search* seeded with the error's first 80 characters **unquoted**, so GitHub can fuzzy-match; and a copyable markdown report from `buildDebugReport()` — app version, `PLATFORM_STRING`, the error, and the log tail. The tail is `read_update_log`'s last 10,000 bytes of `dormouse.log`, sliced on a char boundary; **a failed read is embedded as a placeholder, never aborts the report**.
 
 ### Threading
 
@@ -84,12 +84,7 @@ Single key: `dormouse:update-result`
 | [`standalone/src/updater.test.ts`](../../standalone/src/updater.test.ts) | Pins the updater lifecycle and ordering |
 | [`standalone/src/UpdateBanner.tsx`](../../standalone/src/UpdateBanner.tsx) | Presentational notice content for the Baseboard |
 | [`standalone/src/UpdateDebugModal.tsx`](../../standalone/src/UpdateDebugModal.tsx) | Failure modal: issue search + copyable report |
-| [`standalone/src/quit.ts`](../../standalone/src/quit.ts) | Quit orchestrator (`docs/specs/standalone.md` §Quit flow); calls `installPendingUpdate()` last |
-| [`standalone/src/main.tsx`](../../standalone/src/main.tsx) | `<ConnectedUpdateBanner />` (banner + modal) as `<App />`'s `baseboardNotice`; `startUpdateCheck()` after restore |
 | [`standalone/src-tauri/tauri.conf.json`](../../standalone/src-tauri/tauri.conf.json) | Updater endpoint, public key, artifact mode, Windows install mode |
-| [`standalone/src-tauri/src/lib.rs`](../../standalone/src-tauri/src/lib.rs) | Plugin registration, sidecar teardown, update-log tail, `quit_restart` |
-| [`standalone/src-tauri/capabilities/default.json`](../../standalone/src-tauri/capabilities/default.json) | Shell and window permissions, for `main` and every `ws-*` window |
-| [`standalone/src-tauri/capabilities/main-only.json`](../../standalone/src-tauri/capabilities/main-only.json) | Updater and app-version permissions, scoped to `main` alone |
 
 ## Configuration
 

@@ -32,6 +32,7 @@ export const STRING_CONTROL_INTRODUCER_SCAN = new RegExp(
   STRING_CONTROL_INTRODUCER.source,
   'g',
 );
+// "Terminated" here tracks what the renderer honours rather than ECMA-48 alone.
 // BEL ends an OSC but is payload inside DCS/SOS/PM/APC, so the two kinds scan
 // for different sets; CAN, SUB and the C1 ST end either, and so does a bare ESC
 // — whose next byte decides between an ST terminator and a cancel.
@@ -149,17 +150,35 @@ export class TerminalControlStreamFilter {
 /** Remove presentation controls safely from slices that may start or end
  * mid-sequence. Shared by resume-hint and returned-prompt detection. */
 export function stripTerminalControls(input: string, options: StripTerminalControlsOptions = {}): string {
-  const boundary = options.boundaries ? '\n' : '';
-  const csi = options.boundaries
+  // OSC/DCS/SOS/PM/APC strings, including an unterminated one, whose tail is
+  // swallowed rather than promoted to visible text. Shared with the streaming
+  // filter above so one grammar cannot drift into two — which is also why a
+  // bare C1 introducer counts here, as it does everywhere else.
+  return stripPresentationControls(new TerminalControlStreamFilter().process(input), !!options.boundaries);
+}
+
+/**
+ * Both readings of one strip: `boundaries` turns each removed cursor-moving
+ * control into a line break, `plain` simply removes it. Comparing the two is
+ * what tells a real trailing newline from a trailing boundary
+ * (`docs/specs/terminal-state.md` → "Keystroke fallback"), and taking them
+ * together runs the stateful string-control pass once rather than twice.
+ */
+export function stripTerminalControlsBothWays(input: string): { boundaries: string; plain: string } {
+  const stringsRemoved = new TerminalControlStreamFilter().process(input);
+  return {
+    boundaries: stripPresentationControls(stringsRemoved, true),
+    plain: stripPresentationControls(stringsRemoved, false),
+  };
+}
+
+function stripPresentationControls(stringsRemoved: string, boundaries: boolean): string {
+  const boundary = boundaries ? '\n' : '';
+  const csi = boundaries
     ? (match: string) => (match.endsWith('m') ? '' : '\n')
     : () => '';
   return (
-    // OSC/DCS/SOS/PM/APC strings, including an unterminated one, whose tail is
-    // swallowed rather than promoted to visible text. Shared with the streaming
-    // filter above so one grammar cannot drift into two — which is also why a
-    // bare C1 introducer counts here, as it does everywhere else.
-    new TerminalControlStreamFilter()
-      .process(input)
+    stringsRemoved
       // CSI.
       .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, csi)
       // An incomplete trailing CSI swallows its parameters rather than

@@ -13,13 +13,10 @@ intend to do about it; there is no bounty.
 security spec, [`docs/specs/security.md`](docs/specs/security.md), published at
 <https://dormouse.sh/docs/security> — whole, but with the guarantees table and
 the two lists narrowed there to that page's audience, so the spec itself is
-where every row appears together. It names the five audited
-checklists beside it — [local](docs/specs/security-local.md),
-[remote control](docs/specs/security-remote.md),
-[supply chain](docs/specs/security-supply-chain.md),
-[CI and releases](docs/specs/security-ci.md), and
-[the audit itself](docs/specs/security-audit.md) — whose `FAIL IF` lines a
-nightly audit executes and every VS Code release is gated on. A failure files a
+where every row appears together. Its
+[Domains table](docs/specs/security.md#how-the-guarantees-are-checked) names
+every audited checklist beside it, whose `FAIL IF` lines a nightly audit
+executes and every VS Code release is gated on. A failure files a
 public issue labeled
 [`security-audit-failure`](https://github.com/diffplug/dormouse/issues?q=is%3Aissue+label%3Asecurity-audit-failure);
 open ones are live, closed ones are the record.

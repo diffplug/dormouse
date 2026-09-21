@@ -128,9 +128,70 @@ describe('WorkspaceStrip', () => {
 
     expect(activateButton(first).getAttribute('aria-label')).toBe('Workspace 1, 2 needing attention');
     expect(tabFor(first).querySelector('.todo-pill-shell')).not.toBeNull();
-    expect(tabFor(first).querySelector('svg')).not.toBeNull();
+    expect(tabFor(first).querySelector('[data-alert-ring-inset]')).not.toBeNull();
     // The visible Workspace shows its Surfaces, so its tab stays plain.
     expect(tabFor('ws-2').querySelector('.todo-pill-shell')).toBeNull();
+    expect(tabFor('ws-2').querySelector('[data-alert-ring-inset]')).toBeNull();
+  });
+
+  /** The inset is the ring's only presence on a tab, so a Workspace whose
+   *  members merely owe a TODO must not wear it. */
+  it('leaves the alarm inset off a hidden Workspace with no ringing member', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    setWorkspaceSurfaces(first, ['pane-a']);
+    setTerminalActivity('pane-a', { todo: true });
+    await render();
+
+    expect(tabFor(first).querySelector('.todo-pill-shell')).not.toBeNull();
+    expect(tabFor(first).querySelector('[data-alert-ring-inset]')).toBeNull();
+  });
+
+  /** The tab's summons is the Workspace's whole ringing interval, so losing the
+   *  member that started it must not remount the inset and replay its burst. */
+  it('keeps one burst while a Workspace stays ringing', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    setWorkspaceSurfaces(first, ['pane-a', 'pane-b']);
+    setTerminalActivity('pane-a', { status: 'ALERT_RINGING', episode: { id: 'older', startedAt: 1_000 } });
+    setTerminalActivity('pane-b', { status: 'ALERT_RINGING', episode: { id: 'newer', startedAt: 2_000 } });
+    await render();
+
+    const inset = tabFor(first).querySelector('[data-alert-ring-inset]');
+    expect(inset).not.toBeNull();
+
+    // The older member is attended; the Workspace is still ringing through the
+    // newer one, whose later start would otherwise become a fresh summons.
+    await act(async () => { setTerminalActivity('pane-a', { status: 'NOTHING_TO_SHOW' }); });
+
+    expect(tabFor(first).querySelector('[data-alert-ring-inset]')).toBe(inset);
+  });
+
+  /** The cache is the tab's memory of one ring, so a ring that ends while its
+   *  Workspace is visible must not leave its start behind for the next one. */
+  it('clocks the burst from the ring that began while the Workspace was visible', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    setWorkspaceSurfaces(first, ['pane-a']);
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    setTerminalActivity('pane-a', { status: 'ALERT_RINGING', episode: { id: 'first', startedAt: 1_000 } });
+    await render();
+    expect(tabFor(first).querySelector('[data-alert-ring-inset]')).not.toBeNull();
+
+    // Attend that ring from its own tab, then let the member ring again while
+    // the Workspace is the visible one and wears no inset.
+    await act(async () => { activateButton(first).click(); });
+    await act(async () => { setTerminalActivity('pane-a', { status: 'NOTHING_TO_SHOW' }); });
+    await act(async () => {
+      setTerminalActivity('pane-a', { status: 'ALERT_RINGING', episode: { id: 'second', startedAt: 9_000 } });
+    });
+
+    // Leaving reveals the summons: a burst 100ms old, not one clocked from the
+    // ring that ended eight seconds ago and already past the animation's end.
+    now.mockReturnValue(9_100);
+    await act(async () => { activateButton('ws-2').click(); });
+    const inset = tabFor(first).querySelector<HTMLElement>('[data-alert-ring-inset]')!;
+    expect(inset.style.animationDelay).toBe('-100ms');
   });
 
   it('renames the active tab on click, holding the chrome keyboard lease while the editor is open', async () => {

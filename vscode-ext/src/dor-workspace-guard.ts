@@ -21,8 +21,8 @@ const REFUSAL = 'Dormouse in VS Code puts each Workspace in its own webview, so'
  */
 function namesThisWebviewsWorkspace(workspace: unknown): boolean {
   if (typeof workspace !== 'string') return false;
-  const { position, name } = parseWorkspaceRef(workspace);
-  return position === 1 || name === DEFAULT_WORKSPACE_NAME;
+  const { number, name } = parseWorkspaceRef(workspace);
+  return number === 1 || name === DEFAULT_WORKSPACE_NAME;
 }
 
 /**

@@ -72,8 +72,6 @@ mode. [WebKit's iOS Web Push guidance](https://webkit.org/blog/13878/web-push-fo
 
 **Why a failed or in-flight read never settles at empty.** An empty result and "not yet known" would render the same card. Re-offering the idempotent Enable costs a redundant registration at worst, while a stale **Push notifications on.** claim hides the repair entirely.
 
-**Why the Relay omits rows under an old VAPID key.** After a key rotation those rows can never be delivered to. Serving them would let a device that repaired one Burrow see another Burrow's dead endpoint as current, and stop offering the Enable that would fix it.
-
 **Why the push endpoint is fingerprinted.** A push service may rotate an address on its own with the VAPID key unchanged: the subscription stays valid and correctly keyed while every stored Relay row points somewhere unreachable — a state no other check can see. One scope holds one subscription, so a move invalidates every Burrow row for that device at once, and one recorded digest covers them all.
 
 **Why a matching subscription is reused rather than replaced.** Calling `subscribe()` again with a matching `applicationServerKey` mints a new endpoint and invalidates the one already stored for every other Burrow — turning a single Burrow's registration into a silent outage for all of them.

@@ -1,5 +1,5 @@
 import { test, expect } from "vitest";
-import { providerBindings } from "../policy";
+import { authPolicy, providerBindings, LOGIN_FRESH_AGE_MS } from "../policy";
 import { allowedDevRequest } from "../dev-host-guard";
 import type { IncomingMessage } from "node:http";
 test("provider allowlist fails closed on typos and partial credentials", () => {
@@ -26,4 +26,17 @@ test("local inbox is guarded against rebinding and cross-origin requests", () =>
   expect(
     check({ host: "127.0.0.1:5188", "sec-fetch-site": "cross-site" }),
   ).toBe(false);
+});
+// The account screen and the packed adapter gate on the same window; nothing
+// else would notice a pgstencil bump moving one of them.
+test("the recent-login window matches the adapter's own freshAge", async () => {
+  const { authOptions } = await import("@pgstencil/auth/better-auth");
+  const built = authOptions({
+    ...authPolicy,
+    database: {} as never,
+    origin: "https://hosted.dormouse.sh",
+    secret: "x".repeat(32),
+    email: { send: async () => {} } as never,
+  });
+  expect(built.session?.freshAge).toBe(LOGIN_FRESH_AGE_MS / 1000);
 });

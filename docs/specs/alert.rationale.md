@@ -28,7 +28,7 @@
 
 **Why `--until` is never inferred.** The WATCHING rule set is a human notification preference — app-global, edited from a dialog. Binding a program's wake condition to it would let an unrelated human edit (removing a command from the watched set to quiet the bell) silently change what every `await` parked on that Session is waiting for.
 
-**Why silence at a prompt is not a settle.** The BUSY-first precondition is what makes the `dor send` / `dor await` idiom safe: the await parks in the window before the peer's first byte instead of resolving on the quiet that was already there.
+**Why silence at a prompt is not a settle.** The BUSY-first precondition is what makes the `dor send` / `dor await` idiom safe: the await parks in the window before the peer's first byte instead of resolving on the quiet that was already there. The grace window answers the same question from the other side — silence alone cannot separate a peer that answered long ago from one working quietly — which is also why a running foreground command skips the window outright: a silent build resolves on its exit rather than being guessed at.
 
 **Why `idle` is a `cause`, not a failure.** A caller that asked for quiet and found quiet got what it asked for. A distinct cause rather than a distinct failure lets a simple caller treat success as success, while a careful one can still tell "it settled" from "there was never anything there".
 
@@ -42,7 +42,7 @@
 
 **Why the claim window is left unacknowledged.** Closing the gap between a claim and the caller actually reading the outcome would need a two-phase claim on *every* completion, to cover a process that dies in the microseconds after its answer was computed.
 
-**Why the timeout ceiling exists at all.** Like the inactivity timeout, `timeoutMs` originates a process away and ends up in `setTimeout`, whose delay is a signed 32-bit millisecond count. Anything past ~24.9 days overflows and fires immediately, turning a long park into an instant `timeout`.
+**Why the timeout ceiling exists at all.** `timeoutMs` is a safety rail on a blocking call inside an agent loop, not an alert-tuning knob. Like the inactivity timeout it originates a process away and ends up in `setTimeout`, whose delay is a signed 32-bit millisecond count. Anything past ~24.9 days overflows and fires immediately, turning a long park into an instant `timeout`.
 
 **Why a disposing VS Code webview answers its own parked requests synchronously.** A caller that can no longer be answered would otherwise go on absorbing completions the human would have been shown. Synchronously, because the cancelled outcome would arrive a microtask after the router stopped posting and be dropped, leaving `dor` blocked on a reply that never comes.
 
@@ -62,7 +62,7 @@
 
 ## Alarm settings
 
-**Why animation deferral defaults off.** BEL and notification OSCs explicitly ask to alert now, while continuously changing output may never become quiet. Opt-in preserves their established timing and makes indefinite deferral a deliberate choice.
+**Why animation deferral defaults on.** Coding agents (`claude`, `codex`) send their notification OSC while their TUI is still redrawing its spinner, so an undeferred ring summons the user to a pane that is still animating (2026-09). The gate engages only while the private detector is fully armed, so a BEL from an otherwise quiet shell still rings at once. Deferral is unbounded, so continuous output can hold a ring indefinitely; turning the switch off is the escape hatch that restores the protocols' literal timing. Installs that saved any settings blob keep the old value: the blob has no version field, and a persisted `false` cannot be told from a deliberate opt-out, so dropping it on read would leave the off position unpersistable.
 
 **Why the settings ride the WATCHING rule set's seed/broadcast shape.** Each VS Code webview has its own origin and therefore its own `localStorage`, while the `AlertManager` is shared; without a host-authoritative copy, two webviews would each believe their own blob. The one difference is the whole-blob relay: an alarm setting is not a set of independent keys the way a rule list is.
 
@@ -104,15 +104,11 @@ Guarding only completion leaves a stale `start` free to replace the active utter
 
 ## Pane Header
 
-**Why the bell rings only four times.** With four focused ringing bells, the former infinite animation added 6.89 MB of embedder memory, 1,127 style recalculations, and 3.99 seconds of renderer CPU over three minutes. Pausing only those animations in the same loaded document reduced that to 0.13 MB, two recalculations, and 0.025 seconds. After bounding the burst, two consecutive three-minute windows each had zero live animations, one recalculation, under 0.40 MB of non-cumulative embedder drift, and at most 0.024 seconds of renderer CPU (measured in Chrome 150, 2026-09). Four cycles preserve the entry cue without leaving a per-Session animation running for the lifetime of an unattended alert.
+**Why `SPEAKING` may pulse unbounded and `SPOKEN` may not.** An utterance is seconds long and stops on its own, so the pulse it carries is self-bounding. `SPOKEN` persists until the ring is attended, so animating it would be exactly the per-Session animation with no end that bounding the burst exists to remove.
 
-**Why a counter, not the status.** Bounding the burst turned a continuous cue into an edge-triggered one, and the public status has no such edge: `hasActiveRing` ORs three independently latching tracks, so a second alert behind a latched one leaves `ALERT_RINGING` in place. `notification` is no better — `applyCommandExitRinging` deliberately preserves a richer protocol notification. With both unchanged, `alertStatesEqual` also judged the two states equal and never emitted, so the renderer could not have reacted even had it wanted to. `ringSeq` is the smallest thing that changes exactly once per latch.
+**Why `cfg.alert.ringingPaused` suppresses the pulse.** It is the Chromatic freeze that pins the alarm; even a bounded animation could otherwise snapshot at an arbitrary phase during its first 2.6 seconds.
 
-**Why a presentation mount may replay.** Minimizing and reattaching move the visible cue between a Pane and a Door. Replaying once makes the cue legible in its new location without carrying the CSS animation clock through Activity state; the finite burst still expires without further input.
-
-**Why latches and not notifications.** Counting every ring rule instead would let a Session bell-ing in a loop emit one host→webview update per PTY chunk, each restarting a 3.2s burst that never finishes — the always-running animation the finite burst exists to remove. A latch advances the counter at most once while that track remains latched; after release, relatching is a fresh summons and may replay. That matches the model `deferOrDeliverNotification` already states: an existing ring is enrichment, not a fresh summons. A timestamp floor would bound notifications too, but it would put the CSS duration in the manager.
-
-**Why `cfg.alert.ringingPaused` suppresses the burst.** It is the Chromatic freeze that pins the bell; even a bounded animation could otherwise snapshot at an arbitrary phase during its first 3.2 seconds.
+**Why the unlabelled treatment pulses once per episode.** An infinite per-Session animation is expensive, and the whole-Pane treatment covers far more surface than the retired bell icon did. With four focused panes wearing an infinite animation, three minutes cost 6.89 MB of embedder memory, 1,127 style recalculations, and 3.99 seconds of renderer CPU; pausing only those animations in the same loaded document reduced that to 0.13 MB, two recalculations, and 0.025 seconds. After bounding the burst, two consecutive three-minute windows each had zero live animations, one recalculation, under 0.40 MB of non-cumulative embedder drift, and at most 0.024 seconds of renderer CPU (measured in Chrome 150, 2026-09). A handful of cycles preserves the entry cue without leaving an animation running for the lifetime of an unattended alert. The episode — not a track latch — is the key because the episode is the summons the sinks already work from: a second track latching inside one enriches an alarm the user was already shown, and re-flashing the whole Pane for it would read as a new alarm. Running the burst off `episode.startedAt` rather than from mount makes the CSS clock a property of the episode, so minimize → reattach or a Workspace switch lands past an expired burst instead of replaying it. A Session BEL-ing in a loop still cannot restart the burst, because a track that is already latched does not re-latch.
 
 ## Text And Security
 
@@ -124,4 +120,6 @@ A persisted reminder intentionally forgets rings and detector history. Reusing i
 
 ## Workspace union
 
-The maximum child counter hides a new alert from a child with a smaller counter. Summing counters would turn adding or removing a member into a notification. Per-member observation keeps semantic union and presentation edges separate; retaining the cue's clock also prevents switching Workspaces from restarting an old burst (2026-09).
+A Workspace-level counter was tried first and dropped: the maximum child counter hides a new alert from a child with a smaller counter, and summing counters turns adding or removing a member into a notification. The earliest ringing member's episode replaces it because a hidden tab shows one alarm however many members are behind it, and because switching Workspaces re-derives the union from scratch — an `episode.startedAt` survives that, while a locally tracked generation had to be retained alongside it (2026-09).
+
+"Only that interval" is load-bearing because the tab's memory of a ring is a cache the visible Workspace never refreshes. The retired `WorkspaceRingCues` observed the active Workspace too, so a ring that started and ended while its tab was visible could not leave anything behind; the union cache that replaced it can. Left in place, the stale `ringingSince` is carried forward into the next ring, whose `animationDelay` is then already past the burst's end — the tab wears a static edge for a summons that should have flashed (2026-09).

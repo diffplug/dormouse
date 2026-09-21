@@ -132,3 +132,17 @@ it('still matches an absolute target when the working directory no longer exists
     status: 'ok', name: 'markdown', run: ['markdown', target],
   });
 });
+
+it('reports the user file warnings on the built-in viewer path too', async () => {
+  // Nothing in the user file runs for a built-in open, but the file was still
+  // parsed to decide that — its lint belongs to the user either way
+  // (`docs/specs/dor-tool.md` -> Opening local files).
+  await writeConfig(`tools:
+  viewer:
+    run: [view, $TARGET]
+    nonsense: 1
+`);
+  const result = await host().handle({ op: 'open', target: join(root, 'docs', 'README.md'), cwd: root });
+  expect(result).toMatchObject({ status: 'ok', scope: 'builtin' });
+  expect(result.status === 'ok' && result.warnings).toEqual([expect.stringContaining('nonsense')]);
+});

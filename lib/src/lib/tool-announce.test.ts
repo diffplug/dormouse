@@ -40,6 +40,16 @@ describe('parseToolAnnounce', () => {
     expect(parseToolAnnounce('progress;{"v":1}')).toBeNull();
   });
 
+  it('refuses a serve payload naming a version it does not speak', () => {
+    // A v2 `serve` may reuse a field name for something else, so it is dropped
+    // whole rather than read as v1. An omitted `v` is the shipped v1 shape.
+    expect(parseToolAnnounce(serve({ port: 6006, v: 1 }))?.port).toBe(6006);
+    expect(parseToolAnnounce(serve({ port: 6006 }))?.port).toBe(6006);
+    for (const v of [2, 0, '1', null]) {
+      expect(parseToolAnnounce(serve({ port: 6006, v }))).toBeNull();
+    }
+  });
+
   it('never throws on malformed output', () => {
     expect(parseToolAnnounce('serve;not json')).toBeNull();
     expect(parseToolAnnounce('serve;[1,2]')).toBeNull();

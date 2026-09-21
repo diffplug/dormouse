@@ -19,7 +19,7 @@ import {
   type PromptSubmitState,
 } from './terminal-command-input';
 import { derivePromptShape, extractCommand, type PromptShape } from './terminal-prompt-shape';
-import { stripTerminalControls, TerminalControlStreamFilter } from './terminal-controls';
+import { stripTerminalControlsBothWays, TerminalControlStreamFilter } from './terminal-controls';
 
 const paneStates = new Map<string, TerminalPaneState>();
 const promptSubmitStates = new Map<string, PromptSubmitState>();
@@ -65,11 +65,19 @@ export function getTerminalPaneState(id: string): TerminalPaneState {
   return paneStates.get(id) ?? createTerminalPaneState();
 }
 
+/** The cwd a new local shell may inherit from `id`. A remote cwd (OSC 7 over ssh)
+ *  names a path on the remote host, not one the local shell can chdir to. */
+export function getInheritableCwd(id: string): string | undefined {
+  const cwd = paneStates.get(id)?.cwd;
+  return cwd && !cwd.isRemote ? cwd.path : undefined;
+}
+
 /**
  * The bare program name of the pane's foreground command, or null when the pane
  * is at a prompt (or its shell reported no command line). This is the key the
- * WATCHING rule set is stored under, so the bell and the alert dialog both use
- * it to decide which rule they are toggling — see `docs/specs/alert.md`.
+ * WATCHING rule set is stored under, so the terminal context and the alert
+ * dialog both use it to decide which rule they are toggling — see
+ * `docs/specs/alert.md`.
  */
 export function getRunningCommandArgv0(id: string): string | null {
   const raw = paneStates.get(id)?.currentCommand?.rawCommandLine;
@@ -194,8 +202,11 @@ export function recordTerminalUserInput(id: string, input: string, reader?: Prom
   // Shell integration is authoritative once it's emitting OSC boundaries; don't
   // also synthesize command starts from keystrokes (that would double-count).
   if (oscDrivenPanes.has(id)) return;
-  const state = paneStates.get(id) ?? createTerminalPaneState();
-  if (state.currentCommand || state.activity.kind === 'running' || state.activity.kind === 'finished') return;
+  // One synthesized command at a time: keystrokes into a running program are
+  // not submissions, and its output is not a prompt line. (`finished` and a
+  // `currentCommand`-less `running` are only ever reached through a real
+  // `commandFinish`/`commandStart`, which retires this path above.)
+  if ((paneStates.get(id) ?? createTerminalPaneState()).currentCommand) return;
 
   const submitState = promptSubmitStates.get(id) ?? createPromptSubmitState();
   const next = detectPromptSubmit(submitState, input);
@@ -367,7 +378,7 @@ function detectReturnedShellPrompt(visible: string): string | null {
   // redraw's cursor move welds text that was never adjacent on screen, and this
   // reads the result as a *line*. Without it, `building...\x1b[1;1H➜  ~ ` reads
   // as the single line `building...➜  ~ `, and the prompt goes undetected.
-  const text = normalizeBreaks(stripTerminalControls(visible, { boundaries: true }));
+  //
   // A boundary is not a real line break, though, and the difference decides the
   // safe direction. A genuine trailing newline means nothing has been painted on
   // the current line yet — no prompt — and that must keep returning null, because
@@ -375,9 +386,11 @@ function detectReturnedShellPrompt(visible: string): string | null {
   // the tail means only that a control sequence closed the line: a prompt that
   // clears to end-of-line after painting itself (`➜  ~ \x1b[K`) is the common
   // case, and treating that as an empty last line would hide every such prompt.
-  // Stripping without boundaries leaves exactly the real breaks, so it answers
-  // which one this is.
-  const endsOnRealNewline = /\n$/.test(normalizeBreaks(stripTerminalControls(visible)));
+  // The `plain` reading leaves exactly the real breaks, so it answers which one
+  // this is — both come off one strip.
+  const stripped = stripTerminalControlsBothWays(visible);
+  const text = normalizeBreaks(stripped.boundaries);
+  const endsOnRealNewline = /\n$/.test(normalizeBreaks(stripped.plain));
   let searchEnd = text.length;
   if (!endsOnRealNewline) {
     while (searchEnd > 0 && text[searchEnd - 1] === '\n') searchEnd--;

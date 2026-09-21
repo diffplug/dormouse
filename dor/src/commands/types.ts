@@ -39,9 +39,10 @@ export function hasBrowser(kind: SurfaceKind): boolean {
   return KIND_CAPABILITIES[kind].browser;
 }
 
-/** Where a Surface renders. Minimized Surfaces (baseboard doors) are listed too;
- *  `hidden` is reserved for Surfaces in an inactive Workspace (a future). */
-export type SurfaceView = 'paned' | 'zoomed' | 'minimized' | 'hidden';
+/** Where a Surface renders. Minimized Surfaces (baseboard doors) are listed too.
+ *  A Surface in an inactive Workspace is not a state here — it stays `paned` or
+ *  `minimized` (docs/specs/glossary.md → "View"). */
+export type SurfaceView = 'paned' | 'zoomed' | 'minimized';
 
 /** Shell activity of a terminal Surface (`docs/specs/terminal-state.md`). */
 export type SurfaceActivity = 'unknown' | 'prompt' | 'editing' | 'running' | 'finished';

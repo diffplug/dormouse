@@ -299,21 +299,20 @@ jobs:
           # `security-audit-failure`: an audit that produced no verdict
           # must not let the release gate in `release.yml` pass, and a
           # later PASS should auto-close it like any other failure.
-          if [ -s audit-status.txt ]; then
-            STATUS=$(cat audit-status.txt)
-          fi
-          case "${STATUS:-}" in
-            PASS|FAIL) ;;
-            *) STATUS=MISSING ;;
-          esac
 
-          # What the *file* said, kept separate from `STATUS`, which the guards
-          # below mutate. Every note in the issue body is written about a
-          # condition rather than about a branch, and "the audit never wrote a
-          # verdict" is one of those conditions — it cannot be recovered from
-          # `STATUS` afterwards, because a dissent can raise that same MISSING
-          # to FAIL.
-          if [ "$STATUS" = "MISSING" ]; then STATUS_FILE_VERDICT=none; else STATUS_FILE_VERDICT="$STATUS"; fi
+          # What the *file* said, parsed once and never mutated. Every note in
+          # the issue body is written about a condition rather than about a
+          # branch, and "the audit never wrote a verdict" is one of those
+          # conditions — it cannot be recovered from `STATUS` afterwards,
+          # because the escalation below can raise that same MISSING to FAIL.
+          if [ -s audit-status.txt ]; then
+            FILE_STATUS=$(cat audit-status.txt)
+          fi
+          case "${FILE_STATUS:-}" in
+            PASS|FAIL) ;;
+            *) FILE_STATUS=MISSING ;;
+          esac
+          STATUS="$FILE_STATUS"
 
           # A PASS is only as good as the evidence behind it. Each domain
           # writes its own fragment before returning a verdict, so a
@@ -488,7 +487,7 @@ jobs:
           if [ -n "${INCONCLUSIVE_DOMAINS:-}" ]; then
             echo "- **A domain could not determine every check.** $INCONCLUSIVE_DOMAINS returned \`VERDICT: INCONCLUSIVE\`; read its \`UNVERIFIABLE\` checks. Those checks do not count as passing." >> "$NOTES"
           fi
-          if [ "$STATUS_FILE_VERDICT" = "none" ]; then
+          if [ "$FILE_STATUS" = "MISSING" ]; then
             echo "- **The audit wrote no verdict.** \`audit-status.txt\` was absent, empty, or not \`PASS\`/\`FAIL\`, so the run ended without deciding. Start at the report's own markers: \`UNVERIFIABLE\` is a check the agent could not determine, \`_Incomplete …_\` heads a domain that was cut off mid-report, and a domain section reading \`_No report …_\` is one that never reported — which is what an expired wait deadline looks like." >> "$NOTES"
           fi
 

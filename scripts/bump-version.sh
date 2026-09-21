@@ -18,8 +18,10 @@ if [[ -z "$VERSION" ]]; then
   exit 2
 fi
 
-if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
-  echo "Error: '$VERSION' is not a valid semver (X.Y.Z or X.Y.Z-prerelease)" >&2
+# X.Y.Z only: sign-and-deploy.sh's validate_version rejects anything else, and
+# it does so after the bump, commit, tag, push and a full CI build.
+if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+  echo "Error: '$VERSION' is not a release version (X.Y.Z)" >&2
   exit 2
 fi
 

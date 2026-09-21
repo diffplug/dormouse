@@ -18,7 +18,7 @@ Native path payloads are not URLs: decoding `%20` or trimming edge spaces change
 
 **Why an unquoted Windows path with spaces stays split.** Which token ends the program name is undecidable without asking the filesystem, and the tokenizer has no filesystem.
 
-**What the launcher-suffix rule prevents.** PATHEXT gives one program several spellings (`npm`, `npm.cmd`, `npm.exe`); keying the header, WATCHING rule row, and bell tooltip on the suffixed name would split one program into two rules and let the three disagree about which is running.
+**What the launcher-suffix rule prevents.** PATHEXT gives one program several spellings (`npm`, `npm.cmd`, `npm.exe`); keying the header, WATCHING rule row, and terminal context on the suffixed name would split one program into two rules and let the three disagree about which is running.
 
 ## Keystroke fallback
 

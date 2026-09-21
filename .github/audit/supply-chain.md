@@ -6,6 +6,24 @@
 
 **Output file:** `audit-supply-chain.md`
 
+The default `$GH_TOKEN` in this environment is a workflow `GITHUB_TOKEN` and
+does **not** have admin scope. GitHub omits `security_and_analysis` for a
+non-admin token and answers 403 rather than 204 on the Dependabot alert
+endpoint, so the secret-scanning and Dependabot checks read as absent when they
+are on. Prefix those `gh api` calls with `GH_TOKEN=$AUDIT_PAT`:
+
+```sh
+GH_TOKEN=$AUDIT_PAT gh api repos/$GITHUB_REPOSITORY --jq .security_and_analysis
+GH_TOKEN=$AUDIT_PAT gh api repos/$GITHUB_REPOSITORY/vulnerability-alerts
+```
+
+`$AUDIT_PAT` is a fine-grained, read-only PAT covering Administration +
+Secrets + Environments, guaranteed present by an earlier step. If a prefixed
+call still returns 403, record FAIL with the note "PAT scope drifted from
+docs/specs/security-audit.md". When run by `scripts/security-audit-local.sh`
+without `AUDIT_PAT`, use the operator's existing `gh` authentication without a
+`GH_TOKEN=` override, and report an inaccessible check as `UNVERIFIABLE`.
+
 The workspace is installed by an earlier workflow step, so try the
 generate-deps check directly; if it errors on a missing module, run
 `pnpm install --frozen-lockfile` first. The check requires a clean working tree

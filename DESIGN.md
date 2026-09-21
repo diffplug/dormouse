@@ -94,7 +94,7 @@ components:
 
 Dormouse is a tenant in someone else's house. The house is VSCode. The user picked the furniture (their theme), the lighting (their mode), the typography (their editor font). Dormouse moves in, multiplies what the user can do with their terminals, and leaves the decor alone. The interface should be indistinguishable from a built-in panel: not because it imitates VSCode, but because it inherits from VSCode. Every color, every font, every surface is a passthrough of the host's tokens.
 
-The system is intentionally minimal and bg-only. Chrome recedes; terminals are the content. Hierarchy is conveyed through background shifts between `header-active-bg` and `header-inactive-bg`, not through borders, shadows, or accent stripes. Status is conveyed through shape and position (a bell icon, a door's alert state) and through the active terminal palette's own ANSI red/green/yellow, not through a separate design-system palette.
+The system is intentionally minimal and bg-only. Chrome recedes; terminals are the content. Hierarchy is conveyed through background shifts between `header-active-bg` and `header-inactive-bg`, not through borders, shadows, or accent stripes. Status is conveyed through shape and position (a door's alert state, a ringing Pane's outline) and through the active terminal palette's own ANSI red/green/yellow, not through a separate design-system palette.
 
 The system explicitly rejects: rounded SaaS cards, gradient accents, hacker-aesthetic green-on-black, "Slack-style" Electron chrome bloat, decorative animations, and any token that hardcodes a color. If a user installs a high-contrast theme, the chrome can look flatter than usual: that is accepted, not "fixed" with overrides.
 
@@ -137,12 +137,13 @@ This system has no "primary" accent in the brand sense. The closest analogue is 
 - **Terminal Background / Foreground** (`var(--vscode-terminal-background)` / `var(--vscode-terminal-foreground)`): the terminal content surface and xterm default text. Orthogonal to the chrome.
 - **Error** (`var(--vscode-terminal-ansiRed)`): destructive actions and kill-confirm letter flash.
 - **Success** (`var(--vscode-terminal-ansiGreen)`): TODO check, theme-store install confirm.
-- **Alarm** (`var(--vscode-terminal-ansiYellow)` baseline; runtime-overridden): alert tint. `computeDynamicPalette()` replaces each `--color-alarm-vs-*` token with plain white or black by the OKLab lightness of its background (active header, inactive header, Door, or terminal body), so ringing bells and the whole-Pane spoken-alarm treatment stay maximally legible on any surface.
+- **Alarm** (`var(--vscode-terminal-ansiYellow)` baseline; runtime-overridden): alert tint. `computeDynamicPalette()` replaces each `--color-alarm-vs-*` token with plain white or black by the OKLab lightness of its background (active header, inactive header, Door, or terminal body), so every alarm inset and the whole-Pane alarm treatment stay maximally legible on any surface.
 
 ### Fixed Exceptions
 Every literal color the Host-Theme-Only Rule below permits, in full. Each is here because the surface it paints is not read as part of the theme; a literal anywhere else is a bug.
 - **Window Close Hover** (`#b92a1b`): native OS close-button hover on Windows/Linux chrome buttons; matches the platform convention across themes.
 - **Setup QR** (`#ffffff` ground, `#000000` modules, in `lib/src/components/QrCode.tsx`): a phone camera reads this control, not a person. Scanners expect dark-on-light and many refuse an inverted code, and no theme token promises either the polarity or the contrast ratio in both light and dark.
+- **Terminal last resort** (`#1e1e1e` background, `#cccccc` foreground, in `lib/src/lib/terminal-theme.ts`): xterm.js needs two readable colors to render at all, and `pnpm dev:lib` runs with no resolver and no applied theme (`docs/specs/theme.md` front matter). The rest of the terminal palette carries no literal — an unset key is omitted and xterm uses its own default, except the cursor, which derives from the resolved foreground.
 
 ### Named Rules
 **The Host-Theme-Only Rule.** Never write a hex value or `oklch()` literal into `theme-colors.css`, `theme.css`, or a component. Never use `var(..., fallback)` chains. Every color must resolve through `--vscode-*` or one of the body-published runtime picks (`--color-door-*`, `--color-focus-ring`, `--color-alarm-vs-*`). The only exceptions are the ones rostered under Fixed Exceptions above, and adding one means adding it there.
@@ -198,18 +199,18 @@ Doors are the pane-header indicators on the baseboard. The most signature compon
 - **Surface:** `bg-door-bg` + `text-door-fg`. These resolve at runtime via `computeDynamicPalette()` and may match either the inactive-header palette or the terminal palette, whichever has stronger separation from `app-bg`.
 - **Dimensions:** `h-6` (24px), `min-w-[68px]`, `max-w-[220px]`; the title button pads `pl-2.5` (10px), `gap-2` between its glyph, title, and badges, ending `pr-2.5` alone or `pr-1` when the notepad button follows it. The notepad button carries the trailing inset itself (`pl-0.5 pr-2`).
 - **Type:** `text-sm font-medium font-mono`.
-- **Content:** leading browser-display icon cluster on a browser Surface (`size={12}` each, `gap-0.5` — a wide robot plus the presentation glyph, or the presentation glyph alone for `iframe`; named in the Door's accessible name, `docs/specs/dor-browser.md` → Browser Chrome); truncated title; optional TODO pill (`text-xs font-semibold tracking-[0.08em]`, success-tinted when flourishing); optional bell icon (`size={11}`, `weight="fill"`), `text-alarm-vs-door` when ringing; trailing notepad button (`size={12}`, `weight="fill"`) when the minimized Surface holds notes.
-- **Spoken alarm:** `SPEAKING` inverts and pulses the whole Door and takes the badge slot for its speaker-plus-label — it lasts one utterance. `SPOKEN` persists until the ring is attended, so it keeps a static 2px inset and adds its speaker icon *beside* the TODO pill and bell instead of evicting them. Both carry a speaker icon (shape, not color) and name the state in the accessible name.
+- **Content:** leading browser-display icon cluster on a browser Surface (`size={12}` each, `gap-0.5` — a wide robot plus the presentation glyph, or the presentation glyph alone for `iframe`; named in the Door's accessible name, `docs/specs/dor-browser.md` → Browser Chrome); truncated title; optional TODO pill (`text-xs font-semibold tracking-[0.08em]`, success-tinted when flourishing); trailing notepad button (`size={12}`, `weight="fill"`) when the minimized Surface holds notes.
+- **Alarm:** one 2px inset overlay (`--color-alarm-vs-door`) draws the edge for both the unlabelled ring, where it flashes once on arrival, and `SPOKEN`, which persists until the ring is attended and adds a speaker icon *beside* the TODO pill instead of evicting it. `SPEAKING` instead inverts and pulses the whole Door and takes the badge slot for its speaker-plus-label, for one utterance. Both speech states carry a speaker icon (shape, not color); all three name the state in the accessible name. The row inventory is `docs/specs/layout.md` → Alarm overlay.
 - **Hover/Focus:** no decorative hover on the door itself; the focus state is conveyed by the parent pane's selection ring, not by a per-door treatment. The door is a labelled `role="group"` wrapper holding one or two buttons rather than one button — the title button reattaches, the notepad button opens the popover and does not (`docs/specs/notepad.md` → Notepad UI) — and only the notepad button takes the standard `hover:bg-current/10` wash.
 
 ### Buttons
 
 #### Header Action Button
-The icon-and-tooltip button used inside pane headers (kill, alert toggle, todo, etc.).
+The icon-and-tooltip button used inside pane headers (kill, minimize, notepad, etc.).
 - **Shape:** `rounded` (4px) when icon-only, also `rounded` for labeled variants.
 - **Color:** `text-inherit` — inherits the header's foreground, so it tints with the active/inactive header palette.
 - **Hover:** `hover:bg-current/10` — a 10%-opacity wash of the current text color. Theme-agnostic, works light or dark.
-- **Tooltip:** rendered through a portal as a `PopupButtonRow` 8px below the button, with `text-sm` primary line and an optional muted detail line. Keybindings inside the tooltip auto-render as `[bracketed]` shortcuts.
+- **Tooltip:** rendered through a portal as a `PopupButtonRow` 8px below the button, one `text-sm` line right-aligned to its edge. Keybindings inside the tooltip auto-render as `[bracketed]` shortcuts.
 
 #### Popup Button (`popupButton`)
 The flat segments inside a `PopupButtonRow` — the row owns the border, background, shadow, and `text-sm`, so a segment contributes only padding and state. Every segment currently inherits the row's foreground; these rows offer rather than ask, so none of them carries an emphasized action.

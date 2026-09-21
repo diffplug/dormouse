@@ -39,9 +39,12 @@ Chrome rules:
 * The Touch row and its selector tray sit on `terminal-bg`; the Input row and
   the reserve area on `header-inactive-bg` / `header-inactive-fg` (rationale).
 * The mobile session header is a flush bar — **never** the desktop title corner
-  radius. Order: title, alert bell, secondary detail, TODO pill, minimize, kill
-  (suppressed by `showKillButton={false}`, as Pocket does). Both consumers wire
-  minimize to the Sessions reserve, not a desktop Door.
+  radius. Order: title, secondary detail, TODO pill, minimize, kill (suppressed
+  by `showKillButton={false}`, as Pocket does). Both consumers wire minimize to
+  the Sessions reserve, not a desktop Door. A ring shows as the alarm inset on
+  the bar and on its session-list row, and **a tap on the terminal attends the
+  Session**, which is how it is dismissed here (`docs/specs/alert.md` -> Pane
+  Header).
 * **Must install `useDynamicPalette` in `MobileTerminalUi`** for gesture tokens;
   it never mounts the desktop `Wall`. `docs/specs/theme.md` owns publication
   and the CSS baselines available before the effect runs.
@@ -71,7 +74,7 @@ Touch mode is global, so **each mounted pane's mouse override is a pure function
 of that mode and the pane's *own* mouse-reporting state** (`selection` +
 reporting ≠ `none` → `permanent`, else `off`), recomputed for **every** pane,
 not just the active one — a pane switched away from must not keep a stale
-override. The consumer owns this wiring.
+override. `lib` exports the function; the consumer owns the loop.
 
 Select mode **must route touch and pen drags through the shared terminal
 mouse-selection router**, never a mobile-only one, so every selection and copy
@@ -99,8 +102,9 @@ the pointer, and **must never reach xterm or the pane** for focus, selection,
 or pane interaction. **Non-primary mouse buttons
 are ignored**, so their browser or host behavior continues.
 
-Source of truth: `TOUCH_MODES` in `lib/src/components/MobileTerminalUi.tsx`;
-per-pane override wiring in `lib/src/remote/pocket-app/PocketWall.tsx` and
+Source of truth: `TOUCH_MODES` and `paneMouseOverride` in
+`lib/src/components/MobileTerminalUi.tsx`; per-pane wiring in
+`lib/src/remote/pocket-app/PocketWall.tsx` and
 `website/src/components/PocketTerminalExperience.tsx`.
 
 ## Gesture mode
@@ -234,7 +238,7 @@ same rule as the touch selector.
 | Draft | Draft reserve copy, filling the reserve. |
 
 Default input mode is **Type**. Recent and Draft are placeholder-only today and
-say so in the reserve — the real features are staged (see [Future](#future)).
+say so in the reserve ([Future](#future)).
 
 **Must focus the hidden input synchronously inside the Type selector's tap/click
 handler** (rationale). A follow-up effect retries via rAF and staggered timers

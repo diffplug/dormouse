@@ -254,18 +254,6 @@ export interface PlatformAdapter {
   killPty(id: string): void;
 
   /**
-   * Whether this host keeps a Session snapshot across a restart. `false` means
-   * `saveSession` does no work at all rather than building a record for a
-   * `saveState` that discards it — the gate belongs above the per-pane `getCwd`
-   * round trips, not below them.
-   *
-   * Absent reads as `true`. Standalone sets it `false`: quitting is a deliberate
-   * ending and a crash captured nothing, so every launch starts fresh
-   * (docs/specs/transport.md -> "The governing rule").
-   */
-  persistsSession?: boolean;
-
-  /**
    * Whether the host owns the color theme, so Dormouse must not offer a theme
    * picker of its own. Absent reads as `false`.
    *
@@ -429,8 +417,6 @@ export interface PlatformAdapter {
   // Relaunch headless (pop back in) reopening `url`, resuming the screencast;
   // returns the new stream port. Pairs with agentBrowserPopOut.
   agentBrowserPopIn?(session: string, opts: { url?: string }, binaryPath?: string): Promise<AgentBrowserPopResult>;
-  // Best-effort raise the session's headed window to the front.
-  agentBrowserBringToFront?(session: string, binaryPath?: string): Promise<void>;
 
   // PTY event listeners
   onPtyData(handler: (detail: PtyDataDetail) => void): void;
@@ -442,8 +428,9 @@ export interface PlatformAdapter {
   /** Ask for the live PTY list and each one's replay. `requestId` is the asking
    *  collector's token: a host serving several windows echoes it on the answer
    *  so two collections in one webview cannot finish on each other's list
-   *  (docs/specs/transport.md -> "Reconnection"). A host with one webview may
-   *  ignore it, and its answers then carry none. */
+   *  (docs/specs/transport.md -> "Reconnection"). The hosts that do not echo it
+   *  (VS Code, Pocket, the website) run one collector per JS realm, so their
+   *  answers carry none and the collector takes them. */
   requestInit(requestId?: string): void;
   onPtyList(handler: (detail: PtyListDetail) => void): void;
   offPtyList(handler: (detail: PtyListDetail) => void): void;

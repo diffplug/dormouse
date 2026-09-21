@@ -66,11 +66,12 @@ describe('WATCHING output resuming before alarm delivery', () => {
   it('cancels pending speech and push during animation, then gives the next settle a fresh delay', () => {
     busy();
     settle();
-    const firstRing = manager.getState(ID).ringSeq;
+    const firstEpisode = manager.getState(ID).episode;
+    expect(firstEpisode?.id).toBeTruthy();
     expect(manager.getState(ID).status).toBe('ALERT_RINGING');
     vi.advanceTimersByTime(1_000);
     busy();
-    expect(manager.getState(ID)).toMatchObject({ status: 'BUSY', todo: false, ringSeq: firstRing });
+    expect(manager.getState(ID)).toMatchObject({ status: 'BUSY', todo: false, episode: null });
 
     // Keep animating across the old speech deadline, as in the marked incident.
     for (let i = 0; i < 50; i++) {
@@ -81,7 +82,10 @@ describe('WATCHING output resuming before alarm delivery', () => {
     expect(pushed).not.toHaveBeenCalled();
 
     settle();
-    expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', ringSeq: firstRing + 1 });
+    const relatched = manager.getState(ID);
+    expect(relatched.status).toBe('ALERT_RINGING');
+    expect(relatched.episode?.id).toBeTruthy();
+    expect(relatched.episode?.id).not.toBe(firstEpisode?.id);
     vi.advanceTimersByTime(DELAY - 1);
     expect(spoken).not.toHaveBeenCalled();
     expect(pushed).not.toHaveBeenCalled();
@@ -138,9 +142,9 @@ describe('WATCHING output resuming before alarm delivery', () => {
         { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
       ]);
     }
-    const ringSeq = manager.getState(ID).ringSeq;
+    const episode = manager.getState(ID).episode;
     busy();
-    expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', ringSeq });
+    expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', episode });
     vi.advanceTimersByTime(DELAY);
     expect(spoken).toHaveBeenCalledOnce();
   });

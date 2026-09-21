@@ -2,9 +2,9 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Link } from "react-router";
 import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "../components/SiteHeader";
 import { PlaceToPaste } from "../components/PlaceToPaste";
-import { POCKET_THEME_ID } from "../components/PocketTerminalExperience";
 import { useRestoredTheme } from "dormouse-lib/lib/themes";
 import { PlaygroundShellRegistry } from "../lib/playground-shells";
+import { DESKTOP_TUTORIAL_PROFILE } from "../lib/tut-items";
 import { TutorialState } from "../lib/tutorial-state";
 import { TutDetector } from "../lib/tut-detector";
 import {
@@ -21,6 +21,7 @@ import {
   type DesktopPaneSpec,
 } from "../lib/playground-desktop-layout";
 import { SITE_LINK_CLASS } from "../components/site-tokens";
+import { WEBSITE_DEFAULT_THEME_ID } from "../lib/website-theme";
 
 type FakePtyAdapter = import("dormouse-lib/lib/platform/fake-adapter").FakePtyAdapter;
 type WallEvent = import("dormouse-lib/components/Wall").WallEvent;
@@ -86,7 +87,7 @@ function PlaygroundDesktopExperience() {
   // The navbar picker used to theme this page as a side effect of its own
   // render-time restore. The picker now lives in the Settings dialog and only
   // mounts when opened, so the page restores its own theme.
-  useRestoredTheme(POCKET_THEME_ID);
+  useRestoredTheme(WEBSITE_DEFAULT_THEME_ID);
 
   const [WallModule, setWallModule] = useState<{
     Wall: React.ComponentType<any>;
@@ -101,7 +102,7 @@ function PlaygroundDesktopExperience() {
   const spawnUnsubRef = useRef<(() => void) | null>(null);
   const busyDemoDisposeRef = useRef<(() => void) | null>(null);
   const busyDemoFinishTimerRef = useRef<number | null>(null);
-  const demoTimersRef = useRef<number[]>([]);
+  const commandExitDemoFinishTimerRef = useRef<number | null>(null);
 
   const handleOpenGithub = useCallback(() => {
     window.open(
@@ -159,7 +160,7 @@ function PlaygroundDesktopExperience() {
         adapter.setScenario(pane.id, { name: "none", chunks: [] });
       }
 
-      const tutorialState = new TutorialState();
+      const tutorialState = new TutorialState(DESKTOP_TUTORIAL_PROFILE.sections);
       stateRef.current = tutorialState;
       const detector = new TutDetector({
         state: tutorialState,
@@ -182,9 +183,13 @@ function PlaygroundDesktopExperience() {
               getInactivityTimeoutMs: () => alertSettings.getAlertSettings().inactivityTimeoutMs,
               // WATCHING is keyed on the running command, so the demo has to
               // report one through shell integration. Both alert panes run the
-              // same fake `longtask`, which is what lets one bell click light
-              // up the other pane (docs/specs/alert.md).
+              // same fake `longtask`, which is what lets one rule light up the
+              // other pane (docs/specs/alert.md).
               onTriggerBusyDemo: (durationMs, commandMs) => {
+                // TutRunner ignores `s` for the whole `commandMs`, but that
+                // guard is per runner while these refs are per page: exiting
+                // `tut` and re-running it, or running it in a second pane,
+                // builds a fresh runner that cannot see this pump or timer.
                 busyDemoDisposeRef.current?.();
                 if (busyDemoFinishTimerRef.current !== null) {
                   window.clearTimeout(busyDemoFinishTimerRef.current);
@@ -222,16 +227,18 @@ function PlaygroundDesktopExperience() {
                   "\x1b]777;notify;Build finished;3 packages rebuilt\x07",
                 );
               },
-              // An unwatched command, so the command-exit track owns the bell:
+              // An unwatched command, so the command-exit track owns the ring:
               // the user attends the pane, leaves, and the exit rings.
               onTriggerCommandExitDemo: (durationMs) => {
+                if (commandExitDemoFinishTimerRef.current !== null) {
+                  window.clearTimeout(commandExitDemoFinishTimerRef.current);
+                }
                 startFakeCommand(adapter, PANE_SPLASH, "slowbuild");
-                demoTimersRef.current.push(
-                  window.setTimeout(() => {
-                    finishFakeCommand(adapter, PANE_SPLASH);
-                    shellRegistryRef.current?.ensureShell(PANE_SPLASH).reportRunningCommand();
-                  }, durationMs),
-                );
+                commandExitDemoFinishTimerRef.current = window.setTimeout(() => {
+                  commandExitDemoFinishTimerRef.current = null;
+                  finishFakeCommand(adapter, PANE_SPLASH);
+                  shellRegistryRef.current?.ensureShell(PANE_SPLASH).reportRunningCommand();
+                }, durationMs);
               },
               onTogglePlaceToPaste: () => setPlaceToPasteOpen((open) => !open),
               onOpenGithub: handleOpenGithub,
@@ -292,8 +299,10 @@ function PlaygroundDesktopExperience() {
         window.clearTimeout(busyDemoFinishTimerRef.current);
         busyDemoFinishTimerRef.current = null;
       }
-      for (const timer of demoTimersRef.current) window.clearTimeout(timer);
-      demoTimersRef.current = [];
+      if (commandExitDemoFinishTimerRef.current !== null) {
+        window.clearTimeout(commandExitDemoFinishTimerRef.current);
+        commandExitDemoFinishTimerRef.current = null;
+      }
     };
   }, [handleOpenGithub, handleOpenPocket, tryAutoStart]);
 

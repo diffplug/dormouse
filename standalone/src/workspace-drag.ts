@@ -8,6 +8,7 @@ import { getWallHandle } from "dormouse-lib/components/wall/wall-handles";
 import { randomKillChar } from "dormouse-lib/components/KillConfirm";
 import { setPendingWorkspaceMove, setWorkspaceMoveError } from "dormouse-lib/lib/workspace-ui-store";
 import { workspaceTabRect } from "./workspace-tabs";
+import { DOOR_TAB_HEIGHT_PX, DOOR_TAB_MAX_WIDTH_PX } from "dormouse-lib/components/design";
 
 /**
  * The host side of the Workspace strip's drag, past the edge of its own strip
@@ -23,7 +24,8 @@ import { workspaceTabRect } from "./workspace-tabs";
 /** The cursor probe is an IPC round trip; a pointermove is per frame. */
 const HIT_TEST_THROTTLE_MS = 60;
 /** How far the pointer must travel inside the target before its caret is worth
- *  redrawing. A tab is 180px at most, so this cannot skip a whole slot. */
+ *  redrawing. A tab is `DOOR_TAB_MAX_WIDTH_PX` at most, so this cannot skip a
+ *  whole slot. */
 const HOVER_BUCKET_PX = 12;
 
 /** Where the cursor is, in the hit window's own logical client space. */
@@ -177,7 +179,7 @@ export function onDropOnOtherWindow(
     // The one thing a move cannot carry is a plain iframe's document, Doored
     // ones included; it reopens at its saved URL. The user says so first, with
     // the same typed letter a kill takes (docs/specs/layout.md → Workspaces).
-    const iframes = getWallHandle(id)?.iframeSurfaceIds() ?? [];
+    const iframes = getWallHandle(id)?.iframeSurfaceRefs() ?? [];
     if (iframes.length > 0) {
       setPendingWorkspaceMove({ id, char: randomKillChar(), iframeCount: iframes.length, proceed: move });
       return;
@@ -194,7 +196,7 @@ export function onDropOnOtherWindow(
  */
 function grabOffset(workspaceId: WorkspaceId): { x: number; y: number } {
   const rect = workspaceTabRect(workspaceId);
-  return { x: (rect?.width ?? 180) / 2, y: (rect?.height ?? 24) / 2 };
+  return { x: (rect?.width ?? DOOR_TAB_MAX_WIDTH_PX) / 2, y: (rect?.height ?? DOOR_TAB_HEIGHT_PX) / 2 };
 }
 
 /** The drag was abandoned — `pointercancel`, or Escape. Nothing moves, but a

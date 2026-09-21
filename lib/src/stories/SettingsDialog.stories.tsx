@@ -52,15 +52,15 @@ export const WithRules: Story = {
   },
 };
 
-/** The animation watcher gates terminal-notification alerts. */
-export const DeferralEnabled: Story = {
+/** The escape hatch: deferral off, so terminal notifications ring during animation. */
+export const DeferralDisabled: Story = {
   parameters: {
     primedWatchedCommands: ['claude', 'codex'],
-    primedAlertSettings: { deferAlertsUntilQuiet: true },
+    primedAlertSettings: { deferAlertsUntilQuiet: false },
   },
   play: async ({ canvasElement }) => {
     await dialog(canvasElement).findByRole('switch', {
-      name: 'Defer alerts until animation stops on',
+      name: 'Defer alerts until animation stops off',
     });
   },
 };

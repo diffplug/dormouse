@@ -121,7 +121,6 @@ function payload(overrides: Partial<WorkspaceTransferPayload> = {}): WorkspaceTr
         surfaceTitle: "a",
         surfaceKind: "terminal",
         cwd: null,
-        terminalId: "pane-a",
         notes: [{ id: "n1", createdAt: 1, content: { kind: "plain", text: "keep me" } }],
       }],
       stagedDeletions: {},

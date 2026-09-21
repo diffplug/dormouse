@@ -9,6 +9,7 @@ export interface SpeechJob {
   onFinish?: (started: boolean) => void;
 }
 
+/** Pending jobs are refused past this, never evicted: the refusal is an answer. */
 const MAX_PENDING = 64;
 /** A missing engine callback must not retain every later alert indefinitely. */
 export const SPEECH_ENGINE_TIMEOUT_MS = 60_000;
@@ -20,6 +21,22 @@ interface Attempt {
   timer: ReturnType<typeof setTimeout>;
 }
 
+/**
+ * The one seam between Dormouse's pending spoken alarms and the browser's Web
+ * Speech engine (`docs/specs/alert.md` -> "Spoken alarms" owns the behavior;
+ * the bounds and the timeout are here). **Only one utterance at a time is
+ * admitted per renderer** — Settings test sounds included, since they share
+ * {@link speechQueue} — so the engine never interleaves two panes and an
+ * ineligible job can still be dropped while it is only pending here.
+ *
+ * Bounded in both directions, because a wedged or callback-less engine must not
+ * retain later alerts: at most {@link MAX_PENDING} pending jobs, and at most
+ * {@link SPEECH_ENGINE_TIMEOUT_MS} per engine attempt, after which the attempt
+ * is cancelled and the queue advances. Callback identity is revoked before any
+ * cancel, so a detached late callback cannot settle the attempt that replaced
+ * it. Nothing is retried: an alarm that failed, expired, or never fit has
+ * missed the moment it was about.
+ */
 export class SpeechQueue {
   private pending: SpeechJob[] = [];
   private active: Attempt | null = null;
@@ -55,6 +72,7 @@ export class SpeechQueue {
     clearTimeout(attempt.timer);
     attempt.utterance.onstart = attempt.utterance.onend = attempt.utterance.onerror = null;
     // Revoke callback identity before cancel(), which may synchronously callback.
+    // Teardown (`clear`) comes through here too, cancelling the engine.
     if (cancel) { try { attempt.synth.cancel(); } catch { /* unavailable engine */ } }
     attempt.job.onFinish?.(attempt.started);
     this.pump();

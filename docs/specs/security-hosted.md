@@ -2,7 +2,7 @@
 
 > See `docs/specs/glossary.md` for Burrow, Client, and Relay vocabulary.
 > Owns the account application's security checks. Defers identity behavior to `docs/specs/hosted.md` and terminal access to `docs/specs/remote-security-model.md`.
-> Read `docs/specs/security.md` first. Provisioning and real-provider acceptance remain pending.
+> Read `docs/specs/security.md` first; provisioning and real-provider acceptance are pending.
 
 ## Origin boundary
 
@@ -29,8 +29,10 @@ Pinned by `hosted/server/tests/workers.test.ts` and `hosted/server/tests/policy.
 
 - **FAIL IF** preview mail or OAuth calls reach external providers, preview configuration copies production routes/bindings, or a preview exposes deterministic time controls; inspect `hosted/server/preview-worker.ts`, `hosted/scripts/preview.mjs`, and `hosted/server/tests/workers.test.ts`.
 
-Production activation must verify uncached Hyperdrive, separate credentials, and excluded marketing injection using `hosted/README.md`; checked-in placeholders do not prove those external controls.
+Pinned by `hosted/server/tests/artifacts.test.ts`, `hosted/server/tests/workers.test.ts`, `hosted/server/tests/policy.test.ts`.
+
+Production activation must verify uncached Hyperdrive, separate credentials, and excluded marketing injection (`hosted/README.md`); checked-in placeholders prove none of them.
 
 ## Future
 
-Public hosted voice and Relay require their own abuse, authorization, data-disclosure, and recovery checks before activation; `docs/specs/hosted.md` owns the staged work.
+Public hosted voice and Relay need their own abuse, authorization, data-disclosure, and recovery checks first; `docs/specs/hosted.md` owns the staged work.

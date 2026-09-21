@@ -70,6 +70,9 @@ afterEach(() => {
   vi.restoreAllMocks();
   __resetArchiveServiceForTests();
   clearAllNotepads();
+  // The activity store is Window-global, so a ring or TODO left on a pane id
+  // would wear its alarm overlay in every later test that renders that id.
+  clearTerminalActivity();
 });
 
 const flush = (): Promise<void> => harness.flush();
@@ -108,6 +111,21 @@ async function flushFrame(): Promise<void> {
 }
 
 describe('Wall on the Lath engine', () => {
+  /** The alarm treatment is the leaf overlay, so it must reach a ringing terminal
+   *  through the engine's overlay slot and leave a quiet neighbour alone. */
+  it('mounts the alarm overlay on a ringing terminal leaf', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} />));
+    await flush();
+    expect(container.querySelector('[data-alert-ring-state]')).toBeNull();
+
+    await act(async () => { setTerminalActivity('pane-a', { status: 'ALERT_RINGING' }); });
+
+    const overlays = container.querySelectorAll('[data-alert-ring-state="ringing"]');
+    expect(overlays).toHaveLength(1);
+    const leaf = overlays[0].closest('[data-lath-leaf]');
+    expect(leaf?.querySelector('[data-session-id]')?.getAttribute('data-session-id')).toBe('pane-a');
+  });
+
   it('releases input during context exit, cancels stale removal on reopen, and skips exit for reduced motion', async () => {
     await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="passthrough" />));
     await flush();
@@ -145,7 +163,7 @@ describe('Wall on the Lath engine', () => {
 
   it('cancels an ensure restart before a late prompt can relaunch its command', async () => {
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
     });
     await flush();
     const cwd = { path: '/repo', pathKind: 'posix', isRemote: false, source: 'osc633', updatedAt: 0 } as const;
@@ -187,7 +205,7 @@ describe('Wall on the Lath engine', () => {
 
   it('cancels an ensure restart even when the prompt is already back before the wait', async () => {
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
     });
     await flush();
     const cwd = { path: '/repo', pathKind: 'posix', isRemote: false, source: 'osc633', updatedAt: 0 } as const;
@@ -225,7 +243,7 @@ describe('Wall on the Lath engine', () => {
 
   it('removes an unintegrated ensure split as soon as its client cancels', async () => {
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
     });
     await flush();
     vi.spyOn(terminalRegistry, 'isPaneOscDriven').mockReturnValue(false);
@@ -340,7 +358,7 @@ describe('Wall on the Lath engine', () => {
 
   it('renders a pane through LathHost, splits via wallActions, kills, and persists the Lath layout on save', async () => {
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
     });
     await flush();
 
@@ -393,7 +411,7 @@ describe('Wall on the Lath engine', () => {
   it('manual keyboard splits enter passthrough on the new pane immediately', async () => {
     const onEvent = vi.fn();
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard onEvent={onEvent} />);
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" onEvent={onEvent} />);
     });
     await flush();
     onEvent.mockClear();
@@ -413,7 +431,7 @@ describe('Wall on the Lath engine', () => {
 
   it('host New Terminal actions enter passthrough on the spawned pane', async () => {
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
     });
     await flush();
 
@@ -432,7 +450,7 @@ describe('Wall on the Lath engine', () => {
 
   it('retires a killed surface ref instead of reusing its number, and persists the counter', async () => {
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
     });
     await flush();
 
@@ -495,7 +513,7 @@ describe('Wall on the Lath engine', () => {
   // only the host reads its own environment).
   it('drops a binaryPath that is not an agent-browser without failing the request', async () => {
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
     });
     await flush();
 
@@ -523,7 +541,7 @@ describe('Wall on the Lath engine', () => {
   // `<iframe src>`, where `javascript:` runs in the app's own origin.
   it('refuses a surface.iframe url that is not http(s)', async () => {
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
     });
     await flush();
 
@@ -545,7 +563,7 @@ describe('Wall on the Lath engine', () => {
 
   it('preserves the surface ref when an iframe replaces an untouched terminal', async () => {
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
     });
     await flush();
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockImplementation((id) => id === 'pane-a');
@@ -603,7 +621,7 @@ describe('Wall on the Lath engine', () => {
 
   it('validates a dor await and parks it on the host alert manager', async () => {
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
     });
     await flush();
 
@@ -654,7 +672,7 @@ describe('Wall on the Lath engine', () => {
 
   it('parks a minimized browser surface so its DOM survives, and unparks it on kill', async () => {
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
     });
     await flush();
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockImplementation((id) => id === 'pane-a');
@@ -706,7 +724,7 @@ describe('Wall on the Lath engine', () => {
 
     try {
       await act(async () => {
-        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
       });
       await flush();
       if (!fake.hasPty('pane-a')) fake.spawnPty('pane-a');
@@ -793,7 +811,7 @@ describe('Wall on the Lath engine', () => {
 
     try {
       await act(async () => {
-        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
       });
       await flush();
       const iframeId = (await dispatchIframe('http://localhost:5173/')).id;
@@ -842,7 +860,7 @@ describe('Wall on the Lath engine', () => {
 
     try {
       await act(async () => {
-        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
       });
       await flush();
       const iframeId = (await dispatchIframe('http://localhost:5173/')).id;
@@ -882,7 +900,7 @@ describe('Wall on the Lath engine', () => {
 
     try {
       await act(async () => {
-        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
       });
       await flush();
       const iframeId = (await dispatchIframe('http://localhost:5173/')).id;
@@ -912,7 +930,7 @@ describe('Wall on the Lath engine', () => {
 
     try {
       await act(async () => {
-        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
       });
       await flush();
       const iframeId = (await dispatchIframe('http://localhost:5173/')).id;
@@ -952,7 +970,7 @@ describe('Wall on the Lath engine', () => {
 
     try {
       await act(async () => {
-        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
       });
       await flush();
 
@@ -1013,7 +1031,7 @@ describe('Wall on the Lath engine', () => {
 
     try {
       await act(async () => {
-        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
       });
       await flush();
       const browserId = await dispatchAgentBrowser({
@@ -1069,7 +1087,7 @@ describe('Wall on the Lath engine', () => {
 
   it('removes a minimized terminal outright — only DOM-resident surfaces park', async () => {
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" showBaseboard />);
+      root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" />);
     });
     await flush();
     expect(leafCount()).toBe(2);
@@ -1086,9 +1104,32 @@ describe('Wall on the Lath engine', () => {
     expect(leafCount()).toBe(1);
   });
 
-  it('retires the old ref when shell selection replaces an untouched pane', async () => {
+  it.each(['Minimize', 'Kill'] as const)('starts the refill after %s of the last pane in that pane\'s cwd', async (control) => {
+    // The stubbed pane has no registry entry to tear down, so disposal is made to
+    // drop the pane state as the real teardown does.
+    vi.spyOn(terminalRegistry, 'disposeSession').mockImplementation((id) => terminalRegistry.removeTerminalPaneState(id));
+    terminalRegistry.seedTerminalManualCwd('pane-a', '/repo');
     await act(async () => {
       root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+    });
+    await flush();
+
+    await clickHeaderControl('pane-a', control);
+
+    const refillId = container.querySelector('[data-lath-leaf]')?.getAttribute('data-lath-leaf');
+    try {
+      expect(refillId).toBeTruthy();
+      expect(refillId).not.toBe('pane-a');
+      expect(pendingShellOpts.get(refillId!)?.cwd).toBe('/repo');
+    } finally {
+      if (refillId) pendingShellOpts.delete(refillId);
+      act(() => terminalRegistry.removeTerminalPaneState('pane-a'));
+    }
+  });
+
+  it('retires the old ref when shell selection replaces an untouched pane', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
     });
     await flush();
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockImplementation((id) => id === 'pane-a');
@@ -1138,7 +1179,7 @@ describe('Wall on the Lath engine', () => {
 
   it('retires the old ref when shell selection replaces an untouched selected door', async () => {
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
     });
     await flush();
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockImplementation((id) => id === 'pane-a');
@@ -1220,7 +1261,6 @@ describe('Wall on the Lath engine', () => {
             },
           }}
           initialMode="command"
-          showBaseboard
         />);
       });
       await flush();
@@ -1262,7 +1302,6 @@ describe('Wall on the Lath engine', () => {
             },
           }}
           initialMode="command"
-          showBaseboard
         />);
       });
       await flush();
@@ -1284,7 +1323,7 @@ describe('Wall on the Lath engine', () => {
   it('ignores zoom keyboard requests while a door is selected', async () => {
     const onEvent = vi.fn();
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard onEvent={onEvent} />);
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" onEvent={onEvent} />);
     });
     await flush();
 
@@ -1306,7 +1345,7 @@ describe('Wall on the Lath engine', () => {
   it('gives passthrough focus to a pane when it gains zoom, and unzooms when passthrough focus ends', async () => {
     const onEvent = vi.fn();
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard onEvent={onEvent} />);
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" onEvent={onEvent} />);
     });
     await flush();
     onEvent.mockClear();
@@ -1342,7 +1381,7 @@ describe('Wall on the Lath engine', () => {
   it('unzooms the focused pane when another pane gains focus', async () => {
     const onEvent = vi.fn();
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" showBaseboard onEvent={onEvent} />);
+      root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" onEvent={onEvent} />);
     });
     await flush();
 
@@ -1371,7 +1410,7 @@ describe('Wall on the Lath engine', () => {
 
   it('hands zoom over when a partially exposed pane\'s Zoom control is clicked', async () => {
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" showBaseboard />);
+      root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" />);
     });
     await flush();
 
@@ -1399,7 +1438,7 @@ describe('Wall on the Lath engine', () => {
   it('dor kill can target a minimized surface ref', async () => {
     let response: { ok: boolean; error?: string } | undefined;
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
     });
     await flush();
 
@@ -1435,7 +1474,7 @@ describe('Wall on the Lath engine', () => {
       .spyOn(terminalRegistry, 'getOrCreateTerminal')
       .mockImplementation(() => ({}) as ReturnType<typeof terminalRegistry.getOrCreateTerminal>);
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" showBaseboard />);
+      root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" />);
     });
     await flush();
 
@@ -1590,7 +1629,7 @@ describe('Wall on the Lath engine', () => {
     const toolControl = vi.fn(async (request: { op: string }) => {
       if (request.op === 'trust') return { status: 'trust-recorded' };
       const common = { projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'viewer', run: ['view', '/repo/file.md'] };
-      if (calls++ === 0) return { ...common, status: 'untrusted', upstreamUrl: null };
+      if (calls++ === 0) return { ...common, status: 'untrusted', upstreamUrl: null, warnings: [] };
       if (calls === 2) return { status: 'error', message: 'The selected file is missing' };
       return { ...common, status: 'ok', render: 'iframe', port: 'auto', key: null, warnings: [] };
     });
@@ -1639,7 +1678,7 @@ describe('Wall on the Lath engine', () => {
         if (failure === 'throws') throw new Error('Permission storage is unavailable');
         return failure === 'missing' ? undefined : { status: 'error', message: 'Permission storage is unavailable' };
       }
-      return { status: 'untrusted', projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'viewer', run: 'view', upstreamUrl: 'https://example.com/repo.git' };
+      return { status: 'untrusted', projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'viewer', run: 'view', upstreamUrl: 'https://example.com/repo.git', warnings: [] };
     });
     Object.assign(fake, { toolControl });
     await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
@@ -1667,7 +1706,7 @@ describe('Wall on the Lath engine', () => {
       if (request.op === 'trust') { trusted = true; return { status: 'trust-recorded' as const }; }
       const common = { projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'viewer', run: ['view', ...(request.args ?? [])] };
       return trusted ? { ...common, status: 'ok' as const, render: 'iframe' as const, port: 'auto' as const, key: request.args ?? [], warnings: [] }
-        : { ...common, status: 'untrusted' as const, upstreamUrl: null };
+        : { ...common, status: 'untrusted' as const, upstreamUrl: null, warnings: [] };
     });
     Object.assign(fake, { toolControl });
     await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
@@ -1781,11 +1820,11 @@ describe('Wall on the Lath engine', () => {
       if (request.op === 'trust') { trusted = true; return { status: 'trust-recorded' as const }; }
       return trusted
         ? { ...config, status: 'ok' as const, render: 'iframe' as const, port: 'announced' as const, key: ['/repo'], warnings: [] }
-        : { ...config, status: 'untrusted' as const, upstreamUrl: null };
+        : { ...config, status: 'untrusted' as const, upstreamUrl: null, warnings: [] };
     });
     (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = toolControl;
     try {
-      await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />));
+      await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />));
       await flush();
       for (const launchCwd of ['/repo', fresh ? '/repo' : '/repo/subdir']) {
         const respond = vi.fn();
@@ -1849,6 +1888,7 @@ describe('Wall on the Lath engine', () => {
     (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = vi.fn(async () => ({
       status: 'untrusted' as const, projectRoot: '/repo', path: '/repo/dormouse.yml',
       name: 'storybook', run: 'pnpm storybook', upstreamUrl: null,
+      warnings: [],
     }));
     const ring = () => container.querySelector('[data-ring="outline"]')?.closest('svg')?.parentElement;
     await act(async () => { root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />); });
@@ -1875,7 +1915,7 @@ describe('Wall on the Lath engine', () => {
   it.each(['', ' \t\n'])('shows a useful fallback for a blank grant failure (%j)', async message => {
     const toolControl = vi.fn(async (request: { op: string }) => request.op === 'trust'
       ? { status: 'error', message }
-      : { status: 'untrusted', projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'storybook', run: 'pnpm storybook', upstreamUrl: null });
+      : { status: 'untrusted', projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'storybook', run: 'pnpm storybook', upstreamUrl: null, warnings: [] });
     Object.assign(fake, { toolControl });
     await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
     await flush();
@@ -1892,7 +1932,7 @@ describe('Wall on the Lath engine', () => {
   });
 
   it.each(['read error', 'unknown tool'])('retains a failed post-grant lookup with retry and quiet stale completion (%s)', async failure => {
-    const untrusted = { status: 'untrusted', projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'storybook', run: 'pnpm storybook', upstreamUrl: null };
+    const untrusted = { status: 'untrusted', projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'storybook', run: 'pnpm storybook', upstreamUrl: null, warnings: [] };
     const failed = failure === 'read error'
     ? { status: 'error', message: 'configuration temporarily unreadable' }
     : { status: 'unknown-tool', projectRoot: '/repo', path: '/repo/dormouse.yml', names: [] };
@@ -1962,6 +2002,7 @@ describe('Wall on the Lath engine', () => {
           name: 'storybook',
           run: 'pnpm storybook',
           upstreamUrl: null,
+          warnings: [],
         });
       }
       return resolvedGate.promise;
@@ -1970,7 +2011,7 @@ describe('Wall on the Lath engine', () => {
 
     try {
       await act(async () => {
-        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
       });
       await flush();
 
@@ -2093,6 +2134,7 @@ describe('Wall on the Lath engine', () => {
           name: 'storybook',
           run: 'pnpm storybook',
           upstreamUrl: null,
+          warnings: [],
         };
       }
       return okToolLookup(null);
@@ -2101,7 +2143,7 @@ describe('Wall on the Lath engine', () => {
 
     try {
       await act(async () => {
-        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
       });
       await flush();
 
@@ -2151,6 +2193,7 @@ describe('Wall on the Lath engine', () => {
       name: 'storybook',
       run: 'pnpm storybook',
       upstreamUrl: null,
+      warnings: [],
     }));
 
     await act(async () => {
@@ -2159,7 +2202,6 @@ describe('Wall on the Lath engine', () => {
           initialPaneIds={['pane-a']}
           initialDoors={[{ id: 'reference-door', title: 'Reference' }]}
           initialMode="command"
-          showBaseboard
         />,
       );
     });
@@ -2199,6 +2241,7 @@ describe('Wall on the Lath engine', () => {
       name: 'storybook',
       run: 'pnpm storybook',
       upstreamUrl: null,
+      warnings: [],
     }));
 
     await act(async () => {
@@ -2227,7 +2270,6 @@ describe('Wall on the Lath engine', () => {
             },
           }]}
           initialMode="command"
-          showBaseboard
         />,
       );
     });
@@ -2309,6 +2351,9 @@ describe('Wall on the Lath engine', () => {
   it('reports a reused minimized tool as visible after reattaching it', async () => {
     const toolId = 'tool-door';
     terminalRegistry.applyTerminalSemanticEvents(toolId, [
+      // The match runs in its own directory, not the caller's: the response has
+      // to name that one (docs/specs/dor-tool.md -> Identity and dedupe).
+      { type: 'cwd', cwd: terminalRegistry.cwdFromOsc633('/repo/packages/ui')! },
       { type: 'commandLine', commandLine: 'pnpm storybook' },
       { type: 'commandStart' },
     ]);
@@ -2335,14 +2380,13 @@ describe('Wall on the Lath engine', () => {
               },
             }]}
             initialMode="command"
-            showBaseboard
           />,
         );
       });
       await flush();
       expect(container.querySelector(`[data-door-id="${toolId}"]`)).not.toBeNull();
 
-      let response: { ok: boolean; result?: { status: string; surfaceId: string; minimized: boolean } } | undefined;
+      let response: { ok: boolean; result?: { status: string; surfaceId: string; minimized: boolean; cwd: string } } | undefined;
       await act(async () => {
         window.dispatchEvent(new CustomEvent('dormouse:control-request', {
           detail: {
@@ -2356,7 +2400,7 @@ describe('Wall on the Lath engine', () => {
 
       expect(response).toMatchObject({
         ok: true,
-        result: { status: 'existing', surfaceId: toolId, minimized: false },
+        result: { status: 'existing', surfaceId: toolId, minimized: false, cwd: '/repo/packages/ui' },
       });
       expect(container.querySelector(`[data-door-id="${toolId}"]`)).toBeNull();
       expect(container.querySelector(`[data-lath-leaf="${toolId}"]`)).not.toBeNull();
@@ -2374,7 +2418,7 @@ describe('Wall on the Lath engine', () => {
     const typed: string[] = [];
     let releaseClosing: (() => void) | undefined;
     try {
-      await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />));
+      await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />));
       await flush();
       act(() => { fake.spawnPty('pane-a'); addPlainNote('pane-a', 'Preserve me'); });
       fake.setInputHandler('pane-a', data => typed.push(data));
@@ -2545,7 +2589,7 @@ describe('Wall on the Lath engine', () => {
 
     try {
       await act(async () => {
-        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
       });
       await flush();
       act(() => { fake.spawnPty('pane-a'); addPlainNote('pane-a', 'Keep my takeover notes'); });
@@ -2670,7 +2714,7 @@ describe('Wall on the Lath engine', () => {
 
     try {
       await act(async () => {
-        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
       });
       await flush();
       act(() => fake.spawnPty('pane-a'));
@@ -2730,12 +2774,13 @@ describe('Wall on the Lath engine', () => {
       name: 'storybook',
       run: 'pnpm storybook',
       upstreamUrl: null,
+      warnings: [],
     }));
     (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = toolControl;
 
     try {
       await act(async () => {
-        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
       });
       await flush();
 
@@ -2769,7 +2814,7 @@ describe('Wall on the Lath engine', () => {
       .spyOn(terminalRegistry, 'getOrCreateTerminal')
       .mockImplementation(() => ({}) as ReturnType<typeof terminalRegistry.getOrCreateTerminal>);
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" showBaseboard />);
+      root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" />);
     });
     await flush();
 
@@ -2805,7 +2850,7 @@ describe('Wall on the Lath engine', () => {
   it('dor action targets reject bare numeric refs', async () => {
     let response: { ok: boolean; error?: string } | undefined;
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
     });
     await flush();
 
@@ -2828,7 +2873,7 @@ describe('Wall on the Lath engine', () => {
   it('dor action targets can resolve surface:self from the caller id', async () => {
     let response: { ok: boolean; error?: string } | undefined;
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
     });
     await flush();
 
@@ -2864,7 +2909,7 @@ describe('Wall on the Lath engine', () => {
 
     try {
       await act(async () => {
-        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
       });
       await flush();
 
@@ -2994,7 +3039,7 @@ describe('Wall on the Lath engine', () => {
 
   it('dor split transfers focus to the new surface (passthrough)', async () => {
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="passthrough" showBaseboard />);
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="passthrough" />);
     });
     await flush();
     // The seeded pane starts focused (passthrough + selected).
@@ -3009,7 +3054,7 @@ describe('Wall on the Lath engine', () => {
 
   it('dor split -- <command> keeps focus on the calling surface (passthrough)', async () => {
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="passthrough" showBaseboard />);
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="passthrough" />);
     });
     await flush();
     expect(focusOf('pane-a')).toBe('true');
@@ -3033,7 +3078,7 @@ describe('Wall on the Lath engine', () => {
       // The CLI arm creates Browser B without moving selection or keyboard input
       // away from the passthrough terminal.
       await act(async () => {
-        root.render(<Wall initialPaneIds={['pane-a']} initialMode="passthrough" showBaseboard onEvent={onEvent} />);
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="passthrough" onEvent={onEvent} />);
       });
       await flush();
       expect(focusOf('pane-a')).toBe('true');
@@ -3100,7 +3145,7 @@ describe('Wall on the Lath engine', () => {
 
   it('dor split -- (empty tail) opens a blank surface without stealing focus', async () => {
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="passthrough" showBaseboard />);
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="passthrough" />);
     });
     await flush();
     expect(focusOf('pane-a')).toBe('true');
@@ -3141,15 +3186,15 @@ describe('Wall on the Lath engine', () => {
     await flush();
   }
 
-  /** The pane header's Kill button — a user-visible closure, which does prompt.
-   *  `isUntouched` short-circuits the kill confirmation so this is one click. */
-  async function clickHeaderKill(paneId: string): Promise<void> {
+  /** A pane header control; Kill is a user-visible closure, which does prompt.
+   *  `isUntouched` short-circuits the kill confirmation so a kill is one click. */
+  async function clickHeaderControl(paneId: string, label: 'Kill' | 'Minimize'): Promise<void> {
     const untouched = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(true);
     try {
       const button = container.querySelector<HTMLButtonElement>(
-        `[data-lath-leaf="${paneId}"] button[aria-label="Kill"]`,
+        `[data-lath-leaf="${paneId}"] button[aria-label="${label}"]`,
       );
-      expect(button, `no Kill button on ${paneId}`).not.toBeNull();
+      expect(button, `no ${label} button on ${paneId}`).not.toBeNull();
       await act(async () => {
         button!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       });
@@ -3171,7 +3216,7 @@ describe('Wall on the Lath engine', () => {
   }
 
   async function renderNotedPane(): Promise<void> {
-    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />));
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />));
     await flush();
     act(() => { addPlainNote('pane-a', 'shared helper note'); });
   }
@@ -3204,7 +3249,7 @@ describe('Wall on the Lath engine', () => {
 
   it('closes an untouched pane at once and stages the confirm overlay for a touched one', async () => {
     const untouched = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(true);
-    await act(async () => root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" showBaseboard />));
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" />));
     await flush();
     const kill = (id: string) => act(async () => {
       container.querySelector<HTMLButtonElement>(`[data-lath-leaf="${id}"] button[aria-label="Kill"]`)!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -3221,7 +3266,7 @@ describe('Wall on the Lath engine', () => {
 
   /** Minimize pane-a beside pane-b (the Door stays selected) and press the kill key on it. */
   async function killSelectedDoor(): Promise<void> {
-    await act(async () => root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" showBaseboard />));
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" />));
     await flush();
     await act(async () => { container.querySelector<HTMLElement>('[data-lath-leaf="pane-a"] [aria-label="Minimize"]')!.click(); });
     await flush();
@@ -3255,7 +3300,7 @@ describe('Wall on the Lath engine', () => {
   ] as const)('returns keyboard focus from deleted Door %s to %s (confirm: %s)', async (target, next, confirm) => {
     vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(!confirm);
     const onEvent = vi.fn();
-    await act(async () => root.render(<Wall initialPaneIds={['pane-live', 'pane-a', 'pane-b', 'pane-c']} initialMode="command" showBaseboard onEvent={onEvent} />));
+    await act(async () => root.render(<Wall initialPaneIds={['pane-live', 'pane-a', 'pane-b', 'pane-c']} initialMode="command" onEvent={onEvent} />));
     await flush();
     for (const id of ['pane-a', 'pane-b', 'pane-c']) {
       await act(async () => { container.querySelector<HTMLElement>(`[data-lath-leaf="${id}"] [aria-label="Minimize"]`)!.click(); });
@@ -3288,7 +3333,7 @@ describe('Wall on the Lath engine', () => {
     vi.spyOn(helpers, 'closeHelperParent').mockImplementation(() => {});
     const inspections: Array<(busy: boolean) => void> = [];
     vi.spyOn(helpers, 'helperHasWork').mockImplementation(() => new Promise<boolean>(resolve => { inspections.push(resolve); }));
-    await act(async () => root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" showBaseboard />));
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" />));
     await flush();
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-lath-leaf="pane-a"] button[aria-label="Kill"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -3337,7 +3382,7 @@ describe('Wall on the Lath engine', () => {
     const { dispose, setBusy } = spyOnHelper();
     vi.spyOn(fake.notepadArchive, 'save').mockRejectedValue(new Error('disk full'));
     await renderNotedPane();
-    await clickHeaderKill('pane-a');
+    await clickHeaderControl('pane-a', 'Kill');
     expect(archiveFailureModal()).not.toBeNull();
     setBusy(true);
     await clickButton('Close anyway');
@@ -3348,7 +3393,7 @@ describe('Wall on the Lath engine', () => {
 
   it('archives a closing Surface\'s notes before tearing it down', async () => {
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
     });
     await flush();
     act(() => { addPlainNote('pane-a', 'ssh key is in 1password'); });
@@ -3368,12 +3413,12 @@ describe('Wall on the Lath engine', () => {
   it('keeps the Surface and asks when the archive refuses the write', async () => {
     vi.spyOn(fake.notepadArchive, 'save').mockRejectedValue(new Error('disk is full'));
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
     });
     await flush();
     act(() => { addPlainNote('pane-a', 'keep me'); });
 
-    await clickHeaderKill('pane-a');
+    await clickHeaderControl('pane-a', 'Kill');
 
     expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
     expect(getNotes('pane-a')).toHaveLength(1);
@@ -3385,7 +3430,7 @@ describe('Wall on the Lath engine', () => {
     // would block a Wall nobody is watching (docs/specs/notepad.md → "Closure").
     vi.spyOn(fake.notepadArchive, 'save').mockRejectedValue(new Error('disk is full'));
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
     });
     await flush();
     act(() => { addPlainNote('pane-a', 'keep me'); });
@@ -3404,11 +3449,11 @@ describe('Wall on the Lath engine', () => {
   it('Keep open dismisses the prompt and leaves everything alone', async () => {
     vi.spyOn(fake.notepadArchive, 'save').mockRejectedValue(new Error('disk is full'));
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
     });
     await flush();
     act(() => { addPlainNote('pane-a', 'keep me'); });
-    await clickHeaderKill('pane-a');
+    await clickHeaderControl('pane-a', 'Kill');
 
     await clickButton('Keep open');
 
@@ -3420,11 +3465,11 @@ describe('Wall on the Lath engine', () => {
   it('Close anyway discards the notes and removes the Surface without a batch', async () => {
     vi.spyOn(fake.notepadArchive, 'save').mockRejectedValue(new Error('disk is full'));
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
     });
     await flush();
     act(() => { addPlainNote('pane-a', 'expendable'); });
-    await clickHeaderKill('pane-a');
+    await clickHeaderControl('pane-a', 'Kill');
 
     await clickButton('Close anyway');
 
@@ -3445,7 +3490,7 @@ describe('Wall on the Lath engine', () => {
       .mockRejectedValueOnce(new Error('a could not be written'))
       .mockRejectedValueOnce(new Error('b could not be written'));
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" showBaseboard />);
+      root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" />);
     });
     await flush();
     act(() => {
@@ -3453,8 +3498,8 @@ describe('Wall on the Lath engine', () => {
       addPlainNote('pane-b', 'from b');
     });
 
-    await clickHeaderKill('pane-a');
-    await clickHeaderKill('pane-b');
+    await clickHeaderControl('pane-a', 'Kill');
+    await clickHeaderControl('pane-b', 'Kill');
 
     // A's prompt is the one on screen; B's is behind it.
     expect(archiveFailureModal()?.textContent).toContain('a could not be written');
@@ -3474,7 +3519,7 @@ describe('Wall on the Lath engine', () => {
 
   it('migrates a notepad to the new id when a replacement mints one', async () => {
     await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
     });
     await flush();
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockImplementation((id) => id === 'pane-a');
@@ -3517,7 +3562,7 @@ describe('Wall on the Lath engine', () => {
     };
     try {
       await act(async () => {
-        root.render(<Wall initialPaneIds={['pane-a', 'pane-b', 'pane-c']} initialMode="command" showBaseboard />);
+        root.render(<Wall initialPaneIds={['pane-a', 'pane-b', 'pane-c']} initialMode="command" />);
       });
       await flush();
 
@@ -3630,7 +3675,7 @@ describe('Wall session persistence: ownership filtering', () => {
       });
 
       await act(async () => {
-        root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" showBaseboard />);
+        root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" />);
       });
       await settle(0);
       await act(async () => {
@@ -3668,7 +3713,7 @@ describe('Wall session persistence: ownership filtering', () => {
       const settle = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
 
       await act(async () => {
-        root.render(<Wall initialPaneIds={['pane-a']} showBaseboard />);
+        root.render(<Wall initialPaneIds={['pane-a']} />);
       });
       // Past a heartbeat, so the mount's own dirty state has been written off.
       await settle(31_000);
@@ -3703,7 +3748,7 @@ it('shares one primary terminal and notepad between a Tool pane and Terminal Con
   const params = { surfaceType: 'tool', command: 'pnpm storybook', toolRender: 'iframe', toolPort: 'announced' };
   await act(async () => root.render(<Wall restoredLathLayout={{ version: 1, tree: { root: { kind: 'leaf', id: 'tool-context' } }, leafMeta: {
     'tool-context': { component: 'tool', tabComponent: 'tool', title: 'Storybook', params },
-  } }} initialMode="command" showBaseboard />));
+  } }} initialMode="command" />));
   await flush();
   act(() => { addPlainNote('tool-context', 'Keep this note'); setOpenNotepadId('tool-context'); });
   expect(container.querySelectorAll('[data-notepad-panel-for="tool-context"]')).toHaveLength(1);
@@ -3735,4 +3780,21 @@ it('shares one primary terminal and notepad between a Tool pane and Terminal Con
     expect(mountedDuringRefit).toBe(true);
   });
 
+});
+
+it('leaves a reveal for a hidden Workspace unanswered', async () => {
+  // A hidden Wall consumes no window input (docs/specs/layout.md →
+  // "Workspaces"): opening the context here would mount chrome nobody can see
+  // and refit a terminal whose element is detached.
+  const params = { surfaceType: 'tool', command: 'pnpm storybook', toolRender: 'iframe', toolPort: 'announced' };
+  await act(async () => root.render(<Wall active={false} restoredLathLayout={{ version: 1, tree: { root: { kind: 'leaf', id: 'tool-hidden' } }, leafMeta: {
+    'tool-hidden': { component: 'tool', tabComponent: 'tool', title: 'Storybook', params },
+  } }} initialMode="command" />));
+  await flush();
+  const refit = vi.spyOn(terminalRegistry, 'refitSession');
+  act(() => {
+    window.dispatchEvent(new CustomEvent('dormouse:reveal-note-source', { detail: { surfaceId: 'tool-hidden' } }));
+  });
+  expect(refit).not.toHaveBeenCalled();
+  expect(container.querySelector('[data-terminal-context]')).toBeNull();
 });

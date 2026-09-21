@@ -19,10 +19,10 @@
   `sdf` (the default) carries our changes; upstreamable fixes branch off
   `master` and cherry-pick into `sdf`.
 - **Versioning**: `@diffplug/xterm-addon-webgl-sdf`, versions shaped
-  `<addon-version>-sdf<coreBeta>.<iteration>` (`0.20.0-sdf301.1` ⇒
-  `@xterm/xterm@6.1.0-beta.301`, iteration 1). **Consumers must pin the exact
-  core beta named by the tarball's peer dependency**, not the `-sdfNNN`
-  counter — the addon bundles core internals (rationale).
+  `<addon-version>-sdf<coreBeta>.<iteration>` (`0.20.0-sdf304.0` ⇒
+  `@xterm/xterm@6.1.0-beta.304`, iteration 0). **Consumers must pin the exact
+  core beta named by the tarball's peer dependency** — the addon bundles core
+  internals (rationale); `xterm-lint.mjs` holds the `-sdfNNN` counter to it.
 - **Distribution**: a pnpm tarball-URL dependency on GitHub Release assets,
   never an npm registry (rationale). **Never replace a published asset**; the
   lockfile records a sha512 integrity hash, so cut a new iteration.
@@ -31,17 +31,13 @@
   `node scripts/xterm-bump.mjs --canopy <forkVersion>`.
 - **Must derive canopy's core from the released tarball's peer**, verifying its
   package name, version and counter before writing pins; select the upstream
-  addon by matching commit and peer. `scripts/xterm-bump.test.mjs` pins this
-  behavior and standalone drift repair.
+  addon by matching commit and peer. `scripts/xterm-bump.test.mjs` pins that,
+  standalone drift repair, and the lint's canopy checks.
 - **Every pin must be exact, and every addon's core peer must equal its
-  workspace's core pin** — the first-party `@xterm/*` packages share a repo but carry
-  independent beta counters (rationale). `scripts/xterm-lint.mjs` also requires
-  `lib` ≡ `standalone` and checks the canopy tarball's tag, filename, counter
-  and peer as one set; `scripts/xterm-bump.mjs` (`pnpm bump:xterm`) writes the
-  newest coherent per-commit set for both `lib` and `standalone`, even when only
-  one has drifted.
-- **Releases are hand-cut today** per FORK.md; automating this is staged in
-  `## Future`.
+  workspace's core pin** — the `@xterm/*` packages share a repo but carry
+  independent beta counters (rationale). `scripts/xterm-lint.mjs` owns the full
+  check list in its header comment; `scripts/xterm-bump.mjs` (`pnpm bump:xterm`)
+  writes the newest coherent per-commit set for `lib` and `standalone` alike.
 - **Dev loop**: `pnpm link ~/projects/xterm.js/addons/addon-webgl` from
   `canopy/`. **Revert its root `package.json` / `pnpm-workspace.yaml` residue
   and reinstall before verifying a tarball** (rationale).
@@ -65,7 +61,7 @@ PR:
    FORK.md's `Merging upstream` —
    **a conflict-free merge is not a correct one** (rationale).
 3. **After rebasing, bump `canopy/package.json`** with `--canopy <forkVersion>`
-   and update its recorded triple ("Canopy lab").
+   and update its recorded triple ("Canopy lab"), which the lint requires.
 
 **Must land any required fork rebase with the `@xterm/*` bump in one PR.**
 
@@ -128,9 +124,10 @@ its `test` (a `tsc` typecheck) runs under `pnpm test`. Stories:
 | `UpstreamVsFork` | regression harness: identical content through pristine upstream `@xterm/addon-webgl`, fork `sdf: false`, fork `sdf: true`, stacked |
 
 **`UpstreamVsFork`'s upstream addon must come from the fork base commit**, its
-addon/core/commit triple recorded in both `canopy/src/GlTerminal.stories.tsx`
-and `canopy/README.md`. The harness owns its discriminating `chevronGauntlet`
-rows.
+addon/core/commit triple recorded as `addon <v> == core <v> == commit <sha>` in
+both `canopy/src/GlTerminal.stories.tsx` and `canopy/README.md` —
+`xterm-lint.mjs` check 4 holds each against canopy's pins, and the two commits
+against each other. The harness owns its discriminating `chevronGauntlet` rows.
 
 **Never write PUA glyphs as literals; use `\uE0BX` escapes** — the literals
 vanish silently in a rewrite (rationale).

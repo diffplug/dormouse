@@ -9,14 +9,12 @@ import { useWallKeyboard } from '../use-wall-keyboard';
 import type { WallKeyboardCtx } from './types';
 
 const terminalRegistryMocks = vi.hoisted(() => ({
-  dismissOrToggleAlert: vi.fn(),
-  getActivity: vi.fn(() => ({ status: 'WATCHING_DISABLED' })),
+  dismissSessionAlert: vi.fn(),
   toggleSessionTodo: vi.fn(),
 }));
 
 vi.mock('../../../lib/terminal-registry', () => ({
-  dismissOrToggleAlert: terminalRegistryMocks.dismissOrToggleAlert,
-  getActivity: terminalRegistryMocks.getActivity,
+  dismissSessionAlert: terminalRegistryMocks.dismissSessionAlert,
   toggleSessionTodo: terminalRegistryMocks.toggleSessionTodo,
 }));
 
@@ -57,6 +55,7 @@ function makeCtx(overrides: Partial<WallKeyboardCtx> = {}): WallKeyboardCtx {
     handleReattachRef: { current: vi.fn() },
     selectPane: vi.fn(),
     enterTerminalMode: vi.fn(),
+    openTerminalContext: vi.fn(),
     requestKill: vi.fn(),
     setRenamingPaneId: vi.fn(),
     fireEvent: vi.fn(),
@@ -201,22 +200,31 @@ describe('handlePaneShortcuts `>` header context menu', () => {
   beforeEach(() => vi.clearAllMocks());
   afterEach(() => { document.body.innerHTML = ''; });
 
-  function makeHeaderEl(id: string): ReturnType<typeof vi.fn> {
+  function makeHeaderEl(id: string): HTMLElement {
     const el = document.createElement('div');
     el.setAttribute('data-pane-header-for', id);
+    el.getBoundingClientRect = () => ({ left: 10, bottom: 30, top: 0, right: 100, width: 90, height: 30, x: 10, y: 0, toJSON: () => ({}) });
     document.body.appendChild(el);
-    const onContextMenu = vi.fn();
-    el.addEventListener('contextmenu', onContextMenu);
-    return onContextMenu;
+    return el;
   }
 
-  it('dispatches contextmenu on the selected pane header element', () => {
-    const onContextMenu = makeHeaderEl('pane-a');
+  it('opens the context from the selected pane header\'s bottom-left corner', () => {
+    makeHeaderEl('pane-a');
+    const ctx = makeCtx();
 
-    expect(handlePaneShortcuts(keydown('>'), makeCtx(), { current: null })).toBe(true);
+    expect(handlePaneShortcuts(keydown('>'), ctx, { current: null })).toBe(true);
 
-    expect(onContextMenu).toHaveBeenCalledTimes(1);
-    expect(onContextMenu.mock.calls[0][0].type).toBe('contextmenu');
+    expect(ctx.openTerminalContext).toHaveBeenCalledWith('pane-a', { x: 10, y: 30 });
+  });
+
+  it('`a` dismisses the ring and opens the context', () => {
+    makeHeaderEl('pane-a');
+    const ctx = makeCtx();
+
+    expect(handlePaneShortcuts(keydown('a'), ctx, { current: null })).toBe(true);
+
+    expect(terminalRegistryMocks.dismissSessionAlert).toHaveBeenCalledWith('pane-a');
+    expect(ctx.openTerminalContext).toHaveBeenCalledWith('pane-a', { x: 10, y: 30 });
   });
 
   it('consumes `>` without throwing when no header element matches', () => {
@@ -227,10 +235,10 @@ describe('handlePaneShortcuts `>` header context menu', () => {
   });
 
   it('does nothing when a door is selected', () => {
-    const onContextMenu = makeHeaderEl('pane-a');
+    makeHeaderEl('pane-a');
     const ctx = makeCtx({ selectedTypeRef: { current: 'door' } });
 
     expect(handlePaneShortcuts(keydown('>'), ctx, { current: null })).toBe(false);
-    expect(onContextMenu).not.toHaveBeenCalled();
+    expect(ctx.openTerminalContext).not.toHaveBeenCalled();
   });
 });

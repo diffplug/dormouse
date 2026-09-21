@@ -71,7 +71,6 @@ export interface TerminalPaneState {
   pendingCommandLine: string | null;
   currentCommand: CommandRun | null;
   lastCommand: CommandRun | null;
-  title: TerminalTitle | null;
   titleCandidates: TerminalTitleCandidates;
 }
 
@@ -92,7 +91,6 @@ export interface DirectoryDisplayOptions {
 }
 
 export interface HeaderOptions extends DirectoryDisplayOptions {
-  shellName?: string;
   appTitleForPane?: (pane: TerminalPaneState) => string | null | undefined;
 }
 
@@ -142,22 +140,13 @@ const COMMAND_TITLE_LIMIT = 48;
 let nextCommandRunId = 0;
 
 export function createTerminalPaneState(initial?: Partial<TerminalPaneState>): TerminalPaneState {
-  const titleCandidates: TerminalTitleCandidates = { ...initial?.titleCandidates };
-  if (initial?.title) titleCandidates[initial.title.source] = initial.title;
-  let title = initial?.title ?? null;
-  if (!title) {
-    for (const candidate of Object.values(titleCandidates)) {
-      if (candidate && (!title || candidate.updatedAt > title.updatedAt)) title = candidate;
-    }
-  }
   return {
     cwd: initial?.cwd ?? null,
     activity: initial?.activity ?? { kind: 'unknown' },
     pendingCommandLine: initial?.pendingCommandLine ?? null,
     currentCommand: initial?.currentCommand ?? null,
     lastCommand: initial?.lastCommand ?? null,
-    title,
-    titleCandidates,
+    titleCandidates: { ...initial?.titleCandidates },
   };
 }
 
@@ -231,12 +220,9 @@ export function reduceTerminalState(
     }
     case 'title': {
       const existing = state.titleCandidates[event.title.source];
-      if (state.title && existing && sameTitle(state.title, event.title) && sameTitle(existing, event.title)) {
-        return state;
-      }
+      if (existing && sameTitle(existing, event.title)) return state;
       return {
         ...state,
-        title: event.title,
         titleCandidates: {
           ...state.titleCandidates,
           [event.title.source]: event.title,
@@ -503,13 +489,8 @@ export function surfaceRunsCommand(
   return cwdPathsEqual(run.cwdAtStart?.path ?? state.cwd?.path, cwdPath);
 }
 
-export function deriveFallbackCommandTitle(
-  state?: TerminalPaneState | null,
-  options: { shellName?: string } = {},
-): string {
-  const title = latestTerminalTitleCandidate(state)?.title.trim();
-  if (title) return title;
-  return options.shellName?.trim() || DEFAULT_COMMAND_TITLE;
+export function deriveFallbackCommandTitle(state?: TerminalPaneState | null): string {
+  return latestTerminalTitleCandidate(state)?.title.trim() || DEFAULT_COMMAND_TITLE;
 }
 
 export function resolveDisplayPrimary(
@@ -1015,7 +996,7 @@ export const WINDOWS_EXECUTABLE_SUFFIX = /\.(?:exe|cmd|bat|com|ps1)$/i;
 /**
  * argv[0] reduced to the one name a program answers to: no path, no launcher
  * suffix. The single answer to "which program is this", so the header, the
- * WATCHING rule row and the bell tooltip cannot disagree about it.
+ * WATCHING rule row and the terminal context cannot disagree about it.
  */
 export function commandProgramName(command: string): string {
   return commandBasename(command).replace(WINDOWS_EXECUTABLE_SUFFIX, '');

@@ -63,16 +63,22 @@ export const DIRECT_GATHER_TIMEOUT_MS = 3_000;
 export const MAX_DIRECT_SDP_LENGTH = 2000;
 
 /**
- * How many bytes of held channel frames a receiver holds while awaiting the
- * peer's switch. **The operative bound of the two**: what the window has to
- * cover is one relay one-way hop of a terminal stream, and bytes are what the
- * machine actually holds (`docs/specs/remote-security-model.md` -> "Burrow
- * bounds").
+ * How many bytes of channel frames either direction may hold — a receiver while
+ * it awaits the peer's switch, a sender while the channel drains. **The
+ * operative bound of the two**: what the window has to cover is one relay
+ * one-way hop of a terminal stream, and bytes are what the machine actually
+ * holds (`docs/specs/remote-security-model.md` -> "Burrow bounds").
+ *
+ * **One pair of numbers for both directions**, since each covers a burst of the
+ * same terminal stream: sizing them apart would mean one had a reason the other
+ * did not. A sender that overruns them is one whose peer is not draining fast
+ * enough to stay in order, which is a dead session rather than a dropped
+ * frame — the same answer the receiver gives.
  */
 export const MAX_DIRECT_PENDING_BYTES = 4 * 1024 * 1024;
 
 /**
- * How many channel frames a receiver holds, whatever their size. Set above
+ * How many channel frames either direction holds, whatever their size. Set above
  * where the ~1 KiB frames a PTY produces can reach it, so it stops only a peer
  * sending thousands of tiny ones; {@link MAX_DIRECT_PENDING_BYTES} is what
  * bounds real traffic. The relationship is pinned by
@@ -109,25 +115,12 @@ export const DIRECT_HANDOFF_TIMEOUT_MS = DIRECT_SETUP_TIMEOUT_MS;
 export const DIRECT_DISCONNECTED_GRACE_MS = 5_000;
 
 /**
- * How much a sender holds while the channel drains, in bytes and in frames.
- *
- * The same pair of numbers as the receiver's hold, for the same reasons: what a
- * queue has to cover is a burst of a terminal stream, bytes are what the machine
- * actually holds, and the frame count sits above where the ~1 KiB frames a PTY
- * produces can reach it. A sender that overruns them is one whose peer is not
- * draining fast enough to stay in order, which is a dead session rather than a
- * dropped frame — the same answer the receiver gives.
- */
-export const MAX_DIRECT_OUTBOUND_BYTES = MAX_DIRECT_PENDING_BYTES;
-export const MAX_DIRECT_OUTBOUND_FRAMES = MAX_DIRECT_PENDING_FRAMES;
-
-/**
  * How much the channel implementation may have buffered before a sender stops
  * handing it more and queues instead, and the level it must drain back to
  * before sending resumes.
  *
  * Two levels rather than one, so a busy stream is not woken on every frame.
- * {@link MAX_DIRECT_OUTBOUND_BYTES} is what bounds the wait; these only decide
+ * {@link MAX_DIRECT_PENDING_BYTES} is what bounds the wait; these only decide
  * where the ciphertext sits while the association catches up.
  */
 export const DIRECT_BUFFER_HIGH = 256 * 1024;

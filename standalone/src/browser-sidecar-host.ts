@@ -34,7 +34,7 @@ export class BrowserSidecarHost {
    * constructed. The bridge registers a stream in `sseClients` when the GET
    * arrives, and the app's first act after `init()` is to POST the two alert
    * seeds whose replies come back only over that stream — a POST that beat
-   * the GET would be answered to nobody (docs/specs/transport.md ->
+   * the GET would be answered to nobody (docs/specs/standalone.md ->
    * "Standalone browser-dev harness"). Tauri awaits its listener
    * registration for the same reason.
    */

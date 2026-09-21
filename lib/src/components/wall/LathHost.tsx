@@ -33,7 +33,7 @@ import { isToolParams } from './browser-surface';
 import { ToolPaneHeader } from './ToolPaneHeader';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { SurfacePaneHeader } from './SurfacePaneHeader';
-import { AlertSpeechIndicator } from './AlertSpeechIndicator';
+import { AlertRingIndicator } from './AlertRingIndicator';
 import { TerminalContext } from './TerminalContext';
 import { TerminalContextContext, TerminalResizeContext } from './wall-context';
 
@@ -115,7 +115,7 @@ function TerminalLeafOverlay({ id, title, params }: PaneProps) {
   const { mounted } = useContext(TerminalContextContext);
   return (
     <>
-      <AlertSpeechIndicator sessionId={id} />
+      <AlertRingIndicator sessionId={id} />
       {mounted?.id === id && <TerminalContext {...mounted} title={title} tool={isToolParams(params)} />}
     </>
   );

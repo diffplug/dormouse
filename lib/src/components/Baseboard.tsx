@@ -257,9 +257,9 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
       browserDisplay: item.browserDisplay,
       toolDirty: item.kind === 'tool' && dirtyTools.get(item.id) === true,
       status: activity.status,
-      ringSeq: activity.ringSeq,
       todo: activity.todo,
       speechState: speechStates.get(item.id),
+      episode: activity.episode ?? null,
       noteCount: notepadAvailable ? (notepadNotes.get(item.id)?.length ?? 0) : 0,
     };
   };

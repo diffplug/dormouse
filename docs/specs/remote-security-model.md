@@ -349,10 +349,9 @@ omits `client-gone`, invents client IDs, or reorders frames.
 | `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` | 120 000 | same |
 | `E2E_INIT_BURST` / `E2E_INIT_REFILL_INTERVAL_MS` | 8 / 1 000 | same |
 | `DIRECT_SETUP_TIMEOUT_MS` / `DIRECT_ANSWER_TIMEOUT_MS` / `DIRECT_GATHER_TIMEOUT_MS` | 15 000 / 10 000 / 3 000 | `remote-lib-common/src/security/direct-path.ts` |
-| `DIRECT_HANDOFF_TIMEOUT_MS` / `DIRECT_DISCONNECTED_GRACE_MS` | 5 000 / 5 000 | same |
+| `DIRECT_HANDOFF_TIMEOUT_MS` / `DIRECT_DISCONNECTED_GRACE_MS` | `= DIRECT_SETUP_TIMEOUT_MS` (15 000) / 5 000 | same |
 | `MAX_DIRECT_SDP_LENGTH` | 2 000 characters | same |
-| `MAX_DIRECT_PENDING_FRAMES` / `MAX_DIRECT_PENDING_BYTES` | 8 192 frames / 4 MiB, bytes binding first (rationale) | same |
-| `MAX_DIRECT_OUTBOUND_FRAMES` / `MAX_DIRECT_OUTBOUND_BYTES` | the same pair, for what a sender holds | same |
+| `MAX_DIRECT_PENDING_FRAMES` / `MAX_DIRECT_PENDING_BYTES` | 8 192 frames / 4 MiB, bytes binding first; one pair for a receiver's hold and a sender's queue alike (rationale) | same |
 | `DIRECT_BUFFER_HIGH` / `DIRECT_BUFFER_LOW` | 256 KiB / 64 KiB | same |
 
 - **Must bound waiting relay frames before enqueueing**, by count and cumulative
@@ -422,22 +421,15 @@ admits Burrow enrollment with ([relay.md](./relay.md#http-api)). Pinned by
 **The direct path adds no layer to this model.** A WebRTC data channel replaces
 the Relay as the carrier of an already-authorized session; every rule above
 holds unchanged, because nothing about *what* is carried changes.
-[remote-api.md](./remote-api.md) -> "Direct path" owns the design and is not
-restated here: that the channel carries transport messages of the session
-promoted at [Connection](#connection) on that `Split`'s own two `CipherState`s,
-that every signal rides inside the ciphertext, that nothing is offered before
-promotion, and that one peer connection per session is closed by every path
-that ends one, are its rules. What this model adds is what is *underneath* them.
+[remote-api.md](./remote-api.md) -> "Direct path" owns the design — the session
+promoted at [Connection](#connection) and its `CipherState`s, the signals that
+ride inside it, the empty ICE-server list, and the bound on either end's queue.
+What this model adds is what is *underneath* them.
 
 - **DTLS beneath is transport hygiene this model does not rely on.** It protects
   nothing the Noise session does not already protect, and **the fingerprints in
   an SDP are authentic for exactly one reason — that SDP arrived inside the
   session**. A DTLS peer is never an authenticated one.
-- **Never an ICE server.** Both ends pass an empty list. (rationale)
-- **What the channel may buffer is this side's bound, not the
-  implementation's**, in both directions ([remote-api.md](./remote-api.md) ->
-  "Direct path"): the same pair of numbers holds a sender's queue and a
-  receiver's, and overrunning either disposes the session.
 
 **The listener is UDP on every interface a candidate names, for the life of an
 attempt.** The standalone Burrow's addon binds one socket on the unspecified
@@ -609,10 +601,11 @@ Onboarding changes with security surface are staged in the
 
 ### Device verification
 
-Two properties of the shipped Pocket client are observable only on a real iOS
-device, and both are load-bearing: the selected Client-static storage format
-surviving an app and phone restart, and `getUserMedia` working inside a Home Screen web app (without
-it the install has only the paste field).
+`getUserMedia` inside a Home Screen web app is observable only on a real iOS
+device, and without it the install has only the paste field. The Client-static
+storage format surviving an app and phone restart is no longer open: the v3
+Home Screen report is in [Client statics](#client-statics)'s rationale and in
+[pocket-app.rationale.md](./pocket-app.rationale.md).
 
 ### Revocation propagation
 

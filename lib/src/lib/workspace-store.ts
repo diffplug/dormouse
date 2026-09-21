@@ -284,15 +284,28 @@ export type WorkspaceRefResolution =
   | ({ ok: true } & ResolvedWorkspace)
   | { ok: false; message: string };
 
+/**
+ * The Workspace a numeric `workspace:<n>` names. On a registry host the number
+ * is the Workspace's own minted id, stable across reorders and moves between
+ * Windows — the documented behavior. The 1-based strip-position reading is the
+ * fallback for the one host with no registry, VS Code, where each Workspace is a
+ * separate webview and there is no application-wide numbering to be stable
+ * against; the branch disappears if VS Code ever gets one
+ * (`docs/specs/dor-cli.md` → "Handle Model").
+ */
+function workspaceByNumber(number: number): WorkspaceMeta | undefined {
+  return refsArePositional()
+    ? state.workspaces[number - 1]
+    : state.workspaces.find((ws) => workspaceRefNumber(ws.id) === number);
+}
+
 /** Resolve the host's canonical ref first, then an unambiguous name. */
 export function resolveWorkspaceRef(ref: string): WorkspaceRefResolution {
-  const { target, position, name } = parseWorkspaceRef(ref);
+  const { target, number, name } = parseWorkspaceRef(ref);
   const found = (meta: WorkspaceMeta): WorkspaceRefResolution =>
     ({ ok: true, ...meta, ref: workspaceRefFor(meta.id) });
-  if (position !== null) {
-    const match = refsArePositional()
-      ? state.workspaces[position - 1]
-      : state.workspaces.find((ws) => workspaceRefNumber(ws.id) === position);
+  if (number !== null) {
+    const match = workspaceByNumber(number);
     if (match) return found(match);
   } else if (name) {
     const byId = registryInstalled && state.workspaces.find((ws) => ws.id === name);

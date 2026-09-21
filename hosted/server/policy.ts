@@ -16,6 +16,8 @@ export const authPolicy = {
 // plain-node deploy scripts import without this module's dependencies.
 export { providerIds, type ProviderId };
 
+export { LOGIN_FRESH_AGE_MS } from "./policy-constants.js";
+
 // Only an explicit deployment allowlist enables a provider; stale secrets do not.
 export function providerBindings(env: Record<string, unknown>) {
   const enabled = String(env.OAUTH_PROVIDERS ?? "")

@@ -202,7 +202,9 @@ export class FileBurrowStateStore implements BurrowStateStore {
 }
 
 /**
- * The store for a run with no state directory (the browser dev harness).
+ * The store for a run whose host could not create a state directory — the
+ * browser dev harness is *not* this case, since it passes a per-run temp
+ * `DORMOUSE_STATE_DIR` (docs/specs/standalone.md -> "Burrow service").
  *
  * Held in memory rather than dropped: a Burrow enrolled here has to keep working
  * for the rest of the session — its ACL is what authorizes every pairing it

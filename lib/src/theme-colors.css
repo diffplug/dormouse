@@ -53,7 +53,7 @@
   --color-success: var(--vscode-terminal-ansiGreen);
 
   /* Alarm — per-surface black/white contrast pick, computed at runtime by
-   * dynamic-palette.ts from the OKLab lightness of the bg the bell sits on.
+   * dynamic-palette.ts from the OKLab lightness of the bg the alarm sits on.
    * The binding below is only the baseline before the dynamic pass runs. */
   --color-alarm-vs-header-active: var(--vscode-terminal-ansiYellow);
   --color-alarm-vs-header-inactive: var(--vscode-terminal-ansiYellow);

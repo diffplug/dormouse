@@ -26,7 +26,7 @@ export const cfg = {
     resizeDebounce: 500,
     /** ms — attention idle expiry. How long before "looking at this pane" wears off. */
     userAttention: 15_000,
-    /** When true, the ALERT_RINGING bell-ring animation is frozen at T=0 (for deterministic Chromatic snapshots). */
+    /** When true, the ALERT_RINGING alarm pulse animations are frozen at T=0 (for deterministic Chromatic snapshots). */
     ringingPaused: false,
   },
   terminal: {

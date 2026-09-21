@@ -117,8 +117,6 @@ import {
   disposeAllSessions,
   disposeSession,
   unmountElement,
-  disableSessionAlert,
-  dismissOrToggleAlert,
   dismissSessionAlert,
   focusSession,
   registerSurfaceFocusHandle,
@@ -139,11 +137,11 @@ import {
   restoreTerminal,
   setPendingShellOpts,
   subscribeToActivity,
-  toggleSessionAlert,
   toggleSessionTodo,
 } from './terminal-registry';
 import { pasteFilePaths } from './clipboard';
 import { registry } from './terminal-store';
+import { commandArgv0 } from './terminal-state';
 import { REPLAY_MODE_RESET } from './terminal-report-filter';
 import { cfg } from '../cfg';
 import { TerminalWebglRenderer } from './terminal-webgl';
@@ -258,10 +256,10 @@ function runCommand(id: string, commandLine = 'longtask'): void {
   fakePlatform.sendOutput(id, `\x1b]633;E;${commandLine}\x07\x1b]633;C\x07`);
 }
 
-/** Run `commandLine` and turn its WATCHING rule on, as the bell would. */
+/** Run `commandLine` and turn its WATCHING rule on, as the terminal context would. */
 function enableAlert(id: string, commandLine = 'longtask'): void {
   runCommand(id, commandLine);
-  toggleSessionAlert(id);
+  setCommandWatched(commandArgv0(commandLine), true);
   expect(getActivity(id).watchingEnabled).toBe(true);
 }
 
@@ -361,7 +359,7 @@ describe('terminal-registry alert behavior', () => {
 
   it('preserves pre-registration activity through terminal creation and orphaning', () => {
     const id = 'early-host-state';
-    setTerminalActivity(id, { status: 'ALERT_RINGING', ringSeq: 7, todo: true, awaited: true });
+    setTerminalActivity(id, { status: 'ALERT_RINGING', todo: true, awaited: true });
     const activity = getActivity(id);
     expect(getLivePersistedAlertState(id)).toBeNull();
 
@@ -396,28 +394,28 @@ describe('terminal-registry alert behavior', () => {
     expect(getActivitySnapshot().has(id)).toBe(false);
   });
 
-  it('preserves early attention dismissal', () => {
+  it('keeps the TODO an early attention dismissal left behind', () => {
     const id = 'early-attention-dismissal';
     fakePlatform.spawnPty(id);
     fakePlatform.sendOutput(id, '\x07');
     expect(getActivity(id).status).toBe('ALERT_RINGING');
     fakePlatform.alertAttend(id);
-    expect(getActivity(id).status).toBe('WATCHING_DISABLED');
+    expect(getActivity(id)).toMatchObject({ status: 'WATCHING_DISABLED', todo: true });
 
     resumeTerminal(id, null, { alive: true });
 
-    expect(dismissOrToggleAlert(id, 'WATCHING_DISABLED')).toBe('dismissed');
-    // The explicit dismissal consumes the flag; a second click is at a prompt.
-    expect(dismissOrToggleAlert(id, 'WATCHING_DISABLED')).toBe('no-command');
+    // Nothing is ringing any more, so the alert action changes nothing.
+    dismissSessionAlert(id);
+    expect(getActivity(id)).toMatchObject({ status: 'WATCHING_DISABLED', todo: true });
   });
 
   it('retains a resumed exited Session TODO until disposal', () => {
     const id = 'exited-host-state';
-    setTerminalActivity(id, { todo: true, ringSeq: 3 });
+    setTerminalActivity(id, { todo: true });
     resumeTerminal(id, null, { alive: false, exitCode: 1 });
 
     expect(registry.get(id)?.exited).toBe(true);
-    expect(getActivity(id)).toMatchObject({ todo: true, ringSeq: 3 });
+    expect(getActivity(id)).toMatchObject({ todo: true });
     expect(getLivePersistedAlertState(id)).toMatchObject({ todo: true });
 
     disposeSession(id);
@@ -767,7 +765,7 @@ describe('terminal-registry alert behavior', () => {
     enableAlert(id);
 
     driveToRingingNeedsAttention(id);
-    disableSessionAlert(id);
+    setCommandWatched('longtask', false);
 
     expect(getActivity(id)).toMatchObject({
       status: 'WATCHING_DISABLED',
@@ -1153,13 +1151,13 @@ describe('terminal-registry alert behavior', () => {
     });
   });
 
-  it('disabling alerts while ringing does not turn TODO on', () => {
+  it('removing the rule while ringing does not turn TODO on', () => {
     const id = 'disable-no-todo';
     createSession(id);
     enableAlert(id);
 
     driveToRingingNeedsAttention(id);
-    disableSessionAlert(id);
+    setCommandWatched('longtask', false);
 
     expect(getActivity(id)).toMatchObject({
       status: 'WATCHING_DISABLED',
@@ -1167,71 +1165,55 @@ describe('terminal-registry alert behavior', () => {
     });
   });
 
-  it('alert button enables alerts from WATCHING_DISABLED', () => {
-    const id = 'alert-button-enable';
-    createSession(id);
-    runCommand(id);
-
-    expect(dismissOrToggleAlert(id, 'WATCHING_DISABLED')).toBe('enabled');
-
-    expect(getActivity(id)).toMatchObject({
-      status: 'NOTHING_TO_SHOW',
-      todo: false,
-    });
-  });
-
-  it('alert button reports no-command at a prompt instead of enabling', () => {
-    const id = 'alert-button-no-command';
-    createSession(id);
-
-    // WATCHING is keyed on the running command; with nothing running there is
-    // no rule to create, so the header opens the dialog to explain that.
-    expect(dismissOrToggleAlert(id, 'WATCHING_DISABLED')).toBe('no-command');
-    expect(getActivity(id).watchingEnabled).toBe(false);
-    expect(getWatchedCommands()).toEqual([]);
-  });
-
-  it('alert button turns the rule on for every session running that command', () => {
-    const alpha = 'alert-button-spread-a';
-    const beta = 'alert-button-spread-b';
+  it('a rule turns watching on for every session running that command', () => {
+    const alpha = 'alert-rule-spread-a';
+    const beta = 'alert-rule-spread-b';
     createSession(alpha);
     createSession(beta);
     runCommand(alpha, 'claude --resume');
     runCommand(beta, '/usr/local/bin/claude');
 
-    expect(dismissOrToggleAlert(alpha, 'WATCHING_DISABLED')).toBe('enabled');
+    setCommandWatched('claude', true);
 
     expect(getWatchedCommands()).toEqual(['claude']);
     expect(getActivity(alpha).watchingEnabled).toBe(true);
     expect(getActivity(beta).watchingEnabled).toBe(true);
 
-    // Turning it off anywhere turns it off everywhere.
-    expect(dismissOrToggleAlert(beta, 'NOTHING_TO_SHOW')).toBe('disabled');
+    // Removing it anywhere removes it everywhere.
+    setCommandWatched('claude', false);
     expect(getActivity(alpha).watchingEnabled).toBe(false);
     expect(getActivity(beta).watchingEnabled).toBe(false);
   });
 
-  it('alert button disables alerts from enabled non-ringing states', () => {
-    const id = 'alert-button-disable';
+  it('the alert action never edits a rule, whatever is running', () => {
+    const id = 'alert-action-keeps-rule';
     createSession(id);
     enableAlert(id);
     driveToBusy(id);
 
-    dismissOrToggleAlert(id, 'BUSY');
+    dismissSessionAlert(id);
 
-    expect(getActivity(id)).toMatchObject({
-      status: 'WATCHING_DISABLED',
-      todo: false,
-    });
+    expect(getWatchedCommands()).toEqual(['longtask']);
+    expect(getActivity(id)).toMatchObject({ status: 'BUSY', todo: false });
   });
 
-  it('alert button dismisses ringing alerts and turns TODO on', () => {
-    const id = 'alert-button-dismiss';
+  it('the alert action at a prompt creates no rule', () => {
+    const id = 'alert-action-no-command';
+    createSession(id);
+
+    dismissSessionAlert(id);
+
+    expect(getActivity(id).watchingEnabled).toBe(false);
+    expect(getWatchedCommands()).toEqual([]);
+  });
+
+  it('the alert action dismisses ringing alerts and turns TODO on', () => {
+    const id = 'alert-action-dismiss';
     createSession(id);
     enableAlert(id);
     driveToRingingNeedsAttention(id);
 
-    dismissOrToggleAlert(id, 'ALERT_RINGING');
+    dismissSessionAlert(id);
 
     expect(getActivity(id)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
@@ -1239,7 +1221,7 @@ describe('terminal-registry alert behavior', () => {
     });
   });
 
-  it('clicking a bell rendered as ringing does not disable alerts after attention already reset it', () => {
+  it('the alert action leaves a Session attention already quieted alone', () => {
     const id = 'displayed-ringing-dismiss';
     createSession(id);
     enableAlert(id);
@@ -1252,28 +1234,9 @@ describe('terminal-registry alert behavior', () => {
       todo: true,
     });
 
-    dismissOrToggleAlert(id, 'ALERT_RINGING');
+    dismissSessionAlert(id);
 
-    expect(getActivity(id)).toMatchObject({
-      status: 'NOTHING_TO_SHOW',
-      todo: true,
-    });
-  });
-
-  it('a bell click immediately after attention clears ringing is treated as a dismiss, not disable', () => {
-    const id = 'recent-ringing-dismiss';
-    createSession(id);
-    enableAlert(id);
-
-    driveToRingingNeedsAttention(id);
-    markSessionAttention(id);
-
-    expect(getActivity(id)).toMatchObject({
-      status: 'NOTHING_TO_SHOW',
-      todo: true,
-    });
-
-    expect(dismissOrToggleAlert(id, 'NOTHING_TO_SHOW')).toBe('dismissed');
+    expect(getWatchedCommands()).toEqual(['longtask']);
     expect(getActivity(id)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
       todo: true,
