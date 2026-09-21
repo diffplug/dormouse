@@ -21,6 +21,13 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 AUDIT_DIR=.github/audit
 export GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-diffplug/dormouse}"
+# `_preamble.md`'s delegate wait persists its deadline under `$RUNNER_TEMP`,
+# which only Actions sets. No domain reaches that block here — `run_domain`
+# denies `Task`/`Agent`, so a local domain cannot delegate, and the
+# orchestrator never runs locally — but a fresh directory per run keeps the
+# wait bounded if that ever changes, where a repo-root fallback would hand the
+# next run an expired deadline.
+export RUNNER_TEMP="${RUNNER_TEMP:-$(mktemp -d)}"
 
 if ! command -v claude >/dev/null 2>&1; then
   echo "error: the \`claude\` CLI is not on PATH." >&2

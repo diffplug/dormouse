@@ -548,7 +548,7 @@ jobs:
                   # finished, and the no-verdict note above sends the reader
                   # after a marker this arm never wrote.
                   [ "$(sed -e '/^[[:space:]]*$/d' "$f" | tail -n1)" = "<!-- END OF REPORT -->" ] ||
-                    echo "_Incomplete — this domain was still writing when the run ended. What follows is what it had recorded, not a finished report._"
+                    echo "_Incomplete — this domain never closed its report. What follows is what it had recorded, not a finished report._"
                   cat "$f"
                 fi
                 echo

@@ -49,7 +49,7 @@ Source of truth: the `**Scope` and `## Qualitative pass` sections of each domain
 
 ## Orchestration
 
-**Subagents launch in the background**, so an orchestrator that ends its turn to await a completion notification ends the whole run (rationale).
+**Subagents launch in the background**, so an agent that ends its turn to await a completion notification is finished: an orchestrator ends the whole run, a delegating domain ships what it has (rationale).
 
 - **The job's `timeout-minutes: 40` stays above the orchestrator's 32-minute wait deadline** (rationale).
 - **`--allowed-tools` enforces none of this**, only auto-approving; `Task`/`Agent` are allowed on purpose and only `Workflow` is denied (rationale).
@@ -58,7 +58,7 @@ Source of truth: the `**Scope` and `## Qualitative pass` sections of each domain
 
 - **FAIL IF** the orchestrator prompt stops requiring a non-turn-ending wait — a Bash `until` loop over the fragments' sentinels, **breaking on its own sub-cap under the Bash cap the workflow sets** so every call ends by printing its answer, re-issued under a bounded 32-minute deadline **persisted to a file** (`$RUNNER_TEMP/audit-deadline`) rather than recomputed from `now`. That cap is `BASH_DEFAULT_TIMEOUT_MS` in `.github/workflows/security-audit.yaml`, set above the loop's 540-second break; the harness default is two minutes, under it (rationale).
 - **FAIL IF** the prompt permits ending the turn without `audit-report.md` (rationale).
-- **FAIL IF** a domain prompt lets findings be held for a write-up at the end, or the wait, the merge, or the verdict treats existence rather than the sentinel as a domain having reported (rationale).
+- **FAIL IF** a domain prompt lets findings be held for a write-up at the end, lets a domain that delegates end its turn or background its wait loop, or the wait, the merge, or the verdict treats existence rather than the sentinel as a domain having reported (rationale).
 - **FAIL IF** the orchestrator can report `PASS` while a subagent left no report fragment — nor `FAIL`, unless some domain actually returned one: the prompt writes no status file when a fragment is missing and no domain failed, routing an audit that ran out of time to INCONCLUSIVE. Both exit non-zero and hold the release gate shut (rationale).
 
 Source of truth: `2. Wait without ending your turn`, `3. Merge`, and `4. The verdict` in `.github/audit/orchestrator.md`; the fragment contract in `.github/audit/_preamble.md`; the wait and merge blocks run as shipped in `scripts/security-audit.test.mjs`.
