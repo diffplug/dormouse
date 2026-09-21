@@ -83,7 +83,6 @@ export function attachTerminalMouseRouter({
     altKey: boolean;
     block: boolean;
     startedInScrollback: boolean;
-    button: number;
     clientX: number;
     clientY: number;
     touchLike: boolean;
@@ -137,7 +136,6 @@ export function attachTerminalMouseRouter({
       altKey: ev.altKey,
       block: opts.block ?? false,
       startedInScrollback: cell.startedInScrollback,
-      button: ev.button,
       clientX: ev.clientX,
       clientY: ev.clientY,
       touchLike: opts.touchLike,
@@ -153,7 +151,6 @@ export function attachTerminalMouseRouter({
         consumePointerEvent(ev, true);
         consumed = true;
       }
-      if (pendingDrag.button !== 0) return;
       const dx = ev.clientX - pendingDrag.clientX;
       const dy = ev.clientY - pendingDrag.clientY;
       if (dx * dx + dy * dy < DRAG_THRESHOLD_PX_SQ) return;
@@ -190,7 +187,9 @@ export function attachTerminalMouseRouter({
 
   const finishPendingOrActiveDrag = (ev: MouseEvent | PointerEvent) => {
     if (pendingDrag) {
-      if (ev.button !== pendingDrag.button) return;
+      // Only the primary button leaves a pendingDrag (see beginPendingDrag),
+      // so this is the release of the press that started it.
+      if (ev.button !== 0) return;
       const suppressNativeMouse = stateRequiresNativeMouseSuppression(getMouseSelectionState(id));
       if (suppressNativeMouse || pendingDrag.touchLike) consumePointerEvent(ev, true);
       // A touch press that releases without ever dragging is a tap — remember it
