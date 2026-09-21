@@ -32,6 +32,20 @@ export const DOOR_TAB_CLASS = clsx(
   TERMINAL_TOP_RADIUS_CLASS,
 );
 
+/** The surface an alarm inset is drawn on, which is what picks its token: each
+ *  `--color-alarm-vs-*` is contrast-picked against one background. */
+export type AlertRingGround = 'door' | 'header-active' | 'header-inactive';
+
+export const ALERT_RING_INSET_CLASS = 'pointer-events-none absolute inset-0';
+
+/** Spelled out per ground, never built from a template — Tailwind's scanner
+ *  reads source text, so a composed arbitrary value would never be emitted. */
+export const ALERT_RING_INSET_BY_GROUND: Record<AlertRingGround, string> = {
+  door: 'shadow-[inset_0_0_0_2px_var(--color-alarm-vs-door)]',
+  'header-active': 'shadow-[inset_0_0_0_2px_var(--color-alarm-vs-header-active)]',
+  'header-inactive': 'shadow-[inset_0_0_0_2px_var(--color-alarm-vs-header-inactive)]',
+};
+
 // The Workspace strip's two halves of one idea: the selected tab is seated
 // against the Wall, and the rest recede into the app ground. Keep them
 // together so a palette change can't move one endpoint without the other.
@@ -98,10 +112,8 @@ export const HEADER_PALETTE_TRANSITION_CLASS =
 // tiny label legible. Shared so both pill sites stay in sync.
 export const TODO_PILL_TRACKING_CLASS = 'tracking-[0.08em]';
 
-// Spoken-alarm delivery is intentionally louder than resting chrome.
-// `--color-alarm-vs-terminal` is the dynamic black/white contrast pick for the
-// terminal body behind the overlay. The pulse itself is `alertSpeakingAnimationClass`
-// in `bell-icon-class.ts`, beside the other Chromatic-frozen alert animation.
+// Letter-spacing for the alarm overlay's `SPEAKING` / `SPOKEN` labels — wider
+// tracking keeps the small all-caps label legible over the wash.
 export const ALERT_SPEECH_TRACKING_CLASS = 'tracking-[0.12em]';
 
 // Chrome for small anchored popovers (title candidates, TODO preview, pane

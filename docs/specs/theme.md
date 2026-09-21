@@ -46,7 +46,7 @@ runtime instead:
 | `--color-focus-ring` | a chromatic `focusBorder`, else a chromatic active-header background, else the candidate furthest from `--color-app-bg`; "chromatic" is OKLab chroma ≥ `FOCUS_RING_SATURATION_FLOOR` |
 | `--color-alarm-vs-{header-active,header-inactive,door,terminal}` | plain white or black, by the OKLab lightness of the background the alert treatment sits on (rationale) |
 
-The terminal alarm tint drives the whole-Pane spoken-alarm overlay.
+The terminal alarm tint drives the whole-Pane alarm overlay.
 **Must derive the Door alarm tint from the newly chosen background in the same
 pass.** Pinned by `lib/src/lib/themes/dynamic-palette.test.ts`.
 **Must refresh dynamic picks on `body` or `html` class/style changes and repair
@@ -104,9 +104,9 @@ the `body` copy sees what `applyTheme()` writes to `body.style` (rationale).
 `lib/src/lib/themes/consumed-keys.test.ts` enforces it **per file**, because a
 host may import either layer alone. **The seven
 dynamic-palette tokens also carry body-level baselines** matching their `@theme`
-declarations, so direct CSS-var consumers (the mobile gesture SVG, a bell ringing
-before the first pass) render before `useDynamicPalette()` publishes refined
-values.
+declarations, so direct CSS-var consumers (the mobile gesture SVG, an alarm
+inset before the first pass) render before `useDynamicPalette()` publishes
+refined values.
 
 **Never put hardcoded color defaults or `var(..., fallback)` chains in
 `theme-colors.css` or `theme.css`** (Host-Theme-Only Rule): hosts plus the resolver provide every
@@ -276,7 +276,7 @@ and **must run them through `completeThemeVars()` and `flattenSelectionAlpha()`*
 materialized `--vscode-*` set the app sees. The preview decorator writes them to
 both `html` (VSCode's host globals) and `body` (matching `applyTheme()`), and
 publishes the dynamic palette through `computeDynamicPalette()` so stories
-outside a full Wall — doors, focus rings, ringing bells — still get the runtime
+outside a full Wall — doors, focus rings, alarm insets — still get the runtime
 picks. `PREFERRED_STORYBOOK_THEME` in `lib/.storybook/preview.ts` names
 the default simulated host theme, **falling back to the first bundled theme** so
 a renamed or removed bundle cannot leave stories without theme vars.

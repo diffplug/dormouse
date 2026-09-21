@@ -20,7 +20,7 @@ The browser's 94/102 pair is the former 72/80 pair plus the zoom button and its 
 
 xterm.js paints only its own rendered surface, and integer row fitting leaves a sub-row remainder at the bottom of the pane: a host background differing from the terminal screen shows as a stripe under the last row, and an unclipped host squares off the rounded bottom corners.
 
-## Spoken-alarm overlay
+## Alarm overlay
 
 **Why the wash sits below the header.** `--color-alarm-vs-terminal` is picked for contrast against the *terminal body*, so it carries no contrast guarantee over the header band.
 

@@ -45,10 +45,10 @@ export interface PersistedPane {
 }
 
 /**
- * Narrow live Activity down to what may reach disk. An explicit projection, not
- * a structurally-assignable pass-through: `ActivityState` is a superset, and
- * `JSON.stringify` writes every extra field it grows
- * (`docs/specs/alert.md` -> Public State, "Persist only").
+ * Narrow Activity down to what may reach disk. The parameter deliberately uses
+ * the persisted shape: live `AlertState` is structurally assignable to it, and
+ * this explicit projection keeps `JSON.stringify` from writing extra live or
+ * stale fields (`docs/specs/alert.md` -> Public State, "Persist only").
  */
 export function toPersistedAlertState(state: PersistedAlertState): PersistedAlertState {
   return {

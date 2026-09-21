@@ -21,7 +21,6 @@ const KEYBOARD_ITEM_IDS = [
 const ALERT_ITEM_IDS = [
   "al-watch-cmd",
   "al-spreads",
-  "al-busy",
   "al-ring",
   "al-todo-auto",
   "al-todo-clear",
@@ -198,28 +197,23 @@ export const DESKTOP_SECTIONS: readonly Section[] = [
       {
         id: 'al-watch-cmd',
         title: 'Alert me whenever `longtask` runs',
-        hint: 'Press `s` to start a fake `longtask`, then click that pane\'s bell (or select it and press `a`). Alerts belong to the command, not the tab — the bell says "Alert on all longtask".',
+        hint: 'Press `s` to start a fake `longtask`, then right-click that pane\'s header (or select it and press `a`) and turn on "Watch all longtask commands". Alerts belong to the command, not the tab.',
       },
       {
         id: 'al-spreads',
         title: 'The rule covers every pane running that command',
-        hint: 'Both fake tasks light up from the one bell you clicked. Any pane you open later that runs `longtask` will watch too, with no extra clicks.',
-      },
-      {
-        id: 'al-busy',
-        title: 'The bell tilts while the command works',
-        hint: 'Press `s` again if the task already finished.',
+        hint: 'Both fake tasks are covered by the one rule you set. Any pane you open later that runs `longtask` will watch too, with no extra clicks.',
       },
       {
         id: 'al-ring',
         title: 'It rings when the command goes quiet',
         hint:
-          `Don't type! If you type, Dormouse will think you are paying attention to this task and the bell will not ring. The bell waits until you attend another pane or stop interacting for the inactivity timeout in Alarm settings.`,
+          `Don't type! If you type, Dormouse will think you are paying attention to this task and the pane will not ring. It waits until you attend another pane or stop interacting for the inactivity timeout in Alarm settings.`,
       },
       {
         id: 'al-todo-auto',
         title: 'Dismissing a ringing alert leaves a TODO behind',
-        hint: 'Click the bell or interact with the pane to dismiss. The TODO is there so a ring you waved away does not vanish without a trace.',
+        hint: 'Interact with the pane, or press `a`, to dismiss. The TODO is there so a ring you waved away does not vanish without a trace.',
       },
       {
         id: 'al-todo-clear',
@@ -228,11 +222,11 @@ export const DESKTOP_SECTIONS: readonly Section[] = [
       {
         id: 'al-todo-manual',
         title: 'Add a TODO by hand',
-        hint: 'Press `t` in command mode, or right-click the bell.',
+        hint: 'Press `t` in command mode, or right-click the header and use the TODO switch.',
       },
       {
         id: 'al-notif',
-        title: 'A program can ring the bell itself',
+        title: 'A program can ring on its own',
         hint: 'Press `n` for a fake build that sends a notification. This needs no rule at all — any program that emits `BEL`, `OSC 9`, `OSC 777`, or `OSC 99` rings, and its message shows on the TODO tag.',
       },
       {
@@ -243,7 +237,7 @@ export const DESKTOP_SECTIONS: readonly Section[] = [
       },
     ],
     prose: [
-      'Three different things can ring the bell: a rule you set on a command name, a notification the program sends, and a long command finishing while you were elsewhere. None of them ring while you are actually looking at the pane.',
+      'Three different things can make a pane ring: a rule you set on a command name, a notification the program sends, and a long command finishing while you were elsewhere. None of them ring while you are actually looking at the pane.',
     ],
   },
   COPY_PASTE_SECTION,

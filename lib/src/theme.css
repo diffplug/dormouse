@@ -39,8 +39,9 @@
   --text-sm--line-height: 1rem;
 
   /* Animation */
-  --animate-bell-ring: bell-ring 800ms ease-in-out 4;
-  --animate-speech-alarm-pulse: speech-alarm-pulse 650ms ease-in-out infinite;
+  --animate-alarm-pulse: alarm-pulse 650ms ease-in-out infinite;
+  /* Four cycles, so an unattended ring leaves no animation running. */
+  --animate-alarm-pulse-burst: alarm-pulse 650ms ease-in-out 4;
   --animate-shake-x: shake-x 400ms ease-out;
 }
 
@@ -58,12 +59,7 @@ body {
   --font-mono: var(--vscode-editor-font-family);
 }
 
-@keyframes bell-ring {
-  0%, 100% { rotate: 45deg; }
-  50%      { rotate: -45deg; }
-}
-
-@keyframes speech-alarm-pulse {
+@keyframes alarm-pulse {
   0%, 100% { opacity: 1; }
   50%      { opacity: 0.55; }
 }

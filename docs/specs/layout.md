@@ -52,17 +52,17 @@ A 30px header doubling as a drag handle: **a `pointerdown` past a 5px threshold 
 
 **Must use browser chrome for a serving Tool, with a Terminal Context disclosure for its serving terminal.** Tool composition belongs to `docs/specs/dor-tool.md` → Lifecycle.
 
-Elements left to right: derived label; alert bell; TODO pill (compact+); flexible gap; mouse-reporting override icon (compact+, only while the inside program requests mouse reporting); notepad icon (`docs/specs/notepad.md` → "Notepad UI"); split left/right, split top/bottom (full only); then the pane-action group: zoom/unzoom, minimize, kill (hover turns error-red).
+Elements left to right: derived label; TODO pill (compact+); flexible gap; mouse-reporting override icon (compact+, only while the inside program requests mouse reporting); notepad icon (`docs/specs/notepad.md` → "Notepad UI"); split left/right, split top/bottom (full only); then the pane-action group: zoom/unzoom, minimize, kill (hover turns error-red).
 
 The label is the `DerivedHeader` from `deriveHeader(...)`; `docs/specs/terminal-state.md` owns the priority chain and disambiguator. Layout renders it: primary truncates with ellipsis, secondary muted beside it, a failed last command appends an error-colored glyph. Click renames/pins; right-click — or `>` in command mode — opens the header context menu.
 
 #### Header context menu
 
-**Must open the terminal context from terminal header, alert, body, and command-mode `>` entry points.** Browser-only Surfaces and Doors have no context. Tool context displays its primary terminal; `docs/specs/terminal-context.md` → Tool context owns that composition. Application mouse ownership follows `docs/specs/mouse-and-clipboard.md` → Terminal context input.
+**Must open the terminal context from terminal header, body, and command-mode `a` and `>` entry points.** Browser-only Surfaces and Doors have no context. Tool context displays its primary terminal; `docs/specs/terminal-context.md` → Tool context owns that composition. Application mouse ownership follows `docs/specs/mouse-and-clipboard.md` → Terminal context input.
 
 **Must float the context inside its source Pane with a one-rem inset on every side**, overlapping the header, with a theme-derived edge and raised shadow. Render it in the Lath leaf's overlay slot, outside the body's clipping box, so it follows the leaf's layout without remounting the helper. Keep one context per Wall. Outside pointer press and explicit close dismiss it. No separate context heading or clipboard toolbar is shown.
 
-**Must reveal the context from the opening pointer position, clamped to its bounds, over 320ms.** Alert activation uses the alert button center; command-mode `>` uses the header's bottom-left; openings without a position use the context's top-left. Keep final layout dimensions throughout the reveal. Start helper creation, settings reads, and port scanning immediately on mount; fade mounted content, including detail dialogs, in over 140ms after 160ms. Reduced motion or disabled layout animation skips both animations and the delay.
+**Must reveal the context from the opening pointer position, clamped to its bounds, over 320ms.** Command-mode `a` and `>` use the header's bottom-left; openings without a position use the context's top-left. Keep final layout dimensions throughout the reveal. Start helper creation, settings reads, and port scanning immediately on mount; fade mounted content, including detail dialogs, in over 140ms after 160ms. Reduced motion or disabled layout animation skips both animations and the delay.
 
 **Must contract dismissals toward the opening origin over 180ms, fading content over 100ms**, starting from the current reveal when interrupted. Make the closing context inert and pause helper polling immediately; release focus without waiting for removal. Reopening cancels pending removal. Reduced motion dismisses immediately; promotion, source removal, and replacement by another context retain their immediate lifecycle transitions.
 
@@ -96,16 +96,24 @@ The pane body paints `--color-terminal-bg` on the React pane wrapper and the `Te
 
 Source of truth: `PaneMessage` in `lib/src/components/design.tsx`. Visual regression cases: `lib/src/stories/ToolApproval.stories.tsx`.
 
-### Spoken-alarm overlay
+### Alarm overlay
 
-A terminal Session with transient speech-delivery state gets a pointer-transparent overlay spanning its whole Lath leaf; browser surfaces never render it. It resolves through the tiling engine's per-leaf overlay slot (`docs/specs/tiling-engine.md`) and **must never intercept pointer/focus routing or change leaf geometry**.
+A ringing terminal Session gets an overlay spanning its whole Lath leaf; browser surfaces never render it. It resolves through the tiling engine's per-leaf overlay slot (`docs/specs/tiling-engine.md`) and **must never intercept pointer/focus routing or change geometry**.
 
 **Two layers straddling the header's stacking context** (`.lath-leaf-header` is `position: relative; z-index: 20`):
 
-- **Wash + label at `z-index: 19`** — above terminal content, below the header and below the `z-index: 20` pane-corner mouse-override banner, so neither is tinted (rationale). Both states wash, `SPEAKING` at 20% opacity and `SPOKEN` at half that — `SPOKEN` is an unbounded window, so its haze must stay light enough to read terminal text through. **Never use color-alpha utilities here** — their emitted `color-mix()` is unsupported by the standalone Safari 15 / Chrome 105 targets; the solid alarm color lives on a dedicated child whose element opacity supplies those strengths. The label sits `PANE_HEADER_HEIGHT_PX + 4` from the Pane top, centered, in both states.
-- **Perimeter ring at `z-index: 25`** — above the header so the treatment reads as one rounded rectangle around the whole Pane, below the `z-index: 30` sashes (rationale). 5px for `SPEAKING`, 3px for `SPOKEN`.
+- **Wash + label at `z-index: 19`** — above terminal content, below the header and the `z-index: 20` pane-corner mouse-override banner, so neither is tinted (rationale). **Never use color-alpha utilities here** — their `color-mix()` is unsupported by the standalone Safari 15 / Chrome 105 targets; the solid alarm color lives on a child whose element opacity supplies those strengths. The label sits `PANE_HEADER_HEIGHT_PX + 4` from the Pane top, centered.
+- **Perimeter ring at `z-index: 25`** — above the header so the treatment reads as one rounded rectangle around the Pane, below the `z-index: 30` sashes (rationale).
 
-Both layers wear the leaf's own rounding (header radius on top, terminal radius on the bottom). Under `SPEAKING` both pulse when motion is allowed and `cfg.alert.ringingPaused` is not set. Source of truth: `lib/src/components/wall/AlertSpeechIndicator.tsx`, registered as the `terminal` overlay by `lib/src/components/wall/LathHost.tsx`.
+Three strengths, by speech state over the latched ring. `SPOKEN` is unbounded, so its wash stays light enough to read text through:
+
+| State | Wash | Ring | Label |
+|---|---|---|---|
+| ringing | 10% | 3px | none |
+| `SPEAKING` | 20% | 5px | `SPEAKING` + speaker icon |
+| `SPOKEN` | 10% | 3px | `SPOKEN` + speaker icon |
+
+Both layers wear the leaf's own rounding (header radius on top, terminal radius on the bottom). **Only the perimeter ring animates**, compositing one layer rather than two; `docs/specs/alert.md` → Pane Header owns the motion. Source of truth: `AlertRingIndicator` in `lib/src/components/wall/AlertRingIndicator.tsx`, registered as the `terminal` overlay by `lib/src/components/wall/LathHost.tsx`.
 
 ### Pane header responsive sizing
 

@@ -1,7 +1,7 @@
 export type { SessionStatus } from './alert-manager';
 export type { TodoState } from './alert-manager';
-export type { AlertSpeechState } from './alert-speech-state';
-export type { ActivityState, AlertButtonActionResult } from './session-activity-store';
+export type { AlertRingState, AlertSpeechState } from './alert-speech-state';
+export type { ActivityState } from './session-activity-store';
 export type { TerminalEntry, TerminalOverlayDims } from './terminal-store';
 export type {
   CommandRun,
@@ -20,8 +20,6 @@ export {
   clearSessionAttention,
   clearSessionTodo,
   DEFAULT_ACTIVITY_STATE,
-  disableSessionAlert,
-  dismissOrToggleAlert,
   dismissSessionAlert,
   getActivity,
   getActivitySnapshot,
@@ -32,7 +30,6 @@ export {
   setTerminalActivity,
   restoreBrowserSurfaceTodo,
   subscribeToActivity,
-  toggleSessionAlert,
   toggleSessionTodo,
 } from './session-activity-store';
 

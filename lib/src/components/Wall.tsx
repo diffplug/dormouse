@@ -38,7 +38,6 @@ import {
   clearLocalSurfaceActivity,
   deriveSessionLabel,
   disposeSession,
-  dismissOrToggleAlert,
   focusSession,
   refitSession,
   markSessionAttention,
@@ -55,7 +54,6 @@ import {
   countRunningSessionsIn,
   setTerminalUserTitle,
   UNNAMED_PANEL_TITLE,
-  type SessionStatus,
 } from '../lib/terminal-registry';
 import {
   buildAppTitleResolver,
@@ -1895,9 +1893,6 @@ export function Wall({
       exitTerminalMode();
       requestKill(id);
     },
-    onAlertButton: (id: string, displayedStatus: SessionStatus) => {
-      return dismissOrToggleAlert(id, displayedStatus);
-    },
     onToggleTodo: (id: string) => {
       toggleSessionTodo(id);
     },
@@ -2223,6 +2218,7 @@ export function Wall({
     enterTerminalMode,
     exitTerminalMode,
     minimizePane,
+    openTerminalContext: (id, origin) => contextActions.open(id, { origin }),
     requestKill,
     acceptKill,
     rejectKill,

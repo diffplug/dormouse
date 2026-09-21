@@ -373,7 +373,8 @@ describe('WorkspaceWindow', () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await render();
     setTerminalActivity('pane-a', { status: 'ALERT_RINGING' });
-    const ringBefore = getActivitySnapshot().get('pane-a')!.ringSeq;
+    const episodeBefore = getActivitySnapshot().get('pane-a')!.episode;
+    expect(episodeBefore?.id).toBeTruthy();
     const leafBefore = wallFor(first).querySelector('[data-lath-leaf="pane-a"]');
     const paneBefore = wallFor(first).querySelector('[data-session-id="pane-a"]');
 
@@ -383,11 +384,11 @@ describe('WorkspaceWindow', () => {
     await flush();
 
     // A switch flips a prop; it never unmounts a leaf, so nothing calls
-    // mountElement / resumeTerminal / restoreTerminal and `ringSeq` cannot
-    // advance (docs/specs/glossary.md → "Invariants" I8).
+    // mountElement / resumeTerminal / restoreTerminal and the delivery episode
+    // cannot restart (docs/specs/glossary.md → "Invariants" I8).
     expect(wallFor(first).querySelector('[data-lath-leaf="pane-a"]')).toBe(leafBefore);
     expect(wallFor(first).querySelector('[data-session-id="pane-a"]')).toBe(paneBefore);
-    expect(getActivitySnapshot().get('pane-a')!.ringSeq).toBe(ringBefore);
+    expect(getActivitySnapshot().get('pane-a')!.episode?.id).toBe(episodeBefore?.id);
   });
 
   it('gives host New Terminal and the dialog hosts to the visible Workspace only', async () => {

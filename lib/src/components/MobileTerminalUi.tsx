@@ -19,7 +19,6 @@ import {
   TextTIcon,
 } from '@phosphor-icons/react';
 import { clsx } from 'clsx';
-import { AlertBell } from './AlertBell';
 import {
   MobileGestureConfirmDialog,
   MobileGestureRadialMenu,
@@ -40,6 +39,8 @@ import {
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
 import { isEditableTarget } from '../lib/dom';
 import { TouchUiContext } from './touch-ui-context';
+import { AlertRingInset, alertRingRow, useAlertRingBurst } from './alert-ring';
+import type { AlertEpisode } from '../lib/alert-episode';
 import type { SessionStatus } from '../lib/terminal-registry';
 
 export type MobileTerminalKeyboardMode = 'sessions' | 'recent' | 'type' | 'draft';
@@ -52,8 +53,9 @@ export interface MobileTerminalSessionItem {
   secondary?: string | null;
   active?: boolean;
   status?: SessionStatus;
-  /** `ActivityState.ringSeq`; a change replays the ringing burst. */
-  ringSeq: number;
+  /** `ActivityState.episode` — the Session's current ringing interval, which
+   *  anchors the row's arrival burst; `null` while it is quiet. */
+  episode: AlertEpisode | null;
   todo?: boolean;
 }
 
@@ -321,56 +323,59 @@ function SessionsPane({
   return (
     <div className="h-full overflow-auto p-2">
       <div className="grid gap-1">
-        {sessions.map((session) => {
-          const active = session.active === true;
-          const ringing = session.status === 'ALERT_RINGING' || session.status === 'MIGHT_NEED_ATTENTION';
-          return (
-            <button
-              key={session.id}
-              type="button"
-              disabled={disabled}
-              aria-current={active ? 'page' : undefined}
-              onClick={() => onSelect?.(session.id)}
-              className={clsx(
-                'flex min-h-10 min-w-0 items-center gap-2 rounded px-2 text-left font-mono text-xs transition-colors',
-                'focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-focus-ring',
-                'disabled:pointer-events-none disabled:opacity-60',
-                // Rows sit on the header-inactive reserve, so the inactive row
-                // recesses to the app pair — the guaranteed app↔inactive delta
-                // (theme.md's three-pair rule); surface-raised is unreliable here.
-                active
-                  ? 'bg-header-active-bg text-header-active-fg shadow-[inset_0_0_0_1px_var(--color-focus-ring)]'
-                  : 'bg-app-bg text-app-fg',
-              )}
-            >
-              <TerminalWindowIcon size={15} weight={active ? 'bold' : 'regular'} className="shrink-0" />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate font-medium">{session.title}</span>
-                {session.secondary ? (
-                  <span className="block truncate opacity-70">{session.secondary}</span>
-                ) : null}
-              </span>
-              {session.todo ? (
-                <span className="shrink-0 rounded border border-current px-1 py-px text-[0.55rem] font-semibold leading-none tracking-[0.08em]">
-                  TODO
-                </span>
-              ) : null}
-              {ringing ? (
-                <AlertBell
-                  size={14}
-                  status={session.status ?? 'ALERT_RINGING'}
-                  ringSeq={session.ringSeq}
-                  className={clsx(
-                    'shrink-0',
-                    active ? 'text-alarm-vs-header-active' : 'text-alarm-vs-door',
-                  )}
-                />
-              ) : null}
-            </button>
-          );
-        })}
+        {sessions.map((session) => (
+          <SessionRow key={session.id} session={session} disabled={disabled} onSelect={onSelect} />
+        ))}
       </div>
     </div>
+  );
+}
+
+/** A row is its own component so it can hold the burst hook; the mobile list has
+ *  no speech sink, so the unlabelled row is the only one it ever wears. */
+function SessionRow({ session, disabled, onSelect }: {
+  session: MobileTerminalSessionItem;
+  disabled: boolean;
+  onSelect?: (id: string) => void;
+}) {
+  const active = session.active === true;
+  const row = alertRingRow(session.status, null);
+  const burst = useAlertRingBurst(row, session.episode);
+
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      aria-current={active ? 'page' : undefined}
+      onClick={() => onSelect?.(session.id)}
+      className={clsx(
+        'relative flex min-h-10 min-w-0 items-center gap-2 overflow-hidden rounded px-2 text-left font-mono text-xs transition-colors',
+        'focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-focus-ring',
+        'disabled:pointer-events-none disabled:opacity-60',
+        // Rows sit on the header-inactive reserve, so the inactive row recesses
+        // to the app pair — the guaranteed app↔inactive delta (theme.md's
+        // three-pair rule); surface-raised is unreliable here.
+        active
+          ? 'bg-header-active-bg text-header-active-fg shadow-[inset_0_0_0_1px_var(--color-focus-ring)]'
+          : 'bg-app-bg text-app-fg',
+      )}
+    >
+      <TerminalWindowIcon size={15} weight={active ? 'bold' : 'regular'} className="shrink-0" />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-medium">{session.title}</span>
+        {session.secondary ? (
+          <span className="block truncate opacity-70">{session.secondary}</span>
+        ) : null}
+      </span>
+      {session.todo ? (
+        <span className="shrink-0 rounded border border-current px-1 py-px text-[0.55rem] font-semibold leading-none tracking-[0.08em]">
+          TODO
+        </span>
+      ) : null}
+      {/* No alarm token is computed against `app-bg`, so an inactive row borrows
+          the Door's — the nearest recessed ground the palette does cover. */}
+      {row && <AlertRingInset ground={active ? 'header-active' : 'door'} burst={burst} className="rounded" />}
+    </button>
   );
 }
 

@@ -30,7 +30,7 @@
 
 ## Fake shell behavior
 
-**Why shell integration is mandatory rather than nice-to-have.** A playground pane emitting no `OSC 633` would report "nothing is running" for every bell — including the pane hosting the tutorial itself, leaving the alert section with nothing to demonstrate. Reporting them also makes every playground pane OSC-driven, which is what keeps `docs/specs/terminal-state.md`'s keystroke fallback from engaging there.
+**Why shell integration is mandatory rather than nice-to-have.** A playground pane emitting no `OSC 633` would report "No command running" for every alert — including the pane hosting the tutorial itself, leaving the alert section with nothing to demonstrate. Reporting them also makes every playground pane OSC-driven, which is what keeps `docs/specs/terminal-state.md`'s keystroke fallback from engaging there.
 
 ## Lib hooks backing the tutorial
 

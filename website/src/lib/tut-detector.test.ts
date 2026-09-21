@@ -9,7 +9,7 @@ function activity(
   todo = false,
   watchingEnabled = status !== "WATCHING_DISABLED",
 ): ActivityState {
-  return { status, watchingEnabled, todo, notification: null, awaited: false, ringSeq: 0 };
+  return { status, watchingEnabled, todo, notification: null, awaited: false };
 }
 
 function makeDetectorHarness(initialActivitySnapshot = new Map<string, ActivityState>()) {
@@ -155,28 +155,23 @@ describe("TutDetector", () => {
     expect(state.isComplete("kb-arrows")).toBe(true);
   });
 
-  it("does not credit al-busy or al-ring when a pane is already in that status at first observation", () => {
+  it("does not credit al-ring when a pane is already ringing at first observation", () => {
     const { state, setActivitySnapshot } = makeDetectorHarness();
 
     setActivitySnapshot(new Map([
-      ["pane-a", activity("BUSY")],
       ["pane-b", activity("ALERT_RINGING")],
     ]));
 
-    expect(state.isComplete("al-busy")).toBe(false);
     expect(state.isComplete("al-ring")).toBe(false);
   });
 
-  it("credits al-busy and al-ring on a true status transition", () => {
+  it("credits al-ring on a true status transition", () => {
     const { state, setActivitySnapshot } = makeDetectorHarness();
 
     setActivitySnapshot(new Map([
       ["pane-a", activity("NOTHING_TO_SHOW")],
     ]));
-    setActivitySnapshot(new Map([
-      ["pane-a", activity("BUSY")],
-    ]));
-    expect(state.isComplete("al-busy")).toBe(true);
+    expect(state.isComplete("al-ring")).toBe(false);
 
     setActivitySnapshot(new Map([
       ["pane-a", activity("ALERT_RINGING")],

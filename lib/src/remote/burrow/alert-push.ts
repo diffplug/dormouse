@@ -25,10 +25,11 @@ let pushDevicesRefreshSequence = 0;
 
 /**
  * Run `load` and publish its result to the dialog's store, fenced as below.
- * `load` goes over the service bridge (`activation.ts`), because the ACL the
- * list is joined against is the Burrow's — and it answers `null` when no Burrow is
- * running, which is "nowhere to push", not an empty list. Failure is reported
- * as `error` rather than an empty list: "we could not ask" and "no devices are
+ * `load` goes over the service bridge (`activation.ts`) as a `pushDevices`
+ * command, because the ACL the list is joined against is the Burrow's — and it
+ * answers `null` when no Burrow is running, which is "nowhere to push"
+ * (rendered `no-burrow`), not an empty list. Failure is reported as `error`
+ * rather than an empty list: "we could not ask" and "no devices are
  * subscribed" are different things to show a user.
  */
 export async function commitPushDevices(

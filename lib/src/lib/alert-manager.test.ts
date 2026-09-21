@@ -102,6 +102,9 @@ describe('AlertManager in isolation', () => {
 
   it('ALERT_RINGING latches when user has no attention (view hidden)', () => {
     const id = 'latch-test';
+    // Deferral ships on and withdraws a WATCHING ring once output resumes
+    // confirmed BUSY; latching through output is the switched-off timing.
+    manager.setDeferAlertsUntilQuiet(false);
     runWatchedCommand(id);
     manager.clearAttention(id);
 
@@ -306,44 +309,46 @@ describe('AlertManager in isolation', () => {
     });
   });
 
-  it('attending a ring leaves attentionDismissedRing for the bell table to consume', () => {
-    const id = 'attention-dismissed-watching-disabled';
+  it('attending a ring clears it and leaves the TODO behind', () => {
+    const id = 'attention-clears-ring';
 
-    // A protocol ring needs no WATCHING; attending it dismisses the ring and
-    // sets attentionDismissedRing while status falls back to WATCHING_DISABLED.
+    // A protocol ring needs no WATCHING, so status falls back to
+    // WATCHING_DISABLED once attention clears the latch.
     manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Build finished' });
     expect(manager.getState(id).status).toBe('ALERT_RINGING');
-    manager.attend(id);
-    expect(manager.getState(id)).toMatchObject({
-      status: 'WATCHING_DISABLED',
-      todo: true,
-      attentionDismissedRing: true,
-    });
 
-    // An explicit dismiss is the click that consumes the flag.
-    manager.dismissAlert(id);
-    expect(manager.getState(id).attentionDismissedRing).toBe(false);
+    manager.attend(id);
+    expect(manager.getState(id)).toMatchObject({ status: 'WATCHING_DISABLED', todo: true });
   });
 
-  it('keeps attentionDismissedRing when a watched command starts before bell dismissal', () => {
-    const id = 'attention-dismissed-then-watched-command';
-    manager.setWatchedCommands(['claude']);
+  it('dismissing a Session with nothing ringing changes nothing and notifies no one', () => {
+    const id = 'dismiss-without-ring';
     manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Build finished' });
-    manager.attend(id);
+    manager.dismissAlert(id);
+    const quiet = manager.getState(id);
 
-    manager.applyTerminalSemanticEvents(id, [
-      { type: 'commandLine', commandLine: 'claude --resume' },
-      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
-    ]);
+    const states: string[] = [];
+    manager.onStateChange((changed) => states.push(changed));
+    manager.dismissAlert(id);
 
-    expect(manager.getState(id)).toMatchObject({
-      watchingEnabled: true,
-      todo: true,
-      attentionDismissedRing: true,
-    });
+    expect(states).toEqual([]);
+    expect(manager.getState(id)).toEqual(quiet);
+  });
+
+  it('leaves a notification still deferred behind animation pending when dismissed', () => {
+    const id = 'dismiss-keeps-deferral';
+    driveToBusy(id);
+    manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Build finished' });
+    expect(manager.getState(id)).toMatchObject({ status: 'WATCHING_DISABLED', todo: false, notification: null });
 
     manager.dismissAlert(id);
-    expect(manager.getState(id).attentionDismissedRing).toBe(false);
+
+    vi.advanceTimersByTime(5_000);
+    expect(manager.getState(id)).toMatchObject({
+      status: 'ALERT_RINGING',
+      todo: true,
+      notification: { source: 'OSC 9', title: null, body: 'Build finished' },
+    });
   });
 
   it('protocol completion is suppressed while the user has attention', () => {
@@ -425,12 +430,12 @@ describe('AlertManager in isolation', () => {
     });
   });
 
-  // `docs/specs/alert.md` -> Pane Header.
-  it('counts a second track ringing behind an already-latched one', () => {
-    const id = 'ring-seq-cross-track';
-    const seqs: number[] = [];
+  // `docs/specs/alert.md` -> Public State.
+  it('a second track latching mid-episode keeps the episode id', () => {
+    const id = 'episode-cross-track';
+    const seen: string[] = [];
     manager.onStateChange((_id, state) => {
-      if (_id === id) seqs.push(state.ringSeq);
+      if (_id === id && state.episode) seen.push(state.episode.id);
     });
 
     manager.attend(id);
@@ -445,31 +450,38 @@ describe('AlertManager in isolation', () => {
     ]);
     const rung = manager.getState(id);
     expect(rung.status).toBe('ALERT_RINGING');
+    expect(rung.episode?.id).toBeTruthy();
 
-    // The command-exit track latches behind the protocol one. Everything else the
-    // renderer could have keyed on is unchanged across this ring.
+    // The command-exit track latches behind the protocol one: one enriched
+    // summons, so no consumer keyed on the episode may deliver a second time.
     manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
     const again = manager.getState(id);
     expect(again.status).toBe(rung.status);
     expect(again.notification).toEqual(rung.notification);
-    expect(again.ringSeq).toBeGreaterThan(rung.ringSeq);
-    // And it has to reach subscribers: `alertStatesEqual` would otherwise call
-    // these two states equal and drop the update before it left the host.
-    expect(seqs).toContain(again.ringSeq);
+    expect(again.episode?.id).toBe(rung.episode?.id);
+    expect(new Set(seen)).toEqual(new Set([rung.episode!.id]));
   });
 
-  // The counter is bounded by construction: a repeated notification on a track
-  // that is already ringing enriches the standing summons rather than raising a
-  // new one, so bell spam cannot restart the burst faster than it can play.
-  it('does not count a track that is already ringing', () => {
-    const id = 'ring-seq-same-track';
+  it('re-latching after all tracks clear starts a new episode', () => {
+    const id = 'episode-restart';
     const bell = { source: 'BEL', title: 'Terminal bell', body: null } as const;
 
     applyTerminalProtocolEvents(manager, id, [{ kind: 'notification', notification: bell }]);
-    const first = manager.getState(id).ringSeq;
-    applyTerminalProtocolEvents(manager, id, [{ kind: 'notification', notification: bell }]);
+    const first = manager.getState(id).episode;
+    expect(first?.id).toBeTruthy();
 
-    expect(manager.getState(id).ringSeq).toBe(first);
+    // Bell spam on a track that is already ringing enriches the standing
+    // summons; it cannot raise a new episode, so nothing keyed on one replays.
+    applyTerminalProtocolEvents(manager, id, [{ kind: 'notification', notification: bell }]);
+    expect(manager.getState(id).episode?.id).toBe(first!.id);
+
+    manager.clearTodo(id);
+    expect(manager.getState(id).episode).toBeNull();
+
+    applyTerminalProtocolEvents(manager, id, [{ kind: 'notification', notification: bell }]);
+    const second = manager.getState(id).episode;
+    expect(second?.id).toBeTruthy();
+    expect(second?.id).not.toBe(first!.id);
   });
 
   it('finishes an armed command-exit watch when the PTY exits without commandFinish', () => {
@@ -825,7 +837,7 @@ describe('AlertManager in isolation', () => {
     manager.attend(id);
     manager.clearAttention(id);
 
-    // Armed underneath, but the monitor's own state is what the bell shows.
+    // Armed underneath, but the monitor's own state is what is published.
     expect(manager.getState(id).status).toBe('NOTHING_TO_SHOW');
 
     manager.setWatchedCommands([]);
@@ -932,6 +944,17 @@ describe('AlertManager in isolation', () => {
       vi.advanceTimersByTime(1);
       expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
     });
+  });
+
+  it('defers a protocol alert with no settings call, because deferral ships on', () => {
+    const id = 'defer-shipped-default';
+    driveToBusy(id);
+
+    manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Done' });
+    expect(manager.getState(id)).toMatchObject({ todo: false, notification: null });
+
+    vi.advanceTimersByTime(5_000);
+    expect(manager.getState(id)).toMatchObject({ status: 'ALERT_RINGING', todo: true });
   });
 
   describe('defer terminal notifications until quiet', () => {
@@ -1413,7 +1436,6 @@ describe('AlertManager in isolation', () => {
         status: 'WATCHING_DISABLED',
         todo: true,
         notification: { source: 'OSC 9', title: null, body: 'Build finished' },
-        attentionDismissedRing: false,
         awaited: false,
       });
     });
@@ -1489,6 +1511,8 @@ describe('AlertManager in isolation', () => {
       ['after the detector has noticed the output', 800],
     ] as const)('leaves a stale WATCHING ring alone once output has resumed, %s', async (_label, gapMs) => {
       const id = `await-stale-watching-ring-${gapMs}`;
+      // Keep the latched ring across resumed output: deferral would withdraw it.
+      manager.setDeferAlertsUntilQuiet(false);
       driveToRinging(id);
 
       // The peer was sent another turn and is talking again. Nothing clears the

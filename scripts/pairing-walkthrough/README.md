@@ -79,7 +79,7 @@ it.
 | 5 | `qr` | Clicks **Set up a phone**, waits for the code, screenshots, crops to the QR, makes a camera-shaped Y4M, and decodes the crop to prove it is legible. → `qr-full.png`, `qr.png`, `qr.y4m`, `invitation-url.txt` |
 | 6 | `pocket` | Launches a second, isolated Chrome with the fake camera pointed at `qr.y4m`, attaches with `agent-browser connect <port>`, opens the **plain origin**, and gives the page a CDP virtual authenticator. → `05-pocket-first-run.png` |
 | 7 | `code` | Taps **Scan a setup code**; Pocket's own scanner decodes the fake camera, registers a passkey with the scanned token, signs in, and shows two digits. Reads them, and waits for the Burrow's modal to open. → `06-scanner.png`, `07-code-screen.png`, `08-burrow-pairing-modal.png`, `pairing-code.txt` |
-| 8 | `terminal` | Types the two digits into the Burrow's modal and authorizes; waits for Pocket to connect itself and land on the terminal; runs a command from the phone and reads the file it wrote; rings the Burrow and finds the bell on the phone; then leaves to the Burrows view and connects again. → `09-burrow-approved.png` … `14-pocket-reconnected.png`, `terminal-proof.txt`, `notify-proof.txt`, `reconnect-proof.txt` |
+| 8 | `terminal` | Types the two digits into the Burrow's modal and authorizes; waits for Pocket to connect itself and land on the terminal; runs a command from the phone and reads the file it wrote; rings the Burrow and finds the alarm on the phone; then leaves to the Burrows view and connects again. → `09-burrow-approved.png` … `14-pocket-reconnected.png`, `terminal-proof.txt`, `notify-proof.txt`, `reconnect-proof.txt` |
 | 8′ | `mismatch` | (`wrong-code`) Types the *next* two digits instead, and waits for the panel to report a mismatch; checks the paired count did not move and follows the phone back to its list. → `09-burrow-mismatch.png`, `10-pocket-mismatch.png` |
 | 8′ | `cancel` | (`denied`) Presses the modal's Cancel and waits for the panel to report it; same two checks. → `09-burrow-cancelled.png`, `10-pocket-cancelled.png` |
 | 7′ | `dead-code` | (`expired-code`) Replaces the camera's Y4M with a blank frame, opens the scanner, and pastes the Burrow's own code re-issued twice — once stamped with a 2023 expiry, once for another origin as well. Waits for the phone's own sentence each time, and checks the two differ. → `06-pocket-expired.png`, `07-pocket-foreign.png` |
@@ -158,7 +158,7 @@ not healthier than one that has them.
 
 `summary.json` also carries what only a run can know: the decoded pairing URL
 and how much of its TTL was left, the round trip from Enter to the file the
-laptop's shell wrote (`terminal.roundTripMs`, ~220 ms here), the Enter-to-bell
+laptop's shell wrote (`terminal.roundTripMs`, ~220 ms here), the Enter-to-alarm
 time, and the authenticator's `signCount` after each ceremony. `options` holds
 what the run chose for itself. The setup password is not among them — the
 Relay mints its own, and a `--keep` run is signed into by hand with the

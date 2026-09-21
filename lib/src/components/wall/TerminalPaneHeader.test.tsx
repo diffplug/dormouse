@@ -11,7 +11,7 @@ import { ensureResizeObserver, stubResizeObserver, stubWallActions as stubAction
 import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
 import { setPlatform } from '../../lib/platform';
 import { setNativeFieldValue } from '../../lib/dom';
-import { removeTerminalPaneState } from '../../lib/terminal-registry';
+import { clearTerminalActivity, removeTerminalPaneState, setTerminalActivity } from '../../lib/terminal-registry';
 import { removeMouseSelectionState, setMouseReporting } from '../../lib/mouse-selection';
 import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
 import {
@@ -40,6 +40,7 @@ afterEach(() => {
   act(() => root.unmount());
   container.remove();
   platform.reset();
+  clearTerminalActivity('term-1');
   removeTerminalPaneState('term-1');
 });
 
@@ -63,6 +64,23 @@ function renameInput(): HTMLInputElement {
   expect(input).not.toBeNull();
   return input!;
 }
+
+describe('TerminalPaneHeader — alert state', () => {
+  /** The header is untinted whatever the Session's status: the Pane overlay's
+   *  perimeter ring is the whole treatment (`docs/specs/alert.md` -> Pane
+   *  Header), and a second tinted surface would double-report it. */
+  it('never tints for a ringing Session, and offers it no control of its own', () => {
+    renderHeader(stubActions(), null);
+    const quiet = container.querySelector<HTMLElement>('[data-pane-header-for="term-1"]')!.className;
+
+    act(() => { setTerminalActivity('term-1', { status: 'ALERT_RINGING' }); });
+
+    const header = container.querySelector<HTMLElement>('[data-pane-header-for="term-1"]')!;
+    expect(header.className).toBe(quiet);
+    expect(header.innerHTML).not.toContain('alarm-vs');
+    expect(container.querySelector('[data-alert-ring-inset]')).toBeNull();
+  });
+});
 
 describe('TerminalPaneHeader — inline rename', () => {
   it('clicking the title starts a rename', () => {
@@ -184,7 +202,6 @@ describe('TerminalPaneHeader — notepad icon', () => {
     const labels = Array.from(container.querySelectorAll<HTMLElement>('button[aria-label]'))
       .map((button) => button.getAttribute('aria-label'));
     expect(labels).toEqual([
-      'Alerts are per command',
       'Override mouse capture',
       'Notepad',
       'Split left/right',

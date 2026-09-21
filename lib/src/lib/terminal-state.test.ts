@@ -322,7 +322,7 @@ describe('command title summarizer', () => {
   });
 
   // One name per program: the launcher suffix is dropped everywhere, so the
-  // header reads the same name as the WATCHING rule row and the bell tooltip.
+  // header reads the same name as the WATCHING rule row and the terminal context.
   it('reads a Windows launcher as the program it launches', () => {
     expect(summarizeCommandLine('vim.exe notes.txt')).toBe('vim');
     expect(summarizeCommandLine('cargo.exe watch -x test')).toBe('cargo watch -x test');

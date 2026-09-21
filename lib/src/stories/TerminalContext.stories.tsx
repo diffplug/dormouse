@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
-import { BellIcon, FrameCornersIcon, XIcon } from '@phosphor-icons/react';
+import { FrameCornersIcon, XIcon } from '@phosphor-icons/react';
 import { PANE_HEADER_HEIGHT_PX } from '../components/design';
 import { NotepadHeaderButton } from '../components/wall/NotepadHeaderButton';
 import { NotepadPanel } from '../components/NotepadPanel';
@@ -94,7 +94,7 @@ function ContextPrototype({ scenario, initialDetail = null, paneWidth }: { scena
   const preserved = ['preserved', 'editor', 'differentDirectory'].includes(scenario);
   const ports = (scenario === 'multiplePorts' ? [5173, 6006, 9229] : [5173]).map(port => ({ port, host: 'localhost', url: `http://localhost:${port}/`, processName: port === 5173 ? 'vite' : port === 6006 ? 'storybook' : 'node inspector' }));
   return <div className="relative h-[680px] overflow-hidden rounded-lg bg-terminal-bg font-mono text-sm text-terminal-fg" style={{ width: paneWidth }}>
-    <div className="flex items-center gap-2 bg-header-active-bg px-2.5 text-header-active-fg" style={{ height: PANE_HEADER_HEIGHT_PX }}><span>pnpm dev</span><BellIcon size={13} /><span className="ml-auto flex items-center gap-3"><FrameCornersIcon size={13} /><XIcon size={13} /></span></div>
+    <div className="flex items-center gap-2 bg-header-active-bg px-2.5 text-header-active-fg" style={{ height: PANE_HEADER_HEIGHT_PX }}><span>pnpm dev</span><span className="ml-auto flex items-center gap-3"><FrameCornersIcon size={13} /><XIcon size={13} /></span></div>
     <pre className="m-0 p-3 leading-6 text-muted">{'~/projects/dormouse ❯ pnpm dev\n\n  VITE ready\n  ➜  Local: http://localhost:5173/'}</pre>
     <div className="absolute inset-0">
       <TerminalContextView title="pnpm dev" surfaceRef="surface:3" cwd={PARENT_DIR} helperCwd={HELPER_DIR} mismatch={scenario === 'differentDirectory'}

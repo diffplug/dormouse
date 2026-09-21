@@ -22,7 +22,6 @@ const SESSION_ID = 'mouse-story';
 const noopActions: WallActions = {
   onKill: () => {},
   onMinimize: () => {},
-  onAlertButton: () => 'noop',
   onToggleTodo: () => {},
   onSplitH: () => {},
   onSplitV: () => {},

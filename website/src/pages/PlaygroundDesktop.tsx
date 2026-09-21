@@ -182,8 +182,8 @@ function PlaygroundDesktopExperience() {
               getInactivityTimeoutMs: () => alertSettings.getAlertSettings().inactivityTimeoutMs,
               // WATCHING is keyed on the running command, so the demo has to
               // report one through shell integration. Both alert panes run the
-              // same fake `longtask`, which is what lets one bell click light
-              // up the other pane (docs/specs/alert.md).
+              // same fake `longtask`, which is what lets one rule light up the
+              // other pane (docs/specs/alert.md).
               onTriggerBusyDemo: (durationMs, commandMs) => {
                 busyDemoDisposeRef.current?.();
                 if (busyDemoFinishTimerRef.current !== null) {
@@ -222,7 +222,7 @@ function PlaygroundDesktopExperience() {
                   "\x1b]777;notify;Build finished;3 packages rebuilt\x07",
                 );
               },
-              // An unwatched command, so the command-exit track owns the bell:
+              // An unwatched command, so the command-exit track owns the ring:
               // the user attends the pane, leaves, and the exit rings.
               onTriggerCommandExitDemo: (durationMs) => {
                 startFakeCommand(adapter, PANE_SPLASH, "slowbuild");

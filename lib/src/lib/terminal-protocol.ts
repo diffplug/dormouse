@@ -340,6 +340,13 @@ export class TerminalProtocolParser {
       : [];
   }
 
+  /**
+   * rxvt/WezTerm notifications. The alert behavior is `docs/specs/alert.md` ->
+   * "Terminal reports"; the grammar is here. Only the `notify` subcommand is
+   * supported: the first field after it is the title and everything past the
+   * next semicolon is the body, so semicolons inside a body survive — only the
+   * first one separates.
+   */
   private parseOsc777(content: string): TerminalProtocolEvent[] {
     if (!content.startsWith('777;notify;')) return [];
     const rest = content.slice('777;notify;'.length);
@@ -352,6 +359,32 @@ export class TerminalProtocolParser {
     return [{ kind: 'notification', notification: { source: 'OSC 777', title, body } }];
   }
 
+  /**
+   * kitty desktop notifications. The alert behavior is `docs/specs/alert.md` ->
+   * "Terminal reports"; the grammar is here.
+   *
+   * Metadata keys are single ASCII letters separated by `:`, and an unknown key
+   * is ignored. `i` groups the chunks of one pending notification, `d` is the
+   * done flag (default `1`), `e` selects plain (`0`) or base64 (`1`) payload
+   * encoding, and `p` the payload type (default `title`). `title` / `body`
+   * chunks append into the pending entry; the done flag completes it, and a
+   * completion whose sanitized title or body is nonempty becomes one
+   * notification. Without `i` there is no pending entry to append to, so only a
+   * complete single-sequence notification is meaningful.
+   *
+   * Management payloads contribute no content and are consumed: `p=?` answers
+   * the capability query with {@link OSC99_SUPPORT_PAYLOAD}, while `p=close`
+   * and `p=alive` are dropped outright, touching no pending notification. Any
+   * *other* unknown payload type still obeys the done flag — under the default
+   * `d=1` it completes a pending same-`i` notification, which may then fire on
+   * the title and body it had already accumulated.
+   *
+   * Incomplete chunk state is bounded, so a program that opens chunked
+   * notifications and never finishes them cannot grow this map:
+   * {@link OSC99_MAX_PENDING_IDS} ids, each expiring
+   * {@link OSC99_PENDING_TTL_MS} after its last chunk, and each of the two
+   * buffers capped as it appends.
+   */
   private parseOsc99(content: string): TerminalProtocolEvent[] {
     this.expireOsc99Pending();
 

@@ -368,12 +368,12 @@ export class FakePtyAdapter implements PlatformAdapter {
    * the alert-manager's activity feed the same way real PTY data does in
    * the Tauri/VSCode adapters — without this, browser-side echo (e.g.
    * TutorialShell's per-character echo, AsciiSplashRunner frames) never
-   * reaches the activity monitor and the bell can never tilt or ring.
+   * reaches the activity monitor and a pane can never ring.
    *
    * Pass `{ skipActivity: true }` for writes that are pure UI chrome and
    * shouldn't count as a "task is active" signal — e.g. a tutorial TUI
    * re-rendering its menu on state change. Without the opt-out, every
-   * runner frame would tilt the bell on whichever pane hosts the runner.
+   * runner frame would look like work on whichever pane hosts the runner.
    */
   sendOutput(id: string, data: string, options: { skipActivity?: boolean } = {}): void {
     if (!this.terminals.has(id)) return;
@@ -385,7 +385,7 @@ export class FakePtyAdapter implements PlatformAdapter {
    * no data output — useful for animating a fake "task running" state on
    * a pane while the visual feedback lives elsewhere. Calls
    * `alertManager.onData(id)` immediately, then again every `intervalMs`
-   * until `durationMs` elapses, after which silence resumes and the bell
+   * until `durationMs` elapses, after which silence resumes and the Session
    * transitions naturally to MIGHT_NEED_ATTENTION → ALERT_RINGING.
    * Returns a dispose handle that cancels remaining ticks.
    */
