@@ -186,10 +186,12 @@ export function attachTerminalMouseRouter({
   };
 
   const finishPendingOrActiveDrag = (ev: MouseEvent | PointerEvent) => {
+    // Only the primary button leaves a pendingDrag (see beginPendingDrag), and an
+    // active drag only ever grows out of one — so neither path below is ever
+    // finished by a non-primary button. The window-mousemove backstop reaches
+    // both: a mousemove reports button 0.
+    if (ev.button !== 0) return;
     if (pendingDrag) {
-      // Only the primary button leaves a pendingDrag (see beginPendingDrag),
-      // so this is the release of the press that started it.
-      if (ev.button !== 0) return;
       const suppressNativeMouse = stateRequiresNativeMouseSuppression(getMouseSelectionState(id));
       if (suppressNativeMouse || pendingDrag.touchLike) consumePointerEvent(ev, true);
       // A touch press that releases without ever dragging is a tap — remember it
@@ -201,7 +203,6 @@ export function attachTerminalMouseRouter({
       pendingDrag = null;
       return;
     }
-    if (ev.button !== 0) return;
     if (!isDragging(id)) return;
     const suppressNativeMouse = stateRequiresNativeMouseSuppression(getMouseSelectionState(id));
     endDrag(id);
