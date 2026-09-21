@@ -33,7 +33,7 @@
     "typescript": "^6.0.3",
     "vite": "^8.0.14",
     "vitest": "^4.1.6",
-    "tsx": "4.23.13",
+    "tsx": "4.23.15",
     "esbuild": "^0.28.2",
     "wrangler": "4.130.0",
     "miniflare": "5.20260908.0-alpha"
