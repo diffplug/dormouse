@@ -35,7 +35,7 @@
     "vitest": "^4.1.6",
     "tsx": "4.23.15",
     "esbuild": "^0.28.2",
-    "wrangler": "4.130.0",
+    "wrangler": "4.135.0",
     "miniflare": "5.20260908.0-alpha"
   }
 }
