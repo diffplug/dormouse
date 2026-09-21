@@ -14,7 +14,7 @@ import {
   AGENT_BROWSER_BIN_ENV,
   DEFAULT_AGENT_BROWSER_BIN,
 } from 'dor-lib-common';
-import { existsSync } from 'node:fs';
+import { accessSync, constants, existsSync, statSync } from 'node:fs';
 import type {
   CliEnv,
   AgentBrowserExecResult,
@@ -35,9 +35,14 @@ import {
 const INSTALL_HINT = 'npm i -g agent-browser';
 const INSTALL_DOCS = 'https://agent-browser.dev';
 
-// Extensions a bare command name can carry on Windows, in PATH-search order.
-// Shared by resolveBinaryPath (PATH walk) and existsCandidate (explicit path).
-const WINDOWS_BIN_EXTS = ['.cmd', '.exe', '.bat'];
+// Extensions a bare command name can carry on Windows, and the order to try
+// them in. This is `which@2`'s own hardcoded fallback — npm's list, deliberately
+// NOT cmd.exe's `.COM;.EXE;.BAT;.CMD` — because `resolveBinaryPath` now picks
+// the file that gets spawned and has to choose the same one cross-spawn's
+// `which` would (docs/specs/dor-cli.md → "Spawning External Binaries").
+// Source: `getPathInfo` in `which/which.js`. Shared by resolveBinaryPath (PATH
+// walk) and existsCandidate (explicit path, where order only affects reporting).
+const WINDOWS_BIN_EXTS = ['.EXE', '.CMD', '.BAT', '.COM'];
 
 /**
  * Clear, multi-line guidance shown when the user's agent-browser binary is
@@ -238,12 +243,27 @@ export async function runAgentBrowserCli(args: string[], options: CliOptions): P
   const binary = env[AGENT_BROWSER_BIN_ENV] || DEFAULT_AGENT_BROWSER_BIN;
   const exec = options.execAgentBrowser ?? execAgentBrowserProcess;
 
-  // Resolve the binary to an absolute path once: it both proves the install
-  // present (below) and travels to the host as `binaryPath` (a GUI host may not
-  // share this terminal's PATH). undefined means "not found on PATH" — or, for
-  // an explicit path, simply "returned verbatim", which agentBrowserIsMissing
-  // re-checks on disk.
+  // Resolve the binary to an absolute path once: it proves the install present
+  // (below), is what we spawn (see `execTarget`), and travels to the host as
+  // `binaryPath` (a GUI host may not share this terminal's PATH). undefined
+  // means "not found on PATH" — or, for an explicit path, simply "returned
+  // verbatim", which agentBrowserIsMissing re-checks on disk.
   const binaryPath = resolveBinaryPath(binary, env);
+
+  // Spawn the resolved path, never the bare name: cross-spawn resolves a bare
+  // name through `which`, which checks `process.cwd()` *before* PATH on Windows
+  // (and re-emits the bare name into cmd.exe for a `.cmd` shim, which does the
+  // same). Since `dor` inherits the pane's cwd, a bare-name spawn would let an
+  // `agent-browser.cmd` sitting in a cloned repository win the race against the
+  // real install — repo content executing with no gate, which
+  // docs/specs/dor-tool.md -> Trust treats as a boundary.
+  //
+  // The `?? binary` branch is unreachable on the real path and is a type-level
+  // belt only: agentBrowserIsMissing already ends the call whenever binaryPath is
+  // undefined, and an explicit path comes back from resolveBinaryPath verbatim.
+  // Only a stub exec (tests), which skips that check, reaches it.
+  // See docs/specs/dor-cli.md -> "Spawning External Binaries".
+  const execTarget = binaryPath ?? binary;
 
   // Detect a missing install deterministically, before spawning. A failed spawn
   // on Windows emits BOTH 'error' (ENOENT) and 'close' (a libuv error code); if
@@ -257,7 +277,7 @@ export async function runAgentBrowserCli(args: string[], options: CliOptions): P
 
   let result: AgentBrowserExecResult;
   try {
-    result = await exec(binary, ['--session', session, ...rest]);
+    result = await exec(execTarget, ['--session', session, ...rest]);
   } catch (error) {
     if (isMissingBinaryError(error)) {
       return fail(missingBinaryMessage(binary));
@@ -272,7 +292,7 @@ export async function runAgentBrowserCli(args: string[], options: CliOptions): P
     // passthrough rather than nagging about the missing surface.
     if (!(client instanceof Error)) {
       try {
-        const status = await exec(binary, streamStatusArgs(session));
+        const status = await exec(execTarget, streamStatusArgs(session));
         const wsPort = parseStreamPort(status.stdout);
         // Pass the absolute path resolved above so the host (which may not share
         // this terminal's PATH) can run host-side tab/close commands.
@@ -399,42 +419,92 @@ function shouldManageSurface(exitCode: number, rest: string[]): boolean {
   return subcommand !== undefined && subcommand !== 'close';
 }
 
+/**
+ * Whether `candidate` is a file this platform would actually run. `which` (and
+ * so cross-spawn) skips a directory or a non-executable file and keeps walking;
+ * since the walk's answer is now the spawn target, a laxer test here would turn
+ * a `PATH` entry `which` ignored into an EACCES/EISDIR failure. On Windows the
+ * extension decides executability, so being a regular file is the whole test —
+ * taken as an argument, like `binaryCandidateNames`, so both branches are
+ * reachable from a Linux-only CI.
+ */
+export function isExecutableFile(candidate: string, isWindows: boolean): boolean {
+  try {
+    if (!statSync(candidate).isFile()) return false;
+    if (isWindows) return true;
+    accessSync(candidate, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The filenames to try for a bare `binary`, in order — `which`'s extension logic,
+ * which the walk has to reproduce because its answer is what gets spawned. Takes
+ * `isWindows` rather than reading `process.platform` so the Windows ordering is
+ * testable off Windows: every rule here is Windows-only, and a Linux-only CI
+ * that could not exercise them would be asserting an unenforced claim.
+ *
+ * Mirrors `getPathInfo` in `which/which.js` on three points a hand-rolled walk
+ * gets wrong: `||` (not `??`), so an *empty* PATHEXT falls back rather than
+ * yielding no candidates; the fallback list is npm's, not `cmd.exe`'s; and an
+ * empty extension comes first when the name already carries one, so
+ * `agent-browser.exe` is tried as itself and not only as `agent-browser.exe.EXE`.
+ */
+export function binaryCandidateNames(binary: string, env: CliEnv, isWindows: boolean): string[] {
+  if (!isWindows) return [binary];
+  // No `.filter(Boolean)`: `getPathInfo` splits without one, so a trailing
+  // separator — ordinary on Windows — leaves a final empty extension that tries
+  // the name unsuffixed. Nothing runnable lives there, but dropping it would make
+  // the walk report missing where `which` returned a path.
+  const exts = (env.PATHEXT || WINDOWS_BIN_EXTS.join(';')).split(';');
+  if (binary.includes('.')) exts.unshift('');
+  return exts.map((ext) => `${binary}${ext}`);
+}
+
 export function resolveBinaryPath(binary: string, env: CliEnv): string | undefined {
   if (binary.includes('/') || binary.includes('\\')) return binary;
   const pathVar = env.PATH;
   if (!pathVar) return undefined;
   const isWindows = process.platform === 'win32';
-  const names = isWindows ? WINDOWS_BIN_EXTS.map((ext) => `${binary}${ext}`) : [binary];
+  const names = binaryCandidateNames(binary, env, isWindows);
   for (const dir of pathVar.split(isWindows ? ';' : ':')) {
     if (!dir) continue;
     for (const name of names) {
       const candidate = `${dir}${isWindows ? '\\' : '/'}${name}`;
-      if (existsSync(candidate)) return candidate;
+      if (isExecutableFile(candidate, isWindows)) return candidate;
     }
   }
   return undefined;
 }
 
+// Narrow, now that an unresolvable name never reaches the spawn: this catches a
+// binary that disappeared between the PATH walk and the spawn, plus a stub exec's
+// injected ENOENT.
 function isMissingBinaryError(error: unknown): boolean {
   return !!error && typeof error === 'object' && (error as { code?: unknown }).code === 'ENOENT';
 }
 
 /**
  * Whether the binary can be proven absent without spawning it, given the path
- * `resolveBinaryPath` already produced for it. Returns true only when the absence
- * is certain; ambiguous cases (no PATH to search) fall through to the spawn,
- * which still rejects with ENOENT.
+ * `resolveBinaryPath` already produced for it. Every "not found" answer ends the
+ * call here rather than at the spawn, because the spawn's own fallback is the
+ * bare name and cross-spawn resolves that against the cwd first on Windows.
  */
-function agentBrowserIsMissing(binary: string, env: CliEnv, resolvedPath: string | undefined): boolean {
+export function agentBrowserIsMissing(binary: string, env: CliEnv, resolvedPath: string | undefined): boolean {
   // Explicit path (e.g. a DORMOUSE_AGENT_BROWSER_BIN override): resolveBinaryPath
   // hands such a path back verbatim without touching disk, so check it (and
   // Windows launcher extensions) directly.
   if (binary.includes('/') || binary.includes('\\')) {
     return !existsCandidate(binary, process.platform === 'win32');
   }
-  // Bare name: resolvedPath is the PATH walk's result. Without a PATH to search
-  // we can't prove anything, so let the spawn decide.
-  if (!env.PATH) return false;
+  // Bare name: resolvedPath is the PATH walk's result. With no PATH to search
+  // there is nowhere the binary could legitimately be, and falling through to
+  // the spawn would hand cross-spawn a bare name — whose `which` searches the
+  // cwd first on Windows, the one thing `execTarget` exists to prevent. So an
+  // absent PATH is "missing", not "ambiguous".
+  if (!env.PATH) return true;
   return resolvedPath === undefined;
 }
 
