@@ -105,7 +105,9 @@ if [[ "${1:-}" != "--no-install" ]]; then
       /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
         -f "$INSTALL_DIR" >/dev/null 2>&1 || true
       echo "✦ Installed to $INSTALL_DIR"
-      if pgrep -f "$INSTALL_DIR/Contents/MacOS/" >/dev/null 2>&1; then
+      # `-a`: macOS pgrep skips its own ancestors by default, and run from a
+      # Dormouse terminal the running app and its sidecar are exactly that.
+      if pgrep -a -f "$INSTALL_DIR/Contents/MacOS/" >/dev/null 2>&1; then
         echo "  Dormouse is still running the previous build. To switch, run this in any"
         echo "  Dormouse terminal (Claude and Codex sessions resume):"
         echo ""
