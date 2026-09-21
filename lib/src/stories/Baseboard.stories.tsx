@@ -25,10 +25,8 @@ function withState(items: DoorChip[], byId: Record<string, Record<string, unknow
 
 function userTitleState(title: string, index: number): TerminalPaneState {
   return createTerminalPaneState({
-    title: {
-      title,
-      source: 'user',
-      updatedAt: BASE_TIME + index,
+    titleCandidates: {
+      user: { title, source: 'user', updatedAt: BASE_TIME + index },
     },
   });
 }

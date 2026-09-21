@@ -94,11 +94,9 @@ signal always fits one control body.
 **No ICE servers**, and **never a public STUN or TURN default**: `iceServers:
 []` at both ends, host candidates only. (rationale)
 
-**The two shipped stacks are proven against each other by hand.** No CI job has
-a browser, so `scripts/direct-interop/run.mjs` negotiates a real browser against
-the real addon over the shipped `DirectPeer` — measuring the browser's offer
-against `MAX_DIRECT_SDP_LENGTH`, which is a property of the host's interfaces
-rather than of the code (rationale).
+**The two shipped stacks are proven against each other by hand**, by
+`scripts/direct-interop/run.mjs` over the shipped `DirectPeer`, which also
+measures a real browser's offer against `MAX_DIRECT_SDP_LENGTH` (rationale).
 
 **Every byte on the channel is a Noise transport message of the promoted
 session**: one message per channel frame, raw bytes, the same two `CipherState`s
@@ -114,13 +112,11 @@ session, and an answerer that refuses before it has answered declines rather
 than leaving the offerer to wait out its setup budget. A limit the
 implementation does not report is not treated as small.
 
-**Two limits of those checks are known and accepted.** The reliability flags
-reach only as far as the implementation reports them, and `node-datachannel`'s
-polyfill rebuilds an incoming channel with its own defaults — so on the
-standalone Burrow only the label comparison is load-bearing (rationale). And the
-message limit is the *remote's* advertised one, so it is per direction: where
-the two ends disagree, a peer that has already switched loses the session rather
-than staying relayed.
+**Two limits of those checks are known and accepted**: on the standalone Burrow
+the reliability flags reach nothing, so only the label comparison is
+load-bearing; and the message limit is the *remote's* advertised one, so where
+the two ends disagree a peer that has already switched loses the session rather
+than staying relayed. (rationale)
 
 **A sender bounds its own queue rather than the implementation's.** Past
 `DIRECT_BUFFER_HIGH` of buffered channel data the ciphertext queues, draining at
@@ -128,11 +124,9 @@ than staying relayed.
 overtakes a frame encrypted before it. **A frame is written once or not at all** —
 the implementation's send either consumes a message or throws, and a retry would
 put counted ciphertext on the wire twice. Overflowing
-`MAX_DIRECT_OUTBOUND_FRAMES` / `MAX_DIRECT_OUTBOUND_BYTES` disposes the session,
-as the receiver's hold does. **Each failure is reported in its own words**: this
-end's queue overrunning and the channel refusing a write are opposite diagnoses,
-and the reason is all an operator reading a burrow-loss log has to tell them
-apart.
+`MAX_DIRECT_PENDING_FRAMES` / `MAX_DIRECT_PENDING_BYTES` — the one pair both
+directions use — disposes the session, as the receiver's hold does. **Each failure is reported in its own words** — a
+queue overrun and a refused write are opposite diagnoses in a burrow-loss log.
 
 **The switch preserves order per direction:**
 
@@ -210,6 +204,12 @@ Reserved: a `capabilities` field on the client hello (what the client can render
 ## Directory (the phone's picker)
 
 `directory.watch` subscribes to a live, lightweight listing of every pane — enough to render the picker and know which pane wants attention, without attaching. `DirectoryEntry` / `DirectorySnapshot` carry the terminal-only payload: identity, derived title, focus, semantic state, PTY liveness, and the `ringing` / `hasTODO` badges. Nothing else — thumbnails are staged.
+
+Reserved: **`paneRef` is set to the same value as `surfaceId`** and no Client
+reads it — it becomes the Pane handle when `window.watch` lands ([Future](#future),
+The Window), so a Burrow keeps setting it. **`focused` and `exitCode` likewise
+have no Client reader today**, produced for picker affordances the phone does
+not render yet.
 
 **Snapshot-only, never deltas**: on any change the Burrow coalesces (150ms window, `DIRECTORY_DEBOUNCE_MS`) and resends the whole listing. (rationale)
 

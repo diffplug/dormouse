@@ -162,11 +162,6 @@ export async function saveSession(
   sink?: SaveSink,
   options: SaveOptions = {},
 ): Promise<void> {
-  // Gate the work, not just the write. Building the record costs a cwd probe —
-  // on standalone a synchronous process scan in the sidecar — and a host that
-  // persists nothing would spend it on every debounced save, every 30s
-  // heartbeat, and twice more per quit, only for `saveState` to drop the result.
-  if (platform.persistsSession === false) return;
   const previous = sink ? sink.previous() : readPersistedSession(platform.getState());
   const session = await buildPersistedSession(platform, panes, doors, lathLayout, surfaceRefs, surfaceRefsNext, previous, options);
   if (sink) sink.publish(session);

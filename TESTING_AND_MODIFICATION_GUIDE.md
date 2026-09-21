@@ -217,7 +217,7 @@ the heading, and the rule gets a `(rationale)` marker.
 | Persistence and restore | `lib/src/lib/window-session-aggregator.ts`, `standalone/src/window-restore.ts`, Rust `save_session` etc. | `standalone.md` → Persistence; `transport.md` |
 | `dor workspace` verbs, `dor list` | `dor/src/commands/workspace.ts`, `list.ts`, `dor/src/protocol.ts`, `dor/src/control-client.ts`, `dor/src/commands/types.ts`; window handler `lib/src/components/wall/workspace-control.ts`; router `dor-control-router.ts` | `dor-cli.md` → dor workspace, Standalone, Handle Model |
 | Platform hooks the stack added | `onPtyMarked`, `transferWorkspace` on `PlatformAdapter` (`lib/src/lib/platform/types.ts`), implemented in `standalone/src/tauri-adapter.ts` and `browser-sidecar-adapter.ts` | `transport.md` |
-| Browser harness | `standalone/scripts/dev-agent-browser.mjs` (`invokeMap`, `fireAndForget`), `browser-sidecar-adapter.ts` | `transport.md` → Standalone browser-dev harness |
+| Browser harness | `standalone/scripts/dev-agent-browser.mjs` (`invokeMap`, `fireAndForget`), `browser-sidecar-adapter.ts` | `standalone.md` → Standalone browser-dev harness |
 
 ## 7. Rules that bite
 

@@ -9,7 +9,6 @@ import { beginPromotion, cancelPromotion, closeHelperParent, finishPromotion, ge
 import { isHelperSession } from '../lib/terminal-store';
 import { useRef, useState, useEffect, useCallback, useMemo, useSyncExternalStore, lazy, Suspense, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
-import { clsx } from 'clsx';
 import { Baseboard } from './Baseboard';
 import { revealWorkspaceTab, workspaceTabElement } from './workspace-tab-elements';
 import { collapseWorkspace, restoreWorkspaceMotion, workspaceIsCollapsed } from './workspace-motion';
@@ -275,7 +274,6 @@ export function Wall({
   onEvent,
   baseboardNotice,
   dialogHost,
-  showBaseboard = true,
   enableBurrow = false,
   workspaceId,
   active = true,
@@ -287,10 +285,8 @@ export function Wall({
    * Host-provided modal host(s) (e.g. the standalone teardown dialog), mounted
    * beside the built-in modal hosts inside the Wall's `DialogKeyboardContext`
    * provider, so one may suppress command-mode keyboard dispatch while visible.
-   * Unlike `baseboardNotice`, this renders regardless of `showBaseboard`.
    */
   dialogHost?: ReactNode;
-  showBaseboard?: boolean;
   /**
    * Opt in to the Burrow (the "Pocket" pairing seam). Only the
    * standalone desktop/sidecar runtime sets this; the website playground and
@@ -1019,14 +1015,15 @@ export function Wall({
     [lath],
   );
 
-  /** The members whose live document a move between Windows cannot carry. */
-  const iframeSurfaceIds = useCallback(
+  /** The members whose live document a move between Windows cannot carry, by
+   *  the ref a `dor` caller can act on. */
+  const iframeSurfaceRefs = useCallback(
     (): string[] => memberSurfaceIds().filter((id) => {
       const params = lath.getMeta(id)?.params;
       return (isBrowserParams(params) || (isToolParams(params) && browserUrlFromParams(params) !== null))
         && resolveRenderMode(params) === 'iframe';
-    }),
-    [lath, memberSurfaceIds],
+    }).map(surfaceRefForId),
+    [lath, memberSurfaceIds, surfaceRefForId],
   );
 
   /** Whether a member Surface has a PTY behind it, as against a browser view. */
@@ -1705,6 +1702,8 @@ export function Wall({
         // withholds `render` / `port` / `key` — they live only in the `ok` arm — so
         // asking again is what gives an approved tool the config its dormouse.yml
         // declared, rather than silently running it as a keyless default iframe.
+        // `resolved.warnings` is not re-reported: the untrusted answer carried
+        // the same set to the `dor` that asked, and that process has exited.
         const cwd = typeof meta?.params?.cwd === 'string' ? meta.params.cwd : pending.projectRoot;
         const resolved = await platform.toolControl?.({ op: 'lookup', name: pending.name, cwd, args: pending.args });
         if (resolved?.status !== 'ok') {
@@ -1787,7 +1786,7 @@ export function Wall({
   const methods: Omit<WallHandle, 'workspaceId'> = {
     surfaceIds: memberSurfaceIds,
     ownsSurface,
-    iframeSurfaceIds,
+    iframeSurfaceRefs,
     hasTouchedSurfaces: () => memberSurfaceIds().some((id) => {
       // A browser Surface has no "untouched" notion and always holds a page, so
       // it counts; so does a Tool, before its terminal exists to be asked. A
@@ -1873,6 +1872,11 @@ export function Wall({
 
   useEffect(() => {
     const reveal = (event: Event) => {
+      // A hidden Wall answers no window event: mounting the context here would
+      // put chrome on screen nobody asked for and refit a detached element
+      // (docs/specs/layout.md → "Workspaces"). The pin that raised this event
+      // was clicked in the visible Wall, so only that Wall may answer it.
+      if (!activeRef.current) return;
       const { surfaceId } = (event as CustomEvent<{ surfaceId: string }>).detail;
       const meta = lath.getMeta(surfaceId);
       if (!meta || !isToolParams(meta.params)) return;
@@ -2262,12 +2266,10 @@ export function Wall({
   }, [lath, fireEvent, selectPane]);
 
   // Drop of a pane onto the baseboard zone: minimize it (captures the token + selects
-  // the door, exactly like the header minimize button). No-op when the Baseboard is
-  // hidden — there is nowhere for a below-wall release to minimize into.
+  // the door, exactly like the header minimize button).
   const onProposeMinimize = useCallback((id: string) => {
-    if (!showBaseboard) return;
     minimizePane(id);
-  }, [minimizePane, showBaseboard]);
+  }, [minimizePane]);
 
   // A Door received a press in the baseboard — hand its item + press point to LathHost,
   // which starts an inactive external drag and applies the threshold.
@@ -2310,10 +2312,10 @@ export function Wall({
           <WindowFocusedContext.Provider value={windowFocused}>
           <DialogKeyboardContext.Provider value={acquireDialogKeyboard}>
           <div className="flex-1 min-h-0 flex flex-col bg-app-bg text-app-fg font-sans overflow-hidden">
-            {/* The tiling area — 2px bottom inset keeps rounded panes distinct from the baseboard when present. */}
+            {/* The tiling area — 2px bottom inset keeps rounded panes distinct from the baseboard. */}
             {/* 1.75 = PANE_GUTTER_PX (7px) in design.tsx — keep in sync. */}
-            <div className={clsx('flex-1 min-h-0 relative px-1.75 pt-1.75', showBaseboard ? 'pb-0.5' : 'pb-1.75')}>
-              <div className={clsx('absolute inset-x-1.75 top-1.75', showBaseboard ? 'bottom-0.5' : 'bottom-1.75')}>
+            <div className="flex-1 min-h-0 relative px-1.75 pt-1.75 pb-0.5">
+              <div className="absolute inset-x-1.75 top-1.75 bottom-0.5">
                 <LathHost
                   lath={lath}
                   onCommitResize={onCommitResize}
@@ -2328,15 +2330,13 @@ export function Wall({
               </div>
             </div>
 
-            {/* Baseboard — always visible in the main shell; embedders may suppress it for constrained mobile prototypes. */}
-            {showBaseboard ? (
-              <Baseboard
-                items={doorChips}
-                onReattach={handleReattach}
-                notice={baseboardNotice}
-                onDoorDragStart={onDoorDragStart}
-              />
-            ) : null}
+            {/* Baseboard — always present; the mobile composition is `MobileWall`, not a baseboard-less Wall. */}
+            <Baseboard
+              items={doorChips}
+              onReattach={handleReattach}
+              notice={baseboardNotice}
+              onDoorDragStart={onDoorDragStart}
+            />
 
             {/* Kill confirmation overlay — centered over the pane being killed.
                 Gated on `active` with the modal hosts below: its Escape trap is

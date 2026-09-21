@@ -8,6 +8,10 @@
  * all the detection ever needed (docs/specs/vscode.md -> "Capturing agent
  * recovery", docs/specs/standalone.md -> "Agent recovery").
  *
+ * The gesture is always `^C` written *into* the pty, never a signal: the tty
+ * line discipline delivers the SIGINT to the foreground process group, so the
+ * hint comes back as ordinary PTY output on the path the host already reads.
+ *
  * The scrollback read here never leaves this module: only the detected
  * invocation reaches `onCommand`, so no transcript can reach persisted state.
  */
@@ -17,6 +21,10 @@ import { stripTerminalControls } from '../lib/terminal-controls';
 
 // Claude's explicit request permits an immediate second press. Other panes
 // without a recovery hint must pass both fallback clocks below before retrying.
+//
+// Keying on an English UI string is deliberate, not an oversight: claude could
+// reword it, and that failure is visible and costs one shutdown's claude
+// recovery, where a mistimed second press destroys codex's hint every time.
 const ASKS_FOR_SECOND_PRESS = /Press Ctrl-C again/i;
 
 // When to press a silent pane again without having been asked.

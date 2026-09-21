@@ -11,7 +11,7 @@
 
 **Must pin locally packed core/auth packages through root pnpm overrides and commit archives, provenance, and lockfile together.** `vendor/build.json` records the source commit, dirty state, and archive hashes. No runtime import depends on a sibling checkout. The auth migrations remain owned by the package.
 
-Source of truth: `auth` in `hosted/server/worker.ts`; `workerApp` in `hosted/server/worker-app.ts`; `migrations` in `hosted/server/migrations.ts`; `scripts/sync-pgstencil.mjs`.
+Source of truth: `auth` in `hosted/server/worker.ts`; `workerApp` in `hosted/server/worker-app.ts`; `migrations` in `hosted/server/migrations.ts`; `scripts/sync-pgstencil.mjs`. Pinned by `hosted/server/tests/artifacts.test.ts`.
 
 ## Identity and login
 
@@ -35,7 +35,7 @@ Source of truth: `hosted/server/providers.js`; `authPolicy` / `providerBindings`
 
 **Must check the account on return to the page and serialize submitted actions.** Authenticated data remains in memory; login tokens never enter local storage. Only public identity fields are rendered, without provider images or external assets.
 
-**Must inherit Dormouse product theme tokens before mounting React.** The OS light/dark preference selects bundled Light Visual Studio or Kimbie Dark. Hosted uses a narrow single-column form, 44px controls, 16px inputs, and 13px body copy; its page heading is 18px. It loads no marketing styles, fonts, or analytics.
+**Must inherit Dormouse product theme tokens before mounting React.** The OS light/dark preference selects bundled Light Visual Studio or Kimbie Dark. Its type scale and touch sizing are in `hosted/src/style.css`. It loads no marketing styles, fonts, or analytics.
 
 Source of truth: `App` in `hosted/src/App.tsx`; `restoreTheme` in `hosted/src/main.tsx`; `hosted/src/style.css`.
 
@@ -43,7 +43,7 @@ Source of truth: `App` in `hosted/src/App.tsx`; `restoreTheme` in `hosted/src/ma
 
 **Must run local development with `dor ensure -- pnpm dev:hosted` inside Dormouse.** A single loopback origin serves Vite and Node auth, with a disposable development database. Host, Origin, and Fetch Metadata checks guard the local captured-email inbox; the production entry imports no inbox or test-control handler.
 
-**Must verify the production Worker bundle and run the consumer's integration suite before release.** `pnpm test:hosted` needs Docker; root `pnpm test` skips it. The test entry alone injects the packed Better Auth deterministic module. Simulated callbacks do not certify provider registrations; production acceptance requires real browser login with each enabled provider and email delivery.
+**Must verify the production Worker bundle and run the consumer's integration suite before release.** Root `pnpm test` runs the `hosted/scripts/*.test.mjs` deploy suites; `pnpm test:hosted`'s vitest half needs Docker and is skipped there. The test entry alone injects the packed Better Auth deterministic module. Simulated callbacks do not certify provider registrations; production acceptance requires real browser login with each enabled provider and email delivery.
 
 **Must keep production, test, and preview databases and credentials separate.** The development and preview entries are email-only. Production configuration and operator steps live in `hosted/README.md`.
 
@@ -63,9 +63,9 @@ Source of truth: `touchesHosted` in `hosted/scripts/changed.mjs`; `.github/workf
 
 ## Production releases
 
-**Must deploy only manually selected main revisions after Hosted tests/build and accepted clean package provenance.** Preflight checks archive hashes, uncached Hyperdrive, matching migration/runtime database identity with distinct roles, and required Worker secret names. Back up, encrypt, decrypt, and restore-test before applying migrations; upload only the encrypted archive. Production has no public candidate URL.
+**Must deploy only manually selected main revisions after Hosted tests/build and accepted clean package provenance.** `verifyPackages` checks the archive hashes; preflight checks uncached Hyperdrive, matching migration/runtime database identity with distinct roles, and required Worker secret names. Back up, encrypt, decrypt, and restore-test before applying migrations; upload only the encrypted archive. Production has no public candidate URL.
 
-**Must record an immutable annotated hosted/YYYY-MM-DD tag only after live verification.** Dates use America/Los_Angeles; later deployments use numeric `--r2`, `--r3` suffixes. Tags identify the deployed commit and verification run/attempt. Tag retries are idempotent; redeployments get new tags. Code rollback never reverses migrations.
+**Must record an immutable annotated hosted/YYYY-MM-DD tag only after live verification.** Tags identify the deployed commit and verification run/attempt; retries are idempotent and redeployments get new tags. Dating and repeat-deployment suffixes: `recordDeployment`. Code rollback never reverses migrations.
 
 Source of truth: `.github/workflows/hosted-production.yml`; `verifyPackages` / `preflight` in `hosted/scripts/production.mjs`; `hosted/scripts/production-backup.mjs`; `recordDeployment` in `hosted/scripts/production-tag.mjs`. Pinned by `hosted/scripts/production.test.mjs` and `hosted/scripts/production-tag.test.mjs`.
 

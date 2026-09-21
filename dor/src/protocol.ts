@@ -97,21 +97,24 @@ export function spansWorkspaces(method: string, params?: Record<string, unknown>
 export interface ParsedWorkspaceRef {
   /** The target as written, trimmed — what an error message quotes back. */
   target: string;
-  /** 1-based strip position when the ref reads as a number, else null. */
-  position: number | null;
-  /** The Workspace name it reads as otherwise; empty when it is positional. */
+  /** The number the ref reads as, else null. What that number *means* is the
+   *  resolving host's business: a registry host matches it against the
+   *  Workspace's minted id, a host without one falls back to the strip
+   *  position. Named for the reading, not for either resolution. */
+  number: number | null;
+  /** The Workspace name it reads as otherwise; empty when it is numeric. */
   name: string;
 }
 
-const POSITIONAL_WORKSPACE_REF = /^[1-9]\d*$/;
+const NUMERIC_WORKSPACE_REF = /^[1-9]\d*$/;
 
 /** Split a `workspace:<n|name>` target into its readings. A ref that reads as a
- *  number is positional, never a name. */
+ *  number is a number, never a name. */
 export function parseWorkspaceRef(ref: string): ParsedWorkspaceRef {
   const target = ref.trim();
   const bare = (target.startsWith('workspace:') ? target.slice('workspace:'.length) : target).trim();
-  const positional = POSITIONAL_WORKSPACE_REF.test(bare);
-  return { target, position: positional ? Number(bare) : null, name: positional ? '' : bare };
+  const numeric = NUMERIC_WORKSPACE_REF.test(bare);
+  return { target, number: numeric ? Number(bare) : null, name: numeric ? '' : bare };
 }
 
 /** A control request as it travels over a transport, correlated by `requestId`. */

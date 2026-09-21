@@ -16,11 +16,13 @@ export interface WallHandle {
   /** The Wall's member Surfaces: visible panes ∪ Doors. */
   surfaceIds(): string[];
   ownsSurface(id: string): boolean;
-  /** Member Surfaces rendered as plain iframes, Doored ones included: the page
-   *  state a move between Windows destroys (`docs/specs/layout.md` →
-   *  Workspaces). Agent-browser Surfaces are not among them — their session
-   *  lives in the host and reconnects. */
-  iframeSurfaceIds(): string[];
+  /** Member Surfaces rendered as plain iframes, Doored ones included, as their
+   *  Workspace-stable `surface:N` refs: the page state a move between Windows
+   *  destroys (`docs/specs/layout.md` → Workspaces). Refs, not internal ids,
+   *  because the refusal naming them is read by a `dor` caller. Agent-browser
+   *  Surfaces are not among them — their session lives in the host and
+   *  reconnects. */
+  iframeSurfaceRefs(): string[];
   /** Any member terminal Session the user has typed into (the close confirmation
    *  gate, alongside `runningCount`). */
   hasTouchedSurfaces(): boolean;
@@ -89,7 +91,7 @@ export function stubWallHandle(workspaceId: WorkspaceId, overrides: Partial<Wall
     workspaceId,
     surfaceIds: () => [],
     ownsSurface: () => false,
-    iframeSurfaceIds: () => [],
+    iframeSurfaceRefs: () => [],
     hasTouchedSurfaces: () => false,
     runningCount: () => 0,
     enterSelectedPane: () => {},

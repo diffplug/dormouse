@@ -11,14 +11,15 @@
  * The spec the cases plant into is chosen at run time: one with a rationale
  * file, no `## Future` (a planted heading must not land after the fold), and
  * the most room under its word budget, so a case cannot go red for the budget
- * instead of for its check. Check 15 (a large spec needs a rationale file) is
- * a number, not a pattern, and cannot be planted without also tripping the
- * structural checks, so it is not here. `scripts/lint-kit.mjs` owns the
- * edit-and-restore. Valid-form cases also keep optional navigation maps
- * compatible with targeted implementation pointers.
+ * instead of for its check. Check 17's case needs a spec that is *not* a
+ * security spec, which headroom alone cannot promise, so it picks the same way
+ * from the specs that qualify. Check 15 is a number rather than a pattern: its
+ * case removes a paired rationale file instead of planting text.
+ * `scripts/lint-kit.mjs` owns the edit-and-restore. Valid-form cases also keep
+ * optional navigation maps compatible with targeted implementation pointers.
  */
 
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
@@ -26,14 +27,24 @@ import { makeSelftest, readRepoFile, repoRoot } from './lint-kit.mjs';
 import { countWords } from './spec-md.mjs';
 
 const budgets = JSON.parse(readRepoFile('scripts/spec-word-budgets.json'));
-const SPEC = readdirSync(join(repoRoot, 'docs/specs'))
+const BY_HEADROOM = readdirSync(join(repoRoot, 'docs/specs'))
   .filter((f) => f.endsWith('.md') && !f.endsWith('.rationale.md'))
   .map((f) => `docs/specs/${f}`)
   .filter((f) => existsSync(join(repoRoot, f.replace(/\.md$/, '.rationale.md'))))
   .filter((f) => !/^##\s+(?:\d+\.\s*)?Future\s*$/m.test(readRepoFile(f)))
   .map((f) => [f, budgets[f] - countWords(readRepoFile(f))])
-  .sort((a, b) => b[1] - a[1])[0][0];
+  .sort((a, b) => b[1] - a[1])
+  .map(([f]) => f);
+const SPEC = BY_HEADROOM[0];
+const NON_SECURITY_SPEC = BY_HEADROOM.find((f) => !/\/security[a-z-]*\.md$/.test(f));
+assert.ok(NON_SECURITY_SPEC, 'check 17 needs a non-security spec to plant into');
 const RATIONALE = SPEC.replace(/\.md$/, '.rationale.md');
+// Check 15 pairs a root-level spec with a root-level rationale; removing that
+// file is the only way to plant the defect it exists to catch. Asserted
+// present first: deleting what is already gone would "hold" while proving
+// nothing.
+const ROOT_RATIONALE = 'SELF_HOST.rationale.md';
+assert.ok(existsSync(join(repoRoot, ROOT_RATIONALE)), `check 15 needs ${ROOT_RATIONALE} to remove`);
 const SOURCE = 'standalone/scripts/clean-dev-sidecar.mjs'; // a comment appended here disturbs nothing
 // Assembled at runtime so this file's own planted citations are invisible to
 // the citation check, which scans every tracked source file, this one included.
@@ -52,6 +63,7 @@ const CASES = [
   ['check 13: a citation of a spec that does not exist', SOURCE, `\n// ${spec('no-such-spec.md')} -> "Heading"\n`],
   ['check 13: an unbackticked citation of a missing spec, from a spec', SPEC, `\nSee ${spec('no-such-spec.md')} -> "Heading" for more.\n`],
   ['check 14: a rule stated in a rationale file', RATIONALE, '\n**Never plant rules here.**\n'],
+  ['check 17: an audited rule outside a security spec', NON_SECURITY_SPEC, '\n- **FAIL IF** this rule is audited by nobody.\n'],
 ];
 
 const selftest = makeSelftest('spec-lint.mjs', '.spec-selftest.bak');
@@ -79,6 +91,12 @@ console.log('spec-lint-selftest: OK (Files / Code Map coexist with pointers; par
 for (const [name, target, text] of CASES) {
   selftest.withAppended(target, text, `${name}\n      planting this in ${target} stays green — spec-lint cannot see it`);
 }
+
+selftest.withMutation(
+  ROOT_RATIONALE,
+  (path) => rmSync(path, { force: true }),
+  `check 15: a large root-level spec with no rationale file\n      removing ${ROOT_RATIONALE} stays green — spec-lint cannot see it`,
+);
 
 // Check 16's failures need separate mutations so one ownership diagnostic
 // cannot hide another one regressing.

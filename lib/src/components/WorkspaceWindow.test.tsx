@@ -701,7 +701,7 @@ it.each([
 });
 
 it('routes Tools to the requested Workspace and never launches after lookup races closure', async () => {
-  const lookup = { status: 'untrusted' as const, projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'storybook', run: 'pnpm storybook', upstreamUrl: null };
+  const lookup = { status: 'untrusted' as const, projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'storybook', run: 'pnpm storybook', upstreamUrl: null, warnings: [] };
   const gate = Promise.withResolvers<typeof lookup>();
   const toolControl = vi.fn().mockResolvedValueOnce(lookup).mockImplementationOnce(() => gate.promise);
   Object.assign(fake, { toolControl });

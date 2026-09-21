@@ -32,6 +32,13 @@ export const DOOR_TAB_CLASS = clsx(
   TERMINAL_TOP_RADIUS_CLASS,
 );
 
+/** The `max-w-` / `h-` bounds of `DOOR_TAB_CLASS`, for the host code that has to
+ *  reason about a tab's size without a rendered element (the cross-window tab
+ *  drag). Tailwind needs the arbitrary values spelled literally above, so these
+ *  two are a mirror — keep them in sync. */
+export const DOOR_TAB_MAX_WIDTH_PX = 220;
+export const DOOR_TAB_HEIGHT_PX = 24;
+
 /** The surface an alarm inset is drawn on, which is what picks its token: each
  *  `--color-alarm-vs-*` is contrast-picked against one background. */
 export type AlertRingGround = 'door' | 'header-active' | 'header-inactive';

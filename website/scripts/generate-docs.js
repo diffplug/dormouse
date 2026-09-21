@@ -8,11 +8,10 @@
  * /docs/dor does not ship the agent skill along with it.
  *
  * The guide half of this pipeline has no page of its own right now (see
- * docs/specs/website-docs.md -> Canonical product guide). It is kept whole and
- * still runs on every build, because the guide's media sync is what puts
+ * docs/specs/website-docs.md -> Canonical product guide), so it is parsed and
+ * validated on every build but not written: the media sync is what puts
  * vscode-ext/images/ on dormouse.sh, where the packaged Marketplace listing
- * loads its images from, and because the guide data is what a future page
- * would render.
+ * loads its images from, and the lint reads the parsed guide in memory.
  *
  * Wired into website `predev` / `pretest` / `prebuild`, mirroring
  * generate-changelog.js.
@@ -730,8 +729,8 @@ async function buildCli(skill) {
 
   // Emitted, not assembled in the page: every docs page reads `toc` off its own
   // data file, so the table of contents has one owner for all three. The
-  // commands nest one level down, so the rail shows this page as four entries
-  // rather than fourteen.
+  // commands nest one level down, so the rail shows this page as a handful of
+  // top-level entries rather than one per command.
   const entry = ({ id, title }) => ({ id, text: title, children: [] });
   const toc = [
     ...intro.map(entry),
@@ -750,13 +749,37 @@ async function buildCli(skill) {
   };
 }
 
+/**
+ * An assertion, not a rewrite: the skill ships inside an installed CLI and must
+ * stay self-contained, so it names no website URL at all
+ * (docs/specs/website-docs.md -> `/docs/agent-skill` guide). Running
+ * `localizeSiteLinks` over it would quietly repair a violation instead of
+ * reporting it — and buildCli lifts these same block objects, so a site URL
+ * here would reach /docs/dor too.
+ *
+ * Exported so a test can feed it a violating block tree: `dor/skill.md` is
+ * clean, so nothing else ever drives this check red.
+ */
+export function assertNoSiteLinks(blocks, source) {
+  const siteLinks = [];
+  visit(blocks, (node) => {
+    if (node.type === 'link' && node.href && node.href.startsWith(`${SITE_ORIGIN}/`)) {
+      siteLinks.push(node.href);
+    }
+  });
+  if (siteLinks.length > 0) {
+    throw new Error(
+      `${source} links to ${SITE_ORIGIN}: ${siteLinks.join(', ')} — the bundled skill must ` +
+      'stay version-matched to its own CLI rather than pointing at the latest website',
+    );
+  }
+}
+
 async function buildSkill() {
   const markdown = await readFile(join(repoRoot, 'dor', 'skill.md'), 'utf8');
   const parsed = parseMarkdown(markdown, { slug: createSlugger() });
-  // Before buildCli lifts its intro sections out of these same block objects,
-  // so /docs/dor inherits the rewrite rather than needing its own.
-  const localizedLinks = localizeSiteLinks(parsed.blocks);
-  return { source: 'dor/skill.md', blocks: parsed.blocks, headings: parsed.headings, localizedLinks };
+  assertNoSiteLinks(parsed.blocks, 'dor/skill.md');
+  return { source: 'dor/skill.md', blocks: parsed.blocks, headings: parsed.headings };
 }
 
 /**
@@ -823,11 +846,27 @@ export async function generateDocs() {
       source: skill.source,
       blocks: skill.blocks,
       headings: skill.headings,
-      localizedLinks: skill.localizedLinks,
       toc: buildToc(skill.headings.filter((h) => h.depth > 1)),
       references,
     },
   };
+}
+
+/**
+ * What the generator derives for its own assertions and for the summary below,
+ * and no page reads: `docs.security.json` alone shipped ~190 KB of it to the
+ * browser. Stripped at the write; the in-memory result the tests and
+ * `scripts/public-docs-lint.mjs` consume keeps every field.
+ */
+const BUILD_ONLY_FIELDS = ['delta', 'withheldLinks', 'repoLinks', 'localizedLinks'];
+
+/** The pages with a component; the guide has none (`Scope: guide-page-return`). */
+const PUBLISHED_PAGES = ['selfhost', 'security', 'cli', 'skill'];
+
+function publishable(value) {
+  const out = { ...value };
+  for (const field of BUILD_ONLY_FIELDS) delete out[field];
+  return out;
 }
 
 async function main() {
@@ -836,22 +875,22 @@ async function main() {
   // One file per page: importing a single combined module made every docs
   // route ship all three documents in one shared chunk.
   await Promise.all([
-    ...Object.entries(data).map(([name, value]) =>
-      writeFile(join(dataDir, `docs.${name}.json`), `${JSON.stringify(value, null, 2)}\n`, 'utf8'),
+    ...PUBLISHED_PAGES.map((name) =>
+      writeFile(join(dataDir, `docs.${name}.json`), `${JSON.stringify(publishable(data[name]), null, 2)}\n`, 'utf8'),
     ),
     syncGuideMedia(data.guide.media.available),
   ]);
   const { guide, selfhost, security, cli, skill } = data;
   const markdownPages = [guide, selfhost, security];
   console.log(
-    `Wrote docs data: guide ${guide.headings.length} headings, ` +
+    `Wrote docs data: guide ${guide.headings.length} headings (parsed, not written), ` +
       `self-host ${selfhost.headings.length} headings (${selfhost.delta.length} delta rules), ` +
       `security ${security.headings.length} headings (${security.delta.length} delta rules), ` +
       `cli ${cli.commands.length} commands + ${cli.intro.length} intro sections, ` +
       `skill ${Object.keys(skill.references).length} reference links, ` +
       `${guide.media.available.length} media file(s), ` +
       `${markdownPages.reduce((n, page) => n + page.repoLinks.length, 0)} link(s) sent to the repository, ` +
-      `${markdownPages.reduce((n, page) => n + page.localizedLinks.length, 0) + skill.localizedLinks.length} link(s) localized`,
+      `${markdownPages.reduce((n, page) => n + page.localizedLinks.length, 0)} link(s) localized`,
   );
 }
 

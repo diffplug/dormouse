@@ -92,8 +92,6 @@ export function attachTerminalMouseRouter({
   let suppressSyntheticMouseUntil = 0;
   // The most recent touch that ended as a tap (no drag), used to recognize a double-tap.
   let lastTouchTap: { time: number; x: number; y: number } | null = null;
-  // True while the active drag is block-mode (Alt on desktop, double-tap on touch).
-  let dragBlock = false;
   // Set while we hold pointer capture for a mouse drag. Chromium delivers the
   // captured pointerup across the iframe boundary even when the button is
   // released over the host page, which lets us finalize an outside release at
@@ -129,7 +127,10 @@ export function attachTerminalMouseRouter({
       consumePointerEvent(ev, true);
       terminal.focus();
     }
-    if (ev.button !== 0 && !suppressNativeMouse) return true;
+    // Only the primary button can begin a selection — and a non-primary press
+    // must leave no pendingDrag behind, or its release would read as the paired
+    // click that ends a temporary override (spec §2).
+    if (ev.button !== 0) return true;
     pendingDrag = {
       row: cell.row,
       col: cell.col,
@@ -157,14 +158,14 @@ export function attachTerminalMouseRouter({
       const dy = ev.clientY - pendingDrag.clientY;
       if (dx * dx + dy * dy < DRAG_THRESHOLD_PX_SQ) return;
       // Touch has no Alt to read mid-drag, so its double-tap block mode latches
-      // for the whole drag; desktop Alt stays live (see onAltChange). A tap can
+      // on the selection for the whole drag; desktop Alt stays live. A tap can
       // no longer chain into the next press once a drag has begun.
-      dragBlock = pendingDrag.block;
       lastTouchTap = null;
       beginDrag(id, {
         row: pendingDrag.row,
         col: pendingDrag.col,
-        altKey: pendingDrag.altKey || pendingDrag.block,
+        altKey: pendingDrag.altKey,
+        blockLatched: pendingDrag.block,
         startedInScrollback: pendingDrag.startedInScrollback,
       });
       terminal.clearSelection();
@@ -172,7 +173,7 @@ export function attachTerminalMouseRouter({
     }
     if (!isDragging(id)) return;
     const cell = computeCell(ev);
-    updateDrag(id, { row: cell.row, col: cell.col, altKey: ev.altKey || dragBlock });
+    updateDrag(id, { row: cell.row, col: cell.col, altKey: ev.altKey });
     const suppressNativeMouse = stateRequiresNativeMouseSuppression(getMouseSelectionState(id));
     if (!consumed) consumePointerEvent(ev, suppressNativeMouse || isNonMousePointerEvent(ev));
 
@@ -205,7 +206,6 @@ export function attachTerminalMouseRouter({
     if (!isDragging(id)) return;
     const suppressNativeMouse = stateRequiresNativeMouseSuppression(getMouseSelectionState(id));
     endDrag(id);
-    dragBlock = false;
     setHintToken(id, null);
     const sel = getMouseSelectionState(id).selection;
     setSelectionBaseline(sel ? extractSelectionText(terminal, sel) : null);
@@ -336,7 +336,6 @@ export function attachTerminalMouseRouter({
     if (activePointerId !== ev.pointerId) return;
     pendingDrag = null;
     activePointerId = null;
-    dragBlock = false;
     setSelection(id, null);
     setHintToken(id, null);
     consumePointerEvent(ev, true);
@@ -349,7 +348,7 @@ export function attachTerminalMouseRouter({
 
   const onAltChange = (ev: KeyboardEvent) => {
     if (!isDragging(id)) return;
-    setDragAlt(id, ev.altKey || dragBlock);
+    setDragAlt(id, ev.altKey);
   };
 
   element.addEventListener('mousedown', onMouseDown, true);

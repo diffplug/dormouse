@@ -42,6 +42,7 @@ import { TouchUiContext } from './touch-ui-context';
 import { AlertRingInset, alertRingRow, useAlertRingBurst } from './alert-ring';
 import type { AlertEpisode } from '../lib/alert-episode';
 import type { SessionStatus } from '../lib/terminal-registry';
+import type { MouseTrackingMode, OverrideState } from '../lib/mouse-selection';
 
 export type MobileTerminalKeyboardMode = 'sessions' | 'recent' | 'type' | 'draft';
 export type MobileTerminalTouchMode = 'gestures' | 'selection' | 'cursor';
@@ -86,6 +87,24 @@ const KEYBOARD_MODES: Array<{ id: MobileTerminalKeyboardMode; label: string; Ico
   { id: 'draft', label: 'Draft', Icon: ArticleNyTimesIcon },
 ];
 
+/**
+ * The mouse override one pane gets, from the global touch mode and that pane's
+ * *own* mouse reporting.
+ *
+ * A pure function rather than each consumer's own conditional: touch mode is
+ * one UI state for the whole wall, so every mounted pane has to be reconfigured
+ * on a change — a pane switched away from that kept `permanent` would swallow
+ * the inner program's mouse input for as long as it stayed mounted. Both
+ * compositions call it in a loop over their panes
+ * (`docs/specs/mobile-terminal-ui.md` -> "Touch mode selector").
+ */
+export function paneMouseOverride(
+  touchMode: MobileTerminalTouchMode,
+  reporting: MouseTrackingMode,
+): OverrideState {
+  return touchMode === 'selection' && reporting !== 'none' ? 'permanent' : 'off';
+}
+
 const TOUCH_MODES: Array<{
   id: MobileTerminalTouchMode;
   label: string;
@@ -100,9 +119,6 @@ const TOUCH_MODES: Array<{
 
 export interface MobileTerminalUiProps {
   terminal: ReactNode;
-  activeSection?: MobileTerminalKeyboardMode;
-  defaultSection?: MobileTerminalKeyboardMode;
-  onSectionChange?: (section: MobileTerminalKeyboardMode) => void;
   activeKeyboardMode?: MobileTerminalKeyboardMode;
   defaultKeyboardMode?: MobileTerminalKeyboardMode;
   onKeyboardModeChange?: (mode: MobileTerminalKeyboardMode) => void;
@@ -459,11 +475,8 @@ class RetrySchedule {
 
 export function MobileTerminalUi({
   terminal,
-  activeSection,
-  defaultSection = 'type',
-  onSectionChange,
   activeKeyboardMode,
-  defaultKeyboardMode,
+  defaultKeyboardMode = 'type',
   onKeyboardModeChange,
   activeTouchMode,
   defaultTouchMode = 'gestures',
@@ -482,10 +495,9 @@ export function MobileTerminalUi({
   style,
 }: MobileTerminalUiProps) {
   useDynamicPalette();
-  const resolvedDefaultKeyboardMode = defaultKeyboardMode ?? defaultSection;
-  const [internalKeyboardMode, setInternalKeyboardMode] = useState<MobileTerminalKeyboardMode>(resolvedDefaultKeyboardMode);
+  const [internalKeyboardMode, setInternalKeyboardMode] = useState<MobileTerminalKeyboardMode>(defaultKeyboardMode);
   const [internalTouchMode, setInternalTouchMode] = useState<MobileTerminalTouchMode>(defaultTouchMode);
-  const keyboardMode = activeKeyboardMode ?? activeSection ?? internalKeyboardMode;
+  const keyboardMode = activeKeyboardMode ?? internalKeyboardMode;
   const touchMode = activeTouchMode ?? internalTouchMode;
   const terminalHostRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -567,17 +579,14 @@ export function MobileTerminalUi({
   }, [blurRetries, configurePaneTextInputs, focusRetries]);
 
   const setKeyboardMode = useCallback((nextMode: MobileTerminalKeyboardMode) => {
-    if (activeKeyboardMode === undefined && activeSection === undefined) {
-      setInternalKeyboardMode(nextMode);
-    }
+    if (activeKeyboardMode === undefined) setInternalKeyboardMode(nextMode);
     onKeyboardModeChange?.(nextMode);
-    onSectionChange?.(nextMode);
     if (nextMode === 'type') {
       focusInput();
     } else {
       blurInput();
     }
-  }, [activeKeyboardMode, activeSection, blurInput, focusInput, onKeyboardModeChange, onSectionChange]);
+  }, [activeKeyboardMode, blurInput, focusInput, onKeyboardModeChange]);
 
   const setTouchMode = useCallback((nextMode: MobileTerminalTouchMode) => {
     if (nextMode === 'cursor' && !cursorTouchAvailable) return;

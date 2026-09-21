@@ -16,7 +16,7 @@
 
 **Why a relative path is a `ConfigError`.** `DORMOUSE_RUNTIME_FILE` and `DORMOUSE_ENROLL_TOKEN_FILE` come from the installer's `run-relay` wrapper, which a service manager launches with a working directory that is not the installer's — a relative value lands where neither side can predict. The same drift is why `DORMOUSE_POCKET_DIR` resolves from the compiled Relay's own location: a service manager could otherwise change what is served.
 
-**Why the runtime file sits outside the state dir.** It is runtime truth about one process — pid, port, release — not durable state a backup should capture and a restore replay.
+**Why the installers keep the runtime file outside the state dir.** It is runtime truth about one process — pid, port, release — not durable state a backup should capture and a restore replay.
 
 **Why a blank `PORT` is not zero.** `Number('')` is 0, which asks the OS for an ephemeral port and moves the Relay out from under whatever proxy is pointed at it — the same reason an explicit `PORT=0` is refused.
 

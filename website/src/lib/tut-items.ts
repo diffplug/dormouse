@@ -261,14 +261,3 @@ export const POCKET_TUTORIAL_PROFILE: TutorialProfile = {
   sections: POCKET_SECTIONS,
   initialSectionId: "gesture",
 };
-
-export const SECTIONS = DESKTOP_SECTIONS;
-
-export const ALL_ITEM_IDS: readonly ItemId[] = ITEM_IDS;
-
-export function itemSection(
-  id: ItemId,
-  sections: readonly Section[] = SECTIONS,
-): Section | undefined {
-  return sections.find((s) => s.items.some((i) => i.id === id));
-}

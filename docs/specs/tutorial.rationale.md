@@ -12,7 +12,7 @@
 
 ## Layout
 
-**Why the page restores its own theme.** Theme selection moved out of `SiteHeader` into the Wall's Settings dialog, so nothing on the page guarantees a picker ever mounts. `useRestoredTheme(POCKET_THEME_ID)` makes the restore unconditional, and declares the host fallback the Settings picker later re-resolves through.
+**Why the page restores its own theme.** Theme selection moved out of `SiteHeader` into the Wall's Settings dialog, so nothing on the page guarantees a picker ever mounts. `useRestoredTheme(WEBSITE_DEFAULT_THEME_ID)` makes the restore unconditional, and declares the host fallback the Settings picker later re-resolves through.
 
 **Why the desktop layout is an explicit Lath seed.** The synchronous `initialPaneIds` path creates its leaves before the later ones have measured geometry, so it cannot reliably choose alternating split axes — the L-shape comes out however the measurements land. A valid Lath snapshot fixes the shape, and with it the one vertical and one horizontal divider.
 
@@ -43,3 +43,5 @@
 ## Mouse and Clipboard Feature Coverage
 
 **What supplies the mouse-capturing text.** Both neighbor panes, `ascii-splash` and `changelog`; why `changelog` is also the copy target: [Layout](#layout).
+
+**Coverage audit, against `mouse-and-clipboard.md`'s section numbers as of 2026-09.** Exercisable: §§1–2 (mouse reporting + override), §§3.1–3.3 (drag, block shape, block hint), §§3.6–3.7 (drag keys + popup), §§4.1–4.3 (raw/rewrapped copy, shortcuts, dismissal). Partial: §3.4 exposes change/resize cancellation but not pure scroll; §3.5 lacks enough scrollback; §8.2 writes paste chords to the fake PTY, whose shell ignores bracket markers. Missing: §§3.3 and 5 lack smart tokens and therefore `e` extension; §8.5 lacks a scenario that enables bracketed paste. Auto-scroll during a drag and right-click paste are deferred in the implementation ([§9. Future](mouse-and-clipboard.md#9-future)), not Playground gaps.

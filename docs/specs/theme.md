@@ -6,8 +6,11 @@
 VS Code supplies `--vscode-*`; standalone, website, and Pocket use `applyTheme()`
 with bundled or installed themes — Pocket before first paint, including auth
 ([pocket-app.md](./pocket-app.md#design-system-and-theming) owns its
-browser-chrome sync). **Every path runs the same consumed-token resolver**
-(`lib/src/lib/themes/vscode-color-resolver.ts`) before rendering.
+browser-chrome sync). **Every shipping host runs the same consumed-token
+resolver** (`lib/src/lib/themes/vscode-color-resolver.ts`) before rendering.
+`pnpm dev:lib` is the one exception: `lib/src/main.tsx` installs the resolver
+only for a real webview and nothing on that path applies a theme, so the dev
+server renders with no `--vscode-*` at all.
 
 ## Surface hierarchy
 
@@ -22,11 +25,10 @@ foreground/background pairs and nothing else (rationale):
   unfocused headers.
 
 **Hierarchy is the background swap between pairs**; secondary text is alpha on
-the same pair's own foreground (`text-app-fg/70`), never a separate token. The
-rest is `DESIGN.md`'s: bg-only chrome, no pass-through `--mt-*` layer or one-off
-tokens, no `text-muted` inside a header — **use `hover:bg-current/10`** there,
-with the `text-alarm-vs-*` ringing tint and destructive-action error styling as
-the semantic exceptions.
+the same pair's own foreground (`text-app-fg/70`), never a separate token.
+`DESIGN.md`'s Do/Don't lists own the rest — bg-only chrome, **no pass-through
+`--mt-*` layer** or one-off tokens, header hover — with the `text-alarm-vs-*`
+ringing tint and destructive-action error styling as the semantic exceptions.
 
 **Never carry resting structure** with `surface-raised`, `border` (panel.border),
 `input-border`, or `muted` (descriptionForeground): themes may leave those unset,
@@ -91,9 +93,10 @@ cancel queued resolution on disposal.** Pinned by
 Dormouse uses them as solid header and Workspace-tab fills, so `applyTheme()` composites
 them over `sideBar.background` first (rationale).
 
-**A same-theme `applyTheme()` call is a no-op only while the expected inline
+**A same-*object* `applyTheme()` call is a no-op only while the expected inline
 `--vscode-*` variables, `color-scheme`, and the `vscode-light` / `vscode-dark` class are still on
-`document.body`**, and **ThemePicker re-restores in a layout effect after mount**
+`document.body`** — a fresh object for the same id re-applies, and the id
+comparison gates only the listener notification — and **ThemePicker re-restores in a layout effect after mount**
 — React Router document hydration can reconcile those writes away (rationale).
 
 Each layer declares its theme-dependent tokens twice: at document level
@@ -136,6 +139,13 @@ resolver materializes the VSCode terminal defaults first — when unset,
 inherits `terminal.foreground`, `terminal.selectionBackground` inherits
 `editor.selectionBackground`, and `terminal.foreground` takes VSCode's terminal
 foreground registry default.
+
+**`getTerminalTheme()` carries no per-key default** — `REGISTRY_DEFAULTS` is the
+one such table, and every shipping host materializes these keys first; an unset
+key is omitted so xterm.js applies its own. Two exceptions: the
+background/foreground pair, rostered under `DESIGN.md` → "Fixed Exceptions", and
+`cursor`, which falls back to the resolved foreground because **the three colors
+pushed to a DOM-less host must all be present** or the push is dropped whole.
 
 A `MutationObserver` re-reads these on class or style mutations of `body` or
 `html`, so applying a theme updates existing terminals. **Adapters must use the
@@ -207,15 +217,12 @@ playground navbar — carries none**.
 - **The picker renders the bundled default through hydration, then reconciles
   stored themes and selection in a layout effect** (rationale).
 - **Every candidate previews in its own palette**, resolved through
-  `resolveThemeVars`, the path `applyTheme` paints, so no preview shows a color
-  the app would not: the entry takes that theme's terminal foreground/background,
-  its swatch the active-header fill and the runtime's focus-ring pick
-  (rationale). Omissions resolve from the candidate's polarity, never the
-  document's, and **previewing neither applies a theme nor writes storage**.
+  `resolveThemeVars` — the path `applyTheme` paints, so no preview shows a color
+  the app would not (rationale). Omissions resolve from the candidate's
+  polarity, never the document's, and **previewing neither applies a theme nor
+  writes storage**.
 - **Must underline hover without visually marking selection**, preserving the
   candidate's palette.
-- **Fades appear only toward a direction still holding entries**, painted in the
-  active terminal background, updating on scroll, content, and resize.
 - **Chrome outside the previews styles itself in `--color-*` utilities.** A host
   rendering library JSX scans `lib/src` and imports `theme-colors.css`, or none
   of those utilities reach it (rationale). Controls *inside* one take
@@ -230,19 +237,15 @@ playground navbar — carries none**.
   every path re-resolving the active theme gets the same answer (rationale).
   **`useRestoredTheme()` latches it before its first restore and ahead of any
   child render** (rationale).
-- **Never use `window.confirm`** — no native dialog in app chrome at all
-  (`DESIGN.md` → "Don't"; rationale). Uninstalling is a single click, matching
-  `WatchedCommandList`'s remove control in the same dialog, and **the picker
-  row's `X` keeps a gap from the row's select target** (rationale).
+- Uninstalling is a single click (`DESIGN.md` → "Don't" bans `window.confirm`),
+  matching `WatchedCommandList`'s remove control in the same dialog, and **the
+  picker row's `X` keeps a gap from the row's select target** (rationale).
 - **`useAnchoredMenu` returns a dropdown's whole geometry; a caller never
-  re-implements placement beside it.** Dialog dropdowns take its measured,
-  viewport-clamped `fixed` strategy; `compact` takes `absolute`, which measures
-  only the trigger (rationale). Both prefer the requested `side`, flip to the roomier
-  side, and recompute their cap when the trigger, menu, or viewport changes.
-  **Must clamp and cap against the visual viewport when the browser exposes
-  it**, so mobile browser chrome and the on-screen keyboard stay outside the
-  menu's usable area.
-  They close on ancestor scroll and share dismissal with the Shell row. **The dialog owns
+  re-implements placement beside it** — dialog dropdowns on its `fixed`
+  strategy, `compact` on `absolute` (rationale). **Must clamp and cap against the visual
+  viewport when the browser exposes it**, so mobile browser chrome and the
+  on-screen keyboard stay outside the menu's usable area. Menus close on
+  ancestor scroll and share dismissal with the Shell row. **The dialog owns
   the open state** so `Escape` closes the menu first, which `ModalFrame`'s
   capture-phase handler would otherwise swallow.
 - **Heights follow the viewport, never a fixed pixel budget**: both surfaces cap

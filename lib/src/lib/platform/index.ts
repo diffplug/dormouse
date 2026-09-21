@@ -17,14 +17,15 @@ export {
 
 /**
  * Best available platform identifier from the browser. Prefers the
- * UA-Client-Hints `userAgentData.platform` (e.g. "macOS", "Windows"),
- * falling back to the legacy `navigator.platform`, then `userAgent`.
- * Empty string in non-browser environments. Computed once at module load.
+ * UA-Client-Hints `userAgentData.platform` (e.g. "macOS", "Windows"), falling
+ * back to the legacy `navigator.platform`, which every browser defines (as the
+ * empty string at worst). Empty string in non-browser environments. Computed
+ * once at module load.
  */
 export const PLATFORM_STRING: string = (() => {
   if (typeof navigator === 'undefined') return '';
   const nav = navigator as Navigator & { userAgentData?: { platform?: string } };
-  return nav.userAgentData?.platform ?? nav.platform ?? nav.userAgent ?? '';
+  return nav.userAgentData?.platform ?? nav.platform;
 })();
 
 /**

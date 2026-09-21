@@ -3,7 +3,6 @@
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { clsx } from 'clsx';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
-import { getPlatform } from '../../lib/platform';
 import { isEditableTarget } from '../../lib/dom';
 import type { RenderMode } from './agent-browser-screen';
 import { tabDisplayTitle } from './browser-url';
@@ -393,23 +392,10 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
           // Popped out to a headed OS window — the pane is a clean stub. While
           // the window is still being opened (a relaunch in flight, or an eager
           // swap whose daemon has not yet named its session) there is nothing to
-          // bring to front or pop back in, so the affordances wait with it.
+          // pop back in, so the affordance waits with it.
           <div className="flex flex-col items-center gap-3 px-4 text-center text-sm text-muted">
             <div>{!session || relaunching ? 'Opening the browser window…' : 'This browser is running in a separate window.'}</div>
             {session && !relaunching && <div className="flex gap-2 text-xs">
-              {getPlatform().agentBrowserBringToFront && (
-                <button
-                  type="button"
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    controller.bringToFront();
-                  }}
-                  className="rounded border border-border px-2.5 py-1 text-muted transition-colors hover:border-foreground hover:text-foreground"
-                >
-                  Bring to front
-                </button>
-              )}
               <button
                 type="button"
                 onMouseDown={(e) => e.stopPropagation()}

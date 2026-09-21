@@ -22,8 +22,6 @@ import {
   DIRECT_SETUP_TIMEOUT_MS,
   DirectCutover,
   DirectFrameQueue,
-  MAX_DIRECT_OUTBOUND_BYTES,
-  MAX_DIRECT_OUTBOUND_FRAMES,
   MAX_DIRECT_PENDING_BYTES,
   MAX_DIRECT_PENDING_FRAMES,
   MAX_DIRECT_SDP_LENGTH,
@@ -139,17 +137,7 @@ test('the send water marks bracket the queue they feed', () => {
   assert.equal(DIRECT_BUFFER_HIGH, 256 * 1024);
   assert.equal(DIRECT_BUFFER_LOW, 64 * 1024);
   assert.ok(DIRECT_BUFFER_LOW < DIRECT_BUFFER_HIGH);
-  assert.ok(DIRECT_BUFFER_HIGH < MAX_DIRECT_OUTBOUND_BYTES);
-});
-
-/**
- * A sender holds what a receiver holds. The window each covers is a burst of
- * the same terminal stream, so sizing them apart would mean one of the two
- * numbers had a reason the other did not.
- */
-test('both directions are bounded the same way', () => {
-  assert.equal(MAX_DIRECT_OUTBOUND_BYTES, MAX_DIRECT_PENDING_BYTES);
-  assert.equal(MAX_DIRECT_OUTBOUND_FRAMES, MAX_DIRECT_PENDING_FRAMES);
+  assert.ok(DIRECT_BUFFER_HIGH < MAX_DIRECT_PENDING_BYTES);
 });
 
 // --- The queue both directions use ------------------------------------------

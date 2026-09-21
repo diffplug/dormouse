@@ -2,31 +2,64 @@ import { Terminal } from '@xterm/xterm';
 import { registry } from './terminal-store';
 import type { TerminalColorProvider } from './terminal-protocol';
 
+/**
+ * The xterm `ITheme`, read straight off `body`'s resolved `--vscode-*`.
+ *
+ * No per-key hex defaults: `REGISTRY_DEFAULTS` in `themes/vscode-color-registry.ts`
+ * is the one table of what an unset VSCode color id resolves to, and every
+ * shipping host materializes these keys before a terminal renders
+ * (docs/specs/theme.md -> Terminal color contract). A second table here drifted
+ * from it — `#cccccc` against the registry's `#BBBBBB` for dark
+ * `editor-foreground` — and would have painted the terminal with the stale one.
+ *
+ * Background and foreground keep a last-resort pair anyway, because xterm.js
+ * needs two readable colors even in the one path that has no resolver behind it
+ * (`pnpm dev:lib`); the rest of the palette degrades to xterm's own defaults.
+ */
+const FALLBACK_BACKGROUND = '#1e1e1e';
+const FALLBACK_FOREGROUND = '#cccccc';
+
+/** xterm `ITheme` key -> the `--vscode-*` variable that fills it. */
+const ANSI_VARS: Record<string, string> = {
+  selectionBackground: '--vscode-terminal-selectionBackground',
+  black: '--vscode-terminal-ansiBlack',
+  red: '--vscode-terminal-ansiRed',
+  green: '--vscode-terminal-ansiGreen',
+  yellow: '--vscode-terminal-ansiYellow',
+  blue: '--vscode-terminal-ansiBlue',
+  magenta: '--vscode-terminal-ansiMagenta',
+  cyan: '--vscode-terminal-ansiCyan',
+  white: '--vscode-terminal-ansiWhite',
+  brightBlack: '--vscode-terminal-ansiBrightBlack',
+  brightRed: '--vscode-terminal-ansiBrightRed',
+  brightGreen: '--vscode-terminal-ansiBrightGreen',
+  brightYellow: '--vscode-terminal-ansiBrightYellow',
+  brightBlue: '--vscode-terminal-ansiBrightBlue',
+  brightMagenta: '--vscode-terminal-ansiBrightMagenta',
+  brightCyan: '--vscode-terminal-ansiBrightCyan',
+  brightWhite: '--vscode-terminal-ansiBrightWhite',
+};
+
 export function getTerminalTheme(): Record<string, string> {
   const style = getComputedStyle(document.body);
-  const v = (prop: string, fallback: string) => style.getPropertyValue(prop).trim() || fallback;
-  return {
-    background: v('--vscode-terminal-background', v('--vscode-editor-background', '#1e1e1e')),
-    foreground: v('--vscode-terminal-foreground', v('--vscode-editor-foreground', '#cccccc')),
-    cursor: v('--vscode-terminalCursor-foreground', '#aeafad'),
-    selectionBackground: v('--vscode-terminal-selectionBackground', '#264f7840'),
-    black: v('--vscode-terminal-ansiBlack', '#000000'),
-    red: v('--vscode-terminal-ansiRed', '#cd3131'),
-    green: v('--vscode-terminal-ansiGreen', '#0dbc79'),
-    yellow: v('--vscode-terminal-ansiYellow', '#e5e510'),
-    blue: v('--vscode-terminal-ansiBlue', '#2472c8'),
-    magenta: v('--vscode-terminal-ansiMagenta', '#bc3fbc'),
-    cyan: v('--vscode-terminal-ansiCyan', '#11a8cd'),
-    white: v('--vscode-terminal-ansiWhite', '#e5e5e5'),
-    brightBlack: v('--vscode-terminal-ansiBrightBlack', '#666666'),
-    brightRed: v('--vscode-terminal-ansiBrightRed', '#f14c4c'),
-    brightGreen: v('--vscode-terminal-ansiBrightGreen', '#23d18b'),
-    brightYellow: v('--vscode-terminal-ansiBrightYellow', '#f5f543'),
-    brightBlue: v('--vscode-terminal-ansiBrightBlue', '#3b8eea'),
-    brightMagenta: v('--vscode-terminal-ansiBrightMagenta', '#d670d6'),
-    brightCyan: v('--vscode-terminal-ansiBrightCyan', '#29b8db'),
-    brightWhite: v('--vscode-terminal-ansiBrightWhite', '#e5e5e5'),
+  const v = (prop: string, fallback = '') => style.getPropertyValue(prop).trim() || fallback;
+  const foreground = v('--vscode-terminal-foreground', v('--vscode-editor-foreground', FALLBACK_FOREGROUND));
+  const theme: Record<string, string> = {
+    background: v('--vscode-terminal-background', v('--vscode-editor-background', FALLBACK_BACKGROUND)),
+    foreground,
+    // Derived, not defaulted: `RESOLUTION_RULES` inherits the cursor from the
+    // terminal foreground, and the three keys a DOM-less host is pushed
+    // (`setThemeColors` in lib/src/host/remote/sidecar-entry.ts) must all be
+    // strings or the whole push is dropped.
+    cursor: v('--vscode-terminalCursor-foreground', foreground),
   };
+  // Omitted rather than emptied: an unset key leaves xterm.js on its own
+  // default, and leaves `themeColorProvider` answering `null` to an OSC query.
+  for (const [key, prop] of Object.entries(ANSI_VARS)) {
+    const value = v(prop);
+    if (value) theme[key] = value;
+  }
+  return theme;
 }
 
 /**

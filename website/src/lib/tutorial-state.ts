@@ -1,5 +1,5 @@
 import { loadJson, removeJson, saveJson } from "dormouse-lib/lib/local-json-store";
-import { ITEM_IDS, SECTIONS, type ItemId, type Section } from "./tut-items";
+import { ITEM_IDS, type ItemId, type Section } from "./tut-items";
 
 const STORAGE_KEY = "dormouse-tut-v3";
 const STAR_STORAGE_KEY = "dormouse-tut-star-v1";
@@ -12,9 +12,12 @@ export class TutorialState {
   private flappyHighScore = 0;
   private listeners = new Set<() => void>();
   private sections: readonly Section[];
+  /** The ids `markComplete` will accept — this profile's own, and no more. */
+  private ownIds: ReadonlySet<ItemId>;
 
-  constructor(sections: readonly Section[] = SECTIONS) {
+  constructor(sections: readonly Section[]) {
     this.sections = sections;
+    this.ownIds = new Set(sections.flatMap((s) => s.items.map((i) => i.id)));
     this.starPromptResolved = loadJson<unknown>(STAR_STORAGE_KEY, false) === true;
     const high = loadJson<unknown>(FLAPPY_HIGH_SCORE_KEY, 0);
     if (typeof high === "number" && Number.isFinite(high) && high >= 0) {
@@ -51,7 +54,16 @@ export class TutorialState {
     return true;
   }
 
+  /**
+   * Credit an item, if this profile has one.
+   *
+   * Both profiles share `dormouse-tut-v3`, so a detection that fires under one
+   * and names an item only the other lists would pre-check that other
+   * tutorial. Pocket's Select mode does exactly that with `cp-override`, which
+   * Pocket's checklist does not carry.
+   */
   markComplete(id: ItemId): boolean {
+    if (!this.ownIds.has(id)) return false;
     if (this.completed.has(id)) return false;
     this.completed.add(id);
     this.notify();

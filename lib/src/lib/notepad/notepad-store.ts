@@ -4,7 +4,7 @@
 // `localStorage`, or webview state. The one mirror is `syncVolatile`, host
 // memory that exists so a VS Code webview re-resolved over live PTYs can get its
 // notes back (docs/specs/notepad.md).
-import { hasTerminal, type SurfaceKind } from 'dor/commands/types';
+import { type SurfaceKind } from 'dor/commands/types';
 import { getPlatformOrNull } from '../platform';
 import type { CwdState } from '../terminal-state';
 import { toArchivedNote } from './archive-model';
@@ -378,7 +378,8 @@ export function clearAllNotepads(): void {
 
 // --- Open panel ---
 //
-// Only one Surface notepad is open per Wall, so this is a single id rather than
+// Only one Surface notepad is open per window — this module is per webview, so
+// the id is shared by every Wall in it — hence a single id rather than
 // per-Surface open state. Its own listener set: a note edit must not re-render
 // every header that only cares about which panel is open, and vice versa.
 
@@ -483,12 +484,6 @@ function collectVolatile(ids: readonly string[]): VolatileNotepadSnapshot {
       surfaceTitle: meta?.surfaceTitle ?? '',
       surfaceKind: meta?.surfaceKind ?? 'terminal',
       cwd: meta?.cwd ?? null,
-      // Only a terminal Surface has a PTY to ask about; its Surface id is
-      // also its PTY id, so the mirror carries it straight through
-      // (docs/specs/notepad.md → "VS Code lifecycle").
-      ...(meta && hasTerminal(meta.surfaceKind)
-        ? { terminalId: surfaceId }
-        : {}),
       ...(pendingBatchId ? { pendingBatchId } : {}),
       notes: notes.map(toArchivedNote),
     });

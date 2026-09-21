@@ -208,6 +208,29 @@ describe('lookupTool', () => {
       });
   });
 
+  it('carries the same config warnings whether or not the repo is trusted', async () => {
+    // The config lint runs before the trust gate, so the first (untrusted) run
+    // is the one that has to report it — the `ok` arm is a later run's answer
+    // (`docs/specs/dor-tool.md` -> Declaring tools).
+    await write(`
+tools:
+  storybook:
+    run: pnpm storybook
+    nonsense: 1
+    prespawn_dedupe: [storybook]
+`);
+    const untrusted = await lookupTool('storybook', root, new MemoryToolTrustStore(), { resolveUpstream: noUpstream });
+    const trust = new MemoryToolTrustStore();
+    await trust.grant(folderGrantKey(root), 'folder');
+    const ok = await lookupTool('storybook', root, trust, { resolveUpstream: noUpstream });
+
+    expect(untrusted.status).toBe('untrusted');
+    expect(ok.status).toBe('ok');
+    const warnings = ok.status === 'ok' ? [...ok.file.warnings] : [];
+    expect(warnings.length).toBeGreaterThan(0);
+    expect(untrusted.status === 'untrusted' && untrusted.warnings).toEqual(warnings);
+  });
+
   it('offers the upstream when git resolves one', async () => {
     await write();
     const upstream = async () => 'https://github.com/diffplug/dormouse';

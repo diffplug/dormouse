@@ -2,30 +2,6 @@
 
 > Informative companion to [transport.md](transport.md): the evidence, symptoms, and dead-approach history behind its rules, keyed by that spec's headings (AGENTS.md → "What, not why"). Nothing here is normative.
 
-## Adapter model
-
-**What `persistsSession: false` actually saves.** The expensive half of a save is the record build, not the write: one `getCwd` round trip per pane (`docs/specs/standalone.md` → "Persistence", whose rationale prices it). No shipped adapter answers `false` today; the gate stays because a host that persists nothing must not pay for a record it discards.
-
-## Standalone browser-dev harness
-
-**Why the bridge needs authentication at all.** Loopback is not an access control: any web page open in the developer's own browser reaches `127.0.0.1` as readily as the dev page does, and an unauthenticated bridge hands it arbitrary command execution as the developer (`docs/specs/security-local.md` → "Loopback Listeners").
-
-**Why the token is digested before comparison.** `timingSafeEqual` throws on unequal-length inputs, so raw-string comparison turns a wrong-length guess into an exception rather than a refusal; hashing both sides to SHA-256 makes every comparison equal-length.
-
-**Why the bridge token is not the `dor` control token.** The `dor` control-API `controlToken` is handed to every shell Dormouse spawns; the bridge's circle is smaller than "every terminal on the machine", so it mints its own per-run credential.
-
-**How DNS rebinding defeats a loopback bind.** A hostile domain re-resolved to `127.0.0.1` arrives with its own name in `Host`; the browser treats the result as same-origin, so CORS never applies. Pinning `Host` is the check that survives it.
-
-**What a CORS-*simple* endpoint costs.** A foreign page can POST with `mode: 'no-cors'` and, though it cannot read the reply, the request still executes — and executing is the whole risk here. `application/json` forces a preflight it cannot pass.
-
-**Why the CORS origin is never `*`.** It was `*` once: the bridge's clipboard invokes were readable cross-origin under it — a foreign page could POST an invoke and read the reply.
-
-**Why both loopback spellings are echoed.** `127.0.0.1:<port>` and `localhost:<port>` are the same dev page, and pinning one rejects a developer who typed the other with symptoms — blank terminal, console CORS errors — that do not point at the token gate.
-
-**Agent workflows were unaffected by the gate.** The token reaches the page through the `VITE_DORMOUSE_BROWSER_DEV_HOST` env var the harness already sets, and `agent-browser` drives the Vite origin, never the bridge.
-
-**Why the harness does not persist.** Persisting would restore panes across a reload the real app drops, so the harness would stop reproducing the cold-start behavior it exists to exercise — and would run the record build ("Adapter model") on a path production never takes.
-
 ## Paced input
 
 Measured on macOS 27 with Claude Code 2.1.274 and Codex 0.154.0, 2026-09 (issue #679).

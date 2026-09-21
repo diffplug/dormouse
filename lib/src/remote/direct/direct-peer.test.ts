@@ -12,8 +12,8 @@ import {
   DIRECT_DISCONNECTED_GRACE_MS,
   DIRECT_GATHER_TIMEOUT_MS,
   DIRECT_SETUP_TIMEOUT_MS,
-  MAX_DIRECT_OUTBOUND_BYTES,
-  MAX_DIRECT_OUTBOUND_FRAMES,
+  MAX_DIRECT_PENDING_BYTES,
+  MAX_DIRECT_PENDING_FRAMES,
   NOISE_MAX_MESSAGE_LENGTH,
 } from 'remote-lib-common';
 
@@ -261,7 +261,7 @@ describe('DirectPeer', () => {
       const frame = new Uint8Array(NOISE_MAX_MESSAGE_LENGTH);
 
       let held = 0;
-      while (client.closes.length === 0 && held <= MAX_DIRECT_OUTBOUND_FRAMES) {
+      while (client.closes.length === 0 && held <= MAX_DIRECT_PENDING_FRAMES) {
         clientPeer.send(frame);
         held += 1;
       }
@@ -270,8 +270,8 @@ describe('DirectPeer', () => {
       // log has only the reason to tell those two apart.
       expect(client.closes).toEqual(['the direct path outran what a sender can hold in order']);
       // Bytes bind first: the frame cap is far above what this many reaches.
-      expect((held - 1) * frame.length).toBeLessThanOrEqual(MAX_DIRECT_OUTBOUND_BYTES);
-      expect(held * frame.length).toBeGreaterThan(MAX_DIRECT_OUTBOUND_BYTES);
+      expect((held - 1) * frame.length).toBeLessThanOrEqual(MAX_DIRECT_PENDING_BYTES);
+      expect(held * frame.length).toBeGreaterThan(MAX_DIRECT_PENDING_BYTES);
     });
 
     it('reports the channel gone when a queued frame will not go out', async () => {

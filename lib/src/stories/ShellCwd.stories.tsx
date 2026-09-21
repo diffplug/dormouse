@@ -289,7 +289,12 @@ function idle({
   activity?: ShellActivity;
   title?: TerminalTitle | null;
 } = {}): TerminalPaneState {
-  return createTerminalPaneState({ cwd, activity, title });
+  return createTerminalPaneState({ cwd, activity, ...titleCandidatesOf(title) });
+}
+
+/** A pane state's whole title channel, from the one candidate a story pins. */
+function titleCandidatesOf(title: TerminalTitle | null): Pick<TerminalPaneState, 'titleCandidates'> {
+  return { titleCandidates: title ? { [title.source]: title } : {} };
 }
 
 function running(
@@ -308,7 +313,7 @@ function running(
   return createTerminalPaneState({
     cwd: currentCwd,
     activity: { kind: 'running' },
-    title: options.title ?? null,
+    ...titleCandidatesOf(options.title ?? null),
     currentCommand: commandRun({
       id: `cmd-${displayCommand}-${startCwdPath ?? 'unknown'}`,
       rawCommandLine,
@@ -389,11 +394,7 @@ function titleCandidateState(): TerminalPaneState {
     osc99: terminalTitleAt('Codex waiting', 'osc99', BASE_TIME + 4_000),
     osc777: terminalTitleAt('Tests complete', 'osc777', BASE_TIME + 3_000),
   } satisfies TerminalPaneState['titleCandidates'];
-  return createTerminalPaneState({
-    ...pane,
-    title: candidates.user,
-    titleCandidates: candidates,
-  });
+  return createTerminalPaneState({ ...pane, titleCandidates: candidates });
 }
 
 async function openHeaderContextMenu() {

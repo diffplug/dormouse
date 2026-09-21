@@ -33,7 +33,7 @@ Source of truth: `surfaceKindFromParams` / `isToolParams` in `lib/src/components
 
 **Must resolve a named Tool from the nearest ancestor `dormouse.yml`, then fall back to user Tools when that name is absent.** `--global` skips project discovery. Malformed project files fail lookup. If only the user file exists, an unknown name reports that file and its Tool names. The host owns discovery, bounded reads, YAML parsing, and substitutions; the renderer receives the resolved result. Canonical field shapes are `ToolEntry` in `lib/src/host/tool-registry.ts`.
 
-**Must read user Tools from `$XDG_CONFIG_HOME/dormouse/dormouse.yml` when that environment value is absolute, otherwise `~/.config/dormouse/dormouse.yml`.** Both local hosts use this location. User Tools require no project grant; malformed or unreadable user configuration fails lookup. Project and user Tools occupy separate reuse scopes.
+**Must read user Tools from `$XDG_CONFIG_HOME/dormouse/dormouse.yml` only when that environment value is absolute**, else `~/.config/dormouse/dormouse.yml`; both local hosts use this location. User Tools require no project grant; malformed or unreadable user configuration fails lookup. Project and user Tools occupy separate reuse scopes.
 
 | Field | Behavior |
 | --- | --- |
@@ -43,7 +43,9 @@ Source of truth: `surfaceKindFromParams` / `isToolParams` in `lib/src/components
 | `prespawn_dedupe` | Optional scalar or list of literal key elements with substitutions |
 
 - **Must reject unknown `prespawn_*` fields and unknown substitutions**; unknown ordinary fields produce warnings. `$PROJECT_ROOT` is the declaring directory, `$CWD` the caller's resolved directory, and `$TARGET` the canonical local file input. (rationale)
+- **Must deliver the parsed file's warnings on the untrusted answer and on a built-in open**, not only on an already-trusted lookup — those are the paths a Tool's first run takes.
 - **Must preserve scalar `prespawn_dedupe` as a one-element literal list**, never interpret it as a command to execute. Reserve separate fields for future computed keys. (rationale)
+- **Must reject an empty `prespawn_dedupe` list, and `$TARGET` in a `prespawn_dedupe` whose `run` is a shell-command string** — a string `run` takes no inputs, so there is no target to key on.
 - **Must warn when a repo-local key omits `$PROJECT_ROOT`, or a `$TARGET` run has a key without `$TARGET`.** Allow intentional cross-checkout or cross-file dedupe.
 - **Must reject `$PROJECT_ROOT` in user configuration**, which has no project root.
 
@@ -51,7 +53,7 @@ Source of truth: `surfaceKindFromParams` / `isToolParams` in `lib/src/components
 
 **Must require exactly one existing regular local file when `$TARGET` appears in the run list or dedupe key.** Resolve relative paths against the invocation CWD and follow symlinks to a canonical absolute path before substitution and reuse. Reject URLs, directories, and missing files. Validate run and key inputs before showing approval. Pending approval distinguishes the original arguments and invocation CWD; [Trust](#trust) owns re-resolution and recovery. Input control-character restrictions belong to `docs/specs/security-local.md` → Dor Tool configuration.
 
-Source of truth: `lookupTool` in `lib/src/host/tool-trust.ts`; `parseToolFile` / `resolveDedupeKey` in `lib/src/host/tool-registry.ts`; `resolveToolInput` in `lib/src/host/tool-input.ts`; `readUserToolFile` in `lib/src/host/tool-user-config.ts`; `toolRunCommand` in `lib/src/components/wall/use-dor-control.ts`; `lib/src/host/tool-host.test.ts`, `lib/src/components/Wall.test.tsx`.
+Source of truth: `lookupTool` in `lib/src/host/tool-trust.ts`; `parseToolFile` / `resolveDedupeKey` in `lib/src/host/tool-registry.ts`; `resolveToolInput` in `lib/src/host/tool-input.ts`; `readUserToolFile` in `lib/src/host/tool-user-config.ts`; `toolRunCommand` in `lib/src/components/wall/use-dor-control.ts`; `lib/src/host/tool-host.test.ts`, `lib/src/host/tool-trust.test.ts`, `lib/src/host/tool-open.test.ts`, `lib/src/components/Wall.test.tsx`.
 
 ## Identity and dedupe
 
@@ -79,7 +81,7 @@ Source of truth: `queueToolSpawn` / the `surface.tool` handler in `lib/src/compo
 4. **Must require `trust-recorded` before re-resolving the named entry**, then stage the command, renderer, port strategy, and key before exposing its terminal. Rejected grants or failed re-resolution retain approval and display an error until retry; blank reasons use a fallback. Closed Surfaces must not start later or show stale errors.
 5. **Must recheck the resolved key before launching an approved Tool**, honoring its original `--fresh` intent. Close a redundant approval through the ordinary close coordinator before revealing or restarting the match; a failed closure retains the approval and sends no command.
 6. **Must close a declined approval through the ordinary close coordinator and record no denial.** Archive failure may retain the pane. (rationale)
-7. **Must record each grant as its own atomically written file**, so hosts sharing one state directory never lock or merge.
+7. **Must record each grant as its own atomically written file** under the host's state directory, so hosts sharing one never lock or merge. **A host that supplies no state directory keeps grants in memory for that process only**, rather than inventing a location the user cannot find to revoke.
 8. **Never content-hash grants or re-prompt solely because the config changed.** (rationale)
 
 **Must offer Retry and Close after post-grant lookup failure**, preserving the error with no PTY. Retry repeats only lookup; Close retains permission; the footer states both. **Never restore pending approval once launch clears its marker**, including after PTY/minimization failure.
@@ -149,19 +151,19 @@ Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `dor/test/snapshot
 
 **Must accept exactly one existing local regular file for `dor open`**, resolved by the `$TARGET` rules in [Declaring tools](#declaring-tools).
 
-**Must select the first matching entry of the user file's ordered `open` list**, whose entries contain `match` and `tool`. `--tool` explicitly selects a handler. Every association must name an argument-list Tool in that same user file or `builtin:file`. Never discover project configuration during this lookup; project `open` rules are ignored with a warning during explicit project-tool lookup.
+**Must select the first matching entry of the user file's ordered `open` list.** Every association must name an argument-list Tool in that same user file or `builtin:file`. **Never discover project configuration during this lookup**; project `open` rules are ignored with a warning during explicit project-tool lookup.
 
-**Must match patterns without `/` against the canonical filename, and patterns with `/` against both paths relative to the canonical CWD and canonical absolute paths**, separators normalized to `/`, with bundled picomatch: case-sensitive, dotfiles only by explicit pattern. Use the supplied CWD if canonicalization fails; matching never changes the Tool's run directory or `$CWD`. A miss names the user config path and suggests `--tool`. (rationale)
+**Must use the supplied CWD when canonicalization fails**, and never let matching change the Tool's run directory or `$CWD`. A miss names the user config path and suggests `--tool`. (rationale)
 
 **Must pass the canonical file path as the selected Tool's one input.** Reuse follows [Identity and dedupe](#identity-and-dedupe), `$TARGET` in the key providing per-file identity; placement follows [Take-over](#take-over).
 
 **Must reject declared Tool names beginning with `builtin:` in either configuration scope.** Built-in handler names cannot be shadowed.
 
-**Must use `builtin:file` for supported files when no user rule matches.** An explicit unknown handler or malformed user configuration fails without fallback. Selecting `builtin:file` for an unsupported format reports that limitation and suggests a user Tool. Built-in identity is the canonical file path in its own scope, separate from user and project Tools.
+**Must fail without fallback on an explicit unknown handler or malformed user configuration**; `builtin:file` named for an unsupported format reports that limitation and suggests a user Tool. Built-in identity is the canonical file path in its own scope, separate from user and project Tools.
 
 **Must prefer known extensions over filename-based text fallbacks; source extensions remain escaped previews.**
 
-**Must run the built-in viewer as a Tool-owned `dor` process**, serving HTML, images, media, and escaped text/source previews. Markdown is source text; custom viewers may render it. Text previews and HTML/CSS dependency inspection are limited to 8 MiB per file. Text/source previews grant only their opened file and skip dependency inspection. (rationale) Oversized HTML and referenced CSS still stream without dependency inspection. The grant contains at most 256 files: the opened document and statically referenced relative HTML/CSS assets within its directory tree; exceeding that bound fails the open without serving a partial grant. Never expand the grant through root-relative, external, or dynamic references; requests can read only granted paths.
+**Must run the built-in viewer as a Tool-owned `dor` process.** Text/source previews grant only their opened file and skip dependency inspection. (rationale) Oversized HTML and referenced CSS still stream without dependency inspection. **The grant contains at most 256 files** — the opened document and statically referenced relative HTML/CSS assets within its directory tree — and exceeding that bound fails the open without serving a partial grant. **Never expand the grant through root-relative, external, or dynamic references**; requests can read only granted paths.
 
 **Must require a user Tool for PDFs**, including files named `README.pdf`. (rationale)
 
@@ -202,6 +204,7 @@ Source of truth: `toolTakesOverCaller` / `toolRerunsInCaller` / `callerStillPlac
 **Must consume OSC 367 at the PTY owner's parser**, including malformed and unknown verbs, and emit no reply. `serve` and `state` are implemented verbs. The escape registry is `docs/specs/terminal-escapes.md`.
 
 - **Must sanitize and bound the payload before retaining it.** `ToolAnnounce` / `parseToolAnnounce` and `ToolState` / `parseToolState` own the field shapes and validation limits.
+- **Must reject a payload naming a version this contract does not speak.** `state` requires `v: 1`; `serve` reads an omitted `v` as 1 and refuses any other value — a future v2's rejection path.
 - **Must treat an optional serve `path` as a path/query on the discovered port, never as another authority.** Accept at most 2,048 characters starting with one `/`, with no backslash, ASCII whitespace/control, or DEL; invalid paths are ignored and the default is `/`. The port still must belong to the designated Session's process tree. Live binding memory includes the path; durable saves omit it.
 - **Must forward parsed announcements, state reports, and command-start resets in stream order to the owning renderer.** A start clears the previous command's announcement and unsaved state; later reports in that chunk survive. Standalone uses `terminal:protocolEvents`; VS Code uses nullable `terminal:toolAnnounce` and `terminal:toolState` scoped to the owning webview, with null clearing the corresponding record. The fake adapter applies locally.
 - **Must reconstruct announcements, state, and resets from raw replay without emitting replies**, preserving transferred announcements when since-mark replay has no command start, and clear the renderer record on Session disposal. Ordinary terminal announcements stay inert.
@@ -261,16 +264,16 @@ Source of truth: `PersistedToolMetadata` in `lib/src/lib/session-types.ts`; `sav
   rehydrate-from-args + `persist: "never"`: every stateless tool, no new API,
   no Windows question.
 - **D2 — dehydrate/rehydrate.** The `367;dehydrate` verb +
-  `DORMOUSE_DEHYDRATE`; the `dehydrate` flag is reserved in the serve payload
-  from the shipped `serve` payload. The Windows graceful-stop is needed here
-  only.
+  `DORMOUSE_DEHYDRATE`, opted into by the `dehydrate` flag the shipped `serve`
+  payload already reserves. The Windows graceful-stop is needed here only.
 - **The announced `name`.** Wire the reserved [OSC 367](#osc-367) `name` into
   the title-candidates channel and `dor list`'s location column.
 - **Later** — `prespawn_*` beyond the dedupe literal: a computed key, and
   `prespawn_port`. Pocket/remote browser view (rides the browser-surface
   staging in `docs/specs/remote-api.md`; reserve the kind on the wire now). An in-pane terminal/browser strip (decide against the
   glossary's reserved multiple-Surfaces-per-Pane). A `boots: web` hint if the
-  terminal flash grates. `--has terminal` / `--has browser` for `dor list`.
+  terminal flash grates. `--has terminal` / `--has browser` *filter flags* for
+  `dor list`, whose rows already carry the fields.
 
 ### Dehydrate and rehydrate
 

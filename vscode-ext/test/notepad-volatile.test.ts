@@ -163,21 +163,16 @@ describe('the volatile notepad mirror', () => {
     expect(mirror.takeAllVolatile().stagedDeletions).toEqual(noDeletions);
   });
 
-  it('carries a Surface\'s PTY id through, and only when it is a string', () => {
+  it('mirrors no field the archive validator does not know', () => {
+    // The mirror is written verbatim into a batch by a teardown with no webview
+    // left to ask, so anything extra a webview sends has to be dropped here.
     mirror.setVolatileForRouter('router-1', {
-      surfaces: [
-        { ...surface('a'), terminalId: 'pty-9' },
-        { ...surface('b'), terminalId: 7 },
-        surface('c'),
-      ],
+      surfaces: [{ ...surface('a'), terminalId: 'pty-9' }],
       stagedDeletions: noDeletions,
     });
 
-    const taken = mirror.takeVolatileForSurfaces(['a', 'b', 'c']);
-    expect(taken.map((s) => s.terminalId)).toEqual(['pty-9', undefined, undefined]);
-    // Absent, not present-and-undefined: `batchFromVolatile` never copies it,
-    // and the validator would reject a batch that carried it.
-    expect(Object.keys(taken[2])).not.toContain('terminalId');
+    const [taken] = mirror.takeVolatileForSurfaces(['a']);
+    expect(Object.keys(taken).sort()).toEqual(['cwd', 'notes', 'surfaceId', 'surfaceKind', 'surfaceTitle']);
   });
 
   it('drains every router at once, merging their staged deletions', () => {
@@ -214,13 +209,10 @@ describe('refreshMirrorCwds', () => {
   it('fills a mirrored Surface that reported no CWD from its live PTY', async () => {
     const getCwd = vi.fn(async () => '/Users/me/project');
 
-    const refreshed = await mirror.refreshMirrorCwds(
-      snapshot({ ...surface('a'), terminalId: 'pty-9' }),
-      getCwd,
-      50,
-    );
+    const refreshed = await mirror.refreshMirrorCwds(snapshot(surface('a')), getCwd, 50);
 
-    expect(getCwd).toHaveBeenCalledWith('pty-9');
+    // A terminal Surface's id is its PTY id, so that is what the host is asked.
+    expect(getCwd).toHaveBeenCalledWith('a');
     expect(refreshed.surfaces[0].cwd).toMatchObject({ path: '/Users/me/project', source: 'process' });
     // The rest of the mirror is untouched.
     expect(refreshed.surfaces[0].notes).toEqual(surface('a').notes);
@@ -233,8 +225,8 @@ describe('refreshMirrorCwds', () => {
 
     const refreshed = await mirror.refreshMirrorCwds(
       snapshot(
-        { ...surface('a'), cwd: stale, terminalId: 'pty-a' },
-        { ...surface('b'), cwd: OSC7, terminalId: 'pty-b' },
+        { ...surface('a'), cwd: stale },
+        { ...surface('b'), cwd: OSC7 },
       ),
       getCwd,
       50,
@@ -245,10 +237,11 @@ describe('refreshMirrorCwds', () => {
     expect(getCwd).toHaveBeenCalledTimes(1);
   });
 
-  it('never asks about a Surface with no PTY id', async () => {
+  it('never asks about a Surface with no terminal', async () => {
     const getCwd = vi.fn(async () => '/Users/me/project');
+    const browser: VolatileSurfaceNotes = { ...surface('a'), surfaceKind: 'browser' };
 
-    const refreshed = await mirror.refreshMirrorCwds(snapshot(surface('a')), getCwd, 50);
+    const refreshed = await mirror.refreshMirrorCwds(snapshot(browser), getCwd, 50);
 
     expect(getCwd).not.toHaveBeenCalled();
     expect(refreshed.surfaces[0].cwd).toBeNull();
@@ -258,7 +251,7 @@ describe('refreshMirrorCwds', () => {
     const getCwd = vi.fn(async () => { throw new Error('the pty host is gone'); });
 
     const refreshed = await mirror.refreshMirrorCwds(
-      snapshot({ ...surface('a'), cwd: OSC7, terminalId: 'pty-9' }),
+      snapshot({ ...surface('a'), cwd: OSC7 }),
       getCwd,
       50,
     );
@@ -273,7 +266,7 @@ describe('refreshMirrorCwds', () => {
     const started = Date.now();
 
     const refreshed = await mirror.refreshMirrorCwds(
-      snapshot({ ...surface('a'), terminalId: 'pty-9' }),
+      snapshot(surface('a')),
       () => never,
       20,
     );

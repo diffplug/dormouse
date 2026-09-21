@@ -1784,14 +1784,6 @@ test('list id-format ids output', async () => {
   );
 });
 
-test('list accepts uuids as an id-format compatibility alias', async () => {
-  const ids = await runCli(['list', '--id-format', 'ids'], { client: fixtureClient(), env: listEnv });
-  const uuids = await runCli(['list', '--id-format', 'uuids'], { client: fixtureClient(), env: listEnv });
-  assert.equal(uuids.stdout, ids.stdout);
-  assert.equal(uuids.stderr, '');
-  assert.equal(uuids.exitCode, 0);
-});
-
 test('list json schema includes ids and refs regardless of id-format', async () => {
   const result = await runCli(['list', '--json', '--id-format', 'ids'], { client: fixtureClient(), env: listEnv });
   assert.equal(result.exitCode, 0);

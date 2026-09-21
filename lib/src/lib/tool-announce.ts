@@ -80,6 +80,11 @@ export function parseToolPayload(content: string, verb: string): Record<string, 
 export function parseToolAnnounce(content: string): ToolAnnounce | null {
   const record = parseToolPayload(content, 'serve');
   if (!record) return null;
+  // A payload that names a version this parser does not speak is refused whole
+  // rather than half-honored: a v2 `serve` may reuse a field name for something
+  // else. `v` is optional — an omitted one is v1, the shipped shape — but a
+  // stated one must be 1 (`docs/specs/dor-tool.md` -> OSC 367).
+  if (record.v !== undefined && record.v !== 1) return null;
 
   const announce: ToolAnnounce = {
     port: readPort(record.port),

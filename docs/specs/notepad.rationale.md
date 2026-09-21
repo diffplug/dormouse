@@ -30,9 +30,10 @@ Remembering the id and deleting it in the very mutation that re-appends it repla
 the batch wholesale instead, so edits, additions, and the user's own deletions all
 survive. That is why deletes apply before appends, and why the note-id dedupe is
 computed after them — otherwise the batch being replaced would still count as
-storing its own notes. The dedupe stays because the VS Code mirror path mints a
-fresh id per teardown and has nothing to address an earlier write by; a note id is
-a UUID, so "already stored" is an exact test there rather than a heuristic.
+storing its own notes. The dedupe stays for the VS Code mirror path: a mirrored
+Surface carrying no pending batch id still mints a fresh one at teardown, leaving
+that batch nothing to address an earlier write by; a note id is a UUID, so
+"already stored" is an exact test there rather than a heuristic.
 
 `MAX_SAVE_ATTEMPTS` is 5. An unbounded retry against an archive somebody else is
 rewriting in a loop would spin instead of telling the user, and the closure paths
@@ -258,13 +259,15 @@ meant the new view showed a batch the user had already deleted, still offering
 Undo, which `deactivate()` would then delete for real hours later. Committing at
 the disposal makes the promise true and leaves nothing pending to hand a resume.
 
-The mirror carries a PTY id purely so a teardown can ask where each process is: the
-extension host knows nothing of Surface ids, and `ptyManager.getCwd` answers for the
-Session id the webview spawned under. On an editor-panel disposal the kills moved
-*after* the archive write for that one reason — the loop used to run first, so by
-the time the refresh asked, the PTY it was asking about was already dead. Every
-other bookkeeping step in that disposal stayed synchronous and where it was; only
-the kills wait, and they run in a `finally`, so a failed write still kills them.
+A teardown asks `ptyManager.getCwd` for each mirrored terminal Surface's id, which
+is the Session id the webview spawned the PTY under. The mirror carried that id a
+second time as a `terminalId` field until it became clear the two are always equal;
+the kind is what decides whether there is anything to ask. On an editor-panel
+disposal the kills moved *after* the archive write so there would be a PTY left to
+ask — the loop used to run first, so by the time the refresh asked, the process was
+already dead. Every other bookkeeping step in that disposal stayed synchronous and
+where it was; only the kills wait, and they run in a `finally`, so a failed write
+still kills them.
 
 The original `globalState` store was workspace-independent but cached separately
 in every extension host. A process-local queue and revision counter therefore

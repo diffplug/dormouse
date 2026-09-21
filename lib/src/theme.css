@@ -19,12 +19,6 @@
 
 @import "./theme-colors.css";
 
-/* --- Font tokens (not Tailwind colors) --- */
-:root {
-  --mt-font-size: var(--vscode-font-size);
-  --mt-font-family: var(--vscode-editor-font-family);
-}
-
 /* --- Tailwind token declarations (app layer; colours are next door) --- */
 @theme {
   /* Fonts */
@@ -53,8 +47,6 @@
  * this per file; rationale in docs/specs/theme.md). The colour tokens carry
  * their own mirror in ./theme-colors.css. */
 body {
-  --mt-font-size: var(--vscode-font-size);
-  --mt-font-family: var(--vscode-editor-font-family);
   --font-sans: var(--vscode-editor-font-family);
   --font-mono: var(--vscode-editor-font-family);
 }

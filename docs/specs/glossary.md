@@ -70,10 +70,7 @@ Workspace and Window are containers, not Session layers — they group Surfaces 
 | **Window** | One or more Workspaces; the OS frame (a standalone Tauri window) or the host frame (a VS Code window). A host may hold several, and a Workspace may move between them. Its **Tauri label is its persistence identity** — one snapshot per label (`docs/specs/standalone.md` → Windows). | host (Tauri / VS Code) |
 | **Workspace** | "A window's worth of panes": a `WorkspaceId`, a user-facing `name`, its Panes and Surfaces, and the layout arranging them (Lath snapshot + doors). Exactly one **Wall** renders one Workspace. | `lib/src/lib/workspace-store.ts` (the model), `lib/src/components/Wall.tsx` at render time; persisted per `docs/specs/transport.md` |
 
-How many Workspaces a Window shows at once is host-specific:
-
-- **Standalone** mounts every Workspace's Wall at once and shows one, switching between them (`docs/specs/layout.md` → Workspaces); a Window may be one of several.
-- **VS Code** maps one Workspace to one webview, several visible at once: the sidebar/panel `WebviewView` is the default Workspace, each `dormouse.open` editor-tab `WebviewPanel` an independent one owning its Sessions' PTYs and browser Surfaces (`docs/specs/vscode.md`).
+How many Workspaces a Window shows at once is host-specific: standalone mounts every Wall and shows one (`docs/specs/layout.md` → Workspaces), VS Code maps each Workspace to its own webview (`docs/specs/vscode.md`).
 
 ### Wall chrome
 
@@ -88,10 +85,6 @@ How many Workspaces a Window shows at once is host-specific:
 ### Workspace union status
 
 A Workspace's **union status** is its display projection of member Surfaces' Activity; `docs/specs/alert.md` → Workspace union owns its fields and rules.
-
-### Implementation status
-
-The Pane / Surface model, surface kinds, the Workspace model, per-Workspace persistence, several Windows each holding several Workspaces, and the `dor workspace` verbs over them are all live (`docs/specs/layout.md` → Workspaces); this glossary tracks no rollout.
 
 ## Roles
 

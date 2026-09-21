@@ -37,7 +37,7 @@ last column means nothing cheaper does.
 | **A page in a browser pane cannot forge a host message.** In VS Code every host message carries a per-boot token it cannot read, and the standalone adapters have no inbox for it to post to. | [Browser panes](./security-local.md#browser-panes) | `lib/src/lib/platform/vscode-adapter.test.ts` |
 | **Only your own account can drive your terminals through `dor`.** The socket sits in a directory only you can open, and its token never crosses the wire. | [The dor control socket](./security-local.md#the-dor-control-socket) | `standalone/sidecar/dor-control-server.test.js` |
 | **A loopback listener grants a stranger nothing it could not get from the upstream directly.** | [Loopback Listeners](./security-local.md#loopback-listeners) | `scripts/loopback-lint.mjs` |
-| **Current persistence writers never save terminal scrollback.** Standalone snapshots are owner-only; VS Code controls access to its own storage. Older snapshots may contain transcripts. Explicitly captured notepad excerpts, titles, and working directories are archived on Surface closure. | [Persisted state](./security-local.md#persisted-state) | audit |
+| **Current persistence writers never save terminal scrollback.** Standalone snapshots are owner-only; VS Code controls access to its own storage. Older snapshots may contain transcripts. Explicitly captured notepad excerpts, titles, and working directories are archived on Surface closure. | [Persisted state](./security-local.md#persisted-state) | `cargo test` in `standalone/src-tauri` (the owner-only half); audit |
 | **Nothing but a human at the laptop can authorize a phone.** The only path into a Burrow's ACL is typing, on that Burrow, the two digits the phone shows, and the Burrow makes every access decision. | [Pairing](./remote-security-model.md#pairing), [Burrow Authorization](./remote-security-model.md#burrow-authorization) | `remote-lib-common/test/security-guarantees.test.mjs` |
 | **The Relay cannot read ceremony or terminal content or grant terminal access.** One end-to-end channel per ceremony carries content under keys the Relay never holds; account data and routing metadata remain visible. | [Trust Model](./remote-security-model.md#trust-model), [Residual metadata](./remote-security-model.md#residual-metadata) | `scripts/e2e-lint.mjs` |
 | **Push notifications are opt-in, and a push is sealed to the one phone that receives it.** | [Push sealing](./remote-security-model.md#push-sealing) | `remote-lib-common/test/push-seal.test.mjs` |
@@ -53,7 +53,7 @@ last column means nothing cheaper does.
 | **Merging to `main` and creating a tag are admin-only**, and every workflow this repository authors pins its actions by commit. | [GitHub Actions Policies](./security-ci.md#github-actions-policies) | audit |
 | **The bot maintainer cannot merge, tag, or read a release secret**, and its token never enters its own environment. | [Automated Maintainer (tend)](./security-ci.md#automated-maintainer-tend) | `.github/workflows/workflow-audit.yaml`, nightly |
 | **Publishing the extension takes a second human's approval.** | [VS Code Extension Releases](./security-ci.md#vs-code-extension-releases) | audit |
-| **Desktop binaries are signed locally.** CI never holds production signing or updater keys, and the signing script verifies CI's attestations and hashes first. | [Desktop Releases](./security-ci.md#desktop-releases) | audit |
+| **Desktop binaries are signed locally.** CI never holds production signing or updater keys, and the signing script verifies CI's attestations and hashes first. | [Desktop Releases](./security-ci.md#desktop-releases) | `scripts/sign-and-deploy.test.mjs` |
 
 ## What is not defended
 
@@ -105,21 +105,19 @@ Gaps rather than accepted risks: we intend to close them.
   WebSocket cookie headers are stripped, but `document.cookie` remains shared;
   cookie-authenticated iframe pages are unsupported
   ([Loopback Listeners](./security-local.md#loopback-listeners)).
-- **VS Code's peer-link token has no Windows ACL applied by Dormouse**, and
-  `recovery.json` is written at the umask
-  ([Persisted state](./security-local.md#persisted-state)).
-- **The standalone log file is written at the umask**, readable by another
-  local account wherever the temp directory is shared, and records the `dor`
-  socket path; no terminal output reaches it
-  ([Persisted state](./security-local.md#persisted-state)).
+- **Neither VS Code's peer-link token nor the `recovery.json` beside it carries
+  a Windows ACL applied by Dormouse.** Both are written owner-only by unix
+  mode, which Windows makes a no-op; standalone locks its state directory
+  instead ([Persisted state](./security-local.md#persisted-state)).
+- **The standalone log file is written at the umask** and records the `dor`
+  socket path ([Persisted state](./security-local.md#persisted-state)).
 - **Revocation has no mechanism.** Revoking a lost phone is editing the Burrow's
   ACL file and restarting the Burrow
   ([Revocation and the audit trail](./security-remote.md#revocation-and-the-audit-trail)).
 - **There is no audit trail.** Nothing records connects, attaches, denials, or
   writes ([same](./security-remote.md#revocation-and-the-audit-trail)).
-- **The workflow audit's window has two evasions**: a backdated committer date,
-  and a branch pushed, run, and deleted before the nightly fetch
-  ([Automated Maintainer](./security-ci.md#automated-maintainer-tend)).
+- **The workflow audit's window has two evasions**, both in how the window is
+  computed ([Automated Maintainer](./security-ci.md#automated-maintainer-tend)).
 - **The audit's three subagents share one credential.** Their contexts are
   separate; `AUDIT_PAT` is not ([Domains](./security-audit.md#domains)).
 - **The notarization password sits on a command line for up to half an hour**
