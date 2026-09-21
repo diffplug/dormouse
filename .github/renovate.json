@@ -21,6 +21,7 @@
   },
   "packageRules": [
     {
+      "description": "Declare a dependency the same way in every workspace: under update-lockfile, an exact pin beside a caret splits one release into a package.json rewrite and a lockfile-only update on a separate `-lockfile` branch, so it arrives as two PRs that each move one workspace (#727/#728, #732/#733)",
       "matchManagers": ["npm", "cargo"],
       "rangeStrategy": "update-lockfile"
     },
@@ -98,11 +99,12 @@
       "separateMajorMinor": false
     },
     {
-      "description": "hosted pins hono and @hono/node-server exactly while relay takes caret ranges. Under update-lockfile, a release the exact pin excludes rewrites package.json, one the caret already admits is lockfile-only, and Renovate puts lockfile-only updates on a separate `-lockfile` branch — so one hono release arrived as two PRs (#732, #733), each moving one workspace. A group is one branch, so both workspaces move in one PR; the @hono adapters peer on hono and ride along",
+      "description": "The @hono adapters peer on hono (`^4`), so bump them in one PR and a hono major never lands without the adapter releases that admit it",
       "matchManagers": ["npm"],
       "matchPackageNames": ["hono", "@hono/**"],
       "groupName": "hono",
-      "groupSlug": "hono"
+      "groupSlug": "hono",
+      "separateMajorMinor": false
     },
     {
       "description": "@types/node must track the pinned Node runtime major and must not expose APIs newer than the runtime we bundle",
