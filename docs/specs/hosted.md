@@ -11,6 +11,8 @@
 
 **Must pin locally packed core/auth packages through root pnpm overrides and commit archives, provenance, and lockfile together.** `vendor/build.json` records the source commit, dirty state, and archive hashes. No runtime import depends on a sibling checkout. The auth migrations remain owned by the package.
 
+**Must declare pgstencil's peer dependencies (`kysely`, `hono`) in `hosted/package.json`**, so the archives share Hosted's copy and Renovate updates it.
+
 Source of truth: `auth` in `hosted/server/worker.ts`; `workerApp` in `hosted/server/worker-app.ts`; `migrations` in `hosted/server/migrations.ts`; `scripts/sync-pgstencil.mjs`. Pinned by `hosted/server/tests/artifacts.test.ts`.
 
 ## Identity and login
