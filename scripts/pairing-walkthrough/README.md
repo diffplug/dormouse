@@ -12,9 +12,10 @@ checked on the side that cannot fake it: the file the laptop's shell wrote, the
 authenticator's own `signCount`, the Burrow's alert arriving in the phone's session
 list.
 
-It is a development tool, not a test. **It is deliberately not wired into
+It is a development tool, not a test. **The run is deliberately not wired into
 `pnpm test` or any CI workflow**: it wants Chrome, `ffmpeg`, and several
-minutes.
+minutes. `proc.test.mjs`, which pins the line plumbing and needs none of them,
+is.
 
 ```sh
 node scripts/pairing-walkthrough/run.mjs

@@ -1017,8 +1017,8 @@ synced passkey signs it in; clearing site data destroys them → re-pair, per th
 security model; a dropped WebSocket sends you back to the Burrows view — reconnect
 by tapping Connect again.
 
-`scripts/pairing-walkthrough/` drives all three in real browsers, ending at a
-command typed from Pocket. Not in CI.
+`scripts/pairing-walkthrough/run.mjs` drives all three in real browsers, ending
+at a command typed from Pocket; the run is not in CI.
 
 - **Must learn the walkthrough's Relay origin from its owned dev runner, including
   with `--skip-build`, before staging the Burrow's allowlist and opening Pocket.**
