@@ -12,14 +12,23 @@ import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
+const usage =
+  "Usage: pnpm pgstencil:sync /path/to/pgstencil [<revision> | --working-tree]";
 const [source, ...options] = process.argv.slice(2);
-if (!source)
-  throw new Error(
-    "Usage: pnpm pgstencil:sync /path/to/pgstencil [<revision> | --working-tree]",
-  );
-const repository = resolve(source);
+const revisions = options.filter((option) => !option.startsWith("--"));
 const workingTree = options.includes("--working-tree");
-const revision = options.find((option) => !option.startsWith("--")) ?? "HEAD";
+// A mistyped flag must not fall back to a clean sync of HEAD, which would
+// overwrite the archives with something other than what was asked for.
+if (
+  !source ||
+  options.some(
+    (option) => option.startsWith("--") && option !== "--working-tree",
+  ) ||
+  revisions.length > (workingTree ? 0 : 1)
+)
+  throw new Error(usage);
+const repository = resolve(source);
+const revision = revisions[0] ?? "HEAD";
 const run = (command, args, cwd, env = process.env) =>
   execFileSync(command, args, { cwd, stdio: "inherit", env });
 const git = (...args) =>

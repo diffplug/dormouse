@@ -56,3 +56,26 @@ test("both pinned specifiers name the recorded archives", () => {
     expect(override).toBe(`file:vendor/${filename}`);
   }
 });
+
+// strictPeerDependencies only rejects an out-of-range peer. pnpm resolves an
+// undeclared one itself, where Renovate never sees it and Hosted's own imports
+// can get a second copy.
+test("Hosted declares every peer of the pinned archives", () => {
+  const { dependencies } = JSON.parse(
+    readFileSync("package.json", "utf8"),
+  ) as { dependencies: Record<string, string> };
+  for (const archive of ["pgstencil-0.1.0.tgz", "pgstencil-auth-0.1.0.tgz"]) {
+    const manifest = execFileSync(
+      "tar",
+      ["-xOf", "../vendor/" + archive, "package/package.json"],
+      { encoding: "utf8" },
+    );
+    const { peerDependencies = {} } = JSON.parse(manifest) as {
+      peerDependencies?: Record<string, string>;
+    };
+    for (const peer of Object.keys(peerDependencies))
+      expect(Object.keys(dependencies), `${archive} peers on ${peer}`).toContain(
+        peer,
+      );
+  }
+});
