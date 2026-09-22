@@ -20,6 +20,12 @@ for a check you could not determine — a transient network error, or an area yo
 ran out of room to reach — and say which it was. It is never a substitute for a
 check you could have run.
 
+A condition on state outside the repository — a provisioning step, an external
+zone setting — is not a check you could not determine; it is not a check at
+all. Verdict the `FAIL IF`'s condition on the repository's own state, and
+record the external obligation as INFO. `UNVERIFIABLE` there would make every
+later run inconclusive too, because nothing a later run can read settles it.
+
 Where `docs/specs/security.md` says a risk is accepted ("What is not defended")
 or a gap is known ("Known gaps"), do not re-report it as a finding — report
 only if the situation has changed or is worse than described.
