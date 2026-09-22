@@ -38,18 +38,21 @@ does not deploy.
 ## Refresh private packages
 
 ```sh
-node scripts/sync-pgstencil.mjs /path/to/pgstencil
+node scripts/sync-pgstencil.mjs /path/to/pgstencil [revision]
 ```
 
-This runs `pnpm packages:pack` in pgstencil, vendors core/auth, records source
-commit/dirty state and SHA-256 hashes in `vendor/build.json`, and installs. The
-direct Node command also works before the archives exist (pnpm may otherwise
-auto-install first). See `docs/specs/hosted.md` -> "Application boundary" for
-what has to be committed together.
+This checks out the pgstencil revision (default `HEAD`) in a temporary clean
+worktree, runs `pnpm packages:pack` there, vendors core/auth, records the commit,
+`dirty: false` and SHA-256 hashes in `vendor/build.json`, and installs. To try
+uncommitted pgstencil changes, pass `--working-tree` instead of a revision; it
+packs the checkout as it stands against its local install and always records
+`dirty: true`, which production preflight rejects. The direct Node command also works before the
+archives exist (pnpm may otherwise auto-install first). See
+`docs/specs/hosted.md` -> "Application boundary" for what has to be committed
+together.
 
-Re-run integration tests after every refresh. The initial vendored pgstencil
-manifest is dirty; production preflight rejects it until it is refreshed from an
-accepted clean revision with matching archive hashes.
+Re-run integration tests after every refresh. Vendor an accepted pgstencil
+revision before a production release.
 
 ## Resource inventory
 
