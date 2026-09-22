@@ -6,7 +6,9 @@ The three release-gate pieces are named separately because they break independen
 
 ## Domains
 
-One context holding all three subject matters degrades application security — the newest domain, with the most code behind it, and the easiest to crowd out with API responses.
+One context holding every subject matter degrades application security — the domain with the most code behind it, and the easiest to crowd out with API responses.
+
+Hosted accounts were split out of `application-security` on 2026-09-21. That domain already carried remote control (where the depth goes), the local boundaries, Hosted, and the catch-all sweep, and it had overrun the 32-minute deadline more than once, so a remote-control pass that ran out of time took the Hosted results down with it. Hosted is a disjoint tree — `hosted/`, `vendor/`, and the two `hosted-*.yml` workflows it reads for the Deployment boundary — with its own spec, so it splits cleanly and now writes its own fragment. It also gives the pgstencil provenance checks a prompt that is about them rather than a paragraph inside one about pairing code. It runs on Opus for the same reason `application-security` does: the Worker's origin gate and the deployment path are read, not enumerated.
 
 Folding the application-security scope back into a shared context is how that spec stops being audited without anyone deciding to stop auditing it.
 
@@ -36,7 +38,7 @@ The deadline is persisted because one longer than the ten-minute Bash cap cannot
 
 A call that reaches the cap is *moved to the background*, not returned: it prints nothing back, so re-issuing becomes a judgement call rather than a step. Run 34457954349 happened to re-issue a third time and its deadline fell inside that call, so it merged and published two PASS domains; run 34581574869 spent one extra call checking the fragments, which shifted the phase enough that a third wait would have been needed, ended its turn instead, and published no report at all — the same two domains' PASS fragments survived only in the artifact. A loop that ends itself under the cap turns both nights into the same printed answer.
 
-The answer is the call's last line, below a per-domain status, rather than an `ls` listing: once domains append as they go, all three fragments exist within minutes, so a listing of three files no longer means three reports.
+The answer is the call's last line, below a per-domain status, rather than an `ls` listing: once domains append as they go, every fragment exists within minutes, so a listing of them no longer means that many reports.
 
 The 25-minute deadline was raised to 32 after `application-security` failed to report inside it two nights running — the deadline expired on it on 2026-09-10, and on 2026-09-11 it was still sweeping when the run ended at 21 minutes — while roughly 13 of the job's 40 minutes went unused on both nights. On 2026-09-15 every domain reported in an agent step that ran 25.5 minutes, so the old deadline had little slack even on a night that finished.
 
