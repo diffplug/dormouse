@@ -294,9 +294,10 @@ let serverToken: string | null = null;
  *
  * {@link stillOurs} compares the path against *this*, never against a second
  * read of the path: a competing window that cleared the same corpse may have
- * rebound it before the first read lands, and then both reads name that
+ * rebound it before an async read lands, and then both reads name that
  * window's socket, the two agree, and every window that bound believes it
- * won.
+ * won. Captured synchronously after the bind, which narrows that gap without
+ * closing it (see `tryBind`).
  */
 let boundSocketFile: SocketFileIdentity | null = null;
 const clients = new Set<PeerLinkClient>();
@@ -796,8 +797,10 @@ async function tryBind(path: string, token: string): Promise<boolean> {
   }
   server = nextServer;
   // Synchronous, and before the first `await` past the bind: `listen` binds
-  // inside the call and resolves on a nextTick, so nothing queued on the thread
-  // pool — a competing window's unlink among it — can run in between, and this
+  // inside the call and resolves on a nextTick, so no thread-pool callback of
+  // *this* process can interleave. A competing window is a separate extension
+  // host, so its unlink and rebind can still land here — this narrows the gap
+  // to a few microseconds of straight-line code rather than closing it, and
   // reads the file our own bind made ({@link boundSocketFile}).
   boundSocketFile = socketFileIdentitySync(path);
   // Provisional until the caller settles it: a reclaimed bind may still be
