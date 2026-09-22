@@ -28,6 +28,12 @@ export function ThemeStoreDialog({
   const [error, setError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
+  // Every search takes a new epoch, and so does every close, so only the newest
+  // search may write its outcome. Cancelling the debounce below stops the
+  // searches that have not started yet; a search already in flight needs this,
+  // in two shapes — an earlier query answering after a later one, and a request
+  // outliving the close, repopulating the slate the reset effect just cleared.
+  const searchEpoch = useRef(0);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -46,6 +52,7 @@ export function ThemeStoreDialog({
       // Cancel any debounce scheduled by the last keystroke; otherwise it fires
       // doSearch after close and repopulates results/loading for the old query.
       if (debounceRef.current) clearTimeout(debounceRef.current);
+      searchEpoch.current += 1;
       setQuery('');
       setResults([]);
       setError(null);
@@ -60,6 +67,8 @@ export function ThemeStoreDialog({
   }, []);
 
   const doSearch = useCallback(async (value: string) => {
+    const epoch = ++searchEpoch.current;
+    const newest = () => searchEpoch.current === epoch;
     if (!value.trim()) {
       setResults([]);
       return;
@@ -68,11 +77,11 @@ export function ThemeStoreDialog({
     setError(null);
     try {
       const response = await searchThemes(value, 0, 20);
-      setResults(response.extensions);
+      if (newest()) setResults(response.extensions);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Search failed');
+      if (newest()) setError(reason instanceof Error ? reason.message : 'Search failed');
     } finally {
-      setLoading(false);
+      if (newest()) setLoading(false);
     }
   }, []);
 

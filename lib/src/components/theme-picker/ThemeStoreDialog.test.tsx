@@ -16,11 +16,22 @@ vi.mock('../../lib/themes', () => ({
   setActiveThemeId: vi.fn(),
 }));
 
-import { searchThemes } from '../../lib/themes';
+import { searchThemes, type OpenVSXExtension } from '../../lib/themes';
 import { ThemeStoreDialog } from './ThemeStoreDialog';
 import { setNativeFieldValue } from '../../lib/dom';
 
 const searchThemesMock = vi.mocked(searchThemes);
+
+function extension(name: string, displayName: string): OpenVSXExtension {
+  return {
+    namespace: 'test',
+    name,
+    displayName,
+    description: '',
+    version: '1.0.0',
+    downloadCount: 1,
+  };
+}
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -85,6 +96,63 @@ describe('ThemeStoreDialog', () => {
       });
 
       expect(searchThemesMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('discards a search already in flight when the store closes', async () => {
+    let resolveSearch!: (result: { extensions: OpenVSXExtension[] }) => void;
+    searchThemesMock.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveSearch = resolve; }),
+    );
+
+    vi.useFakeTimers();
+    try {
+      render(true);
+      typeQuery('dracula');
+      act(() => { vi.advanceTimersByTime(300); }); // the request leaves
+      expect(searchThemesMock).toHaveBeenCalledTimes(1);
+
+      render(false); // close while it is still in flight
+      await act(async () => {
+        resolveSearch({ extensions: [extension('dracula', 'Dracula Official')] });
+      });
+      render(true);
+
+      expect(container.textContent).not.toContain('Dracula Official');
+      expect(container.textContent).toContain('Search for a VS Code theme to install');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('ignores a superseded search whose response arrives last', async () => {
+    let resolveFirst!: (result: { extensions: OpenVSXExtension[] }) => void;
+    let resolveSecond!: (result: { extensions: OpenVSXExtension[] }) => void;
+    searchThemesMock
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveSecond = resolve; }));
+
+    vi.useFakeTimers();
+    try {
+      render(true);
+      typeQuery('dra');
+      act(() => { vi.advanceTimersByTime(300); });
+      typeQuery('nord');
+      act(() => { vi.advanceTimersByTime(300); });
+      expect(searchThemesMock).toHaveBeenCalledTimes(2);
+
+      // The newer query answers first; the older one lands afterwards.
+      await act(async () => {
+        resolveSecond({ extensions: [extension('nord', 'Nord Theme')] });
+      });
+      await act(async () => {
+        resolveFirst({ extensions: [extension('dracula', 'Dracula Official')] });
+      });
+
+      expect(container.textContent).toContain('Nord Theme');
+      expect(container.textContent).not.toContain('Dracula Official');
     } finally {
       vi.useRealTimers();
     }
