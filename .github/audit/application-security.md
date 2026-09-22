@@ -9,19 +9,37 @@
 **Output file:** `audit-application.md`
 
 This is a code-and-specs audit of the product's own boundaries — the remote
-control stack, and the local application. You need no GitHub API access and no
-PAT — do not use one.
+control stack, and the local application. You need no PAT — do not use one.
+The two pgstencil provenance checks below do read the GitHub API, but only a
+public repository, which the workflow's default `GITHUB_TOKEN` and the
+operator's own `gh` login both reach; if that API is unreachable, report those
+two checks as `UNVERIFIABLE`.
 
 For Hosted accounts, read `docs/specs/hosted.md`, `hosted/server/`,
-`hosted/src/`, `hosted/scripts/`, `hosted/wrangler.jsonc`, the packed core/auth
-modules in `vendor/`, and `.github/workflows/hosted-preview.yml` and
+`hosted/src/`, `hosted/scripts/`, `hosted/wrangler.jsonc`, and
+`.github/workflows/hosted-preview.yml` and
 `.github/workflows/hosted-production.yml` — `docs/specs/security-hosted.md`'s
 Deployment boundary quantifies over the preview and production paths, which
 live in those scripts and workflows rather than in the Worker. Verify the
-archive hashes against `vendor/build.json`. Distinguish tested code from
-pending production configuration; do not treat local provider simulations as
-live OAuth acceptance, and treat a checked-in placeholder as no evidence about
-an external control.
+vendored packages by their provenance rather than by reading them: hash each
+archive in `vendor/` against `vendor/build.json`; read each archive's own claim
+with `tar -xOf vendor/<archive>.tgz package/dist/provenance.json` and check
+that it names `build.json`'s commit and does not record `dirty`; then check
+that commit against pgstencil `main` and its audit:
+
+```sh
+gh api repos/diffplug/pgstencil/compare/<commit>...main --jq .status
+gh api repos/diffplug/pgstencil/commits/<commit>/check-runs \
+  --jq '.check_runs[] | select(.name=="security-audit") | .conclusion'
+```
+
+The first must be `ahead` or `identical`, the second `success`. The packed code
+itself is audited in `diffplug/pgstencil` by that repository's own
+`security-audit` workflow against its `SECURITY.md`; do not audit the tarballs'
+contents here — audit how `hosted/` configures the adapter. Distinguish tested
+code from pending production configuration; do not treat local provider
+simulations as live OAuth acceptance, and treat a checked-in placeholder as no
+evidence about an external control.
 
 Read, at minimum: `docs/specs/remote-security-model.md` **and its paired
 `docs/specs/remote-security-model.rationale.md`**, `docs/specs/relay.md`,

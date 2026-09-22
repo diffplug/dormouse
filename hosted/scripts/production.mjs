@@ -34,12 +34,12 @@ export async function verifyPackages() {
   const manifest = JSON.parse(
     await readFile(new URL("../../vendor/build.json", import.meta.url), "utf8"),
   );
+  assert.match(manifest.commit, /^[a-f0-9]{40}$/);
   assert.equal(
     manifest.dirty,
     false,
-    "Production requires accepted, clean pgstencil provenance; refresh the vendored packages first",
+    "Production requires a sync of a committed pgstencil revision, not --working-tree; refresh the vendored packages first",
   );
-  assert.match(manifest.commit, /^[a-f0-9]{40}$/);
   assert.deepEqual(
     manifest.files.map((entry) => entry.filename).sort(),
     ["pgstencil-0.1.0.tgz", "pgstencil-auth-0.1.0.tgz"],
@@ -47,13 +47,36 @@ export async function verifyPackages() {
   );
   for (const entry of manifest.files) {
     assert.match(entry.filename, /^pgstencil(?:-auth)?-[\w.-]+\.tgz$/);
-    const bytes = await readFile(
-      new URL(`../../vendor/${entry.filename}`, import.meta.url),
-    );
+    const archive = new URL(`../../vendor/${entry.filename}`, import.meta.url);
     assert.equal(
-      createHash("sha256").update(bytes).digest("hex"),
+      createHash("sha256")
+        .update(await readFile(archive))
+        .digest("hex"),
       entry.sha256,
       "Vendored archive checksum mismatch",
+    );
+    // The archive's own provenance is what pgstencil's audit is keyed to —
+    // docs/specs/security-hosted.md -> "Deployment boundary".
+    const packed = spawnSync(
+      "tar",
+      ["-xOf", fileURLToPath(archive), "package/dist/provenance.json"],
+      { encoding: "utf8" },
+    );
+    assert.equal(
+      packed.status,
+      0,
+      `${entry.filename} carries no package/dist/provenance.json; refresh the vendored packages first`,
+    );
+    const provenance = JSON.parse(packed.stdout);
+    assert.notEqual(
+      provenance.dirty,
+      true,
+      "Production requires accepted, clean pgstencil provenance; refresh the vendored packages first",
+    );
+    assert.equal(
+      provenance.commit,
+      manifest.commit,
+      `${entry.filename} was packed from a commit other than the one vendor/build.json records`,
     );
   }
 }
