@@ -45,8 +45,8 @@ This checks out the pgstencil revision (default `HEAD`) in a temporary clean
 worktree, runs `pnpm packages:pack` there, vendors core/auth, records the commit,
 `dirty: false` and SHA-256 hashes in `vendor/build.json`, and installs. To try
 uncommitted pgstencil changes, pass `--working-tree` instead of a revision; it
-packs the checkout as it stands and records whether it was dirty, which
-production preflight rejects. The direct Node command also works before the
+packs the checkout as it stands against its local install and always records
+`dirty: true`, which production preflight rejects. The direct Node command also works before the
 archives exist (pnpm may otherwise auto-install first). See
 `docs/specs/hosted.md` -> "Application boundary" for what has to be committed
 together.
