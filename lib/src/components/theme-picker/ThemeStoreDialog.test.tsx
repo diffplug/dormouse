@@ -127,6 +127,34 @@ describe('ThemeStoreDialog', () => {
     }
   });
 
+  it('stops searching when the box is emptied while a request is in flight', async () => {
+    let resolveSearch!: (result: { extensions: OpenVSXExtension[] }) => void;
+    searchThemesMock.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveSearch = resolve; }),
+    );
+
+    vi.useFakeTimers();
+    try {
+      render(true);
+      typeQuery('dracula');
+      act(() => { vi.advanceTimersByTime(300); });
+
+      // Emptying the box supersedes the in-flight request, so nothing it
+      // resolves with may show — but the spinner it turned on must still go.
+      typeQuery('');
+      act(() => { vi.advanceTimersByTime(300); });
+      await act(async () => {
+        resolveSearch({ extensions: [extension('dracula', 'Dracula Official')] });
+      });
+
+      expect(container.textContent).not.toContain('Searching...');
+      expect(container.textContent).not.toContain('Dracula Official');
+      expect(container.textContent).toContain('Search for a VS Code theme to install');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('ignores a superseded search whose response arrives last', async () => {
     let resolveFirst!: (result: { extensions: OpenVSXExtension[] }) => void;
     let resolveSecond!: (result: { extensions: OpenVSXExtension[] }) => void;

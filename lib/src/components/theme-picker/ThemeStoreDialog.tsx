@@ -71,6 +71,10 @@ export function ThemeStoreDialog({
     const newest = () => searchEpoch.current === epoch;
     if (!value.trim()) {
       setResults([]);
+      // An emptied box is the newest search, so it inherits the spinner any
+      // request it just superseded turned on: that request's `finally` is
+      // gated off, and nothing else here would clear `loading`.
+      setLoading(false);
       return;
     }
     setLoading(true);
