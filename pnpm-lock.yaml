@@ -2386,7 +2386,7 @@ packages:
     os: [win32]
 
   '@pgstencil/auth@file:vendor/pgstencil-auth-0.1.0.tgz':
-    resolution: {integrity: sha512-gfnfb5HOlYS7anaPCD3890fLvlloczS7gvb3+Fh6mXldrYNoK0HjtDVit68pQb9kbPivyUSduuoKS/2jAoeHgw==, tarball: file:vendor/pgstencil-auth-0.1.0.tgz}
+    resolution: {integrity: sha512-LjVC3COsHxwUaR9CEx06vqSSZk5+YPXzoho1whqm/IWcyHBmLBu+LW0p7eh2Rb1n3OomUTOQhP0g/FvAMbxoMA==, tarball: file:vendor/pgstencil-auth-0.1.0.tgz}
     version: 0.1.0
     engines: {node: '>=24'}
     peerDependencies:
@@ -5204,7 +5204,7 @@ packages:
     resolution: {integrity: sha512-FdW9r/jQZhSeohs1Z3sI1yxFQNFvMcnmfuj4WBMUTxOrAyLMaTcE1aAMBiTlbMNaXvBCQuVi0R7hd8udDSP7ug==}
 
   pgstencil@file:vendor/pgstencil-0.1.0.tgz:
-    resolution: {integrity: sha512-tJncl/ELHO09guw0Mm1kBDC9de8gNOMQLv96MLCoWqDFW7oyHyfNxO/2A8Jy7EeVh/K1PELawu507Ohs3WSXMQ==, tarball: file:vendor/pgstencil-0.1.0.tgz}
+    resolution: {integrity: sha512-CbfIuJbdeFbpUeSa0sFAVHEHoNQoh0ACqaorTRtf/fkXrLJK7elR5C7DAZHsZtU0WcXa6EDnRpECFUOF3vCClg==, tarball: file:vendor/pgstencil-0.1.0.tgz}
     version: 0.1.0
     engines: {node: '>=24'}
     peerDependencies:
