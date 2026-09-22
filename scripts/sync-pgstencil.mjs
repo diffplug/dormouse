@@ -33,6 +33,40 @@ const run = (command, args, cwd, env = process.env) =>
   execFileSync(command, args, { cwd, stdio: "inherit", env });
 const git = (...args) =>
   execFileSync("git", args, { cwd: repository, encoding: "utf8" }).trim();
+const succeeds = (attempt) => {
+  try {
+    attempt();
+    return true;
+  } catch {
+    return false;
+  }
+};
+// Every pgstencil pack writes package/dist/provenance.json: the archive's own
+// claim of the commit it came from, plus `dirty` when it was packed
+// --allow-dirty. Dormouse verifies that claim instead of auditing the packed
+// code, which pgstencil audits in its own repository —
+// docs/specs/security-hosted.md -> "Deployment boundary".
+const provenanceOf = (archive) => {
+  let raw;
+  try {
+    raw = execFileSync(
+      "tar",
+      ["-xOf", archive, "package/dist/provenance.json"],
+      { encoding: "utf8" },
+    );
+  } catch {
+    throw new Error(`${archive} carries no package/dist/provenance.json`);
+  }
+  let claim;
+  try {
+    claim = JSON.parse(raw);
+  } catch {
+    throw new Error(`${archive}: package/dist/provenance.json is not JSON`);
+  }
+  if (typeof claim?.commit !== "string" || !/^[0-9a-f]{40}$/.test(claim.commit))
+    throw new Error(`${archive}: provenance.json names no commit`);
+  return claim;
+};
 const manifest = JSON.parse(
   readFileSync(resolve(root, "hosted/package.json"), "utf8"),
 );
@@ -56,6 +90,9 @@ const overrides = new Map(
 // --working-tree packs the checkout as it stands, for trying unfinished
 // pgstencil changes. That result depends on local state even when git status is
 // clean, so it is always recorded dirty and production preflight refuses it.
+// Either way `commit` is the HEAD of the checkout that was packed, so it is
+// what each archive's own provenance must name; a pack that reports itself
+// dirty (pgstencil's --allow-dirty) is refused below rather than vendored.
 const commit = git(
   "rev-parse",
   "--verify",
@@ -92,11 +129,22 @@ try {
     run("pnpm", ["install", "--frozen-lockfile"], checkout, pgstencil);
   run("pnpm", ["packages:pack"], checkout, pgstencil);
   mkdirSync(resolve(root, "vendor"), { recursive: true });
-  for (const filename of archives)
-    copyFileSync(
-      resolve(checkout, "dist/packages", filename),
-      resolve(root, "vendor", filename),
-    );
+  for (const filename of archives) {
+    const target = resolve(root, "vendor", filename);
+    copyFileSync(resolve(checkout, "dist/packages", filename), target);
+    // Both archives are held to the commit packed here, so a stale pack —
+    // or two archives disagreeing with each other — stops the sync before
+    // build.json can record a commit the bytes do not carry.
+    const claim = provenanceOf(target);
+    if (claim.dirty === true)
+      throw new Error(
+        `${filename} was packed --allow-dirty; a dirty pack cannot be vendored`,
+      );
+    if (claim.commit !== commit)
+      throw new Error(
+        `${filename} was packed from ${claim.commit}, not the ${commit} packed here`,
+      );
+  }
 } finally {
   if (!workingTree) git("worktree", "remove", "--force", checkout);
 }
@@ -117,3 +165,17 @@ run(
   ["--filter", "dormouse-hosted", "update", "pgstencil", "@pgstencil/auth"],
   root,
 );
+// Dormouse `main` must vendor a pgstencil `main` commit, because the nightly
+// audit reads that commit's pgstencil `security-audit` check run — but a
+// Dormouse branch may vendor a pgstencil branch while a cross-repo change is
+// in flight, so this warns and does not fail.
+const fetched = succeeds(() => git("fetch", "origin", "main"));
+const onMain =
+  fetched &&
+  succeeds(() => git("merge-base", "--is-ancestor", commit, "origin/main"));
+if (!onMain)
+  console.warn(
+    fetched
+      ? `warning: pgstencil ${commit} is not on origin/main — Dormouse main must vendor a pgstencil main commit, and the nightly audit fails until it does`
+      : `warning: could not fetch pgstencil origin/main to check ${commit} — Dormouse main must vendor a pgstencil main commit`,
+  );

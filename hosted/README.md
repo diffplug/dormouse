@@ -43,13 +43,19 @@ node scripts/sync-pgstencil.mjs /path/to/pgstencil [revision]
 
 This checks out the pgstencil revision (default `HEAD`) in a temporary clean
 worktree, runs `pnpm packages:pack` there, vendors core/auth, records the commit,
-`dirty: false` and SHA-256 hashes in `vendor/build.json`, and installs. To try
-uncommitted pgstencil changes, pass `--working-tree` instead of a revision; it
-packs the checkout as it stands against its local install and always records
-`dirty: true`, which production preflight rejects. The direct Node command also works before the
-archives exist (pnpm may otherwise auto-install first). See
-`docs/specs/hosted.md` -> "Application boundary" for what has to be committed
-together.
+`dirty: false` and SHA-256 hashes in `vendor/build.json`, and installs. Each
+archive carries its own `package/dist/provenance.json`, and the sync refuses one
+that is missing it, that reports a dirty pack, or that names a commit other than
+the one packed here. To try uncommitted pgstencil changes, pass `--working-tree`
+instead of a revision; it packs the checkout as it stands against its local
+install and always records `dirty: true`, which production preflight rejects.
+The sync also warns when the vendored commit is not on pgstencil's
+`origin/main`: a Dormouse branch may vendor a pgstencil branch while a
+cross-repo change is in flight, but Dormouse `main` must vendor a pgstencil
+`main` commit, and the nightly audit fails until it does. The direct Node
+command also works before the archives exist (pnpm may otherwise auto-install
+first). See `docs/specs/hosted.md` -> "Application boundary" for what has to be
+committed together.
 
 Re-run integration tests after every refresh. Vendor an accepted pgstencil
 revision before a production release.

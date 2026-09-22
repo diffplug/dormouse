@@ -142,13 +142,14 @@ lints can only read.
 `.github/workflows/security-audit.yaml` audits the repository against these
 specs. Three subagents, each owning the specs below, run every `FAIL IF` as a
 mechanical check with evidence, then read their domain adversarially for what
-no check names. A failure, or a run that reaches no verdict, files a public
+no check names. A failure, or a run reaching no verdict, files a public
 issue labeled
 [`security-audit-failure`](https://github.com/diffplug/dormouse/issues?q=is%3Aissue+label%3Asecurity-audit-failure)
 and holds the release; a later pass closes it. Open issues are live; closed
-ones are the record of what tripped and what changed.
+ones record what tripped and changed.
 `scripts/security-audit-local.sh` runs the same prompts locally.
-[security-audit.md](./security-audit.md) is the contract.
+[security-audit.md](./security-audit.md) is the contract. pgstencil audits the
+packages Hosted consumes in its own repository; these checks verify that link.
 
 | Domain | Specs | Covers |
 | --- | --- | --- |
