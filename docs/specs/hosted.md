@@ -9,7 +9,7 @@
 
 **Must run committed Better Auth migrations before deploying code that needs them, never during a Worker request.** Postgres is reached through an uncached Hyperdrive binding. The runtime creates and closes its database pool within each request.
 
-**Must pin locally packed core/auth packages through root pnpm overrides and commit archives, provenance, and lockfile together.** `vendor/build.json` records the source commit, dirty state, and archive hashes. No runtime import depends on a sibling checkout. The auth migrations remain owned by the package.
+**Must pin locally packed core/auth packages through root pnpm overrides and commit archives, provenance, and lockfile together.** `vendor/build.json` records the source commit, archive hashes, and `dirty` — true for every `--working-tree` build, which production preflight refuses. No runtime import depends on a sibling checkout. The auth migrations remain owned by the package.
 
 **Must declare every peer dependency of the pinned archives in `hosted/package.json`**, so they share Hosted's copy and Renovate updates them.
 
