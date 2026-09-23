@@ -4,6 +4,7 @@ export type ContextSide = Edge;
 export type ContextPlacement = { rect: Rect; side: ContextSide; available: ContextSide[] };
 const SIDES: ContextSide[] = ['right', 'left', 'bottom', 'top'];
 const GAP = 8;
+const OVERLAP_INSET = 16;
 // Compact source/directory/status chrome plus a useful terminal viewport.
 const MIN_WIDTH = 280;
 const MIN_HEIGHT = 240;
@@ -38,12 +39,15 @@ export function placeTerminalContext(wall: Rect, source: Rect, multiPane: boolea
   if (chosen) return { ...chosen, available: candidates.map(candidate => candidate.side) };
 
   const side = preferred === 'top' || preferred === 'bottom' ? preferred : fallback;
-  // Small source panes borrow Wall width/height only when the half-pane would be unusable.
-  const width = Math.min(wall.width, Math.max(source.width, MIN_WIDTH));
-  const height = Math.min(wall.height, Math.max(source.height / 2, MIN_HEIGHT));
+  // Leave the source visible around overlapping helpers. Small sources may borrow
+  // Wall space for usable chrome, but keep the inset even below the minimum size.
+  const insetX = Math.min(OVERLAP_INSET, wall.width / 2);
+  const insetY = Math.min(OVERLAP_INSET, wall.height / 2);
+  const width = Math.min(wall.width - 2 * insetX, Math.max(source.width - 2 * insetX, MIN_WIDTH));
+  const height = Math.min(wall.height - 2 * insetY, Math.max(source.height / 2 - 2 * insetY, MIN_HEIGHT));
   return { side, available: ['top', 'bottom'], rect: {
-    x: clamp(source.x, wall.x, right - width),
-    y: clamp(side === 'bottom' ? source.y + source.height - height : source.y, wall.y, bottom - height),
+    x: clamp(source.x + insetX, wall.x + insetX, right - insetX - width),
+    y: clamp(side === 'bottom' ? source.y + source.height - insetY - height : source.y + insetY, wall.y + insetY, bottom - insetY - height),
     width, height,
   } };
 }

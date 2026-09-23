@@ -95,6 +95,14 @@ async function prepare(args: Props) {
     const a = context().getBoundingClientRect();
     const b = sourcePane().getBoundingClientRect();
     expect(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom).toBe(true);
+  } else {
+    const a = context().getBoundingClientRect();
+    const b = sourcePane().getBoundingClientRect();
+    expect(a.left - b.left).toBeCloseTo(16);
+    expect(b.right - a.right).toBeCloseTo(16);
+    expect(a.top - b.top).toBeGreaterThanOrEqual(16);
+    expect(b.bottom - a.bottom).toBeGreaterThanOrEqual(16);
+    expect(expectedSide(args) === 'top' ? a.top - b.top : b.bottom - a.bottom).toBeCloseTo(16);
   }
   return { expectSourceUnchanged };
 }

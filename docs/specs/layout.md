@@ -67,8 +67,8 @@ The label is the `DerivedHeader` from `deriveHeader(...)`; `docs/specs/terminal-
 | Layout | Placement |
 |---|---|
 | Multiple visible panes | Outside the source, separated by 8px; match its outer bounds where possible. Choose the largest usable candidate, ties right / left / bottom / top. Align the shared edge, shifting only to stay inside the Wall. |
-| No usable adjacent candidate; single or zoomed pane | Source's top or bottom half, opposite its visible terminal cursor sampled on opening; unknown, offscreen, or midpoint cursor defaults to top. |
-| Small source or Wall | Expand the half-pane fallback to the minimum usable size, clamped to Wall bounds. |
+| No usable adjacent candidate; single or zoomed pane | Source's top or bottom half, inset 16px on every side, opposite its visible terminal cursor sampled on opening; unknown, offscreen, or midpoint cursor defaults to top. |
+| Small source or Wall | Expand the half-pane fallback to the minimum usable size, clamped inside the Wall's 16px inset; shrink below the minimum when necessary to preserve the inset. |
 
 **Must offer available side buttons plus Auto**, with destination tooltips, accessible labels, and selected state. Remember manual choices per source for the mounted Wall's lifetime; clear on source removal or Auto. Preserve terminal focus on pointer repositioning. An unavailable choice falls back automatically; no preference is persisted to disk.
 

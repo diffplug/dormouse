@@ -19,13 +19,22 @@ describe('terminal context placement', () => {
     expect(placeTerminalContext(wall, { ...wall, width: 800 }, true)).toMatchObject({ side: 'right', rect: { width: 392 } });
     expect(placeTerminalContext(wall, { ...wall, width: 1000 }, true)).toMatchObject({ side: 'top', available: ['top', 'bottom'] });
   });
-  it('uses source halves for single or zoomed panes', () => {
-    expect(placeTerminalContext(wall, wall, false)).toMatchObject({ rect: { ...wall, height: 400 }, available: ['top', 'bottom'] });
-    expect(placeTerminalContext(wall, wall, false, 'bottom').rect.y).toBe(400);
+  it('insets each source half for single or zoomed panes', () => {
+    expect(placeTerminalContext(wall, wall, false)).toMatchObject({ rect: { x: 16, y: 16, width: 1168, height: 368 }, available: ['top', 'bottom'] });
+    expect(placeTerminalContext(wall, wall, false, 'bottom').rect).toEqual({ x: 16, y: 416, width: 1168, height: 368 });
+  });
+  it('insets overlapping fallbacks when no adjacent candidate fits', () => {
+    const source = { x: 100, y: 80, width: 1000, height: 640 };
+    expect(placeTerminalContext(wall, source, true).rect).toEqual({ x: 116, y: 96, width: 968, height: 288 });
+    expect(placeTerminalContext(wall, source, true, 'bottom').rect).toEqual({ x: 116, y: 416, width: 968, height: 288 });
   });
   it('keeps even tiny fallback panels inside offset Wall bounds', () => {
     const tiny = { x: 40, y: 60, width: 250, height: 180 };
-    expect(placeTerminalContext(tiny, tiny, false, 'bottom').rect).toEqual(tiny);
+    expect(placeTerminalContext(tiny, tiny, false, 'bottom').rect).toEqual({ x: 56, y: 76, width: 218, height: 148 });
+  });
+  it('borrows space for small sources without losing the Wall inset', () => {
+    const source = { x: 1100, y: 700, width: 100, height: 100 };
+    expect(placeTerminalContext(wall, source, false, 'bottom').rect).toEqual({ x: 904, y: 544, width: 280, height: 240 });
   });
   it('keeps an existing side when still usable, then falls back when it is not', () => {
     expect(placeTerminalContext(wall, { x: 400, y: 0, width: 380, height: 800 }, true, 'left').side).toBe('left');
