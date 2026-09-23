@@ -409,6 +409,7 @@ async function openHeaderContextMenu() {
     clientX: rect.left + rect.width / 2,
     clientY: rect.top + rect.height / 2,
   }));
+  (await requireElement<HTMLButtonElement>('[aria-label="Terminal context details"]', 'context Details')).click();
   const explain = await requireElement<HTMLButtonElement>('[data-terminal-context] [aria-label="Explain this title"]', 'title explanation action');
   explain.click();
   await requireElement('[role="dialog"][aria-label="Title sources"]', 'title sources');

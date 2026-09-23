@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { expect, userEvent, waitFor, within } from 'storybook/test';
 import { Wall } from '../components/Wall';
-import { getHelper } from '../lib/helper-terminal';
+import { disposeHelper, getHelper } from '../lib/helper-terminal';
 import { getTerminalInstance, refitSession } from '../lib/terminal-registry';
 import { flattenScenario, SCENARIO_SHELL_PROMPT } from '../lib/platform';
 import { leaves, normalizeWeights, type LathNode } from '../lib/lath/model';
@@ -102,6 +102,9 @@ async function prepare(args: Props) {
 const meta = {
   title: 'App/Helper placement',
   component: PlacementWall,
+  // Argos replays stories for capture; unfinished input from the preceding run
+  // must not turn this run's fresh-helper fixture into a preserved helper.
+  beforeEach: () => { disposeHelper(SOURCE); },
   args: { layout: 'single', width: 1100, height: 780, sourceAtEnd: false, cursor: 'bottom', zoomed: false },
   parameters: { layout: 'fullscreen', fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) }, primedTerminalState: { byId: { [SOURCE]: { cwd: { path: '/home/demo/projects/dormouse', pathKind: 'posix', isRemote: false, source: 'osc633', updatedAt: 0 } } } }, chromatic: { viewports: [1200] } },
   play: async ({ args, canvasElement }) => { await prepare(args); canvasElement.dataset.placementCheck = 'passed'; },
