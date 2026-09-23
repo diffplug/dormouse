@@ -20,12 +20,16 @@ for a check you could not determine — a transient network error, or an area yo
 ran out of room to reach — and say which it was. It is never a substitute for a
 check you could have run.
 
-A condition on state outside the repository — a provisioning step, an external
-zone setting — is not a check you could not determine; it is not a check at
-all. Verdict the `FAIL IF`'s condition on the repository's own state, and
-record the external obligation as INFO — as for anything a spec stages under
-`## Future`. `UNVERIFIABLE` there would make every
-later run inconclusive too, because nothing a later run can read settles it.
+A condition no audit run can read — a provisioning step, a setting in an
+external service's console — is not a check you could not determine; it is not
+a check at all. Verdict the `FAIL IF`'s readable condition, and record the
+external obligation as INFO. `UNVERIFIABLE` there would make every later run
+inconclusive too, because nothing a later run can read settles it. GitHub state
+`AUDIT_PAT` reaches — rulesets, environments, secret placement, workflow
+permissions — is readable: it stays a check, and `UNVERIFIABLE` stays right for
+a call that fails. An obligation a spec stages under `## Future` is not a check
+either; once it is promoted above the fold, audit it as a `FAIL IF` like any
+other.
 
 Where `docs/specs/security.md` says a risk is accepted ("What is not defended")
 or a gap is known ("Known gaps"), do not re-report it as a finding — report

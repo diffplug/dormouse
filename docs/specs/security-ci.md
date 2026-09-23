@@ -87,7 +87,9 @@ Source of truth: `packageRules` in `.github/renovate.json`; `WINDOW` and `is_ten
 **Must keep Hosted credentials in dedicated environments.** `hosted-production` and `hosted-release-tag` admit only `main`; `hosted-preview` admits only `main` and `refs/pull/*/merge`. All require Ned or Edgar's review with administrator bypass disabled; self-review is allowed. Preview approval authorizes the PR code to receive test-resource credentials only.
 
 - **FAIL IF** a Hosted environment lacks those branch restrictions, required reviewers, or disabled administrator bypass; inspect all three environments and their deployment policies.
-- **FAIL IF** Hosted credentials appear at repository/org scope, production credentials appear in `hosted-preview`, or preview credentials can reach production/TTR/marketing resources. Inspect GitHub secret placement and Cloudflare/Neon token scope; names alone do not isolate resources.
+- **FAIL IF** Hosted credentials appear at repository/org scope, or production credentials appear in `hosted-preview`; inspect GitHub secret placement.
+
+**Must scope `hosted-preview`'s Cloudflare and Neon tokens away from production, TTR, and marketing resources** when issuing them; names do not isolate resources, and no audit run can read a token's scope.
 - **FAIL IF** `HOSTED_TAG_TOKEN` appears outside `hosted-release-tag`, or that environment is used by a job other than `tag` in `.github/workflows/hosted-production.yml`. Its admin identity's repository-scoped Contents-write PAT can write code and bypass tag protection; it must never enter a deployment job or PR execution.
 - **FAIL IF** a Hosted preview deploy accepts a fork or a failing verification, preview cleanup checks out a PR ref rather than `main`, or a Hosted production tag can run before live verification succeeds; inspect the workflow dependency/condition graph.
 
