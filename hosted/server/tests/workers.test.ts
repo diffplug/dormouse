@@ -1,5 +1,5 @@
 import { test, expect } from "vitest";
-import { createHash } from "node:crypto";
+import { digest } from "@pgstencil/auth/security";
 import { build } from "esbuild";
 import { builtinModules } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -22,6 +22,7 @@ import {
 } from "./oauth-server";
 import type { Session } from "../../src/api";
 import { ADMIN_EMAIL } from "../admin";
+import { VOICE_DAILY_CAP } from "../voice";
 
 const origin = "https://hosted.dormouse.sh";
 const bundle = (production: boolean | "preview") =>
@@ -290,7 +291,9 @@ async function fixture(
         },
         body: typeof body === "string" ? body : JSON.stringify(body),
       });
-    return { request, post, session, email, oauth, voice, speak };
+    const mint = async () =>
+      (await (await voice("POST")).json()) as { id: string; token: string };
+    return { request, post, session, email, oauth, voice, speak, mint };
   }
   return {
     ...context,
@@ -538,8 +541,8 @@ test("preview runs cloud smoke against real auth, ignores stale providers, and p
   expect(await inbox.get(id)).toBeUndefined();
 });
 
-const sha256 = (value: string) =>
-  createHash("sha256").update(value).digest("hex");
+const voiceId = "21m00Tcm4TlvDq8ikWAM";
+const hi = { text: "hi", voiceId };
 
 test("managed voice: only the verified admin mints, speaks, and revokes", async ({
   onTestFinished,
@@ -572,9 +575,8 @@ test("managed voice: only the verified admin mints, speaks, and revokes", async 
     f.database.url,
     "SELECT hash FROM dormouse_voice_tokens",
   );
-  expect(stored).toEqual([{ hash: sha256(token) }]);
+  expect(stored).toEqual([{ hash: digest(token) }]);
 
-  const voiceId = "21m00Tcm4TlvDq8ikWAM";
   const spoken = await admin.speak(token, {
     text: "  Build passed.  ",
     voiceId,
@@ -608,28 +610,29 @@ test("managed voice: only the verified admin mints, speaks, and revokes", async 
 
   for (const body of [
     "not json",
+    JSON.stringify({ ...hi, pad: "x".repeat(4096) }),
     { voiceId },
     { text: "   ", voiceId },
     { text: "x".repeat(201), voiceId },
-    { text: "hi", voiceId: "../v1/voices" },
-    { text: "hi", voiceId: "x".repeat(65) },
+    { ...hi, voiceId: "../v1/voices" },
+    { ...hi, voiceId: "x".repeat(65) },
   ])
     expect((await admin.speak(token, body)).status).toBe(400);
   for (const bad of [undefined, "dmv_unknown", "dmv_" + "A".repeat(43)])
-    expect((await admin.speak(bad, { text: "hi", voiceId })).status).toBe(401);
+    expect((await admin.speak(bad, hi)).status).toBe(401);
 
   // Upstream failure: 502, and nothing of the upstream body reaches the caller.
-  f.elevenLabs.respond = () =>
-    new WorkerResponse("upstream-secret-detail", { status: 401 });
-  const failed = await admin.speak(token, { text: "hi", voiceId });
-  expect(failed.status).toBe(502);
-  expect(await failed.text()).not.toContain("upstream-secret-detail");
-  f.elevenLabs.respond = () => {
-    throw new Error("upstream-secret-detail");
-  };
-  const thrown = await admin.speak(token, { text: "hi", voiceId });
-  expect(thrown.status).toBe(502);
-  expect(await thrown.text()).not.toContain("upstream-secret-detail");
+  for (const respond of [
+    () => new WorkerResponse("upstream-secret-detail", { status: 401 }),
+    () => {
+      throw new Error("upstream-secret-detail");
+    },
+  ]) {
+    f.elevenLabs.respond = respond;
+    const failed = await admin.speak(token, hi);
+    expect(failed.status).toBe(502);
+    expect(await failed.text()).not.toContain("upstream-secret-detail");
+  }
 
   // The daily cap counts attempts that reached the upstream call.
   expect(
@@ -640,10 +643,11 @@ test("managed voice: only the verified admin mints, speaks, and revokes", async 
   ).toEqual([{ count: 3 }]);
   await queryDatabase(
     f.database.url,
-    "UPDATE dormouse_voice_usage SET count = 500",
+    "UPDATE dormouse_voice_usage SET count = $1",
+    [VOICE_DAILY_CAP],
   );
   const requests = f.elevenLabs.requests.length;
-  expect((await admin.speak(token, { text: "hi", voiceId })).status).toBe(429);
+  expect((await admin.speak(token, hi)).status).toBe(429);
   expect(f.elevenLabs.requests.length).toBe(requests);
 
   // A token held by any other account is refused even though it is valid.
@@ -651,14 +655,14 @@ test("managed voice: only the verified admin mints, speaks, and revokes", async 
   await queryDatabase(
     f.database.url,
     `INSERT INTO dormouse_voice_tokens ("userId", hash) VALUES ($1, $2)`,
-    [(await other.session())!.user.id, sha256(otherToken)],
+    [(await other.session())!.user.id, digest(otherToken)],
   );
-  expect((await other.speak(otherToken, { text: "hi", voiceId })).status).toBe(
+  expect((await other.speak(otherToken, hi)).status).toBe(
     403,
   );
 
   expect((await admin.voice("DELETE", "/" + id)).status).toBe(204);
-  expect((await admin.speak(token, { text: "hi", voiceId })).status).toBe(401);
+  expect((await admin.speak(token, hi)).status).toBe(401);
   expect((await admin.voice("DELETE", "/not-a-token")).status).toBe(404);
   expect(
     (await admin.voice("DELETE", "/00000000-0000-4000-8000-000000000000"))
@@ -666,9 +670,7 @@ test("managed voice: only the verified admin mints, speaks, and revokes", async 
   ).toBe(404);
 
   // The admin address counts only while verified, rechecked on every request.
-  const second = (await (await admin.voice("POST")).json()) as {
-    token: string;
-  };
+  const second = await admin.mint();
   await queryDatabase(
     f.database.url,
     `UPDATE "user" SET "emailVerified" = false WHERE email = $1`,
@@ -677,7 +679,7 @@ test("managed voice: only the verified admin mints, speaks, and revokes", async 
   expect((await admin.voice("GET")).status).toBe(403);
   expect((await admin.voice("POST")).status).toBe(403);
   expect(
-    (await admin.speak(second.token, { text: "hi", voiceId })).status,
+    (await admin.speak(second.token, hi)).status,
   ).toBe(403);
 });
 
@@ -688,13 +690,7 @@ test("managed voice fails closed in production without an ElevenLabs key", async
   onTestFinished(f.close);
   const admin = f.browser();
   await admin.email(ADMIN_EMAIL);
-  const { token } = (await (await admin.voice("POST")).json()) as {
-    token: string;
-  };
-  const response = await admin.speak(token, {
-    text: "hi",
-    voiceId: "21m00Tcm4TlvDq8ikWAM",
-  });
+  const response = await admin.speak((await admin.mint()).token, hi);
   expect(response.status).toBe(503);
   expect(f.elevenLabs.requests).toEqual([]);
 });

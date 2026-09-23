@@ -25,10 +25,9 @@ Request a code for a test address and read it at `/api/dev/emails` on that
 same origin. No real mail is sent, and the development database is isolated by
 the worktree path; `docs/specs/hosted.md` -> "Development and release" owns what
 the local entry serves and what production omits. Use another `PORT` if 5188 is
-occupied. Do not share this local inbox publicly. Managed voice answers with
-silent fake audio unless `ELEVENLABS_API_KEY` is set in the environment of
-`pnpm dev:hosted`; only the admin address in `hosted/server/admin.ts` sees the
-Voice tokens section.
+occupied. Do not share this local inbox publicly. Set `ELEVENLABS_API_KEY` in
+the environment of `pnpm dev:hosted` to hear real speech; see
+`docs/specs/hosted.md` -> "Managed voice".
 
 ```sh
 pnpm test:hosted
@@ -255,9 +254,8 @@ pnpm exec wrangler secret put ELEVENLABS_API_KEY
 ```
 
 Create `ELEVENLABS_API_KEY` in a Dormouse-owned ElevenLabs workspace, restricted
-to text-to-speech, with a spending limit set in the ElevenLabs console; the
-Worker's own cap is `docs/specs/hosted.md` -> "Managed voice". Production
-preflight refuses to deploy without it, and speak answers 503 while it is unset.
+to text-to-speech, with a spending limit set in the ElevenLabs console. How the
+Worker uses it is `docs/specs/hosted.md` -> "Managed voice".
 
 Generate a fresh cryptographically random `AUTH_SECRET` with at least 32 bytes
 of entropy in your secret manager. Client IDs are public but may be stored

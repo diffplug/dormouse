@@ -201,16 +201,22 @@ dd {
   min-height: 52px;
   padding: 4px 0;
 }
-.status {
+.status,
+.detail {
   opacity: 0.95;
 }
 .detail {
   display: block;
   font-size: 12px;
-  opacity: 0.95;
 }
 .minted {
   margin-bottom: 16px;
+}
+.minted code {
+  display: block;
+  margin-bottom: 12px;
+  font: inherit;
+  overflow-wrap: anywhere;
 }
 .minted .copy {
   background: var(--vscode-list-activeSelectionBackground);
@@ -218,12 +224,6 @@ dd {
 }
 .mint {
   margin-top: 8px;
-}
-.minted code {
-  display: block;
-  margin-bottom: 12px;
-  font: inherit;
-  overflow-wrap: anywhere;
 }
 footer {
   display: flex;

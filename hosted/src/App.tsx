@@ -26,7 +26,7 @@ export function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [enabled, setEnabled] = useState<Provider[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
-  // Null hides the section: the server alone decides who may use managed voice.
+  // Null hides the Voice tokens section (docs/specs/hosted.md -> "Interface").
   const [voiceTokens, setVoiceTokens] = useState<VoiceToken[] | null>(null);
   const [minted, setMinted] = useState("");
   const [loading, setLoading] = useState(true);
@@ -132,7 +132,6 @@ export function App() {
       await post("sign-out");
       setSession(null);
       setAccounts([]);
-      setVoiceTokens(null);
       setMinted("");
       setEnterCode(false);
       setCode("");
@@ -143,13 +142,23 @@ export function App() {
     });
   const mintToken = () =>
     act("mint", async () => {
-      setMinted((await createVoiceToken()).token);
-      setVoiceTokens(await getVoiceTokens());
+      const { token, id, createdAt } = await createVoiceToken();
+      setMinted(token);
+      setVoiceTokens((tokens) => [
+        { id, createdAt, lastUsedAt: null, revokedAt: null },
+        ...(tokens ?? []),
+      ]);
     });
   const revokeToken = (id: string) =>
     act(`revoke-${id}`, async () => {
       await revokeVoiceToken(id);
-      setVoiceTokens(await getVoiceTokens());
+      const revokedAt = new Date().toISOString();
+      setVoiceTokens(
+        (tokens) =>
+          tokens?.map((token) =>
+            token.id === id ? { ...token, revokedAt } : token,
+          ) ?? null,
+      );
     });
   const copyMinted = () =>
     act("copy", async () => {
@@ -329,8 +338,9 @@ export function App() {
                 </section>
                 <p className="footnote">
                   {voiceTokens
-                    ? "Remote control is not available yet."
-                    : "Hosted voice and remote control are not available yet."}
+                    ? "Remote control is"
+                    : "Hosted voice and remote control are"}{" "}
+                  not available yet.
                 </p>
               </>
             ) : (

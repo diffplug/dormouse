@@ -12,7 +12,11 @@ export interface Account {
   providerId: string;
 }
 
-async function json<T>(path: string, init?: RequestInit): Promise<T> {
+async function request(
+  path: string,
+  init: RequestInit | undefined,
+  unavailable: string,
+): Promise<Response> {
   let response: Response;
   try {
     response = await fetch(path, {
@@ -23,11 +27,18 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
   } catch {
     throw new Error("Could not connect. Check your connection and try again.");
   }
+  if (response.status >= 500) throw new Error(unavailable);
+  return response;
+}
+async function json<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await request(
+    path,
+    init,
+    "Sign-in is temporarily unavailable. Please try again.",
+  );
   if (!response.ok) {
     if (response.status === 429)
       throw new Error("Too many attempts. Wait a minute before trying again.");
-    if (response.status >= 500)
-      throw new Error("Sign-in is temporarily unavailable. Please try again.");
     throw new Error(
       "That did not work. Check your details and try again. If connecting a provider, sign in again first.",
     );
@@ -69,32 +80,29 @@ export interface VoiceToken {
   revokedAt: string | null;
 }
 async function voice(method: string, path = ""): Promise<Response> {
-  let response: Response;
-  try {
-    response = await fetch(`/api/voice/tokens${path}`, {
-      method,
-      credentials: "same-origin",
-      cache: "no-store",
-    });
-  } catch {
-    throw new Error("Could not connect. Check your connection and try again.");
-  }
-  // 401/403 on the list means "not for this account"; the caller hides the section.
-  if (response.ok || (method === "GET" && [401, 403].includes(response.status)))
-    return response;
-  if (response.status >= 500)
-    throw new Error("Voice tokens are temporarily unavailable. Try again.");
-  throw new Error("That did not work. Reload the page and try again.");
+  return request(
+    `/api/voice/tokens${path}`,
+    { method },
+    "Voice tokens are temporarily unavailable. Try again.",
+  );
 }
+const voiceFailed = () =>
+  new Error("That did not work. Reload the page and try again.");
 /** Null when the server says this account may not use managed voice. */
 export async function getVoiceTokens(): Promise<VoiceToken[] | null> {
   const response = await voice("GET");
-  return response.ok
-    ? ((await response.json()) as { tokens: VoiceToken[] }).tokens
-    : null;
+  if (response.status === 401 || response.status === 403) return null;
+  if (!response.ok) throw voiceFailed();
+  return ((await response.json()) as { tokens: VoiceToken[] }).tokens;
 }
-export const createVoiceToken = async () =>
-  (await (await voice("POST")).json()) as { id: string; token: string };
+export async function createVoiceToken() {
+  const response = await voice("POST");
+  if (!response.ok) throw voiceFailed();
+  return (await response.json()) as Pick<VoiceToken, "id" | "createdAt"> & {
+    token: string;
+  };
+}
 export async function revokeVoiceToken(id: string) {
-  await voice("DELETE", `/${encodeURIComponent(id)}`);
+  if (!(await voice("DELETE", `/${encodeURIComponent(id)}`)).ok)
+    throw voiceFailed();
 }

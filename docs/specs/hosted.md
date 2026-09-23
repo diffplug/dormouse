@@ -21,7 +21,7 @@ Source of truth: `auth` in `hosted/server/worker.ts`; `workerApp` in `hosted/ser
 
 **May create provider-only accounts without verified email.** Public email is null; pgstencil's internal placeholder is never a delivery address. Email-code login remains an access path to an account's canonical verified mailbox. No merge, email adoption, unlink, or account-recovery interface exists.
 
-**Must identify accounts by immutable user ID, never email.** Provider-only accounts keep their identity when a provider subsequently supplies email. The one exception is the temporary managed-voice admin check ("Managed voice"); nothing else may key on an address.
+**Must identify accounts by immutable user ID, never email.** Provider-only accounts keep their identity when a provider subsequently supplies email. Exception: "Managed voice".
 
 **Must enable providers explicitly in `OAUTH_PROVIDERS`.** The allowed set is GitHub, Google, Microsoft, and Apple. Missing paired credentials or unknown names fail closed; unused credentials enable nothing. Email uses Postmark in production and local capture in development.
 
@@ -52,7 +52,7 @@ An admin-only test slice: Dormouse desktop exchanges a pasted voice token for El
 
 Errors are JSON `{ message }`. Cookie routes answer 401 without a login and 403 for any account but the admin.
 
-**Must admit only `ADMIN_EMAIL` while it is the account's verified email, rechecked on every request.** This is a recorded exception to "never email" ("Identity and login") that ends with the entitlement in Future item 3. Cookie routes ask the Better Auth handler's `get-session` for the login; speak reads the token owner's user row.
+**Must admit only `ADMIN_EMAIL` while it is the account's verified email, rechecked on every request.** This is the only exception to "never email" ("Identity and login"); nothing else may key on an address, and it ends with the entitlement in Future item 3. Cookie routes ask the Better Auth handler's `get-session` for the login; speak reads the token owner's user row.
 
 **Must store only a token's SHA-256.** A token is `dmv_` plus base64url of 32 random bytes, returned only by the mint response. Revocation is permanent; speak stamps `lastUsedAt`.
 
