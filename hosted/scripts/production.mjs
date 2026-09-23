@@ -38,7 +38,7 @@ export async function verifyPackages() {
   assert.equal(
     manifest.dirty,
     false,
-    "Production requires a sync of a committed pgstencil revision, not --working-tree; refresh the vendored packages first",
+    "Production requires a clean sync of a committed pgstencil revision; refresh the vendored packages first",
   );
   assert.deepEqual(
     manifest.files.map((entry) => entry.filename).sort(),

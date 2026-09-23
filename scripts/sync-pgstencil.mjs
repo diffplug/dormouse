@@ -12,23 +12,17 @@ import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const usage =
-  "Usage: pnpm pgstencil:sync /path/to/pgstencil [<revision> | --working-tree]";
-const [source, ...options] = process.argv.slice(2);
-const revisions = options.filter((option) => !option.startsWith("--"));
-const workingTree = options.includes("--working-tree");
-// A mistyped flag must not fall back to a clean sync of HEAD, which would
-// overwrite the archives with something other than what was asked for.
+const args = process.argv.slice(2);
+// There are no flags, so a stray one (such as the removed --working-tree) must
+// not be read as a path or a revision.
 if (
-  !source ||
-  options.some(
-    (option) => option.startsWith("--") && option !== "--working-tree",
-  ) ||
-  revisions.length > (workingTree ? 0 : 1)
+  args.length < 1 ||
+  args.length > 2 ||
+  args.some((arg) => arg.startsWith("-"))
 )
-  throw new Error(usage);
+  throw new Error("Usage: pnpm pgstencil:sync /path/to/pgstencil [revision]");
+const [source, revision = "HEAD"] = args;
 const repository = resolve(source);
-const revision = revisions[0] ?? "HEAD";
 const run = (command, args, cwd, env = process.env) =>
   execFileSync(command, args, { cwd, stdio: "inherit", env });
 const git = (...args) =>
@@ -86,24 +80,13 @@ const overrides = new Map(
 // Pack a committed revision in a temporary worktree after a frozen install, so
 // nothing uncommitted, untracked or ignored in the pgstencil checkout (a stray
 // migration, editor settings, stale build output, a local node_modules) can
-// reach an archive, and build.json truthfully records `dirty: false`.
-// --working-tree packs the checkout as it stands, for trying unfinished
-// pgstencil changes. That result depends on local state even when git status is
-// clean, so it is always recorded dirty and production preflight refuses it.
-// Either way `commit` is the HEAD of the checkout that was packed, so it is
-// what each archive's own provenance must name; a pack that reports itself
+// reach an archive, and build.json truthfully records `dirty: false`. To try an
+// unfinished pgstencil change, commit it to a local branch and sync that. Each
+// archive's own provenance must name `commit`; a pack that reports itself
 // dirty (pgstencil's --allow-dirty) is refused below rather than vendored.
-const commit = git(
-  "rev-parse",
-  "--verify",
-  `${workingTree ? "HEAD" : revision}^{commit}`,
-);
-const dirty = workingTree;
+const commit = git("rev-parse", "--verify", `${revision}^{commit}`);
 // Check the pins before the slow install and before any archive is replaced.
-const read = (path) =>
-  workingTree
-    ? readFileSync(resolve(repository, path), "utf8")
-    : git("show", `${commit}:${path}`);
+const read = (path) => git("show", `${commit}:${path}`);
 const archives = [
   ["pgstencil", "pgstencil"],
   ["auth", "@pgstencil/auth"],
@@ -118,15 +101,12 @@ const archives = [
     );
   return filename;
 });
-const checkout = workingTree
-  ? repository
-  : mkdtempSync(join(tmpdir(), "pgstencil-sync-"));
+const checkout = mkdtempSync(join(tmpdir(), "pgstencil-sync-"));
 // pgstencil's scripts locate their project from this variable before the cwd.
 const pgstencil = { ...process.env, PGSTENCIL_PROJECT_ROOT: checkout };
-if (!workingTree) git("worktree", "add", "--detach", checkout, commit);
+git("worktree", "add", "--detach", checkout, commit);
 try {
-  if (!workingTree)
-    run("pnpm", ["install", "--frozen-lockfile"], checkout, pgstencil);
+  run("pnpm", ["install", "--frozen-lockfile"], checkout, pgstencil);
   run("pnpm", ["packages:pack"], checkout, pgstencil);
   mkdirSync(resolve(root, "vendor"), { recursive: true });
   for (const filename of archives) {
@@ -146,7 +126,7 @@ try {
       );
   }
 } finally {
-  if (!workingTree) git("worktree", "remove", "--force", checkout);
+  git("worktree", "remove", "--force", checkout);
 }
 const files = archives.map((filename) => ({
   filename,
@@ -156,7 +136,7 @@ const files = archives.map((filename) => ({
 }));
 writeFileSync(
   resolve(root, "vendor/build.json"),
-  JSON.stringify({ commit, dirty, files }, null, 2) + "\n",
+  JSON.stringify({ commit, dirty: false, files }, null, 2) + "\n",
 );
 // A changed tarball integrity is resolved by a normal install. --force also
 // installs foreign-platform optional binaries and distorts dependency disclosure.
