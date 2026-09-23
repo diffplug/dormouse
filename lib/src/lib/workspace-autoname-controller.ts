@@ -10,8 +10,9 @@ export type GitInfoQuery = (paths: string[]) => Promise<GitInfoResult>;
 /** Names are recomputed at most this often. */
 const RECOMPUTE_DELAY_MS = 100;
 /** An unanswered lookup is asked again after this, doubling per miss up to
- *  `RETRY_MAX_MS`: a hung mount's git never exits, so re-asking at once
- *  would pile them up. */
+ *  `RETRY_MAX_MS`: a hung mount's git never exits and cannot be killed, so
+ *  re-asking at once would pile them up. The cap bounds their rate, not their
+ *  total; lowering it for responsiveness trades against that. */
 const RETRY_FIRST_MS = 1_000;
 const RETRY_MAX_MS = 5 * 60_000;
 /** Directories remembered before the cache starts over. */
