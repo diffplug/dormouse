@@ -88,10 +88,10 @@ Source of truth: `packageRules` in `.github/renovate.json`; `WINDOW` and `is_ten
 
 - **FAIL IF** a Hosted environment lacks those branch restrictions, required reviewers, or disabled administrator bypass; inspect all three environments and their deployment policies.
 - **FAIL IF** Hosted credentials appear at repository/org scope, or production credentials appear in `hosted-preview`; inspect GitHub secret placement.
-
-**Must scope `hosted-preview`'s Cloudflare and Neon tokens away from production, TTR, and marketing resources** when issuing them; names do not isolate resources, and no audit run can read a token's scope.
 - **FAIL IF** `HOSTED_TAG_TOKEN` appears outside `hosted-release-tag`, or that environment is used by a job other than `tag` in `.github/workflows/hosted-production.yml`. Its admin identity's repository-scoped Contents-write PAT can write code and bypass tag protection; it must never enter a deployment job or PR execution.
 - **FAIL IF** a Hosted preview deploy accepts a fork or a failing verification, preview cleanup checks out a PR ref rather than `main`, or a Hosted production tag can run before live verification succeeds; inspect the workflow dependency/condition graph.
+
+**Must scope `hosted-preview`'s Cloudflare and Neon tokens away from production, TTR, and marketing resources** when issuing them; names do not isolate resources, and no audit run can read a token's scope.
 
 Source of truth: `hosted/scripts/setup-github.mjs`; `.github/workflows/hosted-preview.yml`; `.github/workflows/hosted-production.yml`.
 
