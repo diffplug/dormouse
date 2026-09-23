@@ -13,12 +13,12 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const args = process.argv.slice(2);
-// There are no flags, so a stray one (such as the removed --working-tree) must
-// not be read as a path or a revision.
+// There are no flags, so a stray one (such as the removed --working-tree), or an
+// empty argument from an unset variable, must not be read as a path or revision.
 if (
   args.length < 1 ||
   args.length > 2 ||
-  args.some((arg) => arg.startsWith("-"))
+  args.some((arg) => !arg || arg.startsWith("-"))
 )
   throw new Error("Usage: pnpm pgstencil:sync /path/to/pgstencil [revision]");
 const [source, revision = "HEAD"] = args;
