@@ -801,8 +801,10 @@ async function tryBind(path: string, token: string): Promise<boolean> {
   // *this* process can interleave. A competing window is a separate extension
   // host, so its unlink and rebind can still land here — this narrows the gap
   // to a few microseconds of straight-line code rather than closing it, and
-  // reads the file our own bind made ({@link boundSocketFile}).
-  boundSocketFile = socketFileIdentitySync(path);
+  // reads the file our own bind made ({@link boundSocketFile}). Skipped on
+  // Windows: a named pipe is not a filesystem object, so there is no anchor
+  // to take and nothing there can displace us ({@link stillOurs}).
+  boundSocketFile = process.platform === 'win32' ? null : socketFileIdentitySync(path);
   // Provisional until the caller settles it: a reclaimed bind may still be
   // displaced (see {@link brokerConfirmed}).
   brokerConfirmed = false;
