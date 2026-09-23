@@ -15,6 +15,6 @@ export interface GitDirInfo {
 /** Keyed by the requested path; `null` for a path in no repository or one that
  *  does not exist. A host leaves a path out of the answer when it did not get
  *  one — past its per-request cap or its deadline — and an absent key
- *  means "not answered, ask again", never "no repository". A failure rejects;
- *  it never answers with a partial or empty map. */
+ *  means "not answered, ask again", never "no repository". A host that cannot
+ *  run the lookup at all rejects; it never reports a failure as an answer. */
 export type GitInfoResult = Record<string, GitDirInfo | null>;

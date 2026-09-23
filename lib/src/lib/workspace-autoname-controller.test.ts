@@ -143,7 +143,20 @@ describe('installWorkspaceAutoNaming', () => {
     await vi.advanceTimersByTimeAsync(16_000);
     expect(gitInfo.mock.calls.length).toBeGreaterThanOrEqual(4);
     expect(gitInfo.mock.calls.length).toBeLessThanOrEqual(5);
-    expect(name()).toBe('Workspace 1');
+  });
+
+  it('stops holding the name for a mount that stays hung, so healthy members name it', async () => {
+    const gitInfo = vi.fn<GitInfoQuery>(async (paths) =>
+      (paths.includes('/p/a') ? { '/p/a': { repo: 'a', branch: 'main' } } : {}));
+    pane('p1', '/p/a');
+    pane('p2', '/mnt/hung');
+    setWorkspaceSurfaces(DEFAULT_WORKSPACE_ID, ['p1', 'p2']);
+    dispose = installWorkspaceAutoNaming(gitInfo);
+    await settle();
+    expect(name()).toBe('Workspace 1'); // held while /mnt/hung is first unanswered
+    await vi.advanceTimersByTimeAsync(8_000); // three misses
+    await settle();
+    expect(name()).toBe('a @ main');
   });
 
   it('retries every missed wave at its own deadline, not only the first', async () => {

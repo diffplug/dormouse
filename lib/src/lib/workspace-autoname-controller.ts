@@ -15,6 +15,10 @@ const RECOMPUTE_DELAY_MS = 100;
  *  total; lowering it for responsiveness trades against that. */
 const RETRY_FIRST_MS = 1_000;
 const RETRY_MAX_MS = 5 * 60_000;
+/** Misses a never-answered path holds the name through before it votes as
+ *  "no repository": enough to cover a slow start without a folder-name flash,
+ *  bounded so a mount that stays hung cannot freeze the name. */
+const HOLD_MISSES = 3;
 /** Directories remembered before the cache starts over. */
 const CACHE_LIMIT = 1000;
 
@@ -62,8 +66,8 @@ export function installWorkspaceAutoNaming(
     for (const path of paths) inflight.add(path);
     // A path the host left out (past its cap or its deadline) or a rejected
     // request is unanswered, never "no repository": it keeps its last answer,
-    // or holds the name if it never had one, and is asked again after a
-    // doubling delay. Settling after dispose writes only the dead cache: every
+    // or holds the name for its first `HOLD_MISSES` misses if it never had
+    // one, and is asked again after a doubling delay. Settling after dispose writes only the dead cache: every
     // timer is armed through `schedule` or `recompute`, both inert once disposed.
     const settle = (result: GitInfoResult, failed: boolean) => {
       if (cache.size > CACHE_LIMIT) cache.clear();
@@ -83,7 +87,7 @@ export function installWorkspaceAutoNaming(
       schedule();
     };
     gitInfo(paths).then((result) => settle(result, false), (error: unknown) => {
-      console.warn('[workspace-autoname] git lookup failed; naming by directory', error);
+      console.warn('[workspace-autoname] git lookup failed; will ask again', error);
       settle({}, true);
     });
   };
@@ -110,9 +114,10 @@ export function installWorkspaceAutoNaming(
         const cached = cache.get(cwd.path);
         const stale = !cached || cached.asOf < asOf || (cached.retryAt !== undefined && Date.now() >= cached.retryAt);
         if (stale) wanted.set(cwd.path, Math.max(asOf, wanted.get(cwd.path) ?? 0));
-        // Never answered: hold the current name rather than flash the folder name first.
-        if (cached?.info === undefined) waiting = true;
-        else votes.push({ cwd, git: cached.info });
+        // Never answered: hold the current name rather than flash the folder
+        // name first, but only for a few misses.
+        if (cached?.info === undefined && (cached?.misses ?? 0) < HOLD_MISSES) waiting = true;
+        else votes.push({ cwd, git: cached?.info ?? null });
       }
       if (waiting) continue;
       const name = deriveWorkspaceAutoName(votes, workspace.name, home);
