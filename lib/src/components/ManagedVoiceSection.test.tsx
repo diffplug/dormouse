@@ -89,6 +89,7 @@ describe('ManagedVoiceSection', () => {
     const adapter = Object.assign(new FakePtyAdapter(), { managedVoice: makePort() });
     await render(adapter);
     expect(text()).toContain('Only the spoken pane label and voice id are sent to hosted.dormouse.sh');
+    expect(text()).toContain("ElevenLabs' copy is usually deleted within seconds");
 
     await act(async () => type(input('password'), TOKEN));
     await act(async () => button('Use managed voice').click());
