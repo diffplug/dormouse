@@ -101,7 +101,7 @@ export function stubWallHandle(workspaceId: WorkspaceId, overrides: Partial<Wall
     prepareWorkspaceTransfer: async () => ({
       payload: {
         workspaceId,
-        workspace: { id: workspaceId, name: '', session: { version: 3, panes: [] } },
+        workspace: { id: workspaceId, name: '', nameIsAuto: false, session: { version: 3, panes: [] } },
         notepad: { surfaces: [], stagedDeletions: {} },
         terminalIds: [],
         allIds: [],

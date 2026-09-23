@@ -142,6 +142,8 @@ export interface WorkspaceRow {
   ref: string;
   id: string;
   name: string;
+  /** Derived from its terminals rather than set by a user. */
+  auto: boolean;
   active: boolean;
   ringing: boolean;
   todo: boolean;
@@ -166,7 +168,9 @@ export interface NewWorkspaceRequest {
 
 export interface RenameWorkspaceRequest {
   workspace: string;
-  name: string;
+  /** The name to keep; omitted with `auto`, which hands it back to auto-naming. */
+  name?: string;
+  auto?: true;
   window?: string;
 }
 

@@ -493,6 +493,46 @@ jobs:
             echo "- **The audit wrote no verdict.** \`audit-status.txt\` was absent, empty, or not \`PASS\`/\`FAIL\`, so the run ended without deciding. Start at the report's own markers: \`UNVERIFIABLE\` is a check the agent could not determine, \`_Incomplete …_\` heads a domain that was cut off mid-report, and a domain section reading \`_No report …_\` is one that never reported — which is what an expired wait deadline looks like." >> "$NOTES"
           fi
 
+          # The notes above index the report by marker, and the clamp below
+          # keeps the head — so on a report too long to post, the markers they
+          # send the reader to are the part that gets cut. Run 35842217451
+          # posted `VERDICT: INCONCLUSIVE` naming `audit-ci-secrets.md`, and
+          # its one `UNVERIFIABLE` line, along with two whole later domains
+          # and their verdicts, fell past 32,000 characters of a 226,302-
+          # character body. Lift every line that carries a verdict or a
+          # non-passing finding into the head, where the clamp cannot reach
+          # it; the full sections still follow for whatever survives.
+          #
+          # Verdicts and findings are collected separately so the cap can fall
+          # on the findings alone: one verdict line per fragment is bounded by
+          # the fragment count, while a single domain's findings are not, and
+          # a shared cap would let the first domain's findings push the last
+          # domain's verdict out — the loss this lift exists to prevent.
+          #
+          # Matched at line start after an optional heading or bullet marker,
+          # which is what keeps `### FAIL IF results` and every `- PASS:`
+          # bullet quoting a **FAIL IF** clause out of the lift. `FAIL:` takes
+          # its colon for the same reason; a domain-level failure arrives as
+          # `VERDICT: FAIL` and is caught by the verdict pass.
+          #
+          # `|| true` on both: `grep` exits 1 when it matches nothing, and
+          # under this step's `set -eo pipefail` that would end the step here,
+          # before `audit-comment.md` is composed and before any `gh issue`
+          # call — turning a truncated report into no report at all. A
+          # nonempty fragment with no marker line is exactly the state the
+          # verdict loop above already reports as unreadable.
+          VERDICTS=$(mktemp)
+          FINDINGS=$(mktemp)
+          # Unquoted on purpose: `AUDIT_FRAGMENTS` is a filename list.
+          # shellcheck disable=SC2086
+          for f in $AUDIT_FRAGMENTS; do
+            [ -s "$f" ] || continue
+            { grep -hE '^[[:space:]]*(#+[[:space:]]*)?([-*][[:space:]]*)?VERDICT:' "$f" || true; } |
+              cut -c1-500 | sed "s|^|- \`$f\`: |" >> "$VERDICTS"
+            { grep -hE '^[[:space:]]*(#+[[:space:]]*)?([-*][[:space:]]*)?(FAIL:|UNVERIFIABLE|BLOCKER|WARNING)' "$f" || true; } |
+              cut -c1-500 | sed "s|^|- \`$f\`: |" >> "$FINDINGS"
+          done
+
           if [ "$STATUS" = "FAIL" ]; then
             TITLE="[security-audit] FAIL on $(date -u +%Y-%m-%d)"
             HEADLINE="Audit failed at $DATE."
@@ -514,6 +554,19 @@ jobs:
               # unreachable, since every path that sets it also records why.
               # Say so rather than filing a blank issue.
               echo "- **Inconclusive for a reason this step could not name.** That is itself a bug in the reporting step."
+              echo
+            fi
+            if [ -s "$VERDICTS" ] || [ -s "$FINDINGS" ]; then
+              echo "### Lines that decided this verdict"
+              echo
+              echo "_Lifted out of the fragments so truncation cannot cut them. Each domain's full section follows for as far as the body reaches._"
+              echo
+              cat "$VERDICTS"
+              head -n 40 "$FINDINGS"
+              LIFTED=$(wc -l < "$FINDINGS")
+              if [ "$LIFTED" -gt 40 ]; then
+                echo "- _…and $((LIFTED - 40)) more findings; read them in the transcript._"
+              fi
               echo
             fi
             if [ -s audit-report.md ]; then
@@ -557,7 +610,7 @@ jobs:
               done
             fi
           } > audit-comment.md
-          rm -f "$NOTES"
+          rm -f "$NOTES" "$VERDICTS" "$FINDINGS"
 
           # Truncate before posting, non-fatally. See docs/specs/security-audit.md -> "Outcomes and reporting".
           node scripts/clamp-issue-body.mjs audit-comment.md \

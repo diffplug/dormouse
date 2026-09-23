@@ -32,6 +32,7 @@ interface WorkspaceFlags {
   readonly window?: string;
   readonly index?: number;
   readonly dangerouslyDestroyIframePageState?: boolean;
+  readonly auto?: boolean;
 }
 
 /** One action of `dor workspace`: how it is spelled in help, what argument
@@ -40,7 +41,7 @@ interface WorkspaceFlags {
 interface WorkspaceActionSpec {
   /** The arguments and flags after the action name, as help prints them. */
   usage: string;
-  accepts: (args: string[]) => boolean;
+  accepts: (args: string[], flags: WorkspaceFlags) => boolean;
   arityError: string;
   run: (client: ControlClient, args: string[], flags: WorkspaceFlags) => Promise<WorkspaceMutationResponse>;
 }
@@ -53,10 +54,12 @@ const ACTIONS = {
     run: (client, args) => client.newWorkspace(args[0] === undefined ? {} : { name: args[0] }),
   },
   rename: {
-    usage: '<workspace> <name> [--json]',
-    accepts: (args) => args.length === 2,
-    arityError: 'dor workspace rename takes a workspace and a name',
-    run: (client, args) => client.renameWorkspace({ workspace: args[0], name: args[1] }),
+    usage: '<workspace> <name>|--auto [--json]',
+    accepts: (args, flags) => args.length === (flags.auto === true ? 1 : 2),
+    arityError: 'dor workspace rename takes a workspace and a name, or a workspace and --auto',
+    run: (client, args, flags) => client.renameWorkspace(flags.auto === true
+      ? { workspace: args[0], auto: true }
+      : { workspace: args[0], name: args[1] }),
   },
   close: {
     usage: '<workspace> [--force] [--json]',
@@ -96,7 +99,7 @@ export const workspaceCommand: Command = {
       // actions collapse to the shape they share.
       scope: 'root',
       findReplace: [
-        '  dor workspace [--force] [--json] [--window label] [--index n] [--dangerously-destroy-iframe-page-state]<TO-EOL>',
+        '  dor workspace [--force] [--json] [--window label] [--index n] [--dangerously-destroy-iframe-page-state] [--auto]<TO-EOL>',
         `  dor workspace ${ACTION_NAMES.join('|')} [args...] [flags...]\n`,
       ],
     },
@@ -109,7 +112,9 @@ export const workspaceCommand: Command = {
 
 A <workspace> target is workspace:<n> — a stable number that a strip reorder or a move between windows never changes — or workspace:<name>, which resolves only when exactly one Workspace carries that name and otherwise fails listing the candidates. Both forms are also accepted bare ("2", "build"). A target in another window is routed there.
 
-new creates a Workspace in the background and prints its ref: it never moves the user to it, since that is a larger theft than the focus a bare dor split takes. Use dor workspace switch to activate one. Without a name, the Workspace is named "Workspace N".
+new creates a Workspace in the background and prints its ref: it never moves the user to it, since that is a larger theft than the focus a bare dor split takes. Use dor workspace switch to activate one. Without a name, the Workspace is auto-named: after its terminals' most common git repository and branch ("dormouse @ main"), else their most common directory, and "Workspace N" until one reports a directory. An auto-name follows the terminals, so a script should target the Workspace by its number.
+
+rename sets a name the Workspace keeps; rename --auto hands it back to auto-naming and prints the outgoing name, since the derived one is computed afterwards.
 
 close archives and kills every Surface in the Workspace. It refuses — raising no confirmation, because the caller is a command rather than someone watching the Wall — when the Workspace holds a Surface the user has typed into or a running command; --force closes it anyway. Closing the last remaining Workspace replaces it with a fresh one.
 
@@ -135,6 +140,7 @@ JSON output:
         window: { kind: 'parsed', parse: stringParser, brief: 'move: the window to move to (a label, or "new").', optional: true, placeholder: 'label' },
         index: { kind: 'parsed', parse: (value) => parseNonNegativeInt(value, '--index'), brief: 'move: the 0-based strip position to move to.', optional: true, placeholder: 'n' },
         dangerouslyDestroyIframePageState: { kind: 'boolean', brief: 'move: accept losing every iframe Surface\'s page state.', optional: true, withNegated: false },
+        auto: { kind: 'boolean', brief: 'rename: return to the name derived from its terminals.', optional: true, withNegated: false },
       },
       positional: {
         kind: 'array',
@@ -155,7 +161,10 @@ async function runWorkspaceCommand(
   if (!parsed.ok) return new Error(parsed.message);
   const action = ACTIONS[parsed.value];
   const rest = args.slice(1);
-  if (!action.accepts(rest)) return new Error(action.arityError);
+  if (!action.accepts(rest, flags)) return new Error(action.arityError);
+  if (flags.auto === true && parsed.value !== 'rename') {
+    return new Error('--auto applies only to dor workspace rename');
+  }
   if (flags.force === true && parsed.value !== 'close') {
     return new Error('--force applies only to dor workspace close');
   }

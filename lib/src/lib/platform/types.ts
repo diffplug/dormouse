@@ -8,8 +8,10 @@ import type { ShellEntry } from '../shell-defaults';
 // share it without pulling this browser-typed module into a Node tsconfig.
 import type { IframeProxyResult } from './iframe-proxy-types';
 import type { ToolControlResult, ToolHostRequest } from './tool-types';
+import type { GitInfoResult } from './git-types';
 
 export type { ToolControlResult, ToolHostRequest, ToolLookupResult } from './tool-types';
+export type { GitDirInfo, GitInfoResult } from './git-types';
 import type { NotepadArchivePort } from '../notepad/types';
 import type { PersistedAlertState, PersistedWindow } from '../session-types';
 
@@ -397,6 +399,11 @@ export interface PlatformAdapter {
   // reports that the host cannot read a tool file. `dor tool -- <command>`
   // needs none of it and works everywhere.
   toolControl?(request: ToolHostRequest): Promise<ToolControlResult>;
+
+  // The repository holding each local directory, for Workspace auto-naming
+  // (docs/specs/layout.md → "Workspace names"). Absent on a host with no local
+  // filesystem, which names every Workspace by directory.
+  gitInfo?(paths: string[]): Promise<GitInfoResult>;
 
   // Render-swap support (docs/specs/dor-browser.md → "Display Modal And Render Swaps";
   // docs/specs/dor-browser.md → "Pop-Out"). All optional

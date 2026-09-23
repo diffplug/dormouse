@@ -37,7 +37,7 @@ beforeEach(() => {
 function deps(order: string[] = [], overrides: Partial<Parameters<typeof prepareWorkspaceTransfer>[0]> = {}) {
   return {
     workspaceId: 'ws-id',
-    name: 'Deploys',
+    naming: { name: 'Deploys', nameIsAuto: false },
     serialize: vi.fn(async () => {
       order.push('serialize');
       return SESSION;
@@ -73,7 +73,7 @@ describe('prepareWorkspaceTransfer', () => {
     });
 
     expect(order).toEqual(['serialize:true']);
-    expect(prepared.payload.workspace).toEqual({ id: 'ws-id', name: 'Deploys', session: SESSION });
+    expect(prepared.payload.workspace).toEqual({ id: 'ws-id', name: 'Deploys', nameIsAuto: false, session: SESSION });
   });
 
   it('touches nothing until the commit, so a refused transfer costs nothing', async () => {

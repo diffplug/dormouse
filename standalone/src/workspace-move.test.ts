@@ -110,6 +110,7 @@ function payload(overrides: Partial<WorkspaceTransferPayload> = {}): WorkspaceTr
     workspace: {
       id: WORKSPACE_ID,
       name: "Deploys",
+      nameIsAuto: false,
       session: {
         version: 3,
         panes: [{ id: "pane-a", title: "a", cwd: "/tmp", untouched: false, alert: null }],
@@ -666,6 +667,7 @@ describe("the target half", () => {
         workspace: {
           id: "ws-b",
           name: "Builds",
+          nameIsAuto: false,
           session: {
             version: 3,
             panes: [{ id: "pane-b", title: "b", cwd: "/tmp", untouched: false, alert: null }],
