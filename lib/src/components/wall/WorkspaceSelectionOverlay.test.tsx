@@ -21,6 +21,7 @@ import {
   type PaneElementsState,
 } from './wall-context';
 import type { WallMode, WallSelectionKind } from './wall-types';
+import type { ContextHelper } from './lath-wall-engine';
 import { cfg } from '../../cfg';
 import { ringPerimeter } from '../../lib/ring-geometry';
 import type { RingFrame } from '../../lib/rect-tween';
@@ -65,7 +66,7 @@ function paneCtx(elements: Map<string, HTMLElement>): PaneElementsState {
   return { elements, version: 0, bumpVersion: () => {} };
 }
 
-function Harness({ selectedId, selectedType = 'pane', mode, store, panes, doors = new Map(), active = true, contextSourceId }: {
+function Harness({ selectedId, selectedType = 'pane', mode, store, panes, doors = new Map(), active = true, subscribeFrames = null, contextHelper }: {
   selectedId: string | null;
   selectedType?: WallSelectionKind;
   mode: WallMode;
@@ -73,7 +74,8 @@ function Harness({ selectedId, selectedType = 'pane', mode, store, panes, doors 
   panes: Map<string, HTMLElement>;
   doors?: Map<string, HTMLElement>;
   active?: boolean;
-  contextSourceId?: string;
+  subscribeFrames?: ((cb: (settled: boolean) => void) => () => void) | null;
+  contextHelper?: () => ContextHelper | null;
 }) {
   return (
     <PaneElementsContext.Provider value={paneCtx(panes)}>
@@ -81,12 +83,12 @@ function Harness({ selectedId, selectedType = 'pane', mode, store, panes, doors 
         <WindowFocusedContext.Provider value={true}>
           <WorkspaceSelectionOverlay
             lathStore={store}
-            subscribeLathFrames={null}
+            subscribeLathFrames={subscribeFrames}
             selectedId={selectedId}
             selectedType={selectedType}
             mode={mode}
             active={active}
-            contextSourceId={contextSourceId}
+            contextHelper={contextHelper}
           />
         </WindowFocusedContext.Provider>
       </DoorElementsContext.Provider>
@@ -559,21 +561,26 @@ describe('SelectionRing motion smear', () => {
 
 it('animates the source/helper union on opening, side changes and interrupted close, tracking same-side resizes 1:1', async () => {
   const store = makeStore();
-  const wall = document.createElement('div');
-  wall.className = 'lath-host';
   const source = document.createElement('div');
-  const helper = document.createElement('div');
-  helper.dataset.contextFor = 'a';
-  helper.dataset.contextSide = 'right';
-  wall.append(source, helper);
-  document.body.append(wall);
+  const element = document.createElement('div');
+  document.body.append(source, element);
   stubRect(source, { left: 0, top: 0, width: 500, height: 600 });
-  stubRect(helper, { left: 484, top: 0, width: 400, height: 300 });
+  stubRect(element, { left: 484, top: 0, width: 400, height: 300 });
   const panes = new Map([['a', source]]);
+  // LathHost's paint: publish the placed helper, then notify frames.
+  let helper: ContextHelper | null = null;
+  const frames = new Set<(settled: boolean) => void>();
+  const subscribeFrames = (cb: (settled: boolean) => void) => { frames.add(cb); return () => { frames.delete(cb); }; };
+  const paint = (next: ContextHelper | null) => act(async () => { helper = next; for (const cb of frames) cb(true); });
+  const harness = (mode: WallMode) => <Harness selectedId="a" mode={mode} store={store} panes={panes} subscribeFrames={subscribeFrames} contextHelper={() => helper} />;
   try {
-    await act(async () => root.render(<Harness selectedId="a" mode="passthrough" store={store} panes={panes} />));
+    await act(async () => root.render(harness('passthrough')));
     const sourceBounds = ringRect();
-    await act(async () => root.render(<Harness selectedId="a" contextSourceId="a" mode="passthrough" store={store} panes={panes} />));
+    await paint({ sourceId: 'b', element, side: 'right' });
+    expect(ringRect()).toEqual(sourceBounds);
+    await frame(220);
+    expect(ringRect()).toEqual(sourceBounds);
+    await paint({ sourceId: 'a', element, side: 'right' });
     expect(ringRect()).toEqual(sourceBounds);
     await frame(30);
     expect(ringRect()!.width).toBeGreaterThan(508);
@@ -582,17 +589,20 @@ it('animates the source/helper union on opening, side changes and interrupted cl
     const path = container.querySelector<SVGPathElement>('[data-ring="outline"]')!;
     expect(path.dataset.contextUnion).toBe('true');
     expect(ringRect()?.width).toBe(892);
-    await act(async () => { stubRect(helper, { left: 484, top: 0, width: 440, height: 300 }); helper.style.width = '440px'; });
+    stubRect(element, { left: 484, top: 0, width: 440, height: 300 });
+    await paint({ sourceId: 'a', element, side: 'right' });
     expect(ringRect()?.width).toBe(932);
     const original = path.getAttribute('d');
-    await act(async () => { stubRect(helper, { left: 0, top: 584, width: 400, height: 300 }); helper.dataset.contextSide = 'bottom'; });
+    stubRect(element, { left: 0, top: 584, width: 400, height: 300 });
+    await paint({ sourceId: 'a', element, side: 'bottom' });
     expect(path.getAttribute('d')).toBe(original);
     await frame(30);
     expect(ringRect()!.height).toBeGreaterThan(608);
     expect(ringRect()!.height).toBeLessThan(892);
     expect(path.getAttribute('d')).not.toBe(original);
     const midMove = ringRect();
-    await act(async () => root.render(<Harness selectedId="a" mode="command" store={store} panes={panes} />));
+    await act(async () => root.render(harness('command')));
+    await paint(null);
     expect(ringRect()).toEqual(midMove);
     await frame(30);
     expect(ringRect()!.height).toBeGreaterThan(608);
@@ -601,5 +611,5 @@ it('animates the source/helper union on opening, side changes and interrupted cl
     expect(path.dataset.contextUnion).toBe('false');
     expect(ringRect()?.width).toBe(508);
     expect(path.getAttribute('stroke-dasharray')).toBeTruthy();
-  } finally { wall.remove(); }
+  } finally { source.remove(); element.remove(); }
 });

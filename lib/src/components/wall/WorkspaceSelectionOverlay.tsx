@@ -40,6 +40,7 @@ import {
 } from '../../lib/ring-geometry';
 import { SelectionRing } from './SelectionRing';
 import { unionBounds, unionRingOutline } from '../../lib/rect-union-outline';
+import type { ContextHelper } from './lath-wall-engine';
 
 /** The subset of the Lath store the overlay needs — a revision that bumps on every
  *  commit, so the ring re-measures as leaves move / resize / restore. Kept
@@ -192,7 +193,7 @@ function writeSmear(
   }
 }
 
-export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, selectedId, selectedType, mode, active = true, contextSourceId }: {
+export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, selectedId, selectedType, mode, active = true, contextHelper }: {
   /** The Lath store — the overlay re-measures on every commit (`revision` via
    *  `useSyncExternalStore`), so the ring tracks leaves as they move / resize / restore. */
   lathStore: LathOverlayStore;
@@ -204,7 +205,8 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
   selectedType: WallSelectionKind;
   mode: WallMode;
   active?: boolean;
-  contextSourceId?: string;
+  /** The open context's helper as last painted; LathHost notifies frames after placing it. */
+  contextHelper?: () => ContextHelper | null;
 }) {
   const { elements: paneElements, version: paneVersion } = useContext(PaneElementsContext);
   const { elements: doorElements, version: doorVersion } = useContext(DoorElementsContext);
@@ -394,8 +396,6 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
       if (isWorkspaceSelection(selectedType)) return workspaceTabElement(workspaceIdOfSelection(selectedType, selectedId));
       return selectedType === 'door' ? doorElements.get(selectedId) : resolvePaneElement(paneElements.get(selectedId));
     };
-    // Wall selects the context source while a context is open, and renders one context per Wall.
-    const helperEl = contextSourceId ? target()?.closest('.lath-host')?.querySelector<HTMLElement>('[data-context-for]') : null;
     const update = () => {
       if (!activeRef.current) return;
       const targetEl = target();
@@ -405,12 +405,13 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
       if (!next) return;
       // An open helper's side joins the identity, so opening, closing and switching
       // sides tween the union while same-side motion tracks like any other re-measure.
-      const helperFrame = helperEl ? measureFrame(helperEl, 'pane') : null;
+      const helper = selectedType === 'pane' ? contextHelper?.() : null;
+      const helperFrame = helper?.sourceId === selectedId ? measureFrame(helper.element, 'pane') : null;
       if (helperFrame) {
         next.union = [next.rect, helperFrame.rect];
         next.rect = unionBounds(...next.union);
       }
-      const identity = helperFrame ? `${selectionIdentity}|context:${helperEl!.dataset.contextSide}` : selectionIdentity;
+      const identity = helperFrame ? `${selectionIdentity}|context:${helper!.side}` : selectionIdentity;
       const wall = targetEl.closest<HTMLElement>('[data-workspace-wall]');
       opacityRef.current = wall?.style.opacity ?? '';
 
@@ -465,12 +466,6 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     const ro = new ResizeObserver(update);
     const targetEl = target();
     if (targetEl) ro.observe(targetEl);
-    // The helper's placement is an inline style and side write, which a ResizeObserver misses.
-    let mo: MutationObserver | undefined;
-    if (helperEl) {
-      mo = new MutationObserver(update);
-      mo.observe(helperEl, { attributes: true, attributeFilter: ['style', 'data-context-side'] });
-    }
     window.addEventListener('resize', update);
     document.addEventListener('scroll', update, true);
 
@@ -481,7 +476,6 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
 
     return () => {
       ro.disconnect();
-      mo?.disconnect();
       unsubFrames?.();
       unsubWorkspaceFrames();
       window.removeEventListener('resize', update);
@@ -490,7 +484,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     // The rAF loop is intentionally NOT torn down here: it is keyed to the tween
     // (a ref), so a mid-glide re-run of this effect keeps the ring moving. It is
     // cancelled on selection-clear (above), on snap, and on unmount (below).
-  }, [active, contextSourceId, handoff, workspaces, subscribeLathFrames, lathRevision, selectedId, selectedType, paneVersion, doorVersion, paneElements, doorElements, applyRing]);
+  }, [active, contextHelper, handoff, workspaces, subscribeLathFrames, lathRevision, selectedId, selectedType, paneVersion, doorVersion, paneElements, doorElements, applyRing]);
 
   // After any structural render (mount, variant/color/focus change) re-apply the
   // current frame imperatively so the shell's DOM matches — runs pre-paint, so a

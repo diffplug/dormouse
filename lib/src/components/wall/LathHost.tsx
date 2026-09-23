@@ -562,8 +562,9 @@ export function LathHost({
         // pane inert while it fades.
         el.style.pointerEvents = animator.isDying(id) ? 'none' : '';
       }
+      lath.placeContext(paint);
     },
-    [animator],
+    [animator, lath],
   );
 
   // The single tick body and the loop's entry point (from the retarget effects and the

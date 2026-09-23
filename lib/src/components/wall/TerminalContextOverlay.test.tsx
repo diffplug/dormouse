@@ -3,8 +3,9 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it, vi } from 'vitest';
 import { TerminalContextOverlay } from './TerminalContextOverlay';
-import type { LathWallEngine } from './lath-wall-engine';
+import type { ContextPlacer, LathWallEngine } from './lath-wall-engine';
 import type { ContextSide } from './terminal-context-placement';
+import type { Rect } from '../../lib/lath/model';
 
 const { rendered } = vi.hoisted(() => ({ rendered: vi.fn() }));
 vi.mock('./TerminalContext', () => ({ TerminalContext: () => {
@@ -14,20 +15,20 @@ vi.mock('./TerminalContext', () => ({ TerminalContext: () => {
 vi.mock('../../lib/terminal-registry', () => ({ getTerminalInstance: () => null }));
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-it('tracks animation without rerendering the helper or snapping back on unrelated renders', () => {
+it('places from painted frames without rerendering the helper or snapping back on unrelated renders', () => {
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root = createRoot(container);
   const source = { x: 0, y: 0, width: 500, height: 600 };
-  let painted = source;
-  const listeners = new Set<() => void>();
+  let placer: ContextPlacer | null = null;
   const lath = {
-    animator: { framesAt: () => new Map([['source', { rect: painted }]]) },
-    subscribeFrames: (listener: () => void) => { listeners.add(listener); return () => listeners.delete(listener); },
+    animator: { framesAt: () => new Map([['source', { rect: source }]]) },
+    setContextPlacer: (next: ContextPlacer | null) => { placer = next; },
   } as unknown as LathWallEngine;
+  const paint = (rect: Rect) => placer!(new Map([['source', { rect, opacity: 1, layer: 0 }]]));
   const preferences = new Map<string, ContextSide>();
-  const render = (title: string) => act(() => root.render(<TerminalContextOverlay
-    context={{ id: 'source' }} title={title} tool={false}
+  const render = (title: string, closing?: boolean) => act(() => root.render(<TerminalContextOverlay
+    context={{ id: 'source', closing }} title={title} tool={false}
     wall={{ x: 0, y: 0, width: 1200, height: 800 }} source={source}
     multiPane lath={lath} preferences={preferences} />));
   try {
@@ -39,8 +40,9 @@ it('tracks animation without rerendering the helper or snapping back on unrelate
     input.value = 'unfinished command';
     const renders = rendered.mock.calls.length;
     expect(host.style.left).toBe('484px');
-    painted = { ...source, width: 550 };
-    act(() => { for (const notify of listeners) notify(); });
+    let published: ReturnType<ContextPlacer> = null;
+    act(() => { published = paint({ ...source, width: 550 }); });
+    expect(published).toEqual({ sourceId: 'source', element: host, side: 'right' });
     expect(host.style.left).toBe('534px');
     expect(host.style.width).toBe('550px');
     expect(rendered).toHaveBeenCalledTimes(renders);
@@ -50,10 +52,12 @@ it('tracks animation without rerendering the helper or snapping back on unrelate
     expect(container.querySelector('[data-test-context]')).toBe(helper);
     expect(input.value).toBe('unfinished command');
     expect(document.activeElement).toBe(input);
-    expect(host.dataset.contextFor).toBe('source');
+    render('New source title', true);
+    act(() => { published = paint(source); });
+    expect(published).toBeNull();
   } finally {
     act(() => root.unmount());
     container.remove();
   }
-  expect(listeners.size).toBe(0);
+  expect(placer).toBeNull();
 });
