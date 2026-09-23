@@ -7,7 +7,7 @@
  * reads the index, so a repository's `core.fsmonitor` never executes. A repository's
  * `.git/config` is still read, the risk `git-upstream.ts` already accepts.
  */
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, realpath, stat } from 'node:fs/promises';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 import type { GitDirInfo, GitInfoResult } from '../lib/platform/git-types';
 import { settleAllWithin } from '../lib/settle-within';
@@ -15,7 +15,8 @@ import { runGit } from './git-cli';
 
 /** Lookups still running at this deadline (a hung network mount) answer "no repository". */
 const LOOKUP_TIMEOUT_MS = 3000;
-/** Paths answered per request; the rest go unanswered, which reads as "no repository". */
+/** Paths answered per request; the rest are left out of the answer, for the
+ *  caller to ask again. */
 const MAX_PATHS = 64;
 
 /**
@@ -36,12 +37,16 @@ function checkoutName(commonDir: string): string {
   return base === '.git' ? basename(resolve(commonDir, '..')) : base.replace(/\.git$/, '');
 }
 
-async function isDirectory(path: string): Promise<boolean> {
-  if (!isAbsolute(path) || path.includes('\0')) return false;
+/** The canonical path of an existing absolute directory, else null
+ *  (`docs/specs/security-local.md` → "Terminal context directory actions"):
+ *  these paths originate as terminal-reported cwds. */
+async function canonicalDirectory(path: string): Promise<string | null> {
+  if (!isAbsolute(path) || path.includes('\0')) return null;
   try {
-    return (await stat(path)).isDirectory();
+    const canonical = await realpath(path);
+    return (await stat(canonical)).isDirectory() ? canonical : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -54,8 +59,9 @@ async function headBranch(gitDir: string): Promise<string | null> {
   return /^[0-9a-f]{7,}$/.test(head) ? head.slice(0, 7) : null;
 }
 
-export async function lookupGitDir(dir: string): Promise<GitDirInfo | null> {
-  if (!(await isDirectory(dir))) return null;
+export async function lookupGitDir(path: string): Promise<GitDirInfo | null> {
+  const dir = await canonicalDirectory(path);
+  if (!dir) return null;
   const [dirs, remote] = await Promise.all([
     runGit(dir, ['rev-parse', '--path-format=absolute', '--git-common-dir', '--git-dir']),
     // Fails harmlessly outside a repository, so it need not wait for rev-parse.

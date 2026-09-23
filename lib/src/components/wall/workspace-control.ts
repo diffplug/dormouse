@@ -212,6 +212,8 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
       const target = requireWorkspace(detail);
       if (!target) return;
       if (params.auto === true) {
+        // Answers the outgoing name: the derived one is computed afterwards
+        // (`docs/specs/dor-cli.md` → "dor workspace").
         resumeAutoWorkspaceName(target.id);
         respondMutation('renamed', target);
         return;

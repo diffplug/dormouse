@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -49,6 +49,12 @@ describe('gitInfo', () => {
     const plain = join(root, 'plain');
     const missing = join(root, 'nope');
     expect(await gitInfo([plain, missing, 'myrepo'])).toEqual({ [plain]: null, [missing]: null, myrepo: null });
+  });
+
+  it('looks up a symlinked directory at its canonical path', async () => {
+    const link = join(root, 'link-to-src');
+    symlinkSync(join(root, 'myrepo/src'), link);
+    expect((await gitInfo([link]))[link]).toEqual({ repo: 'myrepo', branch: 'main' });
   });
 
   it('names an unborn branch', async () => {

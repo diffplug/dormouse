@@ -75,6 +75,21 @@ describe('installWorkspaceAutoNaming', () => {
     expect(name()).toBe('a @ dev');
   });
 
+  it('asks again for a path the host left out of its answer', async () => {
+    const gitInfo = vi.fn<GitInfoQuery>()
+      .mockResolvedValueOnce({ '/p/a': { repo: 'a', branch: 'main' } })
+      .mockResolvedValueOnce({ '/p/b': { repo: 'b', branch: 'main' } });
+    pane('p1', '/p/a');
+    pane('p2', '/p/b');
+    pane('p3', '/p/b');
+    setWorkspaceSurfaces(DEFAULT_WORKSPACE_ID, ['p1', 'p2', 'p3']);
+    dispose = installWorkspaceAutoNaming(gitInfo);
+    await settle();
+    await settle();
+    expect(gitInfo).toHaveBeenNthCalledWith(2, ['/p/b']);
+    expect(name()).toBe('b @ main');
+  });
+
   it('never asks git about a remote cwd', async () => {
     const gitInfo = vi.fn<GitInfoQuery>(async () => ({}));
     resetTerminalPaneState('p1', { cwd: { ...cwd('/srv/app', true), host: 'prod-box', scheme: 'file' } });

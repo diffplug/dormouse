@@ -48,17 +48,20 @@ export function installWorkspaceAutoNaming(
     const paths = [...wanted.keys()].filter((path) => !inflight.has(path));
     if (!gitInfo || paths.length === 0) return;
     for (const path of paths) inflight.add(path);
-    const settle = (result: GitInfoResult) => {
+    // A path the host left out (past its per-request cap) stays uncached, so
+    // the next pass asks again; a failed request caches every path as "no
+    // repository", so it is not re-asked in a loop.
+    const settle = (result: GitInfoResult, failed: boolean) => {
       if (cache.size > CACHE_LIMIT) cache.clear();
       for (const path of paths) {
         inflight.delete(path);
-        cache.set(path, { info: result[path] ?? null, asOf: wanted.get(path)! });
+        if (failed || path in result) cache.set(path, { info: failed ? null : result[path], asOf: wanted.get(path)! });
       }
       schedule();
     };
-    gitInfo(paths).then(settle, (error: unknown) => {
+    gitInfo(paths).then((result) => settle(result, false), (error: unknown) => {
       console.warn('[workspace-autoname] git lookup failed; naming by directory', error);
-      settle({});
+      settle({}, true);
     });
   };
 

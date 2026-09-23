@@ -17,7 +17,7 @@ A <workspace> target is workspace:<n> — a stable number that a strip reorder o
 
 new creates a Workspace in the background and prints its ref: it never moves the user to it, since that is a larger theft than the focus a bare dor split takes. Use dor workspace switch to activate one. Without a name, the Workspace is auto-named: after its terminals' most common git repository and branch ("dormouse @ main"), else their most common directory, and "Workspace N" until one reports a directory. An auto-name follows the terminals, so a script should target the Workspace by its number.
 
-rename sets a name the Workspace keeps; rename --auto hands it back to auto-naming.
+rename sets a name the Workspace keeps; rename --auto hands it back to auto-naming and prints the outgoing name, since the derived one is computed afterwards.
 
 close archives and kills every Surface in the Workspace. It refuses — raising no confirmation, because the caller is a command rather than someone watching the Wall — when the Workspace holds a Surface the user has typed into or a running command; --force closes it anyway. Closing the last remaining Workspace replaces it with a fresh one.
 
