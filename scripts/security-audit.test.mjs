@@ -96,6 +96,17 @@ const cases = [
     evidence: ['### FAIL IF results\n- PASS: **FAIL IF** a secret leaks — none does.', null, null, null],
     unfinished: [0], expected: 'INCONCLUSIVE',
     counts: { 'FAIL IF': 0 } },
+  // A fragment carrying no marker line at all — the unreadable-verdict state
+  // the guard loop above already reports. The lift's `grep` matches nothing
+  // and exits 1; without `|| true` this step's `set -eo pipefail` ends it
+  // before the body is composed, so the reader gets a red run and an artifact
+  // instead of a truncated report. `raw` bypasses the verdict-line prefix
+  // every other fixture fragment carries.
+  { name: 'a fragment with no marker line still gets reported', status: 'PASS',
+    verdicts: ['PASS', 'PASS', 'PASS', 'PASS'],
+    raw: [null, null, '# audit-application.md\n\nI reviewed the specs but could not finish.\n', null],
+    expected: 'INCONCLUSIVE', posts: true,
+    notes: ["A domain's verdict could not be read", '- `audit-hosted.md`: VERDICT: PASS'] },
 ];
 for (const scenario of cases) {
   test(`reporting: ${scenario.name}`, (t) => {
@@ -114,12 +125,18 @@ for (const scenario of cases) {
         ? ''
         : `${SENTINEL}\n${scenario.trailingBlank ? '\n' : ''}`;
       const evidence = scenario.evidence?.[i] ?? 'Evidence';
-      writeFileSync(join(dir, fragments[i]), `VERDICT: ${verdict}\n${evidence}\n${sentinel}`);
+      writeFileSync(join(dir, fragments[i]),
+        scenario.raw?.[i] ?? `VERDICT: ${verdict}\n${evidence}\n${sentinel}`);
     });
     const result = spawnSync('bash', ['-c', reporting], { cwd: dir, env, encoding: 'utf8' });
     assert.equal(result.status, scenario.expected === 'PASS' ? 0 : 1, result.stderr);
     const calls = readFileSync(join(dir, 'gh-calls.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
     assert.equal(calls.some((args) => args[0] === 'issue' && args[1] === 'close'), scenario.expected === 'PASS');
+    // The step aborting before it posts leaves every `notes` assertion below
+    // unreachable, so name the post itself.
+    if (scenario.posts) {
+      assert.ok(calls.some((args) => args[0] === 'issue' && args[1] === 'comment'), 'no issue comment was posted');
+    }
     if (scenario.expected !== 'PASS') {
       const body = readFileSync(join(dir, 'audit-comment.md'), 'utf8');
       assert.match(body, scenario.expected === 'FAIL' ? /Audit failed/ : /Audit reached no usable verdict/);
