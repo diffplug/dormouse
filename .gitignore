@@ -67,12 +67,13 @@ hosted/.wrangler/
 hosted/.pgstencil/
 hosted/dist-worker/
 
-# Storybook / Chromatic
+# Storybook / Chromatic / Argos
 storybook-static/
 build-storybook.log
 chromatic.log
 chromatic-build-*.xml
 chromatic-diagnostics.json
+lib/screenshots/
 
 # symlinked skill files
 .agents/skills/

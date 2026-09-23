@@ -93,8 +93,8 @@ run this knows what they are taking on.
 - **The bot's upstream is pinned by tag, not commit**, so a hostile upstream
   could change what the bot runs without a diff here. Accepted: the trust equals
   what the harness already holds ([Automated Maintainer](./security-ci.md#automated-maintainer-tend)).
-- **The Chromatic token is reachable by any workflow the bot can author.**
-  Accepted with rotation; abuse is visible in Chromatic's dashboard
+- **The Chromatic and Argos tokens are reachable by any workflow the bot can author.**
+  Accepted with rotation; abuse is visible in each service's dashboard
   ([Automated Maintainer](./security-ci.md#automated-maintainer-tend)).
 
 ## Known gaps

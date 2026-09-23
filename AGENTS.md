@@ -13,7 +13,7 @@ pnpm build       # build lib, vscode extension, Pocket, and website
 The harness opens its browser pane and prints its URL and browser command
 (`docs/specs/standalone.md` → "Standalone browser-dev harness").
 
-**Open every PR as a draft.** Chromatic bills per snapshot and skips drafts, so
+**Open every PR as a draft.** Chromatic and Argos bill per snapshot and skip drafts, so
 marking a PR ready for review is what spends them.
 
 ## Worktrees
