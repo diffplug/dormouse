@@ -6,7 +6,7 @@ import {
   SCENARIO_LS_OUTPUT,
 } from '../lib/platform';
 import type { ActivityState } from '../lib/terminal-registry';
-import { requireElement, settleTerminals, waitForCondition } from './settle-terminals';
+import { requireElement, settleTerminalContext, settleTerminals, waitForCondition } from './settle-terminals';
 
 const meta: Meta<typeof Wall> = {
   title: 'App/Wall',
@@ -101,9 +101,8 @@ async function minimizeFirstVisiblePane() {
 async function openAlertDialog() {
   const header = await requireElement<HTMLElement>('[data-pane-header-for]', 'pane header');
   header.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
-  await requireElement('[data-terminal-context]', 'terminal context');
+  await settleTerminalContext();
   (await requireElement<HTMLButtonElement>('[aria-label="Terminal context details"]', 'context Details')).click();
-  await settleTerminals();
 }
 
 export const Default: Story = {
@@ -220,11 +219,6 @@ export const TerminalContext: Story = {
     await settleTerminals();
     const header = await requireElement('[data-pane-header-for="context-live"]', 'terminal header');
     header.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
-    await waitForCondition(() => !!document.querySelector('[data-helper-terminal]'));
-    // Hold until autorun has finished and the helper has painted, so the capture
-    // is never the "Waiting for shell…" or "Running …" frame on the way there.
-    await waitForCondition(() =>
-      document.querySelector('[aria-label="Helper terminal status"]')?.textContent?.includes('autoran') ?? false);
-    await settleTerminals();
+    await settleTerminalContext();
   },
 };

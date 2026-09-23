@@ -44,7 +44,7 @@
 - **FAIL IF** `application-security` or `hosted` does not run on a stronger model than the mechanical domains, in **both** `.github/workflows/security-audit.yaml`'s `claude_args` — its `--model` sets the floor and its `--agents` raises those two domains — and `scripts/security-audit-local.sh` (rationale).
 - **FAIL IF** `.github/audit/` is missing a prompt file the workflow names, or `scripts/security-audit-local.sh` stops running the audit from those same files (rationale).
 - **FAIL IF** the union of the subagents' qualitative scopes does not cover every top-level path in the repository (rationale).
-- **FAIL IF** `.github/audit/` or `.vscode/` is outside **any** consumer of `.github/workflows/workflow-audit.yaml`'s diff window — the commit list, `own_changes`, and both classifiers' refusals, whose half is *derived* from the single `WINDOW` array (`"${WINDOW[@]:1}"`). Widening one consumer without the others is the failure. The security specs are deliberately *not* watched there (rationale).
+- **FAIL IF** `.github/audit/` or `.vscode/` is outside **any** consumer of `.github/workflows/workflow-audit.yaml`'s diff window — the commit list, `own_changes`, `is_clean_merge`, and both content classifiers' refusals, whose half is *derived* from the single `WINDOW` array (`"${WINDOW[@]:1}"`). Widening one consumer without the others is the failure. The security specs are deliberately *not* watched there (rationale).
 
 Source of truth: the `**Scope` and `## Qualitative pass` sections of each domain prompt in `.github/audit/`; `claude_args` in `.github/workflows/security-audit.yaml`; `run_domain` in `scripts/security-audit-local.sh`.
 

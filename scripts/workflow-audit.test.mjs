@@ -43,6 +43,8 @@ function fixture(t) {
     writeFileSync(target, value);
   };
   const commit = () => { git('add', '-A'); git('commit', '-qm', 'fixture'); return git('rev-parse', 'HEAD'); };
+  const activity = join(dir, 'activity.tsv');
+  writeFileSync(activity, '');
   write('.config/tend.yaml', 'bot_name: test\n');
   write('.github/workflows/tend-review.yaml', original);
   commit();
@@ -53,12 +55,21 @@ printf '%s' '${generated}' > .github/workflows/tend-review.yaml
 printf 'generated actionlint' > .github/actionlint.yaml
 if [[ -n "\${EXTRA_WORKFLOW:-}" ]]; then printf 'unexpected' > .github/workflows/tend-extra.yaml; fi
 `, { mode: 0o755 });
-  const classify = (sha, extraEnv = {}) => spawnSync('bash', ['-c', `set -euo pipefail
-WINDOW_NON_WORKFLOW=(.config/tend.yaml .github/audit/ .vscode/)
+  // Answers only the collaborator-permission call; ADMINS lists the admins.
+  writeFileSync(join(bin, 'gh'), `#!/bin/bash
+set -euo pipefail
+[[ "$1" = api && "$2" =~ ^repos/test/repo/collaborators/([^/]+)/permission$ ]] || exit 1
+login="\${BASH_REMATCH[1]}"
+if [[ " \${ADMINS:-} " = *" $login "* ]]; then echo admin; else echo write; fi
+`, { mode: 0o755 });
+  const classify = (sha, extraEnv = {}, fn = 'is_tend_regen') => spawnSync('bash', ['-c', `set -euo pipefail
+WINDOW=(.github/workflows/ .config/tend.yaml .github/audit/ .vscode/)
+WINDOW_NON_WORKFLOW=("\${WINDOW[@]:1}")
 ${classifier}
-is_tend_regen "$1"
-`, 'classifier', sha], { cwd: repo, env: { ...env, ...extraEnv }, encoding: 'utf8' });
-  return { dir, repo, write, commit, classify };
+prepare_activity
+${fn} "$1"
+`, 'classifier', sha], { cwd: repo, env: { ...env, GITHUB_REPOSITORY: 'test/repo', ACTIVITY: activity, ...extraEnv }, encoding: 'utf8' });
+  return { dir, repo, git, write, commit, classify, activity };
 }
 
 test('accepts exact regeneration and reports changed output', t => {
@@ -102,4 +113,227 @@ test('reports a config change even when its workflows reproduce', t => {
   f.write('.config/tend.yaml', 'bot_name: changed\n');
   f.write('.github/workflows/tend-review.yaml', generated);
   assert.equal(f.classify(f.commit()).status, 1);
+});
+
+const ZERO = '0'.repeat(40);
+
+function mergeFixture(t) {
+  const f = fixture(t);
+  const base = f.git('rev-parse', 'HEAD');
+  f.git('switch', '-qc', 'side');
+  f.write('.github/audit/side.md', 'side\n');
+  f.commit();
+  f.git('switch', '-q', '-');
+  f.write('.github/audit/main.md', 'main\n');
+  f.commit();
+  return { ...f, base };
+}
+
+test('explains a merge that reproduces from its parents', t => {
+  const f = mergeFixture(t);
+  f.git('merge', '-q', '--no-edit', 'side');
+  assert.equal(f.classify(f.git('rev-parse', 'HEAD'), {}, 'is_clean_merge').status, 0);
+});
+
+test('reports a merge that edits a window path beyond its parents', t => {
+  const f = mergeFixture(t);
+  f.git('merge', '-q', '--no-commit', 'side');
+  f.write('.github/audit/main.md', 'evil\n');
+  f.git('add', '-A');
+  f.git('commit', '-qm', 'merge');
+  assert.equal(f.classify(f.git('rev-parse', 'HEAD'), {}, 'is_clean_merge').status, 1);
+});
+
+test('explains a merge whose only conflict is outside the window', t => {
+  const f = mergeFixture(t);
+  f.git('switch', '-q', 'side');
+  f.write('package.json', 'side\n');
+  f.commit();
+  f.git('switch', '-q', '-');
+  f.write('package.json', 'main\n');
+  f.commit();
+  spawnSync('git', ['merge', '-q', '--no-edit', 'side'], { cwd: f.repo });
+  f.write('package.json', 'resolved\n');
+  f.git('add', '-A');
+  f.git('commit', '-qm', 'merge');
+  assert.equal(f.classify(f.git('rev-parse', 'HEAD'), {}, 'is_clean_merge').status, 0);
+});
+
+test('reports a hand-resolved conflict inside the window', t => {
+  const f = mergeFixture(t);
+  f.git('switch', '-q', 'side');
+  f.write('.github/audit/main.md', 'side\n');
+  f.commit();
+  f.git('switch', '-q', '-');
+  spawnSync('git', ['merge', '-q', '--no-edit', 'side'], { cwd: f.repo });
+  f.write('.github/audit/main.md', 'main\n');
+  f.git('add', '-A');
+  f.git('commit', '-qm', 'merge');
+  assert.equal(f.classify(f.git('rev-parse', 'HEAD'), {}, 'is_clean_merge').status, 1);
+});
+
+test('reports a single-parent commit as not a clean merge', t => {
+  const f = mergeFixture(t);
+  assert.equal(f.classify(f.git('rev-parse', 'HEAD'), {}, 'is_clean_merge').status, 1);
+});
+
+function pushFixture(t, authorEnv = {}) {
+  const f = fixture(t);
+  const before = f.git('rev-parse', 'HEAD');
+  f.write('.github/audit/change.md', 'change\n');
+  f.git('add', '-A');
+  execFileSync('git', ['commit', '-qm', 'change'], { cwd: f.repo, env: { ...process.env, ...authorEnv } });
+  const sha = f.git('rev-parse', 'HEAD');
+  const events = rows => writeFileSync(f.activity, rows.map(r => r.join('\t')).join('\n') + '\n');
+  const run = () => {
+    const result = f.classify(sha, { ADMINS: 'admin-user' }, 'is_admin_first_push');
+    assert.ok(result.status < 2, result.stderr);
+    return result.status;
+  };
+  return { ...f, before, sha, events, run };
+}
+
+test('explains a commit first pushed by an admin', t => {
+  const f = pushFixture(t);
+  f.events([['2026-01-01T00:00:00Z', 'push', 'admin-user', f.before, f.sha]]);
+  assert.equal(f.run(), 0);
+});
+
+test('reports a commit a non-admin pushed before an admin did', t => {
+  const f = pushFixture(t);
+  f.events([
+    ['2026-01-01T00:00:00Z', 'branch_creation', 'bot-user', ZERO, f.sha],
+    ['2026-01-02T00:00:00Z', 'push', 'admin-user', f.before, f.sha],
+  ]);
+  assert.equal(f.run(), 1);
+});
+
+test('skips updates that already contained the commit', t => {
+  const f = pushFixture(t);
+  f.events([
+    ['2026-01-01T00:00:00Z', 'push', 'bot-user', f.before, f.before],
+    ['2026-01-02T00:00:00Z', 'force_push', 'bot-user', f.sha, f.sha],
+    ['2026-01-03T00:00:00Z', 'push', 'admin-user', f.before, f.sha],
+  ]);
+  assert.equal(f.run(), 0);
+});
+
+test('reports a commit whose first retained introduction is a PR merge', t => {
+  const f = pushFixture(t);
+  f.events([['2026-01-01T00:00:00Z', 'pr_merge', 'admin-user', f.before, f.sha]]);
+  assert.equal(f.run(), 1);
+});
+
+test('reports a bot-authored commit even when an admin pushed it', t => {
+  const f = pushFixture(t, { GIT_AUTHOR_NAME: 'dormouse-bot', GIT_AUTHOR_EMAIL: '1+dormouse-bot@users.noreply.github.com' });
+  f.events([['2026-01-01T00:00:00Z', 'push', 'admin-user', f.before, f.sha]]);
+  assert.equal(f.run(), 1);
+});
+
+test('reports a commit missing from the activity log', t => {
+  const f = pushFixture(t);
+  assert.equal(f.run(), 1);
+});
+
+test('activity rows keep five columns when a field is null', () => {
+  const filter = auditBlock.match(/activity\?[^"]*" \\\n\s*--jq '([^']*)'/)[1];
+  const row = execFileSync('jq', ['-r', filter], {
+    input: JSON.stringify([{ timestamp: 't', activity_type: 'push', actor: null, before: null, after: 'a' }]),
+  }).toString().trimEnd();
+  assert.deepEqual(row.split('\t'), ['t', 'push', '-', '-', 'a']);
+});
+
+test('reports a commit whose first introducer has no login', t => {
+  const f = pushFixture(t);
+  f.events([
+    ['2026-01-01T00:00:00Z', 'push', '-', f.before, f.sha],
+    ['2026-01-02T00:00:00Z', 'push', 'admin-user', f.before, f.sha],
+  ]);
+  assert.equal(f.run(), 1);
+});
+
+function rebaseFixture(t, firstPusher) {
+  const f = pushFixture(t);
+  const original = f.sha;
+  f.git('reset', '-q', '--hard', f.before);
+  f.write('unrelated.txt', 'x\n');
+  f.commit();
+  f.git('cherry-pick', original);
+  const rebased = f.git('rev-parse', 'HEAD');
+  f.events([
+    ['2026-01-01T00:00:00Z', 'push', firstPusher, f.before, original],
+    ['2026-01-02T00:00:00Z', 'force_push', 'admin-user', original, rebased],
+  ]);
+  return f.classify(rebased, { ADMINS: 'admin-user' }, 'is_admin_first_push');
+}
+
+test('reports an admin rebase of commits a non-admin pushed', t => {
+  const result = rebaseFixture(t, 'bot-user');
+  assert.equal(result.status, 1, result.stderr);
+});
+
+test('explains an admin rebase of the admin\'s own commits', t => {
+  const result = rebaseFixture(t, 'admin-user');
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test('reports when a non-admin update cannot be resolved', t => {
+  const f = pushFixture(t);
+  f.events([
+    ['2026-01-01T00:00:00Z', 'push', 'bot-user', f.before, 'f'.repeat(40)],
+    ['2026-01-02T00:00:00Z', 'push', 'admin-user', f.before, f.sha],
+  ]);
+  assert.equal(f.run(), 1);
+});
+
+test('skips an admin update that cannot be resolved', t => {
+  const f = pushFixture(t);
+  f.events([
+    ['2026-01-01T00:00:00Z', 'push', 'admin-user', f.before, 'f'.repeat(40)],
+    ['2026-01-02T00:00:00Z', 'push', 'admin-user', f.before, f.sha],
+  ]);
+  assert.equal(f.run(), 0);
+});
+
+test('reports a commit a non-admin force-pushed first', t => {
+  const f = pushFixture(t);
+  f.events([['2026-01-01T00:00:00Z', 'force_push', 'bot-user', f.before, f.sha]]);
+  assert.equal(f.run(), 1);
+});
+
+test('reports an admin force-push whose replaced tip is lost', t => {
+  const f = pushFixture(t);
+  f.events([['2026-01-01T00:00:00Z', 'force_push', 'admin-user', 'f'.repeat(40), f.sha]]);
+  assert.equal(f.run(), 1);
+});
+
+test('never skips an admin force-push whose new tip is lost', t => {
+  const f = pushFixture(t);
+  f.events([
+    ['2026-01-01T00:00:00Z', 'force_push', 'admin-user', f.before, 'f'.repeat(40)],
+    ['2026-01-02T00:00:00Z', 'push', 'admin-user', f.before, f.sha],
+  ]);
+  assert.equal(f.run(), 1);
+});
+
+test('one unfetchable tip does not cost its batch the others', t => {
+  const f = pushFixture(t);
+  const origin = join(f.dir, 'origin.git');
+  execFileSync('git', ['init', '-q', '--bare', origin]);
+  execFileSync('git', ['config', 'uploadpack.allowAnySHA1InWant', 'true'], { cwd: origin });
+  f.git('remote', 'add', 'origin', origin);
+  f.git('push', '-q', 'origin', `${f.sha}:refs/heads/gone`);
+  execFileSync('git', ['update-ref', '-d', 'refs/heads/gone'], { cwd: origin });
+  f.git('reset', '-q', '--hard', f.before);
+  spawnSync('git', ['update-ref', '-d', 'refs/remotes/origin/gone'], { cwd: f.repo });
+  spawnSync('git', ['update-ref', '-d', 'ORIG_HEAD'], { cwd: f.repo });
+  f.git('reflog', 'expire', '--expire=now', '--all');
+  f.git('gc', '-q', '--prune=now');
+  assert.notEqual(spawnSync('git', ['cat-file', '-e', f.sha], { cwd: f.repo }).status, 0);
+  f.events([
+    ['2026-01-01T00:00:00Z', 'push', 'admin-user', f.before, 'f'.repeat(40)],
+    ['2026-01-02T00:00:00Z', 'push', 'admin-user', f.before, f.sha],
+  ]);
+  const result = f.classify(f.sha, {}, 'git cat-file -e');
+  assert.equal(result.status, 0, result.stderr);
 });
