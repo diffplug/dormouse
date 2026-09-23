@@ -107,6 +107,14 @@ const cases = [
     raw: [null, null, '# audit-application.md\n\nI reviewed the specs but could not finish.\n', null],
     expected: 'INCONCLUSIVE', posts: true,
     notes: ["A domain's verdict could not be read", '- `audit-hosted.md`: VERDICT: PASS'] },
+  // The cap falls on the findings alone, so one domain's findings cannot push
+  // a later domain's verdict out of the head — the loss the lift exists to
+  // prevent. 42 findings in the first fragment is two past the cap.
+  { name: 'findings past the cap do not push out a later verdict', status: 'PASS',
+    verdicts: ['PASS', 'PASS', 'PASS', 'PASS'],
+    evidence: [Array.from({ length: 42 }, (_, i) => `WARNING: finding ${i}`).join('\n'), null, null, null],
+    unfinished: [0], expected: 'INCONCLUSIVE',
+    notes: ['- `audit-hosted.md`: VERDICT: PASS', 'more findings; read them in the transcript'] },
 ];
 for (const scenario of cases) {
   test(`reporting: ${scenario.name}`, (t) => {
