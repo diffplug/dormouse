@@ -39,6 +39,13 @@ export function ensureResizeObserver(): void {
   } as unknown as typeof ResizeObserver;
 }
 
+/** jsdom lacks the native modal `<dialog>` API that `NativeModalDialog` calls. */
+export function ensureDialogModal(): void {
+  HTMLDialogElement.prototype.showModal ??= function showModal(this: HTMLDialogElement) {
+    this.open = true;
+  };
+}
+
 /**
  * A ResizeObserver whose width the test drives: every observed element is told
  * `initialWidth` on observe, and the returned setter re-delivers a new width to
