@@ -13,6 +13,10 @@ export interface WorkspaceMeta {
   alertDelivery?: AlertDeliveryOverrides;
   id: WorkspaceId;
   name: string;
+  /** The name is derived (`docs/specs/layout.md` → "Workspace names") rather than
+   *  one a user set; absent means explicit, so a name is never overwritten
+   *  unless something marked it replaceable. */
+  nameIsAuto?: true;
 }
 
 export interface WorkspacesState {
@@ -22,7 +26,7 @@ export interface WorkspacesState {
 
 function defaultState(): WorkspacesState {
   return {
-    workspaces: [{ id: DEFAULT_WORKSPACE_ID, name: DEFAULT_WORKSPACE_NAME }],
+    workspaces: [{ id: DEFAULT_WORKSPACE_ID, name: DEFAULT_WORKSPACE_NAME, nameIsAuto: true }],
     activeId: DEFAULT_WORKSPACE_ID,
   };
 }
@@ -183,25 +187,49 @@ function freshWorkspaceId(): WorkspaceId {
   return id;
 }
 
-export function createWorkspace(opts?: { id?: WorkspaceId; name?: string; activate?: boolean; alertDelivery?: AlertDeliveryOverrides }): WorkspaceMeta {
+export function createWorkspace(opts?: { id?: WorkspaceId; name?: string; nameIsAuto?: boolean; activate?: boolean; alertDelivery?: AlertDeliveryOverrides }): WorkspaceMeta {
   if (opts?.id !== undefined && state.workspaces.some((workspace) => workspace.id === opts.id)) {
     throw new Error(`Duplicate Workspace id: ${opts.id}`);
   }
   const id = opts?.id ?? freshWorkspaceId();
-  const meta: WorkspaceMeta = { id, name: opts?.name ?? nextDefaultName(), ...(opts?.alertDelivery ? { alertDelivery: normalizeAlertDeliveryOverrides(opts.alertDelivery) } : {}) };
+  const meta: WorkspaceMeta = {
+    id,
+    name: opts?.name ?? nextDefaultName(),
+    ...(opts?.name === undefined || opts.nameIsAuto ? { nameIsAuto: true as const } : {}),
+    ...(opts?.alertDelivery ? { alertDelivery: normalizeAlertDeliveryOverrides(opts.alertDelivery) } : {}),
+  };
   const activeId = opts?.activate === false ? state.activeId : meta.id;
   emit({ workspaces: [...state.workspaces, meta], activeId });
   return meta;
 }
 
+/**
+ * A user's rename. An empty name hands the Workspace back to auto-naming, and
+ * resubmitting the displayed name changes nothing — the editor submits on blur,
+ * so opening it must not pin an auto-name.
+ */
 export function renameWorkspace(id: WorkspaceId, name: string): void {
+  const current = getWorkspace(id);
+  if (!current) return;
   const trimmed = name.trim();
-  if (!trimmed) return;
-  if (!state.workspaces.some((ws) => ws.id === id)) return;
-  emit({
-    ...state,
-    workspaces: state.workspaces.map((ws) => (ws.id === id ? { ...ws, name: trimmed } : ws)),
-  });
+  if (!trimmed) {
+    if (!current.nameIsAuto) replaceWorkspace(id, { ...current, nameIsAuto: true });
+    return;
+  }
+  if (trimmed === current.name) return;
+  const { nameIsAuto: _auto, ...rest } = current;
+  replaceWorkspace(id, { ...rest, name: trimmed });
+}
+
+/** Set a derived name; inert once a user has named the Workspace. */
+export function setAutoWorkspaceName(id: WorkspaceId, name: string): void {
+  const current = getWorkspace(id);
+  if (!current?.nameIsAuto || current.name === name) return;
+  replaceWorkspace(id, { ...current, name });
+}
+
+function replaceWorkspace(id: WorkspaceId, next: WorkspaceMeta): void {
+  emit({ ...state, workspaces: state.workspaces.map((ws) => (ws.id === id ? next : ws)) });
 }
 
 /**
@@ -213,7 +241,7 @@ export function closeWorkspace(id: WorkspaceId): boolean {
   const index = state.workspaces.findIndex((ws) => ws.id === id);
   if (index === -1) return false;
   const workspaces = state.workspaces.filter((ws) => ws.id !== id);
-  if (workspaces.length === 0) workspaces.push({ id: freshWorkspaceId(), name: nextDefaultName() });
+  if (workspaces.length === 0) workspaces.push({ id: freshWorkspaceId(), name: nextDefaultName(), nameIsAuto: true });
   const activeId = state.activeId === id ? workspaces[Math.min(index, workspaces.length - 1)].id : state.activeId;
   emit({ workspaces, activeId });
   return true;

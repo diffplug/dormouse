@@ -111,6 +111,9 @@ export type WorkspaceId = string;
 export interface PersistedWorkspace {
   id: WorkspaceId;
   name: string;
+  /** Always written. A blob from before auto-naming lacks it, and reads a
+   *  `Workspace <n>` name as auto, any other as user-set. */
+  nameIsAuto?: boolean;
   session: PersistedSession;
 }
 
@@ -309,7 +312,7 @@ export function wrapSessionInWindow(
   id: WorkspaceId = DEFAULT_WORKSPACE_ID,
   name: string = DEFAULT_WORKSPACE_NAME,
 ): PersistedWindow {
-  return { version: 1, workspaces: [{ id, name, session }], activeWorkspaceId: id };
+  return { version: 1, workspaces: [{ id, name, nameIsAuto: name === DEFAULT_WORKSPACE_NAME, session }], activeWorkspaceId: id };
 }
 
 /** Parse a Window, dropping invalid Workspaces and repairing a dangling active id. */
@@ -334,7 +337,8 @@ export function readPersistedWindow(raw: unknown): PersistedWindow | null {
       const session = readPersistedSession(ws.session);
       if (!session) return null;
       seen.add(ws.id);
-      return { id: ws.id, name: ws.name, session };
+      const nameIsAuto = typeof ws.nameIsAuto === 'boolean' ? ws.nameIsAuto : /^Workspace \d+$/.test(ws.name);
+      return { id: ws.id, name: ws.name, nameIsAuto, session };
     })
     .filter((ws): ws is PersistedWorkspace => ws !== null);
   if (workspaces.length === 0) return null;

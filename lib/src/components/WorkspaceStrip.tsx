@@ -15,7 +15,7 @@ import { InlineEditInput } from './wall/InlineEditInput';
 import { WorkspaceKillConfirm } from './WorkspaceKillConfirm';
 import { useTodoPillContent } from './TodoPillBody';
 import { AlertRingInset, useAlertRingBurst } from './alert-ring';
-import { chromeButton, DOOR_TAB_CLASS, HEADER_PALETTE_TRANSITION_CLASS, ModalFrame, modalActionButton, OVERLAY_MAX_HEIGHT, TAB_INACTIVE_FADE_STYLE, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from './design';
+import { AUTO_NAME_CLASS, chromeButton, DOOR_TAB_CLASS, HEADER_PALETTE_TRANSITION_CLASS, ModalFrame, modalActionButton, OVERLAY_MAX_HEIGHT, TAB_INACTIVE_FADE_STYLE, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from './design';
 import { createWorkspaceStripDrag, type StripDragHost } from './workspace-strip-drag';
 import { acquireChromeKeyboardLease } from './wall/chrome-keyboard-lease';
 import { getWallHandle } from './wall/wall-handles';
@@ -189,6 +189,7 @@ export function WorkspaceStrip({
             key={workspace.id}
             id={workspace.id}
             name={workspace.name}
+            nameIsAuto={!!workspace.nameIsAuto}
             active={isActive}
             union={unionFor(workspace.id, isActive)}
             renaming={renamingId === workspace.id}
@@ -263,6 +264,7 @@ export function WorkspaceStrip({
 const WorkspaceTab = memo(function WorkspaceTab({
   id,
   name,
+  nameIsAuto,
   active,
   union,
   renaming,
@@ -278,6 +280,7 @@ const WorkspaceTab = memo(function WorkspaceTab({
 }: {
   id: WorkspaceId;
   name: string;
+  nameIsAuto: boolean;
   active: boolean;
   union: WorkspaceUnion;
   renaming: boolean;
@@ -355,7 +358,7 @@ const WorkspaceTab = memo(function WorkspaceTab({
             else onActivate(id);
           }}
         >
-          <span className="min-w-0 flex-1 truncate">{name}</span>
+          <span className={clsx('min-w-0 flex-1 truncate', nameIsAuto && AUTO_NAME_CLASS)}>{name}</span>
           {showTodoPill && (
             <span
               className={`todo-pill-shell shrink-0 text-xs font-semibold ${TODO_PILL_TRACKING_CLASS}`}

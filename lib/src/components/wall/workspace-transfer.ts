@@ -43,6 +43,7 @@ export interface WorkspaceTransferPayload {
 export interface ReleaseForTransferDeps {
   workspaceId: WorkspaceId;
   name: string;
+  nameIsAuto: boolean;
   /** The Workspace's record, built but not published. */
   serialize: (options?: SaveOptions) => Promise<PersistedSession>;
   /** Member Surfaces: visible panes ∪ Doors. */
@@ -112,7 +113,7 @@ export async function prepareWorkspaceTransfer(
     ...(tools && Object.keys(tools).length ? { tools } : {}),
     payload: {
       workspaceId: deps.workspaceId,
-      workspace: { id: deps.workspaceId, name: deps.name, session },
+      workspace: { id: deps.workspaceId, name: deps.name, nameIsAuto: deps.nameIsAuto, session },
       notepad,
       terminalIds,
       allIds,

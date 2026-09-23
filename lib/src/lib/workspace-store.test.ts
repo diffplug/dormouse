@@ -11,6 +11,7 @@ import {
   resetWorkspaceIdPool,
   resetWorkspaces,
   setActiveWorkspace,
+  setAutoWorkspaceName,
   setWorkspaces,
   subscribeToWorkspaces,
   resolveWorkspaceRef,
@@ -32,7 +33,7 @@ describe('workspace-store', () => {
 
   it('defaults to a single "Workspace 1", active', () => {
     expect(getWorkspacesSnapshot()).toEqual({
-      workspaces: [{ id: DEFAULT_WORKSPACE_ID, name: DEFAULT_WORKSPACE_NAME }],
+      workspaces: [{ id: DEFAULT_WORKSPACE_ID, name: DEFAULT_WORKSPACE_NAME, nameIsAuto: true }],
       activeId: DEFAULT_WORKSPACE_ID,
     });
   });
@@ -101,13 +102,33 @@ describe('workspace-store', () => {
     expect(getActiveWorkspaceId()).toBe('ws-2');
   });
 
-  it('renameWorkspace updates the name; ignores empty and unknown', () => {
+  it('renameWorkspace pins the name; empty hands it back to auto-naming; unknown is ignored', () => {
     renameWorkspace(DEFAULT_WORKSPACE_ID, '  Build  ');
-    expect(getWorkspacesSnapshot().workspaces[0].name).toBe('Build');
+    expect(getWorkspacesSnapshot().workspaces[0]).toEqual({ id: DEFAULT_WORKSPACE_ID, name: 'Build' });
     renameWorkspace(DEFAULT_WORKSPACE_ID, '   ');
-    expect(getWorkspacesSnapshot().workspaces[0].name).toBe('Build');
+    expect(getWorkspacesSnapshot().workspaces[0]).toEqual({ id: DEFAULT_WORKSPACE_ID, name: 'Build', nameIsAuto: true });
     renameWorkspace('nope', 'X'); // no throw
     expect(getWorkspacesSnapshot().workspaces).toHaveLength(1);
+  });
+
+  it('resubmitting the displayed auto-name leaves it auto', () => {
+    const before = getWorkspacesSnapshot();
+    renameWorkspace(DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_NAME);
+    expect(getWorkspacesSnapshot()).toBe(before);
+  });
+
+  it('setAutoWorkspaceName renames only an auto-named Workspace', () => {
+    setAutoWorkspaceName(DEFAULT_WORKSPACE_ID, 'dormouse @ main');
+    expect(getWorkspacesSnapshot().workspaces[0]).toMatchObject({ name: 'dormouse @ main', nameIsAuto: true });
+    renameWorkspace(DEFAULT_WORKSPACE_ID, 'mine');
+    setAutoWorkspaceName(DEFAULT_WORKSPACE_ID, 'dormouse @ dev');
+    expect(getWorkspacesSnapshot().workspaces[0].name).toBe('mine');
+  });
+
+  it('createWorkspace auto-names only when no name is given', () => {
+    expect(createWorkspace().nameIsAuto).toBe(true);
+    expect(createWorkspace({ name: 'build' }).nameIsAuto).toBeUndefined();
+    expect(createWorkspace({ name: 'arrived', nameIsAuto: true }).nameIsAuto).toBe(true);
   });
 
   it('closeWorkspace atomically replaces the last Workspace with a fresh identity', () => {
@@ -145,7 +166,7 @@ describe('workspace-store', () => {
     expect(getActiveWorkspaceId()).toBe('a');
     setWorkspaces({ workspaces: [], activeId: 'x' });
     expect(getWorkspacesSnapshot()).toEqual({
-      workspaces: [{ id: DEFAULT_WORKSPACE_ID, name: DEFAULT_WORKSPACE_NAME }],
+      workspaces: [{ id: DEFAULT_WORKSPACE_ID, name: DEFAULT_WORKSPACE_NAME, nameIsAuto: true }],
       activeId: DEFAULT_WORKSPACE_ID,
     });
   });
@@ -186,7 +207,7 @@ describe('workspace-store', () => {
     // A minted Workspace already gone (its Wall is mid-unmount) keeps its number.
     expect(workspaceRefFor('workspace-9')).toBe('workspace:9');
     // A resolution carries the Workspace, so a caller needs no second lookup.
-    expect(resolveWorkspaceRef('workspace:7')).toEqual({ ok: true, id: 'workspace-7', name: 'Workspace 2', ref: 'workspace:7' });
+    expect(resolveWorkspaceRef('workspace:7')).toEqual({ ok: true, id: 'workspace-7', name: 'Workspace 2', nameIsAuto: true, ref: 'workspace:7' });
     expect(resolveWorkspaceRef('7')).toMatchObject({ ok: true, id: 'workspace-7' });
     // The strip position is not a ref once ids are minted.
     for (const ref of ['workspace:2', 'workspace:9', 'workspace:0', 'nonsense']) {
