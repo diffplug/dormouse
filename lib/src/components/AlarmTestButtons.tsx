@@ -52,10 +52,10 @@ function ResultLine({ result }: { result: { text: string; tone: 'ok' | 'bad' } |
 }
 
 /**
- * Speak a fixed phrase now. Synchronous and local — there is no Relay in this
- * path — so the only failure worth reporting is a webview with no speech
- * backend at all, which would otherwise be indistinguishable from a working one
- * with the volume down.
+ * Speak a fixed phrase now, through the same engine an alarm uses — managed
+ * voice where configured, else Web Speech. Admission is synchronous, so the only
+ * failure worth reporting is a webview with no speech backend at all, which
+ * would otherwise be indistinguishable from a working one with the volume down.
  */
 export function SpeakTestButton({ voice }: { voice?: string | null }) {
   const [result, show] = useTransientResult();
