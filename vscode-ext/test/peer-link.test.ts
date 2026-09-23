@@ -48,6 +48,26 @@ vi.mock('../src/log', () => ({
   },
 }));
 
+/**
+ * Runs once, just before the next `stat` of the peer socket path — the only
+ * `stat` `peer-link` makes. Lets a test land a competing window's displacement
+ * at an exact point in the reclaim verification. Hoisted for the same reason as
+ * {@link logged}.
+ */
+const beforeSocketStat = vi.hoisted(() => ({ hook: null as null | (() => Promise<void>), path: '' }));
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const real = await importOriginal<typeof import('node:fs/promises')>();
+  const stat = (async (...args: Parameters<typeof real.stat>) => {
+    const { hook, path } = beforeSocketStat;
+    if (hook && String(args[0]) === path) {
+      beforeSocketStat.hook = null;
+      await hook();
+    }
+    return real.stat(...args);
+  }) as typeof real.stat;
+  return { ...real, stat };
+});
+
 let dir: string;
 /** Peer sockets live in the temp dir; point that at this test's own storage. */
 let realTmp: string | undefined;
@@ -133,6 +153,7 @@ beforeEach(async () => {
   realTmp = process.env.TMPDIR;
   process.env.TMPDIR = dir;
   logged.length = 0;
+  beforeSocketStat.hook = null;
 });
 
 afterEach(async () => {
@@ -455,6 +476,54 @@ describe('bind-as-lease', () => {
     const loser = [first, second].find((mod) => !mod.isPeerBroker())!;
     await waitFor(() => loser.forwardCommand({ burrowRequestId: 'rh-1', cmd: 'status' }), 15_000);
     expect(firstRoles.concat(secondRoles)).toEqual([true]);
+  }, 30_000);
+
+  it('stands down when a competing reclaim displaces it before its verification reads the path', async () => {
+    // The interleaving the racing test above reaches only by luck, forced: a
+    // competing window's unlink and rebind land after our bind but before
+    // `stillOurs` first reads the path. Anchored to that read rather than to
+    // our own bind, both windows would name the competitor's socket as "ours"
+    // and both would broker.
+    const path = derivedSocketPath();
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    const corpse = spawn(process.execPath, [
+      '-e',
+      `require('node:net').createServer().listen(${JSON.stringify(path)})`,
+    ]);
+    await waitForFile(path);
+    corpse.kill('SIGKILL');
+    await new Promise((resolve) => corpse.on('exit', resolve));
+
+    // The competitor holds the path and never speaks, standing in for a window
+    // that won the reclaim.
+    const held: Socket[] = [];
+    const competitor = createServer((socket) => void held.push(socket));
+    let theirs: SocketFileIdentity | null = null;
+    beforeSocketStat.path = path;
+    beforeSocketStat.hook = async () => {
+      await rm(path, { force: true });
+      await new Promise<void>((resolve) => competitor.listen(path, resolve));
+      theirs = await socketFileIdentity(path);
+    };
+    try {
+      const mod = await openWindow(fakeWindow());
+      const roles: boolean[] = [];
+      await mod.ensurePeerNet((broker) => roles.push(broker));
+      expect(theirs).not.toBeNull();
+      // Settled as broker either way — standing down closes our server, which
+      // unlinks the path (libuv does, whatever it names now; #756), so the next
+      // round binds uncontested. What tells the two apart is whose socket the path
+      // names at the verdict: a window that confirmed on the competitor's
+      // socket is a broker nobody can reach.
+      expect(roles).toEqual([true]);
+      expect(sameSocketFile(await socketFileIdentity(path), theirs!)).toBe(false);
+      const peer = await openWindow(fakeWindow({ entries: [{ surfaceId: 'far-1' }] }));
+      await peer.ensurePeerNet(() => {});
+      expect(peer.isPeerBroker()).toBe(false);
+    } finally {
+      for (const socket of held) socket.destroy();
+      if (competitor.listening) await new Promise((resolve) => competitor.close(resolve));
+    }
   }, 30_000);
 
   it('collects directory entries from the other window', async () => {
