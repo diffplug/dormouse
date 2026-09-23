@@ -194,6 +194,7 @@ A Workspace's name is **auto**, italic (`AUTO_NAME_CLASS`) and derived from its 
 - **A tie keeps the current name when it is among the tied**, else takes the earliest member's (Lath leaf order, then Doors).
 - **Must hold the current name while a lookup is unanswered** (rationale), and `Workspace N` until a terminal reports a directory.
 - **Never ask git about a remote cwd.** **Must re-ask after a command finishes** (rationale). A host without `gitInfo` names by directory.
+- **A path absent from a `gitInfo` answer is unanswered, never "no repository"**: the controller asks again. **A host failure must reject**, never answer `{}`; a rejected lookup names by directory until a short retry deadline.
 - **The editor submitting the displayed name changes nothing**: it submits on blur, and opening it must not pin an auto-name.
 - **Must run only `rev-parse` and `config --get`, reading `HEAD` directly**, so `core.fsmonitor` never runs; a lookup timeout answers "no repository".
 

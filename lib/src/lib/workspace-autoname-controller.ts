@@ -9,6 +9,8 @@ export type GitInfoQuery = (paths: string[]) => Promise<GitInfoResult>;
 
 /** Names are recomputed at most this often. */
 const RECOMPUTE_DELAY_MS = 100;
+/** How long a failed lookup names by directory before it is asked again. */
+const FAILED_RETRY_MS = 30_000;
 /** Directories remembered before the cache starts over. */
 const CACHE_LIMIT = 1000;
 
@@ -17,6 +19,8 @@ interface CachedGit {
   /** The newest command finish this answer covers: a later one may have
    *  switched branch without moving the cwd, so it asks again. */
   asOf: number;
+  /** Set on a failed lookup: asked again from this time, whatever `asOf` says. */
+  retryAt?: number;
 }
 
 /**
@@ -33,6 +37,7 @@ export function installWorkspaceAutoNaming(
   let home: string | undefined;
   const cache = new Map<string, CachedGit>();
   const inflight = new Set<string>();
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let disposed = false;
 
@@ -49,13 +54,19 @@ export function installWorkspaceAutoNaming(
     if (!gitInfo || paths.length === 0) return;
     for (const path of paths) inflight.add(path);
     // A path the host left out (past its per-request cap) stays uncached, so
-    // the next pass asks again; a failed request caches every path as "no
-    // repository", so it is not re-asked in a loop.
+    // the next pass asks again. A failed request names by directory until
+    // `retryAt`, so it neither loops nor sticks.
     const settle = (result: GitInfoResult, failed: boolean) => {
       if (cache.size > CACHE_LIMIT) cache.clear();
+      const retryAt = failed ? Date.now() + FAILED_RETRY_MS : undefined;
       for (const path of paths) {
         inflight.delete(path);
-        if (failed || path in result) cache.set(path, { info: failed ? null : result[path], asOf: wanted.get(path)! });
+        const asOf = wanted.get(path)!;
+        if (failed) cache.set(path, { info: null, asOf, retryAt });
+        else if (path in result) cache.set(path, { info: result[path], asOf });
+      }
+      if (failed && retryTimer === null) {
+        retryTimer = setTimeout(() => { retryTimer = null; schedule(); }, FAILED_RETRY_MS);
       }
       schedule();
     };
@@ -85,7 +96,8 @@ export function installWorkspaceAutoNaming(
         }
         const asOf = pane.lastCommand?.finishedAt ?? 0;
         const cached = cache.get(cwd.path);
-        if (!cached || cached.asOf < asOf) wanted.set(cwd.path, Math.max(asOf, wanted.get(cwd.path) ?? 0));
+        const stale = !cached || cached.asOf < asOf || (cached.retryAt !== undefined && Date.now() >= cached.retryAt);
+        if (stale) wanted.set(cwd.path, Math.max(asOf, wanted.get(cwd.path) ?? 0));
         // Unanswered: hold the current name rather than flash the folder name first.
         if (!cached) waiting = true;
         else votes.push({ cwd, git: cached.info });
@@ -120,6 +132,7 @@ export function installWorkspaceAutoNaming(
   return () => {
     disposed = true;
     if (timer !== null) clearTimeout(timer);
+    if (retryTimer !== null) clearTimeout(retryTimer);
     for (const unsubscribe of unsubscribes) unsubscribe();
   };
 }

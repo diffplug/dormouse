@@ -474,7 +474,11 @@ export class TauriAdapter implements PlatformAdapter {
 
   async gitInfo(paths: string[]): Promise<GitInfoResult> {
     // The sidecar runs git (shared lib/src/host/git-info.ts).
-    return (await rawInvoke<GitInfoResult | null>("git_info", { paths })) ?? {};
+    // A missing result is a failure, never an empty answer: an absent key
+    // means "ask again" (lib/src/lib/platform/git-types.ts).
+    const result = await rawInvoke<GitInfoResult | null>("git_info", { paths });
+    if (!result) throw new Error("git_info answered nothing");
+    return result;
   }
 
   async createIframeProxyUrl(targetUrl: string): Promise<IframeProxyResult> {

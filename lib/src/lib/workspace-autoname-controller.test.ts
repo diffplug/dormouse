@@ -90,6 +90,25 @@ describe('installWorkspaceAutoNaming', () => {
     expect(name()).toBe('b @ main');
   });
 
+  it('names by directory after a failed lookup, then asks again after the retry deadline', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const gitInfo = vi.fn<GitInfoQuery>()
+      .mockRejectedValueOnce(new Error('sidecar timed out'))
+      .mockResolvedValueOnce({ '/p/a': { repo: 'a', branch: 'main' } });
+    pane('p1', '/p/a');
+    setWorkspaceSurfaces(DEFAULT_WORKSPACE_ID, ['p1']);
+    dispose = installWorkspaceAutoNaming(gitInfo);
+    await settle();
+    await settle();
+    expect(name()).toBe('a');
+    expect(gitInfo).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    await settle();
+    expect(gitInfo).toHaveBeenCalledTimes(2);
+    expect(name()).toBe('a @ main');
+  });
+
   it('never asks git about a remote cwd', async () => {
     const gitInfo = vi.fn<GitInfoQuery>(async () => ({}));
     resetTerminalPaneState('p1', { cwd: { ...cwd('/srv/app', true), host: 'prod-box', scheme: 'file' } });
