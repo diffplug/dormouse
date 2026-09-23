@@ -136,6 +136,20 @@ describe('installWorkspaceAutoNaming', () => {
     expect(getWorkspace('ws-2')!.name).toBe('b @ main');
   });
 
+  it('leaves no timer behind when a lookup rejects after dispose', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let reject!: (error: Error) => void;
+    const gitInfo = vi.fn<GitInfoQuery>(() => new Promise((_, fail) => { reject = fail; }));
+    pane('p1', '/p/a');
+    setWorkspaceSurfaces(DEFAULT_WORKSPACE_ID, ['p1']);
+    dispose = installWorkspaceAutoNaming(gitInfo);
+    await settle();
+    dispose();
+    reject(new Error('late'));
+    await settle();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('never asks git about a remote cwd', async () => {
     const gitInfo = vi.fn<GitInfoQuery>(async () => ({}));
     resetTerminalPaneState('p1', { cwd: { ...cwd('/srv/app', true), host: 'prod-box', scheme: 'file' } });

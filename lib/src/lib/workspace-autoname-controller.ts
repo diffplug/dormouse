@@ -57,6 +57,7 @@ export function installWorkspaceAutoNaming(
     // the next pass asks again. A failed request names by directory until
     // `retryAt`, so it neither loops nor sticks.
     const settle = (result: GitInfoResult, failed: boolean) => {
+      if (disposed) return;
       if (cache.size > CACHE_LIMIT) cache.clear();
       const retryAt = failed ? Date.now() + FAILED_RETRY_MS : undefined;
       for (const path of paths) {
