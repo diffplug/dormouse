@@ -316,36 +316,94 @@ jobs:
             [ "$permission" = admin ]
           }
 
-          # The earliest ref update in the repository activity log (`$ACTIVITY`,
-          # server-set timestamps, oldest first) whose range contains the commit,
-          # as `<activity_type>\t<actor>`; nothing if no retained update does.
-          first_introduction() {
-            local sha="$1" type actor before after
+          # Index `$ACTIVITY` once so each lookup is one `for-each-ref`: every
+          # resolvable tip is pinned as `refs/audit/{after,before}/<row>`, a tip
+          # missing from the clone is fetched by SHA first (a force-push leaves
+          # the tip it replaced on no branch), and each actor is asked about
+          # admin once. `$ROWS` holds `<row>\t<activity_type>\t<actor>\t<state>`,
+          # `state` being `ok`, or `unresolved` when a tip cannot be fetched.
+          prepare_activity() {
+            local row=0 type actor before after state missing
+            ROWS=$(mktemp)
+            ADMIN_LOGINS=" "
+            missing=$(cut -f4,5 "$ACTIVITY" | tr '\t' '\n' | grep -E '^[0-9a-f]{40}$' | grep -vE '^0+$' | sort -u \
+              | git cat-file --batch-check='%(objectname) %(objecttype)' | awk '$2 == "missing" { print $1 }') || true
+            if [ -n "$missing" ]; then
+              printf '%s\n' "$missing" | xargs -n 100 git fetch -q origin 2>/dev/null || true
+            fi
+            while IFS= read -r actor; do
+              if is_admin "$actor"; then ADMIN_LOGINS="$ADMIN_LOGINS$actor "; fi
+            done < <(cut -f3 "$ACTIVITY" | sort -u)
             while IFS=$'\t' read -r _ type actor before after; do
-              git merge-base --is-ancestor "$sha" "$after" 2>/dev/null || continue
-              if [[ ! "$before" =~ ^0+$ ]] && git merge-base --is-ancestor "$sha" "$before" 2>/dev/null; then
-                continue
+              row=$((row + 1))
+              state=ok
+              if git cat-file -e "$after^{commit}" 2>/dev/null; then
+                echo "update refs/audit/after/$row $after"
+              else
+                state=unresolved
               fi
-              printf '%s\t%s\n' "$type" "$actor"
-              return
-            done < "$ACTIVITY"
+              if [[ ! "$before" =~ ^0+$ ]]; then
+                if git cat-file -e "$before^{commit}" 2>/dev/null; then
+                  echo "update refs/audit/before/$row $before"
+                else
+                  state=unresolved
+                fi
+              fi
+              printf '%s\t%s\t%s\t%s\n' "$row" "$type" "$actor" "$state" >> "$ROWS"
+            done < "$ACTIVITY" | git update-ref --stdin
           }
 
-          # First pushed by an admin: the commit's first introduction is a push,
-          # force-push, or branch creation by an admin. A PR merge as the first
-          # introduction means the real push is missing from the log, so it is
-          # reported. So is a commit whose author or committer claims a bot, even
-          # if an admin re-pushed it: a rebased bot commit is still bot content.
-          is_admin_first_push() {
-            local sha="$1" type actor
-            if git show -s --format='%ae%n%ce%n%an%n%cn' "$sha" | grep -qiE '(\[bot\]|-bot)(@|$)'; then
-              return 1
-            fi
-            IFS=$'\t' read -r type actor < <(first_introduction "$sha") || return 1
+          # The earliest activity row whose range contains the commit, as
+          # `<activity_type>\t<actor>\t<row>`; nothing if no retained row does.
+          # An unresolved row might be the introduction: an admin's is skipped
+          # (the worst case is that a later row decides), anyone else's ends the
+          # walk as `unresolved`.
+          first_introduction() {
+            local after before row type actor state
+            after=" $(git for-each-ref --contains "$1" --format='%(refname:lstrip=3)' refs/audit/after/ | tr '\n' ' ')"
+            before=" $(git for-each-ref --contains "$1" --format='%(refname:lstrip=3)' refs/audit/before/ | tr '\n' ' ')"
+            while IFS=$'\t' read -r row type actor state; do
+              if [ "$state" = unresolved ]; then
+                [[ "$ADMIN_LOGINS" = *" $actor "* ]] && continue
+                printf 'unresolved\t-\t%s\n' "$row"
+                return
+              fi
+              [[ "$after" = *" $row "* && "$before" != *" $row "* ]] || continue
+              printf '%s\t%s\t%s\n' "$type" "$actor" "$row"
+              return
+            done < "$ROWS"
+          }
+
+          # Introduced by an admin: the commit's first introduction is a push or
+          # branch creation by an admin, or an admin's force-push whose replaced
+          # window commits were each admin-introduced too. That last clause is
+          # the rebase case: an admin rewriting a bot branch re-pushes the bot's
+          # content under new SHAs, which its self-declared author cannot flag.
+          # A PR merge as the first introduction means the real push is missing
+          # from the log, so it is reported.
+          admin_introduced() {
+            local type actor row replaced old
+            IFS=$'\t' read -r type actor row < <(first_introduction "$1") || return 1
+            [[ "$ADMIN_LOGINS" = *" $actor "* ]] || return 1
             case "$type" in
-              push|force_push|branch_creation) is_admin "$actor" ;;
+              push|branch_creation) ;;
+              force_push)
+                replaced=$(git rev-list "refs/audit/before/$row" --not "refs/audit/after/$row" -- "${WINDOW[@]}") || return 1
+                for old in $replaced; do
+                  admin_introduced "$old" || return 1
+                done
+                ;;
               *) return 1 ;;
             esac
+          }
+
+          # Also reports a commit whose author or committer claims a bot, even
+          # if an admin introduced it: a rebased bot commit is still bot content.
+          is_admin_first_push() {
+            if git show -s --format='%ae%n%ce%n%an%n%cn' "$1" | grep -qiE '(\[bot\]|-bot)(@|$)'; then
+              return 1
+            fi
+            admin_introduced "$1"
           }
 
           REPORT=$(mktemp)
@@ -354,18 +412,21 @@ jobs:
 
           # The last quarter of ref updates (the API's longest `time_period`
           # short of a year), oldest first by GitHub's own timestamp. Any
-          # failure empties the file, which `is_admin_first_push` refuses.
+          # failure empties the file, which `is_admin_first_push` refuses. A
+          # null field is `-`, never empty: tab is IFS whitespace, so `read`
+          # would merge an empty column and shift every later one left.
           ACTIVITY=$(mktemp)
           if ! gh api --paginate \
             "repos/$GITHUB_REPOSITORY/activity?per_page=100&time_period=quarter" \
             --jq '.[] | select(.activity_type != "branch_deletion")
-              | [.timestamp, .activity_type, (.actor.login // ""), (.before // ""), (.after // "")] | @tsv' \
+              | [.timestamp, .activity_type, (.actor.login // "-"), (.before // "-"), (.after // "-")] | @tsv' \
             | sort > "$ACTIVITY.unsorted"; then
             echo "Activity log unavailable; the admin-push classifier explains nothing this run." \
               | tee -a "$GITHUB_STEP_SUMMARY" >&2
             : > "$ACTIVITY.unsorted"
           fi
           mv "$ACTIVITY.unsorted" "$ACTIVITY"
+          prepare_activity
 
           # What this commit itself changed under .github/workflows/.
           #

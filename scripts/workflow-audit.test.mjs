@@ -66,6 +66,7 @@ if [[ " \${ADMINS:-} " = *" $login "* ]]; then echo admin; else echo write; fi
 WINDOW=(.github/workflows/ .config/tend.yaml .github/audit/ .vscode/)
 WINDOW_NON_WORKFLOW=("\${WINDOW[@]:1}")
 ${classifier}
+prepare_activity
 ${fn} "$1"
 `, 'classifier', sha], { cwd: repo, env: { ...env, GITHUB_REPOSITORY: 'test/repo', ACTIVITY: activity, ...extraEnv }, encoding: 'utf8' });
   return { dir, repo, git, write, commit, classify, activity };
@@ -231,5 +232,71 @@ test('reports a bot-authored commit even when an admin pushed it', t => {
 
 test('reports a commit missing from the activity log', t => {
   const f = pushFixture(t);
+  assert.equal(f.run(), 1);
+});
+
+test('activity rows keep five columns when a field is null', () => {
+  const filter = auditBlock.match(/activity\?[^"]*" \\\n\s*--jq '([^']*)'/)[1];
+  const row = execFileSync('jq', ['-r', filter], {
+    input: JSON.stringify([{ timestamp: 't', activity_type: 'push', actor: null, before: null, after: 'a' }]),
+  }).toString().trimEnd();
+  assert.deepEqual(row.split('\t'), ['t', 'push', '-', '-', 'a']);
+});
+
+test('reports a commit whose first introducer has no login', t => {
+  const f = pushFixture(t);
+  f.events([
+    ['2026-01-01T00:00:00Z', 'push', '-', f.before, f.sha],
+    ['2026-01-02T00:00:00Z', 'push', 'admin-user', f.before, f.sha],
+  ]);
+  assert.equal(f.run(), 1);
+});
+
+function rebaseFixture(t, firstPusher) {
+  const f = pushFixture(t);
+  const original = f.sha;
+  f.git('reset', '-q', '--hard', f.before);
+  f.write('unrelated.txt', 'x\n');
+  f.commit();
+  f.git('cherry-pick', original);
+  const rebased = f.git('rev-parse', 'HEAD');
+  f.events([
+    ['2026-01-01T00:00:00Z', 'push', firstPusher, f.before, original],
+    ['2026-01-02T00:00:00Z', 'force_push', 'admin-user', original, rebased],
+  ]);
+  return f.classify(rebased, { ADMINS: 'admin-user' }, 'is_admin_first_push');
+}
+
+test('reports an admin rebase of commits a non-admin pushed', t => {
+  const result = rebaseFixture(t, 'bot-user');
+  assert.equal(result.status, 1, result.stderr);
+});
+
+test('explains an admin rebase of the admin\'s own commits', t => {
+  const result = rebaseFixture(t, 'admin-user');
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test('reports when a non-admin update cannot be resolved', t => {
+  const f = pushFixture(t);
+  f.events([
+    ['2026-01-01T00:00:00Z', 'push', 'bot-user', f.before, 'f'.repeat(40)],
+    ['2026-01-02T00:00:00Z', 'push', 'admin-user', f.before, f.sha],
+  ]);
+  assert.equal(f.run(), 1);
+});
+
+test('skips an admin update that cannot be resolved', t => {
+  const f = pushFixture(t);
+  f.events([
+    ['2026-01-01T00:00:00Z', 'push', 'admin-user', f.before, 'f'.repeat(40)],
+    ['2026-01-02T00:00:00Z', 'push', 'admin-user', f.before, f.sha],
+  ]);
+  assert.equal(f.run(), 0);
+});
+
+test('reports a commit a non-admin force-pushed first', t => {
+  const f = pushFixture(t);
+  f.events([['2026-01-01T00:00:00Z', 'force_push', 'bot-user', f.before, f.sha]]);
   assert.equal(f.run(), 1);
 });
