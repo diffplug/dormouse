@@ -48,12 +48,22 @@ function expectContained(element: Element, parent: Element) {
   expect(a.right).toBeLessThanOrEqual(b.right + 1);
   expect(a.bottom).toBeLessThanOrEqual(b.bottom + 1);
 }
-async function openContext() {
+async function rightClickSourceHeader() {
   const header = await requireElement(`[data-pane-header-for="${SOURCE}"]`, 'source header');
   header.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
   await requireElement('[data-helper-terminal] .xterm', 'helper terminal');
+}
+async function openContext() {
+  await rightClickSourceHeader();
   await waitFor(() => expect(getHelper(SOURCE)?.status).toBe('completed'));
   await settleTerminals();
+}
+function expectedSide({ layout, zoomed, cursor, sourceAtEnd }: Props) {
+  // Alone in the Wall, the helper avoids the cursor; beside a neighbor, it takes the neighbor's side.
+  if (zoomed || layout === 'single') return cursor === 'top' ? 'bottom' : 'top';
+  if (layout === 'grid') return 'bottom';
+  if (layout === 'rows') return sourceAtEnd ? 'top' : 'bottom';
+  return sourceAtEnd ? 'left' : 'right';
 }
 async function prepare(args: Props) {
   await settleTerminals();
@@ -68,16 +78,15 @@ async function prepare(args: Props) {
   const row = args.cursor === 'top' ? 2 : source.rows - 1;
   await new Promise<void>(resolve => source.write(`\x1b[${row};1Hsource cursor here`, resolve));
   const before = rect(sourcePane());
-  const grid = { cols: source.cols, rows: source.rows };
+  const size = { cols: source.cols, rows: source.rows };
+  const expectSourceUnchanged = () => {
+    expect(rect(sourcePane())).toEqual(before);
+    expect({ cols: source.cols, rows: source.rows }).toEqual(size);
+  };
   await openContext();
-  expect(rect(sourcePane())).toEqual(before);
-  expect({ cols: source.cols, rows: source.rows }).toEqual(grid);
+  expectSourceUnchanged();
   expectContained(context(), document.querySelector('.lath-host')!);
-  const expected = args.zoomed || args.layout === 'single' ? args.cursor === 'top' ? 'bottom' : 'top'
-    : args.layout === 'grid' ? 'bottom'
-    : args.layout === 'rows' ? args.sourceAtEnd ? 'top' : 'bottom'
-    : args.sourceAtEnd ? 'left' : 'right';
-  expect(context().dataset.contextSide).toBe(expected);
+  expect(context().dataset.contextSide).toBe(expectedSide(args));
   if (args.layout === 'grid' && !args.zoomed) {
     expect(within(context()).getByRole('button', { name: 'Place helper at right' })).toBeVisible();
     expect(within(context()).getByRole('button', { name: 'Place helper at bottom' })).toBeVisible();
@@ -87,7 +96,7 @@ async function prepare(args: Props) {
     const b = sourcePane().getBoundingClientRect();
     expect(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom).toBe(true);
   }
-  return { source, before, grid };
+  return { expectSourceUnchanged };
 }
 
 const meta = {
@@ -115,7 +124,7 @@ export const ShortWindow: Story = { args: { width: 580, height: 310 } };
 /** Real xterm input and browser pointer focus, through the same controls as users. */
 export const PreserveInputAndFocus: Story = {
   play: async ({ args, canvasElement, step }) => {
-    const { source, before, grid } = await prepare(args);
+    const { expectSourceUnchanged } = await prepare(args);
     const helper = getHelper(SOURCE)!;
     const input = terminal(helper.id);
     const element = input.element!;
@@ -136,8 +145,7 @@ export const PreserveInputAndFocus: Story = {
       await userEvent.click(within(context()).getByRole('button', { name: 'Place helper at bottom' }));
       await waitFor(() => expect(context().dataset.contextSide).toBe('bottom'));
       expect(document.activeElement).toBe(focused);
-      expect(rect(sourcePane())).toEqual(before);
-      expect({ cols: source.cols, rows: source.rows }).toEqual(grid);
+      expectSourceUnchanged();
       checkInput();
     });
     await step('Resize the Wall without replacing the helper or dropping focus', async () => {
@@ -155,9 +163,7 @@ export const PreserveInputAndFocus: Story = {
       await userEvent.click(within(context()).getByRole('button', { name: 'Close terminal context' }));
       await waitFor(() => expect(document.querySelector('[data-terminal-context]')).toBeNull());
       const resizedSource = rect(sourcePane());
-      const header = await requireElement(`[data-pane-header-for="${SOURCE}"]`, 'source header');
-      header.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
-      await requireElement('[data-helper-terminal] .xterm', 'retained helper');
+      await rightClickSourceHeader();
       expect(context().dataset.contextSide).toBe('bottom');
       expect(rect(sourcePane())).toEqual(resizedSource);
       checkInput();
