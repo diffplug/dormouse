@@ -195,9 +195,11 @@ export function TerminalContextView(p: TerminalContextViewProps) {
             <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2 text-muted"><ContextCopyAction label="Copy surface identifier" onCopy={() => attempt(p.onCopyRef)}><span>{p.surfaceRef}</span><CopyIcon size={12} /></ContextCopyAction>{p.compact && <ContextAction label="Terminal context details" expanded={expanded} onClick={() => setExpanded(value => !value)}>Details</ContextAction>}<div data-context-header-actions className="flex shrink-0 items-center gap-0.5">{p.placement && <div aria-label="Helper placement" className="flex shrink-0 items-center gap-0.5">
               {p.placement.available.map(side => <ContextAction key={side} label={`Place helper at ${side}`} pressed={p.placement!.side === side} keepFocus onClick={() => p.placement!.onChange(side)}>
                 <svg aria-hidden width="18" height="18" viewBox="0 0 256 256" fill="currentColor">
-                  <g transform={side === 'bottom' ? 'translate(0 256) scale(1 -1)' : side === 'left' ? 'rotate(-90 128 128)' : side === 'right' ? 'rotate(90 128 128)' : undefined}>
+                  <g transform={side === 'bottom' ? 'translate(0 256) scale(1 -1)' : side === 'left' ? 'translate(256 0) scale(-1 1)' : undefined}>
                     <rect x="32" y="48" width="192" height="160" rx="8" fill="none" stroke="currentColor" strokeWidth="16" strokeLinecap="round" strokeLinejoin="round" />
-                    <rect x="56" y="72" width="144" height="64" rx="8" />
+                    {side === 'left' || side === 'right'
+                      ? <rect x="120" y="72" width="80" height="112" rx="8" />
+                      : <rect x="56" y="72" width="144" height="64" rx="8" />}
                   </g>
                 </svg>
               </ContextAction>)}
