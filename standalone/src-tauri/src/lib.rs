@@ -1449,6 +1449,73 @@ fn tool_control(
     Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
 }
 
+// ── Managed voice (docs/specs/alert.md -> "Spoken alarms"). Bridge only: the
+// token store and the one outbound speak request live in the sidecar
+// (lib/src/host/managed-voice-host.ts), so no command here ever returns the
+// token. ─────────────────────────────────────────────────────────────────────
+
+// Past the sidecar's own 15s request ceiling, so its `timeout` answer arrives
+// before this bridge gives up.
+const MANAGED_VOICE_SPEAK_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// `status` / `configure` only; speaking and cancelling have their own commands.
+#[tauri::command(async)]
+fn managed_voice_command(
+    state: tauri::State<'_, SidecarState>,
+    payload: JsonValue,
+) -> Result<JsonValue, String> {
+    match payload.get("op").and_then(JsonValue::as_str) {
+        Some("status") | Some("configure") => {}
+        _ => return Err("unsupported managed voice op".to_string()),
+    }
+    let response =
+        request_from_sidecar_timeout(&state, "voice:command", payload, Duration::from_secs(5))?;
+    Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
+}
+
+/// Audio as a raw `tauri::ipc::Response` (an ArrayBuffer in the webview); a
+/// failure rejects with the sidecar's failure kind, which the adapter maps.
+#[tauri::command(async)]
+fn managed_voice_speak(
+    state: tauri::State<'_, SidecarState>,
+    text: String,
+    speak_id: String,
+) -> Result<tauri::ipc::Response, String> {
+    let response = request_from_sidecar_timeout(
+        &state,
+        "voice:command",
+        serde_json::json!({ "op": "speak", "speakId": speak_id, "text": text }),
+        MANAGED_VOICE_SPEAK_TIMEOUT,
+    )
+    .map_err(|err| {
+        if err.starts_with("timed out") { "timeout" } else { "unavailable" }.to_string()
+    })?;
+    let result = response.get("result").cloned().unwrap_or(JsonValue::Null);
+    if result.get("ok").and_then(JsonValue::as_bool) != Some(true) {
+        return Err(result
+            .get("reason")
+            .and_then(JsonValue::as_str)
+            .unwrap_or("unavailable")
+            .to_string());
+    }
+    let b64 = result
+        .get("audioBase64")
+        .and_then(JsonValue::as_str)
+        .ok_or("unavailable")?;
+    let bytes = BASE64.decode(b64).map_err(|_| "unavailable".to_string())?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// Abort an in-flight speak. Fire-and-forget: the speak itself answers `cancelled`.
+#[tauri::command]
+fn managed_voice_cancel(state: tauri::State<'_, SidecarState>, speak_id: String) {
+    let msg = serde_json::json!({
+        "event": "voice:command",
+        "data": { "op": "cancel", "speakId": speak_id },
+    });
+    send_to_sidecar(&state, msg.to_string());
+}
+
 // ── agent-browser host (docs/specs/dor-browser.md → "Agent-Browser Host Capabilities").
 // Thin forwarders to the Node sidecar, which runs the shared
 // lib/src/host/agent-browser-host.ts — the very same module the VS Code
@@ -4443,6 +4510,9 @@ pub fn run() {
             take_recovery_commands,
             iframe_create_proxy_url,
             tool_control,
+            managed_voice_command,
+            managed_voice_speak,
+            managed_voice_cancel,
             pty_request_init,
             dor_control_response,
             burrow_command,

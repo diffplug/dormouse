@@ -7,6 +7,7 @@
 //   - lib/src/host/remote/sidecar-entry.ts → sidecar/burrow.cjs
 //   - lib/src/host/recovery.ts             → sidecar/recovery.cjs
 //   - lib/src/host/alert-store-host.ts     → sidecar/alert-store.cjs
+//   - lib/src/host/managed-voice-host.ts   → sidecar/managed-voice.cjs
 // See docs/specs/dor-browser.md, docs/specs/remote-api.md,
 // docs/specs/standalone.md -> "Agent recovery", and docs/specs/alert.md.
 import { build } from 'esbuild';
@@ -63,6 +64,7 @@ const bundles = [
   { entry: 'tool-host.ts', out: 'tool-host.cjs' },
   { entry: 'recovery.ts', out: 'recovery.cjs' },
   { entry: 'alert-store-host.ts', out: 'alert-store.cjs' },
+  { entry: 'managed-voice-host.ts', out: 'managed-voice.cjs' },
   {
     entry: 'remote/sidecar-entry.ts',
     out: 'burrow.cjs',

@@ -115,6 +115,8 @@ const fireAndForget = {
   // over the event stream like every other sidecar line (`alert_command` in
   // src-tauri/src/lib.rs).
   alert_command: ({ payload }) => writeSidecar('alert:command', payload),
+  // Managed voice mirrors `managed_voice_cancel` in src-tauri/src/lib.rs.
+  managed_voice_cancel: ({ speakId }) => writeSidecar('voice:command', { op: 'cancel', speakId }),
   kill_sidecar_now: () => shutdown(),
 };
 
@@ -144,6 +146,15 @@ const invokeMap = {
     return result;
   },
   agent_browser_stream_status: ({ session, binaryPath }) => requestSidecar('agentBrowser:streamStatus', { session, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
+  // Managed voice (docs/specs/alert.md -> "Spoken alarms"), mirroring the Rust
+  // bridge: status/configure only here, and the speak's audio stays base64 in
+  // the HTTP invoke response where Rust would hand the webview raw bytes.
+  managed_voice_command: ({ payload }) => {
+    if (payload?.op !== 'status' && payload?.op !== 'configure') throw new Error('unsupported managed voice op');
+    return requestSidecar('voice:command', payload, 'voice:result', (data) => data.result, 5000);
+  },
+  managed_voice_speak: ({ text, speakId }) =>
+    requestSidecar('voice:command', { op: 'speak', speakId, text }, 'voice:result', (data) => data.result, 20000),
   tool_control: ({ request }) =>
     requestSidecar('tool:control', { request }, 'tool:result', (data) => data.result),
   agent_browser_open: ({ url, headed, binaryPath }) => requestSidecar('agentBrowser:open', { url, headed, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),

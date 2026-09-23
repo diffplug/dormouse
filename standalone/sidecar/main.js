@@ -32,6 +32,10 @@ const { captureAgentRecovery, createRecoveryStore, sliceSince } = require('./rec
 // for every window — running the same classes the VS Code extension host runs.
 // See docs/specs/alert.md.
 const { createAlertStoreHost } = require('./alert-store.cjs');
+// Same pattern again: lib/src/host/managed-voice-host.ts holds the managed-voice
+// token and makes the one outbound speak request, so the token never reaches a
+// webview. See docs/specs/alert.md -> "Spoken alarms".
+const { createManagedVoiceHost } = require('./managed-voice.cjs');
 
 const agentBrowser = createAgentBrowserHost({
   writeClipboardText: (text) => clipboard.writeClipboardText(text),
@@ -90,6 +94,11 @@ delete process.env.DORMOUSE_CONTROL_SOCKET;
 // Broadcast, never addressed: both stores are one per machine, so every window
 // gets the same canonical snapshot (docs/specs/standalone.md -> "Windows").
 const alertStore = createAlertStoreHost({ send });
+
+const managedVoice = createManagedVoiceHost({
+  stateDir: process.env.DORMOUSE_STATE_DIR,
+  log: (m) => console.error(m),
+});
 
 const dorControl = createDorControlServer({
   token: dorControlToken,
@@ -202,6 +211,11 @@ function handleLine(line) {
       // "Burrow service").
       case 'burrow:askDelivered': burrow.setAskDelivery(data); break;
       case 'alert:command': alertStore.handle(data); break;
+      // `cancel` is fire-and-forget; every other op answers `voice:result`.
+      case 'voice:command':
+        if (data?.op === 'cancel') managedVoice.handle(data);
+        else respondAsync('voice:result', data.requestId, async () => ({ result: await managedVoice.handle(data) }));
+        break;
       case 'pty:themeColors': burrow.setThemeColors(data); break;
       case 'sidecar:shutdown': shutdown(); break;
       case 'dor:controlResponse': dorControl?.respond(data); break;
@@ -302,6 +316,7 @@ async function shutdown() {
   } catch {}
   dorControl?.close();
   alertStore.dispose();
+  managedVoice.dispose();
   burrow.dispose();
   mgr.killAll();
   process.exit(0);

@@ -27,6 +27,12 @@ import type {
   SessionFlushRequest,
   WritePtyOptions,
 } from "dormouse-lib/lib/platform/types";
+import {
+  toManagedVoiceFailure,
+  type ManagedVoiceConfigResult,
+  type ManagedVoicePort,
+  type ManagedVoiceStatus,
+} from "dormouse-lib/lib/platform/managed-voice-types";
 import type {
   NotepadArchiveLoadResult,
   NotepadArchivePort,
@@ -788,6 +794,37 @@ export class TauriAdapter implements PlatformAdapter {
   getWindowState(): PersistedWindow | null {
     return this.windowSlot.read();
   }
+
+  // --- Managed voice (docs/specs/alert.md -> "Spoken alarms") ---
+  //
+  // The token lives in the sidecar and never comes back through here: status
+  // answers `configured`, and speak sends only the text. Aborting the signal
+  // tells the sidecar to abort its request; the speak itself then answers
+  // `cancelled`.
+  readonly managedVoice: ManagedVoicePort = {
+    status: () => rawInvoke<ManagedVoiceStatus>("managed_voice_command", { payload: { op: "status" } }),
+    configure: async (update): Promise<ManagedVoiceConfigResult> => {
+      try {
+        return await rawInvoke<ManagedVoiceConfigResult>("managed_voice_command", { payload: { op: "configure", update } });
+      } catch {
+        return { ok: false, reason: "unavailable" };
+      }
+    },
+    speak: async (text, signal) => {
+      if (signal.aborted) return { ok: false, reason: "cancelled" };
+      const speakId = crypto.randomUUID();
+      const cancel = () => invoke("managed_voice_cancel", { speakId });
+      signal.addEventListener("abort", cancel, { once: true });
+      try {
+        const buffer = await rawInvoke<ArrayBuffer>("managed_voice_speak", { text, speakId });
+        return { ok: true, audio: new Uint8Array(buffer), mime: "audio/mpeg" };
+      } catch (err) {
+        return { ok: false, reason: toManagedVoiceFailure(err) };
+      } finally {
+        signal.removeEventListener("abort", cancel);
+      }
+    },
+  };
 
   // --- Notepad archive (docs/specs/notepad.md) ---
   //

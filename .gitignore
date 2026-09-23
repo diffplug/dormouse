@@ -37,6 +37,7 @@ standalone/sidecar/recovery.cjs
 standalone/sidecar/agent-browser-host.cjs
 standalone/sidecar/burrow.cjs
 standalone/sidecar/alert-store.cjs
+standalone/sidecar/managed-voice.cjs
 # Kept beside it: a checkout that built before the Burrow rename still holds
 # the old bundle, and `bundle.resources` would ship it.
 standalone/sidecar/remote-host.cjs
