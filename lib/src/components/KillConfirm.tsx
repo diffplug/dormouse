@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { resolvePaneElement } from './wall/resolve-pane-element';
 import { ModalFrame, Shortcut, type ModalLayer } from './design';
+import { cfg } from '../cfg';
 
 export type KillExit = 'shake' | 'confirm';
 
@@ -16,7 +17,7 @@ export const KILL_CONFIRM_MS = 220;
 // Excludes both kill shortcuts ('x' and 'k') so a double-tap can't accept itself.
 const KILL_CONFIRM_CHARS = 'abcdefghijlmnopqrstuvwyz';
 export function randomKillChar(): string {
-  return KILL_CONFIRM_CHARS[Math.floor(Math.random() * KILL_CONFIRM_CHARS.length)];
+  return cfg.killConfirm.char ?? KILL_CONFIRM_CHARS[Math.floor(Math.random() * KILL_CONFIRM_CHARS.length)];
 }
 
 export function KillConfirmModal({

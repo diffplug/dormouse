@@ -6,7 +6,6 @@ import {
   enrolledStatus,
   OFFER_STATUS,
   UNENROLLED_STATUS,
-  setupQrResult,
 } from '../host/remote/test-burrow-link';
 import { TEST_SETUP_PASSWORD } from '../remote/test-setup-password';
 
@@ -32,9 +31,18 @@ function RemoteControlStory() {
   );
 }
 
+/** The clock every story here reads. A setup code encodes its expiry, so a real
+ *  clock would draw a different QR on every run. */
+const STORY_NOW = Date.UTC(2026, 0, 1);
+
 const meta: Meta<typeof RemoteControlStory> = {
   title: 'Modals/RemoteControlSection',
   component: RemoteControlStory,
+  beforeEach: () => {
+    const realNow = Date.now;
+    Date.now = () => STORY_NOW;
+    return () => { Date.now = realNow; };
+  },
   // Embedded in a docs page, each of these needs its own frame. The section
   // reads a module-singleton store (`burrow-status-store.ts`: `state` is module
   // scope, and the link is captured only when `listeners.size === 1`), so N
@@ -190,7 +198,9 @@ export const ConfirmingDisconnect: Story = {
  */
 export const SetupPhoneQr: Story = {
   parameters: {
-    primedBurrow: { status: enrolledStatus(), setupQr: setupQrResult() },
+    // No `setupQr`: the stub's default mints at request time, under the frozen
+    // clock, where one built here would read the real clock at import.
+    primedBurrow: { status: enrolledStatus() },
     docs: { story: { height: '520px' } },
   },
   // The one setup-panel story that settles on the QR's accessible name rather
