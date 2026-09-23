@@ -272,7 +272,7 @@ Rules:
 - **Distribution follows the WATCHING rule set's seed/broadcast shape** (rationale), except that an edit **relays the whole blob** rather than a per-command delta, so every webview resolves workspace overrides against the same defaults. Wire contract and host revalidation: `docs/specs/transport.md`.
 - **Must keep detection settings application-wide.** Standalone and browser-sidecar renderers apply detector settings to their local manager; VS Code applies them in the extension host.
 
-**Must resolve delivery policy from application defaults, then sparse Workspace overrides.** Speech/push enable and delay can override independently; `speakVoice` selects a local engine voice URI, missing inherits the system-voice default, and explicit null selects the system voice. Missing or unavailable voices fall back to the engine default without erasing the saved choice. Unknown/invalid overrides are dropped; finite delays share the application clamp.
+**Must resolve delivery policy from application defaults, then sparse Workspace overrides.** Speech/push enable and delay can override independently; `speakVoice` selects a Web Speech voice URI (managed voice uses the host's voice id), missing inherits the system-voice default, and explicit null selects the system voice. Missing or unavailable voices fall back to the engine default without erasing the saved choice. Unknown/invalid overrides are dropped; finite delays share the application clamp.
 
 **Must persist overrides in the Workspace's `PersistedSession.alertDelivery` in both hosts**, preserving them through rename, reorder, save, and live move. Reset removes overrides, restoring inheritance. A pane resolves its current parent Workspace; a pane without membership uses application defaults.
 
@@ -292,7 +292,7 @@ Source of truth: `normalizeAlertDeliveryOverrides` / `resolveAlertDeliveryPolicy
 | Delivery identity | Episode receipt plus native attempt identity; renderer-local `speaking` / `spoken`. | HTTP push tagged by Session id, so a newer ring replaces the prior notification. |
 | After delivery | Attending cuts off speech. | **Never recall** — another push would only replace one stale notice with another. |
 | Failure | A refused or unavailable engine produces no marker. | Warn on non-2xx, partial, or zero delivery; **never retry** stale alarms. |
-| Authority | The renderer invokes `window.speechSynthesis`. | The webview names Session/title; the Burrow selects active ACL devices, the Relay intersects subscriptions. |
+| Authority | The renderer plays host-fetched managed-voice audio, else invokes `window.speechSynthesis`; only the host holds the voice token. | The webview names Session/title; the Burrow selects active ACL devices, the Relay intersects subscriptions. |
 
 Source of truth: `AlertSettings` in `lib/src/lib/alert-settings.ts` (renderer mirror, persisted at `dormouse:alert-settings`); `lib/src/lib/alert-settings-host.ts`; `watchUnattendedRings` in `lib/src/lib/alert-ring-watch.ts`.
 
@@ -303,11 +303,25 @@ Source of truth: `AlertSettings` in `lib/src/lib/alert-settings.ts` (renderer mi
 - **Delivery state follows actual engine callbacks, not queue admission.** `AlertSpeechState` is a renderer-local `speaking | spoken` map keyed by Session: `start` publishes `speaking`; `end`, or `error` after a real start, publishes `spoken`; an utterance that never starts publishes neither. **Must check delivery identity before accepting `start` or completion**, including after cancellation, timeout, or teardown. Pinned by `ignores an older ring starting after a newer ring has begun speaking` and `recovers from a callback-less engine without accepting its later callbacks` in `lib/src/lib/alert-speech.test.ts`.
 - **Nothing in the settle path may assume the callback arrives after `speak()` returns** — an engine may dispatch `start` then `end`/`error` *synchronously* inside `speechSynthesis.speak()` (rationale). Handlers therefore close over the utterance itself and registration happens before dispatch. A dispatch the engine refuses outright settles too.
 - **Attending mid-sentence cuts the utterance off** — silence the engine, not merely un-render the overlay. "Mid-sentence" is the sink's own record that an utterance started — its generation token — never the rendered `speaking` state.
-- **Must admit only one utterance at a time to Web Speech per renderer**, Settings tests included, and **must remove resolved, disabled, or suspended pending jobs before engine admission** without cutting another pane's current utterance. Pinned by `never admits a resolved queued alarm to the speech engine` in `lib/src/lib/alert-speech.test.ts`.
+- **Must admit only one utterance at a time to a speech engine per renderer**, Settings tests included, and **must remove resolved, disabled, or suspended pending jobs before engine admission** without cutting another pane's current utterance. Pinned by `never admits a resolved queued alarm to the speech engine` in `lib/src/lib/alert-speech.test.ts`.
 - **Must bound pending jobs and cancel a stalled engine attempt**, advancing the queue and revoking callback identity before every cancel, and **never retry a failed, expired, or overflowed delivery**. Teardown cancels the current engine utterance and drops pending jobs. The bound, the timeout, and the revocation mechanism live at `SpeechQueue`.
 - `speaking` / `spoken` remains only while the originating Session is still `ALERT_RINGING`: any action that resolves the ring (Clearing And TODO) clears it, killing the Session included, while visibility, hover, and command-mode selection do not. **Never persist it or send it to the host**, so restore/reconnect cannot recreate it.
 
 Source of truth: `toSpokenText` in `lib/src/lib/alert-speech.ts`, armed by `lib/src/components/wall/use-alert-speech.ts`; `SpeechQueue` in `lib/src/lib/speech-queue.ts`; `redactHighEntropyTokens` in `lib/src/lib/redact-high-entropy.ts`; label derivation in `lib/src/lib/session-label.ts`; `AlertSpeechState` in `lib/src/lib/alert-speech-state.ts`.
+
+#### Managed voice
+
+`SpeechQueue` owns ordering, eligibility, the timeout, and callback identity; a `SpeechEngine` owns only dispatch, real start/end, and cancel. Every rule above holds for both engines.
+
+- **Must try managed voice first wherever the adapter exposes `managedVoice`** (standalone only; VS Code, Pocket, and the website omit it and speak through Web Speech). With no token saved the host answers `unconfigured`, which falls back like any failure.
+- **Must fall back to Web Speech for the same utterance, inside the same attempt, on any failure before managed audio starts** — no token, offline, non-2xx, host timeout, undecodable or refused playback. **Never play both**: audio that started and then failed ends the attempt instead (rationale). Nothing is retried.
+- `speaking` / `spoken` follow the audio element's `playing` / `ended`. **Cut-off and teardown must stop the audio and abort the in-flight request**, host `fetch` included.
+- **Never let the voice token reach a renderer.** The host stores it, adds it and the voice id to the request, and answers `configured` and the voice id, never the token; a renderer sends only the sanitized label (rationale). `docs/specs/transport.md` → "Managed voice" owns the messages.
+- **The host must call only `POST https://hosted.dormouse.sh/api/voice/speak`**, bearer-authenticated, `redirect: 'error'` so no redirect receives the token, bounded at `MANAGED_VOICE_REQUEST_TIMEOUT_MS` (inside `SPEECH_ENGINE_TIMEOUT_MS`, so a fallback still fits) and `MAX_AUDIO_BYTES`. It validates the token (`dmv_…`) and voice id grammar before storing either.
+
+Pinned by `lib/src/lib/managed-voice-engine.test.ts` and `lib/src/host/managed-voice-host.test.ts`.
+
+Source of truth: `SpeechEngine` / `webSpeechEngine` in `lib/src/lib/speech-engine.ts`; `createManagedVoiceEngine` in `lib/src/lib/managed-voice-engine.ts`; `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts`; `ManagedVoicePort` in `lib/src/lib/platform/managed-voice-types.ts`.
 
 ### Push notifications
 
@@ -330,14 +344,15 @@ Reached from the baseboard sliders; `docs/specs/layout.md` owns placement. The a
 - **Delays are committed on blur or `Enter`, never per keystroke** — typing `3` on the way to `30` must not briefly install a 3-second timer. They are shown in seconds; an out-of-range or empty entry snaps back to whatever the store clamped it to.
 - **The push group's device line names every device a push would reach**, and otherwise says why there is none — no Burrow enrolled, nothing subscribed yet, or the server could not be asked (rationale).
 - **Must separate application defaults from this Workspace’s overrides** and offer per-field inheritance plus reset-all. The local voice picker follows engine voice availability. Pinned by `lib/src/components/WorkspaceAlarmSettings.test.tsx`.
+- **The Managed voice group never shows the token**: a saved token reads as configured with a clear action, and what is sent to Hosted is stated before one is saved. The voice id commits on blur or `Enter`. Hidden without `managedVoice`. Pinned by `lib/src/components/ManagedVoiceSection.test.tsx`.
 - Each alarm sink carries a **try it now** control outside the switch's dimming; both report inline and clear after a few seconds.
 
   | Control | Path and result |
   |---|---|
-  | **Play test sound** | Fixed sanitized phrase through the shared speech queue and selected voice; reports queue admission or an unavailable backend, never Session delivery state. |
+  | **Play test sound** | Fixed sanitized phrase through the shared speech queue — managed voice where configured, else the selected Web Speech voice; reports queue admission or an unavailable backend, never Session delivery state. |
   | **Send test push** | Real Burrow→ACL→Relay path; does not swallow failures and distinguishes no targets, zero delivery, partial delivery, and success. Hidden without a Burrow service. |
 
-Source of truth: `lib/src/components/SettingsDialog.tsx`; `WorkspaceAlarmSettings` in `lib/src/components/WorkspaceAlarmSettings.tsx`; `SettingsPreview` in `lib/src/components/SettingsPreview.tsx`; `Baseboard` in `lib/src/components/Baseboard.tsx`; `lib/src/components/WatchedCommandList.tsx`; `lib/src/components/AlarmTestButtons.tsx`.
+Source of truth: `lib/src/components/SettingsDialog.tsx`; `WorkspaceAlarmSettings` in `lib/src/components/WorkspaceAlarmSettings.tsx`; `SettingsPreview` in `lib/src/components/SettingsPreview.tsx`; `Baseboard` in `lib/src/components/Baseboard.tsx`; `lib/src/components/WatchedCommandList.tsx`; `lib/src/components/AlarmTestButtons.tsx`; `ManagedVoiceSection` in `lib/src/components/ManagedVoiceSection.tsx`.
 
 ## Workspace union
 

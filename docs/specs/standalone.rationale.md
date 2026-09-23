@@ -4,6 +4,8 @@
 
 ## Rust ↔ sidecar bridge
 
+**Why managed-voice audio may ride the pipe when screenshots may not.** A screenshot streams on every settled frame; an utterance is at most one per window at a time, alarms are rare, and a 120-code-point label is well under 300 KB of base64 even at Hosted's 200-character cap. The temp-file path would leave spoken-label audio on disk between the sidecar's write and Rust's read, and an orphan whenever the invoke timed out first.
+
 **What a sync blocking command cost.** A cold `agent-browser open` froze the webview for ~3 s — long enough to look like a pane that never appeared — and a hung one would have held it for the full 30 s `AGENT_BROWSER_TIMEOUT`; `(async)` moves the same blocking body onto a runtime worker. The incident is recorded at the `request_from_sidecar_timeout` invariant comment in `standalone/src-tauri/src/lib.rs`.
 
 ## Windows node subsystem

@@ -91,6 +91,8 @@ are *not* forwarded:
 | the `clipboard` readers (Windows only) | Rust (`clipboard_win.rs`) | native Win32 reads (`docs/specs/mouse-and-clipboard.md` §8.6) |
 | `agent_browser_screenshot` | Rust reads the bytes from a sidecar-supplied temp-file *path* | images must never ride the JSON-lines pipe shared with PTY traffic (`docs/specs/dor-browser.md`) |
 
+**Managed-voice audio is the one byte payload that rides the pipe**: the sidecar base64s one utterance's audio, bounded by `MAX_AUDIO_BYTES`, into its `voice:result` line, and `managed_voice_speak` decodes it into a raw `tauri::ipc::Response` (rationale; messages in `docs/specs/transport.md` → "Managed voice").
+
 Request/response commands block on the sidecar's reply under a timeout.
 `OPEN_PORT_TIMEOUT_MS` and `OPEN_PORT_TIMEOUT_PER_ID_MS` in `lib.rs` mirror the
 constants in `lib/src/lib/platform/types.ts` (and `standalone/sidecar/pty-core.js`);

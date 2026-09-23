@@ -140,6 +140,8 @@ What header stripping cannot protect. A proxied script runs on `127.0.0.1` and c
 
 ## Persisted state
 
+Why the managed-voice token sits beside the Burrow's enrollment. It is the same class of secret — a revocable bearer credential for a Dormouse service — and that directory is the one `burrow_state_dir` already locks on Windows, where `writeJsonAtomic`'s modes are no-ops. A leaked token lets its holder spend the account's daily speak cap until it is revoked on the Hosted account page; it grants no terminal access.
+
 Why session snapshots earn the strongest protection on disk. They are
 `PersistedWindow` blobs, and historically they carried terminal transcripts —
 whatever the user's shells printed, a superset of every other secret in the

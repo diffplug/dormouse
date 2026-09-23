@@ -178,6 +178,8 @@ and the CWD at closure, appended only by a Surface closing
 same Tauri identifier; the dev wrapper uses a per-worktree identifier. VS Code keeps it in
 `<globalStorageUri>/notepad-archive.json`, mode `0600` on Unix and inheriting VS Code's directory ACL on Windows. Migration and Settings Sync follow `docs/specs/notepad.md` -> "VS Code lifecycle". Its live half never reaches disk.
 
+**The managed-voice token is a bearer credential at rest** — `<state dir>/managed-voice.json` beside the Burrow's enrollment, written by `writeJsonAtomic` (`0700`/`0600`; on Windows the owner-only DACL `burrow_state_dir` applies before the sidecar spawns), with the voice id (rationale). Standalone only; **never returned to a webview** (`docs/specs/alert.md` → "Managed voice"). Its one request is outbound HTTPS, not a listener, so "Loopback Listeners" does not apply.
+
 **VS Code persists pane structure in VS Code's own storage** — `workspaceState`
 under `dormouse.session`, and `vscode.setState()`, a WebviewPanel's only store —
 so the modes there are VS Code's, not ours, and no transcript reaches either
