@@ -511,8 +511,8 @@ describe('bind-as-lease', () => {
       await mod.ensurePeerNet((broker) => roles.push(broker));
       expect(theirs).not.toBeNull();
       // Settled as broker either way — standing down closes our server, which
-      // unlinks the path (libuv does, whatever it names now), so the next round
-      // binds uncontested. What tells the two apart is whose socket the path
+      // unlinks the path (libuv does, whatever it names now; #756), so the next
+      // round binds uncontested. What tells the two apart is whose socket the path
       // names at the verdict: a window that confirmed on the competitor's
       // socket is a broker nobody can reach.
       expect(roles).toEqual([true]);
