@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
-import { expect, userEvent, within } from 'storybook/test';
+import { expect, within } from 'storybook/test';
 import { FrameCornersIcon, XIcon } from '@phosphor-icons/react';
 import { PANE_HEADER_HEIGHT_PX } from '../components/design';
 import { NotepadHeaderButton } from '../components/wall/NotepadHeaderButton';
@@ -139,9 +139,6 @@ const meta = {
     // These snapshots must actually expose the state named in the story.
     if (['noPorts', 'multiplePorts', 'notification', 'scanFailed'].includes(args.initialScenario ?? 'fresh')) {
       const canvas = within(canvasElement);
-      const details = canvas.getByRole('button', { name: 'Terminal context details' });
-      await userEvent.click(details);
-      await expect(details).toHaveAttribute('aria-expanded', 'true');
       const target = canvas.getByText(args.initialScenario === 'notification' ? 'Tests complete' : 'Ports', { exact: true });
       target.scrollIntoView({ block: 'nearest' });
       await expect(target).toBeVisible();

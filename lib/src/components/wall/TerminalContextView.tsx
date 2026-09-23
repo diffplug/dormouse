@@ -45,7 +45,7 @@ const DETAILS = {
 type Detail = keyof typeof DETAILS;
 export interface TerminalContextViewProps {
   terminalRole?: 'helper' | 'tool';
-  /** Fill the positioned host and fold directory actions, ports, and alerts behind Details. */
+  /** Fill the positioned host instead of adding an inset. */
   compact?: boolean;
   placement?: ContextPlacement & { onChange(side: ContextSide): void };
   /** Exit in progress: the view is inert, and `onClose` is not called again. */
@@ -65,14 +65,14 @@ export interface TerminalContextViewProps {
   initialDetail?: Detail | null;
 }
 
-export function ContextAction({ children, label, onClick, disabled = false, busy = false, muted = false, pressed, expanded, keepFocus = false }: { children: ReactNode; label: string; onClick?: () => void; disabled?: boolean; busy?: boolean; muted?: boolean; pressed?: boolean; expanded?: boolean; keepFocus?: boolean }) {
+export function ContextAction({ children, label, onClick, disabled = false, busy = false, muted = false, pressed, keepFocus = false }: { children: ReactNode; label: string; onClick?: () => void; disabled?: boolean; busy?: boolean; muted?: boolean; pressed?: boolean; keepFocus?: boolean }) {
   const windowFocused = useContext(WindowFocusedContext);
   // Native app launches can leave :hover stale until this window regains focus.
   const color = muted ? 'text-muted' : windowFocused ? SUBTLE_ACTION_COLOR_CLASS : SUBTLE_ACTION_REST_COLOR_CLASS;
   // `busy` must never reach native `disabled`: the browser blurs a button the moment it is disabled,
   // and this context's Escape and Tab handling both live on the <section> and need a focused descendant.
   return <button type="button" title={label} aria-label={label} aria-busy={busy || undefined} aria-disabled={busy || undefined} disabled={disabled} onClick={busy ? undefined : onClick}
-    aria-pressed={pressed} aria-expanded={expanded} onPointerDown={keepFocus ? event => event.preventDefault() : undefined}
+    aria-pressed={pressed} onPointerDown={keepFocus ? event => event.preventDefault() : undefined}
     className={`inline-flex h-6 shrink-0 items-center justify-center gap-1.5 rounded px-1.5 disabled:opacity-40 aria-pressed:bg-current/10 ${windowFocused ? SUBTLE_ACTION_INTERACTION_CLASS : ''} ${color}`}>{children}</button>;
 }
 
@@ -155,7 +155,6 @@ export function TerminalContextView(p: TerminalContextViewProps) {
     return () => document.removeEventListener('pointerdown', outside, true);
   }, [p.closing, close]);
   const detailRoot = useRef<HTMLDivElement>(null);
-  const [expanded, setExpanded] = useState(!p.compact);
   const [detail, setDetail] = useState(p.initialDetail ?? null);
   useEffect(() => {
     if (!detail) return;
@@ -191,8 +190,8 @@ export function TerminalContextView(p: TerminalContextViewProps) {
         <div className="grid grid-cols-[3rem_minmax(0,1fr)] items-center gap-y-1">
           <span className="text-muted">Title</span>
           <div className="flex min-h-6 min-w-0 flex-wrap items-center gap-1.5">
-            <span className="min-w-[8ch] flex-1 truncate" title={p.title}>{p.title}</span>{expanded && <ContextAction label="Explain this title" onClick={() => setDetail('title')}><BugBeetleIcon size={15} />Explain</ContextAction>}
-            <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2 text-muted"><ContextCopyAction label="Copy surface identifier" onCopy={() => attempt(p.onCopyRef)}><span>{p.surfaceRef}</span><CopyIcon size={12} /></ContextCopyAction>{p.compact && <ContextAction label="Terminal context details" expanded={expanded} onClick={() => setExpanded(value => !value)}>Details</ContextAction>}<div data-context-header-actions className="flex shrink-0 items-center gap-0.5">{p.placement && <div aria-label="Helper placement" className="flex shrink-0 items-center gap-0.5">
+            <span className="min-w-[8ch] flex-1 truncate" title={p.title}>{p.title}</span><ContextAction label="Explain this title" onClick={() => setDetail('title')}><BugBeetleIcon size={15} />Explain</ContextAction>
+            <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2 text-muted"><ContextCopyAction label="Copy surface identifier" onCopy={() => attempt(p.onCopyRef)}><span>{p.surfaceRef}</span><CopyIcon size={12} /></ContextCopyAction><div data-context-header-actions className="flex shrink-0 items-center gap-0.5">{p.placement && <div aria-label="Helper placement" className="flex shrink-0 items-center gap-0.5">
               {p.placement.available.map(side => <ContextAction key={side} label={`Place helper at ${side}`} pressed={p.placement!.side === side} keepFocus onClick={() => p.placement!.onChange(side)}>
                 <svg aria-hidden width="18" height="18" viewBox="0 0 256 256" fill="currentColor">
                   <g transform={side === 'bottom' ? 'translate(0 256) scale(1 -1)' : side === 'left' ? 'translate(256 0) scale(-1 1)' : undefined}>
@@ -206,8 +205,8 @@ export function TerminalContextView(p: TerminalContextViewProps) {
             </div>}<ContextAction label="Close terminal context" onClick={close} muted><XIcon size={15} /></ContextAction></div></div>
           </div>
           <span className="text-muted">Dir</span>
-          <div className="flex min-h-6 min-w-0 flex-wrap items-center gap-1.5"><span className="truncate" title={p.cwd}>{p.cwd}</span>{expanded && <><ContextOpenAction label={p.canExplore ? p.explorerLabel : 'Directory unavailable on this host'} disabled={!p.canExplore} onOpen={() => attempt(p.onExplore)}><ArrowSquareOutIcon size={15} />{p.explorerLabel}</ContextOpenAction><ContextCopyAction label="Copy absolute path" onCopy={() => attempt(p.onCopyPath)}><CopyIcon size={14} />Copy path</ContextCopyAction></>}</div>
-          {expanded && <><span className="text-muted">Ports</span>
+          <div className="flex min-h-6 min-w-0 flex-wrap items-center gap-1.5"><span className="truncate" title={p.cwd}>{p.cwd}</span><ContextOpenAction label={p.canExplore ? p.explorerLabel : 'Directory unavailable on this host'} disabled={!p.canExplore} onOpen={() => attempt(p.onExplore)}><ArrowSquareOutIcon size={15} />{p.explorerLabel}</ContextOpenAction><ContextCopyAction label="Copy absolute path" onCopy={() => attempt(p.onCopyPath)}><CopyIcon size={14} />Copy path</ContextCopyAction></div>
+          <span className="text-muted">Ports</span>
           <div className="flex min-h-7 flex-wrap items-center gap-2">
             {p.scan.status === 'scanning' ? <span className="text-muted">Scanning ports…</span> : p.scan.status === 'failed' ? <span className="text-error">Port scan failed · Reopen to try again</span> : !selected ? <span className="text-muted">No listening ports</span> : <>
               {entries.length > 1 ? <div className="flex w-full min-w-0 items-center gap-2"><select aria-label="Port" value={selected.port} onChange={e => setPort(Number(e.target.value))} className="h-6 min-w-0 flex-1 rounded border border-input-border bg-input-bg px-1 text-foreground">{entries.map(entry => <option key={entry.port} value={entry.port}>{entry.host}:{entry.port}{entry.processName ? ` · ${entry.processName}` : ''}</option>)}</select><span className="text-muted">{entries.length} ports</span></div> : <><span>{selected.host}:{selected.port}</span><span className="text-muted">{selected.processName}</span></>}
@@ -219,9 +218,9 @@ export function TerminalContextView(p: TerminalContextViewProps) {
               </div>
             </>}
           </div>
-          <span className="text-muted">Alerts</span><div className="flex min-h-6 flex-wrap items-center gap-2"><span>{p.argv0 ? `Watch all ${p.argv0} commands` : 'No command running'}</span>{p.argv0 && <OnOffSwitch on={p.watching} onEnable={p.onWatch} onDisable={p.onWatch} label={`Watch all ${p.argv0} commands`} />}<span className="mx-1 h-3 border-l border-border" /><span>TODO</span><OnOffSwitch on={p.todo} onEnable={p.onTodo} onDisable={p.onTodo} label="TODO" /></div></>}
+          <span className="text-muted">Alerts</span><div className="flex min-h-6 flex-wrap items-center gap-2"><span>{p.argv0 ? `Watch all ${p.argv0} commands` : 'No command running'}</span>{p.argv0 && <OnOffSwitch on={p.watching} onEnable={p.onWatch} onDisable={p.onWatch} label={`Watch all ${p.argv0} commands`} />}<span className="mx-1 h-3 border-l border-border" /><span>TODO</span><OnOffSwitch on={p.todo} onEnable={p.onTodo} onDisable={p.onTodo} label="TODO" /></div>
         </div>
-        {expanded && p.notification && <div className="ml-12 mt-2 border-l-2 border-border py-1 pl-3"><div>{p.notification.title}</div><div className="whitespace-pre-wrap text-muted">{p.notification.body}</div></div>}
+        {p.notification && <div className="ml-12 mt-2 border-l-2 border-border py-1 pl-3"><div>{p.notification.title}</div><div className="whitespace-pre-wrap text-muted">{p.notification.body}</div></div>}
       </div>
       <div className="@container flex min-h-0 flex-1 flex-col border-t border-border">
         <div aria-label={isTool ? 'Tool terminal status' : 'Helper terminal status'} className="flex h-9 shrink-0 items-center gap-3 whitespace-nowrap px-3">

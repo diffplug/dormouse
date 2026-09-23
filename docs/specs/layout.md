@@ -74,7 +74,7 @@ Popups share the zoomed pane’s app-background halo.
 
 **Must group available side buttons beside Close at the context header’s right edge**, with destination tooltips, accessible labels, and selected state. Remember manual choices per source for the mounted Wall's lifetime; clear on source removal. Preserve terminal focus on pointer repositioning. An unavailable choice falls back automatically; no preference is persisted to disk.
 
-**Must keep source title, directory, and helper actions visible in compact context**, disclosing title explanation, directory actions, ports, and alerts through Details. Wrap header and detail actions within the panel; scroll bounded details and warnings while reserving 64px for terminal content.
+**Must always show source title, directory actions, ports, alerts, and helper actions**, with title explanation available through Explain. Wrap header and detail actions within the panel; scroll bounded details and warnings while reserving 64px for terminal content.
 
 **Must reveal the context from the opening pointer position, clamped to its bounds, over 320ms.** Command-mode `a` and `>` use the header's bottom-left; openings without a position use the context's top-left. Keep final layout dimensions throughout the reveal. Start helper creation, settings reads, and port scanning immediately on mount; fade mounted content, including detail dialogs, in over 140ms after 160ms. Reduced motion or disabled layout animation skips both animations and the delay.
 

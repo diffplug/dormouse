@@ -749,7 +749,6 @@ describe('Wall on the Lath engine', () => {
         }));
       });
       await flush();
-      act(() => container.querySelector<HTMLButtonElement>('[aria-label="Terminal context details"]')!.click());
       const portRow = document.querySelector<HTMLButtonElement>(
         '[data-terminal-context] button[aria-label="Open in agent-browser screencast"]',
       )!;
@@ -3123,7 +3122,6 @@ describe('Wall on the Lath engine', () => {
       });
       await flush();
 
-      act(() => container.querySelector<HTMLButtonElement>('[aria-label="Terminal context details"]')!.click());
       const portRow = document.querySelector<HTMLButtonElement>(
         '[data-terminal-context] button[aria-label="Open in agent-browser screencast"]',
       );

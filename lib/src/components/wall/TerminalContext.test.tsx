@@ -212,18 +212,15 @@ it('uses the Tool primary terminal without creating a helper or offering helper 
   openHelper.mockRestore(); terminal.mockRestore(); focusSurface.mockRestore();
 });
 
-it('keeps the helper mounted while compact details are toggled', async () => {
+it('always shows context details alongside the helper', () => {
   props.compact = true;
   render();
-  const terminal = container.querySelector('textarea');
-  expect(button('Open in system browser')).toBeNull();
-  expect(container.textContent).toContain('pnpm dev');
-  expect(container.textContent).toContain('~/repo');
-  await click('Terminal context details');
+  expect(button('Terminal context details')).toBeNull();
   expect(button('Open in system browser')).not.toBeNull();
-  expect(button('Terminal context details').getAttribute('aria-expanded')).toBe('true');
-  await click('Terminal context details');
-  expect(container.querySelector('textarea')).toBe(terminal);
+  expect(button('Explain this title')).not.toBeNull();
+  expect(button('Copy absolute path')).not.toBeNull();
+  expect(container.textContent).toContain('Alerts');
+  expect(container.querySelector('textarea')).not.toBeNull();
 });
 
 it('position buttons preserve input focus and report the destination', async () => {
