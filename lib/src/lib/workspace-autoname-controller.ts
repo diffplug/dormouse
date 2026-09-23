@@ -56,8 +56,9 @@ export function installWorkspaceAutoNaming(
     // A path the host left out (past its per-request cap) stays uncached, so
     // the next pass asks again. A failed request names by directory until
     // `retryAt`, so it neither loops nor sticks.
+    // Settling after dispose writes only the dead cache: every timer is armed
+    // through `schedule` or `recompute`, both inert once disposed.
     const settle = (result: GitInfoResult, failed: boolean) => {
-      if (disposed) return;
       if (cache.size > CACHE_LIMIT) cache.clear();
       const retryAt = failed ? Date.now() + FAILED_RETRY_MS : undefined;
       for (const path of paths) {

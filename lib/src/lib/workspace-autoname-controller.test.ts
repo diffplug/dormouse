@@ -136,7 +136,9 @@ describe('installWorkspaceAutoNaming', () => {
     expect(getWorkspace('ws-2')!.name).toBe('b @ main');
   });
 
-  it('leaves no timer behind when a lookup rejects after dispose', async () => {
+  // An invariant, not a pin on one line: whichever path would arm a timer,
+  // a lookup settling after dispose must not leave one running.
+  it('no timer survives dispose, even when a lookup settles late', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     let reject!: (error: Error) => void;
     const gitInfo = vi.fn<GitInfoQuery>(() => new Promise((_, fail) => { reject = fail; }));
