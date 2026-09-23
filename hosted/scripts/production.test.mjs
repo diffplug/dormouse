@@ -19,6 +19,7 @@ test("production config keeps canonical domain and production entry, excludes pu
   assert.equal(config.workers_dev, false);
   assert.equal(config.preview_urls, false);
   assert.equal(config.hyperdrive[0].id, env.HYPERDRIVE_ID);
+  assert.deepEqual(config.triggers, { crons: ["*/5 * * * *"] });
   assert.throws(() =>
     productionConfig(base, { ...env, HYPERDRIVE_ID: "0".repeat(32) }),
   );

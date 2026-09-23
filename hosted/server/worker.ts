@@ -5,6 +5,7 @@ import {
 import { postmarkEmail } from "@pgstencil/auth/postmark";
 import { authPolicy, providerBindings } from "./policy";
 import { workerApp } from "./worker-app";
+import { logSweep, sweepHistory } from "./voice";
 
 export interface Env extends BetterAuthWorkerBindings {
   ASSETS: { fetch(request: Request): Promise<Response> };
@@ -38,5 +39,10 @@ const app = workerApp(
 export default {
   fetch(request: Request, env: Env, ctx: Parameters<typeof app.fetch>[2]) {
     return app.fetch(request, env, ctx);
+  },
+  // The cron in wrangler.jsonc: reads only the ElevenLabs key, never Hyperdrive.
+  async scheduled(_controller: unknown, env: Env) {
+    if (env.ELEVENLABS_API_KEY)
+      await logSweep(sweepHistory(env.ELEVENLABS_API_KEY));
   },
 };

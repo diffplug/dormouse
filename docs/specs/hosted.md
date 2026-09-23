@@ -67,7 +67,13 @@ Errors are JSON `{ message }`. Cookie routes answer 401 without a login and 403 
 
 **Never log the text or forward an upstream body or status.** The upstream URL, model `eleven_flash_v2_5`, and format `mp3_44100_128` are fixed in code; no binding or request field redirects them. `ELEVENLABS_API_KEY` is a Worker secret that production preflight requires; the preview mapper never passes it. Only the local development entry substitutes silent MP3 when the key is unset. Tests fake ElevenLabs in Miniflare's outbound service, so no entry carries an upstream override.
 
-Source of truth: `isAdmin` in `hosted/server/admin.ts`; `voiceRoutes` / `elevenLabs` in `hosted/server/voice.ts`; `hosted/server/dormouse-migrations/001_voice_tokens.sql`; `preflight` in `hosted/scripts/production.mjs`. Pinned by `hosted/server/tests/workers.test.ts` and `hosted/scripts/production.test.mjs`.
+**Must delete ElevenLabs speech history, which keeps each generation's text, from the production Worker only.** A successful speak schedules one sweep about 10 s later in `waitUntil`; a Cron Trigger every 5 minutes sweeps what that missed. Spoken text usually leaves ElevenLabs about 10 s after the call, otherwise within the interval plus ElevenLabs' indexing delay; no bound is guaranteed (rationale).
+
+- **Must use an ElevenLabs account dedicated to Dormouse voice.** A sweep deletes the whole account's history.
+- **Never touch the database or any binding but `ELEVENLABS_API_KEY` in a sweep**, so an idle deployment lets Postgres suspend. Without the key nothing runs; development and previews never sweep, and the preview mapper drops `triggers`.
+- **Must bound each pass**: list, then delete up to a fixed cap at six in flight, leaving a backlog to the next pass. A 404 counts as deleted; failures are counted, never abort the pass, and only counts are logged.
+
+Source of truth: `isAdmin` in `hosted/server/admin.ts`; `voiceRoutes` / `elevenLabs` / `sweepHistory` / `sweepAfterSpeech` in `hosted/server/voice.ts`; `scheduled` in `hosted/server/worker.ts`; `triggers` in `hosted/wrangler.jsonc`; `hosted/server/dormouse-migrations/001_voice_tokens.sql`; `preflight` in `hosted/scripts/production.mjs`. Pinned by `hosted/server/tests/workers.test.ts` (sweeps: "production cron sweeps ElevenLabs history with only its key and no database"), `hosted/scripts/production.test.mjs`, and `hosted/scripts/preview.test.mjs`.
 
 ## Development and release
 

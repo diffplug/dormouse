@@ -1,6 +1,9 @@
 import { DevTime, DevRandom } from "pgstencil";
 import { deterministicScope } from "@pgstencil/auth/better-auth-testing";
 import worker from "../worker";
+import { speechSweep } from "../voice";
+// The after-speech sweep runs within the test instead of 10 s later.
+speechSweep.delayMs = 0;
 const time = new DevTime();
 const scope = { time, random: new DevRandom("dormouse-hosted-test") };
 export default {

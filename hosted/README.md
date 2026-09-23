@@ -253,9 +253,12 @@ pnpm exec wrangler secret put APPLE_CLIENT_SECRET
 pnpm exec wrangler secret put ELEVENLABS_API_KEY
 ```
 
-Create `ELEVENLABS_API_KEY` in a Dormouse-owned ElevenLabs workspace, restricted
-to text-to-speech, with a spending limit set in the ElevenLabs console. How the
-Worker uses it is `docs/specs/hosted.md` -> "Managed voice".
+Create `ELEVENLABS_API_KEY` in an ElevenLabs account used for nothing but
+Dormouse voice: the Worker deletes that account's entire speech history on a
+schedule, so never point it at a shared account. Restrict the key to
+text-to-speech plus speech-history access (the sweep lists and deletes history),
+and set a spending limit in the ElevenLabs console. How the Worker uses it is
+`docs/specs/hosted.md` -> "Managed voice".
 
 Generate a fresh cryptographically random `AUTH_SECRET` with at least 32 bytes
 of entropy in your secret manager. Client IDs are public but may be stored
@@ -312,7 +315,12 @@ credential pair do and do not enable. Facebook is outside this milestone.
 6. Sign in as the admin address, create a voice token, and speak one short
    phrase with it from Dormouse desktop; revoke it and confirm the next speak
    fails. Confirm another account sees no Voice tokens section.
-7. Confirm `/api/dev/emails`, `/dev/emails`, and `/__test/time` are absent, and
+7. Confirm the history sweep's Cron Trigger is registered: the deploy log lists
+   `schedule: */5 * * * *`, and the dashboard shows it under Workers & Pages ->
+   `dormouse-hosted` -> Settings -> Trigger Events. After the speak in step 6,
+   the ElevenLabs console's speech history should be empty within a few
+   minutes; the Worker's Cron Events list each run.
+8. Confirm `/api/dev/emails`, `/dev/emails`, and `/__test/time` are absent, and
    check the live responses against the origin, caching, and cookie rules in
    `docs/specs/security-hosted.md` -> "Origin boundary".
 

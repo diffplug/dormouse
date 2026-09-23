@@ -31,6 +31,11 @@
       "id": "00000000000000000000000000000000"
     }
   ],
+  "triggers": {
+    "crons": [
+      "*/5 * * * *"
+    ]
+  },
   "observability": {
     "enabled": false
   }

@@ -46,6 +46,9 @@ test("preview configuration isolates the origin and excludes production bindings
   assert.equal(config.main, "../../server/preview-worker.ts");
   assert.equal(config.vars.EMAIL_FROM, undefined);
   assert.equal(config.routes, undefined);
+  // Production alone sweeps ElevenLabs history; a preview has no cron.
+  assert.ok(base.triggers?.crons?.length);
+  assert.equal(config.triggers, undefined);
   assert.equal(config.d1_databases, undefined);
   assert.equal(config.vars.GOOGLE_CLIENT_SECRET, undefined);
   assert.equal(config.assets.run_worker_first, true);

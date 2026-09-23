@@ -37,6 +37,8 @@ export interface VoiceHost {
   auth(request: Request): Response | Promise<Response>;
   /** Undefined when this deployment has no upstream. */
   synthesize: Synthesize | undefined;
+  /** Schedules a history sweep after a successful speech; unset without a key. */
+  sweepSoon?: () => void;
 }
 
 const fail = (
@@ -195,8 +197,119 @@ export function voiceRoutes(app: Hono<any>, host: (c: Context) => VoiceHost) {
       await upstream?.body?.cancel().catch(() => {});
       return fail(c, 502, "The voice service did not respond. Try again.");
     }
+    host(c).sweepSoon?.();
     return new Response(upstream.body, {
       headers: { "content-type": "audio/mpeg", "cache-control": "no-store" },
     });
   });
+}
+
+const HISTORY = "https://api.elevenlabs.io/v1/history";
+/**
+ * Sweep bounds. A pass issues at most `pages + deletions` subrequests, so the
+ * cron pass (45) and the speech call plus its after-speech pass (12) each fit
+ * the Workers Free plan's 50 per invocation
+ * (developers.cloudflare.com/workers/platform/limits). A backlog continues on
+ * the next pass; 40 per five minutes far exceeds VOICE_DAILY_CAP.
+ */
+export const CRON_SWEEP = { deletions: 40, pages: 5 };
+const SPEECH_SWEEP = { deletions: 10, pages: 1 };
+/** Workers allow six connections awaiting response headers at once. */
+const SWEEP_CONCURRENCY = 6;
+/**
+ * The after-speech pass, in ms after the response: long enough for the new
+ * item to be listed, inside waitUntil's 30 s. Only the test entry changes it.
+ */
+export const speechSweep = { delayMs: 10_000 };
+
+export interface SweepResult {
+  deleted: number;
+  failed: number;
+}
+
+/**
+ * Deletes ElevenLabs speech history, which retains every generation's text.
+ * Whole-account: the key's account must serve Dormouse voice alone. Touches
+ * no database, so an idle deployment lets Postgres suspend.
+ */
+export async function sweepHistory(
+  apiKey: string,
+  limit = CRON_SWEEP,
+): Promise<SweepResult> {
+  const headers = { "xi-api-key": apiKey };
+  const ids: string[] = [];
+  let cursor: string | undefined;
+  // List first, then delete, so no cursor names an item this pass deleted.
+  for (
+    let pages = 0;
+    pages < limit.pages && ids.length < limit.deletions;
+    pages++
+  ) {
+    const url = new URL(HISTORY);
+    url.searchParams.set(
+      "page_size",
+      String(Math.min(100, limit.deletions - ids.length)),
+    );
+    if (cursor) url.searchParams.set("start_after_history_item_id", cursor);
+    const response = await fetch(url, { headers });
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw new Error(`ElevenLabs history list failed (${response.status})`);
+    }
+    const page = (await response.json()) as {
+      history?: { history_item_id?: unknown }[];
+      has_more?: unknown;
+      last_history_item_id?: unknown;
+    };
+    for (const item of page.history ?? [])
+      if (typeof item.history_item_id === "string")
+        ids.push(item.history_item_id);
+    if (
+      page.has_more !== true ||
+      typeof page.last_history_item_id !== "string" ||
+      page.last_history_item_id === cursor
+    )
+      break;
+    cursor = page.last_history_item_id;
+  }
+  const queue = ids.slice(0, limit.deletions);
+  const result: SweepResult = { deleted: 0, failed: 0 };
+  const worker = async () => {
+    for (let id; (id = queue.shift()) !== undefined; ) {
+      const ok = await fetch(`${HISTORY}/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers,
+      }).then(
+        async (response) => {
+          await response.body?.cancel();
+          // Already gone counts as deleted.
+          return response.ok || response.status === 404;
+        },
+        () => false,
+      );
+      if (ok) result.deleted++;
+      else result.failed++;
+    }
+  };
+  await Promise.all(Array.from({ length: SWEEP_CONCURRENCY }, worker));
+  return result;
+}
+
+/** Logs counts only; a pass's failure never reaches the caller. */
+export async function logSweep(pass: Promise<SweepResult>) {
+  try {
+    const { deleted, failed } = await pass;
+    if (deleted || failed)
+      console.log(
+        `ElevenLabs history sweep: ${deleted} deleted, ${failed} failed`,
+      );
+  } catch (error) {
+    console.log(`ElevenLabs history sweep: ${(error as Error).message}`);
+  }
+}
+
+/** The pass a successful speech schedules; never rejects. */
+export async function sweepAfterSpeech(apiKey: string) {
+  await new Promise((resolve) => setTimeout(resolve, speechSweep.delayMs));
+  await logSweep(sweepHistory(apiKey, SPEECH_SWEEP));
 }

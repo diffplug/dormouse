@@ -2,7 +2,7 @@ import { Hono, type ExecutionContext } from "hono";
 import type { Env } from "./worker";
 import { queryDatabase } from "pgstencil/postgres";
 import { secureHeaders } from "./headers";
-import { elevenLabs, voiceRoutes } from "./voice";
+import { elevenLabs, sweepAfterSpeech, voiceRoutes } from "./voice";
 
 export function workerApp(
   fetchAuth: (
@@ -48,6 +48,10 @@ export function workerApp(
     auth: (request) => fetchAuth(request, c.env, c.executionCtx),
     synthesize: c.env.ELEVENLABS_API_KEY
       ? elevenLabs(c.env.ELEVENLABS_API_KEY)
+      : undefined,
+    sweepSoon: c.env.ELEVENLABS_API_KEY
+      ? () =>
+          c.executionCtx.waitUntil(sweepAfterSpeech(c.env.ELEVENLABS_API_KEY!))
       : undefined,
   }));
   app.all("/api/*", (c) => c.json({ message: "Not found." }, 404));
