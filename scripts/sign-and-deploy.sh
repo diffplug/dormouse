@@ -929,6 +929,14 @@ create_release() {
     fi
 
     if gh release view "$tag" --repo "$GITHUB_REPO" &>/dev/null; then
+        # Immutable releases lock assets and the tag at publication, so a published
+        # release cannot be repaired by re-uploading, and deleting it burns the tag
+        # name for good. Refuse here rather than discover it in a 422 mid-release.
+        local is_draft
+        is_draft=$(gh release view "$tag" --repo "$GITHUB_REPO" --json isDraft --jq '.isDraft')
+        [[ "$is_draft" == "true" ]] \
+            || error "Release $tag is already published; its assets cannot be replaced. Cut the next version instead — the tag cannot be reused."
+
         local existing_assets
         existing_assets=$(gh release view "$tag" --repo "$GITHUB_REPO" --json assets --jq '.assets[].name')
         while IFS= read -r asset; do
@@ -937,7 +945,7 @@ create_release() {
                 *) error "Existing release contains unexpected asset: $asset. Remove it before retrying." ;;
             esac
         done <<< "$existing_assets"
-        log "Release $tag already exists — updating assets..."
+        log "Draft release $tag already exists — updating assets..."
         gh release upload "$tag" \
             --repo "$GITHUB_REPO" \
             --clobber \
@@ -945,10 +953,14 @@ create_release() {
         gh release edit "$tag" \
             --repo "$GITHUB_REPO" \
             --title "$tag" \
+            --tag "$tag" \
             --verify-tag \
             --draft=false \
             --notes-file "$notes_file"
     else
+        # `gh release create` with assets uploads them to a draft and publishes only
+        # once every upload succeeds, deleting the draft if one fails — so a release
+        # never becomes immutable with a partial asset set.
         gh release create "$tag" \
             --repo "$GITHUB_REPO" \
             --title "$tag" \

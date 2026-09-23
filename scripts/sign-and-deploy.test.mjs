@@ -172,13 +172,53 @@ create_release 1.2.3`));
   assert.equal(readFileSync(join(root, 'captured-notes'), 'utf8'), 'last release line\n');
 });
 
+test('a published release stops the retry path before it clobbers immutable assets', t => {
+  const root = fixture(t);
+  put(root, 'release-signed/work/.completed-sign-updates');
+  for (const file of ['Dormouse-macos-aarch64.tar.gz', 'Dormouse-windows-x64-setup.exe', 'Dormouse-linux-x86_64.AppImage']) put(root, `release-signed/release-assets/${file}`, 'bundle');
+  const result = shell(root, `
+gh() {
+  if [[ "$2" == view ]]; then
+    case "$*" in *isDraft*) echo false;; *assets*) ;; esac
+    return
+  fi
+  touch "$REPO_ROOT/published"
+}
+create_release 1.2.3`);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /already published/);
+  assert.equal(existsSync(join(root, 'published')), false);
+});
+
+test('a draft release is repaired and published with a verified tag', t => {
+  const root = fixture(t);
+  put(root, 'release-signed/work/.completed-sign-updates');
+  for (const file of ['Dormouse-macos-aarch64.tar.gz', 'Dormouse-windows-x64-setup.exe', 'Dormouse-linux-x86_64.AppImage']) put(root, `release-signed/release-assets/${file}`, 'bundle');
+  succeeds(shell(root, `
+gh() {
+  if [[ "$2" == view ]]; then
+    case "$*" in *isDraft*) echo true;; *assets*) echo Dormouse-macos-aarch64.tar.gz;; esac
+    return
+  fi
+  echo "$2 $*" >> "$REPO_ROOT/gh-calls"
+}
+create_release 1.2.3`));
+  const calls = readFileSync(join(root, 'gh-calls'), 'utf8').trim().split('\n');
+  assert.equal(calls.length, 2);
+  assert.match(calls[0], /^upload .*--clobber/);
+  assert.match(calls[1], /^edit .*--tag v1\.2\.3 --verify-tag --draft=false/);
+});
+
 test('existing unexpected GitHub assets block release updates', t => {
   const root = fixture(t);
   put(root, 'release-signed/work/.completed-sign-updates');
   for (const file of ['Dormouse-macos-aarch64.tar.gz', 'Dormouse-windows-x64-setup.exe', 'Dormouse-linux-x86_64.AppImage']) put(root, `release-signed/release-assets/${file}`, 'bundle');
   const result = shell(root, `
 gh() {
-  if [[ "$2" == view ]]; then echo extra.vsix; return; fi
+  if [[ "$2" == view ]]; then
+    case "$*" in *isDraft*) echo true;; *assets*) echo extra.vsix;; esac
+    return
+  fi
   touch "$REPO_ROOT/published"
 }
 create_release 1.2.3`);
