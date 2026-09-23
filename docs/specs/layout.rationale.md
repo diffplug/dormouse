@@ -44,6 +44,12 @@ xterm.js paints only its own rendered surface, and integer row fitting leaves a 
 
 **Why the modal hosts are gated rather than hoisted.** Each calls `useDialogKeyboardOwner`, which reads the *active* Wall's `DialogKeyboardContext`; hoisting them above `WorkspaceWindow` would leave them with no coordinator to suppress command-mode dispatch through. The cost is that a modal's React-local state resets on a switch — accepted, since every modal that matters keeps its state in a store.
 
+## Workspace names
+
+**Why the name holds while git is unanswered.** Naming by directory first would flash the folder name for one round trip, then flip to `repo @ branch`, on every new directory. The hold is bounded because a mount that stays hung is durable, not slow: its `realpath` never returns, so an unbounded hold froze the name for the life of the Window and drowned out the Workspace's healthy members (found in review, 2026-09).
+
+**Why a command finish re-asks git.** `git switch` changes the branch without moving the cwd, and there is no filesystem watcher; the prompt after it is the first boundary that can notice. An agent switching branches inside a long-running command is not seen until that command exits — accepted over watching every repository's `HEAD` (2026-09).
+
 ## Mode switching
 
 **Why both gesture tracks stay live everywhere.** Keyboards with no right Meta key are common on Windows and Linux laptops, so the Shift track is the only available gesture there. Keeping both live on every platform avoids a platform switch inside the detector and leaves macOS users a fallback when a hand is already on Shift.

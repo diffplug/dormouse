@@ -7,18 +7,8 @@
  * returns `null`, which leaves the caller offering only a folder grant. Failing
  * closed costs one extra approval; guessing would mint a key for the wrong repo.
  */
-import { spawnAndCapture } from 'dor-lib-common';
+import { runGit as git } from './git-cli';
 import { canonicalRemoteUrl } from './git-remote-url';
-
-/** The directory travels in argv, not a `cwd` option (`docs/specs/dor-cli.md`
- *  -> the `spawnAndCapture` rules). `dir` is the host-resolved project root,
- *  never a raw string off the wire. */
-async function git(dir: string, args: string[]): Promise<string | null> {
-  const result = await spawnAndCapture('git', ['-C', dir, ...args]);
-  if (!result.ok || result.exitCode !== 0) return null;
-  const out = result.stdout.trim();
-  return out || null;
-}
 
 /**
  * The remote name the current branch tracks (`origin` from `origin/main`), or

@@ -70,7 +70,7 @@ import type {
 import { hasBrowser, hasTerminal } from 'dor/commands/types';
 import { DEFAULT_WORKSPACE_ID, type PersistedSurfaceRefs, type WorkspaceId } from '../lib/session-types';
 import { clearWorkspaceSurfaces, setWorkspaceSurfaces } from '../lib/workspace-surfaces';
-import { getWorkspacesSnapshot, subscribeToWorkspaces, workspaceRefFor } from '../lib/workspace-store';
+import { getWorkspace, getWorkspacesSnapshot, subscribeToWorkspaces, workspaceRefFor } from '../lib/workspace-store';
 import { awaitWallEmpty } from './wall/close-all';
 import { registerWallHandle, type WallHandle } from './wall/wall-handles';
 import { prepareWorkspaceTransfer } from './wall/workspace-transfer';
@@ -1804,8 +1804,7 @@ export function Wall({
     flushPersistence: (options) => persistence.flush(options),
     prepareWorkspaceTransfer: () => prepareWorkspaceTransfer({
       workspaceId: effectiveWorkspaceId,
-      name: getWorkspacesSnapshot().workspaces
-        .find((workspace) => workspace.id === effectiveWorkspaceId)?.name ?? '',
+      naming: getWorkspace(effectiveWorkspaceId) ?? { name: '', nameIsAuto: false },
       serialize: persistence.serialize,
       surfaceIds: memberSurfaceIds,
       hasTerminal: surfaceHasTerminal,

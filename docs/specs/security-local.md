@@ -207,9 +207,9 @@ Source of truth: `SESSION_STATE_KEY` in `vscode-ext/src/session-state.ts`,
 
 ## Terminal context directory actions
 
-**Must validate context directory arguments as existing absolute directories and pass the canonical path as one process argument without shell interpretation.** Keep this capability separate from the external-URL allowlist. VS Code per-terminal context requests and helper ownership updates remain scoped to the owning router.
+**Must validate context directory arguments as existing absolute directories and pass the canonical path as one process argument without shell interpretation.** The same holds for the terminal-reported directories Workspace auto-naming hands the host's git lookup (`docs/specs/layout.md` → "Workspace names"). Keep this capability separate from the external-URL allowlist. VS Code per-terminal context requests and helper ownership updates remain scoped to the owning router.
 
-Source of truth: `context` in `standalone/sidecar/pty-core.js`; `attachRouter` in `vscode-ext/src/message-router.ts`. Test: `standalone/sidecar/helper-terminal.test.js`.
+Source of truth: `context` in `standalone/sidecar/pty-core.js`; `attachRouter` in `vscode-ext/src/message-router.ts`; `lookupGitDir` in `lib/src/host/git-info.ts`. Tests: `standalone/sidecar/helper-terminal.test.js`, `lib/src/host/git-info.test.ts`.
 
 ## Dor Tool configuration
 

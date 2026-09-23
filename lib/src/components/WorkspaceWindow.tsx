@@ -6,6 +6,7 @@ import { getWorkspaceBootPlan, seedWorkspaceBootPlans } from './wall/workspace-b
 import { getPlatform } from '../lib/platform';
 import { getWorkspacesSnapshot, subscribeToWorkspaces } from '../lib/workspace-store';
 import type { SessionFlushRequest } from '../lib/platform/types';
+import { installWorkspaceAutoNaming } from '../lib/workspace-autoname-controller';
 import type { WallBootPlans, WallBootProps } from './wall/wall-types';
 import { RingHandoffContext } from './wall/wall-context';
 import type { RingFrame } from '../lib/rect-tween';
@@ -55,6 +56,12 @@ export function WorkspaceWindow({
     };
     platform.onRequestSessionFlush(handleFlushRequest);
     return () => platform.offRequestSessionFlush(handleFlushRequest);
+  }, []);
+
+  useEffect(() => {
+    const platform = getPlatform();
+    const home = platform.terminalContext?.({ op: 'settings' }).then((settings) => settings.home);
+    return installWorkspaceAutoNaming(platform.gitInfo?.bind(platform), home);
   }, []);
 
   return (
