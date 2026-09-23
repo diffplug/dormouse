@@ -93,7 +93,7 @@ Downloaded CI artifacts must pass three checks before any signing step:
 
 **Never select release artifacts with a broad `find | head`** — use strict expected paths or exactly-one matching. Release upload rejects unexpected local files or existing remote asset names.
 
-**Must refuse a published release before spending a stage on it.** Immutable releases lock assets and tag at publication and burn the tag name even after deletion, so a botched publish is repaired by cutting the next version, and every command ending in a release upload checks before it downloads or signs. The retry path stays open only while the release is a draft (rationale).
+**Must refuse a published release before spending a stage on it** — every command ending in a release upload checks before it downloads or signs, and the retry path stays open only while the release is a draft (rationale).
 
 **Must repoint the Tauri-generated `.nsi` at local paths before `makensis`** — it is baked with CI-runner absolutes; `rebuild_windows_installer` documents the rewrite.
 
