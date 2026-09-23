@@ -17,6 +17,7 @@ Pinned by `hosted/server/tests/workers.test.ts`.
 
 - **FAIL IF** the consumer changes `authPolicy` away from explicit linking or multiple independent logins, or accepts an explicit connection callback after its initiating login was revoked; inspect `hosted/server/policy.ts` and the packed adapter.
 - **FAIL IF** an unused provider credential enables login, an unknown provider name is accepted, or incomplete enabled credentials silently degrade; inspect `providerBindings` in `hosted/server/policy.ts`.
+- **FAIL IF** a managed-voice route admits any account but the verified `ADMIN_EMAIL` without rechecking per request, stores a voice token other than as its SHA-256, logs speak text, forwards an ElevenLabs body or status, or lets a binding or request field choose the upstream URL; inspect `hosted/server/admin.ts` and `hosted/server/voice.ts`.
 - **FAIL IF** Hosted account login mints a Burrow ACL grant or substitutes for the existing encrypted pairing/presence proof. No Hosted endpoint currently implements terminal access.
 
 Pinned by `hosted/server/tests/workers.test.ts` and `hosted/server/tests/policy.test.ts`.

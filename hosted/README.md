@@ -1,8 +1,9 @@
 # Dormouse Hosted
 
 Account frontend and Hono/Cloudflare Worker for `https://hosted.dormouse.sh`.
-The marketing website is a separate application. Hosted voice and the managed
-Relay are not implemented. See [the spec](../docs/specs/hosted.md).
+The marketing website is a separate application. Managed voice exists only as
+an admin-only test slice; the managed Relay is not implemented. See
+[the spec](../docs/specs/hosted.md).
 
 This file is the whole operator runbook, in the order an operator works: run
 locally, refresh packages, set up GitHub, provision previews, provision
@@ -24,7 +25,10 @@ Request a code for a test address and read it at `/api/dev/emails` on that
 same origin. No real mail is sent, and the development database is isolated by
 the worktree path; `docs/specs/hosted.md` -> "Development and release" owns what
 the local entry serves and what production omits. Use another `PORT` if 5188 is
-occupied. Do not share this local inbox publicly.
+occupied. Do not share this local inbox publicly. Managed voice answers with
+silent fake audio unless `ELEVENLABS_API_KEY` is set in the environment of
+`pnpm dev:hosted`; only the admin address in `hosted/server/admin.ts` sees the
+Voice tokens section.
 
 ```sh
 pnpm test:hosted
@@ -247,7 +251,13 @@ pnpm exec wrangler secret put GITHUB_CLIENT_SECRET
 pnpm exec wrangler secret put GOOGLE_CLIENT_SECRET
 pnpm exec wrangler secret put MICROSOFT_CLIENT_SECRET
 pnpm exec wrangler secret put APPLE_CLIENT_SECRET
+pnpm exec wrangler secret put ELEVENLABS_API_KEY
 ```
+
+Create `ELEVENLABS_API_KEY` in a Dormouse-owned ElevenLabs workspace, restricted
+to text-to-speech, with a spending limit set in the ElevenLabs console; the
+Worker's own cap is `docs/specs/hosted.md` -> "Managed voice". Production
+preflight refuses to deploy without it, and speak answers 503 while it is unset.
 
 Generate a fresh cryptographically random `AUTH_SECRET` with at least 32 bytes
 of entropy in your secret manager. Client IDs are public but may be stored
@@ -301,7 +311,10 @@ credential pair do and do not enable. Facebook is outside this milestone.
 5. Log in on two devices and confirm both remain signed in. Log out on one;
    the other must remain signed in. Provider-only accounts display no email
    and repeat login preserves their account ID.
-6. Confirm `/api/dev/emails`, `/dev/emails`, and `/__test/time` are absent, and
+6. Sign in as the admin address, create a voice token, and speak one short
+   phrase with it from Dormouse desktop; revoke it and confirm the next speak
+   fails. Confirm another account sees no Voice tokens section.
+7. Confirm `/api/dev/emails`, `/dev/emails`, and `/__test/time` are absent, and
    check the live responses against the origin, caching, and cookie rules in
    `docs/specs/security-hosted.md` -> "Origin boundary".
 
@@ -322,4 +335,4 @@ Current provisioning status is discoverable with `gh secret list --env NAME`,
 `gh variable list --env NAME`, and each provider console. Configuration presence
 alone is not acceptance. The account limitations an operator will be asked about
 — login lifetime, no device revocation or sign-out-everywhere, no merge or
-recovery, no paid-service activation — are in `docs/specs/hosted.md`.
+recovery, admin-only managed voice, no paid-service activation — are in `docs/specs/hosted.md`.
