@@ -5,6 +5,7 @@
  */
 
 import { chmod, lstat, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { statSync, type BigIntStats } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { createConnection, createServer, type Server, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -287,6 +288,18 @@ let server: Server | null = null;
 let brokerConfirmed = false;
 /** Claimed and cleared with `server`; the two always move together. */
 let serverToken: string | null = null;
+/**
+ * The socket file this window's own bind created, claimed and cleared with
+ * `server`.
+ *
+ * {@link stillOurs} compares the path against *this*, never against a second
+ * read of the path: a competing window that cleared the same corpse may have
+ * rebound it before an async read lands, and then both reads name that
+ * window's socket, the two agree, and every window that bound believes it
+ * won. Captured synchronously after the bind, which narrows that gap without
+ * closing it (see `tryBind`).
+ */
+let boundSocketFile: SocketFileIdentity | null = null;
 const clients = new Set<PeerLinkClient>();
 /** Provider-local route handle → the peer window that owns it. */
 const routes = new Map<string, PeerLinkClient>();
@@ -783,6 +796,15 @@ async function tryBind(path: string, token: string): Promise<boolean> {
     return false;
   }
   server = nextServer;
+  // Synchronous, and before the first `await` past the bind: `listen` binds
+  // inside the call and resolves on a nextTick, so no thread-pool callback of
+  // *this* process can interleave. A competing window is a separate extension
+  // host, so its unlink and rebind can still land here — this narrows the gap
+  // to a few microseconds of straight-line code rather than closing it, and
+  // reads the file our own bind made ({@link boundSocketFile}). Skipped on
+  // Windows: a named pipe is not a filesystem object, so there is no anchor
+  // to take and nothing there can displace us ({@link stillOurs}).
+  boundSocketFile = process.platform === 'win32' ? null : socketFileIdentitySync(path);
   // Provisional until the caller settles it: a reclaimed bind may still be
   // displaced (see {@link brokerConfirmed}).
   brokerConfirmed = false;
@@ -1243,11 +1265,21 @@ interface SocketFileIdentity {
   ctimeNs: bigint;
 }
 
+function toSocketFileIdentity(value: BigIntStats | null | undefined): SocketFileIdentity | null {
+  return value ? { dev: value.dev, ino: value.ino, ctimeNs: value.ctimeNs } : null;
+}
+
 async function socketFileIdentity(path: string): Promise<SocketFileIdentity | null> {
-  const value = await stat(path, { bigint: true }).catch(() => null);
-  return value
-    ? { dev: value.dev, ino: value.ino, ctimeNs: value.ctimeNs }
-    : null;
+  return toSocketFileIdentity(await stat(path, { bigint: true }).catch(() => null));
+}
+
+/** {@link socketFileIdentity} without yielding — see {@link boundSocketFile}. */
+function socketFileIdentitySync(path: string): SocketFileIdentity | null {
+  try {
+    return toSocketFileIdentity(statSync(path, { bigint: true, throwIfNoEntry: false }));
+  } catch {
+    return null;
+  }
 }
 
 function sameSocketFile(left: SocketFileIdentity, right: SocketFileIdentity): boolean {
@@ -1256,7 +1288,7 @@ function sameSocketFile(left: SocketFileIdentity, right: SocketFileIdentity): bo
 
 async function stillOurs(path: string): Promise<boolean> {
   const unstattable = process.platform === 'win32';
-  const mine = await socketFileIdentity(path);
+  const mine = boundSocketFile;
   if (!mine) return unstattable;
   await delay(RECLAIM_VERIFY_MS);
   const now = await socketFileIdentity(path);
@@ -1296,6 +1328,7 @@ async function closeServer(unlink: boolean): Promise<void> {
   server = null;
   brokerConfirmed = false;
   serverToken = null;
+  boundSocketFile = null;
   for (const peer of [...clients]) dropClient(peer);
   if (!closing) return;
   if (closing.listening) closing.close();
