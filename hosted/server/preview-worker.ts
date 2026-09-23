@@ -10,7 +10,7 @@ const auth = createBetterAuthWorker<Env>({
 });
 const app = workerApp(
   (request, env, ctx) => auth.fetch(request, env, ctx),
-  // Ignore stale production/OAuth bindings on an existing preview Worker.
+  // Ignore stale production/OAuth/ElevenLabs bindings on an existing preview Worker.
   (env) => ({
     HYPERDRIVE: env.HYPERDRIVE,
     ASSETS: env.ASSETS,

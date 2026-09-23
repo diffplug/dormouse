@@ -10,6 +10,7 @@ export interface Env extends BetterAuthWorkerBindings {
   ASSETS: { fetch(request: Request): Promise<Response> };
   EMAIL_FROM: string;
   POSTMARK_SERVER_TOKEN: string;
+  ELEVENLABS_API_KEY?: string;
   OAUTH_PROVIDERS?: string;
   BUILD_SHA?: string;
 }
@@ -28,6 +29,7 @@ const app = workerApp(
     AUTH_SECRET: env.AUTH_SECRET,
     EMAIL_FROM: env.EMAIL_FROM,
     POSTMARK_SERVER_TOKEN: env.POSTMARK_SERVER_TOKEN,
+    ELEVENLABS_API_KEY: env.ELEVENLABS_API_KEY,
     BUILD_SHA: env.BUILD_SHA,
     ...providerBindings(env as unknown as Record<string, unknown>),
   }),

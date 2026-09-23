@@ -1,4 +1,5 @@
 import { test, expect } from "vitest";
+import { createHash } from "node:crypto";
 import { build } from "esbuild";
 import { builtinModules } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -20,6 +21,7 @@ import {
   mockOAuthServer,
 } from "./oauth-server";
 import type { Session } from "../../src/api";
+import { ADMIN_EMAIL } from "../admin";
 
 const origin = "https://hosted.dormouse.sh";
 const bundle = (production: boolean | "preview") =>
@@ -70,12 +72,21 @@ async function fixture(
     betterAuth: true,
     now: production ? undefined : () => context.time.now(),
   });
+  // Simulated ElevenLabs: tests swap `respond` and read what the Worker sent.
+  const elevenLabs = {
+    requests: [] as { url: string; key: string | null; body: unknown }[],
+    respond: (): WorkerResponse | Promise<WorkerResponse> =>
+      new WorkerResponse(new Uint8Array([0xff, 0xfb, 0x90, 0x64]), {
+        headers: { "content-type": "audio/mpeg" },
+      }),
+  };
   const bindings: Record<string, string> = {
     APP_ORIGIN: origin,
     BUILD_SHA: "a".repeat(40),
     AUTH_SECRET: "dormouse-test-secret-with-at-least-32-characters",
     EMAIL_FROM: "signin@example.test",
     POSTMARK_SERVER_TOKEN: "test-token",
+    ELEVENLABS_API_KEY: "test-elevenlabs-key",
     OAUTH_PROVIDERS: enabled,
   };
   for (const [id, credentials] of Object.entries(betterAuthCredentials)) {
@@ -139,6 +150,14 @@ async function fixture(
           return new WorkerResponse(JSON.stringify({ ErrorCode: 0 }), {
             headers: { "content-type": "application/json" },
           });
+        }
+        if (url.origin === "https://api.elevenlabs.io") {
+          elevenLabs.requests.push({
+            url: url.href,
+            key: request.headers.get("xi-api-key"),
+            body: await request.json(),
+          });
+          return elevenLabs.respond();
         }
         const path = endpointPaths[url.origin + url.pathname];
         if (!path) throw new Error(`Unexpected outbound host: ${url.hostname}`);
@@ -259,12 +278,25 @@ async function fixture(
       }
       return { path, result: await request(path) };
     }
-    return { request, post, session, email, oauth };
+    // Token management is same-origin JSON; speak is bearer-only, with no cookie.
+    const voice = (method: string, path = "") =>
+      request("/api/voice/tokens" + path, { method, headers: { origin } });
+    const speak = (token: string | undefined, body: unknown) =>
+      worker.dispatchFetch(origin + "/api/voice/speak", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
+        },
+        body: typeof body === "string" ? body : JSON.stringify(body),
+      });
+    return { request, post, session, email, oauth, voice, speak };
   }
   return {
     ...context,
     worker,
     provider,
+    elevenLabs,
     browser,
     advance: (time: string) =>
       worker.dispatchFetch(origin + "/__test/time", {
@@ -504,4 +536,165 @@ test("preview runs cloud smoke against real auth, ignores stale providers, and p
     [id],
   );
   expect(await inbox.get(id)).toBeUndefined();
+});
+
+const sha256 = (value: string) =>
+  createHash("sha256").update(value).digest("hex");
+
+test("managed voice: only the verified admin mints, speaks, and revokes", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const admin = f.browser(),
+    other = f.browser();
+  expect((await admin.voice("GET")).status).toBe(401);
+  await other.email("other@example.test");
+  expect((await other.voice("GET")).status).toBe(403);
+  expect((await other.voice("POST")).status).toBe(403);
+  await admin.email(ADMIN_EMAIL);
+  expect(await (await admin.voice("GET")).json()).toEqual({ tokens: [] });
+  // A same-site page carries the cookie but not this origin.
+  expect(
+    (
+      await admin.request("/api/voice/tokens", {
+        method: "POST",
+        headers: { origin: "https://dormouse.sh" },
+      })
+    ).status,
+  ).toBe(403);
+
+  const minted = await admin.voice("POST");
+  expect(minted.status).toBe(201);
+  const { id, token } = (await minted.json()) as { id: string; token: string };
+  expect(token).toMatch(/^dmv_[A-Za-z0-9_-]{43}$/);
+  const stored = await queryDatabase<{ hash: string }>(
+    f.database.url,
+    "SELECT hash FROM dormouse_voice_tokens",
+  );
+  expect(stored).toEqual([{ hash: sha256(token) }]);
+
+  const voiceId = "21m00Tcm4TlvDq8ikWAM";
+  const spoken = await admin.speak(token, {
+    text: "  Build passed.  ",
+    voiceId,
+  });
+  expect(spoken.status).toBe(200);
+  expect(spoken.headers.get("content-type")).toBe("audio/mpeg");
+  expect(spoken.headers.get("cache-control")).toBe("no-store");
+  expect([...new Uint8Array(await spoken.arrayBuffer())]).toEqual([
+    0xff, 0xfb, 0x90, 0x64,
+  ]);
+  expect(f.elevenLabs.requests).toEqual([
+    {
+      url: `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`,
+      key: "test-elevenlabs-key",
+      body: { text: "Build passed.", model_id: "eleven_flash_v2_5" },
+    },
+  ]);
+  const [listed] = (
+    (await (await admin.voice("GET")).json()) as {
+      tokens: { id: string; lastUsedAt: string | null; revokedAt: null }[];
+    }
+  ).tokens;
+  expect(listed.id).toBe(id);
+  expect(listed.lastUsedAt).not.toBeNull();
+  expect(Object.keys(listed).sort()).toEqual([
+    "createdAt",
+    "id",
+    "lastUsedAt",
+    "revokedAt",
+  ]);
+
+  for (const body of [
+    "not json",
+    { voiceId },
+    { text: "   ", voiceId },
+    { text: "x".repeat(201), voiceId },
+    { text: "hi", voiceId: "../v1/voices" },
+    { text: "hi", voiceId: "x".repeat(65) },
+  ])
+    expect((await admin.speak(token, body)).status).toBe(400);
+  for (const bad of [undefined, "dmv_unknown", "dmv_" + "A".repeat(43)])
+    expect((await admin.speak(bad, { text: "hi", voiceId })).status).toBe(401);
+
+  // Upstream failure: 502, and nothing of the upstream body reaches the caller.
+  f.elevenLabs.respond = () =>
+    new WorkerResponse("upstream-secret-detail", { status: 401 });
+  const failed = await admin.speak(token, { text: "hi", voiceId });
+  expect(failed.status).toBe(502);
+  expect(await failed.text()).not.toContain("upstream-secret-detail");
+  f.elevenLabs.respond = () => {
+    throw new Error("upstream-secret-detail");
+  };
+  const thrown = await admin.speak(token, { text: "hi", voiceId });
+  expect(thrown.status).toBe(502);
+  expect(await thrown.text()).not.toContain("upstream-secret-detail");
+
+  // The daily cap counts attempts that reached the upstream call.
+  expect(
+    await queryDatabase(
+      f.database.url,
+      "SELECT count FROM dormouse_voice_usage",
+    ),
+  ).toEqual([{ count: 3 }]);
+  await queryDatabase(
+    f.database.url,
+    "UPDATE dormouse_voice_usage SET count = 500",
+  );
+  const requests = f.elevenLabs.requests.length;
+  expect((await admin.speak(token, { text: "hi", voiceId })).status).toBe(429);
+  expect(f.elevenLabs.requests.length).toBe(requests);
+
+  // A token held by any other account is refused even though it is valid.
+  const otherToken = "dmv_" + "B".repeat(43);
+  await queryDatabase(
+    f.database.url,
+    `INSERT INTO dormouse_voice_tokens ("userId", hash) VALUES ($1, $2)`,
+    [(await other.session())!.user.id, sha256(otherToken)],
+  );
+  expect((await other.speak(otherToken, { text: "hi", voiceId })).status).toBe(
+    403,
+  );
+
+  expect((await admin.voice("DELETE", "/" + id)).status).toBe(204);
+  expect((await admin.speak(token, { text: "hi", voiceId })).status).toBe(401);
+  expect((await admin.voice("DELETE", "/not-a-token")).status).toBe(404);
+  expect(
+    (await admin.voice("DELETE", "/00000000-0000-4000-8000-000000000000"))
+      .status,
+  ).toBe(404);
+
+  // The admin address counts only while verified, rechecked on every request.
+  const second = (await (await admin.voice("POST")).json()) as {
+    token: string;
+  };
+  await queryDatabase(
+    f.database.url,
+    `UPDATE "user" SET "emailVerified" = false WHERE email = $1`,
+    [ADMIN_EMAIL],
+  );
+  expect((await admin.voice("GET")).status).toBe(403);
+  expect((await admin.voice("POST")).status).toBe(403);
+  expect(
+    (await admin.speak(second.token, { text: "hi", voiceId })).status,
+  ).toBe(403);
+});
+
+test("managed voice fails closed in production without an ElevenLabs key", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture(true, "", { ELEVENLABS_API_KEY: "" });
+  onTestFinished(f.close);
+  const admin = f.browser();
+  await admin.email(ADMIN_EMAIL);
+  const { token } = (await (await admin.voice("POST")).json()) as {
+    token: string;
+  };
+  const response = await admin.speak(token, {
+    text: "hi",
+    voiceId: "21m00Tcm4TlvDq8ikWAM",
+  });
+  expect(response.status).toBe(503);
+  expect(f.elevenLabs.requests).toEqual([]);
 });

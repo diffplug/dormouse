@@ -2,6 +2,7 @@ import { Hono, type ExecutionContext } from "hono";
 import type { Env } from "./worker";
 import { queryDatabase } from "pgstencil/postgres";
 import { secureHeaders } from "./headers";
+import { elevenLabs, voiceRoutes } from "./voice";
 
 export function workerApp(
   fetchAuth: (
@@ -42,6 +43,16 @@ export function workerApp(
   });
   app.all("/api/auth/*", (c) => fetchAuth(c.req.raw, c.env, c.executionCtx));
   app.get("/api/providers", (c) => fetchAuth(c.req.raw, c.env, c.executionCtx));
+  voiceRoutes(app, {
+    origin: (c) => c.env.APP_ORIGIN,
+    databaseUrl: (c) => c.env.HYPERDRIVE.connectionString,
+    auth: (request, c) => fetchAuth(request, c.env, c.executionCtx),
+    // No key, no upstream: production fails closed rather than faking audio.
+    synthesize: (c) =>
+      c.env.ELEVENLABS_API_KEY
+        ? elevenLabs(c.env.ELEVENLABS_API_KEY)
+        : undefined,
+  });
   app.all("/api/*", (c) => c.json({ message: "Not found." }, 404));
   app.all("/dev/*", (c) => c.notFound());
   app.all("/__test/*", (c) => c.notFound());
