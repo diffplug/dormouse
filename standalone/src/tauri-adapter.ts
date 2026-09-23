@@ -22,6 +22,7 @@ import type {
   PtyMarkedDetail,
   PtyReplayDetail,
   BurrowLink,
+  GitInfoResult,
   ToolControlResult,
   ToolHostRequest,
   SessionFlushRequest,
@@ -469,6 +470,11 @@ export class TauriAdapter implements PlatformAdapter {
     } catch (err) {
       return { status: "error", message: errMessage(err) };
     }
+  }
+
+  async gitInfo(paths: string[]): Promise<GitInfoResult> {
+    // The sidecar runs git (shared lib/src/host/git-info.ts).
+    return (await rawInvoke<GitInfoResult | null>("git_info", { paths })) ?? {};
   }
 
   async createIframeProxyUrl(targetUrl: string): Promise<IframeProxyResult> {

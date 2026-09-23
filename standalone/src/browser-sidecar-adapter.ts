@@ -19,6 +19,7 @@ import type {
   PtyMarkedDetail,
   PtyReplayDetail,
   BurrowLink,
+  GitInfoResult,
   ToolControlResult,
   ToolHostRequest,
   WritePtyOptions,
@@ -250,6 +251,10 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
 
   async readClipboardText(): Promise<string | null> {
     try { return await this.host.invoke("read_clipboard_text"); } catch { return null; }
+  }
+
+  async gitInfo(paths: string[]): Promise<GitInfoResult> {
+    return (await this.host.invoke<GitInfoResult | null>("git_info", { paths })) ?? {};
   }
 
   async toolControl(request: ToolHostRequest): Promise<ToolControlResult> {
