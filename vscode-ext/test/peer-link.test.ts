@@ -74,8 +74,6 @@ let realTmp: string | undefined;
 const opened: LinkModule[] = [];
 
 const derivedSocketPath = (): string => socketPathFor(dir);
-/** `RECLAIM_VERIFY_MS` in `peer-link.ts`. */
-const RECLAIM_VERIFY_MS = 250;
 
 interface SocketFileIdentity {
   dev: bigint;
@@ -496,33 +494,36 @@ describe('bind-as-lease', () => {
     corpse.kill('SIGKILL');
     await new Promise((resolve) => corpse.on('exit', resolve));
 
-    // The competitor holds the path and never speaks, so a dial to it neither
-    // connects nor reads as refused: this window can only wait for it to go.
+    // The competitor holds the path and never speaks, standing in for a window
+    // that won the reclaim.
     const held: Socket[] = [];
     const competitor = createServer((socket) => void held.push(socket));
-    let displaced = false;
+    let theirs: SocketFileIdentity | null = null;
     beforeSocketStat.path = path;
     beforeSocketStat.hook = async () => {
       await rm(path, { force: true });
       await new Promise<void>((resolve) => competitor.listen(path, resolve));
-      displaced = true;
+      theirs = await socketFileIdentity(path);
     };
-
-    const mod = await openWindow(fakeWindow());
-    const roles: boolean[] = [];
-    const settled = mod.ensurePeerNet((held) => roles.push(held));
-    await waitFor(() => displaced, 15_000);
-    // Past the whole verification: a window that confirmed would be broker now.
-    await tick(RECLAIM_VERIFY_MS * 2);
-    expect(mod.isPeerBroker()).toBe(false);
-    expect(roles).toEqual([]);
-
-    // Once the competitor is gone the path is free, and the loop takes it.
-    const gone = new Promise((resolve) => competitor.close(resolve));
-    for (const socket of held) socket.destroy();
-    await gone;
-    await settled;
-    expect(mod.isPeerBroker()).toBe(true);
+    try {
+      const mod = await openWindow(fakeWindow());
+      const roles: boolean[] = [];
+      await mod.ensurePeerNet((broker) => roles.push(broker));
+      expect(theirs).not.toBeNull();
+      // Settled as broker either way — standing down closes our server, which
+      // unlinks the path (libuv does, whatever it names now), so the next round
+      // binds uncontested. What tells the two apart is whose socket the path
+      // names at the verdict: a window that confirmed on the competitor's
+      // socket is a broker nobody can reach.
+      expect(roles).toEqual([true]);
+      expect(sameSocketFile(await socketFileIdentity(path), theirs!)).toBe(false);
+      const peer = await openWindow(fakeWindow({ entries: [{ surfaceId: 'far-1' }] }));
+      await peer.ensurePeerNet(() => {});
+      expect(peer.isPeerBroker()).toBe(false);
+    } finally {
+      for (const socket of held) socket.destroy();
+      if (competitor.listening) await new Promise((resolve) => competitor.close(resolve));
+    }
   }, 30_000);
 
   it('collects directory entries from the other window', async () => {
