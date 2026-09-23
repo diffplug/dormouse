@@ -10,7 +10,7 @@
 name: tend-ci-fix
 on:
   workflow_run:
-    workflows: ["CI", "Chromatic"]
+    workflows: ["CI", "Chromatic", "Argos"]
     types: [completed]
     branches: ["main"]
 
