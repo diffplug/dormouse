@@ -294,6 +294,9 @@ function startHostServer() {
 }
 
 function startSidecar() {
+  // Inherited through `...process.env` below; the sidecar accepts only an http
+  // loopback origin and logs which (docs/specs/standalone.md -> "Build and development").
+  if (process.env.DORMOUSE_HOSTED_ORIGIN) log(`managed voice: DORMOUSE_HOSTED_ORIGIN=${process.env.DORMOUSE_HOSTED_ORIGIN}`);
   sidecar = spawn(process.execPath, [sidecarScript], {
     cwd: sidecarDir,
     stdio: ['pipe', 'pipe', 'pipe'],

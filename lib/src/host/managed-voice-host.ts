@@ -5,8 +5,8 @@
  * spoken text, this module adds the token and voice id, calls Hosted, and
  * answers with audio bytes or a failure kind.
  *
- * The only network call is `POST MANAGED_VOICE_SPEAK_URL`: an outbound HTTPS
- * request, never a listener.
+ * The only network call is `POST MANAGED_VOICE_SPEAK_URL` (or a loopback dev
+ * override, `resolveManagedVoiceSpeakUrl`): outbound, never a listener.
  */
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -22,6 +22,25 @@ import {
 } from '../lib/platform/managed-voice-types';
 
 export const MANAGED_VOICE_FILE = 'managed-voice.json';
+/** Dev-only: point the speak request at a local `pnpm dev:hosted`. */
+export const HOSTED_ORIGIN_ENV = 'DORMOUSE_HOSTED_ORIGIN';
+const LOOPBACK_HOSTNAMES = new Set(['127.0.0.1', '[::1]', 'localhost']);
+
+/**
+ * The speak URL: production unless `override` is a bare `http:` loopback
+ * origin, so the token can reach only Hosted or this machine. Anything else —
+ * https, a remote or LAN host, credentials, a path — is ignored, never an error.
+ * `hosted/server/dev.ts` answers only its own `Host`, `127.0.0.1:<port>`.
+ */
+export function resolveManagedVoiceSpeakUrl(override: string | undefined): string {
+  if (!override) return MANAGED_VOICE_SPEAK_URL;
+  let url: URL;
+  try { url = new URL(override); } catch { return MANAGED_VOICE_SPEAK_URL; }
+  const bare = url.username === '' && url.password === '' && url.pathname === '/'
+    && url.search === '' && url.hash === '';
+  if (url.protocol !== 'http:' || !LOOPBACK_HOSTNAMES.has(url.hostname) || !bare) return MANAGED_VOICE_SPEAK_URL;
+  return `${url.origin}/api/voice/speak`;
+}
 /** Longer than a healthy synthesis, well inside `SPEECH_ENGINE_TIMEOUT_MS`,
  *  so a hung request still leaves the attempt time to fall back to Web Speech. */
 export const MANAGED_VOICE_REQUEST_TIMEOUT_MS = 15_000;
@@ -75,12 +94,21 @@ export function createManagedVoiceHost(options: {
   stateDir?: string;
   fetch?: typeof globalThis.fetch;
   timeoutMs?: number;
+  /** Defaults to `process.env`; read once, for `HOSTED_ORIGIN_ENV`. */
+  env?: Record<string, string | undefined>;
   log?: (message: string) => void;
 }): ManagedVoiceHost {
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const timeoutMs = options.timeoutMs ?? MANAGED_VOICE_REQUEST_TIMEOUT_MS;
   const log = options.log ?? (() => {});
   const stateDir = options.stateDir || undefined;
+  const override = (options.env ?? process.env)[HOSTED_ORIGIN_ENV];
+  const speakUrl = resolveManagedVoiceSpeakUrl(override);
+  if (override) {
+    log(speakUrl === MANAGED_VOICE_SPEAK_URL
+      ? `[managed-voice] ignoring ${HOSTED_ORIGIN_ENV}: not an http loopback origin`
+      : `[managed-voice] dev override: speaking via ${speakUrl}`);
+  }
   const file = stateDir ? join(stateDir, MANAGED_VOICE_FILE) : undefined;
   const inFlight = new Map<string, AbortController>();
   let loaded: Promise<StoredConfig> | null = null;
@@ -137,7 +165,7 @@ export function createManagedVoiceHost(options: {
     let timedOut = false;
     const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
     try {
-      const response = await fetchImpl(MANAGED_VOICE_SPEAK_URL, {
+      const response = await fetchImpl(speakUrl, {
         method: 'POST',
         headers: {
           authorization: `Bearer ${config.token}`,

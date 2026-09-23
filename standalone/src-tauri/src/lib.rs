@@ -4086,6 +4086,12 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        // The managed-voice dev override (lib/src/host/managed-voice-host.ts)
+        // reaches only a debug build's sidecar; a release build always speaks
+        // to production Hosted (docs/specs/security-local.md -> "Persisted state").
+        if !cfg!(debug_assertions) {
+            c.env_remove("DORMOUSE_HOSTED_ORIGIN");
+        }
     });
     #[cfg(windows)]
     {
