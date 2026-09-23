@@ -53,8 +53,8 @@ needed. If a PR is squash-merged by mistake, PR N+1 will show PR N's changes
 again until `main` is merged into its branch (that merge resolves cleanly, since
 both sides carry identical content). The repo's default is a merge commit; keep it.
 
-Keep every PR a draft until it is actually up for review (Chromatic bills on
-ready-for-review).
+Keep every PR a draft until it is actually up for review (Chromatic and Argos
+bill on ready-for-review).
 
 ## 2. Setup in a worktree
 

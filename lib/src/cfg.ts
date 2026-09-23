@@ -59,6 +59,12 @@ export const cfg = {
      *  Snapping straight to the final geometry removes that whole race. */
     animate: true,
   },
+  killConfirm: {
+    /** The letter a kill confirmation asks for; null draws one at random per
+     *  prompt. Pinned under visual snapshots, where a random letter would
+     *  change the capture on every run. */
+    char: null as string | null,
+  },
   overlays: {
     /** ms before the illegal-rename warning dismisses itself. 0 disables the
      *  timer entirely — what Chromatic uses, because a popover that removes

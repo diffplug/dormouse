@@ -32,6 +32,10 @@ export const DOOR_TAB_CLASS = clsx(
   TERMINAL_TOP_RADIUS_CLASS,
 );
 
+/** A Workspace name the app derived rather than one a user set
+ *  (`docs/specs/layout.md` → "Workspace names"). */
+export const AUTO_NAME_CLASS = 'italic';
+
 /** The `max-w-` / `h-` bounds of `DOOR_TAB_CLASS`, for the host code that has to
  *  reason about a tab's size without a rendered element (the cross-window tab
  *  drag). Tailwind needs the arbitrary values spelled literally above, so these
@@ -656,6 +660,33 @@ export function ModalFrame({
         {children}
       </ModalSurface>
     </ModalOverlay>
+  );
+}
+
+/**
+ * A native modal `<dialog>`, shown on mount. Mount it only while open: closing
+ * unmounts it, which discards everything its owner held, so no reset-on-close
+ * logic is needed and no in-flight work can reach the next open.
+ */
+export function NativeModalDialog({
+  onClose,
+  className,
+  children,
+}: {
+  onClose: () => void;
+  className?: string;
+  children: ReactNode;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    // StrictMode runs this twice on one element, and a second showModal throws.
+    if (dialog && !dialog.open) dialog.showModal();
+  }, []);
+  return (
+    <dialog ref={dialogRef} onClose={onClose} className={className}>
+      {children}
+    </dialog>
   );
 }
 

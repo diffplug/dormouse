@@ -41,6 +41,7 @@ standalone/sidecar/alert-store.cjs
 # the old bundle, and `bundle.resources` would ship it.
 standalone/sidecar/remote-host.cjs
 standalone/sidecar/tool-host.cjs
+standalone/sidecar/git-info.cjs
 standalone/sidecar/node_modules/
 standalone/node_modules/
 
@@ -67,12 +68,13 @@ hosted/.wrangler/
 hosted/.pgstencil/
 hosted/dist-worker/
 
-# Storybook / Chromatic
+# Storybook / Chromatic / Argos
 storybook-static/
 build-storybook.log
 chromatic.log
 chromatic-build-*.xml
 chromatic-diagnostics.json
+lib/screenshots/
 
 # symlinked skill files
 .agents/skills/

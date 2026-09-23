@@ -14,6 +14,8 @@ const config: StorybookConfig = {
   // a story since Storybook 7).
   stories: ['../src/**/*.stories.@(ts|tsx)', '../../docs/stories/**/*.mdx'],
   addons: [
+    // Runs the stories as Vitest tests for Argos (`lib/vitest.argos.config.ts`).
+    '@storybook/addon-vitest',
     {
       name: '@storybook/addon-docs',
       // MDX is CommonMark only out of the box, so a GFM table renders as its own

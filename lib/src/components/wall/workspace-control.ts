@@ -16,6 +16,7 @@ import {
   isWindowRef,
   moveWorkspace,
   renameWorkspace,
+  resumeAutoWorkspaceName,
   resolveWorkspaceRef,
   setActiveWorkspace,
   workspaceRefFor,
@@ -46,6 +47,7 @@ export type WindowControlParams = DorControlParams & {
   toWindow?: unknown;
   index?: unknown;
   dangerouslyDestroyIframePageState?: unknown;
+  auto?: unknown;
 };
 
 /** This Window's Workspaces in strip order, each with its union status. */
@@ -59,6 +61,7 @@ export function workspaceRows(): WorkspaceRow[] {
       ref: workspaceRefFor(workspace.id),
       id: workspace.id,
       name: workspace.name,
+      auto: workspace.nameIsAuto,
       active: workspace.id === activeId,
       ringing: union.ringing,
       todo: union.todo,
@@ -208,6 +211,13 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
     case WORKSPACE_CONTROL_METHODS.rename: {
       const target = requireWorkspace(detail);
       if (!target) return;
+      if (params.auto === true) {
+        // Answers the outgoing name: the derived one is computed afterwards
+        // (`docs/specs/dor-cli.md` → "dor workspace").
+        resumeAutoWorkspaceName(target.id);
+        respondMutation('renamed', target);
+        return;
+      }
       if (!name) {
         detail.respond({ ok: false, error: 'name is required' });
         return;

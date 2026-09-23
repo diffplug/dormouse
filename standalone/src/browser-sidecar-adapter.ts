@@ -19,6 +19,7 @@ import type {
   PtyMarkedDetail,
   PtyReplayDetail,
   BurrowLink,
+  GitInfoResult,
   ToolControlResult,
   ToolHostRequest,
   WritePtyOptions,
@@ -250,6 +251,14 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
 
   async readClipboardText(): Promise<string | null> {
     try { return await this.host.invoke("read_clipboard_text"); } catch { return null; }
+  }
+
+  async gitInfo(paths: string[]): Promise<GitInfoResult> {
+    // A missing result is a failure, never an empty answer: an absent key
+    // means "ask again" (lib/src/lib/platform/git-types.ts).
+    const result = await this.host.invoke<GitInfoResult | null>("git_info", { paths });
+    if (!result) throw new Error("git_info answered nothing");
+    return result;
   }
 
   async toolControl(request: ToolHostRequest): Promise<ToolControlResult> {

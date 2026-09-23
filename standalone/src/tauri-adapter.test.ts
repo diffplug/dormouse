@@ -142,7 +142,7 @@ describe("TauriAdapter window persistence", () => {
   const session = { version: 3 as const, panes: [{ id: "pane-a", title: "A", cwd: "/a", untouched: false }] };
   const windowBlob = {
     version: 1 as const,
-    workspaces: [{ id: "ws-1", name: "One", session }],
+    workspaces: [{ id: "ws-1", name: "One", nameIsAuto: false, session }],
     activeWorkspaceId: "ws-1",
   };
 

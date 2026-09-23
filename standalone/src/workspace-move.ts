@@ -533,7 +533,7 @@ async function adoptWorkspace(platform: PlatformAdapter, payload: MovePayload): 
     // tabs, which is why a drag sends a point rather than an index — else the
     // end.
     const index = payload.index ?? (payload.at ? workspaceDropTarget(payload.at.x).index : undefined);
-    createWorkspace({ id, name, alertDelivery: session.alertDelivery });
+    createWorkspace({ id, name, nameIsAuto: payload.workspace.nameIsAuto, alertDelivery: session.alertDelivery });
     if (index !== undefined) moveWorkspace(id, index);
     setActiveWorkspace(id);
     // Last, and only now: it is what tells the source to let the Workspace go.
@@ -615,7 +615,7 @@ export async function bootFromTearOut(platform: PlatformAdapter): Promise<WallBo
   if (platform.getWindowState?.()) return null;
   const [first, ...rest] = await drainArrivals();
   if (!first?.workspace) return null;
-  const { id, name, session } = first.workspace;
+  const { id, name, nameIsAuto, session } = first.workspace;
   adopting.add(id);
   let plan: WallBootPlans[string];
   try {
@@ -641,7 +641,7 @@ export async function bootFromTearOut(platform: PlatformAdapter): Promise<WallBo
   // Nothing on disk yet: this window's first aggregator flush writes its
   // snapshot, and from there it is an ordinary restorable window. After the
   // plan, so a refused arrival leaves no half-installed Window behind.
-  installWindowPersistence(platform, { version: 1, workspaces: [{ id, name, session }], activeWorkspaceId: id });
+  installWindowPersistence(platform, { version: 1, workspaces: [{ id, name, nameIsAuto, session }], activeWorkspaceId: id });
   publishWorkspaceSession(id, session);
   acceptArrival(first);
   adopting.delete(id);

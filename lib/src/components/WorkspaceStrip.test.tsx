@@ -25,6 +25,7 @@ import {
   getActiveWorkspaceId,
   getWorkspacesSnapshot,
   resetWorkspaces,
+  setAutoWorkspaceName,
 } from '../lib/workspace-store';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -211,6 +212,41 @@ describe('WorkspaceStrip', () => {
     });
     expect(tabNames()).toEqual(['Deploys']);
     expect(chromeKeyboardHeld()).toBe(false);
+  });
+
+  it('italicizes an auto-name until a rename changes it, and an empty rename hands it back', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await render();
+    const nameSpan = () => tabFor(first).querySelector('span')!;
+    const rename = async (value: string | null) => {
+      await act(async () => { activateButton(first).click(); });
+      const input = container.querySelector<HTMLInputElement>(`[data-workspace-rename-for="${first}"]`)!;
+      await act(async () => {
+        if (value !== null) typeInto(input, value);
+        input.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+      });
+    };
+    expect(nameSpan().classList.contains('italic')).toBe(true);
+
+    await rename(null); // opened and blurred: the editor submits, but nothing changed
+    expect(nameSpan().classList.contains('italic')).toBe(true);
+
+    await rename('Deploys');
+    expect(tabNames()).toEqual(['Deploys']);
+    expect(nameSpan().classList.contains('italic')).toBe(false);
+
+    await rename('');
+    expect(nameSpan().classList.contains('italic')).toBe(true);
+  });
+
+  it('never pins an auto-name that moved while the editor was open untouched', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await render();
+    await act(async () => { activateButton(first).click(); });
+    const input = container.querySelector<HTMLInputElement>(`[data-workspace-rename-for="${first}"]`)!;
+    await act(async () => { setAutoWorkspaceName(first, 'dormouse @ main'); });
+    await act(async () => { input.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); });
+    expect(getWorkspacesSnapshot().workspaces[0]).toMatchObject({ name: 'dormouse @ main', nameIsAuto: true });
   });
 
   it('shows the close button with one Workspace and closes an untouched one outright', async () => {
