@@ -26,7 +26,7 @@
 | `application-security` | `docs/specs/security-local.md`, `docs/specs/security-remote.md` |
 | `hosted` | `docs/specs/security-hosted.md` |
 
-**The separation is one of context, not of credential.** `AUDIT_PAT` is a step-level `env:` on the one job, so every subagent inherits it, and only the prompt tells `application-security` not to use it. A prompt is not a control: four contexts each *read* less, none *holds* less. A known gap, staged as `## Future` -> Credential separation.
+**The separation is one of context, not of credential.** `AUDIT_PAT` is a step-level `env:` on the one job, so every subagent inherits it, and only the prompt tells `application-security` and `hosted` not to use it. A prompt is not a control: four contexts each *read* less, none *holds* less. A known gap, staged as `## Future` -> Credential separation.
 
 **Must pin the mechanical domains to Sonnet and the two code-reading domains — `application-security` and `hosted` — to Opus in CI and locally** (rationale).
 
