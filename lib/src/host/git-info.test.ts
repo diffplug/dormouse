@@ -2,8 +2,23 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { gitInfo, remoteRepoName } from './git-info';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+
+// The real spawner, observed: a symlinked path gives git's answer unchanged
+// (git chdirs to the physical path itself), so only argv shows canonicalization.
+const spawned = vi.hoisted(() => [] as string[][]);
+vi.mock('dor-lib-common', async (importActual) => {
+  const actual = await importActual<typeof import('dor-lib-common')>();
+  return {
+    ...actual,
+    spawnAndCapture: (binary: string, args: readonly string[]) => {
+      spawned.push([...args]);
+      return actual.spawnAndCapture(binary, args);
+    },
+  };
+});
+
+const { gitInfo, remoteRepoName } = await import('./git-info');
 
 let root: string;
 const git = (dir: string, ...args: string[]) =>
@@ -51,10 +66,14 @@ describe('gitInfo', () => {
     expect(await gitInfo([plain, missing, 'myrepo'])).toEqual({ [plain]: null, [missing]: null, myrepo: null });
   });
 
-  it('looks up a symlinked directory at its canonical path', async () => {
+  it('hands git the canonical path, never the symlink it was given', async () => {
     const link = join(root, 'link-to-src');
     symlinkSync(join(root, 'myrepo/src'), link);
+    spawned.length = 0;
     expect((await gitInfo([link]))[link]).toEqual({ repo: 'myrepo', branch: 'main' });
+    const dirs = spawned.map((args) => args[args.indexOf('-C') + 1]);
+    expect(dirs.length).toBeGreaterThan(0);
+    expect(new Set(dirs)).toEqual(new Set([join(root, 'myrepo/src')]));
   });
 
   it('names an unborn branch', async () => {
