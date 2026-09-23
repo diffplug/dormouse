@@ -141,7 +141,7 @@ resolve_tag_sha() { echo abc; }
 verify_downloaded_artifacts() { :; }
 all_artifacts_downloaded() { return 0; }
 find_release_run_id() { echo 123; }
-gh() { if [[ "$2" == watch ]]; then return 1; else echo failure; fi; }
+gh() { if [[ "$2" == watch ]]; then return 1; elif [[ "$1 $2" == "release view" ]]; then return 1; else echo failure; fi; }
 main "$@"`, [command, '1.2.3']);
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /conclusion 'failure'|Workflow failed/);
@@ -171,6 +171,30 @@ gh() {
 create_release 1.2.3`));
   assert.equal(readFileSync(join(root, 'captured-notes'), 'utf8'), 'last release line\n');
 });
+
+for (const command of ['all', 'resume']) {
+  test(`${command} refuses a published release before downloading or signing anything`, t => {
+    const root = fixture(t);
+    put(root, 'release-signed/.version', '1.2.3');
+    put(root, 'release-signed/work/keep', 'signed');
+    const result = shell(root, `
+check_command() { :; }
+check_git_clean() { :; }
+download_artifacts() { error 'must refuse before downloading'; }
+resume_download() { error 'must refuse before downloading'; }
+prepare_sign_dir() { error 'must refuse before signing'; }
+gh() {
+  case "$1 $2" in
+    "release view") case "$*" in *isDraft*) echo false;; esac; return 0;;
+  esac
+  error 'must refuse before reaching any other gh call'
+}
+main "$@"`, [command, '1.2.3']);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /already published/);
+    assert.equal(readFileSync(join(root, 'release-signed/work/keep'), 'utf8'), 'signed');
+  });
+}
 
 test('a published release stops the retry path before it clobbers immutable assets', t => {
   const root = fixture(t);

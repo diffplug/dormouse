@@ -257,6 +257,21 @@ require_stage() {
     [[ -f "$SIGN_DIR/.completed-$1" ]] || error "Release stage '$1' has not completed. Re-run that stage first."
 }
 
+# Immutable releases lock assets and the tag at publication, so a published release
+# cannot be repaired by re-uploading, and deleting it burns the tag name for good.
+# Every command that ends in a release upload calls this before it spends anything.
+require_unpublished_release() {
+    local tag="v$1"
+    local is_draft
+
+    check_command gh "brew install gh && gh auth login"
+    gh release view "$tag" --repo "$GITHUB_REPO" &>/dev/null || return 0
+
+    is_draft=$(gh release view "$tag" --repo "$GITHUB_REPO" --json isDraft --jq '.isDraft')
+    [[ "$is_draft" == "true" ]] \
+        || error "Release $tag is already published; its assets cannot be replaced. Cut the next version instead — the tag cannot be reused."
+}
+
 invalidate_updates() {
     rm -f "$SIGN_DIR/.completed-sign-updates"
     rm -rf "$WORK_DIR/release-assets"
@@ -929,13 +944,7 @@ create_release() {
     fi
 
     if gh release view "$tag" --repo "$GITHUB_REPO" &>/dev/null; then
-        # Immutable releases lock assets and the tag at publication, so a published
-        # release cannot be repaired by re-uploading, and deleting it burns the tag
-        # name for good. Refuse here rather than discover it in a 422 mid-release.
-        local is_draft
-        is_draft=$(gh release view "$tag" --repo "$GITHUB_REPO" --json isDraft --jq '.isDraft')
-        [[ "$is_draft" == "true" ]] \
-            || error "Release $tag is already published; its assets cannot be replaced. Cut the next version instead — the tag cannot be reused."
+        require_unpublished_release "$version"
 
         local existing_assets
         existing_assets=$(gh release view "$tag" --repo "$GITHUB_REPO" --json assets --jq '.assets[].name')
@@ -1026,6 +1035,7 @@ main() {
 
             validate_version "$version"
             check_git_clean
+            require_unpublished_release "$version"
             ensure_version "$version"
             download_artifacts "$version"
             prepare_sign_dir
@@ -1040,6 +1050,7 @@ main() {
             [[ -z "$version" ]] && error "Usage: $(basename "$0") resume <version>"
 
             validate_version "$version"
+            require_unpublished_release "$version"
             [[ -f "$WORK_DIR/.version" ]] || error "No cached release. Run all first."
             [[ "$(cat "$WORK_DIR/.version")" == "$version" ]] || error "Cached release version differs. Run all to start another version."
             resume_download "$version"
