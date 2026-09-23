@@ -59,6 +59,7 @@ export function workspaceRows(): WorkspaceRow[] {
       ref: workspaceRefFor(workspace.id),
       id: workspace.id,
       name: workspace.name,
+      auto: !!workspace.nameIsAuto,
       active: workspace.id === activeId,
       ringing: union.ringing,
       todo: union.todo,
@@ -208,6 +209,11 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
     case WORKSPACE_CONTROL_METHODS.rename: {
       const target = requireWorkspace(detail);
       if (!target) return;
+      if (params.auto === true) {
+        renameWorkspace(target.id, '');
+        respondMutation('renamed', target);
+        return;
+      }
       if (!name) {
         detail.respond({ ok: false, error: 'name is required' });
         return;
