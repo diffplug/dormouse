@@ -17,7 +17,7 @@ import { flattenScenario, SCENARIO_SHELL_PROMPT } from '../lib/platform';
 import { removeMouseSelectionState, setMouseReporting, setOverride } from '../lib/mouse-selection';
 import { addPlainNote, clearAllNotepads } from '../lib/notepad/notepad-store';
 import { recordToolDirty, resetToolDirty } from '../lib/tool-dirty-store';
-import { requireElement, settleTerminals, waitForCondition, waitForPrimedState } from './settle-terminals';
+import { requireElement, settleTerminalContext, waitForCondition, waitForPrimedState } from './settle-terminals';
 
 const SESSION_ID = 'tab-story';
 
@@ -230,8 +230,7 @@ async function openHeaderRightClickDialog() {
     clientX: rect.left + rect.width / 2,
     clientY: rect.top + rect.height / 2,
   }));
-  await requireElement('[data-terminal-context]', 'terminal context');
-  await settleTerminals();
+  await settleTerminalContext();
 }
 
 /**

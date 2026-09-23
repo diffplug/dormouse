@@ -43,6 +43,24 @@ export async function settleTerminals(opts?: { timeoutMs?: number }): Promise<vo
 }
 
 /**
+ * Hold until an open terminal context has settled: its helper's autorun has
+ * finished (the status row's spinner is gone) and every terminal, the helper's
+ * included, has painted. The helper steps through "Waiting for shell…" and
+ * "Running …" on timers, so a capture without this lands on whichever step a
+ * loaded runner happened to reach.
+ */
+export async function settleTerminalContext(opts?: { timeoutMs?: number }): Promise<void> {
+  await requireElement('[data-terminal-context]', 'terminal context');
+  const settled = () => {
+    const status = document.querySelector('[data-terminal-context] [aria-label$="terminal status"]');
+    return !!status && !status.querySelector('.animate-spin');
+  };
+  await waitForCondition(settled, opts);
+  if (!settled()) throw new Error('terminal context autorun never finished');
+  await settleTerminals(opts);
+}
+
+/**
  * Hold until the preview's primed-state decorator has applied.
  *
  * Priming (activity status, TODO, notification, WATCHING rules) lands two rAFs

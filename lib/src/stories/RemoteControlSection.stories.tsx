@@ -206,6 +206,10 @@ export const SetupPhoneQr: Story = {
   // The one setup-panel story that settles on the QR's accessible name rather
   // than on text, so it cannot use {@link setupPanel}.
   play: async (context) => {
+    // The QR is a lazily-imported chunk. Fetched cold after the click, it can
+    // outlast `findByRole`'s 1 s on a loaded WebKit runner; loaded here first,
+    // the panel's own import resolves from the module cache.
+    await import('../components/QrCode');
     const canvas = within(context.canvasElement);
     await userEvent.click(await canvas.findByRole('button', { name: 'Set up a phone' }));
     await canvas.findByRole('img', { name: 'Setup code for this machine' });
