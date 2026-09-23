@@ -109,6 +109,33 @@ describe('installWorkspaceAutoNaming', () => {
     expect(name()).toBe('a @ main');
   });
 
+  it('retries every failed wave at its own deadline, not only the first', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const gitInfo = vi.fn<GitInfoQuery>()
+      .mockRejectedValueOnce(new Error('cold sidecar'))
+      .mockRejectedValueOnce(new Error('cold sidecar'))
+      .mockResolvedValueOnce({ '/p/a': { repo: 'a', branch: 'main' } })
+      .mockResolvedValueOnce({ '/p/b': { repo: 'b', branch: 'main' } });
+    const other = createWorkspace({ id: 'ws-2', activate: false });
+    pane('p1', '/p/a');
+    setWorkspaceSurfaces(DEFAULT_WORKSPACE_ID, ['p1']);
+    dispose = installWorkspaceAutoNaming(gitInfo);
+    await settle(); // wave A fails
+    await vi.advanceTimersByTimeAsync(1_000);
+    pane('p2', '/p/b');
+    setWorkspaceSurfaces(other.id, ['p2']);
+    await settle(); // wave B fails a second later
+    expect(gitInfo).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    await settle();
+    await vi.advanceTimersByTimeAsync(2_000);
+    await settle();
+    expect(gitInfo).toHaveBeenCalledTimes(4);
+    expect(name()).toBe('a @ main');
+    expect(getWorkspace('ws-2')!.name).toBe('b @ main');
+  });
+
   it('never asks git about a remote cwd', async () => {
     const gitInfo = vi.fn<GitInfoQuery>(async () => ({}));
     resetTerminalPaneState('p1', { cwd: { ...cwd('/srv/app', true), host: 'prod-box', scheme: 'file' } });

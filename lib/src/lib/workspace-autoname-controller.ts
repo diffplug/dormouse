@@ -65,9 +65,6 @@ export function installWorkspaceAutoNaming(
         if (failed) cache.set(path, { info: null, asOf, retryAt });
         else if (path in result) cache.set(path, { info: result[path], asOf });
       }
-      if (failed && retryTimer === null) {
-        retryTimer = setTimeout(() => { retryTimer = null; schedule(); }, FAILED_RETRY_MS);
-      }
       schedule();
     };
     gitInfo(paths).then((result) => settle(result, false), (error: unknown) => {
@@ -107,6 +104,21 @@ export function installWorkspaceAutoNaming(
       if (name !== null) setAutoWorkspaceName(workspace.id, name);
     }
     requestGit(wanted);
+    armRetry();
+  };
+
+  // One timer, re-aimed after every pass at the earliest deadline still
+  // ahead: failures land in waves, and each has its own. A passed deadline
+  // needs none — this pass either re-asked that path or no terminal wants it.
+  const armRetry = () => {
+    if (retryTimer !== null) clearTimeout(retryTimer);
+    retryTimer = null;
+    const now = Date.now();
+    let next = Infinity;
+    for (const entry of cache.values()) {
+      if (entry.retryAt !== undefined && entry.retryAt > now) next = Math.min(next, entry.retryAt);
+    }
+    if (next !== Infinity) retryTimer = setTimeout(() => { retryTimer = null; schedule(); }, next - now);
   };
 
   // A pane's title and activity churn far more often than anything a name
