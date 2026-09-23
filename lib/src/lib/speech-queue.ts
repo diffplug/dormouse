@@ -1,4 +1,7 @@
-/** The browser owns only our current utterance. Pending jobs remain cancellable here. */
+import { createManagedVoiceEngine, currentManagedVoicePort } from './managed-voice-engine';
+import { webSpeechEngine, type SpeechAttemptHandle, type SpeechEngine } from './speech-engine';
+
+/** The engine owns only our current utterance. Pending jobs remain cancellable here. */
 export interface SpeechJob {
   key: string;
   text: () => string;
@@ -15,17 +18,16 @@ const MAX_PENDING = 64;
 export const SPEECH_ENGINE_TIMEOUT_MS = 60_000;
 interface Attempt {
   job: SpeechJob;
-  utterance: SpeechSynthesisUtterance;
-  synth: SpeechSynthesis;
+  handle: SpeechAttemptHandle | null;
   started: boolean;
   timer: ReturnType<typeof setTimeout>;
 }
 
 /**
- * The one seam between Dormouse's pending spoken alarms and the browser's Web
- * Speech engine (`docs/specs/alert.md` -> "Spoken alarms" owns the behavior;
- * the bounds and the timeout are here). **Only one utterance at a time is
- * admitted per renderer** — Settings test sounds included, since they share
+ * The one seam between Dormouse's pending spoken alarms and a speech engine
+ * (`docs/specs/alert.md` -> "Spoken alarms" owns the behavior; the bounds and
+ * the timeout are here). **Only one utterance at a time is admitted per
+ * renderer** — Settings test sounds included, since they share
  * {@link speechQueue} — so the engine never interleaves two panes and an
  * ineligible job can still be dropped while it is only pending here.
  *
@@ -42,9 +44,11 @@ export class SpeechQueue {
   private active: Attempt | null = null;
   private pumping = false;
 
+  constructor(private readonly engine: SpeechEngine = webSpeechEngine) {}
+
   /** False when no engine exists or the queue is full; a job that fails later reports through `onFinish(false)`. */
   enqueue(job: SpeechJob): boolean {
-    if (!globalThis.speechSynthesis || typeof globalThis.SpeechSynthesisUtterance !== 'function') return false;
+    if (!this.engine.available()) return false;
     if (this.active?.job.key === job.key || this.pending.some(pending => pending.key === job.key)) return true;
     if (this.pending.length >= MAX_PENDING) return false;
     this.pending.push(job);
@@ -52,7 +56,7 @@ export class SpeechQueue {
     return true;
   }
 
-  /** Recheck both waiting and browser-owned work after activity/policy changes. */
+  /** Recheck both waiting and engine-owned work after activity/policy changes. */
   refresh(): void {
     // Runs on every activity notification; almost always there is nothing queued.
     if (!this.active && this.pending.length === 0) return;
@@ -68,12 +72,11 @@ export class SpeechQueue {
 
   private finish(attempt: Attempt, cancel = false): void {
     if (this.active !== attempt) return;
+    // Revoke callback identity before the engine is told anything: disposing
+    // may synchronously call back. Teardown (`clear`) comes through here too.
     this.active = null;
     clearTimeout(attempt.timer);
-    attempt.utterance.onstart = attempt.utterance.onend = attempt.utterance.onerror = null;
-    // Revoke callback identity before cancel(), which may synchronously callback.
-    // Teardown (`clear`) comes through here too, cancelling the engine.
-    if (cancel) { try { attempt.synth.cancel(); } catch { /* unavailable engine */ } }
+    try { attempt.handle?.dispose(cancel); } catch { /* unavailable engine */ }
     attempt.job.onFinish?.(attempt.started);
     this.pump();
   }
@@ -85,26 +88,28 @@ export class SpeechQueue {
       while (!this.active && this.pending.length) {
         const job = this.pending.shift()!;
         if (!job.eligible()) continue;
-        const synth = globalThis.speechSynthesis;
-        let utterance: SpeechSynthesisUtterance;
-        try {
-          utterance = new globalThis.SpeechSynthesisUtterance(job.text());
-          const voice = job.voice?.();
-          if (voice) utterance.voice = synth.getVoices?.().find(candidate => candidate.voiceURI === voice) ?? null;
-        } catch { job.onFinish?.(false); continue; }
         const attempt: Attempt = {
-          job, utterance, synth, started: false,
+          job, handle: null, started: false,
           timer: setTimeout(() => this.finish(attempt, true), SPEECH_ENGINE_TIMEOUT_MS),
         };
         this.active = attempt;
-        utterance.onstart = () => {
-          if (this.active !== attempt) return;
-          if (!job.eligible()) { this.finish(attempt, true); return; }
-          attempt.started = true;
-          job.onStart?.();
-        };
-        utterance.onend = utterance.onerror = () => this.finish(attempt);
-        try { job.onAdmit?.(); synth.speak(utterance); }
+        try {
+          attempt.handle = this.engine.prepare({ text: job.text(), voice: job.voice?.() ?? null }, {
+            onStart: () => {
+              if (this.active !== attempt || attempt.started) return;
+              if (!job.eligible()) { this.finish(attempt, true); return; }
+              attempt.started = true;
+              job.onStart?.();
+            },
+            onEnd: () => this.finish(attempt),
+          });
+        } catch {
+          this.active = null;
+          clearTimeout(attempt.timer);
+          job.onFinish?.(false);
+          continue;
+        }
+        try { job.onAdmit?.(); attempt.handle.start(); }
         catch { this.finish(attempt); }
         // Synchronous completion clears active; loop advances without recursion.
       }
@@ -112,5 +117,8 @@ export class SpeechQueue {
   }
 }
 
-/** Settings previews and real alerts share the same native engine admission. */
-export const speechQueue = new SpeechQueue();
+/** Settings previews and real alerts share the same engine admission. Managed
+ *  voice first where the host has it, falling back to Web Speech per utterance. */
+export const speechQueue = new SpeechQueue(
+  createManagedVoiceEngine({ port: currentManagedVoicePort, fallback: webSpeechEngine }),
+);

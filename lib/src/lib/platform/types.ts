@@ -8,8 +8,10 @@ import type { ShellEntry } from '../shell-defaults';
 // share it without pulling this browser-typed module into a Node tsconfig.
 import type { IframeProxyResult } from './iframe-proxy-types';
 import type { ToolControlResult, ToolHostRequest } from './tool-types';
+import type { ManagedVoicePort } from './managed-voice-types';
 
 export type { ToolControlResult, ToolHostRequest, ToolLookupResult } from './tool-types';
+export type { ManagedVoicePort } from './managed-voice-types';
 import type { NotepadArchivePort } from '../notepad/types';
 import type { PersistedAlertState, PersistedWindow } from '../session-types';
 
@@ -511,6 +513,14 @@ export interface PlatformAdapter {
    * Settings entry all stay hidden.
    */
   notepadArchive?: NotepadArchivePort;
+
+  /**
+   * Managed voice for spoken alarms (`docs/specs/alert.md` -> "Spoken alarms").
+   * Present only where a host process can hold the voice token and make the
+   * request — standalone's sidecar. Absent (VS Code, Pocket, the website) means
+   * every utterance goes to Web Speech.
+   */
+  managedVoice?: ManagedVoicePort;
 
   /**
    * Whether the browser hosting this webview reserves the notepad chord
