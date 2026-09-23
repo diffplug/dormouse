@@ -54,6 +54,12 @@
 
 **Why the alert state is retired before the PTY is killed.** A data chunk is enough to create a Session's entry, so killing first leaves output already in flight to rebuild an entry — and a `QuiesceDetector` that nothing will ever dispose. Raw output and resizes are exactly what a dying PTY emits; a semantic or protocol event may revive an id, because an id may be handed to a replacement pane and its first reported command start is evidence that somebody is home.
 
+**Why the key is the last command of a list, past its wrappers.** The old key, argv[0] of the first simple command, named the set-up rather than the work: `cd web && pnpm dev` keyed on `cd`, `clear; claude` on `clear`, and `sudo make`, `time make`, `caffeinate -i claude` and `npx claude` on the wrapper, so a rule offered from those panes matched every other use of `cd` or `sudo` (audit, 2026-09-23). The last command of a list is the one still running when the line settles; a pipeline's first stage is the producer whose output the pane shows. An unknown wrapper flag keys the wrapper because guessing whether it swallowed the next word would key an argument as a program.
+
+**Why runners key by script.** `pnpm dev` never finishes and `pnpm test` does; one `pnpm` rule rang for both, so watching a dev server's pane also rang every test run. `run` is dropped because `npm run test` and `npm test` are one script under two spellings.
+
+**Why a bare runner rule still covers every script.** Rules stored before script keys are bare runner names, and a user who watched `pnpm` asked for all of it; a new rule never loses ground an old one had.
+
 **Why a mid-command enable shows the current state.** Starting a fresh detector when a rule is added would report `NOTHING_TO_SHOW` for a command that has been busy for ten minutes.
 
 **Why the keystroke fallback is not routed into the manager.** The fallback in `docs/specs/terminal-state.md` is renderer-side and lower confidence than a shell-reported command boundary. Wiring it in would buy integration-less shells a worse version of WATCHING at the price of a second command-tracking path to keep in sync.
@@ -103,6 +109,8 @@ Guarding only completion leaves a stale `start` free to replace the active utter
 **Why the device line always says something.** A push that silently goes nowhere is indistinguishable from a broken one, so each cause is worth its own message rather than an empty list.
 
 ## Pane Header
+
+**Why a helper tracks its command before promotion.** A helper dropped every semantic event, so one promoted while running `claude` had no command watch until its next command: no WATCHING, and no command-exit arm (audit, 2026-09-23). Command state alerts no one by itself; only dispatch and publishing have to wait for promotion.
 
 **Why `SPEAKING` may pulse unbounded and `SPOKEN` may not.** An utterance is seconds long and stops on its own, so the pulse it carries is self-bounding. `SPOKEN` persists until the ring is attended, so animating it would be exactly the per-Session animation with no end that bounding the burst exists to remove.
 

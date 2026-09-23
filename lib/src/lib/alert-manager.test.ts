@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AlertManager, AWAIT_GRACE_MS, DEFAULT_ALERT_STATE, MAX_AWAIT_TIMEOUT_MS } from './alert-manager';
 import type { AwaitHandle, AwaitOutcome, CompletionEvent } from './alert-manager';
-import { applyTerminalProtocolEvents } from './terminal-protocol';
+import { applyTerminalProtocolEvents, collectTerminalSemanticEvents, TerminalProtocolParser } from './terminal-protocol';
 
 describe('AlertManager in isolation', () => {
   let manager: AlertManager;
@@ -31,28 +31,115 @@ describe('AlertManager in isolation', () => {
     ]);
   }
 
-  it('drops every feed and control for a helper Session until it is promoted', () => {
-    const states: string[] = [];
-    manager.onStateChange((id) => states.push(id));
-    manager.setHelper('helper', true);
-    runWatchedCommand('helper');
-    manager.onData('helper');
-    applyTerminalProtocolEvents(manager, 'helper', [{ type: 'notification', notification: { title: 'done', body: null } }]);
-    manager.attend('helper');
-    manager.toggleTodo('helper');
-    manager.markTodo('helper');
-    manager.seed('helper', { todo: true });
-    manager.clearTodo('helper');
-    manager.onExit('helper', 0);
-    manager.onResize('helper');
-    applyTerminalProtocolEvents(manager, 'helper', [{ type: 'notification', notification: { title: 'late output', body: null } }]);
-    vi.advanceTimersByTime(10_000);
-    expect(states).toEqual([]);
-    expect(manager.getState('helper')).toEqual(DEFAULT_ALERT_STATE);
+  describe('helper Sessions', () => {
+    const HELPER = 'helper';
 
-    manager.setHelper('helper', false);
-    runWatchedCommand('helper');
-    expect(states).toContain('helper');
+    function startCommand(id: string, commandLine: string): void {
+      manager.applyTerminalSemanticEvents(id, [
+        { type: 'commandLine', commandLine },
+        { type: 'commandStart', source: 'osc633_boundaries' },
+      ]);
+    }
+
+    function outputFor(id: string, ms: number): void {
+      for (let t = 0; t < ms; t += 200) {
+        manager.onData(id);
+        vi.advanceTimersByTime(200);
+      }
+    }
+
+    it('alerts no one, publishes nothing, and accepts no report or control until promoted', () => {
+      const states: string[] = [];
+      manager.onStateChange((id) => states.push(id));
+      const seen = recordingClaimant(HELPER, true);
+      manager.setHelper(HELPER, true);
+      runWatchedCommand(HELPER);
+      outputFor(HELPER, 3_000);
+      settle();
+      applyTerminalProtocolEvents(manager, HELPER, [{ kind: 'notification', notification: { source: 'OSC 9', title: null, body: 'done' } }]);
+      applyTerminalProtocolEvents(manager, HELPER, [{ kind: 'progress', progress: { state: 'normal', percent: 40 } }]);
+      manager.attend(HELPER);
+      manager.toggleTodo(HELPER);
+      manager.markTodo(HELPER);
+      manager.seed(HELPER, { todo: true });
+      manager.onResize(HELPER);
+      manager.applyTerminalSemanticEvents(HELPER, [{ type: 'commandFinish', exitCode: 1 }]);
+      manager.onExit(HELPER, 0);
+      vi.advanceTimersByTime(10_000);
+
+      expect(states).toEqual([]);
+      expect(seen).toEqual([]);
+      expect(manager.getState(HELPER)).toEqual(DEFAULT_ALERT_STATE);
+      expect(manager.getAllStates().has(HELPER)).toBe(false);
+      // Removing a helper that never published tells subscribers nothing either.
+      manager.remove(HELPER);
+      expect(states).toEqual([]);
+    });
+
+    it('cancels an await on a helper', async () => {
+      manager.setHelper(HELPER, true);
+      await expect(manager.awaitCompletion(HELPER, { until: 'quiet', timeoutMs: 10_000 }).promise)
+        .resolves.toEqual({ kind: 'cancelled', waitedMs: 0 });
+    });
+
+    it('keeps the command a helper was running when it is promoted mid-command', () => {
+      manager.setWatchedCommands(['claude']);
+      manager.setHelper(HELPER, true);
+      startCommand(HELPER, 'claude');
+      outputFor(HELPER, 3_000);
+
+      const states: boolean[] = [];
+      manager.onStateChange((id, state) => { if (id === HELPER) states.push(state.watchingEnabled); });
+      manager.setHelper(HELPER, false);
+      // Promotion publishes what the helper built up: WATCHING on `claude`, now.
+      expect(states).toEqual([true]);
+      expect(manager.getState(HELPER)).toMatchObject({ watchingEnabled: true, status: 'BUSY' });
+
+      // Its next unattended settle rings like any watched Session's.
+      settle();
+      expect(manager.getState(HELPER).status).toBe('ALERT_RINGING');
+    });
+
+    it('never replays a completion suppressed before promotion', () => {
+      manager.setWatchedCommands(['claude']);
+      manager.setHelper(HELPER, true);
+      startCommand(HELPER, 'claude');
+      outputFor(HELPER, 3_000);
+      settle();
+      applyTerminalProtocolEvents(manager, HELPER, [{ kind: 'notification', notification: { source: 'OSC 9', title: null, body: 'done' } }]);
+
+      manager.setHelper(HELPER, false);
+      vi.advanceTimersByTime(10_000);
+      expect(manager.getState(HELPER)).toMatchObject({ status: 'NOTHING_TO_SHOW', todo: false, notification: null });
+    });
+
+    it('does not ring the exit of a command it never saw with attention', () => {
+      manager.setHelper(HELPER, true);
+      startCommand(HELPER, 'npm run build');
+      manager.setHelper(HELPER, false);
+      vi.advanceTimersByTime(30_000);
+      manager.applyTerminalSemanticEvents(HELPER, [{ type: 'commandFinish', exitCode: 0 }]);
+      expect(manager.getState(HELPER).status).toBe('WATCHING_DISABLED');
+
+      // The ordinary seen rule applies from promotion on.
+      startCommand(HELPER, 'npm run build');
+      manager.attend(HELPER);
+      manager.clearAttention(HELPER);
+      vi.advanceTimersByTime(30_000);
+      manager.applyTerminalSemanticEvents(HELPER, [{ type: 'commandFinish', exitCode: 0 }]);
+      expect(manager.getState(HELPER).status).toBe('ALERT_RINGING');
+    });
+
+    it('takes back what a Session published when a failed placement demotes it', () => {
+      manager.setHelper(HELPER, true);
+      manager.setHelper(HELPER, false);
+      manager.markTodo(HELPER);
+      const states: boolean[] = [];
+      manager.onStateChange((id, state) => { if (id === HELPER) states.push(state.todo); });
+      manager.setHelper(HELPER, true);
+      expect(states).toEqual([false]);
+      expect(manager.getState(HELPER)).toEqual(DEFAULT_ALERT_STATE);
+    });
   });
 
   it('state machine advances through silence to ALERT_RINGING', () => {
@@ -607,14 +694,22 @@ describe('AlertManager in isolation', () => {
     expect(watching).toContain(false);
   });
 
-  it('matches on the bare program name, not the whole command line', () => {
-    const id = 'rule-argv0';
+  it('matches on the watch key, not the whole command line', () => {
+    const id = 'rule-watch-key';
     manager.setWatchedCommands(['claude']);
 
     manager.applyTerminalSemanticEvents(id, [
       { type: 'commandLine', commandLine: 'FOO=1 env BAR=2 /usr/local/bin/claude --resume' },
       { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
     ]);
+    expect(manager.getState(id).watchingEnabled).toBe(true);
+  });
+
+  it('engages WATCHING for a command fish reports on OSC 133;C', () => {
+    const id = 'rule-fish';
+    manager.setWatchedCommands(['claude']);
+    const parsed = new TerminalProtocolParser().process('\x1b]133;C;cmdline_url=claude%20--resume\x1b\\');
+    manager.applyTerminalSemanticEvents(id, collectTerminalSemanticEvents(parsed.events));
     expect(manager.getState(id).watchingEnabled).toBe(true);
   });
 
@@ -690,6 +785,45 @@ describe('AlertManager in isolation', () => {
       watchingEnabled: false,
       todo: false,
     });
+  });
+
+  it('rings a runner script only under a rule that covers it', () => {
+    const id = 'runner-script-rule';
+    const ringsUnder = (rules: string[]): boolean => {
+      manager.setWatchedCommands(rules);
+      manager.applyTerminalSemanticEvents(id, [
+        { type: 'commandLine', commandLine: 'pnpm run dev' },
+        { type: 'commandStart', source: 'osc633_boundaries' },
+      ]);
+      driveToBusy(id);
+      settle();
+      const ringing = manager.getState(id).status === 'ALERT_RINGING';
+      manager.clearTodo(id);
+      manager.applyTerminalSemanticEvents(id, [{ type: 'promptStart' }]);
+      return ringing;
+    };
+
+    expect(ringsUnder(['pnpm test'])).toBe(false);
+    expect(ringsUnder(['pnpm dev'])).toBe(true);
+    // A bare runner rule keeps matching every script of that runner.
+    expect(ringsUnder(['pnpm'])).toBe(true);
+  });
+
+  it('keeps a WATCHING ring whose command another rule still covers', () => {
+    const id = 'ring-survives-covered';
+    manager.setWatchedCommands(['pnpm', 'pnpm dev']);
+    manager.applyTerminalSemanticEvents(id, [
+      { type: 'commandLine', commandLine: 'pnpm dev' },
+      { type: 'commandStart', source: 'osc633_boundaries' },
+    ]);
+    driveToBusy(id);
+    settle();
+    expect(manager.getState(id).status).toBe('ALERT_RINGING');
+
+    manager.setWatchedCommands(['pnpm']);
+    expect(manager.getState(id).status).toBe('ALERT_RINGING');
+    manager.setWatchedCommands([]);
+    expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
   });
 
   it('silences a latched WATCHING ring when its rule is removed after command exit', () => {
@@ -1220,7 +1354,7 @@ describe('AlertManager in isolation', () => {
       expect(seen).toEqual([{
         kind: 'commandFinished',
         displayCommand: 'npm test',
-        argv0: 'npm',
+        watchKey: 'npm test',
         exitCode: 0,
         ranMs: 1_000,
         armed: false,
@@ -1249,7 +1383,7 @@ describe('AlertManager in isolation', () => {
       expect(seen).toEqual([{
         kind: 'commandFinished',
         displayCommand: 'pnpm build',
-        argv0: 'pnpm',
+        watchKey: 'pnpm build',
         exitCode: 0,
         ranMs: 15_000,
         armed: true,
@@ -1367,7 +1501,7 @@ describe('AlertManager in isolation', () => {
         event: {
           kind: 'commandFinished',
           displayCommand: 'pnpm build',
-          argv0: 'pnpm',
+          watchKey: 'pnpm build',
           exitCode: 1,
           ranMs: 15_000,
           armed: true,

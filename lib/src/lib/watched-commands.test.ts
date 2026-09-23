@@ -7,9 +7,9 @@ vi.mock('./platform', () => ({
   getPlatform: () => ({ alertSetWatchedCommands, alertSetCommandWatched }),
 }));
 
-import { commandArgv0 } from './terminal-state';
 import {
   applyWatchedCommandsFromHost,
+  commandWatchRule,
   getWatchedCommands,
   isCommandWatched,
   publishWatchedCommands,
@@ -27,32 +27,6 @@ afterEach(() => {
   alertSetCommandWatched.mockClear();
 });
 
-describe('commandArgv0', () => {
-  it.each([
-    ['claude', 'claude'],
-    ['claude --print hello', 'claude'],
-    ['/usr/local/bin/claude --resume', 'claude'],
-    ['FOO=1 claude', 'claude'],
-    ['FOO=1 env BAR=2 claude', 'claude'],
-    ['"/opt/my tools/claude" --print', 'claude'],
-    // Only the first simple command counts — this matches what bash's DEBUG
-    // trap reports for a pipeline (docs/specs/terminal-escapes.md).
-    ['foo | claude', 'foo'],
-    ['pnpm test && claude', 'pnpm'],
-  ])('reduces %j to %j', (raw, expected) => {
-    expect(commandArgv0(raw)).toBe(expected);
-  });
-
-  it.each(['', '   ', '|', 'FOO=1'])('returns null for %j', (raw) => {
-    expect(commandArgv0(raw)).toBeNull();
-  });
-
-  it('reduces a native Windows path to the bare name a rule is stored under', () => {
-    // The tokenizer's dialect handling is pinned in `terminal-state.test.ts`.
-    expect(commandArgv0('C:\\Users\\me\\.claude\\local\\claude')).toBe('claude');
-  });
-});
-
 describe('watched-commands store', () => {
   it('drops a key no command line can ever produce', () => {
     // Written by the pre-fix tokenizer, which ate the backslashes in
@@ -66,7 +40,7 @@ describe('watched-commands store', () => {
     ]);
     expect(getWatchedCommands()).toEqual(['claude', 'foo:bar']);
     // Same gate on the write path — a drive-relative invocation is the one
-    // shape `commandArgv0` can still return with a `:` in it.
+    // shape a program name can still arrive in with a `:` in it.
     setCommandWatched('C:foo.exe', true);
     expect(getWatchedCommands()).toEqual(['claude', 'foo:bar']);
     // A launcher suffix is the other tell: a relative invocation had no
@@ -81,6 +55,32 @@ describe('watched-commands store', () => {
       'foo:bar',
     ]);
     expect(getWatchedCommands()).toEqual(['claude', 'foo:bar']);
+  });
+
+  it('keeps a runner and script key and drops a malformed one', () => {
+    applyWatchedCommandsFromHost([
+      'pnpm dev',
+      'npm test:unit',
+      'pnpm',
+      'pnpm  dev',
+      'npm run dev extra',
+      'npm.cmd test',
+      'make build/app.o',
+      ' pnpm',
+    ]);
+    expect(getWatchedCommands()).toEqual(['npm test:unit', 'pnpm', 'pnpm dev']);
+    setCommandWatched('npm.cmd dev', true);
+    setCommandWatched('cargo build', true);
+    expect(getWatchedCommands()).toEqual(['cargo build', 'npm test:unit', 'pnpm', 'pnpm dev']);
+  });
+
+  it('names the rule covering a running command, a bare runner covering its scripts', () => {
+    setCommandWatched('pnpm test', true);
+    expect(commandWatchRule('pnpm test')).toBe('pnpm test');
+    expect(commandWatchRule('pnpm dev')).toBeNull();
+    setCommandWatched('pnpm', true);
+    expect(commandWatchRule('pnpm dev')).toBe('pnpm');
+    expect(commandWatchRule(null)).toBeNull();
   });
 
   it('adds, reports, and removes rules', () => {

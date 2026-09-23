@@ -138,9 +138,10 @@ export const CustomTimings: Story = {
 };
 
 /**
- * A realistic accumulated rule set next to a long command name. argv0 is a
- * basename so it is normally short, but nothing enforces that — a pathological
- * name must truncate instead of widening the dialog.
+ * A realistic accumulated rule set next to a long command name. A watch key is
+ * a basename or `<runner> <script>`, so it is normally short, but nothing
+ * enforces that — a pathological name must truncate instead of widening the
+ * dialog.
  */
 export const ManyRules: Story = {
   parameters: {

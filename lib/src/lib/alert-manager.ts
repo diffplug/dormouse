@@ -4,8 +4,9 @@ import { applyTerminalProtocolEvents, collectTerminalSemanticEvents, type Termin
 import { DEFAULT_ALERT_SETTINGS, type AlertSettings } from './alert-settings-model';
 import { cfg } from '../cfg';
 import {
-  commandArgv0,
+  commandWatchKey,
   resolveCommandStart,
+  watchRuleFor,
   DEFAULT_COMMAND_TITLE,
   type CommandRunSource,
   type TerminalSemanticEvent,
@@ -52,8 +53,8 @@ interface ActiveProtocolProgress {
 
 interface CommandExitWatch {
   displayCommand: string;
-  /** Bare program name the WATCHING rule set is keyed on; null without shell integration. */
-  argv0: string | null;
+  /** `commandWatchKey` of the command line; null without one to key on. */
+  watchKey: string | null;
   source: CommandRunSource;
   startedAt: number;
   seenWithAttentionAt: number | null;
@@ -87,7 +88,7 @@ export type CompletionEvent =
   | {
       kind: 'commandFinished';
       displayCommand: string;
-      argv0: string | null;
+      watchKey: string | null;
       exitCode: number | undefined;
       /** Wall time from commandStart to this finish. */
       ranMs: number;
@@ -178,7 +179,7 @@ interface AlertEntry {
   episode: AlertEpisode | null;
   /** Always-on output/silence detector. Never disposed before the entry is. */
   detector: QuiesceDetector;
-  /** Command rule that raised the latched WATCHING ring, even after command exit. */
+  /** Watch key of the command whose settle latched the WATCHING ring, kept after it exits. */
   watchingRingingCommand: string | null;
   /**
    * Has any output arrived since that ring latched? The detector cannot answer
@@ -222,9 +223,11 @@ export class AlertManager {
   private listeners = new Set<(id: string, state: AlertState) => void>();
   private lastEmitted = new Map<string, AlertState>();
   private watchedCommands = new Set<string>();
-  /** Helper Sessions never alert (docs/specs/alert.md → "suppress helper
-   *  alerting until promotion"): every ingestion and control entry point below
-   *  drops them here, so a host marks the id once instead of guarding each call. */
+  /** Helper Sessions alert no one until promotion (docs/specs/alert.md → Pane
+   *  Header). They still build command state and feed the detector, so one
+   *  promoted mid-command knows what it is running; everything else — reports,
+   *  controls, awaits, completion dispatch, publishing — drops them, so a host
+   *  marks the id once instead of guarding each call. */
   private helpers = new Set<string>();
   private inactivityTimeoutMs = cfg.alert.userAttention;
   /** The shipped default (platform-free module: this runs in both hosts), so a
@@ -272,6 +275,10 @@ export class AlertManager {
   setHelper(id: string, helper: boolean): void {
     if (helper) this.helpers.add(id);
     else this.helpers.delete(id);
+    // Promotion publishes the state the helper built up — nothing that was
+    // suppressed, since a helper's completions were never kept. A failed
+    // placement's demotion takes back whatever the Session had published.
+    if (this.entries.has(id)) this.notify(id);
   }
 
   // --- State change subscription ---
@@ -284,7 +291,6 @@ export class AlertManager {
   // --- Feed PTY events ---
 
   onData(id: string): void {
-    if (this.inert(id)) return;
     // The detector runs for every Session, including one that has never
     // produced a semantic or protocol event, so output creates the entry.
     const entry = this.streamEntry(id);
@@ -298,7 +304,7 @@ export class AlertManager {
   }
 
   onExit(id: string, exitCode?: number): void {
-    if (this.inert(id)) return;
+    if (this.suspendedForTransfer.has(id)) return;
     const entry = this.entries.get(id);
     if (entry && this.finishCommandExitWatch(id, entry, exitCode)) this.notify(id);
     // The command-exit dispatch above already resolved anything waiting on the
@@ -308,7 +314,6 @@ export class AlertManager {
   }
 
   onResize(id: string): void {
-    if (this.inert(id)) return;
     // Same reasoning as `onData`: the resize grace window is part of the
     // always-on detector, and a Pane's first fit usually beats any PTY event.
     this.streamEntry(id)?.detector.onResize();
@@ -317,7 +322,7 @@ export class AlertManager {
   // --- WATCHING rule set ---
 
   /**
-   * Replace the set of command names WATCHING applies to (`docs/specs/alert.md`).
+   * Replace the set of command keys WATCHING applies to (`docs/specs/alert.md`).
    * Pushed from the renderer, which owns the persisted copy — the extension host
    * has no `localStorage` of its own.
    */
@@ -330,11 +335,12 @@ export class AlertManager {
       // re-applies this rule wherever the snapshot lands.
       if (this.suspendedForTransfer.has(id)) continue;
       // Dropping a rule is an explicit "stop alerting on this", so it also
-      // silences the ring that rule already raised. The originating key stays
-      // latched after command exit precisely so this still works at a prompt.
+      // silences the ring that rule already raised — unless another rule still
+      // covers it. The originating key stays latched after command exit
+      // precisely so this still works at a prompt.
       if (
         entry.watchingRingingCommand !== null
-        && !this.watchedCommands.has(entry.watchingRingingCommand)
+        && watchRuleFor(this.watchedCommands, entry.watchingRingingCommand) === null
       ) {
         entry.watchingRingingCommand = null;
         entry.outputSinceWatchingRing = false;
@@ -360,13 +366,12 @@ export class AlertManager {
   }
 
   /**
-   * WATCHING follows the foreground command's name: on while a watched command
-   * runs, off at the prompt. The detector keeps running either way; this only
-   * decides whether its state is public and whether a settle rings.
+   * WATCHING follows the foreground command's watch key: on while a command a
+   * rule covers runs, off at the prompt. The detector keeps running either way;
+   * this only decides whether its state is public and whether a settle rings.
    */
   private isWatching(entry: AlertEntry): boolean {
-    const argv0 = entry.commandExitWatch?.argv0 ?? null;
-    return argv0 !== null && this.watchedCommands.has(argv0);
+    return watchRuleFor(this.watchedCommands, entry.commandExitWatch?.watchKey ?? null) !== null;
   }
 
   private createDetector(id: string): QuiesceDetector {
@@ -438,6 +443,8 @@ export class AlertManager {
    * have passed on it. Returns whether a claimant took the event.
    */
   private dispatchCompletion(id: string, entry: AlertEntry, event: CompletionEvent): boolean {
+    // A helper's completion reaches no one, and is not kept for promotion.
+    if (this.helpers.has(id)) return false;
     // Snapshot: a claimant may unregister itself (or register another) while
     // being offered this very event.
     const claimants = [...(this.claimants.get(id) ?? [])];
@@ -450,7 +457,7 @@ export class AlertManager {
         // outlives the command that raised it.
         if (!this.isWatching(entry) || this.hasAttention(id)) break;
         this.openEpisode(entry);
-        entry.watchingRingingCommand = entry.commandExitWatch?.argv0 ?? null;
+        entry.watchingRingingCommand = entry.commandExitWatch?.watchKey ?? null;
         entry.outputSinceWatchingRing = false;
         this.notify(id);
         break;
@@ -761,7 +768,7 @@ export class AlertManager {
   // --- Command-exit track ---
 
   applyTerminalSemanticEvents(id: string, events: TerminalSemanticEvent[]): void {
-    if (events.length === 0 || this.inert(id)) return;
+    if (events.length === 0 || this.suspendedForTransfer.has(id)) return;
     const entry = this.reportedEntry(id);
     let changed = false;
 
@@ -809,7 +816,7 @@ export class AlertManager {
     if (entry.commandExitStatus !== 'ALERT_RINGING') entry.commandExitStatus = 'IDLE';
     entry.commandExitWatch = {
       displayCommand: resolved.displayCommand,
-      argv0: resolved.rawCommandLine === null ? null : commandArgv0(resolved.rawCommandLine),
+      watchKey: resolved.rawCommandLine === null ? null : commandWatchKey(resolved.rawCommandLine),
       source: resolved.source,
       startedAt: resolved.startedAt,
       seenWithAttentionAt: this.hasAttention(id) ? Date.now() : null,
@@ -839,7 +846,7 @@ export class AlertManager {
       this.dispatchCompletion(id, entry, {
         kind: 'commandFinished',
         displayCommand: watch.displayCommand,
-        argv0: watch.argv0,
+        watchKey: watch.watchKey,
         exitCode,
         ranMs: Date.now() - watch.startedAt,
         armed: wasArmed,
@@ -1115,7 +1122,7 @@ export class AlertManager {
 
   getState(id: string): AlertState {
     const entry = this.entries.get(id);
-    if (!entry) return DEFAULT_ALERT_STATE;
+    if (!entry || this.helpers.has(id)) return DEFAULT_ALERT_STATE;
     return {
       status: this.getProjectedStatus(entry),
       watchingEnabled: this.isWatching(entry),
@@ -1129,16 +1136,17 @@ export class AlertManager {
   getAllStates(): Map<string, AlertState> {
     const result = new Map<string, AlertState>();
     for (const [id] of this.entries) {
-      result.set(id, this.getState(id));
+      if (!this.helpers.has(id)) result.set(id, this.getState(id));
     }
     return result;
   }
 
   /** Completely remove alert state for a PTY (used when PTY is destroyed) */
   remove(id: string): void {
+    // A helper that never published has nothing for subscribers to forget.
+    const unpublished = this.helpers.delete(id) && !this.lastEmitted.has(id);
     this.suspendedForTransfer.delete(id);
     this.liveReplay.delete(id);
-    this.helpers.delete(id);
     this.removed.add(id);
     // Nobody parked here has anything left to wait for.
     this.settleWaiters(id, 'died');
@@ -1154,7 +1162,7 @@ export class AlertManager {
       this.attentionId = null;
       this.clearAttentionTimer();
     }
-    this.notify(id);
+    if (!unpublished) this.notify(id);
   }
 
   /**
@@ -1181,7 +1189,8 @@ export class AlertManager {
     this.notify(id);
   }
 
-  /** A helper, or a Session suspended for a live handoff, accepts nothing. */
+  /** A Session suspended for a live handoff accepts nothing; a helper accepts
+   *  only what builds its command state. */
   private inert(id: string): boolean {
     return this.helpers.has(id) || this.suspendedForTransfer.has(id);
   }
@@ -1222,7 +1231,7 @@ export class AlertManager {
     entry.deferredNotificationTimer = null;
     entry.detector = this.createDetector(id);
     entry.detector.restore(detector);
-    if (entry.watchingRingingCommand !== null && !this.watchedCommands.has(entry.watchingRingingCommand)) {
+    if (entry.watchingRingingCommand !== null && watchRuleFor(this.watchedCommands, entry.watchingRingingCommand) === null) {
       entry.watchingRingingCommand = null;
       entry.outputSinceWatchingRing = false;
     }
@@ -1333,7 +1342,8 @@ export class AlertManager {
   private notify(id: string): void {
     const state = this.getState(id);
     const last = this.lastEmitted.get(id);
-    if (last && alertStatesEqual(last, state)) return;
+    // A helper publishes nothing, but takes back what it published before a demotion.
+    if (last ? alertStatesEqual(last, state) : this.helpers.has(id)) return;
     if (this.entries.has(id)) {
       this.lastEmitted.set(id, state);
     } else {

@@ -8,7 +8,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { execFileSync, spawnSync } = require('node:child_process');
-const { existsSync } = require('node:fs');
+const { existsSync, mkdtempSync, rmSync } = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 const dir = __dirname;
@@ -112,4 +113,146 @@ for (const [name, bin] of shells) {
   test(`${name}: escape still handles what it always did`, () => {
     assert.equal(callHelper(bin, '__dormouse_633_escape', 'a;b\\c'), 'a\\x3bb\\\\c');
   });
+
+  test(`${name}: escape keeps a multi-line command inside one sequence`, () => {
+    assert.equal(callHelper(bin, '__dormouse_633_escape', 'cat <<EOF\nhi\r\nEOF'), 'cat <<EOF\\x0ahi\\x0d\\x0aEOF');
+  });
 }
+
+// bash 4.0 is where a `bind -x` command runs with READLINE_LINE bound.
+const BASH_MAJOR = Number(execFileSync(BASH, ['-c', 'echo "${BASH_VERSINFO[0]}"'], { encoding: 'utf8' }).trim());
+
+/**
+ * Drive the real bash integration on a PTY, one submitted line at a time.
+ * `run` resolves with every `E` the line emitted (decoded as the parser decodes
+ * it) and the text the shell printed, once the next prompt is drawn.
+ */
+function interactiveBash() {
+  const pty = require('node-pty');
+  const home = mkdtempSync(path.join(os.tmpdir(), 'dormouse-bash-'));
+  const shell = pty.spawn(BASH, ['--init-file', path.join(dir, 'shell-integration/bash/shellIntegration.bash')], {
+    cols: 200,
+    rows: 50,
+    cwd: home,
+    // Bare on purpose: an exported HISTCONTROL, PROMPT_COMMAND or TERM_PROGRAM
+    // from the developer's shell would change what history keeps.
+    env: { PATH: process.env.PATH, HOME: home, TERM: 'xterm-256color' },
+  });
+  const exited = new Promise((resolve) => shell.onExit(resolve));
+  let output = '';
+  let prompts = 0;
+  let onPrompt = () => {};
+  shell.onData((data) => {
+    output += data;
+    // A prompt is ready at the `B` that follows an `A`: `B` rides PS1, which
+    // readline draws after taking the terminal raw, while input written at the
+    // bare `A` meets the cooked terminal, where macOS eats Ctrl-T as STATUS. A
+    // `bind -x` key redraws PS1, so a `B` with no fresh `A` is not a prompt.
+    const seen = (output.match(/\x1b\]633;A\x07[\s\S]*?\x1b\]633;B\x07/g) || []).length;
+    if (seen !== prompts) {
+      prompts = seen;
+      onPrompt();
+    }
+  });
+  const nextPrompt = (count) => new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`no prompt ${count}; tail: ${JSON.stringify(output.slice(-300))}`)), 15_000);
+    onPrompt = () => {
+      if (prompts >= count) {
+        clearTimeout(timer);
+        resolve();
+      }
+    };
+    onPrompt();
+  });
+  const decode = (field) => field.replace(/\\(?:x([0-9a-fA-F]{2})|\\)/g, (_, hex) => (hex ? String.fromCharCode(parseInt(hex, 16)) : '\\'));
+  let ready = nextPrompt(1);
+  return {
+    async run(line) {
+      await ready;
+      const start = output.length;
+      shell.write(`${line}\r`);
+      ready = nextPrompt(prompts + 1);
+      await ready;
+      const chunk = output.slice(start);
+      return {
+        commands: [...chunk.matchAll(/\x1b\]633;E;([^\x07]*)\x07/g)].map((m) => decode(m[1])),
+        starts: chunk.split('\x1b]633;C\x07').length - 1,
+        printed: chunk,
+      };
+    },
+    async close() {
+      // `exit`, not a signal: SIGHUP intermittently left bash (5.2, in a Linux
+      // container) alive, and the live PTY kept the test process from exiting.
+      shell.write('exit\r');
+      const backstop = setTimeout(() => shell.kill('SIGKILL'), 5_000);
+      await exited;
+      clearTimeout(backstop);
+      rmSync(home, { recursive: true, force: true });
+    },
+  };
+}
+
+// $BASH_COMMAND is only a line's first simple command, so the bash preexec reads
+// the whole line back from history; this pins that it does, and that a line
+// history did not take never reports the stale entry left in its place. Both
+// hinge on bash's own line reader, which no `bash -c` reaches — hence the PTY.
+test('bash: E is the whole submitted line, and never a stale history entry', { timeout: 60_000 }, async () => {
+  const bash = interactiveBash();
+  try {
+    const expect = async (line, expected) => {
+      const { commands } = await bash.run(line);
+      assert.deepEqual(commands, [expected], `bash reported ${JSON.stringify(commands)} for ${JSON.stringify(line)}`);
+    };
+    // Seeds history: before 5.1, fc cannot vouch for a history's only entry.
+    await expect('true', 'true');
+    // $BASH_COMMAND reads `echo spaced`; the entry is matched whitespace aside.
+    await expect('echo  spaced  &&  echo x', 'echo  spaced  &&  echo x');
+    // Two physical lines, one joined entry: the last line appends, adding nothing.
+    await expect('echo m1 && \\\recho m2', 'echo m1 && echo m2');
+    await expect('HISTCONTROL=ignoredups', 'HISTCONTROL=ignoredups');
+    await expect('echo p && echo q', 'echo p && echo q');
+    // Kept out as a duplicate, so the last entry is still this very line.
+    await expect('echo p && echo q', 'echo p && echo q');
+    await expect('set +o history; echo a && echo b', 'set +o history; echo a && echo b');
+    // History is off; the last entry contains `echo a` and is not this line.
+    await expect('echo a', 'echo a');
+    await expect('set -o history', 'set -o history');
+    await expect("HISTIGNORE='cd /'", "HISTIGNORE='cd /'");
+    await expect('cd / && echo hi', 'cd / && echo hi');
+    // Kept out by HISTIGNORE; the last entry contains `cd /` but is the line before.
+    await expect('cd /', 'cd /');
+    await expect('unset HISTIGNORE; HISTCONTROL=ignorespace', 'unset HISTIGNORE; HISTCONTROL=ignorespace');
+    await expect('cd / && echo hi', 'cd / && echo hi');
+    // Kept out by its leading space, with the same stale entry.
+    await expect(' cd /', 'cd /');
+    // A widget the way fzf's Ctrl-R is one: a `bind -x` key that fills the line.
+    const widget = `__widget() { READLINE_LINE='echo widget'; READLINE_POINT=11; }; bind -x '"\\C-t": __widget'`;
+    await expect(widget, widget);
+    await expect('cd / && echo hi', 'cd / && echo hi');
+    // Ctrl-T, then Enter on the line it left.
+    const key = await bash.run('\x14');
+    if (BASH_MAJOR >= 4) {
+      // The key is no command; the line it filled is, with the one E/C pair.
+      assert.deepEqual(key.commands, ['echo widget']);
+      assert.equal(key.starts, 1);
+    } else {
+      // 3.2 gives a `bind -x` command no signal, so the key still reads as one.
+      // Its trap fires with the previous line last in history, which must not
+      // be reported again.
+      assert.ok(!key.commands.includes('cd / && echo hi'), `the previous line was re-reported: ${JSON.stringify(key.commands)}`);
+    }
+    // On 3.2 the widget left READLINE_LINE set; that must not silence a line.
+    await expect('echo after && echo key', 'echo after && echo key');
+    // The DEBUG trap leaves $_ as its own last word, so it passes the user's.
+    const { printed } = await bash.run('echo foo; echo "u=$_"');
+    assert.match(printed, /u=foo/);
+    // Last, since it leaves every later line without its E/C: a hook appended
+    // after ours in PROMPT_COMMAND fires the trap once the prompt is armed. The
+    // last entry is then the line just run, which must not be reported again.
+    await bash.run(`__sfx() { :; }; PROMPT_COMMAND="$PROMPT_COMMAND; __sfx"`);
+    const { commands: afterHook } = await bash.run('cd / && echo hi');
+    assert.ok(!afterHook.includes('cd / && echo hi'), `the previous line was re-reported: ${JSON.stringify(afterHook)}`);
+  } finally {
+    await bash.close();
+  }
+});

@@ -135,6 +135,32 @@ function withPrependedPath(env, dir, platform = process.platform) {
   };
 }
 
+// Another terminal's identity, inherited when the host was launched from it.
+// Dormouse is the pane's terminal now, and tools read these to decide what to
+// emit (docs/specs/terminal-escapes.md -> "iTerm2 identity"). A `*` entry is a
+// prefix. Names compare case-insensitively on win32, like its environment.
+const FOREIGN_TERMINAL_ENV = [
+  'VTE_VERSION', 'WT_SESSION', 'WT_PROFILE_ID', 'TERM_FEATURES', 'TERM_SESSION_ID',
+  'ITERM_SESSION_ID', 'ITERM_PROFILE', 'ConEmu*', 'KONSOLE_VERSION', 'KONSOLE_DBUS_SERVICE',
+  'KONSOLE_DBUS_SESSION', 'KONSOLE_DBUS_WINDOW', 'PTYXIS_VERSION', 'KITTY_WINDOW_ID', 'KITTY_PID',
+  'KITTY_PUBLIC_KEY', 'KITTY_INSTALLATION_DIR', 'GHOSTTY_RESOURCES_DIR', 'GHOSTTY_BIN_DIR',
+  'GHOSTTY_SHELL_FEATURES', 'WEZTERM_*', 'ALACRITTY_WINDOW_ID', 'ALACRITTY_SOCKET', 'ALACRITTY_LOG',
+  'TERMINAL_EMULATOR', 'TERMINATOR_UUID', 'TILIX_ID', 'TMUX', 'TMUX_PANE', 'STY', 'COLORFGBG',
+  'CURSOR_TRACE_ID',
+];
+
+function isForeignTerminalEnv(key, platform) {
+  const name = platform === 'win32' ? key.toUpperCase() : key;
+  return FOREIGN_TERMINAL_ENV.some((entry) => {
+    const pattern = platform === 'win32' ? entry.toUpperCase() : entry;
+    return pattern.endsWith('*') ? name.startsWith(pattern.slice(0, -1)) : name === pattern;
+  });
+}
+
+function withoutForeignTerminalEnv(env, platform = process.platform) {
+  return Object.fromEntries(Object.entries(env).filter(([key]) => !isForeignTerminalEnv(key, platform)));
+}
+
 function withoutInternalDormouseEnv(env) {
   const next = { ...env };
   delete next.DORMOUSE_CLI_BIN;
@@ -291,11 +317,11 @@ function applyShellIntegration(shell, env, shellArgs, integrationDir, runtime = 
 
 function resolveSpawnConfig(options, runtime = {}) {
   const { cols = 80, rows = 30, cwd: requestedCwd, shell: explicitShell, args: explicitArgs, surfaceId } = options || {};
+  const platform = runtime.platform || process.platform;
   const env = {
-    ...(runtime.env || process.env),
+    ...withoutForeignTerminalEnv(runtime.env || process.env, platform),
     ...(options?.env || {}),
   };
-  const platform = runtime.platform || process.platform;
   const osModule = runtime.osModule || os;
   const fsModule = runtime.fsModule || fs;
   // Normalize the requested cwd into a native spelling before it reaches the OS,

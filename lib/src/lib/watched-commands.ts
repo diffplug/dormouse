@@ -1,9 +1,9 @@
 import { loadJson, saveJson } from './local-json-store';
 import { getPlatform } from './platform';
-import { WINDOWS_EXECUTABLE_SUFFIX } from './terminal-state';
+import { isWatchKey, watchRuleFor } from './terminal-state';
 
 /**
- * The WATCHING rule set: the bare program names (`commandArgv0` output) whose
+ * The WATCHING rule set: the command keys (`commandWatchKey` output) whose
  * Sessions run the output/silence monitor. WATCHING is a property of the
  * command, not of a Session — enabling it while `claude` runs enables it for
  * every Session running `claude`, now and later. See `docs/specs/alert.md`.
@@ -19,37 +19,22 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
 }
 
-/**
- * Whether a stored key is one `commandArgv0` can still produce. It is a bare
- * program name, so it holds no separator or legacy Windows drive prefix, and it
- * never ends in a launcher suffix — `commandProgramName` strips those. Keys
- * written before this module's fixes fail one test or the other: a full path
- * mangled to `C:toolsclaude.exe`, a relative one to `toolsdor.cmd`, and a bare
- * launcher stored cleanly as `npm.cmd`. Each can only sit in the rule list as
- * a row that matches nothing, so it is dropped rather than shown.
- *
- * Residual: a mangled *relative* path with no suffix (`bin\claude` ->
- * `binclaude`) is indistinguishable from a program actually named that, and
- * survives. The user deletes it from the rule list.
- */
-function isKeyableName(name: string): boolean {
-  return (
-    !/[\\/]/.test(name) &&
-    !/^[A-Za-z]:/.test(name) &&
-    !WINDOWS_EXECUTABLE_SUFFIX.test(name)
-  );
-}
-
 function readStored(): string[] {
   return normalize(loadJson<string[], string[]>(STORAGE_KEY, [], isStringArray));
 }
 
-// Dedupe and drop what can never be a rule: the key is user-visible in devtools
-// and in the rule list, so a malformed entry would otherwise sit there as a row
-// that matches nothing. Applied to both sources, `localStorage` and the host's
-// canonical snapshot, since a stale key reaches the mirror either way.
+// Dedupe and drop what can never be a rule — a key `commandWatchKey` cannot
+// produce (`isWatchKey`): the key is user-visible in devtools and in the rule
+// list, so a malformed entry would otherwise sit there as a row that matches
+// nothing. Keys written before earlier fixes fail it: a full path mangled to
+// `C:toolsclaude.exe`, a relative one to `toolsdor.cmd`, a bare launcher stored
+// cleanly as `npm.cmd`. Residual: a mangled *relative* path with no suffix
+// (`bin\claude` -> `binclaude`) is indistinguishable from a program actually
+// named that, and survives until the user deletes it. Applied to both sources,
+// `localStorage` and the host's canonical snapshot, since a stale key reaches
+// the mirror either way.
 function normalize(names: string[]): string[] {
-  return [...new Set(names.map((name) => name.trim()).filter(Boolean).filter(isKeyableName))].sort();
+  return [...new Set(names.map((name) => name.trim()).filter(Boolean).filter(isWatchKey))].sort();
 }
 
 let watched: string[] = readStored();
@@ -74,12 +59,18 @@ export function isCommandWatched(name: string | null | undefined): boolean {
   return watched.includes(name);
 }
 
+/** The rule covering a running command's `commandWatchKey`, or null — a bare
+ *  runner rule covers every script of that runner. */
+export function commandWatchRule(key: string | null): string | null {
+  return watchRuleFor(new Set(watched), key);
+}
+
 export function setCommandWatched(name: string, on: boolean): void {
   const trimmed = name.trim();
   // Same gate `normalize` applies on the way in, so a key that would be dropped
   // on the next reload is never stored: it would otherwise match for the rest of
   // the session and then vanish with nothing on screen to explain it.
-  if (!trimmed || !isKeyableName(trimmed)) return;
+  if (!trimmed || !isWatchKey(trimmed)) return;
   if (watched.includes(trimmed) === on) return;
   watched = on
     ? [...watched, trimmed].sort()

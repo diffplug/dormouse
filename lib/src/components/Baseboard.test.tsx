@@ -28,6 +28,7 @@ import {
 import { resetShellStore, seedShellStore } from '../lib/shell-store';
 import { addPlainNote, clearAllNotepads } from '../lib/notepad/notepad-store';
 import { resetPushDevices, setPushDevices, setPushDevicesRefresher } from '../lib/push-devices';
+import { clearTerminalActivity, setTerminalActivity } from '../lib/session-activity-store';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -385,6 +386,72 @@ describe('Baseboard Door notepad', () => {
   });
 });
 
+
+describe('Baseboard overflow alerts', () => {
+  afterEach(() => act(() => clearTerminalActivity()));
+
+  const items = ['a', 'b', 'c', 'd'].map(id => ({ id, title: id, kind: 'terminal' as const }));
+  const renderSelected = (selected: string) => act(() => root.render(
+    <SelectedIdContext.Provider value={selected}><Baseboard items={items} onReattach={() => {}} /></SelectedIdContext.Provider>,
+  ));
+  const arrow = (direction: 'left' | 'right') => container.querySelector<HTMLButtonElement>(`[data-overflow-arrow="${direction}"]`);
+
+  it('marks an overflow arrow for the ringing and TODO Doors it hides', () => {
+    act(() => {
+      setTerminalActivity('b', { status: 'ALERT_RINGING' });
+      setTerminalActivity('c', { todo: true });
+      setTerminalActivity('d', { status: 'ALERT_RINGING', todo: true });
+    });
+    // The zero-width test viewport fits exactly one Door.
+    renderSelected('a');
+    const right = arrow('right');
+    expect(right?.getAttribute('aria-label')).toBe('3 more, 2 ringing, 2 TODO');
+    expect(right?.querySelector('[data-alert-ring-inset="door"]')).not.toBeNull();
+    expect(right?.textContent).toContain('TODO');
+    // Static: the arrow never replays the arrival burst.
+    expect(right?.querySelector('[data-alert-ring-inset]')?.className).not.toContain('animate');
+    expect(arrow('left')).toBeNull();
+
+    // The same on the other side, for exactly the Doors hidden there.
+    renderSelected('d');
+    expect(arrow('left')?.getAttribute('aria-label')).toBe('3 more, 1 ringing, 1 TODO');
+    expect(arrow('right')).toBeNull();
+  });
+
+  it('leaves an arrow plain while the Doors it hides owe nothing', () => {
+    act(() => setTerminalActivity('a', { status: 'ALERT_RINGING', todo: true }));
+    renderSelected('a');
+    const right = arrow('right');
+    expect(right?.getAttribute('aria-label')).toBe('3 more');
+    expect(right?.querySelector('[data-alert-ring-inset]')).toBeNull();
+    expect(right?.textContent).not.toContain('TODO');
+  });
+
+  it('reserves the wider arrow a hidden TODO Door needs', () => {
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(private callback: ResizeObserverCallback) {}
+      observe(target: HTMLElement) {
+        const width = target.classList.contains('h-7') ? 244 : 72;
+        this.callback([{ target, contentRect: { width } } as ResizeObserverEntry], this as unknown as ResizeObserver);
+      }
+      disconnect() {}
+    });
+    // Budget 244 - 72 = 172: two 60px Doors fit beside a 20px arrow, not a 60px one.
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      if (this.getAttribute('role') === 'group') return 60;
+      if (this.tagName === 'BUTTON') return this.textContent?.includes('TODO') ? 60 : 20;
+      return 16;
+    });
+    const three = items.slice(0, 3);
+    const render = () => act(() => root.render(<Baseboard items={three} onReattach={() => {}} />));
+    render();
+    expect(container.querySelectorAll('[data-door-id]')).toHaveLength(2);
+    act(() => setTerminalActivity('c', { todo: true }));
+    render();
+    expect(container.querySelectorAll('[data-door-id]')).toHaveLength(1);
+    expect(arrow('right')?.getAttribute('aria-label')).toBe('2 more, 1 TODO');
+  });
+});
 
 describe('Baseboard Tool unsaved changes', () => {
   afterEach(() => act(() => resetToolDirty()));

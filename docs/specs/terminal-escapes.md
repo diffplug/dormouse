@@ -22,7 +22,7 @@ State-driving and security-sensitive OSCs — plus the `CSI > q` query — are p
 
 **Must buffer an unterminated consumed OSC up to `OSC_INCOMPLETE_LIMIT` (16,384 UTF-16 code units), then discard through its terminator or cancellation**, retaining only a split `ESC`, never promoting payload to text or its terminating BEL to an alert (rationale). A complete sequence in a single read is parsed whole. Pinned by `discards an oversized consumed OSC through its %j terminator` in `lib/src/lib/terminal-protocol.test.ts`. **An unterminated OSC the parser will forward streams to xterm.js instead**, preserving a split `ESC \` terminator (rationale). **Route by the OSC id, and decide nothing while more digits could follow** — `133` becomes `1337` — for `1337` by the subcommand ([Inline graphics](#inline-graphics)).
 
-**Every semantic value `TerminalProtocolParser` *retains* is bounded and stripped of control characters before storage**, whatever the emitter: `TITLE_LIMIT` / `BODY_LIMIT` for titles and notification bodies, whose whitespace controls collapse to spaces before the trim; `COMMAND_LINE_LIMIT` for the OSC 633 `E` command line, bounded *before* the `\xNN` unescape and sanitized *after* it (rationale); `MAX_CWD_LENGTH` for every CWD source, interior whitespace preserved. **Every limit counts code points**, so a cut never splits a surrogate pair. **A value that reduces to nothing is dropped, never stored empty.**
+**Every semantic value `TerminalProtocolParser` *retains* is bounded and stripped of control characters before storage**, whatever the emitter: `TITLE_LIMIT` / `BODY_LIMIT` for titles and notification bodies, whose whitespace controls collapse to spaces before the trim; `COMMAND_LINE_LIMIT` for the command line (`OSC 633 ; E`, `OSC 133 ; C`), bounded *before* its decoding and sanitized *after* it (rationale); `MAX_CWD_LENGTH` for every CWD source, interior whitespace preserved. **Every limit counts code points**, so a cut never splits a surrogate pair. **A value that reduces to nothing is dropped, never stored empty.**
 
 **The owner alone acts on the events** its parse produced — writing the responses, recording the semantic state — and hands every consumer the same chunk ([remote-api.md](remote-api.md#terminal-surfaces)).
 
@@ -55,8 +55,9 @@ Replay (`pty:replay`) is the raw stream requiring re-parse: **the webview runs a
 | `OSC 9 ; <message> ST` | iTerm2 legacy notification | [alert.md](alert.md#terminal-reports) |
 | `OSC 9 ; 4 ; <state> [; <progress>] ST` | iTerm2 progress | [alert.md](alert.md#terminal-reports) |
 | `OSC 9 ; 9 ; <cwd> ST` | CWD (Windows Terminal / ConEmu) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
+| `OSC 9 ; <n> [; ...] ST` | Any other ConEmu subcommand — sleep, tab title, GuiMacro, the `9;12` prompt mark, a bare `9;9`; consumed and ignored | [alert.md](alert.md#terminal-reports) |
 | `OSC 99 ; <metadata> ; <payload> ST` | kitty desktop notification. Dormouse also **answers** the `p=?` capability query with `OSC 99 ; [i=<id>:]p=? ; o=always:p=title,body ST`. | [alert.md](alert.md#terminal-reports) |
-| `OSC 133 ; A/B/C/D [...] ST` | Prompt/command boundaries; command-exit alert input | [terminal-state.md](terminal-state.md#supported-osc-inputs), [alert.md](alert.md#command-exit-track) |
+| `OSC 133 ; A/B/C/D [...] ST` | Prompt/command boundaries, `C` optionally carrying the command line (`cmdline_url=` / `cmdline=`); command-exit alert input | [terminal-state.md](terminal-state.md#supported-osc-inputs), [alert.md](alert.md#command-exit-track) |
 | `OSC 633 ; A/B/C/D ST` | VS Code prompt/command boundaries; command-exit alert input | [terminal-state.md](terminal-state.md#supported-osc-inputs), [alert.md](alert.md#command-exit-track) |
 | `OSC 633 ; E ; <commandline> [; <nonce>] ST` | VS Code command line | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 633 ; P ; Cwd=<cwd> ST` | CWD (VS Code) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
@@ -160,6 +161,8 @@ Environment for spawned PTYs:
 
 **Never advertise** feature-specific support before the behavior exists; the device answer's shape is in [Supported CSI](#supported-csi).
 
+**Must strip another terminal's identity from the inherited environment before setting Dormouse's** — its session, version, and multiplexer variables — so a tool never drives a terminal that is not there (rationale). Source of truth: `FOREIGN_TERMINAL_ENV` in `standalone/sidecar/pty-core.js`, pinned by `standalone/sidecar/pty-core.test.js`.
+
 The identity provokes more iTerm2 escape codes than Dormouse implements, so **unsupported escape codes must fail inertly** — consumed or ignored, with no visible terminal garbage, privilege escalation, clipboard access, file access, or focus stealing; OSC and CSI alike ([Pass-through and fail-inertly](#pass-through-and-fail-inertly)).
 
 ## Shell-integration injection
@@ -171,7 +174,7 @@ The identity provokes more iTerm2 escape codes than Dormouse implements, so **un
 | Shell | Mechanism | Channel | Notes |
 |---|---|---|---|
 | zsh | `ZDOTDIR` → our dotfiles chain to the user's, then install `precmd`/`preexec` hooks | env (as reliable as the `PATH` prepend) | **Nothing may be written into our directory when shipped** — signed macOS app bundle (rationale). **A `HISTFILE` set inside it is redirected to `USER_ZDOTDIR`**; a user-set one is never touched. |
-| bash | `--init-file` → our script installs a `DEBUG`-trap / `PROMPT_COMMAND` hook | shellArgs | **Injected only when the launch args are *purely* interactive/login flags** (`-i`/`-l`/`--login`), so Git Bash's `--login -i` is covered and a specific `-c <cmd>` is not (rationale). **The whole argv is replaced with `--init-file <script>`** — `-l` and `-i` go with it, and the script replicates login startup itself. **`E` is a pipeline's first simple command**; boundaries and exit codes stay exact. |
+| bash | `--init-file` → our script installs a `DEBUG`-trap / `PROMPT_COMMAND` hook | shellArgs | **Injected only when the launch args are *purely* interactive/login flags** (`-i`/`-l`/`--login`), so Git Bash's `--login -i` is covered and a specific `-c <cmd>` is not (rationale). **The whole argv is replaced with `--init-file <script>`** — `-l` and `-i` go with it, and the script replicates login startup itself. **`E` is the submitted line, read back from history only when the last entry provably is it**, else its first simple command, `$BASH_COMMAND` (rationale). **From bash 4.0 a `bind -x` key is no command**; on 3.2 it still is (rationale). Boundaries and exit codes stay exact. |
 | PowerShell | dot-source a script that wraps the user's `prompt` and PSReadLine's `PSConsoleHostReadLine`; covers `pwsh` and `powershell.exe` | shellArgs | Injected for any **interactive** launch — a bare REPL gets `-NoExit -Command ". '<script>'"`, one already carrying a startup command gets our dot-source *appended* (rationale); non-interactive one-offs (`-Command`/`-File`/`-EncodedCommand` without `-NoExit`) are left untouched. **`-NoProfile` is never passed.** **Without PSReadLine the whole triple falls back to the next prompt**, boundaries and exit codes still exact (rationale). |
 | WSL | `wsl.exe -d <distro> -- sh -c <detector>` → the detector execs the distro's bash with our `--init-file`, referenced via its `/mnt/...` path | shellArgs (Windows-side injection cannot reach inside the distro) | **Injected only for the exact two-argument `-d <distro>` launch** the shell picker emits. The detector reads `/etc/passwd` and prefers bash, stepping aside only for an explicitly configured zsh or fish login shell (rationale). **bash is the only integrated WSL shell**; assumes the default `/mnt` automount root. |
 | cmd.exe | no per-command hook exists | — | Never gets real OSC 633; always uses the keystroke fallback below. |
@@ -183,7 +186,7 @@ Wired in `applyShellIntegration`, called from `resolveSpawnConfig` (`standalone/
 - **`E` (command line)** is escaped by `__dormouse_633_escape`: BEL, ESC and the C1 ST alongside `\`, `;`, LF and CR. The parser decodes `\xNN` back, so it still reports verbatim.
 - **`Cwd=`** is read verbatim, no `\xNN` decoding, so a Windows path's backslashes arrive intact — `__dormouse_633_safe_cwd` therefore *removes* control characters instead of escaping them, preserving backslashes and semicolons. **Under `LC_ALL=C` the scripts strip the C1 ST explicitly first**, `[[:cntrl:]]` not matching its two ordinary bytes.
 
-Source of truth: `__dormouse_633_escape` and `__dormouse_633_safe_cwd` in each of `standalone/sidecar/shell-integration/bash/shellIntegration.bash`, `standalone/sidecar/shell-integration/zsh/.zshrc`, `standalone/sidecar/shell-integration/pwsh/shellIntegration.ps1`; pinned by `standalone/sidecar/shell-integration.test.js`, which spawns real bash and zsh rather than mocking them, hard-fails if bash is absent, and names any uncovered shell out loud.
+Source of truth: `__dormouse_633_escape` and `__dormouse_633_safe_cwd` in each of `standalone/sidecar/shell-integration/bash/shellIntegration.bash`, `standalone/sidecar/shell-integration/zsh/.zshrc`, `standalone/sidecar/shell-integration/pwsh/shellIntegration.ps1`, and bash's `E` in `__dormouse_633_command_line`; pinned by `standalone/sidecar/shell-integration.test.js`, which spawns real bash (on a PTY for `E`) and zsh rather than mocking them, hard-fails if bash is absent, and names any uncovered shell out loud.
 
 ### Keystroke fallback
 
@@ -206,4 +209,4 @@ Two escape-aware consumers are **not** parse sites: `lib/src/lib/terminal-contro
 
 ## Future
 
-- **fish shell integration** — inject via `XDG_DATA_DIRS`: fish auto-sources `*/fish/vendor_conf.d/*.fish`, so the integration ships as a vendor conf file (env channel, as reliable as the `PATH` prepend). Until it lands, fish panes use the keystroke fallback above.
+- **fish shell integration** — inject via `XDG_DATA_DIRS`: fish auto-sources `*/fish/vendor_conf.d/*.fish`, so the integration ships as a vendor conf file (env channel, as reliable as the `PATH` prepend). Until it lands, fish ≥ 4 reports `OSC 133` itself, command line included, and older fish uses the keystroke fallback above.

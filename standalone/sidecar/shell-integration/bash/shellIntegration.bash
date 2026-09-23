@@ -88,19 +88,68 @@ __dormouse_633_prompt() {
   __dormouse_633_armed=1
 }
 
+# The submitted line, into __dormouse_633_out. $BASH_COMMAND is only the simple
+# command about to run (`cd web` of `cd web && pnpm dev`), so the line is read
+# back from history (one fork per line; HISTTIMEFORMAT is emptied inside it) and
+# used only when the last entry provably is this line, else $BASH_COMMAND stands:
+#  - History is on. Off, nothing is added, and 3.2 leaves the flag below stale.
+#  - `fc -l -1` stops one entry short of `history 1` exactly when bash's own
+#    flag says reading this line added an entry. No count taken at the prompt
+#    could stand in: erasedups renumbers, and HISTCMD is dead in traps before 5.1.
+#    A line that added nothing is still the last entry when neither ignorespace
+#    nor HISTIGNORE could have dropped it: ignoredups did, or the entry is a
+#    multi-line command's joined whole, whose flag covers its last line alone.
+#  - The entry contains $BASH_COMMAND, whitespace aside (bash re-renders it).
+#    This rejects a trap fired outside a fresh line (a hook appended after ours
+#    in PROMPT_COMMAND, a `bind -x` key on 3.2), which would re-report the
+#    previous line.
+# So an aliased first command, an entry spanning lines (a here-document), and a
+# repeat under ignoreboth fall back to $BASH_COMMAND.
+__dormouse_633_command_line() {
+  __dormouse_633_out=$BASH_COMMAND
+  [[ -o history ]] || return 0
+  local listing entry number
+  listing=$( { HISTTIMEFORMAT= && builtin history 1 && builtin fc -l -1; } 2>/dev/null )
+  entry=${listing%%$'\n'*}                      # history 1: "%5d%c %s"
+  entry=${entry#"${entry%%[! ]*}"}
+  number=${entry%%[!0-9]*}
+  [ -n "$number" ] || return 0
+  case ${listing#*$'\n'} in                     # fc -l: "%d\t%c%s"
+    "$((number - 1))"$'\t'*) ;;
+    "$number"$'\t'*)
+      [ -z "${HISTIGNORE:-}" ] || return 0
+      case :${HISTCONTROL:-}: in *:ignorespace:* | *:ignoreboth:*) return 0 ;; esac ;;
+    *) return 0 ;;
+  esac
+  entry=${entry:${#number}+2}                   # drop the number, flag and space
+  case ${entry//[[:space:]]/} in
+    *"${BASH_COMMAND//[[:space:]]/}"*) __dormouse_633_out=$entry ;;
+  esac
+  return 0
+}
+
 # preexec: the DEBUG trap fires before every command; emit E/C once per line.
+# The trap passes "$_" as its last word because bash leaves $_ set to the trap
+# command's last word; bash itself restores $?.
 __dormouse_633_preexec() {
   [ "$BASH_COMMAND" = "__dormouse_633_prompt" ] && return   # the PROMPT_COMMAND invocation itself
   [ -z "$__dormouse_633_armed" ] && return                 # inside PROMPT_COMMAND, or already fired this line
   [ -n "${COMP_LINE:-}" ] && return                        # tab-completion, not a submitted command
+  # A `bind -x` key (fzf's Ctrl-R/Ctrl-T) runs its command at the prompt, with
+  # READLINE_LINE bound for its duration from bash 4.0. Returning still armed
+  # lets the line the key leaves be reported when it is submitted. bash 3.2 binds
+  # nothing, so there the key still reads as a command, and its READLINE_LINE is
+  # an ordinary variable a widget may leave set, hence the version check.
+  [ -n "${READLINE_LINE+x}" ] && [ "${BASH_VERSINFO[0]}" -ge 4 ] && return
   __dormouse_633_armed=
   __dormouse_633_ran=1
-  __dormouse_633_escape "$BASH_COMMAND"
+  __dormouse_633_command_line
+  __dormouse_633_escape "$__dormouse_633_out"
   printf '\033]633;E;%s\007' "$__dormouse_633_out"
   printf '\033]633;C\007'
 }
 
-trap '__dormouse_633_preexec' DEBUG
+trap '__dormouse_633_preexec "$_"' DEBUG
 PROMPT_COMMAND='__dormouse_633_prompt'
 # Prompt-end / input-start (B) at the tail of PS1, wrapped in \[ \] so bash counts
 # it as zero width. Best-effort: a prompt rebuilt every render loses B, but

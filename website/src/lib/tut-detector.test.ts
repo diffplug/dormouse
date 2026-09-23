@@ -35,7 +35,7 @@ function makeDetectorHarness(initialActivitySnapshot = new Map<string, ActivityS
         };
       },
       getWatchedCommands: () => watchedCommands,
-      getRunningCommandArgv0: (id) => runningCommands.get(id) ?? null,
+      getRunningCommandWatchKey: (id) => runningCommands.get(id) ?? null,
       subscribeToWatchedCommands: (listener) => {
         watchedListener = listener;
         return () => {

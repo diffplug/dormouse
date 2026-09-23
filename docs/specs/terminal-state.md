@@ -53,7 +53,7 @@ Command lifecycle:
 |---|---|
 | `OSC 133 ; A ST` / `OSC 633 ; A ST` | `promptStart` |
 | `OSC 133 ; B ST` / `OSC 633 ; B ST` | `promptEnd` |
-| `OSC 133 ; C ST` | `commandStart(source: "osc133_boundaries")` |
+| `OSC 133 ; C [; <key>=<value> ...] ST` | `commandLine` when a command line is present — fish ≥ 4's percent-encoded UTF-8 `cmdline_url`, else kitty's `printf %q` `cmdline`, which runs to the end of the sequence — bounded and sanitized like `E`; then `commandStart(source: "osc133_boundaries")`. |
 | `OSC 633 ; E ; <commandline> [; <nonce>] ST` | `commandLine`; parses only the command field, decoding VS Code `\xAB` / `\\` escapes. Bounded and sanitized like every retained value; one reducing to nothing emits nothing ([terminal-escapes.md](terminal-escapes.md)). |
 | `OSC 633 ; C ST` | `commandStart(source: "osc633_boundaries")`. The reducer re-labels the stored run `osc633_E` when a command line is pending; the *event* source stays a boundary, which is what promotes the pane to OSC-driven ([Keystroke fallback](#keystroke-fallback)). |
 | `OSC 133 ; D ; <exitCode?> ST` / `OSC 633 ; D ; <exitCode?> ST` | `commandFinish` |
@@ -91,11 +91,11 @@ Source of truth: `cwdFromManualPath` in `lib/src/lib/terminal-state.ts`; `seedTe
 - `cwd` replaces the latest session CWD (no-op when both identity and source are unchanged).
 - `promptStart` sets `{ kind: "prompt" }`; `promptEnd` sets `{ kind: "editing" }`. **Both clear `currentCommand` and `pendingCommandLine`** (rationale).
 - `commandLine` stores `pendingCommandLine`.
-- `commandStart` creates `currentCommand`, snapshots `cwdAtStart`, uses `event.startedAt` when present, clears `pendingCommandLine`, and sets `{ kind: "running" }`. `displayCommand` is the summarized pending command line; with none pending (`OSC 133 ; C` carries no command) it falls back to the newest OSC 0/2/9 title candidate, then to the literal `shell`.
+- `commandStart` creates `currentCommand`, snapshots `cwdAtStart`, uses `event.startedAt` when present, clears `pendingCommandLine`, and sets `{ kind: "running" }`. `displayCommand` is the summarized pending command line; with none pending (a bare `OSC 133 ; C`) it falls back to the newest OSC 0/2/9 title candidate, then to the literal `shell`.
 - `commandFinish` moves `currentCommand` to `lastCommand`, stores `event.finishedAt` (otherwise reducer time) and `exitCode`, snapshots the latest in-run OSC 0/2/9 title into `lastCommand.finalTerminalTitle` (titles older than `startedAt` or younger than `finishedAt` excluded), clears `currentCommand`, and sets `{ kind: "finished", exitCode }`. **With no `currentCommand` it only sets the activity**, never inventing a `lastCommand`.
 - `title` updates the per-source entry in `titleCandidates`. **Later OSC title events never erase earlier candidates from other sources.**
 
-Command-line tokenizing is dialect-free: **`\` escapes exactly the set `shellEscapePosix` writes** (`POSIX_ESCAPABLE` in `lib/src/lib/posix-escape.ts`; both halves pinned by `terminal-state.test.ts`). **A leading `&` is PowerShell's call operator, never a POSIX background suffix**, and is dropped rather than read as a boundary. **An unquoted Windows path containing spaces stays split.** **A launcher suffix is not part of a program's name** — `npm.cmd` and `C:\tools\claude.exe` are `npm` and `claude` for the header, the WATCHING key, and the terminal context alike. Accepted: `foo.bat` and `foo.exe` in one directory cannot be watched separately. (rationale)
+Command-line tokenizing is dialect-free: **`\` escapes exactly the set `shellEscapePosix` writes** (`POSIX_ESCAPABLE` in `lib/src/lib/posix-escape.ts`; both halves pinned by `terminal-state.test.ts`). **A leading `&` is PowerShell's call operator, never a POSIX background suffix**, and is dropped rather than read as a boundary. **An unquoted newline separates commands like `;`**; a backslash-newline continues the line. **An unquoted Windows path containing spaces stays split.** **A launcher suffix is not part of a program's name** — `npm.cmd` and `C:\tools\claude.exe` are `npm` and `claude` for the header, the WATCHING key, and the terminal context alike. Accepted: `foo.bat` and `foo.exe` in one directory cannot be watched separately. (rationale)
 
 **`displayCommand` is a per-program summary of those tokens** — the program name plus a bounded argument count, suffixed `| ...` or ` ...` past a pipeline or compound boundary. Source of truth: `summarizeCommandLine` and `commandTitleTokens` in `lib/src/lib/terminal-state.ts`.
 

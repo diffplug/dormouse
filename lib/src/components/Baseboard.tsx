@@ -1,7 +1,7 @@
 import { getToolDirtySnapshot, subscribeToToolDirty } from '../lib/tool-dirty-store';
 import { setWorkspaceAlertDelivery } from '../lib/workspace-store';
 import { useWorkspaceAlertPolicy } from './wall/use-workspace-alert-policy';
-import { useCallback, useRef, useState, useMemo, useLayoutEffect, useContext, useSyncExternalStore, type ReactNode } from 'react';
+import { useCallback, useRef, useState, useMemo, useLayoutEffect, useContext, useSyncExternalStore, type ReactNode, type Ref } from 'react';
 import {
   DeviceMobileSlashIcon,
   CaretLeftIcon,
@@ -11,7 +11,8 @@ import {
   SpeakerSlashIcon,
   VibrateIcon,
 } from '@phosphor-icons/react';
-import { chromeButton } from './design';
+import { chromeButton, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from './design';
+import { AlertRingInset } from './alert-ring';
 import { SettingsDialog, type AlarmSink } from './SettingsDialog';
 import { SettingsPreview } from './SettingsPreview';
 import { Door } from './Door';
@@ -46,10 +47,65 @@ const BASEBOARD_BUTTON_CLASS = chromeButton({
   kind: 'labeled',
   className: 'h-6 shrink-0 justify-center pb-px text-sm font-medium font-mono text-muted hover:text-foreground',
 });
+/** An overflow arrow hiding a ringing or TODO Door stands in for it, so it
+ *  wears a Door's ground — the one its alarm inset is contrast-picked for — and,
+ *  like a Door, no hover wash. */
+const FLAGGED_OVERFLOW_BUTTON_CLASS = chromeButton({
+  kind: 'labeled',
+  className: `relative h-6 shrink-0 justify-center overflow-hidden pb-px text-sm font-medium font-mono bg-door-bg text-door-fg hover:bg-door-bg rounded-b-none ${TERMINAL_TOP_RADIUS_CLASS}`,
+});
 const SETTINGS_BUTTON_CLASS = chromeButton({
   kind: 'icon',
   className: 'h-6 w-6 shrink-0 pb-px hover:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-focus-ring',
 });
+
+/** What the Doors behind one overflow arrow owe the user. */
+interface OverflowAlerts {
+  ringing: number;
+  todo: number;
+}
+
+const NO_OVERFLOW_ALERTS: OverflowAlerts = { ringing: 0, todo: 0 };
+
+/**
+ * `← N more` / `N more →`. A ringing or TODO Door scrolled out of view must not
+ * vanish from the baseboard, so the arrow carries a static alarm inset and a
+ * TODO mark for what it hides, and says so in its name
+ * (`docs/specs/layout.md` → Baseboard responsive sizing).
+ */
+function OverflowArrow({ direction, count, alerts, onClick, measureRef }: {
+  direction: 'left' | 'right';
+  count: number;
+  alerts: OverflowAlerts;
+  onClick?: () => void;
+  /** Set on the hidden measurement copies, which the fitting pass reads. */
+  measureRef?: Ref<HTMLButtonElement>;
+}) {
+  const flagged = alerts.ringing > 0 || alerts.todo > 0;
+  const label = [
+    `${count} more`,
+    alerts.ringing > 0 && `${alerts.ringing} ringing`,
+    alerts.todo > 0 && `${alerts.todo} TODO`,
+  ].filter(Boolean).join(', ');
+  const Caret = direction === 'left' ? CaretLeftIcon : CaretRightIcon;
+  return (
+    <button
+      ref={measureRef}
+      className={flagged ? FLAGGED_OVERFLOW_BUTTON_CLASS : BASEBOARD_BUTTON_CLASS}
+      data-overflow-arrow={measureRef ? undefined : direction}
+      aria-label={measureRef ? undefined : label}
+      tabIndex={measureRef ? -1 : undefined}
+      title={flagged && !measureRef ? label : undefined}
+      onClick={onClick}
+    >
+      {direction === 'left' && <Caret size={10} weight="bold" />}
+      {count} more
+      {alerts.todo > 0 && <span className={`text-xs font-semibold ${TODO_PILL_TRACKING_CLASS}`}>TODO</span>}
+      {direction === 'right' && <Caret size={10} weight="bold" />}
+      {alerts.ringing > 0 && <AlertRingInset ground="door" burst={null} className={TERMINAL_TOP_RADIUS_CLASS} />}
+    </button>
+  );
+}
 
 export interface BaseboardProps {
   items: DoorChip[];
@@ -89,9 +145,11 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   // than one on every activity notification.
   const [doorWidths, setDoorWidths] = useState<number[]>([]);
   const arrowMeasureEl = useRef<HTMLButtonElement>(null);
+  const todoArrowMeasureEl = useRef<HTMLButtonElement>(null);
   const rightClusterEl = useRef<HTMLDivElement>(null);
   const [rightClusterWidth, setRightClusterWidth] = useState(0);
-  const layoutMetrics = useRef({ doorGap: 0, arrowWidth: 0 });
+  // A hidden TODO Door widens its arrow by the mark, so both widths are measured.
+  const layoutMetrics = useRef({ doorGap: 0, arrowWidth: 0, todoArrowWidth: 0 });
   const [settingsOpen, setSettingsOpen] = useState(false);
   // Which Door's notepad popover is open, with the rect it was anchored on. The
   // rect is kept rather than re-read: a pin reattaches the Surface, so the Door
@@ -160,6 +218,9 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
     if (arrowMeasureEl.current) {
       layoutMetrics.current.arrowWidth = arrowMeasureEl.current.offsetWidth;
     }
+    if (todoArrowMeasureEl.current) {
+      layoutMetrics.current.todoArrowWidth = todoArrowMeasureEl.current.offsetWidth;
+    }
   }, [items, activityStates, speechStates, terminalStates, notepadNotes, dirtyTools]);
 
   const itemKey = useMemo(() => items.map(i => i.id).join('\0'), [items]);
@@ -175,18 +236,28 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   let visibleCount = 0;
   let usedWidth = 0;
 
+  const alertsOf = (item: DoorChip): OverflowAlerts => {
+    const activity = activityStates.get(item.id) ?? DEFAULT_ACTIVITY_STATE;
+    return { ringing: activity.status === 'ALERT_RINGING' ? 1 : 0, todo: activity.todo ? 1 : 0 };
+  };
+  const overflowAlerts = (hidden: DoorChip[]): OverflowAlerts => hidden.reduce((sum, item) => {
+    const alerts = alertsOf(item);
+    return { ringing: sum.ringing + alerts.ringing, todo: sum.todo + alerts.todo };
+  }, NO_OVERFLOW_ALERTS);
+
   if (items.length > 0) {
     const widths = doorWidths;
-    const { doorGap, arrowWidth } = layoutMetrics.current;
+    const { doorGap, arrowWidth, todoArrowWidth } = layoutMetrics.current;
+    const arrowFor = (hidden: DoorChip[]) => (hidden.some((item) => alertsOf(item).todo > 0) ? todoArrowWidth : arrowWidth);
     const hasLeftOverflow = startIndex > 0;
     const budget = availableWidth
-      - (hasLeftOverflow ? arrowWidth : 0)
+      - (hasLeftOverflow ? arrowFor(items.slice(0, startIndex)) : 0)
       - (rightClusterWidth + doorGap);
 
     for (let i = startIndex; i < items.length; i++) {
       const doorW = (widths[i] || 100) + (visibleCount > 0 ? doorGap : 0);
       const needsRightArrow = i + 1 < items.length;
-      const rightReserve = needsRightArrow ? arrowWidth : 0;
+      const rightReserve = needsRightArrow ? arrowFor(items.slice(i + 1)) : 0;
 
       if (usedWidth + doorW + rightReserve > budget) break;
       usedWidth += doorW;
@@ -306,9 +377,10 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
       <div ref={measureEl} className="absolute -left-[9999px] flex gap-1.5" aria-hidden>
         {items.map(item => <Door key={item.id} {...doorProps(item)} />)}
       </div>
-      <button ref={arrowMeasureEl} className={`absolute -left-[9999px] ${BASEBOARD_BUTTON_CLASS}`} aria-hidden tabIndex={-1}>
-        9 more <CaretRightIcon size={10} weight="bold" />
-      </button>
+      <div className="absolute -left-[9999px] flex" aria-hidden>
+        <OverflowArrow measureRef={arrowMeasureEl} direction="right" count={9} alerts={NO_OVERFLOW_ALERTS} />
+        <OverflowArrow measureRef={todoArrowMeasureEl} direction="right" count={9} alerts={{ ringing: 0, todo: 9 }} />
+      </div>
 
       {items.length === 0 && showHint && (
         <span className="truncate pb-1 text-sm font-mono text-muted">
@@ -317,13 +389,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
       )}
 
       {hiddenLeft > 0 && (
-        <button
-          className={BASEBOARD_BUTTON_CLASS}
-          onClick={scrollLeft}
-        >
-          <CaretLeftIcon size={10} weight="bold" />
-          {hiddenLeft} more
-        </button>
+        <OverflowArrow direction="left" count={hiddenLeft} alerts={overflowAlerts(items.slice(0, startIndex))} onClick={scrollLeft} />
       )}
 
       {items.slice(startIndex, endIndex).map(item => (
@@ -344,13 +410,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
           depends on the fitting result it feeds. */}
       <div className="ml-auto flex shrink-0 items-end gap-1.5">
         {hiddenRight > 0 && (
-          <button
-            className={BASEBOARD_BUTTON_CLASS}
-            onClick={scrollRight}
-          >
-            {hiddenRight} more
-            <CaretRightIcon size={10} weight="bold" />
-          </button>
+          <OverflowArrow direction="right" count={hiddenRight} alerts={overflowAlerts(items.slice(endIndex))} onClick={scrollRight} />
         )}
 
         <div ref={rightClusterEl} className="flex shrink-0 items-end gap-1.5">

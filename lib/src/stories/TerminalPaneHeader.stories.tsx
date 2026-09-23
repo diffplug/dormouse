@@ -12,7 +12,7 @@ import {
 } from '../components/Wall';
 import type { ActivityNotification, SessionStatus } from '../lib/alert-manager';
 import { summarizeCommandLine, type SetTerminalUserTitleResult } from '../lib/terminal-registry';
-import { commandArgv0, cwdFromOsc633 } from '../lib/terminal-state';
+import { commandWatchKey, cwdFromOsc633 } from '../lib/terminal-state';
 import { flattenScenario, SCENARIO_SHELL_PROMPT } from '../lib/platform';
 import { removeMouseSelectionState, setMouseReporting, setOverride } from '../lib/mouse-selection';
 import { addPlainNote, clearAllNotepads } from '../lib/notepad/notepad-store';
@@ -87,8 +87,8 @@ interface PanePriming {
  */
 function primedPane({ status, todo = false, notification, command = 'pnpm dev', userTitle = 'build-server' }: PanePriming) {
   const watching = SHOWN_ONLY_WHILE_WATCHING[status];
-  const argv0 = command ? commandArgv0(command) : null;
-  if (watching && !argv0) throw new Error(`${status} is public only while a watched command runs`);
+  const watchKey = command ? commandWatchKey(command) : null;
+  if (watching && !watchKey) throw new Error(`${status} is public only while a watched command runs`);
   return {
     primedSessionState: {
       byId: {
@@ -114,7 +114,7 @@ function primedPane({ status, todo = false, notification, command = 'pnpm dev', 
         },
       },
     },
-    primedWatchedCommands: watching && argv0 ? [argv0] : [],
+    primedWatchedCommands: watching && watchKey ? [watchKey] : [],
   };
 }
 
@@ -396,7 +396,7 @@ export const AlertRightClickDialog: Story = contextDialogStory({
   command: 'claude --resume',
 });
 
-/** A pane at a prompt: no argv0, so the dialog explains instead of offering a switch. */
+/** A pane at a prompt: no watch key, so the dialog explains instead of offering a switch. */
 export const AlertDialogNoCommandRunning: Story = contextDialogStory({
   status: 'WATCHING_DISABLED',
   command: null,

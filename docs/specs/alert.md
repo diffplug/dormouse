@@ -146,7 +146,7 @@ Source of truth: `awaitCompletion` in `lib/src/lib/alert-manager.ts`; `alertAwai
 
 ## WATCHING Track
 
-**Must key WATCHING by foreground command name.** A Session is watched exactly while that name belongs to the watched set; edits reach every matching Session. **Never add per-Session enable or mute** (rationale).
+**Must key WATCHING by the foreground command's watch key** (Rules, below). A Session is watched exactly while a rule covers that key; edits reach every matching Session. **Never add per-Session enable or mute** (rationale).
 
 **The output/silence detector is always on.** Every Session runs one `QuiesceDetector` for its whole lifetime, fed by every output chunk and reset at every command boundary. It never latches and knows nothing about attention or rules; the rule set decides only whether its state is publicly visible and whether a settle — a busy Session that stayed quiet — may *ring*.
 
@@ -154,14 +154,15 @@ Source of truth: `awaitCompletion` in `lib/src/lib/alert-manager.ts`; `alertAwai
 
 Rules:
 
-- The key is `commandArgv0(rawCommandLine)`: everything before the first pipeline/compound boundary, skipping leading `VAR=value` assignments and a leading `env`, then argv[0] reduced to its basename minus any launcher suffix (`docs/specs/terminal-state.md`). So `foo | claude` keys on `foo`, matching what bash's `DEBUG` trap reports. Pinned by `lib/src/lib/watched-commands.test.ts`.
+- **The key is `commandWatchKey(rawCommandLine)`**: the last command of a list (`&&`, `||`, `;`, `&`, newline) and the first stage of its pipeline, grouping dropped, leading `VAR=value` words and transparent wrappers (`sudo`, `npx`, …) skipped, then argv[0]'s basename minus any launcher suffix (`docs/specs/terminal-state.md`). **An unknown wrapper flag stops the skip**, keying the wrapper itself. **A script runner keys as `<runner> <script>`**, a leading `run` dropped, so `cd web && pnpm run dev` keys on `pnpm dev`; a script that is no valid key (a path) keys the runner (rationale). Where bash's `E` falls back to a line's first simple command (`docs/specs/terminal-escapes.md` → Shell-integration injection), that command keys. Pinned by `WATCHING key` in `lib/src/lib/terminal-state.test.ts`.
+- **A rule covers a key it equals, and a bare runner rule covers every `<runner> <script>` key of that runner** (rationale). `watchRuleFor` is the one matcher, for WATCHING, rule-removal silencing, and the terminal context's row.
 - **Every command boundary resets the detector** — `commandStart`, `commandFinish`, `promptStart`, `promptEnd`, and PTY exit — even without a command watch. Pinned by `resets unwatched output history on %s without a command watch` in `lib/src/lib/alert-manager.test.ts`.
 - **Editing the rule set re-derives WATCHING across every live Session immediately**, so a mid-command enable shows what that command is doing *right now* rather than a fresh `NOTHING_TO_SHOW` (rationale).
 - **A WATCHING ring outlives the command that raised it.** Watching switches off when the watched command exits; its ring and originating command key remain in `watchingRingingCommand`.
-- **Removing a rule silences its WATCHING rings**, even after the command has exited; other dismissal paths follow Clearing And TODO. A command merely ending never clears the ring.
+- **Removing a rule silences its WATCHING rings**, even after the command has exited, unless another rule still covers the command; other dismissal paths follow Clearing And TODO. A command merely ending never clears the ring.
 - **The rule set is app-global and persisted** (`dormouse:watched-commands`), starting empty, so WATCHING is off everywhere until the user turns it on. **The host is authoritative wherever one serves several webviews** — the VS Code extension host, and the standalone sidecar — so a stale webview can neither replace unrelated rules nor keep reporting an obsolete list: the first webview's persisted copy is taken as the seed, an edit is a delta, and the host broadcasts its canonical snapshot back. The seed/mutation/broadcast wire contract is `docs/specs/transport.md`.
 
-**Limitation:** WATCHING needs the shell to report command boundaries (`OSC 633` / `OSC 133`). Shells without integration (`docs/specs/terminal-escapes.md`) never report a command name, so WATCHING never engages and the terminal context reports `No command running`. Terminal reports still work; command-exit alerting also requires semantic command boundaries. **Never route the keystroke fallback in `docs/specs/terminal-state.md` into the `AlertManager`** (rationale).
+**Limitation:** WATCHING needs the shell to report its command line — `OSC 633 ; E`, or `cmdline_url` / `cmdline` on `OSC 133 ; C` (fish ≥ 4) — beside the boundaries. A shell reporting bare `OSC 133` boundaries, or none (`docs/specs/terminal-escapes.md`), never names a command, so WATCHING never engages and the terminal context reports `No command running`. Terminal reports still work; command-exit alerting also requires semantic command boundaries. **Never route the keystroke fallback in `docs/specs/terminal-state.md` into the `AlertManager`** (rationale).
 
 | State | Meaning |
 |---|---|
@@ -183,7 +184,7 @@ Meaningful output excludes resize redraw noise during `T_RESIZE_DEBOUNCE`; theme
 - **Never reset the detector for attention alone**; settles must reach awaits. **Must reset to `NOTHING_TO_SHOW` when attending or dismissing a WATCHING ring**, preventing its output tail from settling again.
 - **Rings must be caused by a fresh transition** — a settle the detector just reported — never by rerender, theme change, remount, minimize, or reattach.
 
-Source of truth: `commandArgv0` in `lib/src/lib/terminal-state.ts`; `QuiesceDetector` in `lib/src/lib/quiesce-detector.ts`; `onSettled` / `withdrawResumedWatchingRing` in `lib/src/lib/alert-manager.ts` (pinned by `lib/src/lib/alert-resumed-output.test.ts`); renderer mirror `lib/src/lib/watched-commands.ts`, multi-renderer coordinator `lib/src/lib/watched-command-host.ts`.
+Source of truth: `commandWatchKey` / `watchRuleFor` in `lib/src/lib/terminal-state.ts`; `QuiesceDetector` in `lib/src/lib/quiesce-detector.ts`; `onSettled` / `withdrawResumedWatchingRing` in `lib/src/lib/alert-manager.ts` (pinned by `lib/src/lib/alert-resumed-output.test.ts`); renderer mirror `lib/src/lib/watched-commands.ts`, multi-renderer coordinator `lib/src/lib/watched-command-host.ts`.
 
 ## Terminal reports
 
@@ -192,7 +193,7 @@ Source of truth: `commandArgv0` in `lib/src/lib/terminal-state.ts`; `QuiesceDete
 Sequence syntax lives in `docs/specs/terminal-escapes.md`; what each means here:
 
 - **Standalone `BEL`** — stripped from visible output and creates `TERMINAL_BELL_NOTIFICATION`. If the same parse batch also holds a richer OSC notification or progress event, **drop the generic bells** so they cannot overwrite useful preview text; multiple bells in one batch collapse to one notification.
-- **`OSC 9`** — the message becomes the body, title null. Empty sanitized messages are ignored. It also feeds title-candidate derivation (`docs/specs/terminal-state.md`), with no alert effect.
+- **`OSC 9`** — the message becomes the body, title null. Empty sanitized messages are ignored. It also feeds title-candidate derivation (`docs/specs/terminal-state.md`), with no alert effect. **A number, alone or before `;`, is a ConEmu subcommand** (`9;12`, a bare `9;9`) yielding neither notification nor title — except `9;4` below and `9;9;<cwd>` (`docs/specs/terminal-state.md`).
 - **`OSC 777`** — only the `notify` subcommand is supported; unsupported subcommands and empty sanitized notifications are ignored.
 - **`OSC 99`** (kitty) — chunked notifications keyed by `i`; completion rings once if the sanitized title or body is nonempty. **Management payloads (`p=?`, `p=close`, `p=alive`) contribute no content.** Incomplete chunk state is capped and expired.
 - **`OSC 9;4` progress** — progress only: no title, body, urgency, id, app name, or action fields.
@@ -325,7 +326,7 @@ Source of truth: `watchPushRings` / `invalidatePushDeviceRefreshes` in `lib/src/
 Reached from the baseboard sliders; `docs/specs/layout.md` owns placement. The alarm sections sit under the theme and shell rows; when both are hidden (VS Code owns the theme and the shells), the rule list is first and drops its section divider.
 
 - **Must toggle only the clicked baseboard alarm setting**, as an override for that Workspace, showing the effective value. Components without a Workspace scope edit application defaults. **Must show its shared settings section for 2 seconds, then fade for 250ms**, anchored to the button and bounded by the viewport. The preview is inert, announces the resulting state, preserves keyboard focus and command dispatch, and omits test actions. Each click replaces the preview and restarts its lifetime; opening Settings or unmounting clears it. Reduced motion skips the fade. Pinned by `Baseboard.test.tsx`.
-- Lists every watched command with a remove control, and **cannot add one** — WATCHING is keyed on a running command's name, so creating a rule stays the terminal context of a Pane running it, and the empty state says so. **It is the only place a rule set on a since-closed Pane can be removed**, the terminal context reaching only the command its own Pane is running.
+- Lists every watched command with a remove control, and **cannot add one** — WATCHING is keyed on a running command's watch key, so creating a rule stays the terminal context of a Pane running it, and the empty state says so. **It is the only place a rule set on a since-closed Pane can be removed**, the terminal context reaching only the command its own Pane is running.
 - The watcher group carries the **Defer alerts until animation stops** switch and explains that a fully armed watcher delays terminal notifications and withdraws a ring once watched work resumes.
 - **Delays are committed on blur or `Enter`, never per keystroke** — typing `3` on the way to `30` must not briefly install a 3-second timer. They are shown in seconds; an out-of-range or empty entry snaps back to whatever the store clamped it to.
 - **The push group's device line names every device a push would reach**, and otherwise says why there is none — no Burrow enrolled, nothing subscribed yet, or the server could not be asked (rationale).
@@ -372,11 +373,11 @@ Where it surfaces is host-specific:
 The header shows a fixed-text `TODO` pill when `todo === true`, a hover/focus notification preview when TODO has `notification`, and the terminal context opened by right-click or by `a`. **Never tint a ringing Session's header**: the Pane overlay already outlines it. Placement, sizing, and width tiers belong to `docs/specs/layout.md`.
 
 - **`a` on the selected Pane in command mode dismisses a ringing Session and opens the terminal context, whatever the status; it never edits a WATCHING rule.**
-- **A WATCHING rule is created only in the terminal context** ("Watch all `<cmd>` commands"), which offers the row whenever a foreground command is running, and removed there or in Settings. Removing it anywhere drops it for every Session running that command.
+- **A WATCHING rule is created only in the terminal context** ("Watch all `<key>` commands"), which offers the row whenever a foreground command has a watch key — naming the bare runner rule instead when one already covers the running script — and removed there or in Settings. Removing it anywhere drops it for every Session running that command.
 - Right-click always opens the context. Pressing `t` toggles TODO.
 - **The mobile composition dismisses by attention alone** — a tap or a keystroke — and wears its ring as the alarm inset, never an icon (`docs/specs/mobile-terminal-ui.md`). A Client cannot dismiss yet (`docs/specs/remote-api.md` → Future).
 
-**Must keep context alert controls scoped to the source**, with TODO, running-command WATCHING, and notification detail. Settings owns the global watched-command list. **Must suppress helper alerting until promotion, including after exit**, covering BEL/notification protocols, watched commands, TODO, speech, push, and attention projections; semantic command/readiness state remains active. Promotion starts ordinary alert behavior without replaying suppressed events.
+**Must keep context alert controls scoped to the source**, with TODO, running-command WATCHING, and notification detail. Settings owns the global watched-command list. **Must suppress helper alerting until promotion, including after exit**: no completion dispatch (await, ring, TODO, speech, push), protocol report, attention, or TODO control, and only the default state published. **A helper still tracks its command and feeds its detector**, so one promoted mid-command is WATCHING what it runs; promotion publishes that state and never replays a suppressed event (rationale). Pinned by `helper Sessions` in `lib/src/lib/alert-manager.test.ts`.
 
 Source of truth: `TerminalContext` in `lib/src/components/wall/TerminalContext.tsx`; `setHelper` in `lib/src/lib/alert-manager.ts`, which every host calls at helper spawn, listing, and promotion.
 
@@ -394,6 +395,7 @@ A Door is display-only for alert state:
 - while ringing with no speech state, wear the ring `spoken` uses, unlabelled, named `needs attention`
 - while its Session is `speaking`, replace the compact TODO cluster with the explicit `SPEAKING` label and invert + pulse the whole Door — that state lasts one utterance. `spoken` persists until the ring is attended, so it keeps a static high-contrast inset and adds a speaker icon *beside* the TODO pill instead of replacing it; those are the baseboard's persistent signals and **must not go dark for an unbounded window**
 - do not expose a Door-specific alert menu
+- scrolled out of view, its overflow arrow carries its ring and TODO (`docs/specs/layout.md` → Baseboard responsive sizing)
 
 Click or `Enter` on a Door reattaches into passthrough and clears a ring; `d` reattaches in command mode and leaves the ring intact (Attention).
 

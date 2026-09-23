@@ -11,7 +11,7 @@ interface ActivityStoreModule {
   getActivitySnapshot: () => Map<string, ActivityState>;
   subscribeToWatchedCommands: (listener: () => void) => () => void;
   getWatchedCommands: () => string[];
-  getRunningCommandArgv0: (id: string) => string | null;
+  getRunningCommandWatchKey: (id: string) => string | null;
 }
 
 /** Notification sources a program emits for itself, as opposed to the ones
@@ -267,12 +267,12 @@ export class TutDetector {
       const commandCounts = new Map<string, number>();
       for (const [paneId, current] of snapshot) {
         if (!current.watchingEnabled) continue;
-        const command = this.activityStore.getRunningCommandArgv0(paneId);
+        const command = this.activityStore.getRunningCommandWatchKey(paneId);
         if (command) commandCounts.set(command, (commandCounts.get(command) ?? 0) + 1);
       }
       for (const paneId of this.pendingSpreadIds) {
         if (!snapshot.get(paneId)?.watchingEnabled) continue;
-        const command = this.activityStore.getRunningCommandArgv0(paneId);
+        const command = this.activityStore.getRunningCommandWatchKey(paneId);
         if (command && (commandCounts.get(command) ?? 0) > 1) {
           this.state.markComplete("al-spreads");
           break;

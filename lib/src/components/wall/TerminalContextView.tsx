@@ -50,7 +50,7 @@ export interface TerminalContextViewProps {
   origin?: { x: number; y: number };
   defaultCommand?: string; title: string; surfaceRef: string; cwd: string; helperCwd?: string; mismatch?: boolean;
   titleSources: { source: string; value: string; note?: string }[];
-  scan: ContextScan; argv0?: string | null; watching: boolean; todo: boolean;
+  scan: ContextScan; watchRule?: string | null; watching: boolean; todo: boolean;
   notification?: { title: string | null; body: string | null } | null;
   status: HelperStatus; command: string; warning?: string;
   explorerLabel: string; canExplore: boolean; canAgent: boolean; canIframe: boolean;
@@ -202,7 +202,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
               </div>
             </>}
           </div>
-          <span className="text-muted">Alerts</span><div className="flex h-6 items-center gap-2"><span>{p.argv0 ? `Watch all ${p.argv0} commands` : 'No command running'}</span>{p.argv0 && <OnOffSwitch on={p.watching} onEnable={p.onWatch} onDisable={p.onWatch} label={`Watch all ${p.argv0} commands`} />}<span className="mx-1 h-3 border-l border-border" /><span>TODO</span><OnOffSwitch on={p.todo} onEnable={p.onTodo} onDisable={p.onTodo} label="TODO" /></div>
+          <span className="text-muted">Alerts</span><div className="flex h-6 items-center gap-2"><span>{p.watchRule ? `Watch all ${p.watchRule} commands` : 'No command running'}</span>{p.watchRule && <OnOffSwitch on={p.watching} onEnable={p.onWatch} onDisable={p.onWatch} label={`Watch all ${p.watchRule} commands`} />}<span className="mx-1 h-3 border-l border-border" /><span>TODO</span><OnOffSwitch on={p.todo} onEnable={p.onTodo} onDisable={p.onTodo} label="TODO" /></div>
         </div>
         {p.notification && <div className="ml-16 mt-2 border-l-2 border-border py-1 pl-3"><div>{p.notification.title}</div><div className="whitespace-pre-wrap text-muted">{p.notification.body}</div></div>}
       </div>

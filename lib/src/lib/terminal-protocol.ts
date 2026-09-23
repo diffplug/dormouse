@@ -334,6 +334,11 @@ export class TerminalProtocolParser {
       return progress ? [{ kind: 'progress', progress }] : [];
     }
 
+    // ConEmu's numbered subcommands (sleep, tab title, GuiMacro, a bare `9;9`,
+    // the `9;12` prompt mark, ...) are not messages. A message only reaches
+    // here if it does not open with a number followed by `;` or its end.
+    if (/^9;\d+(?:;|$)/.test(content)) return [];
+
     const body = sanitizeText(content.slice(2), BODY_LIMIT);
     return body
       ? [{ kind: 'notification', notification: { source: 'OSC 9', title: null, body } }]
@@ -643,7 +648,107 @@ function parseOsc7(content: string): TerminalProtocolEvent[] {
 function parseOsc133(content: string): TerminalProtocolEvent[] {
   const fields = content.split(';');
   if (fields[0] !== '133') return [];
-  return parsePromptBoundary(fields, 'osc133_boundaries');
+  const boundary = parsePromptBoundary(fields, 'osc133_boundaries');
+  // Staged ahead of the start it names, exactly as `633;E` precedes `633;C`.
+  return fields[1] === 'C' ? [...parseOsc133CommandLine(content.slice('133;C'.length)), ...boundary] : boundary;
+}
+
+/**
+ * The command line fish ≥ 4 and kitty's shell integration put on `133;C`
+ * itself: `cmdline_url=` (percent-encoded UTF-8) or `cmdline=` (one word quoted
+ * by `printf %q`). `params` is everything after the `C`. `cmdline_url` wins when
+ * both are present, being unambiguous; unknown keys are ignored.
+ *
+ * `%q` can leave a raw `;` inside `$'…'`, so `cmdline=` runs to the end of the
+ * sequence, which is where both emitters put it. Bounded before decoding and
+ * sanitized after, like `633;E` — decoding is what re-introduces control
+ * characters.
+ */
+function parseOsc133CommandLine(params: string): TerminalProtocolEvent[] {
+  let url: string | null = null;
+  let quoted: string | null = null;
+  for (let from = 0; from < params.length && quoted === null;) {
+    const start = from + 1;
+    const end = params.indexOf(';', start);
+    const field = params.slice(start, end === -1 ? params.length : end);
+    if (field.startsWith('cmdline=')) quoted = params.slice(start + 'cmdline='.length);
+    else if (field.startsWith('cmdline_url=')) url ??= field.slice('cmdline_url='.length);
+    if (end === -1) break;
+    from = end;
+  }
+  const decoded = url !== null
+    // One code point is at most four UTF-8 bytes of three characters each.
+    ? decodePercentEncoded(truncateText(url, COMMAND_LINE_LIMIT * 12))
+    : quoted !== null
+      ? decodeShellQuotedWord(truncateText(quoted, COMMAND_LINE_LIMIT * 4))
+      : null;
+  const commandLine = decoded === null ? null : sanitizeText(decoded, COMMAND_LINE_LIMIT);
+  return commandLine === null ? [] : [{ kind: 'semantic', event: { type: 'commandLine', commandLine } }];
+}
+
+/** `%XX` runs decoded as UTF-8; a malformed escape stays literal and an invalid
+ *  byte sequence becomes U+FFFD, so a truncated tail never throws. */
+function decodePercentEncoded(value: string): string {
+  return value.replace(/(?:%[0-9a-fA-F]{2})+/g, (run) => {
+    const bytes = new Uint8Array(run.length / 3);
+    for (let i = 0; i < bytes.length; i += 1) bytes[i] = Number.parseInt(run.slice(i * 3 + 1, i * 3 + 3), 16);
+    return new TextDecoder().decode(bytes);
+  });
+}
+
+const ANSI_C_ESCAPES: Record<string, string> = {
+  a: '\x07', b: '\b', e: '\x1b', E: '\x1b', f: '\f', n: '\n', r: '\r', t: '\t', v: '\v',
+};
+const ANSI_C_NUMERIC_ESCAPE = /^(?:x([0-9a-fA-F]{1,2})|u([0-9a-fA-F]{1,4})|U([0-9a-fA-F]{1,8})|([0-7]{1,3}))/;
+
+/**
+ * Undo one `printf %q` word: `\x` escapes, `'…'`, and `$'…'` ANSI-C quoting
+ * (bash and zsh use it for control characters). An unterminated quote runs to
+ * the end. Double quotes are literal: `%q` never emits them unescaped.
+ */
+function decodeShellQuotedWord(value: string): string {
+  let out = '';
+  let i = 0;
+  while (i < value.length) {
+    const char = value[i]!;
+    if (char === '\\') {
+      out += value[i + 1] ?? '';
+      i += 2;
+    } else if (char === "'") {
+      const close = value.indexOf("'", i + 1);
+      const end = close === -1 ? value.length : close;
+      out += value.slice(i + 1, end);
+      i = end + 1;
+    } else if (char === '$' && value[i + 1] === "'") {
+      i += 2;
+      while (i < value.length && value[i] !== "'") {
+        if (value[i] !== '\\') {
+          out += value[i];
+          i += 1;
+          continue;
+        }
+        const rest = value.slice(i + 1, i + 10);
+        const numeric = ANSI_C_NUMERIC_ESCAPE.exec(rest);
+        if (numeric) {
+          const [whole, hex, u4, u8, octal] = numeric;
+          const code = Number.parseInt(hex ?? u4 ?? u8 ?? octal!, octal ? 8 : 16);
+          out += code <= 0x10ffff ? String.fromCodePoint(code) : '';
+          i += 1 + whole.length;
+        } else if (rest[0] === 'c' && rest.length > 1) {
+          out += String.fromCharCode(rest.charCodeAt(1) & 0x1f);
+          i += 3;
+        } else {
+          out += ANSI_C_ESCAPES[rest[0] ?? ''] ?? rest[0] ?? '';
+          i += 2;
+        }
+      }
+      i += 1;
+    } else {
+      out += char;
+      i += 1;
+    }
+  }
+  return out;
 }
 
 function parseOsc633(content: string): TerminalProtocolEvent[] {

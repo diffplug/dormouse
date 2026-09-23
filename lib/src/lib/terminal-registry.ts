@@ -59,6 +59,7 @@ export type { SurfaceFocusHandle } from './terminal-lifecycle';
 export { setDefaultShellOpts, getDefaultShellOpts } from './shell-defaults';
 
 export {
+  commandWatchRule,
   getWatchedCommands,
   getWatchedCommandsSnapshot,
   isCommandWatched,
@@ -99,7 +100,7 @@ export {
   countRunningSessionsIn,
   ensureTerminalPaneState,
   fillTerminalProcessCwd,
-  getRunningCommandArgv0,
+  getRunningCommandWatchKey,
   getInheritableCwd,
   getTerminalPaneState,
   getTerminalPaneStateSnapshot,

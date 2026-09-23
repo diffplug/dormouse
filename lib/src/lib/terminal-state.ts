@@ -376,31 +376,59 @@ export function summarizeCommandLine(raw: string): string {
 }
 
 /**
- * The first word of a command line, reduced to a bare program name: anything
- * after the first pipeline/compound boundary is dropped, leading `VAR=value`
- * assignments and a leading `env` are skipped, and argv[0] is taken as a
- * basename. `claude`, `/usr/bin/claude --print`, and `FOO=1 env BAR=2 claude`
- * all yield `claude`; `foo | claude` yields `foo`. Returns null when the line
- * holds no runnable word.
+ * The key WATCHING rules are stored under (`docs/specs/alert.md` -> WATCHING
+ * Track): the program the line is really waiting on, as a bare name, or
+ * `<runner> <script>` for a script runner. Returns null when the line holds no
+ * runnable word. Every key it returns passes {@link isWatchKey}.
  *
- * A Windows launcher suffix is not part of the name: `C:\tools\claude.exe`,
- * `npm.cmd` and `build.ps1` yield `claude`, `npm` and `build`. `.exe` / `.cmd`
- * is how one program spells itself when PATHEXT resolves it, so keeping the
- * suffix would leave `npm` and `npm.cmd` as two rules for one program — the
- * miss this whole path exists to close. Accepted: `foo.bat` and `foo.exe` in
- * one directory cannot be watched separately.
- *
- * This is the key WATCHING rules are stored under — see `docs/specs/alert.md`.
+ * - **The last command of a list** (`&&`, `||`, `;`, `&`, newline), since the
+ *   earlier ones are set-up (`cd web && pnpm dev`, `clear; claude`), and **the
+ *   first stage of its pipeline** (`claude | tee log`). Grouping parentheses and
+ *   braces are dropped, so `(cd web && pnpm dev)` is `pnpm dev`; a group
+ *   followed by more of the list keys on what follows it.
+ * - **Transparent wrappers are skipped** with the flags they are known to take
+ *   ({@link TRANSPARENT_WRAPPERS}), along with leading `VAR=value` words.
+ * - **A launcher suffix is not part of the name** — see
+ *   {@link commandProgramName}.
+ * - **Runners key by script** ({@link SCRIPT_RUNNERS}); a script that could not
+ *   be a key (a path, a quoted phrase) keys as the bare runner.
  */
-export function commandArgv0(raw: string): string | null {
-  return commandProgramName(primaryCommandTokens(raw)[0] ?? '') || null;
+export function commandWatchKey(raw: string): string | null {
+  const segments = splitCommandList(tokenizeCommand(raw.trim())).map(ungroupedWords);
+  const words = segments.reverse().find((segment) => segment.length > 0) ?? [];
+  const pipe = words.indexOf('|');
+  return watchKeyOfCommand(pipe === -1 ? words : words.slice(0, pipe));
+}
+
+/**
+ * Whether `name` is a WATCHING key some command line can produce: a bare
+ * program name, or exactly `<runner> <script>`. Neither part holds a path
+ * separator or a Windows drive prefix, and the program never ends in a launcher
+ * suffix — `commandProgramName` strips those.
+ */
+export function isWatchKey(name: string): boolean {
+  const parts = name.split(' ');
+  if (parts.length > 2 || parts.some((part) => !part || /[\\/\s]|^[A-Za-z]:/.test(part))) return false;
+  return !WINDOWS_EXECUTABLE_SUFFIX.test(parts[0]!);
+}
+
+/**
+ * The rule in `rules` that covers `key`, or null: the key itself, else — for a
+ * `<runner> <script>` key — a bare rule on its runner, which keeps matching
+ * every script of that runner.
+ */
+export function watchRuleFor(rules: ReadonlySet<string>, key: string | null): string | null {
+  if (key === null) return null;
+  if (rules.has(key)) return key;
+  const space = key.indexOf(' ');
+  const runner = space === -1 ? null : key.slice(0, space);
+  return runner !== null && rules.has(runner) ? runner : null;
 }
 
 /**
  * The tokens of the first command on a line: quote- and escape-aware, truncated
  * at the first pipeline/compound boundary, with leading `VAR=value` assignments
- * and a leading `env` skipped. `commandArgv0` is `commandProgramName` of the
- * first of these.
+ * and a leading `env` skipped.
  */
 export function primaryCommandTokens(raw: string): string[] {
   return takePrimaryCommandTokens(tokenizeCommand(raw.trim()));
@@ -883,7 +911,8 @@ function withRequiredHostPrefixes(
 /**
  * Split a command line into words, honoring quotes, POSIX backslash escapes,
  * and the pipeline/compound separators `| || && ; &`, which are emitted as
- * their own tokens.
+ * their own tokens. An unquoted newline separates commands like `;`, and a
+ * backslash-newline continues the line.
  *
  * A `\` escapes exactly the `POSIX_ESCAPABLE` set (`foo\ bar` is one token,
  * `\*.ts` passes a literal glob, and a path Dormouse escaped for paste reads
@@ -919,6 +948,10 @@ function tokenizeCommand(input: string): string[] {
     }
     if (char === '\\' && quote !== "'") {
       const next = input[i + 1];
+      if (next === '\n') {
+        i += 1;
+        continue;
+      }
       if (next !== undefined && POSIX_ESCAPABLE.test(next)) {
         escaping = true;
         continue;
@@ -933,6 +966,11 @@ function tokenizeCommand(input: string): string[] {
     }
     if (char === '"' || char === "'") {
       quote = char;
+      continue;
+    }
+    if (char === '\n') {
+      push();
+      tokens.push(';');
       continue;
     }
     if (/\s/.test(char)) {
@@ -984,19 +1022,215 @@ function isEnvAssignment(token: string | undefined): boolean {
   return !!token && /^[A-Za-z_][A-Za-z0-9_]*=/.test(token);
 }
 
+const LIST_SEPARATORS = new Set(['&&', '||', ';', '&']);
+
+/** Tokens split into the commands of a list; a pipeline stays in one piece. */
+function splitCommandList(tokens: string[]): string[][] {
+  const segments: string[][] = [[]];
+  for (const token of tokens) {
+    if (LIST_SEPARATORS.has(token)) segments.push([]);
+    else segments[segments.length - 1]!.push(token);
+  }
+  return segments;
+}
+
+/** One list segment without the `(` / `{` / `)` / `}` of a subshell or group
+ *  around it — lexical only, so a group's inner list is split like any other. */
+function ungroupedWords(segment: string[]): string[] {
+  return segment
+    .map((word, index) => (index === 0 ? word.replace(/^[({]+/, '') : word).replace(/\)+$/, ''))
+    .filter((word) => word !== '' && word !== '}');
+}
+
+interface FlagSpec {
+  /** Flags that take the next word as their value, or attached (`-uroot`, `--user=root`). */
+  value?: readonly string[];
+  /** Flags that stand alone; single letters may cluster (`-di`). */
+  bool?: readonly string[];
+  /** A stand-alone flag shape not worth listing (nice's `-5`). */
+  boolPattern?: RegExp;
+  /** Value flags whose value is optional and numeric (make's `-j` / `-j 8`). */
+  numeric?: readonly string[];
+  /** `VAR=value` words it accepts among its flags (`sudo FOO=1 make`). */
+  assignments?: boolean;
+}
+
+interface WrapperSpec extends FlagSpec {
+  /** Positional words before the command it runs (`timeout 5m make`). */
+  operands?: number;
+  /** The command is a package spec, whose `@version` is not part of the name. */
+  packageSpec?: boolean;
+}
+
+/**
+ * Programs that run the command named after their own flags, keyed as one word
+ * or as a launcher's two (`pnpm dlx`). Only the flags listed are understood: an
+ * unknown one stops the skip and the wrapper keys as itself, rather than
+ * guessing whether that flag swallowed the next word. `env -S` and
+ * `command -v` are unknown on purpose — neither runs its next word.
+ */
+const TRANSPARENT_WRAPPERS: ReadonlyMap<string, WrapperSpec> = new Map(Object.entries({
+  env: { value: ['-u', '--unset', '-C', '--chdir'], bool: ['-', '-i', '--ignore-environment', '-0', '--null', '-v', '--debug'], assignments: true },
+  sudo: {
+    value: ['-u', '--user', '-g', '--group', '-p', '--prompt', '-C', '--close-from', '-D', '--chdir', '-r', '--role', '-t', '--type', '-T', '--command-timeout', '-U', '--other-user'],
+    bool: ['-E', '--preserve-env', '-H', '--set-home', '-n', '--non-interactive', '-S', '--stdin', '-b', '--background', '-k', '--reset-timestamp', '-P', '--preserve-groups', '-A', '--askpass', '-B', '--bell', '-i', '--login', '-s', '--shell'],
+    assignments: true,
+  },
+  doas: { value: ['-u'], bool: ['-n'] },
+  time: { value: ['-o', '--output', '-f', '--format'], bool: ['-p', '--portability', '-v', '--verbose', '-a', '--append', '-l'] },
+  nice: { value: ['-n', '--adjustment'], boolPattern: /^-\d+$/ },
+  nohup: {},
+  caffeinate: { value: ['-t', '-w'], bool: ['-d', '-i', '-m', '-s', '-u'] },
+  command: { bool: ['-p'] },
+  builtin: {},
+  exec: { value: ['-a'], bool: ['-c', '-l'] },
+  stdbuf: { value: ['-i', '--input', '-o', '--output', '-e', '--error'] },
+  timeout: { value: ['-k', '--kill-after', '-s', '--signal'], bool: ['-v', '--verbose', '--foreground', '--preserve-status'], operands: 1 },
+  npx: { value: ['-p', '--package'], bool: ['-y', '--yes', '--no', '-q', '--quiet'], packageSpec: true },
+  pnpx: { value: ['--package'], bool: ['-s', '--silent'], packageSpec: true },
+  bunx: { value: ['-p', '--package'], bool: ['--bun', '-y'], packageSpec: true },
+  uvx: { value: ['--from', '--with', '-p', '--python'], bool: ['-q', '--quiet', '-v', '--verbose', '--isolated', '--offline'], packageSpec: true },
+  'pnpm dlx': { value: ['--package'], bool: ['-s', '--silent'], packageSpec: true },
+  'yarn dlx': { value: ['-p', '--package'], bool: ['-q', '--quiet'], packageSpec: true },
+  'npm exec': { value: ['-p', '--package', '-w', '--workspace'], bool: ['-y', '--yes', '--no', '-q', '--quiet', '-ws', '--workspaces'], packageSpec: true },
+  'bun x': { value: ['-p', '--package'], bool: ['--bun', '-y'], packageSpec: true },
+} satisfies Record<string, WrapperSpec>));
+
+interface RunnerSpec extends FlagSpec {
+  /** A verb both spellings of a script share, dropped (`npm run test` is `npm test`). */
+  drop?: readonly string[];
+  /** A leading `+toolchain` word (`cargo +nightly build`). */
+  toolchain?: boolean;
+}
+
+/**
+ * Runners whose script is part of the key, so `pnpm dev` and `pnpm test` are
+ * two rules. `value` lists the flags before the script that take a word; any
+ * other flag is skipped as standing alone.
+ */
+const SCRIPT_RUNNERS: ReadonlyMap<string, RunnerSpec> = new Map(Object.entries({
+  npm: { value: ['-C', '--prefix', '-w', '--workspace'], drop: ['run', 'run-script'] },
+  pnpm: { value: ['-C', '--dir', '-F', '--filter'], drop: ['run'] },
+  yarn: { value: ['--cwd'], drop: ['run'] },
+  bun: { value: ['--cwd', '-F', '--filter', '-c', '--config'], drop: ['run'] },
+  cargo: { value: ['-C', '--color', '--config', '-Z'], toolchain: true },
+  make: {
+    value: ['-C', '--directory', '-f', '--file', '--makefile', '-I', '--include-dir', '-o', '--old-file', '-W', '--what-if'],
+    numeric: ['-j', '--jobs', '-l', '--load-average'],
+    assignments: true,
+  },
+  just: { value: ['-f', '--justfile', '-d', '--working-directory', '--shell', '--dotenv-path', '--dotenv-filename', '--color'], assignments: true },
+} satisfies Record<string, RunnerSpec>));
+
+/** How many words a flag occupies under `spec`: 0 when it is not one it knows. */
+function flagWidth(words: readonly string[], index: number, spec: FlagSpec): number {
+  const word = words[index]!;
+  if (spec.bool?.includes(word) || spec.boolPattern?.test(word)) return 1;
+  if (spec.value?.includes(word)) return 2;
+  if (spec.numeric?.includes(word)) return /^\d+(?:\.\d+)?$/.test(words[index + 1] ?? '') ? 2 : 1;
+  const equals = word.indexOf('=');
+  if (word.startsWith('--')) {
+    const name = equals > 0 ? word.slice(0, equals) : null;
+    return name !== null && [spec.value, spec.bool, spec.numeric].some((list) => list?.includes(name)) ? 1 : 0;
+  }
+  if (word.length > 2) {
+    const short = word.slice(0, 2);
+    if (spec.value?.includes(short) || spec.numeric?.includes(short)) return 1;
+    if ([...word.slice(1)].every((letter) => spec.bool?.includes(`-${letter}`))) return 1;
+  }
+  return 0;
+}
+
+/**
+ * The index of the command a wrapper at `index` runs, or null when `words`
+ * holds no wrapper there, or one whose flags are not understood.
+ */
+function wrappedCommandIndex(words: readonly string[], index: number): { index: number; spec: WrapperSpec } | null {
+  const program = commandProgramName(words[index] ?? '');
+  const launcher = TRANSPARENT_WRAPPERS.get(`${program} ${words[index + 1] ?? ''}`);
+  const spec = launcher ?? TRANSPARENT_WRAPPERS.get(program);
+  if (!spec) return null;
+  let i = index + (launcher ? 2 : 1);
+  while (i < words.length) {
+    const word = words[i]!;
+    if (word === '--') {
+      i += 1;
+      break;
+    }
+    if (spec.assignments && isEnvAssignment(word)) {
+      i += 1;
+      continue;
+    }
+    if (!word.startsWith('-')) break;
+    const width = flagWidth(words, i, spec);
+    if (width === 0) return null;
+    i += width;
+  }
+  i += spec.operands ?? 0;
+  return i < words.length ? { index: i, spec } : null;
+}
+
+/** One simple command's watch key: wrappers and assignments skipped, runners keyed by script. */
+function watchKeyOfCommand(words: readonly string[]): string | null {
+  let index = 0;
+  let packageSpec = false;
+  for (;;) {
+    while (isEnvAssignment(words[index])) index += 1;
+    const wrapped = wrappedCommandIndex(words, index);
+    if (!wrapped) break;
+    index = wrapped.index;
+    packageSpec = !!wrapped.spec.packageSpec;
+  }
+  let program = commandProgramName(words[index] ?? '');
+  // `claude@latest`, but not a scope's leading `@`.
+  if (packageSpec) program = program.replace(/^(.+?)@[^@]*$/, '$1');
+  // A name with a space in it would read back as `<runner> <script>`.
+  if (program.includes(' ') || !isWatchKey(program)) return null;
+  const runner = SCRIPT_RUNNERS.get(program);
+  if (!runner) return program;
+  const script = runnerScript(words, index + 1, runner);
+  return script !== null && isWatchKey(`${program} ${script}`) ? `${program} ${script}` : program;
+}
+
+/** The first word after a runner's own flags (and its shared verb): its script or target. */
+function runnerScript(words: readonly string[], from: number, spec: RunnerSpec): string | null {
+  let i = from;
+  if (spec.toolchain && words[i]?.startsWith('+')) i += 1;
+  let dropped = false;
+  while (i < words.length) {
+    const word = words[i]!;
+    if (word.startsWith('-') && word !== '-') {
+      i += Math.max(1, flagWidth(words, i, spec));
+    } else if (spec.assignments && isEnvAssignment(word)) {
+      i += 1;
+    } else if (!dropped && spec.drop?.includes(word)) {
+      dropped = true;
+      i += 1;
+    } else {
+      return word;
+    }
+  }
+  return null;
+}
+
 /** A path reduced to its last segment, in either dialect. */
 function commandBasename(command: string): string {
   return command.replace(/^.*[\\/]/, '');
 }
 
-/** PATHEXT's spellings of one program. Exported for `watched-commands.ts`,
- *  which drops a stored key ending in one: `commandArgv0` cannot produce one. */
-export const WINDOWS_EXECUTABLE_SUFFIX = /\.(?:exe|cmd|bat|com|ps1)$/i;
+/** PATHEXT's spellings of one program. */
+const WINDOWS_EXECUTABLE_SUFFIX = /\.(?:exe|cmd|bat|com|ps1)$/i;
 
 /**
  * argv[0] reduced to the one name a program answers to: no path, no launcher
  * suffix. The single answer to "which program is this", so the header, the
  * WATCHING rule row and the terminal context cannot disagree about it.
+ *
+ * `C:\tools\claude.exe`, `npm.cmd` and `build.ps1` are `claude`, `npm` and
+ * `build`: `.exe` / `.cmd` is how one program spells itself when PATHEXT
+ * resolves it, so keeping the suffix would leave `npm` and `npm.cmd` as two
+ * WATCHING rules for one program. Accepted: `foo.bat` and `foo.exe` in one
+ * directory cannot be watched separately.
  */
 export function commandProgramName(command: string): string {
   return commandBasename(command).replace(WINDOWS_EXECUTABLE_SUFFIX, '');

@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { POSIX_ESCAPABLE } from './posix-escape';
 import { shellEscapePosix } from './shell-escape';
 import {
-  commandArgv0,
+  commandWatchKey,
   createTerminalPaneState,
+  isWatchKey,
+  watchRuleFor,
   cwdDisplay,
   cwdFromManualPath,
   cwdFromOsc7,
@@ -336,6 +338,112 @@ describe('command title summarizer', () => {
   });
 });
 
+describe('WATCHING key', () => {
+  it.each([
+    ['claude', 'claude'],
+    ['claude --print hello', 'claude'],
+    ['/usr/local/bin/claude --resume', 'claude'],
+    ['FOO=1 env BAR=2 claude', 'claude'],
+    ['"/opt/my tools/claude" --print', 'claude'],
+    // The list's last command is what the line waits on; earlier ones set up.
+    ['cd web && pnpm dev', 'pnpm dev'],
+    ['clear; claude', 'claude'],
+    ['make || say failed', 'say'],
+    ['pnpm dev &', 'pnpm dev'],
+    ['cd web\npnpm dev', 'pnpm dev'],
+    ['pnpm \\\n  dev', 'pnpm dev'],
+    // A pipeline's first stage is the producer.
+    ['claude | tee log', 'claude'],
+    ['foo | claude', 'foo'],
+    // Grouping is lexical only.
+    ['(cd web && pnpm dev)', 'pnpm dev'],
+    ['{ cd web; pnpm dev; }', 'pnpm dev'],
+    ['(cd web && pnpm dev) | tee log', 'pnpm dev'],
+    // Transparent wrappers, with the flags they take.
+    ['sudo make', 'make'],
+    ['sudo -u root FOO=1 make install', 'make install'],
+    ['sudo --preserve-env=PATH make', 'make'],
+    ['doas -u root make', 'make'],
+    ['time make', 'make'],
+    ['time -p make', 'make'],
+    ['caffeinate -i claude', 'claude'],
+    ['caffeinate -dims -t 600 claude', 'claude'],
+    ['nohup x', 'x'],
+    ['nice -n 5 x', 'x'],
+    ['nice -5 x', 'x'],
+    ['env FOO=1 claude', 'claude'],
+    ['env -i PATH=/bin claude', 'claude'],
+    ['command claude', 'claude'],
+    ['builtin exec -a agent claude', 'claude'],
+    ['stdbuf -oL make', 'make'],
+    ['timeout -s KILL 5m cargo test', 'cargo test'],
+    ['npx claude', 'claude'],
+    ['npx -y claude@latest', 'claude'],
+    ['npx --package @anthropic-ai/claude-code claude', 'claude'],
+    ['bunx vite', 'vite'],
+    ['uvx --from ruff ruff', 'ruff'],
+    ['pnpm dlx x', 'x'],
+    ['yarn dlx create-vite', 'create-vite'],
+    ['npm exec -- vitest', 'vitest'],
+    ['sudo nice -n 5 time make all', 'make all'],
+    // A flag it does not know stops the skip rather than guessing.
+    ['sudo --bogus make', 'sudo'],
+    ['command -v claude', 'command'],
+    ['env -S "claude --x"', 'env'],
+    ['sudo', 'sudo'],
+    ['timeout 5m', 'timeout'],
+    // Runners key by script, sharing one key across both spellings.
+    ['npm run dev', 'npm dev'],
+    ['npm run-script dev', 'npm dev'],
+    ['npm test', 'npm test'],
+    ['npm run --silent test:unit', 'npm test:unit'],
+    ['pnpm dev', 'pnpm dev'],
+    ['pnpm run dev', 'pnpm dev'],
+    ['pnpm -C web dev', 'pnpm dev'],
+    ['pnpm --filter=web dev', 'pnpm dev'],
+    ['pnpm -r build', 'pnpm build'],
+    ['yarn --cwd web dev', 'yarn dev'],
+    ['bun run dev', 'bun dev'],
+    ['cargo +nightly build', 'cargo build'],
+    ['cargo --color always test', 'cargo test'],
+    ['make -j8 all', 'make all'],
+    ['make -j 8 all', 'make all'],
+    ['make -j all', 'make all'],
+    ['make -C web CC=clang all', 'make all'],
+    ['make', 'make'],
+    ['just --justfile x build', 'just build'],
+    ['pnpm', 'pnpm'],
+    ['pnpm run', 'pnpm'],
+    // A script that could not be a key keys as the runner.
+    ['make build/app.o', 'make'],
+    ['npm run "my script"', 'npm'],
+  ])('keys %j as %j', (raw, expected) => {
+    expect(commandWatchKey(raw)).toBe(expected);
+    expect(isWatchKey(expected)).toBe(true);
+  });
+
+  it.each(['', '   ', '|', 'FOO=1', ';', '"my tool" --flag'])('has no key for %j', (raw) => {
+    expect(commandWatchKey(raw)).toBeNull();
+  });
+
+  it('matches a rule exactly, and a bare runner rule for every script of that runner', () => {
+    expect(watchRuleFor(new Set(['pnpm']), 'pnpm dev')).toBe('pnpm');
+    expect(watchRuleFor(new Set(['pnpm']), 'pnpm')).toBe('pnpm');
+    expect(watchRuleFor(new Set(['pnpm test']), 'pnpm dev')).toBeNull();
+    expect(watchRuleFor(new Set(['pnpm test', 'pnpm']), 'pnpm test')).toBe('pnpm test');
+    expect(watchRuleFor(new Set(['pnpm dev']), 'pnpm')).toBeNull();
+    expect(watchRuleFor(new Set(['claude']), 'claude')).toBe('claude');
+    expect(watchRuleFor(new Set(['claude']), null)).toBeNull();
+  });
+
+  it('accepts a bare name or exactly one runner and script', () => {
+    for (const key of ['claude', 'foo:bar', 'pnpm dev', 'npm test:unit']) expect(isWatchKey(key), key).toBe(true);
+    for (const key of ['', 'pnpm  dev', 'a b c', ' pnpm', 'pnpm ', 'npm.cmd test', 'npm.cmd', 'C:foo', 'pnpm C:x', 'make build/x', '/usr/bin/claude', 'a\tb']) {
+      expect(isWatchKey(key), key).toBe(false);
+    }
+  });
+});
+
 describe('command tokenizer dialects', () => {
   // A backslash is a path separator unless it precedes something a shell really
   // escapes, so both dialects reduce to the bare program name.
@@ -343,32 +451,32 @@ describe('command tokenizer dialects', () => {
     // Windows: absolute paths, launchers, a quoted path with spaces.
     ['C:\\tools\\dor.cmd tool storybook', 'dor', 'dor tool storybook'],
     ['C:\\Users\\me\\.claude\\local\\claude', 'claude', 'claude'],
-    ['"C:\\Program Files\\nodejs\\npm.cmd" run dev', 'npm', 'npm run dev'],
+    ['"C:\\Program Files\\nodejs\\npm.cmd" run dev', 'npm dev', 'npm run dev'],
     ['\\\\build\\share\\tools\\claude.exe --print', 'claude', 'claude --print'],
-    ['FOO=1 "C:\\Program Files\\nodejs\\npm.cmd" run dev', 'npm', 'npm run dev'],
+    ['FOO=1 "C:\\Program Files\\nodejs\\npm.cmd" run dev', 'npm dev', 'npm run dev'],
     // PowerShell's call operator, the only way that shell runs a quoted path.
-    // Without the leading-`&` skip it reads as a boundary and argv0 is null.
-    ['& "C:\\Program Files\\nodejs\\npm.cmd" run dev', 'npm', 'npm run dev'],
+    // Without the leading-`&` skip it reads as a boundary and the key is null.
+    ['& "C:\\Program Files\\nodejs\\npm.cmd" run dev', 'npm dev', 'npm run dev'],
     ['& C:\\tools\\dor.cmd tool storybook', 'dor', 'dor tool storybook'],
     // POSIX escapes keep their meaning.
     ['/opt/my\\ tools/claude --print', 'claude', 'claude --print'],
     ['grep \\*.ts src', 'grep', 'grep *.ts src'],
     ['echo a\\\\b', 'echo', 'echo a\\b'],
-  ])('reduces %j to %j / %j', (raw, argv0, summary) => {
-    expect(commandArgv0(raw)).toBe(argv0);
+  ])('reduces %j to %j / %j', (raw, watchKey, summary) => {
+    expect(commandWatchKey(raw)).toBe(watchKey);
     expect(summarizeCommandLine(raw)).toBe(summary);
   });
 
   // An unquoted Windows path with spaces is undecidable without probing the
   // filesystem — `A\B C\D.cmd` is equally `A\B` plus an argument — so the
-  // tokenizer splits it and argv0 misses rather than naming the wrong program.
+  // tokenizer splits it and the key misses rather than naming the wrong program.
   it('leaves an unquoted Windows path with spaces split', () => {
-    expect(commandArgv0('C:\\Program Files\\nodejs\\npm.cmd run dev')).toBe('Program');
-    expect(commandArgv0('"C:\\Program Files\\Git\\bin\\bash" scripts\\bootstrap.cmd')).toBe('bash');
+    expect(commandWatchKey('C:\\Program Files\\nodejs\\npm.cmd run dev')).toBe('Program');
+    expect(commandWatchKey('"C:\\Program Files\\Git\\bin\\bash" scripts\\bootstrap.cmd')).toBe('bash');
   });
 
   it('pins the ordinary POSIX argv[0] escape cost of dialect-free tokenizing', () => {
-    expect(commandArgv0('foo\\-bar')).toBe('-bar');
+    expect(commandWatchKey('foo\\-bar')).toBe('-bar');
   });
 
   // `POSIX_ESCAPABLE` is `shellEscapePosix`'s set; the tokenizer unescapes it.

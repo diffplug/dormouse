@@ -28,7 +28,7 @@ beforeEach(() => {
   setPlatform(new FakePtyAdapter()); ensureResizeObserver();
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
   props = { title: 'pnpm dev', surfaceRef: 'surface:3', cwd: '~/repo', titleSources: [{ source: 'OSC 2', value: 'pnpm dev', note: 'Used' }], scan: { status: 'loaded', entries: [port(5173)] },
-    argv0: 'pnpm', watching: false, todo: false, status: 'completed', command: 'git status', explorerLabel: 'Open in Finder', canExplore: true, canAgent: true, canIframe: true,
+    watchRule: 'pnpm', watching: false, todo: false, status: 'completed', command: 'git status', explorerLabel: 'Open in Finder', canExplore: true, canAgent: true, canIframe: true,
     onClose: vi.fn(), onCopyRef: vi.fn(), onCopyPath: vi.fn(), onExplore: vi.fn(), onWatch: vi.fn(), onTodo: vi.fn(), onPort: vi.fn(), onModify: vi.fn(async () => {}), onReset: vi.fn(async () => {}), onPromote: vi.fn(async () => {}),
     children: <div data-helper-terminal="helper"><textarea aria-label="Helper input" /></div> };
 });
@@ -192,6 +192,30 @@ it('opens the parent notepad from the Helper control and keeps edits on that par
   }
 });
 
+
+it('offers the rule covering the running script, else that script\'s own key', async () => {
+  const open = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'helper', parentId: 'watch-row', command: '', status: 'off' });
+  terminalRegistry.applyTerminalSemanticEvents('watch-row', [
+    { type: 'commandLine', commandLine: 'cd web && pnpm run dev' },
+    { type: 'commandStart', source: 'osc633_boundaries' },
+  ]);
+  const watchSwitch = () => container.querySelector<HTMLButtonElement>('[role="switch"][aria-label^="Watch all"]');
+  try {
+    act(() => terminalRegistry.setCommandWatched('pnpm', true));
+    await act(async () => root.render(<TerminalContext id="watch-row" />));
+    // A bare runner rule already covers `pnpm dev`, so the row names — and turns off — that rule.
+    expect(watchSwitch()?.getAttribute('aria-label')).toBe('Watch all pnpm commands on');
+    await act(async () => watchSwitch()!.click());
+    expect(terminalRegistry.getWatchedCommands()).toEqual([]);
+    expect(watchSwitch()?.getAttribute('aria-label')).toBe('Watch all pnpm dev commands off');
+    await act(async () => watchSwitch()!.click());
+    expect(terminalRegistry.getWatchedCommands()).toEqual(['pnpm dev']);
+  } finally {
+    open.mockRestore();
+    act(() => { for (const name of terminalRegistry.getWatchedCommands()) terminalRegistry.setCommandWatched(name, false); });
+    terminalRegistry.removeTerminalPaneState('watch-row');
+  }
+});
 
 it('uses the Tool primary terminal without creating a helper or offering helper lifecycle actions', async () => {
   const openHelper = vi.spyOn(helpers, 'openHelper');
