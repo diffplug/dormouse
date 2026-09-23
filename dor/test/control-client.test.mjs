@@ -120,6 +120,11 @@ test('a peer that does not open with a challenge gets nothing at all', skipOnWin
     try {
       const client = new SocketControlClient({ socketPath, token: 'shared-secret', timeoutMs: 5000 });
       await assert.rejects(client.listSurfaces({}), /could not prove it is Dormouse/);
+      // How much this proves: a client that wrote before validating the frame
+      // would destroy the socket in the same turn and its bytes would never
+      // reach the wire, so `received` would be empty either way. Nothing here
+      // can wait for what is meant never to arrive; the test above is the one
+      // that pins what a client sends a peer it cannot verify.
       assert.deepEqual(received, []);
     } finally {
       await new Promise((resolve) => squatter.close(resolve));
