@@ -221,5 +221,10 @@ export const TerminalContext: Story = {
     const header = await requireElement('[data-pane-header-for="context-live"]', 'terminal header');
     header.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
     await waitForCondition(() => !!document.querySelector('[data-helper-terminal]'));
+    // Hold until autorun has finished and the helper has painted, so the capture
+    // is never the "Waiting for shell…" or "Running …" frame on the way there.
+    await waitForCondition(() =>
+      document.querySelector('[aria-label="Helper terminal status"]')?.textContent?.includes('autoran') ?? false);
+    await settleTerminals();
   },
 };
