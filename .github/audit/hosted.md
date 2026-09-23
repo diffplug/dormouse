@@ -36,7 +36,10 @@ itself is audited in `diffplug/pgstencil` by that repository's own
 contents here — audit how `hosted/` configures the adapter. Distinguish tested
 code from pending production configuration; do not treat local provider
 simulations as live OAuth acceptance, and treat a checked-in placeholder as no
-evidence about an external control.
+evidence about an external control. Production activation is staged under the spec's
+`## Future` and is not a check: report its state as INFO, never as
+`UNVERIFIABLE`, so an unprovisioned deployment cannot hold the audit at
+INCONCLUSIVE.
 
 ## Qualitative pass
 

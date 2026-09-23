@@ -9,7 +9,7 @@
 - **FAIL IF** Hosted accepts a request URL outside configured `APP_ORIGIN`, grants marketing-origin credentialed CORS, or permits a state-changing auth request without exact Origin and CSRF checks; inspect `hosted/server/worker-app.ts` and the packed adapter.
 - **FAIL IF** authentication cookies have a Domain attribute, lack `__Host-`, Secure, HttpOnly, or Path=/ in HTTPS, or session tokens appear in browser JSON or persistent browser storage; inspect the adapter and `hosted/src/api.ts`.
 - **FAIL IF** the production HTML permits third-party scripts, framing, or inline script execution, any response bypasses `secureHeaders` including a misconfigured deployment's error, or anything but a content-hashed `/assets/` file is cacheable, the SPA fallback's shell included; inspect `secureHeaders` in `hosted/server/headers.ts`, binding resolution in `hosted/server/worker-app.ts`, and asset routing in `hosted/wrangler.jsonc`.
-- **FAIL IF** marketing scripts, analytics, provider avatars, or remote fonts enter the Hosted frontend; inspect the frontend import graph and deployed response when available. Cloudflare script injection must be excluded for the Hosted hostname at provisioning.
+- **FAIL IF** marketing scripts, analytics, provider avatars, or remote fonts enter the Hosted frontend; inspect the frontend import graph and deployed response when available.
 
 Pinned by `hosted/server/tests/workers.test.ts`.
 
@@ -34,8 +34,8 @@ Pinned by `hosted/server/tests/workers.test.ts` and `hosted/server/tests/policy.
 
 Pinned by `hosted/server/tests/artifacts.test.ts`, `hosted/server/tests/workers.test.ts`, `hosted/server/tests/policy.test.ts`.
 
-Production activation must verify uncached Hyperdrive, separate credentials, and excluded marketing injection (`hosted/README.md`); checked-in placeholders prove none of them.
-
 ## Future
+
+**Production activation**, not checked until Hosted is provisioned: uncached Hyperdrive, separate credentials, and Cloudflare script injection excluded for the Hosted hostname (`hosted/README.md`). Checked-in placeholders prove none of them.
 
 Public hosted voice and Relay need their own abuse, authorization, data-disclosure, and recovery checks first; `docs/specs/hosted.md` owns the staged work.
