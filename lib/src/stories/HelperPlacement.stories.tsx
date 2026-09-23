@@ -61,7 +61,7 @@ async function openContext() {
 function expectedSide({ layout, zoomed, cursor, sourceAtEnd }: Props) {
   // Alone in the Wall, the helper avoids the cursor; beside a neighbor, it takes the neighbor's side.
   if (zoomed || layout === 'single') return cursor === 'top' ? 'bottom' : 'top';
-  if (layout === 'grid') return 'bottom';
+  if (layout === 'grid') return 'right';
   if (layout === 'rows') return sourceAtEnd ? 'top' : 'bottom';
   return sourceAtEnd ? 'left' : 'right';
 }
@@ -94,7 +94,8 @@ async function prepare(args: Props) {
   if (!args.zoomed && args.layout !== 'single') {
     const a = context().getBoundingClientRect();
     const b = sourcePane().getBoundingClientRect();
-    expect(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom).toBe(true);
+    const overlap = { right: b.right - a.left, left: a.right - b.left, bottom: b.bottom - a.top, top: a.bottom - b.top };
+    expect(overlap[expectedSide(args)]).toBeCloseTo(16);
   } else {
     const a = context().getBoundingClientRect();
     const b = sourcePane().getBoundingClientRect();

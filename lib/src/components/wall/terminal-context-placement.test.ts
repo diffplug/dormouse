@@ -2,13 +2,26 @@ import { describe, expect, it } from 'vitest';
 import { cursorHalfSide, placeTerminalContext } from './terminal-context-placement';
 const wall = { x: 0, y: 0, width: 1200, height: 800 };
 describe('terminal context placement', () => {
-  it('places beside either column without covering the source', () => {
-    expect(placeTerminalContext(wall, { x: 0, y: 0, width: 596, height: 800 }, true)).toMatchObject({ side: 'right', rect: { x: 604, y: 0, width: 596, height: 800 } });
-    expect(placeTerminalContext(wall, { x: 604, y: 0, width: 596, height: 800 }, true)).toMatchObject({ side: 'left', rect: { x: 0, y: 0, width: 596, height: 800 } });
+  it('places beside either column, overlapping the source by the inset', () => {
+    expect(placeTerminalContext(wall, { x: 0, y: 0, width: 596, height: 800 }, true)).toMatchObject({ side: 'right', rect: { x: 580, y: 0, width: 596, height: 800 } });
+    expect(placeTerminalContext(wall, { x: 604, y: 0, width: 596, height: 800 }, true)).toMatchObject({ side: 'left', rect: { x: 24, y: 0, width: 596, height: 800 } });
   });
   it('uses below/above in stacked layouts', () => {
-    expect(placeTerminalContext(wall, { ...wall, height: 396 }, true).side).toBe('bottom');
-    expect(placeTerminalContext(wall, { ...wall, y: 404, height: 396 }, true).side).toBe('top');
+    expect(placeTerminalContext(wall, { ...wall, height: 396 }, true)).toMatchObject({ side: 'bottom', rect: { x: 0, y: 380, width: 1200, height: 396 } });
+    expect(placeTerminalContext(wall, { ...wall, y: 404, height: 396 }, true)).toMatchObject({ side: 'top', rect: { x: 0, y: 24, width: 1200, height: 396 } });
+  });
+  it('aligns all four adjacent edges with the inset helper bounds', () => {
+    const source = { x: 400, y: 260, width: 400, height: 280 };
+    const insetTop = placeTerminalContext(wall, source, false, 'top').rect;
+    const insetBottom = placeTerminalContext(wall, source, false, 'bottom').rect;
+    const right = placeTerminalContext(wall, source, true, 'right').rect;
+    const left = placeTerminalContext(wall, source, true, 'left').rect;
+    const bottom = placeTerminalContext(wall, source, true, 'bottom').rect;
+    const top = placeTerminalContext(wall, source, true, 'top').rect;
+    expect(right.x).toBe(insetTop.x + insetTop.width);
+    expect(left.x + left.width).toBe(insetTop.x);
+    expect(bottom.y).toBe(insetBottom.y + insetBottom.height);
+    expect(top.y + top.height).toBe(insetTop.y);
   });
   it('breaks equal grid fits right-first and honors manual sides', () => {
     const source = { x: 0, y: 0, width: 596, height: 396 };
@@ -16,7 +29,7 @@ describe('terminal context placement', () => {
     expect(placeTerminalContext(wall, source, true, 'bottom').side).toBe('bottom');
   });
   it('shrinks into an uneven neighbor and rejects unusable slivers', () => {
-    expect(placeTerminalContext(wall, { ...wall, width: 800 }, true)).toMatchObject({ side: 'right', rect: { width: 392 } });
+    expect(placeTerminalContext(wall, { ...wall, width: 800 }, true)).toMatchObject({ side: 'right', rect: { x: 784, width: 416 } });
     expect(placeTerminalContext(wall, { ...wall, width: 1000 }, true)).toMatchObject({ side: 'top', available: ['top', 'bottom'] });
   });
   it('insets each source half for single or zoomed panes', () => {
