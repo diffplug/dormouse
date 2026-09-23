@@ -9,13 +9,14 @@ import type { LathPersistedLayout } from '../lib/lath/persistence';
 import { requireElement, settleTerminals } from './settle-terminals';
 
 const SOURCE = 'placement-source';
-type Layout = 'single' | 'columns' | 'rows' | 'grid' | 'uneven';
+type Layout = 'single' | 'columns' | 'rows' | 'grid' | 'uneven' | 'wide-bottom';
 type Props = { layout: Layout; width: number; height: number; sourceAtEnd: boolean; cursor: 'top' | 'bottom'; zoomed: boolean };
 const leaf = (id: string): LathNode => ({ kind: 'leaf', id });
 const split = (dir: 'row' | 'col', nodes: LathNode[], weights = nodes.map(() => 1)): LathNode => ({ kind: 'split', dir, children: normalizeWeights(nodes.map((node, i) => ({ node, weight: weights[i] }))) });
 function boot({ layout, sourceAtEnd }: Props): LathPersistedLayout {
   const pair = sourceAtEnd ? [leaf('peer'), leaf(SOURCE)] : [leaf(SOURCE), leaf('peer')];
   const root = layout === 'single' ? leaf(SOURCE)
+    : layout === 'wide-bottom' ? split('col', [split('row', [leaf('peer'), leaf('peer-2')]), leaf(SOURCE)], [1.08, 1])
     : layout === 'rows' ? split('col', pair)
     : layout === 'grid' ? split('row', [split('col', pair), split('col', [leaf('peer-2'), leaf('peer-3')])])
     : split('row', pair, layout === 'uneven' ? [2, 1] : undefined);
@@ -62,6 +63,7 @@ function expectedSide({ layout, zoomed, cursor, sourceAtEnd }: Props) {
   // Alone in the Wall, the helper avoids the cursor; beside a neighbor, it takes the neighbor's side.
   if (zoomed || layout === 'single') return cursor === 'top' ? 'bottom' : 'top';
   if (layout === 'grid') return 'right';
+  if (layout === 'wide-bottom') return 'top';
   if (layout === 'rows') return sourceAtEnd ? 'top' : 'bottom';
   return sourceAtEnd ? 'left' : 'right';
 }
@@ -109,7 +111,7 @@ async function prepare(args: Props) {
     const a = context().getBoundingClientRect();
     const b = sourcePane().getBoundingClientRect();
     const overlap = { right: b.right - a.left, left: a.right - b.left, bottom: b.bottom - a.top, top: a.bottom - b.top };
-    expect(overlap[expectedSide(args)]).toBeCloseTo(expectedSide(args) === 'top' ? -16 : 16);
+    expect(overlap[expectedSide(args)]).toBeCloseTo(expectedSide(args) === 'top' ? 4 : 16);
   } else {
     const a = context().getBoundingClientRect();
     const b = sourcePane().getBoundingClientRect();
@@ -139,6 +141,7 @@ export const TwoColumns: Story = { args: { layout: 'columns' } };
 export const RightColumn: Story = { args: { layout: 'columns', sourceAtEnd: true } };
 export const TwoRows: Story = { args: { layout: 'rows' } };
 export const BottomRow: Story = { args: { layout: 'rows', sourceAtEnd: true } };
+export const WideBottomRow: Story = { args: { layout: 'wide-bottom' }, globals: { theme: 'Dark (Visual Studio)' } };
 export const Grid: Story = { args: { layout: 'grid' } };
 export const UnevenColumns: Story = { args: { layout: 'uneven' } };
 export const CursorAtTop: Story = { args: { cursor: 'top' } };

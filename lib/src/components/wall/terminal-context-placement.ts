@@ -3,7 +3,7 @@ import { edgeAxis, type Edge, type Rect } from '../../lib/lath/model';
 export type ContextSide = Edge;
 export type ContextPlacement = { rect: Rect; side: ContextSide; available: ContextSide[] };
 const SIDES: ContextSide[] = ['right', 'left', 'bottom', 'top'];
-/** Adjacent helpers overlap the source, except above: leave its title visible. */
+/** Adjacent helpers overlap the source; above helpers only graze its top edge. */
 const OVERLAP_INSET = 16;
 // Compact source/directory/status chrome plus a useful terminal viewport.
 const MIN_WIDTH = 280;
@@ -23,13 +23,14 @@ export function placeTerminalContext(wall: Rect, source: Rect, multiPane: boolea
   const bottom = wall.y + wall.height;
   const candidates = !multiPane ? [] : SIDES.map(side => {
     const horizontal = edgeAxis(side) === 'row';
-    // Lift above helpers by twice the usual offset, clearing the source header.
-    const overlap = side === 'top' ? -OVERLAP_INSET : OVERLAP_INSET;
+    // Grow upward over peer headers, but leave the source title readable.
+    const overlap = side === 'top' ? 4 : OVERLAP_INSET;
     const space = side === 'right' ? right - source.x - source.width + overlap
       : side === 'left' ? source.x - wall.x + overlap
       : side === 'bottom' ? bottom - source.y - source.height + overlap : source.y - wall.y + overlap;
     const width = Math.max(0, Math.min(source.width, horizontal ? space : wall.width));
-    const height = Math.max(0, Math.min(source.height, horizontal ? wall.height : space));
+    const desiredHeight = source.height + (side === 'top' ? 2 * OVERLAP_INSET + overlap : 0);
+    const height = Math.max(0, Math.min(desiredHeight, horizontal ? wall.height : space));
     return { side, rect: {
       x: side === 'right' ? source.x + source.width - overlap : side === 'left' ? source.x + overlap - width : clamp(source.x, wall.x, right - width),
       y: side === 'bottom' ? source.y + source.height - overlap : side === 'top' ? source.y + overlap - height : clamp(source.y, wall.y, bottom - height),

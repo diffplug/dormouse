@@ -66,7 +66,7 @@ The label is the `DerivedHeader` from `deriveHeader(...)`; `docs/specs/terminal-
 
 | Layout | Placement |
 |---|---|
-| Multiple visible panes | Beside the source with 16px overlap, except above: leave a 16px gap to expose the source title. Match its size where possible. Choose the largest usable candidate, ties right / left / bottom / top. Align the other axis with the source, shifting only to stay inside the Wall. |
+| Multiple visible panes | Beside the source with 16px overlap; match its size where possible. Above helpers overlap 4px and extend 32px farther upward over peer headers. Choose the largest usable candidate, ties right / left / bottom / top. Align the other axis with the source, shifting only to stay inside the Wall. |
 | No usable adjacent candidate; single or zoomed pane | Source's top or bottom half, inset 16px on every side, opposite its visible terminal cursor sampled on opening; unknown, offscreen, or midpoint cursor defaults to top. |
 | Small source or Wall | Expand the half-pane fallback to the minimum usable size, clamped inside the Wall's 16px inset; shrink below the minimum when necessary to preserve the inset. |
 
@@ -340,7 +340,7 @@ Source of truth: `requestKill` (every kill gesture: Door reattach, untouched fas
 
 ## Selection overlay
 
-**Must outline the union of the invoking source Pane and its open helper**, following their contour and bridging the above-helper gap without internal seams or framing neighbors. Track helper repositioning and resize without replacing its terminal; restore the source-only ring on close. The context container has no native focus outline; its controls retain their keyboard focus indicators.
+**Must outline the union of the invoking source Pane and its open helper**, following their outer contour without an internal seam or enclosing unused neighboring space. Track helper repositioning and resize without replacing its terminal; restore the source-only ring on close. The context container has no native focus outline; its controls retain their keyboard focus indicators.
 
 A fixed-positioned element on top of the Lath host, covering the active element's area inflated by `SELECTION_RING_INFLATE_PX` (4px) for panes; doors are not inflated. **The inflate is derived in `lib/src/components/design.tsx` so both ring strokes center on the gutter's midline** (rationale).
 

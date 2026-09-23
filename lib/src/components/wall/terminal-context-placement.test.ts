@@ -8,9 +8,9 @@ describe('terminal context placement', () => {
   });
   it('uses below/above in stacked layouts', () => {
     expect(placeTerminalContext(wall, { ...wall, height: 396 }, true)).toMatchObject({ side: 'bottom', rect: { x: 0, y: 380, width: 1200, height: 396 } });
-    expect(placeTerminalContext(wall, { ...wall, y: 404, height: 396 }, true)).toMatchObject({ side: 'top', rect: { x: 0, y: 0, width: 1200, height: 388 } });
+    expect(placeTerminalContext(wall, { ...wall, y: 404, height: 396 }, true)).toMatchObject({ side: 'top', rect: { x: 0, y: 0, width: 1200, height: 408 } });
   });
-  it('aligns adjacent edges with inset helpers, but clears the source when above', () => {
+  it('aligns adjacent edges with inset helpers, but barely overlaps the source when above', () => {
     const source = { x: 400, y: 260, width: 400, height: 280 };
     const insetTop = placeTerminalContext(wall, source, false, 'top').rect;
     const insetBottom = placeTerminalContext(wall, source, false, 'bottom').rect;
@@ -21,8 +21,12 @@ describe('terminal context placement', () => {
     expect(right.x).toBe(insetTop.x + insetTop.width);
     expect(left.x + left.width).toBe(insetTop.x);
     expect(bottom.y).toBe(insetBottom.y + insetBottom.height);
-    expect(top.y + top.height).toBe(source.y - 16);
+    expect(top.y + top.height).toBe(source.y + 4);
     expect(top.y).toBe(wall.y);
+  });
+  it('grows above helpers upward over peer headers while grazing the source top', () => {
+    expect(placeTerminalContext(wall, { x: 0, y: 500, width: 1200, height: 280 }, true).rect)
+      .toEqual({ x: 0, y: 188, width: 1200, height: 316 });
   });
   it('breaks equal grid fits right-first and honors manual sides', () => {
     const source = { x: 0, y: 0, width: 596, height: 396 };

@@ -27,11 +27,3 @@ it('matches the regular ring perimeter for a rectangular union', () => {
   const outline = roundedUnionOutline(rectUnionOutline(rect, rect), 8);
   expect(outline.perimeter).toBeCloseTo(ringPerimeter(rect, { tl: 8, tr: 8, bl: 8, br: 8, inset: 0 }));
 });
-
-it('bridges the above-helper gap while retaining the narrower helper step', () => {
-  const source = { left: 0, top: 100, width: 100, height: 100 };
-  const helper = { left: 0, top: 0, width: 80, height: 84 };
-  const expected = [{ x: 0, y: 0 }, { x: 80, y: 0 }, { x: 80, y: 100 }, { x: 100, y: 100 }, { x: 100, y: 200 }, { x: 0, y: 200 }];
-  expect(rectUnionOutline(source, helper)).toEqual(expected);
-  expect(rectUnionOutline(helper, source)).toEqual(expected);
-});
