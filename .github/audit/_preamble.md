@@ -28,11 +28,12 @@ run would be inconclusive too.
 - Written into a `FAIL IF`: verdict only that rule's readable condition.
 - Stated beside a rule, or staged under `## Future`: there is no rule to
   verdict.
-- Promoted above the fold: it is a `FAIL IF` like any other.
+- Promoted above the fold: audit it as the promoted rule is written — a
+  readable condition as a `FAIL IF`, an unreadable one by the bullets above.
 
 GitHub state `AUDIT_PAT` reaches — rulesets, environments, secret placement,
-workflow permissions — is readable, so it is always a check, and the paragraph
-above governs a call that fails.
+workflow permissions — is readable, so it is always a check, and
+`UNVERIFIABLE` stays right for a call that fails.
 
 Where `docs/specs/security.md` says a risk is accepted ("What is not defended")
 or a gap is known ("Known gaps"), do not re-report it as a finding — report
