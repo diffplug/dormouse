@@ -43,8 +43,8 @@ export function TerminalContextOverlay({ context, title, tool, wall, source, mul
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `measure` reads exactly these inputs
   }, [lath, context.id, manual, multiPane, cursorSide, wall.x, wall.y, wall.width, wall.height, source.x, source.y, source.width, source.height]);
   return <div ref={host} data-context-for={context.id} className="absolute" style={{ ...boxStyle(shown.rect), zIndex: Z_CONTEXT }}>
-    <TerminalContext {...context} title={title} tool={tool} compact placement={{ ...shown, manual: manual !== undefined, onChange: side => {
-      if (side) preferences.set(context.id, side); else preferences.delete(context.id);
+    <TerminalContext {...context} title={title} tool={tool} compact placement={{ ...shown, onChange: side => {
+      preferences.set(context.id, side);
       lastSide.current = side;
       setManual(side);
     } }} />

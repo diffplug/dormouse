@@ -47,7 +47,7 @@ export interface TerminalContextViewProps {
   terminalRole?: 'helper' | 'tool';
   /** Fill the positioned host and fold directory actions, ports, and alerts behind Details. */
   compact?: boolean;
-  placement?: ContextPlacement & { manual: boolean; onChange(side?: ContextSide): void };
+  placement?: ContextPlacement & { onChange(side: ContextSide): void };
   /** Exit in progress: the view is inert, and `onClose` is not called again. */
   closing?: boolean;
   /** Viewport coordinates the reveal grows from; absent, the top-left corner. */
@@ -203,7 +203,6 @@ export function TerminalContextView(p: TerminalContextViewProps) {
                   </g>
                 </svg>
               </ContextAction>)}
-              <ContextAction label="Use automatic helper placement" onClick={() => p.placement!.onChange()} disabled={!p.placement.manual} keepFocus>Auto</ContextAction>
             </div>}<ContextAction label="Close terminal context" onClick={close} muted><XIcon size={15} /></ContextAction></div></div>
           </div>
           <span className="text-muted">Dir</span>

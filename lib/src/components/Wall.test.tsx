@@ -3832,6 +3832,6 @@ it('moves a retained helper without resizing or replacing its source, and rememb
   await open();
   expect(container.querySelector<HTMLElement>('[data-terminal-context]')!.dataset.contextSide).toBe('bottom');
   expect(helpers.getHelper('placement-source')).toBe(helper);
-  act(() => container.querySelector<HTMLButtonElement>('[aria-label="Use automatic helper placement"]')!.click());
+  act(() => container.querySelector<HTMLButtonElement>('[aria-label="Place helper at top"]')!.click());
   expect(container.querySelector<HTMLElement>('[data-terminal-context]')!.dataset.contextSide).toBe('top');
 });

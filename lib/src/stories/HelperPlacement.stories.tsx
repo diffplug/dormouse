@@ -185,7 +185,7 @@ export const PreserveInputAndFocus: Story = {
       expect(context().dataset.contextSide).toBe('bottom');
       checkInput();
     });
-    await step('Close and reopen the retained helper, then return to Auto', async () => {
+    await step('Close and reopen the retained helper, then select the top side', async () => {
       await userEvent.click(within(context()).getByRole('button', { name: 'Close terminal context' }));
       await waitFor(() => expect(document.querySelector('[data-terminal-context]')).toBeNull());
       const resizedSource = rect(sourcePane());
@@ -195,8 +195,8 @@ export const PreserveInputAndFocus: Story = {
       checkInput();
       input.focus();
       const focused = document.activeElement;
-      await userEvent.click(within(context()).getByRole('button', { name: 'Use automatic helper placement' }));
-      await waitFor(() => expect(within(context()).getByRole('button', { name: 'Use automatic helper placement' })).toBeDisabled());
+      await userEvent.click(within(context()).getByRole('button', { name: 'Place helper at top' }));
+      await waitFor(() => expect(within(context()).getByRole('button', { name: 'Place helper at top' })).toHaveAttribute('aria-pressed', 'true'));
       expect(context().dataset.contextSide).toBe('top');
       expect(document.activeElement).toBe(focused);
       checkInput();
