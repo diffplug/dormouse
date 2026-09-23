@@ -321,7 +321,9 @@ jobs:
           # missing from the clone is fetched by SHA first (a force-push leaves
           # the tip it replaced on no branch), and each actor is asked about
           # admin once. `$ROWS` holds `<row>\t<activity_type>\t<actor>\t<state>`,
-          # `state` being `ok`, or `unresolved` when a tip cannot be fetched.
+          # `state` being `ok`, or `after-lost` when the new tip cannot be
+          # fetched. A lost `before` just gets no ref. `git fetch` is all-or-nothing, so a failed batch
+          # retries one SHA at a time rather than losing its neighbours.
           prepare_activity() {
             local row=0 type actor before after state missing
             ROWS=$(mktemp)
@@ -329,7 +331,9 @@ jobs:
             missing=$(cut -f4,5 "$ACTIVITY" | tr '\t' '\n' | grep -E '^[0-9a-f]{40}$' | grep -vE '^0+$' | sort -u \
               | git cat-file --batch-check='%(objectname) %(objecttype)' | awk '$2 == "missing" { print $1 }') || true
             if [ -n "$missing" ]; then
-              printf '%s\n' "$missing" | xargs -n 100 git fetch -q origin 2>/dev/null || true
+              # shellcheck disable=SC2016 # the inner shell expands `$@`
+              printf '%s\n' "$missing" | xargs -n 100 sh -c \
+                'git fetch -q origin "$@" 2>/dev/null || for sha; do git fetch -q origin "$sha" 2>/dev/null; done' _ || true
             fi
             while IFS= read -r actor; do
               if is_admin "$actor"; then ADMIN_LOGINS="$ADMIN_LOGINS$actor "; fi
@@ -340,13 +344,11 @@ jobs:
               if git cat-file -e "$after^{commit}" 2>/dev/null; then
                 echo "update refs/audit/after/$row $after"
               else
-                state=unresolved
+                state="after-lost"
               fi
               if [[ ! "$before" =~ ^0+$ ]]; then
                 if git cat-file -e "$before^{commit}" 2>/dev/null; then
                   echo "update refs/audit/before/$row $before"
-                else
-                  state=unresolved
                 fi
               fi
               printf '%s\t%s\t%s\t%s\n' "$row" "$type" "$actor" "$state" >> "$ROWS"
@@ -355,16 +357,18 @@ jobs:
 
           # The earliest activity row whose range contains the commit, as
           # `<activity_type>\t<actor>\t<row>`; nothing if no retained row does.
-          # An unresolved row might be the introduction: an admin's is skipped
-          # (the worst case is that a later row decides), anyone else's ends the
-          # walk as `unresolved`.
+          # A row whose new tip is lost might be the introduction, and ends the
+          # walk as `unresolved`, with one exception: an admin's plain push or
+          # branch creation is skipped, since it replaces nothing and the worst
+          # case is that a later row decides. A `force_push` is never skipped,
+          # as it may be a rewrite whose replaced commits cannot be checked.
           first_introduction() {
             local after before row type actor state
             after=" $(git for-each-ref --contains "$1" --format='%(refname:lstrip=3)' refs/audit/after/ | tr '\n' ' ')"
             before=" $(git for-each-ref --contains "$1" --format='%(refname:lstrip=3)' refs/audit/before/ | tr '\n' ' ')"
             while IFS=$'\t' read -r row type actor state; do
-              if [ "$state" = unresolved ]; then
-                [[ "$ADMIN_LOGINS" = *" $actor "* ]] && continue
+              if [ "$state" = after-lost ]; then
+                [[ "$type" != force_push && "$ADMIN_LOGINS" = *" $actor "* ]] && continue
                 printf 'unresolved\t-\t%s\n' "$row"
                 return
               fi
@@ -388,6 +392,7 @@ jobs:
             case "$type" in
               push|branch_creation) ;;
               force_push)
+                # A lost `before` has no ref, so this fails and is reported.
                 replaced=$(git rev-list "refs/audit/before/$row" --not "refs/audit/after/$row" -- "${WINDOW[@]}") || return 1
                 for old in $replaced; do
                   admin_introduced "$old" || return 1

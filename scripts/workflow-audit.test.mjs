@@ -300,3 +300,40 @@ test('reports a commit a non-admin force-pushed first', t => {
   f.events([['2026-01-01T00:00:00Z', 'force_push', 'bot-user', f.before, f.sha]]);
   assert.equal(f.run(), 1);
 });
+
+test('reports an admin force-push whose replaced tip is lost', t => {
+  const f = pushFixture(t);
+  f.events([['2026-01-01T00:00:00Z', 'force_push', 'admin-user', 'f'.repeat(40), f.sha]]);
+  assert.equal(f.run(), 1);
+});
+
+test('never skips an admin force-push whose new tip is lost', t => {
+  const f = pushFixture(t);
+  f.events([
+    ['2026-01-01T00:00:00Z', 'force_push', 'admin-user', f.before, 'f'.repeat(40)],
+    ['2026-01-02T00:00:00Z', 'push', 'admin-user', f.before, f.sha],
+  ]);
+  assert.equal(f.run(), 1);
+});
+
+test('one unfetchable tip does not cost its batch the others', t => {
+  const f = pushFixture(t);
+  const origin = join(f.dir, 'origin.git');
+  execFileSync('git', ['init', '-q', '--bare', origin]);
+  execFileSync('git', ['config', 'uploadpack.allowAnySHA1InWant', 'true'], { cwd: origin });
+  f.git('remote', 'add', 'origin', origin);
+  f.git('push', '-q', 'origin', `${f.sha}:refs/heads/gone`);
+  execFileSync('git', ['update-ref', '-d', 'refs/heads/gone'], { cwd: origin });
+  f.git('reset', '-q', '--hard', f.before);
+  spawnSync('git', ['update-ref', '-d', 'refs/remotes/origin/gone'], { cwd: f.repo });
+  spawnSync('git', ['update-ref', '-d', 'ORIG_HEAD'], { cwd: f.repo });
+  f.git('reflog', 'expire', '--expire=now', '--all');
+  f.git('gc', '-q', '--prune=now');
+  assert.notEqual(spawnSync('git', ['cat-file', '-e', f.sha], { cwd: f.repo }).status, 0);
+  f.events([
+    ['2026-01-01T00:00:00Z', 'push', 'admin-user', f.before, 'f'.repeat(40)],
+    ['2026-01-02T00:00:00Z', 'push', 'admin-user', f.before, f.sha],
+  ]);
+  const result = f.classify(f.sha, {}, 'git cat-file -e');
+  assert.equal(result.status, 0, result.stderr);
+});
