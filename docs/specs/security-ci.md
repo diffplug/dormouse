@@ -42,12 +42,15 @@ This repository runs the [tend](https://github.com/max-sixty/tend) agent harness
 
 **Upstream compromise.** Every generated workflow references tend's action as `max-sixty/tend/claude@<version>` — a **tag**, not a commit SHA, and mutable by whoever owns that repository, so upstream can change what our workflows execute with no commit landing here and `workflow-audit.yaml` seeing a byte-identical file. **A real residual, accepted** (rationale). **The version pin bounds *deliberate* upgrades, not a hostile upstream**; `uvx tend@latest` runs only at install and during nightly regen, so a compromise of that path affects the next re-run, not the in-flight workflows. **A second publisher now sits in the same position**: `tend-mention`'s and `tend-notifications`' jobs run `astral-sh/setup-uv@<tag>`, whose `uv` then interprets a `run:` step holding `TEND_BOT_TOKEN` — a broader trust than tend's, **accepted on the same generated-file grounds** (rationale).
 
-**Audit visibility.** `.github/workflows/workflow-audit.yaml` walks nightly every commit touching `.github/workflows/`, `.config/tend.yaml`, `.github/audit/`, or `.vscode/` since its previous successful run — **across all branches, not just `main`**, so a workflow pushed to a feature branch is seen even though it never opens a PR. **This enumeration and the job's `WINDOW` must name the same paths** (rationale). It reports the *unexplained*, classifying out two routine sources on independently checked provenance and content:
+**Audit visibility.** `.github/workflows/workflow-audit.yaml` walks nightly every commit touching `.github/workflows/`, `.config/tend.yaml`, `.github/audit/`, or `.vscode/` since its previous successful run — **across all branches, not just `main`**, so a workflow pushed to a feature branch is seen even though it never opens a PR. **This enumeration and the job's `WINDOW` must name the same paths** (rationale). It reports the *unexplained*, classifying out four routine sources on independently checked provenance or content:
 
 - A **Renovate pin bump** — a valid GitHub-signed commit with `author.login == "renovate[bot]"` and `committer.login == "web-flow"`, associated only with Renovate-authored PRs, changing nothing but the ref of an already-referenced action (rationale). Residual: the ref Renovate selected inside that action's own repo, the trust every Renovate bump already rests on.
 - A **tend regeneration** — byte-for-byte reproducible from `uvx tend@<version> init` at the version in the files' own header, not touching `.config/tend.yaml` in the same commit (rationale).
+- A **clean merge** — a two-parent merge whose window paths equal `git merge-tree --write-tree` of its parents; a conflict outside the window does not disqualify it.
+- An **admin push** — the earliest ref update in the repository activity log (`GET /repos/{repo}/activity`, last quarter, server-set timestamps) whose `before..after` range contains the commit is a `push`, `force_push`, or `branch_creation` by an actor whose collaborator permission is `admin`, and no author or committer field names a bot (rationale). Residual: a bot commit first pushed more than a quarter ago, invisible to the log, then pushed by an admin under a forged human author.
 
-- **Identity is not evidence here at all**: `TEND_BOT_TOKEN` is precisely the credential in question.
+- **Never treat a commit's own author or committer as evidence**: `TEND_BOT_TOKEN` is precisely the credential in question. The pusher recorded by GitHub is evidence; the commit's self-declared identity only ever refuses.
+- **Must report a commit whose earliest retained introduction is a PR merge**; that is the admin reviewing, not pushing.
 - **Must report classifier errors and ambiguity as unexplained commits.**
 - **FAIL IF** tend regeneration materializes anything except regular `.config/tend.yaml` and workflow YAML blobs from the audited commit. `scripts/workflow-audit.test.mjs` pins this boundary (rationale).
 - **Must still report commits already merged to `main`**; review is not proof (rationale).
@@ -80,7 +83,7 @@ This repository runs the [tend](https://github.com/max-sixty/tend) agent harness
 - **FAIL IF** any job in an agent-managed workflow has **effective** `GITHUB_TOKEN` permissions beyond `contents: write`, `pull-requests: write`, `issues: write`, `id-token: write`, `actions: read`, or any `read` permission. Effective, not declared: apply job permissions over workflow permissions over the repository default; omitted scopes in an explicit block become `none` (rationale).
 - **FAIL IF** `default_workflow_permissions` for this repository is not `read`, or `can_approve_pull_request_reviews` is not `false` (`gh api repos/diffplug/dormouse/actions/permissions/workflow`) — the backstop for every permission bullet in this spec (rationale).
 
-Source of truth: `packageRules` in `.github/renovate.json`; `WINDOW` and `is_tend_regen` in `.github/workflows/workflow-audit.yaml`.
+Source of truth: `packageRules` in `.github/renovate.json`; `WINDOW`, `is_tend_regen`, `is_clean_merge`, and `is_admin_first_push` in `.github/workflows/workflow-audit.yaml`; `scripts/workflow-audit.test.mjs`.
 
 ## Hosted Deployments
 
