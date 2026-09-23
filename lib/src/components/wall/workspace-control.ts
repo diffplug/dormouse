@@ -46,6 +46,7 @@ export type WindowControlParams = DorControlParams & {
   toWindow?: unknown;
   index?: unknown;
   dangerouslyDestroyIframePageState?: unknown;
+  auto?: unknown;
 };
 
 /** This Window's Workspaces in strip order, each with its union status. */
