@@ -19,34 +19,25 @@ describe('AlertManager in isolation', () => {
   // Timing from cfg.alert:
   // busyCandidateGap=1500, busyConfirmGap=500, mightNeedAttention=2000, needsAttentionConfirm=3000
 
-  /**
-   * WATCHING is keyed on the foreground command's name, so the only way to turn
-   * it on is to run a watched command (`docs/specs/alert.md`).
-   */
-  function runWatchedCommand(id: string, commandLine = 'longtask'): void {
-    manager.setWatchedCommands(['longtask']);
+  /** Start `commandLine` the way shell integration reports it: the line, then its start. */
+  function runCommand(id: string, commandLine = 'pnpm build'): void {
     manager.applyTerminalSemanticEvents(id, [
       { type: 'commandLine', commandLine },
       { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
     ]);
   }
 
+  /**
+   * WATCHING is keyed on the foreground command's watch key, so the only way to
+   * turn it on is to run a watched command (`docs/specs/alert.md`).
+   */
+  function runWatchedCommand(id: string, commandLine = 'longtask'): void {
+    manager.setWatchedCommands(['longtask']);
+    runCommand(id, commandLine);
+  }
+
   describe('helper Sessions', () => {
     const HELPER = 'helper';
-
-    function startCommand(id: string, commandLine: string): void {
-      manager.applyTerminalSemanticEvents(id, [
-        { type: 'commandLine', commandLine },
-        { type: 'commandStart', source: 'osc633_boundaries' },
-      ]);
-    }
-
-    function outputFor(id: string, ms: number): void {
-      for (let t = 0; t < ms; t += 200) {
-        manager.onData(id);
-        vi.advanceTimersByTime(200);
-      }
-    }
 
     it('alerts no one, publishes nothing, and accepts no report or control until promoted', () => {
       const states: string[] = [];
@@ -54,7 +45,7 @@ describe('AlertManager in isolation', () => {
       const seen = recordingClaimant(HELPER, true);
       manager.setHelper(HELPER, true);
       runWatchedCommand(HELPER);
-      outputFor(HELPER, 3_000);
+      driveToBusy(HELPER);
       settle();
       applyTerminalProtocolEvents(manager, HELPER, [{ kind: 'notification', notification: { source: 'OSC 9', title: null, body: 'done' } }]);
       applyTerminalProtocolEvents(manager, HELPER, [{ kind: 'progress', progress: { state: 'normal', percent: 40 } }]);
@@ -85,8 +76,8 @@ describe('AlertManager in isolation', () => {
     it('keeps the command a helper was running when it is promoted mid-command', () => {
       manager.setWatchedCommands(['claude']);
       manager.setHelper(HELPER, true);
-      startCommand(HELPER, 'claude');
-      outputFor(HELPER, 3_000);
+      runCommand(HELPER, 'claude');
+      driveToBusy(HELPER);
 
       const states: boolean[] = [];
       manager.onStateChange((id, state) => { if (id === HELPER) states.push(state.watchingEnabled); });
@@ -103,8 +94,8 @@ describe('AlertManager in isolation', () => {
     it('never replays a completion suppressed before promotion', () => {
       manager.setWatchedCommands(['claude']);
       manager.setHelper(HELPER, true);
-      startCommand(HELPER, 'claude');
-      outputFor(HELPER, 3_000);
+      runCommand(HELPER, 'claude');
+      driveToBusy(HELPER);
       settle();
       applyTerminalProtocolEvents(manager, HELPER, [{ kind: 'notification', notification: { source: 'OSC 9', title: null, body: 'done' } }]);
 
@@ -115,14 +106,14 @@ describe('AlertManager in isolation', () => {
 
     it('does not ring the exit of a command it never saw with attention', () => {
       manager.setHelper(HELPER, true);
-      startCommand(HELPER, 'npm run build');
+      runCommand(HELPER, 'npm run build');
       manager.setHelper(HELPER, false);
       vi.advanceTimersByTime(30_000);
       manager.applyTerminalSemanticEvents(HELPER, [{ type: 'commandFinish', exitCode: 0 }]);
       expect(manager.getState(HELPER).status).toBe('WATCHING_DISABLED');
 
       // The ordinary seen rule applies from promotion on.
-      startCommand(HELPER, 'npm run build');
+      runCommand(HELPER, 'npm run build');
       manager.attend(HELPER);
       manager.clearAttention(HELPER);
       vi.advanceTimersByTime(30_000);
@@ -791,10 +782,7 @@ describe('AlertManager in isolation', () => {
     const id = 'runner-script-rule';
     const ringsUnder = (rules: string[]): boolean => {
       manager.setWatchedCommands(rules);
-      manager.applyTerminalSemanticEvents(id, [
-        { type: 'commandLine', commandLine: 'pnpm run dev' },
-        { type: 'commandStart', source: 'osc633_boundaries' },
-      ]);
+      runCommand(id, 'pnpm run dev');
       driveToBusy(id);
       settle();
       const ringing = manager.getState(id).status === 'ALERT_RINGING';
@@ -812,10 +800,7 @@ describe('AlertManager in isolation', () => {
   it('keeps a WATCHING ring whose command another rule still covers', () => {
     const id = 'ring-survives-covered';
     manager.setWatchedCommands(['pnpm', 'pnpm dev']);
-    manager.applyTerminalSemanticEvents(id, [
-      { type: 'commandLine', commandLine: 'pnpm dev' },
-      { type: 'commandStart', source: 'osc633_boundaries' },
-    ]);
+    runCommand(id, 'pnpm dev');
     driveToBusy(id);
     settle();
     expect(manager.getState(id).status).toBe('ALERT_RINGING');
@@ -1545,14 +1530,6 @@ describe('AlertManager in isolation', () => {
         await Promise.resolve();
         return seen;
       };
-    }
-
-    /** A command start with no WATCHING rule behind it, so nothing settles into a ring. */
-    function runCommand(id: string, commandLine = 'pnpm build'): void {
-      manager.applyTerminalSemanticEvents(id, [
-        { type: 'commandLine', commandLine },
-        { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
-      ]);
     }
 
     // 1. Already ringing at call time.

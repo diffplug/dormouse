@@ -168,7 +168,8 @@ export function TerminalContextView(p: TerminalContextViewProps) {
   const submit = async (action: Action) => { setBusy(true); if (await attempt(action)) setDetail(null); setBusy(false); };
   const status = HELPER_STATUS[p.status];
   const isTool = p.terminalRole === 'tool';
-  const statusLabel = isTool ? (p.status === 'running' ? `Running ${p.command}…` : 'At prompt') : status.label(p.command);
+  // A Tool's command is whatever its shell reported, line breaks included.
+  const statusLabel = isTool ? (p.status === 'running' ? `Running ${p.command.replace(/\s+/g, ' ')}…` : 'At prompt') : status.label(p.command);
   return <section ref={surface} aria-label="Terminal context" data-terminal-context tabIndex={-1} inert={p.closing} aria-hidden={p.closing || undefined} style={SURFACE_STYLE}
     className={`${TERMINAL_CONTEXT_SURFACE_CLASS} ${motionClass} ${p.closing ? 'pointer-events-none' : ''} absolute inset-4 flex flex-col overflow-hidden text-sm`}
     onContextMenu={event => event.preventDefault()}

@@ -88,23 +88,13 @@ __dormouse_633_prompt() {
   __dormouse_633_armed=1
 }
 
-# The submitted line, into __dormouse_633_out. $BASH_COMMAND is only the simple
-# command about to run (`cd web` of `cd web && pnpm dev`), so the line is read
-# back from history (one fork per line; HISTTIMEFORMAT is emptied inside it) and
-# used only when the last entry provably is this line, else $BASH_COMMAND stands:
-#  - History is on. Off, nothing is added, and 3.2 leaves the flag below stale.
-#  - `fc -l -1` stops one entry short of `history 1` exactly when bash's own
-#    flag says reading this line added an entry. No count taken at the prompt
-#    could stand in: erasedups renumbers, and HISTCMD is dead in traps before 5.1.
-#    A line that added nothing is still the last entry when neither ignorespace
-#    nor HISTIGNORE could have dropped it: ignoredups did, or the entry is a
-#    multi-line command's joined whole, whose flag covers its last line alone.
-#  - The entry contains $BASH_COMMAND, whitespace aside (bash re-renders it).
-#    This rejects a trap fired outside a fresh line (a hook appended after ours
-#    in PROMPT_COMMAND, a `bind -x` key on 3.2), which would re-report the
-#    previous line.
-# So an aliased first command, an entry spanning lines (a here-document), and a
-# repeat under ignoreboth fall back to $BASH_COMMAND.
+# The submitted line, into __dormouse_633_out: the last history entry (one fork;
+# HISTTIMEFORMAT emptied inside it) when that provably is this line, else
+# $BASH_COMMAND, only the simple command about to run. Provably: history is on;
+# `fc -l -1` stops one short of `history 1` (bash's own flag that this line
+# added an entry), or it added none and neither ignorespace nor HISTIGNORE
+# could be why; and the entry contains $BASH_COMMAND, whitespace aside. Why
+# each check: docs/specs/terminal-escapes.rationale.md -> Shell-integration injection.
 __dormouse_633_command_line() {
   __dormouse_633_out=$BASH_COMMAND
   [[ -o history ]] || return 0
@@ -135,11 +125,9 @@ __dormouse_633_preexec() {
   [ "$BASH_COMMAND" = "__dormouse_633_prompt" ] && return   # the PROMPT_COMMAND invocation itself
   [ -z "$__dormouse_633_armed" ] && return                 # inside PROMPT_COMMAND, or already fired this line
   [ -n "${COMP_LINE:-}" ] && return                        # tab-completion, not a submitted command
-  # A `bind -x` key (fzf's Ctrl-R/Ctrl-T) runs its command at the prompt, with
-  # READLINE_LINE bound for its duration from bash 4.0. Returning still armed
-  # lets the line the key leaves be reported when it is submitted. bash 3.2 binds
-  # nothing, so there the key still reads as a command, and its READLINE_LINE is
-  # an ordinary variable a widget may leave set, hence the version check.
+  # A `bind -x` key (fzf's Ctrl-R) runs with READLINE_LINE bound from bash 4.0;
+  # staying armed reports the line it leaves instead. 3.2 binds nothing (see
+  # docs/specs/terminal-escapes.rationale.md -> Shell-integration injection).
   [ -n "${READLINE_LINE+x}" ] && [ "${BASH_VERSINFO[0]}" -ge 4 ] && return
   __dormouse_633_armed=
   __dormouse_633_ran=1

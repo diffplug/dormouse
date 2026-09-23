@@ -369,32 +369,24 @@ export function summarizeCommandLine(raw: string): string {
   if (commandTokens.length === 0) return DEFAULT_COMMAND_TITLE;
 
   const hasPipeline = tokens.includes('|');
-  const hasCompound = tokens.some((token) => token === '&&' || token === '||' || token === ';');
+  // A lone `&` backgrounds the line, or leading it is PowerShell's call
+  // operator; neither makes a second command worth the ` ...`.
+  const hasCompound = tokens.some((token) => token !== '&' && LIST_SEPARATORS.has(token));
   const visibleTokens = commandTitleTokens(commandTokens);
   const suffix = hasPipeline ? ' | ...' : hasCompound ? ' ...' : '';
-  return truncateCommandTitle(`${visibleTokens.join(' ')}${suffix}`);
+  // One line, though a quoted argument or a substitution may span several.
+  return truncateCommandTitle(`${visibleTokens.join(' ')}${suffix}`.replace(/\s*\n\s*/g, ' '));
 }
 
 /**
- * The key WATCHING rules are stored under (`docs/specs/alert.md` -> WATCHING
- * Track): the program the line is really waiting on, as a bare name, or
- * `<runner> <script>` for a script runner. Returns null when the line holds no
- * runnable word. Every key it returns passes {@link isWatchKey}.
- *
- * - **The last command of a list** (`&&`, `||`, `;`, `&`, newline), since the
- *   earlier ones are set-up (`cd web && pnpm dev`, `clear; claude`), and **the
- *   first stage of its pipeline** (`claude | tee log`). Grouping parentheses and
- *   braces are dropped, so `(cd web && pnpm dev)` is `pnpm dev`; a group
- *   followed by more of the list keys on what follows it.
- * - **Transparent wrappers are skipped** with the flags they are known to take
- *   ({@link TRANSPARENT_WRAPPERS}), along with leading `VAR=value` words.
- * - **A launcher suffix is not part of the name** — see
- *   {@link commandProgramName}.
- * - **Runners key by script** ({@link SCRIPT_RUNNERS}); a script that could not
- *   be a key (a path, a quoted phrase) keys as the bare runner.
+ * The key WATCHING rules are stored under: the program a command line waits on,
+ * as a bare name or `<runner> <script>`, or null when the line holds no
+ * runnable word. Every key it returns passes {@link isWatchKey}. The rules that
+ * derive it are `docs/specs/alert.md` -> WATCHING Track.
  */
 export function commandWatchKey(raw: string): string | null {
-  const segments = splitCommandList(tokenizeCommand(raw.trim())).map(ungroupedWords);
+  const segments = splitCommandList(tokenizeCommand(raw.trim()))
+    .map((segment) => segment.filter((token) => !GROUPING_TOKENS.has(token)));
   const words = segments.reverse().find((segment) => segment.length > 0) ?? [];
   const pipe = words.indexOf('|');
   return watchKeyOfCommand(pipe === -1 ? words : words.slice(0, pipe));
@@ -912,7 +904,10 @@ function withRequiredHostPrefixes(
  * Split a command line into words, honoring quotes, POSIX backslash escapes,
  * and the pipeline/compound separators `| || && ; &`, which are emitted as
  * their own tokens. An unquoted newline separates commands like `;`, and a
- * backslash-newline continues the line.
+ * backslash-newline continues the line. An unquoted `(` or `)` is a token of its
+ * own too, except that a `$(…)` / `<(…)` / `>(…)` substitution or a `name=(…)`
+ * array stays inside its word, whitespace and separators included; `{` and `}`
+ * are grouping only as whole words, which the split already makes them.
  *
  * A `\` escapes exactly the `POSIX_ESCAPABLE` set (`foo\ bar` is one token,
  * `\*.ts` passes a literal glob, and a path Dormouse escaped for paste reads
@@ -931,6 +926,11 @@ function tokenizeCommand(input: string): string[] {
   let current = '';
   let quote: '"' | "'" | null = null;
   let escaping = false;
+  // Open parentheses of the substitution or array being read.
+  let wordParens = 0;
+  // Whether the last character was an unquoted, unescaped `$`, `<` or `>`,
+  // which makes a `(` right after it open a substitution.
+  let substitutionPrefix = false;
 
   const push = () => {
     if (!current) return;
@@ -940,6 +940,8 @@ function tokenizeCommand(input: string): string[] {
 
   for (let i = 0; i < input.length; i += 1) {
     const char = input[i];
+    const opensSubstitution = substitutionPrefix;
+    substitutionPrefix = false;
 
     if (escaping) {
       current += char;
@@ -968,6 +970,13 @@ function tokenizeCommand(input: string): string[] {
       quote = char;
       continue;
     }
+    // A substitution or array is one word, through the `)` closing its first `(`.
+    if (wordParens > 0 || (char === '(' && (opensSubstitution || ARRAY_ASSIGNMENT_PREFIX.test(current)))) {
+      if (char === '(') wordParens += 1;
+      else if (char === ')') wordParens -= 1;
+      current += char;
+      continue;
+    }
     if (char === '\n') {
       push();
       tokens.push(';');
@@ -975,6 +984,11 @@ function tokenizeCommand(input: string): string[] {
     }
     if (/\s/.test(char)) {
       push();
+      continue;
+    }
+    if (char === '(' || char === ')') {
+      push();
+      tokens.push(char);
       continue;
     }
     if (char === '&' && input[i + 1] === '&') {
@@ -995,11 +1009,15 @@ function tokenizeCommand(input: string): string[] {
       continue;
     }
     current += char;
+    substitutionPrefix = char === '$' || char === '<' || char === '>';
   }
 
   push();
   return tokens;
 }
+
+/** A word that opens a `name=(…)` / `name+=(…)` array assignment at its `(`. */
+const ARRAY_ASSIGNMENT_PREFIX = /^[A-Za-z_][A-Za-z0-9_]*\+?=$/;
 
 function takePrimaryCommandTokens(tokens: string[]): string[] {
   // PowerShell's call operator. `& "C:\Program Files\nodejs\npm.cmd" run dev`
@@ -1007,8 +1025,9 @@ function takePrimaryCommandTokens(tokens: string[]): string[] {
   // never a POSIX background suffix, so drop it rather than read it as a
   // boundary that leaves no command at all.
   const words = tokens[0] === '&' ? tokens.slice(1) : tokens;
-  const firstBoundary = words.findIndex((token) => token === '|' || token === '&&' || token === '||' || token === ';' || token === '&');
-  const command = (firstBoundary === -1 ? words : words.slice(0, firstBoundary)).filter(Boolean);
+  const firstBoundary = words.findIndex((token) => token === '|' || LIST_SEPARATORS.has(token));
+  const command = (firstBoundary === -1 ? words : words.slice(0, firstBoundary))
+    .filter((token) => !GROUPING_TOKENS.has(token));
   let index = 0;
   while (isEnvAssignment(command[index])) index += 1;
   if (command[index] === 'env') {
@@ -1023,6 +1042,9 @@ function isEnvAssignment(token: string | undefined): boolean {
 }
 
 const LIST_SEPARATORS = new Set(['&&', '||', ';', '&']);
+/** The subshell and group operators `tokenizeCommand` emits; lexical only, so a
+ *  group's inner list is split like any other. */
+const GROUPING_TOKENS = new Set(['(', ')', '{', '}']);
 
 /** Tokens split into the commands of a list; a pipeline stays in one piece. */
 function splitCommandList(tokens: string[]): string[][] {
@@ -1034,33 +1056,27 @@ function splitCommandList(tokens: string[]): string[][] {
   return segments;
 }
 
-/** One list segment without the `(` / `{` / `)` / `}` of a subshell or group
- *  around it — lexical only, so a group's inner list is split like any other. */
-function ungroupedWords(segment: string[]): string[] {
-  return segment
-    .map((word, index) => (index === 0 ? word.replace(/^[({]+/, '') : word).replace(/\)+$/, ''))
-    .filter((word) => word !== '' && word !== '}');
-}
-
 interface FlagSpec {
-  /** Flags that take the next word as their value, or attached (`-uroot`, `--user=root`). */
+  /** Flags that take the next word as their value. */
   value?: readonly string[];
-  /** Flags that stand alone; single letters may cluster (`-di`). */
-  bool?: readonly string[];
-  /** A stand-alone flag shape not worth listing (nice's `-5`). */
-  boolPattern?: RegExp;
-  /** Value flags whose value is optional and numeric (make's `-j` / `-j 8`). */
-  numeric?: readonly string[];
   /** `VAR=value` words it accepts among its flags (`sudo FOO=1 make`). */
   assignments?: boolean;
 }
 
 interface WrapperSpec extends FlagSpec {
+  /** Flags that stand alone; single letters may cluster (`-di`). A `value` flag
+   *  may also carry its value attached (`-uroot`, `--user=root`). */
+  bool?: readonly string[];
+  /** A stand-alone flag shape not worth listing (nice's `-5`). */
+  boolPattern?: RegExp;
   /** Positional words before the command it runs (`timeout 5m make`). */
   operands?: number;
   /** The command is a package spec, whose `@version` is not part of the name. */
   packageSpec?: boolean;
 }
+
+const PNPM_DLX: WrapperSpec = { value: ['--package'], bool: ['-s', '--silent'], packageSpec: true };
+const BUN_X: WrapperSpec = { value: ['-p', '--package'], bool: ['--bun', '-y'], packageSpec: true };
 
 /**
  * Programs that run the command named after their own flags, keyed as one word
@@ -1087,16 +1103,18 @@ const TRANSPARENT_WRAPPERS: ReadonlyMap<string, WrapperSpec> = new Map(Object.en
   stdbuf: { value: ['-i', '--input', '-o', '--output', '-e', '--error'] },
   timeout: { value: ['-k', '--kill-after', '-s', '--signal'], bool: ['-v', '--verbose', '--foreground', '--preserve-status'], operands: 1 },
   npx: { value: ['-p', '--package'], bool: ['-y', '--yes', '--no', '-q', '--quiet'], packageSpec: true },
-  pnpx: { value: ['--package'], bool: ['-s', '--silent'], packageSpec: true },
-  bunx: { value: ['-p', '--package'], bool: ['--bun', '-y'], packageSpec: true },
+  pnpx: PNPM_DLX,
+  bunx: BUN_X,
   uvx: { value: ['--from', '--with', '-p', '--python'], bool: ['-q', '--quiet', '-v', '--verbose', '--isolated', '--offline'], packageSpec: true },
-  'pnpm dlx': { value: ['--package'], bool: ['-s', '--silent'], packageSpec: true },
+  'pnpm dlx': PNPM_DLX,
   'yarn dlx': { value: ['-p', '--package'], bool: ['-q', '--quiet'], packageSpec: true },
   'npm exec': { value: ['-p', '--package', '-w', '--workspace'], bool: ['-y', '--yes', '--no', '-q', '--quiet', '-ws', '--workspaces'], packageSpec: true },
-  'bun x': { value: ['-p', '--package'], bool: ['--bun', '-y'], packageSpec: true },
+  'bun x': BUN_X,
 } satisfies Record<string, WrapperSpec>));
 
 interface RunnerSpec extends FlagSpec {
+  /** Value flags whose value is optional and numeric (make's `-j` / `-j 8`). */
+  numeric?: readonly string[];
   /** A verb both spellings of a script share, dropped (`npm run test` is `npm test`). */
   drop?: readonly string[];
   /** A leading `+toolchain` word (`cargo +nightly build`). */
@@ -1122,30 +1140,29 @@ const SCRIPT_RUNNERS: ReadonlyMap<string, RunnerSpec> = new Map(Object.entries({
   just: { value: ['-f', '--justfile', '-d', '--working-directory', '--shell', '--dotenv-path', '--dotenv-filename', '--color'], assignments: true },
 } satisfies Record<string, RunnerSpec>));
 
-/** How many words a flag occupies under `spec`: 0 when it is not one it knows. */
-function flagWidth(words: readonly string[], index: number, spec: FlagSpec): number {
+/** How many words a wrapper flag occupies under `spec`: 0 when it is not one it knows. */
+function flagWidth(words: readonly string[], index: number, spec: WrapperSpec): number {
   const word = words[index]!;
   if (spec.bool?.includes(word) || spec.boolPattern?.test(word)) return 1;
   if (spec.value?.includes(word)) return 2;
-  if (spec.numeric?.includes(word)) return /^\d+(?:\.\d+)?$/.test(words[index + 1] ?? '') ? 2 : 1;
   const equals = word.indexOf('=');
   if (word.startsWith('--')) {
     const name = equals > 0 ? word.slice(0, equals) : null;
-    return name !== null && [spec.value, spec.bool, spec.numeric].some((list) => list?.includes(name)) ? 1 : 0;
+    return name !== null && [spec.value, spec.bool].some((list) => list?.includes(name)) ? 1 : 0;
   }
   if (word.length > 2) {
-    const short = word.slice(0, 2);
-    if (spec.value?.includes(short) || spec.numeric?.includes(short)) return 1;
+    if (spec.value?.includes(word.slice(0, 2))) return 1;
     if ([...word.slice(1)].every((letter) => spec.bool?.includes(`-${letter}`))) return 1;
   }
   return 0;
 }
 
 /**
- * The index of the command a wrapper at `index` runs, or null when `words`
- * holds no wrapper there, or one whose flags are not understood.
+ * Where the command a wrapper at `index` runs starts, and whether that command
+ * is a package spec; null when `words` holds no wrapper there, or one whose
+ * flags are not understood.
  */
-function wrappedCommandIndex(words: readonly string[], index: number): { index: number; spec: WrapperSpec } | null {
+function wrappedCommandIndex(words: readonly string[], index: number): { index: number; packageSpec: boolean } | null {
   const program = commandProgramName(words[index] ?? '');
   const launcher = TRANSPARENT_WRAPPERS.get(`${program} ${words[index + 1] ?? ''}`);
   const spec = launcher ?? TRANSPARENT_WRAPPERS.get(program);
@@ -1167,7 +1184,7 @@ function wrappedCommandIndex(words: readonly string[], index: number): { index: 
     i += width;
   }
   i += spec.operands ?? 0;
-  return i < words.length ? { index: i, spec } : null;
+  return i < words.length ? { index: i, packageSpec: spec.packageSpec === true } : null;
 }
 
 /** One simple command's watch key: wrappers and assignments skipped, runners keyed by script. */
@@ -1178,8 +1195,7 @@ function watchKeyOfCommand(words: readonly string[]): string | null {
     while (isEnvAssignment(words[index])) index += 1;
     const wrapped = wrappedCommandIndex(words, index);
     if (!wrapped) break;
-    index = wrapped.index;
-    packageSpec = !!wrapped.spec.packageSpec;
+    ({ index, packageSpec } = wrapped);
   }
   let program = commandProgramName(words[index] ?? '');
   // `claude@latest`, but not a scope's leading `@`.
@@ -1200,7 +1216,9 @@ function runnerScript(words: readonly string[], from: number, spec: RunnerSpec):
   while (i < words.length) {
     const word = words[i]!;
     if (word.startsWith('-') && word !== '-') {
-      i += Math.max(1, flagWidth(words, i, spec));
+      // Any flag it does not list as taking a word stands alone.
+      const takesWord = spec.value?.includes(word) || (spec.numeric?.includes(word) && /^\d+(?:\.\d+)?$/.test(words[i + 1] ?? ''));
+      i += takesWord ? 2 : 1;
     } else if (spec.assignments && isEnvAssignment(word)) {
       i += 1;
     } else if (!dropped && spec.drop?.includes(word)) {

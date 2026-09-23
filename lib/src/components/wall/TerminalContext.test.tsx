@@ -217,6 +217,12 @@ it('offers the rule covering the running script, else that script\'s own key', a
   }
 });
 
+it('shows a running Tool command that spans lines on one', () => {
+  props = { ...props, terminalRole: 'tool', status: 'running', command: 'cd web\npnpm dev' };
+  render();
+  expect(container.querySelector('[title^="Running "]')?.getAttribute('title')).toBe('Running cd web pnpm dev…');
+});
+
 it('uses the Tool primary terminal without creating a helper or offering helper lifecycle actions', async () => {
   const openHelper = vi.spyOn(helpers, 'openHelper');
   const focusTerminal = vi.fn();

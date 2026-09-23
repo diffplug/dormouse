@@ -1143,8 +1143,6 @@ export class AlertManager {
 
   /** Completely remove alert state for a PTY (used when PTY is destroyed) */
   remove(id: string): void {
-    // A helper that never published has nothing for subscribers to forget.
-    const unpublished = this.helpers.delete(id) && !this.lastEmitted.has(id);
     this.suspendedForTransfer.delete(id);
     this.liveReplay.delete(id);
     this.removed.add(id);
@@ -1154,15 +1152,19 @@ export class AlertManager {
     // nothing, so holding their closures would only leak them.
     this.claimants.delete(id);
     const entry = this.entries.get(id);
-    if (!entry) return;
-    this.clearDeferredNotification(entry);
-    entry.detector.dispose();
-    this.entries.delete(id);
-    if (this.attentionId === id) {
-      this.attentionId = null;
-      this.clearAttentionTimer();
+    if (entry) {
+      this.clearDeferredNotification(entry);
+      entry.detector.dispose();
+      this.entries.delete(id);
+      if (this.attentionId === id) {
+        this.attentionId = null;
+        this.clearAttentionTimer();
+      }
+      this.notify(id);
     }
-    if (!unpublished) this.notify(id);
+    // Last, so `notify` still knows a helper that never published has nothing
+    // for subscribers to forget.
+    this.helpers.delete(id);
   }
 
   /**
@@ -1189,8 +1191,9 @@ export class AlertManager {
     this.notify(id);
   }
 
-  /** A Session suspended for a live handoff accepts nothing; a helper accepts
-   *  only what builds its command state. */
+  /** Whether `id` drops reports, controls and awaits: a helper, or a Session
+   *  suspended for a live handoff. The output and command-state feeds, which a
+   *  helper keeps, check the suspension alone. */
   private inert(id: string): boolean {
     return this.helpers.has(id) || this.suspendedForTransfer.has(id);
   }

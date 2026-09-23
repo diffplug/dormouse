@@ -336,6 +336,19 @@ describe('command title summarizer', () => {
     expect(summarizeCommandLine('cd lib && pnpm test')).toBe('cd lib ...');
     expect(summarizeCommandLine('"my command" "quoted arg"')).toBe('my command quoted arg');
   });
+
+  it('names a grouped command without its grouping, and keeps a substitution whole', () => {
+    expect(summarizeCommandLine('(cd web && pnpm dev)')).toBe('cd web ...');
+    expect(summarizeCommandLine('{ cd web; pnpm dev; }')).toBe('cd web ...');
+    expect(summarizeCommandLine('echo $(date +%s) a b')).toBe('echo $(date +%s) a');
+    expect(summarizeCommandLine('diff <(ls a) <(ls b) c')).toBe('diff <(ls a) <(ls b)');
+    expect(summarizeCommandLine('cat $(ls | head -1)')).toBe('cat $(ls | head -1)');
+  });
+
+  it('keeps a summary on one line when an argument spans several', () => {
+    expect(summarizeCommandLine('echo "one\ntwo"')).toBe('echo one two');
+    expect(summarizeCommandLine('echo $(\n  date\n)')).toBe('echo $( date )');
+  });
 });
 
 describe('WATCHING key', () => {
@@ -358,6 +371,15 @@ describe('WATCHING key', () => {
     // Grouping is lexical only.
     ['(cd web && pnpm dev)', 'pnpm dev'],
     ['{ cd web; pnpm dev; }', 'pnpm dev'],
+    ['( cd web ; pnpm dev )', 'pnpm dev'],
+    // A substitution's or an array's parentheses are not grouping.
+    ['echo $(date) && claude', 'claude'],
+    ['GH_TOKEN=$(gh auth token) claude', 'claude'],
+    ['x=$(cd a && pwd) claude', 'claude'],
+    ['claude $(cat prompt.txt)', 'claude'],
+    ['arr=(1 2); claude', 'claude'],
+    ['arr=(1 2) claude', 'claude'],
+    ['npm run "build(prod)"', 'npm build(prod)'],
     ['(cd web && pnpm dev) | tee log', 'pnpm dev'],
     // Transparent wrappers, with the flags they take.
     ['sudo make', 'make'],

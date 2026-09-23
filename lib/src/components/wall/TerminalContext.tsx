@@ -8,8 +8,8 @@ import { TerminalContextView, type ContextScan } from './TerminalContextView';
 import { TerminalContextContext, WallActionsContext, type TerminalContextState } from './wall-context';
 import { disposeHelper, getHelper, helperRevision, openHelper, setHelperVisible, subscribeHelpers } from '../../lib/helper-terminal';
 import { getPlatform, IS_MAC, IS_WINDOWS } from '../../lib/platform';
-import { buildAppTitleResolver, commandWatchKey, createTerminalPaneState, cwdDisplay, deriveSurfaceLabel, explainTerminalTitle, type CwdState } from '../../lib/terminal-state';
-import { commandWatchRule, focusSession, getTerminalInstance, getActivitySnapshot, getTerminalPaneStateSnapshot, setCommandWatched, subscribeToActivity, subscribeToTerminalPaneState, subscribeToWatchedCommands, getWatchedCommandsSnapshot, toggleSessionTodo } from '../../lib/terminal-registry';
+import { buildAppTitleResolver, createTerminalPaneState, cwdDisplay, deriveSurfaceLabel, explainTerminalTitle, type CwdState } from '../../lib/terminal-state';
+import { focusSession, getRunningCommandWatchKey, getRunningCommandWatchRule, getTerminalInstance, getActivitySnapshot, getTerminalPaneStateSnapshot, setCommandWatched, subscribeToActivity, subscribeToTerminalPaneState, subscribeToWatchedCommands, getWatchedCommandsSnapshot, toggleSessionTodo } from '../../lib/terminal-registry';
 import { writeTextToClipboard } from '../../lib/clipboard';
 import { listenerUrlsByPort } from './port-url';
 import { DEFAULT_HELPER_COMMAND } from '../../lib/terminal-context-types';
@@ -31,10 +31,9 @@ export function TerminalContext({ id, title, closing, origin, warning: openWarni
   const cwd = state.cwd?.path ? state.cwd : undefined;
   const helperState = helper ? states.get(helper.id) : undefined;
   const helperCwd = helperState?.cwd?.path ? helperState.cwd : undefined;
-  const watchKey = state.currentCommand?.rawCommandLine ? commandWatchKey(state.currentCommand.rawCommandLine) : null;
-  // A bare runner rule already covers this script, so the row offers that rule.
-  const watchRule = commandWatchRule(watchKey);
-  const offeredRule = watchRule ?? watchKey;
+  // A bare runner rule already covering the running script is the one the row offers.
+  const watchRule = getRunningCommandWatchRule(id);
+  const offeredRule = watchRule ?? getRunningCommandWatchKey(id);
   const appTitleForPane = useMemo(() => buildAppTitleResolver(states, activities), [states, activities]);
   const titleSources = useMemo(() => explainTerminalTitle(state, { appTitleForPane }), [state, appTitleForPane]);
   const display = (location: CwdState) => cwdDisplay(location, { style: 'full', homePath: home });

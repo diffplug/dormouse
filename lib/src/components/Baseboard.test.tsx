@@ -18,6 +18,7 @@ import { Baseboard } from './Baseboard';
 import { installLocalStorageStub } from '../lib/test-local-storage';
 import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS, getAlertSettings } from '../lib/alert-settings';
 import { DialogKeyboardContext, SelectedIdContext } from './wall/wall-context';
+import type { DoorChip } from './wall/wall-types';
 import {
   addInstalledTheme,
   getActiveThemeId,
@@ -63,6 +64,29 @@ beforeEach(() => {
   root = createRoot(container);
 });
 
+/** Render `doors`, with `selected` as the selected Door. */
+function renderBaseboard(doors: DoorChip[], selected: string | null = null): void {
+  act(() => root.render(
+    <SelectedIdContext.Provider value={selected}><Baseboard items={doors} onReattach={() => {}} /></SelectedIdContext.Provider>,
+  ));
+}
+
+/** A 244px baseboard whose always-present right cluster is 72px, every other
+ *  element measuring `widthOf` it. */
+function stubBaseboardWidths(widthOf: (element: HTMLElement) => number): void {
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(private callback: ResizeObserverCallback) {}
+    observe(target: HTMLElement) {
+      const width = target.classList.contains('h-7') ? 244 : 72;
+      this.callback([{ target, contentRect: { width } } as ResizeObserverEntry], this as unknown as ResizeObserver);
+    }
+    disconnect() {}
+  });
+  vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+    return widthOf(this);
+  });
+}
+
 afterEach(() => {
   // Module state, so it outlives the component under test.
   setDefaultThemeId(null);
@@ -79,14 +103,11 @@ afterEach(() => {
 describe('Baseboard settings controls', () => {
   it('reveals a selected overflow Door and keeps it visible after its predecessor is deleted', () => {
     const items = ['a', 'b', 'c'].map(id => ({ id, title: id, kind: 'terminal' as const }));
-    const render = (selected: string, doors = items) => act(() => root.render(
-      <SelectedIdContext.Provider value={selected}><Baseboard items={doors} onReattach={() => {}} /></SelectedIdContext.Provider>,
-    ));
     // The zero-width test viewport fits exactly one Door.
-    render('a');
-    render('c');
+    renderBaseboard(items, 'a');
+    renderBaseboard(items, 'c');
     expect(container.querySelector('[data-door-id="c"]')).not.toBeNull();
-    render('c', items.slice(1));
+    renderBaseboard(items.slice(1), 'c');
     expect(container.querySelector('[data-door-id="c"]')).not.toBeNull();
     expect(container.querySelector('[data-door-id="b"]')).toBeNull();
   });
@@ -391,9 +412,6 @@ describe('Baseboard overflow alerts', () => {
   afterEach(() => act(() => clearTerminalActivity()));
 
   const items = ['a', 'b', 'c', 'd'].map(id => ({ id, title: id, kind: 'terminal' as const }));
-  const renderSelected = (selected: string) => act(() => root.render(
-    <SelectedIdContext.Provider value={selected}><Baseboard items={items} onReattach={() => {}} /></SelectedIdContext.Provider>,
-  ));
   const arrow = (direction: 'left' | 'right') => container.querySelector<HTMLButtonElement>(`[data-overflow-arrow="${direction}"]`);
 
   it('marks an overflow arrow for the ringing and TODO Doors it hides', () => {
@@ -403,7 +421,7 @@ describe('Baseboard overflow alerts', () => {
       setTerminalActivity('d', { status: 'ALERT_RINGING', todo: true });
     });
     // The zero-width test viewport fits exactly one Door.
-    renderSelected('a');
+    renderBaseboard(items, 'a');
     const right = arrow('right');
     expect(right?.getAttribute('aria-label')).toBe('3 more, 2 ringing, 2 TODO');
     expect(right?.querySelector('[data-alert-ring-inset="door"]')).not.toBeNull();
@@ -413,41 +431,34 @@ describe('Baseboard overflow alerts', () => {
     expect(arrow('left')).toBeNull();
 
     // The same on the other side, for exactly the Doors hidden there.
-    renderSelected('d');
+    renderBaseboard(items, 'd');
     expect(arrow('left')?.getAttribute('aria-label')).toBe('3 more, 1 ringing, 1 TODO');
     expect(arrow('right')).toBeNull();
   });
 
   it('leaves an arrow plain while the Doors it hides owe nothing', () => {
     act(() => setTerminalActivity('a', { status: 'ALERT_RINGING', todo: true }));
-    renderSelected('a');
+    renderBaseboard(items, 'a');
     const right = arrow('right');
     expect(right?.getAttribute('aria-label')).toBe('3 more');
     expect(right?.querySelector('[data-alert-ring-inset]')).toBeNull();
     expect(right?.textContent).not.toContain('TODO');
   });
 
-  it('reserves the wider arrow a hidden TODO Door needs', () => {
-    vi.stubGlobal('ResizeObserver', class {
-      constructor(private callback: ResizeObserverCallback) {}
-      observe(target: HTMLElement) {
-        const width = target.classList.contains('h-7') ? 244 : 72;
-        this.callback([{ target, contentRect: { width } } as ResizeObserverEntry], this as unknown as ResizeObserver);
-      }
-      disconnect() {}
-    });
-    // Budget 244 - 72 = 172: two 60px Doors fit beside a 20px arrow, not a 60px one.
-    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
-      if (this.getAttribute('role') === 'group') return 60;
-      if (this.tagName === 'BUTTON') return this.textContent?.includes('TODO') ? 60 : 20;
+  it('reserves the TODO arrow\'s width whatever an arrow hides', () => {
+    // Budget 244 - 72 = 172: two 60px Doors fit beside a 20px plain arrow, not
+    // beside the 60px TODO one.
+    stubBaseboardWidths((element) => {
+      if (element.getAttribute('role') === 'group') return 60;
+      if (element.tagName === 'BUTTON') return element.textContent?.includes('TODO') ? 60 : 20;
       return 16;
     });
     const three = items.slice(0, 3);
-    const render = () => act(() => root.render(<Baseboard items={three} onReattach={() => {}} />));
-    render();
-    expect(container.querySelectorAll('[data-door-id]')).toHaveLength(2);
+    renderBaseboard(three);
+    expect(container.querySelectorAll('[data-door-id]')).toHaveLength(1);
+    expect(arrow('right')?.getAttribute('aria-label')).toBe('2 more');
+    // A hidden TODO widens the arrow into the room already reserved for it.
     act(() => setTerminalActivity('c', { todo: true }));
-    render();
     expect(container.querySelectorAll('[data-door-id]')).toHaveLength(1);
     expect(arrow('right')?.getAttribute('aria-label')).toBe('2 more, 1 TODO');
   });
@@ -457,23 +468,15 @@ describe('Baseboard Tool unsaved changes', () => {
   afterEach(() => act(() => resetToolDirty()));
 
   it('refits Door overflow when a live dirty report changes a measured width', () => {
-    vi.stubGlobal('ResizeObserver', class {
-      constructor(private callback: ResizeObserverCallback) {}
-      observe(target: HTMLElement) {
-        const width = target.classList.contains('h-7') ? 244 : 72;
-        this.callback([{ target, contentRect: { width } } as ResizeObserverEntry], this as unknown as ResizeObserver);
-      }
-      disconnect() {}
-    });
-    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
-      if (this.getAttribute('role') !== 'group') return 16;
-      return this.querySelector('[aria-label="Unsaved changes"]') ? 94 : 80;
+    stubBaseboardWidths((element) => {
+      if (element.getAttribute('role') !== 'group') return 16;
+      return element.querySelector('[aria-label="Unsaved changes"]') ? 94 : 80;
     });
     const id = 'dirty-door-fit';
-    act(() => root.render(<Baseboard items={[
+    renderBaseboard([
       { id, kind: 'tool', title: 'Editor' },
       { id: 'other-door', kind: 'terminal', title: 'Shell' },
-    ]} onReattach={() => {}} />));
+    ]);
     expect(container.querySelectorAll('[data-door-id]')).toHaveLength(2);
     act(() => recordToolDirty(id, true));
     expect(container.querySelectorAll('[data-door-id]')).toHaveLength(1);

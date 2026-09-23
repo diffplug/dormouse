@@ -11,7 +11,7 @@ interface ActivityStoreModule {
   getActivitySnapshot: () => Map<string, ActivityState>;
   subscribeToWatchedCommands: (listener: () => void) => () => void;
   getWatchedCommands: () => string[];
-  getRunningCommandWatchKey: (id: string) => string | null;
+  getRunningCommandWatchRule: (id: string) => string | null;
 }
 
 /** Notification sources a program emits for itself, as opposed to the ones
@@ -264,16 +264,16 @@ export class TutDetector {
       this.spreadCheckQueued = false;
       if (this.pendingSpreadIds.size === 0) return;
       const snapshot = this.activityStore.getActivitySnapshot();
-      const commandCounts = new Map<string, number>();
+      const ruleCounts = new Map<string, number>();
       for (const [paneId, current] of snapshot) {
         if (!current.watchingEnabled) continue;
-        const command = this.activityStore.getRunningCommandWatchKey(paneId);
-        if (command) commandCounts.set(command, (commandCounts.get(command) ?? 0) + 1);
+        const rule = this.activityStore.getRunningCommandWatchRule(paneId);
+        if (rule) ruleCounts.set(rule, (ruleCounts.get(rule) ?? 0) + 1);
       }
       for (const paneId of this.pendingSpreadIds) {
         if (!snapshot.get(paneId)?.watchingEnabled) continue;
-        const command = this.activityStore.getRunningCommandWatchKey(paneId);
-        if (command && (commandCounts.get(command) ?? 0) > 1) {
+        const rule = this.activityStore.getRunningCommandWatchRule(paneId);
+        if (rule && (ruleCounts.get(rule) ?? 0) > 1) {
           this.state.markComplete("al-spreads");
           break;
         }

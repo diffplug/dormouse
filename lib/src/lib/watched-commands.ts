@@ -1,6 +1,7 @@
 import { loadJson, saveJson } from './local-json-store';
 import { getPlatform } from './platform';
 import { isWatchKey, watchRuleFor } from './terminal-state';
+import { getRunningCommandWatchKey } from './terminal-state-store';
 
 /**
  * The WATCHING rule set: the command keys (`commandWatchKey` output) whose
@@ -38,7 +39,15 @@ function normalize(names: string[]): string[] {
 }
 
 let watched: string[] = readStored();
+/** `watched` as the set `watchRuleFor` matches against, rebuilt with it. */
+let watchedSet = new Set(watched);
 const listeners = new Set<() => void>();
+
+function replaceWatched(next: string[]): void {
+  watched = next;
+  watchedSet = new Set(next);
+  saveJson(STORAGE_KEY, watched);
+}
 
 export function getWatchedCommands(): string[] {
   return watched;
@@ -54,15 +63,11 @@ export function subscribeToWatchedCommands(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-export function isCommandWatched(name: string | null | undefined): boolean {
-  if (!name) return false;
-  return watched.includes(name);
-}
-
-/** The rule covering a running command's `commandWatchKey`, or null — a bare
- *  runner rule covers every script of that runner. */
-export function commandWatchRule(key: string | null): string | null {
-  return watchRuleFor(new Set(watched), key);
+/** The rule covering the command Session `id` is running (`watchRuleFor` of
+ *  its `commandWatchKey`), or null — a bare runner rule covers every script of
+ *  that runner. */
+export function getRunningCommandWatchRule(id: string): string | null {
+  return watchRuleFor(watchedSet, getRunningCommandWatchKey(id));
 }
 
 export function setCommandWatched(name: string, on: boolean): void {
@@ -71,11 +76,10 @@ export function setCommandWatched(name: string, on: boolean): void {
   // on the next reload is never stored: it would otherwise match for the rest of
   // the session and then vanish with nothing on screen to explain it.
   if (!trimmed || !isWatchKey(trimmed)) return;
-  if (watched.includes(trimmed) === on) return;
-  watched = on
+  if (watchedSet.has(trimmed) === on) return;
+  replaceWatched(on
     ? [...watched, trimmed].sort()
-    : watched.filter((entry) => entry !== trimmed);
-  saveJson(STORAGE_KEY, watched);
+    : watched.filter((entry) => entry !== trimmed));
   getPlatform().alertSetCommandWatched(trimmed, on);
   listeners.forEach((listener) => listener());
 }
@@ -84,8 +88,7 @@ export function setCommandWatched(name: string, on: boolean): void {
 export function applyWatchedCommandsFromHost(names: string[]): void {
   const next = normalize(names);
   if (next.length === watched.length && next.every((name, index) => name === watched[index])) return;
-  watched = next;
-  saveJson(STORAGE_KEY, watched);
+  replaceWatched(next);
   listeners.forEach((listener) => listener());
 }
 

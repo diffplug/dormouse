@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { collectTerminalSemanticEvents, formatOscColorResponse, ITERM2_DEVICE_ATTRIBUTES_RESPONSE, TerminalProtocolParser } from './terminal-protocol';
-import { createTerminalPaneState, deriveHeader, reduceTerminalState, type TerminalSemanticEvent } from './terminal-state';
+import { commandWatchKey, createTerminalPaneState, deriveHeader, reduceTerminalState, type TerminalSemanticEvent } from './terminal-state';
 
 describe('TerminalProtocolParser', () => {
   it('parses and strips standalone terminal bells', () => {
@@ -561,11 +561,15 @@ describe('TerminalProtocolParser', () => {
   // derivation, and the key `dor ensure --restart` matches on — so it is bounded
   // and sanitized like a title rather than stored as it arrived. The `\xNN`
   // unescape is what puts control characters back, so the sanitize runs after it.
+  // Its line breaks survive, since a newline separates commands.
   it('bounds and sanitizes the OSC 633 command line', () => {
     const parser = new TerminalProtocolParser();
 
-    expect(parser.process('\x1b]633;E;git\\x0a\\x1bcommit\x07').events).toEqual([
-      { kind: 'semantic', event: { type: 'commandLine', commandLine: 'git commit' } },
+    expect(parser.process('\x1b]633;E;git\\x0a\\x1bcommit\\x07now\x07').events).toEqual([
+      { kind: 'semantic', event: { type: 'commandLine', commandLine: 'git\ncommit now' } },
+    ]);
+    expect(parser.process('\x1b]633;E;cat <<EOF\\x0d\\x0a  hi\\x0d\\x0dEOF \x07').events).toEqual([
+      { kind: 'semantic', event: { type: 'commandLine', commandLine: 'cat <<EOF\nhi\nEOF' } },
     ]);
 
     const long = parser.process(`\x1b]633;E;${'a'.repeat(100_000)}\x07`).events;
@@ -621,10 +625,10 @@ describe('TerminalProtocolParser', () => {
   it('bounds and sanitizes the OSC 133;C command line', () => {
     const parser = new TerminalProtocolParser();
     expect(parser.process('\x1b]133;C;cmdline_url=git%0A%1Bcommit\x07').events[0]).toEqual(
-      { kind: 'semantic', event: { type: 'commandLine', commandLine: 'git commit' } },
+      { kind: 'semantic', event: { type: 'commandLine', commandLine: 'git\ncommit' } },
     );
     expect(parser.process("\x1b]133;C;cmdline=git$'\\n\\E'commit\x07").events[0]).toEqual(
-      { kind: 'semantic', event: { type: 'commandLine', commandLine: 'git commit' } },
+      { kind: 'semantic', event: { type: 'commandLine', commandLine: 'git\ncommit' } },
     );
     for (const params of [`cmdline_url=${'%E2%9C%93'.repeat(30_000)}`, `cmdline=${'a'.repeat(100_000)}`]) {
       const [event] = parser.process(`\x1b]133;C;${params}\x07`).events;
@@ -635,11 +639,19 @@ describe('TerminalProtocolParser', () => {
 
   it('gives a fish pane its real command name in the header', () => {
     const parser = new TerminalProtocolParser();
-    const events = collectTerminalSemanticEvents(parser.process('\x1b]133;A;click_events=1\x07$ \x1b]133;B\x07\x1b]133;C;cmdline_url=pnpm%20test%20--watch\x07').events);
-    let pane = createTerminalPaneState();
-    for (const event of events) pane = reduceTerminalState(pane, event);
+    const pane = reduceSemanticEvents(collectTerminalSemanticEvents(parser.process('\x1b]133;A;click_events=1\x07$ \x1b]133;B\x07\x1b]133;C;cmdline_url=pnpm%20test%20--watch\x07').events));
     expect(pane.currentCommand?.rawCommandLine).toBe('pnpm test --watch');
     expect(deriveHeader(pane, [pane]).primary).toBe('pnpm test --watch');
+  });
+
+  // zsh's `E` escapes a newline as `\x0a`, fish's `cmdline_url` as `%0A`.
+  it.each([
+    ['\x1b]633;E;cd web\\x0apnpm dev\x07\x1b]633;C\x07'],
+    ['\x1b]133;C;cmdline_url=cd%20web%0Apnpm%20dev\x07'],
+  ])('keys a multi-line command line %j on its last command', (stream) => {
+    const pane = reduceSemanticEvents(collectTerminalSemanticEvents(new TerminalProtocolParser().process(stream).events));
+    expect(commandWatchKey(pane.currentCommand?.rawCommandLine ?? '')).toBe('pnpm dev');
+    expect(pane.currentCommand?.displayCommand).toBe('cd web ...');
   });
 
   // W1: the OSC terminator scan runs on raw bytes, so a `Cwd=` payload holding

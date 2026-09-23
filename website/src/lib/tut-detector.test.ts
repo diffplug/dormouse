@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_MOUSE_SELECTION_STATE, type MouseSelectionState } from "dormouse-lib/lib/mouse-selection";
 import type { ActivityState } from "dormouse-lib/lib/terminal-registry";
+import { watchRuleFor } from "dormouse-lib/lib/terminal-state";
 import { DESKTOP_SECTIONS } from "./tut-items";
 import { TutDetector } from "./tut-detector";
 import { TutorialState } from "./tutorial-state";
@@ -35,7 +36,7 @@ function makeDetectorHarness(initialActivitySnapshot = new Map<string, ActivityS
         };
       },
       getWatchedCommands: () => watchedCommands,
-      getRunningCommandWatchKey: (id) => runningCommands.get(id) ?? null,
+      getRunningCommandWatchRule: (id) => watchRuleFor(new Set(watchedCommands), runningCommands.get(id) ?? null),
       subscribeToWatchedCommands: (listener) => {
         watchedListener = listener;
         return () => {
@@ -189,7 +190,8 @@ describe("TutDetector", () => {
   });
 
   it("credits al-spreads only when a second pane lights up from the same rule", async () => {
-    const { state, setActivitySnapshot, setRunningCommand } = makeDetectorHarness();
+    const { state, setActivitySnapshot, setRunningCommand, setWatchedCommands } = makeDetectorHarness();
+    setWatchedCommands(["longtask"]);
     setRunningCommand("pane-a", "longtask");
     setRunningCommand("pane-b", "longtask");
 
@@ -213,8 +215,26 @@ describe("TutDetector", () => {
   });
 
 
+  it("credits al-spreads for two scripts one bare runner rule covers", async () => {
+    const { state, setActivitySnapshot, setRunningCommand, setWatchedCommands } = makeDetectorHarness();
+    setWatchedCommands(["pnpm"]);
+    setRunningCommand("pane-a", "pnpm dev");
+    setRunningCommand("pane-b", "pnpm test");
+    setActivitySnapshot(new Map([
+      ["pane-a", activity("NOTHING_TO_SHOW")],
+      ["pane-b", activity("WATCHING_DISABLED")],
+    ]));
+    setActivitySnapshot(new Map([
+      ["pane-a", activity("NOTHING_TO_SHOW")],
+      ["pane-b", activity("NOTHING_TO_SHOW")],
+    ]));
+    await Promise.resolve();
+    expect(state.isComplete("al-spreads")).toBe(true);
+  });
+
   it("does not credit different watched commands, including a command updated after Activity", async () => {
-    const { state, setActivitySnapshot, setRunningCommand } = makeDetectorHarness();
+    const { state, setActivitySnapshot, setRunningCommand, setWatchedCommands } = makeDetectorHarness();
+    setWatchedCommands(["longtask", "other-task"]);
     setRunningCommand("pane-a", "longtask");
     setRunningCommand("pane-b", "longtask");
     setActivitySnapshot(new Map([
@@ -232,7 +252,8 @@ describe("TutDetector", () => {
   });
 
   it("does not credit a queued spread after disposal", async () => {
-    const { state, detector, setActivitySnapshot, setRunningCommand } = makeDetectorHarness();
+    const { state, detector, setActivitySnapshot, setRunningCommand, setWatchedCommands } = makeDetectorHarness();
+    setWatchedCommands(["longtask"]);
     setRunningCommand("pane-a", "longtask");
     setRunningCommand("pane-b", "longtask");
     setActivitySnapshot(new Map([

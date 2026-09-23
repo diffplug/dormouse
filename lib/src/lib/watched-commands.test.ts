@@ -9,20 +9,30 @@ vi.mock('./platform', () => ({
 
 import {
   applyWatchedCommandsFromHost,
-  commandWatchRule,
+  getRunningCommandWatchRule,
   getWatchedCommands,
-  isCommandWatched,
   publishWatchedCommands,
   setCommandWatched,
   subscribeToWatchedCommands,
 } from './watched-commands';
+import { applyTerminalSemanticEvents, removeTerminalPaneState } from './terminal-state-store';
+
+const PANE = 'watched-commands-pane';
 
 function clearRules(): void {
   for (const name of getWatchedCommands()) setCommandWatched(name, false);
 }
 
+function run(commandLine: string): void {
+  applyTerminalSemanticEvents(PANE, [
+    { type: 'commandLine', commandLine },
+    { type: 'commandStart', source: 'osc633_boundaries' },
+  ]);
+}
+
 afterEach(() => {
   clearRules();
+  removeTerminalPaneState(PANE);
   alertSetWatchedCommands.mockClear();
   alertSetCommandWatched.mockClear();
 });
@@ -74,26 +84,18 @@ describe('watched-commands store', () => {
     expect(getWatchedCommands()).toEqual(['cargo build', 'npm test:unit', 'pnpm', 'pnpm dev']);
   });
 
-  it('names the rule covering a running command, a bare runner covering its scripts', () => {
-    setCommandWatched('pnpm test', true);
-    expect(commandWatchRule('pnpm test')).toBe('pnpm test');
-    expect(commandWatchRule('pnpm dev')).toBeNull();
+  it('adds, reports, and removes the rule covering a running command', () => {
+    run('cd web && pnpm dev');
+    expect(getWatchedCommands()).toEqual([]);
+    expect(getRunningCommandWatchRule(PANE)).toBeNull();
+
     setCommandWatched('pnpm', true);
-    expect(commandWatchRule('pnpm dev')).toBe('pnpm');
-    expect(commandWatchRule(null)).toBeNull();
-  });
+    expect(getWatchedCommands()).toEqual(['pnpm']);
+    expect(getRunningCommandWatchRule(PANE)).toBe('pnpm');
 
-  it('adds, reports, and removes rules', () => {
+    setCommandWatched('pnpm', false);
     expect(getWatchedCommands()).toEqual([]);
-    expect(isCommandWatched('claude')).toBe(false);
-
-    setCommandWatched('claude', true);
-    expect(getWatchedCommands()).toEqual(['claude']);
-    expect(isCommandWatched('claude')).toBe(true);
-
-    setCommandWatched('claude', false);
-    expect(getWatchedCommands()).toEqual([]);
-    expect(isCommandWatched('claude')).toBe(false);
+    expect(getRunningCommandWatchRule(PANE)).toBeNull();
   });
 
   it('keeps the rule set sorted and free of duplicates and blanks', () => {
@@ -105,11 +107,12 @@ describe('watched-commands store', () => {
     expect(getWatchedCommands()).toEqual(['claude', 'pnpm']);
   });
 
-  it('treats a null or empty name as unwatched', () => {
+  it('names no rule for a Session at a prompt or never seen', () => {
     setCommandWatched('claude', true);
-    expect(isCommandWatched(null)).toBe(false);
-    expect(isCommandWatched(undefined)).toBe(false);
-    expect(isCommandWatched('')).toBe(false);
+    expect(getRunningCommandWatchRule('no-such-pane')).toBeNull();
+    run('claude');
+    applyTerminalSemanticEvents(PANE, [{ type: 'commandFinish', exitCode: 0 }]);
+    expect(getRunningCommandWatchRule(PANE)).toBeNull();
   });
 
   it('sends mutations as deltas and offers the full rule set only as a startup seed', () => {
@@ -132,9 +135,11 @@ describe('watched-commands store', () => {
     setCommandWatched('npm', true);
     listener.mockClear();
 
+    run('claude');
     applyWatchedCommandsFromHost(['claude', 'npm', 'claude']);
 
     expect(getWatchedCommands()).toEqual(['claude', 'npm']);
+    expect(getRunningCommandWatchRule(PANE)).toBe('claude');
     expect(listener).toHaveBeenCalledTimes(1);
     expect(alertSetCommandWatched).toHaveBeenCalledTimes(1);
   });
