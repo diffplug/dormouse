@@ -103,6 +103,7 @@ const insetRect = (r: RingRect, d: number): RingRect =>
 function framesEqual(a: RingFrame, b: RingFrame): boolean {
   return (
     rectsEqual(a.rect, b.rect)
+    && (a.union === b.union || !!a.union && !!b.union && a.union.every((r, i) => rectsEqual(r, b.union![i])))
     && a.shape.tl === b.shape.tl && a.shape.tr === b.shape.tr
     && a.shape.br === b.shape.br && a.shape.bl === b.shape.bl
     && a.shape.inset === b.shape.inset
@@ -112,7 +113,7 @@ function framesEqual(a: RingFrame, b: RingFrame): boolean {
 /** The frame the ring currently shows: geometry plus the per-edge motion-smear
  *  `speeds`, populated only while a tween runs; a settled ring carries null speeds,
  *  so its render is clean. `union` holds the source and helper rects while a terminal
- *  context is open; `rect` is then their bounds, and the ring never tweens.
+ *  context is open; `rect` is then their bounds, and both rectangles tween together.
  *  Held in a ref and written to the DOM imperatively. */
 interface DisplayedRing {
   rect: RingRect;
@@ -317,7 +318,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     // the shell (the post-render layout effect applies it before paint).
     const show = (frame: DisplayedRing) => {
       frameRef.current = frame;
-      displayedFrameRef.current = { rect: frame.rect, shape: frame.shape };
+      displayedFrameRef.current = { rect: frame.rect, shape: frame.shape, union: frame.union };
       if (handoff) handoff.current = displayedFrameRef.current;
       if (visibleRef.current) {
         applyRing();
@@ -326,7 +327,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
         setVisible(true);
       }
     };
-    const showSettled = (frame: RingFrame, union?: DisplayedRing['union']) =>
+    const showSettled = (frame: RingFrame, union: DisplayedRing['union'] = frame.union) =>
       show({ rect: frame.rect, shape: frame.shape, speeds: null, union });
 
     // Per-frame imperative loop: sample the tween's position and velocity, write
@@ -338,11 +339,11 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
       const tween = tweenRef.current;
       if (!tween) return;
       const now = performance.now();
-      const { rect, shape, done } = sampleRingTween(tween, now);
+      const { rect, shape, union, done } = sampleRingTween(tween, now);
       if (done) {
         // Settled: drop the tween so the final render is clean.
         tweenRef.current = null;
-        showSettled({ rect, shape });
+        showSettled({ rect, shape, union });
         return;
       }
       // Velocity comes from the tween's analytic derivative, so it is exact on the
@@ -350,10 +351,10 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
       // smear should be strongest. Finite-differencing rendered positions cannot
       // do that: it has no previous sample to difference on frame one, and that
       // frame alone covers ~31% of a 220ms travel.
-      const speeds = sampleRingVelocity(tween, now);
+      const speeds = union ? null : sampleRingVelocity(tween, now);
 
-      frameRef.current = { rect, shape, speeds };
-      displayedFrameRef.current = { rect, shape };
+      frameRef.current = { rect, shape, speeds, union };
+      displayedFrameRef.current = { rect, shape, union };
       if (handoff) handoff.current = displayedFrameRef.current;
       applyRing();
       rafRef.current = requestAnimationFrame(tick);
@@ -414,7 +415,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
       const helperFrame = helperEl ? measureFrame(helperEl, 'pane') : null;
       const previous = frameRef.current;
       const union = helperFrame ? [next.rect, helperFrame.rect] as const : undefined;
-      if (union) next.rect = unionBounds(...union);
+      if (union) { next.rect = unionBounds(...union); next.union = union; }
       const wall = targetEl.closest<HTMLElement>('[data-workspace-wall]');
       opacityRef.current = wall?.style.opacity ?? '';
 
@@ -430,12 +431,15 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
         wasActiveRef.current = true;
       }
 
-      // A union outline cannot tween, so it snaps in, tracks, and snaps out; an
-      // unchanged union skips the rewrite.
-      if (union || previous?.union) {
-        if (union && previous?.union && identity === displayedIdentityRef.current
-          && framesEqual(previous, next) && union.every((r, i) => rectsEqual(r, previous.union![i]))) return;
-        snapTo(next, identity, union);
+      // Opening, repositioning and closing a helper morph both component
+      // rectangles from the painted frame; never replace the union with a box.
+      if (union || previous?.union || tweenRef.current?.from.union) {
+        if (instant || !displayedFrameRef.current) { snapTo(next, identity, union); return; }
+        const destination = tweenRef.current?.to ?? previous;
+        if (destination && identity === displayedIdentityRef.current && framesEqual(destination, next)) return;
+        tweenRef.current = startRingTween(displayedFrameRef.current, next, performance.now(), FOCUS_MOTION_MS);
+        displayedIdentityRef.current = identity;
+        scheduleTick();
         return;
       }
       // Snap gate: the same instant-motion predicate the Lath animator's

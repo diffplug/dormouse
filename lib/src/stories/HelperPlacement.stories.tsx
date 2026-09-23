@@ -89,6 +89,10 @@ async function prepare(args: Props) {
   const ring = document.querySelector('[data-ring="outline"]')!.closest('svg')!.parentElement!;
   expectContained(context(), ring);
   expectContained(sourcePane(), ring);
+  // Keyboard focus on the container must not add a second browser-native ring.
+  await userEvent.tab();
+  context().focus();
+  expect(getComputedStyle(context()).outlineStyle).toBe('none');
   const actions = context().querySelector('[data-context-header-actions]')!;
   const close = within(actions as HTMLElement).getByRole('button', { name: 'Close terminal context' }).getBoundingClientRect();
   for (const button of actions.querySelectorAll('button')) {

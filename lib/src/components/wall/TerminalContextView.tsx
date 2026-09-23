@@ -176,7 +176,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
   const isTool = p.terminalRole === 'tool';
   const statusLabel = isTool ? (p.status === 'running' ? `Running ${p.command}…` : 'At prompt') : status.label(p.command);
   return <section ref={surface} aria-label="Terminal context" data-terminal-context tabIndex={-1} inert={p.closing} aria-hidden={p.closing || undefined} style={SURFACE_STYLE} data-context-side={p.placement?.side}
-    className={`${TERMINAL_CONTEXT_SURFACE_CLASS} ${motionClass} ${p.closing ? 'pointer-events-none' : ''} absolute ${p.compact ? 'inset-0' : 'inset-4'} flex flex-col overflow-hidden text-sm`}
+    className={`${TERMINAL_CONTEXT_SURFACE_CLASS} ${motionClass} ${p.closing ? 'pointer-events-none' : ''} absolute ${p.compact ? 'inset-0' : 'inset-4'} flex flex-col overflow-hidden text-sm outline-none`}
     onContextMenu={event => event.preventDefault()}
     onKeyDown={event => {
       if ((event.target as HTMLElement).closest('[data-helper-terminal], [data-context-terminal]') && !detail) return;

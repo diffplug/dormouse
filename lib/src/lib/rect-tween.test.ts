@@ -155,3 +155,19 @@ describe('sampleRingVelocity', () => {
     expect(sampleRingVelocity(snap, 0)).toEqual({ top: 0, right: 0, bottom: 0, left: 0 });
   });
 });
+
+it('morphs union components continuously and returns to a plain ring at close', () => {
+  const helper = { ...A.rect, left: 84 };
+  const joined: RingFrame = { rect: { ...A.rect, width: 184 }, shape: A.shape, union: [A.rect, helper] };
+  const open = startRingTween(A, joined, 0, DUR);
+  expect(sampleRingTween(open, 0).rect).toEqual(A.rect);
+  const mid = sampleRingTween(open, 30);
+  expect(mid.rect.width).toBeGreaterThan(A.rect.width);
+  expect(mid.rect.width).toBeLessThan(joined.rect.width);
+  expect(sampleRingTween(open, DUR).union).toEqual(joined.union);
+  const close = startRingTween(mid, A, 30, DUR);
+  expect(sampleRingTween(close, 30).union).toEqual(mid.union);
+  expect(sampleRingTween(close, 60).rect.width).toBeLessThan(mid.rect.width);
+  expect(sampleRingTween(close, 30 + DUR).union).toBeUndefined();
+  expect(sampleRingTween(close, 30 + DUR).rect).toEqual(A.rect);
+});

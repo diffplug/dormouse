@@ -6,6 +6,7 @@
 // easing rather than re-deriving the curve.
 
 import { LATH_EASING } from './lath/animator';
+import { unionBounds } from './rect-union-outline';
 
 /** The ring's measured box in viewport (fixed-position) coordinates. */
 export interface RingRect {
@@ -29,6 +30,8 @@ export interface RingShape {
 export interface RingFrame {
   rect: RingRect;
   shape: RingShape;
+  /** Two overlapping rectangles whose outer contour is the focus ring. */
+  union?: readonly [RingRect, RingRect];
 }
 
 /** Perpendicular speed of each ring edge while it travels (px/ms). See
@@ -103,11 +106,16 @@ function progressAt(tween: RingTween, now: number): { raw: number; clamped: numb
  *  (`LATH_EASING` returns 0/1 at the bounds, so the lerp resolves to `from`/`to`
  *  identically); a zero-duration tween reads as done at `to`. `done` flips true
  *  once the clock reaches the completion instant. */
-export function sampleRingTween(tween: RingTween, now: number): { rect: RingRect; shape: RingShape; done: boolean } {
+export function sampleRingTween(tween: RingTween, now: number): RingFrame & { done: boolean } {
   const { clamped } = progressAt(tween, now);
   const eased = LATH_EASING(clamped);
+  const fromUnion = tween.from.union ?? [tween.from.rect, tween.from.rect];
+  const toUnion = tween.to.union ?? [tween.to.rect, tween.to.rect];
+  const union = clamped >= 1 ? tween.to.union : tween.from.union || tween.to.union
+    ? [lerpRect(fromUnion[0], toUnion[0], eased), lerpRect(fromUnion[1], toUnion[1], eased)] as const : undefined;
   return {
-    rect: lerpRect(tween.from.rect, tween.to.rect, eased),
+    ...(union ? { union } : {}),
+    rect: union ? unionBounds(...union) : lerpRect(tween.from.rect, tween.to.rect, eased),
     shape: lerpShape(tween.from.shape, tween.to.shape, eased),
     done: clamped >= 1,
   };

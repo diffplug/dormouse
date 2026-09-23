@@ -557,7 +557,7 @@ describe('SelectionRing motion smear', () => {
   });
 });
 
-it('tracks the source/helper union through repositioning and restores the source ring on close', async () => {
+it('animates the source/helper union on opening, repositioning and interrupted close', async () => {
   const store = makeStore();
   const wall = document.createElement('div');
   wall.className = 'lath-host';
@@ -570,15 +570,31 @@ it('tracks the source/helper union through repositioning and restores the source
   stubRect(helper, { left: 484, top: 0, width: 400, height: 300 });
   const panes = new Map([['a', source]]);
   try {
+    await act(async () => root.render(<Harness selectedId="a" mode="passthrough" store={store} panes={panes} />));
+    const sourceBounds = ringRect();
     await act(async () => root.render(<Harness selectedId="a" contextSourceId="a" mode="passthrough" store={store} panes={panes} />));
+    expect(ringRect()).toEqual(sourceBounds);
+    await frame(30);
+    expect(ringRect()!.width).toBeGreaterThan(508);
+    expect(ringRect()!.width).toBeLessThan(892);
+    await frame(220);
     const path = container.querySelector<SVGPathElement>('[data-ring="outline"]')!;
     expect(path.dataset.contextUnion).toBe('true');
     expect(ringRect()?.width).toBe(892);
     const original = path.getAttribute('d');
     await act(async () => { stubRect(helper, { left: 0, top: 584, width: 400, height: 300 }); helper.style.top = '584px'; });
-    expect(ringRect()?.height).toBe(892);
+    expect(path.getAttribute('d')).toBe(original);
+    await frame(30);
+    expect(ringRect()!.height).toBeGreaterThan(608);
+    expect(ringRect()!.height).toBeLessThan(892);
     expect(path.getAttribute('d')).not.toBe(original);
+    const midMove = ringRect();
     await act(async () => root.render(<Harness selectedId="a" mode="command" store={store} panes={panes} />));
+    expect(ringRect()).toEqual(midMove);
+    await frame(30);
+    expect(ringRect()!.height).toBeGreaterThan(608);
+    expect(ringRect()!.height).toBeLessThan(midMove!.height);
+    await frame(220);
     expect(path.dataset.contextUnion).toBe('false');
     expect(ringRect()?.width).toBe(508);
     expect(path.getAttribute('stroke-dasharray')).toBeTruthy();
