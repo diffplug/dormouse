@@ -5,7 +5,6 @@ import {
 import { postmarkEmail } from "@pgstencil/auth/postmark";
 import { authPolicy, providerBindings } from "./policy";
 import { workerApp } from "./worker-app";
-import { logSweep, sweepHistory } from "./voice";
 
 export interface Env extends BetterAuthWorkerBindings {
   ASSETS: { fetch(request: Request): Promise<Response> };
@@ -20,29 +19,25 @@ const auth = createBetterAuthWorker<Env>({
   ...authPolicy,
   email: (env) => postmarkEmail(env.POSTMARK_SERVER_TOKEN, env.EMAIL_FROM),
 });
-const app = workerApp(
-  (request, env, ctx) => auth.fetch(request, env, ctx),
-  // A rejected allowlist throws inside the request path, so app.onError answers it.
-  (env) => ({
-    HYPERDRIVE: env.HYPERDRIVE,
-    ASSETS: env.ASSETS,
-    APP_ORIGIN: env.APP_ORIGIN,
-    AUTH_SECRET: env.AUTH_SECRET,
-    EMAIL_FROM: env.EMAIL_FROM,
-    POSTMARK_SERVER_TOKEN: env.POSTMARK_SERVER_TOKEN,
-    ELEVENLABS_API_KEY: env.ELEVENLABS_API_KEY,
-    BUILD_SHA: env.BUILD_SHA,
-    ...providerBindings(env as unknown as Record<string, unknown>),
-  }),
-);
+/** `sweepDelayMs` exists for the test entry; production keeps the default. */
+export function hostedWorker({ sweepDelayMs }: { sweepDelayMs?: number } = {}) {
+  return workerApp(
+    (request, env, ctx) => auth.fetch(request, env, ctx),
+    // A rejected allowlist throws inside the request path, where app.onError
+    // answers it, and fails the cron run.
+    (env) => ({
+      HYPERDRIVE: env.HYPERDRIVE,
+      ASSETS: env.ASSETS,
+      APP_ORIGIN: env.APP_ORIGIN,
+      AUTH_SECRET: env.AUTH_SECRET,
+      EMAIL_FROM: env.EMAIL_FROM,
+      POSTMARK_SERVER_TOKEN: env.POSTMARK_SERVER_TOKEN,
+      ELEVENLABS_API_KEY: env.ELEVENLABS_API_KEY,
+      BUILD_SHA: env.BUILD_SHA,
+      ...providerBindings(env as unknown as Record<string, unknown>),
+    }),
+    { sweepDelayMs },
+  );
+}
 
-export default {
-  fetch(request: Request, env: Env, ctx: Parameters<typeof app.fetch>[2]) {
-    return app.fetch(request, env, ctx);
-  },
-  // The cron in wrangler.jsonc: reads only the ElevenLabs key, never Hyperdrive.
-  async scheduled(_controller: unknown, env: Env) {
-    if (env.ELEVENLABS_API_KEY)
-      await logSweep(sweepHistory(env.ELEVENLABS_API_KEY));
-  },
-};
+export default hostedWorker();

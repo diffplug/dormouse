@@ -253,12 +253,10 @@ pnpm exec wrangler secret put APPLE_CLIENT_SECRET
 pnpm exec wrangler secret put ELEVENLABS_API_KEY
 ```
 
-Create `ELEVENLABS_API_KEY` in an ElevenLabs account used for nothing but
-Dormouse voice: the Worker deletes that account's entire speech history on a
-schedule, so never point it at a shared account. Restrict the key to
-text-to-speech plus speech-history access (the sweep lists and deletes history),
-and set a spending limit in the ElevenLabs console. How the Worker uses it is
-`docs/specs/hosted.md` -> "Managed voice".
+Create `ELEVENLABS_API_KEY` in an ElevenLabs account dedicated to Dormouse
+voice, restricted to text-to-speech plus speech-history access, with a spending
+limit set in the ElevenLabs console. Why the account must be dedicated, and how
+the Worker uses the key, is `docs/specs/hosted.md` -> "Managed voice".
 
 Generate a fresh cryptographically random `AUTH_SECRET` with at least 32 bytes
 of entropy in your secret manager. Client IDs are public but may be stored

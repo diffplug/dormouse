@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   Miniflare,
   convertV4MiniflareOptions,
+  Request as WorkerRequest,
   Response as WorkerResponse,
 } from "miniflare";
 import { createTestContext } from "pgstencil/testing";
@@ -22,7 +23,7 @@ import {
 } from "./oauth-server";
 import type { Session } from "../../src/api";
 import { ADMIN_EMAIL } from "../admin";
-import { CRON_SWEEP, VOICE_DAILY_CAP } from "../voice";
+import { CRON_SWEEP_CAP, SPEECH_SWEEP_CAP, VOICE_DAILY_CAP } from "../voice";
 
 const origin = "https://hosted.dormouse.sh";
 const bundle = (production: boolean | "preview") =>
@@ -60,6 +61,32 @@ const testBundle = bundle(false);
 const productionBundle = bundle(true);
 const previewBundle = bundle("preview");
 type Result = Awaited<ReturnType<Miniflare["dispatchFetch"]>>;
+type Handler = (
+  request: WorkerRequest,
+) => WorkerResponse | Promise<WorkerResponse>;
+
+/** One Worker under Miniflare; `database` backs the HYPERDRIVE binding. */
+const workerOptions = ({
+  script,
+  database,
+  assets,
+  ...rest
+}: {
+  script: string;
+  database: string;
+  assets: Handler;
+  bindings: Record<string, string>;
+  outboundService: Handler;
+}) =>
+  convertV4MiniflareOptions({
+    modules: true,
+    script,
+    compatibilityDate: "2026-09-08",
+    compatibilityFlags: ["nodejs_compat"],
+    hyperdrives: { HYPERDRIVE: database },
+    serviceBindings: { ASSETS: assets },
+    ...rest,
+  });
 
 async function fixture(
   production: boolean | "preview" = false,
@@ -98,8 +125,7 @@ async function fixture(
   }
   Object.assign(bindings, overrides);
   const worker = new Miniflare(
-    convertV4MiniflareOptions({
-      modules: true,
+    workerOptions({
       script: (
         await (production === "preview"
           ? previewBundle
@@ -107,14 +133,11 @@ async function fixture(
             ? productionBundle
             : testBundle)
       ).outputFiles![0].text,
-      compatibilityDate: "2026-09-08",
-      compatibilityFlags: ["nodejs_compat"],
       bindings,
-      hyperdrives: { HYPERDRIVE: context.database.url },
-      serviceBindings: {
-        // Vite's content-hashed build output, with the SPA fallback answering
-        // every other path — including an unknown one under /assets/ — with the shell.
-        ASSETS: (request) =>
+      database: context.database.url,
+      // Vite's content-hashed build output, with the SPA fallback answering
+      // every other path — including an unknown one under /assets/ — with the shell.
+      assets: (request) =>
           new URL(request.url).pathname === "/assets/app-abc123.js"
             ? new WorkerResponse("export const build = 1;\n", {
                 headers: { "content-type": "text/javascript" },
@@ -125,7 +148,6 @@ async function fixture(
                   headers: { "content-type": "text/html" },
                 },
               ),
-      },
       async outboundService(request) {
         if (production === "preview")
           throw new Error(
@@ -156,7 +178,7 @@ async function fixture(
         }
         if (url.href.startsWith("https://api.elevenlabs.io/v1/history?")) {
           elevenLabs.sweeps.push(url.href);
-          return WorkerResponse.json({ history: [], has_more: false });
+          return WorkerResponse.json({ history: [] });
         }
         if (url.origin === "https://api.elevenlabs.io") {
           elevenLabs.requests.push({
@@ -312,6 +334,13 @@ async function fixture(
         method: "POST",
         body: time,
       }),
+    /** Background passes scheduled so far; the test entry only. */
+    waitUntilCalls: async () =>
+      Number(
+        await (
+          await worker.dispatchFetch(origin + "/__test/wait-until")
+        ).text(),
+      ),
     close: async () => {
       await worker.dispose();
       await provider.close();
@@ -601,9 +630,11 @@ test("managed voice: only the verified admin mints, speaks, and revokes", async 
     },
   ]);
   // A successful speech schedules one history sweep (undelayed in the test entry).
-  await vi.waitFor(() => expect(f.elevenLabs.sweeps).toHaveLength(1));
-  expect(f.elevenLabs.sweeps[0]).toBe(
-    "https://api.elevenlabs.io/v1/history?page_size=10",
+  expect(await f.waitUntilCalls()).toBe(1);
+  await vi.waitFor(() =>
+    expect(f.elevenLabs.sweeps).toEqual([
+      `https://api.elevenlabs.io/v1/history?page_size=${SPEECH_SWEEP_CAP}`,
+    ]),
   );
   const [listed] = (
     (await (await admin.voice("GET")).json()) as {
@@ -673,8 +704,7 @@ test("managed voice: only the verified admin mints, speaks, and revokes", async 
   );
 
   // No refused or failed speech (400, 401, 403, 429, 502) scheduled a sweep.
-  await new Promise((resolve) => setTimeout(resolve, 300));
-  expect(f.elevenLabs.sweeps).toHaveLength(1);
+  expect(await f.waitUntilCalls()).toBe(1);
 
   expect((await admin.voice("DELETE", "/" + id)).status).toBe(204);
   expect((await admin.speak(token, hi)).status).toBe(401);
@@ -710,15 +740,21 @@ test("managed voice fails closed in production without an ElevenLabs key", async
   expect(f.elevenLabs.requests).toEqual([]);
 });
 
+test("sweep caps fit Workers Free's 50 subrequests per invocation", () => {
+  // One list, then one DELETE per item.
+  expect(1 + CRON_SWEEP_CAP).toBeLessThanOrEqual(50);
+  // The speak request's database connection and synthesize call come first.
+  expect(1 + 1 + 1 + SPEECH_SWEEP_CAP).toBeLessThanOrEqual(50);
+});
+
 test("production cron sweeps ElevenLabs history with only its key and no database", async ({
   onTestFinished,
 }) => {
-  // Simulated history, newest first; pages come back shorter than requested,
-  // as the API may return them.
+  // Simulated history, newest first.
   const history = new Set(
-    Array.from({ length: CRON_SWEEP.deletions + 12 }, (_, i) => `item${i}`),
+    Array.from({ length: CRON_SWEEP_CAP + 12 }, (_, i) => `item${i}`),
   );
-  const listed: URLSearchParams[] = [];
+  const listed: string[] = [];
   const deleted: string[] = [];
   let gone = "item3";
   let failing = "item5";
@@ -726,45 +762,28 @@ test("production cron sweeps ElevenLabs history with only its key and no databas
     maxInFlight = 0;
   const sweeper = async (bindings: Record<string, string>) => {
     const worker = new Miniflare(
-      convertV4MiniflareOptions({
-        modules: true,
+      workerOptions({
         script: (await productionBundle).outputFiles![0].text,
-        compatibilityDate: "2026-09-08",
-        compatibilityFlags: ["nodejs_compat"],
         // No AUTH_SECRET, APP_ORIGIN, or mail and OAuth credentials.
         bindings,
         // Nothing listens here, so any database access would fail the run.
-        hyperdrives: { HYPERDRIVE: "postgres://user:pass@127.0.0.1:9/none" },
-        serviceBindings: {
-          ASSETS: () => new WorkerResponse("", { status: 500 }),
-        },
+        database: "postgres://user:pass@127.0.0.1:9/none",
+        assets: () => new WorkerResponse("", { status: 500 }),
         async outboundService(request) {
           const url = new URL(request.url);
+          expect(url.origin).toBe("https://api.elevenlabs.io");
           expect(request.headers.get("xi-api-key")).toBe("sweep-key");
-          if (
-            request.method === "GET" &&
-            url.href.startsWith("https://api.elevenlabs.io/v1/history?")
-          ) {
-            listed.push(url.searchParams);
-            const items = [...history];
-            const after = url.searchParams.get("start_after_history_item_id");
-            const start = after ? items.indexOf(after) + 1 : 0;
-            const size = Math.min(
-              25,
-              Number(url.searchParams.get("page_size")),
-            );
-            const page = items.slice(start, start + size);
+          if (request.method === "GET" && url.pathname === "/v1/history") {
+            listed.push(url.search);
+            const size = Number(url.searchParams.get("page_size"));
             return WorkerResponse.json({
-              history: page.map((history_item_id) => ({
+              history: [...history].slice(0, size).map((history_item_id) => ({
                 history_item_id,
                 text: "spoken text",
               })),
-              has_more: start + size < items.length,
-              last_history_item_id: page.at(-1),
             });
           }
           const id = /^\/v1\/history\/(\w+)$/.exec(url.pathname)?.[1];
-          expect(url.origin).toBe("https://api.elevenlabs.io");
           expect(request.method).toBe("DELETE");
           maxInFlight = Math.max(maxInFlight, ++inFlight);
           await new Promise((resolve) => setTimeout(resolve, 5));
@@ -791,20 +810,17 @@ test("production cron sweeps ElevenLabs history with only its key and no databas
   expect(listed).toEqual([]);
 
   const scheduled = await sweeper({ ELEVENLABS_API_KEY: "sweep-key" });
-  // First pass: follows the cursor, stops at the cap, and survives one failure
-  // and one item already gone (404).
+  // First pass: one list, deletes up to the cap, and survives one failure and
+  // one item already gone (404).
   expect((await scheduled()).outcome).toBe("ok");
-  expect(
-    listed.map((params) => params.get("start_after_history_item_id")),
-  ).toEqual([null, "item24"]);
-  expect(listed[1].get("page_size")).toBe(String(CRON_SWEEP.deletions - 25));
-  expect(deleted).toHaveLength(CRON_SWEEP.deletions - 1);
+  expect(listed).toEqual([`?page_size=${CRON_SWEEP_CAP}`]);
+  expect(deleted).toHaveLength(CRON_SWEEP_CAP - 1);
   expect(deleted).toContain(gone);
   expect(deleted).not.toContain(failing);
   expect(maxInFlight).toBeGreaterThan(1);
   expect(maxInFlight).toBeLessThanOrEqual(6);
 
-  // The next pass continues the backlog, including the item that failed.
+  // The next pass takes the rest of the backlog, including the item that failed.
   failing = "";
   gone = "";
   expect((await scheduled()).outcome).toBe("ok");
