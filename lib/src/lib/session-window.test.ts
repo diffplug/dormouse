@@ -23,11 +23,23 @@ describe('readPersistedWindow', () => {
       version: 1,
       activeWorkspaceId: 'ws-b',
       workspaces: [
-        { id: 'ws-a', name: 'Left', session: sessionA },
-        { id: 'ws-b', name: 'Right', session: sessionB },
+        { id: 'ws-a', name: 'Left', nameIsAuto: false, session: sessionA },
+        { id: 'ws-b', name: 'dormouse @ main', nameIsAuto: true, session: sessionB },
       ],
     };
     expect(readPersistedWindow(win)).toEqual(win);
+  });
+
+  it('reads a blob from before auto-naming: only a `Workspace <n>` name is auto', () => {
+    const win = readPersistedWindow({
+      version: 1,
+      activeWorkspaceId: 'ws-a',
+      workspaces: [
+        { id: 'ws-a', name: 'Workspace 3', session: sessionA },
+        { id: 'ws-b', name: 'Build', session: sessionB },
+      ],
+    });
+    expect(win?.workspaces.map((ws) => ws.nameIsAuto)).toEqual([true, false]);
   });
 
   it('parses a JSON-stringified window blob', () => {

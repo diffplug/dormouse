@@ -198,6 +198,22 @@ Source of truth: `lib/src/components/Baseboard.tsx`, `lib/src/components/Door.ts
 
 Source of truth: `DOOR_TAB_CLASS` in `lib/src/components/design.tsx`; `WorkspaceStrip` in `lib/src/components/WorkspaceStrip.tsx`; `AppBar` in `standalone/src/AppBar.tsx`. Close visibility: `activates on click` in `lib/src/components/WorkspaceStrip.test.tsx`.
 
+### Workspace names
+
+A Workspace's name is **auto**, italic (`AUTO_NAME_CLASS`) and derived from its terminals, until a user renames it; an empty rename or `dor workspace rename --auto` hands it back.
+
+- **One vote per member terminal**, Doored ones included, with `cwdAtStart` while a command runs, else `cwd`; browsers do not vote.
+- **Any vote inside a git repository wins**: the name is the most common `<repo> @ <branch>`, and directories outside a repository are ignored. `<repo>` is origin's repository name, else the main checkout's folder, so every worktree shares it; a detached HEAD shows a short hash.
+- **Otherwise the most common directory**, counted by `cwdIdentity` and shown by basename: `~` for local home, a remote one with its host.
+- **A tie keeps the current name when it is among the tied**, else takes the earliest member's (Lath leaf order, then Doors).
+- **Must hold the current name through a lookup's first three misses** (rationale), then vote "no repository" so the Workspace names itself from its healthy members, else its folder; `Workspace N` until a terminal reports a directory.
+- **Never ask git about a remote cwd.** **Must re-ask after a command finishes** (rationale). A host without `gitInfo` names by directory.
+- **A path absent from a `gitInfo` answer is unanswered, never "no repository"**, as is every path of a rejected request. **A host failure must reject**, never answer `{}`. An unanswered path keeps its last answer, else holds the name, and is re-asked after a delay doubling per miss.
+- **An untouched editor never submits**: it submits on blur, and opening it must not pin an auto-name, even one that changed while it was open.
+- **Must run only `rev-parse` and `config --get`, reading `HEAD` directly**, so `core.fsmonitor` never runs; a lookup past its deadline is left out of the answer.
+
+Source of truth: `deriveWorkspaceAutoName` in `lib/src/lib/workspace-autoname.ts`; `installWorkspaceAutoNaming` in `lib/src/lib/workspace-autoname-controller.ts`; `renameWorkspace` / `resumeAutoWorkspaceName` / `setAutoWorkspaceName` in `lib/src/lib/workspace-store.ts`; `finishRename` in `lib/src/components/WorkspaceStrip.tsx`; `gitInfo` in `lib/src/host/git-info.ts`.
+
 ### Workspace motion
 
 - **Must expand the visible Workspace from its tab on activation, creation, and arrival**, using `LATH_MOTION_MS` and `LATH_EASING`, including opacity. Keep its layout box full-size throughout; skip motion without a measurable tab or under `motionIsInstant()`.
@@ -235,11 +251,11 @@ nothing (`iframeSurfaceRefs` on the Wall handle; `standalone/src/workspace-drag.
 
 **Must show drag refusals over Window content in a dialog** until dismissal, retry, or Workspace departure. Source of truth: `onDropOnOtherWindow` in `standalone/src/workspace-drag.ts`; `lib/src/components/WorkspaceStrip.test.tsx`.
 
-- **Create** adds a Workspace named `Workspace N`, makes it active, and gives its Wall no restored record, so Lath's fresh branch spawns one default-shell pane.
+- **Create** adds an auto-named Workspace, `Workspace N` until its terminals name it ([Workspace names](#workspace-names)), makes it active, and gives its Wall no restored record, so Lath's fresh branch spawns one default-shell pane.
 - **Close** confirms first when the Workspace holds touched Surfaces or running work, with a kill-confirm letter over the Window's content area, then routes every member Surface through the closure coordinator. **Must atomically replace the last closed Workspace with a fresh one and select its tab**, after disposing the old Surfaces (`lib/src/components/WorkspaceWindow.test.tsx`). **Must serialize closes across the Window.**
 - **A refused close reveals its Workspace only in `prompt` mode**, activating it so the prompt behind the refusal is on screen rather than inside a hidden Wall; a `silent` close (`dor workspace close`) has no prompt to show and leaves the user where they were (`docs/specs/notepad.md` → "Closure").
 - **A Workspace whose Wall has not registered is refused** (`workspace '<ref>' is still mounting`, one wording for every caller), never closed past — the Wall walks the member Surfaces, so dropping it would leave its Sessions running unheld (`docs/specs/glossary.md` → "Invariants" I4). **A gesture waits out the registration gap first**, as `dor workspace close` does, so `×` or `&` right after a create closes rather than silently doing nothing.
-- **Rename** edits the Workspace `name` only — no Surface title, and not the per-pane inline rename.
+- **Rename** edits the Workspace `name` only — no Surface title, and not the per-pane inline rename — and pins it ([Workspace names](#workspace-names)).
 - **Reorder** moves a tab in the strip and renumbers `workspace:<n>` refs with it only where they are positional (`docs/specs/dor-cli.md` → "Handle Model"); **a press inside the open rename editor never starts a reorder**.
 - **Must drop the closing Workspace’s rename editor and pending confirmation, and no other’s** (`releases the rename lease when the tab being renamed is middle-clicked closed` in `lib/src/components/WorkspaceStrip.test.tsx`; `preserves another Workspace’s rename and close confirmation when closing a sibling` in `lib/src/components/wall/workspace-lifecycle.test.ts`).
 - **Every Workspace verb runs outside the strip**, which renders the rename editor and confirmation from a store, so a tab gesture and a command-mode key take one path.
@@ -329,7 +345,7 @@ A fixed-positioned element on top of the Lath host, covering the active element'
 - **Exactly one pane or door is active at a time**, drawn by one SVG renderer (`SelectionRing`, `variant: 'ants' | 'solid'`).
 - **Passthrough:** `variant='solid'` — a 1px solid SVG stroke, centerline `strokeWidth/2` inside the div edge for panes and doors alike, no glow (rationale).
 - **Command:** `variant='ants'` — marching-ants border (`cfg.marchingAnts`: 10px segment, 60% dash, 0.4s cycle, 2px stroke). **March for as long as command mode lasts** (test: `marches for as long as command mode lasts, across selection changes` in `lib/src/components/wall/WorkspaceSelectionOverlay.test.tsx`; rationale). **Never restart or retime the march for travel** — only the dash resizes, refitted to the moving perimeter so segments stay even — and draw the smear separately ([Ring travel](#ring-travel)). **While unfocused, pause it and apply `saturate(0.3)` to the ring.**
-- **Never pause the ants in a focused window except during Workspace title editing**, resuming when editing ends without changing mode, **under reduced motion**, which holds a still dashed ring, **or under `cfg.marchingAnts.paused`** (Chromatic sets it in `lib/.storybook/preview.ts`). Pinned by `pauses while a workspace is renamed, then resumes marching` and `holds the ants still under reduced motion` in `lib/src/components/wall/WorkspaceSelectionOverlay.test.tsx`.
+- **Never pause the ants in a focused window except during Workspace title editing**, resuming when editing ends without changing mode, **under reduced motion**, which holds a still dashed ring, **or under `cfg.marchingAnts.paused`** (visual snapshots set it in `lib/.storybook/preview.ts`). Pinned by `pauses while a workspace is renamed, then resumes marching` and `holds the ants still under reduced motion` in `lib/src/components/wall/WorkspaceSelectionOverlay.test.tsx`.
 - Border radius follows DESIGN.md's Concentric-Corners Rule: the pane ring's radius is the pane radius plus the inflate (`PANE_SELECTION_RING_RADIUS_PX`), with the marching-ants path inset so its stroke centerline sits on the same gutter midline; doors sit at zero offset and keep `0.5rem 0.5rem 0 0`.
 - Color is the resolved `--color-focus-ring`, **re-read whenever `document.body`'s class/style changes**, because the dynamic palette publishes it there (`useFocusRingColor`).
 - `z-index: SELECTION_RING_Z_INDEX` (50), `pointer-events: none`. Under `WorkspaceWindow` it renders into `document.body`, outside the Workspace's transform and stacking context.
@@ -344,8 +360,8 @@ Per-frame writes are **imperative**: `SelectionRing` gives the overlay refs to i
 - **Identity change → tween.** A measurement whose identity (`${selectedType}:${selectedId}`) differs from the one on screen glides from the current interpolated position to the new target, **clock restarted**, so arrow-key spam stays responsive.
 - **Same identity → snap 1:1.** A same-identity re-measure with no tween in flight (sash drag, window resize, a settled leaf's store commit) writes the new rect directly, tracking the geometry exactly instead of easing behind it.
 - **In-flight retarget.** A same-identity re-measure *during* a tween retargets the destination **without resetting the clock**, so the ring converges on a moving target (select-a-neighbor-during-kill) and still lands on the original completion instant.
-- **Snap gate.** `motionIsInstant()` — `!cfg.layout.animate` (Chromatic) or `prefersReducedMotion()` — settles the ring instantly; it is the same predicate the Lath animator's duration uses, so ring and leaves agree. **A ring appearing with nothing on screen also snaps**: there is no `from` to glide from.
-- **The unfocus-saturate fade is the one CSS transition** (`filter ${FOCUS_MOTION_MS}ms`, set inline by `SelectionRing.tsx`); neither the snap gate nor reduced motion touches it. Under Chromatic it snapshots already finished (pinned in `lib/.storybook/preview.ts`).
+- **Snap gate.** `motionIsInstant()` — `!cfg.layout.animate` (visual snapshots) or `prefersReducedMotion()` — settles the ring instantly; it is the same predicate the Lath animator's duration uses, so ring and leaves agree. **A ring appearing with nothing on screen also snaps**: there is no `from` to glide from.
+- **The unfocus-saturate fade is the one CSS transition** (`filter ${FOCUS_MOTION_MS}ms`, set inline by `SelectionRing.tsx`); neither the snap gate nor reduced motion touches it. Visual snapshots capture it already finished (pinned in `lib/.storybook/preview.ts`).
 - Pane↔door selection morphs the corner radii (12px all-round ⇄ `8,8,0,0`) and stroke inset through the same tween, so the shape lerps instead of popping.
 - **Must continue from the last painted frame across Workspace activation**, not the incoming Wall's stale frame. Hidden Walls neither animate nor publish ring geometry. Tabs use Door geometry; `+` uses its button rectangle and 4px corners. Pinned by `carries the last visible ring across Walls instead of their stale pane positions` in `lib/src/components/wall/WorkspaceSelectionOverlay.test.tsx`.
 
@@ -419,7 +435,7 @@ The name `<span>` is replaced by an `InlineEditInput` (shared with the browser U
 
 The field is **controlled by its own draft state**, seeded at mount and untouched by later prop changes, and **the `select()` ref callback has a stable identity** so it runs exactly once (rationale). **Mounting is the reset** — the editor exists only during a rename, so each one starts from the current label. Clipboard chords inside the field are the wall's job on hosts whose webview has no native Edit menu (`docs/specs/mouse-and-clipboard.md` §8.9).
 
-Submitted values are rejected when empty or when they fail the `setTerminalUserTitle` validation that also guards title seeding (`docs/specs/terminal-state.md` → Supported OSC Inputs). `<unnamed>` is the default panel placeholder but is otherwise allowed as a user pin. **On rejection the input still closes** — it is not a blocking dialog — and a warning popover anchored under it names the offending value, dismissing on the next pointerdown, scroll, resize, `Escape`, or after `cfg.overlays.warningAutoDismissMs` (3s; 0 under Chromatic, pinned in `lib/.storybook/preview.ts`).
+Submitted values are rejected when empty or when they fail the `setTerminalUserTitle` validation that also guards title seeding (`docs/specs/terminal-state.md` → Supported OSC Inputs). `<unnamed>` is the default panel placeholder but is otherwise allowed as a user pin. **On rejection the input still closes** — it is not a blocking dialog — and a warning popover anchored under it names the offending value, dismissing on the next pointerdown, scroll, resize, `Escape`, or after `cfg.overlays.warningAutoDismissMs` (3s; 0 under visual snapshots, pinned in `lib/.storybook/preview.ts`).
 
 Source of truth: `lib/src/components/wall/IllegalRenameWarning.tsx`, `lib/src/components/wall/use-dismiss-overlay.ts`.
 
@@ -448,7 +464,7 @@ On cold restore, a terminal pane with a host-captured recovery invocation runs i
 
 ### Renderer
 
-**Must use `@xterm/addon-webgl` for mounted terminals when available**, falling back to xterm's DOM renderer on unsupported WebGL, activation failure, or context-budget eviction. `cfg.terminal.webglRenderer` disables WebGL and is off under Chromatic. ImageAddon owns its separate canvas layers (`docs/specs/terminal-escapes.md` → "Inline graphics"). (rationale)
+**Must use `@xterm/addon-webgl` for mounted terminals when available**, falling back to xterm's DOM renderer on unsupported WebGL, activation failure, or context-budget eviction. `cfg.terminal.webglRenderer` disables WebGL and is off under visual snapshots. ImageAddon owns its separate canvas layers (`docs/specs/terminal-escapes.md` → "Inline graphics"). (rationale)
 
 - **Must acquire GPU resources at mount, never at Session creation**, and keep a successfully activated renderer when context capture or explicit loss is unavailable. (rationale)
 - **Must dispose the addon on unmount/minimize, Workspace deactivation, helper parking, and Session disposal**, then explicitly lose its context when captured and supported. Report addon or extension failures without aborting teardown. Minimize preserves the xterm, grid, buffers, PTY, and other addons.

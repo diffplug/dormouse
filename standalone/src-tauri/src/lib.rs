@@ -1431,6 +1431,24 @@ fn iframe_create_proxy_url(
     Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
 }
 
+// The repository holding each directory, for Workspace auto-naming, answered by
+// the sidecar (shared lib/src/host/git-info.ts; docs/specs/layout.md ->
+// "Workspace names"). Bridge only. The host lookups time out sooner, so this
+// bound is only for a sidecar that stopped answering.
+#[tauri::command(async)]
+fn git_info(
+    state: tauri::State<'_, SidecarState>,
+    paths: JsonValue,
+) -> Result<JsonValue, String> {
+    let response = request_from_sidecar_timeout(
+        &state,
+        "git:info",
+        serde_json::json!({ "paths": paths }),
+        Duration::from_secs(5),
+    )?;
+    Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
+}
+
 // Resolves a `dor tool <name>` against the nearest dormouse.yml, or records a
 // trust decision, in the sidecar (shared lib/src/host/tool-host.ts). Bridge
 // only — the parsing, the closed substitution set, and the trust record all
@@ -4443,6 +4461,7 @@ pub fn run() {
             take_recovery_commands,
             iframe_create_proxy_url,
             tool_control,
+            git_info,
             pty_request_init,
             dor_control_response,
             burrow_command,

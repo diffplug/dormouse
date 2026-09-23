@@ -10,7 +10,7 @@
 
 **Why instruction files are a class of their own.** They are not read as data the way a diff is; Claude Code loads them as authoritative guidance, which is what makes a fork PR's copy of them a different class of input from the fork's code.
 
-**The `0.1.18` gap, reported from this audit and now fixed.** At the previously pinned `0.1.18` the revert list was a flat, root-relative `SENSITIVE` array naming `CLAUDE.md` but no `AGENTS.md` at all — and this repo keeps its instructions in `AGENTS.md` with `CLAUDE.md` as a one-line `@AGENTS.md` pointer, so the control reverted a pointer and left the content it pointed at attacker-controlled. The fix ([max-sixty/tend#1005](https://github.com/max-sixty/tend/pull/1005), merged 2026-08-22, released in `0.1.19` on 2026-08-26) replaces that list with pathspec globs — `':(glob)**/AGENTS.md'`, `':(glob)**/CLAUDE.md'`, `':(glob)**/.claude/**'` — which `restore-sensitive-config.sh` passes to `pin_to_base`, covering every depth rather than a hand-enumerated set of root paths. `0.1.19` remains the minimum security floor; the version each workflow actually runs is the one in its own generated header, `0.2.15` at the September 2026 inspection.
+**The `0.1.18` gap, reported from this audit and now fixed.** At the previously pinned `0.1.18` the revert list was a flat, root-relative `SENSITIVE` array naming `CLAUDE.md` but no `AGENTS.md` at all — and this repo keeps its instructions in `AGENTS.md` with `CLAUDE.md` as a one-line `@AGENTS.md` pointer, so the control reverted a pointer and left the content it pointed at attacker-controlled. The fix ([max-sixty/tend#1005](https://github.com/max-sixty/tend/pull/1005), merged 2026-08-22, released in `0.1.19` on 2026-08-26) replaces that list with pathspec globs — `':(glob)**/AGENTS.md'`, `':(glob)**/CLAUDE.md'`, `':(glob)**/.claude/**'` — which `restore-sensitive-config.sh` passes to `pin_to_base`, covering every depth rather than a hand-enumerated set of root paths. `0.1.19` remains the minimum security floor; the version each workflow actually runs is the one in its own generated header.
 
 **The local remedy if it ever regresses.** The nightly regen overwrites the *workflow*, not this repository's instruction files, so moving the instruction body into `CLAUDE.md` and dropping the pointer would close it with no upstream dependency, at the cost of the filename convention other agent harnesses read.
 
@@ -44,7 +44,7 @@
 
 **Why the secret inventory is placement-checked.** Env-scoping is what stops a workflow pushed to an excluded branch from reading a secret, so a repo-level copy of an environment secret reopens exactly what the environment gate closes. The `release-attest` environment exists only to bound the ref a provenance OIDC token can be minted from.
 
-**Why `CHROMATIC_PROJECT_TOKEN` is listed in `secrets.allowed`.** The entry is an explicit acknowledgment that the bot can read that token.
+**Why `CHROMATIC_PROJECT_TOKEN` and `ARGOS_TOKEN` are listed in `secrets.allowed`.** Each entry is an explicit acknowledgment that the bot can read that token.
 
 **Why 48 hours is thinner than it reads.** `workflow-audit` runs at 07:13 UTC and the security audit at 04:21, so the steady state is ~21.5h and a single skipped run lands at ~45.5h — inside tolerance by under three hours, which is why one skipped run is a signal rather than noise.
 

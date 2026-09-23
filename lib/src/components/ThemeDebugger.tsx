@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ClipboardTextIcon, XIcon } from '@phosphor-icons/react';
 import {
   captureThemeDiagnostics,
@@ -7,6 +7,7 @@ import {
   type VisibleVarOrigin,
   type VscodeThemeVarTraceOrigin,
 } from '../lib/themes';
+import { NativeModalDialog } from './design';
 
 export const OPEN_THEME_DEBUGGER_EVENT = 'dormouse:openThemeDebugger';
 
@@ -194,29 +195,18 @@ function copyWithFallback(text: string): Promise<void> {
   return Promise.resolve();
 }
 
-export function ThemeDebuggerDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const dialogRef = useRef<HTMLDialogElement>(null);
-  const [snapshot, setSnapshot] = useState<ThemeDiagnosticSnapshot | null>(null);
+/** Mount only while open (`NativeModalDialog`); each open captures a fresh snapshot. */
+export function ThemeDebuggerDialog({ onClose }: { onClose: () => void }) {
+  const [snapshot, setSnapshot] = useState(captureThemeDiagnostics);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    if (!open) return;
-
     const refresh = () => setSnapshot(captureThemeDiagnostics());
-    refresh();
-
     const observer = new MutationObserver(refresh);
     observer.observe(document.body, { attributes: true, attributeFilter: ['class', 'style'] });
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style'] });
     return () => observer.disconnect();
-  }, [open]);
-
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    if (open && !dialog.open) dialog.showModal();
-    if (!open && dialog.open) dialog.close();
-  }, [open]);
+  }, []);
 
   useEffect(() => {
     if (!copied) return;
@@ -224,17 +214,13 @@ export function ThemeDebuggerDialog({ open, onClose }: { open: boolean; onClose:
     return () => clearTimeout(timeout);
   }, [copied]);
 
-  if (!open) return null;
-
   const copyReport = async () => {
-    if (!snapshot) return;
     await copyWithFallback(snapshot.report);
     setCopied(true);
   };
 
   return (
-    <dialog
-      ref={dialogRef}
+    <NativeModalDialog
       onClose={onClose}
       className="fixed inset-0 z-50 m-auto h-[min(720px,calc(100vh-2rem))] w-[min(960px,calc(100vw-2rem))] overflow-hidden rounded border border-border bg-app-bg p-0 font-mono text-app-fg shadow-2xl backdrop:bg-app-bg/80"
     >
@@ -243,15 +229,14 @@ export function ThemeDebuggerDialog({ open, onClose }: { open: boolean; onClose:
           <div className="min-w-0 flex-1">
             <h2 className="text-base font-semibold">Theme Debugger</h2>
             <p className="truncate text-sm text-muted">
-              {snapshot?.activeTheme
+              {snapshot.activeTheme
                 ? `${snapshot.activeTheme.label} - ${snapshot.activeTheme.origin} - ${snapshot.themeKind}`
-                : `VSCode host theme - ${snapshot?.themeKind ?? 'detecting'}`}
+                : `VSCode host theme - ${snapshot.themeKind}`}
             </p>
           </div>
           <button
             type="button"
             onClick={copyReport}
-            disabled={!snapshot}
             className="flex h-7 items-center gap-1.5 rounded px-2 text-sm text-app-fg transition-colors hover:bg-surface-raised disabled:opacity-50"
           >
             <ClipboardTextIcon size={14} weight="bold" />
@@ -267,33 +252,29 @@ export function ThemeDebuggerDialog({ open, onClose }: { open: boolean; onClose:
           </button>
         </header>
 
-        {snapshot ? (
-          <div className="flex-1 space-y-4 overflow-auto px-4 py-3">
-            <Section title="Surface Hierarchy">
-              <SurfaceHierarchy snapshot={snapshot} />
-            </Section>
-            <Section title="Resolved VSCode Vars">
-              <ResolvedVars snapshot={snapshot} />
-            </Section>
-            <Section title="Terminal Colors">
-              <TerminalColors snapshot={snapshot} />
-            </Section>
-            <Section title="Dynamic Picks">
-              <DynamicPicks snapshot={snapshot} />
-            </Section>
-            <Section title="Report">
-              <textarea
-                readOnly
-                value={snapshot.report}
-                className="h-44 w-full resize-none rounded border border-border bg-surface-raised p-2 text-sm text-foreground outline-none"
-              />
-            </Section>
-          </div>
-        ) : (
-          <div className="flex flex-1 items-center justify-center text-sm text-muted">Capturing theme...</div>
-        )}
+        <div className="flex-1 space-y-4 overflow-auto px-4 py-3">
+          <Section title="Surface Hierarchy">
+            <SurfaceHierarchy snapshot={snapshot} />
+          </Section>
+          <Section title="Resolved VSCode Vars">
+            <ResolvedVars snapshot={snapshot} />
+          </Section>
+          <Section title="Terminal Colors">
+            <TerminalColors snapshot={snapshot} />
+          </Section>
+          <Section title="Dynamic Picks">
+            <DynamicPicks snapshot={snapshot} />
+          </Section>
+          <Section title="Report">
+            <textarea
+              readOnly
+              value={snapshot.report}
+              className="h-44 w-full resize-none rounded border border-border bg-surface-raised p-2 text-sm text-foreground outline-none"
+            />
+          </Section>
+        </div>
       </div>
-    </dialog>
+    </NativeModalDialog>
   );
 }
 
@@ -306,5 +287,5 @@ export function ThemeDebuggerGlobal() {
     return () => window.removeEventListener(OPEN_THEME_DEBUGGER_EVENT, handler);
   }, []);
 
-  return <ThemeDebuggerDialog open={open} onClose={() => setOpen(false)} />;
+  return open ? <ThemeDebuggerDialog onClose={() => setOpen(false)} /> : null;
 }

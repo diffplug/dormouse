@@ -16,6 +16,7 @@
     "test:watch": "vitest",
     "storybook": "storybook dev -p 6006 --no-open --ci",
     "build-storybook": "storybook build",
+    "test:argos": "vitest run --config vitest.argos.config.ts",
     "typecheck": "tsc -b"
   },
   "dependencies": {
@@ -42,7 +43,10 @@
     "yaml": "^2.9.0"
   },
   "devDependencies": {
+    "@argos-ci/cli": "^6.9.4",
+    "@argos-ci/storybook": "^6.4.0",
     "@storybook/addon-docs": "^10.4.0",
+    "@storybook/addon-vitest": "^10.6.0",
     "@storybook/react": "^10.4.0",
     "@storybook/react-vite": "^10.4.0",
     "@tailwindcss/vite": "^4.3.0",
@@ -50,8 +54,11 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.2",
+    "@vitest/browser": "^4.1.11",
+    "@vitest/browser-playwright": "^4.1.11",
     "chromatic": "^17.0.0",
     "fake-indexeddb": "^6.2.5",
+    "playwright": "^1.63.0",
     "remark-gfm": "^4.0.1",
     "storybook": "^10.4.0",
     "tailwindcss": "^4.3.0",

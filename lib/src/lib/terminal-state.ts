@@ -511,11 +511,11 @@ export function deriveHeader(
 ): DerivedHeader {
   const primary = headerPrimary(pane, options);
   const samePrimary = visiblePanes.filter((candidate) => headerPrimary(candidate, options).text === primary.text);
-  const cwd = cwdForHeader(pane);
+  const cwd = effectiveCwd(pane);
   let secondary: string | undefined;
 
   if (samePrimary.length > 1) {
-    const candidateCwds = samePrimary.map(cwdForHeader).filter((value): value is CwdState => !!value);
+    const candidateCwds = samePrimary.map(effectiveCwd).filter((value): value is CwdState => !!value);
     if (cwd) {
       secondary = shortestUniqueCwdLabels(candidateCwds, options).get(cwdIdentity(cwd)) ?? cwdDisplay(cwd, options);
     } else {
@@ -637,10 +637,10 @@ export function groupTerminalPanes(
   }
 
   if (mode === 'directory') {
-    const cwds = panes.map(directoryGroupCwd).filter((cwd): cwd is CwdState => !!cwd);
+    const cwds = panes.map(effectiveCwd).filter((cwd): cwd is CwdState => !!cwd);
     const labels = shortestUniqueCwdLabels(cwds, options);
     return groupBy(panes, (pane) => {
-      const cwd = directoryGroupCwd(pane);
+      const cwd = effectiveCwd(pane);
       if (!cwd) return { key: 'unknown', label: DEFAULT_DIRECTORY_LABEL };
       const key = cwdIdentity(cwd);
       return { key, label: labels.get(key) ?? cwdDisplay(cwd, options) };
@@ -1150,12 +1150,9 @@ function findInRunTerminalTitle(pane: TerminalPaneState, command: CommandRun): T
   return best;
 }
 
-function cwdForHeader(pane: TerminalPaneState): CwdState | null {
-  if (pane.currentCommand?.cwdAtStart) return pane.currentCommand.cwdAtStart;
-  return pane.cwd;
-}
-
-function directoryGroupCwd(pane: TerminalPaneState): CwdState | null {
+/** The directory a pane is "in": the running command's `cwdAtStart`, else the
+ *  shell's cwd (`docs/specs/terminal-state.md`). */
+export function effectiveCwd(pane: TerminalPaneState): CwdState | null {
   return pane.currentCommand?.cwdAtStart ?? pane.cwd;
 }
 

@@ -375,6 +375,7 @@ function renderWorkspaceJson(row: WorkspaceRow): Record<string, unknown> {
     ref: row.ref,
     id: row.id,
     name: row.name,
+    auto: row.auto,
     active: row.active,
     ringing: row.ringing,
     todo: row.todo,

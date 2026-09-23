@@ -16,9 +16,10 @@ vi.mock('../../lib/themes', () => ({
   setActiveThemeId: vi.fn(),
 }));
 
-import { searchThemes, type OpenVSXExtension } from '../../lib/themes';
+import { fetchExtensionThemes, searchThemes, type OpenVSXExtension } from '../../lib/themes';
 import { ThemeStoreDialog } from './ThemeStoreDialog';
 import { setNativeFieldValue } from '../../lib/dom';
+import { ensureDialogModal } from '../wall/wall-test-utils';
 
 const searchThemesMock = vi.mocked(searchThemes);
 
@@ -35,15 +36,7 @@ function extension(name: string, displayName: string): OpenVSXExtension {
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-// jsdom does not implement the native <dialog> modal methods.
-beforeEach(() => {
-  HTMLDialogElement.prototype.showModal = function showModal() {
-    this.open = true;
-  };
-  HTMLDialogElement.prototype.close = function close() {
-    this.open = false;
-  };
-});
+beforeEach(ensureDialogModal);
 
 let container: HTMLDivElement;
 let root: Root;
@@ -60,10 +53,29 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-function render(open: boolean) {
+function render() {
   act(() => {
-    root.render(<ThemeStoreDialog open={open} onClose={() => {}} onThemesChanged={() => {}} />);
+    root.render(<ThemeStoreDialog onClose={() => {}} onThemesChanged={() => {}} />);
   });
+}
+
+function unmount() {
+  act(() => { root.render(null); });
+}
+
+async function search(query: string) {
+  typeQuery(query);
+  await act(async () => { vi.advanceTimersByTime(300); });
+}
+
+/** The Install button on the result row showing `displayName`. */
+function installButton(displayName: string): HTMLButtonElement {
+  const button = [...container.querySelectorAll('button')].find(
+    (candidate) => candidate.textContent === 'Install'
+      && candidate.parentElement?.textContent?.includes(displayName),
+  );
+  if (!button) throw new Error(`install button for ${displayName} not rendered`);
+  return button;
 }
 
 function typeQuery(value: string) {
@@ -73,55 +85,18 @@ function typeQuery(value: string) {
 }
 
 describe('ThemeStoreDialog', () => {
-  it('resets the search query when reopened after being closed', () => {
-    render(true);
-    typeQuery('dracula');
-    expect(container.querySelector('input')?.value).toBe('dracula');
-
-    render(false); // close — component renders null but stays mounted
-    render(true); // reopen
-
-    expect(container.querySelector('input')?.value).toBe('');
-  });
-
-  it('cancels a pending debounce when closed before it fires', () => {
+  it('cancels a pending debounce when unmounted before it fires', () => {
     vi.useFakeTimers();
     try {
-      render(true);
+      render();
       typeQuery('dracula'); // schedules doSearch in 300ms
 
-      render(false); // close within the debounce window
+      unmount(); // close within the debounce window
       act(() => {
         vi.advanceTimersByTime(300); // the cancelled timer must not fire
       });
 
       expect(searchThemesMock).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('discards a search already in flight when the store closes', async () => {
-    let resolveSearch!: (result: { extensions: OpenVSXExtension[] }) => void;
-    searchThemesMock.mockImplementationOnce(
-      () => new Promise((resolve) => { resolveSearch = resolve; }),
-    );
-
-    vi.useFakeTimers();
-    try {
-      render(true);
-      typeQuery('dracula');
-      act(() => { vi.advanceTimersByTime(300); }); // the request leaves
-      expect(searchThemesMock).toHaveBeenCalledTimes(1);
-
-      render(false); // close while it is still in flight
-      await act(async () => {
-        resolveSearch({ extensions: [extension('dracula', 'Dracula Official')] });
-      });
-      render(true);
-
-      expect(container.textContent).not.toContain('Dracula Official');
-      expect(container.textContent).toContain('Search for a VS Code theme to install');
     } finally {
       vi.useRealTimers();
     }
@@ -135,7 +110,7 @@ describe('ThemeStoreDialog', () => {
 
     vi.useFakeTimers();
     try {
-      render(true);
+      render();
       typeQuery('dracula');
       act(() => { vi.advanceTimersByTime(300); });
 
@@ -155,6 +130,85 @@ describe('ThemeStoreDialog', () => {
     }
   });
 
+  it('clears a failed search\'s error banner when the box is emptied', async () => {
+    let rejectSearch!: (reason: Error) => void;
+    searchThemesMock.mockImplementationOnce(
+      () => new Promise((_resolve, reject) => { rejectSearch = reject; }),
+    );
+
+    vi.useFakeTimers();
+    try {
+      render();
+      typeQuery('dracula');
+      act(() => { vi.advanceTimersByTime(300); });
+      await act(async () => {
+        rejectSearch(new Error('OpenVSX is unreachable'));
+      });
+      expect(container.textContent).toContain('OpenVSX is unreachable');
+
+      // An emptied box has no query for the banner to be about, and its own
+      // empty state is what should be showing instead.
+      typeQuery('');
+      act(() => { vi.advanceTimersByTime(300); });
+
+      expect(container.textContent).not.toContain('OpenVSX is unreachable');
+      expect(container.textContent).toContain('Search for a VS Code theme to install');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reports a failed install', async () => {
+    searchThemesMock.mockImplementationOnce(async () => ({
+      extensions: [extension('dracula', 'Dracula Official')],
+    }));
+    let rejectInstall!: (reason: Error) => void;
+    vi.mocked(fetchExtensionThemes).mockImplementationOnce(
+      () => new Promise((_resolve, reject) => { rejectInstall = reject; }),
+    );
+
+    vi.useFakeTimers();
+    try {
+      render();
+      await search('dracula');
+      act(() => { installButton('Dracula Official').click(); });
+
+      await act(async () => {
+        rejectInstall(new Error('Install failed: 503'));
+      });
+
+      expect(container.textContent).toContain('Install failed: 503');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps a row installing while another install settles', async () => {
+    searchThemesMock.mockImplementationOnce(async () => ({
+      extensions: [extension('dracula', 'Dracula Official'), extension('nord', 'Nord Theme')],
+    }));
+    let resolveFirst!: () => void;
+    vi.mocked(fetchExtensionThemes)
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = () => resolve([]); }))
+      .mockImplementationOnce(() => new Promise(() => {}));
+
+    vi.useFakeTimers();
+    try {
+      render();
+      await search('dracula');
+      const nord = installButton('Nord Theme');
+      act(() => { installButton('Dracula Official').click(); });
+      act(() => { nord.click(); });
+
+      await act(async () => { resolveFirst(); });
+
+      expect(nord.disabled).toBe(true);
+      expect(nord.textContent).toBe('Installing...');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('ignores a superseded search whose response arrives last', async () => {
     let resolveFirst!: (result: { extensions: OpenVSXExtension[] }) => void;
     let resolveSecond!: (result: { extensions: OpenVSXExtension[] }) => void;
@@ -164,7 +218,7 @@ describe('ThemeStoreDialog', () => {
 
     vi.useFakeTimers();
     try {
-      render(true);
+      render();
       typeQuery('dra');
       act(() => { vi.advanceTimersByTime(300); });
       typeQuery('nord');

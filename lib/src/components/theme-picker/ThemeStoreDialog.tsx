@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { OpenVSXExtension } from '../../lib/themes';
-import { modalSurface } from '../design';
+import { modalSurface, NativeModalDialog } from '../design';
 import {
   addInstalledTheme,
   applyTheme,
@@ -12,54 +12,27 @@ import {
   setActiveThemeId,
 } from '../../lib/themes';
 
+/** Mount only while open (`NativeModalDialog`). */
 export function ThemeStoreDialog({
-  open,
   onClose,
   onThemesChanged,
 }: {
-  open: boolean;
   onClose: () => void;
   onThemesChanged: () => void;
 }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<OpenVSXExtension[]>([]);
   const [loading, setLoading] = useState(false);
-  const [installing, setInstalling] = useState<string | null>(null);
+  // One entry per row, since installs run concurrently: a single slot would be
+  // cleared by whichever install settled first, re-enabling a row still in flight.
+  const [installing, setInstalling] = useState<ReadonlySet<string>>(() => new Set());
   const [error, setError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const dialogRef = useRef<HTMLDialogElement>(null);
-  // Every search takes a new epoch, and so does every close, so only the newest
-  // search may write its outcome. Cancelling the debounce below stops the
-  // searches that have not started yet; a search already in flight needs this,
-  // in two shapes — an earlier query answering after a later one, and a request
-  // outliving the close, repopulating the slate the reset effect just cleared.
+  // Every search takes a new epoch, so only the newest search may write its
+  // outcome: an earlier query can answer after a later one.
   const searchEpoch = useRef(0);
 
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    // Only the open transition needs a native call: closing unmounts the
-    // <dialog> (via `if (!open) return null` below), so there is no element
-    // left to `.close()`.
-    if (open && !dialog.open) dialog.showModal();
-  }, [open]);
-
-  // The component stays mounted (rendering null) while closed, so search state
-  // would otherwise persist — a reopen would flash the previous query, result
-  // list, and any error banner. Reset to a clean slate when the store closes.
-  useEffect(() => {
-    if (!open) {
-      // Cancel any debounce scheduled by the last keystroke; otherwise it fires
-      // doSearch after close and repopulates results/loading for the old query.
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      searchEpoch.current += 1;
-      setQuery('');
-      setResults([]);
-      setError(null);
-      setLoading(false);
-    }
-  }, [open]);
-
+  // A debounce still pending at unmount would search for a closed store.
   useEffect(() => {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -71,10 +44,10 @@ export function ThemeStoreDialog({
     const newest = () => searchEpoch.current === epoch;
     if (!value.trim()) {
       setResults([]);
-      // An emptied box is the newest search, so it inherits the spinner any
-      // request it just superseded turned on: that request's `finally` is
-      // gated off, and nothing else here would clear `loading`.
+      // The request this supersedes has its `finally` gated off, so clear the
+      // spinner it left; an earlier failure's banner has no query left either.
       setLoading(false);
+      setError(null);
       return;
     }
     setLoading(true);
@@ -97,7 +70,7 @@ export function ThemeStoreDialog({
 
   const handleInstall = async (extension: OpenVSXExtension) => {
     const key = `${extension.namespace}/${extension.name}`;
-    setInstalling(key);
+    setInstalling((current) => new Set(current).add(key));
     setError(null);
     try {
       const themes = await fetchExtensionThemes(extension.namespace, extension.name);
@@ -110,7 +83,11 @@ export function ThemeStoreDialog({
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Install failed');
     } finally {
-      setInstalling(null);
+      setInstalling((current) => {
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      });
     }
   };
 
@@ -135,11 +112,8 @@ export function ThemeStoreDialog({
     );
   };
 
-  if (!open) return null;
-
   return (
-    <dialog
-      ref={dialogRef}
+    <NativeModalDialog
       onClose={onClose}
       className={`${modalSurface({ padding: 'none', elevation: 'modal' })} fixed inset-0 z-50 m-auto h-[420px] w-[min(380px,calc(100vw-2rem))] backdrop:bg-black/50`}
     >
@@ -185,7 +159,7 @@ export function ThemeStoreDialog({
           {results.map((extension) => {
             const key = `${extension.namespace}/${extension.name}`;
             const installed = isInstalled(extension);
-            const isInstallingThis = installing === key;
+            const isInstallingThis = installing.has(key);
             return (
               <div key={key} className="flex items-center gap-3 rounded px-2 py-2 transition-colors hover:opacity-85">
                 {extension.files?.icon ? (
@@ -226,6 +200,6 @@ export function ThemeStoreDialog({
           })}
         </div>
       </div>
-    </dialog>
+    </NativeModalDialog>
   );
 }

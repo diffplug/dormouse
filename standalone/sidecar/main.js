@@ -15,6 +15,7 @@ const { createDorControlServer } = require('./dor-control-server');
 // scripts/build-sidecar-proxy.mjs. See docs/specs/dor-browser.md.
 const { createIframeProxyUrl } = require('./iframe-proxy.cjs');
 const { createToolHost } = require('./tool-host.cjs');
+const { gitInfo } = require('./git-info.cjs');
 // Same pattern: lib/src/host/agent-browser-host.ts is the single source of truth
 // for the agent-browser host capabilities, run here exactly as the VS Code
 // extension host runs it. See docs/specs/dor-browser.md → "Agent-Browser Host Capabilities".
@@ -209,6 +210,12 @@ function handleLine(line) {
       case 'tool:control':
         respondAsync('tool:result', data.requestId, async () => ({
           result: await toolHost.handle(data.request),
+        }));
+        break;
+      // Workspace auto-naming (docs/specs/layout.md -> "Workspace names").
+      case 'git:info':
+        respondAsync('git:infoResult', data.requestId, async () => ({
+          result: await gitInfo(data.paths),
         }));
         break;
       case 'iframe:createProxyUrl':

@@ -1,11 +1,14 @@
 bot_name: dormouse-bot
+merge: maintainer
 
 secrets:
   allowed:
     - CHROMATIC_PROJECT_TOKEN
+    - ARGOS_TOKEN
 
 workflows:
   ci-fix:
     watched_workflows:
       - CI
       - Chromatic
+      - Argos

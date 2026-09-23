@@ -1,0 +1,86 @@
+name: Argos
+
+# Runs beside Chromatic while Argos is evaluated as its replacement: same
+# stories, and the same triggers and draft and fork gates as `chromatic.yml`,
+# whose comments give the reasons. Argos renders in this job
+# (Playwright, via the Storybook Vitest addon) rather than in its own cloud, so
+# a play-function exception fails the run here instead of passing silently.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'lib/**'
+      - 'docs/stories/**'
+      - 'pnpm-lock.yaml'
+      - 'dor/**'
+      - 'remote-lib-common/**'
+      - 'dor-lib-common/**'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'lib/**'
+      - 'docs/stories/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Keyed by SHA on push so main never cancels: those builds are the baselines.
+  group: argos-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  argos:
+    name: Argos Visual Tests
+    if: >-
+      github.event_name != 'pull_request'
+      || (github.event.pull_request.draft == false
+      && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    # Unlike Chromatic's, this job does the rendering, and `--with-deps` runs an
+    # unbounded apt-get; without a cap a stalled mirror holds the runner 6h.
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - name: Install dependencies
+        # Frozen, so the lockfile pins what runs in a job holding ARGOS_TOKEN.
+        run: pnpm install --frozen-lockfile
+        working-directory: lib
+
+      - name: Install browsers
+        run: pnpm exec playwright install --with-deps chromium webkit
+        working-directory: lib
+
+      - name: Capture and upload screenshots
+        # One Argos build per browser: `storybook-chromium`, `storybook-webkit`.
+        run: pnpm test:argos
+        working-directory: lib
+        env:
+          ARGOS_TOKEN: ${{ secrets.ARGOS_TOKEN }}
+
+      # Publish even when a story fails capture, as Chromatic does, so one throwing
+      # `play` on main does not freeze the standing Storybook link.
+      - name: Build Storybook
+        if: ${{ !cancelled() }}
+        run: pnpm build-storybook
+        working-directory: lib
+
+      - name: Deploy Storybook
+        if: ${{ !cancelled() }}
+        # main's deploy is the production one, the standing link to the Storybook.
+        run: pnpm exec argos deploy ./storybook-static ${{ github.ref == 'refs/heads/main' && '--prod' || '' }}
+        working-directory: lib
+        env:
+          ARGOS_TOKEN: ${{ secrets.ARGOS_TOKEN }}
