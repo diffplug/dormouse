@@ -72,11 +72,8 @@ revision before a production release.
 | Recovery | Neon backups/PITR enabled, encrypted pre-migration dumps retained as GitHub artifacts for 30 days, age identity also retained independently in a password manager |
 
 Cloudflare Workers Scripts and Hyperdrive permissions are account-scoped, so
-previews need their own test account. Production deployment isolation likewise
-requires a boundary marketing's existing credentials cannot reach; coordinate
-the hostname/zone placement before choosing an account. Do not reuse TTR's Neon
-project, mail token, or OAuth registrations. `docs/specs/security-ci.md` ->
-"Hosted Deployments" owns the credential isolation the audit checks.
+previews need their own test account. `docs/specs/security-ci.md` -> "Hosted
+Deployments" owns the credential placement the audit checks.
 
 ## GitHub setup
 
@@ -142,11 +139,11 @@ back from GitHub; retain independent copies in your password manager.
 ## Provision the production boundary
 
 Use dedicated Dormouse resources in the existing Cloudflare, Neon, and Postmark
-accounts. Do not reuse TTR's database, mail server/token, or OAuth registrations.
+accounts.
 
-1. Create a dedicated Dormouse production Postgres database (Neon is the TTR
-   precedent) on PostgreSQL 17; the backup/restore tooling pins PostgreSQL
-   17.11. Keep TTR, development, and previews separate. Enable backups and a
+1. Create a dedicated Dormouse production Postgres database on Neon, on
+   PostgreSQL 17; the backup/restore tooling pins PostgreSQL
+   17.11. Keep development and previews separate. Enable backups and a
    suitable PITR window, and verify a restore into a separate database before
    accepting real accounts.
 2. Create a Cloudflare Hyperdrive configuration for that database with **query
@@ -166,10 +163,7 @@ accounts. Do not reuse TTR's database, mail server/token, or OAuth registrations
    `signin@hosted.dormouse.sh` (or update `EMAIL_FROM`). Configure SPF/DKIM and
    DMARC. Register the sender with Apple Private Email Relay for relay-address
    delivery.
-5. Use a deployment identity separate from marketing, with access limited to
-   the Hosted deployment resources. If a Cloudflare account token cannot express
-   that isolation, use a separate account/deployment boundary.
-6. Configure `hosted.dormouse.sh` as the Worker's custom domain. Exclude this
+5. Configure `hosted.dormouse.sh` as the Worker's custom domain. Exclude this
    hostname from Cloudflare Web Analytics, Zaraz, and other script injection
    or rewriting rules. Disable account API caching. Keep `workers_dev` and
    public preview URLs disabled.
@@ -182,8 +176,7 @@ keychain. Authenticate in your own terminal; account/provider sign-in is operato
 
 ## Separate OAuth registrations
 
-Create Dormouse registrations; do not reuse TTR credentials or replace TTR's
-callbacks. Register these exact URLs with no trailing slash:
+Create Dormouse registrations. Register these exact URLs with no trailing slash:
 
 | Provider | Registration | Callback |
 | --- | --- | --- |
