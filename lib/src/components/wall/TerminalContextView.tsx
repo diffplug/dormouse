@@ -188,10 +188,10 @@ export function TerminalContextView(p: TerminalContextViewProps) {
     }}>
     <div ref={content} className="terminal-context-content flex min-h-0 flex-1 flex-col">
       <div className="shrink-0 max-h-[45%] overflow-auto px-3 py-2">
-        <div className="grid grid-cols-[4rem_1fr] items-center gap-y-1">
+        <div className="grid grid-cols-[3rem_minmax(0,1fr)] items-center gap-y-1">
           <span className="text-muted">Title</span>
-          <div className="flex h-6 min-w-0 items-center gap-1.5">
-            <span className="truncate">{p.title}</span>{expanded && <ContextAction label="Explain this title" onClick={() => setDetail('title')}><BugBeetleIcon size={15} />Explain</ContextAction>}
+          <div className="flex min-h-6 min-w-0 flex-wrap items-center gap-1.5">
+            <span className="min-w-[8ch] flex-1 truncate" title={p.title}>{p.title}</span>{expanded && <ContextAction label="Explain this title" onClick={() => setDetail('title')}><BugBeetleIcon size={15} />Explain</ContextAction>}
             <div className="ml-auto flex shrink-0 items-center gap-2 text-muted"><ContextCopyAction label="Copy surface identifier" onCopy={() => attempt(p.onCopyRef)}><span>{p.surfaceRef}</span><CopyIcon size={12} /></ContextCopyAction>{p.compact && <ContextAction label="Terminal context details" expanded={expanded} onClick={() => setExpanded(value => !value)}>Details</ContextAction>}<ContextAction label="Close terminal context" onClick={close} muted><XIcon size={15} /></ContextAction></div>
           </div>
           <span className="text-muted">Dir</span>
@@ -199,8 +199,8 @@ export function TerminalContextView(p: TerminalContextViewProps) {
           {expanded && <><span className="text-muted">Ports</span>
           <div className="flex min-h-7 flex-wrap items-center gap-2">
             {p.scan.status === 'scanning' ? <span className="text-muted">Scanning ports…</span> : p.scan.status === 'failed' ? <span className="text-error">Port scan failed · Reopen to try again</span> : !selected ? <span className="text-muted">No listening ports</span> : <>
-              {entries.length > 1 ? <div className="inline-flex shrink-0 items-center gap-2"><select aria-label="Port" value={selected.port} onChange={e => setPort(Number(e.target.value))} className="h-6 rounded border border-input-border bg-input-bg px-1 text-foreground">{entries.map(entry => <option key={entry.port} value={entry.port}>{entry.host}:{entry.port}{entry.processName ? ` · ${entry.processName}` : ''}</option>)}</select><span className="text-muted">{entries.length} ports</span></div> : <><span>{selected.host}:{selected.port}</span><span className="text-muted">{selected.processName}</span></>}
-              <div className="ml-1 inline-flex shrink-0 items-center gap-1 border-l border-border pl-2">
+              {entries.length > 1 ? <div className="flex w-full min-w-0 items-center gap-2"><select aria-label="Port" value={selected.port} onChange={e => setPort(Number(e.target.value))} className="h-6 min-w-0 flex-1 rounded border border-input-border bg-input-bg px-1 text-foreground">{entries.map(entry => <option key={entry.port} value={entry.port}>{entry.host}:{entry.port}{entry.processName ? ` · ${entry.processName}` : ''}</option>)}</select><span className="text-muted">{entries.length} ports</span></div> : <><span>{selected.host}:{selected.port}</span><span className="text-muted">{selected.processName}</span></>}
+              <div className="ml-1 flex min-w-0 flex-wrap items-center gap-1 border-l border-border pl-2">
                 {PORT_ACTIONS.map(action => {
                   const unavailable = action.needs && !p[action.needs] ? action.unavailable : null;
                   return <ContextAction key={action.mode} label={unavailable ?? action.label} disabled={!!unavailable} onClick={() => void attempt(() => p.onPort(selected, action.mode))}>{action.icon}{action.text}</ContextAction>;
@@ -208,7 +208,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
               </div>
             </>}
           </div>
-          <span className="text-muted">Alerts</span><div className="flex h-6 items-center gap-2"><span>{p.argv0 ? `Watch all ${p.argv0} commands` : 'No command running'}</span>{p.argv0 && <OnOffSwitch on={p.watching} onEnable={p.onWatch} onDisable={p.onWatch} label={`Watch all ${p.argv0} commands`} />}<span className="mx-1 h-3 border-l border-border" /><span>TODO</span><OnOffSwitch on={p.todo} onEnable={p.onTodo} onDisable={p.onTodo} label="TODO" /></div></>}
+          <span className="text-muted">Alerts</span><div className="flex min-h-6 flex-wrap items-center gap-2"><span>{p.argv0 ? `Watch all ${p.argv0} commands` : 'No command running'}</span>{p.argv0 && <OnOffSwitch on={p.watching} onEnable={p.onWatch} onDisable={p.onWatch} label={`Watch all ${p.argv0} commands`} />}<span className="mx-1 h-3 border-l border-border" /><span>TODO</span><OnOffSwitch on={p.todo} onEnable={p.onTodo} onDisable={p.onTodo} label="TODO" /></div></>}
         </div>
         {expanded && p.notification && <div className="ml-16 mt-2 border-l-2 border-border py-1 pl-3"><div>{p.notification.title}</div><div className="whitespace-pre-wrap text-muted">{p.notification.body}</div></div>}
       </div>
@@ -227,9 +227,9 @@ export function TerminalContextView(p: TerminalContextViewProps) {
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-2">{p.notepadAction}{!isTool && <ContextAction label="Move this terminal into a new pane" busy={busy} onClick={() => void submit(p.onPromote)}><ArrowLineUpIcon size={15} />Promote</ContextAction>}</div>
         </div>
-        {p.mismatch && <div role="alert" className="mx-3 mb-2 flex shrink-0 items-start gap-2 border-l-4 border-error bg-error/10 px-3 py-2"><WarningIcon size={18} weight="fill" className="shrink-0 text-error" /><div><div className="font-semibold">Helper directory differs from parent</div><div className="mt-1 grid grid-cols-[4rem_1fr] gap-x-2"><span className="text-muted">Helper</span><strong>{p.helperCwd}</strong><span className="text-muted">Parent</span><span>{p.cwd}</span></div></div></div>}
-        {(p.warning || (!detail && error)) && <div role="alert" className="mx-3 mb-2 border-l-4 border-error bg-error/10 px-3 py-2">{p.warning || error}</div>}
-        <div className="min-h-0 flex-1 bg-terminal-bg text-terminal-fg">{p.children}</div>
+        {p.mismatch && <div role="alert" className="mx-3 mb-2 flex max-h-[40%] min-h-0 shrink items-start gap-2 overflow-auto border-l-4 border-error bg-error/10 px-3 py-2"><WarningIcon size={18} weight="fill" className="shrink-0 text-error" /><div className="min-w-0 break-words"><div className="font-semibold">Helper directory differs from parent</div><div className="mt-1 grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2"><span className="text-muted">Helper</span><strong>{p.helperCwd}</strong><span className="text-muted">Parent</span><span>{p.cwd}</span></div></div></div>}
+        {(p.warning || (!detail && error)) && <div role="alert" className="mx-3 mb-2 max-h-[40%] min-h-0 shrink overflow-auto break-words border-l-4 border-error bg-error/10 px-3 py-2">{p.warning || error}</div>}
+        <div className="min-h-16 flex-1 bg-terminal-bg text-terminal-fg">{p.children}</div>
       </div>
     {p.notepadPanel}
     {detail && <div className="absolute inset-0 z-10 bg-app-bg/35" onClick={() => setDetail(null)}><div ref={detailRoot} role="dialog" aria-modal="true" aria-label={DETAILS[detail].label} className={`${POPUP_SURFACE_CLASS} absolute inset-x-3 top-3 max-h-[calc(100%-1.5rem)] overflow-auto p-4`} onClick={e => e.stopPropagation()}>

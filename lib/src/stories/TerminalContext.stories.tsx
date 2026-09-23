@@ -142,8 +142,22 @@ const meta = {
       const details = canvas.getByRole('button', { name: 'Terminal context details' });
       await userEvent.click(details);
       await expect(details).toHaveAttribute('aria-expanded', 'true');
-      await expect(canvas.getByText(args.initialScenario === 'notification' ? 'Tests complete' : 'Ports', { exact: true })).toBeVisible();
+      const target = canvas.getByText(args.initialScenario === 'notification' ? 'Tests complete' : 'Ports', { exact: true });
+      target.scrollIntoView({ block: 'nearest' });
+      await expect(target).toBeVisible();
     }
+    const panel = canvasElement.querySelector<HTMLElement>('[data-terminal-context]')!;
+    const bounds = panel.getBoundingClientRect();
+    // DOM visibility matchers do not catch overflow clipping; check actual bounds.
+    for (const element of [within(panel).getByTitle('pnpm dev'), ...panel.querySelectorAll('button')]) {
+      const box = element.getBoundingClientRect();
+      expect(box.width).toBeGreaterThan(0);
+      expect(box.left).toBeGreaterThanOrEqual(bounds.left);
+      expect(box.right).toBeLessThanOrEqual(bounds.right);
+    }
+    const terminal = panel.querySelector<HTMLElement>('.bg-terminal-bg')!;
+    expect(terminal.getBoundingClientRect().height).toBeGreaterThanOrEqual(64);
+    canvasElement.dataset.contextCheck = 'passed';
   },
 } satisfies Meta<typeof TerminalContextStory>;
 export default meta;
