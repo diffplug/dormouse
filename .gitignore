@@ -41,6 +41,7 @@ standalone/sidecar/alert-store.cjs
 # the old bundle, and `bundle.resources` would ship it.
 standalone/sidecar/remote-host.cjs
 standalone/sidecar/tool-host.cjs
+standalone/sidecar/git-info.cjs
 standalone/sidecar/node_modules/
 standalone/node_modules/
 

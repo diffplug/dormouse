@@ -70,8 +70,8 @@ describe('workspace.list', () => {
     expect(answer(detail)).toEqual({
       windowRef: 'window:1',
       workspaces: [
-        { ref: 'workspace:1', id: first, name: 'Workspace 1', active: true, ringing: false, todo: false, count: 0 },
-        { ref: 'workspace:2', id: 'ws-2', name: 'build', active: false, ringing: true, todo: true, count: 2 },
+        { ref: 'workspace:1', id: first, name: 'Workspace 1', auto: true, active: true, ringing: false, todo: false, count: 0 },
+        { ref: 'workspace:2', id: 'ws-2', name: 'build', auto: false, active: false, ringing: true, todo: true, count: 2 },
       ],
     });
     expect(workspaceRows()).toHaveLength(2);
@@ -107,6 +107,14 @@ describe('workspace mutation verbs', () => {
     await handleWorkspaceControl(switched);
     expect(answer(switched)).toMatchObject({ status: 'active', workspaceId: 'ws-2' });
     expect(getWorkspacesSnapshot().activeId).toBe('ws-2');
+  });
+
+  it('hands a name back to auto-naming with auto', async () => {
+    createWorkspace({ id: 'ws-2', name: 'build', activate: false });
+    const detail = request('workspace.rename', { workspace: 'workspace:2', auto: true });
+    await handleWorkspaceControl(detail);
+    expect(answer(detail)).toMatchObject({ status: 'renamed', workspaceId: 'ws-2' });
+    expect(getWorkspacesSnapshot().workspaces[1].nameIsAuto).toBe(true);
   });
 
   it('refuses an ambiguous name instead of picking, and lists the candidates', async () => {

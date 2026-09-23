@@ -94,7 +94,7 @@ run this knows what they are taking on.
   could change what the bot runs without a diff here. Accepted: the trust equals
   what the harness already holds ([Automated Maintainer](./security-ci.md#automated-maintainer-tend)).
 - **The Chromatic and Argos tokens are reachable by any workflow the bot can author.**
-  Accepted with rotation; abuse is visible in each service's dashboard
+  Accepted with rotation; each dashboard shows abuse
   ([Automated Maintainer](./security-ci.md#automated-maintainer-tend)).
 
 ## Known gaps
