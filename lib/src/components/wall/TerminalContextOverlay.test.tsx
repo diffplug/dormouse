@@ -50,7 +50,7 @@ it('tracks animation without rerendering the helper or snapping back on unrelate
     expect(container.querySelector('[data-test-context]')).toBe(helper);
     expect(input.value).toBe('unfinished command');
     expect(document.activeElement).toBe(input);
-    expect(container.querySelector<HTMLElement>('[data-context-source]')!.style.width).toBe('550px');
+    expect(host.dataset.contextFor).toBe('source');
   } finally {
     act(() => root.unmount());
     container.remove();

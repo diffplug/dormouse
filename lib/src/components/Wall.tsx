@@ -2325,7 +2325,7 @@ export function Wall({
                   externalDrag={doorDrag ? { id: doorDrag.item.id, startX: doorDrag.startX, startY: doorDrag.startY } : null}
                   onExternalDrop={onExternalDrop}
                 />
-                <WorkspaceSelectionOverlay lathStore={lath.store} subscribeLathFrames={lath.subscribeFrames} selectedId={selectedId} selectedType={selectedType} mode={mode} active={active} />
+                <WorkspaceSelectionOverlay lathStore={lath.store} subscribeLathFrames={lath.subscribeFrames} selectedId={terminalContext?.id ?? selectedId} selectedType={terminalContext ? 'pane' : selectedType} mode={mode} active={active} contextSourceId={terminalContext?.id} />
               </div>
             </div>
 

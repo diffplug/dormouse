@@ -85,6 +85,16 @@ async function prepare(args: Props) {
   };
   await openContext();
   expectSourceUnchanged();
+  await waitFor(() => expect(document.querySelector('[data-ring="outline"]')).toHaveAttribute('data-context-union', 'true'));
+  const ring = document.querySelector('[data-ring="outline"]')!.closest('svg')!.parentElement!;
+  expectContained(context(), ring);
+  expectContained(sourcePane(), ring);
+  const actions = context().querySelector('[data-context-header-actions]')!;
+  const close = within(actions as HTMLElement).getByRole('button', { name: 'Close terminal context' }).getBoundingClientRect();
+  for (const button of actions.querySelectorAll('button')) {
+    expect(button.getBoundingClientRect().top).toBe(close.top);
+    expectContained(button, context());
+  }
   expectContained(context(), document.querySelector('.lath-host')!);
   expect(context().dataset.contextSide).toBe(expectedSide(args));
   if (args.layout === 'grid' && !args.zoomed) {

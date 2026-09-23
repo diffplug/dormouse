@@ -60,7 +60,7 @@ The label is the `DerivedHeader` from `deriveHeader(...)`; `docs/specs/terminal-
 
 **Must open the terminal context from terminal header, body, and command-mode `a` and `>` entry points.** Browser-only Surfaces and Doors have no context. Tool context displays its primary terminal; `docs/specs/terminal-context.md` → Tool context owns that composition. Application mouse ownership follows `docs/specs/mouse-and-clipboard.md` → Terminal context input.
 
-**Must render one context per Wall in a stable Wall-level overlay**, with a theme-derived edge and raised shadow. Anchor it to the invoking source, outline that source, and follow its painted bounds without resizing panes or remounting the helper. Outside pointer press and explicit close dismiss it.
+**Must render one context per Wall in a stable Wall-level overlay**, with a theme-derived edge and raised shadow. Anchor it to the invoking source and follow its painted bounds without resizing panes or remounting the helper. Outside pointer press and explicit close dismiss it.
 
 **Must choose placement on opening and retain its side while usable.** Never reposition in response to terminal output. Minimized panes do not count; zoom uses single-pane placement.
 
@@ -70,7 +70,7 @@ The label is the `DerivedHeader` from `deriveHeader(...)`; `docs/specs/terminal-
 | No usable adjacent candidate; single or zoomed pane | Source's top or bottom half, inset 16px on every side, opposite its visible terminal cursor sampled on opening; unknown, offscreen, or midpoint cursor defaults to top. |
 | Small source or Wall | Expand the half-pane fallback to the minimum usable size, clamped inside the Wall's 16px inset; shrink below the minimum when necessary to preserve the inset. |
 
-**Must offer available side buttons plus Auto**, with destination tooltips, accessible labels, and selected state. Remember manual choices per source for the mounted Wall's lifetime; clear on source removal or Auto. Preserve terminal focus on pointer repositioning. An unavailable choice falls back automatically; no preference is persisted to disk.
+**Must group available side buttons plus Auto beside Close at the context header’s right edge**, with destination tooltips, accessible labels, and selected state. Remember manual choices per source for the mounted Wall's lifetime; clear on source removal or Auto. Preserve terminal focus on pointer repositioning. An unavailable choice falls back automatically; no preference is persisted to disk.
 
 **Must keep source title, directory, and helper actions visible in compact context**, disclosing title explanation, directory actions, ports, and alerts through Details. Wrap header and detail actions within the panel; scroll bounded details and warnings while reserving 64px for terminal content.
 
@@ -338,6 +338,8 @@ Source of truth: `requestKill` (every kill gesture: Door reattach, untouched fas
 
 ## Selection overlay
 
+**Must outline the union of the invoking source Pane and its open helper**, following their outer contour without an internal seam or enclosing unused neighboring space. Track helper repositioning and resize without replacing its terminal; restore the source-only ring on close.
+
 A fixed-positioned element on top of the Lath host, covering the active element's area inflated by `SELECTION_RING_INFLATE_PX` (4px) for panes; doors are not inflated. **The inflate is derived in `lib/src/components/design.tsx` so both ring strokes center on the gutter's midline** (rationale).
 
 - **Exactly one pane or door is active at a time**, drawn by one SVG renderer (`SelectionRing`, `variant: 'ants' | 'solid'`).
@@ -348,6 +350,8 @@ A fixed-positioned element on top of the Lath host, covering the active element'
 - Color is the resolved `--color-focus-ring`, **re-read whenever `document.body`'s class/style changes**, because the dynamic palette publishes it there (`useFocusRingColor`).
 - `z-index: SELECTION_RING_Z_INDEX` (50), `pointer-events: none`. Under `WorkspaceWindow` it renders into `document.body`, outside the Workspace's transform and stacking context.
 - **Every modal must render into `document.body` too, at a `MODAL_LAYERS` value above the ring's** (`ModalOverlay`), or the ring crosses it — by value, never insertion order. Pinned by `lib/src/components/ModalOverlay.test.tsx`.
+
+Source of truth: `rectUnionOutline` in `lib/src/lib/rect-union-outline.ts` and `WorkspaceSelectionOverlay` in `lib/src/components/wall/WorkspaceSelectionOverlay.tsx`.
 
 ### Ring travel
 

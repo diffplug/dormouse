@@ -39,6 +39,7 @@ import {
   type RingEdge,
 } from '../../lib/ring-geometry';
 import { SelectionRing } from './SelectionRing';
+import { rectUnionOutline, roundedUnionOutline } from '../../lib/rect-union-outline';
 
 /** The subset of the Lath store the overlay needs — a revision that bumps on every
  *  commit, so the ring re-measures as leaves move / resize / restore. Kept
@@ -188,7 +189,7 @@ function writeSmear(
   }
 }
 
-export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, selectedId, selectedType, mode, active = true }: {
+export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, selectedId, selectedType, mode, active = true, contextSourceId }: {
   /** The Lath store — the overlay re-measures on every commit (`revision` via
    *  `useSyncExternalStore`), so the ring tracks leaves as they move / resize / restore. */
   lathStore: LathOverlayStore;
@@ -200,6 +201,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
   selectedType: WallSelectionKind;
   mode: WallMode;
   active?: boolean;
+  contextSourceId?: string;
 }) {
   const { elements: paneElements, version: paneVersion } = useContext(PaneElementsContext);
   const { elements: doorElements, version: doorVersion } = useContext(DoorElementsContext);
@@ -231,6 +233,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
   // variant without a stale capture.
   const frameRef = useRef<DisplayedRing | null>(null);
   const opacityRef = useRef('');
+  const unionRects = useRef<[RingRect, RingRect] | null>(null);
   const modeRef = useRef(mode);
   modeRef.current = mode;
 
@@ -268,14 +271,18 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     // Resolved once here so every path builder below sees a single inset.
     const effShape = isAnts ? shape : { ...shape, inset: strokeWidth / 2 };
 
-    path.setAttribute('d', roundedRectPath(rect, effShape));
+    const union = unionRects.current?.map(r => ({ left: r.left + effShape.inset, top: r.top + effShape.inset, width: r.width - 2 * effShape.inset, height: r.height - 2 * effShape.inset }));
+    const contour = union ? rectUnionOutline(union[0], union[1]) : null;
+    const outline = contour ? roundedUnionOutline(contour.points.map(p => ({ x: p.x + contour.rect.left - rect.left, y: p.y + contour.rect.top - rect.top })), effShape.tl - effShape.inset) : null;
+    path.setAttribute('d', outline?.path ?? roundedRectPath(rect, effShape));
+    path.dataset.contextUnion = contour ? 'true' : 'false';
 
     if (isAnts) {
       // Dash sized to the perimeter so the segments stay even as the ring resizes.
       // Computed in closed form rather than via `path.getTotalLength()`, which
       // forces a synchronous style+layout flush on every frame of a travel at a
       // cost that scales with the whole document, not this one path.
-      const len = ringPerimeter(rect, effShape);
+      const len = outline?.perimeter ?? ringPerimeter(rect, effShape);
       const count = Math.max(1, Math.round(len / cfg.marchingAnts.segLen));
       const adjusted = len / count;
       const dash = adjusted * cfg.marchingAnts.dashFraction;
@@ -291,7 +298,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     }
 
     const smear = smearRef.current;
-    if (smear) writeSmear(smear, rect, effShape, strokeWidth, speeds);
+    if (smear) writeSmear(smear, rect, effShape, strokeWidth, contour ? null : speeds);
   }, []);
 
   // Re-run the measuring effect after each Lath commit. Runs post-render, so
@@ -388,6 +395,8 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
       if (isWorkspaceSelection(selectedType)) return workspaceTabElement(workspaceIdOfSelection(selectedType, selectedId));
       return selectedType === 'door' ? doorElements.get(selectedId) : resolvePaneElement(paneElements.get(selectedId));
     };
+    const helper = () => contextSourceId === selectedId && selectedType === 'pane'
+      ? target()?.closest('.lath-host')?.querySelector<HTMLElement>('[data-context-for]') ?? null : null;
     const update = () => {
       if (!activeRef.current) return;
       const targetEl = target();
@@ -395,6 +404,11 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
 
       const next = measureFrame(targetEl, selectedType);
       if (!next) return;
+      const helperEl = helper();
+      const helperFrame = helperEl ? measureFrame(helperEl, 'pane') : null;
+      const hadUnion = unionRects.current !== null;
+      unionRects.current = helperFrame ? [next.rect, helperFrame.rect] : null;
+      if (helperFrame) next.rect = rectUnionOutline(next.rect, helperFrame.rect).rect;
       const wall = targetEl.closest<HTMLElement>('[data-workspace-wall]');
       opacityRef.current = wall?.style.opacity ?? '';
 
@@ -412,7 +426,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
 
       // Snap gate: the same instant-motion predicate the Lath animator's
       // duration uses (motionIsInstant), so the ring and the leaves agree.
-      if (instant) {
+      if (instant || helperFrame || hadUnion) {
         snapTo(next, identity);
         return;
       }
@@ -449,6 +463,12 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     const ro = new ResizeObserver(update);
     const targetEl = target();
     if (targetEl) ro.observe(targetEl);
+    const helperEl = helper();
+    const mo = new MutationObserver(update);
+    if (helperEl) {
+      ro.observe(helperEl);
+      mo.observe(helperEl, { attributes: true, attributeFilter: ['style'] });
+    }
     window.addEventListener('resize', update);
     document.addEventListener('scroll', update, true);
 
@@ -459,6 +479,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
 
     return () => {
       ro.disconnect();
+      mo.disconnect();
       unsubFrames?.();
       unsubWorkspaceFrames();
       window.removeEventListener('resize', update);
@@ -467,7 +488,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     // The rAF loop is intentionally NOT torn down here: it is keyed to the tween
     // (a ref), so a mid-glide re-run of this effect keeps the ring moving. It is
     // cancelled on selection-clear (above), on snap, and on unmount (below).
-  }, [active, handoff, workspaces, subscribeLathFrames, lathRevision, selectedId, selectedType, paneVersion, doorVersion, paneElements, doorElements, applyRing]);
+  }, [active, contextSourceId, handoff, workspaces, subscribeLathFrames, lathRevision, selectedId, selectedType, paneVersion, doorVersion, paneElements, doorElements, applyRing]);
 
   // After any structural render (mount, variant/color/focus change) re-apply the
   // current frame imperatively so the shell's DOM matches — runs pre-paint, so a

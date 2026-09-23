@@ -65,7 +65,7 @@ function paneCtx(elements: Map<string, HTMLElement>): PaneElementsState {
   return { elements, version: 0, bumpVersion: () => {} };
 }
 
-function Harness({ selectedId, selectedType = 'pane', mode, store, panes, doors = new Map(), active = true }: {
+function Harness({ selectedId, selectedType = 'pane', mode, store, panes, doors = new Map(), active = true, contextSourceId }: {
   selectedId: string | null;
   selectedType?: WallSelectionKind;
   mode: WallMode;
@@ -73,6 +73,7 @@ function Harness({ selectedId, selectedType = 'pane', mode, store, panes, doors 
   panes: Map<string, HTMLElement>;
   doors?: Map<string, HTMLElement>;
   active?: boolean;
+  contextSourceId?: string;
 }) {
   return (
     <PaneElementsContext.Provider value={paneCtx(panes)}>
@@ -85,6 +86,7 @@ function Harness({ selectedId, selectedType = 'pane', mode, store, panes, doors 
             selectedType={selectedType}
             mode={mode}
             active={active}
+            contextSourceId={contextSourceId}
           />
         </WindowFocusedContext.Provider>
       </DoorElementsContext.Provider>
@@ -553,4 +555,32 @@ describe('SelectionRing motion smear', () => {
     expect(path.getAttribute('transform')).toBeNull();
     expect(path.getAttribute('stroke-opacity')).toBeNull();
   });
+});
+
+it('tracks the source/helper union through repositioning and restores the source ring on close', async () => {
+  const store = makeStore();
+  const wall = document.createElement('div');
+  wall.className = 'lath-host';
+  const source = document.createElement('div');
+  const helper = document.createElement('div');
+  helper.dataset.contextFor = 'a';
+  wall.append(source, helper);
+  document.body.append(wall);
+  stubRect(source, { left: 0, top: 0, width: 500, height: 600 });
+  stubRect(helper, { left: 484, top: 0, width: 400, height: 300 });
+  const panes = new Map([['a', source]]);
+  try {
+    await act(async () => root.render(<Harness selectedId="a" contextSourceId="a" mode="passthrough" store={store} panes={panes} />));
+    const path = container.querySelector<SVGPathElement>('[data-ring="outline"]')!;
+    expect(path.dataset.contextUnion).toBe('true');
+    expect(ringRect()?.width).toBe(892);
+    const original = path.getAttribute('d');
+    await act(async () => { stubRect(helper, { left: 0, top: 584, width: 400, height: 300 }); helper.style.top = '584px'; });
+    expect(ringRect()?.height).toBe(892);
+    expect(path.getAttribute('d')).not.toBe(original);
+    await act(async () => root.render(<Harness selectedId="a" mode="command" store={store} panes={panes} />));
+    expect(path.dataset.contextUnion).toBe('false');
+    expect(ringRect()?.width).toBe(508);
+    expect(path.getAttribute('stroke-dasharray')).toBeTruthy();
+  } finally { wall.remove(); }
 });
