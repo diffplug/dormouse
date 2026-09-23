@@ -23,7 +23,10 @@ const REFUSAL: Record<Exclude<ManagedVoiceConfigResult, { ok: true }>['reason'],
  * "configured" with a clear action and has nothing to echo back.
  *
  * Renders nothing where the host has no managed-voice backend (VS Code, Pocket,
- * the website), where every utterance uses Web Speech.
+ * the website), where every utterance uses Web Speech. Managed voice is an
+ * admin-only test slice, so a public build shows the section only once a token
+ * is already configured; a dev build (`import.meta.env.DEV`, the flag
+ * `standalone/src/updater.ts` reads) always shows it.
  */
 export function ManagedVoiceSection() {
   const port = getPlatform().managedVoice;
@@ -44,6 +47,8 @@ export function ManagedVoiceSection() {
   }, [port]);
 
   if (!port) return null;
+  // `?.`: esbuild hosts (VS Code) leave `import.meta.env` undefined.
+  if (import.meta.env?.DEV !== true && !status?.configured) return null;
 
   const apply = async (update: ManagedVoiceConfigUpdate): Promise<boolean> => {
     setBusy(true);

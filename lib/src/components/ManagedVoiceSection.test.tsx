@@ -61,11 +61,29 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+  vi.unstubAllEnvs();
 });
 
 describe('ManagedVoiceSection', () => {
   it('renders nothing where the host has no managed voice', async () => {
     await render(new FakePtyAdapter());
+    expect(container.innerHTML).toBe('');
+  });
+
+  it('stays hidden on a public build until a token is configured', async () => {
+    vi.stubEnv('DEV', false);
+    await render(Object.assign(new FakePtyAdapter(), { managedVoice: makePort() }));
+    expect(container.innerHTML).toBe('');
+  });
+
+  it('shows on a public build once a token is configured', async () => {
+    vi.stubEnv('DEV', false);
+    stored.token = TOKEN;
+    await render(Object.assign(new FakePtyAdapter(), { managedVoice: makePort() }));
+    expect(text()).toContain('Voice token configured.');
+    await act(async () => button('Clear token').click());
+    await act(async () => {});
+    // Cleared on a public build: the section goes away with the token.
     expect(container.innerHTML).toBe('');
   });
 
