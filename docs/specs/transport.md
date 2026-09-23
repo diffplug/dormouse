@@ -216,21 +216,18 @@ OSC parsing/stripping rules for those rows, and the rule that **only the process
 
 ### Managed voice
 
-**Managed voice is one optional adapter member**, `managedVoice?: ManagedVoicePort`, present only in standalone (Tauri and the browser-dev harness); behavior is `docs/specs/alert.md` → "Managed voice". It is request/response per window, not an app-global store: nothing is broadcast and no renderer mirrors it.
+**Managed voice is one optional adapter member**, `managedVoice?: ManagedVoicePort`, present only in standalone (Tauri and the browser-dev harness); VS Code, Pocket, and the website omit it. Behavior, including the token never reaching a renderer, is `docs/specs/alert.md` → "Managed voice". It is request/response per window, not an app-global store: nothing is broadcast and no renderer mirrors it.
 
 | Direction | Standalone carrier | Payload |
 | --- | --- | --- |
-| Webview → host | `managed_voice_command { payload }` → sidecar `voice:command` | `{ op: 'status' }` or `{ op: 'configure', update: { token?: string \| null, voiceId?: string } }` |
-| Host → webview | sidecar `voice:result` → invoke result | `{ configured, voiceId }`, or `{ ok: false, reason }` for a refused edit |
+| Webview → host | `managed_voice_command { payload }` → sidecar `voice:command` | `{ op: 'status' }`, `{ op: 'configure', update: { token?: string \| null, voiceId?: string } }`, or `{ op: 'cancel', speakId }` |
+| Host → webview | sidecar `voice:result` → invoke result | `{ configured, voiceId }`, `{ ok: false, reason }` for a refused edit, or `{ ok: true }` for a cancel |
 | Webview → host | `managed_voice_speak { text, speakId }` → sidecar `voice:command { op: 'speak' }` | the sanitized label; the host adds token and voice id |
-| Host → webview | invoke result | audio bytes (raw `ArrayBuffer`; base64 in the harness's HTTP answer), or a rejection naming a `ManagedVoiceFailure` |
-| Webview → host | `managed_voice_cancel { speakId }` → sidecar `voice:command { op: 'cancel' }` | fire-and-forget; the pending speak answers `cancelled` |
+| Host → webview | invoke result | `audio/mpeg` bytes (raw `ArrayBuffer`; base64 in the harness's HTTP answer), or a rejection carrying a diagnostic reason |
 
-- **Never carry the token host → webview**, in any result, event, or error. `configure` is the only inbound path for it.
-- **Rust and the harness must forward only `status` and `configure` on the command carrier**, so a webview cannot reach `speak` or `cancel` except through their own commands.
-- **A cancel may overtake its speak**; the host keeps an aborted tombstone for that `speakId` so the late speak answers `cancelled` without a request.
+A cancel may arrive before its speak; that speak then answers `cancelled` without a request.
 
-Source of truth: `ManagedVoicePort` in `lib/src/lib/platform/managed-voice-types.ts`; `managedVoice` in `standalone/src/tauri-adapter.ts` and `standalone/src/browser-sidecar-adapter.ts`; `managed_voice_command` / `managed_voice_speak` / `managed_voice_cancel` in `standalone/src-tauri/src/lib.rs`; `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts`.
+Source of truth: `ManagedVoicePort` in `lib/src/lib/platform/managed-voice-types.ts`; `createManagedVoicePort` in `standalone/src/managed-voice-port.ts`; `managed_voice_command` / `managed_voice_speak` in `standalone/src-tauri/src/lib.rs`; `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts`.
 
 ## Persisted session types
 

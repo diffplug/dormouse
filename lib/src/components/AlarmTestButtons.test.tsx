@@ -10,6 +10,7 @@ let platform: { burrow?: unknown } = {};
 vi.mock('../lib/platform', () => ({
   IS_MAC: false,
   getPlatform: () => platform,
+  getPlatformOrNull: () => platform,
 }));
 
 import { PushTestButton, SpeakTestButton } from './AlarmTestButtons';

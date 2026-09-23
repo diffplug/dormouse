@@ -32,9 +32,8 @@ const { captureAgentRecovery, createRecoveryStore, sliceSince } = require('./rec
 // for every window — running the same classes the VS Code extension host runs.
 // See docs/specs/alert.md.
 const { createAlertStoreHost } = require('./alert-store.cjs');
-// Same pattern again: lib/src/host/managed-voice-host.ts holds the managed-voice
-// token and makes the one outbound speak request, so the token never reaches a
-// webview. See docs/specs/alert.md -> "Spoken alarms".
+// Same pattern again: lib/src/host/managed-voice-host.ts is managed voice's
+// host half. See docs/specs/alert.md -> "Managed voice".
 const { createManagedVoiceHost } = require('./managed-voice.cjs');
 
 const agentBrowser = createAgentBrowserHost({
@@ -95,8 +94,13 @@ delete process.env.DORMOUSE_CONTROL_SOCKET;
 // gets the same canonical snapshot (docs/specs/standalone.md -> "Windows").
 const alertStore = createAlertStoreHost({ send });
 
+// Out of `process.env` like the control token, so no shell inherits the dev
+// override (docs/specs/security-local.md -> "Persisted state").
+const hostedOrigin = process.env.DORMOUSE_HOSTED_ORIGIN;
+delete process.env.DORMOUSE_HOSTED_ORIGIN;
 const managedVoice = createManagedVoiceHost({
   stateDir: process.env.DORMOUSE_STATE_DIR,
+  speakOrigin: hostedOrigin,
   log: (m) => console.error(m),
 });
 
@@ -211,10 +215,8 @@ function handleLine(line) {
       // "Burrow service").
       case 'burrow:askDelivered': burrow.setAskDelivery(data); break;
       case 'alert:command': alertStore.handle(data); break;
-      // `cancel` is fire-and-forget; every other op answers `voice:result`.
       case 'voice:command':
-        if (data?.op === 'cancel') managedVoice.handle(data);
-        else respondAsync('voice:result', data.requestId, async () => ({ result: await managedVoice.handle(data) }));
+        respondAsync('voice:result', data.requestId, async () => ({ result: await managedVoice.handle(data) }));
         break;
       case 'pty:themeColors': burrow.setThemeColors(data); break;
       case 'sidecar:shutdown': shutdown(); break;

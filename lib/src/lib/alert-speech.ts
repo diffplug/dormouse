@@ -1,6 +1,6 @@
 import { isAlertDeliveryPaused, markAlertConsumed } from './alert-delivery-state';
 import { getSessionAlertPolicy, subscribeToAlertDeliveryPolicy } from './alert-delivery-policy';
-import { speechQueue } from './speech-queue';
+import { speechQueue } from './alert-speech-queue';
 import { watchUnattendedRings } from './alert-ring-watch';
 import {
   clearAlertSpeechState,

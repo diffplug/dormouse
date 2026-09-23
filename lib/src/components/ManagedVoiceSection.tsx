@@ -17,17 +17,8 @@ const REFUSAL: Record<Exclude<ManagedVoiceConfigResult, { ok: true }>['reason'],
   unavailable: 'This app could not save the managed voice setting.',
 };
 
-/**
- * Managed voice setup (`docs/specs/alert.md` -> "Spoken alarms"). The token is
- * write-only: the host answers `configured`, never the token, so this shows
- * "configured" with a clear action and has nothing to echo back.
- *
- * Renders nothing where the host has no managed-voice backend (VS Code, Pocket,
- * the website), where every utterance uses Web Speech. Managed voice is an
- * admin-only test slice, so a public build shows the section only once a token
- * is already configured; a dev build (`import.meta.env.DEV`, the flag
- * `standalone/src/updater.ts` reads) always shows it.
- */
+/** Managed voice setup; visibility and the write-only token follow
+ *  `docs/specs/alert.md` -> "Settings dialog". */
 export function ManagedVoiceSection() {
   const port = getPlatform().managedVoice;
   const [status, setStatus] = useState<ManagedVoiceStatus | null>(null);
@@ -46,9 +37,7 @@ export function ManagedVoiceSection() {
     return () => { live = false; };
   }, [port]);
 
-  if (!port) return null;
-  // `?.`: esbuild hosts (VS Code) leave `import.meta.env` undefined.
-  if (import.meta.env?.DEV !== true && !status?.configured) return null;
+  if (!port || !(port.offerSetup || status?.configured)) return null;
 
   const apply = async (update: ManagedVoiceConfigUpdate): Promise<boolean> => {
     setBusy(true);
@@ -77,7 +66,7 @@ export function ManagedVoiceSection() {
         Only the spoken pane label and voice id are sent to hosted.dormouse.sh.
         If it cannot answer, the alarm uses your system voice.
       </p>
-      {status === null ? null : status.configured ? (
+      {status && (<>{status.configured ? (
         <div className="mt-2 flex items-center gap-2 text-sm text-foreground">
           <span>Voice token configured.</span>
           <button
@@ -116,7 +105,6 @@ export function ManagedVoiceSection() {
           </div>
         </form>
       )}
-      {status === null ? null : (
         <label className="mt-2 block">
           <span className={FIELD_LABEL}>Voice id</span>
           <TextInput
@@ -134,7 +122,7 @@ export function ManagedVoiceSection() {
             }}
           />
         </label>
-      )}
+      </>)}
       {error ? <div className="mt-2 text-sm leading-relaxed text-error">{error}</div> : null}
     </div>
   );

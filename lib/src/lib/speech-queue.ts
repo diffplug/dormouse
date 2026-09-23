@@ -1,4 +1,3 @@
-import { createManagedVoiceEngine, currentManagedVoicePort } from './managed-voice-engine';
 import { webSpeechEngine, type SpeechAttemptHandle, type SpeechEngine } from './speech-engine';
 
 /** The engine owns only our current utterance. Pending jobs remain cancellable here. */
@@ -27,8 +26,8 @@ interface Attempt {
  * The one seam between Dormouse's pending spoken alarms and a speech engine
  * (`docs/specs/alert.md` -> "Spoken alarms" owns the behavior; the bounds and
  * the timeout are here). **Only one utterance at a time is admitted per
- * renderer** — Settings test sounds included, since they share
- * {@link speechQueue} — so the engine never interleaves two panes and an
+ * renderer** — Settings test sounds included, since they share one queue
+ * (`alert-speech-queue.ts`) — so the engine never interleaves two panes and an
  * ineligible job can still be dropped while it is only pending here.
  *
  * Bounded in both directions, because a wedged or callback-less engine must not
@@ -102,11 +101,10 @@ export class SpeechQueue {
               job.onStart?.();
             },
             onEnd: () => this.finish(attempt),
+            onFail: () => this.finish(attempt),
           });
         } catch {
-          this.active = null;
-          clearTimeout(attempt.timer);
-          job.onFinish?.(false);
+          this.finish(attempt);
           continue;
         }
         try { job.onAdmit?.(); attempt.handle.start(); }
@@ -116,9 +114,3 @@ export class SpeechQueue {
     } finally { this.pumping = false; }
   }
 }
-
-/** Settings previews and real alerts share the same engine admission. Managed
- *  voice first where the host has it, falling back to Web Speech per utterance. */
-export const speechQueue = new SpeechQueue(
-  createManagedVoiceEngine({ port: currentManagedVoicePort, fallback: webSpeechEngine }),
-);

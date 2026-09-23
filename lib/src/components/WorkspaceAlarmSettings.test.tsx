@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { WorkspaceAlarmSettings } from './WorkspaceAlarmSettings';
 import { WorkspaceIdContext } from './wall/wall-context';
 import { createWorkspace, getWorkspacesSnapshot, resetWorkspaces } from '../lib/workspace-store';
-import { speechQueue } from '../lib/speech-queue';
+import { speechQueue } from '../lib/alert-speech-queue';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 afterEach(() => { speechQueue.clear(); resetWorkspaces(); vi.unstubAllGlobals(); });

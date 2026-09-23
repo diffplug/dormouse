@@ -42,13 +42,8 @@ import type { AwaitHandle, AwaitOptions } from "dormouse-lib/lib/alert-manager";
 import type { AlertSettings } from "dormouse-lib/lib/alert-settings";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
 import { createMemoryNotepadArchivePort } from "dormouse-lib/lib/notepad/memory-archive-port";
-import {
-  toManagedVoiceFailure,
-  type ManagedVoiceConfigResult,
-  type ManagedVoicePort,
-  type ManagedVoiceSpeakResult,
-  type ManagedVoiceStatus,
-} from "dormouse-lib/lib/platform/managed-voice-types";
+import type { ManagedVoicePort } from "dormouse-lib/lib/platform/managed-voice-types";
+import { createManagedVoicePort } from "./managed-voice-port";
 import type { PersistedAlertState, PersistedWindow } from "dormouse-lib/lib/session-types";
 import { claimRecoveryCommands, windowStateSlot } from "./window-recovery";
 import { coalesceCwds } from "./coalesce-cwds";
@@ -409,36 +404,12 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   // (docs/specs/notepad.md).
   readonly notepadArchive = createMemoryNotepadArchivePort();
 
-  // Managed voice over the same sidecar half as the Tauri build
-  // (docs/specs/alert.md -> "Spoken alarms"); the token is kept under this
-  // harness run's own temp state directory, never the installed app's.
-  readonly managedVoice: ManagedVoicePort = {
-    status: () => this.host.invoke<ManagedVoiceStatus>("managed_voice_command", { payload: { op: "status" } }),
-    configure: async (update): Promise<ManagedVoiceConfigResult> => {
-      try {
-        return await this.host.invoke<ManagedVoiceConfigResult>("managed_voice_command", { payload: { op: "configure", update } });
-      } catch {
-        return { ok: false, reason: "unavailable" };
-      }
-    },
-    speak: async (text, signal): Promise<ManagedVoiceSpeakResult> => {
-      if (signal.aborted) return { ok: false, reason: "cancelled" };
-      const speakId = crypto.randomUUID();
-      const cancel = () => this.host.send("managed_voice_cancel", { speakId });
-      signal.addEventListener("abort", cancel, { once: true });
-      try {
-        const result = await this.host.invoke<{ ok: true; mime: string; audioBase64: string } | { ok: false; reason?: string }>(
-          "managed_voice_speak", { text, speakId },
-        );
-        if (!result.ok) return { ok: false, reason: toManagedVoiceFailure(result.reason) };
-        return { ok: true, audio: decodeBase64Bytes(result.audioBase64), mime: result.mime };
-      } catch {
-        return { ok: false, reason: "unavailable" };
-      } finally {
-        signal.removeEventListener("abort", cancel);
-      }
-    },
-  };
+  // The harness answers `managed_voice_speak` with base64 where Rust sends raw bytes.
+  readonly managedVoice: ManagedVoicePort = createManagedVoicePort({
+    invoke: (cmd, args) => this.host.invoke(cmd, args),
+    decodeSpeak: (raw) => decodeBase64Bytes((raw as { audioBase64: string }).audioBase64),
+    offerSetup: import.meta.env.DEV,
+  });
 
   // Cmd/Ctrl+N opens a browser window before any listener sees it, so the
   // harness shows no chord and binds none — the same reason the website's demo

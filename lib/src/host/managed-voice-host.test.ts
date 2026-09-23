@@ -4,12 +4,14 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createManagedVoiceHost,
-  HOSTED_ORIGIN_ENV,
+  MAX_AUDIO_BYTES,
   MANAGED_VOICE_FILE,
   resolveManagedVoiceSpeakUrl,
   type ManagedVoiceHost,
 } from './managed-voice-host';
-import { DEFAULT_MANAGED_VOICE_ID, MANAGED_VOICE_SPEAK_URL } from '../lib/platform/managed-voice-types';
+import { DEFAULT_MANAGED_VOICE_ID } from '../lib/platform/managed-voice-types';
+
+const MANAGED_VOICE_SPEAK_URL = 'https://hosted.dormouse.sh/api/voice/speak';
 
 /**
  * The host half of managed voice (`docs/specs/alert.md` -> "Spoken alarms"):
@@ -22,12 +24,12 @@ let dir: string;
 let fetchMock: ReturnType<typeof vi.fn>;
 let host: ManagedVoiceHost;
 
-function make(options: { timeoutMs?: number; stateDir?: string; env?: Record<string, string> } = {}): ManagedVoiceHost {
+function make(options: { timeoutMs?: number; stateDir?: string; speakOrigin?: string } = {}): ManagedVoiceHost {
   return createManagedVoiceHost({
     stateDir: 'stateDir' in options ? options.stateDir : dir,
     fetch: fetchMock as unknown as typeof fetch,
     timeoutMs: options.timeoutMs,
-    env: options.env ?? {},
+    speakOrigin: options.speakOrigin,
   });
 }
 
@@ -94,7 +96,7 @@ describe('speak', () => {
   it('sends only the text and voice id, with the bearer token, and returns the audio', async () => {
     fetchMock.mockResolvedValue(audioResponse());
     const result = await host.handle({ op: 'speak', speakId: 's1', text: 'build finished' });
-    expect(result).toEqual({ ok: true, mime: 'audio/mpeg', audioBase64: Buffer.from([9, 8, 7]).toString('base64') });
+    expect(result).toEqual({ ok: true, audioBase64: Buffer.from([9, 8, 7]).toString('base64') });
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe(MANAGED_VOICE_SPEAK_URL);
     expect(init.method).toBe('POST');
@@ -109,17 +111,21 @@ describe('speak', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it.each([
-    [400, 'bad-request'], [401, 'unauthorized'], [403, 'forbidden'],
-    [429, 'rate-limited'], [502, 'upstream'], [500, 'http'],
-  ])('maps HTTP %i to %s', async (status, reason) => {
+  it.each([400, 401, 403, 429, 502])('reports HTTP %i as a failure', async (status) => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ message: 'no' }), { status }));
-    expect(await host.handle({ op: 'speak', speakId: 's1', text: 'x' })).toEqual({ ok: false, reason });
+    expect(await host.handle({ op: 'speak', speakId: 's1', text: 'x' })).toEqual({ ok: false, reason: `HTTP ${status}` });
   });
 
-  it('refuses a non-audio success body', async () => {
-    fetchMock.mockResolvedValue(new Response('<html>', { status: 200, headers: { 'content-type': 'text/html' } }));
-    expect(await host.handle({ op: 'speak', speakId: 's1', text: 'x' })).toEqual({ ok: false, reason: 'http' });
+  it.each(['text/html', 'audio/wav'])('refuses a %s success body', async (type) => {
+    fetchMock.mockResolvedValue(new Response('<html>', { status: 200, headers: { 'content-type': type } }));
+    expect(await host.handle({ op: 'speak', speakId: 's1', text: 'x' })).toMatchObject({ ok: false });
+  });
+
+  it('refuses audio over the size cap', async () => {
+    fetchMock.mockResolvedValue(new Response(new Uint8Array(MAX_AUDIO_BYTES + 1), {
+      status: 200, headers: { 'content-type': 'audio/mpeg' },
+    }));
+    expect(await host.handle({ op: 'speak', speakId: 's1', text: 'x' })).toMatchObject({ ok: false });
   });
 
   it('reports a network failure', async () => {
@@ -136,7 +142,7 @@ describe('speak', () => {
     hangingFetch();
     const pending = host.handle({ op: 'speak', speakId: 's1', text: 'x' });
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    await host.handle({ op: 'cancel', speakId: 's1' });
+    expect(await host.handle({ op: 'cancel', speakId: 's1' })).toEqual({ ok: true });
     expect(await pending).toEqual({ ok: false, reason: 'cancelled' });
   });
 
@@ -179,7 +185,7 @@ describe('dev Hosted origin override', () => {
   });
 
   it('sends the speak request to the accepted origin', async () => {
-    const dev = make({ env: { [HOSTED_ORIGIN_ENV]: 'http://127.0.0.1:5199' } });
+    const dev = make({ speakOrigin: 'http://127.0.0.1:5199' });
     await dev.handle({ op: 'configure', update: { token: TOKEN } });
     fetchMock.mockResolvedValue(audioResponse());
     await dev.handle({ op: 'speak', speakId: 's1', text: 'x' });
@@ -187,7 +193,7 @@ describe('dev Hosted origin override', () => {
   });
 
   it('never sends the token to a rejected override', async () => {
-    const dev = make({ env: { [HOSTED_ORIGIN_ENV]: 'http://evil.example' } });
+    const dev = make({ speakOrigin: 'http://evil.example' });
     await dev.handle({ op: 'configure', update: { token: TOKEN } });
     fetchMock.mockResolvedValue(audioResponse());
     await dev.handle({ op: 'speak', speakId: 's1', text: 'x' });

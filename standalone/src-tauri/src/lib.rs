@@ -1449,48 +1449,44 @@ fn tool_control(
     Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
 }
 
-// ── Managed voice (docs/specs/alert.md -> "Spoken alarms"). Bridge only: the
-// token store and the one outbound speak request live in the sidecar
-// (lib/src/host/managed-voice-host.ts), so no command here ever returns the
-// token. ─────────────────────────────────────────────────────────────────────
+// ── Managed voice (docs/specs/alert.md -> "Managed voice"). Bridge only; the
+// host half is lib/src/host/managed-voice-host.ts in the sidecar. ────────────
 
-// Past the sidecar's own 15s request ceiling, so its `timeout` answer arrives
-// before this bridge gives up.
+// Above the sidecar's `MANAGED_VOICE_REQUEST_TIMEOUT_MS`
+// (lib/src/lib/platform/managed-voice-types.ts), so its `timeout` answer
+// arrives before this bridge gives up.
 const MANAGED_VOICE_SPEAK_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// `status` / `configure` only; speaking and cancelling have their own commands.
+/// `status` / `configure` / `cancel`; speaking has its own command for raw bytes.
 #[tauri::command(async)]
 fn managed_voice_command(
     state: tauri::State<'_, SidecarState>,
     payload: JsonValue,
 ) -> Result<JsonValue, String> {
     match payload.get("op").and_then(JsonValue::as_str) {
-        Some("status") | Some("configure") => {}
+        Some("status" | "configure" | "cancel") => {}
         _ => return Err("unsupported managed voice op".to_string()),
     }
-    let response =
+    let mut response =
         request_from_sidecar_timeout(&state, "voice:command", payload, Duration::from_secs(5))?;
-    Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
+    Ok(response.get_mut("result").map(JsonValue::take).unwrap_or(JsonValue::Null))
 }
 
 /// Audio as a raw `tauri::ipc::Response` (an ArrayBuffer in the webview); a
-/// failure rejects with the sidecar's failure kind, which the adapter maps.
+/// failure rejects with the sidecar's diagnostic reason.
 #[tauri::command(async)]
 fn managed_voice_speak(
     state: tauri::State<'_, SidecarState>,
     text: String,
     speak_id: String,
 ) -> Result<tauri::ipc::Response, String> {
-    let response = request_from_sidecar_timeout(
+    let mut response = request_from_sidecar_timeout(
         &state,
         "voice:command",
         serde_json::json!({ "op": "speak", "speakId": speak_id, "text": text }),
         MANAGED_VOICE_SPEAK_TIMEOUT,
-    )
-    .map_err(|err| {
-        if err.starts_with("timed out") { "timeout" } else { "unavailable" }.to_string()
-    })?;
-    let result = response.get("result").cloned().unwrap_or(JsonValue::Null);
+    )?;
+    let result = response.get_mut("result").map(JsonValue::take).unwrap_or(JsonValue::Null);
     if result.get("ok").and_then(JsonValue::as_bool) != Some(true) {
         return Err(result
             .get("reason")
@@ -1501,19 +1497,9 @@ fn managed_voice_speak(
     let b64 = result
         .get("audioBase64")
         .and_then(JsonValue::as_str)
-        .ok_or("unavailable")?;
-    let bytes = BASE64.decode(b64).map_err(|_| "unavailable".to_string())?;
+        .ok_or("speak returned no audio")?;
+    let bytes = BASE64.decode(b64).map_err(|err| format!("bad audio base64: {err}"))?;
     Ok(tauri::ipc::Response::new(bytes))
-}
-
-/// Abort an in-flight speak. Fire-and-forget: the speak itself answers `cancelled`.
-#[tauri::command]
-fn managed_voice_cancel(state: tauri::State<'_, SidecarState>, speak_id: String) {
-    let msg = serde_json::json!({
-        "event": "voice:command",
-        "data": { "op": "cancel", "speakId": speak_id },
-    });
-    send_to_sidecar(&state, msg.to_string());
 }
 
 // ── agent-browser host (docs/specs/dor-browser.md → "Agent-Browser Host Capabilities").
@@ -4086,11 +4072,16 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        // The managed-voice dev override (lib/src/host/managed-voice-host.ts)
-        // reaches only a debug build's sidecar; a release build always speaks
-        // to production Hosted (docs/specs/security-local.md -> "Persisted state").
-        if !cfg!(debug_assertions) {
-            c.env_remove("DORMOUSE_HOSTED_ORIGIN");
+        // docs/specs/security-local.md -> "Persisted state": only a debug
+        // build's sidecar sees the managed-voice dev override. The spawn
+        // inherits the whole environment, so release removes it explicitly.
+        match env::var("DORMOUSE_HOSTED_ORIGIN") {
+            Ok(origin) if cfg!(debug_assertions) => {
+                c.env("DORMOUSE_HOSTED_ORIGIN", origin);
+            }
+            _ => {
+                c.env_remove("DORMOUSE_HOSTED_ORIGIN");
+            }
         }
     });
     #[cfg(windows)]
@@ -4518,7 +4509,6 @@ pub fn run() {
             tool_control,
             managed_voice_command,
             managed_voice_speak,
-            managed_voice_cancel,
             pty_request_init,
             dor_control_response,
             burrow_command,

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('./platform', () => ({
   getPlatform: () => ({ alertPublishSettings: vi.fn() }),
+  getPlatformOrNull: () => null,
 }));
 
 import { AlertManager } from './alert-manager';

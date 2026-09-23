@@ -514,12 +514,8 @@ export interface PlatformAdapter {
    */
   notepadArchive?: NotepadArchivePort;
 
-  /**
-   * Managed voice for spoken alarms (`docs/specs/alert.md` -> "Spoken alarms").
-   * Present only where a host process can hold the voice token and make the
-   * request — standalone's sidecar. Absent (VS Code, Pocket, the website) means
-   * every utterance goes to Web Speech.
-   */
+  /** Managed voice (`docs/specs/transport.md` -> "Managed voice"); absent
+   *  means every utterance goes to Web Speech. */
   managedVoice?: ManagedVoicePort;
 
   /**

@@ -17,9 +17,10 @@ let root: Root;
 let stored: { token: string | null; voiceId: string };
 let updates: ManagedVoiceConfigUpdate[];
 
-function makePort(): ManagedVoicePort {
+function makePort(offerSetup = true): ManagedVoicePort {
   const status = (): ManagedVoiceStatus => ({ configured: stored.token !== null, voiceId: stored.voiceId });
   return {
+    offerSetup,
     status: async () => status(),
     configure: async (update) => {
       updates.push(update);
@@ -61,7 +62,6 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
-  vi.unstubAllEnvs();
 });
 
 describe('ManagedVoiceSection', () => {
@@ -71,15 +71,13 @@ describe('ManagedVoiceSection', () => {
   });
 
   it('stays hidden on a public build until a token is configured', async () => {
-    vi.stubEnv('DEV', false);
-    await render(Object.assign(new FakePtyAdapter(), { managedVoice: makePort() }));
+    await render(Object.assign(new FakePtyAdapter(), { managedVoice: makePort(false) }));
     expect(container.innerHTML).toBe('');
   });
 
   it('shows on a public build once a token is configured', async () => {
-    vi.stubEnv('DEV', false);
     stored.token = TOKEN;
-    await render(Object.assign(new FakePtyAdapter(), { managedVoice: makePort() }));
+    await render(Object.assign(new FakePtyAdapter(), { managedVoice: makePort(false) }));
     expect(text()).toContain('Voice token configured.');
     await act(async () => button('Clear token').click());
     await act(async () => {});

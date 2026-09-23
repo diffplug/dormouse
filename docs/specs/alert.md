@@ -292,7 +292,7 @@ Source of truth: `normalizeAlertDeliveryOverrides` / `resolveAlertDeliveryPolicy
 | Delivery identity | Episode receipt plus native attempt identity; renderer-local `speaking` / `spoken`. | HTTP push tagged by Session id, so a newer ring replaces the prior notification. |
 | After delivery | Attending cuts off speech. | **Never recall** — another push would only replace one stale notice with another. |
 | Failure | A refused or unavailable engine produces no marker. | Warn on non-2xx, partial, or zero delivery; **never retry** stale alarms. |
-| Authority | The renderer plays host-fetched managed-voice audio, else invokes `window.speechSynthesis`; only the host holds the voice token. | The webview names Session/title; the Burrow selects active ACL devices, the Relay intersects subscriptions. |
+| Authority | The renderer plays host-fetched managed-voice audio, else invokes `window.speechSynthesis`. | The webview names Session/title; the Burrow selects active ACL devices, the Relay intersects subscriptions. |
 
 Source of truth: `AlertSettings` in `lib/src/lib/alert-settings.ts` (renderer mirror, persisted at `dormouse:alert-settings`); `lib/src/lib/alert-settings-host.ts`; `watchUnattendedRings` in `lib/src/lib/alert-ring-watch.ts`.
 
@@ -311,17 +311,17 @@ Source of truth: `toSpokenText` in `lib/src/lib/alert-speech.ts`, armed by `lib/
 
 #### Managed voice
 
-`SpeechQueue` owns ordering, eligibility, the timeout, and callback identity; a `SpeechEngine` owns only dispatch, real start/end, and cancel. Every rule above holds for both engines.
+Every rule above holds for both engines.
 
-- **Must try managed voice first wherever the adapter exposes `managedVoice`** (standalone only; VS Code, Pocket, and the website omit it and speak through Web Speech). With no token saved the host answers `unconfigured`, which falls back like any failure.
+- **Must try managed voice first wherever the adapter exposes `managedVoice`** (`docs/specs/transport.md` → "Managed voice"). With no token saved the host answers `unconfigured`, which falls back like any failure.
 - **Must fall back to Web Speech for the same utterance, inside the same attempt, on any failure before managed audio starts** — no token, offline, non-2xx, host timeout, undecodable or refused playback. **Never play both**: audio that started and then failed ends the attempt instead (rationale). Nothing is retried.
 - `speaking` / `spoken` follow the audio element's `playing` / `ended`. **Cut-off and teardown must stop the audio and abort the in-flight request**, host `fetch` included.
 - **Never let the voice token reach a renderer.** The host stores it, adds it and the voice id to the request, and answers `configured` and the voice id, never the token; a renderer sends only the sanitized label (rationale). `docs/specs/transport.md` → "Managed voice" owns the messages.
-- **The host must call only `POST https://hosted.dormouse.sh/api/voice/speak`** (or a loopback dev origin, `docs/specs/security-local.md` -> "Persisted state"), bearer-authenticated, `redirect: 'error'` so no redirect receives the token, bounded at `MANAGED_VOICE_REQUEST_TIMEOUT_MS` (inside `SPEECH_ENGINE_TIMEOUT_MS`, so a fallback still fits) and `MAX_AUDIO_BYTES`. It validates the token (`dmv_…`) and voice id grammar before storing either.
+- **Must bound the host request** at `MANAGED_VOICE_REQUEST_TIMEOUT_MS` (inside `SPEECH_ENGINE_TIMEOUT_MS`, so a fallback still fits) and `MAX_AUDIO_BYTES`, accepting only `audio/mpeg`, and validate the token (`dmv_…`) and voice id grammar before storing either. Where it may go: `docs/specs/security-local.md` → "Persisted state".
 
 Pinned by `lib/src/lib/managed-voice-engine.test.ts` and `lib/src/host/managed-voice-host.test.ts`.
 
-Source of truth: `SpeechEngine` / `webSpeechEngine` in `lib/src/lib/speech-engine.ts`; `createManagedVoiceEngine` in `lib/src/lib/managed-voice-engine.ts`; `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts`; `ManagedVoicePort` in `lib/src/lib/platform/managed-voice-types.ts`.
+Source of truth: `SpeechEngine` / `webSpeechEngine` / `withFallback` in `lib/src/lib/speech-engine.ts`; `speechQueue` in `lib/src/lib/alert-speech-queue.ts`; `createManagedVoiceEngine` in `lib/src/lib/managed-voice-engine.ts`; `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts`; `ManagedVoicePort` in `lib/src/lib/platform/managed-voice-types.ts`.
 
 ### Push notifications
 
@@ -344,7 +344,7 @@ Reached from the baseboard sliders; `docs/specs/layout.md` owns placement. The a
 - **Delays are committed on blur or `Enter`, never per keystroke** — typing `3` on the way to `30` must not briefly install a 3-second timer. They are shown in seconds; an out-of-range or empty entry snaps back to whatever the store clamped it to.
 - **The push group's device line names every device a push would reach**, and otherwise says why there is none — no Burrow enrolled, nothing subscribed yet, or the server could not be asked (rationale).
 - **Must separate application defaults from this Workspace’s overrides** and offer per-field inheritance plus reset-all. The local voice picker follows engine voice availability. Pinned by `lib/src/components/WorkspaceAlarmSettings.test.tsx`.
-- **The Managed voice group never shows the token**: a saved token reads as configured with a clear action, and what is sent to Hosted is stated before one is saved. The voice id commits on blur or `Enter`. Hidden without `managedVoice`, and **hidden on a non-dev build (`import.meta.env.DEV`) unless a token is already configured**, since managed voice is an admin-only test slice. Pinned by `lib/src/components/ManagedVoiceSection.test.tsx`.
+- **The Managed voice group never shows the token**: a saved token reads as configured with a clear action, and what is sent to Hosted is stated before one is saved. The voice id commits on blur or `Enter`. Hidden without `managedVoice`, and **hidden unless the port offers setup (`offerSetup`, a dev build's adapter) or a token is already configured**, since managed voice is an admin-only test slice. Pinned by `lib/src/components/ManagedVoiceSection.test.tsx`.
 - Each alarm sink carries a **try it now** control outside the switch's dimming; both report inline and clear after a few seconds.
 
   | Control | Path and result |

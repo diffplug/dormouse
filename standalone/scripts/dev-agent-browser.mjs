@@ -11,6 +11,7 @@ import { sessionForKey } from 'dor-lib-common/agent-browser';
 // handles both and is a no-op on POSIX. See docs/specs/dor-cli.md.
 import spawn from 'cross-spawn';
 import { createInterface } from 'node:readline';
+import { createRequire } from 'node:module';
 // The bridge's security boundary, in its own module so it is testable —
 // see standalone/scripts/dev-host-guard.test.mjs.
 import { corsHeaders, isAuthorized } from './dev-host-guard.mjs';
@@ -115,8 +116,6 @@ const fireAndForget = {
   // over the event stream like every other sidecar line (`alert_command` in
   // src-tauri/src/lib.rs).
   alert_command: ({ payload }) => writeSidecar('alert:command', payload),
-  // Managed voice mirrors `managed_voice_cancel` in src-tauri/src/lib.rs.
-  managed_voice_cancel: ({ speakId }) => writeSidecar('voice:command', { op: 'cancel', speakId }),
   kill_sidecar_now: () => shutdown(),
 };
 
@@ -146,15 +145,20 @@ const invokeMap = {
     return result;
   },
   agent_browser_stream_status: ({ session, binaryPath }) => requestSidecar('agentBrowser:streamStatus', { session, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
-  // Managed voice (docs/specs/alert.md -> "Spoken alarms"), mirroring the Rust
-  // bridge: status/configure only here, and the speak's audio stays base64 in
-  // the HTTP invoke response where Rust would hand the webview raw bytes.
+  // Managed voice, mirroring the Rust bridge (`managed_voice_command` /
+  // `managed_voice_speak` in src-tauri/src/lib.rs); the speak answer stays base64.
   managed_voice_command: ({ payload }) => {
-    if (payload?.op !== 'status' && payload?.op !== 'configure') throw new Error('unsupported managed voice op');
+    if (!['status', 'configure', 'cancel'].includes(payload?.op)) throw new Error('unsupported managed voice op');
     return requestSidecar('voice:command', payload, 'voice:result', (data) => data.result, 5000);
   },
-  managed_voice_speak: ({ text, speakId }) =>
-    requestSidecar('voice:command', { op: 'speak', speakId, text }, 'voice:result', (data) => data.result, 20000),
+  managed_voice_speak: async ({ text, speakId }) => {
+    // The host's own ceiling, from the bundle `pnpm run stage` built.
+    const { MANAGED_VOICE_REQUEST_TIMEOUT_MS } = createRequire(import.meta.url)(path.join(sidecarDir, 'managed-voice.cjs'));
+    const result = await requestSidecar('voice:command', { op: 'speak', speakId, text }, 'voice:result',
+      (data) => data.result, MANAGED_VOICE_REQUEST_TIMEOUT_MS + 5000);
+    if (!result?.ok) throw new Error(result?.reason ?? 'unavailable');
+    return { audioBase64: result.audioBase64 };
+  },
   tool_control: ({ request }) =>
     requestSidecar('tool:control', { request }, 'tool:result', (data) => data.result),
   agent_browser_open: ({ url, headed, binaryPath }) => requestSidecar('agentBrowser:open', { url, headed, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
@@ -294,9 +298,6 @@ function startHostServer() {
 }
 
 function startSidecar() {
-  // Inherited through `...process.env` below; the sidecar accepts only an http
-  // loopback origin and logs which (docs/specs/standalone.md -> "Build and development").
-  if (process.env.DORMOUSE_HOSTED_ORIGIN) log(`managed voice: DORMOUSE_HOSTED_ORIGIN=${process.env.DORMOUSE_HOSTED_ORIGIN}`);
   sidecar = spawn(process.execPath, [sidecarScript], {
     cwd: sidecarDir,
     stdio: ['pipe', 'pipe', 'pipe'],

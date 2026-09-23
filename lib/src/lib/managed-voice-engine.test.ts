@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createManagedVoiceEngine, type ManagedVoiceAudio, type ManagedVoicePlayback } from './managed-voice-engine';
 import type { ManagedVoicePort, ManagedVoiceSpeakResult } from './platform/managed-voice-types';
-import type { SpeechEngine, SpeechEngineCallbacks } from './speech-engine';
+import { withFallback, type SpeechEngine, type SpeechEngineCallbacks } from './speech-engine';
 import { SPEECH_ENGINE_TIMEOUT_MS, SpeechQueue, type SpeechJob } from './speech-queue';
 
 /**
@@ -26,6 +26,8 @@ class FakeAudio implements ManagedVoiceAudio {
   constructor(readonly url: string) {}
   play(): Promise<void> { this.paused = false; return this.playResult; }
   pause(): void { this.paused = true; }
+  removeAttribute(): void {}
+  load(): void {}
 }
 
 let speaks: PendingSpeak[];
@@ -37,6 +39,7 @@ let fallbackAvailable: boolean;
 let portPresent: boolean;
 
 const port: ManagedVoicePort = {
+  offerSetup: true,
   status: async () => ({ configured: true, voiceId: 'v' }),
   configure: async () => ({ ok: true, configured: true, voiceId: 'v' }),
   speak: (text, signal) => new Promise((resolve, reject) => speaks.push({ text, signal, resolve, reject })),
@@ -75,7 +78,7 @@ function job(key: string, options: { eligible?: () => boolean } = {}): SpeechJob
   };
 }
 
-const audioBytes: ManagedVoiceSpeakResult = { ok: true, audio: new Uint8Array([1, 2, 3]), mime: 'audio/mpeg' };
+const audioBytes: ManagedVoiceSpeakResult = { ok: true, audio: new Uint8Array([1, 2, 3]) };
 /** Let the port's promise settle and the engine's `.then` run. */
 const flush = () => vi.advanceTimersByTimeAsync(0);
 
@@ -89,11 +92,10 @@ beforeEach(() => {
   fallbackAvailable = true;
   portPresent = true;
   events = [];
-  queue = new SpeechQueue(createManagedVoiceEngine({
-    port: () => (portPresent ? port : undefined),
+  queue = new SpeechQueue(withFallback(
+    createManagedVoiceEngine({ port: () => (portPresent ? port : undefined), playback }),
     fallback,
-    playback,
-  }));
+  ));
 });
 
 afterEach(() => {
@@ -157,7 +159,6 @@ describe('managed voice engine', () => {
     expect(audio.paused).toBe(true);
     expect(revoked).toEqual([audio.url]);
     expect(events).toEqual(['start a', 'finish a true']);
-    expect(speaks[0].signal.aborted).toBe(false);
     // The element's handlers are detached; nothing late can settle anything.
     expect(audio.onended).toBeNull();
   });
