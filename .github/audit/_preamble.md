@@ -21,7 +21,8 @@ ran out of room to reach — and say which it was. It is never a substitute for 
 check you could have run.
 
 A condition no audit run can read — a provisioning step, a setting in an
-external service's console — is not a check. Record it as INFO, never as
+external service's console — is not a check, so the each-clause rule above
+does not reach it. Record it as INFO, never as
 `UNVERIFIABLE`: nothing a later run can read would settle it, so every later
 run would be inconclusive too.
 
