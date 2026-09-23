@@ -3128,7 +3128,7 @@ describe('Wall on the Lath engine', () => {
       expect(portRow).not.toBeNull();
       const contextMenu = portRow!.closest('[data-terminal-context]')!;
       expect(contextMenu.closest('[data-lath-leaf]')).toBeNull();
-      expect(contextMenu.parentElement?.parentElement?.classList.contains('lath-host')).toBe(true);
+      expect(contextMenu.closest('.lath-host')).toBe(header.closest('.lath-host'));
       expect(contextMenu.closest('.lath-leaf-body')).toBeNull();
       await act(async () => {
         portRow!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -3815,21 +3815,17 @@ it('moves a retained helper without resizing or replacing its source, and rememb
   await open();
   const menu = container.querySelector<HTMLElement>('[data-terminal-context]')!;
   const terminal = menu.querySelector('[data-helper-terminal]');
-  const helper = helpers.getHelper('placement-source');
-  expect(helper).toBeDefined();
   expect(terminal).not.toBeNull();
   act(() => menu.querySelector<HTMLButtonElement>('[aria-label="Place helper at bottom"]')!.click());
   expect(menu.dataset.contextSide).toBe('bottom');
   expect(menu.querySelector('[data-helper-terminal]')).toBe(terminal);
   expect(openHelper).toHaveBeenCalledTimes(1);
-  expect(helpers.getHelper('placement-source')).toBe(helper);
   expect(source.getAttribute('style')).toBe(sourceStyle);
   expect(container.querySelector('[data-lath-leaf="placement-source"]')).toBe(source);
   act(() => menu.querySelector<HTMLButtonElement>('[aria-label="Close terminal context"]')!.click());
   await flush();
   await open();
   expect(container.querySelector<HTMLElement>('[data-terminal-context]')!.dataset.contextSide).toBe('bottom');
-  expect(helpers.getHelper('placement-source')).toBe(helper);
   act(() => container.querySelector<HTMLButtonElement>('[aria-label="Place helper at top"]')!.click());
   expect(container.querySelector<HTMLElement>('[data-terminal-context]')!.dataset.contextSide).toBe('top');
 });

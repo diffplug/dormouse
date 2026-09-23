@@ -557,13 +557,14 @@ describe('SelectionRing motion smear', () => {
   });
 });
 
-it('animates the source/helper union on opening, repositioning and interrupted close', async () => {
+it('animates the source/helper union on opening, side changes and interrupted close, tracking same-side resizes 1:1', async () => {
   const store = makeStore();
   const wall = document.createElement('div');
   wall.className = 'lath-host';
   const source = document.createElement('div');
   const helper = document.createElement('div');
   helper.dataset.contextFor = 'a';
+  helper.dataset.contextSide = 'right';
   wall.append(source, helper);
   document.body.append(wall);
   stubRect(source, { left: 0, top: 0, width: 500, height: 600 });
@@ -581,8 +582,10 @@ it('animates the source/helper union on opening, repositioning and interrupted c
     const path = container.querySelector<SVGPathElement>('[data-ring="outline"]')!;
     expect(path.dataset.contextUnion).toBe('true');
     expect(ringRect()?.width).toBe(892);
+    await act(async () => { stubRect(helper, { left: 484, top: 0, width: 440, height: 300 }); helper.style.width = '440px'; });
+    expect(ringRect()?.width).toBe(932);
     const original = path.getAttribute('d');
-    await act(async () => { stubRect(helper, { left: 0, top: 584, width: 400, height: 300 }); helper.style.top = '584px'; });
+    await act(async () => { stubRect(helper, { left: 0, top: 584, width: 400, height: 300 }); helper.dataset.contextSide = 'bottom'; });
     expect(path.getAttribute('d')).toBe(original);
     await frame(30);
     expect(ringRect()!.height).toBeGreaterThan(608);

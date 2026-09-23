@@ -3,8 +3,11 @@ import { edgeAxis, type Edge, type Rect } from '../../lib/lath/model';
 export type ContextSide = Edge;
 export type ContextPlacement = { rect: Rect; side: ContextSide; available: ContextSide[] };
 const SIDES: ContextSide[] = ['right', 'left', 'bottom', 'top'];
-/** Adjacent helpers overlap the source; above helpers only graze its top edge. */
-const OVERLAP_INSET = 16;
+/** Adjacent helpers overlap the source by this much, and overlapping fallbacks inset by it. */
+const INSET = 16;
+/** Above helpers only graze the source title, extending upward over peer headers instead. */
+const ABOVE_OVERLAP = 4;
+const ABOVE_EXTENSION = 32;
 // Compact source/directory/status chrome plus a useful terminal viewport.
 const MIN_WIDTH = 280;
 const MIN_HEIGHT = 240;
@@ -23,13 +26,12 @@ export function placeTerminalContext(wall: Rect, source: Rect, multiPane: boolea
   const bottom = wall.y + wall.height;
   const candidates = !multiPane ? [] : SIDES.map(side => {
     const horizontal = edgeAxis(side) === 'row';
-    // Grow upward over peer headers, but leave the source title readable.
-    const overlap = side === 'top' ? 4 : OVERLAP_INSET;
-    const space = side === 'right' ? right - source.x - source.width + overlap
-      : side === 'left' ? source.x - wall.x + overlap
-      : side === 'bottom' ? bottom - source.y - source.height + overlap : source.y - wall.y + overlap;
+    const overlap = side === 'top' ? ABOVE_OVERLAP : INSET;
+    const space = overlap + (side === 'right' ? right - source.x - source.width
+      : side === 'left' ? source.x - wall.x
+      : side === 'bottom' ? bottom - source.y - source.height : source.y - wall.y);
     const width = Math.max(0, Math.min(source.width, horizontal ? space : wall.width));
-    const desiredHeight = source.height + (side === 'top' ? 2 * OVERLAP_INSET + overlap : 0);
+    const desiredHeight = source.height + (side === 'top' ? ABOVE_EXTENSION + ABOVE_OVERLAP : 0);
     const height = Math.max(0, Math.min(desiredHeight, horizontal ? wall.height : space));
     return { side, rect: {
       x: side === 'right' ? source.x + source.width - overlap : side === 'left' ? source.x + overlap - width : clamp(source.x, wall.x, right - width),
@@ -44,8 +46,8 @@ export function placeTerminalContext(wall: Rect, source: Rect, multiPane: boolea
   const side = preferred === 'top' || preferred === 'bottom' ? preferred : fallback;
   // Leave the source visible around overlapping helpers. Small sources may borrow
   // Wall space for usable chrome, but keep the inset even below the minimum size.
-  const insetX = Math.min(OVERLAP_INSET, wall.width / 2);
-  const insetY = Math.min(OVERLAP_INSET, wall.height / 2);
+  const insetX = Math.min(INSET, wall.width / 2);
+  const insetY = Math.min(INSET, wall.height / 2);
   const width = Math.min(wall.width - 2 * insetX, Math.max(source.width - 2 * insetX, MIN_WIDTH));
   const height = Math.min(wall.height - 2 * insetY, Math.max(source.height / 2 - 2 * insetY, MIN_HEIGHT));
   return { side, available: ['top', 'bottom'], rect: {

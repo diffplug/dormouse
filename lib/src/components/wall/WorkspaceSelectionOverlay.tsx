@@ -39,7 +39,7 @@ import {
   type RingEdge,
 } from '../../lib/ring-geometry';
 import { SelectionRing } from './SelectionRing';
-import { rectUnionOutline, roundedUnionOutline, unionBounds } from '../../lib/rect-union-outline';
+import { unionBounds, unionRingOutline } from '../../lib/rect-union-outline';
 
 /** The subset of the Lath store the overlay needs — a revision that bumps on every
  *  commit, so the ring re-measures as leaves move / resize / restore. Kept
@@ -97,9 +97,6 @@ function ringIdentity(type: WallSelectionKind, id: string): string {
 const rectsEqual = (a: RingRect, b: RingRect) =>
   a.top === b.top && a.left === b.left && a.width === b.width && a.height === b.height;
 
-const insetRect = (r: RingRect, d: number): RingRect =>
-  ({ left: r.left + d, top: r.top + d, width: r.width - 2 * d, height: r.height - 2 * d });
-
 function framesEqual(a: RingFrame, b: RingFrame): boolean {
   return (
     rectsEqual(a.rect, b.rect)
@@ -115,11 +112,8 @@ function framesEqual(a: RingFrame, b: RingFrame): boolean {
  *  so its render is clean. `union` holds the source and helper rects while a terminal
  *  context is open; `rect` is then their bounds, and both rectangles tween together.
  *  Held in a ref and written to the DOM imperatively. */
-interface DisplayedRing {
-  rect: RingRect;
-  shape: RingShape;
+interface DisplayedRing extends RingFrame {
   speeds: RingEdgeSpeeds | null;
-  union?: readonly [RingRect, RingRect];
 }
 
 /**
@@ -279,9 +273,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     // Resolved once here so every path builder below sees a single inset.
     const effShape = isAnts ? shape : { ...shape, inset: strokeWidth / 2 };
 
-    const outline = union && roundedUnionOutline(
-      rectUnionOutline(insetRect(union[0], effShape.inset), insetRect(union[1], effShape.inset)).map(p => ({ x: p.x - rect.left, y: p.y - rect.top })),
-      Math.max(0, effShape.tl - effShape.inset));
+    const outline = union && unionRingOutline(union, rect, effShape);
     path.setAttribute('d', outline ? outline.path : roundedRectPath(rect, effShape));
     path.dataset.contextUnion = outline ? 'true' : 'false';
 
@@ -327,8 +319,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
         setVisible(true);
       }
     };
-    const showSettled = (frame: RingFrame, union: DisplayedRing['union'] = frame.union) =>
-      show({ rect: frame.rect, shape: frame.shape, speeds: null, union });
+    const showSettled = (frame: RingFrame) => show({ ...frame, speeds: null });
 
     // Per-frame imperative loop: sample the tween's position and velocity, write
     // the DOM, and self-schedule — no React state, so a travelling ring never
@@ -368,11 +359,11 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
         rafRef.current = null;
       }
     };
-    const snapTo = (frame: RingFrame, identity: string, union?: DisplayedRing['union']) => {
+    const snapTo = (frame: RingFrame, identity: string) => {
       tweenRef.current = null;
       cancelTick();
       displayedIdentityRef.current = identity;
-      showSettled(frame, union);
+      showSettled(frame);
     };
 
     if (!active) {
@@ -394,7 +385,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
       return;
     }
 
-    const identity = ringIdentity(selectedType, selectedId);
+    const selectionIdentity = ringIdentity(selectedType, selectedId);
     // Evaluated once per effect run, not per frame — the effect re-runs on every
     // Lath commit, which is plenty fresh for an OS-preference toggle.
     const instant = motionIsInstant();
@@ -412,10 +403,14 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
 
       const next = measureFrame(targetEl, selectedType);
       if (!next) return;
+      // An open helper's side joins the identity, so opening, closing and switching
+      // sides tween the union while same-side motion tracks like any other re-measure.
       const helperFrame = helperEl ? measureFrame(helperEl, 'pane') : null;
-      const previous = frameRef.current;
-      const union = helperFrame ? [next.rect, helperFrame.rect] as const : undefined;
-      if (union) { next.rect = unionBounds(...union); next.union = union; }
+      if (helperFrame) {
+        next.union = [next.rect, helperFrame.rect];
+        next.rect = unionBounds(...next.union);
+      }
+      const identity = helperFrame ? `${selectionIdentity}|context:${helperEl!.dataset.contextSide}` : selectionIdentity;
       const wall = targetEl.closest<HTMLElement>('[data-workspace-wall]');
       opacityRef.current = wall?.style.opacity ?? '';
 
@@ -431,17 +426,6 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
         wasActiveRef.current = true;
       }
 
-      // Opening, repositioning and closing a helper morph both component
-      // rectangles from the painted frame; never replace the union with a box.
-      if (union || previous?.union || tweenRef.current?.from.union) {
-        if (instant || !displayedFrameRef.current) { snapTo(next, identity, union); return; }
-        const destination = tweenRef.current?.to ?? previous;
-        if (destination && identity === displayedIdentityRef.current && framesEqual(destination, next)) return;
-        tweenRef.current = startRingTween(displayedFrameRef.current, next, performance.now(), FOCUS_MOTION_MS);
-        displayedIdentityRef.current = identity;
-        scheduleTick();
-        return;
-      }
       // Snap gate: the same instant-motion predicate the Lath animator's
       // duration uses (motionIsInstant), so the ring and the leaves agree.
       if (instant) {
@@ -481,12 +465,11 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     const ro = new ResizeObserver(update);
     const targetEl = target();
     if (targetEl) ro.observe(targetEl);
-    // The helper's per-frame placement is an inline style write, which a ResizeObserver misses.
+    // The helper's placement is an inline style and side write, which a ResizeObserver misses.
     let mo: MutationObserver | undefined;
     if (helperEl) {
-      ro.observe(helperEl);
       mo = new MutationObserver(update);
-      mo.observe(helperEl, { attributes: true, attributeFilter: ['style'] });
+      mo.observe(helperEl, { attributes: true, attributeFilter: ['style', 'data-context-side'] });
     }
     window.addEventListener('resize', update);
     document.addEventListener('scroll', update, true);

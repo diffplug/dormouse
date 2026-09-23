@@ -213,7 +213,6 @@ it('uses the Tool primary terminal without creating a helper or offering helper 
 });
 
 it('always shows context details alongside the helper', () => {
-  props.compact = true;
   render();
   expect(button('Terminal context details')).toBeNull();
   expect(button('Open in system browser')).not.toBeNull();
@@ -224,7 +223,7 @@ it('always shows context details alongside the helper', () => {
 });
 
 it('position buttons preserve input focus and report the destination', async () => {
-  props.placement = { rect: { x: 0, y: 0, width: 600, height: 400 }, side: 'top', available: ['top', 'bottom'], onChange: vi.fn() };
+  props.placement = { side: 'top', available: ['top', 'bottom'], onChange: vi.fn() };
   render();
   const input = container.querySelector('textarea')!;
   act(() => input.focus());

@@ -45,9 +45,7 @@ const DETAILS = {
 type Detail = keyof typeof DETAILS;
 export interface TerminalContextViewProps {
   terminalRole?: 'helper' | 'tool';
-  /** Fill the positioned host instead of adding an inset. */
-  compact?: boolean;
-  placement?: ContextPlacement & { onChange(side: ContextSide): void };
+  placement?: Omit<ContextPlacement, 'rect'> & { onChange(side: ContextSide): void };
   /** Exit in progress: the view is inert, and `onClose` is not called again. */
   closing?: boolean;
   /** Viewport coordinates the reveal grows from; absent, the top-left corner. */
@@ -119,6 +117,18 @@ function ContextOpenAction({ children, label, disabled, onOpen }: { children: Re
   </ContextAction>;
 }
 
+/** The supplied Phosphor panel glyph, mirrored so its filled panel marks `side`. */
+function PlacementIcon({ side }: { side: ContextSide }) {
+  return <svg aria-hidden width="18" height="18" viewBox="0 0 256 256" fill="currentColor">
+    <g transform={side === 'bottom' ? 'translate(0 256) scale(1 -1)' : side === 'left' ? 'translate(256 0) scale(-1 1)' : undefined}>
+      <rect x="32" y="48" width="192" height="160" rx="8" fill="none" stroke="currentColor" strokeWidth="16" strokeLinecap="round" strokeLinejoin="round" />
+      {side === 'left' || side === 'right'
+        ? <rect x="120" y="72" width="80" height="112" rx="8" />
+        : <rect x="56" y="72" width="144" height="64" rx="8" />}
+    </g>
+  </svg>;
+}
+
 /** The custom properties `.terminal-context-enter` / `-exit` read (`lib/src/theme.css`)
  *  that JS owns: the exit length the removal timer must match, and the corner radius. */
 const SURFACE_STYLE = { boxShadow: ELEVATED_PANE_SHADOW, '--context-exit-duration': `${TERMINAL_CONTEXT_EXIT_MS}ms`, '--context-radius': TERMINAL_SELECTION_BORDER_RADIUS } as CSSProperties;
@@ -174,8 +184,9 @@ export function TerminalContextView(p: TerminalContextViewProps) {
   const status = HELPER_STATUS[p.status];
   const isTool = p.terminalRole === 'tool';
   const statusLabel = isTool ? (p.status === 'running' ? `Running ${p.command}…` : 'At prompt') : status.label(p.command);
-  return <section ref={surface} aria-label="Terminal context" data-terminal-context tabIndex={-1} inert={p.closing} aria-hidden={p.closing || undefined} style={SURFACE_STYLE} data-context-side={p.placement?.side}
-    className={`${TERMINAL_CONTEXT_SURFACE_CLASS} ${motionClass} ${p.closing ? 'pointer-events-none' : ''} absolute ${p.compact ? 'inset-0' : 'inset-4'} flex flex-col overflow-hidden text-sm outline-none`}
+  const placement = p.placement;
+  return <section ref={surface} aria-label="Terminal context" data-terminal-context tabIndex={-1} inert={p.closing} aria-hidden={p.closing || undefined} style={SURFACE_STYLE} data-context-side={placement?.side}
+    className={`${TERMINAL_CONTEXT_SURFACE_CLASS} ${motionClass} ${p.closing ? 'pointer-events-none' : ''} absolute inset-0 flex flex-col overflow-hidden text-sm outline-none`}
     onContextMenu={event => event.preventDefault()}
     onKeyDown={event => {
       if ((event.target as HTMLElement).closest('[data-helper-terminal], [data-context-terminal]') && !detail) return;
@@ -191,18 +202,11 @@ export function TerminalContextView(p: TerminalContextViewProps) {
           <span className="text-muted">Title</span>
           <div className="flex min-h-6 min-w-0 flex-wrap items-center gap-1.5">
             <span className="min-w-[8ch] flex-1 truncate" title={p.title}>{p.title}</span><ContextAction label="Explain this title" onClick={() => setDetail('title')}><BugBeetleIcon size={15} />Explain</ContextAction>
-            <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2 text-muted"><ContextCopyAction label="Copy surface identifier" onCopy={() => attempt(p.onCopyRef)}><span>{p.surfaceRef}</span><CopyIcon size={12} /></ContextCopyAction><div data-context-header-actions className="flex shrink-0 items-center gap-0.5">{p.placement && <div aria-label="Helper placement" className="flex shrink-0 items-center gap-0.5">
-              {p.placement.available.map(side => <ContextAction key={side} label={`Place helper at ${side}`} pressed={p.placement!.side === side} keepFocus onClick={() => p.placement!.onChange(side)}>
-                <svg aria-hidden width="18" height="18" viewBox="0 0 256 256" fill="currentColor">
-                  <g transform={side === 'bottom' ? 'translate(0 256) scale(1 -1)' : side === 'left' ? 'translate(256 0) scale(-1 1)' : undefined}>
-                    <rect x="32" y="48" width="192" height="160" rx="8" fill="none" stroke="currentColor" strokeWidth="16" strokeLinecap="round" strokeLinejoin="round" />
-                    {side === 'left' || side === 'right'
-                      ? <rect x="120" y="72" width="80" height="112" rx="8" />
-                      : <rect x="56" y="72" width="144" height="64" rx="8" />}
-                  </g>
-                </svg>
-              </ContextAction>)}
-            </div>}<ContextAction label="Close terminal context" onClick={close} muted><XIcon size={15} /></ContextAction></div></div>
+            <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2 text-muted"><ContextCopyAction label="Copy surface identifier" onCopy={() => attempt(p.onCopyRef)}><span>{p.surfaceRef}</span><CopyIcon size={12} /></ContextCopyAction><div data-context-header-actions className="flex shrink-0 items-center gap-0.5">
+              {placement && <div role="group" aria-label="Helper placement" className="flex shrink-0 items-center gap-0.5">{placement.available.map(side =>
+                <ContextAction key={side} label={`Place helper at ${side}`} pressed={placement.side === side} keepFocus onClick={() => placement.onChange(side)}><PlacementIcon side={side} /></ContextAction>)}</div>}
+              <ContextAction label="Close terminal context" onClick={close} muted><XIcon size={15} /></ContextAction>
+            </div></div>
           </div>
           <span className="text-muted">Dir</span>
           <div className="flex min-h-6 min-w-0 flex-wrap items-center gap-1.5"><span className="truncate" title={p.cwd}>{p.cwd}</span><ContextOpenAction label={p.canExplore ? p.explorerLabel : 'Directory unavailable on this host'} disabled={!p.canExplore} onOpen={() => attempt(p.onExplore)}><ArrowSquareOutIcon size={15} />{p.explorerLabel}</ContextOpenAction><ContextCopyAction label="Copy absolute path" onCopy={() => attempt(p.onCopyPath)}><CopyIcon size={14} />Copy path</ContextCopyAction></div>

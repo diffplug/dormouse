@@ -114,7 +114,7 @@ export function sampleRingTween(tween: RingTween, now: number): RingFrame & { do
   const union = clamped >= 1 ? tween.to.union : tween.from.union || tween.to.union
     ? [lerpRect(fromUnion[0], toUnion[0], eased), lerpRect(fromUnion[1], toUnion[1], eased)] as const : undefined;
   return {
-    ...(union ? { union } : {}),
+    union,
     rect: union ? unionBounds(...union) : lerpRect(tween.from.rect, tween.to.rect, eased),
     shape: lerpShape(tween.from.shape, tween.to.shape, eased),
     done: clamped >= 1,

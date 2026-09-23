@@ -6,7 +6,7 @@ import { getTerminalInstance, refitSession } from '../lib/terminal-registry';
 import { flattenScenario, SCENARIO_SHELL_PROMPT } from '../lib/platform';
 import { leaves, normalizeWeights, type LathNode } from '../lib/lath/model';
 import type { LathPersistedLayout } from '../lib/lath/persistence';
-import { requireElement, settleTerminals } from './settle-terminals';
+import { requireElement, settleTerminalContext, settleTerminals } from './settle-terminals';
 
 const SOURCE = 'placement-source';
 type Layout = 'single' | 'columns' | 'rows' | 'grid' | 'uneven' | 'wide-bottom';
@@ -56,8 +56,8 @@ async function rightClickSourceHeader() {
 }
 async function openContext() {
   await rightClickSourceHeader();
-  await waitFor(() => expect(getHelper(SOURCE)?.status).toBe('completed'));
-  await settleTerminals();
+  await settleTerminalContext();
+  expect(getHelper(SOURCE)?.status).toBe('completed');
 }
 function expectedSide({ layout, zoomed, cursor, sourceAtEnd }: Props) {
   // Alone in the Wall, the helper avoids the cursor; beside a neighbor, it takes the neighbor's side.
@@ -102,24 +102,23 @@ async function prepare(args: Props) {
     expectContained(button, context());
   }
   expectContained(context(), document.querySelector('.lath-host')!);
-  expect(context().dataset.contextSide).toBe(expectedSide(args));
+  const side = expectedSide(args);
+  expect(context().dataset.contextSide).toBe(side);
   if (args.layout === 'grid' && !args.zoomed) {
     expect(within(context()).getByRole('button', { name: 'Place helper at right' })).toBeVisible();
     expect(within(context()).getByRole('button', { name: 'Place helper at bottom' })).toBeVisible();
   }
+  const a = context().getBoundingClientRect();
+  const b = sourcePane().getBoundingClientRect();
   if (!args.zoomed && args.layout !== 'single') {
-    const a = context().getBoundingClientRect();
-    const b = sourcePane().getBoundingClientRect();
     const overlap = { right: b.right - a.left, left: a.right - b.left, bottom: b.bottom - a.top, top: a.bottom - b.top };
-    expect(overlap[expectedSide(args)]).toBeCloseTo(expectedSide(args) === 'top' ? 4 : 16);
+    expect(overlap[side]).toBeCloseTo(side === 'top' ? 4 : 16);
   } else {
-    const a = context().getBoundingClientRect();
-    const b = sourcePane().getBoundingClientRect();
     expect(a.left - b.left).toBeCloseTo(16);
     expect(b.right - a.right).toBeCloseTo(16);
     expect(a.top - b.top).toBeGreaterThanOrEqual(16);
     expect(b.bottom - a.bottom).toBeGreaterThanOrEqual(16);
-    expect(expectedSide(args) === 'top' ? a.top - b.top : b.bottom - a.bottom).toBeCloseTo(16);
+    expect(side === 'top' ? a.top - b.top : b.bottom - a.bottom).toBeCloseTo(16);
   }
   return { expectSourceUnchanged };
 }

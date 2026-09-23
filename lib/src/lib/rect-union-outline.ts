@@ -1,4 +1,4 @@
-import type { RingRect } from './rect-tween';
+import type { RingRect, RingShape } from './rect-tween';
 import { QUARTER_TURN } from './ring-geometry';
 
 type Point = { x: number; y: number };
@@ -52,4 +52,13 @@ export function roundedUnionOutline(points: Point[], radius: number) {
     return `${i ? 'L' : 'M'}${toward(p, before, r)} Q${p.x},${p.y} ${toward(p, after, r)}`;
   }).join(' ') + ' Z';
   return { path, perimeter };
+}
+
+/** The ring outline around a union, relative to `origin` and concentric like `roundedRectPath`:
+ *  both rects shrink by `shape.inset`, and every corner takes the top-left radius less the inset. */
+export function unionRingOutline(union: readonly [RingRect, RingRect], origin: RingRect, shape: RingShape) {
+  const { inset } = shape;
+  const local = (r: RingRect): RingRect =>
+    ({ left: r.left - origin.left + inset, top: r.top - origin.top + inset, width: r.width - 2 * inset, height: r.height - 2 * inset });
+  return roundedUnionOutline(rectUnionOutline(local(union[0]), local(union[1])), Math.max(0, shape.tl - inset));
 }
