@@ -21,6 +21,10 @@ allowBuilds:
   keytar: false
   node-pty: true
   sharp: true
+# An unmet peer fails the install instead of warning, so a bump that leaves a
+# shared library outside a dependent's range (pgstencil's kysely/hono, the
+# @hono adapters) goes red in its own PR. Widen deliberately below, with a reason.
+strictPeerDependencies: true
 peerDependencyRules:
   allowedVersions:
     "react-helmet-async>react": ^19.0.0

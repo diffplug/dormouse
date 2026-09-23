@@ -38,18 +38,26 @@ does not deploy.
 ## Refresh private packages
 
 ```sh
-node scripts/sync-pgstencil.mjs /path/to/pgstencil
+node scripts/sync-pgstencil.mjs /path/to/pgstencil [revision]
 ```
 
-This runs `pnpm packages:pack` in pgstencil, vendors core/auth, records source
-commit/dirty state and SHA-256 hashes in `vendor/build.json`, and installs. The
-direct Node command also works before the archives exist (pnpm may otherwise
-auto-install first). See `docs/specs/hosted.md` -> "Application boundary" for
-what has to be committed together.
+This checks out the pgstencil revision (default `HEAD`) in a temporary clean
+worktree, runs `pnpm packages:pack` there, vendors core/auth, records the commit,
+`dirty: false` and SHA-256 hashes in `vendor/build.json`, and installs. Each
+archive carries its own `package/dist/provenance.json`, and the sync refuses one
+that is missing it, that reports a dirty pack, or that names a commit other than
+the one packed here. To try an unfinished pgstencil change, commit it to a local
+branch and sync that revision.
+The sync also warns when the vendored commit is not on pgstencil's
+`origin/main`: a Dormouse branch may vendor a pgstencil branch while a
+cross-repo change is in flight, but Dormouse `main` must vendor a pgstencil
+`main` commit, and the nightly audit fails until it does. The direct Node
+command also works before the archives exist (pnpm may otherwise auto-install
+first). See `docs/specs/hosted.md` -> "Application boundary" for what has to be
+committed together.
 
-Re-run integration tests after every refresh. The initial vendored pgstencil
-manifest is dirty; production preflight rejects it until it is refreshed from an
-accepted clean revision with matching archive hashes.
+Re-run integration tests after every refresh. Vendor an accepted pgstencil
+revision before a production release.
 
 ## Resource inventory
 

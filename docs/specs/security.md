@@ -118,7 +118,7 @@ Gaps rather than accepted risks: we intend to close them.
   writes ([same](./security-remote.md#revocation-and-the-audit-trail)).
 - **The workflow audit's window has two evasions**, both in how the window is
   computed ([Automated Maintainer](./security-ci.md#automated-maintainer-tend)).
-- **The audit's three subagents share one credential.** Their contexts are
+- **The audit's four subagents share one credential.** Their contexts are
   separate; `AUDIT_PAT` is not ([Domains](./security-audit.md#domains)).
 - **The notarization password sits on a command line for up to half an hour**
   per architecture; the remedy is known and not yet done
@@ -140,19 +140,21 @@ lints can only read.
 
 **Every night at 04:21 UTC, and before every VS Code release**,
 `.github/workflows/security-audit.yaml` audits the repository against these
-specs. Three subagents, each owning the specs below, run every `FAIL IF` as a
+specs. Four subagents, each owning the specs below, run every `FAIL IF` as a
 mechanical check with evidence, then read their domain adversarially for what
-no check names. A failure, or a run that reaches no verdict, files a public
+no check names. A failure, or a run reaching no verdict, files a public
 issue labeled
 [`security-audit-failure`](https://github.com/diffplug/dormouse/issues?q=is%3Aissue+label%3Asecurity-audit-failure)
 and holds the release; a later pass closes it. Open issues are live; closed
-ones are the record of what tripped and what changed.
+ones record what tripped and changed.
 `scripts/security-audit-local.sh` runs the same prompts locally.
-[security-audit.md](./security-audit.md) is the contract.
+[security-audit.md](./security-audit.md) is the contract. pgstencil audits the
+packages Hosted consumes in its own repository.
 
 | Domain | Specs | Covers |
 | --- | --- | --- |
-| `application-security` | [security-local.md](./security-local.md), [security-remote.md](./security-remote.md), [security-hosted.md](./security-hosted.md) | local boundaries, remote control, Hosted accounts, and every path no other domain claims |
+| `application-security` | [security-local.md](./security-local.md), [security-remote.md](./security-remote.md) | local boundaries, remote control, and everything no other domain claims |
+| `hosted` | [security-hosted.md](./security-hosted.md) | Hosted accounts and the pgstencil provenance link |
 | `supply-chain` | [security-supply-chain.md](./security-supply-chain.md) | the dependency graph, the lockfile, the disclosure and its generator |
 | `ci-and-secrets` | [security-ci.md](./security-ci.md), [security-audit.md](./security-audit.md), this spec | GitHub Actions, the bot, releases, secrets, and the audit itself |
 

@@ -21,7 +21,7 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     env:
-      # The three per-domain fragment filenames, in one place. They are
+      # The four per-domain fragment filenames, in one place. They are
       # named by the redactor's argv, its fail-closed `rm -f`, and the
       # reporting step's guard loop, and drift between two of those lists
       # is precisely what the `FAIL IF` on the redactor exists to catch —
@@ -30,7 +30,7 @@ jobs:
       # space-separated and shell-safe. The artifact `path:` needs one
       # entry per line and so cannot consume it; that list is spelled out
       # and carries a pointer back here.
-      AUDIT_FRAGMENTS: audit-supply-chain.md audit-ci-secrets.md audit-application.md
+      AUDIT_FRAGMENTS: audit-supply-chain.md audit-ci-secrets.md audit-application.md audit-hosted.md
     # Must stay well above the orchestrator's own wait deadline in
     # `.github/audit/orchestrator.md` (32 minutes, counted from the first
     # time its wait loop runs — i.e. after checkout, setup-node, the
@@ -86,7 +86,7 @@ jobs:
           # calls with `GH_TOKEN=$AUDIT_PAT`.
           AUDIT_PAT: ${{ secrets.AUDIT_PAT }}
           # Process-wide: this raises the cap on every Bash call in the
-          # session, the three domain subagents' as well as the
+          # session, the four domain subagents' as well as the
           # orchestrator's. What it is for is the orchestrator's wait loop,
           # which breaks itself at 540s so a capped call still prints
           # `STILL WAITING`; at the two-minute default that call is
@@ -125,21 +125,22 @@ jobs:
           # release gate for $5 and no verdict.
           #
           # The cause was ending the turn, not delegating. `Task` is
-          # therefore allowed on purpose — the audit fans out to three
+          # therefore allowed on purpose — the audit fans out to four
           # scoped domain agents — and the orchestrator prompt carries
           # the rule that makes it safe: block in a Bash `until` loop on
           # the fragment files, never end the turn to wait. `Workflow`
           # stays denied because nothing here should be spawning one.
-          # Two of the three domains are mechanical — run a generator, read
+          # Two of the four domains are mechanical — run a generator, read
           # `gh api`, compare a pin — and the session default (Sonnet)
-          # does them well. `application-security` is the one that has to
-          # read code adversarially, and its findings have been the ones
-          # that needed real reasoning: tracing a relay-minted `clientId`
-          # to a keystroke-injection path, or working out that an 8-char
-          # fingerprint carries ~40 bits because a P-256 point's leading
-          # byte is constant. It runs on Opus; the orchestrator and the
-          # other two stay on the cheaper default, so the cost lands only
-          # where the depth does.
+          # does them well. `application-security` and `hosted` are the
+          # ones that read code adversarially, and their findings have
+          # been the ones that needed real reasoning: tracing a
+          # relay-minted `clientId` to a keystroke-injection path, or
+          # working out that an 8-char fingerprint carries ~40 bits
+          # because a P-256 point's leading byte is constant. They run on
+          # Opus; the orchestrator and the two mechanical domains stay on
+          # the cheaper default, so the cost lands only where the depth
+          # does.
           #
           # Each agent's prompt is a pointer, not a copy — the content
           # stays in `.github/audit/` so CI and
@@ -148,7 +149,7 @@ jobs:
             --model sonnet
             --allowed-tools "Read,Write,Edit,Bash,Grep,Glob,Task,Agent"
             --disallowed-tools "Workflow"
-            --agents '{"supply-chain":{"description":"Audits docs/specs/security-supply-chain.md.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/supply-chain.md`, and follow them exactly."},"ci-and-secrets":{"description":"Audits docs/specs/security.md, docs/specs/security-ci.md, and docs/specs/security-audit.md.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/ci-and-secrets.md`, and follow them exactly."},"application-security":{"description":"Audits docs/specs/security-local.md and docs/specs/security-remote.md, and sweeps the rest of the product code.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/application-security.md`, and follow them exactly.","model":"opus"}}'
+            --agents '{"supply-chain":{"description":"Audits docs/specs/security-supply-chain.md.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/supply-chain.md`, and follow them exactly."},"ci-and-secrets":{"description":"Audits docs/specs/security.md, docs/specs/security-ci.md, and docs/specs/security-audit.md.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/ci-and-secrets.md`, and follow them exactly."},"application-security":{"description":"Audits docs/specs/security-local.md and docs/specs/security-remote.md, and sweeps the rest of the product code.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/application-security.md`, and follow them exactly.","model":"opus"},"hosted":{"description":"Audits docs/specs/security-hosted.md: Hosted accounts and the pgstencil provenance link.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/hosted.md`, and follow them exactly.","model":"opus"}}'
           # The prompts live in `.github/audit/`, not inline here: they
           # are long enough to need real diffs in review, they must be
           # runnable locally against the same text CI uses
@@ -216,7 +217,7 @@ jobs:
           TRANSCRIPT="$RUNNER_TEMP/claude-execution-output.json"
           # Every sink that the archive step below publishes has to be in
           # the argument list, and the fail-closed `rm -f` has to delete
-          # the same set — docs/specs/security-audit.md names `audit-report.md`, the three
+          # the same set — docs/specs/security-audit.md names `audit-report.md`, the four
           # per-domain fragments, and the transcript. The fragments are
           # agent output like any other: a subagent that shells out and
           # prints an environment lands the value in its own fragment,
@@ -276,6 +277,7 @@ jobs:
             audit-supply-chain.md
             audit-ci-secrets.md
             audit-application.md
+            audit-hosted.md
           retention-days: 14
           if-no-files-found: warn
 
@@ -349,7 +351,7 @@ jobs:
 
           # Existence is not agreement. The loop above catches a domain that
           # produced nothing; this catches one that produced a FAIL the merge
-          # then lost — a mis-summarised verdict, or three domains flattened
+          # then lost — a mis-summarised verdict, or four domains flattened
           # into an optimistic paragraph. That case is worse than a missing
           # fragment, because PASS *closes* the open failure issue below and
           # opens the release gate, leaving the finding only in a 14-day

@@ -4,24 +4,12 @@
 
 - `docs/specs/security-local.md`
 - `docs/specs/security-remote.md`
-- `docs/specs/security-hosted.md`
 
 **Output file:** `audit-application.md`
 
 This is a code-and-specs audit of the product's own boundaries — the remote
 control stack, and the local application. You need no GitHub API access and no
 PAT — do not use one.
-
-For Hosted accounts, read `docs/specs/hosted.md`, `hosted/server/`,
-`hosted/src/`, `hosted/scripts/`, `hosted/wrangler.jsonc`, the packed core/auth
-modules in `vendor/`, and `.github/workflows/hosted-preview.yml` and
-`.github/workflows/hosted-production.yml` — `docs/specs/security-hosted.md`'s
-Deployment boundary quantifies over the preview and production paths, which
-live in those scripts and workflows rather than in the Worker. Verify the
-archive hashes against `vendor/build.json`. Distinguish tested code from
-pending production configuration; do not treat local provider simulations as
-live OAuth acceptance, and treat a checked-in placeholder as no evidence about
-an external control.
 
 Read, at minimum: `docs/specs/remote-security-model.md` **and its paired
 `docs/specs/remote-security-model.rationale.md`**, `docs/specs/relay.md`,
@@ -152,23 +140,6 @@ Be adversarial, and go past the `FAIL IF` list. Ask specifically:
   reconstruct and relay only the registered pane-level shapes, never relay a
   nested document's location, and target only that origin plus the validated
   app origin—never a wildcard or foreign origin.
-- **Is the Hosted origin the only one that can drive Hosted?** Trace a request
-  from `hosted/server/worker.ts` through `workerApp`'s origin gate and
-  `secureHeaders`: a foreign `Host`, a preview hostname, a misconfigured
-  deployment's error path, and the SPA fallback must each answer without
-  credentialed CORS, without a cacheable shell, and without inline script.
-  Check that authentication cookies stay `__Host-`, Secure, HttpOnly, `Path=/`
-  and Domain-less, and that no session token reaches browser JSON or storage.
-- **Can a Hosted login become terminal access, or an account become someone
-  else's?** `authPolicy` must keep explicit linking and independent logins; a
-  callback whose initiating login was revoked must fail; an unused or unknown
-  provider credential must enable nothing. No Hosted endpoint may mint a Burrow
-  ACL grant or stand in for the encrypted pairing and presence proof.
-- **Does anything from the test or preview build reach production?** The
-  production Worker must not export the captured-email inbox, the deterministic
-  clock, or the testing injection module; preview must not copy production
-  routes, bindings, or credentials, must not call real mail or OAuth, and its
-  cleanup must check out the base branch rather than the closed PR's.
 - Does the shipped code still match what the specs and this section claim? Spec
   drift is a finding; say which side is wrong. The newest sections are the ones
   most likely to have drifted: `remote-security-model.md`'s Presence proofs,
@@ -181,11 +152,11 @@ Be adversarial, and go past the `FAIL IF` list. Ask specifically:
   look for what a *textual* lint cannot see.
 
 You are also the **catch-all** domain, and this is defined by subtraction, not
-by a list: you own everything in the repository that `supply-chain.md` and
-`ci-and-secrets.md` do not explicitly claim. Run `ls -A` and work out the
-remainder rather than trusting any enumeration — an enumeration goes stale the
-moment someone adds a directory, which is exactly how `.vscode/` and
-`.impeccable/` ended up owned by nobody.
+by a list: you own everything in the repository that `supply-chain.md`,
+`ci-and-secrets.md`, and `hosted.md` do not explicitly claim. Run `ls -A` and
+work out the remainder rather than trusting any enumeration — an enumeration
+goes stale the moment someone adds a directory, which is exactly how `.vscode/`
+and `.impeccable/` ended up owned by nobody.
 
 Subtraction is **recursive, not top-level**. Where another domain claims a
 subdirectory rather than a whole tree, the rest of that tree is yours — so
@@ -197,10 +168,9 @@ as a subtraction rather than as two named subdirectories, which is the shape
 to prefer when you find the next one.
 
 Today the remainder is `lib/`, `relay/`, `remote-lib-common/`, `standalone/`,
-`vscode-ext/`, `dor/`, `dor-lib-common/`, `hosted/`, `vendor/`, `canopy/`,
-`deploy/`, `docs/`, `.impeccable/`, and the root files — but treat that as a
-description of the current tree, not as your scope. Your scope is the
-remainder.
+`vscode-ext/`, `dor/`, `dor-lib-common/`, `canopy/`, `deploy/`, `docs/`,
+`.impeccable/`, and the root files — but treat that as a description of the
+current tree, not as your scope. Your scope is the remainder.
 
 Remote control is where the depth goes; the rest is a sweep for anything that
 would be a security hole in a terminal that runs local shells — command

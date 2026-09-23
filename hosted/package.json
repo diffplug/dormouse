@@ -20,6 +20,7 @@
   "dependencies": {
     "@pgstencil/auth": "file:../vendor/pgstencil-auth-0.1.0.tgz",
     "pgstencil": "file:../vendor/pgstencil-0.1.0.tgz",
+    "kysely": "^0.29.5",
     "hono": "^4.13.8",
     "@hono/node-server": "^2.0.10",
     "react": "^19.2.6",

@@ -9,7 +9,7 @@
   "docs/specs/dor-cli.md": 5900,
   "docs/specs/dor-tool.md": 4100,
   "docs/specs/glossary.md": 2950,
-  "docs/specs/hosted.md": 1050,
+  "docs/specs/hosted.md": 1100,
   "docs/specs/layout.md": 9900,
   "docs/specs/mobile-terminal-ui.md": 2000,
   "docs/specs/mouse-and-clipboard.md": 3750,
@@ -20,7 +20,7 @@
   "docs/specs/remote-security-model.md": 4750,
   "docs/specs/security-audit.md": 1950,
   "docs/specs/security-ci.md": 2700,
-  "docs/specs/security-hosted.md": 450,
+  "docs/specs/security-hosted.md": 600,
   "docs/specs/security-local.md": 3150,
   "docs/specs/security-remote.md": 5750,
   "docs/specs/security-supply-chain.md": 1150,
@@ -34,7 +34,7 @@
   "docs/specs/tiling-engine.md": 4650,
   "docs/specs/transport.md": 5500,
   "docs/specs/tutorial.md": 1900,
-  "docs/specs/vscode.md": 7200,
+  "docs/specs/vscode.md": 7250,
   "docs/specs/webgl-text.md": 1200,
   "docs/specs/website-docs.md": 4800
 }

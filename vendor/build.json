@@ -1,14 +1,14 @@
 {
-  "commit": "c14097cabbbef8d670234354014e41ae4fc9470a",
-  "dirty": true,
+  "commit": "eaba6d3f15b7a7ecb102e88d3e446e13a32b2f72",
+  "dirty": false,
   "files": [
     {
       "filename": "pgstencil-0.1.0.tgz",
-      "sha256": "88601626740565b3ad8660ebdf8ec06f3d5f553288ec7ea5549f6d3e7c8a293d"
+      "sha256": "7e95e6f90b567eb6e6e757fe3f0c32ff2b0e65ff7791b51da43c442536947c7a"
     },
     {
       "filename": "pgstencil-auth-0.1.0.tgz",
-      "sha256": "111892277b8bd4a6ff5b758ccb0e1bce3997ccf5493c8f9fdb98fedf7f6eab5a"
+      "sha256": "0f7539ad5171c2d88dd294eda5d1d96af08a4946945a01d4259f356c07c26fca"
     }
   ]
 }
