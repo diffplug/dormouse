@@ -84,7 +84,11 @@ export async function preflight(env, config, api = cloudflare(env)) {
     "workers/scripts/dormouse-hosted/secrets",
   );
   const names = new Set(bindings.map((item) => item.name));
-  const requiredSecrets = ["AUTH_SECRET", "POSTMARK_SERVER_TOKEN"];
+  const requiredSecrets = [
+    "AUTH_SECRET",
+    "POSTMARK_SERVER_TOKEN",
+    "ELEVENLABS_API_KEY",
+  ];
   for (const provider of config.vars.OAUTH_PROVIDERS.split(",")
     .map((s) => s.trim())
     .filter(Boolean)) {

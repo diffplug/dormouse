@@ -30,7 +30,7 @@ function provider({
   database = "neondb",
   user = "runtime",
   disabled = true,
-  secrets = ["AUTH_SECRET", "POSTMARK_SERVER_TOKEN"],
+  secrets = ["AUTH_SECRET", "POSTMARK_SERVER_TOKEN", "ELEVENLABS_API_KEY"],
 } = {}) {
   return async (path) => {
     if (path.startsWith("hyperdrive/configs/"))
@@ -49,6 +49,7 @@ test("preflight rejects wrong databases, caching, reused roles, and incomplete p
     { user: "migration" },
     { disabled: false },
     { secrets: ["AUTH_SECRET"] },
+    { secrets: ["AUTH_SECRET", "POSTMARK_SERVER_TOKEN"] },
   ])
     await assert.rejects(preflight(env, config, provider(override)));
   const oauth = {
@@ -63,6 +64,7 @@ test("preflight rejects wrong databases, caching, reused roles, and incomplete p
       secrets: [
         "AUTH_SECRET",
         "POSTMARK_SERVER_TOKEN",
+        "ELEVENLABS_API_KEY",
         "GITHUB_CLIENT_ID",
         "GITHUB_CLIENT_SECRET",
       ],
