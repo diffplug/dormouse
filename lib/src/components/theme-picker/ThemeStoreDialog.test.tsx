@@ -215,6 +215,38 @@ describe('ThemeStoreDialog', () => {
     }
   });
 
+  it('still reports an install that fails while the store is open', async () => {
+    searchThemesMock.mockImplementationOnce(async () => ({
+      extensions: [extension('dracula', 'Dracula Official')],
+    }));
+    let rejectInstall!: (reason: Error) => void;
+    vi.mocked(fetchExtensionThemes).mockImplementationOnce(
+      () => new Promise((_resolve, reject) => { rejectInstall = reject; }),
+    );
+
+    vi.useFakeTimers();
+    try {
+      render(true);
+      typeQuery('dracula');
+      await act(async () => { vi.advanceTimersByTime(300); });
+
+      const install = [...container.querySelectorAll('button')]
+        .find((button) => button.textContent === 'Install');
+      if (!install) throw new Error('install button not rendered');
+      act(() => { install.click(); });
+
+      // The close gate must not swallow the failure it is not about: without
+      // this, a gate that never writes passes the closed-store case above.
+      await act(async () => {
+        rejectInstall(new Error('Install failed: 503'));
+      });
+
+      expect(container.textContent).toContain('Install failed: 503');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('ignores a superseded search whose response arrives last', async () => {
     let resolveFirst!: (result: { extensions: OpenVSXExtension[] }) => void;
     let resolveSecond!: (result: { extensions: OpenVSXExtension[] }) => void;
