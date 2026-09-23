@@ -297,6 +297,17 @@ test('orchestrator wait: fragments still being written keep the wait going', (t)
   assert.deepEqual(lines.slice(0, -1), [`${first}: finished`, ...rest.map((f) => `${f}: still writing`)]);
 });
 
+// One domain still writing keeps the wait going, whichever one it is. The
+// wait block's per-domain status lines are pinned to `AUDIT_FRAGMENTS`; its
+// `until` predicate is not, so a fragment dropped from that predicate would
+// let the orchestrator merge and publish while that domain was still writing.
+for (const held of fragments) {
+  test(`orchestrator wait: ${held} alone unfinished keeps the wait going`, (t) => {
+    const { answer } = runWait(t, { finished: fragments.filter((f) => f !== held), writing: [held] });
+    assert.equal(answer, 'STILL WAITING');
+  });
+}
+
 test('orchestrator wait: a re-issued call reads back the persisted deadline', (t) => {
   const deadline = now() + 600;
   const { answer, persisted } = runWait(t, { deadline });
