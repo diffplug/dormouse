@@ -9,9 +9,13 @@ export function unionBounds(a: RingRect, b: RingRect): RingRect {
   return { left, top, width: Math.max(a.left + a.width, b.left + b.width) - left, height: Math.max(a.top + a.height, b.top + b.height) - top };
 }
 
-/** Corner points of the outer contour of two overlapping rectangles. Grid cells remove
+/** Corner points of the outer contour, bridging the gap above a source. Grid cells remove
  *  internal seams before rounding, so a smaller helper leaves a step rather than framing peers. */
 export function rectUnionOutline(a: RingRect, b: RingRect): Point[] {
+  // Above helpers clear the source title; extend the upper outline across that
+  // gap so the shared ring encloses both, including throughout its animation.
+  if (a.top + a.height < b.top) a = { ...a, height: b.top - a.top };
+  if (b.top + b.height < a.top) b = { ...b, height: a.top - b.top };
   const xs = [...new Set([a.left, a.left + a.width, b.left, b.left + b.width])].sort((x, y) => x - y);
   const ys = [...new Set([a.top, a.top + a.height, b.top, b.top + b.height])].sort((x, y) => x - y);
   const inside = (x: number, y: number) => [a, b].some(r => x > r.left && x < r.left + r.width && y > r.top && y < r.top + r.height);

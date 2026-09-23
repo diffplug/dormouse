@@ -109,7 +109,7 @@ async function prepare(args: Props) {
     const a = context().getBoundingClientRect();
     const b = sourcePane().getBoundingClientRect();
     const overlap = { right: b.right - a.left, left: a.right - b.left, bottom: b.bottom - a.top, top: a.bottom - b.top };
-    expect(overlap[expectedSide(args)]).toBeCloseTo(16);
+    expect(overlap[expectedSide(args)]).toBeCloseTo(expectedSide(args) === 'top' ? -16 : 16);
   } else {
     const a = context().getBoundingClientRect();
     const b = sourcePane().getBoundingClientRect();
