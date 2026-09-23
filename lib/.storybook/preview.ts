@@ -115,6 +115,8 @@ if (visualSnapshot) {
   // seconds after it appears, which a play function cannot outrun: whether it is
   // still on screen at capture time depends on how loaded the runner is.
   cfg.overlays.warningAutoDismissMs = 0;
+  // One kill-confirm letter rather than a random one per prompt.
+  cfg.killConfirm.char = 'q';
   // Zero every CSS transition. Unlike the keyframe animations above, each of
   // which has a static substitute, transitions are started by state that lands
   // AFTER first paint — the primed-state decorator applies two rAFs in, which
