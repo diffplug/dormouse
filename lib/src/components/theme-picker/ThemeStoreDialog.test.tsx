@@ -19,6 +19,7 @@ vi.mock('../../lib/themes', () => ({
 import { fetchExtensionThemes, searchThemes, type OpenVSXExtension } from '../../lib/themes';
 import { ThemeStoreDialog } from './ThemeStoreDialog';
 import { setNativeFieldValue } from '../../lib/dom';
+import { ensureDialogModal } from '../wall/wall-test-utils';
 
 const searchThemesMock = vi.mocked(searchThemes);
 
@@ -35,15 +36,7 @@ function extension(name: string, displayName: string): OpenVSXExtension {
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-// jsdom does not implement the native <dialog> modal methods.
-beforeEach(() => {
-  HTMLDialogElement.prototype.showModal = function showModal() {
-    this.open = true;
-  };
-  HTMLDialogElement.prototype.close = function close() {
-    this.open = false;
-  };
-});
+beforeEach(ensureDialogModal);
 
 let container: HTMLDivElement;
 let root: Root;
@@ -70,16 +63,19 @@ function unmount() {
   act(() => { root.render(null); });
 }
 
-/** Search for `query` and return the rendered row's Install button. */
-async function searchForInstall(query: string, displayName: string): Promise<HTMLButtonElement> {
+async function search(query: string) {
   typeQuery(query);
   await act(async () => { vi.advanceTimersByTime(300); });
-  const row = [...container.querySelectorAll('button')].find(
-    (button) => button.textContent === 'Install'
-      && button.parentElement?.textContent?.includes(displayName),
+}
+
+/** The Install button on the result row showing `displayName`. */
+function installButton(displayName: string): HTMLButtonElement {
+  const button = [...container.querySelectorAll('button')].find(
+    (candidate) => candidate.textContent === 'Install'
+      && candidate.parentElement?.textContent?.includes(displayName),
   );
-  if (!row) throw new Error(`install button for ${displayName} not rendered`);
-  return row;
+  if (!button) throw new Error(`install button for ${displayName} not rendered`);
+  return button;
 }
 
 function typeQuery(value: string) {
@@ -174,8 +170,8 @@ describe('ThemeStoreDialog', () => {
     vi.useFakeTimers();
     try {
       render();
-      const install = await searchForInstall('dracula', 'Dracula Official');
-      act(() => { install.click(); });
+      await search('dracula');
+      act(() => { installButton('Dracula Official').click(); });
 
       await act(async () => {
         rejectInstall(new Error('Install failed: 503'));
@@ -199,11 +195,9 @@ describe('ThemeStoreDialog', () => {
     vi.useFakeTimers();
     try {
       render();
-      const dracula = await searchForInstall('dracula', 'Dracula Official');
-      const nord = [...container.querySelectorAll('button')].find(
-        (button) => button.textContent === 'Install' && button !== dracula,
-      )!;
-      act(() => { dracula.click(); });
+      await search('dracula');
+      const nord = installButton('Nord Theme');
+      act(() => { installButton('Dracula Official').click(); });
       act(() => { nord.click(); });
 
       await act(async () => { resolveFirst(); });

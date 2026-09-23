@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { OpenVSXExtension } from '../../lib/themes';
-import { modalSurface } from '../design';
+import { modalSurface, NativeModalDialog } from '../design';
 import {
   addInstalledTheme,
   applyTheme,
@@ -12,11 +12,7 @@ import {
   setActiveThemeId,
 } from '../../lib/themes';
 
-/**
- * Mount only while the store is open: closing unmounts it, which is what gives
- * every reopen a clean slate. A search or install still in flight at the close
- * settles into an unmounted component, where its state writes are no-ops.
- */
+/** Mount only while open (`NativeModalDialog`). */
 export function ThemeStoreDialog({
   onClose,
   onThemesChanged,
@@ -32,15 +28,12 @@ export function ThemeStoreDialog({
   const [installing, setInstalling] = useState<ReadonlySet<string>>(() => new Set());
   const [error, setError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const dialogRef = useRef<HTMLDialogElement>(null);
   // Every search takes a new epoch, so only the newest search may write its
   // outcome: an earlier query can answer after a later one.
   const searchEpoch = useRef(0);
 
+  // A debounce still pending at unmount would search for a closed store.
   useEffect(() => {
-    const dialog = dialogRef.current;
-    if (dialog && !dialog.open) dialog.showModal();
-    // A debounce still pending at unmount would search for a closed store.
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
@@ -51,11 +44,8 @@ export function ThemeStoreDialog({
     const newest = () => searchEpoch.current === epoch;
     if (!value.trim()) {
       setResults([]);
-      // An emptied box is the newest search, so it inherits both leftovers of
-      // the request it just superseded: the spinner that request turned on,
-      // whose `finally` is now gated off, and the banner an earlier failure
-      // left behind, which has no query left to be about. Nothing else in this
-      // path clears either.
+      // The request this supersedes has its `finally` gated off, so clear the
+      // spinner it left; an earlier failure's banner has no query left either.
       setLoading(false);
       setError(null);
       return;
@@ -89,8 +79,6 @@ export function ThemeStoreDialog({
         setActiveThemeId(themes[0].id);
         applyTheme(themes[0]);
       }
-      // The parent's callback, so an install that outlives the store still
-      // reaches the picker's list.
       onThemesChanged();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Install failed');
@@ -125,8 +113,7 @@ export function ThemeStoreDialog({
   };
 
   return (
-    <dialog
-      ref={dialogRef}
+    <NativeModalDialog
       onClose={onClose}
       className={`${modalSurface({ padding: 'none', elevation: 'modal' })} fixed inset-0 z-50 m-auto h-[420px] w-[min(380px,calc(100vw-2rem))] backdrop:bg-black/50`}
     >
@@ -213,6 +200,6 @@ export function ThemeStoreDialog({
           })}
         </div>
       </div>
-    </dialog>
+    </NativeModalDialog>
   );
 }

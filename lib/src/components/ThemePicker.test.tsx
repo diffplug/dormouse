@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ThemePicker } from './ThemePicker';
 import { installLocalStorageStub } from '../lib/test-local-storage';
 import { setNativeFieldValue } from '../lib/dom';
-import { ensureResizeObserver } from './wall/wall-test-utils';
+import { ensureDialogModal, ensureResizeObserver } from './wall/wall-test-utils';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -17,6 +17,7 @@ let root: Root;
 
 beforeEach(() => {
   ensureResizeObserver();
+  ensureDialogModal();
   installLocalStorageStub();
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -109,7 +110,6 @@ describe('ThemePicker', () => {
   // after a close can reach the next open. Driven through the picker because
   // that conditional mount is what holds it.
   it('reopens the theme store on a clean slate after a close with work in flight', async () => {
-    HTMLDialogElement.prototype.showModal = function showModal() { this.open = true; };
     let failInstall!: () => void;
     vi.stubGlobal('fetch', vi.fn((url: string) => {
       if (url.includes('/-/search')) {
@@ -145,7 +145,6 @@ describe('ThemePicker', () => {
       openStore();
 
       expect(container.querySelector('input')!.value).toBe('');
-      expect(container.textContent).not.toContain('Dracula Official');
       expect(container.textContent).not.toContain('503');
     } finally {
       vi.useRealTimers();

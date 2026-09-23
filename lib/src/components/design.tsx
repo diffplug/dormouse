@@ -659,6 +659,33 @@ export function ModalFrame({
   );
 }
 
+/**
+ * A native modal `<dialog>`, shown on mount. Mount it only while open: closing
+ * unmounts it, which discards everything its owner held, so no reset-on-close
+ * logic is needed and no in-flight work can reach the next open.
+ */
+export function NativeModalDialog({
+  onClose,
+  className,
+  children,
+}: {
+  onClose: () => void;
+  className?: string;
+  children: ReactNode;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    // StrictMode runs this twice on one element, and a second showModal throws.
+    if (dialog && !dialog.open) dialog.showModal();
+  }, []);
+  return (
+    <dialog ref={dialogRef} onClose={onClose} className={className}>
+      {children}
+    </dialog>
+  );
+}
+
 const MODAL_FOCUSABLE_SELECTOR = [
   'a[href]',
   'button:not([disabled])',
