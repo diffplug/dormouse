@@ -204,6 +204,27 @@ dd {
 .status {
   opacity: 0.95;
 }
+.detail {
+  display: block;
+  font-size: 12px;
+  opacity: 0.95;
+}
+.minted {
+  margin-bottom: 16px;
+}
+.minted .copy {
+  background: var(--vscode-list-activeSelectionBackground);
+  color: var(--vscode-list-activeSelectionForeground);
+}
+.mint {
+  margin-top: 8px;
+}
+.minted code {
+  display: block;
+  margin-bottom: 12px;
+  font: inherit;
+  overflow-wrap: anywhere;
+}
 footer {
   display: flex;
   justify-content: space-between;

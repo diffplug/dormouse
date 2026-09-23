@@ -61,3 +61,40 @@ export async function social(provider: Provider, linking: boolean) {
     throw new Error("Sign-in is temporarily unavailable. Please try again.");
   window.location.assign(url.href);
 }
+
+export interface VoiceToken {
+  id: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+}
+async function voice(method: string, path = ""): Promise<Response> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/voice/tokens${path}`, {
+      method,
+      credentials: "same-origin",
+      cache: "no-store",
+    });
+  } catch {
+    throw new Error("Could not connect. Check your connection and try again.");
+  }
+  // 401/403 on the list means "not for this account"; the caller hides the section.
+  if (response.ok || (method === "GET" && [401, 403].includes(response.status)))
+    return response;
+  if (response.status >= 500)
+    throw new Error("Voice tokens are temporarily unavailable. Try again.");
+  throw new Error("That did not work. Reload the page and try again.");
+}
+/** Null when the server says this account may not use managed voice. */
+export async function getVoiceTokens(): Promise<VoiceToken[] | null> {
+  const response = await voice("GET");
+  return response.ok
+    ? ((await response.json()) as { tokens: VoiceToken[] }).tokens
+    : null;
+}
+export const createVoiceToken = async () =>
+  (await (await voice("POST")).json()) as { id: string; token: string };
+export async function revokeVoiceToken(id: string) {
+  await voice("DELETE", `/${encodeURIComponent(id)}`);
+}

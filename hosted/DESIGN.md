@@ -133,6 +133,7 @@ Buttons and inputs share gently rounded corners from the control radius token an
 - **Inputs:** full-width fields with visible labels. Email and verification code share styling; readonly email keeps its normal appearance. The code field receives focus when revealed.
 - **Feedback:** errors use `role="alert"` and an inline retry action. Notices and loading text use `role="status"`.
 - **Account method rows:** show the provider name with either a Connect action or Connected text. State is communicated in words, not solely through color.
+- **Voice tokens (admin only):** token rows reuse the account method row, with creation date, a detail-role last-used line, and a Revoke action or Revoked text. A newly minted token appears once in a notice block with a primary-colored Copy action and a warning that it will not be shown again.
 - **Navigation:** plain product and external links in the header and footer, with no tab bar or card wrapper.
 
 ## Do's and Don'ts

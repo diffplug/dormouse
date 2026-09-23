@@ -6,15 +6,19 @@ import {
   type FormEvent,
 } from "react";
 import {
+  createVoiceToken,
   getAccounts,
   getProviders,
   getSession,
+  getVoiceTokens,
   post,
   providerNames,
+  revokeVoiceToken,
   social,
   type Account,
   type Provider,
   type Session,
+  type VoiceToken,
 } from "./api";
 import { LOGIN_FRESH_AGE_MS } from "../server/policy-constants";
 
@@ -22,6 +26,9 @@ export function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [enabled, setEnabled] = useState<Provider[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  // Null hides the section: the server alone decides who may use managed voice.
+  const [voiceTokens, setVoiceTokens] = useState<VoiceToken[] | null>(null);
+  const [minted, setMinted] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -42,11 +49,14 @@ export function App() {
       getSession(),
       getProviders(),
     ]);
-    const linked = current ? await getAccounts() : [];
+    const [linked, tokens] = current
+      ? await Promise.all([getAccounts(), getVoiceTokens()])
+      : [[], null];
     if (generation !== refreshGeneration.current) return;
     setSession(current);
     setEnabled(providers);
     setAccounts(linked);
+    setVoiceTokens(tokens);
     history.replaceState(null, "", current ? "/account" : "/login");
   }, []);
   useEffect(() => {
@@ -122,12 +132,29 @@ export function App() {
       await post("sign-out");
       setSession(null);
       setAccounts([]);
+      setVoiceTokens(null);
+      setMinted("");
       setEnterCode(false);
       setCode("");
       await refresh();
       setNotice(
         "Signed out of this browser. Your other devices stay signed in.",
       );
+    });
+  const mintToken = () =>
+    act("mint", async () => {
+      setMinted((await createVoiceToken()).token);
+      setVoiceTokens(await getVoiceTokens());
+    });
+  const revokeToken = (id: string) =>
+    act(`revoke-${id}`, async () => {
+      await revokeVoiceToken(id);
+      setVoiceTokens(await getVoiceTokens());
+    });
+  const copyMinted = () =>
+    act("copy", async () => {
+      await navigator.clipboard.writeText(minted);
+      setNotice("Token copied. Paste it into Dormouse’s voice settings.");
     });
   const fresh =
     session &&
@@ -235,6 +262,60 @@ export function App() {
                       </p>
                     )}
                 </section>
+                {voiceTokens && (
+                  <section aria-labelledby="voice">
+                    <h2 id="voice">Voice tokens</h2>
+                    <p className="help">
+                      A token lets Dormouse desktop speak with managed voice.
+                      Managed voice is in admin-only testing.
+                    </p>
+                    {minted && (
+                      <div className="notice minted">
+                        <p>Copy this token now. You won’t see it again.</p>
+                        <code>{minted}</code>
+                        <button
+                          className="copy"
+                          disabled={!!busy}
+                          onClick={() => void copyMinted()}
+                        >
+                          Copy token
+                        </button>
+                      </div>
+                    )}
+                    {voiceTokens.map((token) => (
+                      <div className="method" key={token.id}>
+                        <span>
+                          Created{" "}
+                          {new Date(token.createdAt).toLocaleDateString()}
+                          <span className="detail">
+                            {token.lastUsedAt
+                              ? `Last used ${new Date(token.lastUsedAt).toLocaleString()}`
+                              : "Never used"}
+                          </span>
+                        </span>
+                        {token.revokedAt ? (
+                          <span className="status">Revoked</span>
+                        ) : (
+                          <button
+                            disabled={!!busy}
+                            onClick={() => void revokeToken(token.id)}
+                          >
+                            {busy === `revoke-${token.id}`
+                              ? "Revoking…"
+                              : "Revoke"}
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    <button
+                      className="mint"
+                      disabled={!!busy}
+                      onClick={() => void mintToken()}
+                    >
+                      {busy === "mint" ? "Creating…" : "Create token"}
+                    </button>
+                  </section>
+                )}
                 <section>
                   <h2>Signed in on this browser</h2>
                   <p className="help">
@@ -247,7 +328,9 @@ export function App() {
                   </button>
                 </section>
                 <p className="footnote">
-                  Hosted voice and remote control are not available yet.
+                  {voiceTokens
+                    ? "Remote control is not available yet."
+                    : "Hosted voice and remote control are not available yet."}
                 </p>
               </>
             ) : (
