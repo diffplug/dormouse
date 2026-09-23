@@ -11,7 +11,7 @@ test("consumed package bytes match the recorded source snapshot", () => {
     files: { filename: string; sha256: string }[];
   };
   expect(build.commit).toMatch(/^[a-f0-9]{40}$/);
-  // A --working-tree sync records dirty: true; production preflight refuses it.
+  // The sync only packs committed revisions; production preflight requires this.
   expect(build.dirty).toBe(false);
   expect(build.files.map((file) => file.filename).sort()).toEqual([
     "pgstencil-0.1.0.tgz",
