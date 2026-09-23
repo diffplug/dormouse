@@ -75,6 +75,27 @@ const cases = [
     notes: ['the merge never ran', '## audit-supply-chain.md', 'VERDICT: PASS', '## audit-application.md', '_No report — this domain produced no fragment._',
       '## audit-ci-secrets.md\n\n_Incomplete — this domain never closed its report'],
     counts: { '_Incomplete — this domain never closed its report': 1 } },
+  // Run 35842217451 composed a 226,302-character body; the clamp keeps the
+  // head, so what reached the issue was `VERDICT: INCONCLUSIVE` for
+  // `audit-ci-secrets.md` without the one `UNVERIFIABLE` line the note sends
+  // the reader to, and without two later domains' sections at all. Every
+  // verdict and non-passing finding is lifted into the head ahead of the
+  // report, where the clamp cannot reach it.
+  { name: 'the lines that decided the verdict outlive truncation', status: 'PASS',
+    verdicts: ['PASS', 'INCONCLUSIVE', 'PASS', 'PASS'],
+    evidence: [null, '- UNVERIFIABLE: token scope needs a live credential', null, null],
+    report: `# Fixture report\n${'filler paragraph. '.repeat(3000)}\n`,
+    expected: 'INCONCLUSIVE', clamped: true,
+    notes: ['- `audit-ci-secrets.md`: - UNVERIFIABLE: token scope needs a live credential',
+      '- `audit-hosted.md`: VERDICT: PASS'] },
+  // The lift reads line starts, so the `FAIL IF` vocabulary every fragment is
+  // written in must not read as a finding: a passing clause quoting one, and
+  // the heading the list sits under, are both PASS evidence.
+  { name: 'a passing FAIL IF clause is not lifted as a finding', status: 'PASS',
+    verdicts: ['PASS', 'PASS', 'PASS', 'PASS'],
+    evidence: ['### FAIL IF results\n- PASS: **FAIL IF** a secret leaks — none does.', null, null, null],
+    unfinished: [0], expected: 'INCONCLUSIVE',
+    counts: { 'FAIL IF': 0 } },
 ];
 for (const scenario of cases) {
   test(`reporting: ${scenario.name}`, (t) => {
@@ -86,13 +107,14 @@ for (const scenario of cases) {
       if (args[0] === 'issue' && args[1] === 'list') process.stdout.write('23\\n');
     `);
     if (scenario.status !== undefined) writeFileSync(join(dir, 'audit-status.txt'), scenario.status);
-    if (scenario.report !== null) writeFileSync(join(dir, 'audit-report.md'), '# Fixture report\n');
+    if (scenario.report !== null) writeFileSync(join(dir, 'audit-report.md'), scenario.report ?? '# Fixture report\n');
     scenario.verdicts.forEach((verdict, i) => {
       if (verdict === null) return;
       const sentinel = scenario.unfinished?.includes(i)
         ? ''
         : `${SENTINEL}\n${scenario.trailingBlank ? '\n' : ''}`;
-      writeFileSync(join(dir, fragments[i]), `VERDICT: ${verdict}\nEvidence\n${sentinel}`);
+      const evidence = scenario.evidence?.[i] ?? 'Evidence';
+      writeFileSync(join(dir, fragments[i]), `VERDICT: ${verdict}\n${evidence}\n${sentinel}`);
     });
     const result = spawnSync('bash', ['-c', reporting], { cwd: dir, env, encoding: 'utf8' });
     assert.equal(result.status, scenario.expected === 'PASS' ? 0 : 1, result.stderr);
@@ -101,6 +123,8 @@ for (const scenario of cases) {
     if (scenario.expected !== 'PASS') {
       const body = readFileSync(join(dir, 'audit-comment.md'), 'utf8');
       assert.match(body, scenario.expected === 'FAIL' ? /Audit failed/ : /Audit reached no usable verdict/);
+      // Without this the truncation case passes vacuously on a body that fit.
+      if (scenario.clamped) assert.match(body, /_Truncated to fit: the full body is \d+ characters\./);
       for (const note of scenario.notes ?? []) assert.ok(body.includes(note), `missing note: ${note}`);
       for (const [note, n] of Object.entries(scenario.counts ?? {})) {
         assert.equal(body.split(note).length - 1, n, `wrong occurrence count for: ${note}`);

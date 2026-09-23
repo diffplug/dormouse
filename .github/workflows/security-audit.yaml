@@ -493,6 +493,30 @@ jobs:
             echo "- **The audit wrote no verdict.** \`audit-status.txt\` was absent, empty, or not \`PASS\`/\`FAIL\`, so the run ended without deciding. Start at the report's own markers: \`UNVERIFIABLE\` is a check the agent could not determine, \`_Incomplete …_\` heads a domain that was cut off mid-report, and a domain section reading \`_No report …_\` is one that never reported — which is what an expired wait deadline looks like." >> "$NOTES"
           fi
 
+          # The notes above index the report by marker, and the clamp below
+          # keeps the head — so on a report too long to post, the markers they
+          # send the reader to are the part that gets cut. Run 35842217451
+          # posted `VERDICT: INCONCLUSIVE` naming `audit-ci-secrets.md`, and
+          # its one `UNVERIFIABLE` line, along with two whole later domains
+          # and their verdicts, fell past 32,000 characters of a 226,302-
+          # character body. Lift every line that carries a verdict or a
+          # non-passing finding into the head, where the clamp cannot reach
+          # it; the full sections still follow for whatever survives.
+          #
+          # Matched at line start after an optional heading or bullet marker,
+          # which is what keeps `### FAIL IF results` and every `- PASS:`
+          # bullet quoting a **FAIL IF** clause out of the lift. `FAIL:` takes
+          # its colon for the same reason; a domain-level failure arrives as
+          # `VERDICT: FAIL` and is caught by the `VERDICT:` alternative.
+          DECIDING=$(mktemp)
+          # Unquoted on purpose: `AUDIT_FRAGMENTS` is a filename list.
+          # shellcheck disable=SC2086
+          for f in $AUDIT_FRAGMENTS; do
+            [ -s "$f" ] || continue
+            grep -hE '^[[:space:]]*(#+[[:space:]]*)?([-*][[:space:]]*)?(VERDICT:|FAIL:|UNVERIFIABLE|BLOCKER|WARNING)' "$f" |
+              cut -c1-500 | sed "s|^|- \`$f\`: |"
+          done > "$DECIDING"
+
           if [ "$STATUS" = "FAIL" ]; then
             TITLE="[security-audit] FAIL on $(date -u +%Y-%m-%d)"
             HEADLINE="Audit failed at $DATE."
@@ -514,6 +538,16 @@ jobs:
               # unreachable, since every path that sets it also records why.
               # Say so rather than filing a blank issue.
               echo "- **Inconclusive for a reason this step could not name.** That is itself a bug in the reporting step."
+              echo
+            fi
+            if [ -s "$DECIDING" ]; then
+              echo "### Lines that decided this verdict"
+              echo
+              echo "_Lifted out of the fragments so truncation cannot cut them. Each domain's full section follows for as far as the body reaches._"
+              echo
+              head -n 40 "$DECIDING"
+              LIFTED=$(wc -l < "$DECIDING")
+              [ "$LIFTED" -gt 40 ] && echo "- _…and $((LIFTED - 40)) more; read them in the transcript._"
               echo
             fi
             if [ -s audit-report.md ]; then
@@ -557,7 +591,7 @@ jobs:
               done
             fi
           } > audit-comment.md
-          rm -f "$NOTES"
+          rm -f "$NOTES" "$DECIDING"
 
           # Truncate before posting, non-fatally. See docs/specs/security-audit.md -> "Outcomes and reporting".
           node scripts/clamp-issue-body.mjs audit-comment.md \
