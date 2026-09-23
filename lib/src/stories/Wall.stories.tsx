@@ -102,6 +102,7 @@ async function openAlertDialog() {
   const header = await requireElement<HTMLElement>('[data-pane-header-for]', 'pane header');
   header.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
   await requireElement('[data-terminal-context]', 'terminal context');
+  (await requireElement<HTMLButtonElement>('[aria-label="Terminal context details"]', 'context Details')).click();
   await settleTerminals();
 }
 
