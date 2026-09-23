@@ -25,6 +25,7 @@ import {
   getActiveWorkspaceId,
   getWorkspacesSnapshot,
   resetWorkspaces,
+  setAutoWorkspaceName,
 } from '../lib/workspace-store';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -236,6 +237,16 @@ describe('WorkspaceStrip', () => {
 
     await rename('');
     expect(nameSpan().classList.contains('italic')).toBe(true);
+  });
+
+  it('never pins an auto-name that moved while the editor was open untouched', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await render();
+    await act(async () => { activateButton(first).click(); });
+    const input = container.querySelector<HTMLInputElement>(`[data-workspace-rename-for="${first}"]`)!;
+    await act(async () => { setAutoWorkspaceName(first, 'dormouse @ main'); });
+    await act(async () => { input.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); });
+    expect(getWorkspacesSnapshot().workspaces[0]).toMatchObject({ name: 'dormouse @ main', nameIsAuto: true });
   });
 
   it('shows the close button with one Workspace and closes an untouched one outright', async () => {

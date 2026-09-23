@@ -13,6 +13,8 @@ vi.mock('dor-lib-common', async (importActual) => {
     ...actual,
     spawnAndCapture: (binary: string, args: readonly string[]) => {
       spawned.push([...args]);
+      // A directory named `hung` stands in for a network mount git never returns from.
+      if (args.some((arg) => arg.endsWith('/hung'))) return new Promise(() => {});
       return actual.spawnAndCapture(binary, args);
     },
   };
@@ -81,6 +83,19 @@ describe('gitInfo', () => {
     mkdirSync(dir);
     git(dir, 'init', '-q', '-b', 'fresh');
     expect((await gitInfo([dir]))[dir]).toEqual({ repo: 'unborn', branch: 'fresh' });
+  });
+
+  it('leaves a lookup past its deadline out of the answer, never answering null', async () => {
+    const hung = join(root, 'hung');
+    mkdirSync(hung, { recursive: true });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const answer = gitInfo([hung]);
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(await answer).toEqual({});
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('ignores anything but a list of strings', async () => {

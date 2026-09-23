@@ -9,18 +9,24 @@ export type GitInfoQuery = (paths: string[]) => Promise<GitInfoResult>;
 
 /** Names are recomputed at most this often. */
 const RECOMPUTE_DELAY_MS = 100;
-/** How long a failed lookup names by directory before it is asked again. */
-const FAILED_RETRY_MS = 30_000;
+/** An unanswered lookup is asked again after this, doubling per miss up to
+ *  `RETRY_MAX_MS`: a hung mount's git never exits, so re-asking at once
+ *  would pile them up. */
+const RETRY_FIRST_MS = 1_000;
+const RETRY_MAX_MS = 5 * 60_000;
 /** Directories remembered before the cache starts over. */
 const CACHE_LIMIT = 1000;
 
 interface CachedGit {
-  info: GitDirInfo | null;
-  /** The newest command finish this answer covers: a later one may have
+  /** The last answer; `undefined` until the host has answered at all. */
+  info?: GitDirInfo | null;
+  /** The newest command finish this entry covers: a later one may have
    *  switched branch without moving the cwd, so it asks again. */
   asOf: number;
-  /** Set on a failed lookup: asked again from this time, whatever `asOf` says. */
+  /** Set while unanswered: asked again from this time, whatever `asOf` says. */
   retryAt?: number;
+  /** Consecutive unanswered lookups, which set the next delay. */
+  misses?: number;
 }
 
 /**
@@ -53,19 +59,25 @@ export function installWorkspaceAutoNaming(
     const paths = [...wanted.keys()].filter((path) => !inflight.has(path));
     if (!gitInfo || paths.length === 0) return;
     for (const path of paths) inflight.add(path);
-    // A path the host left out (past its per-request cap) stays uncached, so
-    // the next pass asks again. A failed request names by directory until
-    // `retryAt`, so it neither loops nor sticks.
-    // Settling after dispose writes only the dead cache: every timer is armed
-    // through `schedule` or `recompute`, both inert once disposed.
+    // A path the host left out (past its cap or its deadline) or a rejected
+    // request is unanswered, never "no repository": it keeps its last answer,
+    // or holds the name if it never had one, and is asked again after a
+    // doubling delay. Settling after dispose writes only the dead cache: every
+    // timer is armed through `schedule` or `recompute`, both inert once disposed.
     const settle = (result: GitInfoResult, failed: boolean) => {
       if (cache.size > CACHE_LIMIT) cache.clear();
-      const retryAt = failed ? Date.now() + FAILED_RETRY_MS : undefined;
+      const now = Date.now();
       for (const path of paths) {
         inflight.delete(path);
         const asOf = wanted.get(path)!;
-        if (failed) cache.set(path, { info: null, asOf, retryAt });
-        else if (path in result) cache.set(path, { info: result[path], asOf });
+        if (!failed && path in result) {
+          cache.set(path, { info: result[path], asOf });
+          continue;
+        }
+        const previous = cache.get(path);
+        const misses = (previous?.misses ?? 0) + 1;
+        const delay = Math.min(RETRY_FIRST_MS * 2 ** (misses - 1), RETRY_MAX_MS);
+        cache.set(path, { info: previous?.info, asOf, retryAt: now + delay, misses });
       }
       schedule();
     };
@@ -97,8 +109,8 @@ export function installWorkspaceAutoNaming(
         const cached = cache.get(cwd.path);
         const stale = !cached || cached.asOf < asOf || (cached.retryAt !== undefined && Date.now() >= cached.retryAt);
         if (stale) wanted.set(cwd.path, Math.max(asOf, wanted.get(cwd.path) ?? 0));
-        // Unanswered: hold the current name rather than flash the folder name first.
-        if (!cached) waiting = true;
+        // Never answered: hold the current name rather than flash the folder name first.
+        if (cached?.info === undefined) waiting = true;
         else votes.push({ cwd, git: cached.info });
       }
       if (waiting) continue;
@@ -110,7 +122,7 @@ export function installWorkspaceAutoNaming(
   };
 
   // One timer, re-aimed after every pass at the earliest deadline still
-  // ahead: failures land in waves, and each has its own. A passed deadline
+  // ahead: misses land in waves, and each has its own. A passed deadline
   // needs none — this pass either re-asked that path or no terminal wants it.
   const armRetry = () => {
     if (retryTimer !== null) clearTimeout(retryTimer);

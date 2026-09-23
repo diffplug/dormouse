@@ -35,7 +35,6 @@ import {
 } from '../lib/workspace-ui-store';
 import {
   createWorkspace,
-  getWorkspace,
   getWorkspacesSnapshot,
   moveWorkspace,
   renameWorkspace,
@@ -102,13 +101,12 @@ export function WorkspaceStrip({
     return () => { tabElementsRef.current.delete(id); };
   }, []);
 
-  // The editor submits on blur, so an untouched submit must not pin an
-  // auto-name; an emptied one hands the name back (`docs/specs/layout.md` →
-  // "Workspace names").
+  // An emptied editor hands the name back to auto-naming; an untouched one
+  // never submits (`submitUntouched` below), so opening it cannot pin an
+  // auto-name (`docs/specs/layout.md` → "Workspace names").
   const finishRename = useCallback((id: WorkspaceId, value: string) => {
-    const trimmed = value.trim();
-    if (!trimmed) resumeAutoWorkspaceName(id);
-    else if (trimmed !== getWorkspace(id)?.name) renameWorkspace(id, trimmed);
+    if (value.trim()) renameWorkspace(id, value);
+    else resumeAutoWorkspaceName(id);
     setRenamingWorkspace(null);
   }, []);
   const cancelRename = useCallback(() => setRenamingWorkspace(null), []);
@@ -346,6 +344,7 @@ const WorkspaceTab = memo(function WorkspaceTab({
           initialValue={name}
           className="h-full min-w-0 flex-1 bg-transparent px-2.5 text-sm outline-none"
           blurAction="submit"
+          submitUntouched={false}
           onSubmit={(value) => onFinishRename(id, value)}
           onCancel={onCancelRename}
         />

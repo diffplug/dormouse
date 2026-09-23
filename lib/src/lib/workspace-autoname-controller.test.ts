@@ -75,7 +75,7 @@ describe('installWorkspaceAutoNaming', () => {
     expect(name()).toBe('a @ dev');
   });
 
-  it('asks again for a path the host left out of its answer', async () => {
+  it('holds the name for a path the host left out, then asks again after a delay', async () => {
     const gitInfo = vi.fn<GitInfoQuery>()
       .mockResolvedValueOnce({ '/p/a': { repo: 'a', branch: 'main' } })
       .mockResolvedValueOnce({ '/p/b': { repo: 'b', branch: 'main' } });
@@ -86,11 +86,16 @@ describe('installWorkspaceAutoNaming', () => {
     dispose = installWorkspaceAutoNaming(gitInfo);
     await settle();
     await settle();
+    expect(name()).toBe('Workspace 1');
+    expect(gitInfo).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await settle();
     expect(gitInfo).toHaveBeenNthCalledWith(2, ['/p/b']);
     expect(name()).toBe('b @ main');
   });
 
-  it('names by directory after a failed lookup, then asks again after the retry deadline', async () => {
+  it('holds the name through a rejected lookup, then asks again after a delay', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const gitInfo = vi.fn<GitInfoQuery>()
       .mockRejectedValueOnce(new Error('sidecar timed out'))
@@ -100,16 +105,48 @@ describe('installWorkspaceAutoNaming', () => {
     dispose = installWorkspaceAutoNaming(gitInfo);
     await settle();
     await settle();
-    expect(name()).toBe('a');
+    expect(name()).toBe('Workspace 1');
     expect(gitInfo).toHaveBeenCalledTimes(1);
 
-    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(1_000);
     await settle();
     expect(gitInfo).toHaveBeenCalledTimes(2);
     expect(name()).toBe('a @ main');
   });
 
-  it('retries every failed wave at its own deadline, not only the first', async () => {
+  it('keeps the last answer when a refresh goes unanswered', async () => {
+    const gitInfo = vi.fn<GitInfoQuery>()
+      .mockResolvedValueOnce({ '/p/a': { repo: 'a', branch: 'main' } })
+      .mockResolvedValue({});
+    pane('p1', '/p/a');
+    setWorkspaceSurfaces(DEFAULT_WORKSPACE_ID, ['p1']);
+    dispose = installWorkspaceAutoNaming(gitInfo);
+    await settle();
+    expect(name()).toBe('a @ main');
+
+    pane('p1', '/p/a', {
+      lastCommand: { id: 'c1', rawCommandLine: 'ls', displayCommand: 'ls', cwdAtStart: cwd('/p/a'), startedAt: 1, finishedAt: 2, source: 'osc633_boundaries' },
+    });
+    await settle();
+    await settle();
+    expect(gitInfo).toHaveBeenCalledTimes(2);
+    expect(name()).toBe('a @ main');
+  });
+
+  it('backs off a path that never answers, doubling the delay', async () => {
+    const gitInfo = vi.fn<GitInfoQuery>(async () => ({})); // a hung mount: always past the deadline
+    pane('p1', '/p/a');
+    setWorkspaceSurfaces(DEFAULT_WORKSPACE_ID, ['p1']);
+    dispose = installWorkspaceAutoNaming(gitInfo);
+    await settle();
+    // Asked at ~0.1 s, then ~1 s, ~2 s, ~4 s and ~8 s after each miss.
+    await vi.advanceTimersByTimeAsync(16_000);
+    expect(gitInfo.mock.calls.length).toBeGreaterThanOrEqual(4);
+    expect(gitInfo.mock.calls.length).toBeLessThanOrEqual(5);
+    expect(name()).toBe('Workspace 1');
+  });
+
+  it('retries every missed wave at its own deadline, not only the first', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const gitInfo = vi.fn<GitInfoQuery>()
       .mockRejectedValueOnce(new Error('cold sidecar'))
@@ -120,15 +157,13 @@ describe('installWorkspaceAutoNaming', () => {
     pane('p1', '/p/a');
     setWorkspaceSurfaces(DEFAULT_WORKSPACE_ID, ['p1']);
     dispose = installWorkspaceAutoNaming(gitInfo);
-    await settle(); // wave A fails
-    await vi.advanceTimersByTimeAsync(1_000);
+    await settle(); // wave A misses
+    await vi.advanceTimersByTimeAsync(400);
     pane('p2', '/p/b');
     setWorkspaceSurfaces(other.id, ['p2']);
-    await settle(); // wave B fails a second later
+    await settle(); // wave B misses later, with a later deadline
     expect(gitInfo).toHaveBeenCalledTimes(2);
 
-    await vi.advanceTimersByTimeAsync(30_000);
-    await settle();
     await vi.advanceTimersByTimeAsync(2_000);
     await settle();
     expect(gitInfo).toHaveBeenCalledTimes(4);

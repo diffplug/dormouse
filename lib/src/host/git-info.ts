@@ -13,8 +13,12 @@ import type { GitDirInfo, GitInfoResult } from '../lib/platform/git-types';
 import { settleAllWithin } from '../lib/settle-within';
 import { runGit } from './git-cli';
 
-/** Lookups still running at this deadline (a hung network mount) answer "no repository". */
+/** Lookups still running at this deadline (a hung network mount) are left out
+ *  of the answer, for the caller to ask again. */
 const LOOKUP_TIMEOUT_MS = 3000;
+/** A lookup that did not answer under the deadline. Distinct from `null`,
+ *  which is a real "no repository" answer. */
+const UNANSWERED = Symbol('unanswered');
 /** Paths answered per request; the rest are left out of the answer, for the
  *  caller to ask again. */
 const MAX_PATHS = 64;
@@ -78,6 +82,15 @@ export async function lookupGitDir(path: string): Promise<GitDirInfo | null> {
 export async function gitInfo(paths: unknown): Promise<GitInfoResult> {
   if (!Array.isArray(paths)) return {};
   const wanted = [...new Set(paths.filter((path): path is string => typeof path === 'string'))].slice(0, MAX_PATHS);
-  const answers = await settleAllWithin(wanted.map(lookupGitDir), LOOKUP_TIMEOUT_MS, null);
-  return Object.fromEntries(wanted.map((path, index) => [path, answers[index]]));
+  const answers = await settleAllWithin<GitDirInfo | null | typeof UNANSWERED>(
+    wanted.map(lookupGitDir), LOOKUP_TIMEOUT_MS, UNANSWERED);
+  // A lookup that missed the deadline is unanswered, never "no repository":
+  // leaving it out is what makes the caller ask again
+  // (`lib/src/lib/platform/git-types.ts`).
+  const entries: [string, GitDirInfo | null][] = [];
+  wanted.forEach((path, index) => {
+    const answer = answers[index];
+    if (answer !== UNANSWERED) entries.push([path, answer]);
+  });
+  return Object.fromEntries(entries);
 }

@@ -194,9 +194,9 @@ A Workspace's name is **auto**, italic (`AUTO_NAME_CLASS`) and derived from its 
 - **A tie keeps the current name when it is among the tied**, else takes the earliest member's (Lath leaf order, then Doors).
 - **Must hold the current name while a lookup is unanswered** (rationale), and `Workspace N` until a terminal reports a directory.
 - **Never ask git about a remote cwd.** **Must re-ask after a command finishes** (rationale). A host without `gitInfo` names by directory.
-- **A path absent from a `gitInfo` answer is unanswered, never "no repository"**: the controller asks again. **A host failure must reject**, never answer `{}`; a rejected lookup names by directory until a short retry deadline.
-- **The editor submitting the displayed name changes nothing**: it submits on blur, and opening it must not pin an auto-name.
-- **Must run only `rev-parse` and `config --get`, reading `HEAD` directly**, so `core.fsmonitor` never runs; a lookup timeout answers "no repository".
+- **A path absent from a `gitInfo` answer is unanswered, never "no repository"**, as is every path of a rejected request. **A host failure must reject**, never answer `{}`. An unanswered path keeps its last answer, else holds the name, and is re-asked after a delay doubling per miss.
+- **An untouched editor never submits**: it submits on blur, and opening it must not pin an auto-name, even one that changed while it was open.
+- **Must run only `rev-parse` and `config --get`, reading `HEAD` directly**, so `core.fsmonitor` never runs; a lookup past its deadline is left out of the answer.
 
 Source of truth: `deriveWorkspaceAutoName` in `lib/src/lib/workspace-autoname.ts`; `installWorkspaceAutoNaming` in `lib/src/lib/workspace-autoname-controller.ts`; `renameWorkspace` / `resumeAutoWorkspaceName` / `setAutoWorkspaceName` in `lib/src/lib/workspace-store.ts`; `finishRename` in `lib/src/components/WorkspaceStrip.tsx`; `gitInfo` in `lib/src/host/git-info.ts`.
 
