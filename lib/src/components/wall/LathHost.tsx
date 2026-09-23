@@ -34,7 +34,8 @@ import { ToolPaneHeader } from './ToolPaneHeader';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { SurfacePaneHeader } from './SurfacePaneHeader';
 import { AlertRingIndicator } from './AlertRingIndicator';
-import { TerminalContext } from './TerminalContext';
+import { TerminalContextOverlay } from './TerminalContextOverlay';
+import type { ContextSide } from './terminal-context-placement';
 import { TerminalContextContext, TerminalResizeContext } from './wall-context';
 
 /** Widened pointer target over each (thin) sash band, in px. */
@@ -108,17 +109,9 @@ const TAB_COMPONENTS: Record<string, ComponentType<PaneProps>> = {
   tool: ToolPaneHeader,
 };
 
-/** For a terminal Surface the pane id is its session id (docs/specs/layout.md).
- *  The terminal context floats over the whole leaf, so it lives here rather than
- *  in the body, whose clipping box it must escape. */
-function TerminalLeafOverlay({ id, title, params }: PaneProps) {
-  const { mounted } = useContext(TerminalContextContext);
-  return (
-    <>
-      <AlertRingIndicator sessionId={id} />
-      {mounted?.id === id && <TerminalContext {...mounted} title={title} tool={isToolParams(params)} />}
-    </>
-  );
+/** Alerts stay attached to their source leaf; context lives above the Wall. */
+function TerminalLeafOverlay({ id }: PaneProps) {
+  return <AlertRingIndicator sessionId={id} />;
 }
 
 // Whole-leaf overlays keyed by `leafMeta.component`: chrome spanning header *and*
@@ -305,10 +298,17 @@ export function LathHost({
   onExternalDrop?: (target: DropTarget | null) => void;
   componentsOverride?: LathComponentsOverride;
 }) {
+  const { mounted: terminalContext } = useContext(TerminalContextContext);
+  const contextPreferences = useRef(new Map<string, ContextSide>());
   const store = lath.store;
   const animator = lath.animator;
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot);
 
+  useEffect(() => {
+    for (const id of contextPreferences.current.keys()) {
+      if (!snapshot.leafMeta.has(id)) contextPreferences.current.delete(id);
+    }
+  }, [snapshot.leafMeta]);
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
 
@@ -730,6 +730,14 @@ export function LathHost({
           />
         );
       })}
+
+      {terminalContext && frames.has(terminalContext.id) && (
+        <TerminalContextOverlay key={terminalContext.id} context={terminalContext}
+          title={snapshot.leafMeta.get(terminalContext.id)?.title}
+          tool={isToolParams(snapshot.leafMeta.get(terminalContext.id)?.params)}
+          lath={lath} wall={rect} source={frames.get(terminalContext.id)!}
+          multiPane={!snapshot.zoomedId && frames.size > 1} preferences={contextPreferences.current} />
+      )}
 
       {/* Drop-preview overlay: the exact rect the current candidate would commit to,
           painted in the selection color (translucent fill + solid border). */}

@@ -4,6 +4,7 @@ import { FrameCornersIcon, XIcon } from '@phosphor-icons/react';
 import { PANE_HEADER_HEIGHT_PX } from '../components/design';
 import { NotepadHeaderButton } from '../components/wall/NotepadHeaderButton';
 import { NotepadPanel } from '../components/NotepadPanel';
+import { placeTerminalContext, type ContextSide } from '../components/wall/terminal-context-placement';
 import { TerminalContextView } from '../components/wall/TerminalContextView';
 
 // Sample terminal output with the shared context presentation and notepad UI.
@@ -88,6 +89,9 @@ function TerminalOutput({ scenario }: { scenario: Scenario }) {
 }
 
 function ContextPrototype({ scenario, initialDetail = null, paneWidth }: { scenario: Scenario; initialDetail?: 'title' | 'modify' | 'reset' | null; paneWidth: number }) {
+  const [side, setSide] = useState<ContextSide | undefined>();
+  const bounds = { x: 0, y: 0, width: paneWidth, height: 680 };
+  const placement = placeTerminalContext(bounds, bounds, false, side);
   const [watching, setWatching] = useState(false);
   const [todo, setTodo] = useState(scenario === 'notification');
   const [command, setCommand] = useState(scenario === 'autorunOff' ? '' : 'git status');
@@ -97,7 +101,7 @@ function ContextPrototype({ scenario, initialDetail = null, paneWidth }: { scena
     <div className="flex items-center gap-2 bg-header-active-bg px-2.5 text-header-active-fg" style={{ height: PANE_HEADER_HEIGHT_PX }}><span>pnpm dev</span><span className="ml-auto flex items-center gap-3"><FrameCornersIcon size={13} /><XIcon size={13} /></span></div>
     <pre className="m-0 p-3 leading-6 text-muted">{'~/projects/dormouse ❯ pnpm dev\n\n  VITE ready\n  ➜  Local: http://localhost:5173/'}</pre>
     <div className="absolute inset-0">
-      <TerminalContextView title="pnpm dev" surfaceRef="surface:3" cwd={PARENT_DIR} helperCwd={HELPER_DIR} mismatch={scenario === 'differentDirectory'}
+      <TerminalContextView compact style={{ left: placement.rect.x, top: placement.rect.y, width: placement.rect.width, height: placement.rect.height }} placement={{ ...placement, manual: side !== undefined, onChange: setSide }} title="pnpm dev" surfaceRef="surface:3" cwd={PARENT_DIR} helperCwd={HELPER_DIR} mismatch={scenario === 'differentDirectory'}
         titleSources={[{ source: 'User override', value: 'Not set' }, { source: 'OSC 2', value: 'pnpm dev', note: 'Used' }, { source: 'OSC 0', value: 'zsh', note: 'Not used' }, { source: 'Command', value: 'pnpm dev', note: 'Fallback' }]}
         scan={scenario === 'scanFailed' ? { status: 'failed' } : { status: 'loaded', entries: scenario === 'noPorts' ? [] : ports }}
         argv0="pnpm" watching={watching} todo={todo} notification={scenario === 'notification' ? { title: 'Tests complete', body: '341 passed, 0 failed' } : null}

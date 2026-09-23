@@ -211,3 +211,30 @@ it('uses the Tool primary terminal without creating a helper or offering helper 
   expect(focusSurface).not.toHaveBeenCalled();
   openHelper.mockRestore(); terminal.mockRestore(); focusSurface.mockRestore();
 });
+
+it('keeps the helper mounted while compact details are toggled', async () => {
+  props.compact = true;
+  render();
+  const terminal = container.querySelector('textarea');
+  expect(button('Open in system browser')).toBeNull();
+  expect(container.textContent).toContain('pnpm dev');
+  expect(container.textContent).toContain('~/repo');
+  await click('Terminal context details');
+  expect(button('Open in system browser')).not.toBeNull();
+  expect(button('Terminal context details').getAttribute('aria-expanded')).toBe('true');
+  await click('Terminal context details');
+  expect(container.querySelector('textarea')).toBe(terminal);
+});
+
+it('position buttons preserve input focus and report the destination', async () => {
+  props.placement = { rect: { x: 0, y: 0, width: 600, height: 400 }, side: 'top', mode: 'half', available: ['top', 'bottom'], manual: false, onChange: vi.fn() };
+  render();
+  const input = container.querySelector('textarea')!;
+  act(() => input.focus());
+  const down = new MouseEvent('pointerdown', { bubbles: true, cancelable: true });
+  act(() => button('Place helper at bottom').dispatchEvent(down));
+  expect(down.defaultPrevented).toBe(true);
+  await click('Place helper at bottom');
+  expect(props.placement.onChange).toHaveBeenCalledWith('bottom');
+  expect(document.activeElement).toBe(input);
+});

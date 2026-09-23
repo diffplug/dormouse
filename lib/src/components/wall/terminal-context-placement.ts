@@ -5,7 +5,7 @@ export type ContextPlacement = { rect: Rect; side: ContextSide; mode: 'adjacent'
 const SIDES: ContextSide[] = ['right', 'left', 'bottom', 'top'];
 const GAP = 8;
 // Compact source/directory/status chrome plus a useful terminal viewport.
-const MIN_WIDTH = 360;
+const MIN_WIDTH = 280;
 const MIN_HEIGHT = 240;
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(value, max));
 

@@ -60,7 +60,21 @@ The label is the `DerivedHeader` from `deriveHeader(...)`; `docs/specs/terminal-
 
 **Must open the terminal context from terminal header, body, and command-mode `a` and `>` entry points.** Browser-only Surfaces and Doors have no context. Tool context displays its primary terminal; `docs/specs/terminal-context.md` → Tool context owns that composition. Application mouse ownership follows `docs/specs/mouse-and-clipboard.md` → Terminal context input.
 
-**Must float the context inside its source Pane with a one-rem inset on every side**, overlapping the header, with a theme-derived edge and raised shadow. Render it in the Lath leaf's overlay slot, outside the body's clipping box, so it follows the leaf's layout without remounting the helper. Keep one context per Wall. Outside pointer press and explicit close dismiss it. No separate context heading or clipboard toolbar is shown.
+**Must render one context per Wall in a stable Wall-level overlay**, with a theme-derived edge and raised shadow. Anchor it to the invoking source, outline that source, and follow its painted bounds without resizing panes or remounting the helper. Outside pointer press and explicit close dismiss it.
+
+**Must choose placement on opening and retain its side while usable.** Never reposition in response to terminal output. Minimized panes do not count; zoom uses single-pane placement.
+
+| Layout | Placement |
+|---|---|
+| Multiple visible panes | Outside the source, separated by 8px; match its outer bounds where possible. Choose the largest usable candidate, ties right / left / bottom / top. Align the shared edge, shifting only to stay inside the Wall. |
+| No usable adjacent candidate; single or zoomed pane | Source's top or bottom half, opposite its visible terminal cursor sampled on opening; unknown, offscreen, or midpoint cursor defaults to top. |
+| Small source or Wall | Expand the half-pane fallback to the minimum usable size, clamped to Wall bounds. |
+
+**Must offer available side buttons plus Auto**, with destination tooltips, accessible labels, and selected state. Remember manual choices per source for the mounted Wall's lifetime; clear on source removal or Auto. Preserve terminal focus on pointer repositioning. An unavailable choice falls back automatically; no preference is persisted to disk.
+
+**Must keep source title, directory, and helper actions visible in compact context**, disclosing title explanation, directory actions, ports, and alerts through Details. Bound detail scrolling so the helper retains space. The full state gallery shares the same presentation.
+
+Source of truth: `placeTerminalContext` in `lib/src/components/wall/terminal-context-placement.ts`; `TerminalContextOverlay` in `lib/src/components/wall/TerminalContextOverlay.tsx`; `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`. Tests: `lib/src/components/wall/terminal-context-placement.test.ts`, `lib/src/components/wall/TerminalContext.test.tsx`, `lib/src/components/Wall.test.tsx`.
 
 **Must reveal the context from the opening pointer position, clamped to its bounds, over 320ms.** Command-mode `a` and `>` use the header's bottom-left; openings without a position use the context's top-left. Keep final layout dimensions throughout the reveal. Start helper creation, settings reads, and port scanning immediately on mount; fade mounted content, including detail dialogs, in over 140ms after 160ms. Reduced motion or disabled layout animation skips both animations and the delay.
 

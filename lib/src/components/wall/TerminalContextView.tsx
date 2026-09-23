@@ -7,6 +7,7 @@ import type { PortUrlEntry } from './port-url';
 import type { HelperStatus } from '../../lib/helper-terminal';
 import { WindowFocusedContext } from './wall-context';
 import { motionIsInstant } from '../../lib/ui-geometry';
+import type { ContextPlacement, ContextSide } from './terminal-context-placement';
 import { messageOf } from '../../lib/errors';
 
 export type PortMode = 'system' | 'iframe' | 'ab-screencast' | 'ab-popout';
@@ -44,6 +45,9 @@ const DETAILS = {
 type Detail = keyof typeof DETAILS;
 export interface TerminalContextViewProps {
   terminalRole?: 'helper' | 'tool';
+  style?: CSSProperties;
+  compact?: boolean;
+  placement?: ContextPlacement & { manual: boolean; onChange(side?: ContextSide): void };
   /** Exit in progress: the view is inert, and `onClose` is not called again. */
   closing?: boolean;
   /** Viewport coordinates the reveal grows from; absent, the top-left corner. */
@@ -150,6 +154,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
     return () => document.removeEventListener('pointerdown', outside, true);
   }, [p.closing, close]);
   const detailRoot = useRef<HTMLDivElement>(null);
+  const [expanded, setExpanded] = useState(!p.compact);
   const [detail, setDetail] = useState(p.initialDetail ?? null);
   useEffect(() => {
     if (!detail) return;
@@ -169,8 +174,8 @@ export function TerminalContextView(p: TerminalContextViewProps) {
   const status = HELPER_STATUS[p.status];
   const isTool = p.terminalRole === 'tool';
   const statusLabel = isTool ? (p.status === 'running' ? `Running ${p.command}…` : 'At prompt') : status.label(p.command);
-  return <section ref={surface} aria-label="Terminal context" data-terminal-context tabIndex={-1} inert={p.closing} aria-hidden={p.closing || undefined} style={SURFACE_STYLE}
-    className={`${TERMINAL_CONTEXT_SURFACE_CLASS} ${motionClass} ${p.closing ? 'pointer-events-none' : ''} absolute inset-4 flex flex-col overflow-hidden text-sm`}
+  return <section ref={surface} aria-label="Terminal context" data-terminal-context tabIndex={-1} inert={p.closing} aria-hidden={p.closing || undefined} style={{ ...SURFACE_STYLE, ...p.style }} data-context-side={p.placement?.side}
+    className={`${TERMINAL_CONTEXT_SURFACE_CLASS} ${motionClass} ${p.closing ? 'pointer-events-none' : ''} absolute ${p.style ? '' : 'inset-4'} flex flex-col overflow-hidden text-sm`}
     onContextMenu={event => event.preventDefault()}
     onKeyDown={event => {
       if ((event.target as HTMLElement).closest('[data-helper-terminal], [data-context-terminal]') && !detail) return;
@@ -181,16 +186,16 @@ export function TerminalContextView(p: TerminalContextViewProps) {
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (detail) setDetail(null); else close(); }
     }}>
     <div ref={content} className="terminal-context-content flex min-h-0 flex-1 flex-col">
-      <div className="shrink-0 px-3 py-2">
+      <div className="shrink-0 max-h-[45%] overflow-auto px-3 py-2">
         <div className="grid grid-cols-[4rem_1fr] items-center gap-y-1">
           <span className="text-muted">Title</span>
           <div className="flex h-6 min-w-0 items-center gap-1.5">
-            <span className="truncate">{p.title}</span><ContextAction label="Explain this title" onClick={() => setDetail('title')}><BugBeetleIcon size={15} />Explain</ContextAction>
-            <div className="ml-auto flex shrink-0 items-center gap-2 text-muted"><ContextCopyAction label="Copy surface identifier" onCopy={() => attempt(p.onCopyRef)}><span>{p.surfaceRef}</span><CopyIcon size={12} /></ContextCopyAction><ContextAction label="Close terminal context" onClick={close} muted><XIcon size={15} /></ContextAction></div>
+            <span className="truncate">{p.title}</span>{expanded && <ContextAction label="Explain this title" onClick={() => setDetail('title')}><BugBeetleIcon size={15} />Explain</ContextAction>}
+            <div className="ml-auto flex shrink-0 items-center gap-2 text-muted"><ContextCopyAction label="Copy surface identifier" onCopy={() => attempt(p.onCopyRef)}><span>{p.surfaceRef}</span><CopyIcon size={12} /></ContextCopyAction>{p.compact && <button type="button" aria-label="Terminal context details" aria-expanded={expanded} onClick={() => setExpanded(value => !value)} className={`h-6 rounded px-1.5 ${SUBTLE_ACTION_COLOR_CLASS} ${SUBTLE_ACTION_INTERACTION_CLASS}`}>Details</button>}<ContextAction label="Close terminal context" onClick={close} muted><XIcon size={15} /></ContextAction></div>
           </div>
           <span className="text-muted">Dir</span>
-          <div className="flex min-h-6 min-w-0 flex-wrap items-center gap-1.5"><span className="truncate" title={p.cwd}>{p.cwd}</span><ContextOpenAction label={p.canExplore ? p.explorerLabel : 'Directory unavailable on this host'} disabled={!p.canExplore} onOpen={() => attempt(p.onExplore)}><ArrowSquareOutIcon size={15} />{p.explorerLabel}</ContextOpenAction><ContextCopyAction label="Copy absolute path" onCopy={() => attempt(p.onCopyPath)}><CopyIcon size={14} />Copy path</ContextCopyAction></div>
-          <span className="text-muted">Ports</span>
+          <div className="flex min-h-6 min-w-0 flex-wrap items-center gap-1.5"><span className="truncate" title={p.cwd}>{p.cwd}</span>{expanded && <><ContextOpenAction label={p.canExplore ? p.explorerLabel : 'Directory unavailable on this host'} disabled={!p.canExplore} onOpen={() => attempt(p.onExplore)}><ArrowSquareOutIcon size={15} />{p.explorerLabel}</ContextOpenAction><ContextCopyAction label="Copy absolute path" onCopy={() => attempt(p.onCopyPath)}><CopyIcon size={14} />Copy path</ContextCopyAction></>}</div>
+          {expanded && <><span className="text-muted">Ports</span>
           <div className="flex min-h-7 flex-wrap items-center gap-2">
             {p.scan.status === 'scanning' ? <span className="text-muted">Scanning ports…</span> : p.scan.status === 'failed' ? <span className="text-error">Port scan failed · Reopen to try again</span> : !selected ? <span className="text-muted">No listening ports</span> : <>
               {entries.length > 1 ? <div className="inline-flex shrink-0 items-center gap-2"><select aria-label="Port" value={selected.port} onChange={e => setPort(Number(e.target.value))} className="h-6 rounded border border-input-border bg-input-bg px-1 text-foreground">{entries.map(entry => <option key={entry.port} value={entry.port}>{entry.host}:{entry.port}{entry.processName ? ` · ${entry.processName}` : ''}</option>)}</select><span className="text-muted">{entries.length} ports</span></div> : <><span>{selected.host}:{selected.port}</span><span className="text-muted">{selected.processName}</span></>}
@@ -202,10 +207,19 @@ export function TerminalContextView(p: TerminalContextViewProps) {
               </div>
             </>}
           </div>
-          <span className="text-muted">Alerts</span><div className="flex h-6 items-center gap-2"><span>{p.argv0 ? `Watch all ${p.argv0} commands` : 'No command running'}</span>{p.argv0 && <OnOffSwitch on={p.watching} onEnable={p.onWatch} onDisable={p.onWatch} label={`Watch all ${p.argv0} commands`} />}<span className="mx-1 h-3 border-l border-border" /><span>TODO</span><OnOffSwitch on={p.todo} onEnable={p.onTodo} onDisable={p.onTodo} label="TODO" /></div>
+          <span className="text-muted">Alerts</span><div className="flex h-6 items-center gap-2"><span>{p.argv0 ? `Watch all ${p.argv0} commands` : 'No command running'}</span>{p.argv0 && <OnOffSwitch on={p.watching} onEnable={p.onWatch} onDisable={p.onWatch} label={`Watch all ${p.argv0} commands`} />}<span className="mx-1 h-3 border-l border-border" /><span>TODO</span><OnOffSwitch on={p.todo} onEnable={p.onTodo} onDisable={p.onTodo} label="TODO" /></div></>}
         </div>
-        {p.notification && <div className="ml-16 mt-2 border-l-2 border-border py-1 pl-3"><div>{p.notification.title}</div><div className="whitespace-pre-wrap text-muted">{p.notification.body}</div></div>}
+        {expanded && p.notification && <div className="ml-16 mt-2 border-l-2 border-border py-1 pl-3"><div>{p.notification.title}</div><div className="whitespace-pre-wrap text-muted">{p.notification.body}</div></div>}
       </div>
+      {p.placement && <div aria-label="Helper placement" className="flex shrink-0 flex-wrap items-center gap-1 px-3 pb-1">
+        {p.placement.available.map(side => <button key={side} type="button" title={`Place helper at ${side}`} aria-label={`Place helper at ${side}`} aria-pressed={p.placement!.side === side}
+          onPointerDown={event => event.preventDefault()} onClick={() => p.placement!.onChange(side)}
+          className={`inline-flex h-6 w-7 items-center justify-center rounded aria-pressed:bg-current/10 ${SUBTLE_ACTION_COLOR_CLASS} ${SUBTLE_ACTION_INTERACTION_CLASS}`}>
+          <svg aria-hidden width="18" height="16" viewBox="0 0 18 16" fill="none"><rect x="1" y="1" width="16" height="14" rx="1" stroke="currentColor" strokeWidth="2" />
+            <rect x={side === 'right' ? 10 : 4} y={side === 'bottom' ? 9 : 4} width={side === 'left' || side === 'right' ? 4 : 10} height={side === 'top' || side === 'bottom' ? 3 : 8} rx="0.5" fill="currentColor" /></svg>
+        </button>)}
+        <ContextAction label="Use automatic helper placement" onClick={() => p.placement!.onChange()} disabled={!p.placement.manual}>Auto</ContextAction>
+      </div>}
       <div className="@container flex min-h-0 flex-1 flex-col border-t border-border">
         <div aria-label={isTool ? 'Tool terminal status' : 'Helper terminal status'} className="flex h-9 shrink-0 items-center gap-3 whitespace-nowrap px-3">
           <span className="hidden shrink-0 items-center gap-2 font-semibold @[48rem]:flex"><TerminalIcon size={15} />{isTool ? 'Tool terminal' : 'Helper terminal'}</span>
@@ -219,7 +233,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
         <div className="min-h-0 flex-1 bg-terminal-bg text-terminal-fg">{p.children}</div>
       </div>
     {p.notepadPanel}
-    {detail && <div className="absolute inset-0 z-10 bg-app-bg/35" onClick={() => setDetail(null)}><div ref={detailRoot} role="dialog" aria-modal="true" aria-label={DETAILS[detail].label} className={`${POPUP_SURFACE_CLASS} absolute left-3 right-3 top-9 p-4`} onClick={e => e.stopPropagation()}>
+    {detail && <div className="absolute inset-0 z-10 bg-app-bg/35" onClick={() => setDetail(null)}><div ref={detailRoot} role="dialog" aria-modal="true" aria-label={DETAILS[detail].label} className={`${POPUP_SURFACE_CLASS} absolute inset-x-3 top-3 max-h-[calc(100%-1.5rem)] overflow-auto p-4`} onClick={e => e.stopPropagation()}>
       <div className="mb-3 flex items-center justify-between font-semibold"><span>{DETAILS[detail].heading}</span><ContextAction label="Close details" onClick={() => setDetail(null)} muted><XIcon size={14} /></ContextAction></div>
       {detail === 'title' ? <div className="grid grid-cols-[8rem_1fr_auto] gap-x-3 gap-y-2">{p.titleSources.map((source, index) => <div className="contents" key={index}><span className="text-muted">{source.source}</span><span>{source.value}</span><span className="text-muted">{source.note}</span></div>)}</div> : detail === 'modify' ? <><input autoFocus aria-label="Default helper autorun command" value={command} onChange={e => setCommand(e.target.value)} maxLength={4096} placeholder="Leave empty to turn autorun off" className="w-full border-b border-input-border bg-input-bg px-2 py-1.5 outline-focus-ring" /><p className="mb-4 mt-2 text-muted">Global default. Applies to new and reset helpers. Leave empty to turn autorun off.</p><div className="flex justify-end gap-2"><ContextAction label="Reset helper terminal" onClick={() => setDetail('reset')}>Reset helper…</ContextAction><ContextAction label="Save default" busy={busy} onClick={() => void submit(() => p.onModify(command))}>Save default</ContextAction></div></> : <><p>Discard this helper, including scrollback, unfinished input, and any running program? Unsaved edits will be lost.</p><p className="mb-4 mt-2 text-muted">A fresh helper starts in the parent's current directory using the global autorun default.</p><div className="flex justify-end gap-2"><ContextAction label="Keep helper" onClick={() => setDetail(null)}>Keep helper</ContextAction><ContextAction label="Discard and reset" busy={busy} onClick={() => void submit(p.onReset)}>Discard and reset</ContextAction></div></>}
       {error && <p role="alert" className="mt-2 text-error">{error}</p>}

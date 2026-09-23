@@ -749,6 +749,7 @@ describe('Wall on the Lath engine', () => {
         }));
       });
       await flush();
+      act(() => container.querySelector<HTMLButtonElement>('[aria-label="Terminal context details"]')!.click());
       const portRow = document.querySelector<HTMLButtonElement>(
         '[data-terminal-context] button[aria-label="Open in agent-browser screencast"]',
       )!;
@@ -3122,12 +3123,14 @@ describe('Wall on the Lath engine', () => {
       });
       await flush();
 
+      act(() => container.querySelector<HTMLButtonElement>('[aria-label="Terminal context details"]')!.click());
       const portRow = document.querySelector<HTMLButtonElement>(
         '[data-terminal-context] button[aria-label="Open in agent-browser screencast"]',
       );
       expect(portRow).not.toBeNull();
       const contextMenu = portRow!.closest('[data-terminal-context]')!;
-      expect(contextMenu.closest('[data-lath-leaf]')).toBe(header.closest('[data-lath-leaf]'));
+      expect(contextMenu.closest('[data-lath-leaf]')).toBeNull();
+      expect(contextMenu.parentElement?.classList.contains('lath-host')).toBe(true);
       expect(contextMenu.closest('.lath-leaf-body')).toBeNull();
       await act(async () => {
         portRow!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -3797,4 +3800,38 @@ it('leaves a reveal for a hidden Workspace unanswered', async () => {
   });
   expect(refit).not.toHaveBeenCalled();
   expect(container.querySelector('[data-terminal-context]')).toBeNull();
+});
+
+it('moves a retained helper without resizing or replacing its source, and remembers the manual side', async () => {
+  const retained: helpers.HelperTerminal = { id: 'placement-helper', parentId: 'placement-source', command: '', status: 'preserved' };
+  vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'placement-source' ? retained : undefined);
+  const openHelper = vi.spyOn(helpers, 'openHelper').mockResolvedValue(retained);
+  await act(async () => root.render(<Wall initialPaneIds={['placement-source']} />));
+  await flush();
+  const source = container.querySelector<HTMLElement>('[data-lath-leaf="placement-source"]')!;
+  const sourceStyle = source.getAttribute('style');
+  const open = async () => {
+    act(() => container.querySelector('[data-pane-header-for="placement-source"]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })));
+    await flush();
+  };
+  await open();
+  const menu = container.querySelector<HTMLElement>('[data-terminal-context]')!;
+  const terminal = menu.querySelector('[data-helper-terminal]');
+  const helper = helpers.getHelper('placement-source');
+  expect(helper).toBeDefined();
+  expect(terminal).not.toBeNull();
+  act(() => menu.querySelector<HTMLButtonElement>('[aria-label="Place helper at bottom"]')!.click());
+  expect(menu.dataset.contextSide).toBe('bottom');
+  expect(menu.querySelector('[data-helper-terminal]')).toBe(terminal);
+  expect(openHelper).toHaveBeenCalledTimes(1);
+  expect(helpers.getHelper('placement-source')).toBe(helper);
+  expect(source.getAttribute('style')).toBe(sourceStyle);
+  expect(container.querySelector('[data-lath-leaf="placement-source"]')).toBe(source);
+  act(() => menu.querySelector<HTMLButtonElement>('[aria-label="Close terminal context"]')!.click());
+  await flush();
+  await open();
+  expect(container.querySelector<HTMLElement>('[data-terminal-context]')!.dataset.contextSide).toBe('bottom');
+  expect(helpers.getHelper('placement-source')).toBe(helper);
+  act(() => container.querySelector<HTMLButtonElement>('[aria-label="Use automatic helper placement"]')!.click());
+  expect(container.querySelector<HTMLElement>('[data-terminal-context]')!.dataset.contextSide).toBe('top');
 });
