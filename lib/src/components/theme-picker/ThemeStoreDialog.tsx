@@ -34,6 +34,10 @@ export function ThemeStoreDialog({
   // in two shapes — an earlier query answering after a later one, and a request
   // outliving the close, repopulating the slate the reset effect just cleared.
   const searchEpoch = useRef(0);
+  // Bumped only by a close, where `searchEpoch` is bumped by a search as well.
+  // An install outlives its row — the user can type on while it runs — so it
+  // must survive a later search and be invalidated by the close alone.
+  const openEpoch = useRef(0);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -53,6 +57,7 @@ export function ThemeStoreDialog({
       // doSearch after close and repopulates results/loading for the old query.
       if (debounceRef.current) clearTimeout(debounceRef.current);
       searchEpoch.current += 1;
+      openEpoch.current += 1;
       setQuery('');
       setResults([]);
       setError(null);
@@ -71,10 +76,13 @@ export function ThemeStoreDialog({
     const newest = () => searchEpoch.current === epoch;
     if (!value.trim()) {
       setResults([]);
-      // An emptied box is the newest search, so it inherits the spinner any
-      // request it just superseded turned on: that request's `finally` is
-      // gated off, and nothing else here would clear `loading`.
+      // An emptied box is the newest search, so it inherits both leftovers of
+      // the request it just superseded: the spinner that request turned on,
+      // whose `finally` is now gated off, and the banner an earlier failure
+      // left behind, which has no query left to be about. Nothing else in this
+      // path clears either.
       setLoading(false);
+      setError(null);
       return;
     }
     setLoading(true);
@@ -97,6 +105,13 @@ export function ThemeStoreDialog({
 
   const handleInstall = async (extension: OpenVSXExtension) => {
     const key = `${extension.namespace}/${extension.name}`;
+    // The install outlives the close the same way a search does, so its banner
+    // is gated the same way: a failure landing after the store closed would
+    // otherwise repopulate the slate the reset effect cleared, and greet the
+    // next open with an error about an extension no longer on screen. The
+    // install itself is not cancelled — the themes it fetched are still
+    // installed, which is what the user asked for.
+    const epoch = openEpoch.current;
     setInstalling(key);
     setError(null);
     try {
@@ -108,7 +123,9 @@ export function ThemeStoreDialog({
       }
       onThemesChanged();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Install failed');
+      if (openEpoch.current === epoch) {
+        setError(reason instanceof Error ? reason.message : 'Install failed');
+      }
     } finally {
       setInstalling(null);
     }

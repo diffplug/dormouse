@@ -16,7 +16,7 @@ vi.mock('../../lib/themes', () => ({
   setActiveThemeId: vi.fn(),
 }));
 
-import { searchThemes, type OpenVSXExtension } from '../../lib/themes';
+import { fetchExtensionThemes, searchThemes, type OpenVSXExtension } from '../../lib/themes';
 import { ThemeStoreDialog } from './ThemeStoreDialog';
 import { setNativeFieldValue } from '../../lib/dom';
 
@@ -150,6 +150,66 @@ describe('ThemeStoreDialog', () => {
       expect(container.textContent).not.toContain('Searching...');
       expect(container.textContent).not.toContain('Dracula Official');
       expect(container.textContent).toContain('Search for a VS Code theme to install');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('clears a failed search\'s error banner when the box is emptied', async () => {
+    let rejectSearch!: (reason: Error) => void;
+    searchThemesMock.mockImplementationOnce(
+      () => new Promise((_resolve, reject) => { rejectSearch = reject; }),
+    );
+
+    vi.useFakeTimers();
+    try {
+      render(true);
+      typeQuery('dracula');
+      act(() => { vi.advanceTimersByTime(300); });
+      await act(async () => {
+        rejectSearch(new Error('OpenVSX is unreachable'));
+      });
+      expect(container.textContent).toContain('OpenVSX is unreachable');
+
+      // An emptied box has no query for the banner to be about, and its own
+      // empty state is what should be showing instead.
+      typeQuery('');
+      act(() => { vi.advanceTimersByTime(300); });
+
+      expect(container.textContent).not.toContain('OpenVSX is unreachable');
+      expect(container.textContent).toContain('Search for a VS Code theme to install');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('discards a failed install whose rejection lands after the store closes', async () => {
+    searchThemesMock.mockImplementationOnce(async () => ({
+      extensions: [extension('dracula', 'Dracula Official')],
+    }));
+    let rejectInstall!: (reason: Error) => void;
+    vi.mocked(fetchExtensionThemes).mockImplementationOnce(
+      () => new Promise((_resolve, reject) => { rejectInstall = reject; }),
+    );
+
+    vi.useFakeTimers();
+    try {
+      render(true);
+      typeQuery('dracula');
+      await act(async () => { vi.advanceTimersByTime(300); });
+
+      const install = [...container.querySelectorAll('button')]
+        .find((button) => button.textContent === 'Install');
+      if (!install) throw new Error('install button not rendered');
+      act(() => { install.click(); });
+
+      render(false); // close while the install is still in flight
+      await act(async () => {
+        rejectInstall(new Error('Install failed: 503'));
+      });
+      render(true);
+
+      expect(container.textContent).not.toContain('Install failed: 503');
     } finally {
       vi.useRealTimers();
     }
