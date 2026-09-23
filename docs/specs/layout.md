@@ -74,7 +74,7 @@ The label is the `DerivedHeader` from `deriveHeader(...)`; `docs/specs/terminal-
 
 **Must keep source title, directory, and helper actions visible in compact context**, disclosing title explanation, directory actions, ports, and alerts through Details. Bound detail scrolling so the helper retains space.
 
-Source of truth: `placeTerminalContext` in `lib/src/components/wall/terminal-context-placement.ts`; `TerminalContextOverlay` in `lib/src/components/wall/TerminalContextOverlay.tsx`; `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`. Tests: `lib/src/components/wall/terminal-context-placement.test.ts`, `lib/src/components/wall/TerminalContext.test.tsx`, `lib/src/components/Wall.test.tsx`.
+Source of truth: `placeTerminalContext` in `lib/src/components/wall/terminal-context-placement.ts`; `TerminalContextOverlay` in `lib/src/components/wall/TerminalContextOverlay.tsx`; `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`. Tests: `lib/src/components/wall/terminal-context-placement.test.ts`, `lib/src/components/wall/TerminalContext.test.tsx`, `lib/src/components/wall/TerminalContextOverlay.test.tsx`, `lib/src/components/Wall.test.tsx`.
 
 **Must reveal the context from the opening pointer position, clamped to its bounds, over 320ms.** Command-mode `a` and `>` use the header's bottom-left; openings without a position use the context's top-left. Keep final layout dimensions throughout the reveal. Start helper creation, settings reads, and port scanning immediately on mount; fade mounted content, including detail dialogs, in over 140ms after 160ms. Reduced motion or disabled layout animation skips both animations and the delay.
 
