@@ -28,30 +28,25 @@ export function TerminalContextOverlay({ context, title, tool, wall, source, mul
   const [manual, setManual] = useState(() => preferences.get(context.id));
   const lastSide = useRef<ContextSide | undefined>(manual);
   const host = useRef<HTMLDivElement>(null);
-  const measure = () => {
-    const painted = lath.animator.framesAt(nowMs()).get(context.id)?.rect ?? source;
-    return { painted, placement: placeTerminalContext(wall, painted, multiPane, manual ?? lastSide.current, cursorSide) };
-  };
-  const [shown, setShown] = useState<{ painted: Rect; placement: ContextPlacement }>(measure);
+  const measure = () => placeTerminalContext(wall, lath.animator.framesAt(nowMs()).get(context.id)?.rect ?? source,
+    multiPane, manual ?? lastSide.current, cursorSide);
+  const [shown, setShown] = useState<ContextPlacement>(measure);
   useLayoutEffect(() => {
     const update = () => {
       const next = measure();
-      lastSide.current = next.placement.side;
-      writeBox(host.current, next.placement.rect);
-      setShown(previous => previous.placement.side === next.placement.side
-        && previous.placement.available.join() === next.placement.available.join() ? previous : next);
+      lastSide.current = next.side;
+      writeBox(host.current, next.rect);
+      setShown(previous => previous.side === next.side && previous.available.join() === next.available.join() ? previous : next);
     };
     update();
     return lath.subscribeFrames(update);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `measure` reads exactly these inputs
   }, [lath, context.id, manual, multiPane, cursorSide, wall.x, wall.y, wall.width, wall.height, source.x, source.y, source.width, source.height]);
-  return <>
-    <div ref={host} data-context-for={context.id} className="absolute" style={{ ...boxStyle(shown.placement.rect), zIndex: Z_CONTEXT }}>
-      <TerminalContext {...context} title={title} tool={tool} compact placement={{ ...shown.placement, manual: manual !== undefined, onChange: side => {
-        if (side) preferences.set(context.id, side); else preferences.delete(context.id);
-        lastSide.current = side;
-        setManual(side);
-      } }} />
-    </div>
-  </>;
+  return <div ref={host} data-context-for={context.id} className="absolute" style={{ ...boxStyle(shown.rect), zIndex: Z_CONTEXT }}>
+    <TerminalContext {...context} title={title} tool={tool} compact placement={{ ...shown, manual: manual !== undefined, onChange: side => {
+      if (side) preferences.set(context.id, side); else preferences.delete(context.id);
+      lastSide.current = side;
+      setManual(side);
+    } }} />
+  </div>;
 }

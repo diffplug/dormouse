@@ -193,12 +193,12 @@ export function TerminalContextView(p: TerminalContextViewProps) {
           <div className="flex min-h-6 min-w-0 flex-wrap items-center gap-1.5">
             <span className="min-w-[8ch] flex-1 truncate" title={p.title}>{p.title}</span>{expanded && <ContextAction label="Explain this title" onClick={() => setDetail('title')}><BugBeetleIcon size={15} />Explain</ContextAction>}
             <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2 text-muted"><ContextCopyAction label="Copy surface identifier" onCopy={() => attempt(p.onCopyRef)}><span>{p.surfaceRef}</span><CopyIcon size={12} /></ContextCopyAction>{p.compact && <ContextAction label="Terminal context details" expanded={expanded} onClick={() => setExpanded(value => !value)}>Details</ContextAction>}<div data-context-header-actions className="flex shrink-0 items-center gap-0.5">{p.placement && <div aria-label="Helper placement" className="flex shrink-0 items-center gap-0.5">
-        {p.placement.available.map(side => <ContextAction key={side} label={`Place helper at ${side}`} pressed={p.placement!.side === side} keepFocus onClick={() => p.placement!.onChange(side)}>
-          <svg aria-hidden width="18" height="16" viewBox="0 0 18 16" fill="none"><rect x="1" y="1" width="16" height="14" rx="1" stroke="currentColor" strokeWidth="2" />
-            <rect x={side === 'right' ? 10 : 4} y={side === 'bottom' ? 9 : 4} width={side === 'left' || side === 'right' ? 4 : 10} height={side === 'top' || side === 'bottom' ? 3 : 8} rx="0.5" fill="currentColor" /></svg>
-        </ContextAction>)}
-        <ContextAction label="Use automatic helper placement" onClick={() => p.placement!.onChange()} disabled={!p.placement.manual} keepFocus>Auto</ContextAction>
-      </div>}<ContextAction label="Close terminal context" onClick={close} muted><XIcon size={15} /></ContextAction></div></div>
+              {p.placement.available.map(side => <ContextAction key={side} label={`Place helper at ${side}`} pressed={p.placement!.side === side} keepFocus onClick={() => p.placement!.onChange(side)}>
+                <svg aria-hidden width="18" height="16" viewBox="0 0 18 16" fill="none"><rect x="1" y="1" width="16" height="14" rx="1" stroke="currentColor" strokeWidth="2" />
+                  <rect x={side === 'right' ? 10 : 4} y={side === 'bottom' ? 9 : 4} width={side === 'left' || side === 'right' ? 4 : 10} height={side === 'top' || side === 'bottom' ? 3 : 8} rx="0.5" fill="currentColor" /></svg>
+              </ContextAction>)}
+              <ContextAction label="Use automatic helper placement" onClick={() => p.placement!.onChange()} disabled={!p.placement.manual} keepFocus>Auto</ContextAction>
+            </div>}<ContextAction label="Close terminal context" onClick={close} muted><XIcon size={15} /></ContextAction></div></div>
           </div>
           <span className="text-muted">Dir</span>
           <div className="flex min-h-6 min-w-0 flex-wrap items-center gap-1.5"><span className="truncate" title={p.cwd}>{p.cwd}</span>{expanded && <><ContextOpenAction label={p.canExplore ? p.explorerLabel : 'Directory unavailable on this host'} disabled={!p.canExplore} onOpen={() => attempt(p.onExplore)}><ArrowSquareOutIcon size={15} />{p.explorerLabel}</ContextOpenAction><ContextCopyAction label="Copy absolute path" onCopy={() => attempt(p.onCopyPath)}><CopyIcon size={14} />Copy path</ContextCopyAction></>}</div>
@@ -218,7 +218,6 @@ export function TerminalContextView(p: TerminalContextViewProps) {
         </div>
         {expanded && p.notification && <div className="ml-12 mt-2 border-l-2 border-border py-1 pl-3"><div>{p.notification.title}</div><div className="whitespace-pre-wrap text-muted">{p.notification.body}</div></div>}
       </div>
-
       <div className="@container flex min-h-0 flex-1 flex-col border-t border-border">
         <div aria-label={isTool ? 'Tool terminal status' : 'Helper terminal status'} className="flex h-9 shrink-0 items-center gap-3 whitespace-nowrap px-3">
           <span className="hidden shrink-0 items-center gap-2 font-semibold @[48rem]:flex"><TerminalIcon size={15} />{isTool ? 'Tool terminal' : 'Helper terminal'}</span>

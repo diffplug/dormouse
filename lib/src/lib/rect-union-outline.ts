@@ -2,11 +2,16 @@ import type { RingRect } from './rect-tween';
 import { QUARTER_TURN } from './ring-geometry';
 
 type Point = { x: number; y: number };
-const same = (a: Point, b: Point) => a.x === b.x && a.y === b.y;
 
-/** Outer contour of two overlapping rectangles. Grid cells remove internal seams
- *  before rounding, so a smaller helper leaves a step rather than framing peers. */
-export function rectUnionOutline(a: RingRect, b: RingRect) {
+/** Bounding box of two rectangles. */
+export function unionBounds(a: RingRect, b: RingRect): RingRect {
+  const left = Math.min(a.left, b.left), top = Math.min(a.top, b.top);
+  return { left, top, width: Math.max(a.left + a.width, b.left + b.width) - left, height: Math.max(a.top + a.height, b.top + b.height) - top };
+}
+
+/** Corner points of the outer contour of two overlapping rectangles. Grid cells remove
+ *  internal seams before rounding, so a smaller helper leaves a step rather than framing peers. */
+export function rectUnionOutline(a: RingRect, b: RingRect): Point[] {
   const xs = [...new Set([a.left, a.left + a.width, b.left, b.left + b.width])].sort((x, y) => x - y);
   const ys = [...new Set([a.top, a.top + a.height, b.top, b.top + b.height])].sort((x, y) => x - y);
   const inside = (x: number, y: number) => [a, b].some(r => x > r.left && x < r.left + r.width && y > r.top && y < r.top + r.height);
@@ -25,15 +30,13 @@ export function rectUnionOutline(a: RingRect, b: RingRect) {
   let edge = edges.shift();
   while (edge) {
     points.push(edge[0]);
-    const next = edges.findIndex(candidate => same(candidate[0], edge![1]));
+    const next = edges.findIndex(candidate => candidate[0].x === edge![1].x && candidate[0].y === edge![1].y);
     edge = next < 0 ? undefined : edges.splice(next, 1)[0];
   }
-  const corners = points.filter((p, i) => {
+  return points.filter((p, i) => {
     const before = points[(i + points.length - 1) % points.length], after = points[(i + 1) % points.length];
     return !((before.x === p.x && p.x === after.x) || (before.y === p.y && p.y === after.y));
   });
-  const rect = { left: xs[0], top: ys[0], width: xs[xs.length - 1] - xs[0], height: ys[ys.length - 1] - ys[0] };
-  return { rect, points: corners.map(p => ({ x: p.x - rect.left, y: p.y - rect.top })) };
 }
 
 export function roundedUnionOutline(points: Point[], radius: number) {

@@ -39,7 +39,7 @@ import {
   type RingEdge,
 } from '../../lib/ring-geometry';
 import { SelectionRing } from './SelectionRing';
-import { rectUnionOutline, roundedUnionOutline } from '../../lib/rect-union-outline';
+import { rectUnionOutline, roundedUnionOutline, unionBounds } from '../../lib/rect-union-outline';
 
 /** The subset of the Lath store the overlay needs — a revision that bumps on every
  *  commit, so the ring re-measures as leaves move / resize / restore. Kept
@@ -94,10 +94,15 @@ function ringIdentity(type: WallSelectionKind, id: string): string {
   return `${type}:${id}`;
 }
 
+const rectsEqual = (a: RingRect, b: RingRect) =>
+  a.top === b.top && a.left === b.left && a.width === b.width && a.height === b.height;
+
+const insetRect = (r: RingRect, d: number): RingRect =>
+  ({ left: r.left + d, top: r.top + d, width: r.width - 2 * d, height: r.height - 2 * d });
+
 function framesEqual(a: RingFrame, b: RingFrame): boolean {
   return (
-    a.rect.top === b.rect.top && a.rect.left === b.rect.left
-    && a.rect.width === b.rect.width && a.rect.height === b.rect.height
+    rectsEqual(a.rect, b.rect)
     && a.shape.tl === b.shape.tl && a.shape.tr === b.shape.tr
     && a.shape.br === b.shape.br && a.shape.bl === b.shape.bl
     && a.shape.inset === b.shape.inset
@@ -106,11 +111,14 @@ function framesEqual(a: RingFrame, b: RingFrame): boolean {
 
 /** The frame the ring currently shows: geometry plus the per-edge motion-smear
  *  `speeds`, populated only while a tween runs; a settled ring carries null speeds,
- *  so its render is clean. Held in a ref and written to the DOM imperatively. */
+ *  so its render is clean. `union` holds the source and helper rects while a terminal
+ *  context is open; `rect` is then their bounds, and the ring never tweens.
+ *  Held in a ref and written to the DOM imperatively. */
 interface DisplayedRing {
   rect: RingRect;
   shape: RingShape;
   speeds: RingEdgeSpeeds | null;
+  union?: readonly [RingRect, RingRect];
 }
 
 /**
@@ -233,7 +241,6 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
   // variant without a stale capture.
   const frameRef = useRef<DisplayedRing | null>(null);
   const opacityRef = useRef('');
-  const unionRects = useRef<[RingRect, RingRect] | null>(null);
   const modeRef = useRef(mode);
   modeRef.current = mode;
 
@@ -256,7 +263,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     const container = containerRef.current;
     const path = pathRef.current;
     if (!frame || !container || !path) return;
-    const { rect, shape, speeds } = frame;
+    const { rect, shape, speeds, union } = frame;
 
     container.style.top = `${rect.top}px`;
     container.style.left = `${rect.left}px`;
@@ -271,18 +278,18 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     // Resolved once here so every path builder below sees a single inset.
     const effShape = isAnts ? shape : { ...shape, inset: strokeWidth / 2 };
 
-    const union = unionRects.current?.map(r => ({ left: r.left + effShape.inset, top: r.top + effShape.inset, width: r.width - 2 * effShape.inset, height: r.height - 2 * effShape.inset }));
-    const contour = union ? rectUnionOutline(union[0], union[1]) : null;
-    const outline = contour ? roundedUnionOutline(contour.points.map(p => ({ x: p.x + contour.rect.left - rect.left, y: p.y + contour.rect.top - rect.top })), effShape.tl - effShape.inset) : null;
-    path.setAttribute('d', outline?.path ?? roundedRectPath(rect, effShape));
-    path.dataset.contextUnion = contour ? 'true' : 'false';
+    const outline = union && roundedUnionOutline(
+      rectUnionOutline(insetRect(union[0], effShape.inset), insetRect(union[1], effShape.inset)).map(p => ({ x: p.x - rect.left, y: p.y - rect.top })),
+      Math.max(0, effShape.tl - effShape.inset));
+    path.setAttribute('d', outline ? outline.path : roundedRectPath(rect, effShape));
+    path.dataset.contextUnion = outline ? 'true' : 'false';
 
     if (isAnts) {
       // Dash sized to the perimeter so the segments stay even as the ring resizes.
       // Computed in closed form rather than via `path.getTotalLength()`, which
       // forces a synchronous style+layout flush on every frame of a travel at a
       // cost that scales with the whole document, not this one path.
-      const len = outline?.perimeter ?? ringPerimeter(rect, effShape);
+      const len = outline ? outline.perimeter : ringPerimeter(rect, effShape);
       const count = Math.max(1, Math.round(len / cfg.marchingAnts.segLen));
       const adjusted = len / count;
       const dash = adjusted * cfg.marchingAnts.dashFraction;
@@ -298,7 +305,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     }
 
     const smear = smearRef.current;
-    if (smear) writeSmear(smear, rect, effShape, strokeWidth, contour ? null : speeds);
+    if (smear) writeSmear(smear, rect, effShape, strokeWidth, speeds);
   }, []);
 
   // Re-run the measuring effect after each Lath commit. Runs post-render, so
@@ -319,8 +326,8 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
         setVisible(true);
       }
     };
-    const showSettled = (frame: RingFrame) =>
-      show({ rect: frame.rect, shape: frame.shape, speeds: null });
+    const showSettled = (frame: RingFrame, union?: DisplayedRing['union']) =>
+      show({ rect: frame.rect, shape: frame.shape, speeds: null, union });
 
     // Per-frame imperative loop: sample the tween's position and velocity, write
     // the DOM, and self-schedule — no React state, so a travelling ring never
@@ -360,11 +367,11 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
         rafRef.current = null;
       }
     };
-    const snapTo = (frame: RingFrame, identity: string) => {
+    const snapTo = (frame: RingFrame, identity: string, union?: DisplayedRing['union']) => {
       tweenRef.current = null;
       cancelTick();
       displayedIdentityRef.current = identity;
-      showSettled(frame);
+      showSettled(frame, union);
     };
 
     if (!active) {
@@ -395,8 +402,8 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
       if (isWorkspaceSelection(selectedType)) return workspaceTabElement(workspaceIdOfSelection(selectedType, selectedId));
       return selectedType === 'door' ? doorElements.get(selectedId) : resolvePaneElement(paneElements.get(selectedId));
     };
-    const helper = () => contextSourceId === selectedId && selectedType === 'pane'
-      ? target()?.closest('.lath-host')?.querySelector<HTMLElement>('[data-context-for]') ?? null : null;
+    // Wall selects the context source while a context is open, and renders one context per Wall.
+    const helperEl = contextSourceId ? target()?.closest('.lath-host')?.querySelector<HTMLElement>('[data-context-for]') : null;
     const update = () => {
       if (!activeRef.current) return;
       const targetEl = target();
@@ -404,11 +411,10 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
 
       const next = measureFrame(targetEl, selectedType);
       if (!next) return;
-      const helperEl = helper();
       const helperFrame = helperEl ? measureFrame(helperEl, 'pane') : null;
-      const hadUnion = unionRects.current !== null;
-      unionRects.current = helperFrame ? [next.rect, helperFrame.rect] : null;
-      if (helperFrame) next.rect = rectUnionOutline(next.rect, helperFrame.rect).rect;
+      const previous = frameRef.current;
+      const union = helperFrame ? [next.rect, helperFrame.rect] as const : undefined;
+      if (union) next.rect = unionBounds(...union);
       const wall = targetEl.closest<HTMLElement>('[data-workspace-wall]');
       opacityRef.current = wall?.style.opacity ?? '';
 
@@ -424,9 +430,17 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
         wasActiveRef.current = true;
       }
 
+      // A union outline cannot tween, so it snaps in, tracks, and snaps out; an
+      // unchanged union skips the rewrite.
+      if (union || previous?.union) {
+        if (union && previous?.union && identity === displayedIdentityRef.current
+          && framesEqual(previous, next) && union.every((r, i) => rectsEqual(r, previous.union![i]))) return;
+        snapTo(next, identity, union);
+        return;
+      }
       // Snap gate: the same instant-motion predicate the Lath animator's
       // duration uses (motionIsInstant), so the ring and the leaves agree.
-      if (instant || helperFrame || hadUnion) {
+      if (instant) {
         snapTo(next, identity);
         return;
       }
@@ -463,10 +477,11 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     const ro = new ResizeObserver(update);
     const targetEl = target();
     if (targetEl) ro.observe(targetEl);
-    const helperEl = helper();
-    const mo = new MutationObserver(update);
+    // The helper's per-frame placement is an inline style write, which a ResizeObserver misses.
+    let mo: MutationObserver | undefined;
     if (helperEl) {
       ro.observe(helperEl);
+      mo = new MutationObserver(update);
       mo.observe(helperEl, { attributes: true, attributeFilter: ['style'] });
     }
     window.addEventListener('resize', update);
@@ -479,7 +494,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
 
     return () => {
       ro.disconnect();
-      mo.disconnect();
+      mo?.disconnect();
       unsubFrames?.();
       unsubWorkspaceFrames();
       window.removeEventListener('resize', update);
