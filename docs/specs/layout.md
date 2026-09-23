@@ -70,6 +70,8 @@ The label is the `DerivedHeader` from `deriveHeader(...)`; `docs/specs/terminal-
 | No usable adjacent candidate; single or zoomed pane | Source's top or bottom half, inset 16px on every side, opposite its visible terminal cursor sampled on opening; unknown, offscreen, or midpoint cursor defaults to top. |
 | Small source or Wall | Expand the half-pane fallback to the minimum usable size, clamped inside the Wall's 16px inset; shrink below the minimum when necessary to preserve the inset. |
 
+Popups share the zoomed pane’s app-background halo.
+
 **Must group available side buttons beside Close at the context header’s right edge**, with destination tooltips, accessible labels, and selected state. Remember manual choices per source for the mounted Wall's lifetime; clear on source removal. Preserve terminal focus on pointer repositioning. An unavailable choice falls back automatically; no preference is persisted to disk.
 
 **Must keep source title, directory, and helper actions visible in compact context**, disclosing title explanation, directory actions, ports, and alerts through Details. Wrap header and detail actions within the panel; scroll bounded details and warnings while reserving 64px for terminal content.

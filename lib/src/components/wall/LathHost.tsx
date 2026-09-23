@@ -21,7 +21,7 @@ import { layout, sashes } from '../../lib/lath/layout';
 import { LATH_LAYER_DYING, LATH_LAYER_ELEVATED, LATH_LAYER_TILED } from '../../lib/lath/animator';
 import { type DropTarget, resize } from '../../lib/lath/ops';
 import { useFocusRingColor } from '../../lib/themes/use-focus-ring-color';
-import { PANE_HEADER_HEIGHT_PX, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
+import { ELEVATED_PANE_SHADOW, PANE_HEADER_HEIGHT_PX, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
 import type { PaneProps } from './pane-props';
 import { type LeafMeta, LATH_LAYOUT_OPTS } from './lath-wall-store';
 import { nowMs, type LathWallEngine } from './lath-wall-engine';
@@ -52,7 +52,7 @@ const Z_PREVIEW = 45;
 /** Reveal half a pane header of tiled layout around an elevated zoomed pane. */
 export const LATH_ZOOM_MARGIN = PANE_HEADER_HEIGHT_PX / 2;
 /** Soft app-chrome halo separates the elevated pane from tiled content below. */
-export const LATH_ZOOM_SHADOW = '0 0 5px 5px var(--color-app-bg)';
+export const LATH_ZOOM_SHADOW = ELEVATED_PANE_SHADOW;
 
 const PANE_HEADER_STYLE: CSSProperties = {
   flex: `0 0 ${PANE_HEADER_HEIGHT_PX}px`,
