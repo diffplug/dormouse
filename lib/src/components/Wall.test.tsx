@@ -3130,7 +3130,7 @@ describe('Wall on the Lath engine', () => {
       expect(portRow).not.toBeNull();
       const contextMenu = portRow!.closest('[data-terminal-context]')!;
       expect(contextMenu.closest('[data-lath-leaf]')).toBeNull();
-      expect(contextMenu.parentElement?.classList.contains('lath-host')).toBe(true);
+      expect(contextMenu.parentElement?.parentElement?.classList.contains('lath-host')).toBe(true);
       expect(contextMenu.closest('.lath-leaf-body')).toBeNull();
       await act(async () => {
         portRow!.dispatchEvent(new MouseEvent('click', { bubbles: true }));

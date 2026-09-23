@@ -72,7 +72,7 @@ The label is the `DerivedHeader` from `deriveHeader(...)`; `docs/specs/terminal-
 
 **Must offer available side buttons plus Auto**, with destination tooltips, accessible labels, and selected state. Remember manual choices per source for the mounted Wall's lifetime; clear on source removal or Auto. Preserve terminal focus on pointer repositioning. An unavailable choice falls back automatically; no preference is persisted to disk.
 
-**Must keep source title, directory, and helper actions visible in compact context**, disclosing title explanation, directory actions, ports, and alerts through Details. Bound detail scrolling so the helper retains space. The full state gallery shares the same presentation.
+**Must keep source title, directory, and helper actions visible in compact context**, disclosing title explanation, directory actions, ports, and alerts through Details. Bound detail scrolling so the helper retains space.
 
 Source of truth: `placeTerminalContext` in `lib/src/components/wall/terminal-context-placement.ts`; `TerminalContextOverlay` in `lib/src/components/wall/TerminalContextOverlay.tsx`; `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`. Tests: `lib/src/components/wall/terminal-context-placement.test.ts`, `lib/src/components/wall/TerminalContext.test.tsx`, `lib/src/components/Wall.test.tsx`.
 

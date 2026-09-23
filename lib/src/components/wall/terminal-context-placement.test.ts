@@ -16,8 +16,8 @@ describe('terminal context placement', () => {
     expect(placeTerminalContext(wall, source, true, 'bottom').side).toBe('bottom');
   });
   it('shrinks into an uneven neighbor and rejects unusable slivers', () => {
-    expect(placeTerminalContext(wall, { ...wall, width: 800 }, true)).toMatchObject({ mode: 'adjacent', rect: { width: 392 } });
-    expect(placeTerminalContext(wall, { ...wall, width: 1000 }, true)).toMatchObject({ mode: 'half', side: 'top' });
+    expect(placeTerminalContext(wall, { ...wall, width: 800 }, true)).toMatchObject({ side: 'right', rect: { width: 392 } });
+    expect(placeTerminalContext(wall, { ...wall, width: 1000 }, true)).toMatchObject({ side: 'top', available: ['top', 'bottom'] });
   });
   it('uses source halves for single or zoomed panes', () => {
     expect(placeTerminalContext(wall, wall, false)).toMatchObject({ rect: { ...wall, height: 400 }, available: ['top', 'bottom'] });

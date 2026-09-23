@@ -458,6 +458,8 @@ export function LathHost({
 
   const activeTree = preview ?? snapshot.tree;
   const { targets: frames, layers } = presentationTargets(activeTree, rect, snapshot.zoomedId);
+  const contextSource = terminalContext && frames.get(terminalContext.id);
+  const contextMeta = terminalContext && snapshot.leafMeta.get(terminalContext.id);
   const sashList = sashes(activeTree, rect, LATH_LAYOUT_OPTS);
 
   // DOM order is sorted-by-id and STABLE across layout changes; z-index (not DOM
@@ -731,11 +733,10 @@ export function LathHost({
         );
       })}
 
-      {terminalContext && frames.has(terminalContext.id) && (
-        <TerminalContextOverlay key={terminalContext.id} context={terminalContext}
-          title={snapshot.leafMeta.get(terminalContext.id)?.title}
-          tool={isToolParams(snapshot.leafMeta.get(terminalContext.id)?.params)}
-          lath={lath} wall={rect} source={frames.get(terminalContext.id)!}
+      {contextSource && (
+        <TerminalContextOverlay key={terminalContext!.id} context={terminalContext!}
+          title={contextMeta?.title} tool={isToolParams(contextMeta?.params)}
+          lath={lath} wall={rect} source={contextSource}
           multiPane={!snapshot.zoomedId && frames.size > 1} preferences={contextPreferences.current} />
       )}
 

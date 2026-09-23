@@ -227,7 +227,7 @@ it('keeps the helper mounted while compact details are toggled', async () => {
 });
 
 it('position buttons preserve input focus and report the destination', async () => {
-  props.placement = { rect: { x: 0, y: 0, width: 600, height: 400 }, side: 'top', mode: 'half', available: ['top', 'bottom'], manual: false, onChange: vi.fn() };
+  props.placement = { rect: { x: 0, y: 0, width: 600, height: 400 }, side: 'top', available: ['top', 'bottom'], manual: false, onChange: vi.fn() };
   render();
   const input = container.querySelector('textarea')!;
   act(() => input.focus());

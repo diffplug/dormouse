@@ -45,7 +45,7 @@ const DETAILS = {
 type Detail = keyof typeof DETAILS;
 export interface TerminalContextViewProps {
   terminalRole?: 'helper' | 'tool';
-  style?: CSSProperties;
+  /** Fill the positioned host and fold directory actions, ports, and alerts behind Details. */
   compact?: boolean;
   placement?: ContextPlacement & { manual: boolean; onChange(side?: ContextSide): void };
   /** Exit in progress: the view is inert, and `onClose` is not called again. */
@@ -65,14 +65,15 @@ export interface TerminalContextViewProps {
   initialDetail?: Detail | null;
 }
 
-export function ContextAction({ children, label, onClick, disabled = false, busy = false, muted = false }: { children: ReactNode; label: string; onClick?: () => void; disabled?: boolean; busy?: boolean; muted?: boolean }) {
+export function ContextAction({ children, label, onClick, disabled = false, busy = false, muted = false, pressed, expanded, keepFocus = false }: { children: ReactNode; label: string; onClick?: () => void; disabled?: boolean; busy?: boolean; muted?: boolean; pressed?: boolean; expanded?: boolean; keepFocus?: boolean }) {
   const windowFocused = useContext(WindowFocusedContext);
   // Native app launches can leave :hover stale until this window regains focus.
   const color = muted ? 'text-muted' : windowFocused ? SUBTLE_ACTION_COLOR_CLASS : SUBTLE_ACTION_REST_COLOR_CLASS;
   // `busy` must never reach native `disabled`: the browser blurs a button the moment it is disabled,
   // and this context's Escape and Tab handling both live on the <section> and need a focused descendant.
   return <button type="button" title={label} aria-label={label} aria-busy={busy || undefined} aria-disabled={busy || undefined} disabled={disabled} onClick={busy ? undefined : onClick}
-    className={`inline-flex h-6 shrink-0 items-center justify-center gap-1.5 rounded px-1.5 disabled:opacity-40 ${windowFocused ? SUBTLE_ACTION_INTERACTION_CLASS : ''} ${color}`}>{children}</button>;
+    aria-pressed={pressed} aria-expanded={expanded} onPointerDown={keepFocus ? event => event.preventDefault() : undefined}
+    className={`inline-flex h-6 shrink-0 items-center justify-center gap-1.5 rounded px-1.5 disabled:opacity-40 aria-pressed:bg-current/10 ${windowFocused ? SUBTLE_ACTION_INTERACTION_CLASS : ''} ${color}`}>{children}</button>;
 }
 
 function ContextCopyAction({ children, label, onCopy }: { children: ReactNode; label: string; onCopy: () => Promise<boolean> }) {
@@ -174,8 +175,8 @@ export function TerminalContextView(p: TerminalContextViewProps) {
   const status = HELPER_STATUS[p.status];
   const isTool = p.terminalRole === 'tool';
   const statusLabel = isTool ? (p.status === 'running' ? `Running ${p.command}…` : 'At prompt') : status.label(p.command);
-  return <section ref={surface} aria-label="Terminal context" data-terminal-context tabIndex={-1} inert={p.closing} aria-hidden={p.closing || undefined} style={{ ...SURFACE_STYLE, ...p.style }} data-context-side={p.placement?.side}
-    className={`${TERMINAL_CONTEXT_SURFACE_CLASS} ${motionClass} ${p.closing ? 'pointer-events-none' : ''} absolute ${p.style ? '' : 'inset-4'} flex flex-col overflow-hidden text-sm`}
+  return <section ref={surface} aria-label="Terminal context" data-terminal-context tabIndex={-1} inert={p.closing} aria-hidden={p.closing || undefined} style={SURFACE_STYLE} data-context-side={p.placement?.side}
+    className={`${TERMINAL_CONTEXT_SURFACE_CLASS} ${motionClass} ${p.closing ? 'pointer-events-none' : ''} absolute ${p.compact ? 'inset-0' : 'inset-4'} flex flex-col overflow-hidden text-sm`}
     onContextMenu={event => event.preventDefault()}
     onKeyDown={event => {
       if ((event.target as HTMLElement).closest('[data-helper-terminal], [data-context-terminal]') && !detail) return;
@@ -191,7 +192,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
           <span className="text-muted">Title</span>
           <div className="flex h-6 min-w-0 items-center gap-1.5">
             <span className="truncate">{p.title}</span>{expanded && <ContextAction label="Explain this title" onClick={() => setDetail('title')}><BugBeetleIcon size={15} />Explain</ContextAction>}
-            <div className="ml-auto flex shrink-0 items-center gap-2 text-muted"><ContextCopyAction label="Copy surface identifier" onCopy={() => attempt(p.onCopyRef)}><span>{p.surfaceRef}</span><CopyIcon size={12} /></ContextCopyAction>{p.compact && <button type="button" aria-label="Terminal context details" aria-expanded={expanded} onClick={() => setExpanded(value => !value)} className={`h-6 rounded px-1.5 ${SUBTLE_ACTION_COLOR_CLASS} ${SUBTLE_ACTION_INTERACTION_CLASS}`}>Details</button>}<ContextAction label="Close terminal context" onClick={close} muted><XIcon size={15} /></ContextAction></div>
+            <div className="ml-auto flex shrink-0 items-center gap-2 text-muted"><ContextCopyAction label="Copy surface identifier" onCopy={() => attempt(p.onCopyRef)}><span>{p.surfaceRef}</span><CopyIcon size={12} /></ContextCopyAction>{p.compact && <ContextAction label="Terminal context details" expanded={expanded} onClick={() => setExpanded(value => !value)}>Details</ContextAction>}<ContextAction label="Close terminal context" onClick={close} muted><XIcon size={15} /></ContextAction></div>
           </div>
           <span className="text-muted">Dir</span>
           <div className="flex min-h-6 min-w-0 flex-wrap items-center gap-1.5"><span className="truncate" title={p.cwd}>{p.cwd}</span>{expanded && <><ContextOpenAction label={p.canExplore ? p.explorerLabel : 'Directory unavailable on this host'} disabled={!p.canExplore} onOpen={() => attempt(p.onExplore)}><ArrowSquareOutIcon size={15} />{p.explorerLabel}</ContextOpenAction><ContextCopyAction label="Copy absolute path" onCopy={() => attempt(p.onCopyPath)}><CopyIcon size={14} />Copy path</ContextCopyAction></>}</div>
@@ -212,13 +213,11 @@ export function TerminalContextView(p: TerminalContextViewProps) {
         {expanded && p.notification && <div className="ml-16 mt-2 border-l-2 border-border py-1 pl-3"><div>{p.notification.title}</div><div className="whitespace-pre-wrap text-muted">{p.notification.body}</div></div>}
       </div>
       {p.placement && <div aria-label="Helper placement" className="flex shrink-0 flex-wrap items-center gap-1 px-3 pb-1">
-        {p.placement.available.map(side => <button key={side} type="button" title={`Place helper at ${side}`} aria-label={`Place helper at ${side}`} aria-pressed={p.placement!.side === side}
-          onPointerDown={event => event.preventDefault()} onClick={() => p.placement!.onChange(side)}
-          className={`inline-flex h-6 w-7 items-center justify-center rounded aria-pressed:bg-current/10 ${SUBTLE_ACTION_COLOR_CLASS} ${SUBTLE_ACTION_INTERACTION_CLASS}`}>
+        {p.placement.available.map(side => <ContextAction key={side} label={`Place helper at ${side}`} pressed={p.placement!.side === side} keepFocus onClick={() => p.placement!.onChange(side)}>
           <svg aria-hidden width="18" height="16" viewBox="0 0 18 16" fill="none"><rect x="1" y="1" width="16" height="14" rx="1" stroke="currentColor" strokeWidth="2" />
             <rect x={side === 'right' ? 10 : 4} y={side === 'bottom' ? 9 : 4} width={side === 'left' || side === 'right' ? 4 : 10} height={side === 'top' || side === 'bottom' ? 3 : 8} rx="0.5" fill="currentColor" /></svg>
-        </button>)}
-        <ContextAction label="Use automatic helper placement" onClick={() => p.placement!.onChange()} disabled={!p.placement.manual}>Auto</ContextAction>
+        </ContextAction>)}
+        <ContextAction label="Use automatic helper placement" onClick={() => p.placement!.onChange()} disabled={!p.placement.manual} keepFocus>Auto</ContextAction>
       </div>}
       <div className="@container flex min-h-0 flex-1 flex-col border-t border-border">
         <div aria-label={isTool ? 'Tool terminal status' : 'Helper terminal status'} className="flex h-9 shrink-0 items-center gap-3 whitespace-nowrap px-3">

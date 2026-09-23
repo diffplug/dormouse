@@ -1,7 +1,7 @@
-import type { Rect } from '../../lib/lath/model';
+import { edgeAxis, type Edge, type Rect } from '../../lib/lath/model';
 
-export type ContextSide = 'right' | 'left' | 'bottom' | 'top';
-export type ContextPlacement = { rect: Rect; side: ContextSide; mode: 'adjacent' | 'half'; available: ContextSide[] };
+export type ContextSide = Edge;
+export type ContextPlacement = { rect: Rect; side: ContextSide; available: ContextSide[] };
 const SIDES: ContextSide[] = ['right', 'left', 'bottom', 'top'];
 const GAP = 8;
 // Compact source/directory/status chrome plus a useful terminal viewport.
@@ -20,8 +20,8 @@ export function cursorHalfSide(buffer: { baseY: number; cursorY: number; viewpor
 export function placeTerminalContext(wall: Rect, source: Rect, multiPane: boolean, preferred?: ContextSide, fallback: ContextSide = 'top'): ContextPlacement {
   const right = wall.x + wall.width;
   const bottom = wall.y + wall.height;
-  const candidates = SIDES.map(side => {
-    const horizontal = side === 'left' || side === 'right';
+  const candidates = !multiPane ? [] : SIDES.map(side => {
+    const horizontal = edgeAxis(side) === 'row';
     const space = side === 'right' ? right - source.x - source.width - GAP
       : side === 'left' ? source.x - wall.x - GAP
       : side === 'bottom' ? bottom - source.y - source.height - GAP : source.y - wall.y - GAP;
@@ -32,16 +32,16 @@ export function placeTerminalContext(wall: Rect, source: Rect, multiPane: boolea
       y: side === 'bottom' ? source.y + source.height + GAP : side === 'top' ? source.y - GAP - height : clamp(source.y, wall.y, bottom - height),
       width, height,
     } };
-  }).filter(candidate => multiPane && candidate.rect.width >= MIN_WIDTH && candidate.rect.height >= MIN_HEIGHT);
+  }).filter(candidate => candidate.rect.width >= MIN_WIDTH && candidate.rect.height >= MIN_HEIGHT);
   const chosen = candidates.find(candidate => candidate.side === preferred)
     ?? candidates.reduce<typeof candidates[number] | undefined>((best, candidate) => !best || candidate.rect.width * candidate.rect.height > best.rect.width * best.rect.height ? candidate : best, undefined);
-  if (chosen) return { ...chosen, mode: 'adjacent', available: candidates.map(candidate => candidate.side) };
+  if (chosen) return { ...chosen, available: candidates.map(candidate => candidate.side) };
 
   const side = preferred === 'top' || preferred === 'bottom' ? preferred : fallback;
   // Small source panes borrow Wall width/height only when the half-pane would be unusable.
   const width = Math.min(wall.width, Math.max(source.width, MIN_WIDTH));
   const height = Math.min(wall.height, Math.max(source.height / 2, MIN_HEIGHT));
-  return { side, mode: 'half', available: ['top', 'bottom'], rect: {
+  return { side, available: ['top', 'bottom'], rect: {
     x: clamp(source.x, wall.x, right - width),
     y: clamp(side === 'bottom' ? source.y + source.height - height : source.y, wall.y, bottom - height),
     width, height,
