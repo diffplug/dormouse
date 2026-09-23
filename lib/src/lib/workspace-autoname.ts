@@ -32,7 +32,7 @@ export function gitAutoName(git: GitDirInfo): string {
 export function deriveWorkspaceAutoName(votes: readonly AutoNameVote[], incumbent: string, homePath?: string): string | null {
   const gitVotes = votes.filter((vote) => vote.git !== null);
   const counted = gitVotes.length > 0
-    ? gitVotes.map((vote) => ({ key: gitAutoName(vote.git!), label: gitAutoName(vote.git!) }))
+    ? gitVotes.map((vote) => { const name = gitAutoName(vote.git!); return { key: name, label: name }; })
     : votes.map((vote) => ({ key: cwdIdentity(vote.cwd), label: folderLabel(vote.cwd, homePath) }));
   if (counted.length === 0) return null;
 

@@ -11,6 +11,7 @@ import {
   resetWorkspaceIdPool,
   resetWorkspaces,
   setActiveWorkspace,
+  resumeAutoWorkspaceName,
   setAutoWorkspaceName,
   setWorkspaces,
   subscribeToWorkspaces,
@@ -102,19 +103,20 @@ describe('workspace-store', () => {
     expect(getActiveWorkspaceId()).toBe('ws-2');
   });
 
-  it('renameWorkspace pins the name; empty hands it back to auto-naming; unknown is ignored', () => {
+  it('renameWorkspace pins the name, even an unchanged one; ignores empty and unknown', () => {
+    renameWorkspace(DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_NAME);
+    expect(getWorkspacesSnapshot().workspaces[0]).toEqual({ id: DEFAULT_WORKSPACE_ID, name: DEFAULT_WORKSPACE_NAME, nameIsAuto: false });
     renameWorkspace(DEFAULT_WORKSPACE_ID, '  Build  ');
-    expect(getWorkspacesSnapshot().workspaces[0]).toEqual({ id: DEFAULT_WORKSPACE_ID, name: 'Build' });
     renameWorkspace(DEFAULT_WORKSPACE_ID, '   ');
-    expect(getWorkspacesSnapshot().workspaces[0]).toEqual({ id: DEFAULT_WORKSPACE_ID, name: 'Build', nameIsAuto: true });
+    expect(getWorkspacesSnapshot().workspaces[0]).toEqual({ id: DEFAULT_WORKSPACE_ID, name: 'Build', nameIsAuto: false });
     renameWorkspace('nope', 'X'); // no throw
     expect(getWorkspacesSnapshot().workspaces).toHaveLength(1);
   });
 
-  it('resubmitting the displayed auto-name leaves it auto', () => {
-    const before = getWorkspacesSnapshot();
-    renameWorkspace(DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_NAME);
-    expect(getWorkspacesSnapshot()).toBe(before);
+  it('resumeAutoWorkspaceName hands a pinned name back to auto-naming', () => {
+    renameWorkspace(DEFAULT_WORKSPACE_ID, 'Build');
+    resumeAutoWorkspaceName(DEFAULT_WORKSPACE_ID);
+    expect(getWorkspacesSnapshot().workspaces[0]).toEqual({ id: DEFAULT_WORKSPACE_ID, name: 'Build', nameIsAuto: true });
   });
 
   it('setAutoWorkspaceName renames only an auto-named Workspace', () => {
@@ -127,7 +129,7 @@ describe('workspace-store', () => {
 
   it('createWorkspace auto-names only when no name is given', () => {
     expect(createWorkspace().nameIsAuto).toBe(true);
-    expect(createWorkspace({ name: 'build' }).nameIsAuto).toBeUndefined();
+    expect(createWorkspace({ name: 'build' }).nameIsAuto).toBe(false);
     expect(createWorkspace({ name: 'arrived', nameIsAuto: true }).nameIsAuto).toBe(true);
   });
 

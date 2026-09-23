@@ -35,9 +35,11 @@ import {
 } from '../lib/workspace-ui-store';
 import {
   createWorkspace,
+  getWorkspace,
   getWorkspacesSnapshot,
   moveWorkspace,
   renameWorkspace,
+  resumeAutoWorkspaceName,
   setActiveWorkspace,
   subscribeToWorkspaces,
 } from '../lib/workspace-store';
@@ -100,8 +102,13 @@ export function WorkspaceStrip({
     return () => { tabElementsRef.current.delete(id); };
   }, []);
 
+  // The editor submits on blur, so an untouched submit must not pin an
+  // auto-name; an emptied one hands the name back (`docs/specs/layout.md` →
+  // "Workspace names").
   const finishRename = useCallback((id: WorkspaceId, value: string) => {
-    renameWorkspace(id, value);
+    const trimmed = value.trim();
+    if (!trimmed) resumeAutoWorkspaceName(id);
+    else if (trimmed !== getWorkspace(id)?.name) renameWorkspace(id, trimmed);
     setRenamingWorkspace(null);
   }, []);
   const cancelRename = useCallback(() => setRenamingWorkspace(null), []);
@@ -189,7 +196,7 @@ export function WorkspaceStrip({
             key={workspace.id}
             id={workspace.id}
             name={workspace.name}
-            nameIsAuto={!!workspace.nameIsAuto}
+            nameIsAuto={workspace.nameIsAuto}
             active={isActive}
             union={unionFor(workspace.id, isActive)}
             renaming={renamingId === workspace.id}

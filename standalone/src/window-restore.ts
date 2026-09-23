@@ -121,7 +121,7 @@ export function installWindowPersistence(
   seedWindowSession(saved);
   if (saved) {
     setWorkspaces({
-      workspaces: saved.workspaces.map(({ id, name, nameIsAuto, session }) => ({ id, name, ...(nameIsAuto ? { nameIsAuto: true as const } : {}), ...(session.alertDelivery ? { alertDelivery: session.alertDelivery } : {}) })),
+      workspaces: saved.workspaces.map(({ id, name, nameIsAuto, session }) => ({ id, name, nameIsAuto, ...(session.alertDelivery ? { alertDelivery: session.alertDelivery } : {}) })),
       activeId: saved.activeWorkspaceId,
     });
   } else {

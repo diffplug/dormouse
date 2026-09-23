@@ -1,13 +1,13 @@
 import type { GitDirInfo, GitInfoResult } from './platform/git-types';
 import { getTerminalPaneStateSnapshot, subscribeToTerminalPaneState } from './terminal-state-store';
+import { cwdIdentity, effectiveCwd, type TerminalPaneState } from './terminal-state';
 import { deriveWorkspaceAutoName, type AutoNameVote } from './workspace-autoname';
 import { getWorkspacesSnapshot, setAutoWorkspaceName, subscribeToWorkspaces } from './workspace-store';
 import { getWorkspaceSurfacesSnapshot, subscribeToWorkspaceSurfaces } from './workspace-surfaces';
 
 export type GitInfoQuery = (paths: string[]) => Promise<GitInfoResult>;
 
-/** Output arrives a chunk at a time and every chunk wakes the terminal store;
- *  names are recomputed at most this often. */
+/** Names are recomputed at most this often. */
 const RECOMPUTE_DELAY_MS = 100;
 /** Directories remembered before the cache starts over. */
 const CACHE_LIMIT = 1000;
@@ -44,7 +44,7 @@ export function installWorkspaceAutoNaming(
     }, RECOMPUTE_DELAY_MS);
   };
 
-  const fetch = (wanted: Map<string, number>) => {
+  const requestGit = (wanted: Map<string, number>) => {
     const paths = [...wanted.keys()].filter((path) => !inflight.has(path));
     if (!gitInfo || paths.length === 0) return;
     for (const path of paths) inflight.add(path);
@@ -73,7 +73,7 @@ export function installWorkspaceAutoNaming(
       let waiting = false;
       for (const id of membership.get(workspace.id) ?? []) {
         const pane = panes.get(id);
-        const cwd = pane?.currentCommand?.cwdAtStart ?? pane?.cwd;
+        const cwd = pane && effectiveCwd(pane);
         if (!pane || !cwd) continue;
         // A remote cwd names a path on another machine; git here cannot see it.
         if (cwd.isRemote || !gitInfo) {
@@ -91,13 +91,26 @@ export function installWorkspaceAutoNaming(
       const name = deriveWorkspaceAutoName(votes, workspace.name, home);
       if (name !== null) setAutoWorkspaceName(workspace.id, name);
     }
-    fetch(wanted);
+    requestGit(wanted);
+  };
+
+  // A pane's title and activity churn far more often than anything a name
+  // reads, so only a change to its directory or last command finish wakes it.
+  const inputs = new Map<string, string>();
+  const onPaneChange = (changedId?: string) => {
+    if (changedId === undefined) return schedule();
+    const pane = getTerminalPaneStateSnapshot().get(changedId);
+    const input = pane ? nameInputs(pane) : '';
+    if (inputs.get(changedId) === input) return;
+    if (pane) inputs.set(changedId, input);
+    else inputs.delete(changedId);
+    schedule();
   };
 
   const unsubscribes = [
     subscribeToWorkspaces(schedule),
     subscribeToWorkspaceSurfaces(schedule),
-    subscribeToTerminalPaneState(schedule),
+    subscribeToTerminalPaneState(onPaneChange),
   ];
   void homePath?.then((path) => { home = path || undefined; schedule(); }, () => {});
   schedule();
@@ -106,4 +119,10 @@ export function installWorkspaceAutoNaming(
     if (timer !== null) clearTimeout(timer);
     for (const unsubscribe of unsubscribes) unsubscribe();
   };
+}
+
+/** Everything about a pane its Workspace's name depends on. */
+function nameInputs(pane: TerminalPaneState): string {
+  const cwd = effectiveCwd(pane);
+  return `${cwd ? cwdIdentity(cwd) : ''}\n${pane.lastCommand?.finishedAt ?? ''}`;
 }

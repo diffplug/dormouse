@@ -51,6 +51,13 @@ describe('gitInfo', () => {
     expect(await gitInfo([plain, missing, 'myrepo'])).toEqual({ [plain]: null, [missing]: null, myrepo: null });
   });
 
+  it('names an unborn branch', async () => {
+    const dir = join(root, 'unborn');
+    mkdirSync(dir);
+    git(dir, 'init', '-q', '-b', 'fresh');
+    expect((await gitInfo([dir]))[dir]).toEqual({ repo: 'unborn', branch: 'fresh' });
+  });
+
   it('ignores anything but a list of strings', async () => {
     expect(await gitInfo('nope')).toEqual({});
     expect(await gitInfo([42])).toEqual({});

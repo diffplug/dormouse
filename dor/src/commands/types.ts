@@ -166,10 +166,13 @@ export interface NewWorkspaceRequest {
   window?: string;
 }
 
-/** A name to keep, or `auto` to hand the name back to auto-naming. */
-export type RenameWorkspaceRequest =
-  | { workspace: string; name: string; auto?: never; window?: string }
-  | { workspace: string; auto: true; name?: never; window?: string };
+export interface RenameWorkspaceRequest {
+  workspace: string;
+  /** The name to keep; omitted with `auto`, which hands it back to auto-naming. */
+  name?: string;
+  auto?: true;
+  window?: string;
+}
 
 export interface CloseWorkspaceRequest {
   workspace: string;

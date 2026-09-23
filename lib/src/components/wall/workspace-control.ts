@@ -16,6 +16,7 @@ import {
   isWindowRef,
   moveWorkspace,
   renameWorkspace,
+  resumeAutoWorkspaceName,
   resolveWorkspaceRef,
   setActiveWorkspace,
   workspaceRefFor,
@@ -60,7 +61,7 @@ export function workspaceRows(): WorkspaceRow[] {
       ref: workspaceRefFor(workspace.id),
       id: workspace.id,
       name: workspace.name,
-      auto: !!workspace.nameIsAuto,
+      auto: workspace.nameIsAuto,
       active: workspace.id === activeId,
       ringing: union.ringing,
       todo: union.todo,
@@ -211,7 +212,7 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
       const target = requireWorkspace(detail);
       if (!target) return;
       if (params.auto === true) {
-        renameWorkspace(target.id, '');
+        resumeAutoWorkspaceName(target.id);
         respondMutation('renamed', target);
         return;
       }

@@ -1804,8 +1804,7 @@ export function Wall({
     flushPersistence: (options) => persistence.flush(options),
     prepareWorkspaceTransfer: () => prepareWorkspaceTransfer({
       workspaceId: effectiveWorkspaceId,
-      name: getWorkspace(effectiveWorkspaceId)?.name ?? '',
-      nameIsAuto: !!getWorkspace(effectiveWorkspaceId)?.nameIsAuto,
+      naming: getWorkspace(effectiveWorkspaceId) ?? { name: '', nameIsAuto: false },
       serialize: persistence.serialize,
       surfaceIds: memberSurfaceIds,
       hasTerminal: surfaceHasTerminal,

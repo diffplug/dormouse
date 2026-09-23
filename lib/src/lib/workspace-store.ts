@@ -1,6 +1,6 @@
 import { normalizeAlertDeliveryOverrides, type AlertDeliveryOverrides } from './alert-delivery-model';
 import { parseWorkspaceRef } from 'dor/protocol';
-import { DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_NAME, type WorkspaceId } from './session-types';
+import { DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_NAME, isDefaultWorkspaceName, type WorkspaceId } from './session-types';
 
 /**
  * In-memory model of the Window's Workspaces: the ordered list, which one is
@@ -14,9 +14,8 @@ export interface WorkspaceMeta {
   id: WorkspaceId;
   name: string;
   /** The name is derived (`docs/specs/layout.md` → "Workspace names") rather than
-   *  one a user set; absent means explicit, so a name is never overwritten
-   *  unless something marked it replaceable. */
-  nameIsAuto?: true;
+   *  one a user set. */
+  nameIsAuto: boolean;
 }
 
 export interface WorkspacesState {
@@ -139,8 +138,7 @@ function refsArePositional(): boolean {
 function nextDefaultName(): string {
   let max = 0;
   for (const ws of state.workspaces) {
-    const match = /^Workspace (\d+)$/.exec(ws.name);
-    if (match) max = Math.max(max, Number(match[1]));
+    if (isDefaultWorkspaceName(ws.name)) max = Math.max(max, Number(ws.name.slice('Workspace '.length)));
   }
   return `Workspace ${max + 1}`;
 }
@@ -195,7 +193,7 @@ export function createWorkspace(opts?: { id?: WorkspaceId; name?: string; nameIs
   const meta: WorkspaceMeta = {
     id,
     name: opts?.name ?? nextDefaultName(),
-    ...(opts?.name === undefined || opts.nameIsAuto ? { nameIsAuto: true as const } : {}),
+    nameIsAuto: opts?.name === undefined || opts.nameIsAuto === true,
     ...(opts?.alertDelivery ? { alertDelivery: normalizeAlertDeliveryOverrides(opts.alertDelivery) } : {}),
   };
   const activeId = opts?.activate === false ? state.activeId : meta.id;
@@ -203,22 +201,18 @@ export function createWorkspace(opts?: { id?: WorkspaceId; name?: string; nameIs
   return meta;
 }
 
-/**
- * A user's rename. An empty name hands the Workspace back to auto-naming, and
- * resubmitting the displayed name changes nothing — the editor submits on blur,
- * so opening it must not pin an auto-name.
- */
+/** A user's rename, which pins the name; an empty one is ignored. */
 export function renameWorkspace(id: WorkspaceId, name: string): void {
   const current = getWorkspace(id);
-  if (!current) return;
   const trimmed = name.trim();
-  if (!trimmed) {
-    if (!current.nameIsAuto) replaceWorkspace(id, { ...current, nameIsAuto: true });
-    return;
-  }
-  if (trimmed === current.name) return;
-  const { nameIsAuto: _auto, ...rest } = current;
-  replaceWorkspace(id, { ...rest, name: trimmed });
+  if (!current || !trimmed) return;
+  replaceWorkspace(id, { ...current, name: trimmed, nameIsAuto: false });
+}
+
+/** Hand the name back to auto-naming, which fills it on its next pass. */
+export function resumeAutoWorkspaceName(id: WorkspaceId): void {
+  const current = getWorkspace(id);
+  if (current && !current.nameIsAuto) replaceWorkspace(id, { ...current, nameIsAuto: true });
 }
 
 /** Set a derived name; inert once a user has named the Workspace. */

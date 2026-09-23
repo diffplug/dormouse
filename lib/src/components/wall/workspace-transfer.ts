@@ -12,6 +12,7 @@ import { forgetHelper, getHelper } from '../../lib/helper-terminal';
 import { releaseSession, serializeTerminal, getTerminalInstance } from '../../lib/terminal-registry';
 import type { VolatileNotepadSnapshot } from '../../lib/notepad/types';
 import type { PersistedSession, PersistedWorkspace, WorkspaceId } from '../../lib/session-types';
+import type { WorkspaceMeta } from '../../lib/workspace-store';
 import type { SaveOptions } from '../../lib/session-save';
 
 /**
@@ -42,8 +43,8 @@ export interface WorkspaceTransferPayload {
 
 export interface ReleaseForTransferDeps {
   workspaceId: WorkspaceId;
-  name: string;
-  nameIsAuto: boolean;
+  /** What the Workspace is called, carried as-is to the Window it lands in. */
+  naming: Pick<WorkspaceMeta, 'name' | 'nameIsAuto'>;
   /** The Workspace's record, built but not published. */
   serialize: (options?: SaveOptions) => Promise<PersistedSession>;
   /** Member Surfaces: visible panes ∪ Doors. */
@@ -113,7 +114,7 @@ export async function prepareWorkspaceTransfer(
     ...(tools && Object.keys(tools).length ? { tools } : {}),
     payload: {
       workspaceId: deps.workspaceId,
-      workspace: { id: deps.workspaceId, name: deps.name, nameIsAuto: deps.nameIsAuto, session },
+      workspace: { id: deps.workspaceId, name: deps.naming.name, nameIsAuto: deps.naming.nameIsAuto, session },
       notepad,
       terminalIds,
       allIds,
