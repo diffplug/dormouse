@@ -5,30 +5,32 @@ The security specs (`docs/specs/security*.md`) are what you audit against:
 their `FAIL IF` lines are concrete mechanical checks, and `docs/specs/security-audit.md`
 says that list is not exhaustive, so each domain gets a qualitative pass too.
 
-**Audit nothing yourself.** Fan the work out to three subagents with disjoint
+**Audit nothing yourself.** Fan the work out to four subagents with disjoint
 scopes, then merge what they return. The domains are genuinely different
 subject matters with different evidence — dependency provenance is lockfiles,
 CI is `gh api` output, application security is reading the pairing code
-adversarially — and one context holding all three degrades the third.
+adversarially, Hosted accounts are a Worker's origin gate and its deployment
+path — and one context holding them all degrades the ones that read code.
 
-## 1. Spawn all three
+## 1. Spawn all four
 
 Spawn them with the Task tool **in a single message** so they run
-concurrently, using these three `subagent_type` values:
+concurrently, using these four `subagent_type` values:
 
 - `supply-chain`
 - `ci-and-secrets`
 - `application-security`
+- `hosted`
 
 Each is already defined with the prompt it needs — pointing at
 `.github/audit/_preamble.md` plus its own domain file — and with the model it
-should run on. `application-security` is deliberately on a stronger model than
-the other two; do not override it, and do not paste prompt text into the Task
-call. A one-line instruction such as "begin your audit" is enough, because the
-agent definition carries the rest.
+should run on. `application-security` and `hosted` are deliberately on a
+stronger model than the other two; do not override them, and do not paste
+prompt text into the Task call. A one-line instruction such as "begin your
+audit" is enough, because the agent definition carries the rest.
 
 Do not read the domain files yourself. They are long, you are not auditing,
-and holding all three in your context is the thing this split exists to avoid.
+and holding all four in your context is the thing this split exists to avoid.
 
 ## 2. Wait without ending your turn
 
@@ -74,13 +76,13 @@ finished() { [ -s "$1" ] && [ "$(sed -e '/^[[:space:]]*$/d' "$1" | tail -n1)" = 
 # 540 leaves a minute of margin under the cap.
 CALL_END=$(( $(date +%s) + 540 ))
 ANSWER="ALL FINISHED"
-until finished audit-supply-chain.md && finished audit-ci-secrets.md && finished audit-application.md; do
+until finished audit-supply-chain.md && finished audit-ci-secrets.md && finished audit-application.md && finished audit-hosted.md; do
   NOW=$(date +%s)
   [ "$NOW" -ge "$DEADLINE" ] && { ANSWER="DEADLINE"; break; }
   [ "$NOW" -ge "$CALL_END" ] && { ANSWER="STILL WAITING"; break; }
   sleep 10
 done
-for f in audit-supply-chain.md audit-ci-secrets.md audit-application.md; do
+for f in audit-supply-chain.md audit-ci-secrets.md audit-application.md audit-hosted.md; do
   if finished "$f"; then echo "$f: finished"
   elif [ -s "$f" ]; then echo "$f: still writing"
   else echo "$f: not started"; fi
@@ -151,6 +153,7 @@ emit() {
   emit "Supply chain" audit-supply-chain.md
   emit "CI and secrets" audit-ci-secrets.md
   emit "Application security" audit-application.md
+  emit "Hosted accounts" audit-hosted.md
 } > audit-report.md
 ```
 
@@ -175,7 +178,7 @@ unaudited ones in the one paragraph a reader starts from.
 ## 4. The verdict
 
 Write `PASS` or `FAIL` — no other text — to `audit-status.txt` according to
-the precedence below. PASS requires all three domains to pass.
+the precedence below. PASS requires all four domains to pass.
 
 FAIL if any subagent returned FAIL. That is a finding, and it stays a finding
 whether or not the other domains reported.

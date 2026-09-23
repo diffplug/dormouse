@@ -1,6 +1,6 @@
 # Security Audit
 
-> Owns how the security specs are audited: the schedule and the release gate, the three domains and their prompts, the orchestration, the three outcomes, the reporting step, and the environment that holds `AUDIT_PAT`. Defers what is audited to `docs/specs/security.md` and the specs it names.
+> Owns how the security specs are audited: the schedule and the release gate, the four domains and their prompts, the orchestration, the three outcomes, the reporting step, and the environment that holds `AUDIT_PAT`. Defers what is audited to `docs/specs/security.md` and the specs it names.
 > Read `docs/specs/security.md` first.
 
 ## Schedule and gate
@@ -15,7 +15,7 @@
 
 ## Domains
 
-**Must fan the CI audit out to three subagents, each owning a disjoint share of the tree**; a domain reads outside its share — `application-security` runs the repo's own lints — but owns nothing there. The orchestrator audits nothing itself, spawning them concurrently and merging what they return (rationale).
+**Must fan the CI audit out to four subagents, each owning a disjoint share of the tree**; a domain reads outside its share — `application-security` runs the repo's own lints — but owns nothing there. The orchestrator audits nothing itself, spawning them concurrently and merging what they return (rationale).
 
 **Ownership is by file: every `docs/specs/security*.md` spec is in exactly one domain's scope**, declared as backticked repo paths in the bullet list under the `**Scope` line of its domain file in `.github/audit/`, and enforced by `scripts/spec-lint.mjs`.
 
@@ -23,11 +23,12 @@
 |---|---|
 | `supply-chain` | `docs/specs/security-supply-chain.md` |
 | `ci-and-secrets` | `docs/specs/security-ci.md`, `docs/specs/security-audit.md`, `docs/specs/security.md` |
-| `application-security` | `docs/specs/security-local.md`, `docs/specs/security-remote.md`, `docs/specs/security-hosted.md` |
+| `application-security` | `docs/specs/security-local.md`, `docs/specs/security-remote.md` |
+| `hosted` | `docs/specs/security-hosted.md` |
 
-**The separation is one of context, not of credential.** `AUDIT_PAT` is a step-level `env:` on the one job, so every subagent inherits it, and only the prompt tells `application-security` not to use it. A prompt is not a control: three contexts each *read* less, none *holds* less. A known gap, staged as `## Future` -> Credential separation.
+**The separation is one of context, not of credential.** `AUDIT_PAT` is a step-level `env:` on the one job, so every subagent inherits it, and only the prompt tells `application-security` and `hosted` not to use it. A prompt is not a control: four contexts each *read* less, none *holds* less. A known gap, staged as `## Future` -> Credential separation.
 
-**Must pin the mechanical domains to Sonnet and `application-security` to Opus in CI and locally** (rationale).
+**Must pin the mechanical domains to Sonnet and the two code-reading domains — `application-security` and `hosted` — to Opus in CI and locally** (rationale).
 
 **Must keep shared CI/local prompts and their scopes in `.github/audit/`** (rationale).
 
@@ -39,8 +40,8 @@
 - **The subtraction is recursive**: where a domain claims a subdirectory rather than a whole tree — as `supply-chain` does inside `website/` — the remainder of that tree belongs to `application-security`.
 
 - **FAIL IF** a `docs/specs/security*.md` spec is in no domain's scope, or in two, or a scope names a file that does not exist (rationale).
-- **FAIL IF** the audit stops fanning out to a dedicated `application-security` subagent scoped to the application specs in the Domains table, or that scope is merged back into a context that also carries the supply-chain or CI domains (rationale).
-- **FAIL IF** `application-security` does not run on a stronger model than the mechanical domains, in **both** `.github/workflows/security-audit.yaml`'s `claude_args` — its `--model` sets the floor and its `--agents` raises that one domain — and `scripts/security-audit-local.sh` (rationale).
+- **FAIL IF** the audit stops fanning out to a dedicated `application-security` subagent scoped to the application specs in the Domains table, or to a dedicated `hosted` subagent scoped to `docs/specs/security-hosted.md`, or either scope is merged back into a context that also carries another domain (rationale).
+- **FAIL IF** `application-security` or `hosted` does not run on a stronger model than the mechanical domains, in **both** `.github/workflows/security-audit.yaml`'s `claude_args` — its `--model` sets the floor and its `--agents` raises those two domains — and `scripts/security-audit-local.sh` (rationale).
 - **FAIL IF** `.github/audit/` is missing a prompt file the workflow names, or `scripts/security-audit-local.sh` stops running the audit from those same files (rationale).
 - **FAIL IF** the union of the subagents' qualitative scopes does not cover every top-level path in the repository (rationale).
 - **FAIL IF** `.github/audit/` or `.vscode/` is outside **any** consumer of `.github/workflows/workflow-audit.yaml`'s diff window — the commit list, `own_changes`, and both classifiers' refusals, whose half is *derived* from the single `WINDOW` array (`"${WINDOW[@]:1}"`). Widening one consumer without the others is the failure. The security specs are deliberately *not* watched there (rationale).
@@ -53,7 +54,7 @@ Source of truth: the `**Scope` and `## Qualitative pass` sections of each domain
 
 - **The job's `timeout-minutes: 40` stays above the orchestrator's 32-minute wait deadline** (rationale).
 - **`--allowed-tools` enforces none of this**, only auto-approving; `Task`/`Agent` are allowed on purpose and only `Workflow` is denied (rationale).
-- **Each subagent appends to its own fragment as it determines each result**, never holding findings for a write-up at the end, and the orchestrator concatenates them rather than retyping; `AUDIT_FRAGMENTS` in `.github/workflows/security-audit.yaml` names the three. Fragments upload with the transcript, so an orchestrator that dies mid-merge still ships what the domains found.
+- **Each subagent appends to its own fragment as it determines each result**, never holding findings for a write-up at the end, and the orchestrator concatenates them rather than retyping; `AUDIT_FRAGMENTS` in `.github/workflows/security-audit.yaml` names the four. Fragments upload with the transcript, so an orchestrator that dies mid-merge still ships what the domains found.
 - **A fragment opens `VERDICT: INCONCLUSIVE` and closes with the literal `<!-- END OF REPORT -->`**, its verdict rewritten once at the end. **The sentinel, not existence, is what a reader treats as finished** (rationale).
 
 - **FAIL IF** the orchestrator prompt stops requiring a non-turn-ending wait — a Bash `until` loop over the fragments' sentinels, **breaking on its own sub-cap under the Bash cap the workflow sets** so every call ends by printing its answer, re-issued under a bounded 32-minute deadline **persisted to a file** (`$RUNNER_TEMP/audit-deadline`) rather than recomputed from `now`. That cap is `BASH_DEFAULT_TIMEOUT_MS` in `.github/workflows/security-audit.yaml`, set above the loop's 540-second break; the harness default is two minutes, under it (rationale).
@@ -82,7 +83,7 @@ Source of truth: `2. Wait without ending your turn`, `3. Merge`, and `4. The ver
 - **The report is truncated to 32,000 characters before posting**, head kept, by `scripts/clamp-issue-body.mjs` (self-tested by `scripts/clamp-issue-body-selftest.mjs`). The call is non-fatal; the `audit-transcript` artifact holds the report in full; `.github/workflows/workflow-audit.yaml` truncates its commit list the same way (rationale).
 - **Every run uploads the `audit-transcript` artifact, which is world-readable and not secret-masked** — 14-day retention, deep-linked from failure issues (rationale).
 
-- **FAIL IF** the `Redact secrets from agent output` step is removed, stops covering any sink that is later published (`audit-report.md`, the three per-domain fragments, and the transcript), or stops failing closed by deleting those files when the redactor itself throws (rationale).
+- **FAIL IF** the `Redact secrets from agent output` step is removed, stops covering any sink that is later published (`audit-report.md`, the four per-domain fragments, and the transcript), or stops failing closed by deleting those files when the redactor itself throws (rationale).
 - **FAIL IF** the reporting step writes issue prose per *combination* of conditions rather than one note per condition that holds (rationale).
 - **FAIL IF** either fragment guard is gated on the status at all (rationale).
 - **FAIL IF** the reporting step accepts any domain verdict other than exact `VERDICT: PASS` as passing, fails to recognize a `VERDICT: FAIL` prefix as dissent, ignores an inconclusive domain, accepts a fragment with no completion sentinel as finished, or accepts status text other than literal `PASS`/`FAIL` (rationale).
@@ -109,4 +110,4 @@ Source of truth: `Verify AUDIT_PAT is provisioned` in `.github/workflows/securit
 
 A second job outside the `security-audit` environment, running the domains that
 need no PAT and passing their fragments back as artifacts, would leave
-`application-security` unable to hold `AUDIT_PAT` at all.
+`application-security` and `hosted` unable to hold `AUDIT_PAT` at all.
