@@ -26,7 +26,11 @@ interface CachedGit {
  * `gitInfo` is absent on a host with no local filesystem, and every directory
  * then counts as outside a repository.
  */
-export function installWorkspaceAutoNaming(gitInfo: GitInfoQuery | undefined): () => void {
+export function installWorkspaceAutoNaming(
+  gitInfo: GitInfoQuery | undefined,
+  homePath?: Promise<string | undefined>,
+): () => void {
+  let home: string | undefined;
   const cache = new Map<string, CachedGit>();
   const inflight = new Set<string>();
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -84,7 +88,7 @@ export function installWorkspaceAutoNaming(gitInfo: GitInfoQuery | undefined): (
         else votes.push({ cwd, git: cached.info });
       }
       if (waiting) continue;
-      const name = deriveWorkspaceAutoName(votes, workspace.name);
+      const name = deriveWorkspaceAutoName(votes, workspace.name, home);
       if (name !== null) setAutoWorkspaceName(workspace.id, name);
     }
     fetch(wanted);
@@ -95,6 +99,7 @@ export function installWorkspaceAutoNaming(gitInfo: GitInfoQuery | undefined): (
     subscribeToWorkspaceSurfaces(schedule),
     subscribeToTerminalPaneState(schedule),
   ];
+  void homePath?.then((path) => { home = path || undefined; schedule(); }, () => {});
   schedule();
   return () => {
     disposed = true;

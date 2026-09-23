@@ -190,7 +190,7 @@ A Workspace's name is **auto**, italic (`AUTO_NAME_CLASS`) and derived from its 
 
 - **One vote per member terminal**, Doored ones included, with `cwdAtStart` while a command runs, else `cwd`; browsers do not vote.
 - **Any vote inside a git repository wins**: the name is the most common `<repo> @ <branch>`, and directories outside a repository are ignored. `<repo>` is origin's repository name, else the main checkout's folder, so every worktree shares it; a detached HEAD shows a short hash.
-- **Otherwise the most common directory**, counted by `cwdIdentity` and shown by basename (a remote one with its host).
+- **Otherwise the most common directory**, counted by `cwdIdentity` and shown by basename: `~` for local home, a remote one with its host.
 - **A tie keeps the current name when it is among the tied**, else takes the earliest member's (Lath leaf order, then Doors).
 - **Must hold the current name while a lookup is unanswered** (rationale), and `Workspace N` until a terminal reports a directory.
 - **Never ask git about a remote cwd.** **Must re-ask after a command finishes** (rationale). A host without `gitInfo` names by directory.

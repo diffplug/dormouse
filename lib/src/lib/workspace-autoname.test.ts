@@ -44,6 +44,11 @@ describe('deriveWorkspaceAutoName', () => {
     expect(deriveWorkspaceAutoName(votes, 'Workspace 3')).toBe('a @ main');
   });
 
+  it('labels home `~`, but only on this machine', () => {
+    expect(deriveWorkspaceAutoName([folder('/Users/me')], 'x', '/Users/me')).toBe('~');
+    expect(deriveWorkspaceAutoName([folder('/Users/me', 'prod-box')], 'x', '/Users/me')).toBe('prod-box:me');
+  });
+
   it('labels a remote directory with its host', () => {
     expect(deriveWorkspaceAutoName([folder('/srv/app', 'prod-box')], 'x')).toBe('prod-box:app');
   });

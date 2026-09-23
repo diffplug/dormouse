@@ -8,6 +8,13 @@ export interface AutoNameVote {
   git: GitDirInfo | null;
 }
 
+/** A directory's basename, but `~` for this machine's home: its basename is
+ *  only the user's name. */
+function folderLabel(cwd: CwdState, homePath: string | undefined): string {
+  if (!cwd.isRemote && cwdDisplay(cwd, { style: 'full', homePath }) === '~') return '~';
+  return cwdDisplay(cwd, { style: 'basename' });
+}
+
 export function gitAutoName(git: GitDirInfo): string {
   return `${git.repo} @ ${git.branch}`;
 }
@@ -22,11 +29,11 @@ export function gitAutoName(git: GitDirInfo): string {
  * identity so two unrelated `src/` folders never pool. A tie keeps `incumbent`
  * when it is among the tied names, else goes to the earliest member's.
  */
-export function deriveWorkspaceAutoName(votes: readonly AutoNameVote[], incumbent: string): string | null {
+export function deriveWorkspaceAutoName(votes: readonly AutoNameVote[], incumbent: string, homePath?: string): string | null {
   const gitVotes = votes.filter((vote) => vote.git !== null);
   const counted = gitVotes.length > 0
     ? gitVotes.map((vote) => ({ key: gitAutoName(vote.git!), label: gitAutoName(vote.git!) }))
-    : votes.map((vote) => ({ key: cwdIdentity(vote.cwd), label: cwdDisplay(vote.cwd, { style: 'basename' }) }));
+    : votes.map((vote) => ({ key: cwdIdentity(vote.cwd), label: folderLabel(vote.cwd, homePath) }));
   if (counted.length === 0) return null;
 
   // Map insertion order is first-appearance order, which is the member order tie-break.
