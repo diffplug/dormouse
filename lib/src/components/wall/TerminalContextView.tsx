@@ -194,8 +194,12 @@ export function TerminalContextView(p: TerminalContextViewProps) {
             <span className="min-w-[8ch] flex-1 truncate" title={p.title}>{p.title}</span>{expanded && <ContextAction label="Explain this title" onClick={() => setDetail('title')}><BugBeetleIcon size={15} />Explain</ContextAction>}
             <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2 text-muted"><ContextCopyAction label="Copy surface identifier" onCopy={() => attempt(p.onCopyRef)}><span>{p.surfaceRef}</span><CopyIcon size={12} /></ContextCopyAction>{p.compact && <ContextAction label="Terminal context details" expanded={expanded} onClick={() => setExpanded(value => !value)}>Details</ContextAction>}<div data-context-header-actions className="flex shrink-0 items-center gap-0.5">{p.placement && <div aria-label="Helper placement" className="flex shrink-0 items-center gap-0.5">
               {p.placement.available.map(side => <ContextAction key={side} label={`Place helper at ${side}`} pressed={p.placement!.side === side} keepFocus onClick={() => p.placement!.onChange(side)}>
-                <svg aria-hidden width="18" height="16" viewBox="0 0 18 16" fill="none"><rect x="1" y="1" width="16" height="14" rx="1" stroke="currentColor" strokeWidth="2" />
-                  <rect x={side === 'right' ? 10 : 4} y={side === 'bottom' ? 9 : 4} width={side === 'left' || side === 'right' ? 4 : 10} height={side === 'top' || side === 'bottom' ? 3 : 8} rx="0.5" fill="currentColor" /></svg>
+                <svg aria-hidden width="18" height="18" viewBox="0 0 256 256" fill="currentColor">
+                  <g transform={side === 'bottom' ? 'translate(0 256) scale(1 -1)' : side === 'left' ? 'rotate(-90 128 128)' : side === 'right' ? 'rotate(90 128 128)' : undefined}>
+                    <rect x="32" y="48" width="192" height="160" rx="8" fill="none" stroke="currentColor" strokeWidth="16" strokeLinecap="round" strokeLinejoin="round" />
+                    <rect x="56" y="72" width="144" height="64" rx="8" />
+                  </g>
+                </svg>
               </ContextAction>)}
               <ContextAction label="Use automatic helper placement" onClick={() => p.placement!.onChange()} disabled={!p.placement.manual} keepFocus>Auto</ContextAction>
             </div>}<ContextAction label="Close terminal context" onClick={close} muted><XIcon size={15} /></ContextAction></div></div>
