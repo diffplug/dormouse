@@ -194,14 +194,13 @@ function copyWithFallback(text: string): Promise<void> {
   return Promise.resolve();
 }
 
-export function ThemeDebuggerDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+/** Mount only while the debugger is open: each open captures a fresh snapshot. */
+export function ThemeDebuggerDialog({ onClose }: { onClose: () => void }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [snapshot, setSnapshot] = useState<ThemeDiagnosticSnapshot | null>(null);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    if (!open) return;
-
     const refresh = () => setSnapshot(captureThemeDiagnostics());
     refresh();
 
@@ -209,22 +208,18 @@ export function ThemeDebuggerDialog({ open, onClose }: { open: boolean; onClose:
     observer.observe(document.body, { attributes: true, attributeFilter: ['class', 'style'] });
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style'] });
     return () => observer.disconnect();
-  }, [open]);
+  }, []);
 
   useEffect(() => {
     const dialog = dialogRef.current;
-    if (!dialog) return;
-    if (open && !dialog.open) dialog.showModal();
-    if (!open && dialog.open) dialog.close();
-  }, [open]);
+    if (dialog && !dialog.open) dialog.showModal();
+  }, []);
 
   useEffect(() => {
     if (!copied) return;
     const timeout = setTimeout(() => setCopied(false), 1400);
     return () => clearTimeout(timeout);
   }, [copied]);
-
-  if (!open) return null;
 
   const copyReport = async () => {
     if (!snapshot) return;
@@ -306,5 +301,5 @@ export function ThemeDebuggerGlobal() {
     return () => window.removeEventListener(OPEN_THEME_DEBUGGER_EVENT, handler);
   }, []);
 
-  return <ThemeDebuggerDialog open={open} onClose={() => setOpen(false)} />;
+  return open ? <ThemeDebuggerDialog onClose={() => setOpen(false)} /> : null;
 }

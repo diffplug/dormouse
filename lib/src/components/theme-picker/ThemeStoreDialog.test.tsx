@@ -60,10 +60,26 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-function render(open: boolean) {
+function render() {
   act(() => {
-    root.render(<ThemeStoreDialog open={open} onClose={() => {}} onThemesChanged={() => {}} />);
+    root.render(<ThemeStoreDialog onClose={() => {}} onThemesChanged={() => {}} />);
   });
+}
+
+function unmount() {
+  act(() => { root.render(null); });
+}
+
+/** Search for `query` and return the rendered row's Install button. */
+async function searchForInstall(query: string, displayName: string): Promise<HTMLButtonElement> {
+  typeQuery(query);
+  await act(async () => { vi.advanceTimersByTime(300); });
+  const row = [...container.querySelectorAll('button')].find(
+    (button) => button.textContent === 'Install'
+      && button.parentElement?.textContent?.includes(displayName),
+  );
+  if (!row) throw new Error(`install button for ${displayName} not rendered`);
+  return row;
 }
 
 function typeQuery(value: string) {
@@ -73,55 +89,18 @@ function typeQuery(value: string) {
 }
 
 describe('ThemeStoreDialog', () => {
-  it('resets the search query when reopened after being closed', () => {
-    render(true);
-    typeQuery('dracula');
-    expect(container.querySelector('input')?.value).toBe('dracula');
-
-    render(false); // close — component renders null but stays mounted
-    render(true); // reopen
-
-    expect(container.querySelector('input')?.value).toBe('');
-  });
-
-  it('cancels a pending debounce when closed before it fires', () => {
+  it('cancels a pending debounce when unmounted before it fires', () => {
     vi.useFakeTimers();
     try {
-      render(true);
+      render();
       typeQuery('dracula'); // schedules doSearch in 300ms
 
-      render(false); // close within the debounce window
+      unmount(); // close within the debounce window
       act(() => {
         vi.advanceTimersByTime(300); // the cancelled timer must not fire
       });
 
       expect(searchThemesMock).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('discards a search already in flight when the store closes', async () => {
-    let resolveSearch!: (result: { extensions: OpenVSXExtension[] }) => void;
-    searchThemesMock.mockImplementationOnce(
-      () => new Promise((resolve) => { resolveSearch = resolve; }),
-    );
-
-    vi.useFakeTimers();
-    try {
-      render(true);
-      typeQuery('dracula');
-      act(() => { vi.advanceTimersByTime(300); }); // the request leaves
-      expect(searchThemesMock).toHaveBeenCalledTimes(1);
-
-      render(false); // close while it is still in flight
-      await act(async () => {
-        resolveSearch({ extensions: [extension('dracula', 'Dracula Official')] });
-      });
-      render(true);
-
-      expect(container.textContent).not.toContain('Dracula Official');
-      expect(container.textContent).toContain('Search for a VS Code theme to install');
     } finally {
       vi.useRealTimers();
     }
@@ -135,7 +114,7 @@ describe('ThemeStoreDialog', () => {
 
     vi.useFakeTimers();
     try {
-      render(true);
+      render();
       typeQuery('dracula');
       act(() => { vi.advanceTimersByTime(300); });
 
@@ -163,7 +142,7 @@ describe('ThemeStoreDialog', () => {
 
     vi.useFakeTimers();
     try {
-      render(true);
+      render();
       typeQuery('dracula');
       act(() => { vi.advanceTimersByTime(300); });
       await act(async () => {
@@ -183,7 +162,7 @@ describe('ThemeStoreDialog', () => {
     }
   });
 
-  it('discards a failed install whose rejection lands after the store closes', async () => {
+  it('reports a failed install', async () => {
     searchThemesMock.mockImplementationOnce(async () => ({
       extensions: [extension('dracula', 'Dracula Official')],
     }));
@@ -194,54 +173,43 @@ describe('ThemeStoreDialog', () => {
 
     vi.useFakeTimers();
     try {
-      render(true);
-      typeQuery('dracula');
-      await act(async () => { vi.advanceTimersByTime(300); });
-
-      const install = [...container.querySelectorAll('button')]
-        .find((button) => button.textContent === 'Install');
-      if (!install) throw new Error('install button not rendered');
+      render();
+      const install = await searchForInstall('dracula', 'Dracula Official');
       act(() => { install.click(); });
 
-      render(false); // close while the install is still in flight
-      await act(async () => {
-        rejectInstall(new Error('Install failed: 503'));
-      });
-      render(true);
-
-      expect(container.textContent).not.toContain('Install failed: 503');
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('still reports an install that fails while the store is open', async () => {
-    searchThemesMock.mockImplementationOnce(async () => ({
-      extensions: [extension('dracula', 'Dracula Official')],
-    }));
-    let rejectInstall!: (reason: Error) => void;
-    vi.mocked(fetchExtensionThemes).mockImplementationOnce(
-      () => new Promise((_resolve, reject) => { rejectInstall = reject; }),
-    );
-
-    vi.useFakeTimers();
-    try {
-      render(true);
-      typeQuery('dracula');
-      await act(async () => { vi.advanceTimersByTime(300); });
-
-      const install = [...container.querySelectorAll('button')]
-        .find((button) => button.textContent === 'Install');
-      if (!install) throw new Error('install button not rendered');
-      act(() => { install.click(); });
-
-      // The close gate must not swallow the failure it is not about: without
-      // this, a gate that never writes passes the closed-store case above.
       await act(async () => {
         rejectInstall(new Error('Install failed: 503'));
       });
 
       expect(container.textContent).toContain('Install failed: 503');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps a row installing while another install settles', async () => {
+    searchThemesMock.mockImplementationOnce(async () => ({
+      extensions: [extension('dracula', 'Dracula Official'), extension('nord', 'Nord Theme')],
+    }));
+    let resolveFirst!: () => void;
+    vi.mocked(fetchExtensionThemes)
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = () => resolve([]); }))
+      .mockImplementationOnce(() => new Promise(() => {}));
+
+    vi.useFakeTimers();
+    try {
+      render();
+      const dracula = await searchForInstall('dracula', 'Dracula Official');
+      const nord = [...container.querySelectorAll('button')].find(
+        (button) => button.textContent === 'Install' && button !== dracula,
+      )!;
+      act(() => { dracula.click(); });
+      act(() => { nord.click(); });
+
+      await act(async () => { resolveFirst(); });
+
+      expect(nord.disabled).toBe(true);
+      expect(nord.textContent).toBe('Installing...');
     } finally {
       vi.useRealTimers();
     }
@@ -256,7 +224,7 @@ describe('ThemeStoreDialog', () => {
 
     vi.useFakeTimers();
     try {
-      render(true);
+      render();
       typeQuery('dra');
       act(() => { vi.advanceTimersByTime(300); });
       typeQuery('nord');

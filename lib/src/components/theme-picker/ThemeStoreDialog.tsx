@@ -12,60 +12,35 @@ import {
   setActiveThemeId,
 } from '../../lib/themes';
 
+/**
+ * Mount only while the store is open: closing unmounts it, which is what gives
+ * every reopen a clean slate. A search or install still in flight at the close
+ * settles into an unmounted component, where its state writes are no-ops.
+ */
 export function ThemeStoreDialog({
-  open,
   onClose,
   onThemesChanged,
 }: {
-  open: boolean;
   onClose: () => void;
   onThemesChanged: () => void;
 }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<OpenVSXExtension[]>([]);
   const [loading, setLoading] = useState(false);
-  const [installing, setInstalling] = useState<string | null>(null);
+  // One entry per row, since installs run concurrently: a single slot would be
+  // cleared by whichever install settled first, re-enabling a row still in flight.
+  const [installing, setInstalling] = useState<ReadonlySet<string>>(() => new Set());
   const [error, setError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
-  // Every search takes a new epoch, and so does every close, so only the newest
-  // search may write its outcome. Cancelling the debounce below stops the
-  // searches that have not started yet; a search already in flight needs this,
-  // in two shapes — an earlier query answering after a later one, and a request
-  // outliving the close, repopulating the slate the reset effect just cleared.
+  // Every search takes a new epoch, so only the newest search may write its
+  // outcome: an earlier query can answer after a later one.
   const searchEpoch = useRef(0);
-  // Bumped only by a close, where `searchEpoch` is bumped by a search as well.
-  // An install outlives its row — the user can type on while it runs — so it
-  // must survive a later search and be invalidated by the close alone.
-  const openEpoch = useRef(0);
 
   useEffect(() => {
     const dialog = dialogRef.current;
-    if (!dialog) return;
-    // Only the open transition needs a native call: closing unmounts the
-    // <dialog> (via `if (!open) return null` below), so there is no element
-    // left to `.close()`.
-    if (open && !dialog.open) dialog.showModal();
-  }, [open]);
-
-  // The component stays mounted (rendering null) while closed, so search state
-  // would otherwise persist — a reopen would flash the previous query, result
-  // list, and any error banner. Reset to a clean slate when the store closes.
-  useEffect(() => {
-    if (!open) {
-      // Cancel any debounce scheduled by the last keystroke; otherwise it fires
-      // doSearch after close and repopulates results/loading for the old query.
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      searchEpoch.current += 1;
-      openEpoch.current += 1;
-      setQuery('');
-      setResults([]);
-      setError(null);
-      setLoading(false);
-    }
-  }, [open]);
-
-  useEffect(() => {
+    if (dialog && !dialog.open) dialog.showModal();
+    // A debounce still pending at unmount would search for a closed store.
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
@@ -105,14 +80,7 @@ export function ThemeStoreDialog({
 
   const handleInstall = async (extension: OpenVSXExtension) => {
     const key = `${extension.namespace}/${extension.name}`;
-    // The install outlives the close the same way a search does, so its banner
-    // is gated the same way: a failure landing after the store closed would
-    // otherwise repopulate the slate the reset effect cleared, and greet the
-    // next open with an error about an extension no longer on screen. The
-    // install itself is not cancelled — the themes it fetched are still
-    // installed, which is what the user asked for.
-    const epoch = openEpoch.current;
-    setInstalling(key);
+    setInstalling((current) => new Set(current).add(key));
     setError(null);
     try {
       const themes = await fetchExtensionThemes(extension.namespace, extension.name);
@@ -121,13 +89,17 @@ export function ThemeStoreDialog({
         setActiveThemeId(themes[0].id);
         applyTheme(themes[0]);
       }
+      // The parent's callback, so an install that outlives the store still
+      // reaches the picker's list.
       onThemesChanged();
     } catch (reason) {
-      if (openEpoch.current === epoch) {
-        setError(reason instanceof Error ? reason.message : 'Install failed');
-      }
+      setError(reason instanceof Error ? reason.message : 'Install failed');
     } finally {
-      setInstalling(null);
+      setInstalling((current) => {
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      });
     }
   };
 
@@ -151,8 +123,6 @@ export function ThemeStoreDialog({
       (theme) => theme.origin.kind === 'installed' && theme.origin.extensionId === key,
     );
   };
-
-  if (!open) return null;
 
   return (
     <dialog
@@ -202,7 +172,7 @@ export function ThemeStoreDialog({
           {results.map((extension) => {
             const key = `${extension.namespace}/${extension.name}`;
             const installed = isInstalled(extension);
-            const isInstallingThis = installing === key;
+            const isInstallingThis = installing.has(key);
             return (
               <div key={key} className="flex items-center gap-3 rounded px-2 py-2 transition-colors hover:opacity-85">
                 {extension.files?.icon ? (
