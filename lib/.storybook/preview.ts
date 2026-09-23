@@ -81,18 +81,21 @@ const FRAME_FALLBACK_MS = 100;
 // Initialize fake platform once at module scope
 const fakePlatform = initPlatform('fake');
 
-/** Set only by `lib/vitest.argos.config.ts`; absent in the real Storybook. */
-declare const __ARGOS_SNAPSHOT__: boolean | undefined;
+/** Defined only by `lib/vitest.argos.config.ts`; absent in the real Storybook. */
+declare const __ARGOS_SNAPSHOT__: true | undefined;
 
-// Pin animations at T=0 for deterministic Chromatic and Argos snapshots.
-//
-// Ask `isChromatic()`, never the user agent: Chromatic only rewrites the UA on
-// its Chrome runner, and identifies every other browser (Safari, Firefox, Edge)
-// with a `chromatic=true` query parameter instead. A UA sniff therefore left
-// every guard below OFF in Safari — an alarm pulsing on a 650ms infinite loop, a
-// blinking cursor, terminals on WebGL, and mid-tween pane geometry — which is
-// what made the Safari snapshots unstable while Chrome's stayed clean.
-if (isChromatic() || (typeof __ARGOS_SNAPSHOT__ !== 'undefined' && __ARGOS_SNAPSHOT__)) {
+/** A visual-snapshot run — Chromatic or Argos — that must render deterministically.
+ *
+ *  Ask `isChromatic()`, never the user agent: Chromatic only rewrites the UA on
+ *  its Chrome runner, and identifies every other browser (Safari, Firefox, Edge)
+ *  with a `chromatic=true` query parameter instead. A UA sniff therefore left
+ *  every guard below OFF in Safari — an alarm pulsing on a 650ms infinite loop, a
+ *  blinking cursor, terminals on WebGL, and mid-tween pane geometry — which is
+ *  what made the Safari snapshots unstable while Chrome's stayed clean. */
+const visualSnapshot = isChromatic() || typeof __ARGOS_SNAPSHOT__ !== 'undefined';
+
+// Pin animations at T=0 for deterministic snapshots.
+if (visualSnapshot) {
   cfg.marchingAnts.paused = true;
   cfg.alert.ringingPaused = true;
   // A blinking cursor is captured on-or-off depending on the frame; freeze it to a

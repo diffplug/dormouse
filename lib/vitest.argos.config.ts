@@ -1,6 +1,7 @@
 // Argos visual tests: every Storybook story runs in a real browser through the
 // Storybook Vitest addon, and `@argos-ci/storybook` screenshots it after its
-// `play` settles. Separate from `vite.config.ts` so `pnpm test` never starts a
+// `play` settles; the addon applies the preview's annotations, `beforeAll`
+// included, itself (Storybook 10.3+), so no setup file. Separate from `vite.config.ts` so `pnpm test` never starts a
 // browser. `pnpm test:argos` writes to `./screenshots/<browser>`; it uploads only on CI.
 import path from 'path';
 import { defineConfig, mergeConfig, type TestProjectInlineConfiguration } from 'vitest/config';
@@ -41,7 +42,6 @@ function storybookProject(browser: 'chromium' | 'webkit'): TestProjectInlineConf
         // Chromatic's default capture width; Vitest's default is a 414px phone.
         viewport: { width: 1200, height: 900 },
       },
-      setupFiles: ['.storybook/vitest.setup.ts'],
     },
   };
 }
