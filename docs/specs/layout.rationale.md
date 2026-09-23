@@ -46,7 +46,7 @@ xterm.js paints only its own rendered surface, and integer row fitting leaves a 
 
 ## Workspace names
 
-**Why the name holds while git is unanswered.** Naming by directory first would flash the folder name for one round trip, then flip to `repo @ branch`, on every new directory.
+**Why the name holds while git is unanswered.** Naming by directory first would flash the folder name for one round trip, then flip to `repo @ branch`, on every new directory. The hold is bounded because a mount that stays hung is durable, not slow: its `realpath` never returns, so an unbounded hold froze the name for the life of the Window and drowned out the Workspace's healthy members (found in review, 2026-09).
 
 **Why a command finish re-asks git.** `git switch` changes the branch without moving the cwd, and there is no filesystem watcher; the prompt after it is the first boundary that can notice. An agent switching branches inside a long-running command is not seen until that command exits — accepted over watching every repository's `HEAD` (2026-09).
 

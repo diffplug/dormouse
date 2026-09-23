@@ -67,8 +67,9 @@ export function installWorkspaceAutoNaming(
     // A path the host left out (past its cap or its deadline) or a rejected
     // request is unanswered, never "no repository": it keeps its last answer,
     // or holds the name for its first `HOLD_MISSES` misses if it never had
-    // one, and is asked again after a doubling delay. Settling after dispose writes only the dead cache: every
-    // timer is armed through `schedule` or `recompute`, both inert once disposed.
+    // one, and is asked again after a doubling delay. Settling after dispose
+    // writes only the dead cache: every timer is armed through `schedule` or
+    // `recompute`, both inert once disposed.
     const settle = (result: GitInfoResult, failed: boolean) => {
       if (cache.size > CACHE_LIMIT) cache.clear();
       const now = Date.now();

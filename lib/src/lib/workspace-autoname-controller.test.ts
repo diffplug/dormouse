@@ -143,6 +143,7 @@ describe('installWorkspaceAutoNaming', () => {
     await vi.advanceTimersByTimeAsync(16_000);
     expect(gitInfo.mock.calls.length).toBeGreaterThanOrEqual(4);
     expect(gitInfo.mock.calls.length).toBeLessThanOrEqual(5);
+    expect(name()).toBe('a'); // past HOLD_MISSES, the sole member votes "no repository"
   });
 
   it('stops holding the name for a mount that stays hung, so healthy members name it', async () => {
