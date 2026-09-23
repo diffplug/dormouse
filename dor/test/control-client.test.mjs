@@ -74,19 +74,28 @@ test('a squatter that cannot prove the token never receives it', skipOnWindows, 
     const squatter = createServer((socket) => {
       socket.setEncoding('utf8');
       socket.on('error', () => {});
-      socket.on('data', (chunk) => received.push(chunk));
       // Play the part convincingly: a challenge, then a welcome whose proof is
-      // the best a peer without the token can do.
-      socket.write(`${JSON.stringify({ kind: 'challenge', nonce: 'attacker-nonce' })}\n`);
-      setTimeout(() => {
+      // the best a peer without the token can do. The welcome waits for the
+      // hello rather than a timer, so the client cannot reject before its hello
+      // is in `received` — the client destroys the socket as it rejects, and a
+      // hello still queued there never reaches the wire at all.
+      let welcomed = false;
+      socket.on('data', (chunk) => {
+        received.push(chunk);
+        if (welcomed || !received.join('').includes('\n')) return;
+        welcomed = true;
         socket.write(`${JSON.stringify({ kind: 'welcome', proof: 'f'.repeat(64) })}\n`);
-      }, 10).unref();
+      });
+      socket.write(`${JSON.stringify({ kind: 'challenge', nonce: 'attacker-nonce' })}\n`);
     });
     await new Promise((resolve) => squatter.listen(socketPath, resolve));
     try {
       const client = new SocketControlClient({ socketPath, token: 'shared-secret', timeoutMs: 5000 });
       await assert.rejects(client.listSurfaces({}), /could not prove it is Dormouse/);
       const wire = received.join('');
+      // Every assertion below holds of an empty `wire`, so it observes nothing
+      // about a leak until there is something to observe.
+      assert.ok(wire.trim(), 'the squatter received nothing, so the assertions below prove nothing');
       assert.ok(!wire.includes('shared-secret'), `token leaked to the squatter: ${wire}`);
       // Only the hello — the request, with whatever it would have carried, was
       // never sent.
