@@ -20,9 +20,10 @@ This repository runs the [tend](https://github.com/max-sixty/tend) agent harness
 
 | Secret | What a compromise buys | What bounds it |
 | --- | --- | --- |
-| `TEND_BOT_TOKEN` (worst case) | full `repo` + `workflow` write *as a trusted collaborator*: issue/PR spam, force-pushing or deleting feature branches, persistent compromise by authoring new workflows — also how `CHROMATIC_PROJECT_TOKEN` is reached | cannot itself merge to `main`, push tags, or reach env-scoped secrets; new workflows are caught by `.github/workflows/workflow-audit.yaml`; the trusted identity can still social-engineer an admin toward a `main` merge |
+| `TEND_BOT_TOKEN` (worst case) | full `repo` + `workflow` write *as a trusted collaborator*: issue/PR spam, force-pushing or deleting feature branches, persistent compromise by authoring new workflows — also how `CHROMATIC_PROJECT_TOKEN` and `ARGOS_TOKEN` are reached | cannot itself merge to `main`, push tags, or reach env-scoped secrets; new workflows are caught by `.github/workflows/workflow-audit.yaml`; the trusted identity can still social-engineer an admin toward a `main` merge |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Anthropic API-credit abuse | the bot account's spend limit |
 | `CHROMATIC_PROJECT_TOKEN` | corrupted snapshot testing | rotation; abuse is visible in Chromatic's own dashboard |
+| `ARGOS_TOKEN` | corrupted snapshot testing, a replaced Storybook deploy | rotation; abuse is visible in Argos's own dashboard |
 
 **Prompt-injection through user-supplied content.** The harness reads PR descriptions, code diffs, issue text, comments, and CI logs — all attacker-influenceable. **Assume a malicious prompt can push a workflow that sends a repo-level secret to an external URL**: admin-gated release paths stay sealed, but a workflow on a bot-pushed feature branch still executes with repo-level secrets in scope.
 
@@ -34,7 +35,7 @@ This repository runs the [tend](https://github.com/max-sixty/tend) agent harness
 
 **The notifications poll widens its input.** `tend-notifications.yaml` alone takes its subjects from the bot account's own unread feed rather than from an event payload or a fixed scheduled sweep, and its inlined pre-check `PUT /repos/diffplug/dormouse/subscription -F subscribed=true` runs every `*/15` cycle to keep that feed wide. `dormouse-bot` watches all repository activity; its prompt decides whether to respond (rationale). What still bounds the bot on an undispatched thread is `author_association` tiering and the admin gate on `main`. **Never expect unwatching by hand to stick**: the PUT is idempotent and repeated every cycle, so the lever is `tend-notifications.yaml`, not the Unwatch button.
 
-**Reachable repo-level secrets.** `CHROMATIC_PROJECT_TOKEN` is reachable by any workflow the bot can author: `.github/workflows/chromatic.yml` is `pull_request`-triggered, and GitHub environment policies cannot distinguish a bot from a human contributor at the ref level. **Accepted, with rotation as the mitigation** — the token is scoped to a single project and easy to rotate. `OVSX_PAT` and `VSCE_PAT` are protected: they live only in the `vscode-extension-publish` environment, whose deployment-branch-policy admits only `v*` tags, and tag creation is admin-only.
+**Reachable repo-level secrets.** `CHROMATIC_PROJECT_TOKEN` and `ARGOS_TOKEN` are reachable by any workflow the bot can author: `.github/workflows/chromatic.yml` and `.github/workflows/argos.yml` are `pull_request`-triggered, and GitHub environment policies cannot distinguish a bot from a human contributor at the ref level. **Accepted, with rotation as the mitigation** — each token is scoped to a single project and easy to rotate. `OVSX_PAT` and `VSCE_PAT` are protected: they live only in the `vscode-extension-publish` environment, whose deployment-branch-policy admits only `v*` tags, and tag creation is admin-only.
 
 **Inert secret plumbing.** Every generated `tend-*.yaml` passes `anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}` to `max-sixty/tend/claude`; no such secret exists at repo or org level, so it resolves to the empty string and the harness authenticates with `CLAUDE_CODE_OAUTH_TOKEN` instead. **Never create an `ANTHROPIC_API_KEY` secret**: the input cannot be deleted locally, so the `FAIL IF` below is what makes adding one a deliberate, documented expansion of the bot's reach (rationale).
 
@@ -65,7 +66,7 @@ This repository runs the [tend](https://github.com/max-sixty/tend) agent harness
 - **FAIL IF** `dormouse-bot` holds `maintain` or `admin` on this repository. `GET /collaborators/dormouse-bot/permission` spells `push` as `write` in both `permission` and `role_name`, so check that neither of those two roles appears rather than string-comparing against `push`.
 - **FAIL IF** any GitHub environment except `hosted-preview` admits a ref that is not admin-gated by the `Tag operations` or `Merge access` rulesets. Hosted environments follow "Hosted Deployments" below. Today: `vscode-extension-publish` and `release-attest` (`v*` tag, admin-only via `Tag operations`); `security-audit` (`main` admin-only via `Merge access`, plus `v*` tag); `tend` (`main` only, admin-only via `Merge access`).
 - **FAIL IF** the secret inventory departs from this placement (rationale). One pass over `actions/secrets`, `actions/organization-secrets`, and each environment's secret listing answers every line:
-  - `CHROMATIC_PROJECT_TOKEN` — repo level, the only secret there; accepted with rotation (see "Reachable repo-level secrets").
+  - `CHROMATIC_PROJECT_TOKEN`, `ARGOS_TOKEN` — repo level, the only secrets there; accepted with rotation (see "Reachable repo-level secrets").
   - `AUDIT_PAT` — in `security-audit`, absent at repo level.
   - `TEND_BOT_TOKEN` — in `tend`, absent at repo level.
   - `CLAUDE_CODE_OAUTH_TOKEN` — in **both** `tend` and `security-audit`, absent at repo level. Environments do not inherit each other's secrets, so a rotation must set both.
@@ -73,7 +74,7 @@ This repository runs the [tend](https://github.com/max-sixty/tend) agent harness
   - `ANTHROPIC_API_KEY` — absent at repo *and* org level, for as long as `tend-*.yaml` passes `anthropic_api_key` to `max-sixty/tend/claude` (see "Inert secret plumbing").
   - `release-attest`'s own secret listing is empty **and** it declares no environment variables — an empty environment is what keeps `id-token: write` the only credential `release.yml`'s two build jobs can reach.
   - No org-level secret visible to this repository at all (see "Org-level secrets").
-- **FAIL IF** `CHROMATIC_PROJECT_TOKEN` is missing from `secrets.allowed` in `.config/tend.yaml` (rationale).
+- **FAIL IF** `CHROMATIC_PROJECT_TOKEN` or `ARGOS_TOKEN` is missing from `secrets.allowed` in `.config/tend.yaml` (rationale).
 - **FAIL IF** `.github/workflows/workflow-audit.yaml` is missing, disabled, or has not produced a successful run in the last 48 hours. Treat one skipped run as a signal rather than as slack in the window (rationale).
 - **FAIL IF** Renovate's `github-actions` manager can update `.github/workflows/tend-*.yaml`; the tend generator owns every dependency pin (rationale).
 - **FAIL IF** any `tend-*.yaml` pins `max-sixty/tend` below `0.1.19`, the release that pins instruction files by glob at any depth (rationale).
