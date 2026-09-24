@@ -22,7 +22,7 @@ import { launchChromium } from './launch-chromium';
  * substitutes for it. jsdom is not an option: it does not enforce CSP at all.
  *
  * Deliberately shallow. It asserts the app mounts and the policy blocked
- * nothing — not what the UI looks like, which is Storybook's and Chromatic's
+ * nothing — not what the UI looks like, which is Storybook's and Argos's
  * job.
  */
 
