@@ -6,6 +6,8 @@
 
 **What moving a browser Surface's DOM would cost.** A re-parented `<iframe>` reloads, losing scroll, form contents, live scripts, and any open WebSocket. A screencast canvas that moves mid-click breaks click synthesis, whose device coordinates were computed against the old box. Parking the leaf instead of unmounting it makes minimize/reattach free rather than a reload.
 
+**Why `wsPort` is never persisted.** It is ephemeral, and a persisted one was always wrong after a restart (static reading, 2026-09): the Playwright port is the host's own in-process viewer server, so every restored Playwright pane failed three connects (immediate, +2 s, +4 s) and read "ended" after ~6 s; an agent-browser one after a reboot named nothing, and the stale-port recovery that followed asked `stream status`, which starts a daemon at `about:blank` — the pane showed a blank page while its header still named the real one. The recovery machinery that existed only for stale ports (`maybeRecoverStalePort`, two generation counters, a "this port opened live" marker) went with it.
+
 ## Browser Chrome
 
 **Why the robot is independent of presentation.** Agent visibility is the
@@ -22,17 +24,17 @@ views without weakening that first signal.
 
 **Why the eager pane is created before `agent-browser open` runs.** A cold daemon boot is 1–3s, and a menu that closes on a pane appearing three seconds later reads as a click that did nothing.
 
-**Why a session-less eager pane is inert.** `maybeRecoverStalePort` returns early when params carry no `session`, so the pane spawns no CLI of its own — no `stream status` fired at a still-booting daemon, no race with the `open` behind it.
-
 **Why the eager pane shows its own placeholder.** The idle placeholder asks for `dor ab open <url>`, telling the user to repeat the action they just took instead of naming the pane's actual state.
 
-**Why the handover is a single params refresh.** Setting `session` is what reconciles the controller and connects it, so landing it ahead of `wsPort`/`binaryPath` — or before `agent-browser open` has returned — connects against a daemon that is not up. Handing it over even after a failed `open` lets the placeholder name what it is waiting for; the menu that would have reported the error closed long ago.
-
-The persisted `wsPort` mirror can lag the controller's already-live port after a buffered write, so a simultaneous session change still reconciles when setting that port itself is a no-op.
+**Why a reuse is one intent.** Revealing the target and then asking for its mode and its URL separately sent `open <url>` in the same tick as a pop-out began its close/reopen, deterministically: the navigation raced the relaunch, which had already captured the old URL.
 
 ## Display Modal And Render Swaps
 
 **Why the iframe swap is eager.** The same 1–3s daemon boot as the context-menu connect, behind a modal that has already closed; and while the swap awaited `open`, a slow page held the iframe on screen for the whole load and a timed-out `open` dropped the swap silently — leaving an orphan `gui-<hex>` browser nobody could see or close.
+
+**Why the Surface's controller launches, not the Wall.** The launch-and-bind existed four times — Tool swap, iframe/cross-provider swap, context-menu port, Tool serving — each with its own "still wanted?" predicate and failure rule, racing the controller it handed a session to. Because the launch lived in a Wall closure rather than on the Surface, a session-less pane that was persisted, or whose webview reloaded mid-launch, restored session-less forever; a minimized cross-provider failure rewrote a Door's params under a still-mounted panel holding a disposed controller; and Tool serving still blocked on the page load (static reading, 2026-09).
+
+**Why a failed swap's restore waits for the close.** The restore reopens the previous provider in its own session so its managed key still names it — a fresh `gui-<hex>` session kept a `key` badge that `dor ab --key` no longer resolved to, and the next command opened a second pane. That session's `close` was issued at swap time, and a fast failure (no Playwright installed) lands before it does, so a reopen racing it would be closed under the restored pane.
 
 ## Agent-Browser Renderer
 
@@ -54,7 +56,11 @@ The persisted `wsPort` mirror can lag the controller's already-live port after a
 
 **Why every non-crisp painter must bump the draw generation.** The byte-dedup compares an incoming capture against the last crisp draw. A resting page whose crisp bytes match that draw dedups to a no-op and strands the pane on the blurry provisional frame; a freshly re-attached canvas mounts blank and has the same problem.
 
-**Why the connection is dropped at relaunch start rather than left to fail.** The host closes the browser and kills the daemon, so the old socket's close is certain. Left connected, its three reconnect failures flagged the pane "ended" about three seconds into a pop-in that a slow page could hold open for 25s, and the popped-out CDP observer's `get cdp-url` — issued the moment `poppedOut` flipped — landed in the close→reopen gap, where a daemon command spawns a competing headless daemon that the headed relaunch then reattaches to.
+**Why the connection is dropped at relaunch start rather than left to fail.** The host closes the browser and kills the daemon, so the old socket's close is certain. Left connected, its three reconnect failures flagged the pane "ended" about three seconds into a pop-in that a slow page could hold open for 25s, and the popped-out CDP observer's `get cdp-url` — issued the moment `poppedOut` flipped — landed in the close→reopen gap, where a daemon command spawns a competing headless daemon that the headed relaunch then reattaches to. The same holds for flipping headedness before leaving `live`: the observer would start, gate open, in the gap.
+
+**Why one daemon gate, not a check per call site.** The rule against daemon commands in the relaunch gap was a `relaunching` flag each caller had to check, and most did not (static reading, 2026-09): the header's back/forward/reload/URL edit, the Display modal's device and custom viewport, tab clicks, sync-to-pane (reached by a resize once a pop-in had already flipped `poppedOut`), and Cmd-A/C/X all reached the daemon mid-relaunch. The lifecycle behind it was a dozen flags whose invariants lived in five predicates.
+
+**Why an unpark attaches with no page.** A daemon gone while the pane was hidden is the same failure as one gone while visible, which the pane shows as ended; relaunching it on unpark would hide that failure and undo a `dor ab close` made meanwhile. A restore has no such history, so it reopens the page.
 
 **Why `url` is tracked separately from `tabs`.** Measured against agent-browser 0.31.1 (2026-09): on `open`, the stream sends `tabs` (about:blank), then `url` naming the target at navigation commit, and refreshes `tabs` only when the CLI command completes — after `load`. During a slow load the tab list still named the previous page, so a pop-out issued then relaunched the page before the one being loaded.
 

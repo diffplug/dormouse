@@ -604,9 +604,9 @@ and the host applies two gates in order:
   pw-screencast) — drive it with dor pw --surface surface:2`, or for an iframe
   `… open its page with dor ab open <its url>`.
 
-Neither gate covers an agent-browser Surface the context menu created eagerly,
-whose daemon boot has not yet named it ([dor-browser.md](dor-browser.md) → Pane
-Context Menu Connect): capability and renderer but no session, failing with
+Neither gate covers an agent-browser Surface whose launch has not yet named its
+session ([dor-browser.md](dor-browser.md) → Agent-Browser Connection):
+capability and renderer but no session, failing with
 `surface 'surface:2' has no agent-browser session yet`.
 
 Like every handle target, `--surface` requires a live control endpoint.
