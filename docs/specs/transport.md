@@ -238,7 +238,7 @@ Source of truth: `getWindowSnapshot` / `seedWindowSession` / `installWindowSessi
 
 **A corrupt save must never block startup.** Every read goes through `readPersistedSession()` / `readPersistedWindow()`, which accept the canonical parsed object *or* a JSON-stringified blob (host state APIs may hand back the inner serialized string) and log-and-discard anything present but unreadable. `readPersistedWindow` additionally drops Workspaces whose inner session is unreadable and repairs a dangling `activeWorkspaceId` to the first Workspace.
 
-**The recovery command.** One agent resume invocation per surface (`claude --resume <id>`, `claude --continue`, `codex resume <id>`) survives teardown alongside the persisted structure.
+**The recovery command.** **Must retain one recognized agent resume invocation per Surface** alongside the persisted structure. `CODING_AGENTS` in `lib/src/lib/coding-agents.ts` owns supported executables and resume forms; `docs/compatible-agents.md` is the public guide.
 
 *It is not part of the persisted session.* `PersistedPane` carries no `resumeCommand`, and `normalizeSessionV3` strips one out of a pre-upgrade blob as it strips a transcript. **Host-owned and single-use, it travels out of band**: the host puts `surfaceId -> invocation` on the webview's boot payload, the renderer reads it through `PlatformAdapter.getRecoveryCommands()`, and an adapter whose host captures nothing omits the method (rationale).
 
@@ -247,9 +247,10 @@ Source of truth: `getWindowSnapshot` / `seedWindowSession` / `installWindowSessi
 *Detection.* Executable-string constraints; the grammars that implement them, and their edge cases, are in the comments at the two modules below.
 
 - **Only a known invocation plus an opaque id.** The command is *rebuilt* as label + captured id, never sliced from the buffer; the id grammar is alphanumeric/hyphen/underscore only, so shell punctuation cannot enter executable state. The invocation must end on a word break but nothing stronger (rationale).
+- **Must accept space or equals before a long option's ID; rebuild with a space and preserve the recognized executable alias.** Only the registry's legacy continuation forms may omit an ID.
 - **The scan window is stripped as a whole, in one pass, and an unterminated control swallows the rest of it** — the string controls (OSC, DCS, SOS, PM, APC) **in either introducer form, `ESC` or bare C1**, and equally a CSI the window was cut off *inside* (rationale). **Match every escape by its full ECMA-48 shape**, never by the Fe range (rationale). **One implementation**: `stripTerminalControls` removes string controls by running `TerminalControlStreamFilter`, so the batch and streaming readers cannot disagree.
 - **Stripping runs in boundary mode, whose rule is inverted**: *every* control becomes a newline rather than vanishing, except SGR and charset designators, the two classes that neither move the cursor nor erase (rationale).
-- **Rightmost match in the last 50 lines wins**, newest *by position* and never by pattern order (rationale). **Restore revalidates through `normalizeResumeCommand` before typing**, against a snapshot written by an older detector.
+- **Rightmost match in the last 50 lines wins**, newest *by position* and never by pattern order (rationale). **Must revalidate the complete invocation through `normalizeResumeCommand` before typing**, against a snapshot written by an older detector.
 
 Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `surfaceRefs` in `lib/src/components/Wall.tsx`; `saveSession` in `lib/src/lib/session-save.ts`; `restoreSession` in `lib/src/lib/session-restore.ts`; the resume plan in `lib/src/lib/reconnect.ts`; `captureAgentRecovery` in `lib/src/host/recovery-capture.ts`; `createRecoveryStore` in `lib/src/host/recovery-store.ts`; `takeRecoveryCommands` in `vscode-ext/src/session-state.ts`; `getRecoveryCommands` in `lib/src/lib/platform/vscode-adapter.ts`; `detectResumeCommand` / `normalizeResumeCommand` in `lib/src/lib/resume-patterns.ts`; `stripTerminalControls` in `lib/src/lib/terminal-controls.ts`.
 

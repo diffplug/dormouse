@@ -46,6 +46,7 @@ const ROOT_README = 'README.md';
 const SKILL = 'dor/skill.md';
 const SELF_HOST = 'SELF_HOST.md';
 const SECURITY_SPEC = 'docs/specs/security.md';
+const COMPATIBLE_AGENTS = 'docs/compatible-agents.md';
 const HOMEPAGE = 'website/src/pages/Home.tsx';
 /** The `/docs` redirect entrypoint `website/public/_redirects` owns; it names
  *  no page, so `sitePath` has nothing to point it at. */
@@ -101,12 +102,13 @@ const src = {
   [SKILL]: readRepoFile(SKILL),
   [SELF_HOST]: readRepoFile(SELF_HOST),
   [SECURITY_SPEC]: readRepoFile(SECURITY_SPEC),
+  [COMPATIBLE_AGENTS]: readRepoFile(COMPATIBLE_AGENTS),
   [HOMEPAGE]: readRepoFile(HOMEPAGE),
 };
 
 /** Parsed form, or null when the source is outside the supported subset. */
 const parsed = {};
-for (const rel of [GUIDE, ROOT_README, SKILL, SELF_HOST, SECURITY_SPEC]) {
+for (const rel of [GUIDE, ROOT_README, SKILL, SELF_HOST, SECURITY_SPEC, COMPATIBLE_AGENTS]) {
   try {
     parsed[rel] = parseMarkdown(src[rel]);
   } catch (error) {
@@ -129,7 +131,7 @@ function linksIn(rel) {
 }
 
 function checkNoPlaceholders() {
-  for (const rel of [GUIDE, ROOT_README, SELF_HOST, SECURITY_SPEC]) {
+  for (const rel of [GUIDE, ROOT_README, SELF_HOST, SECURITY_SPEC, COMPATIBLE_AGENTS]) {
     if (/\bTODO:/.test(src[rel])) fail(`${rel}: contains a TODO: placeholder`);
   }
 }
@@ -223,7 +225,7 @@ function checkImageBaseUrl() {
  * than this check could say.
  */
 function checkLinks() {
-  for (const rel of [GUIDE, ROOT_README, SELF_HOST, SECURITY_SPEC]) {
+  for (const rel of [GUIDE, ROOT_README, SELF_HOST, SECURITY_SPEC, COMPATIBLE_AGENTS]) {
     if (!parsed[rel]) continue;
     for (const href of linksIn(rel)) {
       if (href.startsWith('#')) continue;

@@ -61,9 +61,9 @@ describe("WorkspaceTeardownModal copy", () => {
 
   it("says on every quit that agent sessions come back, and never on a window close", () => {
     expect(render({ confirming: false, intent: { kind: "quit" } }))
-      .toContain("Claude and Codex sessions resume when Dormouse reopens.");
+      .toContain("Supported agent sessions resume when Dormouse reopens.");
     expect(render({ confirming: false, intent: { kind: "quit", requester: "pane-1" } }))
-      .toContain("Claude and Codex sessions resume when Dormouse reopens.");
+      .toContain("Supported agent sessions resume when Dormouse reopens.");
     expect(render({ confirming: false, intent: { kind: "close-window" } }))
       .not.toContain("resume");
     expect(render({ confirming: true, intent: { kind: "quit", requester: "pane-1" } }))

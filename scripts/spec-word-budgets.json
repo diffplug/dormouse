@@ -6,7 +6,7 @@
   "docs/specs/auto-update.md": 1150,
   "docs/specs/deploy.md": 1900,
   "docs/specs/dor-browser.md": 7850,
-  "docs/specs/dor-cli.md": 6300,
+  "docs/specs/dor-cli.md": 6350,
   "docs/specs/dor-tool.md": 4150,
   "docs/specs/glossary.md": 2950,
   "docs/specs/hosted.md": 1100,
@@ -32,9 +32,9 @@
   "docs/specs/terminal-state.md": 2550,
   "docs/specs/theme.md": 2200,
   "docs/specs/tiling-engine.md": 4650,
-  "docs/specs/transport.md": 5500,
+  "docs/specs/transport.md": 5550,
   "docs/specs/tutorial.md": 1900,
   "docs/specs/vscode.md": 7400,
   "docs/specs/webgl-text.md": 1200,
-  "docs/specs/website-docs.md": 4800
+  "docs/specs/website-docs.md": 4850
 }

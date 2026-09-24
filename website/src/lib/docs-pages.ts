@@ -59,6 +59,7 @@ export const DOCS_PAGES: readonly DocsPage[] = [
   { path: "/hosted", module: "./pages/Hosted.tsx", label: "Dormouse Hosted", linkedFrom: EVERYWHERE },
   { path: "/docs/agent-skill", module: "./pages/AgentSkillDocs.tsx", label: "dor agent skill", linkedFrom: EVERYWHERE },
   { path: "/docs/dor", module: "./pages/DorDocs.tsx", label: "dor CLI reference", linkedFrom: EVERYWHERE },
+  { path: "/docs/compatible-agents", module: "./pages/CompatibleAgentsDocs.tsx", label: "Compatible agents", linkedFrom: ["root-readme"] },
 ];
 
 /**

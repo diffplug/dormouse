@@ -1135,7 +1135,7 @@ exit without acting: the user's escape hatch if the webview acked then wedged.
 **Must use the Workspace typed-letter confirmation for window close and quit**,
 naming every Workspace in the window, including hidden ones. The gate opens for
 running Sessions; an all-idle quit proceeds without a prompt. **A quit's prompt
-says Claude and Codex sessions resume when Dormouse reopens** (§Agent recovery);
+says supported agent sessions resume when Dormouse reopens** (§Agent recovery);
 a window close's never does, since it runs no capture. Window close also
 asks before discarding a pending download (§Per-window close).
 

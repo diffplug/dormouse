@@ -1,4 +1,5 @@
-import { loadJson, saveJson } from './local-json-store';
+import { getStorage, loadJson, saveJson } from './local-json-store';
+import { DEFAULT_WATCHED_COMMANDS } from './coding-agents';
 import { getPlatform } from './platform';
 import { isWatchKey, watchRuleFor } from './terminal-state';
 import { getRunningCommandWatchKey } from './terminal-state-store';
@@ -21,6 +22,13 @@ function isStringArray(value: unknown): value is string[] {
 }
 
 function readStored(): string[] {
+  try {
+    // Only an absent key gets defaults. A saved [] is an explicit opt-out;
+    // malformed saved data retains the existing empty-list fallback below.
+    if (getStorage()?.getItem(STORAGE_KEY) == null) return [...DEFAULT_WATCHED_COMMANDS];
+  } catch {
+    return [];
+  }
   return normalize(loadJson<string[], string[]>(STORAGE_KEY, [], isStringArray));
 }
 

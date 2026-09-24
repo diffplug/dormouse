@@ -1,4 +1,5 @@
 import { stripTerminalControls } from './terminal-controls';
+import { CODING_AGENTS } from './coding-agents';
 
 interface ResumePattern {
   /** The invocation without its volatile session argument. A detected command is
@@ -9,9 +10,11 @@ interface ResumePattern {
    *  Global (scanning wants every match in a line); every use must therefore
    *  reset `lastIndex` or go through `matchAll`, which does. */
   regex: RegExp;
+  /** Same grammar anchored to the complete persisted invocation. */
+  exact: RegExp;
 }
 
-// Claude and Codex currently emit opaque ASCII identifiers (UUID/ULID-shaped).
+// Supported agents emit opaque ASCII identifiers (UUID/ULID-shaped).
 // Keep this deliberately narrower than a shell word: the captured value is
 // later executed, so punctuation with shell meaning must never enter it.
 const RESUME_ID = String.raw`[A-Za-z0-9][A-Za-z0-9_-]*`;
@@ -25,20 +28,27 @@ const RESUME_ID = String.raw`[A-Za-z0-9][A-Za-z0-9_-]*`;
  *  greedy this lookahead can never truncate an id, only reject a longer word. */
 const ENDS_INVOCATION = String.raw`(?![A-Za-z0-9_-])`;
 
-const BUILTIN_PATTERNS: ResumePattern[] = [
-  {
-    label: 'codex resume',
-    regex: new RegExp(String.raw`\bcodex resume (${RESUME_ID})${ENDS_INVOCATION}`, 'g'),
-  },
-  {
-    label: 'claude --resume',
-    regex: new RegExp(String.raw`\bclaude --resume (${RESUME_ID})${ENDS_INVOCATION}`, 'g'),
-  },
-  {
-    label: 'claude --continue',
-    regex: new RegExp(String.raw`\bclaude --continue${ENDS_INVOCATION}`, 'g'),
-  },
-];
+const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+function pattern(command: string, argument: string, withId: boolean): ResumePattern {
+  const label = `${command} ${argument}`;
+  const separator = argument.startsWith('--') ? '(?:=| )' : ' ';
+  const body = `${escapeRegex(label)}${withId ? `${separator}(${RESUME_ID})` : ''}${ENDS_INVOCATION}`;
+  return {
+    label,
+    // Do not read `agent` from the suffix of `cursor-agent` or an arbitrary
+    // executable/path. Keeping the executable from the hint preserves aliases.
+    regex: new RegExp(String.raw`(?<![A-Za-z0-9_./\\-])${body}`, 'g'),
+    exact: new RegExp(`^(?:${body})$`),
+  };
+}
+
+const BUILTIN_PATTERNS: ResumePattern[] = CODING_AGENTS.flatMap((agent) =>
+  agent.commands.flatMap((command) => [
+    pattern(command, agent.resume, true),
+    ...(agent.continue ? [pattern(command, agent.continue, false)] : []),
+  ]),
+);
 
 /** How far back a resume hint is still considered current. */
 const SCAN_LINES = 50;
@@ -68,8 +78,11 @@ function resumeCommandInVisible(visible: string): string | null {
  */
 export function normalizeResumeCommand(command: string): string | null {
   const visible = stripTerminalControls(command).trim();
-  const detected = resumeCommandInVisible(visible);
-  return detected === visible ? detected : null;
+  for (const { label, exact } of BUILTIN_PATTERNS) {
+    const match = exact.exec(visible);
+    if (match) return match[1] ? `${label} ${match[1]}` : label;
+  }
+  return null;
 }
 
 /**
@@ -111,7 +124,7 @@ export function detectResumeCommand(scrollback: string): string | null {
   // behind, so scanning the window whole gives the same answer for a fraction of
   // the work. (Boundaries mode turns every non-SGR CSI into a `\n`, so a redraw
   // -heavy window would otherwise explode into tens of thousands of segments,
-  // each paying for three fresh `matchAll` iterators.)
+  // each paying for a fresh set of `matchAll` iterators.)
   return resumeCommandInVisible(
     stripTerminalControls(scrollback.slice(windowStart), { boundaries: true }),
   );

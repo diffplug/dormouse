@@ -3,12 +3,12 @@
 > See `docs/specs/glossary.md` for canonical Surface / Session / Pane
 > vocabulary used by the public product guide and browser workflow.
 
-Dormouse publishes four specialized references and a hosted-services preview
-on the marketing site. Each reference is generated from a source that lives
-next to the code it describes.
+Dormouse publishes specialized references and a hosted-services preview
+on the marketing site. Each reference is generated from its canonical source.
 
 ```text
 /docs/dor           dor CLI reference
+/docs/compatible-agents supported agents and contribution guide
 /docs/agent-skill   exact bundled agent skill
 /docs/self-host     the SELF_HOST.md runbook, minus its withheld halves
 /docs/security      the security spec, every section of it
@@ -27,6 +27,7 @@ that once rendered it at `/docs` is retained and still runs (see
 | Homepage | Product marketing, visual proof, conversion, and the way in to every reference | `website/src/pages/Home.tsx` |
 | Marketplace and Open VSX | Extension discovery, evaluation, and basic onboarding | `vscode-ext/README.md` plus public metadata in `vscode-ext/package.json` |
 | `/docs/dor` | Complete CLI reference | Help snapshots in `dor/test/snapshots/help/`, verified against the built CLI |
+| `/docs/compatible-agents` | Agent recovery, watching, and contributions | `docs/compatible-agents.md` |
 | `/docs/agent-skill` | Agent-facing operating guide | Exact `dor/skill.md` |
 | `/docs/self-host` | Running your own Relay | The runbook half of `SELF_HOST.md` |
 | `/hosted` | Prelaunch overview of optional paid managed services | `website/src/pages/Hosted.tsx` |
@@ -72,8 +73,8 @@ checkable and by review otherwise:
 
 - The alert explanation matches [alert.md](alert.md). Terminal notification
   protocols and unattended command exit ring with zero configuration,
-  independent of WATCHING, which is opt-in per command name and needs
-  `OSC 633` / `OSC 133` shell integration. The guide must not promise that
+  independent of WATCHING, whose defaults follow `docs/specs/alert.md` → WATCHING Track
+  and which needs `OSC 633` / `OSC 133` shell integration. The guide must not promise that
   every quiet Pane is automatically marked done after a fixed interval.
 - Pocket is described only as shipped or explicitly in development, and never
   presents WebRTC staged in [remote-api.md](remote-api.md) as available.
@@ -259,6 +260,8 @@ Exempt: `/` with its anchors, and the `/docs` entrypoint, which names no page.
 
 `DOCS_PAGES` pages use `DocsLayout` for header, rail, `h1`, intro, and
 prev/next. `/hosted` follows `/docs/self-host`.
+
+**Must place “Compatible agents” immediately after “dor CLI reference”.** Publish `docs/compatible-agents.md` whole except its document title, through `buildDocument` in `website/scripts/generate-docs.js`. **Must keep its supported-agent table aligned with `CODING_AGENTS` in `lib/src/lib/coding-agents.ts`**, pinned by `compatible agents` in `website/scripts/generate-docs.test.js`. Its contributor instructions publish with its user guide.
 
 **Each page's `linkedFrom` names every document owing it a link** — the two
 READMEs and the homepage — so the obligation is registry-driven, never inferred

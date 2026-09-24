@@ -19,13 +19,14 @@
 import { detectResumeCommand } from '../lib/resume-patterns';
 import { stripTerminalControls } from '../lib/terminal-controls';
 
-// Claude's explicit request permits an immediate second press. Other panes
+// An explicit request permits an immediate second press. Other panes
 // without a recovery hint must pass both fallback clocks below before retrying.
 //
-// Keying on an English UI string is deliberate, not an oversight: claude could
+// Keying on an English UI string is deliberate, not an oversight: an agent could
 // reword it, and that failure is visible and costs one shutdown's claude
 // recovery, where a mistimed second press destroys codex's hint every time.
-const ASKS_FOR_SECOND_PRESS = /Press Ctrl-C again/i;
+// Claude spells the chord Ctrl-C; Cursor spells it Ctrl+C.
+const ASKS_FOR_SECOND_PRESS = /Press Ctrl[-+]C again/i;
 
 // When to press a silent pane again without having been asked.
 //
