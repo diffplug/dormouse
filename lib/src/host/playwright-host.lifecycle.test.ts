@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events';
 import { Server } from 'node:http';
 import { WebSocket } from 'ws';
 import { createPlaywrightHost } from './playwright-host';
-import { playwrightTextInputs } from '../lib/platform/browser-automation';
+import { PLAYWRIGHT_TEXT_INPUT_MAX, playwrightTextInputs } from '../lib/platform/browser-automation';
 
 const mocks = vi.hoisted(() => ({ cli: vi.fn(), connect: vi.fn(), clipboard: vi.fn() }));
 vi.mock('dor-lib-common', async importOriginal => ({ ...await importOriginal<typeof import('dor-lib-common')>(), spawnAndCapture: mocks.cli }));
@@ -201,8 +201,8 @@ test('a long paste reaches the page whole without tripping the input backlog', a
   try {
     await new Promise(resolve => ws.once('open', resolve));
     // Past 128 characters, a key pair per character overflowed the 256-message
-    // queue. The leading `a` puts a message boundary inside an emoji.
-    const text = `a${'é🙂\n'.repeat(40_000)}`;
+    // queue. The first message would end between an emoji's two halves.
+    const text = `${'x'.repeat(PLAYWRIGHT_TEXT_INPUT_MAX - 1)}🙂${'é🙂\n'.repeat(40_000)}`;
     for (const message of playwrightTextInputs(text)) ws.send(JSON.stringify(message));
     const insertions = () => cdp.send.mock.calls.filter(([method]) => method === 'Input.insertText').map(([, params]) => params.text as string);
     const inserted = () => insertions().join('');
@@ -211,7 +211,7 @@ test('a long paste reaches the page whole without tripping the input backlog', a
     expect(closed).not.toHaveBeenCalled();
     // Text past the per-message bound is refused, like oversized key input.
     cdp.send.mockClear();
-    ws.send(JSON.stringify({ type: 'input_text', text: 'x'.repeat(8193) }));
+    ws.send(JSON.stringify({ type: 'input_text', text: 'x'.repeat(PLAYWRIGHT_TEXT_INPUT_MAX + 1) }));
     ws.send(JSON.stringify({ type: 'input_text', text: 'ok' }));
     await vi.waitFor(() => expect(inserted()).toBe('ok'));
   } finally {
