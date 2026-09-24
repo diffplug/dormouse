@@ -27,3 +27,28 @@ export interface PlaywrightResult {
   path?: string;
   mime?: string;
 }
+
+/** The most characters one Playwright viewer `input_text` message carries. A
+ *  paste takes as many messages as it needs, each under the viewer socket's
+ *  64 KiB payload cap even when every character JSON-escapes to six bytes. */
+export const PLAYWRIGHT_TEXT_INPUT_MAX = 8192;
+
+/**
+ * A paste as Playwright viewer messages, each inserted whole by the host (CDP
+ * `Input.insertText`): one queued message per `PLAYWRIGHT_TEXT_INPUT_MAX`
+ * characters, not a key down and up per character, which a long paste would
+ * push past the host's input queue cap. Line endings become `\n`, and a
+ * message never ends inside a surrogate pair.
+ */
+export function playwrightTextInputs(text: string): { type: 'input_text'; text: string }[] {
+  const normalized = text.replace(/\r\n?/g, '\n');
+  const messages: { type: 'input_text'; text: string }[] = [];
+  for (let start = 0; start < normalized.length;) {
+    let end = Math.min(start + PLAYWRIGHT_TEXT_INPUT_MAX, normalized.length);
+    const last = normalized.charCodeAt(end - 1);
+    if (end < normalized.length && last >= 0xd800 && last <= 0xdbff) end -= 1;
+    messages.push({ type: 'input_text', text: normalized.slice(start, end) });
+    start = end;
+  }
+  return messages;
+}

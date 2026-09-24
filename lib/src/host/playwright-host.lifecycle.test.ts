@@ -4,6 +4,7 @@ import { EventEmitter } from 'node:events';
 import { Server } from 'node:http';
 import { WebSocket } from 'ws';
 import { createPlaywrightHost } from './playwright-host';
+import { playwrightTextInputs } from '../lib/platform/browser-automation';
 
 const mocks = vi.hoisted(() => ({ cli: vi.fn(), connect: vi.fn(), clipboard: vi.fn() }));
 vi.mock('dor-lib-common', async importOriginal => ({ ...await importOriginal<typeof import('dor-lib-common')>(), spawnAndCapture: mocks.cli }));
@@ -187,5 +188,33 @@ test('viewers get tabs, url and status only when they change, and the current st
     expect(first).toHaveLength(5);
   } finally {
     for (const ws of sockets) ws.terminate();
+  }
+});
+
+test('a long paste reaches the page whole without tripping the input backlog', async () => {
+  const { wsPort } = await host.request({ ...binding, op: 'streamStatus' });
+  const { url } = await host.request({ op: 'streamUrl', port: wsPort! });
+  const ws = new WebSocket(url!);
+  ws.on('error', () => {});
+  const closed = vi.fn();
+  ws.on('close', closed);
+  try {
+    await new Promise(resolve => ws.once('open', resolve));
+    // Past 128 characters, a key pair per character overflowed the 256-message
+    // queue. The leading `a` puts a message boundary inside an emoji.
+    const text = `a${'é🙂\n'.repeat(40_000)}`;
+    for (const message of playwrightTextInputs(text)) ws.send(JSON.stringify(message));
+    const insertions = () => cdp.send.mock.calls.filter(([method]) => method === 'Input.insertText').map(([, params]) => params.text as string);
+    const inserted = () => insertions().join('');
+    await vi.waitFor(() => expect(inserted()).toBe(text));
+    expect(insertions().every(chunk => chunk.isWellFormed())).toBe(true);
+    expect(closed).not.toHaveBeenCalled();
+    // Text past the per-message bound is refused, like oversized key input.
+    cdp.send.mockClear();
+    ws.send(JSON.stringify({ type: 'input_text', text: 'x'.repeat(8193) }));
+    ws.send(JSON.stringify({ type: 'input_text', text: 'ok' }));
+    await vi.waitFor(() => expect(inserted()).toBe('ok'));
+  } finally {
+    ws.terminate();
   }
 });

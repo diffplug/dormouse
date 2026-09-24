@@ -5,7 +5,7 @@
  * only; Wall owns daemon teardown.
  */
 import type { PlatformAdapter } from '../../lib/platform/types';
-import type { BrowserAutomationProvider } from '../../lib/platform/browser-automation';
+import { playwrightTextInputs, type BrowserAutomationProvider } from '../../lib/platform/browser-automation';
 import { isAllowedBinaryFor } from '../../lib/agent-browser-binary';
 import { readTextFromClipboard } from '../../lib/clipboard';
 import { isAbDebugLogsEnabled } from '../../lib/feature-flags';
@@ -1486,8 +1486,13 @@ export class AgentBrowserSurfaceController {
 
   // cmd/ctrl-V types the LOCAL clipboard into the page. Plain key forwarding
   // would trigger paste of the embedded Chromium's own (empty) clipboard, so
-  // bridge by replaying the text as per-character keyDown events.
+  // bridge by replaying the text: agent-browser's stream takes only key events,
+  // so as per-character keyDown events; the Playwright host inserts it whole.
   private insertText(text: string): void {
+    if (this.provider === 'playwright') {
+      for (const message of playwrightTextInputs(text)) this.send(message);
+      return;
+    }
     for (const ch of text) {
       if (ch === '\r') continue;
       if (ch === '\n') {

@@ -78,6 +78,10 @@ A post-open blank-tab sweep can become such a query when a later relaunch, expli
 
 **Why the screenshot path is private.** The frame is a picture of the user's authenticated browser, written by an external process under the ambient umask, so a derivable name in the shared temp directory is readable by anything else on the machine for as long as it exists. Precedent: `standalone/sidecar/clipboard-ops.js` applies the same discipline, cleanup included, to clipboard images.
 
+## Playwright Renderer
+
+**Why a paste is text, not keys.** agent-browser's stream takes only key and mouse events, so its paste replays a key down and up per character. Sent to the Playwright host, whose input queue closes the viewer (1008) at 256 queued messages, any paste over about 128 characters arriving as one burst truncated and dropped the pane into a 2 s reconnect (static reading, 2026-09). The 8192-character chunk keeps a message under the 64 KiB socket cap even when every character JSON-escapes to six bytes.
+
 ## Iframe Renderer
 
 **Why a site's framing refusal is overridden.** The framing headers exist to stop a third party from framing a site to deceive its user; here the embed is the user's own `dor iframe` — the same trust boundary the agent-browser renderer already sits on.

@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import type { PlatformAdapter } from '../../lib/platform/types';
+import { PLAYWRIGHT_TEXT_INPUT_MAX } from '../../lib/platform/browser-automation';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
 import {
   HIDDEN_PARK_DELAY_MS,
@@ -689,6 +690,28 @@ describe('relaunch (pop-out / pop-in)', () => {
 });
 
 describe('Playwright provider', () => {
+  it('pastes as whole-text messages the host inserts, not a key pair per character', async () => {
+    const platform: PlatformAdapter = new FakePtyAdapter();
+    platform.playwright = vi.fn(async request => request.op === 'streamUrl'
+      ? { ok: true, url: `ws://127.0.0.1:${request.port}` }
+      : { ok: true, exitCode: 0, stdout: '', stderr: '' });
+    const pasted = `${'x'.repeat(PLAYWRIGHT_TEXT_INPUT_MAX + 10)}\r\nend`;
+    platform.readClipboardText = vi.fn(async () => pasted);
+    setPlatform(platform);
+    const controller = acquireAgentBrowserSurfaceController('pw', { renderMode: 'pw-screencast', session: 's', wsPort: 4321 });
+    controller.attachView(makeSink());
+    await flushMicrotasks();
+
+    controller.handleKeyDownLike({ key: 'v', code: 'KeyV', metaKey: true, ctrlKey: false, altKey: false, shiftKey: false });
+    await flushMicrotasks();
+
+    // Two messages, where a key pair per character was ~16k: the host's input
+    // queue closes the viewer at 256.
+    const sent = streamSocket(4321)!.sent.map((raw) => JSON.parse(raw) as { type: string; text: string });
+    expect(sent.map((message) => message.type)).toEqual(['input_text', 'input_text']);
+    expect(sent.map((message) => message.text).join('')).toBe(pasted.replace('\r\n', '\n'));
+  });
+
   it('uses the shared controller with provider-scoped host calls and cwd', async () => {
     const platform: PlatformAdapter = new FakePtyAdapter();
     platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));

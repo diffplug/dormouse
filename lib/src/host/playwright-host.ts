@@ -8,7 +8,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type { Browser, Page, CDPSession } from 'playwright-core';
 import { spawnAndCapture } from 'dor-lib-common';
 import { messageOf } from '../lib/errors';
-import type { PlaywrightRequest, PlaywrightResult } from '../lib/platform/browser-automation';
+import { PLAYWRIGHT_TEXT_INPUT_MAX, type PlaywrightRequest, type PlaywrightResult } from '../lib/platform/browser-automation';
 import { editScript, generateGuiSession, jpegQuality } from './browser-host-shared';
 import { resolvePlaywrightInstall, playwrightWorkspace, type PlaywrightInstall } from './playwright-install';
 import { isLoopbackHost } from './loopback-guard';
@@ -220,6 +220,10 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
         text: typeof data.text === 'string' ? data.text.slice(0, 1000) : '',
         windowsVirtualKeyCode: Number.isInteger(data.windowsVirtualKeyCode) ? data.windowsVirtualKeyCode : 0,
         modifiers: Number.isInteger(data.modifiers) ? data.modifiers & 15 : 0 });
+    } else if (data.type === 'input_text' && typeof data.text === 'string' && data.text.length <= PLAYWRIGHT_TEXT_INPUT_MAX) {
+      // A paste arrives as text, not a key pair per character (`playwrightTextInputs`).
+      const cdp = await control(v, page);
+      await cdp.send('Input.insertText', { text: data.text });
     }
   }
   async function connect(b: Binding): Promise<Viewer> {
