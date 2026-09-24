@@ -13,9 +13,6 @@ pnpm build       # build lib, vscode extension, Pocket, and website
 The harness opens its browser pane and prints its URL and browser command
 (`docs/specs/standalone.md` → "Standalone browser-dev harness").
 
-**Open every PR as a draft.** Argos bills per snapshot and skips drafts, so marking a
-PR ready for review is what spends snapshots.
-
 ## Worktrees
 
 - **Must stack with `wt switch --create <branch> --base @`**, never `git switch -c` in an existing worktree; other sessions need its branch and path intact. Set the GitHub PR base separately.
