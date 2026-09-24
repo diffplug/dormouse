@@ -26,7 +26,7 @@ During an orderly app shutdown or VS Code window reload, Dormouse interrupts run
 
 The agent restores its saved conversation. This does not automatically resubmit a prompt or restart the interrupted task. The agent must remain installed and its conversation must still be available. Its own authentication or permission prompts may appear.
 
-Recovery requires a fresh exit hint. An empty conversation may produce none. A crash or force-quit can prevent capture, and a conversation you already exited before Dormouse shuts down is not recovered from old terminal output. In these cases, use the agent's own conversation history. Standalone window reloads keep the live terminal processes, so those conversations keep running without this recovery step.
+Recovery requires a fresh exit hint followed by a separator, such as a newline. An empty conversation may produce none. A crash or force-quit can prevent capture, and a conversation you already exited before Dormouse shuts down is not recovered from old terminal output. In these cases, use the agent's own conversation history. Standalone window reloads keep the live terminal processes, so those conversations keep running without this recovery step.
 
 ### Watching for attention
 

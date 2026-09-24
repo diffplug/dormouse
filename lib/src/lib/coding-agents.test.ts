@@ -34,7 +34,7 @@ describe('coding agent integrations', () => {
   it.each(RESUME_FORMS)('rebuilds `$label <id>` exactly and rejects anything more', ({ label, separators }) => {
     for (const separator of separators) {
       const invocation = `${label}${separator}${ID}`;
-      expect(detectResumeCommand(invocation)).toBe(`${label} ${ID}`);
+      expect(detectResumeCommand(`${invocation}\n`)).toBe(`${label} ${ID}`);
       expect(normalizeResumeCommand(invocation)).toBe(`${label} ${ID}`);
     }
     for (const invocation of [label, `${label}=`, `${label} -bad`, `${label} $(whoami)`,
@@ -46,9 +46,9 @@ describe('coding agent integrations', () => {
   });
 
   it('keeps Cursor executable aliases distinct and chooses the newest hint', () => {
-    expect(detectResumeCommand('cursor-agent --resume=older\ragent --resume=newer'))
+    expect(detectResumeCommand('cursor-agent --resume=older\ragent --resume=newer\n'))
       .toBe('agent --resume newer');
-    expect(detectResumeCommand('agent --resume=older\rcursor-agent --resume=newer'))
+    expect(detectResumeCommand('agent --resume=older\rcursor-agent --resume=newer\n'))
       .toBe('cursor-agent --resume newer');
   });
 });

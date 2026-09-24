@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { AGENT_EXIT_FIXTURES } from '../lib/__fixtures__/coding-agents';
 import {
   BLIND_SECOND_PRESS_MS,
   QUIET_BEFORE_RETRY_MS,
@@ -85,6 +86,28 @@ const CLAUDE_HINT = 'claude --resume 01JABCDEF';
 const CODEX_HINT = 'codex resume 01HXYZ';
 
 describe('captureAgentRecovery', () => {
+  it.each(AGENT_EXIT_FIXTURES)('waits through every ID split in the $agent exit hint', async ({ output, command }) => {
+    const id = command.split(' ').at(-1)!;
+    const idStart = output.indexOf(id);
+    expect(idStart).toBeGreaterThanOrEqual(0);
+    // Include the cut just after the full ID: only the next read proves it ended.
+    for (let length = 1; length <= id.length; length++) {
+      const cut = idStart + length;
+      const host = new FakePtys(['a'])
+        .onPress('a', 1, 20, output.slice(0, cut))
+        .onPress('a', 1, 80, output.slice(cut));
+      await captureAgentRecovery(host);
+      expect(host.found.a, `split at ID character ${length}`).toBe(command);
+      expect(host.time).toBe(80);
+    }
+  });
+
+  it('does not turn an unterminated hint into a command at the capture deadline', async () => {
+    const host = new FakePtys(['a']).onPress('a', 1, 20, CODEX_HINT);
+    expect(await captureAgentRecovery(host, { maxWaitMs: 200 })).toBe(0);
+    expect(host.found).toEqual({});
+  });
+
   it('presses every live pane once and reports each hint as it arrives', async () => {
     const host = new FakePtys(['a', 'b'])
       .onPress('a', 1, 80, `\r\nResume with \`${CLAUDE_HINT}\`.\r\n`)

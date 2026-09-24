@@ -24,8 +24,9 @@ const RESUME_ID = String.raw`[A-Za-z0-9][A-Za-z0-9_-]*`;
  *  hint inside prose punctuation as often as bare (`Resume with
  *  \`claude --resume <id>\`.`), and requiring whitespace or end-of-line after it
  *  silently dropped every one of those. Safety comes from RESUME_ID plus the
- *  rebuild below, not from what follows the match; and because RESUME_ID is
- *  greedy this lookahead can never truncate an id, only reject a longer word. */
+ *  rebuild below, not from what follows the match. This also matches an
+ *  unfinished tail; the scanner waits for a separator after its newest match
+ *  before accepting it, since the next PTY read may extend the id. */
 const ENDS_INVOCATION = String.raw`(?![A-Za-z0-9_-])`;
 
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -60,15 +61,17 @@ const SCAN_LINES = 50;
 /** Rightmost resume command in already-stripped text (`matchAll` leaves the
  *  shared patterns' `lastIndex` untouched — it scans against a clone). */
 function resumeCommandInVisible(visible: string): string | null {
-  let latest: { index: number; command: string } | null = null;
+  let latest: { index: number; end: number; command: string } | null = null;
   for (const { label, regex } of BUILTIN_PATTERNS) {
     for (const match of visible.matchAll(regex)) {
       const index = match.index;
       if (latest && latest.index > index) continue;
-      latest = { index, command: rebuild(label, match) };
+      latest = { index, end: index + match[0].length, command: rebuild(label, match) };
     }
   }
-  return latest?.command ?? null;
+  // Buffer end is not an observed word boundary. Keep even a complete-looking
+  // id pending there, and never fall back to an older hint while it is pending.
+  return latest && latest.end < visible.length ? latest.command : null;
 }
 
 /**
