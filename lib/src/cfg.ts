@@ -26,6 +26,10 @@ export const cfg = {
     resizeDebounce: 500,
     /** ms — attention idle expiry. How long before "looking at this pane" wears off. */
     userAttention: 15_000,
+    /** ms — shortest run a command-exit ring reports; anything quicker was probably watched. */
+    commandExitMinRuntime: 15_000,
+    /** ms — longest a terminal notification may wait behind animation before it rings anyway. */
+    deferCeiling: 30_000,
     /** When true, the ALERT_RINGING alarm pulse animations are frozen at T=0 (for deterministic Chromatic snapshots). */
     ringingPaused: false,
   },

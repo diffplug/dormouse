@@ -382,7 +382,6 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   alertResize(id: string): void { this.alertManager.onResize(id); }
   alertClearAttention(id?: string): void { this.alertManager.clearAttention(id); }
   alertToggleTodo(id: string): void { this.alertManager.toggleTodo(id); }
-  alertMarkTodo(id: string): void { this.alertManager.markTodo(id); }
   alertClearTodo(id: string): void { this.alertManager.clearTodo(id); }
   alertAwait(id: string, options: AwaitOptions): AwaitHandle { return this.alertManager.awaitCompletion(id, options); }
   onAlertState(handler: (detail: AlertStateDetail) => void): void { this.alertStateHandlers.add(handler); }

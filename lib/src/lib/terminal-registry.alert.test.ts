@@ -131,7 +131,6 @@ import {
   setCommandWatched,
   isUntouched,
   markSessionAttention,
-  markSessionTodo,
   setTerminalActivity,
   resumeTerminal,
   restoreTerminal,
@@ -435,7 +434,7 @@ describe('terminal-registry alert behavior', () => {
     initAlertStateReceiver();
     initAlertStateReceiver();
     const unsubscribe = subscribeToActivity(listener);
-    platformModule.getPlatform().alertMarkTodo(id);
+    platformModule.getPlatform().alertToggleTodo(id);
 
     expect(listener).toHaveBeenCalledTimes(1);
     expect(getActivity(id).todo).toBe(true);
@@ -625,7 +624,7 @@ describe('terminal-registry alert behavior', () => {
     advance(3_000);
     expect(getActivity(id)).toMatchObject({
       status: 'ALERT_RINGING',
-      todo: false,
+      todo: true,
     });
   });
 
@@ -659,7 +658,7 @@ describe('terminal-registry alert behavior', () => {
     });
   });
 
-  it('Story 5: user attends to a ringing pane — turns TODO on', () => {
+  it('Story 5: user attends to a ringing pane — its TODO stays', () => {
     const id = 'story-5';
     createSession(id);
     enableAlert(id);
@@ -673,7 +672,7 @@ describe('terminal-registry alert behavior', () => {
     });
   });
 
-  it('Story 6: dismiss resets to NOTHING_TO_SHOW and turns TODO on; can ring again later', () => {
+  it('Story 6: dismiss resets to NOTHING_TO_SHOW and keeps the TODO; can ring again later', () => {
     const id = 'story-6';
     createSession(id);
     enableAlert(id);
@@ -697,17 +696,18 @@ describe('terminal-registry alert behavior', () => {
     });
   });
 
-  it('Story 7: marking TODO clears ring and resets status, leaves alerts enabled', () => {
+  it('Story 7: toggling TODO on a ringing pane clears both, leaves alerts enabled', () => {
     const id = 'story-7';
     createSession(id);
     enableAlert(id);
 
     driveToRingingNeedsAttention(id);
-    markSessionTodo(id);
+    toggleSessionTodo(id);
 
     expect(getActivity(id)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
-      todo: true,
+      watchingEnabled: true,
+      todo: false,
     });
   });
 
@@ -832,7 +832,7 @@ describe('terminal-registry alert behavior', () => {
 
     expect(getActivity(id)).toMatchObject({
       status: 'ALERT_RINGING',
-      todo: false,
+      todo: true,
     });
   });
 
@@ -882,12 +882,7 @@ describe('terminal-registry alert behavior', () => {
     createSession(id);
     enableAlert(id);
     driveToRingingNeedsAttention(id);
-    toggleSessionTodo(id);
-
-    expect(getActivity(id)).toMatchObject({
-      status: 'NOTHING_TO_SHOW',
-      todo: true,
-    });
+    expect(getActivity(id).todo).toBe(true);
 
     disposeSession(id);
     expect(getActivity(id)).toEqual(DEFAULT_ACTIVITY_STATE);
@@ -903,7 +898,7 @@ describe('terminal-registry alert behavior', () => {
 
     expect(getActivity(id)).toMatchObject({
       status: 'ALERT_RINGING',
-      todo: false,
+      todo: true,
     });
   });
 
@@ -915,7 +910,7 @@ describe('terminal-registry alert behavior', () => {
     driveToRingingNeedsAttention(id);
     entry.terminal.emitInput('x');
 
-    // Typing while ringing: attend clears ring, turns TODO on.
+    // Typing while ringing: attend clears the ring and leaves its TODO.
     // Plain 'x' is not Enter, so TODO stays on.
     expect(getActivity(id).status).toBe('NOTHING_TO_SHOW');
     expect(getActivity(id).todo).toBe(true);
@@ -970,25 +965,11 @@ describe('terminal-registry alert behavior', () => {
       entry.terminal.emitInput(input);
       expect(write).toHaveBeenCalledWith(id, input);
       expect(attend).not.toHaveBeenCalled();
-      expect(getActivity(id)).toMatchObject({ status: 'ALERT_RINGING', todo: false });
+      expect(getActivity(id)).toMatchObject({ status: 'ALERT_RINGING' });
     } finally {
       attend.mockRestore();
       write.mockRestore();
     }
-  });
-
-  it('Enter that dismisses a ringing alert leaves the auto-created TODO visible', () => {
-    const id = 'enter-dismisses-ringing';
-    const entry = createSession(id);
-    enableAlert(id);
-
-    driveToRingingNeedsAttention(id);
-    entry.terminal.emitInput('\r');
-
-    expect(getActivity(id)).toMatchObject({
-      status: 'NOTHING_TO_SHOW',
-      todo: true,
-    });
   });
 
   it('no monitor is created until alert is enabled', () => {
@@ -1137,31 +1118,18 @@ describe('terminal-registry alert behavior', () => {
     expect(getActivity(id).todo).toBe(false);
   });
 
-  it('new output while ringing without attention does not turn TODO on', () => {
-    const id = 'ringing-output-no-todo';
+  it('removing the rule while ringing keeps a TODO the pane already had', () => {
+    const id = 'disable-keeps-todo';
     createSession(id);
     enableAlert(id);
-
-    driveToRingingNeedsAttention(id);
-    emitOutput(id, 'next task');
-
-    expect(getActivity(id)).toMatchObject({
-      status: 'ALERT_RINGING',
-      todo: false,
-    });
-  });
-
-  it('removing the rule while ringing does not turn TODO on', () => {
-    const id = 'disable-no-todo';
-    createSession(id);
-    enableAlert(id);
+    toggleSessionTodo(id);
 
     driveToRingingNeedsAttention(id);
     setCommandWatched('longtask', false);
 
     expect(getActivity(id)).toMatchObject({
       status: 'WATCHING_DISABLED',
-      todo: false,
+      todo: true,
     });
   });
 
@@ -1207,7 +1175,7 @@ describe('terminal-registry alert behavior', () => {
     expect(getWatchedCommands()).toEqual([]);
   });
 
-  it('the alert action dismisses ringing alerts and turns TODO on', () => {
+  it('the alert action dismisses ringing alerts and keeps their TODO', () => {
     const id = 'alert-action-dismiss';
     createSession(id);
     enableAlert(id);
@@ -1273,7 +1241,7 @@ describe('terminal-registry alert behavior', () => {
 
     expect(getActivity(id)).toMatchObject({
       status: 'ALERT_RINGING',
-      todo: false,
+      todo: true,
     });
   });
 

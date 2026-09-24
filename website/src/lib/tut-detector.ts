@@ -229,14 +229,14 @@ export class TutDetector {
         else if (TERMINAL_REPORT_SOURCES.has(source)) this.state.markComplete("al-notif");
       }
 
-      if (!prev.todo && current.todo) {
-        if (prev.status === "ALERT_RINGING") {
-          this.state.markComplete("al-todo-auto");
-        } else if (!source) {
-          // A protocol or command-exit ring sets TODO itself; only a bare
-          // TODO with no notification behind it was added by hand.
-          this.state.markComplete("al-todo-manual");
-        }
+      // Every ring sets TODO when it opens, so the dismissal is the ring
+      // ending with that TODO still standing.
+      if (prev.status === "ALERT_RINGING" && current.status !== "ALERT_RINGING" && current.todo) {
+        this.state.markComplete("al-todo-auto");
+      }
+      // Only a bare TODO with no notification behind it was added by hand.
+      if (!prev.todo && current.todo && !source) {
+        this.state.markComplete("al-todo-manual");
       }
       if (prev.todo && !current.todo) {
         this.state.markComplete("al-todo-clear");

@@ -181,6 +181,20 @@ describe("TutDetector", () => {
     expect(state.isComplete("al-ring")).toBe(true);
   });
 
+  it("credits al-todo-auto when a ring is dismissed and its TODO stays", () => {
+    const { state, setActivitySnapshot } = makeDetectorHarness();
+    const watching = { source: "WATCHING", title: "longtask went quiet", body: null } as const;
+
+    setActivitySnapshot(new Map([["pane-a", activity("BUSY")]]));
+    // The ring sets TODO itself as it opens.
+    setActivitySnapshot(new Map([["pane-a", { ...activity("ALERT_RINGING", true), notification: watching }]]));
+    expect(state.isComplete("al-todo-auto")).toBe(false);
+    expect(state.isComplete("al-todo-manual")).toBe(false);
+
+    setActivitySnapshot(new Map([["pane-a", { ...activity("NOTHING_TO_SHOW", true), notification: watching }]]));
+    expect(state.isComplete("al-todo-auto")).toBe(true);
+  });
+
   it("credits al-watch-cmd once a rule exists", () => {
     const { state, setWatchedCommands } = makeDetectorHarness();
 

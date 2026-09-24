@@ -54,7 +54,9 @@ export function toPersistedAlertState(state: PersistedAlertState): PersistedAler
   return {
     status: state.status,
     todo: state.todo,
-    notification: state.notification ?? null,
+    // Builds before the `WATCHING` source reject a whole session that carries
+    // it, so that detail stays live-only (`docs/specs/alert.md` -> Public State).
+    notification: state.notification?.source === 'WATCHING' ? null : state.notification ?? null,
   };
 }
 

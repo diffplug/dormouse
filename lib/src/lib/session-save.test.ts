@@ -53,7 +53,6 @@ function createPlatform(savedState: PersistedSession | null): PlatformAdapter {
     alertResize: () => {},
     alertClearAttention: () => {},
     alertToggleTodo: () => {},
-    alertMarkTodo: () => {},
     alertClearTodo: () => {},
     onAlertState: () => {},
     onWatchedCommands: () => {},

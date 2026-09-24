@@ -567,16 +567,17 @@ function stripStandaloneBells(segment: string, events: TerminalProtocolEvent[]):
   return segment.replace(/\x07/g, '');
 }
 
+/** Only text-bearing notification detail suppresses the batch's bells: a
+ *  progress event may carry no summons at all (`docs/specs/alert.md` ->
+ *  Terminal reports). Several bells still collapse to one. */
 function filterTerminalBellEvents(events: TerminalProtocolEvent[]): TerminalProtocolEvent[] {
   if (events.length === 0) return events;
   let bellCount = 0;
   let hasRicher = false;
   for (const event of events) {
-    if (event.kind === 'progress') hasRicher = true;
-    else if (event.kind === 'notification') {
-      if (event.notification.source === 'BEL') bellCount += 1;
-      else hasRicher = true;
-    }
+    if (event.kind !== 'notification') continue;
+    if (event.notification.source === 'BEL') bellCount += 1;
+    else hasRicher = true;
   }
   if (bellCount === 0) return events;
   if (!hasRicher && bellCount === 1) return events;

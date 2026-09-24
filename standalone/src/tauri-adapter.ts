@@ -757,10 +757,6 @@ export class TauriAdapter implements PlatformAdapter {
     this.alertManager.toggleTodo(id);
   }
 
-  alertMarkTodo(id: string): void {
-    this.alertManager.markTodo(id);
-  }
-
   alertClearTodo(id: string): void {
     this.alertManager.clearTodo(id);
   }

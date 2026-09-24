@@ -561,6 +561,25 @@ describe('await requests', () => {
     }
   });
 
+  it('judges a report after the command boundary written before it', async () => {
+    const webview = fakeWebview();
+    const disposable = router.attachRouter(webview.channel);
+    try {
+      ptys.callbacks!.onData('pty-ordered', '\x1b]633;E;./build.sh\x07\x1b]633;C\x07');
+      webview.send({ type: 'alert:await', requestId: 'await-ordered', id: 'pty-ordered', until: 'quiet', timeoutMs: 600_000 });
+
+      // A precmd hook reports after the shell's finish, in the same read.
+      ptys.callbacks!.onData('pty-ordered', '\x1b]633;D;0\x07\x1b]777;notify;Command completed;./build.sh\x1b\\');
+      await Promise.resolve();
+
+      expect(outcomes(webview)).toEqual([
+        { type: 'alert:awaitResult', requestId: 'await-ordered', outcome: expect.objectContaining({ kind: 'resolved', cause: 'exit' }) },
+      ]);
+    } finally {
+      disposable.dispose();
+    }
+  });
+
   it('cancels what is still parked when the webview goes away', async () => {
     const webview = fakeWebview();
     const disposable = router.attachRouter(webview.channel);

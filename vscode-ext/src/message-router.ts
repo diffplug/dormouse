@@ -5,12 +5,10 @@ import { AlertManager, type AwaitHandle, type AwaitOutcome } from '../../lib/src
 import { WatchedCommandHost } from '../../lib/src/lib/watched-command-host';
 import { AlertSettingsHost } from '../../lib/src/lib/alert-settings-host';
 import {
-  applyTerminalProtocolEvents,
   collectTerminalSemanticEvents,
   collectTerminalProtocolResponses,
   type TerminalColorProvider,
   type TerminalColors,
-  type TerminalProtocolEvent,
 } from '../../lib/src/lib/terminal-protocol';
 import { isProtocolCommandStart } from '../../lib/src/lib/tool-events';
 import {
@@ -292,14 +290,13 @@ function createOwnerPtyStream(id: string): ProcessedPtyStream {
   return createProcessedPtyStream({
     colorProvider: themeColorProvider,
     onEvents(events) {
-      // `applyTerminalProtocolEvents` records announcements into renderer state
-      // this process cannot reach, so the router withholds them and forwards
-      // them to the webviews instead — and only the rare chunk that carries one
-      // pays for the filtered copy.
-      const isToolEvent = (event: TerminalProtocolEvent) => event.kind === 'toolAnnounce' || event.kind === 'toolState';
-      applyTerminalProtocolEvents(alertManager, id, events.some(isToolEvent) ? events.filter(event => !isToolEvent(event)) : events);
-      // A start retires the previous command's announcement and state in the
-      // owning webview (null). Keep starts and reports in parse order, including one chunk.
+      // Reports and command boundaries in stream order, so a precmd
+      // notification is judged after the finish written before it.
+      alertManager.applyTerminalEvents(id, events);
+      // Tool announcements belong to renderer state this process cannot reach,
+      // so the router forwards them to the webviews. A start retires the
+      // previous command's announcement and state in the owning webview (null).
+      // Keep starts and reports in parse order, including one chunk.
       for (const event of events) {
         const start = isProtocolCommandStart(event);
         if (event.kind === 'toolState' || start) {
@@ -310,7 +307,6 @@ function createOwnerPtyStream(id: string): ProcessedPtyStream {
         }
       }
       const semanticEvents = collectTerminalSemanticEvents(events);
-      alertManager.applyTerminalSemanticEvents(id, semanticEvents);
       if (semanticEvents.length > 0) {
         for (const listener of semanticEventsListeners) listener(id, semanticEvents);
       }
@@ -992,9 +988,6 @@ export function attachRouter(
         break;
       case 'alert:toggleTodo':
         alertManager.toggleTodo(msg.id);
-        break;
-      case 'alert:markTodo':
-        alertManager.markTodo(msg.id);
         break;
       case 'alert:clearTodo':
         alertManager.clearTodo(msg.id);

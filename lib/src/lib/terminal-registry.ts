@@ -26,7 +26,6 @@ export {
   getLivePersistedAlertState,
   initAlertStateReceiver,
   markSessionAttention,
-  markSessionTodo,
   setTerminalActivity,
   restoreBrowserSurfaceTodo,
   subscribeToActivity,

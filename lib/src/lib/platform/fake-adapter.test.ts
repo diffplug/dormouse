@@ -81,6 +81,18 @@ describe('FakePtyAdapter', () => {
     });
   });
 
+  it('judges a report after the command boundary written before it', async () => {
+    const { adapter } = createAdapter();
+    adapter.spawnPty('t1');
+    adapter.sendOutput('t1', '\x1b]633;E;./build.sh\x07\x1b]633;C\x07');
+    const handle = adapter.alertAwait('t1', { until: 'quiet', timeoutMs: 600_000 });
+
+    // A precmd hook reports after the shell's finish, in the same read.
+    adapter.sendOutput('t1', '\x1b]633;D;0\x07\x1b]777;notify;Command completed;./build.sh\x1b\\');
+
+    await expect(handle.promise).resolves.toMatchObject({ kind: 'resolved', cause: 'exit' });
+  });
+
   it('parses terminal bell output into alert state without forwarding the bell byte', () => {
     const { adapter, dataEvents } = createAdapter();
     const alertEvents: unknown[] = [];

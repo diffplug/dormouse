@@ -10,7 +10,6 @@ import {
   type MemoryNotepadArchivePort,
 } from '../notepad/memory-archive-port';
 import {
-  applyTerminalProtocolEvents,
   collectTerminalSemanticEvents,
   collectTerminalProtocolResponses,
   TerminalProtocolParser,
@@ -19,6 +18,7 @@ import {
 import {
   applyTerminalSemanticEvents,
 } from '../terminal-state-store';
+import { recordToolEvents } from '../tool-events';
 import { themeColorProvider } from '../terminal-theme';
 
 export interface FakeScenario {
@@ -340,7 +340,6 @@ export class FakePtyAdapter implements PlatformAdapter {
   alertResize(id: string): void { this.alertManager.onResize(id); }
   alertClearAttention(id?: string): void { this.alertManager.clearAttention(id); }
   alertToggleTodo(id: string): void { this.alertManager.toggleTodo(id); }
-  alertMarkTodo(id: string): void { this.alertManager.markTodo(id); }
   alertClearTodo(id: string): void { this.alertManager.clearTodo(id); }
   alertAwait(id: string, options: AwaitOptions): AwaitHandle { return this.alertManager.awaitCompletion(id, options); }
   onAlertState(handler: (detail: AlertStateDetail) => void): void { this.alertStateHandlers.add(handler); }
@@ -460,10 +459,9 @@ export class FakePtyAdapter implements PlatformAdapter {
 
   private emitPtyData(id: string, data: string, options: { skipActivity?: boolean } = {}): void {
     const parsed = this.getProtocolParser(id).process(data);
-    applyTerminalProtocolEvents(this.alertManager, id, parsed.events);
-    const semanticEvents = collectTerminalSemanticEvents(parsed.events);
-    this.alertManager.applyTerminalSemanticEvents(id, semanticEvents);
-    applyTerminalSemanticEvents(id, semanticEvents);
+    recordToolEvents(id, parsed.events);
+    this.alertManager.applyTerminalEvents(id, parsed.events);
+    applyTerminalSemanticEvents(id, collectTerminalSemanticEvents(parsed.events));
     const inputHandler = this.inputHandlers.get(id);
     for (const response of collectTerminalProtocolResponses(parsed.events)) {
       inputHandler?.(response);

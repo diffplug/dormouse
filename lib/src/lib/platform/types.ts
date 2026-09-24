@@ -475,7 +475,6 @@ export interface PlatformAdapter {
   alertResize(id: string): void;
   alertClearAttention(id?: string): void;
   alertToggleTodo(id: string): void;
-  alertMarkTodo(id: string): void;
   alertClearTodo(id: string): void;
   /**
    * Park until the Session finishes what it is doing (`docs/specs/alert.md` ->

@@ -21,7 +21,9 @@ describe('live alert handoff', () => {
     target.notifyFromProtocol('pane', { source: 'BEL', title: 'More detail', body: null });
     expect(target.getState('pane').episode).toEqual(first.episode);
     target.dismissAlert('pane');
+    target.onData('pane');
     target.notifyFromProtocol('pane', { source: 'BEL', title: 'Next', body: null });
+    expect(target.getState('pane').episode?.id).toBeTruthy();
     expect(target.getState('pane').episode?.id).not.toBe(first.episode?.id);
     target.seed('pane', snapshot);
     expect(target.getState('pane')).toMatchObject({ todo: true, episode: null });

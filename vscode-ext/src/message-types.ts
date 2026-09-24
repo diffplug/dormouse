@@ -71,7 +71,6 @@ export type WebviewMessage =
   | { type: 'alert:resize'; id: string }
   | { type: 'alert:clearAttention'; id?: string }
   | { type: 'alert:toggleTodo'; id: string }
-  | { type: 'alert:markTodo'; id: string }
   | { type: 'alert:clearTodo'; id: string }
   // `dor await`: the AlertManager lives here, so the wait is parked in the
   // extension host and only its outcome crosses back (docs/specs/alert.md → Await).

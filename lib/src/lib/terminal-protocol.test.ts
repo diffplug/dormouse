@@ -59,6 +59,16 @@ describe('TerminalProtocolParser', () => {
     ]);
   });
 
+  it.each([
+    ['a mid-cycle progress update', '\x1b]9;4;1;40\x07\x07'],
+    ['a progress clear', '\x07\x1b]9;4;0;\x07'],
+  ])('keeps a bell that shares its batch with %s', (_label, chunk) => {
+    const result = new TerminalProtocolParser().process(chunk);
+    expect(result.events).toContainEqual(
+      { kind: 'notification', notification: { source: 'BEL', title: 'Terminal bell', body: null } },
+    );
+  });
+
   it('handles chunked OSC sequences terminated by ST', () => {
     const parser = new TerminalProtocolParser();
 

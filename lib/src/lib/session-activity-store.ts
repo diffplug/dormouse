@@ -165,14 +165,6 @@ export function toggleSessionTodo(id: string): void {
   getPlatform().alertToggleTodo(id);
 }
 
-export function markSessionTodo(id: string): void {
-  if (!registry.has(id)) {
-    setLocalSurfaceTodo(id, true);
-    return;
-  }
-  getPlatform().alertMarkTodo(id);
-}
-
 export function clearSessionTodo(id: string): void {
   if (!registry.has(id)) {
     setLocalSurfaceTodo(id, false);

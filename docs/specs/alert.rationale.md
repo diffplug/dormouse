@@ -4,6 +4,10 @@
 
 ## Public State
 
+**Why one ring instead of three tracks.** Each track stored its ring differently and doubled as other state: the protocol ring shared `protocolStatus` with progress, the command-exit ring shared `commandExitStatus` with the arm, and WATCHING kept a command key. Every clearing verb, await, and restart then treated them differently — the TODO asymmetries under Clearing And TODO, progress un-ringing a report, a bell overwriting an exit code (audit, 2026-09-23). One latch with a list of sources gives every rule one place to act.
+
+**Why a `WATCHING` notification is never persisted.** Builds before that source validate every persisted pane's notification against their own source list, and one unknown source rejects the whole session, not just the detail (`isPersistedSessionV3`). A development build and an installed one share one session file, so persisting it would empty the older build's restore. The TODO survives; only the generated `<key> went quiet` detail stays live.
+
 **Why the detector outranks the command-exit arm.** A watched command is by definition running, so a WATCHING Session is almost always also command-exit armed; ranking the arm first would mask the detector's busy/quiet states for the whole run, and the detector's state is the one derived from real output.
 
 ## Attention
@@ -17,6 +21,8 @@
 **Why the gate reads private detector state.** The detector runs for unwatched commands, and other tracks can mask it in the public projection; the gate needs the underlying evidence, not whichever state wins display precedence.
 
 **Why command finishes bypass animation deferral.** A shell-reported exit is a lifecycle event; animation detection is only a recent-output heuristic. Letting the heuristic overrule the event would add latency and let unrelated background output defer a certain completion indefinitely.
+
+**Why deferral has a ceiling.** Unbounded, it held an `OSC 9` behind any output that never went quiet for five seconds: a `watch -n1` pane redrawing once a second, or a dev server's heartbeat line every three seconds after its startup burst, deferred it indefinitely (audit probes, 2026-09-23). Thirty seconds is far past an agent's final spinner frames, which deferral exists to wait out, and short enough that a report behind a ticking clock still reaches its user.
 
 **Why a deferred event is not dispatched again.** Claimants already had first refusal when the completion happened; re-offering it at quiet time would let a later-registered await consume history, and would report one completion twice.
 
@@ -36,7 +42,7 @@
 
 **Why a WATCHING ring is gated on `outputSinceWatchingRing`.** The ring legitimately describes a long-running watched command going quiet — what `--until quiet` exists for — but it is an inference from silence, and a brief burst does not clear it when the peer starts talking again; consuming it mid-turn would make the documented `await && read` idiom read a half-drawn screen. The detector cannot stand in for the flag because it never latches: it reports how output looks *now*, and its post-output `NOTHING_TO_SHOW` window (`busyCandidateGap`) is longer than the two CLI round trips between a `dor send` and the await behind it, so it would still read as settled.
 
-**Why an await never sets TODO.** TODO means a human owes this pane attention; after an await nobody does — a program asked to be told, was told, and acted. A stranded TODO also leaks: the last await of an orchestration would mark a fully handled event, and because TODO feeds the Workspace union, an orchestration awaiting across several panes would light the whole Workspace up. A TODO from an *unrelated* earlier event is a different debt and stays owed.
+**Why an await never leaves a TODO.** TODO means a human owes this pane attention; after an await nobody does — a program asked to be told, was told, and acted. A stranded TODO also leaks: the last await of an orchestration would mark a fully handled event, and because TODO feeds the Workspace union, an orchestration awaiting across several panes would light the whole Workspace up. Before rings set TODO uniformly, the answer depended on a race: a report claimed by an await parked first left nothing, while the same report landing a moment before the await stranded its TODO (audit, 2026-09-23). Withdrawal now takes back the TODO the ring set, so both orders agree. A TODO from an *unrelated* earlier event is a different debt and stays owed.
 
 **Why nothing quieter is substituted for the absorbed ring.** A receipt the human must clear by hand is the same noise in a smaller font, and forensics after a failure come from the pane's own scrollback anyway.
 
@@ -66,9 +72,29 @@
 
 **Why resumed work withdraws an inferred WATCHING ring.** The marked `ttr.pgstencil-adopt` speech (2026-09-09 18:17:03) followed a WATCHING settle, resumed output, and confirmed BUSY before the speech deadline; the latched ring masked that activity, so the renderer spoke while the terminal was still animating. Withdrawing the ring lets the existing sink cancellation and fresh-ring delays follow the new busy/quiet cycle. Only the inference goes: explicit reports and command exits stay authoritative, and a redraw too brief to confirm BUSY never invalidates completion.
 
+## Terminal reports
+
+**Why progress is independent of the ring.** Progress and the report ring shared one field: an active `9;4` update while a report rang silently un-rang it, ending the episode and restarting speech and push, and a ring nulled the cycle, so the cycle's own end never rang. A cycle the program abandoned — a build killed with `Ctrl-C` — left the Session at `OSC_NOTIF_BUSY` forever, and the next program's defensive `9;4;0` then rang a phantom `Progress complete 40%` (audit, 2026-09-23). A command boundary is the one point where a cycle certainly belongs to a dead run.
+
+**Why a progress event no longer drops a bell.** A mid-cycle update or a clear that ends no cycle summons nobody, so dropping the batch's lone `BEL` beside one lost the only ring (audit, 2026-09-23). Richness now decides detail for the batches that do both ring.
+
+**Why the titles name the command.** The generic `Progress complete` said nothing about which run finished; the watch key is the name the user already knows the pane by, and the watch record is live exactly while a cycle can end.
+
+## Command-exit Track
+
+**Why the minimum runtime is not the inactivity timeout.** The two answer different questions — how long "looking at this pane" lasts, and how short a run the user probably watched. Shared, a user who shortened the timeout to three seconds was rung for every four-second `git status` they turned away from, and one who lengthened it lost exit alerts for every build shorter than the new window (2026-09-23).
+
+## Clearing And TODO
+
+**Why every ring sets TODO when it opens.** WATCHING rings used to create TODO only when attended or dismissed, while report and exit rings created it at once. Every verb then diverged by source: `t` on a ringing WATCHING pane turned TODO on and on a report ring turned it off; an `Enter` as the first key kept one and cleared the other; a restart dropped an unattended WATCHING ring without trace while a report ring came back as TODO (audit, 2026-09-23). Setting it at ring time makes the verbs identical. Recording whether the ring set it lets a withdrawal take back only its own TODO.
+
+**Why detail goes by richness.** The last writer used to win, with one special case keeping a report's text over an exit: an `OSC 9` reading `Build finished: 3 warnings` followed by a bell in the next PTY read showed `Terminal bell`, and `make; printf '\a'` showed `Terminal bell` over `make exited 2` (audit, 2026-09-23). One order covers every pair; equal ranks still take the newer text.
+
+**Why an acknowledged state is not summoned again.** Claude Code sends an idle notification about a minute after a turn ends unless it saw input (captured from Claude Code 2.1, 2026-09-23). A user who acknowledged the WATCHING ring with a click, `a`, or a Door was summoned a second time, in a second episode, for the same completion. Output since the acknowledgement is the evidence that something new happened; settles and command exits are fresh by construction, so only reports are held to it.
+
 ## Alarm settings
 
-**Why animation deferral defaults on.** Coding agents (`claude`, `codex`) send their notification OSC while their TUI is still redrawing its spinner, so an undeferred ring summons the user to a pane that is still animating (2026-09). The gate engages only while the private detector is fully armed, so a BEL from an otherwise quiet shell still rings at once. Deferral is unbounded, so continuous output can hold a ring indefinitely; turning the switch off is the escape hatch that restores the protocols' literal timing. Installs that saved any settings blob keep the old value: the blob has no version field, and a persisted `false` cannot be told from a deliberate opt-out, so dropping it on read would leave the off position unpersistable.
+**Why animation deferral defaults on.** Coding agents (`claude`, `codex`) send their notification OSC while their TUI is still redrawing its spinner, so an undeferred ring summons the user to a pane that is still animating (2026-09). The gate engages only while the private detector is fully armed, so a BEL from an otherwise quiet shell still rings at once. The deferral ceiling bounds the wait (Completion events); turning the switch off restores the protocols' literal timing. Installs that saved any settings blob keep the old value: the blob has no version field, and a persisted `false` cannot be told from a deliberate opt-out, so dropping it on read would leave the off position unpersistable.
 
 **Why the settings ride the WATCHING rule set's seed/broadcast shape.** Each VS Code webview has its own origin and therefore its own `localStorage`, while the `AlertManager` is shared; without a host-authoritative copy, two webviews would each believe their own blob. The one difference is the whole-blob relay: an alarm setting is not a set of independent keys the way a rule list is.
 
@@ -116,7 +142,7 @@ Guarding only completion leaves a stale `start` free to replace the active utter
 
 **Why `cfg.alert.ringingPaused` suppresses the pulse.** It is the visual-snapshot freeze that pins the alarm; even a bounded animation could otherwise snapshot at an arbitrary phase during its first 2.6 seconds.
 
-**Why the unlabelled treatment pulses once per episode.** An infinite per-Session animation is expensive, and the whole-Pane treatment covers far more surface than the retired bell icon did. With four focused panes wearing an infinite animation, three minutes cost 6.89 MB of embedder memory, 1,127 style recalculations, and 3.99 seconds of renderer CPU; pausing only those animations in the same loaded document reduced that to 0.13 MB, two recalculations, and 0.025 seconds. After bounding the burst, two consecutive three-minute windows each had zero live animations, one recalculation, under 0.40 MB of non-cumulative embedder drift, and at most 0.024 seconds of renderer CPU (measured in Chrome 150, 2026-09). A handful of cycles preserves the entry cue without leaving an animation running for the lifetime of an unattended alert. The episode — not a track latch — is the key because the episode is the summons the sinks already work from: a second track latching inside one enriches an alarm the user was already shown, and re-flashing the whole Pane for it would read as a new alarm. Running the burst off `episode.startedAt` rather than from mount makes the CSS clock a property of the episode, so minimize → reattach or a Workspace switch lands past an expired burst instead of replaying it. A Session BEL-ing in a loop still cannot restart the burst, because a track that is already latched does not re-latch.
+**Why the unlabelled treatment pulses once per episode.** An infinite per-Session animation is expensive, and the whole-Pane treatment covers far more surface than the retired bell icon did. With four focused panes wearing an infinite animation, three minutes cost 6.89 MB of embedder memory, 1,127 style recalculations, and 3.99 seconds of renderer CPU; pausing only those animations in the same loaded document reduced that to 0.13 MB, two recalculations, and 0.025 seconds. After bounding the burst, two consecutive three-minute windows each had zero live animations, one recalculation, under 0.40 MB of non-cumulative embedder drift, and at most 0.024 seconds of renderer CPU (measured in Chrome 150, 2026-09). A handful of cycles preserves the entry cue without leaving an animation running for the lifetime of an unattended alert. The episode — not a ring source — is the key because the episode is the summons the sinks already work from: a second source joining the ring enriches an alarm the user was already shown, and re-flashing the whole Pane for it would read as a new alarm. Running the burst off `episode.startedAt` rather than from mount makes the CSS clock a property of the episode, so minimize → reattach or a Workspace switch lands past an expired burst instead of replaying it. A Session BEL-ing in a loop still cannot restart the burst, because a source joining an active ring does not open a new one.
 
 ## Text And Security
 

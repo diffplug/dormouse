@@ -52,7 +52,6 @@ function createPlatform(
     alertResize: vi.fn(),
     alertClearAttention: vi.fn(),
     alertToggleTodo: vi.fn(),
-    alertMarkTodo: vi.fn(),
     alertClearTodo: vi.fn(),
     onAlertState: vi.fn(),
     onWatchedCommands: vi.fn(),

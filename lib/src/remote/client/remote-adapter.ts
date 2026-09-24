@@ -352,7 +352,6 @@ export class RemotePtyAdapter implements PlatformAdapter {
   alertResize(): void {}
   alertClearAttention(): void {}
   alertToggleTodo(): void {}
-  alertMarkTodo(): void {}
   alertClearTodo(): void {}
   /**
    * There is no `dor` on the phone and protocol-v1 carries no await, so a

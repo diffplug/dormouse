@@ -233,7 +233,7 @@ export const DESKTOP_SECTIONS: readonly Section[] = [
         id: 'al-cmd-exit',
         title: 'A long command that finished while you were away',
         hint:
-          `Press \`x\` to start a slow build in another pane, click into that pane, then click back here and wait. Dormouse rings for any command that ran longer than the inactivity timeout in Alarm settings and finished after you walked away — again, no rule needed.`,
+          `Press \`x\` to start a slow build in another pane, click into that pane, then click back here and wait. Dormouse rings for any command that ran longer than 15 seconds and finished after you walked away — again, no rule needed.`,
       },
     ],
     prose: [

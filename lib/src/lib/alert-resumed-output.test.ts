@@ -9,6 +9,7 @@ import { watchUnattendedRings } from './alert-ring-watch';
 import { startAlertSpeech } from './alert-speech';
 import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS } from './alert-settings';
 import { clearTerminalActivity, setTerminalActivity } from './session-activity-store';
+import { cfg } from '../cfg';
 
 const ID = 'resumed-watched-work';
 const DELAY = 10_000;
@@ -126,10 +127,10 @@ describe('WATCHING output resuming before alarm delivery', () => {
     expect(manager.getState(ID)).toMatchObject({ status: 'BUSY', todo: true, notification: receipt.notification });
   });
 
-  it.each(['protocol', 'command-exit'] as const)('preserves an authoritative %s ring behind WATCHING', (track) => {
-    manager.setInactivityTimeoutMs(3_000);
+  it.each(['protocol', 'command-exit'] as const)('preserves an authoritative %s source behind WATCHING', (track) => {
     manager.attend(ID);
     manager.clearAttention(ID);
+    vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
     busy();
     settle();
     if (track === 'protocol') {

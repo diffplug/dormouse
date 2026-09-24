@@ -602,10 +602,6 @@ export class VSCodeAdapter implements PlatformAdapter {
     this.vscode.postMessage({ type: 'alert:toggleTodo', id });
   }
 
-  alertMarkTodo(id: string): void {
-    this.vscode.postMessage({ type: 'alert:markTodo', id });
-  }
-
   alertClearTodo(id: string): void {
     this.vscode.postMessage({ type: 'alert:clearTodo', id });
   }
