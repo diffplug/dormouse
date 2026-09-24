@@ -49,7 +49,7 @@ export function isBrowserViewportSetting(value: unknown): value is BrowserViewpo
 
 export function resolveBrowserViewport(config: BrowserViewportConfig, selection: BrowserViewportSelection = config.defaultViewport): BrowserViewportSetting {
   if (selection === PANE_SYNC_PRESET) return { mode: 'pane-sync' };
-  const size = typeof selection === 'string' ? Object.hasOwn(config.viewports, selection) ? config.viewports[selection] : undefined : selection;
+  const size = typeof selection === 'string' ? Object.prototype.hasOwnProperty.call(config.viewports, selection) ? config.viewports[selection] : undefined : selection;
   if (!isFixedBrowserViewport(size)) throw new Error(typeof selection === 'string' ? `Unknown browser viewport preset '${selection}'` : 'Invalid browser viewport dimensions or DPR');
   return { mode: 'fixed', ...size };
 }
