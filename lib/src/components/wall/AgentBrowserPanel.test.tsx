@@ -441,9 +441,8 @@ describe('AgentBrowserPanel Playwright params', () => {
   // Wall records the host-reported mode (and a fresh viewer port) in params,
   // which reach the controller only through this panel.
   it('follows a native headed relaunch and its cwd, and never sizes the headed window', async () => {
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
-      { width: 800, height: 600, left: 0, top: 0, right: 800, bottom: 600, x: 0, y: 0, toJSON() {} } as DOMRect,
-    );
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(800);
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600);
     const host = installBrowserHost();
     // Every operation that drives the browser.
     const commands = () => host.browser.mock.calls.map(([request]) => request.op).filter((op) => DRIVES.has(op));

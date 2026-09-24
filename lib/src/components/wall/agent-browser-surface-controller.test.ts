@@ -84,6 +84,12 @@ function makeSink(): AgentBrowserViewSink & {
   };
 }
 
+/** Lay `el` out at `size()`: its client size, the pane's CSS size. */
+function layOut(el: HTMLElement, size: () => { width: number; height: number }): void {
+  Object.defineProperty(el, 'clientWidth', { configurable: true, get: () => size().width });
+  Object.defineProperty(el, 'clientHeight', { configurable: true, get: () => size().height });
+}
+
 /** A frame the host sends over a viewer socket. */
 function emitFrame(socket: WebSocketMock | undefined, kind: 'provisional' | 'crisp' = 'provisional', n = 1, size?: { width: number; height: number }) {
   socket?.emitMessage(encodeViewerFrame({ kind, jpeg: new Uint8Array([0xff, 0xd8, n]), ...(size ? { size } : {}) }).buffer);
@@ -308,7 +314,7 @@ function resizablePane(width = 800, height = 600) {
   });
   const sink = makeSink();
   let size = { width, height };
-  sink.viewport.getBoundingClientRect = () => ({ ...size }) as DOMRect;
+  layOut(sink.viewport, () => size);
   return {
     sink,
     resize(nextWidth: number, nextHeight: number) {
@@ -361,6 +367,18 @@ describe('sync-to-pane', () => {
     // Re-armed for the new scale.
     expect(queries.at(-1)!.media).toBe('(resolution: 2dppx)');
     expect(queries.at(-1)!.onChange).toBeDefined();
+  });
+
+  it('sizes the browser to the pane as laid out, never as a Workspace presentation scales it', async () => {
+    const pane = resizablePane();
+    // A Workspace entering: the Wall's subtree is drawn at a scale while it moves.
+    pane.sink.viewport.getBoundingClientRect = () => ({ width: 790, height: 593 }) as DOMRect;
+    const controller = withPort('id', { session: 'sess' }, 4321);
+    controller.attachView(pane.sink);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(syncs(4321).at(-1)).toEqual([800, 600, 1]);
+    expect(syncs(4321)).not.toContainEqual([790, 593, 1]);
+    expect(getAgentBrowserScreenController('id')!.snapshot()?.paneCss).toEqual({ w: 800, h: 600 });
   });
 
   it('follows the host alone: its `off` disengages, never a frame, a status or an older engagement', async () => {
@@ -978,7 +996,7 @@ describe('attach', () => {
       const sent = () => host.browser.mock.calls.map(([request]) => request).filter((request) => request.op !== 'view');
       const sink = makeSink();
       let size = { width: 800, height: 600 };
-      sink.viewport.getBoundingClientRect = () => ({ ...size }) as DOMRect;
+      layOut(sink.viewport, () => size);
       const controller = withPort('id', { session: 'sess', url: 'https://page.example/' }, 1111);
       controller.attachView(sink);
       await vi.advanceTimersByTimeAsync(0);
@@ -1356,7 +1374,7 @@ describe('relaunch (pop-out / pop-in)', () => {
       const controller = withPort('id', { session: 'sess' }, 1111);
       const sink = makeSink();
       let size = { width: 800, height: 600 };
-      sink.viewport.getBoundingClientRect = () => ({ ...size }) as DOMRect;
+      layOut(sink.viewport, () => size);
       controller.attachView(sink);
       await vi.advanceTimersByTimeAsync(0);
       streamSocket(1111)?.emitMessage(JSON.stringify({
@@ -1405,7 +1423,7 @@ describe('relaunch (pop-out / pop-in)', () => {
     host.answers.launch = () => popIn.promise;
     const controller = withPort('id', { session: 'sess', renderMode: 'ab-popout' }, 1111);
     const sink = makeSink();
-    sink.viewport.getBoundingClientRect = () => ({ width: 800, height: 600 }) as DOMRect;
+    layOut(sink.viewport, () => ({ width: 800, height: 600 }));
     controller.attachView(sink);
     await flushMicrotasks();
 
@@ -1430,7 +1448,7 @@ describe('relaunch (pop-out / pop-in)', () => {
     host.answers.launch = (request) => request.headed ? Promise.resolve({ ok: true, stream: 3456 }) : popIn.promise;
     const controller = withPort('id', { session: 'sess', renderMode: 'ab-popout', url: 'https://page.example/' }, 1111);
     const sink = makeSink();
-    sink.viewport.getBoundingClientRect = () => ({ width: 800, height: 600 }) as DOMRect;
+    layOut(sink.viewport, () => ({ width: 800, height: 600 }));
     controller.attachView(sink);
     await flushMicrotasks();
     for (const status of statuses) streamSocket(1111)!.emitMessage(JSON.stringify({ type: 'status', screencasting: false, ...status }));

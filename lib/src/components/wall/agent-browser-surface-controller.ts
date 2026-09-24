@@ -87,6 +87,13 @@ function dimsMatch(a: { w: number; h: number }, b: { w: number; h: number }): bo
 /** A viewport the screencast is fixed at: CSS size and device pixel ratio. */
 type FixedViewport = { width: number; height: number; dpr: number };
 
+/** The pane's CSS size as laid out — never `getBoundingClientRect()`, which a
+ *  Workspace presentation scaling the Wall's subtree shrinks while it moves
+ *  (docs/specs/dor-browser.md → "Display Modal And Render Swaps"). */
+function laidOutSize(el: HTMLElement): { w: number; h: number } {
+  return { w: el.clientWidth, h: el.clientHeight };
+}
+
 
 // A stray about:blank the close+reopen of a relaunch can surface is never the
 // page the pane shows.
@@ -304,11 +311,11 @@ export class AgentBrowserSurfaceController {
 
   // --- cached pane size (avoid per-frame forced layout) ---
   // computeScreenSnapshot() runs on EVERY non-duplicate stream frame (~20Hz);
-  // a getBoundingClientRect() there forces layout each time. A ResizeObserver
+  // reading the pane's size there forces layout each time. A ResizeObserver
   // active for the whole attach duration keeps the pane's content-box size
-  // cached (the viewport div has no border/padding, so contentRect matches the
-  // gBCR the hot path used to read). null ⇒ no attached view — treat as 0×0.
-  // The size syncToPane sends stays a live gBCR read.
+  // cached (the viewport div has no border/padding, so contentRect matches its
+  // client size). null ⇒ no attached view — treat as 0×0. The size syncToPane
+  // sends stays a live read.
   // The same observer also drives sync-to-pane (debounced), so there is one
   // observer on the pane, not two.
   private paneSize: { w: number; h: number } | null = null;
@@ -520,9 +527,7 @@ export class AgentBrowserSurfaceController {
 
   private refreshPaneSize(): void {
     const el = this.sink?.viewport;
-    if (!el) { this.paneSize = null; return; }
-    const rect = el.getBoundingClientRect();
-    this.paneSize = { w: Math.round(rect.width), h: Math.round(rect.height) };
+    this.paneSize = el ? laidOutSize(el) : null;
   }
 
   private setupPaneSizeObserver(): void {
@@ -1261,9 +1266,7 @@ export class AgentBrowserSurfaceController {
     if (!this.syncEngaged || this.headed || !this.hosted || this.phase.k !== 'live') return;
     const el = this.sink?.viewport;
     if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const width = Math.round(rect.width);
-    const height = Math.round(rect.height);
+    const { w: width, h: height } = laidOutSize(el);
     if (!width || !height) return;
     this.connection?.send({ type: 'sync', width, height, dpr: window.devicePixelRatio || 1, engagement: this.syncEngagement });
   }
