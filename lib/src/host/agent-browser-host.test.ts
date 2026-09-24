@@ -4,6 +4,7 @@ import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BrowserOp, BrowserRequestBinding } from '../lib/platform/browser-automation';
+import { createAgentBrowserProvider } from './agent-browser-host';
 import { createBrowserHost } from './browser-host';
 
 type SpawnResult = { stdout?: string; stderr?: string; code?: number };
@@ -94,7 +95,7 @@ type Host = ReturnType<typeof createBrowserHost>;
 
 /** The shared browser host, driving agent-browser only. */
 function makeHost(writeClipboardText = vi.fn()): Host {
-  return createBrowserHost({ writeClipboardText, playwright: () => { throw new Error('no Playwright in these tests'); } });
+  return createBrowserHost({ writeClipboardText, providers: { 'agent-browser': () => createAgentBrowserProvider() } });
 }
 
 /** One agent-browser request through `host`, bound to `binding`. */
@@ -145,7 +146,9 @@ describe('agent-browser host relaunch', () => {
     const host = makeHost();
     const result = await ab(host, { op: 'launch', url: 'https://example.com/', headed: true }, { session: 'dormouse.1.default', binaryPath: '/usr/local/bin/agent-browser' });
 
-    expect(result).toEqual({ ok: true, wsPort: 61218, session: 'dormouse.1.default', nativeIdentity: 'dormouse.1.default' });
+    expect(result).toEqual({
+      ok: true, wsPort: 61218, headed: true, session: 'dormouse.1.default', nativeIdentity: 'dormouse.1.default', binaryPath: '/usr/local/bin/agent-browser',
+    });
     await vi.waitFor(() => {
       expect(spawnMock).toHaveBeenCalledWith(
         '/usr/local/bin/agent-browser',
@@ -180,7 +183,7 @@ describe('agent-browser host relaunch', () => {
     try {
       writeState(session, 'pid', DEAD_PID + 1);
       writeState(session, 'stream', port);
-      expect(await popOut).toEqual({ ok: true, wsPort: port, session, nativeIdentity: session });
+      expect(await popOut).toEqual({ ok: true, wsPort: port, headed: true, session, nativeIdentity: session });
       // `open` has not returned, so no daemon command (the blank-tab sweep) has
       // been queued behind it.
       expect(calls.some((args) => args.includes('tab'))).toBe(false);
@@ -225,7 +228,7 @@ describe('agent-browser host relaunch', () => {
     try {
       writeState(session, 'pid', DEAD_PID + 1);
       writeState(session, 'stream', port);
-      expect(await popOut).toEqual({ ok: true, wsPort: port, session, nativeIdentity: session });
+      expect(await popOut).toEqual({ ok: true, wsPort: port, headed: true, session, nativeIdentity: session });
 
       // The second relaunch invalidates the first one's post-open tail before
       // its close queues behind that still-pending `open` command.
@@ -267,7 +270,7 @@ describe('agent-browser host relaunch', () => {
     try {
       writeState(session, 'pid', DEAD_PID + 1);
       writeState(session, 'stream', port);
-      expect(await popOut).toEqual({ ok: true, wsPort: port, session, nativeIdentity: session });
+      expect(await popOut).toEqual({ ok: true, wsPort: port, headed: true, session, nativeIdentity: session });
 
       // Pane kill/render-swap enters command('close') and invalidates the
       // relaunch tail synchronously, before the close queues behind open.
@@ -314,7 +317,7 @@ describe('agent-browser host relaunch', () => {
     try {
       writeState(session, 'pid', DEAD_PID + 1);
       writeState(session, 'stream', port);
-      expect(await popOut).toEqual({ ok: true, wsPort: port, session, nativeIdentity: session });
+      expect(await popOut).toEqual({ ok: true, wsPort: port, headed: true, session, nativeIdentity: session });
 
       await host.close();
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -339,7 +342,7 @@ describe('agent-browser host relaunch', () => {
       stream: () => ({ stdout: JSON.stringify({ port: 61219 }) }),
     });
     expect(await ab(host, { op: 'launch', url: 'https://slow.example/', headed: false })).toEqual({
-      ok: true, session: expect.stringMatching(/^dormouse\.1\.gui-/), nativeIdentity: session, wsPort: 61219,
+      ok: true, session: expect.stringMatching(/^dormouse\.1\.gui-/), nativeIdentity: session, wsPort: 61219, headed: false,
     });
 
     // Failed with no daemon at all: fail, and close so nothing half-launched
@@ -362,7 +365,7 @@ describe('agent-browser host relaunch', () => {
     });
     expect(await ab(host, { op: 'launch', url: 'https://example.com/', headed: false })).toEqual({
       ok: false,
-      error: 'open published no stream port',
+      error: 'agent-browser published no stream port',
     });
 
     mockSpawnByCommand({
@@ -372,8 +375,28 @@ describe('agent-browser host relaunch', () => {
     });
     expect(await ab(host, { op: 'launch', url: 'https://example.com/', headed: true }, { session: 'dormouse.1.default' })).toEqual({
       ok: false,
-      error: 'popOut open published no stream port',
+      error: 'agent-browser published no stream port',
     });
+  });
+});
+
+describe('agent-browser host launch directory', () => {
+  useTempSocketDir('dormouse-ab-cwd-test-');
+
+  // agent-browser reads `./agent-browser.json` from its working directory, so
+  // a GUI launch or relaunch must run where the `dor ab` that made the pane ran.
+  it('opens in the binding\'s project directory, and in the host\'s once that is gone', async () => {
+    const project = mkdtempSync(join(tmpdir(), 'dormouse-ab-project-'));
+    const host = makeHost();
+    const openCalls = () => spawnMock.mock.calls.filter(([, args]) => (args as string[]).includes('open'));
+    mockSpawnByCommand({ open: () => ({ code: 1, stderr: 'boom' }), close: () => ({}) });
+    await ab(host, { op: 'launch', url: 'http://localhost:5173/', headed: false }, { cwd: project });
+    expect(openCalls()[0][2]).toEqual({ cwd: project });
+
+    await fsp.rm(project, { recursive: true });
+    spawnMock.mockClear();
+    await ab(host, { op: 'launch', url: 'http://localhost:5173/', headed: false }, { cwd: project });
+    expect(openCalls()[0]).toHaveLength(2);
   });
 });
 
@@ -413,10 +436,12 @@ describe('agent-browser host attach', () => {
     const opened = deferred<SpawnResult>();
     const calls = mockSpawnByCommand({
       '--headed open': () => {
-        writeState(session, 'pid', DEAD_PID + 1);
+        // This test process stands in for the relaunched daemon.
+        writeState(session, 'pid', process.pid);
         writeState(session, 'stream', port);
         return opened.promise;
       },
+      tab: () => ({ stdout: JSON.stringify({ tabs: [{ tabId: 'real', url: 'https://example.com/', active: true }] }) }),
       close: () => ({}),
     });
     try {
@@ -427,13 +452,18 @@ describe('agent-browser host attach', () => {
         ab(host, { op: 'attach', url: 'https://example.com/', headed: true }, { session }),
       ]);
       // Opened at the page, so the caller has no navigation left to run.
+      // Opened at the page, so the caller has no navigation left to run; the
+      // second found the browser the first brought up, at the first's page.
       expect(first).toEqual({ ok: true, wsPort: port, relaunched: true, session, nativeIdentity: session });
-      expect(second).toEqual(first);
-      expect(calls).toEqual([['--session', session, '--headed', 'open', 'https://example.com/']]);
-      // A cold start leaves no stray blank tab to sweep once `open` returns.
+      expect(second).toEqual({ ok: true, wsPort: port, session, nativeIdentity: session });
+      expect(calls).toEqual([
+        ['--session', session, 'close'],
+        ['--session', session, '--headed', 'open', 'https://example.com/'],
+      ]);
+      // Once `open` returns, the sweep finds no stray blank tab to close.
       opened.resolve({});
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      expect(calls).toHaveLength(1);
+      await vi.waitFor(() => expect(calls).toContainEqual(['--session', session, 'tab', 'list', '--json']));
+      expect(calls.filter((args) => args.includes('close'))).toEqual([['--session', session, 'close']]);
 
       await host.close();
       expect(calls).toContainEqual(['--session', session, 'close']);
@@ -458,7 +488,7 @@ describe('agent-browser host attach', () => {
     try {
       const binding = { session: 'dormouse.1.tool.a' };
       expect(await ab(host, { op: 'launch', url: 'http://localhost:5173/', headed: false }, binding)).toEqual({
-        ok: true, session: 'dormouse.1.tool.a', nativeIdentity: 'dormouse.1.tool.a', wsPort: port,
+        ok: true, session: 'dormouse.1.tool.a', nativeIdentity: 'dormouse.1.tool.a', wsPort: port, headed: false,
       });
       // Whatever held the session is closed first, so the launch lands headless.
       expect(calls[0]).toEqual(['--session', 'dormouse.1.tool.a', 'close']);

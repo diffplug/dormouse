@@ -224,7 +224,7 @@ size landed**, so a resize transient is not read as an external override.
 Source of truth: `lib/src/components/wall/AgentBrowserScreenModal.tsx`,
 `offeredRenderModes` in `lib/src/components/wall/browser-automation.ts`,
 `lib/src/components/wall/agent-browser-surface-controller.ts` (`screenActions`, sync effects,
-pop-out/pop-in, `closeLanded`), `lib/src/components/Wall.tsx` (`onSwapRenderMode`), Storybook
+pop-out/pop-in), `lib/src/components/Wall.tsx` (`onSwapRenderMode`), Storybook
 `lib/src/stories/AgentBrowserScreenModal.stories.tsx`. Pinned by `restores a failed provider swap minimized meanwhile in place` in `lib/src/components/Wall.test.tsx`.
 
 ## Agent-Browser Renderer
@@ -314,7 +314,7 @@ place of `live`; a `dor` handover moves any phase but `launching` and
 | `parked` | Stream released; daemon up at its port | `live` at that port on unpark (rationale); `relaunching` |
 | `relaunching` | Headed↔headless relaunch | `live` at the host's port; else `attaching` with its page, headless |
 | `ended` | No browser; `error` says why | `relaunching`; a navigation rebinds, with its page |
-| `disposed` | Released; `closed` if its session was | — |
+| `disposed` | Released | — |
 
 - **Every daemon command must pass one gate (`driver`), open only in `live`,
   and after an unpark only once its stream opens** — chrome and Display modal
@@ -331,9 +331,9 @@ place of `live`; a `dor` handover moves any phase but `launching` and
 - **A failed first launch is reported once to the Wall, which applies the
   Surface's `launchFallback`**: `close` the pane, `embed` (a Tool's iframe), or
   `{ restore }` the params a swap replaced. A param cleared on success, it
-  survives a restore mid-launch (rationale). **A launch into a
-  named session waits out a close of that session still in flight**, held open
-  by any work of the closed Surface still landing (rationale).
+  survives a restore mid-launch (rationale). **A launch into a named session is
+  sent at once, and so is a close of a Surface whose launch names one**: the
+  host orders them ([Agent-Browser Host Capabilities](#agent-browser-host-capabilities)).
 - **Params predating the controller's own `session` or `renderMode` write are
   ignored until they show it back.**
 - **One relaunch at a time, only of a bound browser** (`live`, `parked`,
@@ -420,28 +420,24 @@ stub offers nothing. **State carried in v1 is only the last
 http(s) active URL**: other tabs, DOM state, scroll, form inputs, session storage,
 cookies/logins do not survive.
 
-Host sequence: run `close`, **then terminate the daemon by its pid file and wait
-for it to exit** (rationale), then reopen. **Never wait for the page to load**
-(rationale): every `launch` — pop-out, pop-in, a GUI open — resolves once
-the *relaunched* daemon is up, asking `stream status` only after `open` returns.
-**A non-zero `open` exit with the daemon up is a page still loading, not a
-failed launch**; only a launch without a published port fails, including after a
-zero exit; a GUI open then closes its spawn. **A headed session is
-tracked for shutdown before its launch**, so a window whose page never loads is
-still closed. **Never query the daemon during the close/reopen gap**
-(rationale) — host-side, and in the controller through its daemon gate — so
-**Dormouse supplies the active-tab URL and the host trusts it**. Once `open` returns, only
-a still-current relaunch best-effort closes stray `about:blank` tabs, **and only
-while a real page is open**, so it never closes the sole tab (rationale).
+A pop-out or pop-in is a `launch` of the bound session, under the host's
+lifecycle ([Agent-Browser Host Capabilities](#agent-browser-host-capabilities)).
+agent-browser's relaunch runs `close`, **then terminates the daemon by its pid
+file and waits for it to exit** (rationale), then reopens. **Never wait for the
+page to load** (rationale): its launch resolves once the *relaunched* daemon is
+up, asking `stream status` only after `open` returns. **A non-zero `open` exit
+with the daemon up is a page still loading, not a failed launch**; only a launch
+without a published port fails, including after a zero exit. **Never query the
+daemon during the close/reopen gap** (rationale) — host-side, and in the
+controller through its daemon gate — so **Dormouse supplies the active-tab URL
+and the host trusts it**.
 
 While popped out, Dormouse keeps a stream/CDP observer for same-tab URL/header
-updates and headed-window close auto-revert. **Hosts must cancel pending
-relaunch sweeps, then close tracked popped-out sessions on shutdown** so
-quitting orphans no headed window.
+updates and headed-window close auto-revert.
 
 Source of truth: `lib/src/components/wall/agent-browser-surface-controller.ts` (pop-out state, CDP
-observer, auto-revert), `lib/src/host/agent-browser-host.ts` (`popOut`, `popIn`,
-`killDaemon`, `closePoppedOut`), VS Code/standalone shutdown wiring.
+observer, auto-revert), `lib/src/host/agent-browser-host.ts` (`killDaemon`),
+VS Code/standalone shutdown wiring.
 
 ### Agent-Browser Host Capabilities
 
@@ -466,6 +462,33 @@ plus `browser_screenshot` for raw bytes.
 **Every transport waits `BROWSER_REQUEST_TIMEOUT_MS` (40s) for any reply**, past
 agent-browser's 25s action timeout, so the webview never re-asks while the host
 still works.
+
+**The host runs one lifecycle for both providers**; a provider implements only
+the primitives that differ (`BrowserProvider`: find, stop, open, probe, close,
+list tabs, act, evaluate, screenshot, stream URL):
+
+- **Must serialize a browser's launches, relaunching attaches and closes per
+  native identity**, in arrival order — a launch into a session waits out a
+  close of it still in flight, and two panes restoring one session relaunch it
+  once. **A close runs after the launch or attach already running, closing what
+  it brings up, and supersedes one sent before it that has not begun**, which
+  answers that the browser was closed (rationale).
+- **Must answer a launch inside `BROWSER_REQUEST_TIMEOUT_MS`**: startup,
+  queueing included, gets 30 s from the request's arrival. A launch stops what
+  runs a named session first, then resolves once the provider reports the
+  browser up, **never waiting for the page**.
+- **A launch that gives up must let its `open` land, for up to 4 s, before
+  closing the session**, and close again when a later `open` lands unless a
+  newer launch owns the session (rationale).
+- **Once `open` returns, only a still-current launch closes stray
+  `about:blank` tabs, last first, and only while a real page is open**, so it
+  never closes the sole tab (rationale).
+- **A headed launch is tracked for shutdown before it starts**, so a window
+  whose page never loads is still closed; a headless relaunch or a close drops
+  it. **Shutdown supersedes pending launches and sweeps, then closes every
+  tracked headed browser**, so quitting orphans no window.
+
+Pinned by `lib/src/host/browser-host.test.ts`.
 
 **Host-side validation is the security boundary: `parseBrowserRequest` rebuilds
 every request field by field before a provider sees it** — a known provider and
@@ -493,10 +516,10 @@ stream server rejects `vscode-webview://` origins. The relay grants one
 single-use, short-TTL token bound to one stream port and strips the Origin
 header; standalone connects directly.
 
-Source of truth: `parseBrowserRequest` and `createBrowserHost` in
-`lib/src/host/browser-host.ts`, `lib/src/host/agent-browser-host.ts`
-(`runWithBinaryFallback`), `lib/src/host/browser-host-shared.ts`
-(`isAgentBrowserSession`, `isPlaywrightSession`),
+Source of truth: `lib/src/host/browser-host.ts` (`parseBrowserRequest`,
+`createBrowserHost`, `BrowserProvider`, `isAgentBrowserSession`,
+`isPlaywrightSession`), `lib/src/host/agent-browser-host.ts`
+(`runWithBinaryFallback`),
 `dor-lib-common/src/browser-providers.ts` (`isAllowedAgentBrowserBinary`),
 `BrowserRequest` in `lib/src/lib/platform/browser-automation.ts`, `browserHandle`
 in `lib/src/components/wall/browser-automation.ts`,
@@ -517,11 +540,11 @@ in `lib/src/components/wall/browser-automation.ts`,
 
 **Must expose only fixed host operations.** Navigation, tabs, viewport/device, screenshots, editing and close are validated host-side (`parseBrowserRequest`, above); arbitrary CLI arguments, JavaScript and CDP methods are unavailable through the webview channel. The trusted `dor pw` process retains native passthrough. Executable hints use the same filename/exact-host-override boundary as agent-browser, with `playwright-cli` as the accepted name; `dor pw` applies it to the executable a binding returns (`docs/specs/dor-cli.md` → Playwright Surface Addressing).
 
-**Must serialize GUI relaunches and closes per native session.** Close the previous CLI session before polling for its replacement; return when the browser endpoint is ready, without waiting for page load. **A pop-out or pop-in whose page is not http(s) must reopen blank**, never fail; only a GUI open's URL must pass the http(s) check. **Must answer a GUI launch inside the transports' `BROWSER_REQUEST_TIMEOUT_MS`**: startup, queueing included, gets 30 s from the request's arrival, and every CLI call it waits on is killed at that deadline. **Must bound every other CLI call to 10 s, except `open`**, which lasts as long as the page load and whose end could take its browser down; nothing waits on it past a launch's own bounds. **A launch that gives up must let its `open` land, for up to 4 s, before closing the session**, and close again when a later `open` lands unless a newer launch owns the session (rationale). Only a completed, still-current GUI launch may close startup blank tabs, and only while a real page exists. Shutdown cancels pending launches, disconnects viewers and closes tracked headed sessions. Viewer disconnect alone leaves the CLI browser alive. Concurrent input/captures share CDP attachments; disposal releases late attachments. **A screencast that fails to start must forget its page**, so the next poll releases the attachment and retries. Temporary screenshots follow the agent-browser private-directory contract.
+Launches follow the host's lifecycle (above): the relaunch closes the previous CLI session, and the launch completes when the browser endpoint is ready. **Every CLI call a launch waits on is killed at its deadline; every other one at 10 s, except `open`**, which lasts as long as the page load and whose end could take its browser down; nothing waits on it past a launch's own bounds. Shutdown also disconnects viewers. Viewer disconnect alone leaves the CLI browser alive. Concurrent input/captures share CDP attachments; disposal releases late attachments. **A screencast that fails to start must forget its page**, so the next poll releases the attachment and retries.
 
 **Must authorize every stream upgrade with an own-loopback Host and a single-use, 60-second token bound to that viewer port.** Grants are capped at 1024; normal HTTP requests are refused. Input is limited to 64 KiB per message and 256 queued messages; frame backpressure drops frames above 2 MB queued. **Must send a paste as `input_text` messages of at most 8192 characters**, which the host inserts with CDP `Input.insertText`, never as a key pair per character (rationale). The same guarded stream serves all three hosts.
 
-Source of truth: `followParamsHeadedness` in `lib/src/components/wall/agent-browser-surface-controller.ts`; `playwrightTextInputs` in `lib/src/lib/platform/browser-automation.ts`; `BrowserBindingReservations` in `lib/src/components/wall/browser-binding-reservations.ts`; `createPlaywrightHost` in `lib/src/host/playwright-host.ts`; `resolvePlaywrightInstall` in `lib/src/host/playwright-install.ts`; `BrowserStreamGrants` in `lib/src/host/browser-stream-guard.ts`. Pinned by `lib/src/host/playwright-host.test.ts` (opt-in real CLI via `DORMOUSE_PLAYWRIGHT_TEST_BIN`), `lib/src/host/playwright-host.lifecycle.test.ts`, `lib/src/host/browser-stream-guard.test.ts`, `lib/src/components/wall/browser-binding-reservations.test.ts`, and `AgentBrowserPanel Playwright params` in `lib/src/components/wall/AgentBrowserPanel.test.tsx`.
+Source of truth: `followParamsHeadedness` in `lib/src/components/wall/agent-browser-surface-controller.ts`; `playwrightTextInputs` in `lib/src/lib/platform/browser-automation.ts`; `BrowserBindingReservations` in `lib/src/components/wall/browser-binding-reservations.ts`; `createPlaywrightProvider` in `lib/src/host/playwright-host.ts`; `resolvePlaywrightInstall` in `lib/src/host/playwright-install.ts`; `BrowserStreamGrants` in `lib/src/host/browser-stream-guard.ts`. Pinned by `lib/src/host/playwright-host.test.ts` (opt-in real CLI via `DORMOUSE_PLAYWRIGHT_TEST_BIN`), `lib/src/host/playwright-host.lifecycle.test.ts`, `lib/src/host/browser-stream-guard.test.ts`, `lib/src/components/wall/browser-binding-reservations.test.ts`, and `AgentBrowserPanel Playwright params` in `lib/src/components/wall/AgentBrowserPanel.test.tsx`.
 
 ## Iframe Renderer
 

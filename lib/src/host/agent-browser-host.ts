@@ -1,42 +1,22 @@
 /**
- * Host-agnostic agent-browser support (docs/specs/dor-browser.md →
- * "Agent-Browser Host Capabilities"), run behind the shared browser host
- * (`browser-host.ts`) on both hosts: imported by the VS Code extension host,
- * bundled into the standalone sidecar's `browser-host.cjs`.
+ * The agent-browser provider beneath the shared browser host
+ * (`browser-host.ts`; docs/specs/dor-browser.md → "Agent-Browser Host
+ * Capabilities"): imported by the VS Code extension host, bundled for the
+ * standalone sidecar. What is genuinely agent-browser's lives here — its
+ * per-session daemon and the state files it leaves beside its socket, the pid
+ * kill a headed/headless relaunch needs, and each operation's one fixed argv.
+ * The host owns everything the two providers share.
  *
- * Everything here is plain Node (child_process / fs / crypto), so the *same*
- * code runs on both hosts. Only two genuinely host-specific bits are injected:
- * writing the OS clipboard (for the macOS editing chords) and logging.
- *
- * Narrow capabilities, all on behalf of the webview (validated by
- * `parseBrowserRequest` before they arrive here):
- *
- * 1. `act` — navigation, history, tab, viewport/device, CDP-endpoint and close
- *    operations, each rendered to one fixed agent-browser argv; not a general
- *    exec channel.
- * 2. `edit` — host-owned `eval` for the macOS editing chords
- *    (select-all/copy/cut) the stream input path can't dispatch; copy/cut land
- *    on the OS clipboard.
- * 3. `screenshot` — captures one device-resolution frame and returns the bytes.
- * 4. `attach` — reports a session's live stream port from its state files,
- *    never spawning a daemon; relaunches a gone one at the page the pane had.
- * 5. `open` — opens a url in a new managed session, backing every GUI launch (docs/specs/dor-browser.md → "Agent-Browser
- *    Connection").
- * 6. `popOut` / `popIn` — relaunch a session headed/headless at its live active
- *    url (Chrome's mode is fixed at launch, so this is a close + relaunch).
- * 7. `closePoppedOut` — close every still-headed window **and drop the capture
- *    directory**, called from each host's shutdown so quitting never orphans a
- *    real Chrome window or leaves a frame of the user's browser in tmp.
- *
- * The VS Code stream relay is NOT here: it works around the `vscode-webview://`
+ * Plain Node (child_process / fs), so the same code runs on both hosts. The
+ * VS Code stream relay is NOT here: it works around the `vscode-webview://`
  * origin the agent-browser stream server rejects, which is a VS-Code-only
  * concern (the standalone webview's `tauri://localhost` origin is accepted, so
- * it connects directly). It stays in the VS Code host.
+ * it connects directly). It stays in the VS Code host, injected as `streamUrl`.
  */
 import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
-import { promises as fs } from 'fs';
+import { promises as fs, statSync } from 'fs';
 // All external spawns go through dor-lib-common's spawnAndCapture, which owns the
 // Windows recipe (cross-spawn for PATHEXT/.cmd, windowsHide, exit-vs-close). The
 // GUI host needs it even for the absolute `binaryPath` dor ab resolved.
@@ -48,19 +28,10 @@ import {
   AGENT_BROWSER_BIN_ENV,
   DEFAULT_AGENT_BROWSER_BIN,
 } from 'dor-lib-common';
-import { randomBytes } from 'crypto';
 import { isAllowedAgentBrowserBinary } from '../lib/agent-browser-binary';
-import { type AgentBrowserTab, parseAgentBrowserTabs } from '../lib/agent-browser-tab';
-import { isBrowsableUrl, type BrowserEditOp, type BrowserResult } from '../lib/platform/browser-automation';
-import { privateCaptureDir } from './private-capture-dir';
-import {
-  captureFormat,
-  editScript,
-  generateGuiSession,
-  isAgentBrowserSession,
-  jpegQuality,
-  type BrowserAct,
-} from './browser-host-shared';
+import { parseAgentBrowserTabs } from '../lib/agent-browser-tab';
+import type { BrowserResult } from '../lib/platform/browser-automation';
+import type { BrowserAct, BrowserProvider, LiveBrowser, ProviderBinding } from './browser-host';
 
 /** The agent-browser argv for an operation — rebuilt from its validated
  *  fields, so no caller token reaches the CLI as it came. */
@@ -72,7 +43,6 @@ function actArgv(act: BrowserAct): string[] {
     case 'viewport': return ['set', 'viewport', String(act.width), String(act.height), String(act.dpr)];
     case 'device': return ['set', 'device', act.name];
     case 'cdpUrl': return ['get', 'cdp-url'];
-    case 'close': return ['close'];
   }
 }
 
@@ -93,81 +63,46 @@ function parseCdpUrl(stdout: string): string | null {
 /** One CLI run's outcome. */
 type CliResult = { exitCode: number; stdout: string; stderr: string };
 
+function cliError(result: CliResult): string {
+  return result.stderr.trim() || result.stdout.trim() || `agent-browser exited ${result.exitCode}`;
+}
+
 // A capture can queue behind a page-loading `open` for the CLI's whole 25s
-// action timeout; past this it is wedged, and killed so it cannot pin
-// `joinInFlight`. Every adapter has stopped waiting by then anyway.
+// action timeout; past this it is wedged, and killed so it cannot pin the
+// host's capture join. Every adapter has stopped waiting by then anyway.
 const CAPTURE_TIMEOUT_MS = 30_000;
 const STREAM_PORT_READ_ATTEMPTS = 4;
 const STREAM_PORT_READ_DELAY_MS = 150;
-// How often a launch re-reads the daemon's state files while `open` is still
-// waiting on the page (docs/specs/dor-browser.md → "Pop-Out").
-const LAUNCH_POLL_MS = 100;
 const PORT_PROBE_TIMEOUT_MS = 500;
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-export interface AgentBrowserHostDeps {
-  /** Write text to the OS clipboard (copy/cut land here). VS Code passes
-   *  `vscode.env.clipboard.writeText`; the sidecar shells out (pbcopy/clip/…). */
-  writeClipboardText: (text: string) => Promise<void> | void;
+export interface AgentBrowserProviderDeps {
   /** Optional diagnostic logger. */
   log?: (message: string) => void;
+  /** The stream URL for a port; absent, the webview dials it directly. */
+  streamUrl?: (port: number) => Promise<string>;
 }
 
-/** Path-only capture result — the bytes stay on disk for the caller to read
- *  (the standalone Rust forwarder reads the file itself; see `screenshotToFile`). */
-export type AgentBrowserScreenshotFileResult =
-  | { ok: true; path: string; mime: string }
-  | { ok: false; error: string };
-
-export interface AgentBrowserHost {
-  act(session: string, act: BrowserAct, binaryPath?: string): Promise<BrowserResult>;
-  edit(session: string, op: BrowserEditOp, binaryPath?: string): Promise<BrowserResult>;
-  screenshot(session: string, opts: { format?: 'jpeg' | 'png'; quality?: number }, binaryPath?: string): Promise<BrowserResult>;
-  screenshotToFile(session: string, opts: { format?: 'jpeg' | 'png'; quality?: number }, binaryPath?: string): Promise<AgentBrowserScreenshotFileResult>;
-  attach(session: string, opts: { url?: string; headed?: boolean }, binaryPath?: string): Promise<BrowserResult>;
-  open(url: string, opts: { headed?: boolean }, binaryPath?: string): Promise<BrowserResult>;
-  popOut(session: string, opts: { url?: string }, binaryPath?: string): Promise<BrowserResult>;
-  popIn(session: string, opts: { url?: string }, binaryPath?: string): Promise<BrowserResult>;
-  closePoppedOut(): Promise<void>;
-}
-
-export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowserHost {
+export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}): BrowserProvider<ProviderBinding> {
   const log = deps.log ?? (() => {});
-
-  // Sessions currently relaunched headed via pop-out, mapped to the binary path
-  // that spawned them. A headed session is a real OS window, so the host must
-  // close it on shutdown or it orphans (spec → "Pop-Out" lifecycle:
-  // "Dormouse/editor quits → headed windows are cleaned up; no orphans").
-  // Headless sessions are deliberately NOT tracked — they're left alive to
-  // reattach across webview reloads (`attach`).
-  const poppedOutSessions = new Map<string, string | undefined>();
-  // A relaunch returns once the daemon is streamable, while its `open` command
-  // may remain pending until page load. Key the post-open blank-tab sweep so a
-  // later pop-in/pop-out invalidates every command left behind by the previous
-  // relaunch before starting its own close -> kill -> reopen gap.
-  const relaunchGenerations = new Map<string, number>();
-  let nextRelaunchGeneration = 0;
-  function beginRelaunch(session: string): number {
-    const generation = ++nextRelaunchGeneration;
-    relaunchGenerations.set(session, generation);
-    // The relaunched daemon's work must not join its predecessor's.
-    forgetInFlight(session);
-    return generation;
-  }
 
   // The host's PATH is often the GUI login PATH (no nvm/volta shims), so prefer
   // the absolute path `dor ab` resolved in the user's terminal; fall through on
   // ENOENT (binary missing) to the next candidate in case it has gone stale.
   //
-  // The one gate every entry point shares. `binaryPath` arrives from the webview
+  // The one gate every spawn shares. `binaryPath` arrives from the webview
   // realm and from a pane's persisted Lath params, so an unchecked one is
   // arbitrary local execution in the extension host or the Tauri sidecar — the
   // exact escape the nonce CSP exists to prevent, and reachable without any user
   // interaction on the next launch. The request validation does not cover it:
-  // every entry point takes a `binaryPath` of its own. A refused path is dropped, not fatal: the
-  // host's own candidates still run, so a stale or hostile value degrades to
-  // "resolve it yourself" rather than to a broken surface.
-  async function runWithBinaryFallback(args: string[], binaryPath?: string, timeoutMs?: number): Promise<CliResult> {
+  // every operation takes a `binaryPath` of its own. A refused path is dropped,
+  // not fatal: the host's own candidates still run, so a stale or hostile value
+  // degrades to "resolve it yourself" rather than to a broken surface.
+  async function runWithBinaryFallback(
+    args: string[],
+    binaryPath?: string,
+    options: { timeoutMs?: number; cwd?: string } = {},
+  ): Promise<CliResult> {
     const configured = process.env[AGENT_BROWSER_BIN_ENV];
     if (binaryPath !== undefined && !isAllowedAgentBrowserBinary(binaryPath, configured)) {
       log(`[agent-browser] refused a caller-supplied binary path that is not an agent-browser: ${JSON.stringify(binaryPath)}`);
@@ -179,9 +114,11 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
       DEFAULT_AGENT_BROWSER_BIN,
     ].filter((c): c is string => !!c))];
 
+    // Only what is set, so an unbounded run in the host's cwd spawns as a bare one.
+    const given = Object.fromEntries(Object.entries(options).filter(([, value]) => value !== undefined));
     let lastError = '';
     for (const binary of candidates) {
-      const result = await (timeoutMs === undefined ? spawnAndCapture(binary, args) : spawnAndCapture(binary, args, { timeoutMs }));
+      const result = await (Object.keys(given).length ? spawnAndCapture(binary, args, given) : spawnAndCapture(binary, args));
       if (result.ok) {
         return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
       }
@@ -197,15 +134,18 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     return { exitCode: 1, stdout: '', stderr: `agent-browser binary not found (${lastError})` };
   }
 
-  // Read a session's stream WebSocket port via `stream status --json` (parsed by
-  // dor-lib-common's parseStreamPort). Right after `open` / `--headed open` (a
-  // fresh spawn, a pop-out, or a pop-in relaunch) the daemon may not have
-  // published the port yet; a single read would then return undefined and leave
-  // the panel pinned to a stale port — it reads "ended" though the session is
-  // live. Retry briefly to close that window.
-  async function readStreamPort(session: string, binaryPath?: string): Promise<number | undefined> {
+  function run(b: ProviderBinding, args: string[], options?: { timeoutMs?: number; cwd?: string }): Promise<CliResult> {
+    return runWithBinaryFallback(['--session', b.session, ...args], b.binaryPath, options);
+  }
+
+  // Read a session's stream WebSocket port via `stream status --json` — only
+  // once `open` has returned, since any CLI verb starts a daemon to answer.
+  // Right after it, the daemon may not have published the port yet; a single
+  // read would then return undefined and leave the panel pinned to a stale
+  // port. Retry briefly to close that window.
+  async function readStreamPort(b: ProviderBinding): Promise<number | undefined> {
     for (let attempt = 0; attempt < STREAM_PORT_READ_ATTEMPTS; attempt++) {
-      const result = await runWithBinaryFallback(streamStatusArgs(session), binaryPath);
+      const result = await runWithBinaryFallback(streamStatusArgs(b.session), b.binaryPath);
       if (result.exitCode === 0) {
         const port = parseStreamPort(result.stdout);
         if (port !== undefined) return port;
@@ -213,36 +153,6 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
       if (attempt < STREAM_PORT_READ_ATTEMPTS - 1) await delay(STREAM_PORT_READ_DELAY_MS);
     }
     return undefined;
-  }
-
-  /** A tab showing something other than the blank page a relaunch can leave. */
-  function isRealTab(url: string): boolean {
-    const trimmed = url.trim();
-    return !!trimmed && trimmed !== 'about:blank';
-  }
-
-  // Enumerate a session's tabs via `tab list --json`. Envelope mirrors the rest
-  // of the CLI parsing here: { tabs } or { data: { tabs } }; the record parse is
-  // shared with the live stream (parseAgentBrowserTabs). Returns [] on any
-  // failure so callers degrade gracefully.
-  async function listTabs(session: string, binaryPath?: string): Promise<AgentBrowserTab[]> {
-    const result = await runWithBinaryFallback(['--session', session, 'tab', 'list', '--json'], binaryPath);
-    if (result.exitCode !== 0) return [];
-    try {
-      const parsed = JSON.parse(result.stdout) as { tabs?: unknown; data?: { tabs?: unknown } };
-      return parseAgentBrowserTabs(parsed.data?.tabs ?? parsed.tabs);
-    } catch {
-      return [];
-    }
-  }
-
-  // Dormouse is the source of truth for the relaunch target: the panel observes
-  // the live `tabs` stream and tracks the active tab's URL in its params, then
-  // passes it here. We deliberately do NOT re-query the daemon — right after
-  // `close` the daemon relaunches at about:blank, so a `get url` / `tab list`
-  // would race the very transition it's meant to preserve and hand back blank.
-  function relaunchUrl(requestedUrl: unknown): string {
-    return isBrowsableUrl(requestedUrl) ? requestedUrl : 'about:blank';
   }
 
   // agent-browser keeps a long-lived per-session daemon whose headed/headless
@@ -296,15 +206,6 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     return port !== undefined && await portAccepts(port) ? port : undefined;
   }
 
-  /** The session's daemon as its state files describe it — a CLI verb would
-   *  start one to answer (docs/specs/dor-browser.md → "Pop-Out"): the pid file's
-   *  pid, whether that process is alive, and its stream port if it accepts. */
-  async function daemonState(session: string): Promise<{ pid: number | undefined; alive: boolean; wsPort?: number }> {
-    const pid = await readStateNumber(session, 'pid');
-    if (pid === undefined || !processAlive(pid)) return { pid, alive: false };
-    return { pid, alive: true, wsPort: await acceptingStreamPort(session) };
-  }
-
   /** Terminate the session's daemon and wait for it to exit. Returns the pid
    *  the pid file named (dead or not), so a relaunch can tell the daemon that
    *  replaces it from the stale state files it leaves behind. */
@@ -330,431 +231,134 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     return pid;
   }
 
-  // `agent-browser open <url>` returns when the page's `load` event fires — up to
-  // the CLI's action timeout (25s in 0.31.1), after which it exits non-zero with
-  // the browser live on the page — and every other daemon command queues behind
-  // it. A transition that awaited it would block for the whole page load and
-  // then read a slow page as a failed launch. So the launch resolves as soon as
-  // the *daemon* is up: its pid file names a pid other than the one a relaunch
-  // just killed, and its stream file names a port that accepts a connection. The
-  // stream serves status/tabs/frames while `open` is still waiting, so the pane
-  // shows the page loading. Only once `open` has returned does the exit code
-  // matter, and then only if no daemon came up at all.
-  type Launch = {
-    wsPort: number | undefined;
-    /** Settles when `open` itself returns — possibly long after the launch. */
-    opened: Promise<CliResult>;
-  };
-  async function launch(session: string, args: string[], binaryPath: string | undefined, replacedPid?: number): Promise<Launch> {
-    let settled: CliResult | undefined;
-    const opened = runWithBinaryFallback(args, binaryPath).then((result) => {
-      settled = result;
-      return result;
-    });
-    for (;;) {
-      const pid = await readStateNumber(session, 'pid');
-      const daemonUp = pid !== undefined && pid !== replacedPid;
-      if (settled) {
-        // A non-zero exit with the daemon up is a page that has not finished
-        // loading, not a failed launch. Without a pid file (an older CLI) the
-        // exit code is all there is.
-        if (settled.exitCode !== 0 && !daemonUp) return { wsPort: undefined, opened };
-        return { wsPort: await readStreamPort(session, binaryPath), opened };
+  /** The launch's working directory: the project's, so agent-browser reads its
+   *  `./agent-browser.json`, while that directory still exists. */
+  function projectDir(cwd: string | undefined): string | undefined {
+    try {
+      return cwd !== undefined && statSync(cwd).isDirectory() ? cwd : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  return {
+    pollMs: 100,
+
+    bind: (binding) => binding,
+
+    // One socket directory per host, so the session names the daemon.
+    identity: (b) => b.session,
+
+    describe: (b) => ({
+      session: b.session,
+      ...(b.cwd !== undefined ? { cwd: b.cwd } : {}),
+      ...(b.binaryPath !== undefined ? { binaryPath: b.binaryPath } : {}),
+    }),
+
+    // The daemon as its state files describe it — a CLI verb would start one
+    // to answer. One up but not streaming is left alone: relaunching would
+    // compete with it.
+    async find(b) {
+      const pid = await readStateNumber(b.session, 'pid');
+      if (pid !== undefined && processAlive(pid)) {
+        const port = await acceptingStreamPort(b.session);
+        if (port !== undefined) return { wsPort: port };
+        throw new Error(`agent-browser session '${b.session}' is not streaming`);
       }
-      if (daemonUp) {
-        const port = await acceptingStreamPort(session);
-        if (port !== undefined) return { wsPort: port, opened };
+      return { gone: `agent-browser session '${b.session}' is not running`, named: pid !== undefined };
+    },
+
+    // Close the browser, then fully stop the daemon so a relaunch isn't ignored
+    // as "daemon already running" (a no-op without a daemon: `close` starts
+    // none).
+    async stop(b, timeoutMs) {
+      await run(b, ['close'], { timeoutMs: Math.max(0, timeoutMs) });
+      return killDaemon(b.session);
+    },
+
+    // `open` returns when the page's `load` event fires — up to the CLI's
+    // action timeout (25s in 0.31.1), after which it exits non-zero with the
+    // browser live on the page — and every other daemon command queues behind
+    // it. Run in the project directory, for the config a `dor ab` there read.
+    async open(b, url, headed) {
+      const result = await run(b, [...(headed ? ['--headed'] : []), 'open', url ?? 'about:blank'], { cwd: projectDir(b.cwd) });
+      log(`[ab-relaunch] open session=${b.session} exit=${result.exitCode}${result.stderr.trim() ? ` stderr=${result.stderr.trim()}` : ''}`);
+      return { exitCode: result.exitCode, stderr: result.stderr };
+    },
+
+    // Up once the *daemon* is: its pid file names a pid other than the one a
+    // relaunch just killed, and its stream file a port that accepts. The stream
+    // serves status/tabs/frames while `open` still waits on the page. Once
+    // `open` has returned, a non-zero exit with the daemon up is a page still
+    // loading, not a failed launch — without a pid file (an older CLI) the exit
+    // code is all there is.
+    async probe(b, { replaced, opened }): Promise<LiveBrowser | { failed: string } | undefined> {
+      const pid = await readStateNumber(b.session, 'pid');
+      const daemonUp = pid !== undefined && pid !== replaced;
+      if (opened) {
+        if (opened.exitCode !== 0 && !daemonUp) return { failed: opened.stderr.trim() || `agent-browser open exited ${opened.exitCode}` };
+        const port = await readStreamPort(b);
+        return port !== undefined ? { wsPort: port } : { failed: 'agent-browser published no stream port' };
       }
-      await delay(LAUNCH_POLL_MS);
-    }
-  }
+      if (!daemonUp) return undefined;
+      const port = await acceptingStreamPort(b.session);
+      return port !== undefined ? { wsPort: port } : undefined;
+    },
 
-  function logOpened(label: string, opened: Promise<CliResult>): void {
-    void opened.then((result) => {
-      log(`[ab-relaunch] ${label} exit=${result.exitCode}${result.stderr.trim() ? ` stderr=${result.stderr.trim()}` : ''}`);
-    });
-  }
+    async close(b, timeoutMs) {
+      const result = await run(b, ['close'], timeoutMs === undefined ? {} : { timeoutMs: Math.max(0, timeoutMs) });
+      if (result.exitCode !== 0) throw new Error(cliError(result));
+    },
 
-  function launchFailure(label: string, result: CliResult): string {
-    const stderr = result.stderr.trim();
-    if (stderr) return stderr;
-    return result.exitCode === 0
-      ? `${label} published no stream port`
-      : `${label} exited ${result.exitCode}`;
-  }
-
-  // After a relaunch, close any stray about:blank tab the close+reopen race can
-  // leave behind — but only when a real page is open, so we never close the sole
-  // tab. Best-effort: a failure here must not fail the pop-out/pop-in.
-  async function closeStrayBlankTabs(
-    session: string,
-    current: () => boolean,
-    binaryPath?: string,
-  ): Promise<void> {
-    if (!current()) return;
-    const tabs = await listTabs(session, binaryPath);
-    // The list may have queued behind `open`; a newer relaunch can begin while
-    // it waits. Never issue a tab close into that relaunch's daemon gap.
-    if (!current()) return;
-    log(`[ab-relaunch] tabs after open: ${JSON.stringify(tabs)}`);
-    if (tabs.length < 2 || !tabs.some((t) => isRealTab(t.url))) return;
-    for (const tab of tabs) {
-      if (!isRealTab(tab.url)) {
-        if (!current()) return;
-        log(`[ab-relaunch] closing stray blank tab ${tab.tabId}`);
-        await runWithBinaryFallback(['--session', session, 'tab', 'close', tab.tabId], binaryPath);
+    // Envelope: { tabs } or { data: { tabs } }; the record parse is shared with
+    // the live stream (parseAgentBrowserTabs). Empty on any failure.
+    async listTabs(b) {
+      const result = await run(b, ['tab', 'list', '--json']);
+      if (result.exitCode !== 0) return [];
+      try {
+        const parsed = JSON.parse(result.stdout) as { tabs?: unknown; data?: { tabs?: unknown } };
+        return parseAgentBrowserTabs(parsed.data?.tabs ?? parsed.tabs);
+      } catch {
+        return [];
       }
-    }
-  }
+    },
 
-  // Screenshots of the user's authenticated browser land here, written by an
-  // external process under the ambient umask — which is why the private
-  // directory, not the file mode, is the control.
-  const screenshotDir = privateCaptureDir('dormouse-ab-');
-
-  /** Drop the whole capture directory. Called on shutdown; safe to repeat. */
-  async function removeScreenshotDir(): Promise<void> {
-    screenshotNames.clear();
-    await screenshotDir.remove();
-  }
-
-  // Reused per session so we don't litter with one file per frame; `joinInFlight`
-  // keeps one capture in flight per session, so overwriting is safe. The
-  // random component is per session, so the name stays stable for reuse while
-  // being unguessable from the session key alone.
-  const screenshotNames = new Map<string, string>();
-  async function screenshotPath(session: string, ext: string): Promise<string> {
-    let name = screenshotNames.get(session);
-    if (name === undefined) {
-      name = randomBytes(12).toString('hex');
-      screenshotNames.set(session, name);
-    }
-    return path.join(await screenshotDir.get(), `shot-${name}.${ext}`);
-  }
-
-  // Work a caller asking meanwhile joins rather than repeats, one per session
-  // and kind: a capture (surfaces can share a session, and a caller re-asks
-  // after its adapter's timeout; a second spawn would only queue behind the
-  // first in the daemon, then race it for the session's one capture file), or
-  // an attach (two panes restoring one session relaunch it once). Never work
-  // from before the session's close or relaunch (`forgetInFlight`); the
-  // capture spawn's `CAPTURE_TIMEOUT_MS` bounds how long one stays joinable.
-  type InFlight = { session: string; kind: string; promise: Promise<unknown> };
-  const inFlight = new Map<string, InFlight>();
-  function joinInFlight<T>(session: string, kind: string, work: () => Promise<T>): Promise<T> {
-    const key = `${kind}\0${session}`;
-    const pending = inFlight.get(key);
-    if (pending) return pending.promise as Promise<T>;
-    const entry: InFlight = { session, kind, promise: Promise.resolve() };
-    const promise = work().finally(() => {
-      if (inFlight.get(key) === entry) inFlight.delete(key);
-    });
-    entry.promise = promise;
-    inFlight.set(key, entry);
-    return promise;
-  }
-
-  /** Join none of `session`'s pending work but the `keep` kind, and give its
-   *  next capture a fresh file, so one still running cannot overwrite it. */
-  function forgetInFlight(session: string, keep?: string): void {
-    for (const [key, entry] of inFlight) {
-      if (entry.session === session && entry.kind !== keep) inFlight.delete(key);
-    }
-    screenshotNames.delete(session);
-  }
-
-  async function act(session: string, request: BrowserAct, binaryPath?: string): Promise<BrowserResult> {
-    if (!isAgentBrowserSession(session)) return { ok: false, error: 'a valid session name is required' };
-    // An explicit close (kill / render-swap) tears the session down itself, so
-    // it's no longer ours to clean up on shutdown. It also invalidates a
-    // post-open sweep left by a fast-returning relaunch: once closed, no later
-    // daemon command may recreate this otherwise-untracked session.
-    if (request.op === 'close') {
-      poppedOutSessions.delete(session);
-      relaunchGenerations.delete(session);
-      forgetInFlight(session);
-    }
-    const result = await runWithBinaryFallback(['--session', session, ...actArgv(request)], binaryPath);
-    if (result.exitCode !== 0) {
-      return { ok: false, error: result.stderr.trim() || result.stdout.trim() || `agent-browser exited ${result.exitCode}` };
-    }
-    if (request.op !== 'cdpUrl') return { ok: true };
-    const url = parseCdpUrl(result.stdout);
-    return url ? { ok: true, url } : { ok: false, error: 'agent-browser printed no CDP endpoint' };
-  }
-
-  async function edit(session: string, op: BrowserEditOp, binaryPath?: string): Promise<BrowserResult> {
-    if (!isAgentBrowserSession(session)) {
-      return { ok: false, error: 'a valid session name is required' };
-    }
-    const script = editScript(op);
-    if (!script) {
-      return { ok: false, error: `unknown edit op '${op}'` };
-    }
-
-    const result = await runWithBinaryFallback(['--session', session, 'eval', script, '--json'], binaryPath);
-    if (result.exitCode !== 0) {
-      return { ok: false, error: result.stderr.trim() || `eval exited ${result.exitCode}` };
-    }
+    async act(b, act): Promise<BrowserResult> {
+      const result = await run(b, actArgv(act));
+      if (result.exitCode !== 0) return { ok: false, error: cliError(result) };
+      if (act.op !== 'cdpUrl') return { ok: true };
+      const url = parseCdpUrl(result.stdout);
+      return url ? { ok: true, url } : { ok: false, error: 'agent-browser printed no CDP endpoint' };
+    },
 
     // eval --json envelope: { success, data: { result }, error }.
-    let text = '';
-    try {
-      const envelope = JSON.parse(result.stdout) as { success?: boolean; data?: { result?: unknown }; error?: unknown };
-      if (envelope.success === false) {
-        return { ok: false, error: typeof envelope.error === 'string' ? envelope.error : `${op} failed` };
-      }
-      if (typeof envelope.data?.result === 'string') text = envelope.data.result;
-    } catch {
-      return { ok: false, error: `could not parse eval output for ${op}` };
-    }
-
-    if (op === 'selectAll') return { ok: true };
-    // Land the grabbed text on the user's real OS clipboard. Skip empty so an
-    // empty selection doesn't clobber what's already there.
-    if (text) {
+    async evaluate(b, script) {
+      const result = await run(b, ['eval', script, '--json']);
+      if (result.exitCode !== 0) throw new Error(result.stderr.trim() || `eval exited ${result.exitCode}`);
+      let envelope: { success?: boolean; data?: { result?: unknown }; error?: unknown };
       try {
-        await deps.writeClipboardText(text);
-      } catch (err) {
-        return { ok: false, error: `clipboard write failed: ${err instanceof Error ? err.message : String(err)}` };
+        envelope = JSON.parse(result.stdout);
+      } catch {
+        throw new Error('could not parse eval output');
       }
-    }
-    return { ok: true, text };
-  }
+      if (envelope.success === false) throw new Error(typeof envelope.error === 'string' ? envelope.error : 'eval failed');
+      return envelope.data?.result;
+    },
 
-  // Capture one device-resolution frame via the user's agent-browser
-  // `screenshot` command (which honors the session's viewport/DPR, unlike the
-  // CSS-resolution screencast). agent-browser writes the frame to a temp file and
-  // reports its path; this returns that PATH without reading the bytes.
-  //
-  // The two hosts read the file differently, and that split is the whole point of
-  // keeping this path-only:
-  //   - VS Code: `screenshot()` (below) reads the bytes here and structured-clones
-  //     them to the webview.
-  //   - Standalone: the sidecar hands this path to Rust, which reads the file
-  //     itself and returns a raw Response — so the ~100-700KB of image bytes never
-  //     ride the JSON-lines stdio pipe shared with all PTY terminal traffic.
-  async function screenshotToFile(
-    session: string,
-    opts: { format?: 'jpeg' | 'png'; quality?: number },
-    binaryPath?: string,
-  ): Promise<AgentBrowserScreenshotFileResult> {
-    if (!isAgentBrowserSession(session)) {
-      return { ok: false, error: 'a valid session name is required' };
-    }
-    const format = captureFormat(opts.format);
-    return joinInFlight(session, `file:${format}`, async (): Promise<AgentBrowserScreenshotFileResult> => {
-      const ext = format === 'png' ? 'png' : 'jpg';
-      let out: string;
-      try {
-        // Every other failure in here answers `{ ok: false, error }`; a tmpdir
-        // that cannot be created must not escape as a rejection instead.
-        out = await screenshotPath(session, ext);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        log(`[agent-browser] could not create the capture directory: ${message}`);
-        return { ok: false, error: `could not create a private screenshot directory: ${message}` };
-      }
-      const args = ['--session', session, 'screenshot', out, '--screenshot-format', format];
-      if (format === 'jpeg') args.push('--screenshot-quality', String(jpegQuality(opts.quality)));
-      const result = await runWithBinaryFallback(args, binaryPath, CAPTURE_TIMEOUT_MS);
+    // agent-browser's `screenshot` honors the session's viewport/DPR, unlike
+    // the CSS-resolution screencast, and writes the frame where it is told.
+    async screenshot(b, { format, quality }, file) {
+      const out = await file();
+      const args = ['screenshot', out, '--screenshot-format', format];
+      if (format === 'jpeg') args.push('--screenshot-quality', String(quality));
+      const result = await run(b, args, { timeoutMs: CAPTURE_TIMEOUT_MS });
       if (result.exitCode !== 0) {
-        log(`[agent-browser] screenshot failed (exit ${result.exitCode}): ${result.stderr.trim() || result.stdout.trim()}`);
-        return { ok: false, error: result.stderr.trim() || `screenshot exited ${result.exitCode}` };
+        log(`[agent-browser] screenshot failed (exit ${result.exitCode}): ${cliError(result)}`);
+        throw new Error(result.stderr.trim() || `screenshot exited ${result.exitCode}`);
       }
-      return { ok: true, path: out, mime: format === 'png' ? 'image/png' : 'image/jpeg' };
-    });
-  }
+      return { path: out };
+    },
 
-  // Byte-returning wrapper over screenshotToFile for the VS Code host (structured
-  // clone to the webview). The standalone sidecar deliberately does NOT use this;
-  // it forwards the path so Rust reads the file off the stdio hot path.
-  async function screenshot(
-    session: string,
-    opts: { format?: 'jpeg' | 'png'; quality?: number },
-    binaryPath?: string,
-  ): Promise<BrowserResult> {
-    // Joined whole, read and unlink included: a caller joining only the capture
-    // would read a file the first caller has already removed.
-    const format = captureFormat(opts.format);
-    return joinInFlight(session, `bytes:${format}`, async (): Promise<BrowserResult> => {
-      const shot = await screenshotToFile(session, opts, binaryPath);
-      if (!shot.ok) return { ok: false, error: shot.error };
-      try {
-        const buffer = await fs.readFile(shot.path);
-        // A Uint8Array view over exactly this file's bytes.
-        const bytes = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
-        // The bytes are in memory now and this path owns the file's whole life,
-        // so the frame does not sit on disk until shutdown. The path-returning
-        // sibling cannot do this — its caller (Rust) reads the file afterwards —
-        // so there the next capture overwrites it and shutdown removes the dir.
-        await fs.unlink(shot.path).catch(() => {});
-        return { ok: true, bytes, mime: shot.mime };
-      } catch (err) {
-        log(`[agent-browser] screenshot read failed: ${err instanceof Error ? err.message : String(err)}`);
-        return { ok: false, error: `could not read screenshot file: ${err instanceof Error ? err.message : String(err)}` };
-      }
-    });
-  }
-
-  /** The `open` argv for `session`, tracking a headed one for shutdown before
-   *  its launch — a window whose page never loads is still closed — and
-   *  dropping a headless one. */
-  function openArgs(session: string, url: string, headed: boolean, binaryPath: string | undefined): string[] {
-    if (headed) poppedOutSessions.set(session, binaryPath);
-    else poppedOutSessions.delete(session);
-    return ['--session', session, ...(headed ? ['--headed'] : []), 'open', url];
-  }
-
-  // A launch into a daemon it did not just kill — a GUI open, or an attach
-  // relaunching a gone one — sweeps no blank tabs: only a relaunch's
-  // close+reopen leaves a stray one. Nothing coming up is the one failure,
-  // and closes whatever did (a no-op without a daemon: `close` starts none).
-  async function coldLaunch(
-    label: string,
-    session: string,
-    args: string[],
-    binaryPath: string | undefined,
-    replacedPid?: number,
-  ): Promise<{ wsPort: number } | { error: string }> {
-    const { wsPort, opened } = await launch(session, args, binaryPath, replacedPid);
-    logOpened(`${label} session=${session}`, opened);
-    if (wsPort !== undefined) return { wsPort };
-    poppedOutSessions.delete(session);
-    await runWithBinaryFallback(['--session', session, 'close'], binaryPath);
-    return { error: launchFailure(label, await opened) };
-  }
-
-  // The session's live stream port, without starting anything. A daemon that is
-  // up but not streaming is left alone — relaunching would compete with it. Only
-  // a daemon that is gone, for a caller naming the page it had, is relaunched
-  // there: headed when the pane is a pop-out.
-  async function attach(
-    session: string,
-    opts: { url?: string; headed?: boolean },
-    binaryPath?: string,
-  ): Promise<BrowserResult> {
-    if (!isAgentBrowserSession(session)) return { ok: false, error: 'a valid session name is required' };
-    return joinInFlight(session, 'attach', async (): Promise<BrowserResult> => {
-      const daemon = await daemonState(session);
-      if (daemon.wsPort !== undefined) return { ok: true, wsPort: daemon.wsPort };
-      if (daemon.alive) return { ok: false, error: `agent-browser session '${session}' is not streaming` };
-      const url = opts?.url;
-      if (!isBrowsableUrl(url)) return { ok: false, error: `agent-browser session '${session}' is not running` };
-      log(`[ab-relaunch] attach session=${session} is gone -> open ${url}`);
-      // An earlier relaunch's sweep must not reach this daemon, nor its captures.
-      relaunchGenerations.delete(session);
-      forgetInFlight(session, 'attach');
-      const launched = await coldLaunch('attach open', session, openArgs(session, url, !!opts.headed, binaryPath), binaryPath, daemon.pid);
-      return 'wsPort' in launched ? { ok: true, wsPort: launched.wsPort, relaunched: true } : { ok: false, error: launched.error };
-    });
-  }
-
-  // Open <url> in a new managed session — every GUI launch that names none
-  // (docs/specs/dor-browser.md → "Agent-Browser Connection"); one that names a
-  // session relaunches it (`popOut` / `popIn`). With `headed`, the process
-  // launches headed in one shot so embed→popout doesn't open a headless browser
-  // only to tear it down.
-  async function open(url: string, opts: { headed?: boolean }, binaryPath?: string): Promise<BrowserResult> {
-    if (!isBrowsableUrl(url)) return { ok: false, error: 'an http(s) url is required' };
-    const session = generateGuiSession();
-    const launched = await coldLaunch('open', session, openArgs(session, url, !!opts?.headed, binaryPath), binaryPath);
-    if ('error' in launched) return { ok: false, error: launched.error };
-    return { ok: true, session, wsPort: launched.wsPort, ...(binaryPath ? { binaryPath } : {}) };
-  }
-
-  // Pop-out is a relaunch, not a live toggle: Chrome's headed/headless choice is
-  // fixed at launch (spec → "Pop-Out"). Close the headless session, then
-  // reopen it headed at the active URL. (v1 preserves the active tab URL only;
-  // multi-tab + profile/cookie restore are tracked follow-ups. The window opens
-  // where Chrome places it.)
-  async function popOut(
-    session: string,
-    opts: { url?: string },
-    binaryPath?: string,
-  ): Promise<BrowserResult> {
-    if (!isAgentBrowserSession(session)) return { ok: false, error: 'a valid session name is required' };
-    const generation = beginRelaunch(session);
-    const url = relaunchUrl(opts?.url);
-    log(`[ab-relaunch] popOut session=${session} requestedUrl=${JSON.stringify(opts?.url)} -> open ${url}`);
-    // Close the browser, then fully stop the daemon so the headed relaunch isn't
-    // ignored as "daemon already running" (which would leave it headless).
-    await runWithBinaryFallback(['--session', session, 'close'], binaryPath);
-    const replacedPid = await killDaemon(session);
-    return relaunch('popOut', session, openArgs(session, url, true, binaryPath), binaryPath, replacedPid, generation);
-  }
-
-  // Shared tail of pop-out/pop-in: launch, and once `open` itself returns —
-  // possibly well after the pane is already streaming — sweep the stray blank
-  // tab the close+reopen can leave (a daemon command, so it must not run while
-  // `open` still holds the queue). A launch that never published a port is the
-  // one failure: the exit code alone is not.
-  async function relaunch(
-    label: string,
-    session: string,
-    args: string[],
-    binaryPath: string | undefined,
-    replacedPid: number | undefined,
-    generation: number,
-  ): Promise<BrowserResult> {
-    const { wsPort, opened } = await launch(session, args, binaryPath, replacedPid);
-    logOpened(`${label} open`, opened);
-    if (wsPort === undefined) {
-      if (relaunchGenerations.get(session) === generation) relaunchGenerations.delete(session);
-      const failed = await opened;
-      return { ok: false, error: launchFailure(`${label} open`, failed) };
-    }
-    const current = () => relaunchGenerations.get(session) === generation;
-    void opened
-      .then(() => closeStrayBlankTabs(session, current, binaryPath))
-      .catch(() => undefined)
-      .finally(() => {
-        if (current()) relaunchGenerations.delete(session);
-      });
-    log(`[ab-relaunch] ${label} returning wsPort=${wsPort}`);
-    return { ok: true, wsPort };
-  }
-
-  // The reverse: close the headed session and relaunch it headless at the active
-  // URL, resuming the screencast.
-  async function popIn(
-    session: string,
-    opts: { url?: string },
-    binaryPath?: string,
-  ): Promise<BrowserResult> {
-    if (!isAgentBrowserSession(session)) return { ok: false, error: 'a valid session name is required' };
-    const generation = beginRelaunch(session);
-    const url = relaunchUrl(opts?.url);
-    log(`[ab-relaunch] popIn session=${session} requestedUrl=${JSON.stringify(opts?.url)} -> open ${url}`);
-    // Reverse of pop-out: the daemon is headed, so a plain `open` would reattach
-    // to it and stay headed. Stop the daemon so the relaunch comes up headless.
-    await runWithBinaryFallback(['--session', session, 'close'], binaryPath);
-    const replacedPid = await killDaemon(session);
-    return relaunch('popIn', session, openArgs(session, url, false, binaryPath), binaryPath, replacedPid, generation);
-  }
-
-  // Close every still-popped-out session's headed window. Called from each
-  // host's shutdown (VS Code `deactivate()`, the sidecar's `shutdown()`) so
-  // quitting doesn't orphan real Chrome windows. On a reload, a popped-out
-  // surface then auto-reverts to a headless screencast when it reactivates
-  // (spec → "The headed window ends → auto-revert"), which is preferable to
-  // leaving a detached headed Chrome behind.
-  async function closePoppedOut(): Promise<void> {
-    const entries = [...poppedOutSessions.entries()];
-    poppedOutSessions.clear();
-    // Shutdown owns every session now, including a headless pop-in that has
-    // already left poppedOutSessions. Invalidate all post-open tails before a
-    // close can release their pending `open` commands and let them query again.
-    relaunchGenerations.clear();
-    await Promise.all([
-      ...entries.map(([session, binaryPath]) =>
-        runWithBinaryFallback(['--session', session, 'close'], binaryPath).catch(() => undefined),
-      ),
-      // The same shutdown, so the same hook: this is the only moment both hosts
-      // reliably reach, and every captured frame is still on disk until it runs.
-      removeScreenshotDir(),
-    ]);
-  }
-
-  return { act, edit, screenshot, screenshotToFile, attach, open, popOut, popIn, closePoppedOut };
+    streamUrl: async (port) => (deps.streamUrl ? deps.streamUrl(port) : `ws://127.0.0.1:${port}`),
+  };
 }

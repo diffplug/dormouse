@@ -1,31 +1,21 @@
-/** The installed Playwright CLI owns browsers; this host owns only their Dormouse viewers. */
+/**
+ * The Playwright provider beneath the shared browser host (`browser-host.ts`;
+ * docs/specs/dor-browser.md → "Playwright Renderer"). The installed Playwright
+ * CLI owns browsers; this provider owns what is genuinely Playwright's — the
+ * install and registry discovery, and the Dormouse viewer each browser is
+ * streamed through over CDP. The host owns everything the providers share.
+ */
 import { createServer, type Server } from 'node:http';
-import { writeFile } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
-import path from 'node:path';
-import { randomBytes } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Browser, Page, CDPSession } from 'playwright-core';
 import { spawnAndCapture } from 'dor-lib-common';
 import { messageOf } from '../lib/errors';
-import {
-  BROWSER_REQUEST_TIMEOUT_MS,
-  isBrowsableUrl,
-  PLAYWRIGHT_TEXT_INPUT_MAX,
-  type BrowserRequest,
-  type BrowserResult,
-} from '../lib/platform/browser-automation';
-import {
-  captureFormat,
-  editScript,
-  generateGuiSession,
-  isPlaywrightSession,
-  jpegQuality,
-} from './browser-host-shared';
+import { PLAYWRIGHT_TEXT_INPUT_MAX, type BrowserResult } from '../lib/platform/browser-automation';
+import type { BrowserProvider, LiveBrowser } from './browser-host';
 import { resolvePlaywrightInstall, playwrightWorkspace, type PlaywrightInstall } from './playwright-install';
 import { isLoopbackHost } from './loopback-guard';
 import { BrowserStreamGrants } from './browser-stream-guard';
-import { privateCaptureDir } from './private-capture-dir';
 
 const TAB_REFRESH_INTERVAL_MS = 750;
 const CONNECT_TIMEOUT_MS = 8_000;
@@ -34,18 +24,6 @@ const CONNECT_TIMEOUT_MS = 8_000;
 // unbounded: it lasts as long as the page load, nothing waits on it past a
 // launch's own bounds, and ending it could take down the browser it started.
 const CLI_TIMEOUT_MS = 10_000;
-// A GUI launch answers inside the webview's wait for any host request
-// (`BROWSER_REQUEST_TIMEOUT_MS`), or the webview restores the previous
-// renderer while the host is still bringing a browser up. The whole request,
-// from its arrival, gets REQUEST_BUDGET_MS, a margin short of that wait for the
-// transport. Startup — queueing behind an earlier launch, closing the old
-// session, listing, polling and connecting — ends LAUNCH_CLOSE_RESERVE_MS
-// before it; a launch that gives up then waits up to OPEN_SETTLE_MS for its
-// `open`, and closes the session with whatever remains.
-const REQUEST_BUDGET_MS = BROWSER_REQUEST_TIMEOUT_MS - 2_000;
-const OPEN_SETTLE_MS = 4_000;
-const LAUNCH_CLOSE_RESERVE_MS = OPEN_SETTLE_MS + 4_000;
-const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 function realpathOrUndefined(file: string): string | undefined {
   try {
@@ -96,17 +74,13 @@ const pagesOf = (v: Viewer) => v.browser.contexts().flatMap(context => context.p
 const tabsOf = (v: Viewer) => Promise.all(pagesOf(v).map(async (page, index) => ({
   tabId: String(index), url: page.url(), title: await page.title().catch(() => ''), active: page === v.page,
 })));
-export function createPlaywrightHost(deps: { writeClipboardText(text: string): void | Promise<void>; log?(text: string): void }) {
+export function createPlaywrightProvider(deps: { log?(text: string): void } = {}): BrowserProvider<Binding> {
   const viewers = new Map<string, Viewer>();
   const connecting = new Map<string, Promise<Viewer>>();
+  // Bumped whenever the host releases a binding's viewer: a connect begun
+  // before must not publish the viewer it brings back.
   const generations = new Map<string, number>();
-  const lifecycle = new Map<string, Promise<unknown>>();
-  // The newest launch per native identity; a failed launch's late close defers to it.
-  const latestLaunch = new Map<string, object>();
-  const headed = new Map<string, Binding>();
   const grants = new BrowserStreamGrants();
-  const captures = privateCaptureDir('dormouse-playwright-');
-  const captureNames = new Map<string, string>();
   let closed = false;
   const log = (e: unknown) => deps.log?.(`[playwright] ${messageOf(e)}`);
   /** One CLI call, ended after `timeoutMs` (none for `null`); throws when it could not run or finish. */
@@ -150,12 +124,6 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
     const v = viewers.get(b.key);
     viewers.delete(b.key);
     if (v) await dispose(v);
-  }
-  function serialize<T>(b: Binding, action: () => Promise<T>): Promise<T> {
-    const operation = (lifecycle.get(b.key) ?? Promise.resolve()).catch(() => {}).then(action);
-    lifecycle.set(b.key, operation);
-    void operation.finally(() => { if (lifecycle.get(b.key) === operation) lifecycle.delete(b.key); }).catch(() => {});
-    return operation;
   }
   async function activeIndex(b: Binding): Promise<number> {
     const r = await cli(b, ['tab-list', '--json']);
@@ -362,210 +330,141 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
       browser.on('disconnected', () => { if (viewers.get(key) === v) viewers.delete(key); void dispose(v); });
       if (closed || gen !== (generations.get(key) ?? 0)) { await dispose(v); throw new Error('Browser launch superseded'); }
       viewers.set(key, v);
-      if (v.headed) headed.set(key, b); else headed.delete(key);
       return v;
     })();
     connecting.set(key, operation);
     try { return await operation; } finally { if (connecting.get(key) === operation) connecting.delete(key); }
   }
-  /** Launch `b`'s browser at `url`, or blank when there is none. */
-  async function launch(b: Binding, url: string | undefined, isHeaded: boolean, fresh: boolean, requestDeadline: number) {
-    if (closed) throw new Error('Playwright host is shutting down');
-    const deadline = requestDeadline - LAUNCH_CLOSE_RESERVE_MS;
-    if (Date.now() >= deadline) throw new Error('Playwright browser launch timed out behind an earlier one');
-    await invalidate(b);
-    // Finish the old CLI session before discovering the replacement endpoint.
-    // A freshly minted session has none to finish.
-    if (!fresh) await cli(b, ['close'], deadline - Date.now());
-    const key = b.key;
-    const launchToken = {};
-    latestLaunch.set(key, launchToken);
-    if (isHeaded) headed.set(key, b); else headed.delete(key);
-    const generation = generations.get(key);
-    let result: Awaited<ReturnType<typeof cli>> | undefined;
-    const opening = cli(b, ['open', ...(url === undefined ? [] : [url]), '--browser=chromium', ...(isHeaded ? ['--headed'] : [])], null);
-    const opened = opening.then(r => { result = r; }, e => { result = { exitCode: 1, stdout: '', stderr: messageOf(e) }; });
-    // Endpoint readiness, not the page load, completes GUI launches.
-    let last: unknown;
-    while (Date.now() < deadline && !closed) {
-      try {
-        const v = await connect(b, deadline);
-        // Only a completed, still-current launch may remove startup blank tabs.
-        void opening.then(async () => {
-          if (closed || generation !== generations.get(key) || v.disposed) return;
-          const pages = pagesOf(v);
-          if (!pages.some(p => isBrowsableUrl(p.url()))) return;
-          for (let i = pages.length - 1; i >= 0; i--) {
-            if (closed || generation !== generations.get(key) || v.disposed) return;
-            if (pages[i].url() === 'about:blank') await cli(b, ['tab-close', String(i)]);
-          }
-        }).catch(log);
-        return v;
-      } catch (e) { last = e; }
-      if (result && result.exitCode !== 0) break;
-      await wait(200);
-    }
-    // Until `open` registers the session, `close` has nothing to close, and the
-    // browser it then brings up is one nothing tracks. Let it land first; if it
-    // is still running, close again once it does, unless a newer launch has
-    // taken the session over by then.
-    const landed = await Promise.race([opened.then(() => true), wait(OPEN_SETTLE_MS).then(() => false)]);
-    await cli(b, ['close'], requestDeadline - Date.now()).catch(log);
-    if (!landed) {
-      void opened.then(async () => {
-        if (latestLaunch.get(key) === launchToken) await cli(b, ['close']);
-      }).catch(log);
-    }
-    throw new Error(result?.stderr || (last === undefined ? 'Playwright browser launch timed out' : messageOf(last)));
-  }
-  /** One validated request (`parseBrowserRequest`). */
-  async function execute(request: BrowserRequest): Promise<BrowserResult> {
-    if (request.op === 'streamUrl') {
-      const v = [...viewers.values()].find(v => v.port === request.port && !v.disposed);
-      if (!v) throw new Error('Playwright stream is no longer live');
-      return { ok: true, url: `ws://127.0.0.1:${v.port}/stream/${grants.issue(v.port)}` };
-    }
-    const install = resolvePlaywrightInstall(request.binding.binaryPath);
-    const cwd = request.binding.cwd ?? process.cwd();
-    // A launch mints a session unless the caller names one to open the page in.
-    const session = request.op === 'launch' ? request.binding.session ?? generateGuiSession() : request.binding.session;
-    if (!isPlaywrightSession(session)) throw new Error('Invalid Playwright session name');
-    const b = bind(session, cwd, install);
-    const bound = (v: Viewer, extra?: Partial<BrowserResult>): BrowserResult => (
-      { ok: true, session, cwd, binaryPath: install.binary, wsPort: v.port, nativeIdentity: b.key, ...extra });
-    if (request.op === 'launch') {
-      const fresh = request.binding.session === undefined;
-      const deadline = Date.now() + REQUEST_BUDGET_MS;
-      return bound(await serialize(b, () => launch(b, request.url, request.headed, fresh, deadline)));
-    }
-    // The viewer for a live session; one whose browser is gone is relaunched at
-    // `url` when the caller names it, and fails otherwise.
-    if (request.op === 'attach') {
-      const url = request.url;
-      const deadline = Date.now() + REQUEST_BUDGET_MS;
-      let relaunched = false;
-      const v = await serialize(b, async () => {
-        try {
-          return await connect(b);
-        } catch (error) {
-          if (!(error instanceof SessionNotOpenError) || !isBrowsableUrl(url)) throw error;
-          // A session no entry names has nothing to close first.
-          const launched = await launch(b, url, !!request.headed, !error.named, deadline);
-          relaunched = true;
-          return launched;
-        }
-      });
-      // A connecting viewer is sent the current state; only live ones need it now.
-      if (v.sockets.size) await refresh(v);
-      return bound(v, { headed: v.headed, ...(relaunched ? { relaunched } : {}) });
-    }
-    if (request.op === 'close') {
-      return serialize(b, async () => {
-        await invalidate(b);
-        headed.delete(b.key);
-        const r = await cli(b, ['close']);
-        return r.exitCode === 0 ? { ok: true } : { ok: false, error: r.stderr.trim() || `playwright-cli exited ${r.exitCode}` };
-      });
-    }
-    if (request.op === 'cdpUrl') throw new Error('Unsupported Playwright host operation');
+  /** The viewer's live page, after a refresh — immediate for a control, the
+   *  poll's own for a capture. */
+  async function livePage(b: Binding, force: boolean): Promise<{ v: Viewer; page: Page }> {
     const v = await connect(b);
-    await refresh(v, request.op !== 'screenshot');
-    const page = v.page;
-    if (!page) throw new Error('No Playwright page is open');
-    switch (request.op) {
-      case 'screenshot': {
-        const format = captureFormat(request.format);
-        const cdp = await control(v, page);
-        const { data } = await cdp.send('Page.captureScreenshot', { format, ...(format === 'jpeg' ? { quality: jpegQuality(request.quality) } : {}), captureBeyondViewport: false });
-        // Keep the cross-host contract a plain typed array, including VS Code's message transport.
-        const bytes = new Uint8Array(Buffer.from(data, 'base64'));
-        return { ok: true, bytes, mime: `image/${format}` };
-      }
-      case 'edit': {
-        const script = editScript(request.edit);
-        if (!script) throw new Error('Invalid editing operation');
-        const result: unknown = await page.evaluate(script);
-        const text = typeof result === 'string' ? result : '';
-        // Skip empty, so an empty selection doesn't clobber the clipboard.
-        if (request.edit !== 'selectAll' && text) await deps.writeClipboardText(text);
-        return { ok: true, text };
-      }
-      case 'navigate': await page.goto(request.url, { waitUntil: 'commit' }); break;
-      case 'history': {
-        const options = { waitUntil: 'commit' } as const;
-        if (request.dir === 'reload') await page.reload(options);
-        else if (request.dir === 'back') await page.goBack(options);
-        else await page.goForward(options);
-        break;
-      }
-      case 'tab': {
-        // The Playwright CLI names tabs by index.
-        if (!/^\d+$/.test(request.tabId)) throw new Error('Unsupported tab operation');
-        const r = await cli(b, [request.action === 'select' ? 'tab-select' : 'tab-close', request.tabId]);
-        await refresh(v);
-        return r.exitCode === 0 ? { ok: true } : { ok: false, error: r.stderr.trim() || `playwright-cli exited ${r.exitCode}` };
-      }
-      case 'viewport':
-      case 'device': {
-        const devices = install.library.devices;
-        const device = request.op === 'device' && Object.prototype.hasOwnProperty.call(devices, request.name) ? devices[request.name] : undefined;
-        const size = request.op === 'viewport' ? request
-          : device ? { width: device.viewport.width, height: device.viewport.height, dpr: device.deviceScaleFactor } : undefined;
-        if (!size) throw new Error('Invalid viewport/device');
-        const { width, height, dpr } = size;
-        await page.setViewportSize({ width, height });
-        const cdp = await control(v, page);
-        await cdp.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: dpr, mobile: device?.isMobile ?? false });
-        await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: device?.hasTouch ?? false });
-        if (device) await cdp.send('Emulation.setUserAgentOverride', { userAgent: device.userAgent });
-        break;
-      }
-    }
-    await refresh(v);
-    return { ok: true };
+    await refresh(v, force);
+    if (!v.page) throw new Error('No Playwright page is open');
+    return { v, page: v.page };
   }
-  async function request(r: BrowserRequest): Promise<BrowserResult> {
-    try {
-      if (closed) throw new Error('Playwright host is shutting down');
-      return await execute(r);
-    } catch (e) {
-      return { ok: false, error: messageOf(e) };
-    }
-  }
-  async function requestFile(r: BrowserRequest): Promise<BrowserResult> {
-    try {
-      const result = await request(r);
-      if (!result.bytes) return result;
-      if (closed) return { ok: false, error: 'Playwright host is shutting down' };
-      // One file per session, as agent-browser's: the reader leaves it, and
-      // the next frame overwrites it.
-      const owner = JSON.stringify([r.binding.cwd ?? '', r.binding.session ?? '']);
-      let name = captureNames.get(owner);
-      if (name === undefined) captureNames.set(owner, name = randomBytes(16).toString('hex'));
-      const file = path.join(await captures.get(), `${name}.frame`);
-      await writeFile(file, result.bytes, { mode: 0o600 });
-      // Shutdown may have begun while the frame was written.
-      if (closed) {
-        await captures.remove();
-        return { ok: false, error: 'Playwright host is shutting down' };
+  const exited = (r: { exitCode: number; stderr: string }) => r.stderr.trim() || `playwright-cli exited ${r.exitCode}`;
+  const live = (v: Viewer): LiveBrowser => ({ wsPort: v.port, headed: v.headed });
+
+  return {
+    pollMs: 200,
+
+    bind: (binding) => bind(binding.session, binding.cwd ?? process.cwd(), resolvePlaywrightInstall(binding.binaryPath)),
+
+    // Installation, CLI project scope and session: a raw `--session` shares it
+    // across one project's subdirectories.
+    identity: (b) => b.key,
+
+    describe: (b) => ({ session: b.session, cwd: b.cwd, binaryPath: b.install.binary }),
+
+    async find(b) {
+      try {
+        const v = await connect(b);
+        // A connecting viewer is sent the current state; only live ones need it now.
+        if (v.sockets.size) await refresh(v);
+        return live(v);
+      } catch (error) {
+        if (!(error instanceof SessionNotOpenError)) throw error;
+        return { gone: error.message, named: error.named };
       }
-      return { ok: true, path: file, mime: result.mime };
-    } catch (error) {
-      return { ok: false, error: messageOf(error) };
-    }
-  }
-  async function close() {
-    closed = true;
-    await Promise.allSettled([...lifecycle.values(), ...connecting.values()]);
-    await Promise.all([...headed.values()].map(async b => {
+    },
+
+    // Finish the old CLI session before discovering the replacement endpoint.
+    stop: (b, timeoutMs) => cli(b, ['close'], timeoutMs),
+
+    async open(b, url, isHeaded) {
+      const r = await cli(b, ['open', ...(url === undefined ? [] : [url]), '--browser=chromium', ...(isHeaded ? ['--headed'] : [])], null);
+      return { exitCode: r.exitCode, stderr: r.stderr };
+    },
+
+    // Endpoint readiness, not the page load, completes a launch: each probe
+    // lists the registry and connects.
+    async probe(b, { opened, deadline }) {
+      try {
+        return live(await connect(b, deadline));
+      } catch (error) {
+        if (opened && opened.exitCode !== 0) return { failed: opened.stderr.trim() || messageOf(error) };
+        throw error;
+      }
+    },
+
+    async close(b, timeoutMs) {
       await invalidate(b);
-      await cli(b, ['close']).catch(log);
-    }));
-    await Promise.all([...viewers.values()].map(dispose));
-    viewers.clear();
-    headed.clear();
-    captureNames.clear();
-    await captures.remove();
-  }
-  return { request, requestFile, close };
+      const r = await cli(b, ['close'], timeoutMs ?? CLI_TIMEOUT_MS);
+      if (r.exitCode !== 0) throw new Error(exited(r));
+    },
+
+    release: (b) => invalidate(b),
+
+    async listTabs(b) {
+      const v = await connect(b);
+      return pagesOf(v).map((page, index) => ({ tabId: String(index), url: page.url() }));
+    },
+
+    async act(b, act): Promise<BrowserResult> {
+      const { v, page } = await livePage(b, true);
+      switch (act.op) {
+        case 'navigate': await page.goto(act.url, { waitUntil: 'commit' }); break;
+        case 'history': {
+          const options = { waitUntil: 'commit' } as const;
+          if (act.dir === 'reload') await page.reload(options);
+          else if (act.dir === 'back') await page.goBack(options);
+          else await page.goForward(options);
+          break;
+        }
+        case 'tab': {
+          // The Playwright CLI names tabs by index.
+          if (!/^\d+$/.test(act.tabId)) throw new Error('Unsupported tab operation');
+          const r = await cli(b, [act.action === 'select' ? 'tab-select' : 'tab-close', act.tabId]);
+          await refresh(v);
+          return r.exitCode === 0 ? { ok: true } : { ok: false, error: exited(r) };
+        }
+        case 'viewport':
+        case 'device': {
+          const devices = b.install.library.devices;
+          const device = act.op === 'device' && Object.prototype.hasOwnProperty.call(devices, act.name) ? devices[act.name] : undefined;
+          const size = act.op === 'viewport' ? act
+            : device ? { width: device.viewport.width, height: device.viewport.height, dpr: device.deviceScaleFactor } : undefined;
+          if (!size) throw new Error('Invalid viewport/device');
+          const { width, height, dpr } = size;
+          await page.setViewportSize({ width, height });
+          const cdp = await control(v, page);
+          await cdp.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: dpr, mobile: device?.isMobile ?? false });
+          await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: device?.hasTouch ?? false });
+          if (device) await cdp.send('Emulation.setUserAgentOverride', { userAgent: device.userAgent });
+          break;
+        }
+        default: throw new Error('Unsupported Playwright host operation');
+      }
+      await refresh(v);
+      return { ok: true };
+    },
+
+    async evaluate(b, script) {
+      const { page } = await livePage(b, true);
+      return page.evaluate(script);
+    },
+
+    // CDP capture in-process. Captures share the viewer's polling cadence.
+    async screenshot(b, { format, quality }) {
+      const { v, page } = await livePage(b, false);
+      const cdp = await control(v, page);
+      const { data } = await cdp.send('Page.captureScreenshot', { format, ...(format === 'jpeg' ? { quality } : {}), captureBeyondViewport: false });
+      // Keep the cross-host contract a plain typed array, including VS Code's message transport.
+      return { bytes: new Uint8Array(Buffer.from(data, 'base64')) };
+    },
+
+    async streamUrl(port) {
+      const v = [...viewers.values()].find(v => v.port === port && !v.disposed);
+      if (!v) throw new Error('Playwright stream is no longer live');
+      return `ws://127.0.0.1:${v.port}/stream/${grants.issue(v.port)}`;
+    },
+
+    async dispose() {
+      closed = true;
+      await Promise.allSettled(connecting.values());
+      await Promise.all([...viewers.values()].map(dispose));
+      viewers.clear();
+    },
+  };
 }

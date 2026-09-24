@@ -3,6 +3,7 @@
 // TypeScript source while the sidecar itself stays plain CJS.
 //   - lib/src/host/iframe-proxy.ts        → sidecar/iframe-proxy.cjs
 //   - lib/src/host/browser-host.ts        → sidecar/browser-host.cjs
+//   - lib/src/host/agent-browser-host.ts  → sidecar/agent-browser-host.cjs
 //   - lib/src/host/playwright-host.ts     → sidecar/playwright-host.cjs
 //   - lib/src/host/tool-host.ts           → sidecar/tool-host.cjs
 //   - lib/src/host/git-info.ts            → sidecar/git-info.cjs
@@ -61,6 +62,7 @@ if (!SIDECAR_RUNTIME_DEPS.includes('node-datachannel')) {
 const bundles = [
   { entry: 'iframe-proxy.ts', out: 'iframe-proxy.cjs' },
   { entry: 'browser-host.ts', out: 'browser-host.cjs' },
+  { entry: 'agent-browser-host.ts', out: 'agent-browser-host.cjs' },
   { entry: 'playwright-host.ts', out: 'playwright-host.cjs' },
   { entry: 'tool-host.ts', out: 'tool-host.cjs' },
   { entry: 'git-info.ts', out: 'git-info.cjs' },
@@ -110,11 +112,10 @@ function assertNothingInlined(metafile, outfile, names) {
 }
 
 // `tauri.conf.json`'s `bundle.resources` globs this whole directory, so a
-// pre-rename bundle left in an older checkout would ship inside the app: a
-// `remote-host.cjs` is a dead Burrow with its own baked connect-src allowlist,
-// an `alert-store.cjs` predates the alerts joining `burrow.cjs`, an
-// `agent-browser-host.cjs` is a dead browser host.
-for (const retired of ['remote-host.cjs', 'alert-store.cjs', 'agent-browser-host.cjs']) {
+// pre-rename `remote-host.cjs` left in an older checkout would ship inside the
+// app — a dead Burrow with its own baked connect-src allowlist — and so would
+// an `alert-store.cjs` from before the alerts joined `burrow.cjs`.
+for (const retired of ['remote-host.cjs', 'alert-store.cjs']) {
   await rm(path.resolve(sidecar, retired), { force: true });
 }
 

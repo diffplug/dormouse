@@ -17,9 +17,11 @@ const { createIframeProxyUrl } = require('./iframe-proxy.cjs');
 const { createToolHost } = require('./tool-host.cjs');
 const { gitInfo } = require('./git-info.cjs');
 // Same pattern: lib/src/host/browser-host.ts is the single source of truth for
-// browser automation, run here exactly as the VS Code extension host runs it.
-// See docs/specs/dor-browser.md → "Agent-Browser Host Capabilities".
+// browser automation, run here exactly as the VS Code extension host runs it,
+// over the providers in lib/src/host/agent-browser-host.ts and
+// playwright-host.ts. See docs/specs/dor-browser.md → "Agent-Browser Host Capabilities".
 const { createBrowserHost } = require('./browser-host.cjs');
+const { createAgentBrowserProvider } = require('./agent-browser-host.cjs');
 // Same pattern again: lib/src/host/remote/sidecar-entry.ts is the Burrow —
 // the relay socket, the enrollment, the ACL, and remote-api v1 — running next to
 // the PTYs it serves (docs/specs/remote-api.md), and the app's one
@@ -32,15 +34,16 @@ const { createSidecarHost } = require('./burrow.cjs');
 // store. See docs/specs/standalone.md -> "Agent recovery".
 const { captureAgentRecovery, createRecoveryStore, sliceSince } = require('./recovery.cjs');
 
-const browserHostDeps = {
-  writeClipboardText: (text) => clipboard.writeClipboardText(text),
-  log: (m) => console.error(m),
-};
+const browserLog = (m) => console.error(m);
 const browserHost = createBrowserHost({
-  ...browserHostDeps,
-  // lib/src/host/playwright-host.ts, required on the first Playwright request
-  // rather than at boot (docs/specs/dor-browser.md → "Playwright Renderer").
-  playwright: () => require('./playwright-host.cjs').createPlaywrightHost(browserHostDeps),
+  writeClipboardText: (text) => clipboard.writeClipboardText(text),
+  log: browserLog,
+  providers: {
+    'agent-browser': () => createAgentBrowserProvider({ log: browserLog }),
+    // Required on the first Playwright request rather than at boot: its bundle
+    // carries `ws`, and most sessions never open a Playwright pane.
+    playwright: () => require('./playwright-host.cjs').createPlaywrightProvider({ log: browserLog }),
+  },
 });
 
 function send(event, data) {

@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import type { PlatformAdapter } from '../../lib/platform/types';
-import { PLAYWRIGHT_TEXT_INPUT_MAX, type BrowserResult } from '../../lib/platform/browser-automation';
+import { PLAYWRIGHT_TEXT_INPUT_MAX, type BrowserRequest, type BrowserResult } from '../../lib/platform/browser-automation';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
 import { forgetLaunchBinaryPaths, launchBinaryPath, rememberLaunchBinaryPath } from './browser-automation';
 import {
@@ -22,6 +22,8 @@ import {
   type AgentBrowserViewSink,
 } from './agent-browser-surface-controller';
 import { installBrowserHost, type BrowserAnswers } from './wall-test-utils';
+import { createBrowserHost } from '../../host/browser-host';
+import { fakeProvider } from '../../host/browser-host-test-utils';
 
 // These tests drive the controller directly, with NO React — it owns the whole
 // non-React lifecycle, so it can be exercised in isolation.
@@ -742,83 +744,81 @@ describe('launch', () => {
 describe('a closed Surface and the next launch into its session', () => {
   // A Tool swapped to its embed and back, or re-framed after its dev server
   // restarts, while its browser was still coming up: the Surface closes, and
-  // the next launch opens the same `tool.<leafId>` session.
+  // the next launch opens the same `tool.<leafId>` session. The host orders
+  // the two (docs/specs/dor-browser.md → "Browser Host"), so these run the
+  // controller against the real one.
   const session = 'dormouse.1.tool.t';
-  function hostPlatform() {
-    const pending = { launch: [] as Array<(result: BrowserResult) => void>, attach: [] as Array<(result: BrowserResult) => void> };
-    const host = installBrowserHost({
-      launch: () => new Promise((resolve) => { pending.launch.push(resolve); }),
-      attach: () => new Promise((resolve) => { pending.attach.push(resolve); }),
-    });
-    return { ...host, pending };
+  const page = 'http://localhost:6006/';
+  function realHost() {
+    const fake = fakeProvider();
+    const host = createBrowserHost({ writeClipboardText: vi.fn(), providers: { 'agent-browser': () => fake.provider } });
+    const browser = vi.fn((request: BrowserRequest) => host.request(request));
+    setPlatform(Object.assign(new FakePtyAdapter(), { browserProviders: ['agent-browser'] as const, browser }));
+    // What the host did to the session's browser: bring it up, or close it.
+    const lifecycle = () => fake.calls.filter((call) => /^(stop|open|close) /.test(call));
+    return { fake, browser, lifecycle };
   }
-  /** Close `id` mid-flight, start the next launch into `session`, and check it
-   *  waits for the first to land and close the session again. */
-  async function expectNextLaunchWaits(host: ReturnType<typeof hostPlatform>, id: string, land: () => void) {
-    // Closes stay unanswered until released, so the wait is for the answer.
-    const answerCloses: Array<() => void> = [];
-    host.answers.close = () => new Promise((resolve) => { answerCloses.push(() => resolve({ ok: true })); });
-    const closesOfSession = () => host.requests('close').filter((request) => request.binding.session === session).length;
-    const nextOpen = () => host.requests('launch').filter((request) => request.binding.session === session).length;
-    const opensBefore = nextOpen();
+  /** `id`'s work into the session is held in the host (at its `stop`): close
+   *  `id`, start the next launch into the session, let the work land, and
+   *  check the close came after it and the next launch after the close. */
+  async function expectNextLaunchAfterClose(host: ReturnType<typeof realHost>, id: string, work: string[]) {
     void closeBrowserSurface(id, {});
-    acquireAgentBrowserSurfaceController('next', { renderMode: 'ab-screencast', url: 'http://localhost:6006/', launchSession: session })
-      .attachView(makeSink());
-    const closesBefore = closesOfSession();
-    answerCloses.splice(0).forEach((answer) => answer());
-    // Every promise chain settled, not a fixed number of turns.
-    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
-    await settle();
-    expect(nextOpen()).toBe(opensBefore);
+    const next = acquireAgentBrowserSurfaceController('next', { renderMode: 'ab-screencast', url: page, launchSession: session });
+    next.attachView(makeSink());
+    await flushMicrotasks();
+    expect(host.lifecycle()).toEqual([`stop ${session}`]);
 
-    // It lands, and closes the session again: the next launch waits for that answer too.
-    land();
-    await settle();
-    expect(closesOfSession()).toBe(closesBefore + 1);
-    expect(nextOpen()).toBe(opensBefore);
-    answerCloses.splice(0).forEach((answer) => answer());
-    await vi.waitFor(() => expect(nextOpen()).toBe(opensBefore + 1));
+    host.fake.release(`stop ${session}`);
+    await vi.waitFor(() => expect(next.snapshot().phase).toBe('live'));
+    expect(host.lifecycle()).toEqual([...work, `close ${session}`, `stop ${session}`, `open ${session} ${page}`]);
   }
 
-  it('waits for a launch that was opening it', async () => {
-    const host = hostPlatform();
-    acquireAgentBrowserSurfaceController('first', { renderMode: 'ab-screencast', url: 'http://localhost:6006/', launchSession: session })
+  it('closes a launch that was opening it before the next launch', async () => {
+    const host = realHost();
+    host.fake.gate(`stop ${session}`);
+    acquireAgentBrowserSurfaceController('first', { renderMode: 'ab-screencast', url: page, launchSession: session })
       .attachView(makeSink());
     await flushMicrotasks();
-    await expectNextLaunchWaits(host, 'first', () => host.pending.launch[0]({ ok: true, session, wsPort: 4321 }));
+    await expectNextLaunchAfterClose(host, 'first', [`stop ${session}`, `open ${session} ${page}`]);
   });
 
-  it('a launch released while it waits opens nothing', async () => {
-    const host = hostPlatform();
-    acquireAgentBrowserSurfaceController('first', { renderMode: 'ab-screencast', url: 'http://localhost:6006/', launchSession: session })
+  it('a launch closed before its turn opens nothing', async () => {
+    const host = realHost();
+    host.fake.gate(`stop ${session}`);
+    acquireAgentBrowserSurfaceController('first', { renderMode: 'ab-screencast', url: page, launchSession: session })
       .attachView(makeSink());
     await flushMicrotasks();
     void closeBrowserSurface('first', {});
-    acquireAgentBrowserSurfaceController('next', { renderMode: 'ab-screencast', url: 'http://localhost:6006/', launchSession: session })
+    acquireAgentBrowserSurfaceController('next', { renderMode: 'ab-screencast', url: page, launchSession: session })
       .attachView(makeSink());
     await flushMicrotasks();
     // Swapped away again before the first launch landed.
-    void closeBrowserSurface('next', {});
-    host.pending.launch[0]({ ok: true, session, wsPort: 4321 });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(host.requests('launch')).toHaveLength(1);
+    const closed = closeBrowserSurface('next', {});
+    host.fake.release(`stop ${session}`);
+    await closed;
+    expect(host.lifecycle()).toEqual([`stop ${session}`, `open ${session} ${page}`, `close ${session}`, `close ${session}`]);
   });
 
-  it('waits for a pop-out that was relaunching it', async () => {
-    const host = hostPlatform();
-    const first = withPort('first', { session, url: 'http://localhost:6006/' }, 1111);
+  it('closes a pop-out that was relaunching it before the next launch', async () => {
+    const host = realHost();
+    const first = withPort('first', { session, url: page }, 1111);
     first.attachView(makeSink());
     await flushMicrotasks();
+    host.fake.gate(`stop ${session}`);
     first.setRenderMode('ab-popout');
-    await expectNextLaunchWaits(host, 'first', () => host.pending.launch[0]({ ok: true, wsPort: 4321 }));
+    await flushMicrotasks();
+    await expectNextLaunchAfterClose(host, 'first', [`stop ${session}`, `open ${session} ${page} headed`]);
   });
 
-  it('waits for an attach that was relaunching it', async () => {
-    const host = hostPlatform();
-    acquireAgentBrowserSurfaceController('first', { session, url: 'http://localhost:6006/' }).attachView(makeSink());
+  it('closes an attach that was relaunching it before the next launch', async () => {
+    const host = realHost();
+    // Gone, but its name still held: the relaunch stops it first.
+    host.fake.provider.find = async () => ({ gone: 'not running', named: true });
+    host.fake.gate(`stop ${session}`);
+    acquireAgentBrowserSurfaceController('first', { session, url: page }).attachView(makeSink());
     await flushMicrotasks();
-    expect(host.requests('attach')).toHaveLength(1);
-    await expectNextLaunchWaits(host, 'first', () => host.pending.attach[0]({ ok: true, wsPort: 4321, relaunched: true }));
+    expect(host.browser).toHaveBeenCalledWith(expect.objectContaining({ op: 'attach', url: page }));
+    await expectNextLaunchAfterClose(host, 'first', [`stop ${session}`, `open ${session} ${page}`]);
   });
 });
 
@@ -1059,7 +1059,7 @@ describe('closeBrowserSurface', () => {
     return { host, closes, resolvePopOut: popOut.resolve };
   }
 
-  it('closes the session again when a relaunch in flight brings its daemon back', async () => {
+  it('closes the session once, at once, even with a relaunch in flight', async () => {
     const { closes, resolvePopOut } = closeHost();
     const controller = withPort('id', { session: 'sess' }, 1111);
     controller.attachView(makeSink());
@@ -1070,10 +1070,28 @@ describe('closeBrowserSurface', () => {
     expect(closes()).toHaveLength(1);
     expect(getAgentBrowserSurfaceController('id')).toBeNull();
 
+    // The host runs that close after the relaunch, so closing again when it
+    // lands would close whoever launched the session next.
     resolvePopOut({ ok: true, wsPort: 3456 });
     await flushMicrotasks();
-    expect(closes()).toHaveLength(2);
+    expect(closes()).toHaveLength(1);
     expect(streamSockets(3456)).toHaveLength(0);
+  });
+
+  it('closes the session a launch names, at once', async () => {
+    const launch = pending();
+    const host = installBrowserHost({ launch: () => launch.promise });
+    acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-screencast', url: 'http://localhost:6006/', launchSession: 'dormouse.1.tool.t', binaryPath: '/opt/agent-browser' })
+      .attachView(makeSink());
+    await flushMicrotasks();
+
+    void closeBrowserSurface('id', {});
+    // Through the binding the launch used, so the host orders the two.
+    expect(host.requests('close')).toEqual([{ provider: 'agent-browser', binding: host.requests('launch')[0].binding, op: 'close' }]);
+    expect(host.requests('close')[0].binding).toMatchObject({ session: 'dormouse.1.tool.t', binaryPath: '/opt/agent-browser' });
+    launch.resolve({ ok: true, session: 'dormouse.1.tool.t', wsPort: 4321 });
+    await flushMicrotasks();
+    expect(host.requests('close')).toHaveLength(1);
   });
 
   it('a release that closes nothing leaves a relaunch in flight to whoever holds the session next', async () => {

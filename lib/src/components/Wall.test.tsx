@@ -1231,14 +1231,14 @@ describe('Wall on the Lath engine', () => {
       await act(async () => { failPlaywright({ ok: false, error: 'playwright-cli was not found' }); });
       await flush();
       warn.mockRestore();
-      expect(events).toEqual([`close ${defaultSession}`]);
+      // Back to agent-browser in the Door it was minimized to, reopened in the
+      // session its key names: the swap's close of it goes first, and the host
+      // finishes it before this launch (`createBrowserHost` serializes a
+      // browser's launches and closes)…
+      expect(container.querySelector(`[data-door-id="${eagerId}"]`)).not.toBeNull();
+      expect(events).toEqual([`close ${defaultSession}`, `launch ${defaultSession} http://localhost:5173/`]);
       await act(async () => { landClose(); });
       await flush();
-
-      // Back to agent-browser in the Door it was minimized to, reopened in the
-      // session its key names once that session's close has landed…
-      expect(container.querySelector(`[data-door-id="${eagerId}"]`)).not.toBeNull();
-      expect(events).toEqual([`close ${defaultSession}`, 'close landed', `launch ${defaultSession} http://localhost:5173/`]);
       expect(await dispatchResolveAgentBrowser(eagerId)).toMatchObject({ ok: true, result: { session: defaultSession } });
       // …so `dor ab --key default` drives it rather than opening a second pane.
       let reused: { ok: boolean; result?: { status: string; surfaceId: string } } | undefined;

@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events';
 import { Server } from 'node:http';
 import { WebSocket } from 'ws';
 import { createBrowserHost } from './browser-host';
-import { createPlaywrightHost } from './playwright-host';
+import { createPlaywrightProvider } from './playwright-host';
 import { BROWSER_REQUEST_TIMEOUT_MS, PLAYWRIGHT_TEXT_INPUT_MAX, playwrightTextInputs, type BrowserOp, type BrowserRequestBinding } from '../lib/platform/browser-automation';
 
 const mocks = vi.hoisted(() => ({ cli: vi.fn(), connect: vi.fn(), clipboard: vi.fn() }));
@@ -44,15 +44,22 @@ beforeEach(() => {
       endpoint: '/tmp/test-playwright.pipe', browser: { browserName: 'chromium' },
     }] } : { result: '- 0: (current) Test' }),
   }));
-  host = createBrowserHost({ writeClipboardText: mocks.clipboard, playwright: () => createPlaywrightHost({ writeClipboardText: mocks.clipboard }) });
+  host = createBrowserHost({ writeClipboardText: mocks.clipboard, providers: { playwright: () => createPlaywrightProvider() } });
 });
 afterEach(async () => { await host.close(); vi.restoreAllMocks(); });
 
-test('concurrent captures share one CDP attachment and detach it once on close', async () => {
-  const results = await Promise.all(Array.from({ length: 3 }, () => pw({ op: 'screenshot' })));
-  expect(results.map(result => result.error)).toEqual([undefined, undefined, undefined]);
+test('concurrent captures join one, a concurrent control shares its CDP attachment, and close detaches it once', async () => {
+  page.setViewportSize = vi.fn(async () => {});
+  const [first, second, sized] = await Promise.all([
+    pw({ op: 'screenshot' }),
+    pw({ op: 'screenshot' }),
+    pw({ op: 'viewport', width: 640, height: 480, dpr: 1 }),
+  ]);
+  expect(first.error).toBeUndefined();
+  expect(second).toEqual(first);
+  expect(sized.ok).toBe(true);
   expect(attach).toHaveBeenCalledTimes(1);
-  expect(cdp.send).toHaveBeenCalledTimes(3);
+  expect(cdp.send.mock.calls.filter(([method]) => method === 'Page.captureScreenshot')).toHaveLength(1);
   expect((await pw({ op: 'close' })).ok).toBe(true);
   expect(cdp.detach).toHaveBeenCalledTimes(1);
   expect(browser.close).toHaveBeenCalledTimes(1);

@@ -143,8 +143,9 @@ type Phase =
   /** Constructed; no view has started it yet. */
   | { k: 'idle' }
   /** No session yet: opening `url` in a browser whose session binds on
-   *  success — in `session` when the launch names one. */
-  | { k: 'launching'; session?: string }
+   *  success — through `named` when the launch names one, which a close of
+   *  the Surface meanwhile closes too. */
+  | { k: 'launching'; named?: BrowserHandle }
   /** The session's stream port is being asked of the host (`attach`). */
   | { k: 'attaching' }
   /** Streaming from `port`. `seen`: the stream has reported its browser
@@ -160,9 +161,8 @@ type Phase =
   | { k: 'relaunching' }
   /** Nothing to show: the browser went away, or `error` kept it from opening. */
   | { k: 'ended'; error?: string }
-  /** Released; `closed` when its session was closed with it, so work still in
-   *  flight closes whatever it brings back up. */
-  | { k: 'disposed'; closed: boolean };
+  /** Released: nothing here runs again. */
+  | { k: 'disposed' };
 
 export type BrowserSurfacePhase = Phase['k'];
 
@@ -345,8 +345,6 @@ export class AgentBrowserSurfaceController {
   private pendingParams = new Map<string, unknown>();
   private pendingTitle: string | null = null;
   private pendingLaunchFailure: string | null = null;
-  /** Host work in flight that can bring the session up (`track`). */
-  private landings = new Set<Promise<void>>();
   // The value this controller last wrote to each field it also takes from
   // params, until params show it back. Params predating the write — buffered
   // while detached, then fed by a remounted view before the flush, or a render
@@ -780,34 +778,32 @@ export class AgentBrowserSurfaceController {
   private launch(): void {
     const url = this.launchUrl();
     const session = this.launchSession;
-    const phase: Phase = { k: 'launching', ...(session ? { session } : {}) };
-    this.setPhase(phase);
     const headed = this.headed;
     // No creation site has to remember the binary a `dor ab` surface resolved.
     const binaryPath = this.binaryPath ?? launchBinaryPath(this.provider);
     // A named session's close still in flight — a failed swap reopening the
-    // previous provider's — would land after this open and shut it.
-    const opening = session ? closeLanded(this.provider, this.cwd, session) : Promise.resolve();
+    // previous provider's, a Tool re-run's — is one the host finishes first:
+    // it serializes a browser's launches and closes.
     const browser = browserHandle(this.provider, { session, cwd: this.cwd, binaryPath });
+    const phase: Phase = { k: 'launching', ...(session && browser ? { named: browser } : {}) };
+    this.setPhase(phase);
     // A launch that cannot start settles as late as one that fails, so whoever
     // created this Surface is always listening by then.
     const opened: Promise<BrowserResult> = !browser
       ? Promise.resolve({ ok: false, error: `${this.label} is unavailable on this host` })
       : !url
         ? Promise.resolve({ ok: false, error: 'no page to open' })
-        // Released while it waited, it opens nothing for a closed Surface.
-        : opening.then(() => this.phase === phase ? browser.launch(url, headed) : { ok: false });
-    this.track(opened
+        : browser.launch(url, headed);
+    opened
       .then((res) => {
         if (this.phase !== phase) {
-          // The browser that came up belongs to nobody: close it — a session
-          // the host minted, or any once the Surface closed. A named one left
-          // otherwise is whoever holds that session next (a Workspace
-          // transfer's destination opens the same one), or this Surface's own.
-          const closed = this.phase.k === 'disposed' && this.phase.closed;
-          return res.session && (closed || !session)
-            ? closeSessionOn(this.provider, res.cwd ?? this.cwd, res.session, res.binaryPath)
-            : undefined;
+          // The browser that came up belongs to nobody: close a session the
+          // host minted, which only this answer names. A named one a close of
+          // this Surface already closed after it (`close`); one left otherwise
+          // is whoever holds that session next (a Workspace transfer's
+          // destination opens the same one).
+          if (res.session && !session) void closeSessionOn(this.provider, res.cwd ?? this.cwd, res.session, res.binaryPath);
+          return;
         }
         if (!res.ok || !res.session) {
           const error = res.error ?? `Could not open ${this.label}`;
@@ -834,8 +830,7 @@ export class AgentBrowserSurfaceController {
         if (res.wsPort) this.goLive(res.wsPort);
         else this.attach(false);
         settleLaunch(this.id, null);
-        return undefined;
-      }));
+      });
   }
 
   /** Tell the Wall this Surface's first launch failed: it applies the
@@ -877,34 +872,17 @@ export class AgentBrowserSurfaceController {
     const phase: Phase = { k: 'attaching' };
     this.setPhase(phase);
     const url = relaunch ? this.launchUrl() : undefined;
-    const attached = browser.attach({ url, headed: this.headed })
+    // A browser this relaunches for a Surface closed meanwhile is closed by
+    // the host: it runs the close after this attach (`close`).
+    browser.attach({ url, headed: this.headed })
       .then((res) => {
-        if (this.phase !== phase) return url ? this.closeIfClosedMeanwhile(session) : undefined;
+        if (this.phase !== phase) return;
         // Only a gone daemon is relaunched at the page; a live one was only
         // found, so a navigation pending to it still has to run.
         if (res.relaunched) this.openedByHost(url);
         if (res.ok && res.wsPort) this.goLive(res.wsPort);
         else this.setPhase({ k: 'ended', error: relaunch ? res.error : undefined });
-        return undefined;
       });
-    // Only one naming a page can bring the browser back up.
-    if (url) this.track(attached);
-  }
-
-  /** The Surface was closed while `session` had work in flight that can bring
-   *  its daemon back up — a relaunch, or an attach that relaunches — so close
-   *  it again once that work lands. */
-  private closeIfClosedMeanwhile(session: string): Promise<void> | undefined {
-    return this.phase.k === 'disposed' && this.phase.closed ? this.closeSession(session) : undefined;
-  }
-
-  /** Host work that can bring the session's browser up — a launch, relaunch
-   *  or relaunching attach — held until it has landed, and closed again what
-   *  it brought back for a Surface closed meanwhile (`close`). */
-  private track(work: Promise<unknown>): void {
-    const landed = work.then(() => {}, () => {});
-    this.landings.add(landed);
-    void landed.then(() => this.landings.delete(landed));
   }
 
   private closeSession(session: string): Promise<void> {
@@ -1480,13 +1458,14 @@ export class AgentBrowserSurfaceController {
     this.setHeaded(headed);
     this.writeParams({ renderMode: this.renderMode() });
     abDebugLog(`[ab-panel] ${headed ? 'popOut' : 'popIn'} -> ${JSON.stringify({ session, url: target })}`);
-    this.track(this.handle(session)!.launch(target, headed).then((res) => {
+    this.handle(session)!.launch(target, headed).then((res) => {
       abDebugLog(`[ab-panel] relaunch result ${JSON.stringify(res)}`);
-      if (this.phase !== phase) return this.closeIfClosedMeanwhile(session);
+      // Closed meanwhile, the host closes what this brought up after it.
+      if (this.phase !== phase) return;
       if (res.ok && res.wsPort) {
         this.openedByHost(target);
         this.goLive(res.wsPort);
-        return undefined;
+        return;
       }
       // Failed: back in the pane at the page it was on, relaunching headless
       // there if no daemon came up.
@@ -1495,8 +1474,7 @@ export class AgentBrowserSurfaceController {
         this.writeParams({ renderMode: this.renderMode() });
       }
       this.attach(true);
-      return undefined;
-    }));
+    });
   }
 
   /**
@@ -1656,23 +1634,20 @@ export class AgentBrowserSurfaceController {
 
   // --- teardown ---
 
-  /** Close this Surface's browser session and release the controller. Work in
-   *  flight that could bring the session back up closes it again when it lands.
-   *  Returns the session closed, if any, and when the host answered. */
+  /** Close this Surface's browser session — the one it is bound to, or the
+   *  one its launch names — and release the controller. Sent at once: the host
+   *  runs it after the session's launch, relaunch or attach still in flight,
+   *  closing what that brings up, and before any launch sent after it
+   *  (docs/specs/dor-browser.md → "Browser Host"). Returns the session
+   *  closed, if any, and when the host answered. */
   close(): { session?: string; done: Promise<void> } {
     const phase = this.phase;
     if (phase.k === 'disposed') return { done: Promise.resolve() };
     const session = this.session;
-    // A launch still opening a named session brings it up after this close.
-    const named = session ?? (phase.k === 'launching' ? phase.session : undefined);
-    const landing = this.landings.size ? Promise.all(this.landings) : null;
-    this.release(true);
-    const closing = session ? this.closeSession(session) : Promise.resolve();
-    // Work in flight closes the session again once it lands; until then a
-    // launch into the same name waits for it too (`closeLanded`).
-    const done = named && landing
-      ? trackClose(this.provider, this.cwd, named, Promise.all([closing, landing]).then(() => {}))
-      : closing;
+    this.release();
+    const done = session ? this.closeSession(session)
+      : phase.k === 'launching' && phase.named ? phase.named.close().then(() => {})
+      : Promise.resolve();
     return { session, done };
   }
 
@@ -1686,19 +1661,20 @@ export class AgentBrowserSurfaceController {
    *  next (a Workspace transfer's destination). */
   dispose(): void {
     if (this.phase.k === 'disposed') return;
-    this.release(false);
+    this.release();
   }
 
-  private release(closed: boolean): void {
-    // A launch in flight lands on a released controller, which closes what it
-    // brings up; whoever awaited one hears that the Surface is gone.
+  private release(): void {
+    // A launch in flight lands on a released controller, which closes a
+    // session the host minted for it; whoever awaited one hears that the
+    // Surface is gone.
     settleLaunch(this.id, null);
     if (this.parkTimer) { clearTimeout(this.parkTimer); this.parkTimer = undefined; }
     this.teardownPaneSizeObserver();
     this.paneSize = null;
     // Leaving `live` drops the connection, its screenshot loop and the CDP
     // observer.
-    this.setPhase({ k: 'disposed', closed });
+    this.setPhase({ k: 'disposed' });
     this.dprQuery?.removeEventListener('change', this.onDprChange);
     this.dprQuery = null;
     this.registration?.dispose();
@@ -1752,33 +1728,15 @@ export function disposeAgentBrowserSurfaceController(id: string): void {
   else settleLaunch(id, null);
 }
 
-// Closes the host has not answered yet, per session, so a launch into the same
-// named session waits them out (`closeLanded`).
-const closesInFlight = new Map<string, Promise<void>>();
-const closeKey = (provider: BrowserAutomationProvider, cwd: string | undefined, session: string) => JSON.stringify([provider, cwd ?? '', session]);
-
 /**
  * The one way a session is closed; resolves once the host answered. A close
- * starts no daemon, so it needs no drive gate. `binaryPath` is checked, not
- * merely typed: it may come off the persisted session blob, and names a program
- * the host will spawn (`lib/src/lib/agent-browser-binary.ts`).
+ * starts no daemon, so it needs no drive gate, and the host serializes it with
+ * the browser's launches. `binaryPath` is checked, not merely typed: it may come
+ * off the persisted session blob, and names a program the host will spawn
+ * (`lib/src/lib/agent-browser-binary.ts`).
  */
 function closeSessionOn(provider: BrowserAutomationProvider, cwd: string | undefined, session: string, binaryPath: unknown): Promise<void> {
-  return trackClose(provider, cwd, session, browserHandle(provider, { session, cwd, binaryPath: allowedBinaryPath(binaryPath, provider) })?.close()
-    .then(() => {}) ?? Promise.resolve());
-}
-
-/** Record `closing` as `session`'s close in flight until it settles. */
-function trackClose(provider: BrowserAutomationProvider, cwd: string | undefined, session: string, closing: Promise<void>): Promise<void> {
-  const key = closeKey(provider, cwd, session);
-  const tracked = closing.finally(() => { if (closesInFlight.get(key) === tracked) closesInFlight.delete(key); });
-  closesInFlight.set(key, tracked);
-  return tracked;
-}
-
-/** Once every close of `session` issued so far has been answered. */
-function closeLanded(provider: BrowserAutomationProvider, cwd: string | undefined, session: string): Promise<void> {
-  return closesInFlight.get(closeKey(provider, cwd, session)) ?? Promise.resolve();
+  return browserHandle(provider, { session, cwd, binaryPath: allowedBinaryPath(binaryPath, provider) })?.close().then(() => {}) ?? Promise.resolve();
 }
 
 /** Hand `id`'s controller a port a `dor` command just learned, with the
@@ -1812,7 +1770,7 @@ function closeBrowserSessionFromParams(params: unknown): Promise<void> {
  * A kill or a swap away from an automated renderer: surface lifetime and browser
  * lifetime are bound (docs/specs/dor-browser.md → "Placement And Lifetime"), so
  * close its session and release its controller. The controller closes what it
- * holds, and closes again after a launch or relaunch still in flight lands;
+ * holds or its launch names, after any of that session's work still in flight;
  * `params` covers a session no controller holds. Resolves once the host
  * answered every close. No-op for other surface types.
  */

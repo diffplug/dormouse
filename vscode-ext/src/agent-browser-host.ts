@@ -17,20 +17,21 @@
 import * as vscode from 'vscode';
 import * as net from 'net';
 import { log } from './log';
+import { createAgentBrowserProvider } from '../../lib/src/host/agent-browser-host';
 import { createBrowserHost } from '../../lib/src/host/browser-host';
 import { BrowserStreamGrants } from '../../lib/src/host/browser-stream-guard';
-import { createPlaywrightHost } from '../../lib/src/host/playwright-host';
+import { createPlaywrightProvider } from '../../lib/src/host/playwright-host';
 
-const hostDeps = {
+const logInfo = (message: string) => log.info(message);
+const host = createBrowserHost({
   // Awaited rather than returned: `vscode.env.clipboard.writeText` yields a
   // `Thenable`, VS Code's minimal promise interface, which is not a `Promise`.
-  writeClipboardText: async (text: string) => { await vscode.env.clipboard.writeText(text); },
-  log: (message: string) => log.info(message),
-};
-const host = createBrowserHost({
-  ...hostDeps,
-  agentBrowserStreamUrl: createStreamRelayUrl,
-  playwright: () => createPlaywrightHost(hostDeps),
+  writeClipboardText: async (text) => { await vscode.env.clipboard.writeText(text); },
+  log: logInfo,
+  providers: {
+    'agent-browser': () => createAgentBrowserProvider({ log: logInfo, streamUrl: createStreamRelayUrl }),
+    playwright: () => createPlaywrightProvider({ log: logInfo }),
+  },
 });
 
 export const runBrowserRequest = host.request;

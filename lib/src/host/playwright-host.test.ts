@@ -8,7 +8,7 @@ import { WebSocket } from 'ws';
 import { spawnAndCapture } from 'dor-lib-common';
 import type { BrowserOp, BrowserRequestBinding } from '../lib/platform/browser-automation';
 import { createBrowserHost } from './browser-host';
-import { createPlaywrightHost } from './playwright-host';
+import { createPlaywrightProvider } from './playwright-host';
 
 // Opt-in: tests the user's real CLI and matching Chromium, with a private session.
 const binaryPath = process.env.DORMOUSE_PLAYWRIGHT_TEST_BIN;
@@ -20,8 +20,7 @@ test.skipIf(!binaryPath)('real CLI: GUI launch, stream grants, native tabs, inpu
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   let clipboard = '';
-  const deps = { writeClipboardText: (text: string) => { clipboard = text; } };
-  const host = createBrowserHost({ ...deps, playwright: () => createPlaywrightHost(deps) });
+  const host = createBrowserHost({ writeClipboardText: text => { clipboard = text; }, providers: { playwright: () => createPlaywrightProvider() } });
   const pw = (op: BrowserOp, binding: BrowserRequestBinding) => host.request({ provider: 'playwright', binding, ...op });
   let session = '';
   let socket: WebSocket | undefined;
