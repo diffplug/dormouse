@@ -2,7 +2,8 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import { expect, fireEvent, userEvent, waitFor, within } from 'storybook/test';
 import type { DormouseTheme } from '../lib/themes';
-import { SettingsDialog } from '../components/SettingsDialog';
+import { OVERLAY_MAX_HEIGHT_VAR } from '../components/design';
+import { SettingsDialog, TOPIC_GAP_PX } from '../components/SettingsDialog';
 import { WorkspaceIdContext } from '../components/wall/wall-context';
 import { enrolledStatus, UNENROLLED_STATUS } from '../host/remote/test-burrow-link';
 
@@ -32,18 +33,32 @@ function DialogStory() {
   </>;
 }
 
+type Body = ReturnType<typeof dialog>;
+
+function contentsButton(body: Body, name: string) {
+  return within(body.getByRole('navigation', { name: 'Settings topics' })).getByRole('button', { name });
+}
+
 function selectTopic(name: string) {
   return async ({ canvasElement }: { canvasElement: HTMLElement }) => {
     const body = dialog(canvasElement);
-    await userEvent.click(within(body.getByRole('navigation', { name: 'Settings topics' })).getByRole('button', { name }));
+    await userEvent.click(contentsButton(body, name));
     await waitForTopicScroll(body.getByRole('region', { name }));
   };
+}
+
+/** Hovers a contents entry and waits out the smooth scroll it starts. */
+async function hoverTopic(body: Body, name: string) {
+  const button = contentsButton(body, name);
+  await userEvent.hover(button);
+  await waitForTopicScroll(body.getByRole('region', { name }));
+  return button;
 }
 
 async function waitForTopicScroll(section: HTMLElement) {
   const content = section.parentElement!;
   await waitFor(() => {
-    const desired = content.scrollTop + section.getBoundingClientRect().top - content.getBoundingClientRect().top - 16;
+    const desired = content.scrollTop + section.getBoundingClientRect().top - content.getBoundingClientRect().top - TOPIC_GAP_PX;
     const clamped = Math.max(0, Math.min(desired, content.scrollHeight - content.clientHeight));
     expect(Math.abs(content.scrollTop - clamped)).toBeLessThan(2);
   }, { timeout: 2000 });
@@ -210,9 +225,7 @@ export const NotepadArchiveEntry: Story = {
   play: async ({ canvasElement }) => {
     const body = dialog(canvasElement);
     await selectTopic('Notepad')({ canvasElement });
-    const open = await body.findByRole('button', { name: 'Open archive' });
-    open.scrollIntoView();
-    await userEvent.click(open);
+    await userEvent.click(await body.findByRole('button', { name: 'Open archive' }));
     await body.findByRole('button', { name: /Back to Settings/ });
   },
 };
@@ -416,13 +429,12 @@ export const ClickOutsideToClose: Story = {
 export const Narrow: Story = {
   ...WithRules,
   globals: { viewport: { value: 'mobile2', isRotated: false } },
-  parameters: { ...WithRules.parameters, chromatic: { viewports: [480] } },
 };
 
 export const ShortViewport: Story = {
   ...PushManyDevices,
   render: () => <>
-    <style>{'[aria-labelledby="settings-dialog-title"] { --overlay-max-h-modal: 20rem; }'}</style>
+    <style>{`body { ${OVERLAY_MAX_HEIGHT_VAR.modal}: 20rem; }`}</style>
     <DialogStory />
   </>,
 };
@@ -431,9 +443,7 @@ export const HoverContents: Story = {
   ...WithRules,
   play: async ({ canvasElement }) => {
     const body = dialog(canvasElement);
-    const topic = within(body.getByRole('navigation')).getByRole('button', { name: 'Notifications' });
-    await userEvent.hover(topic);
-    await waitForTopicScroll(body.getByRole('region', { name: 'Notifications' }));
+    const topic = await hoverTopic(body, 'Notifications');
     await expect(topic).toHaveAttribute('aria-current', 'location');
     await expect(body.getAllByRole('region')).toHaveLength(4);
   },
@@ -443,16 +453,12 @@ export const ScrollFollowsContents: Story = {
   ...WithRules,
   play: async ({ canvasElement }) => {
     const body = dialog(canvasElement);
-    const notifications = within(body.getByRole('navigation')).getByRole('button', { name: 'Notifications' });
-    await userEvent.hover(notifications);
-    await waitForTopicScroll(body.getByRole('region', { name: 'Notifications' }));
-    await userEvent.unhover(notifications);
+    await userEvent.unhover(await hoverTopic(body, 'Notifications'));
     const section = body.getByRole('region', { name: 'Notepad' });
     const content = section.parentElement!;
     content.scrollTo({ top: content.scrollHeight, behavior: 'smooth' });
     await waitForTopicScroll(section);
-    await expect(within(body.getByRole('navigation')).getByRole('button', { name: 'Notepad' }))
-      .toHaveAttribute('aria-current', 'location');
+    await expect(contentsButton(body, 'Notepad')).toHaveAttribute('aria-current', 'location');
   },
 };
 
@@ -460,16 +466,15 @@ export const HoverSettingsOverridesScroll: Story = {
   ...WithRules,
   play: async ({ canvasElement }) => {
     const body = dialog(canvasElement);
-    const contents = within(body.getByRole('navigation'));
     const heading = body.getByRole('heading', { name: 'Activity' });
     const content = body.getByRole('region', { name: 'Activity' }).parentElement!;
     const scrollTop = content.scrollTop;
-    await expect(contents.getByRole('button', { name: 'General' })).toHaveAttribute('aria-current', 'location');
+    await expect(contentsButton(body, 'General')).toHaveAttribute('aria-current', 'location');
     await userEvent.hover(heading);
-    await expect(contents.getByRole('button', { name: 'Activity' })).toHaveAttribute('aria-current', 'location');
+    await expect(contentsButton(body, 'Activity')).toHaveAttribute('aria-current', 'location');
     await expect(content.scrollTop).toBe(scrollTop);
     await userEvent.unhover(heading);
-    await expect(contents.getByRole('button', { name: 'General' })).toHaveAttribute('aria-current', 'location');
+    await expect(contentsButton(body, 'General')).toHaveAttribute('aria-current', 'location');
     await userEvent.hover(heading);
   },
 };

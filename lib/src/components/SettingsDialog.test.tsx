@@ -9,6 +9,8 @@ import { FakePtyAdapter } from '../lib/platform/fake-adapter';
 import { __resetArchiveServiceForTests } from '../lib/notepad/archive-service';
 import { clearAllNotepads } from '../lib/notepad/notepad-store';
 import { SettingsDialog } from './SettingsDialog';
+import { stubResizeObserver } from './wall/wall-test-utils';
+import { setNativeFieldValue } from '../lib/dom';
 import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS, getAlertSettings } from '../lib/alert-settings';
 import { setCommandWatched, getWatchedCommands } from '../lib/terminal-registry';
 
@@ -19,7 +21,7 @@ let root: Root;
 let platform: FakePtyAdapter;
 const scrollTo = vi.fn();
 let sectionOffsets: Record<string, number>;
-let resizeCallbacks: Array<() => void>;
+let resize: (width: number) => void;
 
 function text(): string {
   return document.body.textContent ?? '';
@@ -48,11 +50,19 @@ function visible(selector: string): HTMLElement[] {
 }
 
 async function search(value: string) {
-  const input = document.querySelector<HTMLInputElement>('input[type="search"]')!;
+  await act(async () => setNativeFieldValue(document.querySelector<HTMLInputElement>('input[type="search"]')!, value));
+}
+
+async function scrollContent(top: number) {
+  const content = document.getElementById('settings-content')!;
   await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value);
-    input.dispatchEvent(new Event('input', { bubbles: true }));
+    content.scrollTop = top;
+    content.dispatchEvent(new Event('scroll'));
   });
+}
+
+async function pointerOver(target: Element, pointerType: string) {
+  await act(async () => target.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType })));
 }
 
 async function key(target: Element, key: string) {
@@ -62,20 +72,13 @@ async function key(target: Element, key: string) {
 beforeEach(() => {
   scrollTo.mockClear();
   sectionOffsets = { general: 16, activity: 116, notifications: 516, notepad: 1116 };
-  resizeCallbacks = [];
-  vi.stubGlobal('PointerEvent', MouseEvent);
+  resize = stubResizeObserver(400);
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
     const top = this.dataset.settingsTopic
       ? sectionOffsets[this.dataset.settingsTopic] - (document.getElementById('settings-content')?.scrollTop ?? 0) : 0;
     return { top, bottom: top + 100, left: 0, right: 400, width: 400, height: 100, x: 0, y: top, toJSON() {} };
   });
   Object.defineProperty(HTMLElement.prototype, 'scrollTo', { configurable: true, value: scrollTo });
-  vi.stubGlobal('ResizeObserver', class {
-    constructor(callback: () => void) { resizeCallbacks.push(callback); }
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  });
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -101,7 +104,6 @@ describe('SettingsDialog notepad archive entry', () => {
   it('opens the Archive view in place and comes back', async () => {
     await render();
     expect(text()).toContain('Notepad archive');
-    await act(async () => byText('Notepad').click());
 
     await act(async () => byText('Open archive').click());
     // Same dialog, different view: the archive's own chrome is what proves it.
@@ -144,16 +146,9 @@ describe('SettingsDialog navigation and search', () => {
 
   it('follows manual scrolling, including a short final section at the bottom', async () => {
     await render();
-    const content = document.getElementById('settings-content')!;
-    await act(async () => {
-      content.scrollTop = 150;
-      content.dispatchEvent(new Event('scroll'));
-    });
+    await scrollContent(150);
     expect(byText('Activity').getAttribute('aria-current')).toBe('location');
-    await act(async () => {
-      content.scrollTop = 1000;
-      content.dispatchEvent(new Event('scroll'));
-    });
+    await scrollContent(1000);
     expect(byText('Notepad').getAttribute('aria-current')).toBe('location');
   });
 
@@ -162,52 +157,38 @@ describe('SettingsDialog navigation and search', () => {
     await act(async () => byText('Notifications').click());
     expect(scrollTo).toHaveBeenLastCalledWith({ top: 500, behavior: 'smooth' });
     sectionOffsets.notifications += 50;
-    await act(async () => resizeCallbacks.forEach((callback) => callback()));
+    await act(async () => resize(400));
     expect(scrollTo).toHaveBeenLastCalledWith({ top: 550, behavior: 'smooth' });
     await act(async () => document.getElementById('settings-content')!.dispatchEvent(new Event('wheel', { bubbles: true })));
     scrollTo.mockClear();
     sectionOffsets.notifications += 50;
-    await act(async () => resizeCallbacks.forEach((callback) => callback()));
+    await act(async () => resize(400));
     expect(scrollTo).not.toHaveBeenCalled();
   });
 
   it('lets hovering settings override scrolling without moving the page, then resumes scroll tracking on leave', async () => {
     await render();
-    const content = document.getElementById('settings-content')!;
     const heading = document.getElementById('settings-heading-notifications')!;
-    const enter = (pointerType: string) => {
-      const event = new Event('pointerover', { bubbles: true });
-      Object.defineProperty(event, 'pointerType', { value: pointerType });
-      heading.dispatchEvent(event);
-    };
     scrollTo.mockClear();
-    await act(async () => enter('touch'));
+    await pointerOver(heading, 'touch');
     expect(byText('General').getAttribute('aria-current')).toBe('location');
-    await act(async () => enter('mouse'));
+    await pointerOver(heading, 'mouse');
     expect(byText('Notifications').getAttribute('aria-current')).toBe('location');
     expect(scrollTo).not.toHaveBeenCalled();
-    await act(async () => {
-      content.scrollTop = 150;
-      content.dispatchEvent(new Event('scroll'));
-    });
+    await scrollContent(150);
     expect(byText('Notifications').getAttribute('aria-current')).toBe('location');
     await act(async () => {
-      heading.dispatchEvent(new MouseEvent('pointerout', { bubbles: true, relatedTarget: document.body }));
+      heading.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, relatedTarget: document.body }));
     });
     expect(byText('Activity').getAttribute('aria-current')).toBe('location');
   });
 
   it('scrolls on mouse hover and click without hiding sections or reacting to touch hover', async () => {
     await render();
-    const enter = (pointerType: string) => {
-      const event = new Event('pointerover', { bubbles: true });
-      Object.defineProperty(event, 'pointerType', { value: pointerType });
-      byText('Notifications').dispatchEvent(event);
-    };
     scrollTo.mockClear();
-    await act(async () => enter('touch'));
+    await pointerOver(byText('Notifications'), 'touch');
     expect(scrollTo).not.toHaveBeenCalled();
-    await act(async () => enter('mouse'));
+    await pointerOver(byText('Notifications'), 'mouse');
     expect(scrollTo).toHaveBeenLastCalledWith({ top: 500, behavior: 'smooth' });
     expect(byText('Notifications').getAttribute('aria-current')).toBe('location');
     await act(async () => byText('Activity').click());
@@ -259,8 +240,7 @@ describe('SettingsDialog navigation and search', () => {
   it('keeps Tab focus out of search-filtered settings', async () => {
     await render();
     await search('walked away');
-    const searchInput = document.querySelector('input[type="search"]')!;
-    searchInput.dispatchEvent(new Event('focus'));
+    expect(document.activeElement).toBe(document.querySelector('input[type="search"]'));
     for (let i = 0; i < 8; i++) {
       await key(document.activeElement!, 'Tab');
       expect(document.activeElement?.closest('[hidden]')).toBeNull();

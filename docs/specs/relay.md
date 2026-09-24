@@ -805,7 +805,7 @@ webview's client half).
 ### Remote control, in the Settings dialog
 
 Enrolling is the one step a self-hoster cannot skip, so it is UI, not a console
-incantation: a **Remote control** section at the bottom of the app-global
+incantation: a **Remote control** section under the push settings in the app-global
 Settings dialog ([alert.md](./alert.md) -> Settings dialog).
 Its managed-Relay link follows [website-docs.md](./website-docs.md) ->
 `/hosted` preview.

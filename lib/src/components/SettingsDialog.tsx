@@ -38,8 +38,11 @@ import {
 const TITLE_ID = 'settings-dialog-title';
 const HOSTED_VOICE_URL = 'https://dormouse.sh/hosted/#voice';
 
-/** Every section but the first draws its own divider. */
+/** The divider above a settings group. */
 const SECTION = 'mt-4 border-t border-border pt-3';
+
+/** A picker row; `min-w-0` lets the picker's trigger truncate in a narrow dialog. */
+const PICKER_ROW = 'flex items-center gap-1.5 text-sm text-foreground [&>div]:min-w-0';
 
 /**
  * The "Push will be sent to …" line. Every state names a cause, because a push
@@ -85,6 +88,16 @@ const TOPICS = [
   { id: 'notepad', label: 'Notepad', icon: NotebookIcon, groups: ['archive'] },
 ] as const;
 type TopicId = typeof TOPICS[number]['id'];
+type GroupId = typeof TOPICS[number]['groups'][number];
+/** Search matches a group by its topic's label as well as its own text. */
+const TOPIC_LABEL_OF = Object.fromEntries(
+  TOPICS.flatMap((topic) => topic.groups.map((group) => [group, topic.label.toLocaleLowerCase()])),
+) as Record<GroupId, string>;
+
+/** Where a chosen topic's heading lands below the scroller's top: its `py-4`. */
+export const TOPIC_GAP_PX = 16;
+/** A chosen topic stops being corrected once scrolling pauses this long. */
+const SCROLL_IDLE_MS = 120;
 
 /** Search the mounted controls themselves so descriptions, options, and live
  * command/device names have no second copy to drift. Hidden groups stay mounted
@@ -116,6 +129,24 @@ function useSettingsSearch(content: React.RefObject<HTMLDivElement | null>, view
     return () => observer.disconnect();
   }, [content, view]);
   return index;
+}
+
+function TopicSection({ id, hidden, children }: { id: TopicId; hidden: boolean; children: React.ReactNode }) {
+  return (
+    <section
+      id={`settings-topic-${id}`}
+      role="region"
+      data-settings-topic={id}
+      aria-labelledby={`settings-heading-${id}`}
+      hidden={hidden}
+      className="mb-6"
+    >
+      <h3 id={`settings-heading-${id}`} className="text-sm font-semibold text-foreground">
+        {TOPICS.find((topic) => topic.id === id)!.label}
+      </h3>
+      {children}
+    </section>
+  );
 }
 
 /** App-global settings; the archive replaces this view rather than stacking. */
@@ -152,19 +183,15 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   // every burrow that never seeds the store (fake = 1, remote = 0).
   const showShell = !getPlatform().hostOwnsShells && shellState.shells.length >= 2;
   const showArchive = hasNotepadArchive();
-  const topics = TOPICS.filter((item) => item.id === 'general' ? showTheme || showShell
-    : item.id === 'notepad' ? showArchive : true);
   const index = useSettingsSearch(contentRef, view);
   const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
   const searching = terms.length > 0;
-  const matches = (id: string) => !searching || terms.every((term) =>
-    `${id} ${TOPICS.find((item) => item.groups.some((group) => group === id))?.label.toLocaleLowerCase()} ${index[id] ?? ''}`.includes(term));
-  const topicMatches = (id: TopicId) => TOPICS.find((item) => item.id === id)!.groups.some(
-    (group) => Boolean(index[group]) && matches(group),
-  );
-  const visible = (id: TopicId) => topics.some((item) => item.id === id)
-    && (!searching || topicMatches(id));
-  const visibleTopics = topics.filter((item) => visible(item.id));
+  const matches = (group: GroupId) =>
+    terms.every((term) => `${group} ${TOPIC_LABEL_OF[group]} ${index[group] ?? ''}`.includes(term));
+  // A topic shows once one of its groups renders matching text, so the host
+  // gates in the JSX below are the only ones.
+  const visibleTopics = TOPICS.filter((item) => item.groups.some((group) => index[group] && matches(group)));
+  const visible = (id: TopicId) => visibleTopics.some((item) => item.id === id);
   const highlighted = hoveredTopic ?? topic;
   const visibleTopicIds = visibleTopics.map((item) => item.id).join(',');
 
@@ -175,7 +202,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     if (!sections.length) return;
     // Follow the heading at the reading edge. The final short section cannot
     // reach that edge, so reaching the bottom selects it explicitly.
-    const edge = content.getBoundingClientRect().top + 17;
+    const edge = content.getBoundingClientRect().top + TOPIC_GAP_PX + 1;
     const atBottom = content.scrollTop > 0 && content.scrollTop + content.clientHeight >= content.scrollHeight - 1;
     let current = sections[0];
     for (const section of sections) {
@@ -188,19 +215,24 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     const content = contentRef.current;
     const section = content?.querySelector<HTMLElement>(`[data-settings-topic="${id}"]`);
     if (!content || !section) return;
-    content.scrollTo?.({
-      top: content.scrollTop + section.getBoundingClientRect().top - content.getBoundingClientRect().top - 16,
+    content.scrollTo({
+      top: content.scrollTop + section.getBoundingClientRect().top - content.getBoundingClientRect().top - TOPIC_GAP_PX,
       behavior: 'smooth',
     });
   }, []);
+
+  const releaseTarget = () => { scrollTarget.current = null; };
+  const releaseTargetWhenIdle = () => {
+    clearTimeout(scrollIdleTimer.current);
+    scrollIdleTimer.current = setTimeout(releaseTarget, SCROLL_IDLE_MS);
+  };
 
   const chooseTopic = (id: TopicId) => {
     setTopic(id);
     setOpenMenu(null);
     scrollTarget.current = id;
-    clearTimeout(scrollIdleTimer.current);
     scrollToTopic(id);
-    scrollIdleTimer.current = setTimeout(() => { scrollTarget.current = null; }, 120);
+    releaseTargetWhenIdle();
   };
 
   useLayoutEffect(() => {
@@ -220,12 +252,6 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   }, [followScroll, scrollToTopic, view, visibleTopicIds]);
 
   useEffect(() => () => clearTimeout(scrollIdleTimer.current), []);
-
-  useLayoutEffect(() => {
-    setHoveredTopic(null);
-    scrollTarget.current = null;
-    contentRef.current?.scrollTo?.({ top: 0, behavior: 'smooth' });
-  }, [query]);
 
   if (view === 'archive') {
     return <NotepadArchiveView onBack={() => setView('settings')} onClose={onClose} />;
@@ -264,48 +290,54 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             onChange={(event) => {
               setQuery(event.target.value);
               setOpenMenu(null);
+              setHoveredTopic(null);
+              releaseTarget();
+              contentRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
             }}
             className="min-w-0 w-full bg-transparent text-sm text-foreground outline-none"
           />
         </label>
       </div>
       <div className="flex min-h-0 flex-1">
-        <aside className="flex w-12 shrink-0 flex-col border-r border-border bg-app-bg px-1 py-3 sm:w-48 sm:px-3">
-          <nav aria-label="Settings topics" className="min-h-0 overflow-y-auto" onPointerLeave={() => setHoveredTopic(null)}>
-            {visibleTopics.map(({ id, label, icon: Icon }, position) => (
-              <button
-                key={id}
-                id={`settings-toc-${id}`}
-                type="button"
-                title={label}
-                aria-current={highlighted === id ? 'location' : undefined}
-                aria-controls={`settings-topic-${id}`}
-                onClick={() => chooseTopic(id)}
-                onPointerEnter={(event) => {
-                  if (event.pointerType !== 'mouse') return;
-                  setHoveredTopic(id);
-                  chooseTopic(id);
-                }}
-                onKeyDown={(event) => {
-                  const next = event.key === 'ArrowDown' ? (position + 1) % visibleTopics.length
-                    : event.key === 'ArrowUp' ? (position + visibleTopics.length - 1) % visibleTopics.length
-                    : event.key === 'Home' ? 0 : event.key === 'End' ? visibleTopics.length - 1 : null;
-                  if (next === null) return;
-                  event.preventDefault();
-                  setHoveredTopic(null);
-                  chooseTopic(visibleTopics[next].id);
-                  document.getElementById(`settings-toc-${visibleTopics[next].id}`)?.focus({ preventScroll: true });
-                }}
-                className={`mb-1 flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm focus-visible:outline focus-visible:outline-focus-ring ${highlighted === id
-                  ? 'bg-header-active-bg text-header-active-fg'
-                  : 'text-app-fg hover:bg-foreground/10'}`}
-              >
-                <Icon size={16} className="shrink-0" aria-hidden />
-                <span className="sr-only sm:not-sr-only">{label}</span>
-              </button>
-            ))}
-          </nav>
-        </aside>
+        <nav
+          aria-label="Settings topics"
+          className="w-12 shrink-0 overflow-y-auto border-r border-border bg-app-bg px-1 py-3 sm:w-48 sm:px-3"
+          onPointerLeave={() => setHoveredTopic(null)}
+        >
+          {visibleTopics.map(({ id, label, icon: Icon }, position) => (
+            <button
+              key={id}
+              type="button"
+              title={label}
+              aria-current={highlighted === id ? 'location' : undefined}
+              aria-controls={`settings-topic-${id}`}
+              onClick={() => chooseTopic(id)}
+              onPointerEnter={(event) => {
+                if (event.pointerType !== 'mouse') return;
+                setHoveredTopic(id);
+                chooseTopic(id);
+              }}
+              onKeyDown={(event) => {
+                const count = visibleTopics.length;
+                const next = event.key === 'ArrowDown' ? (position + 1) % count
+                  : event.key === 'ArrowUp' ? (position + count - 1) % count
+                  : event.key === 'Home' ? 0 : event.key === 'End' ? count - 1 : null;
+                if (next === null) return;
+                event.preventDefault();
+                setHoveredTopic(null);
+                chooseTopic(visibleTopics[next].id);
+                // The nav's buttons are exactly `visibleTopics`, in order.
+                (event.currentTarget.parentElement!.children[next] as HTMLElement).focus({ preventScroll: true });
+              }}
+              className={`mb-1 flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm focus-visible:outline focus-visible:outline-focus-ring ${highlighted === id
+                ? 'bg-header-active-bg text-header-active-fg'
+                : 'text-app-fg hover:bg-foreground/10'}`}
+            >
+              <Icon size={16} className="shrink-0" aria-hidden />
+              <span className="sr-only sm:not-sr-only">{label}</span>
+            </button>
+          ))}
+        </nav>
         <div
           id="settings-content"
           ref={contentRef}
@@ -317,30 +349,23 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           onPointerLeave={() => setHoveredTopic(null)}
           onScroll={() => {
             followScroll();
-            clearTimeout(scrollIdleTimer.current);
-            scrollIdleTimer.current = setTimeout(() => { scrollTarget.current = null; }, 120);
+            releaseTargetWhenIdle();
           }}
-          onWheel={() => { scrollTarget.current = null; }}
-          onTouchStart={() => { scrollTarget.current = null; }}
-          onPointerDown={() => { scrollTarget.current = null; }}
-          onKeyDown={() => { scrollTarget.current = null; }}
+          // The user's own input takes over from a chosen topic.
+          onWheel={releaseTarget}
+          onPointerDown={releaseTarget}
+          onKeyDown={releaseTarget}
           className="min-w-0 flex-1 overflow-y-auto overscroll-contain scroll-smooth px-3 py-4 break-words sm:px-6 [&_label]:flex-wrap"
         >
-          {searching && <div role="status" className="mb-4 text-sm text-muted">
-            {topics.some((item) => topicMatches(item.id)) ? 'Search results' : 'No settings found.'}
-          </div>}
-          <section
-            id="settings-topic-general"
-            role="region"
-            data-settings-topic="general"
-            aria-labelledby="settings-heading-general"
-            hidden={!visible('general')}
-            className="mb-6"
-          >
-            <h3 id="settings-heading-general" className="text-sm font-semibold text-foreground">General</h3>
-            <div data-setting="theme" hidden={!matches('theme')}>
-              {showTheme ? (
-                <section className="mt-4 flex items-center gap-1.5 text-sm text-foreground [&>div]:min-w-0">
+          {searching && (
+            <div role="status" className="mb-4 text-sm text-muted">
+              {visibleTopics.length ? 'Search results' : 'No settings found.'}
+            </div>
+          )}
+          <TopicSection id="general" hidden={!visible('general')}>
+            <div className="mt-4 flex flex-col gap-2">
+              {showTheme && (
+                <section data-setting="theme" hidden={!matches('theme')} className={PICKER_ROW}>
                   <span>Theme:</span>
                   <ThemePicker
                     variant="settings-dialog"
@@ -348,14 +373,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                     onOpenChange={onThemeOpenChange}
                   />
                 </section>
-              ) : null}
-
-            </div>
-            <div data-setting="shell" hidden={!matches('shell')}>
-              {showShell ? (
-                <section
-                  className={`${showTheme ? 'mt-2' : 'mt-4'} flex items-center gap-1.5 text-sm text-foreground [&>div]:min-w-0`}
-                >
+              )}
+              {showShell && (
+                <section data-setting="shell" hidden={!matches('shell')} className={PICKER_ROW}>
                   <span>Shell:</span>
                   <ShellPicker
                     open={openMenu === 'shell'}
@@ -363,76 +383,54 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                     onSelect={onClose}
                   />
                 </section>
-              ) : null}
-
+              )}
             </div>
-          </section>
-          <section
-            id="settings-topic-activity"
-            role="region"
-            data-settings-topic="activity"
-            aria-labelledby="settings-heading-activity"
-            hidden={!visible('activity')}
-            className="mb-6"
-          >
-            <h3 id="settings-heading-activity" className="text-sm font-semibold text-foreground">Activity</h3>
-            <div data-setting="watcher" hidden={!matches('watcher')}>
-              <section className="mt-4">
-                <div className="text-sm text-foreground">
-                  Animation watcher enabled for commands that start with:
+          </TopicSection>
+          <TopicSection id="activity" hidden={!visible('activity')}>
+            <section data-setting="watcher" hidden={!matches('watcher')} className="mt-4">
+              <div className="text-sm text-foreground">
+                Animation watcher enabled for commands that start with:
+              </div>
+              {watched.length > 0 ? (
+                <div className="mt-1.5">
+                  <WatchedCommandList />
                 </div>
-                {watched.length > 0 ? (
-                  <div className="mt-1.5">
-                    <WatchedCommandList />
-                  </div>
-                ) : (
-                  <div className="mt-1.5 text-sm leading-relaxed text-muted">
-                    Nothing yet. Start a command, then press <Shortcut>a</Shortcut> in its tab and
-                    turn on <em>Watch all …</em> to alert on every tab running it.
-                  </div>
-                )}
-                <div className="mt-3">
-                  <SwitchRow
-                    label="Defer alerts until animation stops"
-                    on={settings.deferAlertsUntilQuiet}
-                    onChange={(deferAlertsUntilQuiet) => updateAlertSettings({ deferAlertsUntilQuiet })}
-                  />
-                  <div className={`${UNDER_SWITCH_INDENT} mt-1 text-sm leading-relaxed text-muted`}>
-                    When the animation watcher is fully armed, terminal notifications wait
-                    for the pane to become quiet, and a ring raised by silence goes away if
-                    the watched command starts working again.
-                  </div>
+              ) : (
+                <div className="mt-1.5 text-sm leading-relaxed text-muted">
+                  Nothing yet. Start a command, then press <Shortcut>a</Shortcut> in its tab and
+                  turn on <em>Watch all …</em> to alert on every tab running it.
                 </div>
-              </section>
-
-            </div>
-            <div data-setting="inactivity" hidden={!matches('inactivity')}>
-              <section className={SECTION}>
-                <SecondsField
-                  label="Inactivity timeout:"
-                  valueMs={settings.inactivityTimeoutMs}
-                  onCommit={(inactivityTimeoutMs) => updateAlertSettings({ inactivityTimeoutMs })}
+              )}
+              <div className="mt-3">
+                <SwitchRow
+                  label="Defer alerts until animation stops"
+                  on={settings.deferAlertsUntilQuiet}
+                  onChange={(deferAlertsUntilQuiet) => updateAlertSettings({ deferAlertsUntilQuiet })}
                 />
-                <div className="mt-1 text-sm leading-relaxed text-muted">
-                  User has walked away after this much inactivity.
+                <div className={`${UNDER_SWITCH_INDENT} mt-1 text-sm leading-relaxed text-muted`}>
+                  When the animation watcher is fully armed, terminal notifications wait
+                  for the pane to become quiet, and a ring raised by silence goes away if
+                  the watched command starts working again.
                 </div>
-              </section>
-
-            </div>
-          </section>
-          <section
-            id="settings-topic-notifications"
-            role="region"
-            data-settings-topic="notifications"
-            aria-labelledby="settings-heading-notifications"
-            hidden={!visible('notifications')}
-            className="mb-6"
-          >
-            <h3 id="settings-heading-notifications" className="text-sm font-semibold text-foreground">Notifications</h3>
+              </div>
+            </section>
+            <section data-setting="inactivity" hidden={!matches('inactivity')} className={SECTION}>
+              <SecondsField
+                label="Inactivity timeout:"
+                valueMs={settings.inactivityTimeoutMs}
+                onCommit={(inactivityTimeoutMs) => updateAlertSettings({ inactivityTimeoutMs })}
+              />
+              <div className="mt-1 text-sm leading-relaxed text-muted">
+                User has walked away after this much inactivity.
+              </div>
+            </section>
+          </TopicSection>
+          <TopicSection id="notifications" hidden={!visible('notifications')}>
             {(matches('speech') || matches('push')) && <h3 className="mt-4 text-sm font-semibold text-foreground">Application defaults</h3>}
             <div data-setting="speech" hidden={!matches('speech')}>
               <AlarmSettingsSection sink="speech" />
             </div>
+            {/* Remote control sits under push, whose `no-burrow` copy says "below". */}
             <div data-setting="push" hidden={!matches('push')}>
               <AlarmSettingsSection sink="push" />
               <RemoteControlSection />
@@ -440,35 +438,25 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             <div data-setting="workspace" hidden={!matches('workspace')}>
               <WorkspaceAlarmSettings />
             </div>
-          </section>
-          <section
-            id="settings-topic-notepad"
-            role="region"
-            data-settings-topic="notepad"
-            aria-labelledby="settings-heading-notepad"
-            hidden={!visible('notepad')}
-            className="mb-6"
-          >
-            <h3 id="settings-heading-notepad" className="text-sm font-semibold text-foreground">Notepad</h3>
-            <div data-setting="archive" hidden={!matches('archive')}>
-              {showArchive ? (
-                <section className={SECTION}>
-                  <div className="text-sm text-foreground">Notepad archive</div>
-                  <div className="mt-1 text-sm leading-relaxed text-muted">
-                    Notes kept from terminals and browsers that have closed. They stay
-                    until you delete them.
-                  </div>
-                  <button
-                    type="button"
-                    className={`${modalActionButton()} mt-2`}
-                    onClick={() => setView('archive')}
-                  >
-                    Open archive
-                  </button>
-                </section>
-              ) : null}
-            </div>
-          </section>
+          </TopicSection>
+          <TopicSection id="notepad" hidden={!visible('notepad')}>
+            {showArchive && (
+              <section data-setting="archive" hidden={!matches('archive')} className={SECTION}>
+                <div className="text-sm text-foreground">Notepad archive</div>
+                <div className="mt-1 text-sm leading-relaxed text-muted">
+                  Notes kept from terminals and browsers that have closed. They stay
+                  until you delete them.
+                </div>
+                <button
+                  type="button"
+                  className={`${modalActionButton()} mt-2`}
+                  onClick={() => setView('archive')}
+                >
+                  Open archive
+                </button>
+              </section>
+            )}
+          </TopicSection>
         </div>
       </div>
     </ModalFrame>
