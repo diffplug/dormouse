@@ -12,6 +12,7 @@ import {
   type BrowserAutomationProvider,
   type BrowserResult,
   type ViewerFrame,
+  type ViewerSyncIntent,
   type ViewerSyncState,
 } from '../../lib/platform/browser-automation';
 import { isAllowedBinaryFor } from '../../lib/agent-browser-binary';
@@ -74,14 +75,6 @@ function abDebugLogsOn(): boolean {
 }
 function abDebugLog(message: string): void {
   if (abDebugLogsOn()) console.log(message);
-}
-
-// The pane's size, compared only to republish the screen snapshot: dims can
-// be a pixel off after rounding.
-const DIM_TOLERANCE = 1;
-
-function dimsMatch(a: { w: number; h: number }, b: { w: number; h: number }): boolean {
-  return Math.abs(a.w - b.w) <= DIM_TOLERANCE && Math.abs(a.h - b.h) <= DIM_TOLERANCE;
 }
 
 /** A viewport the screencast is fixed at: CSS size and device pixel ratio. */
@@ -260,7 +253,7 @@ export class AgentBrowserSurfaceController {
   // must not be blanked to the placeholder; only a real identity change resets
   // hasFrame.
   private lastConnectedIdentity: string | null = null;
-  /** The stream of the last live/parked phase, whose viewport sync still holds. */
+  /** The stream of the last live/parked phase: the browser `fixedDpr` describes. */
   private boundStream: number | undefined;
 
   // --- view state (the snapshot) ---
@@ -296,8 +289,8 @@ export class AgentBrowserSurfaceController {
   // new one reclaims the viewport, and the host's word on an older one is
   // stale.
   private syncEngagement: string = crypto.randomUUID();
-  // What the host last reported for that engagement.
-  private hostSync: ViewerSyncState | undefined;
+  // Whether the host last reported that engagement `synced`.
+  private hostSynced = false;
   // The viewport as the stream reports it: the Display modal's dims, and the
   // scale pointer input maps through.
   private device = { width: 1280, height: 720 };
@@ -306,16 +299,15 @@ export class AgentBrowserSurfaceController {
   private fixedDpr: number | undefined;
   private lastPublishedScreen: ScreenSnapshot | null = null;
   // Debounce for sending the host a settled pane size (armed by the pane-size
-  // observer below, only while sync is engaged).
+  // observer below).
   private resizeTimer: ReturnType<typeof setTimeout> | undefined;
 
   // --- cached pane size (avoid per-frame forced layout) ---
   // computeScreenSnapshot() runs on EVERY non-duplicate stream frame (~20Hz);
   // reading the pane's size there forces layout each time. A ResizeObserver
   // active for the whole attach duration keeps the pane's content-box size
-  // cached (the viewport div has no border/padding, so contentRect matches its
-  // client size). null ⇒ no attached view — treat as 0×0. The size syncToPane
-  // sends stays a live read.
+  // cached. null ⇒ no attached view — treat as 0×0. The size syncToPane sends
+  // stays a live read.
   // The same observer also drives sync-to-pane (debounced), so there is one
   // observer on the pane, not two.
   private paneSize: { w: number; h: number } | null = null;
@@ -391,7 +383,7 @@ export class AgentBrowserSurfaceController {
         // viewport at the size it last wrote too (an agent's `set` may have
         // taken it), and re-engages a sync it stopped.
         this.syncEngagement = crypto.randomUUID();
-        this.hostSync = undefined;
+        this.hostSynced = false;
         this.forgetFixedViewport();
         this.setSyncEngaged(true);
         this.syncToPane();
@@ -537,13 +529,11 @@ export class AgentBrowserSurfaceController {
     // Seed synchronously (ResizeObserver's first callback is async, and the test
     // stub never fires) so the first frame reads a real size, not 0×0.
     this.refreshPaneSize();
-    const observer = new ResizeObserver((entries) => {
-      const cr = entries[entries.length - 1]?.contentRect;
-      if (cr) this.paneSize = { w: Math.round(cr.width), h: Math.round(cr.height) };
+    // Read in the observer's callback, where layout is already done.
+    const observer = new ResizeObserver(() => {
+      this.refreshPaneSize();
       this.publishScreen();
-      // While syncing, send the host the settled pane size. A sync disengaged
-      // mid-debounce sends nothing (`syncToPane`).
-      if (!this.syncEngaged) return;
+      // Send the host the settled pane size, if syncing then (`syncToPane`).
       if (this.resizeTimer) clearTimeout(this.resizeTimer);
       this.resizeTimer = setTimeout(() => {
         this.resizeTimer = undefined;
@@ -1000,7 +990,7 @@ export class AgentBrowserSurfaceController {
     // The new stream reports its own status, and its host its own sync; the
     // last came from whatever this Surface streamed before.
     this.status = null;
-    this.hostSync = undefined;
+    this.hostSynced = false;
     // Unparking reconnects to the same session/stream; the last good frame is
     // still valid, so only blank to the placeholder when the identity changed.
     const identity = `${session}:${stream}`;
@@ -1103,9 +1093,6 @@ export class AgentBrowserSurfaceController {
     }
     // Reflect the flip in the indicator immediately.
     this.publishScreen();
-    // The always-on pane-size observer reads syncEngaged at fire time, so there
-    // is nothing to (re)wire here. Engaging sends the pane's size via
-    // engageSync; a debounce that outlives a disengage sends nothing.
   }
 
   /** The host's word on this pane's sync. Only the host decides another
@@ -1113,7 +1100,7 @@ export class AgentBrowserSurfaceController {
    *  report on an engagement this pane has since replaced is stale. */
   private applyHostSync(state: ViewerSyncState, engagement: string): void {
     if (engagement !== this.syncEngagement) return;
-    this.hostSync = state;
+    this.hostSynced = state === 'synced';
     if (state === 'off') this.setSyncEngaged(false);
     this.publishScreen();
   }
@@ -1229,7 +1216,7 @@ export class AgentBrowserSurfaceController {
     // fixed, else the one it would sync to.
     const viewport = { w: device.width, h: device.height, dpr: this.status?.devicePixelRatio ?? this.fixedDpr ?? displayDpr };
     // SYNCED only on the host's word that the browser is at this pane's size.
-    const state: ScreenState = this.syncEngaged && this.hostSync === 'synced' ? 'SYNCED' : 'SCALED';
+    const state: ScreenState = this.syncEngaged && this.hostSynced ? 'SYNCED' : 'SCALED';
     const renderMode = this.renderMode();
     return { state, viewport, paneCss, displayDpr, syncEngaged: this.syncEngaged, renderMode };
   }
@@ -1248,7 +1235,8 @@ export class AgentBrowserSurfaceController {
       prev.displayDpr !== next.displayDpr ||
       prev.syncEngaged !== next.syncEngaged ||
       prev.renderMode !== next.renderMode ||
-      !dimsMatch(prev.paneCss, next.paneCss);
+      prev.paneCss.w !== next.paneCss.w ||
+      prev.paneCss.h !== next.paneCss.h;
     if (changed) {
       this.lastPublishedScreen = next;
       this.registration?.update(next);
@@ -1269,7 +1257,7 @@ export class AgentBrowserSurfaceController {
     if (!el) return;
     const { w: width, h: height } = laidOutSize(el);
     if (!width || !height) return;
-    this.connection?.send({ type: 'sync', width, height, dpr: window.devicePixelRatio || 1, engagement: this.syncEngagement });
+    this.connection?.send({ type: 'sync', width, height, dpr: window.devicePixelRatio || 1, engagement: this.syncEngagement } satisfies ViewerSyncIntent);
   }
 
   /** Fix the screencast at `viewport`, disengaging sync: at once while live,

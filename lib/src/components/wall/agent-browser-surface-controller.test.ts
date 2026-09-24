@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import type { PlatformAdapter } from '../../lib/platform/types';
-import { VIEWER_TEXT_INPUT_MAX, encodeViewerFrame, type BrowserRequest, type BrowserResult } from '../../lib/platform/browser-automation';
+import { VIEWER_TEXT_INPUT_MAX, encodeViewerFrame, type BrowserRequest, type BrowserResult, type ViewerInput, type ViewerSyncIntent } from '../../lib/platform/browser-automation';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
 import { forgetLaunchBinaryPaths, launchBinaryPath, rememberLaunchBinaryPath } from './browser-automation';
 import {
@@ -289,15 +289,17 @@ describe('painting', () => {
   });
 });
 
+/** The sync messages a controller sent over its viewer sockets to `port`. */
+const syncMessages = (port: number) => streamSockets(port)
+  .flatMap((ws) => ws.sent.map((raw) => JSON.parse(raw) as ViewerInput))
+  .filter((message): message is ViewerSyncIntent => message.type === 'sync');
+
 /** The pane sizes a controller asked the host to sync the browser at `port`
- *  to, over its viewer socket, as `[width, height, dpr]`. */
-const syncs = (port: number) => streamSockets(port).flatMap((ws) => ws.sent.map((raw) => JSON.parse(raw) as Record<string, unknown>))
-  .filter((message) => message.type === 'sync')
-  .map(({ width, height, dpr }) => [width, height, dpr]);
+ *  to, as `[width, height, dpr]`. */
+const syncs = (port: number) => syncMessages(port).map(({ width, height, dpr }) => [width, height, dpr]);
 
 /** The engagement the controller's last sync message to `port` named. */
-const engagementAt = (port: number) => streamSockets(port).flatMap((ws) => ws.sent.map((raw) => JSON.parse(raw) as Record<string, unknown>))
-  .filter((message) => message.type === 'sync').at(-1)?.engagement as string | undefined;
+const engagementAt = (port: number) => syncMessages(port).at(-1)?.engagement;
 
 /** The host's word on the sync of the browser at `port`. */
 function hostSync(port: number, state: 'applying' | 'synced' | 'off', engagement = engagementAt(port)) {
@@ -1363,19 +1365,11 @@ describe('relaunch (pop-out / pop-in)', () => {
 
   it('reaches no daemon from the header, Display modal, tabs, sync or edit chords mid-relaunch, and carries a navigation to the new browser', async () => {
     const host = relaunchHost();
-    const observers: ResizeObserverCallback[] = [];
-    vi.stubGlobal('ResizeObserver', class {
-      constructor(callback: ResizeObserverCallback) { observers.push(callback); }
-      observe() {}
-      disconnect() {}
-    });
+    const pane = resizablePane();
     vi.useFakeTimers();
     try {
       const controller = withPort('id', { session: 'sess' }, 1111);
-      const sink = makeSink();
-      let size = { width: 800, height: 600 };
-      layOut(sink.viewport, () => size);
-      controller.attachView(sink);
+      controller.attachView(pane.sink);
       await vi.advanceTimersByTimeAsync(0);
       streamSocket(1111)?.emitMessage(JSON.stringify({
         type: 'tabs',
@@ -1400,8 +1394,7 @@ describe('relaunch (pop-out / pop-in)', () => {
       const [first, second] = controller.snapshot().tabs;
       controller.selectTab(second);
       controller.closeTab(first);
-      size = { width: 900, height: 700 };
-      observers.at(-1)?.([{ contentRect: { width: 900, height: 700 } } as ResizeObserverEntry], {} as ResizeObserver);
+      pane.resize(900, 700);
       await vi.advanceTimersByTimeAsync(250);
       controller.handleKeyDownLike({ key: 'a', code: 'KeyA', metaKey: true, ctrlKey: false, altKey: false, shiftKey: false });
       await vi.advanceTimersByTimeAsync(0);

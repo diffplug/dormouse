@@ -217,13 +217,14 @@ Resolution controls apply to both screencast providers. **Fixed** issues
   flight keeps only the latest size, so a drag coalesces.
 - **The host judges a write only by a viewport taken after it landed**, as the
   provider vouches for it: agent-browser's changed frames, Playwright's poll
-  measurement tagged with when it began; never `status` or the ratio
-  (rationale). **One still differing 250ms later, with no write since, is
-  another writer's**: the host stops that browser's sync, reports `off`, and
-  writes no later size of that engagement. **A page shown anew (the active tab)
-  is written, never judged.**
+  measurement tagged with when it began; never `status`, Playwright's
+  screencast metadata, or the ratio (rationale). **One still differing 250ms
+  later, with no write since, is another writer's**: the host stops that
+  browser's sync, reports `off`, and writes no later size of that engagement.
+  **A page shown anew (the active tab) is written, never judged.**
 - **A Fixed viewport or device ends the browser's sync**, after its write in
-  flight.
+  flight; **refused if a launch or close of that browser began meanwhile, or
+  the host shut down**.
 
 **Only `syncEngaged` persists** — device/custom viewport state lives in
 the browser itself. **The webview disengages only on the host's `off` for its
@@ -348,8 +349,8 @@ a Playwright connection — and what `view` takes back.
 
 - **Every browser operation must pass one gate (`driver`), open only in
   `live`** — chrome and Display modal actions, tabs, edit chords (rationale);
-  sync-to-pane rides the viewer socket, which exists only there. **An unpark catches up — sync, a pending intent — only once its
-  socket opens.** The gate orders the Surface's own intents; the host is what
+  sync-to-pane rides the viewer socket, which exists only there. **An unpark
+  catches up on a pending intent only once its socket opens.** The gate orders the Surface's own intents; the host is what
   keeps an operation off a browser mid-relaunch ([Browser Host](#browser-host)).
 - **A navigation or a Fixed viewport asked for outside `live` is kept as the
   one latest intent**, run on the next `live` (a viewport never on a headed
@@ -382,7 +383,6 @@ stopping on its own because clients trigger it.
 - **An unpark keeps the last good frame on screen**, re-priming from the
   stream's re-broadcast frame/tabs; a fresh reattach mounts a blank canvas and
   asks the host to `repaint`, showing the placeholder until a frame lands.
-- **A resize made while not `live` is sent once the socket opens.**
 - **Never park a popped-out pane**: its viewer socket brings the window's page
   and its close, which auto-reverts, even while minimized.
 - **Never set `AGENT_BROWSER_IDLE_TIMEOUT_MS`** for Dormouse-managed sessions —
@@ -699,7 +699,7 @@ Arbitrary CLI arguments, JavaScript and CDP methods are unavailable through the 
 
 A relaunch closes the previous CLI session, and a launch completes when the browser endpoint is ready; its stream is the host's number for that connection. **Every CLI call a launch waits on is killed at its deadline; every other one at 10 s, except `open`**, which lasts as long as the page load and whose end could take its browser down; nothing waits on it past a launch's own bounds. Shutdown also disconnects viewers. Viewer disconnect alone leaves the CLI browser alive; **a browser that disconnects on its own is reported gone to its viewers**. Concurrent input/captures share CDP attachments; disposal releases late attachments. **A screencast that fails to start must forget its page**, so the next poll releases the attachment and retries.
 
-The viewer socket ([Viewer Socket](#viewer-socket)) takes its frames from the CDP screencast, **decoded once and acknowledged no faster than 20 a second** (rationale), and inserts a paste with CDP `Input.insertText`. **Must drop a frame byte-identical to the last, still acknowledging it** (rationale). **Never read a page's viewport from its screencast metadata** (rationale); the poll measures it on the page. **Input waiting on CDP past 256 messages closes the viewer socket.**
+The viewer socket ([Viewer Socket](#viewer-socket)) takes its frames from the CDP screencast, **decoded once and acknowledged no faster than 20 a second** (rationale), and inserts a paste with CDP `Input.insertText`. **Must drop a frame byte-identical to the last, still acknowledging it** (rationale). **Input waiting on CDP past 256 messages closes the viewer socket.**
 
 **Must write a page's viewport only through Playwright's own `setViewportSize`** — sync, a Fixed size and a device alike — **never a CDP metrics override from the host's session** (rationale). A page keeps its browser context's ratio (1 for a browser the CLI opened), whatever ratio a request names. **A device adds only its touch and user agent over the host's CDP session, which the next viewport write resets.**
 

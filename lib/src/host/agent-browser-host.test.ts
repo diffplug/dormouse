@@ -9,7 +9,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { createAgentBrowserProvider } from './agent-browser-host';
 import { createBrowserCaptures, type BrowserCaptures } from './browser-capture';
 import { createBrowserHost } from './browser-host';
-import { openViewer } from './browser-host-test-utils';
+import { openViewer, syncStates } from './browser-host-test-utils';
 import { SYNC_SETTLE_MS } from './browser-sync';
 import { WINDOW_GONE_GRACE_MS } from './browser-viewer';
 
@@ -758,19 +758,18 @@ describe('agent-browser host viewer', () => {
     spawnMock.mockImplementation(async () => spawnResult({}));
     const viewer = await view(daemon.port);
     await daemon.connected();
-    const reports = () => viewer.states.filter((state) => state.type === 'sync').map((state) => state.state);
     viewer.send({ type: 'sync', width: 900, height: 600, dpr: 2, engagement: 'e1' });
     await vi.waitFor(() => expect(spawnMock.mock.calls.map(([, args]) => args.slice(2).join(' '))).toContain('set viewport 900 600 2'));
     await new Promise((resolve) => setTimeout(resolve, 20));
     daemon.send(frame(1, 900));
-    await vi.waitFor(() => expect(reports().at(-1)).toBe('synced'));
+    await vi.waitFor(() => expect(syncStates(viewer).at(-1)).toBe('synced'));
     // The daemon's status names a viewport too: never judged.
     daemon.send({ type: 'status', connected: true, screencasting: true, viewportWidth: 1280, viewportHeight: 720 });
     await new Promise((resolve) => setTimeout(resolve, SYNC_SETTLE_MS + 100));
-    expect(reports().at(-1)).toBe('synced');
+    expect(syncStates(viewer).at(-1)).toBe('synced');
     // An agent's `set viewport`, as the daemon's frames show it.
     daemon.send(frame(2, 1024));
-    await vi.waitFor(() => expect(reports().at(-1)).toBe('off'));
+    await vi.waitFor(() => expect(syncStates(viewer).at(-1)).toBe('off'));
   });
 
   it('sends the daemon only validated input, a paste as a key pair per character', async () => {

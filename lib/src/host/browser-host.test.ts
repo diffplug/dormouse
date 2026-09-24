@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createBrowserHost } from './browser-host';
-import { fakeProvider, openViewer } from './browser-host-test-utils';
+import { fakeProvider, openViewer, syncStates } from './browser-host-test-utils';
 import { SYNC_SETTLE_MS } from './browser-sync';
 
 const flush = async () => { for (let i = 0; i < 10; i++) await new Promise((resolve) => setImmediate(resolve)); };
@@ -356,7 +356,6 @@ describe('sync-to-pane', () => {
     hosts.push(host);
     const viewer = await openViewer((await host.request({ ...s1, op: 'view', stream: 4321, ...(headed ? { headed } : {}) })).url!);
     await vi.waitFor(() => expect(fake.views).toHaveLength(1));
-    const reports = () => viewer.states.filter((state) => state.type === 'sync');
     return {
       fake,
       host,
@@ -365,12 +364,12 @@ describe('sync-to-pane', () => {
       seen: (width: number, height: number, takenAt = performance.now()) => fake.views[0].sink.viewport({ width, height }, takenAt),
       /** The pane's size, once the host has answered it. */
       async size(width: number, height: number, engagement = 'e1') {
-        const answered = reports().length;
+        const answered = syncStates(viewer).length;
         viewer.send({ type: 'sync', width, height, dpr: 2, engagement });
-        await vi.waitFor(() => expect(reports().length).toBeGreaterThan(answered));
+        await vi.waitFor(() => expect(syncStates(viewer).length).toBeGreaterThan(answered));
       },
       writes: () => fake.calls.filter((call) => call.startsWith('viewport ') || call.startsWith('device ')),
-      state: () => reports().at(-1)?.state,
+      state: () => syncStates(viewer).at(-1),
     };
   }
 
@@ -484,6 +483,30 @@ describe('sync-to-pane', () => {
     expect(await fixed).toEqual({ ok: false, error: 'the browser is being relaunched or closed' });
     pane.fake.release('stop s1');
     expect((await relaunch).ok).toBe(true);
+    expect(pane.writes()).toEqual(['viewport s1 800x600@2']);
+  });
+
+  it('drops a Fixed resolution that waited on a write through a whole relaunch', async () => {
+    const pane = await paneOn();
+    pane.fake.gate('viewport s1 800x600@2');
+    await pane.size(800, 600);
+    const fixed = pane.host.request({ ...s1, op: 'device', name: 'iPhone 15' });
+    await flush();
+    expect((await pane.host.request({ ...s1, op: 'launch', url: 'http://localhost:5173/' })).ok).toBe(true);
+    pane.fake.release('viewport s1 800x600@2');
+    expect(await fixed).toEqual({ ok: false, error: 'the browser is being relaunched or closed' });
+    expect(pane.writes()).toEqual(['viewport s1 800x600@2']);
+  });
+
+  it('drops a Fixed resolution that waited on a write through shutdown', async () => {
+    const pane = await paneOn();
+    pane.fake.gate('viewport s1 800x600@2');
+    await pane.size(800, 600);
+    const fixed = pane.host.request({ ...s1, op: 'viewport', width: 1024, height: 768, dpr: 1 });
+    await flush();
+    await pane.host.close();
+    pane.fake.release('viewport s1 800x600@2');
+    expect(await fixed).toEqual({ ok: false, error: 'the browser host is shutting down' });
     expect(pane.writes()).toEqual(['viewport s1 800x600@2']);
   });
 

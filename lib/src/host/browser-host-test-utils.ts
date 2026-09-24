@@ -5,7 +5,7 @@
 import { WebSocket } from 'ws';
 import type { BrowserProvider, ProviderBinding } from './browser-host';
 import type { Upstream, ViewerSink } from './browser-viewer';
-import { decodeViewerFrame, type ViewerBrowserInput, type ViewerFrame, type ViewerState } from '../lib/platform/browser-automation';
+import { decodeViewerFrame, type ViewerBrowserInput, type ViewerFrame, type ViewerState, type ViewerSyncState } from '../lib/platform/browser-automation';
 
 /** One subscription the host made through the fake provider's `view`. */
 export interface FakeView {
@@ -94,6 +94,11 @@ export interface TestViewer {
   closed: Promise<number>;
   /** The reason the host closed it with, once it has. */
   reason?: string;
+}
+
+/** What the host reported of its sync-to-pane to `viewer`, in order. */
+export function syncStates(viewer: TestViewer): ViewerSyncState[] {
+  return viewer.states.flatMap((state) => (state.type === 'sync' ? [state.state] : []));
 }
 
 /** Connect to a viewer socket URL as the webview does, once it is open. */

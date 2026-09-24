@@ -37,7 +37,7 @@ import {
 import { createBrowserCaptures } from './browser-capture';
 import { createViewportSync } from './browser-sync';
 import type { WebSocket } from 'ws';
-import { BrowserView, closeSocket, createViewerServer, type Upstream, type ViewerSink } from './browser-viewer';
+import { BrowserView, WEBVIEW_ID, closeSocket, createViewerServer, type Upstream, type ViewerSink } from './browser-viewer';
 
 /** An operation on a live browser that each provider maps to its own call:
  *  a fixed agent-browser argv, or a Playwright client call. */
@@ -152,13 +152,11 @@ function generateGuiSession(): string {
 
 const TAB_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const DEVICE_NAME = /^[A-Za-z0-9][A-Za-z0-9 ()._-]{0,63}$/;
-/** A webview-minted id of a request that can bring a browser up. */
-const REQUEST_ID = /^[A-Za-z0-9-]{1,64}$/;
 
 /** `value` as an optional request id: absent, valid, or `null` when invalid. */
 function optionalRequestId(value: unknown): { requestId?: string } | null {
   if (value === undefined) return {};
-  return typeof value === 'string' && REQUEST_ID.test(value) ? { requestId: value } : null;
+  return typeof value === 'string' && WEBVIEW_ID.test(value) ? { requestId: value } : null;
 }
 
 function dimension(value: unknown, max: number): number | null {
@@ -236,7 +234,7 @@ function parseOp(r: Record<string, unknown>): BrowserOp | string {
       const cancels = r.cancels;
       if (cancels === undefined) return { op: 'close' };
       const valid = Array.isArray(cancels) && cancels.length <= BROWSER_CLOSE_MAX_CANCELS
-        && cancels.every((id) => typeof id === 'string' && REQUEST_ID.test(id));
+        && cancels.every((id) => typeof id === 'string' && WEBVIEW_ID.test(id));
       return valid ? { op: 'close', cancels: [...cancels] as string[] } : 'invalid cancelled request ids';
     }
     default:
@@ -539,13 +537,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
         if (open?.size === 0) views.delete(bound.id);
       },
       // A popped-out window is never sized with a pane.
-      ...(isHeaded ? {} : {
-        sync: {
-          intent: (intent) => sync.intent(bound, bound.id, stream, intent),
-          viewport: (size, takenAt) => sync.viewport(bound.id, stream, size, takenAt),
-          pageShown: (tabId) => sync.pageShown(bound.id, stream, tabId),
-        },
-      }),
+      ...(isHeaded ? {} : { sync: sync.view(bound, stream) }),
       ...(debug && deps.log ? { log: deps.log } : {}),
     });
     let open = views.get(bound.id);
@@ -633,11 +625,15 @@ export function createBrowserHost(deps: BrowserHostDeps) {
         case 'edit':
           return await edit(bound, r.edit);
         case 'viewport':
-        case 'device':
-          // A Fixed resolution ends sync-to-pane, and lands after its write —
-          // unless a launch or close began meanwhile.
+        case 'device': {
+          // A Fixed resolution ends sync-to-pane and lands after its write,
+          // never on a browser a launch or close began to replace meanwhile.
+          const generation = generations.get(bound.id);
           await sync.fixed(bound.id);
-          return settling.has(bound.id) ? settlingAnswer : await p.act(b, r);
+          if (closed) throw new Error('the browser host is shutting down');
+          if (settling.has(bound.id) || generations.get(bound.id) !== generation) return settlingAnswer;
+          return await p.act(b, r);
+        }
         default:
           return await p.act(b, r);
       }

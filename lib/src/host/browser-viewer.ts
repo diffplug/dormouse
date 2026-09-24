@@ -462,8 +462,9 @@ function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
 
 const MOUSE_EVENTS = new Set(['mouseMoved', 'mousePressed', 'mouseReleased', 'mouseWheel']);
 const MOUSE_BUTTONS = new Set(['left', 'right', 'middle', 'none']);
-// The webview mints one per choice of Resize with pane (`crypto.randomUUID()`).
-const ENGAGEMENT = /^[A-Za-z0-9-]{1,64}$/;
+/** An id the webview mints (`crypto.randomUUID()`): a request's, or a choice
+ *  of Resize with pane's. */
+export const WEBVIEW_ID = /^[A-Za-z0-9-]{1,64}$/;
 const finiteCoordinate = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && Math.abs(n) <= 1e6;
 const integer = (n: unknown): number => (Number.isInteger(n) ? n as number : 0);
 
@@ -512,8 +513,8 @@ export function parseViewerInput(raw: string): ViewerInput | null {
     case 'input_text':
       return typeof data.text === 'string' && data.text.length <= VIEWER_TEXT_INPUT_MAX ? { type: 'input_text', text: data.text } : null;
     case 'sync': {
-      const size = measuredViewport({ width: data.width, height: data.height, dpr: data.dpr });
-      return size && typeof data.engagement === 'string' && ENGAGEMENT.test(data.engagement)
+      const size = measuredViewport(data);
+      return size && typeof data.engagement === 'string' && WEBVIEW_ID.test(data.engagement)
         ? { type: 'sync', width: size.viewportWidth, height: size.viewportHeight, dpr: size.devicePixelRatio, engagement: data.engagement }
         : null;
     }

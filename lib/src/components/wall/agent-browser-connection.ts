@@ -1,4 +1,4 @@
-import { decodeViewerFrame, type BrowserResult, type ViewerFrame, type ViewerState, type ViewerSyncState } from '../../lib/platform/browser-automation';
+import { decodeViewerFrame, type BrowserResult, type ViewerFrame, type ViewerState } from '../../lib/platform/browser-automation';
 import { type AgentBrowserTab, parseAgentBrowserTabs } from '../../lib/agent-browser-tab';
 
 // Re-exported so existing importers keep resolving the tab type/parser from here.
@@ -41,7 +41,7 @@ export type AgentBrowserConnectionEvent =
   /** A popped-out window's page, as its browser reports it. */
   | { type: 'page'; url: string; title: string | null }
   /** Where the host's sync-to-pane stands for `engagement`. */
-  | { type: 'sync'; state: ViewerSyncState; engagement: string }
+  | Extract<ViewerState, { type: 'sync' }>
   /** A frame to paint: provisional (CSS resolution) or crisp. */
   | ({ type: 'frame' } & ViewerFrame)
   | { type: 'debug'; event: AgentBrowserDebugEvent };
