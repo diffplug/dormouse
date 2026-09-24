@@ -252,7 +252,7 @@ export function AlarmSettingsSection({ sink, preview = false }: { sink: AlertSin
   return sink === 'speech' ? (
     <AlarmSinkSection
       className={preview ? '' : SECTION}
-      switchLabel="Speak out loud when you're not looking at that pane"
+      switchLabel="Speak out loud if not attended"
       delayLabel="Delay before speaking:"
       enabled={settings.speakEnabled}
       delayMs={settings.speakDelayMs}
@@ -268,7 +268,7 @@ export function AlarmSettingsSection({ sink, preview = false }: { sink: AlertSin
   ) : (
     <AlarmSinkSection
       className={preview ? '' : SECTION}
-      switchLabel="Send push notification when you're away from Dormouse"
+      switchLabel="Send push notification if not attended"
       delayLabel="Delay before push:"
       enabled={settings.pushEnabled}
       delayMs={settings.pushDelayMs}
