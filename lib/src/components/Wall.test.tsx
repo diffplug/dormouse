@@ -4814,3 +4814,23 @@ it('moves a retained helper without resizing or replacing its source, and rememb
   act(() => container.querySelector<HTMLButtonElement>('[aria-label="Place helper at top"]')!.click());
   expect(container.querySelector<HTMLElement>('[data-terminal-context]')!.dataset.contextSide).toBe('top');
 });
+
+
+it.each(['Shift', 'Meta'])('cancels an interrupted %s leader without leaving passthrough', async modifier => {
+  await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="passthrough" />));
+  await flush();
+  const press = (key: string, location = 0) => act(async () => {
+    (document.activeElement ?? window).dispatchEvent(new KeyboardEvent('keydown', {
+      key, location, bubbles: true, cancelable: true,
+      shiftKey: modifier === 'Shift', metaKey: modifier === 'Meta',
+    }));
+  });
+  await press(modifier, 1);
+  await press('I');
+  await press(modifier, 2);
+  expect(container.querySelector('[data-session-id="pane-a"]')?.getAttribute('data-focused')).toBe('true');
+  // Cancellation only drops the pending gesture; a fresh pair still works.
+  await press(modifier, 1);
+  await press(modifier, 2);
+  expect(container.querySelector('[data-session-id="pane-a"]')?.getAttribute('data-focused')).toBe('false');
+});

@@ -269,6 +269,10 @@ false, `inputmode="text"`, `enterkeyhint="enter"`.
 * **Must handle software-keyboard Enter and Backspace through `beforeinput`
   when no `keydown` occurs**, including deletion from the empty hidden input.
 
+Source of truth: `MobileTerminalUi` in `lib/src/components/MobileTerminalUi.tsx`;
+`isComposingKey` in `lib/src/lib/dom.ts`.
+Tests: `lib/src/components/MobileTerminalUi.test.tsx`.
+
 ## Keyboard focus invariant
 
 **Pane-content touches must never open the native keyboard.** The pane content

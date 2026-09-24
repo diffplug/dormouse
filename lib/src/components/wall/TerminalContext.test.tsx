@@ -267,3 +267,22 @@ it('position buttons preserve input focus and report the destination', async () 
   expect(button('Place helper at top').getAttribute('aria-pressed')).toBe('true');
   expect(document.activeElement).toBe(input);
 });
+
+
+it.each(['composing', 'WebKit ending'])('leaves detail Escape and Tab to the IME (%s)', async phase => {
+  render();
+  await click('Modify autorun command');
+  const input = container.querySelector<HTMLInputElement>('[role="dialog"] input')!;
+  act(() => input.focus());
+  for (const key of ['Tab', 'Escape']) {
+    const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, isComposing: phase === 'composing' });
+    if (phase === 'WebKit ending') Object.defineProperty(event, 'keyCode', { value: 229 });
+    act(() => input.dispatchEvent(event));
+    expect(event.defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(input);
+    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(props.onClose).not.toHaveBeenCalled();
+  }
+  act(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
+});

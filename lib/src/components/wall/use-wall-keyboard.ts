@@ -40,6 +40,9 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
       if (!c.activeRef.current || answeredKeys.has(e)) return;
       answeredKeys.add(e);
 
+      // Any other key cancels a pending leader: a left-Shift capital, a word,
+      // then a right-Shift capital is typing, not the gesture.
+      if (e.key !== 'Meta' && e.key !== 'Shift') lastCmdSide.current = lastShiftSide.current = null;
       const context = (e.target as HTMLElement | null)?.closest?.('[data-terminal-context]');
       if (context) {
         if (handleEditableClipboard(e)) return;
