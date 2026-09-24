@@ -133,6 +133,9 @@ interface Ring extends SourceSet {
  */
 interface HeldCompletion extends SourceSet {
   detail: ActivityNotification;
+  /** Its report came due from an animation deferral: escalating rings it,
+   *  never defers it again. */
+  reportDeferred: boolean;
 }
 
 interface CommandExitWatch {
@@ -252,8 +255,8 @@ interface AwaitGroup {
 }
 
 export interface AlertState {
-  /** Live delivery identity; absent only on older host snapshots. */
-  episode?: AlertEpisode | null;
+  /** The ringing interval's delivery identity; null while not ringing. */
+  episode: AlertEpisode | null;
   status: SessionStatus;
   watchingEnabled: boolean;
   todo: TodoState;
@@ -594,7 +597,7 @@ export class AlertManager {
     deferrable = true,
   ): void {
     if (this.isEngaged(id)) {
-      this.hold(entry, source, detail);
+      this.hold(entry, source, detail, !deferrable);
     } else if (source === 'report' && deferrable) {
       this.deliverReport(id, entry, detail);
       return;
@@ -1193,15 +1196,17 @@ export class AlertManager {
     return Date.now() < entry.echoUntil;
   }
 
-  private hold(entry: AlertEntry, source: ListedRingSource | WatchingSource, detail: ActivityNotification): void {
-    const held = entry.held ??= { sources: [], watching: null, detail };
+  private hold(entry: AlertEntry, source: ListedRingSource | WatchingSource, detail: ActivityNotification, deferred: boolean): void {
+    const held = entry.held ??= { sources: [], watching: null, detail, reportDeferred: false };
     held.detail = richer(held.detail, detail);
+    held.reportDeferred ||= deferred;
     addSource(held, source);
   }
 
   /**
    * Presence lapsed from inactivity with focus unchanged: each held source takes
-   * the path it would have taken unengaged, with the richest held detail.
+   * the path it would have taken unengaged, with the richest held detail — a
+   * report whose deferral already came due skipping deferral.
    */
   private escalateHeld(id: string, entry: AlertEntry): void {
     const held = entry.held;
@@ -1209,7 +1214,7 @@ export class AlertManager {
     entry.held = null;
     if (held.watching !== null) this.holdOrDeliver(id, entry, held.watching, held.detail);
     for (const source of LISTED_RING_SOURCES) {
-      if (held.sources.includes(source)) this.holdOrDeliver(id, entry, source, held.detail);
+      if (held.sources.includes(source)) this.holdOrDeliver(id, entry, source, held.detail, !held.reportDeferred);
     }
   }
 

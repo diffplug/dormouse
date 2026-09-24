@@ -191,9 +191,7 @@ export function createSidecarSurfaceBridge(
   const pty = alertedPty(options.alerts, options.mgr);
 
   const { provider, notifyDirectoryChanged } = createAskSurfaceProvider(ask, {
-    // The Burrow has already dropped a mirror's terminal replies, so what
-    // reaches here is a human's input.
-    writePty: (ptyId, data) => pty.write(ptyId, data, { userInput: true }),
+    writePty: pty.writeClientInput,
     resizePty: pty.resize,
 
     streamPty(ptyId, sink) {

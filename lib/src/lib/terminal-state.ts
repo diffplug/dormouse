@@ -394,13 +394,14 @@ export function commandWatchKey(raw: string): string | null {
 /**
  * Whether `name` is a WATCHING key some command line can produce: a bare
  * program name, or exactly `<runner> <script>`. Neither part holds a path
- * separator or a Windows drive prefix, and the program never ends in a launcher
- * suffix — `commandProgramName` strips those.
+ * separator, and the program never starts with a Windows drive prefix or ends
+ * in a launcher suffix — `commandProgramName` strips those. A script may look
+ * like a drive prefix (`npm run b:dev`).
  */
 export function isWatchKey(name: string): boolean {
   const parts = name.split(' ');
-  if (parts.length > 2 || parts.some((part) => !part || /[\\/\s]|^[A-Za-z]:/.test(part))) return false;
-  return !WINDOWS_EXECUTABLE_SUFFIX.test(parts[0]!);
+  if (parts.length > 2 || parts.some((part) => !part || /[\\/\s]/.test(part))) return false;
+  return !/^[A-Za-z]:/.test(parts[0]!) && !WINDOWS_EXECUTABLE_SUFFIX.test(parts[0]!);
 }
 
 /**
@@ -902,7 +903,11 @@ function withRequiredHostPrefixes(
 /**
  * Split a command line into words, honoring quotes, POSIX backslash escapes,
  * and the pipeline/compound separators `| || && ; &` (and a case item's
- * `;; ;& ;;&`), which are emitted as their own tokens. An unquoted newline
+ * `;; ;& ;;&`), which are emitted as their own tokens; `|&`, and fish's `&|`,
+ * pipe both streams and are emitted as `|`. A redirection's `&` or `|` stays
+ * in its word — `2>&1`, `<&3`, `>|`, and `&>` / `&>>`, which start a word of
+ * their own — so none of them reads as a separator. An unquoted `#` starting a
+ * word comments out the rest of its line. An unquoted newline
  * separates commands like `;`, and a backslash-newline continues the line. A
  * here-document's body — the lines after an unquoted `<<` / `<<-`'s own line,
  * through the one equal to its delimiter word with quotes removed — is
@@ -930,9 +935,10 @@ function tokenizeCommand(input: string): string[] {
   let escaping = false;
   // Open parentheses of the substitution or array being read.
   let wordParens = 0;
-  // Whether the last character was an unquoted, unescaped `$`, `<` or `>`,
-  // which makes a `(` right after it open a substitution.
-  let substitutionPrefix = false;
+  // The last character when it was an unquoted, unescaped `$`, `<` or `>`: a
+  // `(` right after it opens a substitution, and an `&` right after a `<` or
+  // `>` (or a `|` after a `>`) belongs to that redirection.
+  let operatorPrefix: string | null = null;
   // Here-documents opened on the current line, whose bodies follow it in order.
   const hereDocuments: HereDocument[] = [];
 
@@ -944,8 +950,8 @@ function tokenizeCommand(input: string): string[] {
 
   for (let i = 0; i < input.length; i += 1) {
     const char = input[i];
-    const opensSubstitution = substitutionPrefix;
-    substitutionPrefix = false;
+    const prefix = operatorPrefix;
+    operatorPrefix = null;
 
     if (escaping) {
       current += char;
@@ -975,7 +981,7 @@ function tokenizeCommand(input: string): string[] {
       continue;
     }
     // A substitution or array is one word, through the `)` closing its first `(`.
-    if (wordParens > 0 || (char === '(' && (opensSubstitution || ARRAY_ASSIGNMENT_PREFIX.test(current)))) {
+    if (wordParens > 0 || (char === '(' && (prefix !== null || ARRAY_ASSIGNMENT_PREFIX.test(current)))) {
       if (char === '(') wordParens += 1;
       else if (char === ')') wordParens -= 1;
       current += char;
@@ -995,6 +1001,23 @@ function tokenizeCommand(input: string): string[] {
     if (char === '(' || char === ')') {
       push();
       tokens.push(char);
+      continue;
+    }
+    // `2>&1`, `<&3`, `>&-`, `>|`: the redirection it continues.
+    if ((char === '&' && (prefix === '<' || prefix === '>')) || (char === '|' && prefix === '>')) {
+      current += char;
+      continue;
+    }
+    // `&>` / `&>>` redirect both streams, a word of their own.
+    if (char === '&' && input[i + 1] === '>') {
+      push();
+      current = char;
+      continue;
+    }
+    if ((char === '|' && input[i + 1] === '&') || (char === '&' && input[i + 1] === '|')) {
+      push();
+      tokens.push('|');
+      i += 1;
       continue;
     }
     if (char === '&' && input[i + 1] === '&') {
@@ -1022,13 +1045,20 @@ function tokenizeCommand(input: string): string[] {
       tokens.push(char);
       continue;
     }
+    // A `#` starting a word comments out the rest of its line.
+    if (char === '#' && current === '' && (i === 0 || /[\s;&|()]/.test(input[i - 1]!))) {
+      const newline = input.indexOf('\n', i);
+      if (newline === -1) break;
+      i = newline - 1;
+      continue;
+    }
     // `<<` or `<<-`, never the here-string `<<<`.
     if (char === '<' && input[i + 1] === '<' && input[i + 2] !== '<' && input[i - 1] !== '<') {
       const hereDocument = readHereDocumentDelimiter(input, i + 2);
       if (hereDocument) hereDocuments.push(hereDocument);
     }
     current += char;
-    substitutionPrefix = char === '$' || char === '<' || char === '>';
+    if (char === '$' || char === '<' || char === '>') operatorPrefix = char;
   }
 
   push();
@@ -1116,26 +1146,29 @@ const LIST_SEPARATORS = new Set(['&&', '||', ';', '&', ...CASE_ITEM_ENDS]);
 /** The subshell and group operators `tokenizeCommand` emits; lexical only, so a
  *  group's inner list is split like any other. */
 const GROUPING_TOKENS = new Set(['(', ')', '{', '}']);
-/** Words that close a compound command. A segment one leads holds only that
- *  command's redirections or pipeline (`done < list`, `fi | tee log`). */
-const CLOSING_WORDS = new Set(['done', 'fi', 'esac', '}', ')']);
-/** Words that open a compound command or one of its clauses, or negate: the
- *  rest of their segment is the command they run. */
-const OPENING_WORDS = new Set(['if', 'elif', 'then', 'else', 'while', 'until', 'do', '!', '(', '{']);
+/** Words that close a compound command, fish's `end` among them. A segment one
+ *  leads holds only that command's redirections or pipeline (`done < list`,
+ *  `fi | tee log`). */
+const CLOSING_WORDS = new Set(['done', 'fi', 'esac', 'end', '}', ')']);
+/** Words that open a compound command or one of its clauses, negate, or — fish's
+ *  `and` / `or` — chain: the rest of their segment is the command they run. */
+const OPENING_WORDS = new Set(['if', 'elif', 'then', 'else', 'while', 'until', 'do', '!', '(', '{', 'begin', 'and', 'or', 'not']);
 /** Loop headers: a name and a word list, never a command. */
 const LOOP_HEADERS = new Set(['for', 'select']);
 
 /**
  * The simple commands of a list, in order, with the shell's grammar around them
- * taken out: separators, grouping, a compound command's reserved words, a loop
- * header, and a case item's pattern; a pipeline stays in one piece. Lexical,
- * like the tokenizer, and a reserved word counts only where a command starts,
- * so `for f in *; do make; done` and `if x; then make; fi` run `make`.
+ * taken out: separators, grouping, a compound command's reserved words (POSIX
+ * and fish), a loop header, and a case item's pattern; a pipeline stays in one
+ * piece. Lexical, like the tokenizer, and a reserved word counts only where a
+ * command starts, so `for f in *; do make; done`, `if x; then make; fi` and
+ * fish's `while x; make; end` run `make`.
  */
 function listCommands(tokens: readonly string[]): string[][] {
   const commands: string[][] = [];
-  /** The next command starts with a case item's `pattern)`. */
-  let casePattern = false;
+  /** The next command starts with a case item's `pattern)`, or — after a line
+   *  `case WORD` — maybe with the `in` POSIX lets it put there. */
+  let caseNext: 'pattern' | 'in' | null = null;
   let segment: string[] = [];
 
   const end = (): void => {
@@ -1143,23 +1176,27 @@ function listCommands(tokens: readonly string[]): string[][] {
     segment = [];
     if (words.length === 0) return;
     if (CLOSING_WORDS.has(words[0]!)) {
-      if (words[0] === 'esac') casePattern = false;
+      if (words[0] === 'esac') caseNext = null;
       return;
     }
     for (;;) {
       if (words.length === 0) return;
       const first = words[0]!;
-      if (OPENING_WORDS.has(first)) {
+      if (caseNext === 'in') {
+        // Without it, the line was fish's `case PATTERN…`: patterns alone.
+        caseNext = first === 'in' ? 'pattern' : null;
+        if (caseNext !== null) words = words.slice(1);
+      } else if (OPENING_WORDS.has(first)) {
         words = words.slice(1);
-      } else if (casePattern) {
-        casePattern = false;
+      } else if (caseNext === 'pattern') {
+        caseNext = null;
         const close = words.indexOf(')');
         if (close === -1) break;
         words = words.slice(close + 1);
       } else if (first === 'case') {
         // `case WORD in`, then the first item's pattern.
-        casePattern = true;
         const inAt = words.indexOf('in', 2);
+        caseNext = inAt === -1 ? 'in' : 'pattern';
         words = inAt === -1 ? [] : words.slice(inAt + 1);
       } else if (LOOP_HEADERS.has(first)) {
         return;
@@ -1176,7 +1213,7 @@ function listCommands(tokens: readonly string[]): string[][] {
       continue;
     }
     end();
-    if (CASE_ITEM_ENDS.has(token)) casePattern = true;
+    if (CASE_ITEM_ENDS.has(token)) caseNext = 'pattern';
   }
   end();
   return commands.filter((words) => words.length > 0);
@@ -1313,8 +1350,26 @@ function wrappedCommandIndex(words: readonly string[], index: number): { index: 
   return i < words.length ? { index: i, packageSpec: spec.packageSpec === true } : null;
 }
 
-/** One simple command's watch key: wrappers and assignments skipped, runners keyed by script. */
-function watchKeyOfCommand(words: readonly string[]): string | null {
+/** A redirection word: its operator after an optional fd (`2>&1`, `>log`), or
+ *  the operator alone, its target the next word. A `<(…)` / `>(…)`
+ *  substitution is a word, not one. */
+const REDIRECTION = /^\d*(?:&>>?|[<>]&|>\||<>|>>?|<<<|<<-?|<)(?!\()/;
+
+/** `words` without their redirections, each with its target. */
+function withoutRedirections(words: readonly string[]): string[] {
+  const kept: string[] = [];
+  for (let i = 0; i < words.length; i += 1) {
+    const word = words[i]!;
+    const operator = REDIRECTION.exec(word)?.[0];
+    if (operator === undefined) kept.push(word);
+    else if (operator === word) i += 1;
+  }
+  return kept;
+}
+
+/** One simple command's watch key: redirections, wrappers and assignments skipped, runners keyed by script. */
+function watchKeyOfCommand(command: readonly string[]): string | null {
+  const words = withoutRedirections(command);
   let index = 0;
   let packageSpec = false;
   for (;;) {

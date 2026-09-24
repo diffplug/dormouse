@@ -360,7 +360,7 @@ The wire half, as new event names:
 { event: 'terminal.semantic'; data: TerminalSemanticEvent }
 ```
 
-`terminal.resize` lets an attached viewer show its own tether state instead of rendering garbled wrap until re-attach; `terminal.semantic` frees the attached pane's header from the coalesced `directory.snapshot` cadence. Acknowledgement rides the same stage — a `terminal.acknowledge` on touch, without which only a Client's write puts a ring out (`alertAcknowledge` is inert today).
+`terminal.resize` lets an attached viewer show its own tether state instead of rendering garbled wrap until re-attach; `terminal.semantic` frees the attached pane's header from the coalesced `directory.snapshot` cadence. Acknowledgement rides the same stage — a `terminal.acknowledge` on touch, without which only a Client's keystrokes put a ring out (`alertAcknowledge` is inert today).
 
 ### 6. Graded grants and layout mutations
 

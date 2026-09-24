@@ -115,12 +115,11 @@ configureBurrow({
 });
 
 /**
- * A remote Client's keystrokes, reaching this window's PTY from its own Burrow
- * or over the peer link from the broker's: a human's input like a webview's.
- * The Burrow has already dropped a mirror's terminal replies.
+ * A remote Client's input, reaching this window's PTY from its own Burrow or
+ * over the peer link from the broker's.
  */
 function writeClientInput(ptyId: string, data: string): void {
-  alertedPtys.write(ptyId, data, { userInput: true });
+  alertedPtys.writeClientInput(ptyId, data);
 }
 
 function resizeForClient(ptyId: string, cols: number, rows: number, repaint?: boolean): void {

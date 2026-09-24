@@ -11,7 +11,7 @@ function activity(
   todo = false,
   watchingEnabled = status !== "WATCHING_DISABLED",
 ): ActivityState {
-  return { status, watchingEnabled, todo, notification: null, awaited: false };
+  return { episode: null, status, watchingEnabled, todo, notification: null, awaited: false };
 }
 
 function makeDetectorHarness(initialActivitySnapshot = new Map<string, ActivityState>()) {

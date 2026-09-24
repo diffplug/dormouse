@@ -200,8 +200,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           onCommit={(inactivityTimeoutMs) => updateAlertSettings({ inactivityTimeoutMs })}
         />
         <div className="mt-1 text-sm leading-relaxed text-muted">
-          You count as away after this long without typing, moving the mouse,
-          or scrolling in Dormouse.
+          User has walked away after this much inactivity.
         </div>
       </section>
 

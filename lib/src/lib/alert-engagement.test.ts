@@ -174,6 +174,20 @@ describe('held completions', () => {
     expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', notification: PERMISSION });
   });
 
+  // Its deferral already ran from the first report; escalating it must not start another.
+  it('rings a held report whose deferral came due while engaged, still animating', () => {
+    output(PANE, 3_000);
+    manager.notifyFromProtocol(PANE, PERMISSION);
+    output(PANE, 10_000);
+    engage(manager, PANE);
+    output(PANE, cfg.alert.deferCeiling);
+    expect(ringing(PANE)).toBe(false);
+
+    output(PANE, 5_000);
+    goIdle(manager, PANE);
+    expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', notification: PERMISSION });
+  });
+
   it('acknowledging drops what was held and records it as answered', () => {
     manager.setWatchedCommands(['claude']);
     engage(manager, PANE);

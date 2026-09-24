@@ -345,6 +345,16 @@ describe('command title summarizer', () => {
     expect(summarizeCommandLine('cat $(ls | head -1)')).toBe('cat $(ls | head -1)');
   });
 
+  it('drops a comment', () => {
+    expect(summarizeCommandLine('claude --resume # the auth fix')).toBe('claude --resume');
+    expect(summarizeCommandLine('echo a#b $#')).toBe('echo a#b $#');
+  });
+
+  it('keeps a redirection whole', () => {
+    expect(summarizeCommandLine('make 2>&1 | tee build.log')).toBe('make 2>&1 | ...');
+    expect(summarizeCommandLine('make >| build.log')).toBe('make >| build.log');
+  });
+
   it('keeps a summary on one line when an argument spans several', () => {
     expect(summarizeCommandLine('echo "one\ntwo"')).toBe('echo one two');
     expect(summarizeCommandLine('echo $(\n  date\n)')).toBe('echo $( date )');
@@ -401,6 +411,43 @@ describe('WATCHING key', () => {
     ['echo done', 'echo'],
     ['case $x in a|b) make;; esac', 'make'],
     ['case $x in\n  a)\n    make\n    ;;\n  (*) claude ;;\nesac', 'claude'],
+    ['case $x\nin a) make;; esac', 'make'],
+    // fish's grammar words, now that fish 4 reports its command line.
+    ['while true; pnpm test; end', 'pnpm test'],
+    ['begin pnpm test; end', 'pnpm test'],
+    ['pnpm build; and pnpm start', 'pnpm start'],
+    ['pnpm test; or echo fail', 'echo'],
+    ['not pnpm test', 'pnpm test'],
+    ['echo end', 'echo'],
+    ['switch $os\ncase Darwin\n  claude (cat prompt)\nend', 'claude'],
+    // A redirection's `&` or `|` is no separator; `|&` and fish's `&|` are pipes.
+    ['make 2>&1 | tee build.log', 'make'],
+    ['pnpm dev > out.log 2>&1', 'pnpm dev'],
+    ['echo hi >&2', 'echo'],
+    ['make <&3', 'make'],
+    ['pnpm build &> log', 'pnpm build'],
+    ['pnpm build &>> log', 'pnpm build'],
+    ['pnpm build&>log', 'pnpm build'],
+    ['make |& tee log', 'make'],
+    ['pnpm build &| tee log', 'pnpm build'],
+    // A comment is no command, but a `#` inside a word is no comment.
+    ['claude # fix auth; then deploy', 'claude'],
+    ['claude\t#x | y', 'claude'],
+    ['make;# then deploy', 'make'],
+    ['claude # a && b\npnpm dev', 'pnpm dev'],
+    ['cat <<EOF # x; y\na; b\nEOF', 'cat'],
+    ['pnpm dev &# note; claude', 'pnpm dev'],
+    ['x a#b; claude', 'claude'],
+    ['x ""#b; claude', 'claude'],
+    ['x \\ #b; claude', 'claude'],
+    ['claude "#"; make', 'make'],
+    // A redirection is never the program or a runner's script.
+    ['make > build.log', 'make'],
+    ['make >build.log all', 'make all'],
+    ['make &> build.log', 'make'],
+    ['make >| build.log', 'make'],
+    ['2>/dev/null make all', 'make all'],
+    ['make -f <(gen) all', 'make all'],
     // Transparent wrappers, with the flags they take.
     ['sudo make', 'make'],
     ['sudo -u root FOO=1 make install', 'make install'],
@@ -439,6 +486,7 @@ describe('WATCHING key', () => {
     ['npm run-script dev', 'npm dev'],
     ['npm test', 'npm test'],
     ['npm run --silent test:unit', 'npm test:unit'],
+    ['npm run b:dev', 'npm b:dev'],
     ['pnpm dev', 'pnpm dev'],
     ['pnpm run dev', 'pnpm dev'],
     ['pnpm -C web dev', 'pnpm dev'],
@@ -464,7 +512,7 @@ describe('WATCHING key', () => {
     expect(isWatchKey(expected)).toBe(true);
   });
 
-  it.each(['', '   ', '|', 'FOO=1', ';', '"my tool" --flag', 'done', 'fi', 'for f in *', 'case $x in'])('has no key for %j', (raw) => {
+  it.each(['', '   ', '|', 'FOO=1', ';', '"my tool" --flag', 'done', 'fi', 'end', 'for f in *', 'case $x in', '# pnpm dev; claude'])('has no key for %j', (raw) => {
     expect(commandWatchKey(raw)).toBeNull();
   });
 
@@ -479,8 +527,8 @@ describe('WATCHING key', () => {
   });
 
   it('accepts a bare name or exactly one runner and script', () => {
-    for (const key of ['claude', 'foo:bar', 'pnpm dev', 'npm test:unit']) expect(isWatchKey(key), key).toBe(true);
-    for (const key of ['', 'pnpm  dev', 'a b c', ' pnpm', 'pnpm ', 'npm.cmd test', 'npm.cmd', 'C:foo', 'pnpm C:x', 'make build/x', '/usr/bin/claude', 'a\tb']) {
+    for (const key of ['claude', 'foo:bar', 'pnpm dev', 'npm test:unit', 'npm b:dev']) expect(isWatchKey(key), key).toBe(true);
+    for (const key of ['', 'pnpm  dev', 'a b c', ' pnpm', 'pnpm ', 'npm.cmd test', 'npm.cmd', 'C:foo', 'C:foo dev', 'make build/x', '/usr/bin/claude', 'a\tb']) {
       expect(isWatchKey(key), key).toBe(false);
     }
   });

@@ -671,8 +671,10 @@ describe('engagement viewers', () => {
     ptys.callbacks!.onData('pty-remote', REPORT);
     const atWrite: Array<string | undefined> = [];
     ptys.onWrite = (id) => void atWrite.push(status(id));
+    // A phone's scroll in tmux reaches the PTY, acknowledging nothing, as the desktop's does.
+    deps.writePty('pty-remote', '\x1b[<64;10;5M');
     deps.writePty('pty-remote', 'y');
-    expect(atWrite).toEqual(['WATCHING_DISABLED']);
+    expect(atWrite).toEqual(['ALERT_RINGING', 'WATCHING_DISABLED']);
     expect(router.getAlertStates().get('pty-remote')?.todo).toBe(false);
   });
 

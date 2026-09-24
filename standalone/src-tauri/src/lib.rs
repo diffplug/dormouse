@@ -204,8 +204,9 @@ impl WindowState {
         self.suppressed.store(routing.awaiting_replay.len(), Ordering::Relaxed);
     }
 
-    /// Give every id still owned back to `source` — an exited one too, since
-    /// only a kill drops ownership — suppressed behind a replay of its cut when
+    /// Give every id back to `source` that no kill dropped — an exited one too,
+    /// and one whose target window went away (`drop_window` drops its owner,
+    /// never its transfer records) — suppressed behind a replay of its cut when
     /// it has one, otherwise straight back. Returns the cuts it drained, by id.
     fn hand_back(&self, ids: &[String], source: &str) -> JsonValue {
         let mut routing = guard(&self.routing);
@@ -213,12 +214,12 @@ impl WindowState {
         for id in ids {
             let mark = routing.transfer_marks.remove(id);
             if let Some(mark) = mark { marks.insert(id.clone(), JsonValue::from(mark)); }
-            routing.marking.remove(id);
-            if let Some(owner) = routing.owners.get_mut(id) {
-                *owner = source.to_string();
-                if mark.is_some() { routing.awaiting_replay.insert(id.clone(), Instant::now()); }
-                else { routing.awaiting_replay.remove(id); }
-            }
+            let transferring = routing.marking.remove(id).is_some() || mark.is_some();
+            // A kill drops the owner and the transfer records alike.
+            if !transferring && !routing.owners.contains_key(id) { continue; }
+            routing.owners.insert(id.clone(), source.to_string());
+            if mark.is_some() { routing.awaiting_replay.insert(id.clone(), Instant::now()); }
+            else { routing.awaiting_replay.remove(id); }
         }
         self.suppressed.store(routing.awaiting_replay.len(), Ordering::Relaxed);
         JsonValue::Object(marks)
@@ -268,8 +269,9 @@ impl WindowState {
     /// ids it owned outright, which the caller reaps.
     fn drop_window(&self, label: &str) -> (Vec<routing::Arrival>, Vec<String>) {
         // Taken first, and their ids dropped from `owners` before `owned_by`
-        // reads it: an arriving shell belongs to its source again, and reaping
-        // it here would kill a terminal the source is still showing.
+        // reads it: an arriving shell belongs to its source again, which
+        // `hand_back` returns it to, and reaping it here would kill a terminal
+        // the source is still showing.
         let lost = {
             let mut arrivals = guard(&self.arrivals);
             arrivals.forget_deferred_close(label);
@@ -4754,6 +4756,32 @@ mod tests {
             routing::restorable_labels(session_file_names(dir.path())),
             vec!["main", "ws-3"]
         );
+    }
+
+    /// The target going away drops the arriving shells' owner so they are not
+    /// reaped with it; the hand-back must give them to the source again, or the
+    /// panes it still shows receive no output, exit or alert state. A shell
+    /// killed mid-transfer stays unowned.
+    #[test]
+    fn a_target_closing_mid_arrival_hands_its_shells_back() {
+        let windows = super::WindowState::default();
+        let ids = ["t1".to_string(), "t2".to_string(), "t3".to_string()];
+        for id in &ids { windows.mint(id, "main"); }
+        windows.begin_transfer(&ids, "main", "ws-2");
+        guard(&windows.routing).mark_transfer("t1", 42);
+        windows.forget_pty("t3");
+        let mut arrival = arrival_of("workspace-7", "main", "ws-2");
+        arrival.terminal_ids = ids.to_vec();
+        guard(&windows.arrivals).push(arrival);
+
+        let (lost, orphaned) = windows.drop_window("ws-2");
+        assert!(orphaned.is_empty());
+        assert_eq!(windows.hand_back(&lost[0].terminal_ids, "main")["t1"], 42);
+        let routing = guard(&windows.routing);
+        assert_eq!(routing.owners.get("t1").map(String::as_str), Some("main"));
+        assert!(routing.awaiting_replay.contains_key("t1"));
+        assert_eq!(routing.owners.get("t2").map(String::as_str), Some("main"));
+        assert!(!routing.owners.contains_key("t3"));
     }
 
     #[test]

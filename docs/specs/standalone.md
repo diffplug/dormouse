@@ -741,7 +741,8 @@ below reads that record rather than inferring itself from the suppression map.
 - **A refused arrival hands the shells back.** The target's `adopt_failed`
   (a `planArrival` timeout, a missing list, a mount error) and a target
   `Destroyed` with the arrival still queued both return `terminalIds` to the
-  source unsuppressed, drop the record, and emit `workspace-arrival-failed`; the
+  source unsuppressed (`a_target_closing_mid_arrival_hands_its_shells_back`),
+  drop the record, and emit `workspace-arrival-failed`; the
   source clears **transferring** and the Workspace is simply still there. With
   both ends gone the shells are reaped rather than left owned by a dead label.
 - **Must change transfer ownership and source routing under one routing lock**,

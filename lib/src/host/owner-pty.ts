@@ -12,6 +12,7 @@ import {
   type TerminalProtocolEvent,
 } from '../lib/terminal-protocol';
 import type { TerminalSemanticEvent } from '../lib/terminal-state';
+import { stripMouseReportsFromInput } from '../lib/terminal-report-filter';
 
 /**
  * What the process that owns a PTY does with it on behalf of its alerts, the
@@ -73,10 +74,19 @@ export interface PtyWriteTarget {
  * window before the program repaints (`docs/specs/alert.md` → Engagement).
  */
 export function alertedPty(alerts: AlertManager, pty: PtyWriteTarget) {
+  const write = (id: string, data: string, options: { paced?: boolean; userInput?: boolean } = {}): void => {
+    if (options.userInput) alerts.acknowledge(id, { input: true });
+    pty.write(id, data, options.paced ? { paced: true } : undefined);
+  };
   return {
-    write(id: string, data: string, options: { paced?: boolean; userInput?: boolean } = {}): void {
-      if (options.userInput) alerts.acknowledge(id, { input: true });
-      pty.write(id, data, options.paced ? { paced: true } : undefined);
+    write,
+    /**
+     * A remote Client's write, the Burrow having dropped a mirror's terminal
+     * replies: human input unless it holds only mouse reports, which a Client
+     * sends unmarked and the desktop never acknowledges.
+     */
+    writeClientInput(id: string, data: string): void {
+      write(id, data, { userInput: stripMouseReportsFromInput(data).length > 0 });
     },
     resize(id: string, cols: number, rows: number, repaint?: boolean): void {
       alerts.onResize(id);
