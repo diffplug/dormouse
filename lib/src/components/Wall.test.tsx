@@ -3837,6 +3837,75 @@ describe('Wall on the Lath engine', () => {
     expect(getWallHandle(DEFAULT_WORKSPACE_ID)).toBeNull();
   });
 
+  it('refuses an https:// surface.iframe on a host that proxies, naming dor ab open', async () => {
+    const respond = async (url: string) => {
+      let response: { ok: boolean; error?: string } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: { method: SURFACE_CONTROL_METHODS.iframe, params: { url }, respond: (r: typeof response) => { response = r; } },
+        }));
+      });
+      await flush();
+      return response;
+    };
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />));
+    await flush();
+
+    // Without the proxy the raw frame shows it, so only a proxying host refuses.
+    expect((await respond('https://example.com/'))?.ok).toBe(true);
+    (fake as PlatformAdapter).createIframeProxyUrl = vi.fn(async () => ({ ok: true as const, url: 'http://127.0.0.1:61234/' }));
+    expect(await respond('https://example.com/')).toEqual({
+      ok: false,
+      error: 'iframe panes show http:// pages only; open https://example.com/ with `dor ab open https://example.com/`',
+    });
+    expect((await respond('http://localhost:5173/'))?.ok).toBe(true);
+  });
+
+  it('opens a new https:// tab from an iframe as an agent-browser pane bound to its launch', async () => {
+    const launches: Array<(result: { ok: boolean; session?: string; wsPort?: number; error?: string }) => void> = [];
+    (fake as PlatformAdapter).createIframeProxyUrl = vi.fn(async () => ({ ok: true as const, url: 'http://127.0.0.1:61234/' }));
+    (fake as PlatformAdapter).agentBrowserOpen = vi.fn(() => new Promise((resolve) => { launches.push(resolve); }));
+    (fake as PlatformAdapter).agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />));
+      await flush();
+      const iframe = await dispatchIframe('http://localhost:5173/');
+      const leafIds = () => Array.from(container.querySelectorAll<HTMLElement>('[data-lath-leaf]')).map((leaf) => leaf.dataset.lathLeaf!);
+      const openTab = async (url: string) => {
+        await act(async () => {
+          window.dispatchEvent(new MessageEvent('message', { origin: 'http://127.0.0.1:61234', data: { __dormouse: 'open-window', url } }));
+        });
+        const button = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find((b) => b.textContent === 'Open in agent-browser')!;
+        await act(async () => { button.click(); });
+        await flush();
+      };
+
+      const before = leafIds();
+      await openTab('https://accounts.example/login');
+      const [tab] = leafIds().filter((id) => !before.includes(id));
+      expect(tab).toBeTruthy();
+      expect(fake.agentBrowserOpen).toHaveBeenCalledWith('https://accounts.example/login', {}, undefined);
+      // The pane is there at once; `dor ab --surface` has nothing to drive until the launch names it.
+      expect(await dispatchResolveAgentBrowser(tab)).toMatchObject({ ok: false });
+      await act(async () => { launches[0]({ ok: true, session: 'dormouse.1.gui-abc', wsPort: 4321 }); });
+      await flush();
+      expect(await dispatchResolveAgentBrowser(tab)).toMatchObject({ ok: true, result: { session: 'dormouse.1.gui-abc' } });
+
+      // A launch that fails takes its pane with it.
+      const beforeFailure = leafIds();
+      await openTab('https://other.example/');
+      const [failed] = leafIds().filter((id) => !beforeFailure.includes(id));
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      await act(async () => { launches[1]({ ok: false, error: 'agent-browser binary not found' }); });
+      await flush();
+      expect(leafIds()).not.toContain(failed);
+      expect(leafIds()).toContain(iframe.id);
+    } finally {
+      untouchedSpy.mockRestore();
+    }
+  });
+
   it('names the Window that answered `dor list`, once the host has named it', async () => {
     // A caller needs a ref it can hand back, and with several Windows open
     // `window:1` names none of them (docs/specs/dor-cli.md -> "Handle Model").

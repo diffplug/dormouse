@@ -122,9 +122,10 @@ describe('IframePanel', () => {
     });
 
     expect(container.querySelector('iframe')).toBeNull();
-    expect(container.textContent).toContain('only frames');
+    expect(container.textContent).toContain('frames http:// pages only');
     // `dor ab open` refuses a non-http(s) target too, so it is not the remedy here.
     expect(container.textContent).not.toContain('dor ab open');
+    expect(container.textContent).not.toContain('Open in agent-browser');
   });
 
   // The panel frames the string it checked, not the one it was handed: a
@@ -278,6 +279,133 @@ describe('IframePanel', () => {
     // showing /other while the chrome shows /app.
     expect(updateParameters).toHaveBeenLastCalledWith({ url: 'http://example.test/app' });
     expect(createProxy.mock.calls.length).toBeGreaterThan(callsBeforeBack);
+  });
+});
+
+describe('iframe failures offer a way out', () => {
+  const PROXY = 'http://127.0.0.1:61234';
+  function proxyPlatform(result: Awaited<ReturnType<NonNullable<PlatformAdapter['createIframeProxyUrl']>>> = { ok: true, url: `${PROXY}/app` }, swapCapable = true) {
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserOpen' | 'createIframeProxyUrl'>;
+    if (swapCapable) platform.agentBrowserOpen = vi.fn();
+    platform.createIframeProxyUrl = vi.fn(async () => result);
+    setPlatform(platform);
+    return platform;
+  }
+  const report = async (path = '/app') => {
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent('message', { origin: PROXY, data: { __dormouse: 'location', url: `${PROXY}${path}` } }));
+    });
+  };
+  const button = (label: string) => Array.from(container.querySelectorAll('button')).find((b) => b.textContent === label);
+  const banner = () => container.querySelector('[role="status"]');
+
+  it('flags a proxied document the shim never reported from, and clears it when one reports', async () => {
+    vi.useFakeTimers();
+    try {
+      const onSwapRenderMode = vi.fn();
+      const platform = proxyPlatform();
+      const iframe = await renderPanel(stubActions({ onSwapRenderMode }), paneProps('iframe-uninstrumented'));
+
+      // An instrumented document reports its location, so its load is fine.
+      await report();
+      await act(async () => { iframe.dispatchEvent(new Event('load')); });
+      await act(async () => { vi.advanceTimersByTime(1100); });
+      expect(banner()).toBeNull();
+
+      // It navigates off the proxy: a load with no report.
+      await act(async () => { vi.advanceTimersByTime(2000); });
+      await act(async () => { iframe.dispatchEvent(new Event('load')); });
+      await act(async () => { vi.advanceTimersByTime(1100); });
+      expect(banner()?.textContent).toContain('isn’t running through Dormouse');
+
+      await act(async () => { button('Open in agent-browser')!.click(); });
+      expect(onSwapRenderMode).toHaveBeenCalledWith('iframe-uninstrumented', 'ab-screencast');
+
+      const resolved = vi.mocked(platform.createIframeProxyUrl).mock.calls.length;
+      await act(async () => { button('Reload')!.click(); });
+      expect(vi.mocked(platform.createIframeProxyUrl).mock.calls.length).toBeGreaterThan(resolved);
+      expect(banner()).toBeNull();
+
+      // Flagged again, then a later report from the shim clears it.
+      await act(async () => { iframe.dispatchEvent(new Event('load')); });
+      await act(async () => { vi.advanceTimersByTime(1100); });
+      expect(banner()).not.toBeNull();
+      await report('/back-on-the-proxy');
+      expect(banner()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not count a clicked link that leaves the proxy as the shim reporting', async () => {
+    vi.useFakeTimers();
+    try {
+      proxyPlatform();
+      const iframe = await renderPanel(stubActions(), paneProps('iframe-offproxy-link'));
+      // The shim posts a clicked link's href just before the frame navigates.
+      await act(async () => {
+        window.dispatchEvent(new MessageEvent('message', { origin: PROXY, data: { __dormouse: 'location', url: 'https://elsewhere.example/' } }));
+      });
+      await act(async () => { iframe.dispatchEvent(new Event('load')); });
+      await act(async () => { vi.advanceTimersByTime(1100); });
+      expect(banner()).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('offers agent-browser on an unproxyable url, with the command as the fallback', async () => {
+    const onSwapRenderMode = vi.fn();
+    proxyPlatform({ ok: false, reason: 'scheme', detail: 'the embedded view frames http:// pages only' });
+    await act(async () => {
+      root.render(
+        <PaneWriteContext.Provider value={{ updateParams: () => {}, setTitle: () => {} }}>
+          <WallActionsContext.Provider value={stubActions({ onSwapRenderMode })}>
+            <IframePanel id="iframe-https" title="t" params={{ url: 'https://example.com/' }} />
+          </WallActionsContext.Provider>
+        </PaneWriteContext.Provider>,
+      );
+    });
+
+    expect(container.textContent).toContain('Can’t frame this URL — the embedded view frames http:// pages only.');
+    expect(container.textContent).toContain('dor ab open https://example.com/');
+    await act(async () => { button('Open in agent-browser')!.click(); });
+    expect(onSwapRenderMode).toHaveBeenCalledWith('iframe-https', 'ab-screencast');
+
+    // A host that cannot launch one keeps only the command.
+    proxyPlatform({ ok: false, reason: 'scheme' }, false);
+    await act(async () => { root.render(<></>); });
+    await act(async () => {
+      root.render(
+        <PaneWriteContext.Provider value={{ updateParams: () => {}, setTitle: () => {} }}>
+          <WallActionsContext.Provider value={stubActions()}>
+            <IframePanel id="iframe-https-2" title="t" params={{ url: 'https://example.com/' }} />
+          </WallActionsContext.Provider>
+        </PaneWriteContext.Provider>,
+      );
+    });
+    expect(button('Open in agent-browser')).toBeUndefined();
+    expect(container.textContent).toContain('dor ab open https://example.com/');
+  });
+
+  it('opens a new https:// tab in agent-browser instead of an iframe that would refuse it', async () => {
+    const onOpenBrowserPane = vi.fn();
+    proxyPlatform();
+    await renderPanel(stubActions({ onOpenBrowserPane }), paneProps('iframe-newtab'));
+    const openWindow = async (url: string) => {
+      await act(async () => {
+        window.dispatchEvent(new MessageEvent('message', { origin: PROXY, data: { __dormouse: 'open-window', url } }));
+      });
+    };
+
+    await openWindow('https://accounts.example/login');
+    expect(button('Open in new pane')).toBeUndefined();
+    await act(async () => { button('Open in agent-browser')!.click(); });
+    expect(onOpenBrowserPane).toHaveBeenLastCalledWith('iframe-newtab', 'https://accounts.example/login', 'ab-screencast');
+
+    await openWindow(`${PROXY}/docs`);
+    await act(async () => { button('Open in new pane')!.click(); });
+    expect(onOpenBrowserPane).toHaveBeenLastCalledWith('iframe-newtab', 'http://example.test/docs', 'iframe');
   });
 });
 

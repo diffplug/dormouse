@@ -145,7 +145,7 @@ export async function createIframeProxyUrl(
   // plain http, and rewriting authenticated https pages is the agent-browser's
   // job (spec → Target policy).
   if (upstream.protocol !== 'http:') {
-    return { ok: false, reason: 'scheme', detail: `${upstream.protocol.replace(':', '')} upstreams are not proxied yet` };
+    return { ok: false, reason: 'scheme', detail: 'the embedded view frames http:// pages only' };
   }
   // SSRF guard: the proxy fetches a user-supplied URL, so refuse the link-local
   // / cloud-metadata ranges (169.254.169.254 and friends). Other private ranges

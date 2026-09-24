@@ -104,6 +104,31 @@ describe('AgentBrowserScreenModal', () => {
     registration.dispose();
   });
 
+  it('tells the user the embed drops logins, and refuses it for an https:// page on a proxying host', () => {
+    const platform: PlatformAdapter = new FakePtyAdapter();
+    platform.createIframeProxyUrl = async () => ({ ok: true, url: 'http://127.0.0.1:61234/' });
+    setPlatform(platform);
+    const iframeRow = () => [...document.body.querySelectorAll('label')].find((label) => label.textContent?.includes('iframe embed'))!;
+
+    const secure = registerStubScreen('secure', {
+      snapshot: { ...STUB_SCREEN, renderMode: 'ab-screencast' },
+      chrome: { url: 'https://example.com/account', displayUrl: 'example.com/account', title: null, key: null },
+    });
+    act(() => root.render(<AgentBrowserScreenModal controller={getAgentBrowserScreenController('secure')!} label="surface:5" onClose={() => {}} />));
+    expect(document.body.textContent).toContain('no logins/cookies');
+    expect(iframeRow().querySelector('input')!.disabled).toBe(true);
+    expect(iframeRow().textContent).toContain('https:// pages can’t be embedded');
+    secure.dispose();
+
+    const local = registerStubScreen('local', {
+      snapshot: { ...STUB_SCREEN, renderMode: 'ab-screencast' },
+      chrome: { url: 'http://localhost:5173/', displayUrl: 'localhost:5173/', title: null, key: null },
+    });
+    act(() => root.render(<AgentBrowserScreenModal controller={getAgentBrowserScreenController('local')!} label="surface:6" onClose={() => {}} />));
+    expect(iframeRow().querySelector('input')!.disabled).toBe(false);
+    local.dispose();
+  });
+
   it('keeps resize selected while an engaged sync is transiently scaled', () => {
     const registration = registerStubScreen('browser-transient', {
       snapshot: {

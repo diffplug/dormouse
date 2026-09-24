@@ -295,17 +295,30 @@ export interface ErrorPage {
   message: string;
 }
 
+/** Whether the upstream is this machine — the one case where "the dev server"
+ *  is a fair guess at what the user pointed the pane at. */
+function isLoopbackUpstream(upstream: URL): boolean {
+  const host = upstream.hostname.toLowerCase();
+  if (host === 'localhost' || host.endsWith('.localhost') || host === '[::1]') return true;
+  const v4 = parseIPv4(host);
+  return v4 !== null && v4 >>> 24 === 127;
+}
+
 export function unreachablePage(upstream: URL, detail: string): ErrorPage {
   return {
     title: `Nothing responding at ${upstream.host}`,
-    message: `Dormouse couldn’t reach ${upstream.href} (${detail}). Is the dev server running?`,
+    message: `Dormouse couldn’t reach ${upstream.href} (${detail}). ${isLoopbackUpstream(upstream)
+      ? 'Is the dev server running?'
+      : 'Check that the server is up and reachable from this machine.'}`,
   };
 }
 
 export function timedOutPage(upstream: URL): ErrorPage {
   return {
     title: `${upstream.host} isn’t responding`,
-    message: `Dormouse connected to ${upstream.host} but it didn’t respond in time — the dev server may be busy (e.g. optimizing dependencies). Try reloading.`,
+    message: `Dormouse connected to ${upstream.host} but it didn’t respond in time — ${isLoopbackUpstream(upstream)
+      ? 'the dev server may be busy (e.g. optimizing dependencies)'
+      : 'the server may be busy or slow'}. Try reloading.`,
   };
 }
 
@@ -315,19 +328,20 @@ export function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;');
 }
 
+// The page is a separate document on the proxy origin, out of reach of the
+// app's theme tokens, so it follows the system scheme through CSS system
+// colors rather than hardcoding either one.
 export function errorPageHtml(page: ErrorPage): string {
   return `<!doctype html><html><head><meta charset="utf-8">
 <style>
-  :root { color-scheme: dark; }
+  :root { color-scheme: light dark; }
   html, body { height: 100%; margin: 0; }
   body { display: flex; align-items: center; justify-content: center;
-    background: #14161a; color: #c9ced6;
+    background: Canvas; color: color-mix(in srgb, CanvasText 75%, Canvas);
     font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
   .card { max-width: 34rem; padding: 1.5rem 2rem; text-align: center; }
-  h1 { margin: 0 0 .5rem; font-size: 1.05rem; font-weight: 600; color: #e7ebf1; }
+  h1 { margin: 0 0 .5rem; font-size: 1.05rem; font-weight: 600; color: CanvasText; }
   p { margin: .5rem 0; }
-  code { background: #20242b; border-radius: 4px; padding: .15rem .4rem;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #e7ebf1; }
 </style></head>
 <body><div class="card">
   <h1>${escapeHtml(page.title)}</h1>

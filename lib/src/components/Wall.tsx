@@ -2146,17 +2146,32 @@ export function Wall({
         });
       }
     },
-    onOpenBrowserPane: (id, url) => {
-      // A new-tab request from the iframe shim → open the URL as a new iframe
-      // browser pane, split next to the source (docs/specs/dor-browser.md →
-      // "Iframe Shim").
+    onOpenBrowserPane: (id, url, renderMode = 'iframe') => {
+      // A new-tab request from the iframe shim → open the URL as a new browser
+      // pane, split next to the source (docs/specs/dor-browser.md → "Iframe
+      // Shim"). An agent-browser pane lands at once, session-less and inert,
+      // and binds the session its launch returns, like a render swap.
       const reference = buildDorSurfaces().find((s) => s.id === id);
       if (!reference) return;
-      createContentSurface({
+      const agentBrowser = renderMode === 'ab-screencast';
+      const created = createContentSurface({
         minimized: false,
-        params: { surfaceType: 'browser', renderMode: 'iframe', url },
+        params: { surfaceType: 'browser', renderMode, url, ...(agentBrowser ? { syncEngaged: true } : {}) },
         reference,
         title: hostPathDisplay(url, true),
+      });
+      const open = getPlatform().agentBrowserOpen;
+      if (!agentBrowser || !created.ok || !open) return;
+      const eagerId = created.value.id;
+      open(url, {}, launchBinaryPath.get('agent-browser')).then((res) => {
+        if (!res.ok || !res.session) throw new Error(res.error ?? '(no session)');
+        launchBinaryPath.remember('agent-browser', res.binaryPath);
+        const bound = boundBrowserParams(res.session, res, undefined);
+        if (!lath.getMeta(eagerId) || lath.isDying(eagerId)) closeAgentBrowserSession({ renderMode, ...bound });
+        else updateSurfaceParams(eagerId, bound);
+      }).catch((error) => {
+        console.warn(`[dormouse] could not open ${url} in agent-browser:`, error);
+        if (lath.getMeta(eagerId) && !lath.isDying(eagerId)) void closeSurfaceRef.current(eagerId, 'silent');
       });
     },
     resolveSurfaceRef: surfaceRefForId,

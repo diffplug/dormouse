@@ -87,6 +87,16 @@ export function browserSurfaceUrl(raw: string): string | null {
   }
 }
 
+/** Whether `url` parses as an https:// URL — the scheme a host with the iframe
+ *  proxy cannot embed (docs/specs/dor-browser.md → "Iframe Renderer"). */
+export function isHttpsUrl(url: string): boolean {
+  try {
+    return new URL(url).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 /** The host part of a schemeless authority, minus any `:port`. An IPv6 literal
  *  is bracketed and full of colons, so splitting on the first `:` would yield
  *  `[` — take everything through the closing bracket instead, which keeps the

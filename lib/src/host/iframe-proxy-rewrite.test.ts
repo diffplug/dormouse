@@ -235,4 +235,21 @@ describe('errorPageHtml', () => {
     expect(html).toContain('isn’t responding');
     expect(html).toMatch(/reload/i);
   });
+
+  it('follows the system color scheme instead of hardcoding a dark page', () => {
+    const html = errorPageHtml(unreachablePage(new URL('http://localhost:5173/'), 'ECONNREFUSED'));
+    expect(html).toContain('color-scheme: light dark');
+    expect(html).not.toMatch(/#[0-9a-f]{6}\b/i);
+  });
+
+  it('asks about a dev server only when the upstream is this machine', () => {
+    for (const local of ['http://localhost:5173/', 'http://127.0.0.2:8000/', 'http://app.localhost:3000/', 'http://[::1]:8080/']) {
+      expect(unreachablePage(new URL(local), 'ECONNREFUSED').message, local).toContain('dev server');
+      expect(timedOutPage(new URL(local)).message, local).toContain('dev server');
+    }
+    const remote = new URL('http://box.ts.net:3000/');
+    expect(unreachablePage(remote, 'ETIMEDOUT').message).not.toContain('dev server');
+    expect(unreachablePage(remote, 'ETIMEDOUT').message).toContain('reachable from this machine');
+    expect(timedOutPage(remote).message).not.toContain('dev server');
+  });
 });

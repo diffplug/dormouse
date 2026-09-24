@@ -1,5 +1,5 @@
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { PaneMessage, TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
+import { modalActionButton, PaneMessage, PopupButtonRow, popupButton, TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
 import { getPlatform } from '../../lib/platform';
 import { registerProxyOrigin } from '../../lib/iframe-proxy-registry';
 import { registerSurfaceFocusHandle } from '../../lib/terminal-registry';
@@ -16,7 +16,7 @@ import {
 } from './agent-browser-screen';
 import { isToolParams } from './browser-surface';
 import { offeredRenderModes } from './browser-automation';
-import { browserSurfaceUrl, hostPathDisplay } from './browser-url';
+import { browserSurfaceUrl, hostPathDisplay, isHttpsUrl } from './browser-url';
 
 // Sandbox every framed page, proxied or raw, so a tool's
 // `if (top !== self) top.location = …` framebust cannot navigate the Wall away —
@@ -36,6 +36,16 @@ const IFRAME_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups
 // `clipboard-read` most pointedly, since a terminal's clipboard is where users
 // paste secrets. Writing to the clipboard needs a user gesture and cannot read.
 const IFRAME_ALLOW = 'autoplay; clipboard-write; fullscreen';
+// The injected shim reports the document's location on DOMContentLoaded and
+// again on pageshow, just after load. A proxied frame whose `load` brings no
+// report within this window is showing a document the shim is not in: it left
+// the proxy, was refused, or the proxy's grant is gone.
+const SHIM_REPORT_TIMEOUT_MS = 1000;
+// A report this shortly before `load` still counts: the pageshow report and the
+// frame's load event race each other to the parent.
+const SHIM_REPORT_LEAD_MS = 250;
+// On hosts with the proxy, which is every host that runs `dor`.
+const HTTP_ONLY = 'the embedded view frames http:// pages only';
 
 type Resolution =
   | { kind: 'empty' }
@@ -112,6 +122,11 @@ export function IframePanel({ id, title, params }: PaneProps) {
   // A new-tab/window request from the proxy shim, pending the user's choice to
   // open it as a new pane (docs/specs/dor-browser.md → "Iframe Shim").
   const [pendingOpenUrl, setPendingOpenUrl] = useState<string | null>(null);
+  // The proxied frame loaded a document with no shim in it (docs/specs/dor-browser.md
+  // → "Iframe Shim").
+  const [uninstrumented, setUninstrumented] = useState(false);
+  const lastShimReportRef = useRef(Number.NEGATIVE_INFINITY);
+  const shimCheckRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [history, setHistory] = useState<IframeHistory>(() => (
     sourceUrl ? { entries: [sourceUrl], index: 0 } : { entries: [], index: -1 }
   ));
@@ -225,6 +240,11 @@ export function IframePanel({ id, title, params }: PaneProps) {
   // other registration site is `agent-browser-surface-controller.ts`.
   const renderModes = useMemo(() => offeredRenderModes(isTool, null), [isTool]);
   const swapCapable = renderModes.some((mode) => mode !== 'iframe');
+  const agentBrowserCapable = renderModes.includes('ab-screencast');
+  const openInAgentBrowser = useMemo(
+    () => (agentBrowserCapable ? () => actionsRef.current.onSwapRenderMode(id, 'ab-screencast') : undefined),
+    [id, agentBrowserCapable],
+  );
   const screenActions = useMemo<ScreenActions>(() => ({
     engageSync() {},
     applyDevice() {},
@@ -281,6 +301,20 @@ export function IframePanel({ id, title, params }: PaneProps) {
     return registerProxyOrigin(proxyOrigin);
   }, [proxyOrigin]);
 
+  // A new frame source starts over: no verdict until its document loads.
+  useEffect(() => {
+    setUninstrumented(false);
+    return () => clearTimeout(shimCheckRef.current);
+  }, [resolution]);
+  const onFrameLoad = useCallback(() => {
+    if (!proxyOrigin) return;
+    const loadedAt = performance.now();
+    clearTimeout(shimCheckRef.current);
+    shimCheckRef.current = setTimeout(() => {
+      if (lastShimReportRef.current < loadedAt - SHIM_REPORT_LEAD_MS) setUninstrumented(true);
+    }, SHIM_REPORT_TIMEOUT_MS);
+  }, [proxyOrigin]);
+
   // A cross-origin click reaches only the frame, so the Wall never sees the
   // mousedown — and on WebKit the iframe element's own `focus` event doesn't
   // fire for it either. The shim posts `pointerdown` from inside the frame;
@@ -309,8 +343,13 @@ export function IframePanel({ id, title, params }: PaneProps) {
         return;
       }
       if (data?.__dormouse === 'location') {
+        // Only a location on the proxy origin is the shim reporting its own
+        // document; a clicked link's href can name anywhere.
         const nextUrl = upstreamUrlFromFrameLocation(data.url, liveUrl || sourceUrl, proxyOrigin);
-        if (nextUrl) observeFrameUrl(nextUrl);
+        if (!nextUrl) return;
+        lastShimReportRef.current = performance.now();
+        setUninstrumented(false);
+        observeFrameUrl(nextUrl);
       }
     };
     window.addEventListener('message', onMessage);
@@ -382,49 +421,87 @@ export function IframePanel({ id, title, params }: PaneProps) {
           sandbox={IFRAME_SANDBOX}
           {...(resolution.kind === 'proxied' ? { 'data-dormouse-proxy': 'true' } : {})}
           referrerPolicy="strict-origin-when-cross-origin"
+          onLoad={onFrameLoad}
         />
       ) : (
-        <PanelMessage resolution={resolution} url={sourceUrl} />
+        <PanelMessage resolution={resolution} url={sourceUrl} onOpenInAgentBrowser={openInAgentBrowser} />
+      )}
+      {uninstrumented && (
+        <PopupButtonRow
+          className="absolute inset-x-1 top-1 z-10 flex-wrap"
+          role="status"
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <span className="min-w-0 flex-1 px-1.5 py-0.5 text-muted">
+            This page isn’t running through Dormouse — it left the proxy, was blocked, or the proxy expired.
+          </span>
+          <button type="button" className={popupButton()} onClick={() => chromeActions.reload()}>Reload</button>
+          {openInAgentBrowser && (
+            <button type="button" className={popupButton()} onClick={openInAgentBrowser}>Open in agent-browser</button>
+          )}
+          <button type="button" className={popupButton()} aria-label="Dismiss" onClick={() => setUninstrumented(false)}>✕</button>
+        </PopupButtonRow>
       )}
       {pendingOpenUrl && (
-        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-terminal-bg/95 px-6 text-center">
-          <div className="max-w-sm text-sm text-foreground">
-            This page wants to open a new tab:
-            <div className="mt-1 break-all font-mono text-xs text-muted">{pendingOpenUrl}</div>
-          </div>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                const u = pendingOpenUrl;
-                setPendingOpenUrl(null);
-                if (u) actions.onOpenBrowserPane?.(id, u);
-              }}
-              className="rounded border border-border px-2.5 py-1 text-sm text-foreground transition-colors hover:border-foreground"
-            >
-              Open in new pane
-            </button>
-            <button
-              type="button"
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={(e) => { e.stopPropagation(); setPendingOpenUrl(null); }}
-              className="rounded border border-border px-2.5 py-1 text-sm text-muted transition-colors hover:text-foreground"
-            >
-              Cancel
-            </button>
-          </div>
-          <div className="text-xs text-muted/80">
-            Pages that open many tabs work better in agent-browser — open the chip → Render.
-          </div>
-        </div>
+        <NewTabPrompt
+          url={pendingOpenUrl}
+          // On a proxy host an https:// pane would only land on the scheme refusal.
+          inAgentBrowser={agentBrowserCapable && isHttpsUrl(pendingOpenUrl) && !!getPlatform().createIframeProxyUrl}
+          onOpen={(renderMode) => {
+            setPendingOpenUrl(null);
+            actions.onOpenBrowserPane?.(id, pendingOpenUrl, renderMode);
+          }}
+          onCancel={() => setPendingOpenUrl(null)}
+        />
       )}
     </div>
   );
 }
 
-function PanelMessage({ resolution, url }: { resolution: Resolution; url: string }) {
+function NewTabPrompt({ url, inAgentBrowser, onOpen, onCancel }: {
+  url: string;
+  inAgentBrowser: boolean;
+  onOpen: (renderMode: 'iframe' | 'ab-screencast') => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-terminal-bg/95 px-6 text-center">
+      <div className="max-w-sm text-sm text-foreground">
+        This page wants to open a new tab:
+        <div className="mt-1 break-all font-mono text-xs text-muted">{url}</div>
+      </div>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); onOpen(inAgentBrowser ? 'ab-screencast' : 'iframe'); }}
+          className="rounded border border-border px-2.5 py-1 text-sm text-foreground transition-colors hover:border-foreground"
+        >
+          {inAgentBrowser ? 'Open in agent-browser' : 'Open in new pane'}
+        </button>
+        <button
+          type="button"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); onCancel(); }}
+          className="rounded border border-border px-2.5 py-1 text-sm text-muted transition-colors hover:text-foreground"
+        >
+          Cancel
+        </button>
+      </div>
+      <div className="text-xs text-muted/80">
+        {inAgentBrowser
+          ? `It is an https:// page, and ${HTTP_ONLY}.`
+          : 'Pages that open many tabs work better in agent-browser — open the chip → Display.'}
+      </div>
+    </div>
+  );
+}
+
+function PanelMessage({ resolution, url, onOpenInAgentBrowser }: {
+  resolution: Resolution;
+  url: string;
+  onOpenInAgentBrowser?: () => void;
+}) {
   if (resolution.kind === 'resolving') {
     return <PaneMessage className="text-muted">Connecting to <span className="ml-1 font-semibold">{url}</span>…</PaneMessage>;
   }
@@ -436,17 +513,30 @@ function PanelMessage({ resolution, url }: { resolution: Resolution; url: string
   // 'error' — the proxy turned a dead end into something actionable. (Unreachable
   // cases are served as a page inside the frame; this covers the synchronous
   // ones, chiefly an unproxyable scheme such as https://.)
-  // `dor ab open` is the remedy only where the URL itself is fine and the proxy
+  // agent-browser is the remedy only where the URL itself is fine and the proxy
   // can't front it. It refuses a non-http(s) target too (`normalizeConcreteOpenUrl`),
   // so pointing a refused scheme at it would be a dead end.
+  const command = <code className="rounded bg-app-bg px-1 py-0.5">dor ab open {url}</code>;
   return (
     <PaneMessage className="text-muted" contentClassName="flex flex-col gap-2">
       <div>{messageFor(resolution)}</div>
-      <div className="text-xs text-muted/80">
-        {resolution.reason === 'non-http'
-          ? 'Enter an http:// or https:// address in the URL bar above.'
-          : <>For arbitrary web pages, use <code className="rounded bg-app-bg px-1 py-0.5">dor ab open {url}</code></>}
-      </div>
+      {resolution.reason === 'non-http' ? (
+        <div className="text-xs text-muted/80">Enter an http:// address in the URL bar above.</div>
+      ) : onOpenInAgentBrowser ? (
+        <div className="flex flex-col items-start gap-1.5 text-xs text-muted/80">
+          <button
+            type="button"
+            className={modalActionButton({ tone: 'primary' })}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={onOpenInAgentBrowser}
+          >
+            Open in agent-browser
+          </button>
+          <span>or run {command}</span>
+        </div>
+      ) : (
+        <div className="text-xs text-muted/80">Open it in agent-browser: {command}</div>
+      )}
     </PaneMessage>
   );
 }
@@ -454,11 +544,9 @@ function PanelMessage({ resolution, url }: { resolution: Resolution; url: string
 function messageFor(resolution: Extract<Resolution, { kind: 'error' }>): string {
   switch (resolution.reason) {
     case 'non-http':
-      return 'The iframe surface only frames http:// and https:// URLs.';
+      return `Can’t frame this URL — ${HTTP_ONLY}.`;
     case 'scheme':
-      return resolution.detail
-        ? `Can’t frame this URL — ${resolution.detail}.`
-        : 'The iframe surface only frames http:// servers.';
+      return `Can’t frame this URL — ${resolution.detail ?? HTTP_ONLY}.`;
     case 'unreachable':
     default:
       return resolution.detail ? `Couldn’t reach the server — ${resolution.detail}.` : 'Couldn’t reach the server.';

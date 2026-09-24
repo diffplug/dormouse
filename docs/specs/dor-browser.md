@@ -22,9 +22,9 @@ handle (`docs/specs/dor-cli.md` → Browser Open Target Resolution):
 - `dor ab ...` / `dor agent-browser ...` forwards to the user's own
   `agent-browser` binary and binds that session to a browser pane.
 - `dor pw ...` / `dor playwright ...` binds the user-installed Playwright CLI.
-- `dor iframe <url>` uses the iframe renderer. The CLI accepts `https://`, but
-  the proxy instruments `http://` upstreams only, so the pane reports an
-  unproxyable scheme.
+- `dor iframe <url>` uses the iframe renderer, for `http://` pages: a host with
+  the iframe proxy refuses an `https://` target at `surface.iframe`, naming
+  `dor ab open <url>`.
 
 Source of truth: `lib/src/components/wall/BrowserPanel.tsx`,
 `lib/src/components/wall/browser-surface.ts` (`resolveRenderMode`,
@@ -171,6 +171,8 @@ robot rides each provider’s screencast parent, each nested resolution row carr
 its presentation glyph.
 
 **Must offer only the render modes the Surface's screen controller declares** (`renderModes`), never the host's global capabilities: a provider its host can launch, or the running one, which relaunches; that provider's popout where the host can also pop out; always `iframe`; for a Tool, only its declarable renders (`docs/specs/dor-tool.md` → Declaring tools). **`setRenderMode` refuses any other mode.**
+**Must disable the iframe option, naming why, for an `https://` page on a host
+with the iframe proxy**; it lists that the embed keeps no logins or cookies.
 
 Resolution controls apply to both screencast providers, as GUI wrappers around native
 commands: **Resize with pane** is Dormouse-owned sync issuing
@@ -466,9 +468,12 @@ The proxy instruments any `http://` upstream, loopback and remote alike:
   overridden, not obeyed** (rationale); JS framebusting is neutralized
   separately, by the sandbox.
 - Unreachable / timed-out upstream: served Dormouse error page, distinct for
-  "couldn't connect" and "didn't respond in 30s of socket idle".
-- HTTPS: synchronous `scheme` failure with a `dor ab` hint — agent-browser is the
-  path for real HTTPS or a login.
+  "couldn't connect" and "didn't respond in 30s of socket idle", in the system
+  color scheme; **only a loopback upstream is called a dev server**.
+- HTTPS: synchronous `scheme` failure. **Every panel error the URL itself does
+  not cause offers Open in agent-browser** (a swap to `ab-screencast`) where the
+  host can launch one, with `dor ab open <url>` as the fallback text —
+  agent-browser is the path for real HTTPS or a login.
 - **Link-local / cloud-metadata address: refused (`scheme`)** — an SSRF guard
   that stands regardless of the loosened framing policy. **Canonicalize every
   equivalent spelling** (decimal/octal/hex, short forms, IPv4-mapped IPv6) before
@@ -515,7 +520,8 @@ keyboard and pointer interaction inside the frame by design.
 Source of truth: `lib/src/components/wall/IframePanel.tsx`,
 `lib/src/host/iframe-proxy.ts`, `lib/src/host/iframe-proxy-rewrite.ts`
 (`FRAMING_RESPONSE_HEADERS`, `HOP_BY_HOP_RESPONSE_HEADERS`, `instrumentHtml`,
-`isBlockedAddress`), `lib/src/lib/platform/iframe-proxy-types.ts`.
+`isBlockedAddress`, `errorPageHtml`), `lib/src/lib/platform/iframe-proxy-types.ts`,
+`surface.iframe` in `lib/src/components/wall/use-dor-control.ts`.
 
 ### Iframe Shim
 
@@ -534,11 +540,19 @@ Leader messages feed the same Wall command-mode exit path as in-document
 dual-tap; `IframePanel` maps proxy-origin `location` URLs back to upstream URLs
 for chrome/history without reloading the frame.
 
-New-tab requests show an overlay: accept opens an adjacent browser pane; cancel drops it.
-Neither switches to agent-browser.
+New-tab requests show an overlay: accept opens an adjacent browser pane —
+**an `https://` URL opens as an `ab-screencast` pane** on a proxy host that can
+launch agent-browser, bound to its launch like a render swap and closed if it
+fails; cancel drops it.
+
+**A proxied frame `load` with no `location` report within 1s marks the document
+uninstrumented** — it left the proxy, was refused, or its grant is gone — and a
+banner offers Reload and Open in agent-browser. Only a report naming the proxy
+origin counts, including one up to 250ms before the load.
 
 Source of truth: `lib/src/host/iframe-proxy-rewrite.ts` (`iframeShim`),
 `lib/src/components/wall/browser-url.ts` (`browserSurfaceUrl`),
+`lib/src/components/Wall.tsx` (`onOpenBrowserPane`),
 `lib/src/lib/iframe-proxy-registry.ts`,
 `lib/src/components/wall/use-wall-keyboard.ts`, `lib/src/components/wall/IframePanel.tsx`.
 
@@ -566,7 +580,8 @@ focuses/blurs the iframe element like other surfaces).
 The optional `PlatformAdapter.createIframeProxyUrl` method and the
 `IframeProxyResult` union are canonical in the platform types. Reachability is
 diagnosed lazily by served error pages after the iframe loads the proxy URL, and
-frame refusal is not diagnosed at all, so v1 mostly returns `ok` or `scheme`.
+frame refusal only as an uninstrumented load ([Iframe Shim](#iframe-shim)), so
+v1 mostly returns `ok` or `scheme`.
 
 **The webview passes its own ancestor chain with every request for a proxy
 URL** — `location.origin` plus `location.ancestorOrigins`, knowable only in the

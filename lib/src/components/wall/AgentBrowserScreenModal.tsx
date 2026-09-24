@@ -28,8 +28,10 @@ import {
   OVERLAY_MAX_HEIGHT,
 } from '../design';
 import type { RenderMode, ScreenController, ScreenSnapshot } from './agent-browser-screen';
-import { browserDisplayMode, useAgentBrowserScreenSnapshot } from './agent-browser-screen';
+import { browserDisplayMode, useAgentBrowserChromeSnapshot, useAgentBrowserScreenSnapshot } from './agent-browser-screen';
 import { AUTOMATION_PROVIDERS, automationMode, automationProvider, isScreencast, PROVIDER_LABEL } from './browser-automation';
+import { getPlatformOrNull } from '../../lib/platform';
+import { isHttpsUrl } from './browser-url';
 import {
   AgentRobotIcon,
   BROWSER_DISPLAY_LABEL,
@@ -64,6 +66,7 @@ export function AgentBrowserScreenModal({
   onClose: () => void;
 }) {
   const live = useAgentBrowserScreenSnapshot(controller);
+  const chrome = useAgentBrowserChromeSnapshot(controller);
   // Snapshot the state the modal opened with for pre-selection; the live one
   // still tracks the current render mode so external changes update whether
   // Apply is swapping backends.
@@ -92,6 +95,11 @@ export function AgentBrowserScreenModal({
   // The controller declares what this Surface can take (a tool never pops out
   // or changes provider); the current mode always shows so it stays selected.
   const offered = (mode: RenderMode) => mode === currentMode || controller.renderModes.includes(mode);
+  // A host with the iframe proxy frames http:// only, so swapping an https://
+  // page to the embed would land on its refusal.
+  const iframeRefusal = currentMode !== 'iframe' && isHttpsUrl(chrome?.url ?? '') && !!getPlatformOrNull()?.createIframeProxyUrl
+    ? 'https:// pages can’t be embedded'
+    : undefined;
   // Only the screencast backend has a Dormouse-settable viewport; pop-out is a
   // native OS window and embed renders at the pane size, so both grey it out.
   const viewportDisabled = !isScreencast(renderMode);
@@ -262,7 +270,8 @@ export function AgentBrowserScreenModal({
               onSelect={() => setRenderMode('iframe')}
               icon={<BrowserDisplayIcon mode="iframe" size={14} className="text-muted" />}
               label={BROWSER_DISPLAY_LABEL.iframe}
-              features={[[false, 'agents cannot read/write'], [false, 'http only'], [true, 'native human experience']]}
+              features={[[false, 'agents cannot read/write'], [false, 'http only'], [false, 'no logins/cookies'], [true, 'native human experience']]}
+              disabledReason={iframeRefusal}
             />
           )}
         </div>
@@ -309,6 +318,7 @@ function RenderOption({
   icon,
   label,
   features,
+  disabledReason,
   children,
 }: {
   checked: boolean;
@@ -316,14 +326,18 @@ function RenderOption({
   icon?: ReactNode;
   label: string;
   features: [boolean, string][];
+  /** Why this option cannot be chosen here; absent ⇒ enabled. */
+  disabledReason?: string;
   children?: ReactNode;
 }) {
+  const disabled = disabledReason !== undefined;
   return (
     <div className="flex flex-col gap-1.5 text-sm">
-      <label className="flex cursor-pointer items-center gap-2">
-        <input type="radio" name="render-mode" checked={checked} onChange={onSelect} />
+      <label className={`flex items-center gap-2 ${disabled ? 'cursor-not-allowed opacity-45' : 'cursor-pointer'}`}>
+        <input type="radio" name="render-mode" checked={checked} disabled={disabled} onChange={onSelect} />
         {icon}
         <span className="text-foreground">{label}</span>
+        {disabled && <span className="text-xs text-muted">— {disabledReason}</span>}
       </label>
       <div className="ml-6 flex flex-col gap-0.5 text-xs">
         {features.map(([ok, text]) => <Feature key={text} ok={ok}>{text}</Feature>)}

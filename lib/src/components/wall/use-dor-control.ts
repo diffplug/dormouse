@@ -43,7 +43,7 @@ import {
   type ToolTakeoverGate,
 } from './tool-takeover';
 import { attachSurfacePorts } from './surface-ports';
-import { browserSurfaceUrl, hostPathDisplay } from './browser-url';
+import { browserSurfaceUrl, hostPathDisplay, isHttpsUrl } from './browser-url';
 import { automationMode, automationProvider, browserPlatform, type LaunchBinaryPath } from './browser-automation';
 import { BrowserBindingReservations } from './browser-binding-reservations';
 import {
@@ -1571,6 +1571,13 @@ export function useDorControl({
       const url = browserSurfaceUrl(raw);
       if (!url) {
         detail.respond({ ok: false, error: 'url must be an http:// or https:// URL' });
+        return;
+      }
+      // A host with the iframe proxy frames http:// only, so an https:// pane
+      // would open straight onto its refusal (docs/specs/dor-browser.md →
+      // "Iframe Renderer"). Say so here, where the caller can act on it.
+      if (getPlatform().createIframeProxyUrl && isHttpsUrl(url)) {
+        detail.respond({ ok: false, error: `iframe panes show http:// pages only; open ${url} with \`dor ab open ${url}\`` });
         return;
       }
       const target = resolveVisibleSurface(stringParam(params.surface), detail.surfaceId);
