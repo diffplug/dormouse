@@ -117,7 +117,7 @@ const WEBVIEW_COMMANDS: Record<string, (args: string[]) => boolean> = {
 
 /** Whether `args` is exactly one of the `WEBVIEW_COMMANDS` shapes. `args` is
  *  typed but arrives from webview IPC unvalidated. */
-function isWebviewCommand(args: unknown): args is string[] {
+function isWebviewCommand(args: unknown): boolean {
   if (!Array.isArray(args) || !args.every((arg) => typeof arg === 'string')) return false;
   const [verb, ...rest] = args as string[];
   // Own keys only: a verb of `constructor` must not find the prototype's.
