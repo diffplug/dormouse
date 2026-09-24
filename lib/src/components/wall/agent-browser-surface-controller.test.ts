@@ -253,6 +253,59 @@ describe('provisional stream paint', () => {
   });
 });
 
+describe('sync-to-pane on window resize', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('leaves a size change to the debounced pane observer and re-syncs a DPR change at once', async () => {
+    const command = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand'>;
+    platform.agentBrowserCommand = command;
+    setPlatform(platform);
+    // The pane observer fires whenever the test resizes the pane.
+    const observers: ResizeObserverCallback[] = [];
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: ResizeObserverCallback) { observers.push(callback); }
+      observe() {}
+      disconnect() {}
+    });
+    let dpr = 1;
+    vi.spyOn(window, 'devicePixelRatio', 'get').mockImplementation(() => dpr);
+    const sink = makeSink();
+    let size = { width: 800, height: 600 };
+    sink.viewport.getBoundingClientRect = () => ({ ...size }) as DOMRect;
+    const resizePane = (width: number, height: number) => {
+      size = { width, height };
+      observers.at(-1)?.([{ contentRect: { width, height } } as ResizeObserverEntry], {} as ResizeObserver);
+      window.dispatchEvent(new Event('resize'));
+    };
+    const viewports = () => command.mock.calls
+      .map((call) => (call as unknown as [string, string[]])[1])
+      .filter((args) => args[0] === 'set' && args[1] === 'viewport');
+
+    const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', wsPort: 4321 });
+    controller.attachView(sink);
+    await flushMicrotasks();
+    // Sync is engaged by default, so attaching sized the browser to the pane.
+    expect(viewports().at(-1)).toEqual(['set', 'viewport', '800', '600', '1']);
+    const issued = viewports().length;
+
+    // A window drag: `resize` every frame, one settled viewport after the debounce.
+    for (let w = 801; w <= 860; w++) {
+      resizePane(w, 600);
+      await vi.advanceTimersByTimeAsync(16);
+    }
+    expect(viewports()).toHaveLength(issued);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(viewports().slice(issued)).toEqual([['set', 'viewport', '860', '600', '1']]);
+
+    // A display-scale change resizes nothing, so only the window signal sees it.
+    dpr = 2;
+    window.dispatchEvent(new Event('resize'));
+    expect(viewports().at(-1)).toEqual(['set', 'viewport', '860', '600', '2']);
+  });
+});
+
 describe('parking', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());

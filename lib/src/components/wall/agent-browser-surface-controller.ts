@@ -484,7 +484,13 @@ export class AgentBrowserSurfaceController {
     // A display-scale (DPR) change doesn't resize the pane, so ResizeObserver
     // misses it; refresh the cache off the window-resize signal too.
     this.refreshPaneSize();
-    if (this.syncEngaged) this.issueSyncToPane();
+    // Only a DPR change is this listener's to sync. A size change also reaches
+    // the pane's debounced ResizeObserver, and a window drag fires `resize`
+    // every frame — one `set viewport` spawn each, per synced pane.
+    const issued = this.lastIssued;
+    if (this.syncEngaged && issued && Math.abs(issued.dpr - (window.devicePixelRatio || 1)) > 0.001) {
+      this.issueSyncToPane();
+    }
     this.publishScreen();
   };
 

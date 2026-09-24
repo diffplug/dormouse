@@ -174,7 +174,9 @@ its presentation glyph.
 
 Resolution controls apply to both screencast providers, as GUI wrappers around native
 commands: **Resize with pane** is Dormouse-owned sync issuing
-`set viewport <paneW> <paneH> <displayDpr>` on resize; **Fixed** issues
+`set viewport <paneW> <paneH> <displayDpr>` once a pane resize settles (200ms);
+**only a DPR change re-syncs at once**, off the window `resize` event, which
+fires every frame of a drag. **Fixed** issues
 `set viewport <w> <h> <dpr>` or `set device <name>` from the modal's registry.
 
 **Only `syncEngaged` persists** — device/custom viewport state lives in
