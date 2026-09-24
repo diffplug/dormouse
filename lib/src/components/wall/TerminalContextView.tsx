@@ -12,6 +12,7 @@ import { WindowFocusedContext } from './wall-context';
 import { motionIsInstant } from '../../lib/ui-geometry';
 import type { ContextPlacement, ContextSide } from './terminal-context-placement';
 import { messageOf } from '../../lib/errors';
+import { isComposingKey } from '../../lib/dom';
 
 export type PortMode = 'system' | RenderMode;
 export type ContextScan = { status: 'scanning' | 'failed' } | { status: 'loaded'; entries: PortUrlEntry[] };
@@ -205,6 +206,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
     className={`${TERMINAL_CONTEXT_SURFACE_CLASS} ${motionClass} ${p.closing ? 'pointer-events-none' : ''} absolute inset-0 flex flex-col overflow-hidden text-sm outline-none`}
     onContextMenu={event => event.preventDefault()}
     onKeyDown={event => {
+      if (isComposingKey(event.nativeEvent)) return;
       if ((event.target as HTMLElement).closest('[data-helper-terminal], [data-context-terminal]') && !detail) return;
       if (detail && event.key === 'Tab') {
         event.preventDefault();
