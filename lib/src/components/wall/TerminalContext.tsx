@@ -4,7 +4,7 @@ import { NotepadHeaderButton } from './NotepadHeaderButton';
 import { isSurfaceClosing } from '../../lib/notepad/notepad-store';
 import { messageOf } from '../../lib/errors';
 import { TerminalPane } from '../TerminalPane';
-import { TerminalContextView, type ContextScan } from './TerminalContextView';
+import { TerminalContextView, type ContextScan, type TerminalContextViewProps } from './TerminalContextView';
 import { TerminalContextContext, WallActionsContext, type TerminalContextState } from './wall-context';
 import { disposeHelper, getHelper, helperRevision, openHelper, setHelperVisible, subscribeHelpers } from '../../lib/helper-terminal';
 import { getPlatform, IS_MAC, IS_WINDOWS } from '../../lib/platform';
@@ -14,7 +14,7 @@ import { writeTextToClipboard } from '../../lib/clipboard';
 import { listenerUrlsByPort } from './port-url';
 import { DEFAULT_HELPER_COMMAND } from '../../lib/terminal-context-types';
 
-export function TerminalContext({ id, title, closing, origin, warning: openWarning, tool = false }: TerminalContextState & { title?: string; tool?: boolean }) {
+export function TerminalContext({ id, title, closing, origin, warning: openWarning, tool = false, placement }: TerminalContextState & { title?: string; tool?: boolean } & Pick<TerminalContextViewProps, 'placement'>) {
   const context = useContext(TerminalContextContext);
   const actions = useContext(WallActionsContext);
   const states = useSyncExternalStore(subscribeToTerminalPaneState, getTerminalPaneStateSnapshot);
@@ -54,7 +54,7 @@ export function TerminalContext({ id, title, closing, origin, warning: openWarni
   const copy = async (value: string) => { if (!await writeTextToClipboard(value)) throw new Error('Could not copy to clipboard'); };
   const mismatch = !!helper && !!cwd && !!helperCwd && (cwd.path !== helperCwd.path || cwd.isRemote !== helperCwd.isRemote || (cwd.isRemote && cwd.host !== helperCwd.host));
   const warning = openWarning ?? (helperError || (helper && helper.status !== 'waiting' && (!cwd || !helperCwd) ? 'Directory comparison unavailable: a terminal has not reported its directory.' : undefined));
-  return <TerminalContextView terminalRole={tool ? 'tool' : 'helper'} closing={closing} origin={origin} title={deriveSurfaceLabel(state, appTitleForPane, title ?? id)} surfaceRef={actions.resolveSurfaceRef(id)}
+  return <TerminalContextView placement={placement} terminalRole={tool ? 'tool' : 'helper'} closing={closing} origin={origin} title={deriveSurfaceLabel(state, appTitleForPane, title ?? id)} surfaceRef={actions.resolveSurfaceRef(id)}
     titleSources={titleSources} cwd={cwd ? display(cwd) : 'Directory unknown'} helperCwd={helperCwd && display(helperCwd)} mismatch={mismatch}
     scan={scan} watchRule={offeredRule} watching={watchRule !== null} todo={activities.get(id)?.todo === true} notification={activities.get(id)?.notification}
     status={tool ? (state.currentCommand ? 'running' : 'completed') : helper?.status ?? 'waiting'} command={tool ? state.currentCommand?.rawCommandLine ?? state.lastCommand?.rawCommandLine ?? '' : helper?.command ?? defaultCommand} defaultCommand={defaultCommand} warning={warning}

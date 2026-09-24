@@ -9,6 +9,7 @@ import {
 } from '../../lib/lath/model';
 import type { Direction } from '../../lib/lath/layout';
 import {
+  type Frame,
   type LathAnimator,
   LATH_EASING,
   LATH_MOTION_MS,
@@ -149,6 +150,11 @@ export function shouldParkOnMinimize(meta: LeafMeta): boolean {
   return meta.component === 'browser' || meta.component === 'tool';
 }
 
+/** The open terminal context's helper host, outlined by the selection ring with its source. */
+export type ContextHelper = { sourceId: string; element: HTMLElement; side: Edge };
+/** Places the open context's helper from one painted frame; null hides it from the ring. */
+export type ContextPlacer = (paint: ReadonlyMap<string, Frame>) => ContextHelper | null;
+
 export type LathWallEngine = {
   /** The underlying headless store — the state machine + geometry every state op and
    *  query goes through directly (`lath.store.*`), and the reader LathHost + the
@@ -171,9 +177,17 @@ export type LathWallEngine = {
    *  calls `notifyFrames(settled)`; subscribers re-measure. Returns an unsubscribe. */
   subscribeFrames(cb: (settled: boolean) => void): () => void;
   notifyFrames(settled: boolean): void;
-  /** Wake signal for the adapter's tick loop — fired when the animator becomes busy
-   *  without a store commit (i.e. `markDying`). Returns an unsubscribe. */
+  /** Wake signal for the adapter's tick loop — fired when presentation changes
+   *  without a store commit (`markDying`, `setContextPlacer`). Returns an unsubscribe. */
   subscribeWake(cb: () => void): () => void;
+  /** Register the open context's placer (null on unmount) and wake the tick loop, so
+   *  the helper is repainted and chrome re-measures it. */
+  setContextPlacer(placer: ContextPlacer | null): void;
+  /** LathHost's paint calls this with the frames it just wrote, before `notifyFrames`,
+   *  so chrome measures the helper where it is painted. */
+  placeContext(paint: ReadonlyMap<string, Frame>): void;
+  /** The helper the last paint placed, or null. */
+  contextHelper(): ContextHelper | null;
 
   // --- reads / projections over the store ---
   /** Visible leaves in tree pre-order, each with its meta title + params. Parked
@@ -219,6 +233,8 @@ export function createLathWallEngine(
   // listener sets. Enter hints live in the store; dying state lives in the animator.
   const frameListeners = new Set<(settled: boolean) => void>();
   const wakeListeners = new Set<() => void>();
+  let contextPlacer: ContextPlacer | null = null;
+  let contextHelper: ContextHelper | null = null;
 
   return {
     store,
@@ -243,6 +259,14 @@ export function createLathWallEngine(
       wakeListeners.add(cb);
       return () => wakeListeners.delete(cb);
     },
+    setContextPlacer(placer) {
+      contextPlacer = placer;
+      for (const l of wakeListeners) l();
+    },
+    placeContext(paint) {
+      contextHelper = contextPlacer?.(paint) ?? null;
+    },
+    contextHelper: () => contextHelper,
 
     listPanes() {
       const meta = snapshot().leafMeta;

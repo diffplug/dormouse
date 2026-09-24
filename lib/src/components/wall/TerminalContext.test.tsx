@@ -241,3 +241,28 @@ it('uses the Tool primary terminal without creating a helper or offering helper 
   expect(focusSurface).not.toHaveBeenCalled();
   openHelper.mockRestore(); terminal.mockRestore(); focusSurface.mockRestore();
 });
+
+it('always shows context details alongside the helper', () => {
+  render();
+  expect(button('Terminal context details')).toBeNull();
+  expect(button('Open in system browser')).not.toBeNull();
+  expect(button('Explain this title')).not.toBeNull();
+  expect(button('Copy absolute path')).not.toBeNull();
+  expect(container.textContent).toContain('Alerts');
+  expect(container.querySelector('textarea')).not.toBeNull();
+});
+
+it('position buttons preserve input focus and report the destination', async () => {
+  props.placement = { side: 'top', available: ['top', 'bottom'], onChange: vi.fn() };
+  render();
+  const input = container.querySelector('textarea')!;
+  act(() => input.focus());
+  const down = new MouseEvent('pointerdown', { bubbles: true, cancelable: true });
+  act(() => button('Place helper at bottom').dispatchEvent(down));
+  expect(down.defaultPrevented).toBe(true);
+  await click('Place helper at bottom');
+  expect(props.placement.onChange).toHaveBeenCalledWith('bottom');
+  expect(button('Use automatic helper placement')).toBeNull();
+  expect(button('Place helper at top').getAttribute('aria-pressed')).toBe('true');
+  expect(document.activeElement).toBe(input);
+});
