@@ -38,8 +38,10 @@ export type BrowserOp =
   | { op: 'navigate'; url: string }
   | { op: 'history'; dir: 'back' | 'forward' | 'reload' }
   | { op: 'tab'; action: 'select' | 'close'; tabId: string }
-  | { op: 'viewport'; width: number; height: number; dpr: number }
-  | { op: 'device'; name: string }
+  /** `endsSync` cancels this pane's engagement even before its first socket
+   *  intent reaches the host. */
+  | { op: 'viewport'; width: number; height: number; dpr: number; endsSync?: string }
+  | { op: 'device'; name: string; endsSync?: string }
   /** Close the session — after the launch or attach of it running now — and
    *  cancel `cancels`: requests the closing Surface sent that can bring the
    *  browser up, by their `requestId`, however late the transport delivers
@@ -76,6 +78,11 @@ export interface BrowserResult {
 /** The most requests one `close` may cancel; the host refuses a longer list. */
 export const BROWSER_CLOSE_MAX_CANCELS = 32;
 
+/** The largest viewport side and device pixel ratio a `viewport` request may
+ *  set. */
+export const VIEWPORT_MAX_SIDE = 16384;
+export const VIEWPORT_MAX_DPR = 10;
+
 /** The JPEG quality of a crisp capture, for either provider. */
 export const CAPTURE_JPEG_QUALITY = 85;
 
@@ -83,16 +90,28 @@ export const CAPTURE_JPEG_QUALITY = 85;
 
 /** Host → webview, as JSON text: the browser's state, sent only on change. */
 export type ViewerState =
-  /** Whether the browser is up, and its viewport's CSS size when known. */
-  | { type: 'status'; connected: boolean; screencasting: boolean; viewportWidth?: number; viewportHeight?: number }
+  /** Whether the browser is up, and its viewport's CSS size and device pixel
+   *  ratio when known — a popped-out window's own, as its page reports them. */
+  | { type: 'status'; connected: boolean; screencasting: boolean; viewportWidth?: number; viewportHeight?: number; devicePixelRatio?: number }
   | { type: 'tabs'; tabs: AgentBrowserTab[] }
   /** The active tab committed a navigation (before its load completes). */
   | { type: 'url'; url: string }
   /** A popped-out window's page as its browser reports it: URL and title. */
-  | { type: 'page'; url: string; title: string | null };
+  | { type: 'page'; url: string; title: string | null }
+  /** Where the host's sync-to-pane stands for `engagement`: writing the
+   *  pane's size, the browser confirmed at it, or stopped because another
+   *  writer set the viewport. */
+  | { type: 'sync'; state: ViewerSyncState; engagement: string };
 
-/** Webview → host, as JSON text: native input, and a request to resend the
- *  last frame to a canvas that mounted blank. */
+export type ViewerSyncState = 'applying' | 'synced' | 'off';
+
+/** The pane's size while Resize with pane is engaged, for the host to size
+ *  the browser to. `engagement` names the choice of Resize with pane it
+ *  belongs to: a new one reclaims the viewport. */
+export type ViewerSyncIntent = { type: 'sync'; width: number; height: number; dpr: number; engagement: string };
+
+/** Webview → host, as JSON text: native input, the pane's size to sync to,
+ *  and a request to resend the last frame to a canvas that mounted blank. */
 export type ViewerInput =
   | {
       type: 'input_mouse';
@@ -109,7 +128,11 @@ export type ViewerInput =
   | { type: 'input_keyboard'; eventType: 'keyDown' | 'keyUp'; key: string; code: string; text: string; windowsVirtualKeyCode: number; modifiers: number }
   /** A paste, inserted whole. */
   | { type: 'input_text'; text: string }
+  | ViewerSyncIntent
   | { type: 'repaint' };
+
+/** The input a provider forwards to its browser. */
+export type ViewerBrowserInput = Exclude<ViewerInput, { type: 'repaint' | 'sync' }>;
 
 /** A frame: a CSS-resolution stream frame painted at once, or the
  *  device-resolution capture that replaces it. */
@@ -182,10 +205,14 @@ export function viewerTextInputs(text: string): { type: 'input_text'; text: stri
   return messages;
 }
 
-/** Whether a tab shows nothing: empty, or the blank page a launch can leave. */
+// The browsers' own new-tab pages, which a launch leaves beside its page.
+const NEW_TAB_URLS = new Set(['about:newtab', 'chrome://newtab', 'chrome://new-tab-page', 'edge://newtab']);
+
+/** Whether a tab shows nothing: empty, or the blank or new-tab page a launch
+ *  can leave. */
 export function isBlankUrl(url: string): boolean {
   const trimmed = url.trim();
-  return trimmed === '' || trimmed === 'about:blank';
+  return trimmed === '' || trimmed === 'about:blank' || NEW_TAB_URLS.has(trimmed.replace(/\/$/, ''));
 }
 
 /** A URL a browser provider may launch, relaunch or navigate to: http(s) only,

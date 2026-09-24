@@ -14,6 +14,8 @@ export interface AgentBrowserStreamStatus {
   screencasting: boolean;
   viewportWidth?: number;
   viewportHeight?: number;
+  /** A popped-out window's, as its page reports it. */
+  devicePixelRatio?: number;
 }
 
 export interface AgentBrowserSnapshot {
@@ -38,6 +40,8 @@ export type AgentBrowserConnectionEvent =
   | { type: 'url'; url: string }
   /** A popped-out window's page, as its browser reports it. */
   | { type: 'page'; url: string; title: string | null }
+  /** Where the host's sync-to-pane stands for `engagement`. */
+  | Extract<ViewerState, { type: 'sync' }>
   /** A frame to paint: provisional (CSS resolution) or crisp. */
   | ({ type: 'frame' } & ViewerFrame)
   | { type: 'debug'; event: AgentBrowserDebugEvent };
@@ -214,6 +218,7 @@ export class AgentBrowserConnection {
         screencasting: msg.screencasting === true,
         ...(typeof msg.viewportWidth === 'number' ? { viewportWidth: msg.viewportWidth } : {}),
         ...(typeof msg.viewportHeight === 'number' ? { viewportHeight: msg.viewportHeight } : {}),
+        ...(typeof msg.devicePixelRatio === 'number' ? { devicePixelRatio: msg.devicePixelRatio } : {}),
       };
       this.patch({ status });
       this.emit({ type: 'status', status });
@@ -225,6 +230,9 @@ export class AgentBrowserConnection {
     } else if (msg.type === 'page' && typeof msg.url === 'string') {
       this.debug('page', { url: msg.url });
       this.emit({ type: 'page', url: msg.url, title: typeof msg.title === 'string' ? msg.title : null });
+    } else if (msg.type === 'sync' && (msg.state === 'applying' || msg.state === 'synced' || msg.state === 'off') && typeof msg.engagement === 'string') {
+      this.debug('sync', { state: msg.state });
+      this.emit({ type: 'sync', state: msg.state, engagement: msg.engagement });
     }
   }
 

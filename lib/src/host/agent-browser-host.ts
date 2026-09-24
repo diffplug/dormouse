@@ -31,9 +31,9 @@ import {
 import { WebSocket } from 'ws';
 import { isAllowedAgentBrowserBinary } from '../lib/agent-browser-binary';
 import { parseAgentBrowserTabs } from '../lib/agent-browser-tab';
-import { CAPTURE_JPEG_QUALITY, type BrowserResult, type ViewerInput } from '../lib/platform/browser-automation';
+import { CAPTURE_JPEG_QUALITY, type BrowserResult, type ViewerInput, type ViewerState } from '../lib/platform/browser-automation';
 import type { BrowserAct, BrowserProvider, LiveBrowser, ProviderBinding } from './browser-host';
-import type { Upstream, ViewerSink } from './browser-viewer';
+import { measuredViewport, type MeasuredViewport, type Upstream, type ViewerSink } from './browser-viewer';
 
 const SESSION_ARGS = BROWSER_PROVIDERS['agent-browser'].sessionArgs;
 
@@ -126,6 +126,54 @@ function frameSize(metadata: { deviceWidth?: unknown; deviceHeight?: unknown } |
 // A frame's bulk is base64, whose alphabet has no `"` or `:`: these mark a
 // control message large enough to pass for a frame.
 const CONTROL_MARKERS = ['"type":"tabs"', '"type":"status"', '"type":"url"'];
+
+/** A browser target that is one of its window's pages — never a DevTools
+ *  window, a worker or a frame. */
+function windowPage(info: unknown): { targetId: string; url: string; title?: unknown } | undefined {
+  const t = info as { targetId?: unknown; type?: unknown; url?: unknown; title?: unknown } | null;
+  if (!t || typeof t !== 'object' || typeof t.targetId !== 'string' || t.type !== 'page' || typeof t.url !== 'string') return undefined;
+  return t.url.startsWith('devtools://') ? undefined : { targetId: t.targetId, url: t.url, title: t.title };
+}
+
+/** Calls over a CDP `socket`: each answers its result, or undefined for an
+ *  error or a closed socket; every event goes to `event`. */
+function cdpCalls(socket: WebSocket, event: (method: string, params: Record<string, unknown> | undefined) => void = () => {}) {
+  let nextId = 1;
+  const replies = new Map<number, (result: unknown) => void>();
+  socket.on('message', (data: Buffer) => {
+    let message: { id?: unknown; method?: unknown; params?: Record<string, unknown>; result?: unknown };
+    try {
+      message = JSON.parse(data.toString());
+    } catch {
+      return;
+    }
+    if (typeof message.id === 'number') {
+      replies.get(message.id)?.(message.result);
+      replies.delete(message.id);
+    } else if (typeof message.method === 'string') {
+      event(message.method, message.params);
+    }
+  });
+  socket.on('close', () => {
+    for (const reply of replies.values()) reply(undefined);
+    replies.clear();
+  });
+  /** One call to the browser, or to the page `sessionId` is attached to. */
+  return (method: string, params?: Record<string, unknown>, sessionId?: string) => new Promise<unknown>((resolve) => {
+    if (socket.readyState !== WebSocket.OPEN) {
+      resolve(undefined);
+      return;
+    }
+    const id = nextId++;
+    replies.set(id, resolve);
+    socket.send(JSON.stringify({ id, method, ...(params ? { params } : {}), ...(sessionId ? { sessionId } : {}) }));
+  });
+}
+
+// Run in each of a headed window's pages until one answers: the shown page's
+// viewport (`measuredViewport`), measured this often.
+const MEASURE_SCRIPT = "document.visibilityState === 'visible' ? { width: innerWidth, height: innerHeight, dpr: devicePixelRatio } : null";
+const MEASURE_INTERVAL_MS = 1000;
 
 export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}): BrowserProvider<ProviderBinding> {
   const log = deps.log ?? (() => {});
@@ -282,6 +330,57 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
     return run(b, args, options);
   }
 
+  /** The browser's CDP endpoint, as `get cdp-url` run `via` names it — only
+   *  ever on loopback. */
+  async function askCdpEndpoint(b: ProviderBinding, via: typeof run): Promise<string | undefined> {
+    const result = await via(b, ['get', 'cdp-url'], { timeoutMs: CDP_URL_TIMEOUT_MS });
+    const url = result.exitCode === 0 ? parseCdpUrl(result.stdout) : null;
+    if (!url) {
+      log(`[agent-browser] no CDP endpoint for ${b.session}: ${cliError(result)}`);
+      return undefined;
+    }
+    // The browser's own endpoint, and only ever on loopback.
+    if (!/^ws:\/\/(127\.0\.0\.1|localhost):\d+\//.test(url)) {
+      log(`[agent-browser] refused a CDP endpoint off loopback: ${url}`);
+      return undefined;
+    }
+    return url;
+  }
+
+  // Each session's browser CDP endpoint, beside the stream port of the daemon
+  // that named it: once a headed window has closed, any CLI verb run for its
+  // browser opens a blank one (rationale), so a later observer of the same
+  // daemon asks it nothing.
+  const cdpEndpoints = new Map<string, { stream: number; url: string }>();
+
+  /** The CDP endpoint of the browser the daemon streaming on `stream` runs,
+   *  asked of that daemon once. */
+  async function cdpEndpoint(b: ProviderBinding, stream: number): Promise<string | undefined> {
+    const known = cdpEndpoints.get(b.session);
+    if (known?.stream === stream) return known.url;
+    const url = await askCdpEndpoint(b, drive);
+    if (url) cdpEndpoints.set(b.session, { stream, url });
+    return url;
+  }
+
+  /** One call to the session's browser over a connection of its own, for a
+   *  launch's own steps once `open` has brought the daemon up. */
+  async function browserCall(b: ProviderBinding, method: string, params?: Record<string, unknown>): Promise<unknown> {
+    const url = await askCdpEndpoint(b, run);
+    if (!url) throw new Error(`agent-browser session '${b.session}' has no CDP endpoint`);
+    const socket = new WebSocket(url, { handshakeTimeout: STREAM_CONNECT_TIMEOUT_MS, perMessageDeflate: false });
+    try {
+      await new Promise((resolve, reject) => {
+        socket.once('open', resolve);
+        // Kept for the socket's life: a later error must not go unhandled.
+        socket.on('error', reject);
+      });
+      return await cdpCalls(socket)(method, params);
+    } finally {
+      socket.close();
+    }
+  }
+
   /** Terminate `session`'s daemon `pid`, proven live by the caller, and wait
    *  for it to exit. */
   async function killDaemon(session: string, pid: number): Promise<void> {
@@ -377,21 +476,17 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
       if (result.exitCode !== 0) throw new Error(cliError(result));
     },
 
-    // Envelope: { tabs } or { data: { tabs } }; the record parse is shared with
-    // the live stream (parseAgentBrowserTabs). Empty on any failure.
+    // The browser's own pages, over its CDP: `tab list` leaves out the
+    // `chrome://newtab/` page every launch opens beside its own (rationale).
+    // A page closed this way leaves `tab list` too.
     async listTabs(b) {
-      const result = await run(b, ['tab', 'list', '--json']);
-      if (result.exitCode !== 0) return [];
-      try {
-        const parsed = JSON.parse(result.stdout) as { tabs?: unknown; data?: { tabs?: unknown } };
-        return parseAgentBrowserTabs(parsed.data?.tabs ?? parsed.tabs);
-      } catch {
-        return [];
-      }
+      const listed = await browserCall(b, 'Target.getTargets') as { targetInfos?: unknown } | undefined;
+      const infos: unknown[] = Array.isArray(listed?.targetInfos) ? listed.targetInfos : [];
+      return infos.map(windowPage).filter((page) => page !== undefined).map(({ targetId, url }) => ({ tabId: targetId, url }));
     },
 
     async closeTab(b, tabId) {
-      await run(b, ['tab', 'close', tabId]);
+      await browserCall(b, 'Target.closeTarget', { targetId: tabId });
     },
 
     async act(b, act): Promise<BrowserResult> {
@@ -436,9 +531,9 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
    * re-sends its current frame and tab list ~20 times a second whether or not
    * they changed, so each is compared raw against the last and dropped when
    * equal: only a changed frame is parsed, decoded once and passed on. A
-   * headed viewer gets no frames, and its page is followed over the browser's
-   * CDP (`observePage`), which the stream does not report for navigations
-   * made in the window itself.
+   * headed viewer gets no frames: its window is followed over the browser's
+   * CDP (`observeWindow`) — navigations made in the window itself, which the
+   * stream does not report, its pages, and its viewport.
    *
    * `port` is the one `dor ab` read after its command, or a launch or attach
    * answered: it is only ever dialed on loopback, only the stream's own
@@ -456,6 +551,20 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
     let observer: { close(): void } | null = null;
     let lastFrame: Buffer | undefined;
     const lastState = new Map<string, string>();
+    // The stream's status names the daemon's configured viewport, which a
+    // headed window does not follow: the window's own, as its page reports
+    // it, replaces it.
+    let status: Extract<ViewerState, { type: 'status' }> | undefined;
+    let windowViewport: MeasuredViewport | undefined;
+    let sentStatus: string | undefined;
+    const sendStatus = () => {
+      if (!status) return;
+      const message = { ...status, ...windowViewport };
+      const json = JSON.stringify(message);
+      if (json === sentStatus) return;
+      sentStatus = json;
+      sink.state(message);
+    };
     socket.on('error', (error) => log(`[agent-browser] stream error: ${error.message}`));
     const open = new Promise<void>((resolve, reject) => {
       socket.once('open', () => {
@@ -483,7 +592,11 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
       if (message.type === 'frame' && typeof message.data === 'string') {
         if (headed || lastFrame?.equals(data)) return;
         lastFrame = data;
-        sink.frame(Buffer.from(message.data, 'base64'), frameSize(message.metadata));
+        const size = frameSize(message.metadata);
+        sink.frame(Buffer.from(message.data, 'base64'), size);
+        // The daemon's frames follow its `set viewport` exactly, ordered with
+        // rendering: the viewport sync-to-pane judges by (rationale).
+        if (size) sink.viewport(size, performance.now());
         return;
       }
       if (message.type === 'url') {
@@ -498,16 +611,22 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
         if (Array.isArray(message.tabs)) sink.state({ type: 'tabs', tabs: parseAgentBrowserTabs(message.tabs) });
         return;
       }
-      sink.state({
+      status = {
         type: 'status',
         connected: message.connected === true,
         screencasting: message.screencasting === true,
         ...(typeof message.viewportWidth === 'number' ? { viewportWidth: message.viewportWidth } : {}),
         ...(typeof message.viewportHeight === 'number' ? { viewportHeight: message.viewportHeight } : {}),
-      });
+      };
+      sendStatus();
     });
     await open;
-    if (headed) observer = observePage(b, sink);
+    if (headed) {
+      observer = observeWindow(b, port, sink, (measured) => {
+        windowViewport = measured;
+        sendStatus();
+      });
+    }
     const forward = (message: object) => {
       if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
     };
@@ -527,58 +646,97 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
   }
 
   /**
-   * Follow a headed window's page over its browser's CDP: the URL and title
-   * of each page target as it is created or changes, and each main-frame
-   * navigation. The endpoint is asked of the daemon, which is up while its
-   * stream is; the CDP socket stays in the host.
+   * Follow a headed window over its browser's CDP: the URL and title of each
+   * page target as it is created or changes, and each main-frame navigation;
+   * how many pages it has, DevTools' aside, which the host reads as the
+   * window closing once none is left (`ViewerSink.pages`); and each second,
+   * the shown page's viewport and device pixel ratio (`measured`). The CDP
+   * socket stays in the host.
    */
-  function observePage(b: ProviderBinding, sink: ViewerSink): { close(): void } {
+  function observeWindow(b: ProviderBinding, stream: number, sink: ViewerSink, measured: (viewport: MeasuredViewport) => void): { close(): void } {
     let closed = false;
     let cdp: WebSocket | null = null;
+    let measuring: ReturnType<typeof setTimeout> | undefined;
     const page = (url: unknown, title: unknown) => {
       if (typeof url === 'string') sink.state({ type: 'page', url, title: typeof title === 'string' ? title : null });
     };
-    void drive(b, ['get', 'cdp-url'], { timeoutMs: CDP_URL_TIMEOUT_MS }).then((result) => {
-      const url = result.exitCode === 0 ? parseCdpUrl(result.stdout) : null;
-      if (closed || !url) {
-        if (!url) log(`[agent-browser] no CDP endpoint for ${b.session}: ${cliError(result)}`);
-        return;
-      }
-      // The browser's own endpoint, and only ever on loopback.
-      if (!/^ws:\/\/(127\.0\.0\.1|localhost):\d+\//.test(url)) {
-        log(`[agent-browser] refused a CDP endpoint off loopback: ${url}`);
-        return;
-      }
+    void cdpEndpoint(b, stream).then((url) => {
+      if (closed || !url) return;
       const socket = cdp = new WebSocket(url, { handshakeTimeout: STREAM_CONNECT_TIMEOUT_MS, perMessageDeflate: false });
-      let nextId = 1;
-      const send = (method: string, params?: Record<string, unknown>) => socket.send(JSON.stringify({ id: nextId++, method, ...(params ? { params } : {}) }));
+
+      // The window's pages by target id, each with the session it is
+      // measured on once attached. Counted only once listed whole.
+      const pages = new Map<string, string | undefined>();
+      let listed = false;
+      const count = () => { if (listed) sink.pages(pages.size); };
+      const track = (info: unknown) => {
+        const target = windowPage(info);
+        if (!target) return;
+        if (!pages.has(target.targetId)) pages.set(target.targetId, undefined);
+        page(target.url, target.title);
+      };
+      const call = cdpCalls(socket, (method, params) => {
+        switch (method) {
+          case 'Target.targetCreated':
+          case 'Target.targetInfoChanged':
+            track(params?.targetInfo);
+            count();
+            break;
+          case 'Target.targetDestroyed':
+            if (typeof params?.targetId === 'string') pages.delete(params.targetId);
+            count();
+            break;
+          case 'Page.frameNavigated': {
+            const frame = params?.frame as { parentId?: unknown; url?: unknown; name?: unknown } | undefined;
+            if (!frame?.parentId) page(frame?.url, frame?.name);
+            break;
+          }
+        }
+      });
+
+      // The first page shown — a background tab may keep its old size.
+      const measure = async () => {
+        for (const targetId of [...pages.keys()]) {
+          const attached = pages.get(targetId) ?? (await call('Target.attachToTarget', { targetId, flatten: true }) as { sessionId?: unknown } | undefined)?.sessionId;
+          if (typeof attached !== 'string' || !pages.has(targetId)) continue;
+          pages.set(targetId, attached);
+          const answer = await call('Runtime.evaluate', { expression: MEASURE_SCRIPT, returnByValue: true }, attached) as { result?: { value?: unknown } } | undefined;
+          const viewport = measuredViewport(answer?.result?.value);
+          if (viewport) {
+            measured(viewport);
+            return;
+          }
+        }
+      };
+      const measureAgain = () => {
+        measuring = setTimeout(() => void measure().finally(() => { if (!closed) measureAgain(); }), MEASURE_INTERVAL_MS);
+      };
+
       socket.on('open', () => {
-        send('Target.setDiscoverTargets', { discover: true });
-        send('Target.getTargets');
+        void call('Target.setDiscoverTargets', { discover: true });
+        void call('Target.getTargets').then((result) => {
+          const infos = (result as { targetInfos?: unknown } | undefined)?.targetInfos;
+          if (!Array.isArray(infos)) return;
+          for (const info of infos) track(info);
+          // A window that closed before this observer came has none.
+          listed = true;
+          count();
+          void measure().finally(() => { if (!closed) measureAgain(); });
+        });
         // Were the endpoint a page's rather than the browser's, its own events
         // would be the navigation source.
-        send('Page.enable');
+        void call('Page.enable');
       });
-      socket.on('error', (error) => log(`[agent-browser] CDP observer error: ${error.message}`));
-      socket.on('message', (data: Buffer) => {
-        let message: { method?: string; params?: { targetInfo?: unknown; frame?: { parentId?: unknown; url?: unknown; name?: unknown } }; result?: { targetInfos?: unknown } };
-        try {
-          message = JSON.parse(data.toString());
-        } catch {
-          return;
-        }
-        const target = (info: unknown) => {
-          const t = info as { type?: unknown; url?: unknown; title?: unknown } | null;
-          if (t && typeof t === 'object' && t.type === 'page') page(t.url, t.title);
-        };
-        if (message.method === 'Target.targetCreated' || message.method === 'Target.targetInfoChanged') target(message.params?.targetInfo);
-        else if (message.method === 'Page.frameNavigated' && !message.params?.frame?.parentId) page(message.params?.frame?.url, message.params?.frame?.name);
-        else if (Array.isArray(message.result?.targetInfos)) for (const info of message.result.targetInfos) target(info);
+      socket.on('error', (error) => {
+        log(`[agent-browser] CDP observer error: ${error.message}`);
+        // The next observer asks the daemon again.
+        if (cdpEndpoints.get(b.session)?.url === url) cdpEndpoints.delete(b.session);
       });
     }).catch((error: unknown) => log(`[agent-browser] CDP observer: ${error instanceof Error ? error.message : String(error)}`));
     return {
       close() {
         closed = true;
+        clearTimeout(measuring);
         cdp?.close();
       },
     };

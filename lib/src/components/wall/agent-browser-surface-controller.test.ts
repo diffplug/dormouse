@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import type { PlatformAdapter } from '../../lib/platform/types';
-import { VIEWER_TEXT_INPUT_MAX, encodeViewerFrame, type BrowserRequest, type BrowserResult } from '../../lib/platform/browser-automation';
+import { VIEWER_TEXT_INPUT_MAX, encodeViewerFrame, type BrowserRequest, type BrowserResult, type ViewerInput, type ViewerSyncIntent } from '../../lib/platform/browser-automation';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
 import { forgetLaunchBinaryPaths, launchBinaryPath, rememberLaunchBinaryPath } from './browser-automation';
 import {
@@ -82,6 +82,12 @@ function makeSink(): AgentBrowserViewSink & {
     requestRenderSwap: vi.fn(),
     launchFailed: vi.fn(),
   };
+}
+
+/** Lay `el` out at `size()`: its client size, the pane's CSS size. */
+function layOut(el: HTMLElement, size: () => { width: number; height: number }): void {
+  Object.defineProperty(el, 'clientWidth', { configurable: true, get: () => size().width });
+  Object.defineProperty(el, 'clientHeight', { configurable: true, get: () => size().height });
 }
 
 /** A frame the host sends over a viewer socket. */
@@ -283,19 +289,66 @@ describe('painting', () => {
   });
 });
 
+/** The sync messages a controller sent over its viewer sockets to `port`. */
+const syncMessages = (port: number) => streamSockets(port)
+  .flatMap((ws) => ws.sent.map((raw) => JSON.parse(raw) as ViewerInput))
+  .filter((message): message is ViewerSyncIntent => message.type === 'sync');
+
+/** The pane sizes a controller asked the host to sync the browser at `port`
+ *  to, as `[width, height, dpr]`. */
+const syncs = (port: number) => syncMessages(port).map(({ width, height, dpr }) => [width, height, dpr]);
+
+/** The engagement the controller's last sync message to `port` named. */
+const engagementAt = (port: number) => syncMessages(port).at(-1)?.engagement;
+
+/** The host's word on the sync of the browser at `port`. */
+function hostSync(port: number, state: 'applying' | 'synced' | 'off', engagement = engagementAt(port)) {
+  streamSocket(port)?.emitMessage(JSON.stringify({ type: 'sync', state, engagement }));
+}
+
+/** A pane whose observer fires whenever the test resizes it. */
+function resizablePane(width = 800, height = 600) {
+  const observers: ResizeObserverCallback[] = [];
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(callback: ResizeObserverCallback) { observers.push(callback); }
+    observe() {}
+    disconnect() {}
+  });
+  const sink = makeSink();
+  let size = { width, height };
+  layOut(sink.viewport, () => size);
+  return {
+    sink,
+    resize(nextWidth: number, nextHeight: number) {
+      size = { width: nextWidth, height: nextHeight };
+      observers.at(-1)?.([{ contentRect: { width: nextWidth, height: nextHeight } } as ResizeObserverEntry], {} as ResizeObserver);
+    },
+  };
+}
+
 describe('sync-to-pane', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  it('issues one viewport once a pane resize settles, and re-syncs a display-scale change at once', async () => {
+  it('names the engagement a Fixed viewport or device ends', async () => {
     const host = installBrowserHost();
-    // The pane observer fires whenever the test resizes the pane.
-    const observers: ResizeObserverCallback[] = [];
-    vi.stubGlobal('ResizeObserver', class {
-      constructor(callback: ResizeObserverCallback) { observers.push(callback); }
-      observe() {}
-      disconnect() {}
-    });
+    const controller = withPort('id', { session: 'sess' }, 4321);
+    controller.attachView(resizablePane().sink);
+    await vi.advanceTimersByTimeAsync(0);
+    const screen = getAgentBrowserScreenController('id')!;
+    const first = engagementAt(4321);
+    expect(first).toEqual(expect.any(String));
+    screen.actions.applyViewport(1024, 768, 1);
+    expect(host.requests('viewport').at(-1)).toMatchObject({ endsSync: first });
+    screen.actions.engageSync();
+    const next = engagementAt(4321);
+    expect(next).not.toBe(first);
+    screen.actions.applyDevice('iPhone 15');
+    expect(host.requests('device').at(-1)).toMatchObject({ endsSync: next });
+  });
+
+  it('sends the host the pane size when its socket opens, once a resize settles, and at once on a display-scale change', async () => {
+    const host = installBrowserHost();
     // A display-scale change fires the `(resolution)` query armed for the old scale.
     const queries: Array<{ media: string; onChange?: () => void }> = [];
     vi.stubGlobal('matchMedia', (media: string) => {
@@ -308,72 +361,106 @@ describe('sync-to-pane', () => {
     });
     let dpr = 1;
     vi.spyOn(window, 'devicePixelRatio', 'get').mockImplementation(() => dpr);
-    const sink = makeSink();
-    let size = { width: 800, height: 600 };
-    sink.viewport.getBoundingClientRect = () => ({ ...size }) as DOMRect;
-    const resizePane = (width: number, height: number) => {
-      size = { width, height };
-      observers.at(-1)?.([{ contentRect: { width, height } } as ResizeObserverEntry], {} as ResizeObserver);
-    };
-    const viewports = () => host.requests('viewport').map(({ width, height, dpr }) => [width, height, dpr]);
+    const pane = resizablePane();
 
     const controller = withPort('id', { session: 'sess' }, 4321);
-    controller.attachView(sink);
-    await flushMicrotasks();
-    // Sync is engaged by default, so attaching sized the browser to the pane.
-    expect(host.requests('viewport').at(-1)).toEqual(onSess({ op: 'viewport', width: 800, height: 600, dpr: 1 }));
-    const issued = viewports().length;
+    controller.attachView(pane.sink);
+    await vi.advanceTimersByTimeAsync(0);
+    // Sync is engaged by default: the host sizes the browser, never the webview.
+    expect(syncs(4321).at(-1)).toEqual([800, 600, 1]);
+    expect(host.requests('viewport')).toEqual([]);
+    const sent = syncs(4321).length;
 
-    // A window drag resizes the pane every frame; one viewport lands after it settles.
+    // A window drag resizes the pane every frame; one size goes once it settles.
     for (let w = 801; w <= 860; w++) {
-      resizePane(w, 600);
+      pane.resize(w, 600);
       await vi.advanceTimersByTimeAsync(16);
     }
-    expect(viewports()).toHaveLength(issued);
+    expect(syncs(4321)).toHaveLength(sent);
     await vi.advanceTimersByTimeAsync(200);
-    expect(viewports().slice(issued)).toEqual([[860, 600, 1]]);
+    expect(syncs(4321).slice(sent)).toEqual([[860, 600, 1]]);
 
     dpr = 2;
     queries.at(-1)!.onChange!();
-    expect(viewports().at(-1)).toEqual([860, 600, 2]);
+    expect(syncs(4321).at(-1)).toEqual([860, 600, 2]);
     // Re-armed for the new scale.
     expect(queries.at(-1)!.media).toBe('(resolution: 2dppx)');
     expect(queries.at(-1)!.onChange).toBeDefined();
   });
+
+  it('sizes the browser to the pane as laid out, never as a Workspace presentation scales it', async () => {
+    const pane = resizablePane();
+    // A Workspace entering: the Wall's subtree is drawn at a scale while it moves.
+    pane.sink.viewport.getBoundingClientRect = () => ({ width: 790, height: 593 }) as DOMRect;
+    const controller = withPort('id', { session: 'sess' }, 4321);
+    controller.attachView(pane.sink);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(syncs(4321).at(-1)).toEqual([800, 600, 1]);
+    expect(syncs(4321)).not.toContainEqual([790, 593, 1]);
+    expect(getAgentBrowserScreenController('id')!.snapshot()?.paneCss).toEqual({ w: 800, h: 600 });
+  });
+
+  it('follows the host alone: its `off` disengages, never a frame, a status or an older engagement', async () => {
+    const pane = resizablePane();
+    const controller = withPort('id', { session: 'sess' }, 4321);
+    controller.attachView(pane.sink);
+    await vi.advanceTimersByTimeAsync(0);
+    const screen = getAgentBrowserScreenController('id')!;
+    const socket = streamSocket(4321)!;
+    const first = engagementAt(4321)!;
+    hostSync(4321, 'synced');
+    expect(screen.snapshot()).toMatchObject({ syncEngaged: true, state: 'SYNCED' });
+
+    // The stream reporting another size — a poll measured before the host's
+    // write landed, a frame in flight, an agent's `set viewport` — is the
+    // host's to judge.
+    socket.emitMessage(JSON.stringify({ type: 'status', connected: true, screencasting: true, viewportWidth: 1280, viewportHeight: 720 }));
+    emitFrame(socket, 'provisional', 1, { width: 640, height: 480 });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(screen.snapshot()).toMatchObject({ syncEngaged: true, viewport: { w: 640, h: 480 } });
+    hostSync(4321, 'applying');
+    expect(screen.snapshot()).toMatchObject({ syncEngaged: true, state: 'SCALED' });
+
+    // Resize with pane chosen again is a new engagement, which the host's word
+    // on the old one does not undo.
+    screen.actions.engageSync();
+    expect(engagementAt(4321)).not.toBe(first);
+    hostSync(4321, 'off', first);
+    expect(screen.snapshot()?.syncEngaged).toBe(true);
+
+    const sink = pane.sink;
+    hostSync(4321, 'off');
+    expect(screen.snapshot()).toMatchObject({ syncEngaged: false, state: 'SCALED' });
+    expect(sink.updateParameters).toHaveBeenLastCalledWith({ syncEngaged: false });
+    // Disengaged, the pane's size goes nowhere.
+    const sent = syncs(4321).length;
+    pane.resize(900, 700);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(syncs(4321)).toHaveLength(sent);
+  });
 });
 
 describe('sync-to-pane while parked', () => {
-  it('pushes a resize made behind a hidden pane once it is live again', async () => {
+  it('sends a resize made behind a hidden pane once its socket opens again', async () => {
     vi.useFakeTimers();
     try {
-      const host = installBrowserHost({ attach: async () => ({ ok: true, stream: 4321 }) });
-      const observers: ResizeObserverCallback[] = [];
-      vi.stubGlobal('ResizeObserver', class {
-        constructor(callback: ResizeObserverCallback) { observers.push(callback); }
-        observe() {}
-        disconnect() {}
-      });
-      const sink = makeSink();
-      let size = { width: 800, height: 600 };
-      sink.viewport.getBoundingClientRect = () => ({ ...size }) as DOMRect;
-      const viewports = () => host.requests('viewport').map(({ width, height, dpr }) => [width, height, dpr]);
-
+      installBrowserHost({ attach: async () => ({ ok: true, stream: 4321 }) });
+      const pane = resizablePane();
       const controller = withPort('id', { session: 'sess' }, 4321);
-      controller.attachView(sink);
+      controller.attachView(pane.sink);
       await vi.advanceTimersByTimeAsync(0);
       controller.setVisible(false);
       await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50);
       expect(controller.isParked()).toBe(true);
 
-      size = { width: 1000, height: 700 };
-      observers.at(-1)?.([{ contentRect: { width: 1000, height: 700 } } as ResizeObserverEntry], {} as ResizeObserver);
+      pane.resize(1000, 700);
       await vi.advanceTimersByTimeAsync(250);
-      expect(viewports().at(-1)).toEqual([800, 600, 1]);
+      expect(syncs(4321).at(-1)).toEqual([800, 600, 1]);
 
-      // Unparked at the same port: the size it missed still goes out.
+      // Unparked at the same port: the size it missed goes out.
       controller.setVisible(true);
       await vi.advanceTimersByTimeAsync(0);
-      expect(viewports().at(-1)).toEqual([1000, 700, 1]);
+      expect(syncs(4321).at(-1)).toEqual([1000, 700, 1]);
     } finally {
       vi.useRealTimers();
     }
@@ -928,7 +1015,7 @@ describe('attach', () => {
       const sent = () => host.browser.mock.calls.map(([request]) => request).filter((request) => request.op !== 'view');
       const sink = makeSink();
       let size = { width: 800, height: 600 };
-      sink.viewport.getBoundingClientRect = () => ({ ...size }) as DOMRect;
+      layOut(sink.viewport, () => size);
       const controller = withPort('id', { session: 'sess', url: 'https://page.example/' }, 1111);
       controller.attachView(sink);
       await vi.advanceTimersByTimeAsync(0);
@@ -952,12 +1039,13 @@ describe('attach', () => {
       if (answers) {
         expect(sent()).toEqual([
           ...later,
-          onSess({ op: 'viewport', width: 1000, height: 700, dpr: 1 }),
           ...(askedMeanwhile ? [] : [onSess({ op: 'navigate', url: 'https://next.example/' })]),
         ]);
+        expect(syncs(1111).at(-1)).toEqual([1000, 700, 1]);
       } else {
         expect(sent()).toEqual([...later, onSess({ op: 'attach', headed: false })]);
         expect(controller.snapshot().phase).toBe('ended');
+        expect(syncs(1111)).not.toContainEqual([1000, 700, 1]);
       }
     } finally {
       vi.useRealTimers();
@@ -1294,19 +1382,11 @@ describe('relaunch (pop-out / pop-in)', () => {
 
   it('reaches no daemon from the header, Display modal, tabs, sync or edit chords mid-relaunch, and carries a navigation to the new browser', async () => {
     const host = relaunchHost();
-    const observers: ResizeObserverCallback[] = [];
-    vi.stubGlobal('ResizeObserver', class {
-      constructor(callback: ResizeObserverCallback) { observers.push(callback); }
-      observe() {}
-      disconnect() {}
-    });
+    const pane = resizablePane();
     vi.useFakeTimers();
     try {
       const controller = withPort('id', { session: 'sess' }, 1111);
-      const sink = makeSink();
-      let size = { width: 800, height: 600 };
-      sink.viewport.getBoundingClientRect = () => ({ ...size }) as DOMRect;
-      controller.attachView(sink);
+      controller.attachView(pane.sink);
       await vi.advanceTimersByTimeAsync(0);
       streamSocket(1111)?.emitMessage(JSON.stringify({
         type: 'tabs',
@@ -1331,8 +1411,7 @@ describe('relaunch (pop-out / pop-in)', () => {
       const [first, second] = controller.snapshot().tabs;
       controller.selectTab(second);
       controller.closeTab(first);
-      size = { width: 900, height: 700 };
-      observers.at(-1)?.([{ contentRect: { width: 900, height: 700 } } as ResizeObserverEntry], {} as ResizeObserver);
+      pane.resize(900, 700);
       await vi.advanceTimersByTimeAsync(250);
       controller.handleKeyDownLike({ key: 'a', code: 'KeyA', metaKey: true, ctrlKey: false, altKey: false, shiftKey: false });
       await vi.advanceTimersByTimeAsync(0);
@@ -1354,7 +1433,7 @@ describe('relaunch (pop-out / pop-in)', () => {
     host.answers.launch = () => popIn.promise;
     const controller = withPort('id', { session: 'sess', renderMode: 'ab-popout' }, 1111);
     const sink = makeSink();
-    sink.viewport.getBoundingClientRect = () => ({ width: 800, height: 600 }) as DOMRect;
+    layOut(sink.viewport, () => ({ width: 800, height: 600 }));
     controller.attachView(sink);
     await flushMicrotasks();
 
@@ -1363,11 +1442,113 @@ describe('relaunch (pop-out / pop-in)', () => {
     expect(controller.snapshot().poppedOut).toBe(false);
     window.dispatchEvent(new Event('resize'));
     getAgentBrowserScreenController('id')!.actions.engageSync();
-    expect(host.requests('viewport')).toEqual([]);
+    expect(syncs(1111)).toEqual([]);
 
     popIn.resolve({ ok: true, stream: 5555 });
     await flushMicrotasks();
-    expect(host.requests('viewport')).toEqual([onSess({ op: 'viewport', width: 800, height: 600, dpr: 1 })]);
+    expect(syncs(5555)).toEqual([[800, 600, 1]]);
+    expect(host.requests('viewport')).toEqual([]);
+  });
+
+  /** A popped-out pane live at 1111 whose window reported `statuses`, the
+   *  pane itself 800×600; its pop-in waits for `resolvePopIn`. */
+  async function poppedOut(...statuses: object[]) {
+    const host = relaunchHost();
+    const popIn = pending();
+    host.answers.launch = (request) => request.headed ? Promise.resolve({ ok: true, stream: 3456 }) : popIn.promise;
+    const controller = withPort('id', { session: 'sess', renderMode: 'ab-popout', url: 'https://page.example/' }, 1111);
+    const sink = makeSink();
+    layOut(sink.viewport, () => ({ width: 800, height: 600 }));
+    controller.attachView(sink);
+    await flushMicrotasks();
+    for (const status of statuses) streamSocket(1111)!.emitMessage(JSON.stringify({ type: 'status', screencasting: false, ...status }));
+    return { host, controller, sink, resolvePopIn: popIn.resolve };
+  }
+
+  it.each([
+    ['its window closes', () => streamSocket(1111)!.emitMessage(JSON.stringify({ type: 'status', connected: false, screencasting: false }))],
+    ['Pop back in is pressed', () => getAgentBrowserSurfaceController('id')!.popIn()],
+  ])('a pop-in when %s fixes the screencast at the window\'s last resolution, once the headless browser is live', async (_name, popIn) => {
+    const { host, sink, resolvePopIn } = await poppedOut(
+      // The daemon's configured viewport, which the window does not follow.
+      { connected: true, viewportWidth: 1280, viewportHeight: 720 },
+      { connected: true, viewportWidth: 1100, viewportHeight: 657, devicePixelRatio: 2 },
+      // Resized, then moved to another display.
+      { connected: true, viewportWidth: 1200, viewportHeight: 736, devicePixelRatio: 1.5 },
+    );
+    popIn();
+    expect(host.relaunches(false)).toEqual([onSess({ op: 'launch', url: 'https://page.example/', headed: false })]);
+    expect(sink.updateParameters).toHaveBeenCalledWith({ syncEngaged: false });
+    // Nothing reaches the browser the relaunch is replacing.
+    expect(host.requests('viewport')).toEqual([]);
+
+    resolvePopIn({ ok: true, stream: 5555 });
+    await flushMicrotasks();
+    expect(host.requests('viewport')).toEqual([onSess({ op: 'viewport', width: 1200, height: 736, dpr: 1.5, endsSync: expect.any(String) })]);
+    // The Display modal shows Fixed, at those numbers.
+    expect(getAgentBrowserScreenController('id')!.snapshot()).toMatchObject({
+      renderMode: 'ab-screencast', syncEngaged: false, viewport: { w: 1200, h: 736, dpr: 1.5 },
+    });
+  });
+
+  it('a resolution picked during the pop-in wins, and a fixed ratio describes only the browser it was set on', async () => {
+    const { host, controller, resolvePopIn } = await poppedOut({ connected: true, viewportWidth: 1200, viewportHeight: 736, devicePixelRatio: 1.5 });
+    const screen = getAgentBrowserScreenController('id')!;
+    controller.popIn();
+    screen.actions.engageSync();
+    resolvePopIn({ ok: true, stream: 5555 });
+    await flushMicrotasks();
+    expect(syncs(5555)).toEqual([[800, 600, 1]]);
+    expect(host.requests('viewport')).toEqual([]);
+
+    // The modal reports the ratio it fixed, until another resolution is picked.
+    for (const pick of [() => screen.actions.engageSync(), () => screen.actions.applyDevice('iPhone 16')]) {
+      screen.actions.applyViewport(1024, 768, 3);
+      expect(screen.snapshot()).toMatchObject({ syncEngaged: false, viewport: { dpr: 3 } });
+      pick();
+      expect(screen.snapshot()?.viewport.dpr).toBe(1);
+    }
+    // Or until another browser streams.
+    screen.actions.applyViewport(1024, 768, 3);
+    controller.handOver(4321);
+    await flushMicrotasks();
+    emitFrame(streamSocket(4321), 'provisional', 1, { width: 1024, height: 768 });
+    expect(screen.snapshot()?.viewport.dpr).toBe(1);
+  });
+
+  it('a fixed resolution picked while a pop-out opens never sizes the window', async () => {
+    const host = relaunchHost();
+    const controller = withPort('id', { session: 'sess' }, 1111);
+    controller.attachView(makeSink());
+    await flushMicrotasks();
+    const screen = getAgentBrowserScreenController('id')!;
+    screen.actions.setRenderMode?.('ab-popout');
+    screen.actions.applyViewport(1024, 768, 2);
+    host.resolvePopOut({ ok: true, stream: 3456 });
+    await flushMicrotasks();
+    expect(controller.snapshot()).toMatchObject({ poppedOut: true, phase: 'live' });
+    expect(host.requests('viewport')).toEqual([]);
+  });
+
+  it('a pop-in with no resolution from this window keeps resizing with the pane', async () => {
+    const { host, controller, resolvePopIn } = await poppedOut({ connected: true, viewportWidth: 1100, viewportHeight: 657, devicePixelRatio: 2 });
+    controller.popIn();
+    resolvePopIn({ ok: true, stream: 5555 });
+    await flushMicrotasks();
+    const screen = getAgentBrowserScreenController('id')!;
+    screen.actions.engageSync();
+    host.browser.mockClear();
+
+    // Out again: this window reports only the daemon's viewport.
+    screen.actions.setRenderMode?.('ab-popout');
+    await flushMicrotasks();
+    streamSocket(3456)!.emitMessage(JSON.stringify({ type: 'status', connected: true, screencasting: false, viewportWidth: 1280, viewportHeight: 720 }));
+    host.answers.launch = (request) => Promise.resolve({ ok: true, stream: request.headed ? 3456 : 5556 });
+    controller.popIn();
+    await flushMicrotasks();
+    expect(syncs(5556)).toEqual([[800, 600, 1]]);
+    expect(host.requests('viewport')).toEqual([]);
+    expect(screen.snapshot()).toMatchObject({ syncEngaged: true, viewport: { dpr: 1 } });
   });
 
   it('a pop-out asked for with a page relaunches there instead of navigating into the gap', async () => {
@@ -1488,6 +1669,17 @@ describe('Playwright provider', () => {
     const sent = streamSocket(4321)!.sent.map((raw) => JSON.parse(raw) as { type: string; text: string });
     expect(sent.map((message) => message.type)).toEqual(['input_text', 'input_text']);
     expect(sent.map((message) => message.text).join('')).toBe(pasted.replace('\r\n', '\n'));
+  });
+
+  it('shows the ratio its browser measures, which Playwright keeps as its own', async () => {
+    installBrowserHost();
+    const controller = withPort('pw', { renderMode: 'pw-screencast', session: 's' }, 4321);
+    controller.attachView(makeSink());
+    await flushMicrotasks();
+    const screen = getAgentBrowserScreenController('pw')!;
+    screen.actions.applyViewport(1024, 768, 2);
+    streamSocket(4321)!.emitMessage(JSON.stringify({ type: 'status', connected: true, screencasting: true, viewportWidth: 1024, viewportHeight: 768, devicePixelRatio: 1 }));
+    expect(screen.snapshot()?.viewport).toEqual({ w: 1024, h: 768, dpr: 1 });
   });
 
   it('names Playwright in a failed host command warning', async () => {

@@ -4,7 +4,7 @@ import { request as httpRequest } from 'node:http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { decodeViewerFrame, type ViewerFrame, type ViewerState } from '../lib/platform/browser-automation';
-import { BrowserView, PROVISIONAL_INPUT_WINDOW_MS, closeReason, createViewerServer, parseViewerInput, type Upstream } from './browser-viewer';
+import { BrowserView, PROVISIONAL_INPUT_WINDOW_MS, WINDOW_GONE_GRACE_MS, closeReason, createViewerServer, measuredViewport, parseViewerInput, type Upstream } from './browser-viewer';
 import { openViewer } from './browser-host-test-utils';
 
 /** The webview's socket as a view sees it: what was sent, and input to send. */
@@ -262,6 +262,60 @@ describe('a viewer socket', () => {
     expect(socket.states()).toEqual([{ type: 'status', connected: false, screencasting: false }]);
     expect(socket.closedWith).toBe(1000);
   });
+
+  it('reports a headed window gone once its browser has had no page for the grace period', async () => {
+    const { socket, view } = makeView({ headed: true });
+    // A tab closed and replaced: never the window closing.
+    view.pages(0);
+    await vi.advanceTimersByTimeAsync(WINDOW_GONE_GRACE_MS - 1);
+    view.pages(1);
+    await vi.advanceTimersByTimeAsync(10 * WINDOW_GONE_GRACE_MS);
+    expect(socket.states()).toEqual([]);
+    expect(socket.closedWith).toBeUndefined();
+
+    // However often none is reported before a page comes back.
+    view.pages(0);
+    await vi.advanceTimersByTimeAsync(WINDOW_GONE_GRACE_MS / 2);
+    view.pages(0);
+    await vi.advanceTimersByTimeAsync(WINDOW_GONE_GRACE_MS / 2 - 1);
+    view.pages(1);
+    await vi.advanceTimersByTimeAsync(10 * WINDOW_GONE_GRACE_MS);
+    expect(socket.closedWith).toBeUndefined();
+
+    // The window closed, its browser running on with none: counted from the
+    // first report of none, however often it repeats.
+    view.pages(0);
+    await vi.advanceTimersByTimeAsync(WINDOW_GONE_GRACE_MS / 2);
+    view.pages(0);
+    await vi.advanceTimersByTimeAsync(WINDOW_GONE_GRACE_MS / 2);
+    expect(socket.states()).toEqual([{ type: 'status', connected: false, screencasting: false }]);
+    expect(socket.closedWith).toBe(1000);
+  });
+
+  it('never reads an empty browser as gone behind a pane, or once the host ended the view', async () => {
+    const pane = makeView();
+    pane.view.pages(0);
+    await vi.advanceTimersByTimeAsync(10 * WINDOW_GONE_GRACE_MS);
+    expect(pane.socket.closedWith).toBeUndefined();
+
+    const relaunched = makeView({ headed: true });
+    relaunched.view.pages(0);
+    relaunched.view.close(1001, 'the browser was relaunched or closed');
+    await vi.advanceTimersByTimeAsync(10 * WINDOW_GONE_GRACE_MS);
+    expect(relaunched.socket.states()).toEqual([]);
+    expect(relaunched.socket.closedWith).toBe(1001);
+  });
+});
+
+describe('measuredViewport', () => {
+  it('takes a page\'s answer only as a viewport the host would set', () => {
+    expect(measuredViewport({ width: 1200, height: 736, dpr: 2.2 })).toEqual({ viewportWidth: 1200, viewportHeight: 736, devicePixelRatio: 2.2 });
+    for (const answer of [
+      null, 'x', [1200, 736, 2], { width: 1200, height: 736 }, { width: 1200.5, height: 736, dpr: 2 },
+      { width: 0, height: 736, dpr: 2 }, { width: 16385, height: 736, dpr: 2 }, { width: 1200, height: 736, dpr: 0 },
+      { width: 1200, height: 736, dpr: 11 }, { width: '1200', height: 736, dpr: 2 },
+    ]) expect(measuredViewport(answer), JSON.stringify(answer)).toBeUndefined();
+  });
 });
 
 describe('closeReason', () => {
@@ -281,7 +335,11 @@ describe('parseViewerInput', () => {
       .toEqual({ type: 'input_mouse', eventType: 'mouseWheel', x: 1, y: 2, button: 'none', buttons: 31, clickCount: 3, modifiers: 15, deltaX: 0, deltaY: 5 });
     expect(parseViewerInput(JSON.stringify({ type: 'input_keyboard', eventType: 'keyDown', key: 'a', code: 'c'.repeat(200), text: 't'.repeat(2000), windowsVirtualKeyCode: 65.5, modifiers: 16 })))
       .toEqual({ type: 'input_keyboard', eventType: 'keyDown', key: 'a', code: 'c'.repeat(100), text: 't'.repeat(1000), windowsVirtualKeyCode: 0, modifiers: 0 });
+    const sync = { type: 'sync', width: 800, height: 600, dpr: 2, engagement: '0f5c-e1' };
+    expect(parseViewerInput(JSON.stringify({ ...sync, extra: 'x' }))).toEqual(sync);
     for (const refused of [
+      ...[{ width: 0 }, { width: 800.5 }, { height: 16385 }, { dpr: 0 }, { dpr: 11 }, { engagement: 'has space' }, { engagement: 'e'.repeat(65) }, { engagement: 7 }]
+        .map((field) => ({ ...sync, ...field })),
       { type: 'input_mouse', eventType: 'click', x: 1, y: 1 },
       { type: 'input_mouse', eventType: 'mouseMoved', x: 1e7, y: 1 },
       { type: 'input_keyboard', eventType: 'keyPress', key: 'a' },

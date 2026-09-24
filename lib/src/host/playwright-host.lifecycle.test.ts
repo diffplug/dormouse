@@ -1,16 +1,25 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
+import { WebSocket } from 'ws';
 import { createBrowserCaptures } from './browser-capture';
 import { createBrowserHost, type BrowserProvider } from './browser-host';
-import { openViewer } from './browser-host-test-utils';
+import { openViewer, syncStates } from './browser-host-test-utils';
+import { SYNC_SETTLE_MS } from './browser-sync';
+import { WINDOW_GONE_GRACE_MS } from './browser-viewer';
 import { createPlaywrightProvider } from './playwright-host';
 import { BROWSER_REQUEST_TIMEOUT_MS, VIEWER_TEXT_INPUT_MAX, viewerTextInputs, type BrowserOp, type BrowserRequestBinding } from '../lib/platform/browser-automation';
 
 const mocks = vi.hoisted(() => ({ cli: vi.fn(), connect: vi.fn(), clipboard: vi.fn() }));
 vi.mock('dor-lib-common', async importOriginal => ({ ...await importOriginal<typeof import('dor-lib-common')>(), spawnAndCapture: mocks.cli }));
 vi.mock('./playwright-install', () => ({
-  resolvePlaywrightInstall: () => ({ binary: '/tools/playwright-cli', libraryPath: process.cwd(), library: { chromium: { connect: mocks.connect } } }),
+  resolvePlaywrightInstall: () => ({
+    binary: '/tools/playwright-cli', libraryPath: process.cwd(),
+    library: {
+      chromium: { connect: mocks.connect },
+      devices: { 'iPhone 15': { viewport: { width: 393, height: 659 }, userAgent: 'iPhone UA', deviceScaleFactor: 3, isMobile: true, hasTouch: true } },
+    },
+  }),
   playwrightWorkspace: () => process.cwd(),
 }));
 
@@ -43,7 +52,7 @@ beforeEach(() => {
   page = Object.assign(new EventEmitter(), {
     context: () => ({ newCDPSession: attach }), isClosed: () => false,
     title: async () => 'Test', url: () => 'http://localhost/',
-    evaluate: async () => ({ width: 640, height: 480 }),
+    evaluate: async () => ({ width: 640, height: 480, dpr: 1 }), viewportSize: () => ({ width: 640, height: 480 }),
   });
   browser = Object.assign(new EventEmitter(), {
     contexts: () => [{ pages: () => [page] }], isConnected: () => true,
@@ -274,10 +283,10 @@ describe('attach', () => {
 });
 
 test('copy runs the shared edit script and never overwrites the clipboard with an empty selection', async () => {
-  page.evaluate = vi.fn(async (script: unknown) => typeof script === 'string' ? '' : { width: 640, height: 480 });
+  page.evaluate = vi.fn(async (script: unknown) => typeof script === 'string' ? '' : { width: 640, height: 480, dpr: 1 });
   expect(await pw({ op: 'edit', edit: 'copy' })).toMatchObject({ ok: true, text: '' });
   expect(mocks.clipboard).not.toHaveBeenCalled();
-  page.evaluate = vi.fn(async (script: unknown) => typeof script === 'string' ? 'hello' : { width: 640, height: 480 });
+  page.evaluate = vi.fn(async (script: unknown) => typeof script === 'string' ? 'hello' : { width: 640, height: 480, dpr: 1 });
   expect(await pw({ op: 'edit', edit: 'copy' })).toMatchObject({ ok: true, text: 'hello' });
   expect(mocks.clipboard).toHaveBeenCalledExactlyOnceWith('hello');
   expect((await pw({ op: 'edit', edit: 'constructor' as never })).error).toBe("unknown edit op 'constructor'");
@@ -359,6 +368,18 @@ test('frames reach the viewer as binary, decoded once, their acks paced to ~20 a
     await vi.waitFor(() => expect(viewer.frames.length).toBeGreaterThan(0));
     expect(viewer.frames[0]).toMatchObject({ kind: 'provisional', size: { width: 640, height: 480 } });
     expect([...viewer.frames[0].jpeg]).toEqual([0xff, 0xd8, 1]);
+    // A capture makes Chrome send the frame it last sent again: acknowledged,
+    // never forwarded, so it pulses no capture of its own.
+    const captures = () => cdp.send.mock.calls.filter(([method]) => method === 'Page.captureScreenshot').length;
+    await vi.waitFor(() => expect(captures()).toBeGreaterThan(0));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const taken = captures();
+    for (let i = 0; i < 5; i++) {
+      screencastFrame(2);
+      await vi.waitFor(() => expect(acks()).toHaveLength(3 + i));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(captures()).toBe(taken);
   } finally {
     viewer.socket.terminate();
   }
@@ -370,6 +391,70 @@ test('a browser that disconnects on its own tells its viewers it is gone', async
   browser.emit('disconnected');
   expect(await viewer.closed).toBe(1000);
   expect(viewer.states.at(-1)).toEqual({ type: 'status', connected: false, screencasting: false });
+});
+
+describe('a headed window', () => {
+  let pages: unknown[];
+  beforeEach(() => {
+    pages = [page];
+    browser.contexts = () => [{ pages: () => pages }];
+    // The host's own measure, run as the page would.
+    vi.stubGlobal('innerWidth', 1200);
+    vi.stubGlobal('innerHeight', 736);
+    vi.stubGlobal('devicePixelRatio', 2);
+    page.evaluate = async (measure: () => unknown) => measure();
+    // The CLI launched it headed.
+    const originalCli = mocks.cli.getMockImplementation()!;
+    mocks.cli.mockImplementation(async (binary, args, options) => {
+      const result = await originalCli(binary, args, options);
+      if (!args.includes('list')) return result;
+      const registry = JSON.parse(result.stdout);
+      registry.servers[0].browser.launchOptions = { headless: false };
+      return { ...result, stdout: JSON.stringify(registry) };
+    });
+  });
+  afterEach(() => { vi.unstubAllGlobals(); });
+  /** A popped-out pane's viewer socket onto the session's browser. */
+  const viewWindow = async () => {
+    const { stream } = await pw({ op: 'attach' });
+    return openViewer((await pw({ op: 'view', stream: stream!, headed: true })).url!);
+  };
+
+  test('reports its viewport and ratio, as its page measures them', async () => {
+    const viewer = await viewWindow();
+    try {
+      await vi.waitFor(() => expect(viewer.states).toContainEqual(
+        { type: 'status', connected: true, screencasting: false, viewportWidth: 1200, viewportHeight: 736, devicePixelRatio: 2 },
+      ));
+    } finally {
+      viewer.socket.terminate();
+    }
+  });
+
+  test('is gone once every page of its browser has closed, though the browser runs on', async () => {
+    const viewer = await viewWindow();
+    await vi.waitFor(() => expect(viewer.states.map((state) => state.type)).toContain('status'));
+    pages = [];
+    // A refresh reports the pages it sees, as the poll does.
+    await pw({ op: 'attach' });
+    expect(await viewer.closed).toBe(1000);
+    expect(viewer.states.at(-1)).toEqual({ type: 'status', connected: false, screencasting: false });
+  });
+
+  test('is not gone when a tab closed is replaced', async () => {
+    const viewer = await viewWindow();
+    try {
+      await vi.waitFor(() => expect(viewer.states.map((state) => state.type)).toContain('status'));
+      pages = [];
+      await pw({ op: 'attach' });
+      pages = [Object.assign(new EventEmitter(), page)];
+      await pw({ op: 'attach' });
+      await new Promise((resolve) => setTimeout(resolve, 2 * WINDOW_GONE_GRACE_MS));
+      expect(viewer.socket.readyState).toBe(WebSocket.OPEN);
+    } finally {
+      viewer.socket.terminate();
+    }
+  });
 });
 
 describe('a GUI launch that gives up', () => {
@@ -500,3 +585,97 @@ describe('a GUI launch that gives up', () => {
     expect(second.done.at).toBeLessThanOrEqual(30_000);
   });
 });
+
+describe('sync-to-pane', () => {
+  // The page's viewport as Chrome settles it: Playwright's own emulated size.
+  let emulated: { width: number; height: number };
+  /** Held, a `setViewportSize` lands only once released. */
+  let landing: PromiseWithResolvers<void> | undefined;
+  /** Held, a measurement answers what it saw only once released. */
+  let answering: PromiseWithResolvers<void> | undefined;
+  beforeEach(() => {
+    emulated = { width: 640, height: 480 };
+    landing = answering = undefined;
+    page.setViewportSize = vi.fn(async (size: { width: number; height: number }) => {
+      await landing?.promise;
+      emulated = size;
+    });
+    page.evaluate = vi.fn(async () => {
+      const seen = emulated;
+      await answering?.promise;
+      return { ...seen, dpr: 1 };
+    });
+  });
+  /** The poll's next measurement, as a `dor pw` command's attach runs it. */
+  const poll = () => pw({ op: 'attach' });
+
+  test('sizes a page only through Playwright\'s own setViewportSize; a device adds only its touch and user agent', async () => {
+    expect((await pw({ op: 'viewport', width: 900, height: 600, dpr: 2 })).ok).toBe(true);
+    expect(page.setViewportSize).toHaveBeenLastCalledWith({ width: 900, height: 600 });
+    expect((await pw({ op: 'device', name: 'iPhone 15' })).ok).toBe(true);
+    expect(page.setViewportSize).toHaveBeenLastCalledWith({ width: 393, height: 659 });
+    expect((await pw({ op: 'viewport', width: 800, height: 600, dpr: 2 })).ok).toBe(true);
+    expect((await pw({ op: 'viewport', width: 820, height: 600, dpr: 2 })).ok).toBe(true);
+    // No metrics override: a second writer Chrome re-applies on navigation.
+    expect(cdp.send.mock.calls.filter(([method]) => method.startsWith('Emulation.'))).toEqual([
+      ['Emulation.setTouchEmulationEnabled', { enabled: true }],
+      ['Emulation.setUserAgentOverride', { userAgent: 'iPhone UA' }],
+      // The next viewport leaves the device; the one after has nothing to leave.
+      ['Emulation.setTouchEmulationEnabled', { enabled: false }],
+      ['Emulation.setUserAgentOverride', { userAgent: '' }],
+    ]);
+  });
+
+  test('a poll begun before a sync write landed never stops the sync', async () => {
+    const viewer = await viewSession();
+    try {
+      viewer.send({ type: 'sync', width: 800, height: 600, dpr: 2, engagement: 'e1' });
+      await vi.waitFor(() => expect(emulated).toEqual({ width: 800, height: 600 }));
+      await poll();
+      await vi.waitFor(() => expect(syncStates(viewer).at(-1)).toBe('synced'));
+
+      // The drag's next size is being written when the poll starts measuring;
+      // the poll answers the size before it only once the write has landed.
+      landing = Promise.withResolvers();
+      viewer.send({ type: 'sync', width: 900, height: 600, dpr: 2, engagement: 'e1' });
+      await vi.waitFor(() => expect(page.setViewportSize).toHaveBeenLastCalledWith({ width: 900, height: 600 }));
+      answering = Promise.withResolvers();
+      const measured = vi.mocked(page.evaluate).mock.calls.length;
+      const stale = poll();
+      await vi.waitFor(() => expect(vi.mocked(page.evaluate).mock.calls.length).toBeGreaterThan(measured));
+      landing.resolve();
+      await vi.waitFor(() => expect(emulated).toEqual({ width: 900, height: 600 }));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      answering.resolve();
+      answering = undefined;
+      await stale;
+      await new Promise((resolve) => setTimeout(resolve, SYNC_SETTLE_MS + 100));
+      expect(syncStates(viewer)).not.toContain('off');
+      await poll();
+      await vi.waitFor(() => expect(syncStates(viewer).at(-1)).toBe('synced'));
+    } finally {
+      viewer.socket.terminate();
+    }
+  });
+
+  test('a navigation never stops the sync; an agent\'s resize does', async () => {
+    const viewer = await viewSession();
+    try {
+      viewer.send({ type: 'sync', width: 800, height: 600, dpr: 2, engagement: 'e1' });
+      await vi.waitFor(() => expect(page.setViewportSize).toHaveBeenCalled());
+      await poll();
+      await vi.waitFor(() => expect(syncStates(viewer).at(-1)).toBe('synced'));
+      page.url = () => 'http://localhost/next';
+      await poll();
+      await new Promise((resolve) => setTimeout(resolve, SYNC_SETTLE_MS + 100));
+      expect(syncStates(viewer)).not.toContain('off');
+      // An agent's `resize` is another writer.
+      emulated = { width: 1024, height: 768 };
+      await poll();
+      await vi.waitFor(() => expect(syncStates(viewer).at(-1)).toBe('off'));
+    } finally {
+      viewer.socket.terminate();
+    }
+  });
+});
+

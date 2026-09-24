@@ -4,7 +4,7 @@
 > vocabulary. A Surface is `dor`'s user-facing handle; Pane stays layout
 > vocabulary, out of the public target grammar.
 >
-> Owns the CLI Dormouse bundles into every terminal it launches, end to end:
+> Owns the bundled CLI:
 > staging, the PTY env contract, external-binary spawning, control plumbing,
 > handles, the shipped command set, and the bundled agent skill. **The CLI is
 > the public API; any socket under it is private host plumbing.**
@@ -17,9 +17,9 @@
 
 **`dor` must work without `npm i -g`.** Both hosts stage `dor`
 (`scripts/stage-dor-cli.mjs`) before build and prepend its `bin`
-directory to every PTY's `PATH`. Staged: `bin/dor` + `bin/dor.cmd`,
-`dist/dor.js` (the esbuild bundle), and a generated `package.json` declaring
-`"type": "module"` so Node runs the staged ESM without parent package metadata.
+directory to every spawned PTY's `PATH`. Staged: `bin/dor` + `bin/dor.cmd`,
+`dist/dor.js` (esbuild), and a generated `package.json` declaring
+`"type": "module"` so Node runs ESM independently of parent package metadata.
 
 **Both launchers must set `ELECTRON_RUN_AS_NODE=1` themselves** before
 `exec "$DORMOUSE_NODE" "$DORMOUSE_CLI_JS"`, or under VS Code `dor` silently
