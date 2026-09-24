@@ -521,7 +521,12 @@ describe('WorkspaceWindow', () => {
     expect(leafIdsIn(survivors[0].id)).toHaveLength(1);
   });
 
-  it.each([SURFACE_CONTROL_METHODS.split, SURFACE_CONTROL_METHODS.tool])('refuses %s while its Workspace is closing', async (method) => {
+  it.each([
+    SURFACE_CONTROL_METHODS.split,
+    SURFACE_CONTROL_METHODS.tool,
+    SURFACE_CONTROL_METHODS.agentBrowser,
+    SURFACE_CONTROL_METHODS.browser,
+  ])('refuses %s while its Workspace is closing', async (method) => {
     await render();
     await act(async () => { createWorkspace({ id: 'ws-2' }); });
     await flush();
@@ -537,7 +542,8 @@ describe('WorkspaceWindow', () => {
         requestId: 'r1',
         method,
         surfaceId: paneId,
-        params: { direction: 'right' },
+        // `session` names the browser the two browser verbs would bind.
+        params: { direction: 'right', session: 'gui-closing' },
         respond,
       });
       expect(await closing).toBeNull();
@@ -547,6 +553,38 @@ describe('WorkspaceWindow', () => {
     expect(respond).toHaveBeenCalledWith({ ok: false, error: 'this workspace is closing' });
     expect(handle.surfaceIds()).toEqual([]);
     expect(leafIdsIn('ws-2')).toEqual([]);
+  });
+
+  it('refuses a Playwright surface.browser whose host answer lands after the close began', async () => {
+    // The Playwright arm asks the host for the viewer before it creates
+    // anything, so the guard above is not the last word.
+    const status = Promise.withResolvers<{ ok: boolean; wsPort: number; headed: boolean }>();
+    const playwright = vi.fn(() => status.promise);
+    Object.assign(fake, { playwright });
+    await render();
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await flush();
+    const handle = getWallHandle('ws-2')!;
+    const [paneId] = handle.surfaceIds();
+    const respond = vi.fn();
+
+    act(() => {
+      void handle.handleDorControl({
+        requestId: 'late-pw',
+        method: SURFACE_CONTROL_METHODS.browser,
+        surfaceId: paneId,
+        params: { provider: 'playwright', session: 'late', cwd: '/repo' },
+        respond,
+      });
+    });
+    await flush();
+    expect(playwright).toHaveBeenCalledWith(expect.objectContaining({ op: 'streamStatus', session: 'late' }));
+    await act(async () => { expect(await handle.closeAll('silent')).toBeNull(); });
+    await act(async () => status.resolve({ ok: true, wsPort: 4321, headed: false }));
+    await flush();
+
+    expect(respond).toHaveBeenCalledWith({ ok: false, error: 'this workspace is closing' });
+    expect(handle.surfaceIds()).toEqual([]);
   });
 
   it('names each Workspace its own agent-browser session for the same --key', async () => {

@@ -354,15 +354,16 @@ export function waitForNewToolCommand(id: string, command: string, cwd: string, 
 }
 
 const RESTART_CANCELLED: ParseResult<undefined> = { ok: false, message: 'restart was cancelled' };
-/** The control verbs that can add a Surface to the Wall. `resolveOpen` and
- *  `resolveAgentBrowser` only answer questions, and every other verb addresses a
- *  Surface that already exists. */
+/** The control verbs that can add a Surface to the Wall. The `resolve*` verbs
+ *  only answer questions, and every other verb addresses a Surface that
+ *  already exists. */
 const CREATING_CONTROL_METHODS = new Set<string>([
   SURFACE_CONTROL_METHODS.tool,
   SURFACE_CONTROL_METHODS.split,
   SURFACE_CONTROL_METHODS.ensure,
   SURFACE_CONTROL_METHODS.iframe,
   SURFACE_CONTROL_METHODS.agentBrowser,
+  SURFACE_CONTROL_METHODS.browser,
 ]);
 
 const ENSURE_CANCELLED = 'ensure was cancelled';
@@ -1663,6 +1664,11 @@ export function useDorControl({
         const status = await platform.agentBrowserStreamStatus(session, binaryPath);
         if (!status.ok) {
           detail.respond({ ok: false, error: status.error ?? 'Playwright connection failed' });
+          return;
+        }
+        // The Workspace may have begun closing while the host connected.
+        if (isClosingWorkspace()) {
+          detail.respond({ ok: false, error: 'this workspace is closing' });
           return;
         }
         launch = { wsPort: status.wsPort, minimized: false, cwd, headed: status.headed, nativeIdentity: status.nativeIdentity };
