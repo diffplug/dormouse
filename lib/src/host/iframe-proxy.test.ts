@@ -229,10 +229,23 @@ describe('iframe proxy — serving', () => {
   it('passes a compressed or UTF-16 HTML body through rather than splicing the shim into it', async () => {
     const html = '<html><head><title>t</title></head><body>hello</body></html>';
     const gzipped = gzipSync(html);
+    const bom = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(html, 'utf16le')]);
     const port = await upstream((q, s) => {
       if (q.url === '/utf16') {
         s.writeHead(200, { 'content-type': 'text/html; charset=UTF-16LE' });
         s.end(Buffer.from(html, 'utf16le'));
+        return;
+      }
+      if (q.url === '/unicode') {
+        s.writeHead(200, { 'content-type': 'text/html; charset="unicode"' });
+        s.end(Buffer.from(html, 'utf16le'));
+        return;
+      }
+      if (q.url === '/bom') {
+        // No charset at all: the BOM alone makes it UTF-16 to the browser.
+        s.writeHead(200, { 'content-type': 'text/html' });
+        s.write(bom.subarray(0, 1));
+        setTimeout(() => s.end(bom.subarray(1)), 5);
         return;
       }
       // Compresses whatever the request asked for.
@@ -248,8 +261,10 @@ describe('iframe proxy — serving', () => {
     expect(compressed.headers['content-security-policy'])
       .toBe("frame-ancestors 'self' vscode-webview://abc-123 vscode-file://vscode-app");
 
-    const wide = await requestBytes(`${new URL(url).origin}/utf16`);
-    expect(wide.body.toString('utf16le')).toBe(html);
+    const origin = new URL(url).origin;
+    expect((await requestBytes(`${origin}/utf16`)).body.toString('utf16le')).toBe(html);
+    expect((await requestBytes(`${origin}/unicode`)).body.toString('utf16le')).toBe(html);
+    expect((await requestBytes(`${origin}/bom`)).body.equals(bom)).toBe(true);
   });
 
   it('asks for an identity body only when loading a document', async () => {

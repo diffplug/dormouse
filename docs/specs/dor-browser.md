@@ -397,7 +397,7 @@ sidecar/Rust adapter.
 | Method | Contract |
 | --- | --- |
 | `agentBrowserCommand` | Navigation, tab, viewport/device, `get cdp-url` and `close` commands, one shape per verb. |
-| `agentBrowserScreenshot` | One device-resolution JPEG/PNG frame. VS Code structured-clones the bytes; standalone passes Rust the capture's temp-file **path** over the sidecar stdio, for Rust to read (rationale). **One capture per session in flight**: a request made meanwhile joins it — never one from before the session's close or relaunch — and the capture's spawn is killed past 30s. |
+| `agentBrowserScreenshot` | One device-resolution JPEG/PNG frame. VS Code structured-clones the bytes; standalone passes Rust the capture's temp-file **path** over the sidecar stdio, for Rust to read (rationale). **One capture per session and format in flight**: a request made meanwhile joins it — never one from before the session's close or relaunch — and the capture's spawn is killed past 30s. |
 | `agentBrowserStreamStatus` | Current stream port, for stale-`wsPort` recovery. |
 | `agentBrowserEdit` | select-all/copy/cut via fixed host-owned JS plus an OS clipboard write. |
 | `getAgentBrowserStreamUrl` | Direct stream URL, or the VS Code relay URL. |
@@ -517,11 +517,11 @@ Header rewriting:
 **Must update this table whenever header rewriting changes.**
 
 **Must instrument only an identity-encoded, ASCII-compatible HTML body, and keep
-its `content-type` as sent**, charset included; a compressed or UTF-16 body
-passes through uninstrumented (rationale). **Never place the shim ahead of the
-doctype or a `<meta charset>`**: it goes before `</head>`, else after `<body…>`,
-else after the document's leading doctype/`<html>`/`<head>`/`<meta charset>`
-tags.
+its `content-type` as sent**, charset included; a compressed body, or a UTF-16
+one (any WHATWG label, or a byte-order mark), passes through uninstrumented
+(rationale). **Never place the shim ahead of the doctype, a `<meta charset>` or a
+UTF-8 BOM**: it goes before `</head>`, else after `<body…>`, else after the
+document's leading BOM/doctype/`<html>`/`<head>`/`<meta charset>` tags.
 
 **Must preserve enforced and report-only CSP verbatim when the upstream response sends `X-Dormouse-Preserve-CSP: 1`.** Add the validated ancestor policy separately, for every MIME type; preserve meta policies during HTML instrumentation. Never infer this opt-in from request headers. Additional upstream restrictions may prevent framing or shim execution. (rationale)
 
@@ -545,8 +545,9 @@ Source of truth: `lib/src/components/wall/IframePanel.tsx`,
 ### Iframe Shim
 
 **Must send four fixed, never-user-provided message kinds to the app and nothing
-else** — `leader`, `pointerdown`, `location`, `open-window`. **`location` is
-never relayed from a nested document**; the other three are. **`open-window`
+else** — `leader`, `pointerdown`, `location`, `open-window`; `location` carries
+`loaded: true` only on the document's own `pageshow`/`DOMContentLoaded` report.
+**`location` is never relayed from a nested document**; the other three are. **`open-window`
 intercepts every anchor target but `_self`**, plus `window.open`.
 
 **Only `http:` and `https:` reach a browser Surface, re-checked at the sink.**
@@ -565,8 +566,9 @@ New-tab requests show an overlay: accept opens an adjacent browser pane (for
 **Once a proxied frame's shim has reported, a `load` with no `location` report
 within 1s marks the document uninstrumented** (not HTML, off the proxy, refused,
 or its grant gone), and a banner offers Reload and Open in agent-browser. Only a
-report naming the proxy origin counts, including one up to 250ms before the
-load; a new frame source waits for its first report again, since a non-HTML
+`loaded` report naming the proxy origin counts, including one up to 250ms before
+the load — a clicked link's report comes from the page being left; a new frame
+source waits for its first report again, since a non-HTML
 document served from the start carries no shim (rationale).
 
 Source of truth: `lib/src/host/iframe-proxy-rewrite.ts` (`iframeShim`),

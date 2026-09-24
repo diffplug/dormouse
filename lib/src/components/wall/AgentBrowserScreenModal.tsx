@@ -125,7 +125,8 @@ export function AgentBrowserScreenModal({
   //     `set viewport`, and a valid custom size.
   const applyDisabled =
     viewportDisabled || switchingMode
-      ? false
+      // The page may have changed since iframe was picked.
+      ? renderMode === 'iframe' && embedRefusal !== null
       : (!hostCapable || (target === 'custom' && !customValid));
 
   const apply = () => {

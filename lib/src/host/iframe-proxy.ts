@@ -58,6 +58,8 @@ import { isForeignOrigin, isLoopbackHost, isOwnOrigin } from './loopback-guard';
 import {
   FRAMING_RESPONSE_HEADERS,
   HEAD_MARKER,
+  declaresUtf16,
+  startsWithUtf16Bom,
   PRESERVE_CSP_HEADER,
   HOP_BY_HOP_RESPONSE_HEADERS,
   errorPageHtml,
@@ -267,9 +269,9 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
     // The shim is ASCII spliced into the body's own bytes, so it needs an
     // identity, ASCII-compatible body: a compressed one (an upstream that
     // ignores Accept-Encoding, or a non-document fetch) or a UTF-16 one would
-    // be corrupted, not instrumented.
+    // be corrupted, not instrumented. A UTF-16 BOM is caught in streamHtml.
     if (!/text\/html/i.test(contentType) || encoding !== 'identity'
-      || /charset\s*=\s*["']?utf-?16/i.test(contentType) || embedder === undefined) {
+      || declaresUtf16(contentType) || embedder === undefined) {
       passThrough(grant, upstreamRes, res);
       return;
     }
@@ -342,6 +344,7 @@ function streamHtml(
   // The scanned text a marker split across chunks could still begin in.
   let carry = '';
   let handled = false;
+  let bomChecked = false;
   const prefix = () => Buffer.concat(pending).toString('latin1');
 
   // Each chunk is decoded and searched once, plus the carry, so a large head
@@ -349,6 +352,19 @@ function streamHtml(
   const onData = (chunk: Buffer) => {
     pending.push(chunk);
     buffered += chunk.length;
+    // A UTF-16 BOM overrides any header in the browser, so such a body is
+    // passed through as sent, like one the header labels UTF-16.
+    if (!bomChecked && buffered >= 2) {
+      bomChecked = true;
+      if (startsWithUtf16Bom(Buffer.concat(pending))) {
+        handled = true;
+        upstreamRes.off('data', onData);
+        res.write(Buffer.concat(pending));
+        pending.length = 0;
+        upstreamRes.pipe(res);
+        return;
+      }
+    }
     const scan = carry + chunk.toString('latin1');
     if (buffered <= HEAD_STREAM_CAP && !HEAD_MARKER.test(scan)) {
       carry = scan.slice(-MARKER_CARRY);

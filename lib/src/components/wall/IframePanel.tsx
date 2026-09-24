@@ -324,7 +324,7 @@ export function IframePanel({ id, title, params }: PaneProps) {
     if (!proxyOrigin) return;
     const onMessage = (e: MessageEvent) => {
       if (e.origin !== proxyOrigin) return;
-      const data = e.data as { __dormouse?: unknown; url?: unknown } | null;
+      const data = e.data as { __dormouse?: unknown; url?: unknown; loaded?: unknown } | null;
       if (data?.__dormouse === 'pointerdown') {
         actions.onClickPanel(id);
         return;
@@ -345,7 +345,9 @@ export function IframePanel({ id, title, params }: PaneProps) {
         // document; a clicked link's href can name anywhere.
         const nextUrl = upstreamUrlFromFrameLocation(data.url, liveUrl || sourceUrl, proxyOrigin);
         if (!nextUrl) return;
-        lastShimReportRef.current = performance.now();
+        // Only a load report vouches for the document that just loaded: a
+        // clicked link's report comes from the page being left.
+        if (data.loaded === true) lastShimReportRef.current = performance.now();
         setUninstrumented(false);
         observeFrameUrl(nextUrl);
       }

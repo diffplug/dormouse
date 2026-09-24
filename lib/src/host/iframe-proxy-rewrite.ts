@@ -125,6 +125,9 @@ export function iframeShim(embedderOrigin: string): string {
     else if(t==='open-window'&&typeof d.url==='string')post(t,{url:d.url});
   },true);
   function postLocation(){post('location',{url:String(location.href)});}
+  // The document's own load, flagged: the parent takes only these as proof
+  // that the document it just loaded carries the shim.
+  function postLoaded(){post('location',{url:String(location.href),loaded:true});}
   function anchorHref(e){
     var n=e&&e.target;
     while(n&&n.nodeType===1){
@@ -174,15 +177,15 @@ export function iframeShim(embedderOrigin: string): string {
   };}catch(_e){}
   addEventListener('popstate',postLocation,true);
   addEventListener('hashchange',postLocation,true);
-  addEventListener('pageshow',postLocation,true);
+  addEventListener('pageshow',postLoaded,true);
   var H=history;
   if(H&&H.pushState&&H.replaceState){
     var p=H.pushState,r=H.replaceState;
     H.pushState=function(){var v=p.apply(this,arguments);setTimeout(postLocation,0);return v;};
     H.replaceState=function(){var v=r.apply(this,arguments);setTimeout(postLocation,0);return v;};
   }
-  if(document.readyState==='loading')addEventListener('DOMContentLoaded',postLocation,{once:true});
-  else setTimeout(postLocation,0);
+  if(document.readyState==='loading')addEventListener('DOMContentLoaded',postLoaded,{once:true});
+  else setTimeout(postLoaded,0);
 })();`;
 }
 
@@ -195,6 +198,22 @@ export function iframeShim(embedderOrigin: string): string {
 // `embedderOrigin` is the document that frames us, and it is required: without
 // one there is nobody to address the shim's messages to, so the caller must not
 // instrument at all rather than fall back to `'*'`.
+// Every WHATWG label for UTF-16 (LE and BE): a body in either is no place to
+// splice ASCII bytes.
+const UTF16_LABELS = new Set(['utf-16', 'utf-16le', 'utf-16be', 'unicode', 'unicodefeff', 'unicodefffe', 'ucs-2', 'iso-10646-ucs-2', 'csunicode']);
+
+/** Whether a `Content-Type` declares a UTF-16 charset. */
+export function declaresUtf16(contentType: string): boolean {
+  const charset = /;\s*charset\s*=\s*["']?([^"';\s]+)/i.exec(contentType)?.[1];
+  return !!charset && UTF16_LABELS.has(charset.toLowerCase());
+}
+
+/** Whether a body opens with a UTF-16 byte-order mark, which the browser's
+ *  sniff obeys over any header. */
+export function startsWithUtf16Bom(bytes: Uint8Array): boolean {
+  return bytes.length >= 2 && ((bytes[0] === 0xff && bytes[1] === 0xfe) || (bytes[0] === 0xfe && bytes[1] === 0xff));
+}
+
 const HEAD_CLOSE = /<\/head>/i;
 const BODY_OPEN = /<body[^>]*>/i;
 
@@ -214,7 +233,8 @@ export function instrumentHtml(body: string, embedderOrigin: string, preserveCsp
   // would switch the page to quirks mode, nor of a `<meta charset>`, which
   // counts only within the first 1024 bytes — the same window searched here.
   const prologue = html.slice(0, 1024);
-  let at = 0;
+  // Nor ahead of a UTF-8 BOM (its latin1 spelling), which must stay first.
+  let at = html.startsWith('\xEF\xBB\xBF') ? 3 : 0;
   for (const tag of [/<!doctype[^>]*>/i, /<html(?:\s[^>]*)?>/i, /<head(?:\s[^>]*)?>/i, /<meta\b[^>]*\bcharset\b[^>]*>/i]) {
     const match = tag.exec(prologue);
     if (match) at = Math.max(at, match.index + match[0].length);

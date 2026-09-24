@@ -68,20 +68,21 @@ const STALL_WARNING_MS = 8000;
  *
  * A shot out past twice the usual round trip (at least 400ms) is overdue: queued
  * behind a blocking daemon command, such as an `open` waiting on its page load,
- * while the panel paints the stream instead. It is never re-issued — a second
- * one would only queue behind it, and every host adapter bounds the wait. It is
- * taken when the command lets it go, so the pulses of its wait leave nothing
- * owed, and its round trip, which timed the command, is clamped before it
- * enters the pacing average.
+ * or slow itself, while the panel paints the stream instead. It is never
+ * re-issued — a second one would only queue behind it, and every host adapter
+ * bounds the wait. When in the round trip its image was taken is unknown, so a
+ * pulse during it leaves one shot owed like any other; its round trip is
+ * clamped before it enters the pacing average.
  */
 export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
   let inFlight = false;
   let dirty = false;
   let seq = 0;
+  // The newest shot drawn: an older one never paints over it.
+  let drawnSeq = 0;
   let lastStart = 0;
   let avgMs = 120;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let lastPulseAt = 0;
   let disposed = false;
   // The `bytes:generation` of the frame currently on the canvas. Skips decoding a
   // capture we've already displayed onto this same draw target.
@@ -100,8 +101,10 @@ export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
     // the ArrayBufferLike default so they satisfy BlobPart.
     const part = bytes as Uint8Array<ArrayBuffer>;
     createImageBitmap(new Blob([part], { type: mime })).then((bitmap) => {
-      // A newer shot landed first (or we're gone) — drop this one.
-      if (disposed || mySeq !== seq) {
+      // A newer shot drew first (or we're gone) — drop this one. A newer shot
+      // merely started is no reason to withhold this image, which is still
+      // newer than what is on the canvas.
+      if (disposed || mySeq < drawnSeq) {
         bitmap.close();
         return;
       }
@@ -116,6 +119,7 @@ export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
       // Record only once actually drawn, so a shot dropped by the seq guard never
       // suppresses a later identical capture that must still paint.
       lastDrawnKey = key;
+      drawnSeq = mySeq;
       deps.draw(bitmap);
     }).catch((err) => console.warn('[agent-browser] screenshot decode failed:', err));
   };
@@ -132,12 +136,8 @@ export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
     deps.log?.(`[agent-browser] screenshot start ${JSON.stringify({ session, seq: mySeq })}`);
     const stalled = () => performance.now() - lastStart > STALL_WARNING_MS;
     platform.agentBrowserScreenshot(session, { format: 'jpeg', quality: 85 }, deps.getBinaryPath()).then((res) => {
-      const now = performance.now();
-      const elapsedMs = now - lastStart;
+      const elapsedMs = performance.now() - lastStart;
       deps.log?.(`[agent-browser] screenshot done ${JSON.stringify({ session, seq: mySeq, ok: res.ok, bytes: res.bytes?.byteLength ?? 0, elapsedMs: Math.round(elapsedMs), stalled: stalled(), dirty })}`);
-      // Overdue (see above): once it is drawn, only a pulse after its release
-      // is owed a shot.
-      const pulsesInImage = elapsedMs > overdueAfterMs() && lastPulseAt <= now - avgMs;
       avgMs = avgMs * 0.6 + Math.min(elapsedMs, overdueAfterMs()) * 0.4;
       inFlight = false;
       // A provisional stream frame painted during this capture is visibly newer.
@@ -153,7 +153,6 @@ export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
           // work pending so the resting frame still sharpens.
           dirty = true;
         } else {
-          if (pulsesInImage) dirty = false;
           display(res.bytes, res.mime || 'image/jpeg', mySeq, provisionalAtStart);
         }
       } else {
@@ -206,7 +205,6 @@ export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
   return {
     pulse: () => {
       if (disposed || !deps.isCapable()) return;
-      lastPulseAt = performance.now();
       dirty = true;
       schedule();
     },

@@ -13,6 +13,7 @@ import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { sessionForKey } from 'dor-lib-common/agent-browser';
 import { Wall } from './Wall';
 import * as helpers from '../lib/helper-terminal';
+import * as agentBrowserScreen from './wall/agent-browser-screen';
 import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
 import { getAgentBrowserSurfaceController } from './wall/agent-browser-surface-controller';
 import * as browserAutomation from './wall/browser-automation';
@@ -3946,6 +3947,19 @@ describe('Wall on the Lath engine', () => {
       expect(leafIds()).toContain(tab);
       expect(getAgentBrowserScreenController(tab)?.snapshot().renderMode).toBe('ab-screencast');
       expect(warn).toHaveBeenCalledWith(`[dormouse] cannot swap surface '${tab}' to iframe: the embedded view frames http:// pages only`);
+
+      // The swap judges the page on screen, as the Display modal does — here a
+      // local http:// page, though params.url still names the https login.
+      const real = getAgentBrowserScreenController(tab)!;
+      const lookup = agentBrowserScreen.getAgentBrowserScreenController;
+      const shown = vi.spyOn(agentBrowserScreen, 'getAgentBrowserScreenController').mockImplementation((id) => (
+        id === tab ? { ...real, chrome: () => ({ ...real.chrome(), url: 'http://localhost:5173/report' }) } : lookup(id)));
+      const beforeSwap = leafIds();
+      await act(async () => { real.actions.setRenderMode?.('iframe'); });
+      await flush();
+      shown.mockRestore();
+      const [framed] = leafIds().filter((id) => !beforeSwap.includes(id));
+      expect(getAgentBrowserScreenController(framed)?.chrome().url).toBe('http://localhost:5173/report');
 
       // A launch that fails takes its pane with it.
       const beforeFailure = leafIds();

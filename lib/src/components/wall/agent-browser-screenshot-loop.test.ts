@@ -239,7 +239,7 @@ describe('screenshot loop backpressure', () => {
 });
 
 describe('screenshot loop behind a blocking command', () => {
-  it('reports the capture overdue, never re-issues it, and owes a shot only for pulses after its release', async () => {
+  it('reports the capture overdue, never re-issues it, and draws it when it lands', async () => {
     const releases: Array<(res: AgentBrowserScreenshotResult) => void> = [];
     const screenshot = vi.fn(() => new Promise<AgentBrowserScreenshotResult>((resolve) => { releases.push(resolve); }));
     setScreenshot(screenshot as unknown as PlatformAdapter['agentBrowserScreenshot']);
@@ -265,23 +265,18 @@ describe('screenshot loop behind a blocking command', () => {
     }
     expect(screenshot).toHaveBeenCalledTimes(1);
 
-    // Those changes are in the capture `open` releases: drawn, nothing owed.
+    // `open` returns: the capture is drawn, and since when in the wait it was
+    // taken is unknown, the wait's pulses are owed one more.
     releases[0]({ ok: true, bytes: new Uint8Array([1]), mime: 'image/jpeg' });
     await vi.advanceTimersByTimeAsync(10);
     expect(loop.captureOverdue()).toBe(false);
     expect(draw).toHaveBeenCalledTimes(1);
-    expect(screenshot).toHaveBeenCalledTimes(1);
+    expect(screenshot).toHaveBeenCalledTimes(2);
 
     // The wait timed the page load, not a capture, so the next slow load is
-    // overdue just as soon — and a change just before its reply is owed a shot.
-    loop.pulse();
+    // overdue just as soon.
     await vi.advanceTimersByTimeAsync(500);
-    expect(screenshot).toHaveBeenCalledTimes(2);
     expect(loop.captureOverdue()).toBe(true);
-    loop.pulse();
-    releases[1]({ ok: true, bytes: new Uint8Array([2]), mime: 'image/jpeg' });
-    await vi.advanceTimersByTimeAsync(10);
-    expect(screenshot).toHaveBeenCalledTimes(3);
 
     loop.dispose();
   });

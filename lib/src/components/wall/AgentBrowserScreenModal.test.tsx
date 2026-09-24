@@ -120,12 +120,27 @@ describe('AgentBrowserScreenModal', () => {
     expect(iframeRow().textContent).toContain('the embedded view frames http:// pages only');
     secure.dispose();
 
+    // Nothing but http(s) is framed at all.
+    const file = registerStubScreen('file', {
+      snapshot: { ...STUB_SCREEN, renderMode: 'ab-screencast' },
+      chrome: { url: 'file:///tmp/report.html', displayUrl: 'report.html', title: null, key: null },
+    });
+    act(() => root.render(<AgentBrowserScreenModal controller={getAgentBrowserScreenController('file')!} label="surface:7" onClose={() => {}} />));
+    expect(iframeRow().querySelector('input')!.disabled).toBe(true);
+    file.dispose();
+
     const local = registerStubScreen('local', {
       snapshot: { ...STUB_SCREEN, renderMode: 'ab-screencast' },
       chrome: { url: 'http://localhost:5173/', displayUrl: 'localhost:5173/', title: null, key: null },
     });
     act(() => root.render(<AgentBrowserScreenModal controller={getAgentBrowserScreenController('local')!} label="surface:6" onClose={() => {}} />));
     expect(iframeRow().querySelector('input')!.disabled).toBe(false);
+    // The page can move to https after iframe was picked: Apply then stands down.
+    act(() => iframeRow().querySelector<HTMLInputElement>('input')!.click());
+    const apply = () => [...document.body.querySelectorAll('button')].find((button) => button.textContent === 'Apply')!;
+    expect(apply().disabled).toBe(false);
+    act(() => local.updateChrome({ url: 'https://example.com/', displayUrl: 'example.com/', title: null, key: null }));
+    expect(apply().disabled).toBe(true);
     local.dispose();
   });
 

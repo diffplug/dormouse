@@ -2020,9 +2020,11 @@ export function Wall({
       // No pane, tool or not, swaps onto an iframe that would refuse its page;
       // the Display modal never offers it (docs/specs/dor-browser.md → "Iframe
       // Renderer").
+      // The page on screen, which the Display modal judges too: `params.url`
+      // keeps only http(s) pages, so it can name an earlier one.
+      const shownUrl = getAgentBrowserScreenController(id)?.chrome().url || browserUrlFromParams(params);
       if (mode === 'iframe') {
-        const url = browserUrlFromParams(params) || getAgentBrowserScreenController(id)?.chrome().url;
-        const refused = url ? iframeRefusal(url) : null;
+        const refused = shownUrl ? iframeRefusal(shownUrl) : null;
         if (refused) {
           console.warn(`[dormouse] cannot swap surface '${id}' to iframe: ${refused}`);
           return;
@@ -2065,9 +2067,7 @@ export function Wall({
       // agent-browser → iframe: frame the active tab's URL, then the replace
       // closes the now-unneeded headless browser. Webview-only.
       if (currentRenderMode !== 'iframe' && mode === 'iframe') {
-        // Canonical params.url (mirrored from the chrome snapshot) first; fall
-        // back to the live snapshot for a surface that hasn't reported a tab yet.
-        const url = browserUrlFromParams(params) || getAgentBrowserScreenController(id)?.chrome().url;
+        const url = shownUrl;
         if (!url) {
           console.warn(`[dormouse] cannot swap surface '${id}' to iframe: no URL observed yet`);
           return;

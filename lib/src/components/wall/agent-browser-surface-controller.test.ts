@@ -254,13 +254,14 @@ describe('provisional stream paint', () => {
     await frame('still loading');
     expect(decodes()).toBe(decoded + 1);
 
-    // `open` returns: the held capture is the newer image — drawn, not re-taken.
+    // `open` returns: the held capture is drawn on arrival rather than dropped
+    // as older than the overdue paints (the follow-up its wait's pulses owe
+    // comes after).
     const drawn = drawImage.mock.calls.length;
     clock.now += 1000;
     releases[1]({ ok: true, bytes: new Uint8Array([2]), mime: 'image/jpeg' });
     await flushMicrotasks();
     await flushMicrotasks();
-    expect(platform.agentBrowserScreenshot).toHaveBeenCalledTimes(2);
     expect(drawImage.mock.calls.length).toBe(drawn + 1);
   });
 

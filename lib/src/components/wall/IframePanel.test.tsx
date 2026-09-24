@@ -291,9 +291,14 @@ describe('iframe failures offer a way out', () => {
     setPlatform(platform);
     return platform;
   }
-  const report = async (path = '/app') => {
+  // The shim's load report (`pageshow` / `DOMContentLoaded`); a clicked link's
+  // report carries no `loaded`.
+  const report = async (path = '/app', loaded = true) => {
     await act(async () => {
-      window.dispatchEvent(new MessageEvent('message', { origin: PROXY, data: { __dormouse: 'location', url: `${PROXY}${path}` } }));
+      window.dispatchEvent(new MessageEvent('message', {
+        origin: PROXY,
+        data: { __dormouse: 'location', url: `${PROXY}${path}`, ...(loaded ? { loaded: true } : {}) },
+      }));
     });
   };
   const button = (label: string) => Array.from(container.querySelectorAll('button')).find((b) => b.textContent === label);
@@ -349,6 +354,25 @@ describe('iframe failures offer a way out', () => {
       await act(async () => { iframe.dispatchEvent(new Event('load')); });
       await act(async () => { vi.advanceTimersByTime(1100); });
       expect(banner()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not count a clicked link\'s report as the next document reporting', async () => {
+    vi.useFakeTimers();
+    try {
+      proxyPlatform();
+      const iframe = await renderPanel(stubActions(), paneProps('iframe-click-report'));
+      await report();
+      await act(async () => { vi.advanceTimersByTime(2000); });
+      // A same-origin link to a proxied PDF: the page being left reports the
+      // href a tick after the click, and the shim-less PDF loads right after.
+      await report('/manual.pdf', false);
+      await act(async () => { vi.advanceTimersByTime(50); });
+      await act(async () => { iframe.dispatchEvent(new Event('load')); });
+      await act(async () => { vi.advanceTimersByTime(1100); });
+      expect(banner()).not.toBeNull();
     } finally {
       vi.useRealTimers();
     }
