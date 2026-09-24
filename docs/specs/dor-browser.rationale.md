@@ -36,6 +36,16 @@ views without weakening that first signal.
 
 **Why a failed swap's restore reopens the previous session.** A fresh `gui-<hex>` session kept a `key` badge that `dor ab --key` no longer resolved to, and the next command opened a second pane.
 
+**Why the host owns sync-to-pane.** The webview judged it: once a frame confirmed the size it issued, any report of another size disengaged sync. Its reports came from frames and from `status`, and Playwright's `status` comes from a 750 ms poll that measures with an asynchronous `page.evaluate`. A poll begun before a write published the size from before it after a frame had confirmed the new one, and the pane flipped to Fixed on its own; Playwright panes did so often during resizes (reported 2026-09-24). Reproduced against playwright-cli 0.1.21 (Chromium 154, 2026-09-24): an evaluate begun 50 ms before a `setViewportSize` landed answered the old 950×650 about 240 ms after it. One begun after the write resolved never did (0 of 100; the write took 2 ms at p50, 5 ms at p95), so a measurement tagged with its start is authoritative. The webview has no view of when a write begins or lands; the host issues the writes and relays every report.
+
+**Why agent-browser's frames, and Playwright's measurements.** agent-browser 0.31.1's frames matched `set viewport 900 600 2` exactly, about 30 ms after the command returned (2026-09-24). Its headless `status` followed too, so it is not always 1280×720; only a headed window's `status` names the daemon's configured viewport (see [Viewer Socket](#viewer-socket)). Playwright's screencast metadata is no measure of the viewport. Under `setViewportSize` it reported the height 87 px short (900×513 for 900×600). After a tab switch it stayed at 1280×633, even through a repaint, while the page measured 950×650 (playwright-cli 0.1.21, 2026-09-24). Frames are CSS-resolution, so neither provider shows the ratio.
+
+**Why 250 ms.** A frame already in flight when a write lands still shows the old size. The next one follows within a frame or two: 20 Hz, with Playwright's acks paced at 50 ms.
+
+**Why a page shown anew is written, not judged.** A tab Playwright opens comes up at its context's viewport (1280×720 beside a synced 900×600 page, 2026-09-24), and the pane's own tab strip can select one, so the webview's heuristic read either as another writer. agent-browser gives a new tab the viewport's size (at ratio 1).
+
+**Why the pane's laid-out size.** A Workspace presentation scales the Wall's subtree while it moves. `getBoundingClientRect` read mid-scale, as a harness reload does, synced a Playwright page to 681×589 in a 689×596 pane (0.988, 2026-09-24). No resize followed to correct it.
+
 ## Automated Browser
 
 **Why one-session-one-surface is not an invariant.** `dor` forwards the user's command before it asks the host for a surface, so a surface killed or render-swapped inside that window is gone by the time the trailing request arrives — and the session behind it is still live and needs somewhere to render.
@@ -157,6 +167,18 @@ A post-open blank-tab sweep can become such a query when a later relaunch, expli
 **Why `dor ab` reads the stream port itself.** The host's `attach` reads only the state files, which an older agent-browser does not write and a caller's own `AGENT_BROWSER_SOCKET_DIR` keeps where the host does not look; with either, `dor ab open` opened no pane (review of #777, 2026-09). The command has just made the daemon, so asking it starts none.
 
 ## Playwright
+
+**Why one viewport writer.** Chrome keeps one device-metrics override per CDP session. Against playwright-cli 0.1.21 (Chromium 154, 2026-09-24):
+- the latest call applies at once;
+- a navigation re-applies the later-attached session's override, the host's;
+- clearing the host's override leaves the page with no emulation (1280×633) until the next navigation re-applies Playwright's;
+- the CLI's `screenshot` re-applies Playwright's own emulation.
+
+The old double write, `setViewportSize` then a host override carrying the ratio, therefore lost its ratio to every agent `screenshot`. It also undid an agent's `resize` on the next navigation: 800×600@1 became 1000×700@2 again. An override alone was replaced outright by `screenshot` (900×600@2 to 1280×720@1). `setViewportSize` alone survived same-site, cross-site and CLI navigation, reload, a tab switch, `screenshot` and `snapshot`, and an agent's `resize` replaced it and stayed. A device's touch and user-agent overrides from the host's session reset cleanly (`userAgent: ''` restores Playwright's own).
+
+**What one writer costs.** Playwright has no API to change a context's ratio after launch, and the CLI reads it only from a config file, which as `--config` would displace the project's own. So a Playwright page renders at 1, and its crisp capture is CSS-resolution. A `clip.scale` capture renders at 2× but left the page at 900×513 afterward.
+
+**Why an identical frame is dropped.** Under Playwright's emulation alone, each `Page.captureScreenshot` over the host's session made Chrome send the last screencast frame again: 20 captures, 20 frames, 1 distinct. With the host's override in place it sent 1. Forwarded, each re-sent frame pulsed the next capture, so a static page captured about 20 times a second and sent nothing (browser-dev harness, 2026-09-24). A page Dormouse never sized looped the same way before.
 
 **Why screencast acks are paced.** Chrome sends the next screencast frame only once the last is acknowledged, and the host acknowledged each on receipt, so the rate was bounded only by how fast Chrome could encode — each frame then JSON-parsed, re-stringified and base64-decoded again in the webview (static reading, 2026-09). Acknowledging no sooner than 50 ms after the last caps it at the ~20 Hz agent-browser's daemon streams at.
 

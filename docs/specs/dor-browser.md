@@ -201,21 +201,35 @@ its presentation glyph.
 The iframe option lists that the embed keeps no logins or cookies (for
 `https://`, see [Iframe Renderer](#iframe-renderer)).
 
-Resolution controls apply to both screencast providers, as GUI wrappers around native
-commands: **Resize with pane** is Dormouse-owned sync issuing
-`set viewport <paneW> <paneH> <displayDpr>` once a pane resize settles (200ms);
-**only a DPR change re-syncs at once**, off a `(resolution: <dpr>dppx)` media
-query `change` event. **Fixed** issues
+Resolution controls apply to both screencast providers. **Fixed** issues
 `set viewport <w> <h> <dpr>` or `set device <name>` from the modal's registry.
+**Resize with pane** is sync-to-pane, **owned by the host** (rationale).
+
+- **Must send the pane's laid-out CSS size — never `getBoundingClientRect()`,
+  which a Workspace presentation scales — and display ratio over the viewer
+  socket while engaged, never from a popped-out pane**: when the socket opens,
+  once a resize settles (200ms), and at once on a `(resolution: <dpr>dppx)`
+  media query `change`.
+- **Each choice of Resize with pane is a new engagement**, named in every size
+  sent, which reclaims the viewport even at the size last written.
+- **The host writes one size at a time per browser**, through the provider's
+  viewport primitive, never while a launch or close settles it; a write in
+  flight keeps only the latest size, so a drag coalesces.
+- **The host judges a write only by a viewport taken after it landed**, as the
+  provider vouches for it: agent-browser's changed frames, Playwright's poll
+  measurement tagged with when it began; never `status` or the ratio
+  (rationale). **One still differing 250ms later, with no write since, is
+  another writer's**: the host stops that browser's sync, reports `off`, and
+  writes no later size of that engagement. **A page shown anew (the active tab)
+  is written, never judged.**
+- **A Fixed viewport or device ends the browser's sync**, after its write in
+  flight.
 
 **Only `syncEngaged` persists** — device/custom viewport state lives in
-the browser itself. `SYNCED`/`SCALED` derives from viewport versus pane CSS
-dimensions, DPR issued but not compared because stream frames are CSS-resolution;
-**the modal shows the DPR this Surface last fixed on this browser, else the
-display's**.
-Sync coexists with external `set viewport`/`set device` last-writer-wins:
-**disengage sync (→ `SCALED`) only after a frame confirms Dormouse's own issued
-size landed**, so a resize transient is not read as an external override.
+the browser itself. **The webview disengages only on the host's `off` for its
+engagement**; `SYNCED` only while the host reports it `synced`. **The modal shows
+the ratio the browser measures (a Playwright page, a popped-out window), else the
+one this Surface last fixed on this browser, else the display's.**
 
 | From -> To | Behavior |
 | --- | --- |
@@ -225,9 +239,13 @@ size landed**, so a resize transient is not read as an external override.
 
 Source of truth: `lib/src/components/wall/AgentBrowserScreenModal.tsx`,
 `offeredRenderModes` in `lib/src/components/wall/browser-automation.ts`,
-`lib/src/components/wall/agent-browser-surface-controller.ts` (`screenActions`, sync effects,
-pop-out/pop-in), `lib/src/components/Wall.tsx` (`onSwapRenderMode`), Storybook
-`lib/src/stories/AgentBrowserScreenModal.stories.tsx`. Pinned by `restores a failed provider swap minimized meanwhile in place` in `lib/src/components/Wall.test.tsx`.
+`lib/src/components/wall/agent-browser-surface-controller.ts` (`screenActions`, `syncToPane`,
+`applyHostSync`, pop-out/pop-in), `createViewportSync` and `SYNC_SETTLE_MS` in
+`lib/src/host/browser-sync.ts`, `lib/src/components/Wall.tsx` (`onSwapRenderMode`), Storybook
+`lib/src/stories/AgentBrowserScreenModal.stories.tsx`. Pinned by `restores a failed provider swap minimized meanwhile in place` in `lib/src/components/Wall.test.tsx`,
+and `sync-to-pane` in `lib/src/host/browser-host.test.ts`,
+`lib/src/host/playwright-host.lifecycle.test.ts` and
+`lib/src/components/wall/agent-browser-surface-controller.test.ts`.
 
 ## Automated Browser
 
@@ -329,8 +347,8 @@ a Playwright connection — and what `view` takes back.
 | `disposed` | Released | — |
 
 - **Every browser operation must pass one gate (`driver`), open only in
-  `live`** — chrome and Display modal actions, tabs, sync-to-pane, edit chords
-  (rationale). **An unpark catches up — sync, a pending intent — only once its
+  `live`** — chrome and Display modal actions, tabs, edit chords (rationale);
+  sync-to-pane rides the viewer socket, which exists only there. **An unpark catches up — sync, a pending intent — only once its
   socket opens.** The gate orders the Surface's own intents; the host is what
   keeps an operation off a browser mid-relaunch ([Browser Host](#browser-host)).
 - **A navigation or a Fixed viewport asked for outside `live` is kept as the
@@ -364,7 +382,7 @@ stopping on its own because clients trigger it.
 - **An unpark keeps the last good frame on screen**, re-priming from the
   stream's re-broadcast frame/tabs; a fresh reattach mounts a blank canvas and
   asks the host to `repaint`, showing the placeholder until a frame lands.
-- **A resize made while not `live` is pushed on the next `live`.**
+- **A resize made while not `live` is sent once the socket opens.**
 - **Never park a popped-out pane**: its viewer socket brings the window's page
   and its close, which auto-reverts, even while minimized.
 - **Never set `AGENT_BROWSER_IDLE_TIMEOUT_MS`** for Dormouse-managed sessions —
@@ -420,7 +438,9 @@ socket per Surface, onto the browser at the stream `view` names:
 | Message | Direction | Carries |
 | --- | --- | --- |
 | frame | host → webview, binary | A 12-byte header — kind (`provisional` / `crisp`), the viewport's CSS size — then the JPEG |
-| `status`, `tabs` | host → webview | Whether the browser is up, its viewport size and, for a headed window, device pixel ratio; the tab list |
+| `status`, `tabs` | host → webview | Whether the browser is up, its viewport size and, for a headed window or a Playwright page, device pixel ratio; the tab list |
+| `sync` | webview → host | The pane's CSS size and display ratio while Resize with pane is engaged, and its engagement |
+| `sync` | host → webview | That engagement's sync: `applying`, `synced`, or `off` ([Display Modal And Render Swaps](#display-modal-and-render-swaps)) |
 | `url` | host → webview | A navigation the active tab committed |
 | `page` | host → webview | A popped-out window's page URL and title |
 | `input_mouse`, `input_keyboard`, `input_text` | webview → host | Native input; a paste as text |
@@ -432,9 +452,9 @@ socket per Surface, onto the browser at the stream `view` names:
 - **Must rebuild every webview message field by field before a provider sees
   it** (`parseViewerInput`); inbound messages are capped at 64 KiB.
 - **Must send state only on change, and the current state to a socket that
-  connects — except `url`, a commit edge**: `tabs` refreshes only when the
-  driving command completes (rationale), so every commit clears the title
-  until `tabs` refreshes, even at the same URL.
+  connects — except `url`, a commit edge, and `sync`, which answers each size
+  sent**: `tabs` refreshes only when the driving command completes (rationale),
+  so every commit clears the title until `tabs` refreshes, even at the same URL.
 - **A browser that goes on its own is reported `status { connected: false }`
   before its socket closes**, ending a headless pane and auto-reverting a
   headed one seen connected. **A launch or close of the browser ends every
@@ -679,7 +699,9 @@ Arbitrary CLI arguments, JavaScript and CDP methods are unavailable through the 
 
 A relaunch closes the previous CLI session, and a launch completes when the browser endpoint is ready; its stream is the host's number for that connection. **Every CLI call a launch waits on is killed at its deadline; every other one at 10 s, except `open`**, which lasts as long as the page load and whose end could take its browser down; nothing waits on it past a launch's own bounds. Shutdown also disconnects viewers. Viewer disconnect alone leaves the CLI browser alive; **a browser that disconnects on its own is reported gone to its viewers**. Concurrent input/captures share CDP attachments; disposal releases late attachments. **A screencast that fails to start must forget its page**, so the next poll releases the attachment and retries.
 
-The viewer socket ([Viewer Socket](#viewer-socket)) takes its frames from the CDP screencast, **decoded once and acknowledged no faster than 20 a second** (rationale), and inserts a paste with CDP `Input.insertText`. **Input waiting on CDP past 256 messages closes the viewer socket.**
+The viewer socket ([Viewer Socket](#viewer-socket)) takes its frames from the CDP screencast, **decoded once and acknowledged no faster than 20 a second** (rationale), and inserts a paste with CDP `Input.insertText`. **Must drop a frame byte-identical to the last, still acknowledging it** (rationale). **Never read a page's viewport from its screencast metadata** (rationale); the poll measures it on the page. **Input waiting on CDP past 256 messages closes the viewer socket.**
+
+**Must write a page's viewport only through Playwright's own `setViewportSize`** — sync, a Fixed size and a device alike — **never a CDP metrics override from the host's session** (rationale). A page keeps its browser context's ratio (1 for a browser the CLI opened), whatever ratio a request names. **A device adds only its touch and user agent over the host's CDP session, which the next viewport write resets.**
 
 Source of truth: `followParamsHeadedness` in `lib/src/components/wall/agent-browser-surface-controller.ts`; `createPlaywrightProvider` in `lib/src/host/playwright-host.ts`; `resolvePlaywrightInstall` in `lib/src/host/playwright-install.ts`. Pinned by `lib/src/host/playwright-host.test.ts` (opt-in real CLI via `DORMOUSE_PLAYWRIGHT_TEST_BIN`), `lib/src/host/playwright-host.lifecycle.test.ts`, and `AgentBrowserPanel Playwright params` in `lib/src/components/wall/AgentBrowserPanel.test.tsx`.
 
@@ -908,7 +930,8 @@ Source of truth: `lib/src/lib/platform/iframe-proxy-types.ts`,
   frames at DPR>1 — this path's whole point — unless the client re-applies
   `Emulation.setDeviceMetricsOverride`, which Dormouse can do correctly only
   while sync-to-pane owns the values (an external `set device`/`set viewport` DPR
-  is unrecoverable from frames). `captureBeyondViewport:true` bypasses emulation
+  is unrecoverable from frames), and which from the host's own CDP session is a
+  second viewport writer ([Playwright](#playwright)). `captureBeyondViewport:true` bypasses emulation
   and crashed the headless daemon; `clip.scale` returns blank frames. Adopt only
   with a daemon-side answer — an upstream verb exposing current viewport+DPR, or
   a daemon-owned capture channel.
