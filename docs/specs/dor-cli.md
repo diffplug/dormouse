@@ -27,9 +27,9 @@ does nothing and **exits 0** (rationale). **Dormouse-launched terminals must
 rely on injected env, never on a globally installed Node**; each launcher's
 `PATH`-`node` fallback is for developer/manual use.
 
-**Both launchers must exit with the CLI's own status**, which `dor await` and every
-script branching on `dor` depend on. `dor/test/launcher.test.mjs` pins it, running
-`dor.cmd` on the Windows leg of CI's `standalone-platform-check`.
+**Both launchers must exit with the CLI's own status**, which scripts (and
+`dor await` callers) branch on. `dor/test/launcher.test.mjs` pins it, including
+`dor.cmd` on CI's Windows `standalone-platform-check` leg.
 
 Public PTY env:
 
@@ -528,8 +528,8 @@ absolute URL:
   the dev server that terminal owns; and
 - a schemeless **`host:port`** — defaulted to `http://` (`box.ts.net:3000` →
   `http://box.ts.net:3000/`), including the bare **`:port`** localhost shorthand
-  (`:5173` → `http://localhost:5173/`). Purely a string rewrite, so it needs no
-  host and works outside Dormouse.
+  (`:5173` → `http://localhost:5173/`). A pure string rewrite: it needs no host
+  and works outside Dormouse.
 
 **The explicit port, never the hostname, is the signal for the `http` default**
 (rationale). An explicit scheme is always honored — a public HTTPS service on a
@@ -738,8 +738,7 @@ Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `openCommand` in `
   there, so `dor list --all` would have to aggregate at the extension host
   rather than in a per-webview control handler; until it does, VS Code refuses
   the Workspace-spanning requests ([dor workspace](#dor-workspace)).
-- **Additional `dor list` filters** — activity/state filters are deliberately
-  deferred: `--running` as shorthand for `--activity running`, full `--activity
-  unknown|prompt|editing|running|finished`, and possible alert filters such as
-  `--alert` / `--todo`. Add only once a story needs them, each with
+- **Additional `dor list` filters** — `--running` as shorthand for `--activity
+  running`, full `--activity unknown|prompt|editing|running|finished`, and alert
+  filters (`--alert`, `--todo`). Add only once a story needs them, each with
   snapshot-tested help.
