@@ -2,7 +2,8 @@ import { useWorkspaceAlertPolicy } from './wall/use-workspace-alert-policy';
 import { useEffect, useLayoutEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { POPUP_SURFACE_CLASS } from './design';
-import { AlarmSettingsSection, type AlarmSink } from './SettingsDialog';
+import { AlarmSettingsSection } from './SettingsDialog';
+import type { AlertSink } from '../lib/alert-delivery-model';
 import { useAnchoredMenu } from './use-anchored-menu';
 import { OVERLAY_VIEWPORT_MARGIN_PX } from '../lib/ui-geometry';
 
@@ -13,7 +14,7 @@ export function SettingsPreview({
   anchor,
   onClose,
 }: {
-  sink: AlarmSink;
+  sink: AlertSink;
   anchor: HTMLElement;
   onClose: () => void;
 }) {

@@ -16,7 +16,6 @@ import {
   getActivitySnapshot,
   getOrCreateTerminal,
   getTerminalPaneStateSnapshot,
-  markSessionAttention,
   setTerminalUserTitle,
   subscribeToActivity,
   subscribeToTerminalPaneState,
@@ -154,14 +153,9 @@ export function MobileWall({
         onKill={() => killSession(activeItem.id)}
         showKillButton={showKillButton}
       />
-      {/* Touching the pane attends it, which is what puts a ring out here:
-          mobile has no terminal context and no right-click
-          (`docs/specs/alert.md` -> Pane Header). Keystrokes already attend
-          through `wireXtermHandlers`. */}
-      <div
-        className="min-h-0 flex-1 overflow-hidden bg-terminal-bg"
-        onPointerDown={() => markSessionAttention(activeItem.id)}
-      >
+      {/* `MobileTerminalUi` acknowledges a touch or keystroke on this pane —
+          the only way a ring goes out here (`docs/specs/alert.md` -> Pane Header). */}
+      <div className="min-h-0 flex-1 overflow-hidden bg-terminal-bg">
         <TerminalPane id={activeItem.id} isFocused />
       </div>
     </div>

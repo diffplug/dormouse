@@ -1,3 +1,5 @@
+import { cfg } from "dormouse-lib/cfg";
+
 // Item ids are the persistence key — keep them stable across releases.
 const THEME_ITEM_IDS = ["th-theme"] as const;
 
@@ -208,16 +210,16 @@ export const DESKTOP_SECTIONS: readonly Section[] = [
         id: 'al-ring',
         title: 'It rings when the command goes quiet',
         hint:
-          `Don't type! If you type, Dormouse will think you are paying attention to this task and the pane will not ring. It waits until you attend another pane or stop interacting for the inactivity timeout in Alarm settings.`,
+          `It rings when the command goes quiet, unless you are looking at that pane. The pane you are typing in or clicked into counts as looked at while you keep using Dormouse; stop for the inactivity timeout in Alarm settings and it rings.`,
       },
       {
         id: 'al-todo-auto',
         title: 'Dismissing a ringing alert leaves a TODO behind',
-        hint: 'Interact with the pane, or press `a`, to dismiss. The TODO is there so a ring you waved away does not vanish without a trace.',
+        hint: 'Click the pane, or press `a`, to dismiss. The TODO is there so a ring you waved away does not vanish without a trace.',
       },
       {
         id: 'al-todo-clear',
-        title: 'Press `Enter` inside the pane to clear the TODO',
+        title: 'Type anything inside the pane to clear the TODO',
       },
       {
         id: 'al-todo-manual',
@@ -227,17 +229,17 @@ export const DESKTOP_SECTIONS: readonly Section[] = [
       {
         id: 'al-notif',
         title: 'A program can ring on its own',
-        hint: 'Press `n` for a fake build that sends a notification. This needs no rule at all — any program that emits `BEL`, `OSC 9`, `OSC 777`, or `OSC 99` rings, and its message shows on the TODO tag.',
+        hint: 'Press `n` for a fake build that sends a notification. This needs no rule at all — any program that emits `BEL`, `OSC 9`, `OSC 777`, or `OSC 99` rings, and once you look its message stays on the TODO tag.',
       },
       {
         id: 'al-cmd-exit',
         title: 'A long command that finished while you were away',
         hint:
-          `Press \`x\` to start a slow build in another pane, click into that pane, then click back here and wait. Dormouse rings for any command that ran longer than the inactivity timeout in Alarm settings and finished after you walked away — again, no rule needed.`,
+          `Press \`x\` to start a slow build in another pane, click into that pane, then click back here and wait. Dormouse rings for any command that ran longer than ${cfg.alert.commandExitMinRuntime / 1000} seconds and finished after you walked away — again, no rule needed.`,
       },
     ],
     prose: [
-      'Three different things can make a pane ring: a rule you set on a command name, a notification the program sends, and a long command finishing while you were elsewhere. None of them ring while you are actually looking at the pane.',
+      'Three different things can make a pane ring: a rule you set on a command name, a notification the program sends, and a long command finishing while you were elsewhere. None of them ring while you are looking at the pane — they wait until you go idle.',
     ],
   },
   COPY_PASTE_SECTION,

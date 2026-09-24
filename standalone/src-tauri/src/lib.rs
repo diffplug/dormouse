@@ -72,14 +72,15 @@ fn guard<T>(lock: &Mutex<T>) -> MutexGuard<'_, T> {
 // The sidecar has no window concept, so Rust keeps the map from PTY to window
 // and routes every stdout line through `routing::route`.
 
-/// The three maps a sidecar line is routed against, behind **one** lock: they
-/// are always read together, so a PTY chunk costs one acquisition rather than
-/// three, and every label the routing table hands back stays borrowed out of
+/// The maps a sidecar line is routed against, behind **one** lock: they are
+/// always read together, so a PTY chunk costs one acquisition rather than one
+/// per map, and every label the routing table hands back stays borrowed out of
 /// this guard instead of being cloned per line.
 #[derive(Default)]
 struct RoutingState {
     /// ptyId -> window label. Minted only in `pty_spawn`, dropped by
-    /// `pty_kill`, an exit, or a window going away; reassigned by a transfer.
+    /// `pty_kill` or a window going away — never by an exit; reassigned by a
+    /// transfer.
     owners: HashMap<String, String>,
     /// Ids whose output is suppressed until the replay their new owner is about
     /// to be sent has been emitted, each with the instant it began.
@@ -87,10 +88,6 @@ struct RoutingState {
     /// dor requestId -> the window handling it, so a cancel reaches the window
     /// holding the subscription, watch or completion claim it releases.
     dor_targets: HashMap<String, String>,
-    /// Protocol events that arrived while their id was suppressed, delivered
-    /// to the new owner behind its replay (`routing::Route::Hold`). Only ever
-    /// emptied together with `awaiting_replay` (`lift_suppression`).
-    held: HashMap<String, Vec<routing::HeldEvent>>,
     /// Ids between a transfer's invoke and the sidecar's `marked` line, each
     /// with the source still consuming (`routing::RouteView::marking`).
     marking: HashMap<String, String>,
@@ -107,10 +104,15 @@ impl RoutingState {
         }
     }
 
-    /// `routing::lift_suppression` over this state's two halves. The caller
-    /// republishes `WindowState::suppressed` after it, still under the lock.
-    fn lift_suppression(&mut self, id: &str) -> Vec<routing::HeldEvent> {
-        routing::lift_suppression(&mut self.awaiting_replay, &mut self.held, id)
+    /// What `routing::route` reads, borrowed out of this state.
+    fn view<'a>(&'a self, registry: &'a workspaces::Registry) -> RouteView<'a> {
+        RouteView {
+            owners: &self.owners,
+            awaiting_replay: &self.awaiting_replay,
+            dor_targets: &self.dor_targets,
+            registry,
+            marking: &self.marking,
+        }
     }
 }
 
@@ -172,8 +174,7 @@ impl WindowState {
         let mut routing = guard(&self.routing);
         routing.owners.insert(id.to_string(), label.to_string());
         routing.transfer_marks.remove(id);
-        // Whatever was held belonged to the PTY that never arrived, not this one.
-        routing.lift_suppression(id);
+        routing.awaiting_replay.remove(id);
         self.suppressed
             .store(routing.awaiting_replay.len(), Ordering::Relaxed);
     }
@@ -196,42 +197,55 @@ impl WindowState {
             if let Some(owner) = routing.owners.get_mut(id) {
                 *owner = target.to_string();
             }
-            routing.lift_suppression(id);
+            routing.awaiting_replay.remove(id);
             routing.transfer_marks.remove(id);
             routing.marking.insert(id.clone(), source.to_string());
         }
         self.suppressed.store(routing.awaiting_replay.len(), Ordering::Relaxed);
     }
 
-    /// Drain the source cuts and return only still-live ownership. An exited
-    /// id gets its retained replay by explicit address, never a phantom owner.
+    /// Give every id back to `source` that no kill dropped — an exited one too,
+    /// and one whose target window went away (`drop_window` drops its owner,
+    /// never its transfer records) — suppressed behind a replay of its cut when
+    /// it has one, otherwise straight back. Returns the cuts it drained, by id.
     fn hand_back(&self, ids: &[String], source: &str) -> JsonValue {
         let mut routing = guard(&self.routing);
         let mut marks = serde_json::Map::new();
         for id in ids {
             let mark = routing.transfer_marks.remove(id);
             if let Some(mark) = mark { marks.insert(id.clone(), JsonValue::from(mark)); }
-            routing.marking.remove(id);
-            if let Some(owner) = routing.owners.get_mut(id) {
-                *owner = source.to_string();
-                if mark.is_some() { routing.awaiting_replay.insert(id.clone(), Instant::now()); }
-                else { routing.lift_suppression(id); }
-            }
+            let transferring = routing.marking.remove(id).is_some() || mark.is_some();
+            // A kill drops the owner and the transfer records alike.
+            if !transferring && !routing.owners.contains_key(id) { continue; }
+            routing.owners.insert(id.clone(), source.to_string());
+            if mark.is_some() { routing.awaiting_replay.insert(id.clone(), Instant::now()); }
+            else { routing.awaiting_replay.remove(id); }
         }
         self.suppressed.store(routing.awaiting_replay.len(), Ordering::Relaxed);
         JsonValue::Object(marks)
     }
 
-    fn forget_pty(&self, id: &str) { self.remove_pty(id, false); }
-    fn exited_pty(&self, id: &str) { self.remove_pty(id, true); }
-
-    fn remove_pty(&self, id: &str, keep_cut: bool) {
+    /// The Session is gone (`pty_kill`, or its window went away): ownership and
+    /// every transfer record with it, the cut included, since a kill discards
+    /// the buffer it indexes.
+    fn forget_pty(&self, id: &str) {
         let mut routing = guard(&self.routing);
         routing.owners.remove(id);
-        routing.lift_suppression(id);
+        routing.transfer_marks.remove(id);
+        routing.awaiting_replay.remove(id);
         routing.marking.remove(id);
-        // Natural exit retains the sidecar buffer; explicit kill discards it.
-        if !keep_cut { routing.transfer_marks.remove(id); }
+        self.suppressed.store(routing.awaiting_replay.len(), Ordering::Relaxed);
+    }
+
+    /// The PTY exited on its own. **Ownership stays until the Session is
+    /// killed**: the pane still shows it, and the sidecar's `alert:state` for it
+    /// — a dismiss, a TODO cleared — must still reach that window (§Alerts). The
+    /// cut stays too: the sidecar retains the buffer a replay reads. **So does
+    /// a transfer's marking phase**: the sidecar marks an exited id like a live
+    /// one, and that `pty:marked` belongs to the source serializing the pane.
+    fn exited_pty(&self, id: &str) {
+        let mut routing = guard(&self.routing);
+        routing.awaiting_replay.remove(id);
         self.suppressed.store(routing.awaiting_replay.len(), Ordering::Relaxed);
     }
 
@@ -241,7 +255,7 @@ impl WindowState {
     fn clear_suppression(&self, ids: &[String]) {
         let mut routing = guard(&self.routing);
         for id in ids {
-            routing.lift_suppression(id);
+            routing.awaiting_replay.remove(id);
             routing.transfer_marks.remove(id);
             routing.marking.remove(id);
         }
@@ -255,8 +269,9 @@ impl WindowState {
     /// ids it owned outright, which the caller reaps.
     fn drop_window(&self, label: &str) -> (Vec<routing::Arrival>, Vec<String>) {
         // Taken first, and their ids dropped from `owners` before `owned_by`
-        // reads it: an arriving shell belongs to its source again, and reaping
-        // it here would kill a terminal the source is still showing.
+        // reads it: an arriving shell belongs to its source again, which
+        // `hand_back` returns it to, and reaping it here would kill a terminal
+        // the source is still showing.
         let lost = {
             let mut arrivals = guard(&self.arrivals);
             arrivals.forget_deferred_close(label);
@@ -266,7 +281,7 @@ impl WindowState {
             let mut routing = guard(&self.routing);
             for id in lost.iter().flat_map(|arrival| &arrival.terminal_ids) {
                 routing.owners.remove(id);
-                routing.lift_suppression(id);
+                routing.awaiting_replay.remove(id);
             }
             let owned = routing.owned_by(label);
             for id in &owned {
@@ -326,8 +341,6 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
     };
 
     let mut released: Vec<String> = Vec::new();
-    // Held events an expired suppression releases, flushed to the owner below.
-    let mut flushed: Vec<(String, Vec<routing::HeldEvent>)> = Vec::new();
     let delivery = {
         // Before the routing lock, never inside it (§`arrivals`). Nothing is
         // transferring in the steady state, so this second acquisition is paid
@@ -346,43 +359,19 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
         };
         let mut routing = guard(&state.routing);
         if state.suppressed.load(Ordering::Relaxed) > 0 {
-            let RoutingState { awaiting_replay, held, .. } = &mut *routing;
-            let swept = routing::sweep_awaiting(
-                awaiting_replay,
-                held,
+            released = routing::sweep_awaiting(
+                &mut routing.awaiting_replay,
                 Instant::now(),
                 routing::AWAITING_REPLAY_MAX,
                 &arriving,
             );
-            if !swept.is_empty() {
+            if !released.is_empty() {
                 state.suppressed.store(routing.awaiting_replay.len(), Ordering::Relaxed);
-                for (id, queue) in swept {
-                    if let (false, Some(label)) = (queue.is_empty(), routing.owners.get(&id)) {
-                        flushed.push((label.clone(), queue));
-                    }
-                    released.push(id);
-                }
             }
         }
 
-        match routing::route(
-            event,
-            &data,
-            &RouteView {
-                owners: &routing.owners,
-                awaiting_replay: &routing.awaiting_replay,
-                dor_targets: &routing.dor_targets,
-                registry: &registry,
-                marking: &routing.marking,
-            },
-        ) {
+        match routing::route(event, &data, &routing.view(registry)) {
             Route::Drop => Delivery::Nowhere,
-            Route::Hold => {
-                if let Some(id) = data.get("id").and_then(JsonValue::as_str) {
-                    routing::hold_event(&mut routing.held, id, event, data.clone());
-                }
-                Delivery::Nowhere
-            }
             Route::Broadcast => Delivery::Broadcast,
             Route::EmitTo(label) => Delivery::To(label.to_string()),
             // Resolved here, where the focus order is a sibling of the map the
@@ -400,12 +389,6 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
             },
         }
     };
-
-    for (label, queue) in flushed {
-        for (held_event, held_data) in queue {
-            let _ = app.emit_to(label.as_str(), held_event.as_str(), &held_data);
-        }
-    }
 
     let mut delivered: Option<&str> = None;
     match &delivery {
@@ -438,8 +421,8 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
     }
 
     // Bookkeeping strictly after the emit, so a replay lifts its own suppression
-    // only once the new owner has actually been sent it. Only these four events
-    // pay a second acquisition; a PTY chunk takes the lock once and is done.
+    // only once the new owner has actually been sent it. Only these events pay
+    // a second acquisition; a PTY chunk takes the lock once and is done.
     let id = || data.get("id").and_then(JsonValue::as_str);
     let request_id = || data.get("requestId").and_then(JsonValue::as_str);
     match event {
@@ -463,21 +446,11 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
         }
         "pty:replay" => {
             if let Some(id) = id() {
-                let queue = {
-                    let mut routing = guard(&state.routing);
-                    let queue = routing.lift_suppression(id);
-                    state
-                        .suppressed
-                        .store(routing.awaiting_replay.len(), Ordering::Relaxed);
-                    queue
-                };
-                // Behind the replay, to the window that just received it: the
-                // events describe bytes the replay carried.
-                if let Some(label) = delivered {
-                    for (held_event, held_data) in queue {
-                        let _ = app.emit_to(label, held_event.as_str(), &held_data);
-                    }
-                }
+                let mut routing = guard(&state.routing);
+                routing.awaiting_replay.remove(id);
+                state
+                    .suppressed
+                    .store(routing.awaiting_replay.len(), Ordering::Relaxed);
             }
         }
         "dor:controlRequest" => {
@@ -842,7 +815,8 @@ fn finish_window_close(app: &AppHandle, label: &str) {
     }
 }
 
-/// SIGTERM the PTYs a window left behind.
+/// SIGTERM the PTYs a window left behind, and drop their Sessions' alert
+/// entries with them: no window will ever show those Sessions again.
 ///
 /// Reached whenever a window goes away still owning shells — the close
 /// ack-timeout path ran no teardown at all, and a teardown that overran its
@@ -859,14 +833,13 @@ fn reap_orphaned_ptys(app: &AppHandle, label: &str, ids: Vec<String>) {
         "[window] {label} left {} PTY(s) with no owner; killing them",
         ids.len()
     ));
-    send_to_sidecar(
-        &sidecar,
-        serde_json::json!({
-            "event": "pty:gracefulKill",
-            "data": { "ids": ids, "timeout": 2000 },
-        })
-        .to_string(),
-    );
+    send_to_sidecar(&sidecar, pty_reap_message(&ids));
+}
+
+/// The `pty:reap` line `reap_orphaned_ptys` sends. Not `pty:gracefulKill`,
+/// which the quit teardown sends for PTYs whose windows still show them.
+fn pty_reap_message(ids: &[String]) -> String {
+    sidecar_line("pty:reap", serde_json::json!({ "ids": ids, "timeout": 2000 }))
 }
 
 const LOG_FILE_ENV: &str = "DORMOUSE_LOG_FILE";
@@ -982,6 +955,9 @@ struct PtySpawnOptions {
     cwd: Option<String>,
     shell: Option<String>,
     args: Option<Vec<String>>,
+    /// A cold restore's persisted alert state, seeded by the sidecar's
+    /// AlertManager behind the spawn. Opaque here, like `helper`.
+    alert: Option<JsonValue>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -1003,6 +979,17 @@ struct DorCliPaths {
 
 fn send_to_sidecar(state: &SidecarState, line: String) {
     let _ = state.tx.send(line);
+}
+
+/// One sidecar line, `{event, data}`, serialized straight from `data`: no
+/// intermediate `JsonValue`, so a payload is never deep-cloned on its way out.
+fn sidecar_line(event: &str, data: impl Serialize) -> String {
+    #[derive(Serialize)]
+    struct Line<'a, T> {
+        event: &'a str,
+        data: T,
+    }
+    serde_json::to_string(&Line { event, data }).expect("a sidecar line is plain JSON")
 }
 
 fn request_from_sidecar(
@@ -1084,21 +1071,60 @@ fn pty_spawn(
     options: Option<PtySpawnOptions>,
 ) {
     windows.mint(&id, window.label());
-    let msg = serde_json::json!({
-        "event": "pty:spawn",
-        "data": { "id": id, "options": options }
-    });
-    send_to_sidecar(&state, msg.to_string());
+    send_to_sidecar(&state, pty_spawn_message(&id, options.as_ref()));
+}
+
+/// One `pty:spawn` line. The options ride whole, a persisted `alert` included.
+fn pty_spawn_message(id: &str, options: Option<&PtySpawnOptions>) -> String {
+    sidecar_line("pty:spawn", serde_json::json!({ "id": id, "options": options }))
 }
 
 #[tauri::command]
-fn pty_write(state: tauri::State<'_, SidecarState>, id: String, data: String, paced: Option<bool>) {
-    let mut input = serde_json::json!({ "id": id, "data": data });
-    if paced == Some(true) {
-        input["paced"] = true.into();
+fn pty_write(
+    state: tauri::State<'_, SidecarState>,
+    id: String,
+    data: String,
+    paced: Option<bool>,
+    user_input: Option<bool>,
+) {
+    send_to_sidecar(&state, pty_input_message(&id, &data, paced, user_input));
+}
+
+/// One `pty:input` line. **Human input carries `userInput` on the write itself**,
+/// never a separate alert command racing it: the sidecar acknowledges it and
+/// opens the echo window before the bytes reach the PTY (docs/specs/alert.md
+/// → Engagement). Each flag is present only when true.
+fn pty_input_message(id: &str, data: &str, paced: Option<bool>, user_input: Option<bool>) -> String {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct PtyInput<'a> {
+        id: &'a str,
+        data: &'a str,
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        paced: bool,
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        user_input: bool,
     }
-    let msg = serde_json::json!({ "event": "pty:input", "data": input });
-    send_to_sidecar(&state, msg.to_string());
+    sidecar_line(
+        "pty:input",
+        PtyInput { id, data, paced: paced == Some(true), user_input: user_input == Some(true) },
+    )
+}
+
+/// Forward a webview's opaque command to the sidecar as `event`, stamped with
+/// the invoking window (`stamped_message`).
+fn forward_stamped(state: &SidecarState, label: &str, event: &str, payload: JsonValue) {
+    send_to_sidecar(state, stamped_message(label, event, payload));
+}
+
+/// A webview's opaque command with the invoking window's label stamped on it
+/// as `window`, over any it claimed: the one field Rust adds, because a
+/// webview cannot name itself to the sidecar.
+fn stamped_message(label: &str, event: &str, mut payload: JsonValue) -> String {
+    if let Some(command) = payload.as_object_mut() {
+        command.insert("window".to_string(), JsonValue::String(label.to_string()));
+    }
+    sidecar_line(event, payload)
 }
 
 #[tauri::command]
@@ -1175,33 +1201,25 @@ fn pty_request_init(
 fn burrow_command(
     window: tauri::Window,
     state: tauri::State<'_, SidecarState>,
-    mut payload: JsonValue,
+    payload: JsonValue,
 ) {
-    // The one field Rust adds: which webview this came from. An ask fans out to
-    // every window and settles on having heard from each, and a webview cannot
-    // name itself to the Burrow (§Burrow service).
-    if let Some(command) = payload.as_object_mut() {
-        command.insert(
-            "window".to_string(),
-            JsonValue::String(window.label().to_string()),
-        );
-    }
-    let msg = serde_json::json!({
-        "event": "burrow:command",
-        "data": payload,
-    });
-    send_to_sidecar(&state, msg.to_string());
+    // Which webview this came from: an ask fans out to every window and settles
+    // on having heard from each (§Burrow service).
+    forward_stamped(&state, window.label(), "burrow:command", payload);
 }
 
-// The two app-global alert stores live in the sidecar so N windows share one
-// answer (docs/specs/alert.md -> "Alarm settings"). One opaque passthrough, like
-// `burrow_command`: the payload names its own op, and the shape belongs to
-// `lib/src/host/alert-store-host.ts` at the other end. The canonical snapshot
-// comes back as a broadcast `alert:settings` / `alert:watchedCommands`.
+// The app's one AlertManager lives in the sidecar, and every window is one of
+// its viewers (§Alerts). One opaque passthrough, like `burrow_command`: the
+// payload names its own op, and the shape belongs to
+// `lib/src/host/alert-protocol.ts`. The window label is stamped, because it is
+// the viewer id engagement is kept under and the owner of the awaits it parks.
 #[tauri::command]
-fn alert_command(state: tauri::State<'_, SidecarState>, payload: JsonValue) {
-    let msg = serde_json::json!({ "event": "alert:command", "data": payload });
-    send_to_sidecar(&state, msg.to_string());
+fn alert_command(
+    window: tauri::Window,
+    state: tauri::State<'_, SidecarState>,
+    payload: JsonValue,
+) {
+    forward_stamped(&state, window.label(), "alert:command", payload);
 }
 
 #[tauri::command]
@@ -3086,10 +3104,9 @@ fn spawn_arrival_watchdog(app: AppHandle, arrival: &routing::Arrival) {
 /// From its mark to now every byte went to the target, or nowhere, and the
 /// source's xterm stands at the mark; so the sidecar is asked for
 /// `outputSince(mark)` scoped to the source, and that replay lifts the
-/// suppression on its way out (`dispatch_sidecar_event`), the held protocol
-/// events behind it. Marks come from the routing state at `pty:marked`, never
-/// from the later serialized content. Only an id the sidecar never stamped
-/// goes straight back.
+/// suppression on its way out (`dispatch_sidecar_event`). Marks come from the
+/// routing state at `pty:marked`, never from the later serialized content. Only
+/// an id the sidecar never stamped goes straight back.
 ///
 /// The record must already be out of the queue; the caller took it.
 fn hand_back_arrival(
@@ -4741,6 +4758,32 @@ mod tests {
         );
     }
 
+    /// The target going away drops the arriving shells' owner so they are not
+    /// reaped with it; the hand-back must give them to the source again, or the
+    /// panes it still shows receive no output, exit or alert state. A shell
+    /// killed mid-transfer stays unowned.
+    #[test]
+    fn a_target_closing_mid_arrival_hands_its_shells_back() {
+        let windows = super::WindowState::default();
+        let ids = ["t1".to_string(), "t2".to_string(), "t3".to_string()];
+        for id in &ids { windows.mint(id, "main"); }
+        windows.begin_transfer(&ids, "main", "ws-2");
+        guard(&windows.routing).mark_transfer("t1", 42);
+        windows.forget_pty("t3");
+        let mut arrival = arrival_of("workspace-7", "main", "ws-2");
+        arrival.terminal_ids = ids.to_vec();
+        guard(&windows.arrivals).push(arrival);
+
+        let (lost, orphaned) = windows.drop_window("ws-2");
+        assert!(orphaned.is_empty());
+        assert_eq!(windows.hand_back(&lost[0].terminal_ids, "main")["t1"], 42);
+        let routing = guard(&windows.routing);
+        assert_eq!(routing.owners.get("t1").map(String::as_str), Some("main"));
+        assert!(routing.awaiting_replay.contains_key("t1"));
+        assert_eq!(routing.owners.get("t2").map(String::as_str), Some("main"));
+        assert!(!routing.owners.contains_key("t3"));
+    }
+
     #[test]
     fn a_pty_exit_keeps_its_cut_until_the_arrival_settles() {
         let windows = super::WindowState::default();
@@ -4752,8 +4795,106 @@ mod tests {
         assert_eq!(windows.hand_back(&["t1".to_string()], "main")["t1"], 42);
         let routing = guard(&windows.routing);
         assert!(!routing.transfer_marks.contains_key("t1"));
-        assert!(!routing.owners.contains_key("t1"));
-        assert!(!routing.awaiting_replay.contains_key("t1"));
+        // The source shows the exited pane again, behind the replay of its cut.
+        assert_eq!(routing.owners.get("t1").map(String::as_str), Some("main"));
+        assert!(routing.awaiting_replay.contains_key("t1"));
+    }
+
+    /// An exit between a transfer's invoke and its mark belongs to the source,
+    /// which still shows the pane and is about to serialize it, and so does the
+    /// mark behind it: the target lists an exited id only when it has a cut.
+    #[test]
+    fn an_exit_before_the_mark_leaves_the_transfer_to_finish() {
+        let windows = super::WindowState::default();
+        let registry = super::workspaces::Registry::default();
+        let exit = serde_json::json!({"id": "t1", "exitCode": 0});
+        let marked = serde_json::json!({"id": "t1", "mark": 42});
+        windows.mint("t1", "main");
+        windows.begin_transfer(&["t1".to_string()], "main", "ws-2");
+        let routed = |event: &str, data: &JsonValue| {
+            let state = guard(&windows.routing);
+            super::routing::route(event, data, &state.view(&registry)) == super::routing::Route::EmitTo("main")
+        };
+        assert!(routed("pty:exit", &exit));
+        windows.exited_pty("t1");
+        assert!(routed("pty:marked", &marked));
+        guard(&windows.routing).mark_transfer("t1", 42);
+        assert_eq!(guard(&windows.routing).transfer_marks.get("t1"), Some(&42));
+    }
+
+    /// An exited Session is still on screen, and a dismiss or a TODO cleared on
+    /// it comes back as `alert:state`: dropped as unowned, the pane would ring
+    /// forever. Only a kill forgets the owner.
+    #[test]
+    fn an_exited_pty_stays_owned_until_it_is_killed() {
+        let windows = super::WindowState::default();
+        windows.mint("t1", "main");
+        windows.exited_pty("t1");
+        {
+            let state = guard(&windows.routing);
+            let registry = super::workspaces::Registry::default();
+            assert_eq!(
+                super::routing::route("alert:state", &serde_json::json!({"id": "t1"}), &state.view(&registry)),
+                super::routing::Route::EmitTo("main")
+            );
+        }
+        windows.forget_pty("t1");
+        assert!(!guard(&windows.routing).owners.contains_key("t1"));
+    }
+
+    fn parse_line(line: &str) -> JsonValue {
+        serde_json::from_str(line).expect("a sidecar line is JSON")
+    }
+
+    /// The window label is the alert viewer id and the owner of the awaits a
+    /// window parks, and a webview cannot name itself: Rust stamps it on the
+    /// opaque command, over anything the payload claimed.
+    #[test]
+    fn a_forwarded_command_carries_the_invoking_window_over_its_claim() {
+        let forged = serde_json::json!({ "op": "hello", "window": "main" });
+        assert_eq!(
+            parse_line(&super::stamped_message("ws-2", "alert:command", forged)),
+            serde_json::json!({ "event": "alert:command", "data": { "op": "hello", "window": "ws-2" } })
+        );
+    }
+
+    /// Human input is acknowledged by the sidecar before it writes, so the flag
+    /// rides the write itself rather than a second message that could lose the race.
+    #[test]
+    fn user_input_rides_the_write_it_describes() {
+        assert_eq!(
+            parse_line(&super::pty_input_message("t1", "y", None, Some(true))),
+            serde_json::json!({ "event": "pty:input", "data": { "id": "t1", "data": "y", "userInput": true } })
+        );
+        assert_eq!(
+            parse_line(&super::pty_input_message("t1", "\x1b[I", Some(true), Some(false))),
+            serde_json::json!({ "event": "pty:input", "data": { "id": "t1", "data": "\x1b[I", "paced": true } })
+        );
+    }
+
+    /// A window gone for good takes its Sessions' alert entries with its shells,
+    /// unlike the quit teardown's `pty:gracefulKill`, sent while windows still
+    /// show their PTYs.
+    #[test]
+    fn an_orphan_reap_removes_the_sessions_it_kills() {
+        assert_eq!(
+            parse_line(&super::pty_reap_message(&["t1".to_string(), "t2".to_string()])),
+            serde_json::json!({ "event": "pty:reap", "data": { "ids": ["t1", "t2"], "timeout": 2000 } })
+        );
+    }
+
+    /// A cold restore seeds the pane's persisted alert through its spawn, so
+    /// the sidecar starts the Session over and seeds it in one step.
+    #[test]
+    fn a_spawn_carries_its_persisted_alert_to_the_sidecar() {
+        let alert = serde_json::json!({ "status": "ALERT_RINGING", "todo": true, "notification": null });
+        let options: super::PtySpawnOptions =
+            serde_json::from_value(serde_json::json!({ "cols": 80, "rows": 24, "alert": alert })).unwrap();
+        let line = parse_line(&super::pty_spawn_message("t1", Some(&options)));
+        assert_eq!(line["event"], "pty:spawn");
+        assert_eq!(line["data"]["id"], "t1");
+        assert_eq!(line["data"]["options"]["cols"], 80);
+        assert_eq!(line["data"]["options"]["alert"], alert);
     }
 
     #[test]
@@ -4770,11 +4911,7 @@ mod tests {
         assert!(state.awaiting_replay.is_empty());
         assert!(state.transfer_marks.is_empty());
         let registry = super::workspaces::Registry::default();
-        let view = super::RouteView {
-            owners: &state.owners, awaiting_replay: &state.awaiting_replay,
-            dor_targets: &state.dor_targets, registry: &registry, marking: &state.marking,
-        };
-        assert!(matches!(super::routing::route("pty:data", &serde_json::json!({"id": "t1", "data": "live"}), &view), super::routing::Route::EmitTo("ws-2")));
+        assert!(matches!(super::routing::route("pty:data", &serde_json::json!({"id": "t1", "data": "live"}), &state.view(&registry)), super::routing::Route::EmitTo("ws-2")));
     }
 
     #[test]
@@ -4783,13 +4920,9 @@ mod tests {
         windows.mint("t1", "main");
         windows.begin_transfer(&["t1".to_string()], "main", "ws-2");
         let state = guard(&windows.routing);
-        let view = super::RouteView {
-            owners: &state.owners, awaiting_replay: &state.awaiting_replay,
-            dor_targets: &state.dor_targets, registry: &super::workspaces::Registry::default(),
-            marking: &state.marking,
-        };
+        let registry = super::workspaces::Registry::default();
         assert_eq!(state.owners.get("t1").map(String::as_str), Some("ws-2"));
-        assert!(matches!(super::routing::route("pty:data", &serde_json::json!({"id": "t1", "data": "before-mark"}), &view), super::routing::Route::EmitTo("main")));
+        assert!(matches!(super::routing::route("pty:data", &serde_json::json!({"id": "t1", "data": "before-mark"}), &state.view(&registry)), super::routing::Route::EmitTo("main")));
     }
 
     #[test]
@@ -4809,7 +4942,7 @@ mod tests {
         state.mark_transfer("t1", 42);
         assert!(state.awaiting_replay.contains_key("t1"));
         assert_eq!(state.transfer_marks.get("t1"), Some(&42));
-        state.lift_suppression("t1");
+        state.awaiting_replay.remove("t1"); // what the target's replay lifts
         assert_eq!(state.transfer_marks.get("t1"), Some(&42));
         state.mark_transfer("t2", 99); // a late mark after hand-back is inert
         assert!(!state.transfer_marks.contains_key("t2"));
@@ -5618,54 +5751,35 @@ mod tests {
         queue_test_suppression(&state, "pane-a");
         assert_eq!(state.suppressed.load(Ordering::Relaxed), 1);
 
-        super::routing::hold_event(
-            &mut guard(&state.routing).held,
-            "pane-a",
-            "terminal:protocolEvents",
-            serde_json::json!({"n": 1}),
-        );
-
         state.mint("pane-a", "main");
         assert!(guard(&state.routing).awaiting_replay.is_empty());
-        // Nothing held for the PTY that never arrived survives under its id.
-        assert!(guard(&state.routing).held.is_empty());
         assert_eq!(state.suppressed.load(Ordering::Relaxed), 0);
         assert_eq!(state.owned_by("main"), vec!["pane-a".to_string()]);
     }
 
-    /// Every way out of a suppression takes the held queue with it: a queue
-    /// left behind would be flushed ahead of the *next* transfer's own gap.
+    /// Every way out of a suppression lifts it and republishes the count the
+    /// hot path reads: an id left in `awaiting_replay` stays silent until the
+    /// sweep, and a stale count sends every chunk through the sweep.
     #[test]
-    fn every_lift_of_a_suppression_takes_its_held_queue() {
+    fn every_way_out_of_a_suppression_lifts_it() {
         let state = super::WindowState::default();
         let ids = ["pane-a".to_string()];
-        let queue_up = || {
-            queue_test_suppression(&state, "pane-a");
-            super::routing::hold_event(
-                &mut guard(&state.routing).held,
-                "pane-a",
-                "terminal:protocolEvents",
-                serde_json::json!({"n": 1}),
-            );
-            assert_eq!(state.suppressed.load(Ordering::Relaxed), 1);
-        };
         let lifted = || {
-            let routing = guard(&state.routing);
-            routing.awaiting_replay.is_empty() && routing.held.is_empty()
+            guard(&state.routing).awaiting_replay.is_empty()
+                && state.suppressed.load(Ordering::Relaxed) == 0
         };
 
-        queue_up();
+        queue_test_suppression(&state, "pane-a");
         state.clear_suppression(&ids);
         assert!(lifted());
-        assert_eq!(state.suppressed.load(Ordering::Relaxed), 0);
 
-        queue_up();
-        // An unmarked hand-back releases its queue without requesting replay.
+        queue_test_suppression(&state, "pane-a");
+        // An unmarked hand-back goes straight back, with no replay to wait for.
         guard(&state.routing).transfer_marks.remove("pane-a");
         state.hand_back(&ids, "main");
         assert!(lifted());
 
-        queue_up();
+        queue_test_suppression(&state, "pane-a");
         state.forget_pty("pane-a");
         assert!(lifted());
     }

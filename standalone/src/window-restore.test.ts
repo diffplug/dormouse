@@ -67,7 +67,6 @@ function fakePlatform(ptys: PtyInfo[], saved: PersistedWindow | null) {
     offPtyReplay: (handler: (detail: { id: string; data: string }) => void) => { replayHandlers.delete(handler); },
     spawnPty: vi.fn(),
     killPty: vi.fn(),
-    alertSeed: vi.fn(),
   } as unknown as PlatformAdapter;
   setPlatform(platform);
   return { platform, saves };

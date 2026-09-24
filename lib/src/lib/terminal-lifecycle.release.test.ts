@@ -7,32 +7,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  * (`docs/specs/transport.md` → "Transferring a Workspace").
  */
 
-vi.mock('@xterm/addon-fit', () => ({
-  FitAddon: class {
-    fit(): void {}
-    proposeDimensions(): { cols: number; rows: number } { return { cols: 80, rows: 24 }; }
-  },
-}));
-vi.mock('@xterm/addon-image', () => ({ ImageAddon: class {} }));
-vi.mock('@xterm/addon-serialize', () => ({ SerializeAddon: class { serialize(): string { return ''; } } }));
-vi.mock('@xterm/addon-unicode-graphemes', () => ({ UnicodeGraphemesAddon: class {} }));
-vi.mock('@xterm/xterm', () => ({
-  Terminal: class {
-    parser = { registerCsiHandler: () => ({ dispose: () => {} }) };
-    modes = { mouseTrackingMode: 'none' as const, bracketedPasteMode: false };
-    unicode = { activeVersion: '11' };
-    disposed = false;
-    loadAddon(): void {}
-    open(): void {}
-    write(): void {}
-    focus(): void {}
-    blur(): void {}
-    onData(): { dispose: () => void } { return { dispose: () => {} }; }
-    onResize(): { dispose: () => void } { return { dispose: () => {} }; }
-    onRender(): { dispose: () => void } { return { dispose: () => {} }; }
-    dispose(): void { this.disposed = true; }
-  },
-}));
+vi.mock('@xterm/xterm', () => import('./xterm-test-mock'));
+vi.mock('@xterm/addon-fit', () => import('./xterm-test-mock'));
+vi.mock('@xterm/addon-image', () => import('./xterm-test-mock'));
+vi.mock('@xterm/addon-serialize', () => import('./xterm-test-mock'));
+vi.mock('@xterm/addon-unicode-graphemes', () => import('./xterm-test-mock'));
 
 vi.mock('./platform', async () => {
   const actual = await vi.importActual<typeof import('./platform')>('./platform');
@@ -76,6 +55,10 @@ beforeEach(() => {
 });
 
 describe('releaseSession', () => {
+  // The kill is also what removes the host's alert entry, which is the
+  // Session's, not this Window's: a departure or a refused arrival that removed
+  // it would wipe a ring or TODO the other Window is showing
+  // (docs/specs/alert.md → Live Workspace transfer).
   it('never kills the PTY, unlike disposeSession', () => {
     getOrCreateTerminal('pane-1');
     releaseSession('pane-1');

@@ -86,7 +86,8 @@ export const Default: Story = {};
 export const Ringing: Story = { args: { status: 'ALERT_RINGING' } };
 export const TodoOnly: Story = { args: { todo: true } };
 export const TodoAndRinging: Story = { args: { todo: true, status: 'ALERT_RINGING' } };
-export const Speaking: Story = { args: { status: 'ALERT_RINGING', todo: true, speechState: 'speaking' } };
+export const Speaking: Story = { args: { status: 'ALERT_RINGING', speechState: 'speaking' } };
+// A TODO standing from before this ring: the speaker icon joins its pill.
 export const HasSpoken: Story = { args: { status: 'ALERT_RINGING', todo: true, speechState: 'spoken' } };
 export const LongTitleWithIndicators: Story = {
   args: {

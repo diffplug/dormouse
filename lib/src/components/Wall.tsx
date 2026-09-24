@@ -33,13 +33,12 @@ import { messageOf } from '../lib/errors';
 import { archiveSurfaceNotes } from '../lib/notepad/close-coordinator';
 import { beginClosing, isSurfaceClosing, registerNotepadSurfaceMetaResolver, removeSurface, transferNotepad } from '../lib/notepad/notepad-store';
 import {
-  clearSessionAttention,
+  acknowledgeSession,
   clearLocalSurfaceActivity,
   deriveSessionLabel,
   disposeSession,
   focusSession,
   refitSession,
-  markSessionAttention,
   toggleSessionTodo,
   setPendingShellOpts,
   getDefaultShellOpts,
@@ -105,10 +104,11 @@ import type { WallNav } from './wall/keyboard/types';
 import { useWallKeyboard } from './wall/use-wall-keyboard';
 import { useSessionPersistence } from './wall/use-session-persistence';
 import { useDevServerPortCorrelation } from './wall/use-dev-server-ports';
-import { useAlertSpeech } from './wall/use-alert-speech';
+import { useAlertDelivery } from './wall/use-alert-delivery';
 import { queueToolSpawn, restartSurfaceInPlace, toolRunCommand, useDorControl, waitForNewToolCommand } from './wall/use-dor-control';
 import { errorText } from './wall/dor-control-shared';
 import { useWindowFocused } from './wall/use-window-focused';
+import { useEngagementFocus } from './wall/use-engagement-focus';
 import {
   DialogKeyboardContext,
   DoorElementsContext,
@@ -117,6 +117,7 @@ import {
   WorkspaceIdContext,
   PaneElementsContext,
   PaneWriteContext,
+  PassthroughPaneIdContext,
   WallActionsContext,
   RenamingIdContext,
   SelectedIdContext,
@@ -414,6 +415,10 @@ export function Wall({
   const [mode, setMode] = useState<WallMode>(initialMode);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<WallSelectionKind>('pane');
+  /** The Session an open terminal context holds — null while none is open or one is exiting. */
+  const contextSourceId = terminalContext && !terminalContext.closing ? terminalContext.id : null;
+  /** The pane whose Surface takes the keyboard in passthrough. */
+  const passthroughPaneId = mode === 'passthrough' && selectedType === 'pane' ? selectedId : null;
   const lastPaneIdRef = useRef<string | null>(null);
   const doorKillReturnRef = useRef<{ id: string; neighbors: string[] } | null>(null);
 
@@ -843,12 +848,13 @@ export function Wall({
     confirmTimerRef.current = setTimeout(() => setConfirmKill(null), KILL_CONFIRM_MS);
   }, [closeSurface]);
 
-  /** Enter terminal mode for the given panel */
+  /** Enter terminal mode for the given panel. This only moves focus there: the
+   *  human gestures acknowledge at their own handlers, and spawns, reveals, and
+   *  embeds focusing themselves never do (`docs/specs/alert.md` -> Engagement). */
   const enterTerminalMode = useCallback((id: string) => {
     selectPane(id);
     modeRef.current = 'passthrough';
     setMode('passthrough');
-    markSessionAttention(id);
     // Defer focus so it happens after the mousedown/click event finishes.
     requestAnimationFrame(() => focusSession(id, true));
   }, [selectPane]);
@@ -871,7 +877,6 @@ export function Wall({
     // the store (it keeps changing while minimized).
     const { token } = lath.store.doorLeaf(id, { park: shouldParkOnMinimize(meta) });
     if (!token) return;
-    clearSessionAttention(id);
     // The runtime Door is identity + the core restore payload only
     // (docs/specs/tiling-engine.md → "Restore tokens"); its metadata stays in the
     // store, and the persisted row is materialized from there at save time.
@@ -951,20 +956,6 @@ export function Wall({
   const anyArchiveFailure = archiveFailures.length > 0;
   useDialogKeyboardOwner(anyArchiveFailure, acquireDialogKeyboard);
 
-  useEffect(() => {
-    // An iframe surface taking focus blurs this window without backgrounding the
-    // app (document.hasFocus() stays true). Only clear cross-session attention
-    // on a real blur, else focusing an iframe wipes attention
-    // (docs/specs/layout.md → Corner cases #2).
-    const handleBlur = () => {
-      if (!activeRef.current) return;
-      if (document.hasFocus()) return;
-      clearSessionAttention();
-    };
-    window.addEventListener('blur', handleBlur);
-    return () => window.removeEventListener('blur', handleBlur);
-  }, []);
-
   // --- Lath seed + auto-spawn ---
   const lathSeededRef = useRef(false);
   // The leaf-id set as of the last commit, so the store subscription can fire
@@ -1030,6 +1021,16 @@ export function Wall({
   const surfaceHasTerminal = useCallback(
     (id: string): boolean => hasTerminal(surfaceKindFromParams(lath.getMeta(id)?.params)),
     [lath],
+  );
+
+  // The terminal Session this Wall points its realm at (`docs/specs/alert.md` ->
+  // Engagement): an open terminal context's source, else the passthrough pane —
+  // never a command-mode selection, a Door, a browser Surface, or a hidden Wall.
+  const focusCandidate = contextSourceId ?? passthroughPaneId;
+  useEngagementFocus(
+    active && focusCandidate !== null && surfaceHasTerminal(focusCandidate)
+      ? focusCandidate
+      : null,
   );
 
   /** Whether a Surface belongs to this Wall — the membership test in the hot
@@ -1171,8 +1172,8 @@ export function Wall({
   // --- Dev-server port → pane correlation (browser header connection chip) ---
   useDevServerPortCorrelation({ lath, doorsRef });
 
-  // --- Spoken alarms (`docs/specs/alert.md` -> Alarm settings) ---
-  useAlertSpeech();
+  // --- Alarm delivery: this realm's Sessions and speech (`docs/specs/alert.md` -> Alarm settings) ---
+  useAlertDelivery();
 
   // --- Reattach ---
 
@@ -1232,10 +1233,19 @@ export function Wall({
   const handleReattachRef = useRef(handleReattach);
   handleReattachRef.current = handleReattach;
 
+  /** A Door click, or a pin in its popover: reattach into passthrough, a human
+   *  gesture that acknowledges the Session. */
+  const reattachFromDoor = useCallback((item: DooredItem) => {
+    handleReattach(item);
+    acknowledgeSession(item.id);
+  }, [handleReattach]);
+
   /** Focus a surface for the human half of the context's port actions: activating
    *  a port row is an explicit request to look at and control that browser. A visible pane
    *  enters passthrough in place; a minimized one reattaches on the same terms
-   *  as clicking its Door chip. This is deliberately unlike `dor ab`, whose
+   *  as clicking its Door chip, except that a reveal moves focus without
+   *  acknowledging — `dor` reveals too, and an agent showing a pane is not the
+   *  human answering it. This is deliberately unlike `dor ab`, whose
    *  agent-initiated control path remains focus-neutral.
    *
    *  Returns whether the Surface ended up visible, so `dor` can report the
@@ -1916,21 +1926,26 @@ export function Wall({
       // over rather than merely unzoom the owner. Acquiring zoom first enters
       // passthrough on this pane (unless it already owns focus); selectPane's
       // `releaseZoomExcept` drops the previous owner on the way through.
-      const currentZoom = lath.store.getSnapshot().zoomedId;
-      if (currentZoom === id) {
-        lath.store.setZoomed(null);
-        return;
-      }
+      const unzoom = lath.store.getSnapshot().zoomedId === id;
       if (
-        modeRef.current !== 'passthrough' ||
-        selectedTypeRef.current !== 'pane' ||
-        selectedIdRef.current !== id
+        !unzoom && (
+          modeRef.current !== 'passthrough' ||
+          selectedTypeRef.current !== 'pane' ||
+          selectedIdRef.current !== id
+        )
       ) {
         enterTerminalMode(id);
       }
-      lath.store.setZoomed(id);
+      // A gesture on this Session whichever way it goes, in passthrough or not.
+      acknowledgeSession(id);
+      lath.store.setZoomed(unzoom ? null : id);
     },
     onClickPanel: (id: string) => {
+      setConfirmKill(null);
+      enterTerminalMode(id);
+      acknowledgeSession(id);
+    },
+    onEnterPanel: (id: string) => {
       setConfirmKill(null);
       enterTerminalMode(id);
     },
@@ -1940,10 +1955,12 @@ export function Wall({
       const visible = nav.hasPane(id);
       if (visible) {
         enterTerminalMode(id);
-        return;
+      } else {
+        const door = doorsRef.current.find((item) => item.id === id);
+        if (!door) return;
+        handleReattachRef.current(door, { enterPassthrough: true });
       }
-      const door = doorsRef.current.find((item) => item.id === id);
-      if (door) handleReattachRef.current(door, { enterPassthrough: true });
+      acknowledgeSession(id);
     },
     onStartRename: (id: string) => {
       setRenamingPaneId(id);
@@ -2159,7 +2176,7 @@ export function Wall({
     try { await operation; } finally { contextPortLaunches.current.delete(key); }
   }, [buildDorSurfaces, findSurfaceByParams, createContentSurface, enterTerminalMode, closeSurface, lath, revealSurface, updateSurfaceParams]);
   const contextActions = useMemo(() => ({
-    id: terminalContext && !terminalContext.closing ? terminalContext.id : null,
+    id: contextSourceId,
     mounted: terminalContext,
     open: (id: string, options?: TerminalContextOpenOptions) => { if (toolPendingFromParams(lath.getMeta(id)?.params) || isHelperSession(id) || isSurfaceClosing(id) || lath.isDying(id)) return; setTerminalContext({ id, ...options }); },
     close: () => {
@@ -2185,7 +2202,7 @@ export function Wall({
       enterTerminalMode(helper.id);
     },
     openPort: openContextPort,
-  }), [terminalContext, lath, nav, surfaceRefForId, enterTerminalMode, openContextPort]);
+  }), [contextSourceId, terminalContext, lath, nav, surfaceRefForId, enterTerminalMode, openContextPort]);
 
   const wallActionsRef = useRef(wallActions);
   wallActionsRef.current = wallActions;
@@ -2234,6 +2251,7 @@ export function Wall({
   // command → move selection onto it.
   const onLeafFocused = useCallback((id: string) => {
     if (modeRef.current === 'passthrough') {
+      // The embed moved DOM focus; no human gesture reached this Session.
       if (selectedIdRef.current !== id) enterTerminalMode(id);
       return;
     }
@@ -2301,6 +2319,7 @@ export function Wall({
     <WorkspaceActiveContext.Provider value={active}>
     <ModeContext.Provider value={mode}>
       <SelectedIdContext.Provider value={selectedId}>
+      <PassthroughPaneIdContext.Provider value={passthroughPaneId}>
         <WallActionsContext.Provider value={wallActions}>
           <TerminalContextContext.Provider value={contextActions}>
           <PaneWriteContext.Provider value={paneWrite}>
@@ -2332,7 +2351,7 @@ export function Wall({
             {/* Baseboard — always present; the mobile composition is `MobileWall`, not a baseboard-less Wall. */}
             <Baseboard
               items={doorChips}
-              onReattach={handleReattach}
+              onReattach={reattachFromDoor}
               notice={baseboardNotice}
               onDoorDragStart={onDoorDragStart}
             />
@@ -2400,6 +2419,7 @@ export function Wall({
           </PaneWriteContext.Provider>
           </TerminalContextContext.Provider>
         </WallActionsContext.Provider>
+      </PassthroughPaneIdContext.Provider>
       </SelectedIdContext.Provider>
     </ModeContext.Provider>
     </WorkspaceActiveContext.Provider>

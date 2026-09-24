@@ -322,11 +322,12 @@ export function IframePanel({ id, title, params }: PaneProps) {
   // iframe still blurs the parent window while the document itself remains
   // focused. Adopt that as entering the pane so hosts without a proxy keep the
   // same click/focus behavior, albeit without the proxied leader side-channel.
+  // Focus alone is no gesture, so it acknowledges nothing.
   useEffect(() => {
     if (resolution.kind !== 'raw') return;
     const onWindowBlur = () => {
       if (document.hasFocus() && document.activeElement === iframeRef.current) {
-        actions.onClickPanel(id);
+        actions.onEnterPanel(id);
       }
     };
     window.addEventListener('blur', onWindowBlur);

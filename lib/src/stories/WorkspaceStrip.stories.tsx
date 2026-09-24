@@ -76,7 +76,7 @@ export const Indicators: Story = {
         'builds-b': { todo: true },
         'agents-a': { todo: true },
         // The visible Workspace owes attention too, and still shows nothing.
-        'visible-a': { status: 'ALERT_RINGING', todo: true },
+        'visible-a': { status: 'ALERT_RINGING' },
       },
     },
   },

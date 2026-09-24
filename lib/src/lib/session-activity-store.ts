@@ -1,4 +1,3 @@
-import { createAlertEpisode } from './alert-episode';
 import { DEFAULT_ALERT_STATE, type AlertState } from './alert-manager';
 import type { AlertStateDetail } from './platform/types';
 import { applyAlertSettingsFromHost, publishAlertSettings } from './alert-settings';
@@ -65,13 +64,7 @@ export function getLivePersistedAlertState(id: string): PersistedAlertState | nu
 
 /** Install a host snapshot, including one received before xterm initialization. */
 export function setTerminalActivity(id: string, state: Partial<AlertState>): void {
-  const previous = terminalActivity.get(id);
-  // Older hosts and local fixtures have no episode field. Hydrate their status
-  // edges here; consumers still seed first-observed rings without delivery.
-  const episode = state.status === 'ALERT_RINGING'
-    ? state.episode ?? (previous?.status === 'ALERT_RINGING' ? previous.episode : null) ?? createAlertEpisode()
-    : null;
-  terminalActivity.set(id, { ...DEFAULT_ACTIVITY_STATE, ...state, episode });
+  terminalActivity.set(id, { ...DEFAULT_ACTIVITY_STATE, ...state });
   notifyActivityListeners(id);
 }
 
@@ -149,12 +142,14 @@ export function dismissSessionAlert(id: string): void {
   getPlatform().alertDismiss(id);
 }
 
-export function markSessionAttention(id: string): void {
-  getPlatform().alertAttend(id);
-}
-
-export function clearSessionAttention(id?: string): void {
-  getPlatform().alertClearAttention(id);
+/**
+ * A human gesture reached this Session without input — a click, a Door
+ * reattach, a tap (`docs/specs/alert.md` -> Engagement). Input acknowledges
+ * through `writeUserInput`. The host acknowledges nothing it has no Activity
+ * for, a browser Surface included.
+ */
+export function acknowledgeSession(id: string): void {
+  getPlatform().alertAcknowledge(id);
 }
 
 export function toggleSessionTodo(id: string): void {
@@ -163,14 +158,6 @@ export function toggleSessionTodo(id: string): void {
     return;
   }
   getPlatform().alertToggleTodo(id);
-}
-
-export function markSessionTodo(id: string): void {
-  if (!registry.has(id)) {
-    setLocalSurfaceTodo(id, true);
-    return;
-  }
-  getPlatform().alertMarkTodo(id);
 }
 
 export function clearSessionTodo(id: string): void {

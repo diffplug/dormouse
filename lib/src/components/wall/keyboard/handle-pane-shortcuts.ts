@@ -1,4 +1,4 @@
-import { dismissSessionAlert, toggleSessionTodo } from '../../../lib/terminal-registry';
+import { acknowledgeSession, dismissSessionAlert, toggleSessionTodo } from '../../../lib/terminal-registry';
 import { hasTerminal } from 'dor/commands/types';
 import { surfaceKindFromParams } from '../browser-surface';
 import { isWorkspaceSelection } from '../wall-types';
@@ -36,15 +36,19 @@ export function handlePaneShortcuts(
     return true;
   }
 
+  // Entering passthrough, from a pane or through its Door, is a human gesture
+  // that acknowledges the Session (`docs/specs/alert.md` -> Engagement).
   if (e.key === 'Enter' && sid) {
     e.preventDefault();
     e.stopPropagation();
     if (ctx.selectedTypeRef.current === 'door') {
       const item = ctx.doorsRef.current.find((d) => d.id === sid);
-      if (item) ctx.handleReattachRef.current(item);
+      if (!item) return true;
+      ctx.handleReattachRef.current(item);
     } else {
       ctx.enterTerminalMode(sid);
     }
+    acknowledgeSession(sid);
     return true;
   }
 

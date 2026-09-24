@@ -42,9 +42,13 @@ Chrome rules:
   radius. Order: title, secondary detail, TODO pill, minimize, kill (suppressed
   by `showKillButton={false}`, as Pocket does). Both consumers wire minimize to
   the Sessions reserve, not a desktop Door. A ring shows as the alarm inset on
-  the bar and on its session-list row, and **a tap on the terminal attends the
-  Session**, which is how it is dismissed here (`docs/specs/alert.md` -> Pane
-  Header).
+  the bar and on its session-list row. **A tap acknowledges the active
+  Session; a drag never does.** `MobileTerminalUi` tracks each press in its
+  capture phase, before any touch mode consumes it, and acknowledges a release
+  that never strayed past `RADIUS_FADE_START`. **Select mode's router consumes
+  a touch it owns**, so it announces one that never became a drag as
+  `TERMINAL_TAP_EVENT`. Both consumers route the input bar and gesture keys
+  through `writeUserInput` (`docs/specs/alert.md` -> Engagement).
 * **Must install `useDynamicPalette` in `MobileTerminalUi`** for gesture tokens;
   it never mounts the desktop `Wall`. `docs/specs/theme.md` owns publication
   and the CSS baselines available before the effect runs.
@@ -54,6 +58,10 @@ Chrome rules:
 **Never recompute height from `window.visualViewport`**: the reserve is a fixed
 CSS height and the root `h-screen` (when `fillViewport`) or `h-full`, so the
 terminal region does not bounce as the OS keyboard animates (rationale).
+
+Source of truth: `withinTapSlop` in `lib/src/components/MobileTerminalUi.tsx`;
+`TERMINAL_TAP_EVENT` in `lib/src/lib/terminal-mouse-router.ts`. Pinned by
+`lib/src/components/mobile-acknowledge.test.tsx`.
 
 ## Touch mode selector
 

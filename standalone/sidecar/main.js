@@ -22,17 +22,15 @@ const { gitInfo } = require('./git-info.cjs');
 const { createAgentBrowserHost } = require('./agent-browser-host.cjs');
 // Same pattern again: lib/src/host/remote/sidecar-entry.ts is the Burrow —
 // the relay socket, the enrollment, the ACL, and remote-api v1 — running next to
-// the PTYs it serves. See docs/specs/remote-api.md.
-const { createSidecarBurrow } = require('./burrow.cjs');
+// the PTYs it serves (docs/specs/remote-api.md), and the app's one
+// AlertManager, which its parse feeds, in the host role VS Code's extension
+// host runs too (docs/specs/standalone.md -> "Alerts"). It handles every PTY
+// command the alerts must see.
+const { createSidecarHost } = require('./burrow.cjs');
 // Same pattern again: lib/src/host/recovery.ts is the agent-recovery capture
 // machine (shared with the VS Code extension host) plus the single-use record
 // store. See docs/specs/standalone.md -> "Agent recovery".
 const { captureAgentRecovery, createRecoveryStore, sliceSince } = require('./recovery.cjs');
-// Same pattern again: lib/src/host/alert-store-host.ts holds the two
-// app-global alert stores — one WATCHING rule set and one alarm-settings blob
-// for every window — running the same classes the VS Code extension host runs.
-// See docs/specs/alert.md.
-const { createAlertStoreHost } = require('./alert-store.cjs');
 
 const agentBrowser = createAgentBrowserHost({
   writeClipboardText: (text) => clipboard.writeClipboardText(text),
@@ -58,17 +56,18 @@ const mgr = create((event, data) => {
   // `pty:data` the host emits, never raw. A remote sink runs only after that
   // send, and the whole tap is wrapped so a throw is logged rather than fatal.
   try {
-    burrow.onPtyEvent(event, data);
+    host.onPtyEvent(event, data);
   } catch (err) {
     console.error(`[sidecar] burrow ${event} tap failed:`, err && err.message || err);
   }
   if (event !== 'data') send(`pty:${event}`, data);
   // `sliceSince` comes from the shared bundle above rather than living in
   // pty-core, so this host and the VS Code extension host read their replay
-  // buffers through one implementation.
-}, nodePty, { replay: true, sliceSince });
+  // buffers through one implementation. Each helper decision pty-core makes
+  // reaches the alerts, which keep a helper inert (docs/specs/alert.md).
+}, nodePty, { replay: true, sliceSince, onHelper: (id, helper) => host.alerts.setHelper(id, helper) });
 
-const burrow = createSidecarBurrow({
+const host = createSidecarHost({
   send,
   stateDir: process.env.DORMOUSE_STATE_DIR,
   mgr,
@@ -87,10 +86,6 @@ const toolHost = createToolHost({ stateDir: process.env.DORMOUSE_STATE_DIR });
 const dorControlToken = process.env.DORMOUSE_CONTROL_TOKEN;
 delete process.env.DORMOUSE_CONTROL_TOKEN;
 delete process.env.DORMOUSE_CONTROL_SOCKET;
-
-// Broadcast, never addressed: both stores are one per machine, so every window
-// gets the same canonical snapshot (docs/specs/standalone.md -> "Windows").
-const alertStore = createAlertStoreHost({ send });
 
 const dorControl = createDorControlServer({
   token: dorControlToken,
@@ -146,16 +141,9 @@ rl.on('line', (line) => {
 function handleLine(line) {
   try {
     const { event, data } = JSON.parse(line);
+    // The PTY lifecycle and I/O, the alerts and the Burrow.
+    if (host.handleCommand(event, data)) return;
     switch (event) {
-      // Told before the spawn: the id may be a live PTY's, and the parser for
-      // that generation must not carry a half-read sequence into the new one.
-      case 'pty:spawn':   burrow.onPtySpawn(data.id); mgr.spawn(data.id, data.options); break;
-      case 'pty:input':   mgr.write(data.id, data.data, { paced: data.paced === true }); break;
-      case 'pty:resize':  mgr.resize(data.id, data.cols, data.rows); break;
-      case 'pty:kill':    mgr.kill(data.id); break;
-      // One window's own PTYs, and the answer names it so the host can route
-      // the list and every replay behind it back (docs/specs/standalone.md).
-      case 'pty:requestInit': mgr.list(data?.ids, data?.forWindow, data?.requestId, data?.marks); break;
       case 'pty:mark': mgr.mark(data?.ids, data?.requestId); break;
       case 'pty:context': mgr.context(data, data.requestId); break;
       case 'pty:getCwd':  mgr.getCwd(data.id, data.requestId); break;
@@ -193,20 +181,8 @@ function handleLine(line) {
         }));
         break;
       case 'pty:gracefulKill': mgr.gracefulKill(data.ids, data.timeout, data.requestId); break;
-      // The webview's resolved terminal theme, so the parser here can answer
-      // OSC 10/11/12 (docs/specs/terminal-escapes.md → Supported OSCs).
-      // Which webviews will answer a Burrow ask (docs/specs/standalone.md
-      // -> "Burrow service").
-      case 'burrow:windows': burrow.setWindows(data?.labels); break;
-      // Which windows an ask actually reached. Only the host knows: one naming
-      // a Surface goes to its owner alone (docs/specs/standalone.md ->
-      // "Burrow service").
-      case 'burrow:askDelivered': burrow.setAskDelivery(data); break;
-      case 'alert:command': alertStore.handle(data); break;
-      case 'pty:themeColors': burrow.setThemeColors(data); break;
       case 'sidecar:shutdown': shutdown(); break;
       case 'dor:controlResponse': dorControl?.respond(data); break;
-      case 'burrow:command': burrow.handleCommand(data); break;
       case 'tool:control':
         respondAsync('tool:result', data.requestId, async () => ({
           result: await toolHost.handle(data.request),
@@ -308,8 +284,7 @@ async function shutdown() {
     ]);
   } catch {}
   dorControl?.close();
-  alertStore.dispose();
-  burrow.dispose();
+  host.dispose();
   mgr.killAll();
   process.exit(0);
 }

@@ -7,50 +7,34 @@ vi.mock('./platform', () => ({
   getPlatform: () => ({ alertSetWatchedCommands, alertSetCommandWatched }),
 }));
 
-import { commandArgv0 } from './terminal-state';
 import {
   applyWatchedCommandsFromHost,
+  getRunningCommandWatchRule,
   getWatchedCommands,
-  isCommandWatched,
   publishWatchedCommands,
   setCommandWatched,
   subscribeToWatchedCommands,
 } from './watched-commands';
+import { applyTerminalSemanticEvents, removeTerminalPaneState } from './terminal-state-store';
+
+const PANE = 'watched-commands-pane';
 
 function clearRules(): void {
   for (const name of getWatchedCommands()) setCommandWatched(name, false);
 }
 
+function run(commandLine: string): void {
+  applyTerminalSemanticEvents(PANE, [
+    { type: 'commandLine', commandLine },
+    { type: 'commandStart', source: 'osc633_boundaries' },
+  ]);
+}
+
 afterEach(() => {
   clearRules();
+  removeTerminalPaneState(PANE);
   alertSetWatchedCommands.mockClear();
   alertSetCommandWatched.mockClear();
-});
-
-describe('commandArgv0', () => {
-  it.each([
-    ['claude', 'claude'],
-    ['claude --print hello', 'claude'],
-    ['/usr/local/bin/claude --resume', 'claude'],
-    ['FOO=1 claude', 'claude'],
-    ['FOO=1 env BAR=2 claude', 'claude'],
-    ['"/opt/my tools/claude" --print', 'claude'],
-    // Only the first simple command counts — this matches what bash's DEBUG
-    // trap reports for a pipeline (docs/specs/terminal-escapes.md).
-    ['foo | claude', 'foo'],
-    ['pnpm test && claude', 'pnpm'],
-  ])('reduces %j to %j', (raw, expected) => {
-    expect(commandArgv0(raw)).toBe(expected);
-  });
-
-  it.each(['', '   ', '|', 'FOO=1'])('returns null for %j', (raw) => {
-    expect(commandArgv0(raw)).toBeNull();
-  });
-
-  it('reduces a native Windows path to the bare name a rule is stored under', () => {
-    // The tokenizer's dialect handling is pinned in `terminal-state.test.ts`.
-    expect(commandArgv0('C:\\Users\\me\\.claude\\local\\claude')).toBe('claude');
-  });
 });
 
 describe('watched-commands store', () => {
@@ -66,7 +50,7 @@ describe('watched-commands store', () => {
     ]);
     expect(getWatchedCommands()).toEqual(['claude', 'foo:bar']);
     // Same gate on the write path — a drive-relative invocation is the one
-    // shape `commandArgv0` can still return with a `:` in it.
+    // shape a program name can still arrive in with a `:` in it.
     setCommandWatched('C:foo.exe', true);
     expect(getWatchedCommands()).toEqual(['claude', 'foo:bar']);
     // A launcher suffix is the other tell: a relative invocation had no
@@ -83,17 +67,35 @@ describe('watched-commands store', () => {
     expect(getWatchedCommands()).toEqual(['claude', 'foo:bar']);
   });
 
-  it('adds, reports, and removes rules', () => {
-    expect(getWatchedCommands()).toEqual([]);
-    expect(isCommandWatched('claude')).toBe(false);
+  it('keeps a runner and script key and drops a malformed one', () => {
+    applyWatchedCommandsFromHost([
+      'pnpm dev',
+      'npm test:unit',
+      'pnpm',
+      'pnpm  dev',
+      'npm run dev extra',
+      'npm.cmd test',
+      'make build/app.o',
+      ' pnpm',
+    ]);
+    expect(getWatchedCommands()).toEqual(['npm test:unit', 'pnpm', 'pnpm dev']);
+    setCommandWatched('npm.cmd dev', true);
+    setCommandWatched('cargo build', true);
+    expect(getWatchedCommands()).toEqual(['cargo build', 'npm test:unit', 'pnpm', 'pnpm dev']);
+  });
 
-    setCommandWatched('claude', true);
-    expect(getWatchedCommands()).toEqual(['claude']);
-    expect(isCommandWatched('claude')).toBe(true);
-
-    setCommandWatched('claude', false);
+  it('adds, reports, and removes the rule covering a running command', () => {
+    run('cd web && pnpm dev');
     expect(getWatchedCommands()).toEqual([]);
-    expect(isCommandWatched('claude')).toBe(false);
+    expect(getRunningCommandWatchRule(PANE)).toBeNull();
+
+    setCommandWatched('pnpm', true);
+    expect(getWatchedCommands()).toEqual(['pnpm']);
+    expect(getRunningCommandWatchRule(PANE)).toBe('pnpm');
+
+    setCommandWatched('pnpm', false);
+    expect(getWatchedCommands()).toEqual([]);
+    expect(getRunningCommandWatchRule(PANE)).toBeNull();
   });
 
   it('keeps the rule set sorted and free of duplicates and blanks', () => {
@@ -105,11 +107,12 @@ describe('watched-commands store', () => {
     expect(getWatchedCommands()).toEqual(['claude', 'pnpm']);
   });
 
-  it('treats a null or empty name as unwatched', () => {
+  it('names no rule for a Session at a prompt or never seen', () => {
     setCommandWatched('claude', true);
-    expect(isCommandWatched(null)).toBe(false);
-    expect(isCommandWatched(undefined)).toBe(false);
-    expect(isCommandWatched('')).toBe(false);
+    expect(getRunningCommandWatchRule('no-such-pane')).toBeNull();
+    run('claude');
+    applyTerminalSemanticEvents(PANE, [{ type: 'commandFinish', exitCode: 0 }]);
+    expect(getRunningCommandWatchRule(PANE)).toBeNull();
   });
 
   it('sends mutations as deltas and offers the full rule set only as a startup seed', () => {
@@ -132,9 +135,11 @@ describe('watched-commands store', () => {
     setCommandWatched('npm', true);
     listener.mockClear();
 
+    run('claude');
     applyWatchedCommandsFromHost(['claude', 'npm', 'claude']);
 
     expect(getWatchedCommands()).toEqual(['claude', 'npm']);
+    expect(getRunningCommandWatchRule(PANE)).toBe('claude');
     expect(listener).toHaveBeenCalledTimes(1);
     expect(alertSetCommandWatched).toHaveBeenCalledTimes(1);
   });

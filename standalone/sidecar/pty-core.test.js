@@ -47,9 +47,9 @@ test('resolveSpawnConfig uses POSIX shell and home defaults', () => {
   assert.equal(config.cols, 80);
   assert.equal(config.rows, 30);
   assert.equal(config.env.TERM_PROGRAM, 'iTerm.app');
-  assert.equal(config.env.TERM_PROGRAM_VERSION, '3.5.0');
+  assert.equal(config.env.TERM_PROGRAM_VERSION, '3.6.6');
   assert.equal(config.env.LC_TERMINAL, 'iTerm2');
-  assert.equal(config.env.LC_TERMINAL_VERSION, '3.5.0');
+  assert.equal(config.env.LC_TERMINAL_VERSION, '3.6.6');
   assert.equal(config.env.COLORTERM, 'truecolor');
   assert.deepEqual(config.shellArgs, ['-l']);
 });
@@ -151,6 +151,93 @@ test('resolveSpawnConfig keeps ORIGINAL_PATH on non-win32', () => {
   assert.equal(config.env.ORIGINAL_PATH, '/whatever');
 });
 
+// Inherited from whatever terminal launched the host. Each changes what tools
+// emit into the pane: vte.sh's per-command OSC 777, cargo's OSC 9;4, a tmux or
+// screen passthrough meant for a multiplexer that is not there.
+const FOREIGN_TERMINAL_IDENTITY = {
+  VTE_VERSION: '7803',
+  WT_SESSION: '8e3f0c1e-0000-0000-0000-000000000000',
+  WT_PROFILE_ID: '{61c54bbd-c2c6-5271-96e7-009a87ff44bf}',
+  TERM_FEATURES: 'T3LrMSc7UUw9Ts3BFGsSyHNoSxFP',
+  TERM_SESSION_ID: 'w0t0p0:1234',
+  ITERM_SESSION_ID: 'w0t0p0:1234',
+  ITERM_PROFILE: 'Default',
+  ConEmuANSI: 'ON',
+  ConEmuPID: '4242',
+  KONSOLE_VERSION: '240802',
+  KONSOLE_DBUS_SERVICE: ':1.42',
+  KONSOLE_DBUS_SESSION: '/Sessions/1',
+  KONSOLE_DBUS_WINDOW: '/Windows/1',
+  PTYXIS_VERSION: '47.0',
+  KITTY_WINDOW_ID: '1',
+  KITTY_PID: '4242',
+  KITTY_PUBLIC_KEY: '1:abc',
+  KITTY_INSTALLATION_DIR: '/Applications/kitty.app/Contents/Resources/kitty',
+  GHOSTTY_RESOURCES_DIR: '/Applications/Ghostty.app/Contents/Resources/ghostty',
+  GHOSTTY_BIN_DIR: '/Applications/Ghostty.app/Contents/MacOS',
+  GHOSTTY_SHELL_FEATURES: 'cursor,title',
+  WEZTERM_PANE: '0',
+  WEZTERM_UNIX_SOCKET: '/tmp/wezterm.sock',
+  ALACRITTY_WINDOW_ID: '1',
+  ALACRITTY_SOCKET: '/tmp/alacritty.sock',
+  ALACRITTY_LOG: '/tmp/alacritty.log',
+  TERMINAL_EMULATOR: 'JetBrains-JediTerm',
+  TERMINATOR_UUID: 'urn:uuid:1',
+  TILIX_ID: '1',
+  TMUX: '/private/tmp/tmux-501/default,4242,0',
+  TMUX_PANE: '%3',
+  STY: '4242.pts-0.host',
+  COLORFGBG: '15;0',
+  CURSOR_TRACE_ID: 'abc123',
+};
+
+test('resolveSpawnConfig strips another terminal\'s inherited identity', () => {
+  const config = resolveSpawnConfig(
+    { surfaceId: 'pane-1' },
+    {
+      platform: 'darwin',
+      env: {
+        ...FOREIGN_TERMINAL_IDENTITY,
+        PATH: '/usr/bin',
+        HOME: '/Users/tester',
+        VSCODE_PID: '4242',
+        TERMINAL: 'kitty',
+        MY_TMUX_SETTING: 'kept',
+      },
+      osModule: { homedir: () => '/Users/tester', tmpdir: () => '/tmp' },
+    },
+  );
+
+  for (const key of Object.keys(FOREIGN_TERMINAL_IDENTITY)) assert.equal(config.env[key], undefined, key);
+  // Dormouse's own identity still goes on after the strip.
+  assert.equal(config.env.TERM_PROGRAM, 'iTerm.app');
+  assert.equal(config.env.LC_TERMINAL, 'iTerm2');
+  assert.equal(config.env.DORMOUSE_SURFACE_ID, 'pane-1');
+  // Unrelated variables, including one that merely contains a stripped name.
+  assert.equal(config.env.VSCODE_PID, '4242');
+  assert.equal(config.env.TERMINAL, 'kitty');
+  assert.equal(config.env.MY_TMUX_SETTING, 'kept');
+  assert.equal(config.env.PATH, '/usr/bin');
+});
+
+test('resolveSpawnConfig strips foreign terminal identity case-insensitively on win32', () => {
+  const env = {
+    Path: 'C:\\Windows\\System32',
+    Wt_Session: 'abc',
+    CONEMUANSI: 'ON',
+    tmux: '/tmp/tmux',
+    ComSpec: 'C:\\Windows\\System32\\cmd.exe',
+  };
+  const osModule = { homedir: () => 'C:\\Users\\tester', tmpdir: () => 'C:\\Temp' };
+  const win32 = resolveSpawnConfig({ surfaceId: 'pane-1' }, { platform: 'win32', env, osModule });
+  for (const key of ['Wt_Session', 'CONEMUANSI', 'tmux']) assert.equal(win32.env[key], undefined, key);
+  assert.equal(win32.env.ComSpec, 'C:\\Windows\\System32\\cmd.exe');
+
+  // POSIX names are case-sensitive: a lowercase `tmux` is some other variable.
+  const linux = resolveSpawnConfig({ surfaceId: 'pane-1' }, { platform: 'linux', env, osModule });
+  assert.equal(linux.env.tmux, '/tmp/tmux');
+});
+
 test('resolveSpawnConfig drops the GUI node directory from a pane PATH on win32', () => {
   // `cargo run` puts the dev app's target dir on PATH, and the node.exe there
   // is patched to the GUI subsystem, so it never attaches to the pane's
@@ -233,9 +320,9 @@ test('resolveSpawnConfig uses Windows shell and profile defaults', () => {
   assert.equal(config.cwd, 'C:\\Users\\tester');
   assert.equal(config.cwdWarning, null);
   assert.equal(config.env.TERM_PROGRAM, 'iTerm.app');
-  assert.equal(config.env.TERM_PROGRAM_VERSION, '3.5.0');
+  assert.equal(config.env.TERM_PROGRAM_VERSION, '3.6.6');
   assert.equal(config.env.LC_TERMINAL, 'iTerm2');
-  assert.equal(config.env.LC_TERMINAL_VERSION, '3.5.0');
+  assert.equal(config.env.LC_TERMINAL_VERSION, '3.6.6');
   assert.equal(config.env.COLORTERM, 'truecolor');
   assert.deepEqual(config.shellArgs, []);
 });

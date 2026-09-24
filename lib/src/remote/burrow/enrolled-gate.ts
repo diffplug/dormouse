@@ -4,9 +4,8 @@
  * Answering the Burrow is free — a webview replies to an ask and goes back to
  * sleep — but *volunteering* is not: announcing that the directory may have
  * changed costs a crossing into the Burrow's process on every pane-state change,
- * every activity change, and every focus move, and watching for unattended
- * rings costs a subscription to the activity store, forever, on a machine whose
- * owner may never enroll a Burrow at all.
+ * every activity change, and every focus move, on a machine whose owner may
+ * never enroll a Burrow at all.
  *
  * So the outbound half is gated on the service's own answer: it announces
  * `{ name: 'status', enrolled }` whenever its lifecycle changes that

@@ -16,7 +16,6 @@ const registry = vi.hoisted(() => ({
   getOrCreateTerminal: vi.fn(),
   terminalPaneStateSnapshot: new Map(),
   getTerminalPaneStateSnapshot: vi.fn(),
-  markSessionAttention: vi.fn(),
   setTerminalUserTitle: vi.fn(),
   subscribeToActivity: vi.fn(() => () => {}),
   subscribeToTerminalPaneState: vi.fn(() => () => {}),
@@ -72,10 +71,6 @@ function headerInset(): string | null {
     ?.getAttribute('data-alert-ring-inset') ?? null;
 }
 
-function terminalPane(): HTMLElement {
-  return container.querySelector<HTMLElement>('[data-testid="terminal-pane"]')!.parentElement!;
-}
-
 describe('MobileWall', () => {
   it('shows the Kill control by default', () => {
     renderWall();
@@ -106,17 +101,5 @@ describe('MobileWall', () => {
     } finally {
       registry.activitySnapshot.clear();
     }
-  });
-
-  /** Mobile has no terminal context and no right-click, so attention is the
-   *  whole dismissal (`docs/specs/alert.md` -> Pane Header). */
-  it('attends the Session when the terminal is touched', () => {
-    renderWall();
-
-    act(() => {
-      terminalPane().dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
-    });
-
-    expect(registry.markSessionAttention).toHaveBeenCalledWith('pane-a');
   });
 });

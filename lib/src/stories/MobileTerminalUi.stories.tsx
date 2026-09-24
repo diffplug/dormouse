@@ -32,6 +32,7 @@ import {
   type MobileGesturePoint,
   type MobileGestureTrackingState,
 } from '../lib/mobile-gesture-menu';
+import { writeUserInput } from '../lib/terminal-registry';
 import { settleTerminals } from './settle-terminals';
 
 const meta: Meta<typeof MobileTerminalUi> = {
@@ -169,7 +170,7 @@ function PocketWallFrame(args: MobileTerminalUiProps) {
         onSessionSelect={setActivePaneId}
         onSendInput={(data) => {
           args.onSendInput?.(data);
-          adapterRef.current?.writePty(activePaneId, data);
+          writeUserInput(activePaneId, data);
         }}
         onPaste={() => {
           void args.onPaste?.();

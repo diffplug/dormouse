@@ -157,81 +157,39 @@ describe('VSCodeAdapter PTY exit handling', () => {
     });
   });
 
-  it('sends watched-command initialization and mutations as distinct messages', () => {
+  // The shared client's own suite covers what each verb sends; this is the
+  // transport: one `alert:command` message out, the host's events back in.
+  it('carries every alert verb as one alert:command and hands the host\'s events to the client', async () => {
     const adapter = new VSCodeAdapter();
-
-    adapter.alertSetWatchedCommands(['claude']);
-    adapter.alertSetCommandWatched('npm', true);
-
-    expect(postMessage).toHaveBeenCalledWith({
-      type: 'alert:initializeWatchedCommands',
-      names: ['claude'],
-    });
-    expect(postMessage).toHaveBeenCalledWith({
-      type: 'alert:setCommandWatched',
-      name: 'npm',
-      watched: true,
-    });
-  });
-
-  // The AlertManager lives in the extension host, so `dor await` parks there
-  // and only the outcome crosses back (docs/specs/alert.md → Await).
-  it('parks an await in the extension host and settles it from the result message', async () => {
-    const adapter = new VSCodeAdapter();
+    const states: unknown[] = [];
+    adapter.onAlertState((detail) => void states.push(detail));
 
     const handle = adapter.alertAwait('pane-1', { until: 'quiet', timeoutMs: 600_000 });
-    const [request] = postMessage.mock.calls[0] as [{ type: string; requestId: string }];
-    expect(request).toMatchObject({
-      type: 'alert:await',
-      id: 'pane-1',
-      until: 'quiet',
-      timeoutMs: 600_000,
-    });
+    const [request] = postMessage.mock.calls[0] as [{ type: string; command: { op: string; awaitId: string } }];
+    expect(request).toMatchObject({ type: 'alert:command', command: { op: 'await', id: 'pane-1', until: 'quiet' } });
 
     windowTarget.dispatchEvent(hostMessage({
       type: 'alert:awaitResult',
-      requestId: request.requestId,
+      awaitId: request.command.awaitId,
       outcome: { kind: 'resolved', cause: 'quiet', waitedMs: 12_345 },
     }));
-
     expect(await handle.promise).toEqual({ kind: 'resolved', cause: 'quiet', waitedMs: 12_345 });
-  });
 
-  it('asks the host to cancel and still takes the outcome from the result message', async () => {
-    const adapter = new VSCodeAdapter();
-
-    const handle = adapter.alertAwait('pane-1', { until: 'exit', timeoutMs: 1_000 });
-    const [request] = postMessage.mock.calls[0] as [{ requestId: string }];
-    handle.cancel();
-
-    expect(postMessage).toHaveBeenCalledWith({ type: 'alert:awaitCancel', requestId: request.requestId });
-
-    // The host answers the cancel through the same channel, so a claim is never
-    // released locally and then again remotely.
-    windowTarget.dispatchEvent(hostMessage({
-      type: 'alert:awaitResult',
-      requestId: request.requestId,
-      outcome: { kind: 'cancelled', waitedMs: 40 },
-    }));
-    expect(await handle.promise).toEqual({ kind: 'cancelled', waitedMs: 40 });
-  });
-
-  it('forwards the host canonical watched-command snapshot', () => {
-    const adapter = new VSCodeAdapter();
-    const snapshots: string[][] = [];
-    adapter.onWatchedCommands((names) => snapshots.push(names));
-
-    windowTarget.dispatchEvent(hostMessage({ type: 'alert:watchedCommands', names: ['claude', 'npm'] }));
-
-    expect(snapshots).toEqual([['claude', 'npm']]);
+    // Handed over without the envelope: neither the type nor the host token.
+    windowTarget.dispatchEvent(hostMessage({ type: 'alert:state', id: 'pane-1', status: 'ALERT_RINGING', todo: true }));
+    expect(states).toEqual([{ id: 'pane-1', status: 'ALERT_RINGING', todo: true }]);
   });
 
   it('receives dirty state/reset messages and retains ordered replay reports through the semantic batch', () => {
     new VSCodeAdapter();
     const id = 'dirty-vscode';
-    windowTarget.dispatchEvent(hostMessage({ type: 'terminal:toolState', id, dirty: true }));
+    windowTarget.dispatchEvent(hostMessage({ type: 'terminal:toolEvents', id, events: [
+      { kind: 'toolState', state: { dirty: true } },
+    ] }));
     expect(getToolDirty(id)).toBe(true);
-    windowTarget.dispatchEvent(hostMessage({ type: 'terminal:toolState', id, dirty: null }));
+    windowTarget.dispatchEvent(hostMessage({ type: 'terminal:toolEvents', id, events: [
+      { kind: 'semantic', event: { type: 'commandStart', source: 'osc633_boundaries' } },
+    ] }));
     expect(getToolDirty(id)).toBeNull();
     const before = postMessage.mock.calls.length;
     windowTarget.dispatchEvent(hostMessage({ type: 'pty:replay', id, data: '\x1b]633;C\x07\x1b]367;state;{"v":1,"dirty":false}\x07\x1b]633;D;0\x07' }));
@@ -246,9 +204,17 @@ describe('VSCodeAdapter PTY exit handling', () => {
   it('receives owner-parsed Tool announcements and reconstructs them on replay', () => {
     resetToolAnnounces();
     const adapter = new VSCodeAdapter();
-    windowTarget.dispatchEvent(hostMessage({ type: 'terminal:toolAnnounce', id: 'tool-1', announce: { port: 6006, name: null, key: null, dehydrate: false, persist: null } }));
+    // In stream order: a start retires the run before it, and a report later
+    // in the same batch belongs to the new run.
+    windowTarget.dispatchEvent(hostMessage({ type: 'terminal:toolEvents', id: 'tool-1', events: [
+      { kind: 'toolAnnounce', announce: { port: 6005, name: null, key: null, dehydrate: false, persist: null } },
+      { kind: 'semantic', event: { type: 'commandStart', source: 'osc633_boundaries' } },
+      { kind: 'toolAnnounce', announce: { port: 6006, name: null, key: null, dehydrate: false, persist: null } },
+    ] }));
     expect(getToolAnnounce('tool-1')?.port).toBe(6006);
-    windowTarget.dispatchEvent(hostMessage({ type: 'terminal:toolAnnounce', id: 'tool-1', announce: null }));
+    windowTarget.dispatchEvent(hostMessage({ type: 'terminal:toolEvents', id: 'tool-1', events: [
+      { kind: 'semantic', event: { type: 'commandStart', source: 'osc633_boundaries' } },
+    ] }));
     expect(getToolAnnounce('tool-1')).toBeNull();
     const repliesBeforeReplay = postMessage.mock.calls.length;
     windowTarget.dispatchEvent(hostMessage({ type: 'pty:replay', id: 'tool-1', data: '\x1b]367;serve;{"port":6007}\x1b\\' }));

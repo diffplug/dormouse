@@ -1040,6 +1040,10 @@ describe('setup QR', () => {
   });
 });
 
+/**
+ * One due alarm push, from the alert host in the service's own process
+ * (`docs/specs/alert.md` -> Push notifications). No webview can ask for one.
+ */
 describe('push', () => {
   const rawSendBody = (): string | null =>
     (requests.filter((r) => r.url.endsWith('/api/push/send')).at(-1)?.init?.body as string) ?? null;
@@ -1050,14 +1054,14 @@ describe('push', () => {
       : [];
   };
 
-  it('addresses the Burrow’s own ACL, not anything the webview sent', async () => {
+  it('addresses the Burrow’s own ACL', async () => {
     createService({
       enrollment: ENROLLMENT,
       acl: { [BURROW_ID]: [aclRecord('device-1'), aclRecord('device-2', 'iPad')] },
     });
     await service.start();
 
-    await command('push', { sessionId: 'pty-1', title: 'pnpm dev' });
+    await service.push('pty-1', 'pnpm dev');
 
     // One sealed envelope per active record, in ACL order.
     expect(sendRecipients().map((r) => r.deliveryId)).toEqual([
@@ -1066,28 +1070,27 @@ describe('push', () => {
     ]);
   });
 
-  it('seals what the webview named rather than posting it', async () => {
+  it('seals the title rather than posting it', async () => {
     // The Relay forwards this body and can read none of it
     // (docs/specs/remote-security-model.md -> Push sealing). That the label is
-    // bounded *before* it is sealed is `lib/src/remote/burrow/alert-push.test.ts`,
+    // bounded *before* it is sealed is `lib/src/remote/burrow/push-delivery.test.ts`,
     // which holds the key to open one.
     createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [aclRecord('device-1')] } });
     await service.start();
 
-    await command('push', { sessionId: 'pty-1', title: 'build\u0000finished\u001b' });
+    await service.push('pty-1', 'build\u0000finished\u001b');
     const body = rawSendBody()!;
     expect(body).not.toContain('finished');
     expect(body).not.toContain('pty-1');
   });
 
-  it('is a silent no-op with no Burrow running', async () => {
+  it('sends nothing with no Burrow running', async () => {
     createService();
-    const result = await command('push', { sessionId: 'pty-1', title: 'x' });
-    expect(result.error).toBeUndefined();
+    await service.push('pty-1', 'x');
     expect(requests).toEqual([]);
   });
 
-  it('warns rather than failing the command when the Relay rejects it', async () => {
+  it('warns rather than rejecting when the Relay refuses the send', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     store = memoryStore({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [aclRecord('device-1')] } });
     service = new BurrowService({
@@ -1101,9 +1104,17 @@ describe('push', () => {
     });
     await service.start();
 
-    expect((await command('push', { sessionId: 'pty-1', title: 'x' })).error).toBeUndefined();
+    await expect(service.push('pty-1', 'x')).resolves.toBeUndefined();
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
+  });
+
+  it('is no command a webview can send', async () => {
+    createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [aclRecord('device-1')] } });
+    await service.start();
+
+    expect((await command('push', { sessionId: 'pty-1', title: 'x' })).error).toBe('unknown burrow command: push');
+    expect(rawSendBody()).toBeNull();
   });
 });
 

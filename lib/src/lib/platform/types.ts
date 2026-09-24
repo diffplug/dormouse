@@ -1,7 +1,7 @@
-import type { AlertRuntimeSnapshot } from '../alert-manager';
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
-import type { AlertState, AwaitHandle, AwaitOptions } from '../alert-manager';
+import type { AlertState, AwaitHandle, AwaitOptions, Engagement, EngagementLapse } from '../alert-manager';
 import type { AlertSettings } from '../alert-settings';
+import type { AlertSessionInfo, AlertSpeak } from '../../host/alert-protocol';
 import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
 import type { ShellEntry } from '../shell-defaults';
 // Defined in its own dependency-free file so the Node proxy in lib/src/host can
@@ -226,9 +226,22 @@ export interface SessionFlushRequest {
   probeCwd?: boolean;
 }
 
+export interface SpawnPtyOptions {
+  cols?: number;
+  rows?: number;
+  cwd?: string;
+  shell?: string;
+  args?: string[];
+  helper?: HelperIdentity;
+  alert?: PersistedAlertState;
+}
+
 export interface WritePtyOptions {
   /** Deliver at typing pace (`docs/specs/transport.md` → "Paced input"). */
   paced?: boolean;
+  /** A human typed, pasted, or dropped this: the host acknowledges it with
+   *  input before writing (`docs/specs/alert.md` -> Engagement). */
+  userInput?: true;
 }
 
 export interface PlatformAdapter {
@@ -250,7 +263,12 @@ export interface PlatformAdapter {
   terminalContext?(request: TerminalContextRequest): Promise<TerminalContextInfo>;
 
   // PTY operations
-  spawnPty(id: string, options?: { cols?: number; rows?: number; cwd?: string; shell?: string; args?: string[]; helper?: HelperIdentity }): void;
+  /**
+   * `alert` is a cold-restored pane's persisted TODO: the host starts the id's
+   * alert state over at every spawn, then seeds it from this
+   * (`docs/specs/alert.md` -> "Persist only").
+   */
+  spawnPty(id: string, options?: SpawnPtyOptions): void;
   writePty(id: string, data: string, options?: WritePtyOptions): void;
   resizePty(id: string, cols: number, rows: number): void;
   killPty(id: string): void;
@@ -301,22 +319,6 @@ export interface PlatformAdapter {
    */
   requestAppRestart?(requester?: string): Promise<boolean>;
 
-  /** Explicit live Workspace handoff, never a persistence reader. */
-  alertPauseForTransfer?(id: string): AlertRuntimeSnapshot | null;
-  /** `replayRequestId` names the one since-mark `pty:replay` whose notification
-   *  events and visible output count as live; every other replay stays silent. */
-  alertResumeFromTransfer?(id: string, snapshot: AlertRuntimeSnapshot, replayRequestId?: string): void;
-  /**
-   * Seed a cold-restored Surface's persisted TODO/alert into the host's
-   * `AlertManager`, so the freshly spawned PTY inherits the state its saved pane
-   * carried (`docs/specs/alert.md` -> "Persist only").
-   *
-   * Present only where the adapter owns the manager: standalone runs it in the
-   * webview, so the restore path is the only thing that can seed it. VS Code
-   * omits it — its extension host seeds its own manager while answering the
-   * webview's boot (`vscode-ext/src/message-router.ts`).
-   */
-  alertSeed?(id: string, state: PersistedAlertState): void;
 
   // PTY queries
   getCwd(id: string): Promise<string | null>;
@@ -458,8 +460,8 @@ export interface PlatformAdapter {
   offRequestSessionFlush(handler: (detail: SessionFlushRequest) => void): void;
   notifySessionFlushComplete(requestId: string): void;
 
-  // Alert management
-  alertRemove(id: string): void;
+  // Alert management: a Session's alert state follows its PTY — `writePty`'s
+  // `userInput` acknowledges, a resize opens its grace window, a kill removes it.
   /** Offer persisted WATCHING rules as the host's startup seed. */
   alertSetWatchedCommands(names: string[]): void;
   /** Mutate one bare-command WATCHING rule without replacing unrelated rules. */
@@ -471,11 +473,21 @@ export interface PlatformAdapter {
    */
   alertPublishSettings(settings: AlertSettings, opts: { seed: boolean }): void;
   alertDismiss(id: string): void;
-  alertAttend(id: string): void;
-  alertResize(id: string): void;
-  alertClearAttention(id?: string): void;
+  /**
+   * This renderer realm's presence and focus (`docs/specs/alert.md` ->
+   * Engagement), sent only when it changes; `lapse` says why presence ended.
+   */
+  alertEngagement(state: Engagement, lapse?: EngagementLapse): void;
+  /**
+   * Every Session this realm shows, with its Pane label and its Workspace's
+   * sparse delivery overrides, for the host's delivery scheduler
+   * (`docs/specs/alert.md` -> Alarm settings). Replaces what this realm
+   * published before.
+   */
+  alertPublishSessions(sessions: Record<string, AlertSessionInfo>): void;
+  /** A human gesture reached the Session without input; input rides `writePty`'s `userInput`. */
+  alertAcknowledge(id: string): void;
   alertToggleTodo(id: string): void;
-  alertMarkTodo(id: string): void;
   alertClearTodo(id: string): void;
   /**
    * Park until the Session finishes what it is doing (`docs/specs/alert.md` ->
@@ -495,6 +507,8 @@ export interface PlatformAdapter {
   onWatchedCommands(handler: (names: string[]) => void): void;
   /** Receive the host's canonical alarm settings. */
   onAlertSettings(handler: (settings: AlertSettings) => void): void;
+  /** Receive each spoken alarm the host scheduled, to speak. */
+  onAlertSpeak(handler: (speak: AlertSpeak) => void): () => void;
 
   // State persistence
   saveState(state: unknown): void;

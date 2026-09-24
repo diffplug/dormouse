@@ -176,12 +176,6 @@ export interface DenyParams {
   pairingId: string;
 }
 
-/** The webview names the Session and what to call it; recipients are never its call. */
-export interface PushParams {
-  sessionId: string;
-  title: string;
-}
-
 /** Answers an outstanding {@link BurrowAsk}; `burrowRequestId` is the ask's, not a new one. */
 export interface AnswerParams {
   burrowRequestId: string;

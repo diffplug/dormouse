@@ -1,41 +1,26 @@
 /**
  * The webview's end of the Burrow service (`lib/src/host/remote/service.ts`): it
- * forwards console commands, mirrors the pairing queue, and reports rings. It
- * starts no `BurrowRuntime` of its own and holds no Burrow state — there is no
- * webview-resident mode left to fall back to, so a host with no service behind
- * it gets nothing at all.
+ * forwards console commands, mirrors the pairing queue, and refreshes the push
+ * device list. It starts no `BurrowRuntime` of its own and holds no Burrow state
+ * — there is no webview-resident mode left to fall back to, so a host with no
+ * service behind it gets nothing at all.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BurrowLink } from '../../lib/platform/types';
 
-const pushWatch = vi.hoisted(() => ({
-  fire: undefined as ((sessionId: string, title: string) => void) | undefined,
-  stopped: 0,
-  invalidated: 0,
-  loads: [] as Array<() => Promise<unknown>>,
+/** The dialog's device store, as this module drives it. */
+const devices = vi.hoisted(() => ({
+  /** Every refresher installed, latest last. */
+  refreshers: [] as Array<() => void>,
+  /** Every `clearPushDevices()`: the disarm's one call. */
+  cleared: 0,
 }));
-vi.mock('./alert-push', () => ({
-  watchPushRings: (fire: (sessionId: string, title: string) => void) => {
-    pushWatch.fire = fire;
-    return () => {
-      pushWatch.fire = undefined;
-      pushWatch.stopped += 1;
-    };
-  },
-  commitPushDevices: async (load: () => Promise<unknown>) => {
-    pushWatch.loads.push(load);
-    await load();
-  },
-  invalidatePushDeviceRefreshes: () => {
-    pushWatch.invalidated += 1;
-  },
-}));
-const pushRefreshers = vi.hoisted(() => ({ current: [] as Array<() => void>, cleared: 0 }));
 vi.mock('../../lib/push-devices', () => ({
-  setPushDevicesRefresher: (refresh: () => void) => void pushRefreshers.current.push(refresh),
+  commitPushDevices: async (load: () => Promise<unknown>) => void (await load()),
+  setPushDevicesRefresher: (refresh: () => void) => void devices.refreshers.push(refresh),
   clearPushDevices: () => {
-    pushRefreshers.cleared += 1;
+    devices.cleared += 1;
   },
 }));
 
@@ -48,12 +33,8 @@ vi.mock('../../lib/platform', () => ({
 
 beforeEach(() => {
   burrowLink = undefined;
-  pushWatch.fire = undefined;
-  pushWatch.stopped = 0;
-  pushWatch.invalidated = 0;
-  pushWatch.loads.length = 0;
-  pushRefreshers.current.length = 0;
-  pushRefreshers.cleared = 0;
+  devices.refreshers.length = 0;
+  devices.cleared = 0;
   // The console hook lives on globalThis and outlives `vi.resetModules()`;
   // leaving it set would make the next test call the previous module's closure.
   delete (globalThis as { dormouseBurrow?: unknown }).dormouseBurrow;
@@ -107,7 +88,7 @@ async function installBridge(link: FakeLink) {
   const mod = await import('./activation');
   const pairing = await import('./pairing-approval');
   mod.installBurrowConsoleHook();
-  // The `status` seed gates the ring watch and the queue seed behind it.
+  // The `status` seed gates the device fetch and the queue seed behind it.
   await settle();
   return { mod, pairing };
 }
@@ -311,17 +292,6 @@ describe('burrow bridge mode', () => {
     expect(link.commands.filter((c) => c.cmd === 'pairingQueue')).toHaveLength(1);
   });
 
-  it('reports rings with the label the webview derived', async () => {
-    const link = fakeLink();
-    await installBridge(link);
-
-    pushWatch.fire!('pty-1', 'pnpm dev');
-    expect(link.commands.at(-1)).toEqual({
-      cmd: 'push',
-      params: { sessionId: 'pty-1', title: 'pnpm dev' },
-    });
-  });
-
   it('asks the service for the device list the dialog names', async () => {
     const link = fakeLink();
     await installBridge(link);
@@ -329,19 +299,19 @@ describe('burrow bridge mode', () => {
     expect(link.commands.some((c) => c.cmd === 'pushDevices')).toBe(true);
     // And the dialog can ask again later.
     link.commands.length = 0;
-    pushRefreshers.current.at(-1)!();
+    devices.refreshers.at(-1)!();
     await Promise.resolve();
     expect(link.commands.map((c) => c.cmd)).toEqual(['pushDevices']);
   });
 
   it('arms nothing at all on a burrow that never enrolled', async () => {
-    // The common case: no ring watch, no device fetch, and no crossing per
+    // The common case: no device fetch, no queue seed, and no crossing per
     // activity change — only the one `status` that says so.
     const link = fakeLink();
     link.results.status = { enrolled: false };
     await installBridge(link);
 
-    expect(pushWatch.fire).toBeUndefined();
+    expect(link.commands.some((c) => c.cmd === 'pairingQueue')).toBe(false);
     expect(link.commands.some((c) => c.cmd === 'pushDevices')).toBe(false);
     expect(link.commands.some((c) => c.cmd === 'status')).toBe(true);
   });
@@ -354,23 +324,19 @@ describe('burrow bridge mode', () => {
     // An enroll from any webview reaches every webview as this event.
     link.emit('status', { name: 'status', enrolled: true });
     await settle();
-    expect(pushWatch.fire).toBeDefined();
     expect(link.commands.some((c) => c.cmd === 'pushDevices')).toBe(true);
 
     // `clearEnrollment` announces the same way.
     link.emit('status', { name: 'status', enrolled: false });
-    expect(pushWatch.fire).toBeUndefined();
-    expect(pushWatch.stopped).toBe(1);
     // The dialog must stop naming devices nothing can push to — including any
     // list still on the wire, which would otherwise put them back on arrival.
-    expect(pushWatch.invalidated).toBe(1);
-    expect(pushRefreshers.cleared).toBe(1);
+    expect(devices.cleared).toBe(1);
     // The refresher stays installed rather than being dropped and put back: the
     // dialog may still open on an un-enrolled machine, where asking is one
     // command that answers `no-burrow`.
-    expect(pushRefreshers.current).toHaveLength(1);
+    expect(devices.refreshers).toHaveLength(1);
     link.commands.length = 0;
-    pushRefreshers.current.at(-1)!();
+    devices.refreshers.at(-1)!();
     await settle();
     expect(link.commands.map((c) => c.cmd)).toEqual(['pushDevices']);
   });

@@ -22,6 +22,7 @@ async function fixture(t) {
     const { createInterface } = require('node:readline');
     createInterface({ input: process.stdin }).on('line', line => {
       const { event, data } = JSON.parse(line);
+      if (event === 'alert:command' || event === 'pty:input') console.error('SIDECAR_LINE ' + line);
       if (event === 'pty:getCwd') console.log(JSON.stringify({
         event: 'pty:cwd', data: { requestId: data.requestId, cwd: process.env.VITE_DORMOUSE_BROWSER_DEV_HOST || process.cwd() }
       }));
@@ -80,6 +81,14 @@ async function fixture(t) {
 async function invoke(run, token = run.token, origin = run.app, cmd = 'pty_get_cwd', args = { id: 'test' }) {
   return fetch(`${run.bridge}/__dormouse_dev_host/invoke?t=${token}`, {
     method: 'POST', headers: { 'content-type': 'application/json', origin },
+    body: JSON.stringify({ cmd, args }),
+    signal: AbortSignal.timeout(5000),
+  });
+}
+
+async function send(run, cmd, args) {
+  return fetch(`${run.bridge}/__dormouse_dev_host/send?t=${run.token}`, {
+    method: 'POST', headers: { 'content-type': 'application/json', origin: run.app },
     body: JSON.stringify({ cmd, args }),
     signal: AbortSignal.timeout(5000),
   });
@@ -152,6 +161,22 @@ test('parallel worktrees own ports, browser identities and bridges; stopping one
   // it namespaced.
   const restarted = await a.start().ready();
   assert.equal(restarted.session, sessionForKey(one.session));
+});
+
+// The harness speaks the same sidecar protocol Rust does: one fixed window
+// label stamped on every alert command, over anything the page claimed, and a
+// write's `userInput` riding the write (docs/specs/standalone.md -> "Alerts").
+test('stamps its one window on alert commands and carries userInput on the write', { timeout: 60000 }, async t => {
+  const run = await (await fixture(t)).start().ready();
+  const line = async (pattern) => JSON.parse((await run.wait(pattern))[1]);
+  assert.equal((await send(run, 'alert_command', { payload: { op: 'hello', window: 'ws-9' } })).status, 200);
+  assert.deepEqual(await line(/SIDECAR_LINE (\{"event":"alert:command".*\})/), {
+    event: 'alert:command', data: { op: 'hello', window: 'main' },
+  });
+  assert.equal((await send(run, 'pty_write', { id: 'p1', data: 'y', userInput: true })).status, 200);
+  assert.deepEqual(await line(/SIDECAR_LINE (\{"event":"pty:input".*\})/), {
+    event: 'pty:input', data: { id: 'p1', data: 'y', userInput: true },
+  });
 });
 
 test('explicit ports and raw browser sessions are honored; occupied ports fail without adopting a peer', { timeout: 60000 }, async t => {

@@ -15,6 +15,8 @@ export interface PaneElementsState {
 
 export const ModeContext = createContext<WallMode>('command');
 export const SelectedIdContext = createContext<string | null>(null);
+/** The pane whose Surface takes the keyboard in passthrough, else null. */
+export const PassthroughPaneIdContext = createContext<string | null>(null);
 
 /** The last visible ring frame, carried between active Walls in one Window. */
 export const RingHandoffContext = createContext<RefObject<RingFrame | null> | null>(null);
@@ -45,7 +47,12 @@ export interface WallActions {
   onSplitH: (id: string | null, source?: 'keyboard' | 'mouse') => void;
   onSplitV: (id: string | null, source?: 'keyboard' | 'mouse') => void;
   onZoom: (id: string) => void;
+  /** A click on a pane's body or header: enter passthrough on it, acknowledging
+   *  its Session (`docs/specs/alert.md` -> Engagement). */
   onClickPanel: (id: string) => void;
+  /** DOM focus reached a pane with no gesture seen — a raw cross-origin frame:
+   *  enter passthrough on it, acknowledging nothing. */
+  onEnterPanel: (id: string) => void;
   /** Jump to/focus an arbitrary pane by id (visible or minimized). Used by the
    *  browser header's dev-server chip to surface the terminal serving a port. */
   onFocusPane: (id: string) => void;
@@ -78,6 +85,7 @@ export const WallActionsContext = createContext<WallActions>({
   onSplitV: () => {},
   onZoom: () => {},
   onClickPanel: () => {},
+  onEnterPanel: () => {},
   onFocusPane: () => {},
   onStartRename: () => {},
   onFinishRename: () => ({ accepted: true }),

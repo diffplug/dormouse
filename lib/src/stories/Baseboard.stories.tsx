@@ -99,7 +99,7 @@ export const OneSpeakingDoor: Story = {
   },
   parameters: {
     ...withState(oneRingingDoorItems, {
-      p1: { status: 'ALERT_RINGING', todo: true },
+      p1: { status: 'ALERT_RINGING' },
     }),
     primedAlertSpeech: { p1: 'speaking' },
   },

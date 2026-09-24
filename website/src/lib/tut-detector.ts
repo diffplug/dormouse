@@ -11,7 +11,7 @@ interface ActivityStoreModule {
   getActivitySnapshot: () => Map<string, ActivityState>;
   subscribeToWatchedCommands: (listener: () => void) => () => void;
   getWatchedCommands: () => string[];
-  getRunningCommandArgv0: (id: string) => string | null;
+  getRunningCommandWatchRule: (id: string) => string | null;
 }
 
 /** Notification sources a program emits for itself, as opposed to the ones
@@ -229,14 +229,14 @@ export class TutDetector {
         else if (TERMINAL_REPORT_SOURCES.has(source)) this.state.markComplete("al-notif");
       }
 
-      if (!prev.todo && current.todo) {
-        if (prev.status === "ALERT_RINGING") {
-          this.state.markComplete("al-todo-auto");
-        } else if (!source) {
-          // A protocol or command-exit ring sets TODO itself; only a bare
-          // TODO with no notification behind it was added by hand.
-          this.state.markComplete("al-todo-manual");
-        }
+      // A look without typing turns a ring into a TODO, so the dismissal is
+      // the ring ending with a TODO standing.
+      if (prev.status === "ALERT_RINGING" && current.status !== "ALERT_RINGING" && current.todo) {
+        this.state.markComplete("al-todo-auto");
+      }
+      // Only a bare TODO with no notification behind it was added by hand.
+      if (!prev.todo && current.todo && !source) {
+        this.state.markComplete("al-todo-manual");
       }
       if (prev.todo && !current.todo) {
         this.state.markComplete("al-todo-clear");
@@ -264,16 +264,16 @@ export class TutDetector {
       this.spreadCheckQueued = false;
       if (this.pendingSpreadIds.size === 0) return;
       const snapshot = this.activityStore.getActivitySnapshot();
-      const commandCounts = new Map<string, number>();
+      const ruleCounts = new Map<string, number>();
       for (const [paneId, current] of snapshot) {
         if (!current.watchingEnabled) continue;
-        const command = this.activityStore.getRunningCommandArgv0(paneId);
-        if (command) commandCounts.set(command, (commandCounts.get(command) ?? 0) + 1);
+        const rule = this.activityStore.getRunningCommandWatchRule(paneId);
+        if (rule) ruleCounts.set(rule, (ruleCounts.get(rule) ?? 0) + 1);
       }
       for (const paneId of this.pendingSpreadIds) {
         if (!snapshot.get(paneId)?.watchingEnabled) continue;
-        const command = this.activityStore.getRunningCommandArgv0(paneId);
-        if (command && (commandCounts.get(command) ?? 0) > 1) {
+        const rule = this.activityStore.getRunningCommandWatchRule(paneId);
+        if (rule && (ruleCounts.get(rule) ?? 0) > 1) {
           this.state.markComplete("al-spreads");
           break;
         }

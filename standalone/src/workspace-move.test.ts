@@ -88,9 +88,7 @@ import { getTerminalInstance } from "dormouse-lib/lib/terminal-registry";
 import { setPlatform } from "dormouse-lib/lib/platform";
 import { disposeAllSessions, getOrCreateTerminal } from "dormouse-lib/lib/terminal-registry";
 import { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
-import { AlertManager } from "dormouse-lib/lib/alert-manager";
-import { getAlertDeliveryReceipts, isAlertDeliveryPaused } from "dormouse-lib/lib/alert-delivery-state";
-import { watchUnattendedRings } from "dormouse-lib/lib/alert-ring-watch";
+import { createAlertEpisode } from "dormouse-lib/lib/alert-episode";
 import { clearTerminalActivity, getActivitySnapshot, setTerminalActivity } from "dormouse-lib/lib/session-activity-store";
 
 const WORKSPACE_ID = "ws-moving";
@@ -177,9 +175,6 @@ function fakePlatform(
   vi.spyOn(platform, "requestInit").mockImplementation(() => {
     throw new Error("an arrival must never ask for the whole Window");
   });
-  // The fake adapter has no AlertManager, so give it the optional hook the
-  // arrival seeds a persisted TODO through.
-  (platform as unknown as { alertSeed: unknown }).alertSeed = vi.fn();
   mocks.invoke.mockImplementation(async (cmd: string, args?: unknown) => {
     order.push(cmd);
     const workspaceId = (args as { workspaceId?: string; payload?: { workspaceId?: string } } | undefined)?.workspaceId
@@ -511,7 +506,7 @@ describe("the source half", () => {
     expect(getWorkspacesSnapshot().workspaces.map((w) => w.id)).toContain("ws-b");
   });
 
-  it("recovers serialization failure through host hand-back before resuming delivery or another move", async () => {
+  it("recovers serialization failure through host hand-back before another move", async () => {
     initWorkspaceMoves(fakePlatform());
     getOrCreateTerminal("pane-a");
     createWorkspace({ id: WORKSPACE_ID });
@@ -527,7 +522,6 @@ describe("the source half", () => {
     await vi.waitFor(() => expect(mocks.serialize).toHaveBeenCalled());
     await settle();
     expect(finished).toBe(false);
-    expect(isAlertDeliveryPaused("pane-a")).toBe(true);
     expect(isWorkspaceTransferPending(WORKSPACE_ID)).toBe(true);
     expect(getWindowSnapshot().workspaces.map(w => w.id)).not.toContain(WORKSPACE_ID);
     expect(mocks.invoke).not.toHaveBeenCalledWith("transfer_workspace_content", expect.anything());
@@ -540,7 +534,6 @@ describe("the source half", () => {
     });
     deliverReplay({ id: "pane-a", data: "missed output", requestId: `handback-${WORKSPACE_ID}` });
     await expect(moving).resolves.toEqual({ moved: false, reason: "arrival timed out" });
-    expect(isAlertDeliveryPaused("pane-a")).toBe(false);
     expect(isWorkspaceTransferPending(WORKSPACE_ID)).toBe(false);
     expect(getWindowSnapshot().workspaces.map(w => w.id)).toContain(WORKSPACE_ID);
     expect(mocks.writes).toContain("missed output");
@@ -643,16 +636,21 @@ describe("the target half", () => {
     expect(getNotes("pane-a").map((note) => note.content)).toEqual([{ kind: "plain", text: "keep me" }]);
   });
 
-  it("seeds the persisted alert before asking for the replay that rebuilds WATCHING", async () => {
-    const order: string[] = [];
-    const platform = fakePlatform(order);
-    vi.mocked(platform.alertSeed!).mockImplementation(() => { order.push("seed"); });
+  // The Sessions' alert state never left the sidecar's one manager, which
+  // re-sends it to whichever window collects them. A spawn starts it over and a
+  // kill removes it, so an arrival that did either would overwrite a live ring
+  // or TODO (docs/specs/alert.md → Live Workspace transfer).
+  it("never spawns or kills over an arrival's live Sessions", async () => {
+    const platform = fakePlatform();
+    const spawn = vi.spyOn(platform, "spawnPty");
+    const kill = vi.spyOn(platform, "killPty");
     arrivals = [payload()];
     arrivals[0].workspace.session.panes[0].alert = { status: "WATCHING_DISABLED", todo: true, notification: null };
     initWorkspaceMoves(platform);
     await settle();
-    expect(order.indexOf("seed")).toBeGreaterThan(-1);
-    expect(order.indexOf("seed")).toBeLessThan(order.indexOf("adopt_ready"));
+    expect(getWorkspaceBootPlan(WORKSPACE_ID)?.initialPaneIds).toEqual(["pane-a"]);
+    expect(spawn).not.toHaveBeenCalled();
+    expect(kill).not.toHaveBeenCalled();
   });
 
   it("resumes each of two simultaneous arrivals over its own PTYs", async () => {
@@ -729,19 +727,6 @@ describe("the target half", () => {
     expect(getWorkspacesSnapshot().workspaces[0]?.id).toBe(WORKSPACE_ID);
   });
 
-  it("seeds a persisted TODO into this window's own AlertManager", async () => {
-    const platform = fakePlatform();
-    const alert = { kind: "todo" } as never;
-    const moving = payload();
-    moving.workspace.session.panes[0]!.alert = alert;
-    arrivals = [moving];
-
-    initWorkspaceMoves(platform);
-    await settle();
-
-    expect(platform.alertSeed).toHaveBeenCalledWith("pane-a", alert);
-  });
-
   it("hands the Workspace back when the host never answers, rather than restarting live shells", async () => {
     // A timed-out collection is not a collection that found no PTYs: those
     // shells are still running, and a cold restore would start a second set.
@@ -749,15 +734,15 @@ describe("the target half", () => {
     try {
       const platform = fakePlatform([], { answer: false });
       const moving = payload();
-      const alert = { kind: "todo" } as never;
-      moving.workspace.session.panes.push({ ...moving.workspace.session.panes[0]!, id: "browser-1", alert });
+      moving.workspace.session.panes.push({ ...moving.workspace.session.panes[0]!, id: "browser-1", surfaceType: "browser" });
       moving.allIds.push("browser-1");
-      const removeAlert = vi.spyOn(platform, "alertRemove");
+      const kill = vi.spyOn(platform, "killPty");
       arrivals = [moving];
       initWorkspaceMoves(platform);
       await vi.advanceTimersByTimeAsync(5000);
-      expect(platform.alertSeed).toHaveBeenCalledWith("browser-1", alert);
-      expect(removeAlert).toHaveBeenCalledWith("browser-1");
+      // The source still shows these Sessions: their processes and alert
+      // entries are its.
+      expect(kill).not.toHaveBeenCalled();
 
       expect(getWorkspacesSnapshot().workspaces.map((w) => w.name)).not.toContain("Deploys");
       expect(getWorkspaceBootPlan(WORKSPACE_ID)).toEqual({});
@@ -804,39 +789,30 @@ describe("the target half", () => {
     expect(mocks.invoke).not.toHaveBeenCalledWith("adopt_failed", expect.anything());
   });
 
-  it("discards imported alert state when adopt_done is refused before the Wall mounts", async () => {
-    const platform = fakePlatform();
-    platform.onAlertState((detail) => setTerminalActivity(detail.id, detail));
+  it("discards this window's copy of the alert state when adopt_done is refused before the Wall mounts", async () => {
+    // The source's live ring, as the sidecar's snapshot delivers it to the
+    // collecting window.
+    const episode = createAlertEpisode();
+    const platform = fakePlatform([], {
+      beforeReplay: () => setTerminalActivity("pane-a", {
+        status: "ALERT_RINGING", episode, notification: { source: "OSC 9", title: "Done", body: null },
+      }),
+    });
+    const kill = vi.spyOn(platform, "killPty");
     const host = mocks.invoke.getMockImplementation()!;
     mocks.invoke.mockImplementation(async (cmd: string, args?: unknown) => {
       if (cmd === "adopt_done") arrivals = [];
       return host(cmd, args);
     });
-    // The source's live ring and its still-pending speech receipt ride along.
-    const source = new AlertManager();
-    source.notifyFromProtocol("pane-a", { source: "OSC 9", title: "Done", body: null });
-    const episode = source.getState("pane-a").episode!;
-    const alertRuntime = source.pauseForTransfer("pane-a")!;
-    const fire = vi.fn();
-    const stopWatch = watchUnattendedRings({ sink: "speech", subscribe: () => () => {}, enabled: () => true, delayMs: () => 0, fire });
-    arrivals = [payload({
-      terminals: { "pane-a": { serialized: "", alertRuntime, alertDelivery: { speech: { episodeId: episode.id, dueAt: 0, phase: "pending" } } } },
-    } as Partial<WorkspaceTransferPayload>)];
-    try {
-      // No Wall handle: React never mounted the arrival before the refusal.
-      initWorkspaceMoves(platform);
-      await settle();
-      await settle();
-      expect(mocks.invoke).toHaveBeenCalledWith("adopt_done", { workspaceId: WORKSPACE_ID });
-      expect(getActivitySnapshot().has("pane-a")).toBe(false);
-      expect(isAlertDeliveryPaused("pane-a")).toBe(false);
-      expect(getAlertDeliveryReceipts("speech").has("pane-a")).toBe(false);
-      await settle();
-      expect(fire).not.toHaveBeenCalled();
-    } finally {
-      stopWatch();
-      source.dispose();
-    }
+    arrivals = [payload({ terminals: { "pane-a": { serialized: "" } } } as Partial<WorkspaceTransferPayload>)];
+    // No Wall handle: React never mounted the arrival before the refusal.
+    initWorkspaceMoves(platform);
+    await settle();
+    await settle();
+    expect(mocks.invoke).toHaveBeenCalledWith("adopt_done", { workspaceId: WORKSPACE_ID });
+    expect(getActivitySnapshot().has("pane-a")).toBe(false);
+    // The ring is the source's again, still live in the sidecar.
+    expect(kill).not.toHaveBeenCalled();
   });
 
   it("closes the window when its last Workspace leaves, instead of emptying it", async () => {

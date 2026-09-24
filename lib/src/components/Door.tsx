@@ -129,7 +129,7 @@ export function Door({
         <span className="min-w-0 flex-1 truncate">
           {title}
         </span>
-        {/* `spoken` is unbounded (it lasts until the ring is attended), so it joins
+        {/* `spoken` is unbounded (it lasts until the ring clears), so it joins
             the badge cluster instead of replacing it — see docs/specs/layout.md. */}
         {speaking ? (
           <span className={clsx('flex shrink-0 items-center gap-1 text-xs font-bold', ALERT_SPEECH_TRACKING_CLASS)}>

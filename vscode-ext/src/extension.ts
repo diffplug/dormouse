@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as ptyManager from './pty-manager';
 import { DormouseViewProvider } from './webview-view-provider';
-import { attachRouter, flushAllSessions, getAlertStates } from './message-router';
+import { attachRouter, flushAllSessions, getAlertStates, reportWindowPresence } from './message-router';
 import { closePoppedOutSessions } from './agent-browser-host';
 import { serveWebview } from './webview-messaging';
 import { log } from './log';
@@ -69,7 +69,6 @@ function setupPanel(
   const router = attachRouter(channel, {
     reconnect: !!savedState,
     killOnDispose: true,
-    savedSession,
     getSelectedShell,
     context,
     // Reflect this panel's Workspace union onto the editor-tab title
@@ -92,6 +91,10 @@ export function activate(context: vscode.ExtensionContext) {
   // The Burrow runs here, in the extension host that owns the PTYs — in
   // whichever window wins the bind (burrow.ts).
   context.subscriptions.push(initBurrow(context));
+  // Whether the user is at this window, for the alerts' push gate
+  // (message-router.ts).
+  reportWindowPresence(vscode.window.state);
+  context.subscriptions.push(vscode.window.onDidChangeWindowState(reportWindowPresence));
   initToolHost(context.globalStorageUri?.fsPath);
   log.init();
   extensionContext = context;

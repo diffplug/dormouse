@@ -6,42 +6,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MobileTerminalUi, paneMouseOverride, type MobileTerminalSessionItem, type MobileTerminalTouchMode, type MobileTerminalUiProps } from './MobileTerminalUi';
 import { setNativeFieldValue } from '../lib/dom';
+import { pointerEvent } from './wall/wall-test-utils';
 
 const EPISODE = { id: 'episode-1', startedAt: Date.now() };
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-
-function pointerEvent(
-  type: string,
-  overrides: Partial<PointerEvent> = {},
-): PointerEvent {
-  const event = new Event(type, { bubbles: true, cancelable: true }) as PointerEvent;
-  const values: Partial<PointerEvent> = {
-    pointerId: 7,
-    pointerType: 'touch',
-    isPrimary: true,
-    button: 0,
-    buttons: type === 'pointerup' || type === 'pointercancel' ? 0 : 1,
-    clientX: 10,
-    clientY: 12,
-    screenX: 110,
-    screenY: 112,
-    ctrlKey: false,
-    shiftKey: false,
-    altKey: false,
-    metaKey: false,
-    ...overrides,
-  };
-
-  for (const [key, value] of Object.entries(values)) {
-    Object.defineProperty(event, key, {
-      configurable: true,
-      get: () => value,
-    });
-  }
-
-  return event;
-}
 
 function renderMobileTerminal({
   touchMode,

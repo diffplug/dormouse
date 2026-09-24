@@ -33,6 +33,8 @@ const QUIESCE_AFTER_OUTPUT_MS = T_MIGHT_NEED_ATTENTION + T_SETTLED_CONFIRM;
 /** Longest silence unconfirmed candidate history can span and still count. */
 const CANDIDATE_HISTORY_TTL_MS = T_BUSY_CANDIDATE_GAP + T_BUSY_CONFIRM_GAP;
 
+type DetectorTimer = 'busyCandidate' | 'busyConfirm' | 'mightNeedAttention' | 'settledConfirm' | 'resize';
+
 /**
  * Watches one Session's PTY output and reports busy/quiet transitions.
  *
@@ -40,22 +42,11 @@ const CANDIDATE_HISTORY_TTL_MS = T_BUSY_CANDIDATE_GAP + T_BUSY_CONFIRM_GAP;
  * observer, not an alarm. It never latches: a settle is announced through
  * `onSettled` and the detector immediately starts over.
  */
-type DetectorTimer = 'busyCandidate' | 'busyConfirm' | 'mightNeedAttention' | 'settledConfirm' | 'resize';
-export interface QuiesceSnapshot {
-  status: QuiesceStatus;
-  resizeGrace: boolean;
-  firstOutputAt: number | null;
-  lastOutputAt: number | null;
-  lastAcceptedOutputAt: number | null;
-  outputCountSinceReset: number;
-  deadlines: Partial<Record<DetectorTimer, number>>;
-}
-
 export class QuiesceDetector {
   private status: QuiesceStatus = 'NOTHING_TO_SHOW';
   private resizeGrace = false;
   private disposed = false;
-  private timers = new Map<DetectorTimer, { timer: ReturnType<typeof setTimeout>; dueAt: number }>();
+  private timers = new Map<DetectorTimer, ReturnType<typeof setTimeout>>();
   private firstOutputAt: number | null = null;
   private lastOutputAt: number | null = null;
   /**
@@ -105,8 +96,9 @@ export class QuiesceDetector {
     if (this.disposed || this.resizeGrace) return;
 
     const now = Date.now();
-    // Candidate history only describes one run of output. Timer callbacks can
-    // be delayed in hidden views, so expire it against the clock on arrival.
+    // Candidate history only describes one run of output. A timer callback can
+    // run late — a busy event loop, a suspended process — so expire it against
+    // the clock on arrival.
     if (
       !this.isConfirmedBusy() && this.lastOutputAt !== null
       && now - this.lastOutputAt > CANDIDATE_HISTORY_TTL_MS
@@ -139,36 +131,9 @@ export class QuiesceDetector {
     this.schedule('resize', T_RESIZE_DEBOUNCE);
   }
 
-  /** Freeze timers at a live ownership boundary. Cold restore never reads this. */
-  snapshot(): QuiesceSnapshot {
-    return {
-      status: this.status, resizeGrace: this.resizeGrace,
-      firstOutputAt: this.firstOutputAt, lastOutputAt: this.lastOutputAt,
-      lastAcceptedOutputAt: this.lastAcceptedOutputAt,
-      outputCountSinceReset: this.outputCountSinceReset,
-      deadlines: Object.fromEntries([...this.timers].map(([key, value]) => [key, value.dueAt])),
-    };
-  }
-
-  restore(snapshot: QuiesceSnapshot): void {
-    this.dispose();
-    this.disposed = false;
-    this.status = snapshot.status;
-    this.resizeGrace = snapshot.resizeGrace;
-    this.firstOutputAt = snapshot.firstOutputAt;
-    this.lastOutputAt = snapshot.lastOutputAt;
-    this.lastAcceptedOutputAt = snapshot.lastAcceptedOutputAt;
-    this.outputCountSinceReset = snapshot.outputCountSinceReset;
-    for (const [key, dueAt] of Object.entries(snapshot.deadlines)) {
-      // An expired grace must not swallow the output that follows restore.
-      if (key === 'resize' && dueAt <= Date.now()) { this.resizeGrace = false; continue; }
-      this.schedule(key as DetectorTimer, dueAt - Date.now());
-    }
-  }
-
   dispose(): void {
     this.disposed = true;
-    for (const { timer } of this.timers.values()) clearTimeout(timer);
+    for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
   }
 
@@ -209,8 +174,7 @@ export class QuiesceDetector {
   }
 
   private schedule(kind: DetectorTimer, delay: number): void {
-    const previous = this.timers.get(kind);
-    if (previous) clearTimeout(previous.timer);
+    clearTimeout(this.timers.get(kind));
     const dueAt = Date.now() + delay;
     const timer = setTimeout(() => {
       this.timers.delete(kind);
@@ -228,7 +192,7 @@ export class QuiesceDetector {
         case 'mightNeedAttention':
           if (this.status !== 'BUSY') break;
           this.setStatus('MIGHT_NEED_ATTENTION');
-          // Carry the original deadline through a suspended renderer.
+          // Carry the original deadline through a callback that ran late.
           this.schedule('settledConfirm', Math.max(0, dueAt + T_SETTLED_CONFIRM - Date.now()));
           break;
         case 'settledConfirm':
@@ -239,11 +203,11 @@ export class QuiesceDetector {
           break;
       }
     }, delay);
-    this.timers.set(kind, { timer, dueAt });
+    this.timers.set(kind, timer);
   }
 
   private clearActivityTimers(): void {
-    for (const [kind, { timer }] of this.timers) {
+    for (const [kind, timer] of this.timers) {
       if (kind === 'resize') continue;
       clearTimeout(timer);
       this.timers.delete(kind);

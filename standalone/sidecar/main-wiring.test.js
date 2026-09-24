@@ -12,7 +12,7 @@ test('pty-core is created with the shared sliceSince, so recovery capture reads 
   // Without it `outputSince` answers '' and `captureAgentRecovery` records
   // nothing, with no error anywhere (pty-core.js -> outputSince).
   assert.match(source, /\{\s*captureAgentRecovery,\s*createRecoveryStore,\s*sliceSince\s*\}\s*=\s*require\('\.\/recovery\.cjs'\)/);
-  assert.match(source, /nodePty,\s*\{\s*replay:\s*true,\s*sliceSince\s*\}\)/);
+  assert.match(source, /nodePty,\s*\{\s*replay:\s*true,\s*sliceSince\b/);
 });
 
 test('recovery capture and the record take are answered from pty-core marks', () => {

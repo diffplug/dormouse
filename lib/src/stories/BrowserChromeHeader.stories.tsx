@@ -42,6 +42,7 @@ const loggingActions: WallActions = {
   onSplitV: () => console.log('[story] split top/bottom'),
   onZoom: () => console.log('[story] zoom'),
   onClickPanel: () => console.log('[story] click panel'),
+  onEnterPanel: () => console.log('[story] enter panel'),
   onFocusPane: (id) => console.log('[story] focus pane', id),
   onStartRename: () => {},
   onFinishRename: () => ({ accepted: true }),

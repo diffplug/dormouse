@@ -1,12 +1,10 @@
-import { recordToolDirty } from '../tool-dirty-store';
-import { recordToolAnnounce } from '../tool-announce-store';
 import { recordToolEvents } from '../tool-events';
-import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
-import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink, ToolControlResult, ToolHostRequest, WritePtyOptions } from './types';
+import type { TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
+import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, IframeProxyResult, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink, SpawnPtyOptions, ToolControlResult, ToolHostRequest, WritePtyOptions } from './types';
 import { openPortRequestTimeoutMs } from './types';
 import { createBurrowLinkClient } from '../../host/remote/link-client';
-import type { AwaitHandle, AwaitOptions, AwaitOutcome } from '../alert-manager';
-import type { AlertSettings } from '../alert-settings';
+import { createAlertClient, type AlertClientMethods } from '../../host/alert-client';
+import { isAlertEvent } from '../../host/alert-protocol';
 import type {
   NotepadArchiveLoadResult,
   NotepadArchivePort,
@@ -18,14 +16,11 @@ import { readInjectedVolatileNotepad } from '../vscode-notepad-global';
 import { setDefaultShellOpts } from '../shell-defaults';
 import { embedderOrigins } from '../embedder-origins';
 import {
-  collectTerminalSemanticEvents,
-  TerminalProtocolParser,
-} from '../terminal-protocol';
-import {
   applyTerminalSemanticEvents,
 } from '../terminal-state-store';
-import { getTerminalTheme, onTerminalThemeChange, themeColorProvider } from '../terminal-theme';
-import { isHostMessage, readHostMessageToken } from '../vscode-message-token';
+import { getTerminalTheme, onTerminalThemeChange } from '../terminal-theme';
+import { HOST_MESSAGE_TOKEN_FIELD, isHostMessage, readHostMessageToken } from '../vscode-message-token';
+import { parseReplay } from './replay-parse';
 import { cancelDorControlRequest, dispatchDorControlRequest } from './dor-control-dispatch';
 import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
 
@@ -37,8 +32,8 @@ import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
  */
 const DETACHED = Symbol('detached');
 
-/** The outcome a VS Code await handle reports when it can never be answered. */
-const CANCELLED_AWAIT: AwaitOutcome = { kind: 'cancelled', waitedMs: 0 };
+/** The `alert*` platform methods, taken from the shared client in the constructor. */
+export interface VSCodeAdapter extends AlertClientMethods {}
 
 export class VSCodeAdapter implements PlatformAdapter {
   // VS Code owns the theme here: it provides --vscode-* itself and has its own
@@ -58,9 +53,9 @@ export class VSCodeAdapter implements PlatformAdapter {
   private listHandlers = new Set<(detail: { ptys: PtyInfo[] }) => void>();
   private replayHandlers = new Set<(detail: { id: string; data: string }) => void>();
   private flushRequestHandlers = new Set<(detail: { requestId: string }) => void>();
-  private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
-  private watchedCommandHandlers = new Set<(names: string[]) => void>();
-  private alertSettingsHandlers = new Set<(settings: AlertSettings) => void>();
+  // The alerts live in the extension host (`lib/src/host/alert-host.ts`); this
+  // webview is one of their viewers, through the client every host shares.
+  private readonly alerts = createAlertClient((command) => this.vscode.postMessage({ type: 'alert:command', command }));
   // --- Remote host bridge (docs/specs/remote-api.md) ---
   //
   // The Burrow lives in the extension host, next to the PTYs, in whichever VS
@@ -120,6 +115,7 @@ export class VSCodeAdapter implements PlatformAdapter {
 
   constructor() {
     this.vscode = acquireVsCodeApi();
+    Object.assign(this, this.alerts.methods);
 
     // These get called through detached references in the agent-browser panel
     // (e.g. `getPlatform().agentBrowserScreenshot`), which would otherwise drop
@@ -171,46 +167,23 @@ export class VSCodeAdapter implements PlatformAdapter {
           handler({ ptys: msg.ptys });
         }
       } else if (msg.type === 'pty:replay') {
-        // Replay arrives as raw buffered output in a single chunk. Live pty:data
-        // is pre-parsed by the extension host, so we only need a one-shot parser
-        // here to reconstruct semantic state from the buffered bytes and strip
-        // OSCs before xterm sees them. See docs/specs/vscode.md. It gets the
-        // theme for the same reason every other parser does: a *declined* query
-        // is not consumed, so it reaches xterm.js, and answering is the owner's
-        // alone. The replay report filter catches the reply that provokes — a
-        // backstop, not the contract.
-        const parser = new TerminalProtocolParser(themeColorProvider);
-        const parsed = parser.process(msg.data);
-        recordToolEvents(msg.id, parsed.events);
-        applyTerminalSemanticEvents(msg.id, collectTerminalSemanticEvents(parsed.events));
+        // The replay report filter catches the reply a declined colour query
+        // provokes — a backstop, not the contract.
+        const data = parseReplay(msg.id, msg.data);
         for (const handler of this.replayHandlers) {
-          handler({ id: msg.id, data: parsed.visibleData });
+          handler({ id: msg.id, data });
         }
-      } else if (msg.type === 'terminal:toolState') {
-        recordToolDirty(msg.id, msg.dirty);
-      } else if (msg.type === 'terminal:toolAnnounce') {
-        recordToolAnnounce(msg.id, msg.announce);
+      } else if (msg.type === 'terminal:toolEvents') {
+        recordToolEvents(msg.id, msg.events ?? []);
       } else if (msg.type === 'terminal:semanticEvents') {
         applyTerminalSemanticEvents(msg.id, msg.events ?? []);
       } else if (msg.type === 'dormouse:flushSessionSave') {
         for (const handler of this.flushRequestHandlers) {
           handler({ requestId: msg.requestId });
         }
-      } else if (msg.type === 'alert:state') {
-        // The host posts the whole `AlertState`; forwarding it wholesale is what
-        // keeps a new alert field from needing an edit on this path alone.
-        const { type: _type, ...detail } = msg;
-        for (const handler of this.alertStateHandlers) {
-          handler(detail);
-        }
-      } else if (msg.type === 'alert:watchedCommands') {
-        for (const handler of this.watchedCommandHandlers) {
-          handler(msg.names);
-        }
-      } else if (msg.type === 'alert:settings') {
-        for (const handler of this.alertSettingsHandlers) {
-          handler(msg.settings);
-        }
+      } else if (isAlertEvent(msg.type)) {
+        const { type, [HOST_MESSAGE_TOKEN_FIELD]: _token, ...data } = msg;
+        this.alerts.onEvent(type, data);
       } else if (msg.type === 'dormouse:newTerminal') {
         window.dispatchEvent(new CustomEvent('dormouse:new-terminal', {
           detail: {
@@ -328,8 +301,9 @@ export class VSCodeAdapter implements PlatformAdapter {
 
   shutdown(): void {
     // The extension host handles PTY cleanup, but nothing there will answer a
-    // command this webview is still holding once it goes away.
+    // command or an await this webview is still holding once it goes away.
     this.burrowClient.dispose();
+    this.alerts.dispose();
   }
 
   async getAvailableShells(): Promise<{ name: string; path: string; args?: string[] }[]> {
@@ -347,12 +321,12 @@ export class VSCodeAdapter implements PlatformAdapter {
     return result;
   }
 
-  spawnPty(id: string, options?: { cols?: number; rows?: number; cwd?: string; shell?: string; args?: string[]; helper?: HelperIdentity }): void {
+  spawnPty(id: string, options?: SpawnPtyOptions): void {
     this.vscode.postMessage({ type: 'pty:spawn', id, options });
   }
 
   writePty(id: string, data: string, options?: WritePtyOptions): void {
-    this.vscode.postMessage({ type: 'pty:input', id, data, paced: options?.paced });
+    this.vscode.postMessage({ type: 'pty:input', id, data, paced: options?.paced, userInput: options?.userInput });
   }
 
   resizePty(id: string, cols: number, rows: number): void {
@@ -559,87 +533,6 @@ export class VSCodeAdapter implements PlatformAdapter {
 
   notifySessionFlushComplete(requestId: string): void {
     this.vscode.postMessage({ type: 'dormouse:flushSessionSaveDone', requestId });
-  }
-
-  // --- Alert management (proxied to extension host) ---
-
-  alertRemove(id: string): void {
-    this.vscode.postMessage({ type: 'alert:remove', id });
-  }
-
-  alertSetWatchedCommands(names: string[]): void {
-    this.vscode.postMessage({ type: 'alert:initializeWatchedCommands', names });
-  }
-
-  alertSetCommandWatched(name: string, watched: boolean): void {
-    this.vscode.postMessage({ type: 'alert:setCommandWatched', name, watched });
-  }
-
-  alertPublishSettings(settings: AlertSettings, opts: { seed: boolean }): void {
-    this.vscode.postMessage({
-      type: opts.seed ? 'alert:initializeSettings' : 'alert:updateSettings',
-      settings,
-    });
-  }
-
-  alertDismiss(id: string): void {
-    this.vscode.postMessage({ type: 'alert:dismiss', id });
-  }
-
-  alertAttend(id: string): void {
-    this.vscode.postMessage({ type: 'alert:attend', id });
-  }
-
-  alertResize(id: string): void {
-    this.vscode.postMessage({ type: 'alert:resize', id });
-  }
-
-  alertClearAttention(id?: string): void {
-    this.vscode.postMessage({ type: 'alert:clearAttention', id });
-  }
-
-  alertToggleTodo(id: string): void {
-    this.vscode.postMessage({ type: 'alert:toggleTodo', id });
-  }
-
-  alertMarkTodo(id: string): void {
-    this.vscode.postMessage({ type: 'alert:markTodo', id });
-  }
-
-  alertClearTodo(id: string): void {
-    this.vscode.postMessage({ type: 'alert:clearTodo', id });
-  }
-
-  /**
-   * The `AlertManager` lives in the extension host, so the wait parks there and
-   * only its outcome crosses back. Unlike `requestResponse` this has no local
-   * deadline — the ceiling is `timeoutMs`, enforced host-side — and `cancel()`
-   * asks rather than answers: the `cancelled` outcome arrives on the same
-   * result message as every other, so a claim is never released twice.
-   */
-  alertAwait(id: string, options: AwaitOptions): AwaitHandle {
-    const requestId = `req-${++this.nextRequestId}`;
-    const { promise } = this.awaitHostReply('alert:awaitResult', requestId, (msg) => msg.outcome as AwaitOutcome);
-    this.vscode.postMessage({ type: 'alert:await', requestId, id, until: options.until, timeoutMs: options.timeoutMs });
-    return {
-      // Nothing detaches this reply — the host answers exactly one
-      // `alert:awaitResult` per request, a cancel included — but the mapping
-      // keeps the handle's `AwaitOutcome` contract without a cast.
-      promise: promise.then((outcome) => (outcome === DETACHED ? CANCELLED_AWAIT : outcome)),
-      cancel: () => this.vscode.postMessage({ type: 'alert:awaitCancel', requestId }),
-    };
-  }
-
-  onAlertState(handler: (detail: AlertStateDetail) => void): void {
-    this.alertStateHandlers.add(handler);
-  }
-
-  onWatchedCommands(handler: (names: string[]) => void): void {
-    this.watchedCommandHandlers.add(handler);
-  }
-
-  onAlertSettings(handler: (settings: AlertSettings) => void): void {
-    this.alertSettingsHandlers.add(handler);
   }
 
   // --- State persistence ---

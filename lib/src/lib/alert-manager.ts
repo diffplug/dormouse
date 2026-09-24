@@ -1,11 +1,11 @@
 import { createAlertEpisode, type AlertEpisode } from './alert-episode';
-import { QuiesceDetector, type QuiesceStatus, type QuiesceSnapshot } from './quiesce-detector';
-import { applyTerminalProtocolEvents, collectTerminalSemanticEvents, type TerminalProtocolParseResult } from './terminal-protocol';
+import { QuiesceDetector, type QuiesceStatus } from './quiesce-detector';
 import { DEFAULT_ALERT_SETTINGS, type AlertSettings } from './alert-settings-model';
 import { cfg } from '../cfg';
 import {
-  commandArgv0,
+  commandWatchKey,
   resolveCommandStart,
+  watchRuleFor,
   DEFAULT_COMMAND_TITLE,
   type CommandRunSource,
   type TerminalSemanticEvent,
@@ -25,13 +25,32 @@ export type SessionStatus =
 /** Boolean TODO state: on (true) or off (false). */
 export type TodoState = boolean;
 
-export const ACTIVITY_NOTIFICATION_SOURCES = ['OSC 9', 'OSC 9;4', 'OSC 99', 'OSC 777', 'BEL', 'COMMAND_EXIT'] as const;
+export const ACTIVITY_NOTIFICATION_SOURCES = ['OSC 9', 'OSC 9;4', 'OSC 99', 'OSC 777', 'BEL', 'COMMAND_EXIT', 'WATCHING'] as const;
 export type ActivityNotificationSource = typeof ACTIVITY_NOTIFICATION_SOURCES[number];
 
 export interface ActivityNotification {
   source: ActivityNotificationSource;
   title: string | null;
   body: string | null;
+}
+
+/**
+ * How much a notification says, by its source (`docs/specs/alert.md` ->
+ * Clearing And TODO). Read through `richer`, never compared by hand.
+ */
+const DETAIL_RANK: Record<ActivityNotificationSource, number> = {
+  'OSC 9': 4,
+  'OSC 99': 4,
+  'OSC 777': 4,
+  COMMAND_EXIT: 3,
+  'OSC 9;4': 2,
+  WATCHING: 1,
+  BEL: 0,
+};
+
+/** `next`, unless `current` says more: equal ranks take the newer detail. */
+function richer(current: ActivityNotification | null, next: ActivityNotification): ActivityNotification {
+  return current !== null && DETAIL_RANK[current.source] > DETAIL_RANK[next.source] ? current : next;
 }
 
 export type ProtocolProgressState = 'clear' | 'normal' | 'warning' | 'indeterminate' | 'error';
@@ -41,8 +60,6 @@ export interface ProtocolProgressUpdate {
   percent: number | null;
 }
 
-type ProtocolStatus = 'IDLE' | 'OSC_NOTIF_BUSY' | 'ALERT_RINGING';
-type CommandExitStatus = 'IDLE' | 'COMMAND_EXIT_ARMED' | 'ALERT_RINGING';
 type ActiveProtocolProgressState = 'normal' | 'warning' | 'indeterminate';
 
 interface ActiveProtocolProgress {
@@ -50,14 +67,99 @@ interface ActiveProtocolProgress {
   percent: number | null;
 }
 
+/** How a progress cycle ended. */
+type ProgressOutcome = 'complete' | 'warning' | 'error';
+
+/** A progress title by outcome: after the running command, or on its own
+ *  (`docs/specs/alert.md` -> Terminal reports). */
+const PROGRESS_TITLES: Record<ProgressOutcome, { afterCommand: string; alone: string }> = {
+  complete: { afterCommand: 'finished', alone: 'Progress complete' },
+  warning: { afterCommand: 'finished with a warning', alone: 'Progress warning' },
+  error: { afterCommand: 'reported an error', alone: 'Progress error' },
+};
+
+/** What raised a ring: a watched settle, a terminal report, or a command exit. */
+type RingSource = 'watching' | 'report' | 'exit';
+
+/** A source `SourceSet.sources` lists; `watching` carries state of its own. */
+type ListedRingSource = Exclude<RingSource, 'watching'>;
+
+/** The listed sources in escalation order: a report last, so it joins the
+ *  ring an exit opened rather than opening one the exit then joins. */
+const LISTED_RING_SOURCES: readonly ListedRingSource[] = ['exit', 'report'];
+
+/** The `watching` source: the rule key that raised it, and whether output has
+ *  arrived since it joined, which the detector cannot tell
+ *  (`docs/specs/alert.md` -> Await). */
+interface WatchingSource {
+  key: string;
+  outputSince: boolean;
+}
+
+/** The sources a ring holds, or held completions would raise. */
+interface SourceSet {
+  sources: ListedRingSource[];
+  /** Removing the rule that covers its key withdraws it. */
+  watching: WatchingSource | null;
+}
+
+function addSource(set: SourceSet, source: ListedRingSource | WatchingSource): void {
+  if (typeof source !== 'string') set.watching = source;
+  else if (!set.sources.includes(source)) set.sources.push(source);
+}
+
+/** Take `watching` off a set. Returns whether that left it empty. */
+function dropWatching(set: SourceSet): boolean {
+  set.watching = null;
+  return set.sources.length === 0;
+}
+
+/** Output arrived: a settle this set carries no longer describes the Session. */
+function noteOutput(set: SourceSet | null): void {
+  if (set?.watching) set.watching.outputSince = true;
+}
+
+/** The one ring latch a Session holds (`docs/specs/alert.md` -> Public State). */
+interface Ring extends SourceSet {
+  episode: AlertEpisode;
+  /** What it shows, and what the TODO a look turns it into keeps. */
+  detail: ActivityNotification;
+}
+
+/**
+ * Completions withheld because the Session was engaged when they happened
+ * (`docs/specs/alert.md` -> Completion events): the sources they would have
+ * raised, and the richest detail among them.
+ */
+interface HeldCompletion extends SourceSet {
+  detail: ActivityNotification;
+  /** Its report came due from an animation deferral: escalating rings it,
+   *  never defers it again. */
+  reportDeferred: boolean;
+}
+
 interface CommandExitWatch {
   displayCommand: string;
-  /** Bare program name the WATCHING rule set is keyed on; null without shell integration. */
-  argv0: string | null;
+  /** `commandWatchKey` of the command line; null without one to key on. */
+  watchKey: string | null;
   source: CommandRunSource;
   startedAt: number;
-  seenWithAttentionAt: number | null;
+  /** Engaged at its start, or engaged or acknowledged since: its exit may ring. */
+  seen: boolean;
 }
+
+/** One renderer realm's report (`docs/specs/alert.md` -> Engagement). */
+export interface Engagement {
+  present: boolean;
+  /** The terminal Session this viewer points at, or null. */
+  focusId: string | null;
+}
+
+/** Why a viewer stopped being present: its inactivity timeout ran out
+ *  (`idle`), or its window blurred or hid (`leave`). */
+export type EngagementLapse = 'idle' | 'leave';
+
+const NOT_ENGAGED: Engagement = { present: false, focusId: null };
 
 export function normalizeActivityNotification(value: unknown): ActivityNotification | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -87,12 +189,12 @@ export type CompletionEvent =
   | {
       kind: 'commandFinished';
       displayCommand: string;
-      argv0: string | null;
+      watchKey: string | null;
       exitCode: number | undefined;
       /** Wall time from commandStart to this finish. */
       ranMs: number;
-      /** The command-exit track was armed (attention was lost mid-run) when it finished. */
-      armed: boolean;
+      /** The run was seen: engaged at its start, or engaged or acknowledged since. */
+      seen: boolean;
     }
   | { kind: 'notification'; notification: ActivityNotification };
 
@@ -153,11 +255,13 @@ interface AwaitGroup {
 }
 
 export interface AlertState {
-  /** Live delivery identity; absent only on older host snapshots. */
-  episode?: AlertEpisode | null;
+  /** The ringing interval's delivery identity; null while not ringing. */
+  episode: AlertEpisode | null;
   status: SessionStatus;
   watchingEnabled: boolean;
+  /** Set by a look at a ring or by hand, never by a ring opening. */
   todo: TodoState;
+  /** The ring's detail while ringing, else the TODO's. */
   notification: ActivityNotification | null;
   /** At least one `dor await` is parked on this Session. Never persisted. */
   awaited: boolean;
@@ -172,61 +276,59 @@ export const DEFAULT_ALERT_STATE: AlertState = {
   awaited: false,
 };
 
-/** Three independent alarm tracks plus an always-on, non-latching detector.
- * WATCHING gates detector projection; its ring latches separately. */
+/** One ring latch fed by three sources, an independent progress cycle, and an
+ * always-on, non-latching detector. WATCHING gates detector projection. */
 interface AlertEntry {
-  episode: AlertEpisode | null;
   /** Always-on output/silence detector. Never disposed before the entry is. */
   detector: QuiesceDetector;
-  /** Command rule that raised the latched WATCHING ring, even after command exit. */
-  watchingRingingCommand: string | null;
+  ring: Ring | null;
   /**
-   * Has any output arrived since that ring latched? The detector cannot answer
-   * this — it never latches, so it reports how output looks *now*, and it stays
-   * `NOTHING_TO_SHOW` for a full `busyCandidateGap` after output resumes (and
-   * returns there when a burst was too sparse to confirm BUSY). The question is
-   * about the interval since the ring, which is only observable here.
+   * A user verb cleared a ring and no output has arrived since, so a report
+   * describes the state the user already acknowledged (`dispatchCompletion`).
+   * Opening a ring or starting a command forgets it.
    */
-  outputSinceWatchingRing: boolean;
-  protocolStatus: ProtocolStatus;
+  ackedQuiet: boolean;
+  /** The live `OSC 9;4` cycle. Never touches the ring, and the ring never touches it. */
   progress: ActiveProtocolProgress | null;
-  commandExitStatus: CommandExitStatus;
   commandExitWatch: CommandExitWatch | null;
   pendingCommandLine: string | null;
   todo: TodoState;
+  /** The TODO's detail: null without one. A ring shows its own instead. */
   notification: ActivityNotification | null;
-  /** Latest terminal notification deferred behind animation; never public or persisted. */
-  deferredNotification: ActivityNotification | null;
-  deferredNotificationTimer: ReturnType<typeof setTimeout> | null;
-}
-
-/** Explicit live handoff only: timers are deadlines, and no caller closures travel. */
-export interface AlertRuntimeSnapshot extends Omit<AlertEntry, 'detector' | 'deferredNotificationTimer'> {
-  detector: QuiesceSnapshot;
+  /**
+   * The terminal notification held behind animation, never public or
+   * persisted, and when the hold began: a replacement keeps that start, so the
+   * ceiling bounds the whole hold.
+   */
+  deferred: { notification: ActivityNotification; since: number } | null;
+  deferredTimer: ReturnType<typeof setTimeout> | null;
+  /** Completions withheld while engaged: escalated or dropped as engagement ends (`setViewer`), dropped by a user verb. */
+  held: HeldCompletion | null;
+  /** Output and completions before this instant answer the user's own input (`acknowledge`). */
+  echoUntil: number;
 }
 
 /** Portable Session Activity manager. `dispatchCompletion` is the single
  * observe→claim→ring seam, so await can claim completions before suppression. */
 export class AlertManager {
   private entries = new Map<string, AlertEntry>();
-  private suspendedForTransfer = new Set<string>();
-  /** Session → request token of the one replay that counts as live (`applyReplay`). */
-  private liveReplay = new Map<string, string>();
   /** Blocks late output/resize from recreating a removed entry. Only a semantic
    * or protocol event proves a reused id belongs to a live replacement. */
   private removed = new Set<string>();
   private claimants = new Map<string, Set<CompletionClaimant>>();
   private awaits = new Map<string, AwaitGroup>();
-  private attentionId: string | null = null;
-  private attentionTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Each present viewer's focus. An absent viewer engages nothing, so it is not kept. */
+  private viewers = new Map<string, string | null>();
   private listeners = new Set<(id: string, state: AlertState) => void>();
+  private removeListeners = new Set<(id: string) => void>();
   private lastEmitted = new Map<string, AlertState>();
   private watchedCommands = new Set<string>();
-  /** Helper Sessions never alert (docs/specs/alert.md → "suppress helper
-   *  alerting until promotion"): every ingestion and control entry point below
-   *  drops them here, so a host marks the id once instead of guarding each call. */
+  /** Helper Sessions alert no one until promotion (docs/specs/alert.md → Pane
+   *  Header). They still build command state and feed the detector, so one
+   *  promoted mid-command knows what it is running; everything else — reports,
+   *  controls, awaits, completion dispatch, publishing — drops them, so a host
+   *  marks the id once instead of guarding each call. */
   private helpers = new Set<string>();
-  private inactivityTimeoutMs = cfg.alert.userAttention;
   /** The shipped default (platform-free module: this runs in both hosts), so a
    *  manager that never receives a settings blob behaves like one that does. */
   private deferAlertsUntilQuiet = DEFAULT_ALERT_SETTINGS.deferAlertsUntilQuiet;
@@ -240,19 +342,8 @@ export class AlertManager {
    * already-normalized blob; the sinks below revalidate anyway.
    */
   applySettings(settings: AlertSettings): void {
-    this.setInactivityTimeoutMs(settings.inactivityTimeoutMs);
+    // `inactivityTimeoutMs` is read only by the renderer's presence tracker.
     this.setDeferAlertsUntilQuiet(settings.deferAlertsUntilQuiet);
-  }
-
-  /** Walk-away and command-exit minimum-runtime window. Revalidate at this timer sink. */
-  setInactivityTimeoutMs(ms: number): void {
-    if (!Number.isFinite(ms) || ms <= 0 || ms === this.inactivityTimeoutMs) return;
-    this.inactivityTimeoutMs = ms;
-    // Re-arm from now so a shortened window takes effect immediately instead of
-    // waiting out the window that was already running.
-    if (this.attentionTimer !== null && this.attentionId !== null) {
-      this.setAttention(this.attentionId);
-    }
   }
 
   /** Let confirmed terminal activity finish before terminal-notification rings. */
@@ -263,15 +354,17 @@ export class AlertManager {
 
     // Turning the gate off releases news it was holding; dropping it would turn
     // a timing preference into alert loss.
-    for (const [id, entry] of this.entries) {
-      if (!this.suspendedForTransfer.has(id)) this.flushDeferredNotification(id, entry);
-    }
+    for (const [id, entry] of this.entries) this.flushDeferredNotification(id, entry);
   }
 
   /** Mark (or, on promotion, unmark) a helper Session. */
   setHelper(id: string, helper: boolean): void {
     if (helper) this.helpers.add(id);
     else this.helpers.delete(id);
+    // Promotion publishes the state the helper built up — nothing that was
+    // suppressed, since a helper's completions were never kept. A failed
+    // placement's demotion takes back whatever the Session had published.
+    if (this.entries.has(id)) this.notify(id);
   }
 
   // --- State change subscription ---
@@ -281,24 +374,31 @@ export class AlertManager {
     return () => this.listeners.delete(listener);
   }
 
+  /**
+   * A Session gone for good: every `remove`, whatever state it left, and never
+   * a `restart`, whose Session goes on under the same id.
+   */
+  onRemove(listener: (id: string) => void): () => void {
+    this.removeListeners.add(listener);
+    return () => this.removeListeners.delete(listener);
+  }
+
   // --- Feed PTY events ---
 
   onData(id: string): void {
-    if (this.inert(id)) return;
     // The detector runs for every Session, including one that has never
     // produced a semantic or protocol event, so output creates the entry.
     const entry = this.streamEntry(id);
     if (!entry) return;
+    // The echo of the user's own keystroke is not the program working.
+    if (this.inEchoWindow(entry)) return;
     entry.detector.onData();
-    // Only meaningful while a ring is latched: `consumeAwaitableRing` reads it
-    // to tell a ring that still describes the present from one whose quiet has
-    // already ended.
-    if (entry.watchingRingingCommand !== null) entry.outputSinceWatchingRing = true;
+    for (const set of [entry.ring, entry.held]) noteOutput(set);
+    entry.ackedQuiet = false;
     this.eachWaiter(id, (waiter) => waiter.onOutput());
   }
 
   onExit(id: string, exitCode?: number): void {
-    if (this.inert(id)) return;
     const entry = this.entries.get(id);
     if (entry && this.finishCommandExitWatch(id, entry, exitCode)) this.notify(id);
     // The command-exit dispatch above already resolved anything waiting on the
@@ -308,7 +408,6 @@ export class AlertManager {
   }
 
   onResize(id: string): void {
-    if (this.inert(id)) return;
     // Same reasoning as `onData`: the resize grace window is part of the
     // always-on detector, and a Pane's first fit usually beats any PTY event.
     this.streamEntry(id)?.detector.onResize();
@@ -317,7 +416,7 @@ export class AlertManager {
   // --- WATCHING rule set ---
 
   /**
-   * Replace the set of command names WATCHING applies to (`docs/specs/alert.md`).
+   * Replace the set of command keys WATCHING applies to (`docs/specs/alert.md`).
    * Pushed from the renderer, which owns the persisted copy — the extension host
    * has no `localStorage` of its own.
    */
@@ -326,19 +425,7 @@ export class AlertManager {
     if (next.size === this.watchedCommands.size && [...next].every((name) => this.watchedCommands.has(name))) return;
     this.watchedCommands = next;
     for (const [id, entry] of this.entries) {
-      // A suspended Session is frozen at its snapshot; `resumeFromTransfer`
-      // re-applies this rule wherever the snapshot lands.
-      if (this.suspendedForTransfer.has(id)) continue;
-      // Dropping a rule is an explicit "stop alerting on this", so it also
-      // silences the ring that rule already raised. The originating key stays
-      // latched after command exit precisely so this still works at a prompt.
-      if (
-        entry.watchingRingingCommand !== null
-        && !this.watchedCommands.has(entry.watchingRingingCommand)
-      ) {
-        entry.watchingRingingCommand = null;
-        entry.outputSinceWatchingRing = false;
-      }
+      this.withdrawUncoveredWatchingRing(entry);
       // WATCHING is derived from the rule set, so every entry may have changed.
       this.notify(id);
     }
@@ -360,13 +447,12 @@ export class AlertManager {
   }
 
   /**
-   * WATCHING follows the foreground command's name: on while a watched command
-   * runs, off at the prompt. The detector keeps running either way; this only
-   * decides whether its state is public and whether a settle rings.
+   * WATCHING follows the foreground command's watch key: on while a command a
+   * rule covers runs, off at the prompt. The detector keeps running either way;
+   * this only decides whether its state is public and whether a settle rings.
    */
   private isWatching(entry: AlertEntry): boolean {
-    const argv0 = entry.commandExitWatch?.argv0 ?? null;
-    return argv0 !== null && this.watchedCommands.has(argv0);
+    return watchRuleFor(this.watchedCommands, entry.commandExitWatch?.watchKey ?? null) !== null;
   }
 
   private createDetector(id: string): QuiesceDetector {
@@ -385,15 +471,34 @@ export class AlertManager {
 
   /**
    * Watched work that resumed invalidates a ring inferred from silence, so the
-   * next settle raises a fresh one on fresh delivery delays. Not `releaseRing`:
-   * that resets the detector, which would stop this run from settling again.
-   * Callers are the WATCHING-only paths; this adds no rule-set check of its own.
+   * next settle raises a fresh one on fresh delivery delays. The detector is
+   * left alone: resetting it would stop this run from settling again. Callers
+   * are the WATCHING-only paths; this adds no rule-set check of its own.
    */
   private withdrawResumedWatchingRing(entry: AlertEntry): void {
-    if (!this.deferAlertsUntilQuiet || entry.watchingRingingCommand === null) return;
-    if (!entry.detector.isConfirmedBusy()) return;
-    entry.watchingRingingCommand = null;
-    entry.outputSinceWatchingRing = false;
+    if (!this.deferAlertsUntilQuiet || !entry.detector.isConfirmedBusy()) return;
+    this.invalidateWatching(entry, () => true);
+  }
+
+  /**
+   * Dropping a rule is an explicit "stop alerting on this", so it also silences
+   * the `watching` source that rule raised — unless another rule still covers
+   * it. The source keeps its key after command exit precisely so this still
+   * works at a prompt.
+   */
+  private withdrawUncoveredWatchingRing(entry: AlertEntry): void {
+    this.invalidateWatching(entry, (key) => watchRuleFor(this.watchedCommands, key) === null);
+  }
+
+  /**
+   * Void the `watching` source whose key `voids` names, ringing or held alike,
+   * leaving the detector running. Never an acknowledgement: a ring or a hold
+   * left empty goes, leaving no TODO.
+   */
+  private invalidateWatching(entry: AlertEntry, voids: (key: string) => boolean): void {
+    const { ring, held } = entry;
+    if (ring?.watching && voids(ring.watching.key) && dropWatching(ring)) entry.ring = null;
+    if (held?.watching && voids(held.watching.key) && dropWatching(held)) entry.held = null;
   }
 
   /** A busy Session went quiet. Whether that rings is decided downstream. */
@@ -432,49 +537,94 @@ export class AlertManager {
   }
 
   /**
-   * Observe -> claim -> ring rule, for all three tracks. Every ring rule lives
-   * here and nowhere else, so a track's emit site only has to describe what
-   * happened; the decision to bother a human is made once, after the claimants
-   * have passed on it. Returns whether a claimant took the event.
+   * Observe -> claim -> ring rule, for every ring source. Every ring rule lives
+   * here and nowhere else, so an emit site only has to describe what happened;
+   * the decision to bother a human is made once, after the claimants have
+   * passed on it. Returns whether a claimant took the event.
    */
   private dispatchCompletion(id: string, entry: AlertEntry, event: CompletionEvent): boolean {
+    // A helper's completion reaches no one, and is not kept for promotion.
+    if (this.helpers.has(id)) return false;
     // Snapshot: a claimant may unregister itself (or register another) while
     // being offered this very event.
     const claimants = [...(this.claimants.get(id) ?? [])];
     if (claimants.some((claimant) => claimant(event))) return true;
 
+    // A completion inside the echo window answers the keystroke that opened
+    // it — a bell on Tab, the exit `Ctrl-C` caused — so it neither rings nor
+    // holds. A cleared progress cycle still publishes (see below).
+    if (this.inEchoWindow(entry)) {
+      this.notify(id);
+      return false;
+    }
+
     switch (event.kind) {
-      case 'settled':
-        // Only a watched command rings, and only if the user is not looking at
-        // it right now. The originating command key latches here so the ring
-        // outlives the command that raised it.
-        if (!this.isWatching(entry) || this.hasAttention(id)) break;
-        this.openEpisode(entry);
-        entry.watchingRingingCommand = entry.commandExitWatch?.argv0 ?? null;
-        entry.outputSinceWatchingRing = false;
-        this.notify(id);
+      case 'settled': {
+        // Only a watched command rings. The originating command key latches on
+        // the ring so it outlives the command that raised it.
+        const key = entry.commandExitWatch?.watchKey;
+        if (!key || !this.isWatching(entry)) break;
+        this.holdOrDeliver(id, entry, { key, outputSince: false }, { source: 'WATCHING', title: `${key} went quiet`, body: null });
         break;
+      }
       case 'commandFinished':
-        if (!event.armed || this.hasAttention(id) || event.ranMs < this.inactivityTimeoutMs) break;
+        if (!event.seen || event.ranMs < cfg.alert.commandExitMinRuntime) break;
         // A shell-reported exit is authoritative, so recent animation never
         // delays it. The detector only gates in-band terminal notifications.
-        this.applyCommandExitRinging(entry, event.displayCommand, event.exitCode);
-        // If a terminal notification was already waiting, it can enrich this
-        // ring immediately; keeping its timer would publish stale detail later.
-        if (entry.deferredNotification !== null) this.flushDeferredNotification(id, entry);
-        else this.notify(id);
+        this.holdOrDeliver(id, entry, 'exit', {
+          source: 'COMMAND_EXIT',
+          title: 'Command finished',
+          body: formatCommandExitBody(event.displayCommand, event.exitCode),
+        });
         break;
       case 'notification':
-        if (this.hasAttention(id)) {
-          // A progress cycle was already cleared before dispatch, so publish
-          // that; a plain direct notification changes nothing and dedupes away.
-          this.notify(id);
-          break;
-        }
-        this.deferOrDeliverNotification(id, entry, event.notification);
+        this.holdOrDeliver(id, entry, 'report', event.notification);
         break;
     }
     return false;
+  }
+
+  /**
+   * The one path from a completion that may ring to the ring: a live one, a
+   * deferred report coming due (`deferrable` false — its deferral is over),
+   * and an escalated hold alike. Engaged, it is held for engagement to end;
+   * otherwise a report goes through the acknowledged-state check and animation
+   * deferral, and anything else rings. Publishes, including a progress cycle
+   * the caller cleared before dispatch.
+   */
+  private holdOrDeliver(
+    id: string,
+    entry: AlertEntry,
+    source: ListedRingSource | WatchingSource,
+    detail: ActivityNotification,
+    deferrable = true,
+  ): void {
+    if (this.isEngaged(id)) {
+      this.hold(entry, source, detail, !deferrable);
+    } else if (source === 'report' && deferrable) {
+      this.deliverReport(id, entry, detail);
+      return;
+    } else {
+      this.raiseRing(entry, source, detail);
+    }
+    // A terminal notification already waiting on animation joins the exit's
+    // ring (or hold) now; keeping its timer would publish stale detail later.
+    if (source === 'exit' && entry.deferred !== null) this.flushDeferredNotification(id, entry);
+    else this.notify(id);
+  }
+
+  /** An unengaged report: the acknowledged-state check, then animation deferral. */
+  private deliverReport(id: string, entry: AlertEntry, notification: ActivityNotification): void {
+    if (entry.ring === null && entry.ackedQuiet) {
+      // A report about the state the user just acknowledged updates the
+      // receipt instead of summoning again. Nothing is deferred while
+      // acknowledged: no output has arrived to animate.
+      entry.todo = true;
+      entry.notification = richer(entry.notification, notification);
+      this.notify(id);
+      return;
+    }
+    this.deferOrDeliverNotification(id, entry, notification);
   }
 
   // --- Await ---
@@ -486,8 +636,8 @@ export class AlertManager {
    * instead of ringing anyone.
    *
    * Resolves immediately when the Session is already ringing, consuming only
-   * the one latch it resolved on and leaving TODO, notification detail, and
-   * attention exactly as they were.
+   * the one ring source it resolved on. That never acknowledges, so it leaves
+   * no TODO and clears none.
    */
   awaitCompletion(id: string, options: AwaitOptions): AwaitHandle {
     if (this.inert(id)) return settledAwait({ kind: 'cancelled', waitedMs: 0 });
@@ -587,45 +737,19 @@ export class AlertManager {
   }
 
   /**
-   * Consume the ring an await arriving right now would resolve on, if any.
-   * Only that track's latch is released: TODO and its notification detail are
-   * the human's and stay untouched.
-   *
-   * Two of the three are gated, because their latches outlive the fact they
-   * describe.
-   *
-   * The command-exit ring outlives the run that raised it —
-   * `startCommandExitWatch` deliberately preserves `ALERT_RINGING` — so once a
-   * *new* foreground command is running it can only describe a previous one,
-   * and consuming it would answer "the command exited" about the command still
-   * running. That is precisely the misreport `dor send` followed by `dor await
-   * --until exit` would act on, so a running `commandExitWatch` suppresses it
-   * and the await parks for the real exit instead.
-   *
-   * The WATCHING ring is the same hazard one level down. It legitimately
-   * describes the command still running — a long-running watched command going
-   * quiet is the `claude` case `--until quiet` exists for — but it is an
-   * *inference from silence*, not a discrete event, and nothing clears it when
-   * output resumes. Consuming a latched ring after a `dor send` restarted the
-   * peer would answer "output stopped" about a turn that is mid-flight, and the
-   * documented `await && read` idiom would read a half-drawn screen. So it is
-   * consumed only while `outputSinceWatchingRing` is still false; once output
-   * has resumed the await parks for the real settle. The detector cannot stand
-   * in for that flag — it stays `NOTHING_TO_SHOW` for a full `busyCandidateGap`
-   * after output resumes, which is longer than the two CLI round trips between
-   * a `dor send` and the await that follows it.
-   *
-   * The protocol ring is ungated: `OSC 9` is a discrete "I need input" that
-   * stays true until it is answered, so a peer ringing mid-run still means what
-   * it said whenever the await arrives.
+   * Consume the ring source an await arriving right now would resolve on, if
+   * any: only that source is withdrawn. Gated because the ring outlives the
+   * fact a source describes (`docs/specs/alert.md` -> Await, rationale): `exit`
+   * only with nothing running, `watching` only with no output since it joined,
+   * a report always.
    */
   private consumeAwaitableRing(entry: AlertEntry, until: AwaitUntil): AwaitCause | null {
-    if (until === 'quiet' && this.releaseRing(entry, 'protocol')) return 'bell';
-    if (entry.commandExitWatch === null && this.releaseRing(entry, 'commandExit')) return 'exit';
+    if (until === 'quiet' && this.withdrawRingSource(entry, 'report')) return 'bell';
+    if (entry.commandExitWatch === null && this.withdrawRingSource(entry, 'exit')) return 'exit';
     if (
       until === 'quiet'
-      && !entry.outputSinceWatchingRing
-      && this.releaseRing(entry, 'watching')
+      && entry.ring?.watching?.outputSince === false
+      && this.withdrawRingSource(entry, 'watching')
     ) return 'quiet';
     return null;
   }
@@ -671,7 +795,7 @@ export class AlertManager {
     this.eachWaiter(id, (waiter) => (how === 'died' ? waiter.die() : waiter.cancel()));
   }
 
-  // --- Terminal-report protocol track ---
+  // --- Terminal reports ---
 
   notifyFromProtocol(id: string, notification: ActivityNotification): void {
     if (this.inert(id)) return;
@@ -682,45 +806,32 @@ export class AlertManager {
     this.dispatchCompletion(id, entry, { kind: 'notification', notification: normalized });
   }
 
+  /** `OSC 9;4`: active updates move the cycle; its end is a report completion. */
   updateProtocolProgress(id: string, progress: ProtocolProgressUpdate): void {
     if (this.inert(id)) return;
     const entry = this.reportedEntry(id);
+    // A cycle that completes keeps the warning it ran under.
+    const completed: ProgressOutcome = entry.progress?.state === 'warning' ? 'warning' : 'complete';
 
     if (progress.state === 'clear') {
-      if (!entry.progress) return;
-      this.completeProtocolProgress(id, entry, entry.progress);
+      // A clear with no live cycle ends nothing: programs clear defensively.
+      if (entry.progress) this.finishProtocolProgressCycle(id, entry, completed, entry.progress.percent);
       return;
     }
 
     if (progress.state === 'error') {
-      this.finishProtocolProgressCycle(id, entry, 'Progress error', progress.percent);
+      this.finishProtocolProgressCycle(id, entry, 'error', progress.percent);
       return;
     }
 
     if (progress.state === 'normal' && progress.percent === 100) {
-      this.completeProtocolProgress(id, entry, {
-        state: entry.progress?.state === 'warning' ? 'warning' : 'normal',
-        percent: progress.percent,
-      });
+      this.finishProtocolProgressCycle(id, entry, completed, progress.percent);
       return;
     }
 
-    if (
-      entry.protocolStatus === 'OSC_NOTIF_BUSY'
-      && entry.progress?.state === progress.state
-      && entry.progress?.percent === progress.percent
-    ) {
-      return;
-    }
-
+    if (entry.progress?.state === progress.state && entry.progress.percent === progress.percent) return;
     entry.progress = { state: progress.state, percent: progress.percent };
-    entry.protocolStatus = 'OSC_NOTIF_BUSY';
     this.notify(id);
-  }
-
-  private completeProtocolProgress(id: string, entry: AlertEntry, progress: ActiveProtocolProgress): void {
-    const title = progress.state === 'warning' ? 'Progress warning' : 'Progress complete';
-    this.finishProtocolProgressCycle(id, entry, title, progress.percent);
   }
 
   /**
@@ -732,16 +843,15 @@ export class AlertManager {
   private finishProtocolProgressCycle(
     id: string,
     entry: AlertEntry,
-    title: string,
+    outcome: ProgressOutcome,
     percent: number | null,
   ): void {
     entry.progress = null;
-    if (entry.protocolStatus === 'OSC_NOTIF_BUSY') entry.protocolStatus = 'IDLE';
     const claimed = this.dispatchCompletion(id, entry, {
       kind: 'notification',
       notification: {
         source: 'OSC 9;4',
-        title,
+        title: progressTitle(entry.commandExitWatch, outcome),
         body: percent === null ? null : `Progress ${Math.round(percent)}%`,
       },
     });
@@ -750,18 +860,10 @@ export class AlertManager {
     if (claimed) this.notify(id);
   }
 
-  private applyProtocolRinging(entry: AlertEntry, notification: ActivityNotification): void {
-    this.openEpisode(entry);
-    entry.notification = notification;
-    entry.todo = true;
-    entry.protocolStatus = 'ALERT_RINGING';
-    entry.progress = null;
-  }
-
-  // --- Command-exit track ---
+  // --- Command-exit ---
 
   applyTerminalSemanticEvents(id: string, events: TerminalSemanticEvent[]): void {
-    if (events.length === 0 || this.inert(id)) return;
+    if (events.length === 0) return;
     const entry = this.reportedEntry(id);
     let changed = false;
 
@@ -783,15 +885,10 @@ export class AlertManager {
         case 'promptStart':
         case 'promptEnd':
           // A prompt means nothing is in the foreground any more, so WATCHING
-          // stops here even if the shell never sent a finish event.
-          if (entry.pendingCommandLine !== null || entry.commandExitWatch !== null) {
-            this.finishCommandExitWatch(id, entry, undefined);
-            changed = true;
-          } else {
-            // Prompt rendering can produce busy output even without a reported
-            // command. Its history ends at this boundary too.
-            entry.detector.reset();
-          }
+          // stops here even if the shell never sent a finish event. Prompt
+          // rendering can produce busy output even without a reported command,
+          // so its history ends at this boundary too.
+          changed = this.finishCommandExitWatch(id, entry, undefined) || changed;
           break;
       }
     }
@@ -806,13 +903,18 @@ export class AlertManager {
   ): void {
     const resolved = resolveCommandStart(entry.pendingCommandLine, event);
     entry.pendingCommandLine = null;
-    if (entry.commandExitStatus !== 'ALERT_RINGING') entry.commandExitStatus = 'IDLE';
+    // Every command boundary silently ends a progress cycle the program never
+    // closed, so a later stray clear finds nothing to complete.
+    entry.progress = null;
+    // A new command is news the acknowledgement never saw, even when it stays
+    // silent until its report: its echo fell in the echo window, not output.
+    entry.ackedQuiet = false;
     entry.commandExitWatch = {
       displayCommand: resolved.displayCommand,
-      argv0: resolved.rawCommandLine === null ? null : commandArgv0(resolved.rawCommandLine),
+      watchKey: resolved.rawCommandLine === null ? null : commandWatchKey(resolved.rawCommandLine),
       source: resolved.source,
       startedAt: resolved.startedAt,
-      seenWithAttentionAt: this.hasAttention(id) ? Date.now() : null,
+      seen: this.isEngaged(id),
     };
     // Every command boundary starts the detector over, so one command's output
     // history can never leak into the next one's busy/quiet reading.
@@ -828,21 +930,20 @@ export class AlertManager {
     const watch = entry.commandExitWatch;
     entry.commandExitWatch = null;
     entry.pendingCommandLine = null;
-    const wasArmed = entry.commandExitStatus === 'COMMAND_EXIT_ARMED';
-    if (entry.commandExitStatus !== 'ALERT_RINGING') {
-      entry.commandExitStatus = 'IDLE';
-    }
+    // The boundary silently ends a progress cycle, like a command start.
+    const endedProgress = entry.progress !== null;
+    entry.progress = null;
 
-    // Every finish is observable, including the short, unarmed, and attended
+    // Every finish is observable, including the short, unseen, and engaged
     // ones that can never ring — the ring rule is what filters them.
     if (watch !== null) {
       this.dispatchCompletion(id, entry, {
         kind: 'commandFinished',
         displayCommand: watch.displayCommand,
-        argv0: watch.argv0,
+        watchKey: watch.watchKey,
         exitCode,
         ranMs: Date.now() - watch.startedAt,
-        armed: wasArmed,
+        seen: watch.seen,
       });
     }
 
@@ -853,42 +954,7 @@ export class AlertManager {
     // Clearing the watch turns WATCHING off, which flips `watchingEnabled` and
     // the status even when command-exit never armed, so subscribers must hear
     // about any finish — `notify` dedupes if nothing is visible.
-    return watch !== null;
-  }
-
-  private markCommandExitSeen(entry: AlertEntry): void {
-    const watch = entry.commandExitWatch;
-    if (!watch) return;
-    if (watch.seenWithAttentionAt === null) watch.seenWithAttentionAt = Date.now();
-    if (entry.commandExitStatus === 'COMMAND_EXIT_ARMED') entry.commandExitStatus = 'IDLE';
-  }
-
-  private armCommandExitOnAttentionLoss(id: string): boolean {
-    const entry = this.entries.get(id);
-    if (!entry?.commandExitWatch) return false;
-    if (entry.commandExitStatus !== 'IDLE') return false;
-    if (entry.commandExitWatch.seenWithAttentionAt === null) return false;
-    entry.commandExitStatus = 'COMMAND_EXIT_ARMED';
-    return true;
-  }
-
-  /** The watch record is already gone by the time this runs, so it takes the text it needs. */
-  private applyCommandExitRinging(
-    entry: AlertEntry,
-    displayCommand: string,
-    exitCode: number | undefined,
-  ): void {
-    this.openEpisode(entry);
-    entry.commandExitStatus = 'ALERT_RINGING';
-    entry.todo = true;
-    // A protocol ring carries richer text; never overwrite it with the generic one.
-    if (entry.protocolStatus !== 'ALERT_RINGING') {
-      entry.notification = {
-        source: 'COMMAND_EXIT',
-        title: 'Command finished',
-        body: formatCommandExitBody(displayCommand, exitCode),
-      };
-    }
+    return watch !== null || endedProgress;
   }
 
   // --- Deferred terminal notifications ---
@@ -898,23 +964,26 @@ export class AlertManager {
     entry: AlertEntry,
     notification: ActivityNotification,
   ): void {
-    // Once any track rings, another source only enriches the same summons. There
-    // is no fresh transition left for animation deferral to suppress. An already
-    // pending deferral keeps deferring: a command boundary resets the detector,
-    // so `isConfirmedBusy` alone could release a notification before quiet.
+    // Once a ring is active, another source only enriches the same summons.
+    // There is no fresh transition left for animation deferral to suppress. An
+    // already pending deferral keeps deferring: a command boundary resets the
+    // detector, so `isConfirmedBusy` alone could release a notification before
+    // quiet.
     if (
       this.deferAlertsUntilQuiet
-      && !this.hasActiveRing(entry)
-      && (entry.deferredNotification !== null || entry.detector.isConfirmedBusy())
+      && entry.ring === null
+      && (entry.deferred !== null || entry.detector.isConfirmedBusy())
     ) {
-      // Latest wins, matching repeated notifications on an already-ringing track.
-      entry.deferredNotification = notification;
+      // The richer detail waits, as it would show on a ring; the ceiling still
+      // counts from the first.
+      if (entry.deferred === null) entry.deferred = { notification, since: Date.now() };
+      else entry.deferred.notification = richer(entry.deferred.notification, notification);
       this.scheduleDeferredNotification(id, entry);
     } else {
       // An existing ring means this is enrichment, not a fresh summons. Cancel
       // any older pending detail so it cannot overwrite this notification later.
       this.clearDeferredNotification(entry);
-      this.applyProtocolRinging(entry, notification);
+      this.raiseRing(entry, 'report', notification);
     }
     // The caller may have cleared a publicly visible cycle and delegated the
     // publish to the ring rules; deferring the ring must not swallow it.
@@ -922,161 +991,242 @@ export class AlertManager {
   }
 
   /**
-   * Wake at the detector's quiet deadline, re-arming for the remainder if
-   * output moved it — so continuing output costs one timer per quiet window
-   * rather than one per PTY chunk. Mostly the detector's own settle gets there
-   * first and this is a no-op; it is load-bearing only after a command boundary
-   * resets the detector, which kills the settle that would have flushed.
+   * Wake at the earlier of the detector's quiet deadline and the deferral
+   * ceiling, re-arming for the remainder if output moved the former — so
+   * continuing output costs one timer per quiet window rather than one per PTY
+   * chunk. A timer already waiting stays: the due time only moves later, and
+   * the wake re-checks it. Mostly the detector's own settle gets there first;
+   * the timer is load-bearing after a command boundary resets the detector,
+   * which kills the settle that would have flushed, and for output that never
+   * goes quiet.
    */
   private scheduleDeferredNotification(id: string, entry: AlertEntry): void {
-    if (entry.deferredNotificationTimer !== null) clearTimeout(entry.deferredNotificationTimer);
-    entry.deferredNotificationTimer = setTimeout(() => {
-      entry.deferredNotificationTimer = null;
-      if (entry.detector.quietAt() > Date.now()) this.scheduleDeferredNotification(id, entry);
+    if (entry.deferredTimer !== null) return;
+    entry.deferredTimer = setTimeout(() => {
+      entry.deferredTimer = null;
+      if (this.deferredDueAt(entry) > Date.now()) this.scheduleDeferredNotification(id, entry);
       else this.flushDeferredNotification(id, entry);
-    }, Math.max(0, entry.detector.quietAt() - Date.now()));
+    }, Math.max(0, this.deferredDueAt(entry) - Date.now()));
+  }
+
+  /** Quiet, or the deferral ceiling, whichever comes first. */
+  private deferredDueAt(entry: AlertEntry): number {
+    return Math.min(entry.detector.quietAt(), (entry.deferred?.since ?? Date.now()) + cfg.alert.deferCeiling);
   }
 
   private flushDeferredNotification(id: string, entry: AlertEntry): void {
-    const notification = entry.deferredNotification;
-    if (notification === null) return;
+    const deferred = entry.deferred;
+    if (deferred === null) return;
     this.clearDeferredNotification(entry);
-
-    // Attending the Session clears this eagerly too; retain the recheck as the
-    // timer-side safety rule shared by every delayed alarm path.
-    if (this.hasAttention(id)) return;
-
-    this.applyProtocolRinging(entry, notification);
-    this.notify(id);
+    // Never deferred again; due while engaged, it waits on engagement instead.
+    this.holdOrDeliver(id, entry, 'report', deferred.notification, false);
   }
 
   private clearDeferredNotification(entry: AlertEntry): void {
-    if (entry.deferredNotificationTimer !== null) {
-      clearTimeout(entry.deferredNotificationTimer);
-      entry.deferredNotificationTimer = null;
+    if (entry.deferredTimer !== null) {
+      clearTimeout(entry.deferredTimer);
+      entry.deferredTimer = null;
     }
-    entry.deferredNotification = null;
+    entry.deferred = null;
   }
 
   /**
-   * Release every latched ring across the three tracks, plus any delivery still
-   * deferred behind animation — a path that stops summoning the user must never
-   * leave a timer that summons them a second later. Returns whether a ring was
-   * actually active; a cancelled deferral was never visible and does not count.
+   * The one path every ring takes (`docs/specs/alert.md` -> Clearing And TODO),
+   * whatever the source. Opening a ring starts an episode and shows its own
+   * detail, leaving TODO alone; a source joining an active ring enriches that
+   * same summons, its detail shown only if at least as rich as what is shown.
    */
-  private clearAllRingsIfActive(entry: AlertEntry): boolean {
+  private raiseRing(
+    entry: AlertEntry,
+    source: ListedRingSource | WatchingSource,
+    detail: ActivityNotification,
+  ): void {
+    let ring = entry.ring;
+    if (ring === null) {
+      ring = { episode: createAlertEpisode(), sources: [], watching: null, detail };
+      entry.ring = ring;
+      entry.ackedQuiet = false;
+    } else {
+      ring.detail = richer(ring.detail, detail);
+    }
+    addSource(ring, source);
+  }
+
+  /**
+   * An await answers one source, taking it off the ring. Never an
+   * acknowledgement: a ring left empty goes, leaving no TODO. Returns whether
+   * the source was there.
+   */
+  private withdrawRingSource(entry: AlertEntry, source: RingSource): boolean {
+    const ring = entry.ring;
+    if (ring === null) return false;
+    let empty: boolean;
+    if (source === 'watching') {
+      if (ring.watching === null) return false;
+      empty = dropWatching(ring);
+    } else {
+      if (!ring.sources.includes(source)) return false;
+      ring.sources = ring.sources.filter((candidate) => candidate !== source);
+      empty = ring.sources.length === 0 && ring.watching === null;
+    }
+    if (empty) entry.ring = null;
+    if (source === 'watching') this.answeredWatching(entry);
+    return true;
+  }
+
+  /**
+   * A user verb stops the summons: the whole ring goes, with whatever was held
+   * or deferred behind animation — a path that stops summoning the user must
+   * never leave a timer that summons them a second later. TODO is the caller's
+   * to decide, from the ring returned. Only clearing a ring or a hold records
+   * an acknowledgement.
+   */
+  private clearRingForUser(entry: AlertEntry): Ring | null {
     this.clearDeferredNotification(entry);
-    // Release all three, no short-circuit.
-    const released = [
-      this.releaseRing(entry, 'protocol'),
-      this.releaseRing(entry, 'commandExit'),
-      this.releaseRing(entry, 'watching'),
-    ];
-    return released.includes(true);
+    const { ring, held } = entry;
+    if (ring === null && held === null) return null;
+    entry.ring = null;
+    entry.held = null;
+    entry.ackedQuiet = true;
+    if (ring?.watching || held?.watching) this.answeredWatching(entry);
+    return ring;
   }
 
-  private hasActiveRing(entry: AlertEntry): boolean {
-    return entry.protocolStatus === 'ALERT_RINGING'
-      || entry.commandExitStatus === 'ALERT_RINGING'
-      || entry.watchingRingingCommand !== null;
+  /** A look at a ring: it becomes a TODO, keeping its detail. */
+  private ringToTodo(entry: AlertEntry, ring: Ring | null): void {
+    if (ring === null) return;
+    entry.todo = true;
+    entry.notification = ring.detail;
   }
 
   /**
-   * Open a delivery episode only when no track is ringing yet, so a track
-   * latching behind an already-ringing one enriches that same summons. Nothing
-   * closes one: `getState` masks a stale episode to `null` while no track rings.
+   * A `watching` source was answered: start the detector over, so the tail of
+   * the run that rang cannot settle again straight away. Last in its caller:
+   * the reset publishes.
    */
-  private openEpisode(entry: AlertEntry): void {
-    if (!this.hasActiveRing(entry)) entry.episode = createAlertEpisode();
+  private answeredWatching(entry: AlertEntry): void {
+    entry.detector.reset();
   }
 
-  /** Release one track's latched ring. Returns whether it was ringing. */
-  private releaseRing(entry: AlertEntry, track: 'protocol' | 'commandExit' | 'watching'): boolean {
-    switch (track) {
-      case 'protocol':
-        if (entry.protocolStatus !== 'ALERT_RINGING') return false;
-        entry.protocolStatus = 'IDLE';
-        entry.progress = null;
-        return true;
-      case 'commandExit':
-        if (entry.commandExitStatus !== 'ALERT_RINGING') return false;
-        entry.commandExitStatus = 'IDLE';
-        return true;
-      case 'watching':
-        if (entry.watchingRingingCommand === null) return false;
-        entry.watchingRingingCommand = null;
-        entry.outputSinceWatchingRing = false;
-        // Releasing a WATCHING ring starts the detector over, so the tail of
-        // the run that just rang cannot immediately settle again.
-        entry.detector.reset();
-        return true;
+  // --- Engagement (`docs/specs/alert.md` -> Engagement) ---
+
+  /** Some present viewer points at `id`: all the ring rules read, and what
+   *  keeps a spoken alarm from the pane the user is looking at. */
+  isEngaged(id: string): boolean {
+    for (const focusId of this.viewers.values()) {
+      if (focusId === id) return true;
     }
+    return false;
   }
 
-  // --- Attention tracking ---
+  /**
+   * One renderer realm's presence and focus, as its reporter computed them.
+   * `lapse` says why presence ended, and decides what a Session that stops
+   * being engaged does with the completions it held: an `idle` lapse with focus
+   * unchanged escalates them, anything else drops them.
+   */
+  setViewer(viewerId: string, state: Engagement, lapse?: EngagementLapse): void {
+    // Revalidated: in VS Code the shape crosses from the webview.
+    const focusId = typeof state?.focusId === 'string' ? state.focusId : null;
+    const before = this.viewers.get(viewerId);
+    const after = state?.present === true ? focusId : undefined;
+    if (before === after) return;
+    // Only this viewer moved, so only the Sessions it pointed at can change.
+    const touched = [...new Set([before, after])]
+      .filter((id): id is string => typeof id === 'string')
+      .map((id) => ({ id, was: this.isEngaged(id) }));
+    if (after === undefined) this.viewers.delete(viewerId);
+    else this.viewers.set(viewerId, after);
 
-  private hasAttention(id: string): boolean {
-    return this.attentionId === id;
-  }
-
-  private clearAttentionTimer(): void {
-    if (this.attentionTimer !== null) {
-      clearTimeout(this.attentionTimer);
-      this.attentionTimer = null;
-    }
-  }
-
-  private setAttention(id: string): void {
-    const previousAttentionId = this.attentionId;
-    if (previousAttentionId && previousAttentionId !== id && this.armCommandExitOnAttentionLoss(previousAttentionId)) {
-      this.notify(previousAttentionId);
-    }
-    this.attentionId = id;
-    this.clearAttentionTimer();
-    this.attentionTimer = setTimeout(() => {
-      if (this.attentionId === id) {
-        this.attentionId = null;
-        if (this.armCommandExitOnAttentionLoss(id)) {
-          this.notify(id);
-        }
+    for (const { id, was } of touched) {
+      const entry = this.entries.get(id);
+      if (!entry || this.inert(id) || this.isEngaged(id) === was) continue;
+      if (!was) {
+        this.markSeen(entry);
+      } else if (lapse === 'idle' && focusId === id) {
+        this.escalateHeld(id, entry);
+      } else {
+        // An explicit disengage: focus moved, or the window left.
+        entry.held = null;
       }
-      this.attentionTimer = null;
-    }, this.inactivityTimeoutMs);
+      // COMMAND_EXIT_ARMED is derived from engagement.
+      this.notify(id);
+    }
   }
 
-  attend(id: string): void {
-    if (this.inert(id)) return;
-    const entry = this.getOrCreateEntry(id);
-    this.setAttention(id);
+  /** The realm is gone: a disengage for whatever it pointed at. */
+  removeViewer(viewerId: string): void {
+    this.setViewer(viewerId, NOT_ENGAGED, 'leave');
+  }
 
-    if (this.clearAllRingsIfActive(entry)) entry.todo = true;
-    this.markCommandExitSeen(entry);
+  /** Every present viewer. An absent one engages nothing, so it is not kept. */
+  viewerIds(): string[] {
+    return [...this.viewers.keys()];
+  }
+
+  /**
+   * A human interacted with the Session. Both kinds clear the ring and whatever
+   * it held or deferred, and mark the running command seen; without `input` a
+   * cleared ring becomes a TODO, while `input` — keys, a paste, a drop,
+   * acknowledged as the host writes them — turns TODO off and opens the echo
+   * window, a helper's included, since its detector runs. Never creates an
+   * entry: an id with none — a browser Surface — has nothing to clear.
+   */
+  acknowledge(id: string, { input }: { input: boolean }): void {
+    const entry = this.entries.get(id);
+    if (!entry) return;
+    if (input) entry.echoUntil = Date.now() + cfg.alert.echoWindow;
+    if (this.helpers.has(id)) return;
+    this.markSeen(entry);
+    if (input) {
+      this.setTodoForUser(id, entry, false);
+      return;
+    }
+    this.ringToTodo(entry, this.clearRingForUser(entry));
     this.notify(id);
   }
 
-  clearAttention(id?: string): void {
-    if (id !== undefined && (this.attentionId !== id || this.helpers.has(id))) return;
-    const lostAttentionId = this.attentionId;
-    this.attentionId = null;
-    this.clearAttentionTimer();
-    if (lostAttentionId && this.armCommandExitOnAttentionLoss(lostAttentionId)) {
-      this.notify(lostAttentionId);
+  private markSeen(entry: AlertEntry): void {
+    if (entry.commandExitWatch) entry.commandExitWatch.seen = true;
+  }
+
+  private inEchoWindow(entry: AlertEntry): boolean {
+    return Date.now() < entry.echoUntil;
+  }
+
+  private hold(entry: AlertEntry, source: ListedRingSource | WatchingSource, detail: ActivityNotification, deferred: boolean): void {
+    const held = entry.held ??= { sources: [], watching: null, detail, reportDeferred: false };
+    held.detail = richer(held.detail, detail);
+    held.reportDeferred ||= deferred;
+    addSource(held, source);
+  }
+
+  /**
+   * Presence lapsed from inactivity with focus unchanged: each held source takes
+   * the path it would have taken unengaged, with the richest held detail — a
+   * report whose deferral already came due skipping deferral.
+   */
+  private escalateHeld(id: string, entry: AlertEntry): void {
+    const held = entry.held;
+    if (held === null) return;
+    entry.held = null;
+    if (held.watching !== null) this.holdOrDeliver(id, entry, held.watching, held.detail);
+    for (const source of LISTED_RING_SOURCES) {
+      if (held.sources.includes(source)) this.holdOrDeliver(id, entry, source, held.detail, !held.reportDeferred);
     }
   }
 
   // --- Alert controls ---
 
   dismissAlert(id: string): void {
-    if (this.suspendedForTransfer.has(id)) return;
     const entry = this.entries.get(id);
     if (!entry) return;
 
-    // Dismissing a ring leaves the TODO behind, so the summons is not lost. A
+    // Dismissing a ring leaves a TODO behind, so the summons is not lost. A
     // Session with nothing ringing has nothing to dismiss, and must keep any
     // notification still deferred behind animation.
-    if (!this.hasActiveRing(entry)) return;
-    this.clearAllRingsIfActive(entry);
-    entry.todo = true;
+    if (entry.ring === null) return;
+    this.ringToTodo(entry, this.clearRingForUser(entry));
     this.notify(id);
   }
 
@@ -1085,29 +1235,22 @@ export class AlertManager {
   toggleTodo(id: string): void {
     if (this.inert(id)) return;
     const entry = this.getOrCreateEntry(id);
-    entry.todo = !entry.todo;
-    if (!entry.todo) entry.notification = null;
-    this.clearAllRingsIfActive(entry);
-    this.notify(id);
-  }
-
-  markTodo(id: string): void {
-    if (this.inert(id)) return;
-    const entry = this.getOrCreateEntry(id);
-    const cleared = this.clearAllRingsIfActive(entry);
-    if (entry.todo && !cleared) return;
-    entry.todo = true;
-    this.notify(id);
+    this.setTodoForUser(id, entry, !entry.todo);
   }
 
   clearTodo(id: string): void {
     if (this.inert(id)) return;
-    const entry = this.getOrCreateEntry(id);
-    entry.todo = false;
-    entry.notification = null;
-    // A WATCHING ring may not have created TODO yet; clearing must still
-    // release it and any deferred notification. `notify` dedupes unchanged state.
-    this.clearAllRingsIfActive(entry);
+    this.setTodoForUser(id, this.getOrCreateEntry(id), false);
+  }
+
+  /** A TODO verb: the ring goes with any deferred notification, on keeps the
+   *  ring's detail, and off drops the notification. `notify` dedupes unchanged
+   *  state. */
+  private setTodoForUser(id: string, entry: AlertEntry, todo: TodoState): void {
+    const ring = this.clearRingForUser(entry);
+    if (todo) this.ringToTodo(entry, ring);
+    entry.todo = todo;
+    if (!todo) entry.notification = null;
     this.notify(id);
   }
 
@@ -1115,30 +1258,48 @@ export class AlertManager {
 
   getState(id: string): AlertState {
     const entry = this.entries.get(id);
-    if (!entry) return DEFAULT_ALERT_STATE;
+    if (!entry || this.helpers.has(id)) return DEFAULT_ALERT_STATE;
     return {
-      status: this.getProjectedStatus(entry),
+      status: this.getProjectedStatus(id, entry),
       watchingEnabled: this.isWatching(entry),
       todo: entry.todo,
-      notification: entry.notification,
+      notification: entry.ring?.detail ?? entry.notification,
       awaited: (this.awaits.get(id)?.waiters.size ?? 0) > 0,
-      episode: this.hasActiveRing(entry) ? entry.episode : null,
+      episode: entry.ring?.episode ?? null,
     };
+  }
+
+  /** Whether `id` has state to publish: an entry that is not a helper's.
+   *  Exactly the ids {@link getAllStates} answers. */
+  has(id: string): boolean {
+    return this.entries.has(id) && !this.helpers.has(id);
   }
 
   getAllStates(): Map<string, AlertState> {
     const result = new Map<string, AlertState>();
     for (const [id] of this.entries) {
-      result.set(id, this.getState(id));
+      if (!this.helpers.has(id)) result.set(id, this.getState(id));
     }
     return result;
   }
 
   /** Completely remove alert state for a PTY (used when PTY is destroyed) */
   remove(id: string): void {
-    this.suspendedForTransfer.delete(id);
-    this.liveReplay.delete(id);
-    this.helpers.delete(id);
+    this.discard(id);
+    for (const listener of this.removeListeners) listener(id);
+  }
+
+  /**
+   * A new PTY generation under `id`: what the old one left goes as on
+   * `remove`, but no tombstone, since the output about to arrive is the new
+   * Session's own, and no removal, since the Session lives on.
+   */
+  restart(id: string): void {
+    this.discard(id);
+    this.removed.delete(id);
+  }
+
+  private discard(id: string): void {
     this.removed.add(id);
     // Nobody parked here has anything left to wait for.
     this.settleWaiters(id, 'died');
@@ -1146,15 +1307,15 @@ export class AlertManager {
     // nothing, so holding their closures would only leak them.
     this.claimants.delete(id);
     const entry = this.entries.get(id);
-    if (!entry) return;
-    this.clearDeferredNotification(entry);
-    entry.detector.dispose();
-    this.entries.delete(id);
-    if (this.attentionId === id) {
-      this.attentionId = null;
-      this.clearAttentionTimer();
+    if (entry) {
+      this.clearDeferredNotification(entry);
+      entry.detector.dispose();
+      this.entries.delete(id);
+      this.notify(id);
     }
-    this.notify(id);
+    // Last, so `notify` still knows a helper that never published has nothing
+    // for subscribers to forget.
+    this.helpers.delete(id);
   }
 
   /**
@@ -1168,11 +1329,10 @@ export class AlertManager {
     const entry = this.getOrCreateEntry(id);
     entry.todo = state.todo === true;
     entry.notification = entry.todo ? normalizeActivityNotification(state.notification) : null;
-    entry.watchingRingingCommand = null;
-    entry.outputSinceWatchingRing = false;
-    entry.protocolStatus = 'IDLE';
+    entry.ring = null;
+    entry.held = null;
+    entry.ackedQuiet = false;
     entry.progress = null;
-    entry.commandExitStatus = 'IDLE';
     entry.commandExitWatch = null;
     entry.pendingCommandLine = null;
     this.clearDeferredNotification(entry);
@@ -1181,74 +1341,10 @@ export class AlertManager {
     this.notify(id);
   }
 
-  /** A helper, or a Session suspended for a live handoff, accepts nothing. */
+  /** Whether `id` drops reports, controls and awaits: a helper. The output and
+   *  command-state feeds, which a helper keeps, never check it. */
   private inert(id: string): boolean {
-    return this.helpers.has(id) || this.suspendedForTransfer.has(id);
-  }
-
-  /** Suspend at the output mark. Parked await callers receive an explicit cancellation. */
-  pauseForTransfer(id: string): AlertRuntimeSnapshot | null {
-    const entry = this.entries.get(id);
-    if (!entry) return null;
-    this.settleWaiters(id, 'cancelled');
-    if (this.attentionId === id) {
-      this.attentionId = null;
-      this.clearAttentionTimer();
-      this.armCommandExitOnAttentionLoss(id);
-    }
-    this.suspendedForTransfer.add(id);
-    const { detector, deferredNotificationTimer: _timer, ...state } = entry;
-    const snapshot = structuredClone({ ...state, detector: detector.snapshot() });
-    detector.dispose();
-    if (entry.deferredNotificationTimer !== null) clearTimeout(entry.deferredNotificationTimer);
-    entry.deferredNotificationTimer = null;
-    return snapshot;
-  }
-
-  /** Resume live state before replay; unlike seed, this preserves track and
-   *  episode identity. `replayRequestId` names the one since-mark replay that
-   *  `applyReplay` treats as live output. */
-  resumeFromTransfer(id: string, snapshot: AlertRuntimeSnapshot, replayRequestId?: string): void {
-    if (this.helpers.has(id)) return;
-    this.suspendedForTransfer.delete(id);
-    this.removed.delete(id);
-    if (replayRequestId === undefined) this.liveReplay.delete(id);
-    else this.liveReplay.set(id, replayRequestId);
-    const entry = this.getOrCreateEntry(id);
-    entry.detector.dispose();
-    if (entry.deferredNotificationTimer !== null) clearTimeout(entry.deferredNotificationTimer);
-    const { detector, ...state } = structuredClone(snapshot);
-    Object.assign(entry, state);
-    entry.deferredNotificationTimer = null;
-    entry.detector = this.createDetector(id);
-    entry.detector.restore(detector);
-    if (entry.watchingRingingCommand !== null && !this.watchedCommands.has(entry.watchingRingingCommand)) {
-      entry.watchingRingingCommand = null;
-      entry.outputSinceWatchingRing = false;
-    }
-    if (entry.deferredNotification) {
-      if (this.deferAlertsUntilQuiet) this.scheduleDeferredNotification(id, entry);
-      else this.flushDeferredNotification(id, entry);
-    }
-    this.notify(id);
-  }
-
-  /**
-   * Feed a `pty:replay` chunk. Historical replay applies semantic events alone;
-   * only the live since-mark replay of a Workspace handoff, matched by its
-   * request token, counts as output and fires notification events
-   * (`docs/specs/alert.md` → Live Workspace transfer). Returns the semantic
-   * events for the terminal-state store.
-   */
-  applyReplay(id: string, requestId: string | undefined, parsed: TerminalProtocolParseResult): TerminalSemanticEvent[] {
-    if (requestId !== undefined && this.liveReplay.get(id) === requestId) {
-      this.liveReplay.delete(id);
-      if (parsed.visibleData.length) this.onData(id);
-      applyTerminalProtocolEvents(this, id, parsed.events);
-    }
-    const events = collectTerminalSemanticEvents(parsed.events);
-    this.applyTerminalSemanticEvents(id, events);
-    return events;
+    return this.helpers.has(id);
   }
 
   dispose(): void {
@@ -1260,15 +1356,14 @@ export class AlertManager {
       entry.detector.dispose();
     }
     this.entries.clear();
-    this.suspendedForTransfer.clear();
-    this.liveReplay.clear();
     this.removed.clear();
     this.helpers.clear();
     this.awaits.clear();
     this.claimants.clear();
+    this.viewers.clear();
     this.listeners.clear();
+    this.removeListeners.clear();
     this.lastEmitted.clear();
-    this.clearAttentionTimer();
   }
 
   // --- Internals ---
@@ -1281,7 +1376,7 @@ export class AlertManager {
    * was killed (see `removed`).
    */
   private streamEntry(id: string): AlertEntry | null {
-    if (this.removed.has(id) || this.suspendedForTransfer.has(id)) return null;
+    if (this.removed.has(id)) return null;
     return this.getOrCreateEntry(id);
   }
 
@@ -1295,15 +1390,16 @@ export class AlertManager {
     return this.getOrCreateEntry(id);
   }
 
-  private getProjectedStatus(entry: AlertEntry): SessionStatus {
-    if (this.hasActiveRing(entry)) return 'ALERT_RINGING';
-    if (entry.protocolStatus === 'OSC_NOTIF_BUSY') return 'OSC_NOTIF_BUSY';
+  private getProjectedStatus(id: string, entry: AlertEntry): SessionStatus {
+    if (entry.ring !== null) return 'ALERT_RINGING';
+    if (entry.progress !== null) return 'OSC_NOTIF_BUSY';
     // WATCHING outranks the command-exit arm: a watched command is by
     // definition running, so COMMAND_EXIT_ARMED would otherwise mask the
     // detector's busy/quiet states for the entire run. The detector is derived
     // from real output, so it is the more informative of the two.
     if (this.isWatching(entry)) return entry.detector.getStatus();
-    if (entry.commandExitStatus === 'COMMAND_EXIT_ARMED') return 'COMMAND_EXIT_ARMED';
+    // Armed: a seen command running while nobody engages it.
+    if (entry.commandExitWatch?.seen && !this.isEngaged(id)) return 'COMMAND_EXIT_ARMED';
     return 'WATCHING_DISABLED';
   }
 
@@ -1312,18 +1408,17 @@ export class AlertManager {
     if (!entry) {
       entry = {
         detector: this.createDetector(id),
-        watchingRingingCommand: null,
-        outputSinceWatchingRing: false,
-        episode: null,
-        protocolStatus: 'IDLE',
+        ring: null,
+        ackedQuiet: false,
         progress: null,
-        commandExitStatus: 'IDLE',
         commandExitWatch: null,
         pendingCommandLine: null,
         todo: false,
         notification: null,
-        deferredNotification: null,
-        deferredNotificationTimer: null,
+        deferred: null,
+        deferredTimer: null,
+        held: null,
+        echoUntil: 0,
       };
       this.entries.set(id, entry);
     }
@@ -1333,7 +1428,8 @@ export class AlertManager {
   private notify(id: string): void {
     const state = this.getState(id);
     const last = this.lastEmitted.get(id);
-    if (last && alertStatesEqual(last, state)) return;
+    // A helper publishes nothing, but takes back what it published before a demotion.
+    if (last ? alertStatesEqual(last, state) : this.helpers.has(id)) return;
     if (this.entries.has(id)) {
       this.lastEmitted.set(id, state);
     } else {
@@ -1375,6 +1471,12 @@ function awaitCauseFor(until: AwaitUntil, event: CompletionEvent): AwaitCause | 
 /** An await that was over before it parked: nothing to cancel, nothing to clean up. */
 function settledAwait(outcome: AwaitOutcome): AwaitHandle {
   return { promise: Promise.resolve(outcome), cancel: () => {} };
+}
+
+/** Names the running command when there is one: its watch key, else its display command. */
+function progressTitle(watch: CommandExitWatch | null, outcome: ProgressOutcome): string {
+  const titles = PROGRESS_TITLES[outcome];
+  return watch === null ? titles.alone : `${watch.watchKey ?? watch.displayCommand} ${titles.afterCommand}`;
 }
 
 function formatCommandExitBody(displayCommand: string, exitCode: number | undefined): string {

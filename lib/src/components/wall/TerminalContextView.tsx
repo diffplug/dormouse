@@ -52,7 +52,7 @@ export interface TerminalContextViewProps {
   origin?: { x: number; y: number };
   defaultCommand?: string; title: string; surfaceRef: string; cwd: string; helperCwd?: string; mismatch?: boolean;
   titleSources: { source: string; value: string; note?: string }[];
-  scan: ContextScan; argv0?: string | null; watching: boolean; todo: boolean;
+  scan: ContextScan; watchRule?: string | null; watching: boolean; todo: boolean;
   notification?: { title: string | null; body: string | null } | null;
   status: HelperStatus; command: string; warning?: string;
   explorerLabel: string; canExplore: boolean; canAgent: boolean; canIframe: boolean;
@@ -183,7 +183,8 @@ export function TerminalContextView(p: TerminalContextViewProps) {
   const submit = async (action: Action) => { setBusy(true); if (await attempt(action)) setDetail(null); setBusy(false); };
   const status = HELPER_STATUS[p.status];
   const isTool = p.terminalRole === 'tool';
-  const statusLabel = isTool ? (p.status === 'running' ? `Running ${p.command}…` : 'At prompt') : status.label(p.command);
+  // A Tool's command is whatever its shell reported, line breaks included.
+  const statusLabel = isTool ? (p.status === 'running' ? `Running ${p.command.replace(/\s+/g, ' ')}…` : 'At prompt') : status.label(p.command);
   const placement = p.placement;
   return <section ref={surface} aria-label="Terminal context" data-terminal-context tabIndex={-1} inert={p.closing} aria-hidden={p.closing || undefined} style={SURFACE_STYLE} data-context-side={placement?.side}
     className={`${TERMINAL_CONTEXT_SURFACE_CLASS} ${motionClass} ${p.closing ? 'pointer-events-none' : ''} absolute inset-0 flex flex-col overflow-hidden text-sm outline-none`}
@@ -222,7 +223,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
               </div>
             </>}
           </div>
-          <span className="text-muted">Alerts</span><div className="flex min-h-6 flex-wrap items-center gap-2"><span>{p.argv0 ? `Watch all ${p.argv0} commands` : 'No command running'}</span>{p.argv0 && <OnOffSwitch on={p.watching} onEnable={p.onWatch} onDisable={p.onWatch} label={`Watch all ${p.argv0} commands`} />}<span className="mx-1 h-3 border-l border-border" /><span>TODO</span><OnOffSwitch on={p.todo} onEnable={p.onTodo} onDisable={p.onTodo} label="TODO" /></div>
+          <span className="text-muted">Alerts</span><div className="flex min-h-6 flex-wrap items-center gap-2"><span>{p.watchRule ? `Watch all ${p.watchRule} commands` : 'No command running'}</span>{p.watchRule && <OnOffSwitch on={p.watching} onEnable={p.onWatch} onDisable={p.onWatch} label={`Watch all ${p.watchRule} commands`} />}<span className="mx-1 h-3 border-l border-border" /><span>TODO</span><OnOffSwitch on={p.todo} onEnable={p.onTodo} onDisable={p.onTodo} label="TODO" /></div>
         </div>
         {p.notification && <div className="ml-12 mt-2 border-l-2 border-border py-1 pl-3"><div>{p.notification.title}</div><div className="whitespace-pre-wrap text-muted">{p.notification.body}</div></div>}
       </div>
