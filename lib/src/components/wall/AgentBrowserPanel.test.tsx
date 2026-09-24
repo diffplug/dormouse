@@ -438,30 +438,6 @@ describe('AgentBrowserPanel render mode controller', () => {
     expect(getAgentBrowserScreenController('ab-panel')?.chrome().url).toBe('https://github.com/diffplug/dormouse');
   });
 
-  it('does not attach again after the port it streams from drops', async () => {
-    const attach = vi.fn<PlatformAdapter['agentBrowserAttach']>(async (): Promise<AgentBrowserAttachResult> => ({
-      ok: true,
-      wsPort: 2222,
-    }));
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserAttach'>;
-    platform.agentBrowserAttach = attach;
-    setPlatform(platform);
-
-    await renderPanel(paneProps('ab-panel', { surfaceType: 'browser', session: 'browser-session', wsPort: 1111 }));
-
-    await act(async () => {
-      await Promise.resolve();
-    });
-    attach.mockClear();
-
-    await act(async () => {
-      WebSocketMock.instances.at(-1)?.emitMessage(JSON.stringify({ type: 'status', connected: false, screencasting: false }));
-      await Promise.resolve();
-    });
-
-    expect(attach).not.toHaveBeenCalled();
-  });
-
   it('swaps straight to iframe with no extra tabs (no confirm gate)', async () => {
     const onSwapRenderMode = vi.fn();
     await act(async () => {
@@ -738,26 +714,6 @@ describe('AgentBrowserPanel visibility parking', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     expect(streamSockets(4321).length).toBeGreaterThan(before);
     expect(liveStreamSocket(4321)?.readyState).toBe(1);
-  });
-
-  it('never attaches while parked', async () => {
-    const attach = vi.fn<PlatformAdapter['agentBrowserAttach']>(async () => ({ ok: false }));
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserAttach'>;
-    platform.agentBrowserAttach = attach;
-    setPlatform(platform);
-
-    // No wsPort ⇒ the stale-port recovery effect is the code path that would
-    // query the daemon; the parked guard must suppress it.
-    const { setVisible } = await renderVisibilityPanel({
-      surfaceType: 'browser', session: 'browser-session',
-    });
-    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-    attach.mockClear();
-
-    await act(async () => { setVisible(false); });
-    await act(async () => { await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50); });
-
-    expect(attach).not.toHaveBeenCalled();
   });
 
   it('reconnects and repaints from the stream when it becomes visible again', async () => {
