@@ -16,15 +16,15 @@
 import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
-import { promises as fs, statSync } from 'fs';
+import { promises as fs } from 'fs';
 // All external spawns go through dor-lib-common's spawnAndCapture, which owns the
 // Windows recipe (cross-spawn for PATHEXT/.cmd, windowsHide, exit-vs-close). The
 // GUI host needs it even for the absolute `binaryPath` dor ab resolved.
 // See docs/specs/dor-cli.md → "Spawning External Binaries".
 import {
+  BROWSER_PROVIDERS,
+  isDirectory,
   spawnAndCapture,
-  parseStreamPort,
-  streamStatusArgs,
   AGENT_BROWSER_BIN_ENV,
   DEFAULT_AGENT_BROWSER_BIN,
 } from 'dor-lib-common';
@@ -33,13 +33,21 @@ import { parseAgentBrowserTabs } from '../lib/agent-browser-tab';
 import type { BrowserResult } from '../lib/platform/browser-automation';
 import type { BrowserAct, BrowserProvider, LiveBrowser, ProviderBinding } from './browser-host';
 
+const SESSION_ARGS = BROWSER_PROVIDERS['agent-browser'].sessionArgs;
+
+// `tab`'s own verbs, which a tab id rendered after `tab` would run instead.
+const TAB_VERBS = new Set(['new', 'close', 'list']);
+
 /** The agent-browser argv for an operation — rebuilt from its validated
- *  fields, so no caller token reaches the CLI as it came. */
-function actArgv(act: BrowserAct): string[] {
+ *  fields, so no caller token reaches the CLI as it came; null for a tab id
+ *  that would read as one of `tab`'s verbs. */
+function actArgv(act: BrowserAct): string[] | null {
   switch (act.op) {
     case 'navigate': return ['open', act.url];
     case 'history': return [act.dir];
-    case 'tab': return act.action === 'select' ? ['tab', act.tabId] : ['tab', 'close', act.tabId];
+    case 'tab':
+      if (TAB_VERBS.has(act.tabId)) return null;
+      return act.action === 'select' ? ['tab', act.tabId] : ['tab', 'close', act.tabId];
     case 'viewport': return ['set', 'viewport', String(act.width), String(act.height), String(act.dpr)];
     case 'device': return ['set', 'device', act.name];
     case 'cdpUrl': return ['get', 'cdp-url'];
@@ -58,6 +66,26 @@ function parseCdpUrl(stdout: string): string | null {
     // Plain text is the common CLI output.
   }
   return trimmed.match(/ws:\/\/\S+/)?.[0] ?? null;
+}
+
+/** argv for `stream status --json`, whose output `parseStreamPort` reads. */
+function streamStatusArgs(session: string): string[] {
+  return [...SESSION_ARGS(session), 'stream', 'status', '--json'];
+}
+
+/**
+ * The stream WebSocket port `stream status --json` printed. The CLI wraps
+ * payloads as either `{ port }` or `{ data: { port } }`; tolerate both, and
+ * return undefined for anything malformed or non-finite.
+ */
+export function parseStreamPort(stdout: string): number | undefined {
+  try {
+    const parsed = JSON.parse(stdout) as { port?: unknown; data?: { port?: unknown } };
+    const port = parsed.data?.port ?? parsed.port;
+    return typeof port === 'number' && Number.isFinite(port) ? port : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** One CLI run's outcome. */
@@ -135,7 +163,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
   }
 
   function run(b: ProviderBinding, args: string[], options?: { timeoutMs?: number; cwd?: string }): Promise<CliResult> {
-    return runWithBinaryFallback(['--session', b.session, ...args], b.binaryPath, options);
+    return runWithBinaryFallback([...SESSION_ARGS(b.session), ...args], b.binaryPath, options);
   }
 
   // Read a session's stream WebSocket port via `stream status --json` — only
@@ -231,15 +259,6 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
     return pid;
   }
 
-  /** The launch's working directory: the project's, so agent-browser reads its
-   *  `./agent-browser.json`, while that directory still exists. */
-  function projectDir(cwd: string | undefined): string | undefined {
-    try {
-      return cwd !== undefined && statSync(cwd).isDirectory() ? cwd : undefined;
-    } catch {
-      return undefined;
-    }
-  }
 
   return {
     pollMs: 100,
@@ -249,11 +268,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
     // One socket directory per host, so the session names the daemon.
     identity: (b) => b.session,
 
-    describe: (b) => ({
-      session: b.session,
-      ...(b.cwd !== undefined ? { cwd: b.cwd } : {}),
-      ...(b.binaryPath !== undefined ? { binaryPath: b.binaryPath } : {}),
-    }),
+    describe: (b) => b,
 
     // The daemon as its state files describe it — a CLI verb would start one
     // to answer. One up but not streaming is left alone: relaunching would
@@ -272,7 +287,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
     // as "daemon already running" (a no-op without a daemon: `close` starts
     // none).
     async stop(b, timeoutMs) {
-      await run(b, ['close'], { timeoutMs: Math.max(0, timeoutMs) });
+      await run(b, ['close'], { timeoutMs });
       return killDaemon(b.session);
     },
 
@@ -281,7 +296,10 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
     // browser live on the page — and every other daemon command queues behind
     // it. Run in the project directory, for the config a `dor ab` there read.
     async open(b, url, headed) {
-      const result = await run(b, [...(headed ? ['--headed'] : []), 'open', url ?? 'about:blank'], { cwd: projectDir(b.cwd) });
+      // The project's directory, so agent-browser reads its
+      // `./agent-browser.json`, while that directory still exists.
+      const cwd = b.cwd !== undefined && isDirectory(b.cwd) ? b.cwd : undefined;
+      const result = await run(b, [...(headed ? ['--headed'] : []), 'open', url ?? 'about:blank'], { cwd });
       log(`[ab-relaunch] open session=${b.session} exit=${result.exitCode}${result.stderr.trim() ? ` stderr=${result.stderr.trim()}` : ''}`);
       return { exitCode: result.exitCode, stderr: result.stderr };
     },
@@ -306,7 +324,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
     },
 
     async close(b, timeoutMs) {
-      const result = await run(b, ['close'], timeoutMs === undefined ? {} : { timeoutMs: Math.max(0, timeoutMs) });
+      const result = await run(b, ['close'], { timeoutMs });
       if (result.exitCode !== 0) throw new Error(cliError(result));
     },
 
@@ -323,8 +341,14 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
       }
     },
 
+    async closeTab(b, tabId) {
+      await run(b, ['tab', 'close', tabId]);
+    },
+
     async act(b, act): Promise<BrowserResult> {
-      const result = await run(b, actArgv(act));
+      const argv = actArgv(act);
+      if (!argv) return { ok: false, error: 'invalid tab operation' };
+      const result = await run(b, argv);
       if (result.exitCode !== 0) return { ok: false, error: cliError(result) };
       if (act.op !== 'cdpUrl') return { ok: true };
       const url = parseCdpUrl(result.stdout);

@@ -1,5 +1,5 @@
-import { BROWSER_PROVIDERS, sessionForKey, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
-import type { BrowserBinding } from 'dor/commands/types';
+import { sessionForKey, type BrowserAutomationProvider, type BrowserBinding } from 'dor-lib-common/browser-providers';
+import { isAllowedBinaryFor } from '../../lib/agent-browser-binary';
 
 /**
  * The binding of a managed `--key` no Surface holds yet
@@ -30,7 +30,7 @@ export class BrowserBindingReservations {
     const binding: BrowserBinding = {
       session,
       cwd: p.cwd,
-      ...(BROWSER_PROVIDERS[provider].isAllowedBinary(p.binaryPath) ? { binaryPath: p.binaryPath } : {}),
+      ...(isAllowedBinaryFor(provider, p.binaryPath) ? { binaryPath: p.binaryPath } : {}),
     };
     if (this.pending.size >= 1024) this.pending.delete(this.pending.keys().next().value!);
     this.pending.set(reservationKey(provider, key), { binding, expires: now + 120_000 });

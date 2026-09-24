@@ -4,18 +4,13 @@
  * provider-tagged request the host validates once and turns into fixed
  * operations — no CLI argv, script or CDP method crosses it.
  */
-import type { BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
+import type { BrowserAutomationProvider, BrowserBinding } from 'dor-lib-common/browser-providers';
 
 export type { BrowserAutomationProvider };
 
-/** What a request names its browser by: the provider's native session, the
- *  directory its CLI runs in, and the executable. Only a `launch` may omit the
- *  session, and the host then mints one. */
-export interface BrowserRequestBinding {
-  session?: string;
-  cwd?: string;
-  binaryPath?: string;
-}
+/** What a request names its browser by. Only a `launch` may omit the session,
+ *  and the host then mints one. */
+export type BrowserRequestBinding = Partial<BrowserBinding>;
 
 /** A native editing operation the stream's input path cannot dispatch
  *  (CDP drops the `commands` field on macOS). The host owns the script for
@@ -105,6 +100,12 @@ export function playwrightTextInputs(text: string): { type: 'input_text'; text: 
     start = end;
   }
   return messages;
+}
+
+/** Whether a tab shows nothing: empty, or the blank page a launch can leave. */
+export function isBlankUrl(url: string): boolean {
+  const trimmed = url.trim();
+  return trimmed === '' || trimmed === 'about:blank';
 }
 
 /** A URL a browser provider may launch, relaunch or navigate to: http(s) only,

@@ -9,7 +9,7 @@ import { createServer, type Server } from 'node:http';
 import { realpathSync } from 'node:fs';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Browser, Page, CDPSession } from 'playwright-core';
-import { spawnAndCapture } from 'dor-lib-common';
+import { BROWSER_PROVIDERS, spawnAndCapture } from 'dor-lib-common';
 import { messageOf } from '../lib/errors';
 import { PLAYWRIGHT_TEXT_INPUT_MAX, type BrowserResult } from '../lib/platform/browser-automation';
 import type { BrowserProvider, LiveBrowser } from './browser-host';
@@ -85,7 +85,7 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
   const log = (e: unknown) => deps.log?.(`[playwright] ${messageOf(e)}`);
   /** One CLI call, ended after `timeoutMs` (none for `null`); throws when it could not run or finish. */
   async function cli(b: Binding, args: string[], timeoutMs: number | null = CLI_TIMEOUT_MS) {
-    const r = await spawnAndCapture(b.install.binary, [`--session=${b.session}`, ...args], {
+    const r = await spawnAndCapture(b.install.binary, [...BROWSER_PROVIDERS.playwright.sessionArgs(b.session), ...args], {
       cwd: b.cwd,
       ...(timeoutMs === null ? {} : { timeoutMs: Math.max(0, timeoutMs) }),
     });
@@ -389,8 +389,7 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
     },
 
     async close(b, timeoutMs) {
-      await invalidate(b);
-      const r = await cli(b, ['close'], timeoutMs ?? CLI_TIMEOUT_MS);
+      const r = await cli(b, ['close'], timeoutMs);
       if (r.exitCode !== 0) throw new Error(exited(r));
     },
 
@@ -399,6 +398,11 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
     async listTabs(b) {
       const v = await connect(b);
       return pagesOf(v).map((page, index) => ({ tabId: String(index), url: page.url() }));
+    },
+
+    // The sweep's own close: no refresh around it, unlike a GUI tab close.
+    async closeTab(b, tabId) {
+      await cli(b, ['tab-close', tabId]);
     },
 
     async act(b, act): Promise<BrowserResult> {

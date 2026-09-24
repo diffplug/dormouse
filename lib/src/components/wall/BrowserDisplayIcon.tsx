@@ -6,14 +6,12 @@ import {
   PictureInPictureIcon,
 } from '@phosphor-icons/react';
 import { BROWSER_PROVIDER_IDS, BROWSER_PROVIDERS } from 'dor-lib-common/browser-providers';
-import type { BrowserDisplayMode } from './agent-browser-screen';
-import { BROWSER_PROVIDER_GUI } from './browser-automation';
+import { BROWSER_VIEWS, displayModeFor, displayView, type BrowserDisplayMode, type BrowserView } from './agent-browser-screen';
 
-type AutomatedView = 'resize' | 'fixed' | 'popout';
-const VIEW_LABEL: Record<AutomatedView, string> = { resize: 'resizes with pane', fixed: 'fixed size', popout: 'popout' };
+const VIEW_LABEL: Record<BrowserView, string> = { resize: 'resizes with pane', fixed: 'fixed size', popout: 'popout' };
 /** How the human view is presented: one glyph per view, the embed framed like
  *  a pane-sized screencast. */
-const VIEW_ICON: Record<AutomatedView | 'iframe', Icon> = {
+const VIEW_ICON: Record<BrowserView | 'iframe', Icon> = {
   resize: FrameCornersIcon,
   fixed: PictureInPictureIcon,
   popout: ArrowSquareOutIcon,
@@ -22,14 +20,10 @@ const VIEW_ICON: Record<AutomatedView | 'iframe', Icon> = {
 
 /** Every display mode's label: `<provider> <view>`, and the embed. */
 export const BROWSER_DISPLAY_LABEL = Object.fromEntries([
-  ...BROWSER_PROVIDER_IDS.flatMap((provider) => (Object.keys(VIEW_LABEL) as AutomatedView[]).map((view) =>
-    [`${BROWSER_PROVIDERS[provider].alias}-${view}`, `${BROWSER_PROVIDER_GUI[provider].label} ${VIEW_LABEL[view]}`])),
+  ...BROWSER_PROVIDER_IDS.flatMap((provider) => BROWSER_VIEWS.map((view) =>
+    [displayModeFor(provider, view), `${BROWSER_PROVIDERS[provider].label} ${VIEW_LABEL[view]}`])),
   ['iframe', 'iframe embed'],
 ]) as Record<BrowserDisplayMode, string>;
-
-function viewOf(mode: BrowserDisplayMode): AutomatedView | 'iframe' {
-  return mode === 'iframe' ? 'iframe' : mode.slice(mode.indexOf('-') + 1) as AutomatedView;
-}
 
 /** Compact custom robot whose wide silhouette survives the 12–14px chrome. */
 export function AgentRobotIcon({
@@ -70,7 +64,7 @@ export function BrowserPresentationIcon({
   size: number;
   className?: string;
 }) {
-  const Glyph = VIEW_ICON[viewOf(mode)];
+  const Glyph = VIEW_ICON[displayView(mode)];
   return <Glyph size={size} className={className} />;
 }
 

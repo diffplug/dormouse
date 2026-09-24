@@ -5,10 +5,10 @@
  * `BrowserCliDescriptor` of what genuinely differs (docs/specs/dor-cli.md →
  * "Browser Surface Addressing").
  */
-import { statSync } from 'node:fs';
 import {
   BROWSER_PROVIDERS,
   browserBinaryIsMissing,
+  isDirectory,
   resolveBinaryPath,
   sessionForKey,
   spawnAndCapture,
@@ -48,18 +48,9 @@ export type ResolvedSessionFlags = { rest: string[]; workspace?: string } & (
   | { surface: string; session?: undefined; key?: undefined }
 );
 
-/** What differs between the providers sharing the identity flags. */
-export interface SessionFlagOptions {
-  /** How the `--key` charset error names the provider's sessions. */
-  sessionNoun?: string;
-  /** The provider CLI's own spellings of `--session` (Playwright's `-s`);
-   *  reported as `--session` in errors. */
-  sessionAliases?: readonly string[];
-}
-
 export function extractSessionFlags(
   args: string[],
-  { sessionNoun = 'an agent-browser session name', sessionAliases = [] }: SessionFlagOptions = {},
+  { sessionNoun, sessionAliases = [] }: Pick<BrowserCliDescriptor, 'sessionNoun' | 'sessionAliases'>,
 ): ParseResult<ResolvedSessionFlags> {
   const values = new Map<InterceptedFlag, string>();
   const rest: string[] = [];
@@ -188,13 +179,10 @@ export async function execBrowserProcess(binary: string, args: string[], cwd?: s
  *  override, default name and allowlist come from the provider registry. */
 export interface BrowserCliDescriptor {
   provider: BrowserAutomationProvider;
-  /** The provider's name in messages. */
-  label: string;
-  /** The provider CLI's own session flag, as argv. */
-  sessionArgs(session: string): string[];
   /** How the `--key` charset error names the provider's sessions. */
   sessionNoun: string;
-  /** The provider CLI's own spellings of `--session` (Playwright's `-s`). */
+  /** The provider CLI's own spellings of `--session` (Playwright's `-s`);
+   *  reported as `--session` in errors. */
   sessionAliases?: readonly string[];
   /** The verbs whose target `resolveOpenTargetArgs` rewrites. */
   navigationVerbs: ReadonlySet<string>;
@@ -213,21 +201,13 @@ export interface BrowserCliDescriptor {
   exec(options: CliOptions): BrowserExec | undefined;
 }
 
-function isDirectory(path: string): boolean {
-  try {
-    return statSync(path, { throwIfNoEntry: false })?.isDirectory() ?? false;
-  } catch {
-    return false;
-  }
-}
-
 /**
  * Forward `args` to the provider's CLI against the session the identity flags
  * name, then open or reuse the Surface bound to it (docs/specs/dor-browser.md
  * → "Managed identity").
  */
 export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], options: CliOptions): Promise<CliResult> {
-  const parsed = extractSessionFlags(args, { sessionNoun: d.sessionNoun, sessionAliases: d.sessionAliases });
+  const parsed = extractSessionFlags(args, d);
   if (!parsed.ok) return fail(parsed.message);
   const flags = parsed.value;
 
@@ -259,7 +239,7 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
   // removed worktree). Say so, rather than let the spawn's ENOENT read as a
   // missing CLI on every later command.
   if (d.projectScoped && binding.cwd !== undefined && !isDirectory(binding.cwd)) {
-    return fail(`The directory this ${d.label} browser was first opened in no longer exists: ${binding.cwd}\nClose its Dormouse pane, or use another --key.`);
+    return fail(`The directory this ${spec.label} browser was first opened in no longer exists: ${binding.cwd}\nClose its Dormouse pane, or use another --key.`);
   }
   const cwd = d.projectScoped ? binding.cwd ?? callerCwd : undefined;
 
@@ -274,8 +254,10 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
   // comes back from the host (and off a hand-editable session file), so it
   // passes the same allowlist the host spawns under or the caller's own runs
   // instead — as it also does once the pinned one is gone (an uninstall, a Node
-  // version switch).
-  let pinned = d.projectScoped && spec.isAllowedBinary(binding.binaryPath, env[spec.binEnv]) ? binding.binaryPath : undefined;
+  // version switch). A pin that is the caller's own executable changes nothing.
+  let pinned = d.projectScoped && binding.binaryPath !== defaultBinaryPath && spec.isAllowedBinary(binding.binaryPath, env[spec.binEnv])
+    ? binding.binaryPath
+    : undefined;
   let replacedPin = '';
   if (pinned !== undefined && browserBinaryIsMissing(pinned, env, resolveBinaryPath(pinned, env))) {
     replacedPin = `Warning: this browser's ${spec.defaultBin} (${pinned}) is gone; ran ${defaultBinaryPath ?? defaultBinary} instead.\n`;
@@ -300,7 +282,7 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
     // Windows, so an `agent-browser.cmd` sitting in a cloned repository would
     // win the race against the real install (docs/specs/dor-cli.md ->
     // "Spawning External Binaries"). `?? binary` is reached only by a stub.
-    const forwarded = [...(binding.session === undefined ? [] : d.sessionArgs(binding.session)), ...rest];
+    const forwarded = [...(binding.session === undefined ? [] : spec.sessionArgs(binding.session)), ...rest];
     result = await (cwd === undefined ? exec(binaryPath ?? binary, forwarded) : exec(binaryPath ?? binary, forwarded, cwd));
   } catch (error) {
     return isMissingBinaryError(error) ? fail(d.missingBinaryMessage(binary)) : fail(errorMessage(error));
@@ -362,10 +344,7 @@ async function resolveBinding(
       ...(flags.key === undefined ? { surface: flags.surface } : { key: flags.key, ...(proposed ? { proposed } : {}) }),
       ...workspaceParam(flags.workspace),
     });
-    if (binding) return { ok: true, value: binding };
-    return flags.key === undefined
-      ? { ok: false, message: `The surface has no ${d.label} session yet.` }
-      : { ok: true, value: { session: sessionForKey(flags.key) } };
+    return { ok: true, value: binding };
   } catch (error) {
     return { ok: false, message: errorMessage(error) };
   }

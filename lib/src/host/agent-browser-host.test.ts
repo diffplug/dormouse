@@ -4,7 +4,7 @@ import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BrowserOp, BrowserRequestBinding } from '../lib/platform/browser-automation';
-import { createAgentBrowserProvider } from './agent-browser-host';
+import { createAgentBrowserProvider, parseStreamPort } from './agent-browser-host';
 import { createBrowserHost } from './browser-host';
 
 type SpawnResult = { stdout?: string; stderr?: string; code?: number };
@@ -84,8 +84,7 @@ function writeState(session: string, ext: 'pid' | 'stream', value: number): void
 
 // The host spawns through dor-lib-common's spawnAndCapture; mock just that
 // boundary (not its internal cross-spawn — spawnAndCapture's own behavior is
-// covered by dor-lib-common's tests), keeping the package's other real exports
-// (e.g. parseStreamPort).
+// covered by dor-lib-common's tests), keeping the package's other real exports.
 vi.mock('dor-lib-common', async (importOriginal) => ({
   ...(await importOriginal<typeof import('dor-lib-common')>()),
   spawnAndCapture: spawnMock,
@@ -855,6 +854,16 @@ describe('agent-browser host edit ops', () => {
       expect(args.slice(0, 3)).toEqual(['--session', 'sess', 'eval']);
       expect(typeof args[3]).toBe('string');
       expect(args[3]).toContain('document');
+    }
+  });
+});
+
+describe('parseStreamPort', () => {
+  it('reads a top-level or nested port, and nothing from malformed or portless output', () => {
+    expect(parseStreamPort(JSON.stringify({ port: 61218 }))).toBe(61218);
+    expect(parseStreamPort(JSON.stringify({ data: { port: 5173 } }))).toBe(5173);
+    for (const stdout of ['not json', JSON.stringify({ data: {} }), JSON.stringify({ port: 'nope' })]) {
+      expect(parseStreamPort(stdout)).toBeUndefined();
     }
   });
 });

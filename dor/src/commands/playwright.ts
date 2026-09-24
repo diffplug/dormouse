@@ -1,12 +1,12 @@
 /** Playwright's native CLI with Dormouse addressing and a shared browser pane. */
 import { buildCommand } from '@stricli/core';
-import { BROWSER_PROVIDERS, PLAYWRIGHT_BIN_ENV } from 'dor-lib-common';
+import { BROWSER_PROVIDERS, PLAYWRIGHT_BIN_ENV, type BrowserAutomationProvider } from 'dor-lib-common';
 import { runBrowserCli, type BrowserCliDescriptor } from './browser-cli.js';
 import type { CliOptions, CliResult, Command, DorCommandContext } from './types.js';
 import { stringParser, workspaceFlag } from './shared.js';
 
 export const playwrightCommand: Command = {
-  name: 'playwright',
+  name: 'playwright' satisfies BrowserAutomationProvider,
   command: buildCommand<{ key?: string; session?: string; surface?: string; workspace?: string }, string[], DorCommandContext>({
     docs: {
       brief: 'Drive a browser surface via your Playwright CLI install (alias: dor pw).',
@@ -48,8 +48,6 @@ Examples:
 
 const PLAYWRIGHT: BrowserCliDescriptor = {
   provider: 'playwright',
-  label: 'Playwright',
-  sessionArgs: (session) => [`--session=${session}`],
   sessionNoun: 'a Playwright session name',
   sessionAliases: ['-s'],
   // `open` restarts the browser, `goto` navigates the current tab.

@@ -3,7 +3,7 @@
  * stricli so forwarded arguments are never parsed as dor flags. */
 
 import { buildCommand } from '@stricli/core';
-import { AGENT_BROWSER_BIN_ENV, BROWSER_PROVIDERS, DEFAULT_AGENT_BROWSER_BIN } from 'dor-lib-common';
+import { AGENT_BROWSER_BIN_ENV, BROWSER_PROVIDERS, DEFAULT_AGENT_BROWSER_BIN, type BrowserAutomationProvider } from 'dor-lib-common';
 import { runBrowserCli, type BrowserCliDescriptor } from './browser-cli.js';
 import type { CliOptions, CliResult, Command, DorCommandContext } from './types.js';
 import { stringParser, workspaceFlag } from './shared.js';
@@ -33,7 +33,7 @@ function missingBinaryMessage(binary: string): string {
 }
 
 export const agentBrowserCommand: Command = {
-  name: 'agent-browser',
+  name: 'agent-browser' satisfies BrowserAutomationProvider,
   helpPatches: [
     {
       scope: 'root',
@@ -113,8 +113,6 @@ Examples:
 // resolves the same in all three.
 const AGENT_BROWSER: BrowserCliDescriptor = {
   provider: 'agent-browser',
-  label: 'agent-browser',
-  sessionArgs: (session) => ['--session', session],
   sessionNoun: 'an agent-browser session name',
   navigationVerbs: new Set(['open', 'goto', 'navigate']),
   // `close` tears the session down; the Wall notices the stream dropping and

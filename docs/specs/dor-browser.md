@@ -517,9 +517,8 @@ file is reused per session: its reader leaves it, the next capture overwrites
 it.
 
 Source of truth: `lib/src/host/browser-host.ts` (`parseBrowserRequest`,
-`createBrowserHost`, `BrowserProvider`, `isAgentBrowserSession`,
-`isPlaywrightSession`), `BROWSER_PROVIDERS` in
-`dor-lib-common/src/browser-providers.ts`, `BrowserRequest` in
+`createBrowserHost`, `BrowserProvider`), `BROWSER_PROVIDERS` (`isSessionName`,
+`isAllowedBinary`) in `dor-lib-common/src/browser-providers.ts`, `BrowserRequest` in
 `lib/src/lib/platform/browser-automation.ts`, `browserHandle` in
 `lib/src/components/wall/browser-automation.ts`,
 `lib/src/host/private-capture-dir.ts`, `vscode-ext/src/agent-browser-host.ts`,

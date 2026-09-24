@@ -4,7 +4,7 @@
  * released by Wall on kill/render swap: `closeBrowserSurface` closes the
  * session too, `disposeAgentBrowserSurfaceController` only the client side.
  */
-import { isBrowsableUrl, playwrightTextInputs, type BrowserAutomationProvider, type BrowserResult } from '../../lib/platform/browser-automation';
+import { isBlankUrl, isBrowsableUrl, type BrowserAutomationProvider, type BrowserResult } from '../../lib/platform/browser-automation';
 import { isAllowedBinaryFor } from '../../lib/agent-browser-binary';
 import { readTextFromClipboard } from '../../lib/clipboard';
 import { isAbDebugLogsEnabled } from '../../lib/feature-flags';
@@ -20,13 +20,16 @@ import {
   openAgentBrowserScreenModal,
 } from './agent-browser-screen';
 import { hostPathDisplay, tabDisplayTitle } from './browser-url';
-import { parseRenderMode, renderModeFor } from 'dor-lib-common/browser-providers';
+import { parseRenderMode } from 'dor-lib-common/browser-providers';
 import {
   BROWSER_PROVIDER_GUI,
   browserHandle,
+  headedRenderMode,
   hostSupportsBrowser,
+  isHeadedMode,
   offeredRenderModes,
   launchBinaryPath,
+  providerUnavailable,
   rememberLaunchBinaryPath,
   surfaceProvider,
   type BrowserHandle,
@@ -86,9 +89,7 @@ function dprMatch(a: number, b: number): boolean {
 // A stray about:blank the close+reopen of a relaunch can surface is never the
 // page the pane shows.
 function isShownUrl(url: string | null | undefined): url is string {
-  if (typeof url !== 'string') return false;
-  const trimmed = url.trim();
-  return trimmed !== '' && trimmed !== 'about:blank';
+  return typeof url === 'string' && !isBlankUrl(url);
 }
 
 /** The DOM-free key shape the controller's keyboard bridge consumes. A
@@ -225,6 +226,7 @@ export class AgentBrowserSurfaceController {
   }
 
   private phase: Phase = { k: 'idle' };
+  private handleCache: { session?: string; cwd?: string; binaryPath?: string; handle: BrowserHandle | null } | null = null;
   /** The presentation this Surface shows: a separate OS window, or in the pane.
    *  Seeded from `renderMode`; changed by a relaunch (optimistically, reverted
    *  if it fails) or, for Playwright, by a native relaunch the host reports. */
@@ -372,7 +374,7 @@ export class AgentBrowserSurfaceController {
     this.latestRestorableUrl = isBrowsableUrl(params.url) ? params.url : undefined;
     // Headedness is derived from the canonical renderMode; an unset mode (a
     // direct mount in tests) is not popped out.
-    this.headed = parseRenderMode(params.renderMode).presentation === 'popout';
+    this.headed = isHeadedMode(params.renderMode);
     // A fresh surface auto-engages sync (no persisted flag); a re-attached one
     // restores whatever was persisted into the layout blob.
     this.syncEngaged = params.syncEngaged ?? true;
@@ -473,7 +475,7 @@ export class AgentBrowserSurfaceController {
 
   /** The render mode this Surface shows now. */
   private renderMode(): RenderMode {
-    return renderModeFor(this.provider, this.headed ? 'popout' : 'screencast');
+    return headedRenderMode(this.provider, this.headed);
   }
 
   private get label(): string {
@@ -683,7 +685,7 @@ export class AgentBrowserSurfaceController {
    */
   private followParamsHeadedness(renderMode: RenderMode): void {
     if (this.phase.k === 'relaunching') return;
-    const headed = parseRenderMode(renderMode).presentation === 'popout';
+    const headed = isHeadedMode(renderMode);
     if (headed === this.headed) return;
     // The last status came from the old browser; auto-revert waits for the
     // new stream's own before it treats a disconnect as the window closing.
@@ -790,7 +792,7 @@ export class AgentBrowserSurfaceController {
     // A launch that cannot start settles as late as one that fails, so whoever
     // created this Surface is always listening by then.
     const opened: Promise<BrowserResult> = !browser
-      ? Promise.resolve({ ok: false, error: `${this.label} is unavailable on this host` })
+      ? Promise.resolve({ ok: false, error: providerUnavailable(this.provider) })
       : !url
         ? Promise.resolve({ ok: false, error: 'no page to open' })
         : browser.launch(url, headed);
@@ -948,7 +950,8 @@ export class AgentBrowserSurfaceController {
     // frame pulse.
     const screenshotLoop = createScreenshotLoop({
       capture: (opts) => this.driver()?.screenshot(opts) ?? null,
-      isCapable: () => !!this.driver(),
+      // Checked per stream frame: the gate, without building a handle.
+      isCapable: () => this.phase.k === 'live' && !!this.session && this.hosted,
       draw: this.drawBitmap,
       // A re-attach bumps drawGeneration so a fresh (blank) canvas repaints even
       // when the capture bytes are identical to the last displayed frame.
@@ -1458,7 +1461,7 @@ export class AgentBrowserSurfaceController {
     this.setHeaded(headed);
     this.writeParams({ renderMode: this.renderMode() });
     abDebugLog(`[ab-panel] ${headed ? 'popOut' : 'popIn'} -> ${JSON.stringify({ session, url: target })}`);
-    this.handle(session)!.launch(target, headed).then((res) => {
+    this.handle()!.launch(target, headed).then((res) => {
       abDebugLog(`[ab-panel] relaunch result ${JSON.stringify(res)}`);
       // Closed meanwhile, the host closes what this brought up after it.
       if (this.phase !== phase) return;
@@ -1506,9 +1509,15 @@ export class AgentBrowserSurfaceController {
   }
 
   /** The bound session's browser, whatever the phase: for what the gate does
-   *  not cover — a launch, attach or relaunch, the stream URL, a close. */
-  private handle(session = this.session): BrowserHandle | null {
-    return browserHandle(this.provider, { session, cwd: this.cwd, binaryPath: this.binaryPath });
+   *  not cover — a launch, attach or relaunch, the stream URL, a close.
+   *  Rebuilt only when the binding changes: captures take it per frame. */
+  private handle(): BrowserHandle | null {
+    const { session, cwd, binaryPath } = this;
+    const cached = this.handleCache;
+    if (cached && cached.session === session && cached.cwd === cwd && cached.binaryPath === binaryPath) return cached.handle;
+    const handle = browserHandle(this.provider, { session, cwd, binaryPath });
+    this.handleCache = { session, cwd, binaryPath, handle };
+    return handle;
   }
 
   /** One browser operation through the gate, warned about when it fails;
@@ -1587,23 +1596,9 @@ export class AgentBrowserSurfaceController {
 
   // cmd/ctrl-V types the LOCAL clipboard into the page. Plain key forwarding
   // would trigger paste of the embedded Chromium's own (empty) clipboard, so
-  // bridge by replaying the text: agent-browser's stream takes only key events,
-  // so as per-character keyDown events; the Playwright host inserts it whole.
+  // bridge by replaying the text as the provider's viewer takes it.
   private insertText(text: string): void {
-    if (this.provider === 'playwright') {
-      for (const message of playwrightTextInputs(text)) this.send(message);
-      return;
-    }
-    for (const ch of text) {
-      if (ch === '\r') continue;
-      if (ch === '\n') {
-        this.send({ type: 'input_keyboard', eventType: 'keyDown', key: 'Enter', code: 'Enter', text: '\r', windowsVirtualKeyCode: 13, modifiers: 0 });
-        this.send({ type: 'input_keyboard', eventType: 'keyUp', key: 'Enter', code: 'Enter', text: '', windowsVirtualKeyCode: 13, modifiers: 0 });
-      } else {
-        this.send({ type: 'input_keyboard', eventType: 'keyDown', key: ch, code: '', text: ch, windowsVirtualKeyCode: 0, modifiers: 0 });
-        this.send({ type: 'input_keyboard', eventType: 'keyUp', key: ch, code: '', text: '', windowsVirtualKeyCode: 0, modifiers: 0 });
-      }
-    }
+    for (const message of BROWSER_PROVIDER_GUI[this.provider].pasteMessages(text)) this.send(message);
   }
 
   handleKeyDownLike(e: KeyLike): void {
@@ -1736,7 +1731,7 @@ export function disposeAgentBrowserSurfaceController(id: string): void {
  * (`lib/src/lib/agent-browser-binary.ts`).
  */
 function closeSessionOn(provider: BrowserAutomationProvider, cwd: string | undefined, session: string, binaryPath: unknown): Promise<void> {
-  return browserHandle(provider, { session, cwd, binaryPath: allowedBinaryPath(binaryPath, provider) })?.close().then(() => {}) ?? Promise.resolve();
+  return browserHandle(provider, { session, cwd, binaryPath })?.close().then(() => {}) ?? Promise.resolve();
 }
 
 /** Hand `id`'s controller a port a `dor` command just learned, with the

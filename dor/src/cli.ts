@@ -7,6 +7,7 @@ import {
   type ApplicationText,
   type StricliProcess,
 } from '@stricli/core';
+import { BROWSER_PROVIDER_IDS, BROWSER_PROVIDERS, isBrowserProvider, type BrowserAutomationProvider } from 'dor-lib-common';
 import { agentBrowserCommand, runAgentBrowserCli } from './commands/agent-browser.js';
 import { appCommand } from './commands/app.js';
 import { awaitCommand } from './commands/await.js';
@@ -201,11 +202,8 @@ export async function runCli(rawArgv: string[], options: CliOptions = {}): Promi
   // provider's CLI, so they must never reach stricli's flag parser. Only a bare
   // `--help`/`-h` (or `dor help agent-browser`, normalized above) falls through
   // to stricli.
-  if (argv[0] === 'agent-browser' && !isPassthroughHelpInvocation(argv)) {
-    return runAgentBrowserCli(argv.slice(1), options);
-  }
-  if (argv[0] === 'playwright' && !isPassthroughHelpInvocation(argv)) {
-    return runPlaywrightCli(argv.slice(1), options);
+  if (isBrowserProvider(argv[0]) && !isPassthroughHelpInvocation(argv)) {
+    return BROWSER_CLIS[argv[0]](argv.slice(1), options);
   }
   // `dor __view-file <file>` is the built-in viewer's private entry
   // (docs/specs/dor-tool.md -> Opening local files). Its server outlives this
@@ -255,11 +253,14 @@ function normalizeVersionAlias(argv: string[]): string[] {
   return argv;
 }
 
+/** Each browser provider's passthrough, run under its id as the command. */
+const BROWSER_CLIS: Record<BrowserAutomationProvider, (args: string[], options: CliOptions) => Promise<CliResult>> = {
+  'agent-browser': runAgentBrowserCli,
+  playwright: runPlaywrightCli,
+};
+
 /** The documented short aliases of the browser passthroughs. */
-const PASSTHROUGH_ALIASES = new Map([
-  ['ab', 'agent-browser'],
-  ['pw', 'playwright'],
-]);
+const PASSTHROUGH_ALIASES = new Map<string, string>(BROWSER_PROVIDER_IDS.map((provider) => [BROWSER_PROVIDERS[provider].alias, provider]));
 
 /** Expand a passthrough's short alias, in any help form. */
 function normalizePassthroughAlias(argv: string[]): string[] {

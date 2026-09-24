@@ -45,7 +45,7 @@ import {
 import { attachSurfacePorts } from './surface-ports';
 import { browserSurfaceUrl, hostPathDisplay, iframeRefusal } from './browser-url';
 import { isBrowserProvider, parseRenderMode, renderModeFor } from 'dor-lib-common/browser-providers';
-import { BROWSER_PROVIDER_GUI, browserHandle, rememberLaunchBinaryPath } from './browser-automation';
+import { BROWSER_PROVIDER_GUI, browserHandle, headedRenderMode, providerUnavailable, rememberLaunchBinaryPath } from './browser-automation';
 import { BrowserBindingReservations } from './browser-binding-reservations';
 import {
   agentBrowserSessionFromParams,
@@ -786,7 +786,7 @@ export function useDorControl({
       nativeIdentity,
       // The host reports headedness a native launch changed; the controller
       // follows it (`followParamsHeadedness`).
-      ...(headed !== undefined ? { renderMode: renderModeFor(provider, headed ? 'popout' : 'screencast') } : {}),
+      ...(headed !== undefined ? { renderMode: headedRenderMode(provider, headed) } : {}),
       ...(binaryPath !== undefined ? { binaryPath } : {}),
     };
     // The stream port is no param: the command just learned it, so the
@@ -1605,11 +1605,21 @@ export function useDorControl({
       return;
     }
 
-    // `surface.resolveAgentBrowser` is the pre-merge spelling an older `dor ab`
-    // sends: the same answer, as the bare session it read.
+    // The provider a browser request names: agent-browser for the pre-merge
+    // spellings an older `dor ab` sends, else its `provider`.
+    const requestedProvider = (legacy: boolean): BrowserAutomationProvider | null => {
+      if (legacy) return 'agent-browser';
+      if (isBrowserProvider(params.provider)) return params.provider;
+      detail.respond({ ok: false, error: `unknown browser provider '${String(params.provider)}'` });
+      return null;
+    };
+
+    // `surface.resolveAgentBrowser` answers the same, as the bare session the
+    // older `dor ab` read.
     if (detail.method === SURFACE_CONTROL_METHODS.resolveBrowser || detail.method === SURFACE_CONTROL_METHODS.resolveAgentBrowser) {
       const legacy = detail.method === SURFACE_CONTROL_METHODS.resolveAgentBrowser;
-      const provider = !legacy && isBrowserProvider(params.provider) ? params.provider : 'agent-browser';
+      const provider = requestedProvider(legacy);
+      if (!provider) return;
       // `--surface`: that Surface's binding, once it is this provider's and named.
       const key = stringParam(params.key);
       if (key === undefined) {
@@ -1629,12 +1639,11 @@ export function useDorControl({
       return;
     }
 
-    // `surface.agentBrowser` is the pre-merge spelling an older `dor ab` sends,
-    // with a stream port it read itself; the host's own answer is the one used.
+    // `surface.agentBrowser` carries a stream port the older `dor ab` read
+    // itself; the host's own answer is the one used.
     if (detail.method === SURFACE_CONTROL_METHODS.browser || detail.method === SURFACE_CONTROL_METHODS.agentBrowser) {
-      const provider = detail.method === SURFACE_CONTROL_METHODS.browser && isBrowserProvider(params.provider)
-        ? params.provider
-        : 'agent-browser';
+      const provider = requestedProvider(detail.method === SURFACE_CONTROL_METHODS.agentBrowser);
+      if (!provider) return;
       const session = stringParam(params.session);
       if (!session) {
         detail.respond({ ok: false, error: 'session is required' });
@@ -1662,7 +1671,7 @@ export function useDorControl({
       if (key) browserReservations.current.confirm(provider, key);
       const browser = browserHandle(provider, { session, cwd, binaryPath });
       if (!browser) {
-        detail.respond({ ok: false, error: `${BROWSER_PROVIDER_GUI[provider].label} is unavailable on this host` });
+        detail.respond({ ok: false, error: providerUnavailable(provider) });
         return;
       }
       // The host reports where the session the command just drove streams,

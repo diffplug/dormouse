@@ -30,7 +30,7 @@ import {
 import type { RenderMode, ScreenController, ScreenSnapshot } from './agent-browser-screen';
 import { browserDisplayMode, useAgentBrowserChromeSnapshot, useAgentBrowserScreenSnapshot } from './agent-browser-screen';
 import { BROWSER_PROVIDER_IDS, parseRenderMode, renderModeFor } from 'dor-lib-common/browser-providers';
-import { BROWSER_PROVIDER_GUI } from './browser-automation';
+import { BROWSER_PROVIDER_GUI, surfaceProvider } from './browser-automation';
 import { iframeRefusal } from './browser-url';
 import {
   AgentRobotIcon,
@@ -86,7 +86,7 @@ export function AgentBrowserScreenModal({
   const selected = parseRenderMode(renderMode);
   const viewportDisabled = selected.presentation !== 'screencast';
   // Each screencast's device presets are its own provider's.
-  const devices = BROWSER_PROVIDER_GUI[selected.provider ?? 'agent-browser'].devices;
+  const devices = BROWSER_PROVIDER_GUI[surfaceProvider(renderMode)].devices;
   // Whether Apply changes the render backend (vs only tweaking the current
   // screencast's viewport). A swap is gated on whether its option is shown, not
   // on the viewport-drive capability below.
@@ -267,7 +267,7 @@ export function AgentBrowserScreenModal({
 
       {!hostCapable && !viewportDisabled && !switchingMode && (
         <p className="mt-3 text-xs text-muted">
-          This host can't drive the browser viewport; run <span className="font-mono">{BROWSER_PROVIDER_GUI[parseRenderMode(currentMode).provider ?? 'agent-browser'].viewportHint}</span> from a
+          This host can't drive the browser viewport; run <span className="font-mono">{BROWSER_PROVIDER_GUI[surfaceProvider(currentMode)].viewportHint}</span> from a
           terminal instead.
         </p>
       )}

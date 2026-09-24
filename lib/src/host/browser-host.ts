@@ -13,10 +13,18 @@
 import { randomBytes } from 'crypto';
 import * as path from 'path';
 import { promises as fs } from 'fs';
-import { isBrowserProvider, sessionForKey, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
+import {
+  BROWSER_PROVIDERS,
+  isBrowserProvider,
+  sessionForKey,
+  type BrowserAutomationProvider,
+  type BrowserBinding,
+} from 'dor-lib-common/browser-providers';
 import { messageOf } from '../lib/errors';
+import { settleAllWithin } from '../lib/settle-within';
 import {
   BROWSER_REQUEST_TIMEOUT_MS,
+  isBlankUrl,
   isBrowsableUrl,
   type BrowserEditOp,
   type BrowserOp,
@@ -32,11 +40,7 @@ export type BrowserAct = Extract<BrowserOp, { op: 'navigate' | 'history' | 'tab'
 
 /** The binding a provider runs one request with: the session named, or minted
  *  for a new launch. */
-export interface ProviderBinding {
-  session: string;
-  cwd?: string;
-  binaryPath?: string;
-}
+export type ProviderBinding = BrowserBinding;
 
 /** A browser that is up: where it streams, and whether it runs headed when the
  *  provider can tell. */
@@ -62,7 +66,7 @@ export interface BrowserProvider<B = unknown> {
    *  on, and what a Surface is found by. */
   identity(b: B): string;
   /** What a launch or attach answers with beside the port. */
-  describe(b: B): { session: string; cwd?: string; binaryPath?: string };
+  describe(b: B): BrowserBinding;
   /** The live browser, found without starting one; `gone` (why) when nothing
    *  runs the session, `named` when something still carries its name, so a
    *  relaunch stops it first. Throws when one runs that cannot be viewed. */
@@ -79,12 +83,14 @@ export interface BrowserProvider<B = unknown> {
   probe(b: B, launch: { replaced: unknown; opened?: OpenOutcome; deadline: number }): Promise<LiveBrowser | { failed: string } | undefined>;
   /** How often a launch probes, in ms. */
   readonly pollMs: number;
-  /** Close the session; throws when the CLI refused. */
+  /** Close the session; throws when the CLI refused. The host has released
+   *  `b` first. */
   close(b: B, timeoutMs?: number): Promise<void>;
   /** Drop what the provider holds for `b` besides the session itself. */
   release?(b: B): Promise<void>;
-  /** The session's tabs, for the post-launch sweep. */
+  /** The session's tabs, and closing one, for the post-launch sweep. */
   listTabs(b: B): Promise<{ tabId: string; url: string }[]>;
+  closeTab(b: B, tabId: string): Promise<void>;
   act(b: B, act: BrowserAct): Promise<BrowserResult>;
   /** Run one of the host's fixed editing scripts in the page. */
   evaluate(b: B, script: string): Promise<unknown>;
@@ -124,7 +130,7 @@ const EDIT_SCRIPTS: Record<BrowserEditOp, string> = {
  *  `hasOwnProperty.call` keeps the table's own three names the only ones that
  *  select a script. Same guard, same reason as `own()` in
  *  `RemoteControlSection.tsx`. */
-export function editScript(op: unknown): string | undefined {
+function editScript(op: unknown): string | undefined {
   return typeof op === 'string' && Object.prototype.hasOwnProperty.call(EDIT_SCRIPTS, op)
     ? EDIT_SCRIPTS[op as BrowserEditOp]
     : undefined;
@@ -136,30 +142,7 @@ function generateGuiSession(): string {
   return sessionForKey(`gui-${randomBytes(6).toString('hex')}`);
 }
 
-/** An agent-browser session name. `dor ab --session` passes a user's raw name
- *  through, so anything goes but what agent-browser would read as an option or
- *  its socket directory as a path: the name lands after `--session` and in
- *  `<socket dir>/<session>.pid`, whose pid a relaunch signals. */
-export function isAgentBrowserSession(value: unknown): value is string {
-  return typeof value === 'string' && /^(?!-)[^/\\\x00-\x1f\x7f]{1,200}$/.test(value);
-}
-
-/** A Playwright session name: Dormouse mints these, and the host passes them
- *  as `--session=<name>`, so a strict charset costs nothing. */
-export function isPlaywrightSession(value: unknown): value is string {
-  return typeof value === 'string' && /^[A-Za-z0-9._-]{1,200}$/.test(value);
-}
-
-/** Each provider's session charset — the name lands on its CLI's command
- *  line and, for agent-browser, in a socket-directory path. */
-const SESSION_NAME: Record<BrowserAutomationProvider, (value: unknown) => value is string> = {
-  'agent-browser': isAgentBrowserSession,
-  playwright: isPlaywrightSession,
-};
-
 const TAB_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
-// agent-browser's own `tab` verbs, which a tab id rendered after `tab` would run.
-const TAB_VERBS = new Set(['new', 'close', 'list']);
 const DEVICE_NAME = /^[A-Za-z0-9][A-Za-z0-9 ()._-]{0,63}$/;
 
 function dimension(value: unknown, max: number): number | null {
@@ -180,7 +163,7 @@ function jpegQuality(quality: unknown): number {
  * options anywhere on its command line (rationale in docs/specs/dor-browser.md
  * → "Browser Host").
  */
-export function parseBrowserRequest(raw: unknown): BrowserRequest | string {
+function parseBrowserRequest(raw: unknown): BrowserRequest | string {
   if (!raw || typeof raw !== 'object') return 'invalid browser request';
   const r = raw as Record<string, unknown>;
   const provider = r.provider;
@@ -188,7 +171,7 @@ export function parseBrowserRequest(raw: unknown): BrowserRequest | string {
   const given = (r.binding && typeof r.binding === 'object' ? r.binding : {}) as Record<string, unknown>;
   const binding: BrowserRequestBinding = {};
   if (given.session !== undefined) {
-    if (!SESSION_NAME[provider](given.session)) return 'a valid session name is required';
+    if (!BROWSER_PROVIDERS[provider].isSessionName(given.session)) return 'a valid session name is required';
     binding.session = given.session;
   }
   if (typeof given.cwd === 'string' && path.isAbsolute(given.cwd)) binding.cwd = given.cwd;
@@ -212,13 +195,14 @@ function parseOp(r: Record<string, unknown>): BrowserOp | string {
     case 'launch':
       return { op: 'launch', ...(isBrowsableUrl(r.url) ? { url: r.url } : {}), headed: r.headed === true };
     case 'attach':
-      return { op: 'attach', ...(isBrowsableUrl(r.url) ? { url: r.url } : {}), headed: r.headed === true };
+      return { op: 'attach', ...(isBrowsableUrl(r.url) ? { url: r.url } : {}), ...(r.headed === true ? { headed: true } : {}) };
     case 'streamUrl': {
       const port = r.port;
       return typeof port === 'number' && Number.isInteger(port) && port > 0 && port <= 65535 ? { op: 'streamUrl', port } : 'a stream port is required';
     }
     case 'screenshot':
-      return { op: 'screenshot', format: r.format === 'png' ? 'png' : 'jpeg', quality: jpegQuality(r.quality) };
+      // Normalized where it is taken (`screenshot`).
+      return { op: 'screenshot', ...(r.format === 'png' ? { format: 'png' } : {}), ...(typeof r.quality === 'number' ? { quality: r.quality } : {}) };
     case 'edit':
       return editScript(r.edit) !== undefined ? { op: 'edit', edit: r.edit as BrowserEditOp } : `unknown edit op '${String(r.edit)}'`;
     case 'navigate':
@@ -227,7 +211,7 @@ function parseOp(r: Record<string, unknown>): BrowserOp | string {
       return r.dir === 'back' || r.dir === 'forward' || r.dir === 'reload' ? { op: 'history', dir: r.dir } : 'unknown history direction';
     case 'tab': {
       const { action, tabId } = r;
-      if ((action !== 'select' && action !== 'close') || typeof tabId !== 'string' || !TAB_ID.test(tabId) || TAB_VERBS.has(tabId)) return 'invalid tab operation';
+      if ((action !== 'select' && action !== 'close') || typeof tabId !== 'string' || !TAB_ID.test(tabId)) return 'invalid tab operation';
       return { op: 'tab', action, tabId };
     }
     case 'viewport': {
@@ -255,11 +239,6 @@ const REQUEST_BUDGET_MS = BROWSER_REQUEST_TIMEOUT_MS - 2_000;
 const OPEN_SETTLE_MS = 4_000;
 const LAUNCH_CLOSE_RESERVE_MS = OPEN_SETTLE_MS + 4_000;
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
-
-function isBlankTab(url: string): boolean {
-  const trimmed = url.trim();
-  return trimmed === '' || trimmed === 'about:blank';
-}
 
 /** Screenshots answer with their bytes, or — to the sidecar, whose Rust
  *  caller reads the file itself — with the private file holding them. */
@@ -323,6 +302,12 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     return generation;
   }
 
+  /** Release what the provider holds for the browser, then close its session. */
+  async function shut({ p, b }: Bound, timeoutMs?: number): Promise<void> {
+    await p.release?.(b);
+    await p.close(b, timeoutMs === undefined ? undefined : Math.max(0, timeoutMs));
+  }
+
   // Browsers launched headed are real OS windows, so shutdown closes them.
   // Headless ones are left alive to reattach across webview reloads.
   const headed = new Map<string, Bound>();
@@ -343,7 +328,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     const deadline = requestDeadline - LAUNCH_CLOSE_RESERVE_MS;
     if (Date.now() >= deadline) throw new Error('the browser launch timed out behind an earlier one');
     const generation = await invalidate(bound);
-    const replaced = fresh ? undefined : await p.stop(b, deadline - Date.now());
+    const replaced = fresh ? undefined : await p.stop(b, Math.max(0, deadline - Date.now()));
     const token = {};
     latestLaunch.set(id, token);
     // Before the launch, so a window whose page never loads is still closed.
@@ -376,12 +361,12 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     // browser it then brings up is one nothing tracks. Let it land first; if it
     // is still running, close again once it does, unless a newer launch has
     // taken the session over by then.
-    const landed = await Promise.race([opening.then(() => true), wait(OPEN_SETTLE_MS).then(() => false)]);
-    await p.close(b, requestDeadline - Date.now()).catch(log);
+    const [landed] = await settleAllWithin([opening.then(() => true)], OPEN_SETTLE_MS, false);
+    await shut(bound, requestDeadline - Date.now()).catch(log);
     if (latestLaunch.get(id) === token) headed.delete(id);
     if (!landed) {
       void opening.then(async () => {
-        if (latestLaunch.get(id) === token) await p.close(b);
+        if (latestLaunch.get(id) === token) await shut(bound);
       }).catch(log);
     }
     throw new Error(opened?.stderr.trim() || why || 'the browser launch timed out');
@@ -401,7 +386,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       // Last first, so a provider that names tabs by index keeps the rest's.
       for (const tab of [...tabs].reverse()) {
         if (!current()) return;
-        if (isBlankTab(tab.url)) await p.act(b, { op: 'tab', action: 'close', tabId: tab.tabId });
+        if (isBlankUrl(tab.url)) await p.closeTab(b, tab.tabId);
       }
     }).catch(log);
   }
@@ -425,7 +410,8 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   function closeSession(bound: Bound): Promise<void> {
     closesArrived.set(bound.id, (closesArrived.get(bound.id) ?? 0) + 1);
     return serialize(bound.id, async () => {
-      // The session is closed on purpose, so it is no longer shutdown's to close.
+      // The session is closed on purpose, so it is no longer shutdown's to
+      // close. Invalidating released it.
       await invalidate(bound);
       headed.delete(bound.id);
       await bound.p.close(bound.b);
@@ -470,7 +456,8 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     captureNames.delete(id);
   }
 
-  function screenshot({ p, b, id }: Bound, opts: { format: 'jpeg' | 'png'; quality: number }, transport: Transport): Promise<BrowserResult> {
+  function screenshot({ p, b, id }: Bound, asked: { format?: 'jpeg' | 'png'; quality?: number }, transport: Transport): Promise<BrowserResult> {
+    const opts = { format: asked.format === 'png' ? 'png' as const : 'jpeg' as const, quality: jpegQuality(asked.quality) };
     const mime = opts.format === 'png' ? 'image/png' : 'image/jpeg';
     // Joined whole, read and unlink included: a caller joining only the capture
     // would read a file the first caller has already removed.
@@ -546,7 +533,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
           await closeSession(bound);
           return { ok: true };
         case 'screenshot':
-          return await screenshot(bound, { format: r.format ?? 'jpeg', quality: r.quality ?? 85 }, transport);
+          return await screenshot(bound, r, transport);
         case 'edit':
           return await edit(bound, r.edit);
         default:
@@ -566,16 +553,12 @@ export function createBrowserHost(deps: BrowserHostDeps) {
      *  drop the capture directory, so no frame of the user's browser outlives
      *  the process that took it. */
     close: async () => {
-      closed = true;
       // Every launch and sweep still pending now finds itself superseded.
-      for (const [id, generation] of generations) generations.set(id, generation + 1);
+      closed = true;
       const windows = [...headed.values()];
       headed.clear();
       await Promise.all([
-        ...windows.map(async ({ p, b }) => {
-          await p.release?.(b);
-          await p.close(b).catch(log);
-        }),
+        ...windows.map((bound) => shut(bound).catch(log)),
         captures.remove().then(() => captureNames.clear()),
       ]);
       await Promise.allSettled(lifecycle.values());
@@ -584,4 +567,3 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   };
 }
 
-export type BrowserHost = ReturnType<typeof createBrowserHost>;

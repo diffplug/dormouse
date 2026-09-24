@@ -3,6 +3,7 @@ export type { SpawnCaptureResult } from './spawn.js';
 export {
   binaryCandidateNames,
   browserBinaryIsMissing,
+  isDirectory,
   isExecutableFile,
   resolveBinaryPath,
 } from './resolve-binary.js';
@@ -12,20 +13,10 @@ export {
   isAllowedAgentBrowserBinary,
   isAllowedPlaywrightBinary,
   isBrowserProvider,
-  parseRenderMode,
-  parseStreamPort,
-  renderModeFor,
   sessionForKey,
-  streamStatusArgs,
   AGENT_BROWSER_BIN_ENV,
   DEFAULT_AGENT_BROWSER_BIN,
   PLAYWRIGHT_BIN_ENV,
   DEFAULT_PLAYWRIGHT_BIN,
 } from './browser-providers.js';
-export type {
-  AutomatedRenderMode,
-  BrowserAutomationProvider,
-  BrowserPresentation,
-  ParsedRenderMode,
-  SurfaceRenderMode,
-} from './browser-providers.js';
+export type { BrowserAutomationProvider, BrowserBinding } from './browser-providers.js';

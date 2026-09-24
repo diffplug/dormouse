@@ -39,6 +39,15 @@ export function isExecutableFile(candidate: string, isWindows: boolean): boolean
   }
 }
 
+/** Whether `candidate` is a directory that exists. */
+export function isDirectory(candidate: string): boolean {
+  try {
+    return statSync(candidate).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The filenames to try for a bare `binary`, in order — `which`'s extension logic,
  * which the walk has to reproduce because its answer is what gets spawned. Takes

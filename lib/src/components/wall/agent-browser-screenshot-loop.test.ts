@@ -2,19 +2,19 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { FakePtyAdapter, getPlatform, setPlatform } from '../../lib/platform';
-import type { AgentBrowserScreenshotResult, PlatformAdapter } from '../../lib/platform/types';
+import type { BrowserResult } from '../../lib/platform/browser-automation';
 import { createScreenshotLoop } from './agent-browser-screenshot-loop';
 
 // Drive the loop directly (no controller/React): it owns backpressure, byte
-// dedup, and the draw-generation key. The host screenshot is faked through the
-// platform; createImageBitmap is stubbed (jsdom has none).
+// dedup, and the draw-generation key. The host capture is a fake the loop's
+// `capture` calls; createImageBitmap is stubbed (jsdom has none).
 
-function setScreenshot(fn: PlatformAdapter['agentBrowserScreenshot']): void {
-  const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserScreenshot'>;
-  platform.agentBrowserScreenshot = fn;
-  setPlatform(platform);
+type HostScreenshot = (opts: { format: 'jpeg'; quality: number }) => Promise<BrowserResult>;
+let hostScreenshot: HostScreenshot | undefined;
+function setScreenshot(fn: HostScreenshot): void {
+  hostScreenshot = fn;
 }
+const capture = (opts: { format: 'jpeg'; quality: number }) => hostScreenshot?.(opts) ?? null;
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -24,7 +24,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
-  setPlatform(new FakePtyAdapter());
+  hostScreenshot = undefined;
 });
 
 describe('screenshot loop byte dedup', () => {
@@ -34,7 +34,7 @@ describe('screenshot loop byte dedup', () => {
     setScreenshot(screenshot);
     const draw = vi.fn();
     const loop = createScreenshotLoop({
-      capture: (opts) => getPlatform().agentBrowserScreenshot?.('sess', opts) ?? null,
+      capture,
       isCapable: () => true,
       draw,
     });
@@ -61,7 +61,7 @@ describe('screenshot loop byte dedup', () => {
     const draw = vi.fn();
     let generation = 0;
     const loop = createScreenshotLoop({
-      capture: (opts) => getPlatform().agentBrowserScreenshot?.('sess', opts) ?? null,
+      capture,
       isCapable: () => true,
       draw,
       getDrawGeneration: () => generation,
@@ -87,13 +87,13 @@ describe('screenshot loop backpressure', () => {
     // provisionally, its pulse is consumed by the capture that frame started, and
     // the stream then goes quiet. Dropping the stale result without leaving work
     // pending would strand the pane on the blurry frame until the page changes.
-    let release: ((res: AgentBrowserScreenshotResult) => void) | undefined;
-    const screenshot = vi.fn(() => new Promise<AgentBrowserScreenshotResult>((r) => { release = r; }));
-    setScreenshot(screenshot as unknown as PlatformAdapter['agentBrowserScreenshot']);
+    let release: ((res: BrowserResult) => void) | undefined;
+    const screenshot = vi.fn(() => new Promise<BrowserResult>((r) => { release = r; }));
+    setScreenshot(screenshot as unknown as HostScreenshot);
     const draw = vi.fn();
     let provisionalGeneration = 0;
     const loop = createScreenshotLoop({
-      capture: (opts) => getPlatform().agentBrowserScreenshot?.('sess', opts) ?? null,
+      capture,
       isCapable: () => true,
       draw,
       getProvisionalGeneration: () => provisionalGeneration,
@@ -128,7 +128,7 @@ describe('screenshot loop backpressure', () => {
     let provisionalGeneration = 0;
     let provisionalDeadline = 0;
     const loop = createScreenshotLoop({
-      capture: (opts) => getPlatform().agentBrowserScreenshot?.('sess', opts) ?? null,
+      capture,
       isCapable: () => true,
       draw,
       getProvisionalGeneration: () => provisionalGeneration,
@@ -162,7 +162,7 @@ describe('screenshot loop backpressure', () => {
     const draw = vi.fn();
     let provisionalGeneration = 0;
     const loop = createScreenshotLoop({
-      capture: (opts) => getPlatform().agentBrowserScreenshot?.('sess', opts) ?? null,
+      capture,
       isCapable: () => true,
       draw,
       getProvisionalGeneration: () => provisionalGeneration,
@@ -191,13 +191,13 @@ describe('screenshot loop backpressure', () => {
 
   it('coalesces pulses during an in-flight capture into a single follow-up', async () => {
     // A capture that stays in flight until we resolve it, so we can pulse during it.
-    const releases: Array<(res: AgentBrowserScreenshotResult) => void> = [];
-    const screenshot = vi.fn(() => new Promise<AgentBrowserScreenshotResult>((resolve) => { releases.push(resolve); }));
-    setScreenshot(screenshot as unknown as PlatformAdapter['agentBrowserScreenshot']);
+    const releases: Array<(res: BrowserResult) => void> = [];
+    const screenshot = vi.fn(() => new Promise<BrowserResult>((resolve) => { releases.push(resolve); }));
+    setScreenshot(screenshot as unknown as HostScreenshot);
     const draw = vi.fn();
     let provisionalGeneration = 0;
     const loop = createScreenshotLoop({
-      capture: (opts) => getPlatform().agentBrowserScreenshot?.('sess', opts) ?? null,
+      capture,
       isCapable: () => true,
       draw,
       getProvisionalGeneration: () => provisionalGeneration,
@@ -234,12 +234,12 @@ describe('screenshot loop backpressure', () => {
 
 describe('screenshot loop behind a blocking command', () => {
   it('reports the capture overdue, never re-issues it, and draws it when it lands', async () => {
-    const releases: Array<(res: AgentBrowserScreenshotResult) => void> = [];
-    const screenshot = vi.fn(() => new Promise<AgentBrowserScreenshotResult>((resolve) => { releases.push(resolve); }));
-    setScreenshot(screenshot as unknown as PlatformAdapter['agentBrowserScreenshot']);
+    const releases: Array<(res: BrowserResult) => void> = [];
+    const screenshot = vi.fn(() => new Promise<BrowserResult>((resolve) => { releases.push(resolve); }));
+    setScreenshot(screenshot as unknown as HostScreenshot);
     const draw = vi.fn();
     const loop = createScreenshotLoop({
-      capture: (opts) => getPlatform().agentBrowserScreenshot?.('sess', opts) ?? null,
+      capture,
       isCapable: () => true,
       draw,
     });
@@ -275,11 +275,11 @@ describe('screenshot loop behind a blocking command', () => {
   });
 
   it('still owes a shot for the wait when the overdue capture fails', async () => {
-    const releases: Array<(res: AgentBrowserScreenshotResult) => void> = [];
-    const screenshot = vi.fn(() => new Promise<AgentBrowserScreenshotResult>((resolve) => { releases.push(resolve); }));
-    setScreenshot(screenshot as unknown as PlatformAdapter['agentBrowserScreenshot']);
+    const releases: Array<(res: BrowserResult) => void> = [];
+    const screenshot = vi.fn(() => new Promise<BrowserResult>((resolve) => { releases.push(resolve); }));
+    setScreenshot(screenshot as unknown as HostScreenshot);
     vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const loop = createScreenshotLoop({ capture: (opts) => getPlatform().agentBrowserScreenshot?.('sess', opts) ?? null, isCapable: () => true, draw: vi.fn() });
+    const loop = createScreenshotLoop({ capture, isCapable: () => true, draw: vi.fn() });
 
     loop.pulse();
     await vi.advanceTimersByTimeAsync(300);

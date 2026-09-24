@@ -30,6 +30,7 @@ export function fakeProvider() {
     probe: async () => ({ wsPort: 4321 }),
     close: async (b) => { await step(`close ${b.session}`); },
     listTabs: async () => tabs,
+    closeTab: async (b, tabId) => { calls.push(`tab ${b.session} close ${tabId}`); },
     act: async (b, act) => {
       calls.push(`${act.op} ${b.session}${act.op === 'tab' ? ` ${act.action} ${act.tabId}` : ''}`);
       return { ok: true };

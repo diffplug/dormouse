@@ -3,9 +3,9 @@ import type {
   CommandContext,
   StricliProcess,
 } from '@stricli/core';
-import type { BrowserAutomationProvider, SurfaceRenderMode } from 'dor-lib-common/browser-providers';
+import type { BrowserAutomationProvider, BrowserBinding, SurfaceRenderMode } from 'dor-lib-common/browser-providers';
 
-export type { BrowserAutomationProvider, SurfaceRenderMode };
+export type { BrowserAutomationProvider, BrowserBinding, SurfaceRenderMode };
 
 export type IdFormat = 'refs' | 'ids' | 'both';
 export type SplitDirection = 'left' | 'right' | 'up' | 'down' | 'auto';
@@ -407,14 +407,6 @@ export interface ResolveOpenTargetResponse {
   port: number;
 }
 
-/** What a provider's CLI command runs with: its native session, the project
- *  directory it runs in, and the executable. */
-export interface BrowserBinding {
-  session: string;
-  cwd?: string;
-  binaryPath?: string;
-}
-
 /** The two ways a browser command asks the host for its binding: a Surface
  *  handle, or a managed `--key`, which only the answering Workspace can
  *  namespace (`docs/specs/dor-browser.md` → Managed identity). Never both — a
@@ -439,14 +431,13 @@ export type ResolveBrowserRequest = WorkspaceScopedRequest & { provider: Browser
 export interface ResolveBrowserResponse {
   /** The key's or Surface's binding; a key no Surface holds yet gets the
    *  session the host minted for it. */
-  binding: BrowserBinding | null;
+  binding: BrowserBinding;
 }
 
 /** After a browser command succeeds: open or reuse the Surface bound to its
  *  session. The binding fields are what the command ran with. */
 export interface BrowserSurfaceRequest extends WorkspaceScopedRequest {
-  /** Absent reads as agent-browser, as an older `dor` sends it. */
-  provider?: BrowserAutomationProvider;
+  provider: BrowserAutomationProvider;
   /** Managed workspace-scoped key; absent when attaching via raw --session. */
   key?: string;
   session: string;

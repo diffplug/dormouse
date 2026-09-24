@@ -1,7 +1,7 @@
 /** Per-surface bridge from browser bodies to their separate header and modal;
  * see docs/specs/dor-browser.md → "Browser Chrome". */
 import { useSyncExternalStore } from 'react';
-import { BROWSER_PROVIDERS, parseRenderMode, type SurfaceRenderMode } from 'dor-lib-common/browser-providers';
+import { BROWSER_PROVIDERS, parseRenderMode, type BrowserAutomationProvider, type SurfaceRenderMode } from 'dor-lib-common/browser-providers';
 
 export type ScreenState = 'SYNCED' | 'SCALED';
 
@@ -12,19 +12,32 @@ export type RenderMode = SurfaceRenderMode;
 
 type ProviderAlias = (typeof BROWSER_PROVIDERS)[keyof typeof BROWSER_PROVIDERS]['alias'];
 
+/** How an automated browser's human view is presented: resizing with the
+ *  pane, at a fixed size, or popped out. */
+export type BrowserView = 'resize' | 'fixed' | 'popout';
+export const BROWSER_VIEWS: readonly BrowserView[] = ['resize', 'fixed', 'popout'];
+
 /** Capability-first browser display identity shared by pane chrome, the Display
- *  modal, and minimized Doors: a provider's screencast resizing with the pane or
- *  fixed, its popout, or the embed. The automated modes always carry the robot;
- *  the second glyph describes where/how the human view is presented. */
-export type BrowserDisplayMode = 'iframe' | `${ProviderAlias}-${'resize' | 'fixed' | 'popout'}`;
+ *  modal, and minimized Doors: a provider's view, or the embed. The automated
+ *  modes always carry the robot; the second glyph describes the view. */
+export type BrowserDisplayMode = 'iframe' | `${ProviderAlias}-${BrowserView}`;
+
+/** `provider`'s display mode for `view`. */
+export function displayModeFor(provider: BrowserAutomationProvider, view: BrowserView): BrowserDisplayMode {
+  return `${BROWSER_PROVIDERS[provider].alias}-${view}`;
+}
+
+/** The view a display mode presents, or the embed. */
+export function displayView(mode: BrowserDisplayMode): BrowserView | 'iframe' {
+  return mode === 'iframe' ? 'iframe' : mode.slice(mode.lastIndexOf('-') + 1) as BrowserView;
+}
 
 export function browserDisplayMode(
   snapshot: Pick<ScreenSnapshot, 'renderMode' | 'syncEngaged'>,
 ): BrowserDisplayMode {
   const { provider, presentation } = parseRenderMode(snapshot.renderMode);
   if (provider === null) return 'iframe';
-  const view = presentation === 'popout' ? 'popout' : snapshot.syncEngaged ? 'resize' : 'fixed';
-  return `${BROWSER_PROVIDERS[provider].alias}-${view}`;
+  return displayModeFor(provider, presentation === 'popout' ? 'popout' : snapshot.syncEngaged ? 'resize' : 'fixed');
 }
 
 export interface ScreenSnapshot {

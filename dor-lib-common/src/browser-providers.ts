@@ -105,13 +105,41 @@ function isAllowedBrowserBinary(candidate: unknown, configuredPath: string | und
   return filename.test(segments[segments.length - 1] ?? '');
 }
 
-/** One provider's row. `alias` is its short `dor` command and the prefix of
- *  its render modes; `modes` are the persisted `renderMode` strings, which are
- *  also the public `render_mode` and `dormouse.yml` `render` values. */
+/** What a provider's CLI command runs with: its native session, the project
+ *  directory it runs in, and the executable. */
+export interface BrowserBinding {
+  session: string;
+  cwd?: string;
+  binaryPath?: string;
+}
+
+/** An agent-browser session name. `dor ab --session` passes a user's raw name
+ *  through, so anything goes but what agent-browser would read as an option or
+ *  its socket directory as a path: the name lands after `--session` and in
+ *  `<socket dir>/<session>.pid`, whose pid a relaunch signals. */
+function isAgentBrowserSession(value: unknown): value is string {
+  return typeof value === 'string' && /^(?!-)[^/\\\x00-\x1f\x7f]{1,200}$/.test(value);
+}
+
+/** A Playwright session name: Dormouse mints these, and the CLI takes them
+ *  as `--session=<name>`, so a strict charset costs nothing. */
+function isPlaywrightSession(value: unknown): value is string {
+  return typeof value === 'string' && /^[A-Za-z0-9._-]{1,200}$/.test(value);
+}
+
+/** One provider's row. The provider's id is also its long `dor` command;
+ *  `alias` is its short one and the prefix of its render modes; `modes` are the
+ *  persisted `renderMode` strings, which are also the public `render_mode` and
+ *  `dormouse.yml` `render` values. */
 interface BrowserProviderSpec {
-  command: string;
+  /** The provider's name in user-facing text. */
+  label: string;
   alias: string;
   modes: Readonly<Record<BrowserPresentation, string>>;
+  /** The CLI's session flag, as argv. */
+  sessionArgs(session: string): string[];
+  /** A session name the CLI reads as neither an option nor a path. */
+  isSessionName(value: unknown): value is string;
   binEnv: string;
   defaultBin: string;
   installHint: string;
@@ -120,18 +148,22 @@ interface BrowserProviderSpec {
 
 export const BROWSER_PROVIDERS = {
   'agent-browser': {
-    command: 'agent-browser',
+    label: 'agent-browser',
     alias: 'ab',
     modes: { screencast: 'ab-screencast', popout: 'ab-popout' },
+    sessionArgs: (session: string) => ['--session', session],
+    isSessionName: isAgentBrowserSession,
     binEnv: AGENT_BROWSER_BIN_ENV,
     defaultBin: DEFAULT_AGENT_BROWSER_BIN,
     installHint: 'npm i -g agent-browser',
     isAllowedBinary: isAllowedAgentBrowserBinary,
   },
   playwright: {
-    command: 'playwright',
+    label: 'Playwright',
     alias: 'pw',
     modes: { screencast: 'pw-screencast', popout: 'pw-popout' },
+    sessionArgs: (session: string) => [`--session=${session}`],
+    isSessionName: isPlaywrightSession,
     binEnv: PLAYWRIGHT_BIN_ENV,
     defaultBin: DEFAULT_PLAYWRIGHT_BIN,
     installHint: 'npm i -g @playwright/cli',
@@ -176,12 +208,6 @@ export function isBrowserProvider(value: unknown): value is BrowserAutomationPro
   return typeof value === 'string' && Object.prototype.hasOwnProperty.call(BROWSER_PROVIDERS, value);
 }
 
-/** argv for `agent-browser stream status --json` against a session — the command
- * whose output {@link parseStreamPort} reads. */
-export function streamStatusArgs(session: string): string[] {
-  return ['--session', session, 'stream', 'status', '--json'];
-}
-
 /**
  * Managed, scoped browser session name, `dormouse.<scope>.<key>`, for either
  * provider: the host passes the Workspace's id, or the scope a bare Wall mints
@@ -198,20 +224,4 @@ export function streamStatusArgs(session: string): string[] {
 export function sessionForKey(key: string, workspaceId?: string): string {
   const scope = workspaceId ? workspaceId.replace(UNSAFE_SESSION_CHARS, '-') : BARE_WALL_SCOPE;
   return `dormouse.${scope}.${key.replace(UNSAFE_SESSION_CHARS, '-')}`;
-}
-
-/**
- * Parse the stream WebSocket port from `agent-browser stream status --json`.
- * The CLI wraps payloads as either `{ port }` or `{ data: { port } }`; tolerate
- * both, and return undefined for anything malformed or non-finite. Shared by
- * `dor ab` (surface binding) and the lib host (panel stream recovery).
- */
-export function parseStreamPort(stdout: string): number | undefined {
-  try {
-    const parsed = JSON.parse(stdout) as { port?: unknown; data?: { port?: unknown } };
-    const port = parsed.data?.port ?? parsed.port;
-    return typeof port === 'number' && Number.isFinite(port) ? port : undefined;
-  } catch {
-    return undefined;
-  }
 }

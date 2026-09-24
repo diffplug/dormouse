@@ -24,7 +24,7 @@ const RemotePairingModalHost = lazy(() =>
   })),
 );
 import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
-import { BROWSER_PROVIDER_GUI, hostSupportsBrowser } from './wall/browser-automation';
+import { BROWSER_PROVIDER_GUI, hostSupportsBrowser, providerUnavailable } from './wall/browser-automation';
 import { parseRenderMode } from 'dor-lib-common/browser-providers';
 import { isToolRender } from '../lib/platform/tool-types';
 import { closeBrowserSurface, requestBrowserRenderMode, whenBrowserLaunched } from './wall/agent-browser-surface-controller';
@@ -2120,7 +2120,7 @@ export function Wall({
         else updateSurfaceParams(existing.id, { url: entry.url });
         return;
       }
-      if (provider && !hostSupportsBrowser(provider)) throw new Error(`${BROWSER_PROVIDER_GUI[provider].label} is unavailable on this host`);
+      if (provider && !hostSupportsBrowser(provider)) throw new Error(providerUnavailable(provider));
       const created = createContentSurface({ minimized: false, reference, preserveSource: true,
         params: {
           surfaceType: 'browser', renderMode: mode, url: entry.url, cwd, syncEngaged: true, contextPortKey: key,
