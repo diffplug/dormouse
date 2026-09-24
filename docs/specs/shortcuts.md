@@ -10,7 +10,7 @@
 |-----|--------|-------------|
 | Left ⌘ → Right ⌘ (within 500 ms) | Enter command mode | Only exits passthrough; inert in command mode. |
 | Left ⇧ → Right ⇧ (within 500 ms) | Enter command mode | Independent of the ⌘ track; the gesture for keyboards with no right ⌘. |
-| `Enter` (command) | Enter passthrough, or act on a tab | Focus the selected pane; reattach a door; `+` creates a Workspace, focusing its pane. A tab activates, or renames if active, staying in command mode. |
+| `Enter` (command) | Enter passthrough | Focus the selected pane or reattach a door. |
 
 A focused cross-origin iframe surface swallows the gesture; the proxy shim detects it in-frame and re-posts it to the Wall (`docs/specs/dor-browser.md`).
 
@@ -30,22 +30,16 @@ A focused cross-origin iframe surface swallows the gesture; the proxy shim detec
 
 ## Workspaces (command mode)
 
-Standalone only — a bare Wall (VS Code, the website playground) leaves every key here unbound. Follows the tmux *window* bindings, except create and rename: **never bind a bare key to creating a Workspace** — a stray keystroke must not spawn one, so creating is the strip's `+` — and tmux's `,` is already pane rename.
-
+Standalone only — a bare Wall (VS Code, the website playground) leaves these keys unbound.
 | Key | Action | Description |
 |-----|--------|-------------|
-| `n` / `p` | Next / previous | Wraps at both ends. |
 | `1`–`9` | Select by position | The nth Workspace in strip order; out of range is a consumed no-op. |
-| `&` | Close Workspace | Confirms when the Workspace holds work; replaces the last Workspace. |
-| `x` (Workspace selected) | Close Workspace | Reveal and confirm, then select the next tab (previous at the end). Inert on `+`; the last Workspace gets a fresh replacement. |
-| `$` | Rename Workspace | Opens the strip's inline editor on the active tab. |
 
 ## Navigation (command mode)
 
 | Key | Action | Description |
 |-----|--------|-------------|
-| `↑` / `↓` / `←` / `→` | Move selection | Navigate panes and doors; opposite directions backtrack between panes. Down with no pane below selects the first door; Up from a door selects the last pane. Up with no pane above highlights the active Workspace tab when a strip exists. |
-| `←` / `→` (Workspace strip) | Highlight tab / `+` | Move through tabs and then `+`, stopping at either end, without activation. Down returns to the originating pane (first live pane if gone). |
+| `↑` / `↓` / `←` / `→` | Move selection | Navigate panes and doors; opposite directions backtrack between panes. Down with no pane below selects the first door; Up from a door selects the last pane. |
 | `⌘`+arrows or `Ctrl`+arrows | Swap surfaces | Swap the two panes' Surfaces; the opposite chord swaps back exactly. Either modifier, every platform; consumed no-op on non-pane chrome. |
 
 ## Terminal selection & clipboard
@@ -100,7 +94,7 @@ The standalone host contributes no chords; `docs/specs/standalone.md` owns its n
 
 - `lib/src/components/wall/use-wall-keyboard.ts` — the capture-phase listener; the iframe-shim leader `message` listener
 - `lib/src/components/wall/keyboard/` — one module per dispatch branch: `handle-dual-tap.ts`, `handle-editable-clipboard.ts`, `handle-mouse-selection-keys.ts`, `handle-kill-confirm.ts`, `handle-workspace-shortcuts.ts`, `handle-pane-shortcuts.ts`, `handle-pane-navigation.ts`; platform modifiers in `chords.ts`
-- `lib/src/components/wall/chrome-keyboard-lease.ts`, `lib/src/lib/workspace-ui-store.ts` — the strip's keyboard suppression, and the state `&` / `$` write for it to render
+- `lib/src/components/wall/chrome-keyboard-lease.ts`, `lib/src/lib/workspace-ui-store.ts` — the strip's keyboard suppression and rename/confirmation state
 - `lib/src/lib/vscode-keybindings.ts` — the workbench mirror allowlist
 - `lib/src/lib/terminal-mouse-router.ts` — live Alt tracking during a drag
 - `lib/src/components/SelectionPopup.tsx`, `lib/src/components/wall/TerminalContextView.tsx`, `lib/src/components/wall/InlineEditInput.tsx` — the popover/dialog handlers

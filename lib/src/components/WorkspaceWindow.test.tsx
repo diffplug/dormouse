@@ -12,10 +12,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { WorkspaceWindow } from './WorkspaceWindow';
 import { WorkspaceStrip } from './WorkspaceStrip';
+import * as workspaceStore from '../lib/workspace-store';
 import * as workspaceMotion from './workspace-motion';
 import * as uiGeometry from '../lib/ui-geometry';
 import { LATH_MOTION_MS } from '../lib/lath/animator';
-import { closeWorkspaceWithSurfaces } from './wall/workspace-lifecycle';
+import { closeWorkspaceWithSurfaces, requestWorkspaceClose } from './wall/workspace-lifecycle';
 import * as terminalRegistry from '../lib/terminal-registry';
 import { setPlatform } from '../lib/platform';
 import { FakePtyAdapter } from '../lib/platform/fake-adapter';
@@ -128,7 +129,7 @@ describe('WorkspaceWindow', () => {
     expect(wallFor('ws-2').classList.contains('invisible')).toBe(false);
   });
 
-  it('reveals and confirms x on a highlighted workspace, then selects the next tab for repeated deletion', async () => {
+  it('reveals and confirms a requested workspace close, then selects the next tab', async () => {
     const first = getActiveWorkspaceId();
     createWorkspace({ id: 'ws-2', activate: false });
     createWorkspace({ id: 'ws-3', activate: false });
@@ -137,27 +138,28 @@ describe('WorkspaceWindow', () => {
       await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); });
       await flush();
     };
-    await press('ArrowUp');
-    await press('ArrowRight');
-    expect(getActiveWorkspaceId()).toBe(first);
-    await press('x');
+    const close = async () => {
+      await act(async () => { requestWorkspaceClose(getActiveWorkspaceId(), { forceConfirm: true }); });
+      await flush();
+    };
+    await act(async () => { requestWorkspaceClose('ws-2', { forceConfirm: true }); });
+    await flush();
     expect(getActiveWorkspaceId()).toBe('ws-2');
     expect(getWorkspaceUiSnapshot().pendingClose?.id).toBe('ws-2');
     expect(leafIdsIn('ws-2')).toHaveLength(1);
     await press('Escape');
     expect(getWorkspacesSnapshot().workspaces).toHaveLength(3);
-    await press('x');
+    await close();
     await press(getWorkspaceUiSnapshot().pendingClose!.char);
     await flush();
     expect(getActiveWorkspaceId()).toBe('ws-3');
     expect(getWorkspacesSnapshot().workspaces.map(workspace => workspace.id)).toEqual([first, 'ws-3']);
-    // No Up required: selection stayed on the workspace row, not a pane.
-    await press('x');
+    await close();
     expect(getWorkspaceUiSnapshot().pendingClose?.id).toBe('ws-3');
     await press(getWorkspaceUiSnapshot().pendingClose!.char);
     await flush();
     expect(getActiveWorkspaceId()).toBe(first);
-    await press('x');
+    await close();
     expect(getWorkspaceUiSnapshot().pendingClose?.id).toBe(first);
     await press(getWorkspaceUiSnapshot().pendingClose!.char);
     const replacement = getActiveWorkspaceId();
@@ -166,7 +168,7 @@ describe('WorkspaceWindow', () => {
     expect(leafIdsIn(replacement)).toHaveLength(1);
     expect(getWallHandle(first)).toBeNull();
     expect(leafIdsIn(replacement)).not.toContain('pane-a');
-    await press('x');
+    await close();
     expect(getWorkspaceUiSnapshot().pendingClose?.id).toBe(replacement);
   });
 
@@ -227,54 +229,23 @@ describe('WorkspaceWindow', () => {
     expect(focused()).toBe(mode === 'passthrough');
   });
 
-  it('highlights tabs without switching; Enter activates in command mode, renames the active tab, or creates into a live pane', async () => {
+  it('keeps removed Workspace commands inert on a selected tab', async () => {
     const first = getActiveWorkspaceId();
     createWorkspace({ id: 'ws-2', activate: false });
     await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
-    const press = async (key: string, location = 0) => {
-      await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key, location, bubbles: true, cancelable: true })); });
+    await act(async () => { getWallHandle(first)!.selectWorkspaceTab(); });
+    for (const key of ['n', 'p', '$', '&', 'x', 'Enter', 'ArrowUp', 'ArrowRight', 'ArrowDown', 'ArrowLeft']) {
+      await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); });
       await flush();
-    };
-    const renaming = () => container.querySelector<HTMLInputElement>('[data-workspace-rename-for]')?.dataset.workspaceRenameFor;
-    const cancelRename = async () => {
-      const input = container.querySelector<HTMLInputElement>('[data-workspace-rename-for]')!;
-      await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
-      await flush();
-      expect(renaming()).toBeUndefined();
-    };
-    await press('ArrowUp');
-    await press('ArrowRight');
-    expect(getActiveWorkspaceId()).toBe(first);
-    await press('ArrowDown');
-    await press('Enter');
-    expect(getActiveWorkspaceId()).toBe(first);
-    expect(wallFor(first).querySelector('[data-session-id="pane-a"][data-focused="true"]')).not.toBeNull();
-
-    await press('Shift', 1);
-    await press('Shift', 2);
-    await press('ArrowUp');
-    await press('Enter');
-    expect(renaming()).toBe(first);
-    expect(wallFor(first).querySelector('[data-focused="true"]')).toBeNull();
-    await cancelRename();
-
-    await press('ArrowRight');
-    await press('Enter');
+      expect(getActiveWorkspaceId()).toBe(first);
+      expect(getWorkspacesSnapshot().workspaces).toHaveLength(2);
+      expect(getWorkspaceUiSnapshot().renamingId).toBeNull();
+      expect(getWorkspaceUiSnapshot().pendingClose).toBeNull();
+      expect(wallFor(first).querySelector('[data-focused="true"]')).toBeNull();
+    }
+    await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: '2', bubbles: true, cancelable: true })); });
+    await flush();
     expect(getActiveWorkspaceId()).toBe('ws-2');
-    expect(renaming()).toBeUndefined();
-    expect(wallFor('ws-2').querySelector('[data-focused="true"]')).toBeNull();
-    // The ring stayed on the now-active tab, so a second Enter renames it.
-    await press('Enter');
-    expect(renaming()).toBe('ws-2');
-    await cancelRename();
-
-    await press('ArrowRight'); // +
-    expect(getWorkspacesSnapshot().workspaces).toHaveLength(2);
-    await press('Enter');
-    const created = getActiveWorkspaceId();
-    expect(getWorkspacesSnapshot().workspaces).toHaveLength(3);
-    expect(created).not.toBe('ws-2');
-    expect(wallFor(created).querySelector('[data-focused="true"]')).not.toBeNull();
   });
 
   /** docs/specs/layout.md -> "Workspace tabs": the pill is a click on the TODO
@@ -412,9 +383,11 @@ describe('WorkspaceWindow', () => {
 
     createWorkspace({ id: 'ws-2', activate: false });
     await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
-    await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', bubbles: true, cancelable: true })); });
+    const activate = vi.spyOn(workspaceStore, 'activateWorkspaceAt');
+    await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: '2', bubbles: true, cancelable: true })); });
     await flush();
-    // The Wall that `n` activated must not answer it too and switch straight back.
+    // The newly activated Wall must not dispatch the same key a second time.
+    expect(activate).toHaveBeenCalledOnce();
     expect(getActiveWorkspaceId()).toBe('ws-2');
   });
 
@@ -422,9 +395,8 @@ describe('WorkspaceWindow', () => {
     const first = getActiveWorkspaceId();
     createWorkspace({ id: 'ws-2', activate: false });
     await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
-    for (const key of ['ArrowUp', 'ArrowRight']) {
-      await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })); });
-    }
+    await act(async () => { setActiveWorkspace('ws-2'); });
+    await act(async () => { getWallHandle('ws-2')!.selectWorkspaceTab(); });
     await act(async () => { closeWorkspace('ws-2'); });
     await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
     await flush();
@@ -786,9 +758,7 @@ describe('WorkspaceWindow', () => {
     const second = ids()[1];
     expect(getActiveWorkspaceId()).toBe(second);
 
-    await press('p');
-    expect(getActiveWorkspaceId()).toBe(first);
-    await press('n');
+    for (const key of ['n', 'p', '$', '&']) await press(key);
     expect(getActiveWorkspaceId()).toBe(second);
     await press('1');
     expect(getActiveWorkspaceId()).toBe(first);
@@ -796,8 +766,7 @@ describe('WorkspaceWindow', () => {
     await press('9');
     expect(getActiveWorkspaceId()).toBe(first);
 
-    // Exactly one Wall dispatches: two mounted Walls step one Workspace, not two.
-    await press('n');
+    await press('2');
     expect(getActiveWorkspaceId()).toBe(second);
   });
 

@@ -28,7 +28,7 @@ export function handlePaneShortcuts(
   navHistory: NavHistoryRef,
 ): boolean {
   const sid = ctx.selectedIdRef.current;
-  // Workspace chrome has its own Enter and navigation paths, never pane verbs.
+  // Workspace chrome never dispatches pane verbs.
   if (isWorkspaceSelection(ctx.selectedTypeRef.current)) {
     if (!PANE_VERB_KEYS.has(e.key) && !(isArrowKey(e.key) && (e.metaKey || e.ctrlKey))) return false;
     e.preventDefault();

@@ -1,6 +1,5 @@
 import { ARROW_OPPOSITES, isArrowKey, type NavHistoryRef, type WallKeyboardCtx } from './types';
-import { getWorkspacesSnapshot } from '../../../lib/workspace-store';
-import { isWorkspaceSelection, workspaceIdOfSelection } from '../wall-types';
+import { isWorkspaceSelection } from '../wall-types';
 
 /**
  * Plain arrow navigation: across panes (tiled), or across doors (in the
@@ -26,13 +25,6 @@ export function handlePaneNavigation(
 
   if (isWorkspaceSelection(currentType)) {
     navHistory.current = null;
-    if (dir === 'ArrowDown') ctx.returnToPane();
-    else if (dir === 'ArrowLeft' || dir === 'ArrowRight') {
-      const ids = [...getWorkspacesSnapshot().workspaces.map(workspace => workspace.id), null];
-      const index = ids.indexOf(workspaceIdOfSelection(currentType, sid));
-      const next = index + (dir === 'ArrowLeft' ? -1 : 1);
-      if (index >= 0 && next >= 0 && next < ids.length) ctx.selectWorkspace(ids[next]);
-    }
     return true;
   }
 
@@ -62,9 +54,6 @@ export function handlePaneNavigation(
   } else if (dir === 'ArrowDown' && currentDoors.length > 0) {
     navHistory.current = null;
     ctx.selectDoor(currentDoors[0].id);
-  } else if (dir === 'ArrowUp' && ctx.workspaceId !== undefined) {
-    navHistory.current = null;
-    ctx.selectWorkspace(getWorkspacesSnapshot().activeId);
   }
   return true;
 }
