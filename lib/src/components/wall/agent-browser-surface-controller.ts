@@ -645,15 +645,14 @@ export class AgentBrowserSurfaceController {
 
   updateParams(params: AgentBrowserSurfaceParams): void {
     if (this.phase.k === 'disposed') return;
-    // Mirror every field first, then rebind once: a session and the port a
-    // launch learned for it land as a single write, and binding per field would
-    // attach the session before its port is mirrored.
+    // Mirror every field first, then rebind once: binding per field would bind
+    // a new session with the cwd or binary of the old.
     if (params.cwd !== undefined && params.cwd !== this.cwd) {
       this.cwd = params.cwd;
       this.platformCache = null;
     }
-    // Before the port below, so the new stream never inherits a `set viewport`
-    // meant for the old mode.
+    // First, so neither a stream this rebinds nor a port handed over next
+    // (`handOverBrowserPort`) inherits a `set viewport` meant for the old mode.
     if (params.renderMode && this.echoed('renderMode', params.renderMode)) this.followParamsHeadedness(params.renderMode);
     const sessionChanged = this.echoed('session', params.session) && params.session !== this.session;
     if (sessionChanged) this.session = params.session;
