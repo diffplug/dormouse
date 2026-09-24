@@ -22,15 +22,22 @@ import { privateCaptureDir } from './private-capture-dir';
 
 const TAB_REFRESH_INTERVAL_MS = 750;
 const CONNECT_TIMEOUT_MS = 8_000;
+// Every CLI call but `open` ends here at the latest, so a wedged playwright-cli
+// cannot hold a viewer refresh or a host operation forever. `open` alone runs
+// unbounded: it lasts as long as the page load, nothing waits on it past a
+// launch's own bounds, and ending it could take down the browser it started.
+const CLI_TIMEOUT_MS = 10_000;
 // A GUI launch answers inside the webview's wait for any host request
 // (`PLAYWRIGHT_REQUEST_TIMEOUT_MS`), or the webview restores the previous
-// renderer while the host is still bringing a browser up. Startup — queueing
-// behind an earlier launch, closing the old session, polling and connecting —
-// gets LAUNCH_TIMEOUT_MS from the request's arrival; a launch that gives up then
-// waits up to OPEN_SETTLE_MS for its `open` before closing the session, leaving
-// the rest for that closing CLI call and the transport.
+// renderer while the host is still bringing a browser up. The whole request,
+// from its arrival, gets REQUEST_BUDGET_MS, a margin short of that wait for the
+// transport. Startup — queueing behind an earlier launch, closing the old
+// session, listing, polling and connecting — ends LAUNCH_CLOSE_RESERVE_MS
+// before it; a launch that gives up then waits up to OPEN_SETTLE_MS for its
+// `open`, and closes the session with whatever remains.
+const REQUEST_BUDGET_MS = PLAYWRIGHT_REQUEST_TIMEOUT_MS - 2_000;
 const OPEN_SETTLE_MS = 4_000;
-const LAUNCH_TIMEOUT_MS = PLAYWRIGHT_REQUEST_TIMEOUT_MS - OPEN_SETTLE_MS - 6_000;
+const LAUNCH_CLOSE_RESERVE_MS = OPEN_SETTLE_MS + 4_000;
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const validSession = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9._-]+$/.test(value) && value.length <= 200;
 const validUrl = (value: unknown): value is string => { try { return typeof value === 'string' && ['http:', 'https:'].includes(new URL(value).protocol); } catch { return false; } };
@@ -88,8 +95,12 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
   const captures = privateCaptureDir('dormouse-playwright-');
   let closed = false;
   const log = (e: unknown) => deps.log?.(`[playwright] ${messageOf(e)}`);
-  async function cli(b: Binding, args: string[]) {
-    const r = await spawnAndCapture(b.install.binary, [`--session=${b.session}`, ...args], { cwd: b.cwd });
+  /** One CLI call, ended after `timeoutMs` (none for `null`); throws when it could not run or finish. */
+  async function cli(b: Binding, args: string[], timeoutMs: number | null = CLI_TIMEOUT_MS) {
+    const r = await spawnAndCapture(b.install.binary, [`--session=${b.session}`, ...args], {
+      cwd: b.cwd,
+      ...(timeoutMs === null ? {} : { timeoutMs: Math.max(0, timeoutMs) }),
+    });
     if (!r.ok) throw new Error(r.error.message);
     return { exitCode: r.exitCode, stdout: r.stdout, stderr: r.stderr };
   }
@@ -243,7 +254,8 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
       await cdp.send('Input.insertText', { text: data.text });
     }
   }
-  async function connect(b: Binding, timeout = CONNECT_TIMEOUT_MS): Promise<Viewer> {
+  /** The viewer for `b`, discovered and connected by `deadline`. */
+  async function connect(b: Binding, deadline = Date.now() + CLI_TIMEOUT_MS + CONNECT_TIMEOUT_MS): Promise<Viewer> {
     const key = b.key;
     const cached = viewers.get(key);
     if (cached && cached.browser.isConnected()) return cached;
@@ -251,7 +263,7 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
     if (pending) return pending;
     const gen = generations.get(key) ?? 0;
     const operation = (async () => {
-      const list = await cli(b, ['list', '--all', '--json']);
+      const list = await cli(b, ['list', '--all', '--json'], Math.min(CLI_TIMEOUT_MS, deadline - Date.now()));
       if (list.exitCode !== 0) throw new Error(list.stderr || 'Cannot discover Playwright browsers');
       const parsed = JSON.parse(list.stdout);
       const servers: unknown = parsed.servers ?? parsed.data?.servers;
@@ -268,7 +280,9 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
       if (typeof endpoint !== 'string' || !endpoint) throw new Error('Playwright browser endpoint unavailable');
       // CLI-created browsers publish private local pipes. Never dial an arbitrary network endpoint from saved data.
       if (/^[a-z]+:\/\//i.test(endpoint)) throw new Error('Only local Playwright CLI browser pipes can be viewed');
-      const browser = await b.install.library.chromium.connect(endpoint, { timeout });
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error('Playwright browser connection timed out');
+      const browser = await b.install.library.chromium.connect(endpoint, { timeout: Math.min(CONNECT_TIMEOUT_MS, remaining) });
       if (closed || gen !== (generations.get(key) ?? 0)) { await browser.close(); throw new Error('Browser launch superseded'); }
       const server = createServer((_req, res) => { res.writeHead(403); res.end(); });
       const wss = new WebSocketServer({ noServer: true, maxPayload: 65536 });
@@ -328,27 +342,28 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
     connecting.set(key, operation);
     try { return await operation; } finally { if (connecting.get(key) === operation) connecting.delete(key); }
   }
-  async function launch(b: Binding, url: string, isHeaded: boolean, fresh: boolean, deadline: number) {
+  async function launch(b: Binding, url: string, isHeaded: boolean, fresh: boolean, requestDeadline: number) {
     if (!validUrl(url)) throw new Error('Browser navigation requires an http(s) URL');
     if (closed) throw new Error('Playwright host is shutting down');
+    const deadline = requestDeadline - LAUNCH_CLOSE_RESERVE_MS;
     if (Date.now() >= deadline) throw new Error('Playwright browser launch timed out behind an earlier one');
     await invalidate(b);
     // Finish the old CLI session before discovering the replacement endpoint.
     // A freshly minted session has none to finish.
-    if (!fresh) await cli(b, ['close']);
+    if (!fresh) await cli(b, ['close'], deadline - Date.now());
     const key = b.key;
     const launchToken = {};
     latestLaunch.set(key, launchToken);
     if (isHeaded) headed.set(key, b); else headed.delete(key);
     const generation = generations.get(key);
     let result: Awaited<ReturnType<typeof cli>> | undefined;
-    const opening = cli(b, ['open', url, '--browser=chromium', ...(isHeaded ? ['--headed'] : [])]);
+    const opening = cli(b, ['open', url, '--browser=chromium', ...(isHeaded ? ['--headed'] : [])], null);
     const opened = opening.then(r => { result = r; }, e => { result = { exitCode: 1, stdout: '', stderr: messageOf(e) }; });
     // Endpoint readiness, not the page load, completes GUI launches.
     let last: unknown;
-    for (let remaining = deadline - Date.now(); remaining > 0 && !closed; remaining = deadline - Date.now()) {
+    while (Date.now() < deadline && !closed) {
       try {
-        const v = await connect(b, Math.min(CONNECT_TIMEOUT_MS, remaining));
+        const v = await connect(b, deadline);
         // Only a completed, still-current launch may remove startup blank tabs.
         void opening.then(async () => {
           if (closed || generation !== generations.get(key) || v.disposed) return;
@@ -369,7 +384,7 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
     // is still running, close again once it does, unless a newer launch has
     // taken the session over by then.
     const landed = await Promise.race([opened.then(() => true), wait(OPEN_SETTLE_MS).then(() => false)]);
-    await cli(b, ['close']).catch(log);
+    await cli(b, ['close'], requestDeadline - Date.now()).catch(log);
     if (!landed) {
       void opened.then(async () => {
         if (latestLaunch.get(key) === launchToken) await cli(b, ['close']);
@@ -393,7 +408,7 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
       const url = request.url ?? '';
       const isHeaded = request.op === 'open' ? !!request.headed : request.op === 'popOut';
       const fresh = request.op === 'open';
-      const deadline = Date.now() + LAUNCH_TIMEOUT_MS;
+      const deadline = Date.now() + REQUEST_BUDGET_MS;
       const v = await serialize(b, () => launch(b, url, isHeaded, fresh, deadline));
       return { ok: true, session, cwd, binaryPath: install.binary, wsPort: v.port, nativeIdentity: b.key };
     }

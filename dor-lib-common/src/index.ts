@@ -1,4 +1,4 @@
-export { spawnAndCapture } from './spawn.js';
+export { spawnAndCapture, treeKillCommand, SPAWN_TIMEOUT_CODE } from './spawn.js';
 export type { SpawnCaptureResult } from './spawn.js';
 export {
   binaryCandidateNames,

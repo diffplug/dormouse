@@ -140,6 +140,13 @@ the exit-grace fallback, without terminating descendants (rationale).
 `dor-lib-common/test/spawn.test.mjs` pins caller exit with an inherited-pipe daemon
 still alive.
 
+**An optional `timeoutMs` must kill the child and resolve `{ ok: false }` with
+`SPAWN_TIMEOUT_CODE`** (`ETIMEDOUT`), without waiting for the kill. POSIX
+SIGKILLs the child; **Windows must end the whole tree** with
+`%SystemRoot%\System32\taskkill.exe /PID <pid> /T /F`, since a `.cmd` shim's
+child is `cmd.exe` and the real CLI is its descendant (`treeKillCommand`, pinned
+through its `isWindows` argument).
+
 **Resolution.** `dor-lib-common`'s `exports` point at its built `dist`
 (Node-type-free `.d.ts`, since `dor`'s `tsc` avoids `@types/node`); every
 esbuild/Vite consumer inlines it. **The `dor` and `dormouse-lib` prebuilds must

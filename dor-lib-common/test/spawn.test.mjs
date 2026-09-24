@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import { mkdtemp, rm, realpath } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnAndCapture } from '../dist/index.js';
+import { spawnAndCapture, treeKillCommand, SPAWN_TIMEOUT_CODE } from '../dist/index.js';
 
 const node = process.execPath;
 
@@ -126,4 +126,42 @@ test('runs relative paths in the requested cwd without changing the caller cwd',
     assert.equal(result.stdout, await realpath(cwd));
     assert.equal(process.cwd(), before);
   } finally { await rm(cwd, { recursive: true, force: true }); }
+});
+
+test('a timeout kills a hung child and resolves with a distinct error', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'dormouse-spawn-timeout-'));
+  try {
+    const pidFile = path.join(dir, 'pid');
+    const started = Date.now();
+    const result = await spawnAndCapture(node, ['-e', `
+      require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+      setTimeout(() => {}, 60000);
+    `], { timeoutMs: 500 });
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, SPAWN_TIMEOUT_CODE);
+    assert.ok(Date.now() - started < 5000);
+    const { readFile } = await import('node:fs/promises');
+    const pid = Number(await readFile(pidFile, 'utf8'));
+    // The kill is not awaited; give the signal a moment to land.
+    for (let i = 0; i < 50; i++) {
+      try { process.kill(pid, 0); } catch { return; }
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    assert.fail(`child ${pid} survived its timeout`);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a command that finishes inside its timeout resolves normally', async () => {
+  const result = await spawnAndCapture(node, ['-e', 'process.stdout.write("done")'], { timeoutMs: 10000 });
+  assert.deepEqual(result, { ok: true, exitCode: 0, stdout: 'done', stderr: '' });
+});
+
+test('Windows ends a timed-out child\'s whole tree with taskkill by absolute path', () => {
+  assert.equal(treeKillCommand(42, {}, false), null);
+  assert.deepEqual(treeKillCommand(42, { SystemRoot: 'D:\\Win' }, true), {
+    binary: 'D:\\Win\\System32\\taskkill.exe', args: ['/PID', '42', '/T', '/F'],
+  });
+  assert.equal(treeKillCommand(42, {}, true).binary, 'C:\\Windows\\System32\\taskkill.exe');
 });

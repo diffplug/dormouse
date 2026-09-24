@@ -96,7 +96,7 @@ test('captures reuse recent tab state but refresh it when it expires', async () 
   expect(mocks.cli).not.toHaveBeenCalled();
   now.mockReturnValue(10750);
   expect((await host.request({ ...binding, op: 'screenshot' })).ok).toBe(true);
-  expect(mocks.cli).toHaveBeenCalledExactlyOnceWith('/tools/playwright-cli', ['--session=test', 'tab-list', '--json'], { cwd: binding.cwd });
+  expect(mocks.cli).toHaveBeenCalledExactlyOnceWith('/tools/playwright-cli', ['--session=test', 'tab-list', '--json'], { cwd: binding.cwd, timeoutMs: 10_000 });
 });
 
 test('GUI tab selection refreshes immediately even with a recent capture', async () => {
@@ -224,13 +224,22 @@ describe('a GUI launch that gives up', () => {
   let events: string[];
   let open: PromiseWithResolvers<typeof ok>;
   let listed: () => boolean;
+  // A wedged playwright-cli: the verbs here never finish on their own, and end
+  // only as a bounded `spawnAndCapture` would, at their `timeoutMs`.
+  let hung: (verb: string) => boolean;
   beforeEach(() => {
     vi.useFakeTimers();
     events = [];
     open = Promise.withResolvers();
     listed = () => false;
-    mocks.cli.mockImplementation(async (_binary, args) => {
+    hung = () => false;
+    mocks.cli.mockImplementation(async (_binary, args, options?: { timeoutMs?: number }) => {
       events.push(args[1]);
+      if (hung(args[1])) {
+        return new Promise((resolve) => {
+          if (options?.timeoutMs !== undefined) setTimeout(() => resolve({ ok: false, error: { code: 'ETIMEDOUT', message: `${args[1]} timed out` } }), options.timeoutMs);
+        });
+      }
       if (args[1] === 'open') return open.promise;
       if (args[1] === 'list') {
         const servers = listed() ? [{ title: 'test', workspaceDir: process.cwd(), playwrightLib: process.cwd(), endpoint: '/tmp/test-playwright.pipe', browser: { browserName: 'chromium' } }] : [];
@@ -239,7 +248,8 @@ describe('a GUI launch that gives up', () => {
       return ok;
     });
   });
-  afterEach(() => { vi.useRealTimers(); });
+  // Shutdown's own CLI calls must not meet a wedged CLI once the clock is real.
+  afterEach(() => { hung = () => false; vi.useRealTimers(); });
 
   const popOut = () => {
     const done = { at: -1 };
@@ -309,5 +319,31 @@ describe('a GUI launch that gives up', () => {
     expect((await first.answer).ok).toBe(false);
     expect((await second.answer).ok).toBe(false);
     expect(second.done.at).toBeLessThan(PLAYWRIGHT_REQUEST_TIMEOUT_MS);
+  });
+
+  test('a wedged CLI cannot hold a launch past its budget', async () => {
+    // A GUI open: the CLI lists nothing until the last second of startup, then
+    // wedges, and wedges again on the closing call.
+    const start = Date.now();
+    hung = (verb) => verb === 'close' || (verb === 'list' && Date.now() - start >= 29_000);
+    let at = -1;
+    const answer = host.request({ cwd: process.cwd(), op: 'open', url: 'http://localhost/' }).then((r) => { at = Date.now() - start; return r; });
+    await vi.advanceTimersByTimeAsync(PLAYWRIGHT_REQUEST_TIMEOUT_MS);
+    expect((await answer).ok).toBe(false);
+    expect(at).toBeGreaterThan(0);
+    expect(at).toBeLessThan(PLAYWRIGHT_REQUEST_TIMEOUT_MS);
+  });
+
+  test('a wedged close before a queued relaunch ends it at its startup deadline', async () => {
+    // The first launch's two closes finish; the queued one's own close wedges.
+    hung = (verb) => verb === 'close' && events.filter(e => e === 'close').length > 2;
+    const first = popOut();
+    await vi.advanceTimersByTimeAsync(7_000);
+    // The first gives up about 34 s in; the second then starts with 3 s of its 30 s left.
+    const second = popOut();
+    await vi.advanceTimersByTimeAsync(PLAYWRIGHT_REQUEST_TIMEOUT_MS);
+    expect((await first.answer).ok).toBe(false);
+    expect((await second.answer).ok).toBe(false);
+    expect(second.done.at).toBeLessThanOrEqual(30_000);
   });
 });
