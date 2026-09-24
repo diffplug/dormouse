@@ -470,10 +470,10 @@ The proxy instruments any `http://` upstream, loopback and remote alike:
 - Unreachable / timed-out upstream: served Dormouse error page, distinct for
   "couldn't connect" and "didn't respond in 30s of socket idle", in the system
   color scheme; **only a loopback upstream is called a dev server**.
-- HTTPS: synchronous `scheme` failure. **Every panel error the URL itself does
-  not cause offers Open in agent-browser** (a swap to `ab-screencast`) where the
-  host can launch one, with `dor ab open <url>` as the fallback text —
-  agent-browser is the path for real HTTPS or a login.
+- HTTPS: synchronous `scheme` failure. **Every panel error but a non-http(s)
+  URL offers Open in agent-browser** (a swap to `ab-screencast`) where the host
+  can launch one, with `dor ab open <url>` as the fallback text — agent-browser
+  is the path for real HTTPS or a login.
 - **Link-local / cloud-metadata address: refused (`scheme`)** — an SSRF guard
   that stands regardless of the loosened framing policy. **Canonicalize every
   equivalent spelling** (decimal/octal/hex, short forms, IPv4-mapped IPv6) before
