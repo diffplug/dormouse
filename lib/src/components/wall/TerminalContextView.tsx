@@ -67,7 +67,10 @@ export interface TerminalContextViewProps {
   initialDetail?: Detail | null;
 }
 
-export function ContextAction({ children, label, onClick, disabled = false, busy = false, muted = false, pressed, keepFocus = false }: { children: ReactNode; label: string; onClick?: () => void; disabled?: boolean; busy?: boolean; muted?: boolean; pressed?: boolean; keepFocus?: boolean }) {
+/** `fit` lets the button shrink to its row and truncate its text rather than
+ *  overflow the panel; wrap the text in a `truncate` span. The tooltip keeps the
+ *  full label. For a row whose labels grow with the host's browser providers. */
+export function ContextAction({ children, label, onClick, disabled = false, busy = false, muted = false, pressed, keepFocus = false, fit = false }: { children: ReactNode; label: string; onClick?: () => void; disabled?: boolean; busy?: boolean; muted?: boolean; pressed?: boolean; keepFocus?: boolean; fit?: boolean }) {
   const windowFocused = useContext(WindowFocusedContext);
   // Native app launches can leave :hover stale until this window regains focus.
   const color = muted ? 'text-muted' : windowFocused ? SUBTLE_ACTION_COLOR_CLASS : SUBTLE_ACTION_REST_COLOR_CLASS;
@@ -75,7 +78,7 @@ export function ContextAction({ children, label, onClick, disabled = false, busy
   // and this context's Escape and Tab handling both live on the <section> and need a focused descendant.
   return <button type="button" title={label} aria-label={label} aria-busy={busy || undefined} aria-disabled={busy || undefined} disabled={disabled} onClick={busy ? undefined : onClick}
     aria-pressed={pressed} onPointerDown={keepFocus ? event => event.preventDefault() : undefined}
-    className={`inline-flex h-6 shrink-0 items-center justify-center gap-1.5 rounded px-1.5 disabled:opacity-40 aria-pressed:bg-current/10 ${windowFocused ? SUBTLE_ACTION_INTERACTION_CLASS : ''} ${color}`}>{children}</button>;
+    className={`inline-flex h-6 ${fit ? 'min-w-0' : 'shrink-0'} items-center justify-center gap-1.5 rounded px-1.5 disabled:opacity-40 aria-pressed:bg-current/10 ${windowFocused ? SUBTLE_ACTION_INTERACTION_CLASS : ''} ${color}`}>{children}</button>;
 }
 
 function ContextCopyAction({ children, label, onCopy }: { children: ReactNode; label: string; onCopy: () => Promise<boolean> }) {
@@ -221,7 +224,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
               <div className="ml-1 flex min-w-0 flex-wrap items-center gap-1 border-l border-border pl-2">
                 {PORT_ACTIONS.map(action => {
                   const unavailable = action.needs && !p[action.needs] ? action.unavailable : null;
-                  return <ContextAction key={action.mode} label={unavailable ?? action.label} disabled={!!unavailable} onClick={() => void attempt(() => p.onPort(selected, action.mode))}>{action.icon}{action.text}</ContextAction>;
+                  return <ContextAction key={action.mode} label={unavailable ?? action.label} disabled={!!unavailable} fit onClick={() => void attempt(() => p.onPort(selected, action.mode))}>{action.icon}<span className="truncate">{action.text}</span></ContextAction>;
                 })}
               </div>
             </>}

@@ -152,6 +152,11 @@ const meta = {
       expect(box.left).toBeGreaterThanOrEqual(bounds.left);
       expect(box.right).toBeLessThanOrEqual(bounds.right);
     }
+    // A button that fits must not do it by spilling or wrapping its label past its own box.
+    for (const button of panel.querySelectorAll('button')) {
+      expect(button.scrollWidth, button.getAttribute('aria-label') ?? '').toBeLessThanOrEqual(button.clientWidth);
+      expect(button.scrollHeight, button.getAttribute('aria-label') ?? '').toBeLessThanOrEqual(button.clientHeight);
+    }
     const terminal = panel.querySelector<HTMLElement>('.bg-terminal-bg')!;
     expect(terminal.getBoundingClientRect().height).toBeGreaterThanOrEqual(64);
     canvasElement.dataset.contextCheck = 'passed';

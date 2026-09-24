@@ -53,6 +53,8 @@ Source of truth: `context` in `standalone/sidecar/pty-core.js`; `terminalContext
 
 **Must share the context presentation between the live menu and its state gallery.**
 
+**Must fit every control inside the panel at its minimum width, label included.** The port launch actions, whose set grows with the host's browser providers, shrink and truncate their text, keeping the full label as the tooltip. The gallery's play check measures each button against the panel and against its own box.
+
 Source of truth: `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`; `lib/src/stories/TerminalContext.stories.tsx` supplies sample output; `lib/src/stories/Wall.stories.tsx` exercises the live helper with the fake shell. `lib/src/stories/HelperPlacement.stories.tsx` checks rendered placement and real xterm input/focus retention; the context gallery checks narrow controls and always-visible details.
 
 ## Tool context
