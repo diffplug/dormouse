@@ -4,7 +4,7 @@
  * released by Wall on kill/render swap: `closeBrowserSurface` closes the
  * session too, `disposeAgentBrowserSurfaceController` only the client side.
  */
-import type { AgentBrowserCommandResult, AgentBrowserOpenResult } from '../../lib/platform/types';
+import type { AgentBrowserAttachResult, AgentBrowserCommandResult, AgentBrowserOpenResult } from '../../lib/platform/types';
 import { isBrowsableUrl, playwrightTextInputs, type BrowserAutomationProvider } from '../../lib/platform/browser-automation';
 import { isAllowedBinaryFor } from '../../lib/agent-browser-binary';
 import { readTextFromClipboard } from '../../lib/clipboard';
@@ -296,7 +296,8 @@ export class AgentBrowserSurfaceController {
 
   /** The latest presentation and page asked for while nothing could be
    *  driven, applied once the Surface is live: a launch, attach or relaunch
-   *  must not lose them. */
+   *  must not lose them. A launch or relaunch opens the page itself
+   *  (`launchUrl`), and a host that opened it settles it (`openedByHost`). */
   private pendingIntent: { url?: string; headed?: boolean } = {};
 
   // --- sync-to-pane ---
@@ -788,7 +789,7 @@ export class AgentBrowserSurfaceController {
    */
   private launch(): void {
     const platform = this.platform;
-    const url = this.currentRelaunchUrl();
+    const url = this.launchUrl();
     const phase: Phase = { k: 'launching' };
     this.setPhase(phase);
     const headed = this.headed;
@@ -844,6 +845,7 @@ export class AgentBrowserSurfaceController {
           launchFallback: undefined,
         });
         this.launchSession = undefined;
+        this.openedByHost(url);
         if (res.wsPort) this.goLive(res.wsPort);
         else this.attach(false);
         settleLaunch(this.id, null);
@@ -856,6 +858,19 @@ export class AgentBrowserSurfaceController {
   private reportLaunchFailure(error: string): void {
     if (this.sink) this.sink.launchFailed(error);
     else this.pendingLaunchFailure = error;
+  }
+
+  /** The page a launch, relaunch or relaunching attach opens: the navigation
+   *  still pending, else the page this Surface is on. */
+  private launchUrl(): string | undefined {
+    const pending = this.pendingIntent.url;
+    return isBrowsableUrl(pending) ? pending : this.currentRelaunchUrl();
+  }
+
+  /** The host opened `url` in the browser it started: a navigation pending to
+   *  that page is done, or `live` would load it a second time. */
+  private openedByHost(url: string | undefined): void {
+    if (url !== undefined && this.pendingIntent.url === url) delete this.pendingIntent.url;
   }
 
   /**
@@ -875,16 +890,19 @@ export class AgentBrowserSurfaceController {
     }
     const phase: Phase = { k: 'attaching' };
     this.setPhase(phase);
-    const url = relaunch ? this.currentRelaunchUrl() : undefined;
+    const url = relaunch ? this.launchUrl() : undefined;
     // Call through the adapter instance — pulling the method into a bare
     // variable would detach `this` and break its internal `requestResponse`.
     platform.agentBrowserAttach(session, { url, headed: this.headed }, this.binaryPath)
-      .catch((err: unknown) => ({ ok: false, wsPort: undefined, error: messageOf(err) }))
+      .catch((err: unknown): AgentBrowserAttachResult => ({ ok: false, error: messageOf(err) }))
       .then((res) => {
         if (this.phase !== phase) {
           if (url) this.closeIfClosedMeanwhile(session);
           return;
         }
+        // Only a gone daemon is relaunched at the page; a live one was only
+        // found, so a navigation pending to it still has to run.
+        if (res.relaunched) this.openedByHost(url);
         if (res.ok && res.wsPort) this.goLive(res.wsPort);
         else this.setPhase({ k: 'ended', error: relaunch ? res.error : undefined });
       });
@@ -1459,8 +1477,12 @@ export class AgentBrowserSurfaceController {
       if (url) this.navigate(url);
       return;
     }
-    if (isBrowsableUrl(url)) this.latestRestorableUrl = url;
-    const target = this.currentRelaunchUrl();
+    // The page asked for is the latest navigation, superseding a pending one.
+    if (isBrowsableUrl(url)) {
+      this.latestRestorableUrl = url;
+      this.pendingIntent.url = url;
+    }
+    const target = this.launchUrl();
     // The phase first: flipping headedness while still live would start the
     // CDP observer, whose `get cdp-url` would land in the close/reopen gap.
     const phase: Phase = { k: 'relaunching' };
@@ -1479,6 +1501,7 @@ export class AgentBrowserSurfaceController {
         return;
       }
       if (res.ok && res.wsPort) {
+        this.openedByHost(target);
         this.goLive(res.wsPort);
         return;
       }

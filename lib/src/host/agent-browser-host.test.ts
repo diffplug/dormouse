@@ -406,7 +406,8 @@ describe('agent-browser host attach', () => {
         host.attach(session, { url: 'https://example.com/', headed: true }),
         host.attach(session, { url: 'https://example.com/', headed: true }),
       ]);
-      expect(first).toEqual({ ok: true, wsPort: port });
+      // Opened at the page, so the caller has no navigation left to run.
+      expect(first).toEqual({ ok: true, wsPort: port, relaunched: true });
       expect(second).toEqual(first);
       expect(calls).toEqual([['--session', session, '--headed', 'open', 'https://example.com/']]);
       // A cold start leaves no stray blank tab to sweep once `open` returns.

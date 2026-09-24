@@ -419,7 +419,7 @@ export class VSCodeAdapter implements PlatformAdapter {
     const result = await this.requestResponse<AgentBrowserAttachResult>(
       'agentBrowser:attach', 'agentBrowser:attachResult',
       { session, url: opts.url, headed: opts.headed, binaryPath },
-      (msg) => ({ ok: msg.ok, wsPort: msg.wsPort, headed: msg.headed, nativeIdentity: msg.nativeIdentity, error: msg.error }),
+      (msg) => ({ ok: msg.ok, wsPort: msg.wsPort, relaunched: msg.relaunched, headed: msg.headed, nativeIdentity: msg.nativeIdentity, error: msg.error }),
       15000,
     );
     return result ?? { ok: false, error: 'agent-browser attach timed out' };

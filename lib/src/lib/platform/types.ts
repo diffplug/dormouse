@@ -130,6 +130,9 @@ export interface AgentBrowserAttachResult {
   nativeIdentity?: string;
   ok: boolean;
   wsPort?: number;
+  /** The session was gone, and the host started a browser at the caller's
+   *  `url`: that page is already open. */
+  relaunched?: boolean;
   error?: string;
 }
 

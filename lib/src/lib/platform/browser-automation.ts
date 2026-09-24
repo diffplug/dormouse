@@ -22,6 +22,8 @@ export interface PlaywrightResult {
   cwd?: string;
   binaryPath?: string;
   wsPort?: number;
+  /** `attach` only: see `AgentBrowserAttachResult`. */
+  relaunched?: boolean;
   url?: string;
   bytes?: Uint8Array;
   path?: string;

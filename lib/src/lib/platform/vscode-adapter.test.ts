@@ -488,9 +488,9 @@ describe('VSCodeAdapter agent-browser replies', () => {
     const request = postMessage.mock.calls.map(([message]) => message).find((message) => message.type === 'agentBrowser:attach');
     expect(request).toMatchObject({ session: 'sess', url: 'https://example.com/' });
     windowTarget.dispatchEvent(hostMessage({
-      type: 'agentBrowser:attachResult', requestId: request.requestId, ok: true, wsPort: 4321, headed: true, nativeIdentity: 'id',
+      type: 'agentBrowser:attachResult', requestId: request.requestId, ok: true, wsPort: 4321, relaunched: true, headed: true, nativeIdentity: 'id',
     }));
-    expect(await attached).toEqual({ ok: true, wsPort: 4321, headed: true, nativeIdentity: 'id', error: undefined });
+    expect(await attached).toEqual({ ok: true, wsPort: 4321, relaunched: true, headed: true, nativeIdentity: 'id', error: undefined });
   });
 });
 

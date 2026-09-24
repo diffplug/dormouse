@@ -89,6 +89,10 @@ function withPort(id: string, params: AgentBrowserSurfaceParams, port: number): 
   return controller;
 }
 
+/** The pages a controller opened with a daemon command, in order. */
+const opens = (platform: Pick<PlatformAdapter, 'agentBrowserCommand'>) =>
+  vi.mocked(platform.agentBrowserCommand!).mock.calls.filter(([, args]) => args[0] === 'open').map(([, args]) => args[1]);
+
 const streamSockets = (port: number) =>
   WebSocketMock.instances.filter((ws) => ws.url === `ws://127.0.0.1:${port}`);
 const streamSocket = (port: number) => streamSockets(port).at(-1);
@@ -627,6 +631,19 @@ describe('launch', () => {
     expect(WebSocketMock.instances).toHaveLength(0);
   });
 
+  it('a navigation out of a failed launch launches at its page, and loads it once', async () => {
+    const answers = [{ ok: false, error: 'boom' }, { ok: true, session: 'dormouse.1.gui-n', wsPort: 4321 }];
+    const platform = launchPlatform(async () => answers.shift()!);
+    acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-screencast', url: 'https://page.example/' }).attachView(makeSink());
+    await flushMicrotasks();
+
+    getAgentBrowserScreenController('id')!.chromeActions.navigate('https://next.example/');
+    await flushMicrotasks();
+    expect(platform.agentBrowserOpen).toHaveBeenLastCalledWith('https://next.example/', { headed: false }, undefined);
+    expect(streamSocket(4321)?.readyState).toBe(1);
+    expect(opens(platform)).toEqual([]);
+  });
+
   it('ignores params that predate the session its launch bound', async () => {
     const platform = launchPlatform(async () => ({ ok: true, session: 'dormouse.1.gui-abc', wsPort: 4321 }));
     const controller = acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-screencast', url: 'https://page.example/' });
@@ -838,7 +855,8 @@ describe('attach', () => {
     expect(streamSockets(1111)).toHaveLength(2);
 
     // Ended again, a URL-bar navigation attaches — never a daemon command, which
-    // would start a daemon on a port nobody learns — and opens the page once live.
+    // would start a daemon on a port nobody learns. Its daemon was still up, so
+    // attach only found it: the page opens once live.
     streamSocket(1111)!.emitMessage(JSON.stringify({ type: 'status', connected: true, screencasting: true }));
     streamSocket(1111)!.emitMessage(JSON.stringify({ type: 'status', connected: false, screencasting: false }));
     getAgentBrowserScreenController('id')!.chromeActions.navigate('https://next.example/');
@@ -846,7 +864,20 @@ describe('attach', () => {
     expect(platform.agentBrowserAttach).toHaveBeenCalledExactlyOnceWith('sess', { url: 'https://next.example/', headed: false }, undefined);
     await flushMicrotasks();
     expect(streamSocket(3333)?.readyState).toBe(1);
-    expect(platform.agentBrowserCommand).toHaveBeenCalledWith('sess', ['open', 'https://next.example/'], undefined);
+    expect(opens(platform)).toEqual(['https://next.example/']);
+  });
+
+  it('a navigation that relaunches a gone daemon loads its page once', async () => {
+    const platform = attachPlatform(async () => ({ ok: false, error: 'not running' }));
+    acquireAgentBrowserSurfaceController('id', { session: 'sess', url: 'https://page.example/' }).attachView(makeSink());
+    await flushMicrotasks();
+    vi.mocked(platform.agentBrowserAttach!).mockResolvedValue({ ok: true, wsPort: 3333, relaunched: true });
+
+    getAgentBrowserScreenController('id')!.chromeActions.navigate('https://next.example/');
+    await flushMicrotasks();
+    expect(platform.agentBrowserAttach).toHaveBeenLastCalledWith('sess', { url: 'https://next.example/', headed: false }, undefined);
+    expect(streamSocket(3333)?.readyState).toBe(1);
+    expect(opens(platform)).toEqual([]);
   });
 
   it('does not query the daemon while a relaunch is in flight', async () => {
@@ -1175,6 +1206,42 @@ describe('relaunch (pop-out / pop-in)', () => {
     platform.resolvePopOut({ ok: true, wsPort: 3456 });
     await flushMicrotasks();
     expect(platform.agentBrowserCommand).not.toHaveBeenCalledWith('sess', ['open', 'http://localhost:5173/'], undefined);
+  });
+
+  it('a navigation to the page a relaunch is opening loads it once', async () => {
+    const platform = relaunchPlatform();
+    const controller = withPort('id', { session: 'sess', url: 'https://page.example/' }, 1111);
+    controller.attachView(makeSink());
+    await flushMicrotasks();
+
+    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout');
+    getAgentBrowserScreenController('id')!.chromeActions.navigate('https://page.example/');
+    platform.resolvePopOut({ ok: true, wsPort: 3456 });
+    await flushMicrotasks();
+    expect(platform.agentBrowserPopOut).toHaveBeenCalledWith('sess', expect.objectContaining({ url: 'https://page.example/' }), undefined);
+    expect(opens(platform)).toEqual([]);
+  });
+
+  it('a pop-out from a parked pane opens the page asked for while it was parked', async () => {
+    vi.useFakeTimers();
+    try {
+      const platform = relaunchPlatform();
+      const controller = withPort('id', { session: 'sess', url: 'https://page.example/' }, 1111);
+      controller.attachView(makeSink());
+      await vi.advanceTimersByTimeAsync(0);
+      controller.setVisible(false);
+      await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50);
+      expect(controller.isParked()).toBe(true);
+
+      getAgentBrowserScreenController('id')!.chromeActions.navigate('https://next.example/');
+      getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout');
+      expect(platform.agentBrowserPopOut).toHaveBeenCalledWith('sess', expect.objectContaining({ url: 'https://next.example/' }), undefined);
+      platform.resolvePopOut({ ok: true, wsPort: 3456 });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(opens(platform)).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps a pop-out asked for before the browser is bound, and runs it with its page once live', async () => {

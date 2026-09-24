@@ -215,6 +215,7 @@ describe('attach', () => {
     running = true;
     const attached = await host.request({ ...binding, op: 'attach', url: 'http://localhost/' });
     expect(attached).toMatchObject({ ok: true, headed: false, wsPort: expect.any(Number) });
+    expect(attached).not.toHaveProperty('relaunched');
     expect(verbs()).not.toContain('open');
   });
 
@@ -223,7 +224,8 @@ describe('attach', () => {
     expect(verbs()).not.toContain('open');
 
     const attached = await host.request({ ...binding, op: 'attach', url: 'http://localhost/', headed: true });
-    expect(attached).toMatchObject({ ok: true, wsPort: expect.any(Number) });
+    // Opened at the page, so the caller has no navigation left to run.
+    expect(attached).toMatchObject({ ok: true, wsPort: expect.any(Number), relaunched: true });
     expect(mocks.cli.mock.calls.map(([, args]) => args)).toContainEqual(['--session=test', 'open', 'http://localhost/', '--browser=chromium', '--headed']);
   });
 

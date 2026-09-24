@@ -64,6 +64,8 @@ views without weakening that first signal.
 
 **Why a dropped headless stream ends.** While a drop only flagged the connection lost, the phase stayed `live` and the gate open, so a URL-bar navigation ran `open`, which started a daemon on a port the controller never learned; the placeholder read "ended" off three separate signals (review, 2026-09). Attach never spawns, so leaving `live` loses nothing a navigation or `dor` handover cannot reach again.
 
+**Why a launch opens the pending page itself.** A navigation out of `ended` relaunched a gone daemon at that page through `attach`, then ran `open` for it again on `live`: the page reloaded right after its first load, dropping any state it had set up and repeating a non-idempotent GET (review of #775, 2026-09). The controller cannot tell a relaunch from a found daemon on its own, since both answer a port, so `attach` says which. A launch carrying the previous page instead loaded that page first and then navigated away from it.
+
 **Why the launch-failure policy is a param.** Its four creators each awaited an in-memory waiter with its own liveness check, so a pane persisted mid-launch — or whose webview reloaded — then failed, showed "ended" instead of its creator's fallback (review, 2026-09).
 
 **Why a launch waits out its session's close.** A failed swap's restore reopens the previous provider's session, whose `close` was issued at swap time; a fast failure (no Playwright installed) lands before that close does, so a reopen racing it was closed under the restored pane. A Tool re-run relaunching the `tool.<leafId>` session its last run closed meets the same race.

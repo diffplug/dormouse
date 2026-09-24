@@ -47,8 +47,8 @@ Invariants on the flat persisted `BrowserPanelParams`:
   `cwd`/`nativeIdentity`), never nested but for a `launchFallback` restore's
   params. Pop-out is not a param — it derives from `renderMode`
   once, at controller construction.
-- **Never carry a stream port in params**: a port `dor ab`/`dor pw` just
-  learned is handed straight to the Surface's controller (rationale).
+- **Never carry a stream port in params**: `dor ab`/`dor pw` hand one they
+  learn straight to the Surface's controller (rationale).
 - **`contextPortKey` is declared and persisted like any other param.** Only a
   Surface the pane context menu opened for a port carries it, and reuse looks
   one up by it ([Pane Context Menu Connect](#pane-context-menu-connect)).
@@ -88,7 +88,7 @@ Surface lifetime owns backing resources:
 - **A Workspace transfer releases its browser controllers without closing their
   sessions**; the destination attaches to them, or opens the same named session
   a launch was opening. **An abandoned launch closes only a session the host
-  minted for it.**
+  minted.**
 - Iframe proxy grants are reclaimed by the proxy idle sweep, not a per-surface
   teardown hook.
 
@@ -162,7 +162,7 @@ Source of truth: `lib/src/components/wall/use-dev-server-ports.ts`,
 
 **Must offer System browser, Iframe, and each automation provider’s screencast and popout for the selected port**, disabling unavailable host capabilities with a reason. Opening a browser from context always preserves the source terminal, including an untouched one.
 
-**Must reuse targets per source, port, and provider**: each provider’s screencast and popout share a browser session and switch display modes. **A reuse is one intent, `setRenderMode(mode, { url })`, reaching the Surface's controller by id** (`requestBrowserRenderMode`), so a mode switch relaunches at the port's page instead of racing a navigation into it, and a revealed Door not yet mounted keeps it. Reattach minimized targets and recreate closed ones. System browser follows the OS opener's behavior.
+**Must reuse targets per source, port, and provider**: each provider’s screencast and popout share a browser session and switch display modes. **A reuse is one intent, `setRenderMode(mode, { url })`, reaching the Surface's controller by id** (`requestBrowserRenderMode`), so a mode switch relaunches at the port's page rather than racing a navigation into it, even in an unmounted Door. Reattach minimized targets and recreate closed ones. System browser follows the OS opener's behavior.
 
 **Must create automated browser Surfaces at once with the URL and no session**, their controller launching ([Agent-Browser Connection](#agent-browser-connection)); a failure is reported in context and closes the pane (`launchFallback: 'close'`). Concurrent requests for the same target are serialized.
 
@@ -277,7 +277,7 @@ provider as well as Surface id, and the registry must replace one driving the
 other provider**: a minimized pane stays mounted while a failed cross-provider
 swap is restored in place, and a controller's provider is fixed for its life.
 **A view whose controller was released takes a new one on its next params
-change, never on the release itself**, which a kill makes as its fade starts.
+change, never on the release itself** (a kill's, as its fade starts).
 
 **Phase.** The controller holds one `Phase`; the stream connection and CDP
 observer exist exactly in `live`. A hidden headless pane enters `parked` in
@@ -300,13 +300,15 @@ place of `live`; a `dor` handover moves any phase but `launching` and
   chords, screenshots (rationale).
 - **A navigation asked for outside `live` is kept as the one latest intent**,
   run on the next `live`; **so is a pop-out or pop-in asked before the browser
-  is bound** (`idle`, `launching`, `attaching`), run as a relaunch.
+  is bound** (`idle`, `launching`, `attaching`), run as a relaunch. **A launch
+  or relaunch opens the pending page itself; one the host opened never loads
+  again** (rationale).
 - **The controller never asks a daemon-spawning CLI verb for a port**: ports
   come from a launch or relaunch answer, a `dor` handover, or `attach`.
 - **A failed first launch is reported once to the Wall, which applies the
   Surface's `launchFallback`**: `close` the pane, `embed` (a Tool's iframe), or
-  `{ restore }` the params a swap replaced. A param, cleared once the launch
-  succeeds, so a pane restored mid-launch keeps it (rationale). **A launch into a
+  `{ restore }` the params a swap replaced. A param cleared on success, it
+  survives a restore mid-launch (rationale). **A launch into a
   named session waits out a close of that session still in flight** (rationale).
 - **Params predating the controller's own `session` or `renderMode` write are
   ignored until they show it back.**
@@ -427,7 +429,7 @@ sidecar/Rust adapter.
 | --- | --- |
 | `agentBrowserCommand` | Navigation, tab, viewport/device, `get cdp-url` and `close` commands, one shape per verb. |
 | `agentBrowserScreenshot` | One device-resolution JPEG/PNG frame. VS Code structured-clones the bytes; standalone passes Rust the capture's temp-file **path** over the sidecar stdio, for Rust to read (rationale). **One capture per session and format in flight**: a request made meanwhile joins it — never one from before the session's close or relaunch — and the capture's spawn is killed past 30s. |
-| `agentBrowserAttach` | The live stream port from `<session>.pid` / `<session>.stream` and a port probe, never spawning. Only a gone daemon, for a caller naming a page, is relaunched there (headed on request); one up but not streaming is left alone. Concurrent attaches join. |
+| `agentBrowserAttach` | The live stream port from `<session>.pid` / `<session>.stream` and a port probe, never spawning. Only a gone daemon, for a caller naming a page, is relaunched there (headed on request), answering `relaunched`; one up but not streaming is left alone. Concurrent attaches join. |
 | `agentBrowserEdit` | select-all/copy/cut via fixed host-owned JS plus an OS clipboard write. |
 | `getAgentBrowserStreamUrl` | Direct stream URL, or the VS Code relay URL. |
 | `agentBrowserOpen` | Open a URL in a new GUI session, or a caller-named one (a live daemon navigates); resolves when the daemon is up, not when the page loads ([Pop-Out](#pop-out)). |
@@ -477,7 +479,7 @@ Source of truth: `lib/src/host/agent-browser-host.ts` (`runWithBinaryFallback`),
 
 **Must scope managed keys by provider and Dormouse workspace.** Managed bindings retain unique native session names. The first command reserves its cwd and executable for two minutes while binding the Surface; concurrent first commands share the reservation, and one that succeeds without a viewer (a non-Chromium browser) keeps it until a Surface binds. Successful bindings remove reservations; Surfaces retain cwd/executable for later commands, including relative paths. `--session` bypasses managed-key addressing and uses the caller's native project scope. `--surface` requires a Playwright renderer. GUI Connect inherits the source terminal's cwd; a swap without one uses the host cwd.
 
-**Must discover the native session in its CLI project scope and connect using that installation's matching Playwright client.** Accept only a unique registry entry matching session, workspace and library, with a local pipe endpoint and Chromium engine. Never load modules from the registry's library path. The host derives the client from the validated CLI installation. Raw sessions reuse Surfaces by that native identity, including callers in different subdirectories of one project. **`attach` relaunches at the page only when the registry lists no browser for the session**, never one it cannot view; `dor pw`'s binding attaches with no page. Native CLI tabs and the pane share the selected tab; the host polls tab selection and metadata every 750ms while viewed, broadcasting only changes, and the current state to each connecting viewer. Screenshots reuse tab state for up to 750ms; explicit host controls refresh immediately. A native launch updates headed shutdown ownership and the pane's display mode. **Must apply that host-reported mode in the controller before the new viewer port**, so sync never sizes a headed window, except mid-relaunch or as an echo ([Agent-Browser Connection](#agent-browser-connection)).
+**Must discover the native session in its CLI project scope and connect using that installation's matching Playwright client.** Accept only a unique registry entry matching session, workspace and library, with a local pipe endpoint and Chromium engine. Never load modules from the registry's library path. The host derives the client from the validated CLI installation. Raw sessions reuse Surfaces by that native identity, including callers in different subdirectories of one project. **`attach` relaunches at the page only when the registry lists no browser for the session**, answering `relaunched`, never one it cannot view; `dor pw`'s binding attaches with no page. Native CLI tabs and the pane share the selected tab; the host polls tab selection and metadata every 750ms while viewed, broadcasting only changes, and the current state to each connecting viewer. Screenshots reuse tab state for up to 750ms; explicit host controls refresh immediately. A native launch updates headed shutdown ownership and the pane's display mode. **Must apply that host-reported mode in the controller before the new viewer port**, so sync never sizes a headed window, except mid-relaunch or as an echo ([Agent-Browser Connection](#agent-browser-connection)).
 
 **Must expose only fixed host operations.** Navigation, tabs, viewport/device, screenshots, editing and close are validated host-side (commands by the shared parser above); arbitrary CLI arguments, JavaScript and CDP methods are unavailable through the webview channel. The trusted `dor pw` process retains native passthrough. Executable hints use the same filename/exact-host-override boundary as agent-browser, with `playwright-cli` as the accepted name; `dor pw` applies it to the executable a binding returns (`docs/specs/dor-cli.md` → Playwright Surface Addressing).
 

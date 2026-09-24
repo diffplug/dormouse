@@ -450,18 +450,21 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
     if (request.op === 'attach') {
       const url = request.url;
       const deadline = Date.now() + REQUEST_BUDGET_MS;
+      let relaunched = false;
       const v = await serialize(b, async () => {
         try {
           return await connect(b);
         } catch (error) {
           if (!(error instanceof SessionNotOpenError) || !isBrowsableUrl(url)) throw error;
           // A session no entry names has nothing to close first.
-          return launch(b, url, !!request.headed, !error.named, deadline);
+          const launched = await launch(b, url, !!request.headed, !error.named, deadline);
+          relaunched = true;
+          return launched;
         }
       });
       // A connecting viewer is sent the current state; only live ones need it now.
       if (v.sockets.size) await refresh(v);
-      return bound(v, { headed: v.headed });
+      return bound(v, { headed: v.headed, ...(relaunched ? { relaunched } : {}) });
     }
     // Parsed before anything connects, so a refused command costs nothing.
     const command = request.op === 'command' ? parseWebviewCommand(request.args) : undefined;

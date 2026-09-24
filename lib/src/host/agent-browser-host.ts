@@ -646,7 +646,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
       relaunchGenerations.delete(session);
       forgetInFlight(session, 'attach');
       const launched = await coldLaunch('attach open', session, openArgs(session, url, !!opts.headed, binaryPath), binaryPath, daemon.pid);
-      return 'wsPort' in launched ? { ok: true, wsPort: launched.wsPort } : { ok: false, error: launched.error };
+      return 'wsPort' in launched ? { ok: true, wsPort: launched.wsPort, relaunched: true } : { ok: false, error: launched.error };
     });
   }
 
