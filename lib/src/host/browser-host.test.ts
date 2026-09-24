@@ -470,6 +470,38 @@ describe('sync-to-pane', () => {
     expect(pane.writes()).toHaveLength(2);
   });
 
+  it.each([
+    { op: 'viewport', width: 1024, height: 768, dpr: 1 },
+    { op: 'device', name: 'iPhone 15' },
+  ] as const)('cancels unseen sync intents when Fixed $op arrives first', async (op) => {
+    const pane = await paneOn();
+    expect((await pane.host.request({ ...s1, ...op, endsSync: 'e1' })).ok).toBe(true);
+    // Sent before Fixed on the socket, but delivered after its host request.
+    await pane.size(800, 600, 'e1');
+    expect(pane.state()).toBe('off');
+    expect(pane.writes()).toHaveLength(1);
+    // A fresh choice can sync; replaying the cancelled engagement cannot
+    // overwrite it or resurrect the cancelled pane size.
+    await pane.size(900, 600, 'e2');
+    await vi.waitFor(() => expect(pane.writes()).toHaveLength(2));
+    await pane.size(800, 600, 'e1');
+    expect(pane.writes()).toHaveLength(2);
+    await flush();
+    pane.seen(900, 600);
+    await vi.waitFor(() => expect(pane.state()).toBe('synced'));
+    expect(pane.viewer.states.at(-1)).toMatchObject({ engagement: 'e2' });
+  });
+
+  it('rejects malformed ended engagements before writing a viewport or device', async () => {
+    const pane = await paneOn();
+    for (const endsSync of ['', 'has space', 'x'.repeat(65), 7]) {
+      for (const op of [{ op: 'viewport', width: 800, height: 600, dpr: 1 }, { op: 'device', name: 'iPhone 15' }]) {
+        expect(await pane.host.request({ ...s1, ...op, endsSync })).toEqual({ ok: false, error: 'invalid sync engagement' });
+      }
+    }
+    expect(pane.writes()).toEqual([]);
+  });
+
   it('finishes a Fixed write before a newer sync engagement writes the pane size', async () => {
     const pane = await paneOn();
     pane.fake.gate('viewport s1 1024x768@1');

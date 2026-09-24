@@ -330,6 +330,23 @@ describe('sync-to-pane', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
+  it('names the engagement a Fixed viewport or device ends', async () => {
+    const host = installBrowserHost();
+    const controller = withPort('id', { session: 'sess' }, 4321);
+    controller.attachView(resizablePane().sink);
+    await vi.advanceTimersByTimeAsync(0);
+    const screen = getAgentBrowserScreenController('id')!;
+    const first = engagementAt(4321);
+    expect(first).toEqual(expect.any(String));
+    screen.actions.applyViewport(1024, 768, 1);
+    expect(host.requests('viewport').at(-1)).toMatchObject({ endsSync: first });
+    screen.actions.engageSync();
+    const next = engagementAt(4321);
+    expect(next).not.toBe(first);
+    screen.actions.applyDevice('iPhone 15');
+    expect(host.requests('device').at(-1)).toMatchObject({ endsSync: next });
+  });
+
   it('sends the host the pane size when its socket opens, once a resize settles, and at once on a display-scale change', async () => {
     const host = installBrowserHost();
     // A display-scale change fires the `(resolution)` query armed for the old scale.
@@ -1467,7 +1484,7 @@ describe('relaunch (pop-out / pop-in)', () => {
 
     resolvePopIn({ ok: true, stream: 5555 });
     await flushMicrotasks();
-    expect(host.requests('viewport')).toEqual([onSess({ op: 'viewport', width: 1200, height: 736, dpr: 1.5 })]);
+    expect(host.requests('viewport')).toEqual([onSess({ op: 'viewport', width: 1200, height: 736, dpr: 1.5, endsSync: expect.any(String) })]);
     // The Display modal shows Fixed, at those numbers.
     expect(getAgentBrowserScreenController('id')!.snapshot()).toMatchObject({
       renderMode: 'ab-screencast', syncEngaged: false, viewport: { w: 1200, h: 736, dpr: 1.5 },

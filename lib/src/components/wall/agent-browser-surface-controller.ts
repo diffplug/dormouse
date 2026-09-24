@@ -391,7 +391,7 @@ export class AgentBrowserSurfaceController {
       applyDevice: (name) => {
         this.forgetFixedViewport();
         this.setSyncEngaged(false);
-        this.drive(`set device ${name}`, (browser) => browser.device(name));
+        this.drive(`set device ${name}`, (browser) => browser.device(name, this.syncEngagement));
       },
       applyViewport: (width, height, dpr) => this.fixViewport({ width, height, dpr }),
       openModal: () => openAgentBrowserScreenModal(this.id),
@@ -1271,7 +1271,7 @@ export class AgentBrowserSurfaceController {
   private issueFixedViewport({ width, height, dpr }: FixedViewport): void {
     this.fixedDpr = dpr;
     this.publishScreen();
-    this.drive(`set viewport ${width} ${height} ${dpr}`, (browser) => browser.viewport(width, height, dpr));
+    this.drive(`set viewport ${width} ${height} ${dpr}`, (browser) => browser.viewport(width, height, dpr, this.syncEngagement));
   }
 
   /** Another resolution was asked for: a fixed viewport still waiting is

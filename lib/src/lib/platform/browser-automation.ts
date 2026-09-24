@@ -38,8 +38,10 @@ export type BrowserOp =
   | { op: 'navigate'; url: string }
   | { op: 'history'; dir: 'back' | 'forward' | 'reload' }
   | { op: 'tab'; action: 'select' | 'close'; tabId: string }
-  | { op: 'viewport'; width: number; height: number; dpr: number }
-  | { op: 'device'; name: string }
+  /** `endsSync` cancels this pane's engagement even before its first socket
+   *  intent reaches the host. */
+  | { op: 'viewport'; width: number; height: number; dpr: number; endsSync?: string }
+  | { op: 'device'; name: string; endsSync?: string }
   /** Close the session — after the launch or attach of it running now — and
    *  cancel `cancels`: requests the closing Surface sent that can bring the
    *  browser up, by their `requestId`, however late the transport delivers

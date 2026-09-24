@@ -198,6 +198,9 @@ function parseBrowserRequest(raw: unknown): BrowserRequest | string {
 }
 
 function parseOp(r: Record<string, unknown>): BrowserOp | string {
+  if ((r.op === 'viewport' || r.op === 'device') && r.endsSync !== undefined
+    && (typeof r.endsSync !== 'string' || !WEBVIEW_ID.test(r.endsSync))) return 'invalid sync engagement';
+  const endsSync = typeof r.endsSync === 'string' ? { endsSync: r.endsSync } : {};
   switch (r.op) {
     case 'launch':
     case 'attach': {
@@ -226,10 +229,10 @@ function parseOp(r: Record<string, unknown>): BrowserOp | string {
     }
     case 'viewport': {
       const [width, height, dpr] = [dimension(r.width, VIEWPORT_MAX_SIDE), dimension(r.height, VIEWPORT_MAX_SIDE), dimension(r.dpr, VIEWPORT_MAX_DPR)];
-      return width && height && dpr ? { op: 'viewport', width, height, dpr } : 'invalid viewport';
+      return width && height && dpr ? { op: 'viewport', width, height, dpr, ...endsSync } : 'invalid viewport';
     }
     case 'device':
-      return typeof r.name === 'string' && DEVICE_NAME.test(r.name) ? { op: 'device', name: r.name } : 'invalid device name';
+      return typeof r.name === 'string' && DEVICE_NAME.test(r.name) ? { op: 'device', name: r.name, ...endsSync } : 'invalid device name';
     case 'close': {
       const cancels = r.cancels;
       if (cancels === undefined) return { op: 'close' };
@@ -642,7 +645,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
           return await edit(bound, r.edit);
         case 'viewport':
         case 'device': {
-          sync.fixed(bound.id);
+          sync.fixed(bound.id, r.endsSync);
           return await writeViewport(bound, r);
         }
         default:

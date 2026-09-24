@@ -224,7 +224,8 @@ Resolution controls apply to both screencast providers. **Fixed** issues
   **A page shown anew (the active tab) is written, never judged.**
 - **A Fixed viewport or device ends the browser's sync**, after its write in
   flight; **refused if a launch or close of that browser began meanwhile, or
-  the host shut down**.
+  the host shut down**. **Must carry the pane's ended engagement to the host,
+  which rejects its later socket intents even when none arrived before Fixed.**
 
 **Only `syncEngaged` persists** — device/custom viewport state lives in
 the browser itself. **The webview disengages only on the host's `off` for its

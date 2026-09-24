@@ -62,6 +62,11 @@ export interface ViewportSyncDeps<B> {
 
 export function createViewportSync<B extends { id: string }>(deps: ViewportSyncDeps<B>) {
   const syncs = new Map<string, Sync<B>>();
+  // A Fixed choice and its earlier sync intents use different transports.
+  // Remember every ended engagement for this browser's lifetime, including
+  // ones whose first intent has not arrived. A later engagement cannot revive
+  // an older one still arriving on another viewer socket.
+  const ended = new Map<string, Set<string>>();
   // The page each browser shows, by its tab id, whether or not a pane syncs it.
   const shown = new Map<string, string>();
 
@@ -84,13 +89,21 @@ export function createViewportSync<B extends { id: string }>(deps: ViewportSyncD
     const s = syncs.get(id);
     if (s) clearMismatch(s);
     syncs.delete(id);
+    ended.delete(id);
     shown.delete(id);
   }
 
   /** Stop syncing: another writer set the browser's viewport. */
   function release(s: Sync<B>): void {
     clearMismatch(s);
+    end(s.browser.id, s.engagement);
     setState(s, 'off');
+  }
+
+  function end(id: string, engagement: string): void {
+    let engagements = ended.get(id);
+    if (!engagements) ended.set(id, engagements = new Set());
+    engagements.add(engagement);
   }
 
   /** Write the pane's latest size, unless a write runs — it writes the
@@ -122,6 +135,10 @@ export function createViewportSync<B extends { id: string }>(deps: ViewportSyncD
    *  host stopped answers `off` and writes nothing. */
   function intent(browser: B, stream: number, message: ViewerSyncIntent): void {
     const { id } = browser;
+    if (ended.get(id)?.has(message.engagement)) {
+      deps.report(id, { type: 'sync', state: 'off', engagement: message.engagement });
+      return;
+    }
     let s = syncs.get(id);
     // Another browser streams under this identity now (a `dor ab` re-run).
     if (s && s.stream !== stream) {
@@ -186,7 +203,8 @@ export function createViewportSync<B extends { id: string }>(deps: ViewportSyncD
 
     /** A Fixed viewport or device ends this engagement. The host queues its
      *  write alongside sync writes. */
-    fixed(id: string): void {
+    fixed(id: string, engagement?: string): void {
+      if (engagement !== undefined) end(id, engagement);
       const s = syncs.get(id);
       if (!s) return;
       release(s);
@@ -199,6 +217,7 @@ export function createViewportSync<B extends { id: string }>(deps: ViewportSyncD
     close(): void {
       for (const s of syncs.values()) clearMismatch(s);
       syncs.clear();
+      ended.clear();
       shown.clear();
     },
   };
