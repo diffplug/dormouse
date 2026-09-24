@@ -6,7 +6,7 @@
 
 **What moving a browser Surface's DOM would cost.** A re-parented `<iframe>` reloads, losing scroll, form contents, live scripts, and any open WebSocket. A screencast canvas that moves mid-click breaks click synthesis, whose device coordinates were computed against the old box. Parking the leaf instead of unmounting it makes minimize/reattach free rather than a reload.
 
-**Why `wsPort` is never persisted.** It is ephemeral, and a persisted one was always wrong after a restart (static reading, 2026-09): the Playwright port is the host's own in-process viewer server, so every restored Playwright pane failed three connects (immediate, +2 s, +4 s) and read "ended" after ~6 s; an agent-browser one after a reboot named nothing, and the stale-port recovery that followed asked `stream status`, which starts a daemon at `about:blank` — the pane showed a blank page while its header still named the real one. The recovery machinery that existed only for stale ports (`maybeRecoverStalePort`, two generation counters, a "this port opened live" marker) went with it.
+**Why no stream port is a param.** It is ephemeral, and a persisted one was always wrong after a restart (static reading, 2026-09): the Playwright port is the host's own in-process viewer server, so every restored Playwright pane failed three connects (immediate, +2 s, +4 s) and read "ended" after ~6 s; an agent-browser one after a reboot named nothing, and the stale-port recovery that followed asked `stream status`, which starts a daemon at `about:blank` — the pane showed a blank page while its header still named the real one. The recovery machinery that existed only for stale ports (`maybeRecoverStalePort`, two generation counters, a "this port opened live" marker) went with it. Kept as an unpersisted param, `wsPort` still needed seven scrubs across four files, and the params diff could not see the same port handed over twice (review, 2026-09).
 
 ## Browser Chrome
 
@@ -32,9 +32,9 @@ views without weakening that first signal.
 
 **Why the iframe swap is eager.** The same 1–3s daemon boot as the context-menu connect, behind a modal that has already closed; and while the swap awaited `open`, a slow page held the iframe on screen for the whole load and a timed-out `open` dropped the swap silently — leaving an orphan `gui-<hex>` browser nobody could see or close.
 
-**Why the Surface's controller launches, not the Wall.** The launch-and-bind existed four times — Tool swap, iframe/cross-provider swap, context-menu port, Tool serving — each with its own "still wanted?" predicate and failure rule, racing the controller it handed a session to. Because the launch lived in a Wall closure rather than on the Surface, a session-less pane that was persisted, or whose webview reloaded mid-launch, restored session-less forever; a minimized cross-provider failure rewrote a Door's params under a still-mounted panel holding a disposed controller; and Tool serving still blocked on the page load (static reading, 2026-09).
+**Why the Surface's controller launches, not the Wall.** The launch-and-bind existed four times — Tool swap, iframe/cross-provider swap, context-menu port, Tool serving — each with its own "still wanted?" predicate and failure rule, racing the controller it handed a session to. Because the launch lived in a Wall closure rather than on the Surface, a session-less pane that was persisted, or whose webview reloaded mid-launch, restored session-less forever, and Tool serving still blocked on the page load (static reading, 2026-09).
 
-**Why a failed swap's restore waits for the close.** The restore reopens the previous provider in its own session so its managed key still names it — a fresh `gui-<hex>` session kept a `key` badge that `dor ab --key` no longer resolved to, and the next command opened a second pane. That session's `close` was issued at swap time, and a fast failure (no Playwright installed) lands before it does, so a reopen racing it would be closed under the restored pane.
+**Why a failed swap's restore reopens the previous session.** A fresh `gui-<hex>` session kept a `key` badge that `dor ab --key` no longer resolved to, and the next command opened a second pane.
 
 ## Agent-Browser Renderer
 
@@ -60,7 +60,13 @@ views without weakening that first signal.
 
 **Why one daemon gate, not a check per call site.** The rule against daemon commands in the relaunch gap was a `relaunching` flag each caller had to check, and most did not (static reading, 2026-09): the header's back/forward/reload/URL edit, the Display modal's device and custom viewport, tab clicks, sync-to-pane (reached by a resize once a pop-in had already flipped `poppedOut`), and Cmd-A/C/X all reached the daemon mid-relaunch. The lifecycle behind it was a dozen flags whose invariants lived in five predicates.
 
-**Why an unpark attaches with no page.** A daemon gone while the pane was hidden is the same failure as one gone while visible, which the pane shows as ended; relaunching it on unpark would hide that failure and undo a `dor ab close` made meanwhile. A restore has no such history, so it reopens the page.
+**Why an unpark streams from its parked port first, and attaches with no page.** Asking the host first cost every unpark an attach round trip (a pid and stream-file read plus a port probe) before the first frame, for a daemon that almost never moves while hidden (review, 2026-09). When it did move, or went away: a daemon gone while the pane was hidden is the same failure as one gone while visible, which the pane shows as ended; relaunching it on unpark would hide that failure and undo a `dor ab close` made meanwhile. A restore has no such history, so it reopens the page.
+
+**Why a dropped headless stream ends.** While a drop only flagged the connection lost, the phase stayed `live` and the gate open, so a URL-bar navigation ran `open`, which started a daemon on a port the controller never learned; the placeholder read "ended" off three separate signals (review, 2026-09). Attach never spawns, so leaving `live` loses nothing a navigation or `dor` handover cannot reach again.
+
+**Why the launch-failure policy is a param.** Its four creators each awaited an in-memory waiter with its own liveness check, so a pane persisted mid-launch — or whose webview reloaded — then failed, showed "ended" instead of its creator's fallback (review, 2026-09).
+
+**Why a launch waits out its session's close.** A failed swap's restore reopens the previous provider's session, whose `close` was issued at swap time; a fast failure (no Playwright installed) lands before that close does, so a reopen racing it was closed under the restored pane. A Tool re-run relaunching the `tool.<leafId>` session its last run closed meets the same race.
 
 **Why `url` is tracked separately from `tabs`.** Measured against agent-browser 0.31.1 (2026-09): on `open`, the stream sends `tabs` (about:blank), then `url` naming the target at navigation commit, and refreshes `tabs` only when the CLI command completes — after `load`. During a slow load the tab list still named the previous page, so a pop-out issued then relaunched the page before the one being loaded.
 

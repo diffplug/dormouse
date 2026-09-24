@@ -109,13 +109,12 @@ Source of truth: `createToolHost` in `lib/src/host/tool-host.ts`; `FileToolTrust
 - **Must poll unbound Tools every 1.5 seconds while their command runs.** Reset settle memory and retire browser resources when the observed command-run id changes, even when the command text is unchanged; an initial observation preserves an imported live binding. (rationale)
 - **Must let a changed announced port or path override a committed conflict or browser**, but only after a matching scan. An unchanged announcement never undoes URL-bar navigation. (rationale)
 - **Must stop ordinary port scans once a browser or conflict is committed.** An unannounced additional port appearing after settle is not detected.
-- **Must display the browser destination at once and leave the launch to the Surface's controller**, clearing the existing session/stream binding during a reopen as well (`docs/specs/dor-browser.md` → Agent-Browser Connection). Block Workspace transfer until the session binds. A browser whose Tool disappeared or changed command during startup is closed when it comes up.
-- **Must launch in the Tool's own session — or reuse its existing session and binary path when an announcement changes its destination**, which navigates the live browser. Never wait for the page to load.
+- **Must display the browser destination at once and leave the launch to the Surface's controller** (`docs/specs/dor-browser.md` → Agent-Browser Connection), in the session the Tool has or else its own `tool.<leafId>`, falling back to the embed. Block Workspace transfer until the session binds.
 - **Must retain a runtime re-key within the Tool's namespace**, following [Identity and dedupe](#identity-and-dedupe).
 
 Reserved: **Must derive a Tool's URL again on cold restore**, compatible with future `prespawn_port` and `DORMOUSE_TOOL_PORT` in scope **dor-tools**; [Persistence and hosts](#persistence-and-hosts) owns the saved projection.
 
-Source of truth: `useToolServing` in `lib/src/components/wall/use-tool-serving.ts`; `listenerUrlsByPort` in `lib/src/components/wall/port-url.ts`. Tests: `lib/src/components/wall/use-tool-serving.test.tsx`.
+Source of truth: `useToolServing` in `lib/src/components/wall/use-tool-serving.ts`; `toolBrowserLaunchParams` in `lib/src/components/wall/browser-surface.ts`; `listenerUrlsByPort` in `lib/src/components/wall/port-url.ts`. Tests: `lib/src/components/wall/use-tool-serving.test.tsx`.
 
 ## Lifecycle
 
