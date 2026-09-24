@@ -152,8 +152,8 @@ type Phase =
   /** Streaming from `port`. `seen`: the stream has reported its browser
    *  connected, so a later drop means it went away — a headed window closed.
    *  `resumed`: an unpark reconnecting to the port it parked at, not yet
-   *  proven there — nothing drives the daemon until its stream opens, since a
-   *  CLI command would start a new one if it went away while hidden. */
+   *  proven there — its catch-up waits until the stream opens, and a stream
+   *  that fails asks the host where it moved. */
   | { k: 'live'; port: number; seen: boolean; resumed: boolean }
   /** Hidden long enough to shed the stream; the daemon stays up at `port`. */
   | { k: 'parked'; port: number }
@@ -1515,13 +1515,14 @@ export class AgentBrowserSurfaceController {
 
   // --- the daemon gate ---
 
-  /** The browser to drive, only while `live` — and after an unpark, once its
-   *  stream opens: every command, edit and capture takes it from here, since
-   *  mid-launch, mid-attach or mid-relaunch, or for a daemon gone while hidden,
-   *  a CLI command starts a competing daemon at about:blank
-   *  (docs/specs/dor-browser.md → "Browser Connection"). */
+  /** The browser to drive, only while `live`: every command, edit and capture
+   *  takes it from here, and what is asked outside it waits as the pending
+   *  intent. The host refuses whatever would reach a browser mid-launch or
+   *  mid-close, or a daemon that is gone, so this gate orders the Surface's
+   *  own intents rather than guarding the daemon (docs/specs/dor-browser.md →
+   *  "Browser Connection"). */
   private driver(): BrowserHandle | null {
-    if (this.phase.k !== 'live' || this.phase.resumed || !this.session) return null;
+    if (this.phase.k !== 'live' || !this.session) return null;
     return this.handle();
   }
 
@@ -1557,6 +1558,8 @@ export class AgentBrowserSurfaceController {
   private navigate(url: string): void {
     if (!url) return;
     if (this.driver()) {
+      // The latest navigation, superseding one an unpark has yet to catch up on.
+      delete this.pendingIntent.url;
       this.drive(`open ${url}`, (browser) => browser.navigate(url));
       return;
     }

@@ -76,6 +76,30 @@ describe('createBrowserHost', () => {
     expect(await launch('r287')).toEqual({ ok: false, error: 'the browser was closed' });
   });
 
+  it('drives no browser a launch is replacing or a close is ending until it is done', async () => {
+    const fake = fakeProvider();
+    const host = createBrowserHost({ writeClipboardText: vi.fn(), providers: { 'agent-browser': () => fake.provider } });
+    const s1 = { provider: 'agent-browser', binding: { session: 's1' } } as const;
+    const drive = () => Promise.all([
+      host.request({ ...s1, op: 'navigate', url: 'http://localhost:5173/next' }),
+      host.request({ ...s1, op: 'viewport', width: 800, height: 600, dpr: 2 }),
+      host.request({ ...s1, op: 'edit', edit: 'selectAll' }),
+    ]);
+    const refused = { ok: false, error: 'the browser is being relaunched or closed' };
+    for (const [step, op] of [['stop s1', { op: 'launch', url: 'http://localhost:5173/', headed: true }], ['close s1', { op: 'close' }]] as const) {
+      fake.gate(step);
+      const settling = host.request({ ...s1, ...op });
+      await flush();
+      expect(await drive()).toEqual([refused, refused, refused]);
+      fake.release(step);
+      expect((await settling).ok).toBe(true);
+    }
+    // A pop-out's relaunch holds the browser from its stop until it is up.
+    expect(fake.calls).not.toContain('navigate s1');
+    expect((await drive()).map((result) => result.ok)).toEqual([true, true, true]);
+    expect(fake.calls).toContain('navigate s1');
+  });
+
   it('refuses a request id or cancel list it cannot bound', async () => {
     const host = createBrowserHost({ writeClipboardText: vi.fn(), providers: { 'agent-browser': () => fakeProvider().provider } });
     const s1 = { provider: 'agent-browser', binding: { session: 's1' } } as const;

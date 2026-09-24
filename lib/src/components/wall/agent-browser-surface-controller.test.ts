@@ -994,7 +994,7 @@ describe('attach', () => {
     ['answers', true, false],
     ['answers, with a page asked for meanwhile', true, true],
     ['has gone away', false, true],
-  ])('an unpark drives nothing until the port it parked at %s', async (_name, answers, askedMeanwhile) => {
+  ])('an unpark catches up only once the port it parked at %s', async (_name, answers, askedMeanwhile) => {
     vi.useFakeTimers();
     try {
       const host = attachHost(async () => ({ ok: false, error: 'not running' }));
@@ -1014,19 +1014,23 @@ describe('attach', () => {
       getAgentBrowserScreenController('id')!.chromeActions.navigate('https://next.example/');
       host.browser.mockClear();
 
-      // A daemon gone meanwhile would be started again by any CLI command.
+      // The resize and the page asked for while hidden wait for the stream, so
+      // a daemon gone meanwhile is found ended rather than driven.
       if (!answers) WebSocketMock.failPorts.add(1111);
       controller.setVisible(true);
-      // Asked for before the stream opens: kept, like any navigation the gate refuses.
+      // Asked for before the stream opens: sent at once — the host refuses it
+      // if the daemon is gone — superseding the page asked for while hidden.
       if (askedMeanwhile) getAgentBrowserScreenController('id')!.chromeActions.navigate('https://later.example/');
       await vi.advanceTimersByTimeAsync(250);
+      const later = askedMeanwhile ? [onSess({ op: 'navigate', url: 'https://later.example/' })] : [];
       if (answers) {
         expect(sent()).toEqual([
+          ...later,
           onSess({ op: 'viewport', width: 1000, height: 700, dpr: 1 }),
-          onSess({ op: 'navigate', url: askedMeanwhile ? 'https://later.example/' : 'https://next.example/' }),
+          ...(askedMeanwhile ? [] : [onSess({ op: 'navigate', url: 'https://next.example/' })]),
         ]);
       } else {
-        expect(sent()).toEqual([onSess({ op: 'attach', headed: false })]);
+        expect(sent()).toEqual([...later, onSess({ op: 'attach', headed: false })]);
         expect(controller.snapshot().phase).toBe('ended');
       }
     } finally {

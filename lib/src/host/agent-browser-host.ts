@@ -217,6 +217,19 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
     }
   }
 
+  /**
+   * One CLI call on a live browser. Any verb starts a daemon to answer when
+   * none runs, so it is refused unless the session's daemon runs as its pid
+   * file says: only a launch's own steps may start one (docs/specs/dor-browser.md
+   * → "Browser Host"). A session in a socket directory the host does not
+   * share has no pid file here, so it is refused too.
+   */
+  async function drive(b: ProviderBinding, args: string[], options?: { timeoutMs?: number }): Promise<CliResult> {
+    const pid = await readStateNumber(b.session, 'pid');
+    if (pid === undefined || !processAlive(pid)) throw new Error(`agent-browser session '${b.session}' is not running`);
+    return run(b, args, options);
+  }
+
   /** The port `<session>.stream` names, when something accepts on it. */
   async function acceptingStreamPort(session: string): Promise<number | undefined> {
     const port = await readStateNumber(session, 'stream');
@@ -340,7 +353,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
     async act(b, act): Promise<BrowserResult> {
       const argv = actArgv(act);
       if (!argv) return { ok: false, error: 'invalid tab operation' };
-      const result = await run(b, argv);
+      const result = await drive(b, argv);
       if (result.exitCode !== 0) return { ok: false, error: cliError(result) };
       if (act.op !== 'cdpUrl') return { ok: true };
       const url = parseCdpUrl(result.stdout);
@@ -349,7 +362,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
 
     // eval --json envelope: { success, data: { result }, error }.
     async evaluate(b, script) {
-      const result = await run(b, ['eval', script, '--json']);
+      const result = await drive(b, ['eval', script, '--json']);
       if (result.exitCode !== 0) throw new Error(result.stderr.trim() || `eval exited ${result.exitCode}`);
       let envelope: { success?: boolean; data?: { result?: unknown }; error?: unknown };
       try {
@@ -367,7 +380,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
       const out = await file();
       const args = ['screenshot', out, '--screenshot-format', format];
       if (format === 'jpeg') args.push('--screenshot-quality', String(quality));
-      const result = await run(b, args, { timeoutMs: CAPTURE_TIMEOUT_MS });
+      const result = await drive(b, args, { timeoutMs: CAPTURE_TIMEOUT_MS });
       if (result.exitCode !== 0) {
         log(`[agent-browser] screenshot failed (exit ${result.exitCode}): ${cliError(result)}`);
         throw new Error(result.stderr.trim() || `screenshot exited ${result.exitCode}`);

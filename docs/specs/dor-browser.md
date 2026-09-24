@@ -324,10 +324,12 @@ place of `live`; a `dor` handover moves any phase but `launching` and
 | `ended` | No browser; `error` says why | `relaunching`; a navigation rebinds, with its page |
 | `disposed` | Released | — |
 
-- **Every daemon command must pass one gate (`driver`), open only in `live`,
-  and after an unpark only once its stream opens** — chrome and Display modal
-  actions, tabs, sync-to-pane, `get cdp-url`, edit chords, screenshots
-  (rationale).
+- **Every browser operation must pass one gate (`driver`), open only in
+  `live`** — chrome and Display modal actions, tabs, sync-to-pane, `get
+  cdp-url`, edit chords, screenshots (rationale). **An unpark catches up —
+  sync, a pending intent — only once its stream opens.** The gate orders the
+  Surface's own intents; the host is what keeps an operation off a browser
+  mid-relaunch ([Browser Host](#browser-host)).
 - **A navigation asked for outside `live` is kept as the one latest intent**,
   run on the next `live`; **so is a pop-out or pop-in asked before the browser
   is bound** (`idle`, `launching`, `attaching`), run as a relaunch, and so is
@@ -440,9 +442,9 @@ page to load** (rationale): its launch resolves once the *relaunched* daemon is
 up, asking `stream status` only after `open` returns. **A non-zero `open` exit
 with the daemon up is a page still loading, not a failed launch**; only a launch
 without a published port fails, including after a zero exit. **Never query the
-daemon during the close/reopen gap** (rationale) — host-side, and in the
-controller through its daemon gate — so **Dormouse supplies the active-tab URL
-and the host trusts it**.
+daemon during the close/reopen gap** (rationale) — the host refuses every
+operation on a browser mid-launch ([Browser Host](#browser-host)) — so
+**Dormouse supplies the active-tab URL and the host trusts it**.
 
 While popped out, Dormouse keeps a stream/CDP observer for same-tab URL/header
 updates and headed-window close auto-revert.
@@ -492,6 +494,10 @@ list tabs, act, evaluate, screenshot, stream URL):
   must navigate it, never stop it** (a Tool re-announced); only one gone or in
   the other mode is relaunched (rationale). agent-browser cannot report its
   mode: one this host did not launch headed counts as headless.
+- **Must refuse every operation but `launch`, `attach` and `close` on a
+  browser a launch is replacing or a close is ending**, until it is done, so
+  nothing reaches a browser in the close/reopen gap ([Pop-Out](#pop-out)),
+  whichever Surface asks.
 - **Must answer a launch inside `BROWSER_REQUEST_TIMEOUT_MS`**: startup,
   queueing included, gets 30 s from the request's arrival. A relaunch stops
   what runs the session first, then resolves once the provider reports the
@@ -567,13 +573,16 @@ relaunch changes the mode.
   every other call runs in the host's.
 - **Every spawn passes the `binaryPath` gate in `runWithBinaryFallback`**, the
   host's `DORMOUSE_AGENT_BROWSER_BIN` being the exact-match override.
+- **Only a launch's own steps may run a CLI verb with no daemon up**: an
+  operation runs only while `<session>.pid` names a live process, since any
+  verb starts a daemon at `about:blank` to answer.
 - **`dor ab` must read the stream port itself after a command that may bind**
   (`stream status --json`, safe once the command made the daemon) and hand it
   over; the Surface streams from it without asking the host (rationale).
   **Never carry a socket directory to the host** — it kills the pid it reads
   there. **Host-side operations for a session in a socket directory the host
-  does not share are unsupported**: they run the CLI under the host's
-  environment.
+  does not share are refused**, as the host sees no daemon for it; a close runs
+  the CLI under the host's environment.
 - **VS Code must reach the stream through a loopback relay** — the agent-browser
   stream server rejects `vscode-webview://` origins. The relay grants one
   single-use, short-TTL token bound to one stream port and strips the Origin

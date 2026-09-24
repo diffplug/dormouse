@@ -346,6 +346,23 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     return expires !== undefined && expires > Date.now();
   }
 
+  // The browsers a launch is replacing or a close is ending right now. An
+  // operation reaching one meanwhile would drive the browser in the gap —
+  // agent-browser's CLI starts a competing daemon at about:blank to answer —
+  // so every operation but these three is refused until the launch or close
+  // is done.
+  const settling = new Map<string, number>();
+  async function settle<T>(id: string, work: () => Promise<T>): Promise<T> {
+    settling.set(id, (settling.get(id) ?? 0) + 1);
+    try {
+      return await work();
+    } finally {
+      const left = (settling.get(id) ?? 1) - 1;
+      if (left > 0) settling.set(id, left);
+      else settling.delete(id);
+    }
+  }
+
   // Bumped by every launch and close: work begun for an earlier browser (a
   // post-launch sweep, a capture to join) must not reach the one that
   // replaced it.
@@ -378,7 +395,11 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   /** Launch `bound`'s browser at `url`, or blank without one: headed or not,
    *  stopping what runs the session first unless it is `fresh`. Answers once
    *  the browser is up, never waiting for the page. */
-  async function launch(bound: Bound, url: string | undefined, isHeaded: boolean, fresh: boolean, requestDeadline: number): Promise<LiveBrowser> {
+  function launch(bound: Bound, url: string | undefined, isHeaded: boolean, fresh: boolean, requestDeadline: number): Promise<LiveBrowser> {
+    return settle(bound.id, () => bringUpBrowser(bound, url, isHeaded, fresh, requestDeadline));
+  }
+
+  async function bringUpBrowser(bound: Bound, url: string | undefined, isHeaded: boolean, fresh: boolean, requestDeadline: number): Promise<LiveBrowser> {
     const { p, b, id } = bound;
     if (closed) throw new Error('the browser host is shutting down');
     const deadline = requestDeadline - LAUNCH_CLOSE_RESERVE_MS;
@@ -483,13 +504,13 @@ export function createBrowserHost(deps: BrowserHostDeps) {
    *  superseded (`bringUp`), and one arriving later runs after. */
   function closeSession(bound: Bound): Promise<void> {
     closesArrived.set(bound.id, (closesArrived.get(bound.id) ?? 0) + 1);
-    return serialize(bound.id, async () => {
+    return serialize(bound.id, () => settle(bound.id, async () => {
       // The session is closed on purpose, so it is no longer shutdown's to
       // close. Invalidating released it.
       await invalidate(bound);
       headed.delete(bound.id);
       await bound.p.close(bound.b, CLOSE_TIMEOUT_MS);
-    });
+    }));
   }
 
   // --- captures ---
@@ -606,6 +627,9 @@ export function createBrowserHost(deps: BrowserHostDeps) {
         return { ok: true, ...p.describe(b), nativeIdentity: bound.id, wsPort: live.wsPort, ...(live.headed !== undefined ? { headed: live.headed } : {}) };
       };
       const requestDeadline = Date.now() + REQUEST_BUDGET_MS;
+      if (r.op !== 'launch' && r.op !== 'attach' && r.op !== 'close' && settling.has(bound.id)) {
+        return { ok: false, error: 'the browser is being relaunched or closed' };
+      }
       switch (r.op) {
         case 'launch': {
           const fresh = r.binding.session === undefined;

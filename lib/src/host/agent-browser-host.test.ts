@@ -1,9 +1,9 @@
-import { spawn } from 'child_process';
+import { spawn, type ChildProcess } from 'child_process';
 import { existsSync, mkdtempSync, promises as fsp, statSync, utimesSync, writeFileSync } from 'fs';
 import { createServer, type Server } from 'net';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { BrowserOp, BrowserRequestBinding } from '../lib/platform/browser-automation';
 import { createAgentBrowserProvider } from './agent-browser-host';
 import { createBrowserHost } from './browser-host';
@@ -81,6 +81,12 @@ function useTempSocketDir(prefix: string): void {
 
 function writeState(session: string, ext: 'pid' | 'stream', value: number): void {
   writeFileSync(join(process.env.AGENT_BROWSER_SOCKET_DIR!, `${session}.${ext}`), `${value}\n`);
+}
+
+/** Give each session a running daemon, as its pid file says: the host drives
+ *  no other. This test process stands in for it. */
+function running(...sessions: string[]): void {
+  for (const session of sessions) writeState(session, 'pid', process.pid);
 }
 
 // The host spawns through dor-lib-common's spawnAndCapture; mock just that
@@ -514,6 +520,29 @@ describe('agent-browser host attach', () => {
     expect(spawnMock).not.toHaveBeenCalled();
   });
 
+  // Any verb starts a daemon to answer when none runs, at about:blank: an
+  // operation on a daemon gone while its pane was hidden, or on one in a
+  // socket directory the host does not share, must start nothing.
+  it('runs no operation on a session whose daemon is not running', async () => {
+    const host = makeHost();
+    const ops: BrowserOp[] = [
+      { op: 'navigate', url: 'https://example.com/' },
+      { op: 'history', dir: 'back' },
+      { op: 'tab', action: 'select', tabId: 't1' },
+      { op: 'viewport', width: 800, height: 600, dpr: 2 },
+      { op: 'device', name: 'iPhone 16' },
+      { op: 'edit', edit: 'copy' },
+      { op: 'screenshot' },
+    ];
+    for (const pid of [undefined, DEAD_PID]) {
+      if (pid !== undefined) writeState(session, 'pid', pid);
+      for (const op of ops) {
+        expect(await ab(host, op, { session }), JSON.stringify(op)).toEqual({ ok: false, error: `agent-browser session '${session}' is not running` });
+      }
+    }
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
   it('relaunches a gone daemon at the page named, headed for a pop-out, and tracks that window for shutdown', async () => {
     writeState(session, 'pid', DEAD_PID);
     writeState(session, 'stream', await closedPort());
@@ -588,9 +617,8 @@ describe('agent-browser host attach', () => {
 });
 
 describe('agent-browser host screenshot transport', () => {
-  // Block body (not `() => spawnMock.mockReset()`): an arrow returning the mock
-  // makes vitest register it as a teardown hook and call it — a phantom spawn.
-  beforeEach(() => { spawnMock.mockReset(); });
+  useTempSocketDir('dormouse-ab-shot-test-');
+  beforeEach(() => { running('shotfile', 'dormouse.1.default', 'shotbytes', 'shutdown-sess', 'read-sess', 'queued', 'queued-bytes', 'retry-sess', 'sess', 'left', 'kept'); });
 
   /** agent-browser's `screenshot <path>`, writing `frames` in turn. */
   function captureFrames(...frames: number[][]): string[][] {
@@ -736,6 +764,15 @@ describe('agent-browser host screenshot transport', () => {
       }
       return spawnResult({ code: args.includes('open') ? 1 : 0 });
     });
+    // A relaunch kills the daemon its pid file names, so a child stands in.
+    const daemons: ChildProcess[] = [];
+    const daemon = () => {
+      const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1 << 30)'], { stdio: 'ignore' });
+      daemons.push(child);
+      writeState('wedged', 'pid', child.pid!);
+    };
+    onTestFinished(() => { for (const child of daemons) child.kill('SIGKILL'); });
+    daemon();
     const host = makeHost();
     const capture = async () => {
       void abFile(host, { op: 'screenshot', format: 'jpeg' }, { session: 'wedged' });
@@ -754,6 +791,7 @@ describe('agent-browser host screenshot transport', () => {
 
     // So does a relaunch, which reuses the session name.
     await ab(host, { op: 'launch', url: 'https://example.com/', headed: false }, { session: 'wedged' });
+    daemon();
     await capture();
     expect(shots).toHaveLength(3);
 
@@ -815,6 +853,7 @@ describe('agent-browser host screenshot transport', () => {
 describe('agent-browser host requests', () => {
   useTempSocketDir('dormouse-ab-argv-test-');
   const session = { session: 'dormouse.1.gui-abc' };
+  beforeEach(() => { running(session.session); });
 
   it('renders each operation to exactly one fixed argv', async () => {
     const shapes: [BrowserOp, string[]][] = [
@@ -912,7 +951,8 @@ describe('agent-browser host requests', () => {
 });
 
 describe('agent-browser host edit ops', () => {
-  beforeEach(() => { spawnMock.mockReset(); });
+  useTempSocketDir('dormouse-ab-edit-test-');
+  beforeEach(() => { running('sess'); });
 
   // `op` is a TypeScript type, not a runtime check — it arrives from webview IPC
   // (`vscode-ext/src/message-router.ts`, `standalone/sidecar/main.js`) with no
