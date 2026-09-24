@@ -201,8 +201,21 @@ export function instrumentHtml(body: string, embedderOrigin: string, preserveCsp
   const shimTag = `<script>${iframeShim(embedderOrigin)}</script>`;
   if (/<\/head>/i.test(html)) return html.replace(/<\/head>/i, `${shimTag}</head>`);
   if (/<body[^>]*>/i.test(html)) return html.replace(/(<body[^>]*>)/i, `$1${shimTag}`);
-  return shimTag + html;
+  // Both tags are optional in valid HTML. Never ahead of the doctype, which
+  // would switch the page to quirks mode, nor of a `<meta charset>`, which
+  // counts only within the first 1024 bytes — the same window searched here.
+  const prologue = html.slice(0, 1024);
+  let at = 0;
+  for (const tag of [/<!doctype[^>]*>/i, /<html(?:\s[^>]*)?>/i, /<head(?:\s[^>]*)?>/i, /<meta\b[^>]*\bcharset\b[^>]*>/i]) {
+    const match = tag.exec(prologue);
+    if (match) at = Math.max(at, match.index + match[0].length);
+  }
+  return html.slice(0, at) + shimTag + html.slice(at);
 }
+
+/** The end of the document prefix `instrumentHtml` places the shim before
+ *  (`</head>`) or after (`<body…>`). The proxy buffers until it sees one. */
+export const HEAD_MARKER = /<\/head>|<body[^>]*>/i;
 
 // 169.254.0.0/16 — IPv4 link-local, incl. the 169.254.169.254 cloud-metadata
 // endpoint — as a numeric range so every equivalent encoding is caught.

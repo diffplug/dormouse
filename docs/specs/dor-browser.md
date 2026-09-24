@@ -482,7 +482,7 @@ Header rewriting:
 | request | `Host` | upstream host |
 | request | `Origin` | upstream origin **only** when it is the proxy's own; else forwarded untouched (absent stays absent) |
 | request | `Referer` | proxy origin replaced with the upstream origin |
-| request | `Accept-Encoding` | deleted, so HTML comes back identity for rewriting |
+| request | `Accept-Encoding` | deleted on a document load (`Sec-Fetch-Dest` `document`, `iframe`, `frame`, `embed`, `object`, or none sent), so its HTML comes back identity; kept on every other request |
 | request | `Cookie` | dropped, including WebSocket handshakes |
 | response | `Set-Cookie` | dropped, including successful and refused WebSocket handshakes |
 | response | `X-Frame-Options`, CSP headers | with validated chain, replaced by `frame-ancestors 'self' <validated chain>`; opted-in CSP policies remain alongside it (rationale) |
@@ -492,6 +492,13 @@ Header rewriting:
 | response body | `<meta http-equiv="content-security-policy">` | removed unless the response opts into CSP preservation |
 
 **Must update this table whenever header rewriting changes.**
+
+**Must instrument only an identity-encoded, ASCII-compatible HTML body, and keep
+its `content-type` as sent**, charset included; a compressed or UTF-16 body
+passes through uninstrumented (rationale). **Never place the shim ahead of the
+doctype or a `<meta charset>`**: it goes before `</head>`, else after `<body…>`,
+else after the document's leading doctype/`<html>`/`<head>`/`<meta charset>`
+tags.
 
 **Must preserve enforced and report-only CSP verbatim when the upstream response sends `X-Dormouse-Preserve-CSP: 1`.** Add the validated ancestor policy separately, for every MIME type; preserve meta policies during HTML instrumentation. Never infer this opt-in from request headers. Additional upstream restrictions may prevent framing or shim execution. (rationale)
 

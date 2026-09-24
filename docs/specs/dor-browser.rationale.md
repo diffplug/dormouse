@@ -98,6 +98,8 @@ A post-open blank-tab sweep can become such a query when a later relaunch, expli
 
 The built-in local-file viewer supplies its own content boundary and permits the inline shim, so removing its CSP would expand active documents' resource access. Its response opts into preservation without new renderer or host-bridge state. The proxy adds an independent ancestor policy: CSP policies intersect, so no directive parser or partial reconstruction can accidentally weaken the upstream. An opt-in upstream with stricter framing or script restrictions keeps those restrictions even if the shim cannot run.
 
+**Why the HTML path keeps the body's own encoding.** Each was reproduced against the proxy (2026-09-23): relabelling every HTML response `charset=utf-8` overrode both the upstream header and any `<meta charset>`, so a Shift_JIS or windows-1252 page mis-decoded; an upstream that compresses without being asked had the shim prepended to its gzip bytes with `content-encoding: gzip` kept, and the frame failed with `ERR_CONTENT_DECODING_FAILED`; and a valid document with neither `</head>` nor `<body>` got the shim before `<!doctype html>`, switching it to quirks mode. Deleting `Accept-Encoding` on every request sent a remote upstream's scripts and styles uncompressed, typically 3-5x the bytes.
+
 **Why a grant gets its own origin instead of a path token.** A dedicated origin keeps root-relative resources and client-side routers working with no body URL rewriting; a path token would have to survive every link, redirect and `fetch` the page makes.
 
 ## Iframe Shim

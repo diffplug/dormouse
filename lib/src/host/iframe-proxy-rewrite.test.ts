@@ -59,6 +59,18 @@ describe('instrumentHtml', () => {
     expect(out).toMatch(/<body>\s*<script>/);
   });
 
+  it('never places the shim ahead of the doctype or a meta charset when both head and body tags are omitted', () => {
+    const shim = /<script>\(function\(\)\{/;
+    expect(instrumentHtml('<!doctype html><title>x</title><p>hi', APP)).toMatch(/^<!doctype html><script>/);
+    const withCharset = instrumentHtml('<!DOCTYPE html><html lang="ja"><head><meta charset="shift_jis"><title>x</title><p>hi', APP);
+    expect(withCharset.indexOf('<meta charset="shift_jis">')).toBeLessThan(withCharset.search(shim));
+    expect(withCharset).toMatch(/<meta charset="shift_jis"><script>/);
+    // No prologue at all: nothing to stay behind.
+    expect(instrumentHtml('<p>hi', APP)).toMatch(/^<script>/);
+    // `<header>` is not `<head>`.
+    expect(instrumentHtml('<!doctype html><header>h</header>', APP)).toMatch(/^<!doctype html><script>/);
+  });
+
   it('strips an in-document CSP meta', () => {
     const out = instrumentHtml('<head><meta http-equiv="Content-Security-Policy" content="default-src \'none\'"></head>', APP);
     expect(out).not.toMatch(/http-equiv=["']?content-security-policy/i);
