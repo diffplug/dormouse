@@ -863,16 +863,15 @@ export class AgentBrowserSurfaceController {
    * Ask the host where the session's stream is (`attach`, which never starts a
    * daemon to answer). With `relaunch`, a session whose daemon is gone is
    * reopened at the page this Surface had, so a restore after a reboot comes
-   * back where it was. Without, as on an unpark, a gone daemon is `ended`, or
-   * `fallbackPort` streams on to find that out.
+   * back where it was. Without, as on an unpark whose port failed, a gone
+   * daemon is `ended`.
    */
-  private attach(relaunch: boolean, fallbackPort?: number): void {
+  private attach(relaunch: boolean): void {
     const session = this.session;
     if (!session) { this.launch(); return; }
     const platform = this.platform;
     if (!platform.agentBrowserAttach) {
-      if (fallbackPort) this.goLive(fallbackPort);
-      else this.setPhase({ k: 'ended' });
+      this.setPhase({ k: 'ended' });
       return;
     }
     const phase: Phase = { k: 'attaching' };
@@ -888,7 +887,6 @@ export class AgentBrowserSurfaceController {
           return;
         }
         if (res.ok && res.wsPort) this.goLive(res.wsPort);
-        else if (fallbackPort) this.goLive(fallbackPort);
         else this.setPhase({ k: 'ended', error: relaunch ? res.error : undefined });
       });
   }
