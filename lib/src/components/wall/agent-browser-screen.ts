@@ -104,7 +104,7 @@ export interface ScreenController {
   subscribeChrome(listener: () => void): () => void;
   chrome(): ChromeSnapshot;
   readonly chromeActions: ChromeActions;
-  /** Whether the host can run `agentBrowserCommand` (false ⇒ resizes inert). */
+  /** Whether the host can drive this Surface's browser (false ⇒ resizes inert). */
   readonly hostCapable: boolean;
   /** The render modes this Surface can take — the Display modal offers these
    *  (and the current mode) and nothing else. `offeredRenderModes` answers for

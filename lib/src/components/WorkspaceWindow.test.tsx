@@ -560,8 +560,8 @@ describe('WorkspaceWindow', () => {
     // The Playwright arm asks the host for the viewer before it creates
     // anything, so the guard above is not the last word.
     const status = Promise.withResolvers<{ ok: boolean; wsPort: number; headed: boolean }>();
-    const playwright = vi.fn(() => status.promise);
-    Object.assign(fake, { playwright });
+    const browser = vi.fn(() => status.promise);
+    Object.assign(fake, { browserProviders: ['agent-browser', 'playwright'], browser });
     await render();
     await act(async () => { createWorkspace({ id: 'ws-2' }); });
     await flush();
@@ -579,7 +579,7 @@ describe('WorkspaceWindow', () => {
       });
     });
     await flush();
-    expect(playwright).toHaveBeenCalledWith(expect.objectContaining({ op: 'attach', session: 'late' }));
+    expect(browser).toHaveBeenCalledWith(expect.objectContaining({ provider: 'playwright', op: 'attach', binding: expect.objectContaining({ session: 'late' }) }));
     await act(async () => { expect(await handle.closeAll('silent')).toBeNull(); });
     await act(async () => status.resolve({ ok: true, wsPort: 4321, headed: false }));
     await flush();

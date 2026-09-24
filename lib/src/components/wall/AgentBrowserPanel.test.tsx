@@ -5,7 +5,6 @@ import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
-import type { AgentBrowserPopResult, AgentBrowserAttachResult, PlatformAdapter } from '../../lib/platform/types';
 import type { PaneProps } from './pane-props';
 import { AgentBrowserPanel, HIDDEN_PARK_DELAY_MS } from './AgentBrowserPanel';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
@@ -18,7 +17,7 @@ import {
 } from './agent-browser-surface-controller';
 import type { RenderMode } from './agent-browser-screen';
 import { ModeContext, PaneWriteContext, SelectedIdContext, WallActionsContext, WorkspaceActiveContext, type PaneWriteActions } from './wall-context';
-import { stubWallActions as stubActions } from './wall-test-utils';
+import { installBrowserHost, stubWallActions as stubActions, type BrowserAnswers } from './wall-test-utils';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -33,6 +32,11 @@ type TestPanelParams = {
 };
 
 const DEFAULT_PARAMS: TestPanelParams = { surfaceType: 'agent-browser', session: 'browser-session' };
+
+// The Playwright host serves its own viewer, so it names the stream URL.
+const PLAYWRIGHT_STREAM: BrowserAnswers = { streamUrl: async ({ port }) => ({ ok: true, url: `ws://127.0.0.1:${port}` }) };
+/** The operations that drive a live browser, rather than bind or view one. */
+const DRIVES = new Set(['navigate', 'history', 'tab', 'viewport', 'device', 'cdpUrl', 'close']);
 
 class ResizeObserverMock {
   observe() {}
@@ -162,19 +166,10 @@ describe('AgentBrowserPanel placeholders', () => {
 describe('AgentBrowserPanel render mode controller', () => {
   it('relaunches screencast sessions as popout and publishes the mode immediately', async () => {
     const updateParameters = vi.fn();
-    const popOut = vi.fn<PlatformAdapter['agentBrowserPopOut']>(async (): Promise<AgentBrowserPopResult> => ({
-      ok: true,
-      wsPort: 3456,
-    }));
-    const attach = vi.fn<PlatformAdapter['agentBrowserAttach']>(async (): Promise<AgentBrowserAttachResult> => ({
-      ok: true,
-      wsPort: 1234,
-    }));
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserPopOut' | 'agentBrowserAttach'>;
-    platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
-    platform.agentBrowserPopOut = popOut;
-    platform.agentBrowserAttach = attach;
-    setPlatform(platform);
+    const host = installBrowserHost({
+      launch: async () => ({ ok: true, wsPort: 3456 }),
+      attach: async () => ({ ok: true, wsPort: 1234 }),
+    });
 
     await renderPanel(paneProps('ab-panel'), updateParameters);
 
@@ -182,7 +177,7 @@ describe('AgentBrowserPanel render mode controller', () => {
       getAgentBrowserScreenController('ab-panel')?.actions.setRenderMode?.('ab-popout');
     });
 
-    expect(popOut).toHaveBeenCalledWith('browser-session', expect.objectContaining({ url: undefined }), undefined);
+    expect(host.requests('launch')).toEqual([{ provider: 'agent-browser', binding: { session: 'browser-session' }, op: 'launch', headed: true }]);
     expect(updateParameters).toHaveBeenCalledWith({ renderMode: 'ab-popout' });
     expect(getAgentBrowserScreenController('ab-panel')?.snapshot().renderMode).toBe('ab-popout');
     expect(container.textContent).toContain('This browser is running in a separate window.');
@@ -191,15 +186,10 @@ describe('AgentBrowserPanel render mode controller', () => {
 
   it('relaunches popped-out sessions back into screencast', async () => {
     const updateParameters = vi.fn();
-    const popIn = vi.fn<PlatformAdapter['agentBrowserPopIn']>(async (): Promise<AgentBrowserPopResult> => ({
-      ok: true,
-      wsPort: 4567,
-    }));
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserPopIn' | 'agentBrowserAttach'>;
-    platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
-    platform.agentBrowserPopIn = popIn;
-    platform.agentBrowserAttach = vi.fn(async () => ({ ok: true, wsPort: 1234 }));
-    setPlatform(platform);
+    const host = installBrowserHost({
+      launch: async () => ({ ok: true, wsPort: 4567 }),
+      attach: async () => ({ ok: true, wsPort: 1234 }),
+    });
 
     await renderPanel(
       paneProps('ab-panel', { surfaceType: 'browser', renderMode: 'ab-popout', session: 'browser-session' }),
@@ -212,22 +202,17 @@ describe('AgentBrowserPanel render mode controller', () => {
       getAgentBrowserScreenController('ab-panel')?.actions.setRenderMode?.('ab-screencast');
     });
 
-    expect(popIn).toHaveBeenCalledWith('browser-session', expect.objectContaining({ url: undefined }), undefined);
+    expect(host.requests('launch')).toEqual([{ provider: 'agent-browser', binding: { session: 'browser-session' }, op: 'launch', headed: false }]);
     expect(updateParameters).toHaveBeenCalledWith({ renderMode: 'ab-screencast' });
     expect(getAgentBrowserScreenController('ab-panel')?.snapshot().renderMode).toBe('ab-screencast');
   });
 
   it('pop-in uses the latest observed headed-window tab URL over stale params', async () => {
     const updateParameters = vi.fn();
-    const popIn = vi.fn<PlatformAdapter['agentBrowserPopIn']>(async (): Promise<AgentBrowserPopResult> => ({
-      ok: true,
-      wsPort: 4567,
-    }));
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserPopIn' | 'agentBrowserAttach'>;
-    platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
-    platform.agentBrowserPopIn = popIn;
-    platform.agentBrowserAttach = vi.fn(async () => ({ ok: true, wsPort: 1234 }));
-    setPlatform(platform);
+    const host = installBrowserHost({
+      launch: async () => ({ ok: true, wsPort: 4567 }),
+      attach: async () => ({ ok: true, wsPort: 1234 }),
+    });
 
     await renderPanel(
       paneProps('ab-panel', {
@@ -253,15 +238,14 @@ describe('AgentBrowserPanel render mode controller', () => {
       getAgentBrowserScreenController('ab-panel')?.actions.setRenderMode?.('ab-screencast');
     });
 
-    expect(popIn).toHaveBeenCalledWith('browser-session', expect.objectContaining({ url: 'https://example.com/' }), undefined);
+    expect(host.requests('launch')).toEqual([{
+      provider: 'agent-browser', binding: { session: 'browser-session' }, op: 'launch', url: 'https://example.com/', headed: false,
+    }]);
   });
 
   it('mirrors popped-out stream tab URL updates when the stream reports id instead of tabId', async () => {
     const updateParameters = vi.fn();
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserAttach'>;
-    platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
-    platform.agentBrowserAttach = vi.fn(async () => ({ ok: true, wsPort: 1234 }));
-    setPlatform(platform);
+    installBrowserHost({ attach: async () => ({ ok: true, wsPort: 1234 }) });
 
     await renderPanel(
       paneProps('ab-panel', {
@@ -286,13 +270,10 @@ describe('AgentBrowserPanel render mode controller', () => {
 
   it('mirrors popped-out manual navigation from CDP target events', async () => {
     const updateParameters = vi.fn();
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserAttach'>;
-    platform.agentBrowserCommand = vi.fn(async (_session, args) => {
-      if (args.join(' ') === 'get cdp-url') return { exitCode: 0, stdout: 'ws://127.0.0.1:9222/devtools/browser/test', stderr: '' };
-      return { exitCode: 0, stdout: '', stderr: '' };
+    const host = installBrowserHost({
+      cdpUrl: async () => ({ ok: true, url: 'ws://127.0.0.1:9222/devtools/browser/test' }),
+      attach: async () => ({ ok: true, wsPort: 1234 }),
     });
-    platform.agentBrowserAttach = vi.fn(async () => ({ ok: true, wsPort: 1234 }));
-    setPlatform(platform);
 
     await renderPanel(
       paneProps('ab-panel', {
@@ -320,14 +301,12 @@ describe('AgentBrowserPanel render mode controller', () => {
       }));
     });
 
-    expect(platform.agentBrowserCommand).toHaveBeenCalledWith('browser-session', ['get', 'cdp-url'], undefined);
+    expect(host.requests('cdpUrl')).toEqual([{ provider: 'agent-browser', binding: { session: 'browser-session' }, op: 'cdpUrl' }]);
     expect(updateParameters).toHaveBeenCalledWith({ url: 'https://example.com/' });
   });
 
   it('actively selects a newly opened tab when the stream does not mark it active', async () => {
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand'>;
-    platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
-    setPlatform(platform);
+    const host = installBrowserHost();
 
     await renderPanel(paneProps('ab-panel', { surfaceType: 'browser', session: 'browser-session', wsPort: 1111 }));
 
@@ -348,13 +327,11 @@ describe('AgentBrowserPanel render mode controller', () => {
       }));
     });
 
-    expect(platform.agentBrowserCommand).toHaveBeenCalledWith('browser-session', ['tab', 't2'], undefined);
+    expect(host.requests('tab')).toContainEqual({ provider: 'agent-browser', binding: { session: 'browser-session' }, op: 'tab', action: 'select', tabId: 't2' });
   });
 
   it('does not force-select a provisional new tab that already reports active', async () => {
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand'>;
-    platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
-    setPlatform(platform);
+    const host = installBrowserHost();
 
     await renderPanel(paneProps('ab-panel', { surfaceType: 'browser', session: 'browser-session', wsPort: 1111 }));
 
@@ -375,13 +352,11 @@ describe('AgentBrowserPanel render mode controller', () => {
       }));
     });
 
-    expect(platform.agentBrowserCommand).not.toHaveBeenCalled();
+    expect(host.browser.mock.calls.map(([request]) => request.op).filter((op) => DRIVES.has(op))).toEqual([]);
   });
 
   it('selects a provisional new tab after it reaches its destination if it is not active', async () => {
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand'>;
-    platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
-    setPlatform(platform);
+    const host = installBrowserHost();
 
     await renderPanel(paneProps('ab-panel', { surfaceType: 'browser', session: 'browser-session', wsPort: 1111 }));
 
@@ -412,7 +387,7 @@ describe('AgentBrowserPanel render mode controller', () => {
       }));
     });
 
-    expect(platform.agentBrowserCommand).toHaveBeenCalledWith('browser-session', ['tab', 't2'], undefined);
+    expect(host.requests('tab')).toContainEqual({ provider: 'agent-browser', binding: { session: 'browser-session' }, op: 'tab', action: 'select', tabId: 't2' });
   });
 
   it('keeps the last known active tab when the stream emits a transient empty tab list', async () => {
@@ -468,23 +443,19 @@ describe('AgentBrowserPanel Playwright params', () => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
       { width: 800, height: 600, left: 0, top: 0, right: 800, bottom: 600, x: 0, y: 0, toJSON() {} } as DOMRect,
     );
-    const playwright = vi.fn<NonNullable<PlatformAdapter['playwright']>>(async (request) => request.op === 'streamUrl'
-      ? { ok: true, url: `ws://127.0.0.1:${request.port}` }
-      : { ok: true, exitCode: 0, stdout: '', stderr: '' });
-    const platform: PlatformAdapter = new FakePtyAdapter();
-    platform.playwright = playwright;
-    setPlatform(platform);
-    const commands = (cwd?: string) => playwright.mock.calls
+    const host = installBrowserHost(PLAYWRIGHT_STREAM);
+    // Every operation that drives the browser, in the directory it ran for.
+    const commands = (cwd?: string) => host.browser.mock.calls
       .map(([request]) => request)
-      .filter((request) => request.op === 'command' && (cwd === undefined || request.cwd === cwd))
-      .map((request) => (request as { args: string[] }).args.join(' '));
+      .filter((request) => DRIVES.has(request.op) && (cwd === undefined || request.binding.cwd === cwd))
+      .map((request) => request.op === 'viewport' ? `set viewport ${request.width} ${request.height} ${request.dpr}` : request.op);
     const params = { surfaceType: 'browser', renderMode: 'pw-screencast', session: 'app', cwd: '/first', wsPort: 4321 };
 
     await renderPanel(paneProps('pw-panel', params));
     expect(commands()).toContain('set viewport 800 600 1');
     const stream = (port: number) => WebSocketMock.instances.findLast((ws) => ws.url === `ws://127.0.0.1:${port}`)!;
     await act(async () => { stream(4321).emitMessage(JSON.stringify({ type: 'status', connected: true, screencasting: true })); });
-    playwright.mockClear();
+    host.browser.mockClear();
 
     await renderPanel(paneProps('pw-panel', { ...params, renderMode: 'pw-popout', wsPort: 4322 }));
     expect(getAgentBrowserScreenController('pw-panel')?.snapshot().renderMode).toBe('pw-popout');
@@ -493,7 +464,7 @@ describe('AgentBrowserPanel Playwright params', () => {
     // The old browser's status is not the new window's: a disconnect before
     // the new stream reports is not the user closing that window.
     await act(async () => { stream(4322).emitMessage(JSON.stringify({ type: 'status', connected: false, screencasting: false })); });
-    expect(playwright.mock.calls.map(([request]) => request.op)).not.toContain('popIn');
+    expect(host.requests('launch')).toEqual([]);
 
     await renderPanel(paneProps('pw-panel', { ...params, cwd: '/second', wsPort: 4323 }));
     expect(getAgentBrowserScreenController('pw-panel')?.snapshot().renderMode).toBe('pw-screencast');
@@ -501,12 +472,7 @@ describe('AgentBrowserPanel Playwright params', () => {
   });
 
   it('keeps its own mode write over params that predate it', async () => {
-    const playwright = vi.fn<NonNullable<PlatformAdapter['playwright']>>(async (request) => request.op === 'streamUrl'
-      ? { ok: true, url: `ws://127.0.0.1:${request.port}` }
-      : { ok: true, wsPort: 4330 });
-    const platform: PlatformAdapter = new FakePtyAdapter();
-    platform.playwright = playwright;
-    setPlatform(platform);
+    const host = installBrowserHost({ ...PLAYWRIGHT_STREAM, launch: async () => ({ ok: true, wsPort: 4330 }) });
     const updateParameters = vi.fn();
     const popped = { surfaceType: 'browser', renderMode: 'pw-popout', session: 'app', cwd: '/p', wsPort: 4321 };
     await renderPanel(paneProps('pw-panel', popped), updateParameters);
@@ -517,7 +483,9 @@ describe('AgentBrowserPanel Playwright params', () => {
     // back in and buffers its `renderMode` write until the next attach.
     await act(async () => { root.render(<div />); });
     await act(async () => { stream.emitMessage(JSON.stringify({ type: 'status', connected: false, screencasting: false })); });
-    expect(playwright).toHaveBeenCalledWith(expect.objectContaining({ op: 'popIn', session: 'app' }));
+    expect(host.requests('launch')).toEqual([expect.objectContaining({
+      provider: 'playwright', binding: expect.objectContaining({ session: 'app' }), op: 'launch', headed: false,
+    })]);
     expect(updateParameters).not.toHaveBeenCalledWith(expect.objectContaining({ renderMode: 'pw-screencast' }));
 
     // Reattached with the params the store still held: they predate the write.
@@ -536,12 +504,7 @@ describe('AgentBrowserPanel across a provider change', () => {
   // A minimized pane keeps this view mounted while its Wall restores a failed
   // cross-provider swap in place: same id, the other provider's params.
   function withBothProviders() {
-    const platform: PlatformAdapter = new FakePtyAdapter();
-    platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
-    platform.playwright = vi.fn(async (request) => request.op === 'streamUrl'
-      ? { ok: true, url: `ws://127.0.0.1:${request.port}` }
-      : { ok: true });
-    setPlatform(platform);
+    installBrowserHost(PLAYWRIGHT_STREAM);
   }
   const pw = { surfaceType: 'browser', renderMode: 'pw-screencast', session: 'failed-swap', wsPort: 4400 };
   const ab = { surfaceType: 'browser', renderMode: 'ab-screencast', session: 'relaunched', wsPort: 4401 };
@@ -578,11 +541,7 @@ describe('AgentBrowserPanel across a provider change', () => {
 
 describe('AgentBrowserPanel after its controller is released', () => {
   it('takes a fresh controller for the params that follow, and none for the release alone', async () => {
-    const attach = vi.fn<PlatformAdapter['agentBrowserAttach']>(async () => ({ ok: true, wsPort: 4402 }));
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserAttach'>;
-    platform.agentBrowserAttach = attach;
-    platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
-    setPlatform(platform);
+    const host = installBrowserHost({ attach: async () => ({ ok: true, wsPort: 4402 }) });
     const first = { surfaceType: 'browser', renderMode: 'ab-screencast', session: 'first-run', wsPort: 4400 };
     await renderPanel(paneProps('released-panel', first));
     const released = getAgentBrowserSurfaceController('released-panel');
@@ -597,7 +556,7 @@ describe('AgentBrowserPanel after its controller is released', () => {
     const next = getAgentBrowserSurfaceController('released-panel');
     expect(next).not.toBeNull();
     expect(next).not.toBe(released);
-    expect(attach).toHaveBeenCalledWith('next-run', expect.anything(), undefined);
+    expect(host.requests('attach')).toContainEqual(expect.objectContaining({ binding: { session: 'next-run' } }));
   });
 });
 
@@ -719,9 +678,7 @@ describe('AgentBrowserPanel visibility parking', () => {
 
   it('reconnects and repaints from the stream when it becomes visible again', async () => {
     const screenshot = vi.fn(async () => ({ ok: false as const, error: 'test' }));
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserScreenshot'>;
-    platform.agentBrowserScreenshot = screenshot;
-    setPlatform(platform);
+    installBrowserHost({ screenshot });
 
     const { setVisible } = await renderVisibilityPanel({
       surfaceType: 'browser', session: 'browser-session', wsPort: 4321,
@@ -892,11 +849,8 @@ describe('AgentBrowserPanel tab strip actions', () => {
   // mid-press; under Lath the leaf div is never re-parented, so the node stays put
   // and the click survives. jsdom doesn't move the DOM, so a dispatched click here
   // just exercises the onClick → selectTab/closeTab wiring.
-  async function renderWithTwoTabs(): Promise<ReturnType<typeof vi.fn>> {
-    const command = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand'>;
-    platform.agentBrowserCommand = command;
-    setPlatform(platform);
+  async function renderWithTwoTabs(): Promise<ReturnType<typeof installBrowserHost>> {
+    const host = installBrowserHost();
     const props = paneProps('ab-panel', { surfaceType: 'agent-browser', session: 'browser-session', wsPort: 4321 });
     await renderPanel(props);
     const ws = WebSocketMock.instances[WebSocketMock.instances.length - 1];
@@ -906,29 +860,29 @@ describe('AgentBrowserPanel tab strip actions', () => {
         { tabId: 't2', title: 'GitHub', url: 'https://github.com/diffplug/dormouse', active: false },
       ] }));
     });
-    return command;
+    return host;
   }
 
   const chipFor = (url: string) => [...container.querySelectorAll('div[title]')]
     .find((e) => e.getAttribute('title') === url && (e.className || '').includes('cursor-pointer')) as HTMLElement;
 
   it('switches to an inactive tab on chip click', async () => {
-    const command = await renderWithTwoTabs();
+    const host = await renderWithTwoTabs();
     const chip = chipFor('https://github.com/diffplug/dormouse');
     await act(async () => {
       chip.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
     });
-    expect(command).toHaveBeenCalledWith('browser-session', ['tab', 't2'], undefined);
+    expect(host.requests('tab')).toContainEqual({ provider: 'agent-browser', binding: { session: 'browser-session' }, op: 'tab', action: 'select', tabId: 't2' });
   });
 
   it('closes a tab on the × button click', async () => {
-    const command = await renderWithTwoTabs();
+    const host = await renderWithTwoTabs();
     const closeBtn = chipFor('https://github.com/diffplug/dormouse')
       .querySelector('button[aria-label="Close tab"]') as HTMLButtonElement;
     await act(async () => {
       closeBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
     });
-    expect(command).toHaveBeenCalledWith('browser-session', ['tab', 'close', 't2'], undefined);
+    expect(host.requests('tab')).toContainEqual({ provider: 'agent-browser', binding: { session: 'browser-session' }, op: 'tab', action: 'close', tabId: 't2' });
   });
 
   it('captures a fresh frame when the active tab changes, but not on other tab edits', async () => {
@@ -936,9 +890,7 @@ describe('AgentBrowserPanel tab strip actions', () => {
     // is otherwise silent, so the panel forces one device screenshot so the canvas
     // follows the newly-active tab.
     const screenshot = vi.fn(async () => ({ ok: false as const, error: 'test' }));
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserScreenshot'>;
-    platform.agentBrowserScreenshot = screenshot;
-    setPlatform(platform);
+    installBrowserHost({ screenshot });
     const props = paneProps('ab-panel', { surfaceType: 'agent-browser', session: 'browser-session', wsPort: 4321 });
     await renderPanel(props);
     const ws = WebSocketMock.instances[WebSocketMock.instances.length - 1];
@@ -975,13 +927,7 @@ describe('the render modes a tool is offered (regression: PR #493 review)', () =
   // `agent-browser-surface-controller.ts`. The host can do everything, so a
   // refusal is the tool rule and not a missing capability.
   function withCapableHost() {
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserOpen' | 'agentBrowserPopOut' | 'playwright'>;
-    platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
-    platform.agentBrowserOpen = vi.fn(async () => ({ ok: true }));
-    platform.agentBrowserPopOut = vi.fn(async (): Promise<AgentBrowserPopResult> => ({ ok: true, wsPort: 1 }));
-    platform.playwright = vi.fn(async () => ({ ok: true }));
-    setPlatform(platform);
-    return platform;
+    return installBrowserHost({ launch: async () => ({ ok: true, wsPort: 1 }) });
   }
 
   it('offers every mode on a plain browser surface', async () => {
@@ -992,7 +938,7 @@ describe('the render modes a tool is offered (regression: PR #493 review)', () =
   });
 
   it('offers a tool only its declarable renders, and refuses the rest', async () => {
-    const platform = withCapableHost();
+    const host = withCapableHost();
     const onSwapRenderMode = vi.fn();
     await act(async () => {
       root.render(
@@ -1009,7 +955,7 @@ describe('the render modes a tool is offered (regression: PR #493 review)', () =
     // The popout relaunches in-controller, never reaching the Wall's guard.
     await act(async () => { controller.actions.setRenderMode?.('ab-popout'); });
     await act(async () => { controller.actions.setRenderMode?.('pw-screencast'); });
-    expect(platform.agentBrowserPopOut).not.toHaveBeenCalled();
+    expect(host.requests('launch')).toEqual([]);
     expect(onSwapRenderMode).not.toHaveBeenCalled();
 
     await act(async () => { controller.actions.setRenderMode?.('iframe'); });

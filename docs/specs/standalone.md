@@ -89,7 +89,7 @@ are *not* forwarded:
 |---|---|---|
 | `load_session` / `save_session` | Rust | the per-window session file is Rust's store (§Persistence) |
 | the `clipboard` readers (Windows only) | Rust (`clipboard_win.rs`) | native Win32 reads (`docs/specs/mouse-and-clipboard.md` §8.6) |
-| `agent_browser_screenshot` | Rust reads the bytes from a sidecar-supplied temp-file *path* | images must never ride the JSON-lines pipe shared with PTY traffic (`docs/specs/dor-browser.md`) |
+| `browser_screenshot` | Rust reads the bytes from a sidecar-supplied temp-file *path* | images must never ride the JSON-lines pipe shared with PTY traffic (`docs/specs/dor-browser.md`) |
 
 Request/response commands block on the sidecar's reply under a timeout.
 `OPEN_PORT_TIMEOUT_MS` and `OPEN_PORT_TIMEOUT_PER_ID_MS` in `lib.rs` mirror the
@@ -311,10 +311,10 @@ Source of truth: `standalone/sidecar/main.js`. Browser cleanup is pinned by `sta
 Shutdown (`sidecar:shutdown` message, stdin EOF, or SIGTERM) is **idempotent and
 ordered**:
 
-1. **Must await both browser providers’ cleanup under one 1.5s deadline**
-   (`agentBrowser.closePoppedOut()`, and `playwright.close()` once its
-   lazily required host exists); `docs/specs/dor-browser.md` owns their
-   teardown contracts.
+1. **Must await the browser host's cleanup under one 1.5s deadline**
+   (`browserHost.close()`, which closes Playwright's only once its lazily
+   required host exists); `docs/specs/dor-browser.md` owns the teardown
+   contract.
 2. Close the dor control socket.
 3. `host.dispose()`: the alerts (§Alerts), then the Burrow service, dropping
    the relay socket and settling every outstanding ask so nothing waits on a

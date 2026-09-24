@@ -16,10 +16,10 @@ const { createDorControlServer } = require('./dor-control-server');
 const { createIframeProxyUrl } = require('./iframe-proxy.cjs');
 const { createToolHost } = require('./tool-host.cjs');
 const { gitInfo } = require('./git-info.cjs');
-// Same pattern: lib/src/host/agent-browser-host.ts is the single source of truth
-// for the agent-browser host capabilities, run here exactly as the VS Code
-// extension host runs it. See docs/specs/dor-browser.md → "Agent-Browser Host Capabilities".
-const { createAgentBrowserHost } = require('./agent-browser-host.cjs');
+// Same pattern: lib/src/host/browser-host.ts is the single source of truth for
+// browser automation, run here exactly as the VS Code extension host runs it.
+// See docs/specs/dor-browser.md → "Agent-Browser Host Capabilities".
+const { createBrowserHost } = require('./browser-host.cjs');
 // Same pattern again: lib/src/host/remote/sidecar-entry.ts is the Burrow —
 // the relay socket, the enrollment, the ACL, and remote-api v1 — running next to
 // the PTYs it serves (docs/specs/remote-api.md), and the app's one
@@ -32,23 +32,16 @@ const { createSidecarHost } = require('./burrow.cjs');
 // store. See docs/specs/standalone.md -> "Agent recovery".
 const { captureAgentRecovery, createRecoveryStore, sliceSince } = require('./recovery.cjs');
 
-const agentBrowser = createAgentBrowserHost({
+const browserHostDeps = {
   writeClipboardText: (text) => clipboard.writeClipboardText(text),
   log: (m) => console.error(m),
+};
+const browserHost = createBrowserHost({
+  ...browserHostDeps,
+  // lib/src/host/playwright-host.ts, required on the first Playwright request
+  // rather than at boot (docs/specs/dor-browser.md → "Playwright Renderer").
+  playwright: () => require('./playwright-host.cjs').createPlaywrightHost(browserHostDeps),
 });
-
-// Same pattern again: lib/src/host/playwright-host.ts backs the Playwright
-// renderer (docs/specs/dor-browser.md → "Playwright Renderer"). Required on the
-// first request rather than at boot: the bundle carries `ws`, and most sessions
-// never open a Playwright pane. Shutdown skips it while it is still undefined.
-let playwright;
-function playwrightHost() {
-  playwright ??= require('./playwright-host.cjs').createPlaywrightHost({
-    writeClipboardText: (text) => clipboard.writeClipboardText(text),
-    log: (m) => console.error(m),
-  });
-  return playwright;
-}
 
 function send(event, data) {
   process.stdout.write(JSON.stringify({ event, data }) + '\n');
@@ -218,53 +211,14 @@ function handleLine(line) {
           }),
         }));
         break;
-      // Screenshots answer with a temp-file path, like agentBrowser:screenshot below.
-      case 'playwright:request':
-        respondAsync('agentBrowser:result', data.requestId, async () => ({
-          result: await playwrightHost().requestFile(data.request),
-        }));
-        break;
-      case 'agentBrowser:command':
-        respondAsync('agentBrowser:result', data.requestId, async () => ({
-          result: await agentBrowser.command(data.session, data.args, data.binaryPath),
-        }));
-        break;
-      case 'agentBrowser:edit':
-        respondAsync('agentBrowser:result', data.requestId, async () => ({
-          result: await agentBrowser.edit(data.session, data.op, data.binaryPath),
-        }));
-        break;
-      case 'agentBrowser:screenshot':
-        // Return the temp-file PATH, not the bytes: a ~100-700KB base64 line would
-        // otherwise ride the JSON-lines stdio pipe shared with all PTY traffic
-        // (head-of-line blocking terminal output on every frame). Rust reads the
-        // file itself and returns a raw tauri::ipc::Response for the webview.
-        respondAsync('agentBrowser:result', data.requestId, async () => {
-          const shot = await agentBrowser.screenshotToFile(
-            data.session, { format: data.format, quality: data.quality }, data.binaryPath,
-          );
-          if (!shot.ok) return { result: { ok: false, error: shot.error } };
-          return { result: { ok: true, mime: shot.mime, path: shot.path } };
-        });
-        break;
-      case 'agentBrowser:attach':
-        respondAsync('agentBrowser:result', data.requestId, async () => ({
-          result: await agentBrowser.attach(data.session, { url: data.url, headed: data.headed }, data.binaryPath),
-        }));
-        break;
-      case 'agentBrowser:open':
-        respondAsync('agentBrowser:result', data.requestId, async () => ({
-          result: await agentBrowser.open(data.url, { headed: data.headed, session: data.session }, data.binaryPath),
-        }));
-        break;
-      case 'agentBrowser:popOut':
-        respondAsync('agentBrowser:result', data.requestId, async () => ({
-          result: await agentBrowser.popOut(data.session, { url: data.url, rect: data.rect }, data.binaryPath),
-        }));
-        break;
-      case 'agentBrowser:popIn':
-        respondAsync('agentBrowser:result', data.requestId, async () => ({
-          result: await agentBrowser.popIn(data.session, { url: data.url }, data.binaryPath),
+      case 'browser:request':
+        // A screenshot answers with its temp-file PATH, not the bytes: a
+        // ~100-700KB base64 line would otherwise ride the JSON-lines stdio pipe
+        // shared with all PTY traffic (head-of-line blocking terminal output on
+        // every frame). Rust reads the file itself and returns a raw
+        // tauri::ipc::Response for the webview.
+        respondAsync('browser:result', data.requestId, async () => ({
+          result: await browserHost.requestFile(data.request),
         }));
         break;
       case 'clipboard:readFiles':
@@ -298,7 +252,7 @@ async function shutdown() {
   // can't wedge the exit; mirrors the VS Code host's deactivate().
   try {
     await Promise.race([
-      Promise.allSettled([agentBrowser.closePoppedOut(), playwright?.close()]),
+      browserHost.close(),
       new Promise((resolve) => setTimeout(resolve, 1500).unref?.()),
     ]);
   } catch {}

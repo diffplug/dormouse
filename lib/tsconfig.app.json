@@ -24,5 +24,5 @@
   // The pure rewrite helpers typecheck here (DOM provides URL); the Node proxy
   // server is esbuild-only (bundled per host), like the rest of our host code.
   // The test utils import vitest, so they live with the tests, not the app.
-  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/components/wall/wall-test-utils.ts", "src/lib/alert-manager-test-utils.ts", "src/host/iframe-proxy.ts", "src/host/agent-browser-host.ts", "src/host/playwright-host.ts", "src/host/playwright-install.ts", "src/host/browser-stream-guard.ts"]
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/components/wall/wall-test-utils.ts", "src/lib/alert-manager-test-utils.ts", "src/host/iframe-proxy.ts", "src/host/agent-browser-host.ts", "src/host/browser-host.ts", "src/host/playwright-host.ts", "src/host/playwright-install.ts", "src/host/browser-stream-guard.ts"]
 }

@@ -3,8 +3,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
-import type { AgentBrowserAttachResult, AgentBrowserOpenResult, AgentBrowserPopResult, PlatformAdapter } from '../../lib/platform/types';
-import { PLAYWRIGHT_TEXT_INPUT_MAX } from '../../lib/platform/browser-automation';
+import type { PlatformAdapter } from '../../lib/platform/types';
+import { PLAYWRIGHT_TEXT_INPUT_MAX, type BrowserResult } from '../../lib/platform/browser-automation';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
 import { forgetLaunchBinaryPaths, launchBinaryPath, rememberLaunchBinaryPath } from './browser-automation';
 import {
@@ -21,6 +21,7 @@ import {
   getAgentBrowserSurfaceController,
   type AgentBrowserViewSink,
 } from './agent-browser-surface-controller';
+import { installBrowserHost, type BrowserAnswers } from './wall-test-utils';
 
 // These tests drive the controller directly, with NO React — it owns the whole
 // non-React lifecycle, so it can be exercised in isolation.
@@ -89,17 +90,27 @@ function withPort(id: string, params: AgentBrowserSurfaceParams, port: number): 
   return controller;
 }
 
-/** The pages a controller opened with a daemon command, in order. */
-const opens = (platform: Pick<PlatformAdapter, 'agentBrowserCommand'>) =>
-  vi.mocked(platform.agentBrowserCommand!).mock.calls.filter(([, args]) => args[0] === 'open').map(([, args]) => args[1]);
+/** The pages a controller navigated its live browser to, in order. */
+const opens = (host: Pick<ReturnType<typeof installBrowserHost>, 'requests'>) =>
+  host.requests('navigate').map((request) => request.url);
 
 const streamSockets = (port: number) =>
   WebSocketMock.instances.filter((ws) => ws.url === `ws://127.0.0.1:${port}`);
 const streamSocket = (port: number) => streamSockets(port).at(-1);
 
 async function flushMicrotasks(): Promise<void> {
-  for (let i = 0; i < 6; i++) await Promise.resolve();
+  for (let i = 0; i < 12; i++) await Promise.resolve();
 }
+
+/** A browser that stays pending, until `resolve` answers it. */
+function pending(): { promise: Promise<BrowserResult>; resolve: (result: BrowserResult) => void } {
+  let resolve!: (result: BrowserResult) => void;
+  const promise = new Promise<BrowserResult>((r) => { resolve = r; });
+  return { promise, resolve };
+}
+
+/** An agent-browser request for session `sess`. */
+const onSess = (op: Record<string, unknown>) => ({ provider: 'agent-browser', binding: { session: 'sess' }, ...op });
 
 beforeEach(() => {
   vi.stubGlobal('WebSocket', WebSocketMock);
@@ -182,12 +193,13 @@ describe('provisional stream paint', () => {
    *  canvas under the test's control. Captures never answer unless `screenshot` says. */
   async function paintFixture(
     screenshot: () => Promise<Shot> = () => new Promise<never>(() => {}),
-    extra: Partial<Pick<PlatformAdapter, 'agentBrowserEdit' | 'readClipboardText'>> = {},
+    clipboardText?: string,
   ) {
     const clock = { now: 1000 };
     vi.spyOn(performance, 'now').mockImplementation(() => clock.now);
-    const platform = Object.assign(new FakePtyAdapter(), { agentBrowserScreenshot: vi.fn(screenshot), ...extra });
-    setPlatform(platform);
+    const host = installBrowserHost({ screenshot });
+    const platform: PlatformAdapter = host.platform;
+    if (clipboardText !== undefined) platform.readClipboardText = vi.fn(async () => clipboardText);
     const bitmap = { width: 40, height: 30, close: vi.fn() } as unknown as ImageBitmap;
     vi.stubGlobal('createImageBitmap', vi.fn(async () => bitmap));
     const sink = makeSink();
@@ -201,15 +213,15 @@ describe('provisional stream paint', () => {
       await flushMicrotasks();
     };
     const decodes = () => vi.mocked(createImageBitmap).mock.calls.length;
-    return { clock, platform, sink, bitmap, drawImage, controller, frame, decodes };
+    return { clock, host, platform, sink, bitmap, drawImage, controller, frame, decodes };
   }
 
   it('draws the native stream frame before the crisp screenshot resolves', async () => {
-    const { clock, platform, sink, bitmap, drawImage, controller, frame, decodes } = await paintFixture();
+    const { clock, host, sink, bitmap, drawImage, controller, frame, decodes } = await paintFixture();
 
     controller.send({ type: 'input_mouse', eventType: 'mouseMoved', x: 1, y: 1 });
     await frame('low-latency-frame');
-    expect(platform.agentBrowserScreenshot).toHaveBeenCalled();
+    expect(host.requests('screenshot').length).toBeGreaterThan(0);
     expect(drawImage).toHaveBeenCalledWith(bitmap, 0, 0);
     expect(sink.canvas.width).toBe(40);
     expect(sink.canvas.height).toBe(30);
@@ -223,10 +235,7 @@ describe('provisional stream paint', () => {
   });
 
   it('paints the stream frame after keys, pasted text and editing chords, not only after pointer input', async () => {
-    const { clock, platform, controller, frame, decodes } = await paintFixture(undefined, {
-      agentBrowserEdit: vi.fn(async () => ({ ok: true })),
-      readClipboardText: vi.fn(async () => 'pasted'),
-    });
+    const { clock, host, platform, controller, frame, decodes } = await paintFixture(undefined, 'pasted');
     await frame('first');
     expect(decodes()).toBe(1);
 
@@ -250,21 +259,21 @@ describe('provisional stream paint', () => {
     // A select-all runs through the host rather than the stream.
     clock.now += PROVISIONAL_INPUT_WINDOW_MS + 1;
     controller.handleKeyDownLike({ key: 'a', code: 'KeyA', ctrlKey: true, metaKey: false, altKey: false, shiftKey: false });
-    expect(platform.agentBrowserEdit).toHaveBeenCalledWith('sess', 'selectAll', undefined);
+    expect(host.requests('edit')).toEqual([onSess({ op: 'edit', edit: 'selectAll' })]);
     await frame('selected');
     expect(decodes()).toBe(4);
   });
 
   it('paints the stream while a crisp capture waits behind a blocking command, then draws that capture', async () => {
     const releases: Array<(shot: Shot) => void> = [];
-    const { clock, platform, drawImage, frame, decodes } = await paintFixture(() => new Promise((resolve) => { releases.push(resolve); }));
+    const { clock, host, drawImage, frame, decodes } = await paintFixture(() => new Promise((resolve) => { releases.push(resolve); }));
     // The first image paints from the stream, superseding the capture it pulsed;
     // its replacement is the one a page-loading `open` then holds.
     await frame('previous page');
     clock.now += 300;
     releases[0]({ ok: true, bytes: new Uint8Array([1]), mime: 'image/jpeg' });
     await flushMicrotasks();
-    expect(platform.agentBrowserScreenshot).toHaveBeenCalledTimes(2);
+    expect(host.requests('screenshot')).toHaveLength(2);
     const decoded = decodes();
 
     clock.now += PROVISIONAL_INPUT_WINDOW_MS + 1;
@@ -289,7 +298,7 @@ describe('provisional stream paint', () => {
   it('repaints a byte-identical crisp capture over a provisional paint', async () => {
     // A provisional paint changes the canvas behind the loop's byte-dedup, so a
     // resting page's byte-identical capture must still repaint over the blur.
-    const { clock, platform, drawImage, controller, frame } = await paintFixture(
+    const { clock, host, drawImage, controller, frame } = await paintFixture(
       async () => ({ ok: true, bytes: new Uint8Array([9, 9, 9]), mime: 'image/jpeg' }),
     );
     await frame('first');
@@ -300,7 +309,7 @@ describe('provisional stream paint', () => {
     clock.now += PROVISIONAL_INPUT_WINDOW_MS + 1;
     await frame('rest');
     const afterCrisp = drawImage.mock.calls.length;
-    expect(platform.agentBrowserScreenshot).toHaveBeenCalled();
+    expect(host.requests('screenshot').length).toBeGreaterThan(0);
 
     controller.send({ type: 'input_mouse', eventType: 'mouseMoved', x: 1, y: 1 });
     await frame('hover');
@@ -318,10 +327,7 @@ describe('sync-to-pane', () => {
   afterEach(() => vi.useRealTimers());
 
   it('issues one viewport once a pane resize settles, and re-syncs a display-scale change at once', async () => {
-    const command = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand'>;
-    platform.agentBrowserCommand = command;
-    setPlatform(platform);
+    const host = installBrowserHost();
     // The pane observer fires whenever the test resizes the pane.
     const observers: ResizeObserverCallback[] = [];
     vi.stubGlobal('ResizeObserver', class {
@@ -348,15 +354,13 @@ describe('sync-to-pane', () => {
       size = { width, height };
       observers.at(-1)?.([{ contentRect: { width, height } } as ResizeObserverEntry], {} as ResizeObserver);
     };
-    const viewports = () => command.mock.calls
-      .map((call) => (call as unknown as [string, string[]])[1])
-      .filter((args) => args[0] === 'set' && args[1] === 'viewport');
+    const viewports = () => host.requests('viewport').map(({ width, height, dpr }) => [width, height, dpr]);
 
     const controller = withPort('id', { session: 'sess' }, 4321);
     controller.attachView(sink);
     await flushMicrotasks();
     // Sync is engaged by default, so attaching sized the browser to the pane.
-    expect(viewports().at(-1)).toEqual(['set', 'viewport', '800', '600', '1']);
+    expect(host.requests('viewport').at(-1)).toEqual(onSess({ op: 'viewport', width: 800, height: 600, dpr: 1 }));
     const issued = viewports().length;
 
     // A window drag resizes the pane every frame; one viewport lands after it settles.
@@ -366,11 +370,11 @@ describe('sync-to-pane', () => {
     }
     expect(viewports()).toHaveLength(issued);
     await vi.advanceTimersByTimeAsync(200);
-    expect(viewports().slice(issued)).toEqual([['set', 'viewport', '860', '600', '1']]);
+    expect(viewports().slice(issued)).toEqual([[860, 600, 1]]);
 
     dpr = 2;
     queries.at(-1)!.onChange!();
-    expect(viewports().at(-1)).toEqual(['set', 'viewport', '860', '600', '2']);
+    expect(viewports().at(-1)).toEqual([860, 600, 2]);
     // Re-armed for the new scale.
     expect(queries.at(-1)!.media).toBe('(resolution: 2dppx)');
     expect(queries.at(-1)!.onChange).toBeDefined();
@@ -381,11 +385,7 @@ describe('sync-to-pane while parked', () => {
   it('pushes a resize made behind a hidden pane once it is live again', async () => {
     vi.useFakeTimers();
     try {
-      const command = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
-      const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserAttach'>;
-      platform.agentBrowserCommand = command;
-      platform.agentBrowserAttach = vi.fn(async () => ({ ok: true, wsPort: 4321 }));
-      setPlatform(platform);
+      const host = installBrowserHost({ attach: async () => ({ ok: true, wsPort: 4321 }) });
       const observers: ResizeObserverCallback[] = [];
       vi.stubGlobal('ResizeObserver', class {
         constructor(callback: ResizeObserverCallback) { observers.push(callback); }
@@ -395,9 +395,7 @@ describe('sync-to-pane while parked', () => {
       const sink = makeSink();
       let size = { width: 800, height: 600 };
       sink.viewport.getBoundingClientRect = () => ({ ...size }) as DOMRect;
-      const viewports = () => command.mock.calls
-        .map((call) => (call as unknown as [string, string[]])[1])
-        .filter((args) => args[1] === 'viewport');
+      const viewports = () => host.requests('viewport').map(({ width, height, dpr }) => [width, height, dpr]);
 
       const controller = withPort('id', { session: 'sess' }, 4321);
       controller.attachView(sink);
@@ -409,12 +407,12 @@ describe('sync-to-pane while parked', () => {
       size = { width: 1000, height: 700 };
       observers.at(-1)?.([{ contentRect: { width: 1000, height: 700 } } as ResizeObserverEntry], {} as ResizeObserver);
       await vi.advanceTimersByTimeAsync(250);
-      expect(viewports().at(-1)).toEqual(['set', 'viewport', '800', '600', '1']);
+      expect(viewports().at(-1)).toEqual([800, 600, 1]);
 
       // Unparked at the same port: the size it missed still goes out.
       controller.setVisible(true);
       await vi.advanceTimersByTimeAsync(0);
-      expect(viewports().at(-1)).toEqual(['set', 'viewport', '1000', '700', '1']);
+      expect(viewports().at(-1)).toEqual([1000, 700, 1]);
     } finally {
       vi.useRealTimers();
     }
@@ -427,9 +425,7 @@ describe('parking', () => {
 
   it('detach parks after the debounce and resets hasFrame', async () => {
     const screenshot = vi.fn(async () => ({ ok: true as const, bytes: new Uint8Array([1, 2, 3]), mime: 'image/jpeg' }));
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserScreenshot'>;
-    platform.agentBrowserScreenshot = screenshot;
-    setPlatform(platform);
+    installBrowserHost({ screenshot });
     // Give the draw path a bitmap so hasFrame can flip true without a real canvas.
     vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 4, height: 4, close: vi.fn() })));
 
@@ -464,9 +460,7 @@ describe('re-attach repaint', () => {
     vi.useFakeTimers();
     try {
       const screenshot = vi.fn(async () => ({ ok: true as const, bytes: new Uint8Array([1, 2, 3]), mime: 'image/jpeg' }));
-      const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserScreenshot'>;
-      platform.agentBrowserScreenshot = screenshot;
-      setPlatform(platform);
+      installBrowserHost({ screenshot });
       vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 4, height: 4, close: vi.fn() })));
 
       const controller = withPort('id', { session: 'sess' }, 4321);
@@ -493,11 +487,9 @@ describe('re-attach repaint', () => {
 
 describe('param-write buffering', () => {
   it('buffers writes while detached and flushes them on the next attach', async () => {
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand'>;
-    // Returning no cdp-url keeps the popped-out CDP observer from opening a
-    // second socket, so only the stream socket exists.
-    platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
-    setPlatform(platform);
+    // Answering no CDP endpoint keeps the popped-out CDP observer from opening
+    // a second socket, so only the stream socket exists.
+    installBrowserHost();
 
     // Popped out ⇒ exempt from parking, so a detached (minimized) pane keeps its
     // stream observer and can still record a URL change.
@@ -548,18 +540,12 @@ describe('updateParams', () => {
 });
 
 describe('launch', () => {
-  type Open = PlatformAdapter['agentBrowserOpen'];
-  function launchPlatform(open: NonNullable<Open>) {
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserOpen' | 'agentBrowserCommand' | 'agentBrowserAttach'>;
-    platform.agentBrowserOpen = vi.fn(open);
-    platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
-    platform.agentBrowserAttach = vi.fn(async () => ({ ok: true, wsPort: 9999 }));
-    setPlatform(platform);
-    return platform;
+  function launchHost(launch: NonNullable<BrowserAnswers['launch']>) {
+    return installBrowserHost({ launch, attach: async () => ({ ok: true, wsPort: 9999 }) });
   }
 
   it('a session-less pane opens its page, binds the session the host answers with, and streams', async () => {
-    const platform = launchPlatform(async () => ({ ok: true, session: 'dormouse.1.gui-abc', wsPort: 4321, binaryPath: '/usr/bin/agent-browser' }));
+    const host = launchHost(async () => ({ ok: true, session: 'dormouse.1.gui-abc', wsPort: 4321, binaryPath: '/usr/bin/agent-browser' }));
     const launched = whenBrowserLaunched('id');
     // A restored pane whose launch never landed is the same pane.
     const controller = acquireAgentBrowserSurfaceController('id', {
@@ -570,40 +556,44 @@ describe('launch', () => {
     expect(controller.snapshot().phase).toBe('launching');
     await flushMicrotasks();
 
-    expect(platform.agentBrowserOpen).toHaveBeenCalledExactlyOnceWith('https://page.example/', { headed: false }, '/usr/bin/agent-browser');
+    expect(host.requests('launch')).toEqual([{
+      provider: 'agent-browser', binding: { binaryPath: '/usr/bin/agent-browser' }, op: 'launch', url: 'https://page.example/', headed: false,
+    }]);
     expect(sink.updateParameters).toHaveBeenCalledWith({ session: 'dormouse.1.gui-abc', binaryPath: '/usr/bin/agent-browser' });
     expect(streamSocket(4321)?.readyState).toBe(1);
-    expect(platform.agentBrowserAttach).not.toHaveBeenCalled();
+    expect(host.requests('attach')).toEqual([]);
     expect(await launched).toBeNull();
     // Driven as the session it bound.
     getAgentBrowserScreenController('id')!.chromeActions.reload();
-    expect(platform.agentBrowserCommand).toHaveBeenLastCalledWith('dormouse.1.gui-abc', ['reload'], '/usr/bin/agent-browser');
+    expect(host.browser).toHaveBeenLastCalledWith({
+      provider: 'agent-browser', binding: { session: 'dormouse.1.gui-abc', binaryPath: '/usr/bin/agent-browser' }, op: 'history', dir: 'reload',
+    });
 
     // Params that predate that write — a remounted view feeding them before its
     // flush — do not take the session away and launch again.
     controller.updateParams({ renderMode: 'ab-screencast', url: 'https://page.example/' });
     controller.updateParams({ renderMode: 'ab-screencast', url: 'https://page.example/', session: 'dormouse.1.gui-abc' });
     await flushMicrotasks();
-    expect(platform.agentBrowserOpen).toHaveBeenCalledTimes(1);
+    expect(host.requests('launch')).toHaveLength(1);
     expect(streamSockets(4321)).toHaveLength(1);
   });
 
   it('opens in the session params name, headed for a pop-out, and binds it', async () => {
-    const platform = launchPlatform(async () => ({ ok: true, session: 'dormouse.1.tool.t', wsPort: 4321 }));
+    const host = launchHost(async () => ({ ok: true, session: 'dormouse.1.tool.t', wsPort: 4321 }));
     const controller = acquireAgentBrowserSurfaceController('id', {
       renderMode: 'ab-popout', url: 'http://localhost:6006/', launchSession: 'dormouse.1.tool.t',
     });
     const sink = makeSink();
     controller.attachView(sink);
     await flushMicrotasks();
-    expect(platform.agentBrowserOpen).toHaveBeenCalledWith('http://localhost:6006/', { headed: true, session: 'dormouse.1.tool.t' }, undefined);
+    expect(host.requests('launch')).toEqual([{
+      provider: 'agent-browser', binding: { session: 'dormouse.1.tool.t' }, op: 'launch', url: 'http://localhost:6006/', headed: true,
+    }]);
     expect(sink.updateParameters).toHaveBeenCalledWith({ session: 'dormouse.1.tool.t', launchSession: undefined, launchFallback: undefined });
   });
 
   it('a failed launch says why, in the pane and to whoever awaited it', async () => {
-    const platform: PlatformAdapter = new FakePtyAdapter();
-    platform.playwright = vi.fn(async () => ({ ok: false }));
-    setPlatform(platform);
+    installBrowserHost({ launch: async () => ({ ok: false }) });
     const launched = whenBrowserLaunched('pw');
     const controller = acquireAgentBrowserSurfaceController('pw', { renderMode: 'pw-screencast', url: 'https://page.example/' });
     controller.attachView(makeSink());
@@ -614,8 +604,8 @@ describe('launch', () => {
   });
 
   it('a Surface closed mid-launch closes the browser that comes up, and its waiter hears it is gone', async () => {
-    let answer!: (res: { ok: boolean; session?: string; wsPort?: number }) => void;
-    const platform = launchPlatform(() => new Promise((resolve) => { answer = resolve; }));
+    const launch = pending();
+    const host = launchHost(() => launch.promise);
     const launched = whenBrowserLaunched('id');
     const controller = acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-screencast', url: 'https://page.example/' });
     controller.attachView(makeSink());
@@ -623,30 +613,30 @@ describe('launch', () => {
 
     closeBrowserSurface('id', { surfaceType: 'browser', renderMode: 'ab-screencast', url: 'https://page.example/' });
     expect(await launched).toBeNull();
-    expect(platform.agentBrowserCommand).not.toHaveBeenCalled();
+    expect(host.requests('close')).toEqual([]);
 
-    answer({ ok: true, session: 'dormouse.1.gui-late', wsPort: 4321 });
+    launch.resolve({ ok: true, session: 'dormouse.1.gui-late', wsPort: 4321 });
     await flushMicrotasks();
-    expect(platform.agentBrowserCommand).toHaveBeenCalledExactlyOnceWith('dormouse.1.gui-late', ['close'], undefined);
+    expect(host.requests('close')).toEqual([{ provider: 'agent-browser', binding: { session: 'dormouse.1.gui-late' }, op: 'close' }]);
     expect(WebSocketMock.instances).toHaveLength(0);
   });
 
   it('a navigation out of a failed launch launches at its page, and loads it once', async () => {
-    const answers = [{ ok: false, error: 'boom' }, { ok: true, session: 'dormouse.1.gui-n', wsPort: 4321 }];
-    const platform = launchPlatform(async () => answers.shift()!);
+    const answers: BrowserResult[] = [{ ok: false, error: 'boom' }, { ok: true, session: 'dormouse.1.gui-n', wsPort: 4321 }];
+    const host = launchHost(async () => answers.shift()!);
     acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-screencast', url: 'https://page.example/' }).attachView(makeSink());
     await flushMicrotasks();
 
     getAgentBrowserScreenController('id')!.chromeActions.navigate('https://next.example/');
     await flushMicrotasks();
-    expect(platform.agentBrowserOpen).toHaveBeenLastCalledWith('https://next.example/', { headed: false }, undefined);
+    expect(host.requests('launch').at(-1)).toEqual({ provider: 'agent-browser', binding: {}, op: 'launch', url: 'https://next.example/', headed: false });
     expect(streamSocket(4321)?.readyState).toBe(1);
-    expect(opens(platform)).toEqual([]);
+    expect(opens(host)).toEqual([]);
   });
 
   it('a Tool re-framed while its browser opens goes to the new page once live', async () => {
-    let answer!: (res: AgentBrowserOpenResult) => void;
-    const platform = launchPlatform(() => new Promise((resolve) => { answer = resolve; }));
+    const launch = pending();
+    const host = launchHost(() => launch.promise);
     const controller = acquireAgentBrowserSurfaceController('id', {
       renderMode: 'ab-screencast', url: 'http://localhost:6006/', launchSession: 'dormouse.1.tool.t',
     });
@@ -655,14 +645,14 @@ describe('launch', () => {
 
     // A new announcement: the same session, another page.
     controller.updateParams({ renderMode: 'ab-screencast', url: 'http://localhost:6007/docs', launchSession: 'dormouse.1.tool.t' });
-    answer({ ok: true, session: 'dormouse.1.tool.t', wsPort: 4321 });
+    launch.resolve({ ok: true, session: 'dormouse.1.tool.t', wsPort: 4321 });
     await flushMicrotasks();
     expect(streamSocket(4321)?.readyState).toBe(1);
-    expect(opens(platform)).toEqual(['http://localhost:6007/docs']);
+    expect(opens(host)).toEqual(['http://localhost:6007/docs']);
   });
 
   it('ignores params that predate the session its launch bound', async () => {
-    const platform = launchPlatform(async () => ({ ok: true, session: 'dormouse.1.gui-abc', wsPort: 4321 }));
+    const host = launchHost(async () => ({ ok: true, session: 'dormouse.1.gui-abc', wsPort: 4321 }));
     const controller = acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-screencast', url: 'https://page.example/' });
     controller.attachView(makeSink());
     await flushMicrotasks();
@@ -670,13 +660,13 @@ describe('launch', () => {
     // A remounted view feeds the params it rendered with, before the write shows.
     controller.updateParams({ renderMode: 'ab-screencast', url: 'https://page.example/' });
     await flushMicrotasks();
-    expect(platform.agentBrowserOpen).toHaveBeenCalledOnce();
+    expect(host.requests('launch')).toHaveLength(1);
     expect(streamSocket(4321)?.readyState).toBe(1);
   });
 
   it('never closes the session a launch opened when the Surface has since bound it', async () => {
-    let answer!: (res: { ok: boolean; session?: string; wsPort?: number }) => void;
-    const platform = launchPlatform(() => new Promise((resolve) => { answer = resolve; }));
+    const launch = pending();
+    const host = launchHost(() => launch.promise);
     const controller = acquireAgentBrowserSurfaceController('id', {
       renderMode: 'ab-screencast', url: 'http://localhost:6006/', launchSession: 'dormouse.1.tool.t',
     });
@@ -685,23 +675,25 @@ describe('launch', () => {
 
     controller.updateParams({ renderMode: 'ab-screencast', url: 'http://localhost:6006/', session: 'dormouse.1.tool.t' });
     controller.handOver(4321);
-    answer({ ok: true, session: 'dormouse.1.tool.t', wsPort: 4321 });
+    launch.resolve({ ok: true, session: 'dormouse.1.tool.t', wsPort: 4321 });
     await flushMicrotasks();
-    expect(platform.agentBrowserCommand).not.toHaveBeenCalledWith('dormouse.1.tool.t', ['close'], undefined);
+    expect(host.requests('close')).toEqual([]);
     expect(streamSocket(4321)?.readyState).toBe(1);
   });
 
   it('launches with the binary `dor ab` last resolved, and remembers the one it ran', async () => {
-    const platform = launchPlatform(async () => ({ ok: true, session: 'dormouse.1.gui-b', wsPort: 4321, binaryPath: '/opt/ab/agent-browser' }));
+    const host = launchHost(async () => ({ ok: true, session: 'dormouse.1.gui-b', wsPort: 4321, binaryPath: '/opt/ab/agent-browser' }));
     rememberLaunchBinaryPath('agent-browser', '/usr/local/bin/agent-browser');
     acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-screencast', url: 'https://page.example/' }).attachView(makeSink());
     await flushMicrotasks();
-    expect(platform.agentBrowserOpen).toHaveBeenCalledWith('https://page.example/', { headed: false }, '/usr/local/bin/agent-browser');
+    expect(host.requests('launch')).toEqual([{
+      provider: 'agent-browser', binding: { binaryPath: '/usr/local/bin/agent-browser' }, op: 'launch', url: 'https://page.example/', headed: false,
+    }]);
     expect(launchBinaryPath('agent-browser')).toBe('/opt/ab/agent-browser');
   });
 
   it('tells the Wall about a failed launch, once a view is attached to hear it', async () => {
-    launchPlatform(async () => ({ ok: false, error: 'boom' }));
+    launchHost(async () => ({ ok: false, error: 'boom' }));
     const controller = acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-screencast', url: 'https://page.example/' });
     const first = makeSink();
     const handle = controller.attachView(first);
@@ -714,8 +706,8 @@ describe('launch', () => {
   });
 
   it('a launch released without a close leaves a session it named, and closes one the host minted', async () => {
-    const answers: Array<(res: { ok: boolean; session?: string; wsPort?: number }) => void> = [];
-    const platform = launchPlatform(() => new Promise((resolve) => { answers.push(resolve); }));
+    const answers: Array<(res: BrowserResult) => void> = [];
+    const host = launchHost(() => new Promise((resolve) => { answers.push(resolve); }));
     const named = acquireAgentBrowserSurfaceController('named', { renderMode: 'ab-screencast', url: 'https://page.example/', launchSession: 'dormouse.1.tool.t' });
     named.attachView(makeSink());
     const minted = acquireAgentBrowserSurfaceController('minted', { renderMode: 'ab-screencast', url: 'https://page.example/' });
@@ -728,11 +720,11 @@ describe('launch', () => {
     answers[0]({ ok: true, session: 'dormouse.1.tool.t', wsPort: 4321 });
     answers[1]({ ok: true, session: 'dormouse.1.gui-x', wsPort: 4322 });
     await flushMicrotasks();
-    expect(platform.agentBrowserCommand).toHaveBeenCalledExactlyOnceWith('dormouse.1.gui-x', ['close'], undefined);
+    expect(host.requests('close')).toEqual([{ provider: 'agent-browser', binding: { session: 'dormouse.1.gui-x' }, op: 'close' }]);
   });
 
   it('a controller released before it ever started still settles its waiter', async () => {
-    launchPlatform(async () => ({ ok: true }));
+    launchHost(async () => ({ ok: true }));
     const launched = whenBrowserLaunched('id');
     acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-screencast', url: 'https://page.example/' });
     disposeAgentBrowserSurfaceController('id');
@@ -740,7 +732,7 @@ describe('launch', () => {
   });
 
   it('a Surface killed before its view ever mounted still settles its waiter', async () => {
-    launchPlatform(async () => ({ ok: true }));
+    launchHost(async () => ({ ok: true }));
     const launched = whenBrowserLaunched('never-mounted');
     closeBrowserSurface('never-mounted', { surfaceType: 'browser', renderMode: 'ab-screencast', url: 'https://page.example/' });
     expect(await launched).toBeNull();
@@ -752,35 +744,22 @@ describe('a closed Surface and the next launch into its session', () => {
   // restarts, while its browser was still coming up: the Surface closes, and
   // the next launch opens the same `tool.<leafId>` session.
   const session = 'dormouse.1.tool.t';
-  type Pending<T> = { resolve: (value: T) => void };
   function hostPlatform() {
-    const pending = { open: [] as Pending<AgentBrowserOpenResult>[], popOut: [] as Pending<AgentBrowserPopResult>[], attach: [] as Pending<AgentBrowserAttachResult>[] };
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserOpen' | 'agentBrowserCommand' | 'agentBrowserAttach' | 'agentBrowserPopOut' | 'agentBrowserPopIn'>;
-    platform.agentBrowserOpen = vi.fn(() => new Promise<AgentBrowserOpenResult>((resolve) => { pending.open.push({ resolve }); }));
-    platform.agentBrowserAttach = vi.fn(() => new Promise<AgentBrowserAttachResult>((resolve) => { pending.attach.push({ resolve }); }));
-    platform.agentBrowserPopOut = vi.fn(() => new Promise<AgentBrowserPopResult>((resolve) => { pending.popOut.push({ resolve }); }));
-    platform.agentBrowserPopIn = vi.fn(async () => ({ ok: true, wsPort: 5555 }));
-    platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
-    setPlatform(platform);
-    return { platform, pending };
+    const pending = { launch: [] as Array<(result: BrowserResult) => void>, attach: [] as Array<(result: BrowserResult) => void> };
+    const host = installBrowserHost({
+      launch: () => new Promise((resolve) => { pending.launch.push(resolve); }),
+      attach: () => new Promise((resolve) => { pending.attach.push(resolve); }),
+    });
+    return { ...host, pending };
   }
   /** Close `id` mid-flight, start the next launch into `session`, and check it
    *  waits for the first to land and close the session again. */
-  async function expectNextLaunchWaits(
-    { platform }: ReturnType<typeof hostPlatform>,
-    id: string,
-    land: () => void,
-  ) {
+  async function expectNextLaunchWaits(host: ReturnType<typeof hostPlatform>, id: string, land: () => void) {
     // Closes stay unanswered until released, so the wait is for the answer.
     const answerCloses: Array<() => void> = [];
-    vi.mocked(platform.agentBrowserCommand!).mockImplementation((_session, args) => new Promise((resolve) => {
-      const answer = () => resolve({ exitCode: 0, stdout: '', stderr: '' });
-      if (args[0] === 'close') answerCloses.push(answer);
-      else answer();
-    }));
-    const closesOfSession = () => vi.mocked(platform.agentBrowserCommand!).mock.calls
-      .filter(([name, args]) => name === session && args[0] === 'close').length;
-    const nextOpen = () => vi.mocked(platform.agentBrowserOpen!).mock.calls.filter(([, opts]) => opts.session === session).length;
+    host.answers.close = () => new Promise((resolve) => { answerCloses.push(() => resolve({ ok: true })); });
+    const closesOfSession = () => host.requests('close').filter((request) => request.binding.session === session).length;
+    const nextOpen = () => host.requests('launch').filter((request) => request.binding.session === session).length;
     const opensBefore = nextOpen();
     void closeBrowserSurface(id, {});
     acquireAgentBrowserSurfaceController('next', { renderMode: 'ab-screencast', url: 'http://localhost:6006/', launchSession: session })
@@ -806,7 +785,7 @@ describe('a closed Surface and the next launch into its session', () => {
     acquireAgentBrowserSurfaceController('first', { renderMode: 'ab-screencast', url: 'http://localhost:6006/', launchSession: session })
       .attachView(makeSink());
     await flushMicrotasks();
-    await expectNextLaunchWaits(host, 'first', () => host.pending.open[0].resolve({ ok: true, session, wsPort: 4321 }));
+    await expectNextLaunchWaits(host, 'first', () => host.pending.launch[0]({ ok: true, session, wsPort: 4321 }));
   });
 
   it('a launch released while it waits opens nothing', async () => {
@@ -820,9 +799,9 @@ describe('a closed Surface and the next launch into its session', () => {
     await flushMicrotasks();
     // Swapped away again before the first launch landed.
     void closeBrowserSurface('next', {});
-    host.pending.open[0].resolve({ ok: true, session, wsPort: 4321 });
+    host.pending.launch[0]({ ok: true, session, wsPort: 4321 });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(host.platform.agentBrowserOpen).toHaveBeenCalledOnce();
+    expect(host.requests('launch')).toHaveLength(1);
   });
 
   it('waits for a pop-out that was relaunching it', async () => {
@@ -831,29 +810,25 @@ describe('a closed Surface and the next launch into its session', () => {
     first.attachView(makeSink());
     await flushMicrotasks();
     first.setRenderMode('ab-popout');
-    await expectNextLaunchWaits(host, 'first', () => host.pending.popOut[0].resolve({ ok: true, wsPort: 4321 }));
+    await expectNextLaunchWaits(host, 'first', () => host.pending.launch[0]({ ok: true, wsPort: 4321 }));
   });
 
   it('waits for an attach that was relaunching it', async () => {
     const host = hostPlatform();
     acquireAgentBrowserSurfaceController('first', { session, url: 'http://localhost:6006/' }).attachView(makeSink());
     await flushMicrotasks();
-    expect(host.platform.agentBrowserAttach).toHaveBeenCalled();
-    await expectNextLaunchWaits(host, 'first', () => host.pending.attach[0].resolve({ ok: true, wsPort: 4321, relaunched: true }));
+    expect(host.requests('attach')).toHaveLength(1);
+    await expectNextLaunchWaits(host, 'first', () => host.pending.attach[0]({ ok: true, wsPort: 4321, relaunched: true }));
   });
 });
 
 describe('attach', () => {
-  function attachPlatform(attach: PlatformAdapter['agentBrowserAttach']) {
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserAttach' | 'agentBrowserCommand'>;
-    platform.agentBrowserAttach = vi.fn(attach);
-    platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
-    setPlatform(platform);
-    return platform;
+  function attachHost(attach: NonNullable<BrowserAnswers['attach']>) {
+    return installBrowserHost({ attach });
   }
 
   it('a restored pane attaches at the page and presentation it had', async () => {
-    const platform = attachPlatform(async () => ({ ok: true, wsPort: 2222 }));
+    const host = attachHost(async () => ({ ok: true, wsPort: 2222 }));
     const controller = acquireAgentBrowserSurfaceController('id', {
       session: 'sess', renderMode: 'ab-popout', url: 'https://restored.example/',
     });
@@ -861,12 +836,12 @@ describe('attach', () => {
     controller.attachView(sink);
     await flushMicrotasks();
 
-    expect(platform.agentBrowserAttach).toHaveBeenCalledExactlyOnceWith('sess', { url: 'https://restored.example/', headed: true }, undefined);
+    expect(host.requests('attach')).toEqual([onSess({ op: 'attach', url: 'https://restored.example/', headed: true })]);
     expect(streamSocket(2222)?.readyState).toBe(1);
   });
 
   it('streams from a port `dor` hands over, out of `ended` too', async () => {
-    attachPlatform(async () => ({ ok: false, error: 'not running' }));
+    attachHost(async () => ({ ok: false, error: 'not running' }));
     const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', url: 'https://page.example/' });
     controller.attachView(makeSink());
     await flushMicrotasks();
@@ -879,7 +854,7 @@ describe('attach', () => {
   });
 
   it('a browser that cannot be reopened says why', async () => {
-    attachPlatform(async () => ({ ok: false, error: 'agent-browser binary not found' }));
+    attachHost(async () => ({ ok: false, error: 'agent-browser binary not found' }));
     const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', url: 'https://restored.example/' });
     controller.attachView(makeSink());
     await flushMicrotasks();
@@ -888,8 +863,8 @@ describe('attach', () => {
   });
 
   /** A live pane on 1111, parked. */
-  async function parkedAt1111(attach: PlatformAdapter['agentBrowserAttach']) {
-    const platform = attachPlatform(attach);
+  async function parkedAt1111(attach: NonNullable<BrowserAnswers['attach']>) {
+    const host = attachHost(attach);
     const controller = withPort('id', { session: 'sess', url: 'https://page.example/' }, 1111);
     controller.attachView(makeSink());
     await vi.advanceTimersByTimeAsync(0);
@@ -898,20 +873,20 @@ describe('attach', () => {
     await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50);
     expect(controller.isParked()).toBe(true);
     expect(streamSocket(1111)?.readyState).toBe(3);
-    return { platform, controller };
+    return { host, controller };
   }
 
   it('never attaches while parked, and an unpark whose port still answers asks the host nothing', async () => {
     vi.useFakeTimers();
     try {
-      const { platform, controller } = await parkedAt1111(async () => ({ ok: true, wsPort: 2222 }));
+      const { host, controller } = await parkedAt1111(async () => ({ ok: true, wsPort: 2222 }));
       // Hidden and shown again, a headless pane never left `live` for its view.
       expect(controller.snapshot().phase).toBe('live');
       controller.setVisible(true);
       await vi.advanceTimersByTimeAsync(0);
       expect(streamSockets(1111)).toHaveLength(2);
       expect(streamSocket(1111)?.readyState).toBe(1);
-      expect(platform.agentBrowserAttach).not.toHaveBeenCalled();
+      expect(host.requests('attach')).toEqual([]);
     } finally {
       vi.useRealTimers();
     }
@@ -920,13 +895,13 @@ describe('attach', () => {
   it('an unpark whose port fails asks the host, without a page, where the stream moved', async () => {
     vi.useFakeTimers();
     try {
-      const { platform, controller } = await parkedAt1111(async () => ({ ok: true, wsPort: 2222 }));
+      const { host, controller } = await parkedAt1111(async () => ({ ok: true, wsPort: 2222 }));
       WebSocketMock.failPorts.add(1111);
       controller.setVisible(true);
       await vi.advanceTimersByTimeAsync(0);
       // Without a page: a daemon gone while hidden has ended, it is not
       // relaunched behind the user's back.
-      expect(platform.agentBrowserAttach).toHaveBeenCalledExactlyOnceWith('sess', { url: undefined, headed: false }, undefined);
+      expect(host.requests('attach')).toEqual([onSess({ op: 'attach', url: undefined, headed: false })]);
       expect(streamSocket(2222)?.readyState).toBe(1);
     } finally {
       vi.useRealTimers();
@@ -940,7 +915,9 @@ describe('attach', () => {
   ])('an unpark drives nothing until the port it parked at %s', async (_name, answers, askedMeanwhile) => {
     vi.useFakeTimers();
     try {
-      const platform = attachPlatform(async () => ({ ok: false, error: 'not running' }));
+      const host = attachHost(async () => ({ ok: false, error: 'not running' }));
+      // What reaches the browser: a stream URL is only the host's to build.
+      const sent = () => host.browser.mock.calls.map(([request]) => request).filter((request) => request.op !== 'streamUrl');
       const sink = makeSink();
       let size = { width: 800, height: 600 };
       sink.viewport.getBoundingClientRect = () => ({ ...size }) as DOMRect;
@@ -953,7 +930,7 @@ describe('attach', () => {
       // While hidden: the Door comes back at another size, and a page is asked for.
       size = { width: 1000, height: 700 };
       getAgentBrowserScreenController('id')!.chromeActions.navigate('https://next.example/');
-      vi.mocked(platform.agentBrowserCommand!).mockClear();
+      host.browser.mockClear();
 
       // A daemon gone meanwhile would be started again by any CLI command.
       if (!answers) WebSocketMock.failPorts.add(1111);
@@ -962,13 +939,12 @@ describe('attach', () => {
       if (askedMeanwhile) getAgentBrowserScreenController('id')!.chromeActions.navigate('https://later.example/');
       await vi.advanceTimersByTimeAsync(250);
       if (answers) {
-        expect(vi.mocked(platform.agentBrowserCommand!).mock.calls.map(([, args]) => args)).toEqual([
-          ['set', 'viewport', '1000', '700', '1'],
-          ['open', askedMeanwhile ? 'https://later.example/' : 'https://next.example/'],
+        expect(sent()).toEqual([
+          onSess({ op: 'viewport', width: 1000, height: 700, dpr: 1 }),
+          onSess({ op: 'navigate', url: askedMeanwhile ? 'https://later.example/' : 'https://next.example/' }),
         ]);
       } else {
-        expect(platform.agentBrowserCommand).not.toHaveBeenCalled();
-        expect(platform.agentBrowserAttach).toHaveBeenCalledExactlyOnceWith('sess', { url: undefined, headed: false }, undefined);
+        expect(sent()).toEqual([onSess({ op: 'attach', headed: false })]);
         expect(controller.snapshot().phase).toBe('ended');
       }
     } finally {
@@ -990,7 +966,7 @@ describe('attach', () => {
   });
 
   it('a headless browser that drops ends, reached again only through attach or a handed-over port', async () => {
-    const platform = attachPlatform(async () => ({ ok: true, wsPort: 3333 }));
+    const host = attachHost(async () => ({ ok: true, wsPort: 3333 }));
     const controller = withPort('id', { session: 'sess', url: 'https://page.example/' }, 1111);
     controller.attachView(makeSink());
     await flushMicrotasks();
@@ -1002,7 +978,7 @@ describe('attach', () => {
     socket.emitMessage(JSON.stringify({ type: 'status', connected: false, screencasting: false }));
     expect(controller.snapshot().phase).toBe('ended');
     expect(socket.readyState).toBe(3);
-    expect(platform.agentBrowserAttach).not.toHaveBeenCalled();
+    expect(host.requests('attach')).toEqual([]);
 
     // `dor ab open` brings it back on the port it had.
     handOverBrowserPort('id', { session: 'sess', url: 'https://page.example/' }, 1111);
@@ -1016,30 +992,29 @@ describe('attach', () => {
     streamSocket(1111)!.emitMessage(JSON.stringify({ type: 'status', connected: true, screencasting: true }));
     streamSocket(1111)!.emitMessage(JSON.stringify({ type: 'status', connected: false, screencasting: false }));
     getAgentBrowserScreenController('id')!.chromeActions.navigate('https://next.example/');
-    expect(platform.agentBrowserCommand).not.toHaveBeenCalledWith('sess', ['open', 'https://next.example/'], undefined);
-    expect(platform.agentBrowserAttach).toHaveBeenCalledExactlyOnceWith('sess', { url: 'https://next.example/', headed: false }, undefined);
+    expect(host.requests('navigate')).toEqual([]);
+    expect(host.requests('attach')).toEqual([onSess({ op: 'attach', url: 'https://next.example/', headed: false })]);
     await flushMicrotasks();
     expect(streamSocket(3333)?.readyState).toBe(1);
-    expect(opens(platform)).toEqual(['https://next.example/']);
+    expect(host.requests('navigate')).toEqual([onSess({ op: 'navigate', url: 'https://next.example/' })]);
   });
 
   it('a navigation that relaunches a gone daemon loads its page once', async () => {
-    const platform = attachPlatform(async () => ({ ok: false, error: 'not running' }));
+    const host = attachHost(async () => ({ ok: false, error: 'not running' }));
     acquireAgentBrowserSurfaceController('id', { session: 'sess', url: 'https://page.example/' }).attachView(makeSink());
     await flushMicrotasks();
-    vi.mocked(platform.agentBrowserAttach!).mockResolvedValue({ ok: true, wsPort: 3333, relaunched: true });
+    host.answers.attach = async () => ({ ok: true, wsPort: 3333, relaunched: true });
 
     getAgentBrowserScreenController('id')!.chromeActions.navigate('https://next.example/');
     await flushMicrotasks();
-    expect(platform.agentBrowserAttach).toHaveBeenLastCalledWith('sess', { url: 'https://next.example/', headed: false }, undefined);
+    expect(host.requests('attach').at(-1)).toEqual(onSess({ op: 'attach', url: 'https://next.example/', headed: false }));
     expect(streamSocket(3333)?.readyState).toBe(1);
-    expect(opens(platform)).toEqual([]);
+    expect(opens(host)).toEqual([]);
   });
 
   it('does not query the daemon while a relaunch is in flight', async () => {
-    const platform = attachPlatform(async () => ({ ok: true, wsPort: 9999 }));
-    const popOut = vi.fn(() => new Promise<never>(() => {}));
-    Object.assign(platform, { agentBrowserPopOut: popOut });
+    const host = attachHost(async () => ({ ok: true, wsPort: 9999 }));
+    host.answers.launch = () => new Promise<never>(() => {});
 
     const controller = withPort('id', { session: 'sess' }, 1111);
     const sink = makeSink();
@@ -1047,13 +1022,13 @@ describe('attach', () => {
     await flushMicrotasks();
 
     getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout');
-    vi.mocked(platform.agentBrowserCommand!).mockClear();
+    expect(host.requests('launch')).toEqual([onSess({ op: 'launch', url: undefined, headed: true })]);
+    host.browser.mockClear();
 
     // A stream drop mid-relaunch must not spawn a competing daemon.
     streamSocket(1111)?.emitMessage(JSON.stringify({ type: 'status', connected: false, screencasting: false }));
     await flushMicrotasks();
-    expect(platform.agentBrowserAttach).not.toHaveBeenCalled();
-    expect(platform.agentBrowserCommand).not.toHaveBeenCalled();
+    expect(host.browser).not.toHaveBeenCalled();
   });
 });
 
@@ -1077,18 +1052,15 @@ describe('dispose', () => {
 });
 
 describe('closeBrowserSurface', () => {
-  function closePlatform() {
-    let resolvePopOut!: (res: { ok: boolean; wsPort?: number }) => void;
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserPopOut'>;
-    platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
-    platform.agentBrowserPopOut = vi.fn(() => new Promise((r) => { resolvePopOut = r; }));
-    setPlatform(platform);
-    const closes = () => vi.mocked(platform.agentBrowserCommand!).mock.calls.filter(([, args]) => args[0] === 'close');
-    return { platform, closes, resolvePopOut: (res: { ok: boolean; wsPort?: number }) => resolvePopOut(res) };
+  function closeHost() {
+    const popOut = pending();
+    const host = installBrowserHost({ launch: () => popOut.promise });
+    const closes = () => host.requests('close');
+    return { host, closes, resolvePopOut: popOut.resolve };
   }
 
   it('closes the session again when a relaunch in flight brings its daemon back', async () => {
-    const { closes, resolvePopOut } = closePlatform();
+    const { closes, resolvePopOut } = closeHost();
     const controller = withPort('id', { session: 'sess' }, 1111);
     controller.attachView(makeSink());
     await flushMicrotasks();
@@ -1105,7 +1077,7 @@ describe('closeBrowserSurface', () => {
   });
 
   it('a release that closes nothing leaves a relaunch in flight to whoever holds the session next', async () => {
-    const { closes, resolvePopOut } = closePlatform();
+    const { closes, resolvePopOut } = closeHost();
     const controller = withPort('id', { session: 'sess' }, 1111);
     controller.attachView(makeSink());
     await flushMicrotasks();
@@ -1118,28 +1090,29 @@ describe('closeBrowserSurface', () => {
   });
 
   it('closes a session no controller holds from its params, with only a checked binary', async () => {
-    const { platform } = closePlatform();
+    const { host } = closeHost();
     closeBrowserSurface('never-mounted', { surfaceType: 'browser', renderMode: 'ab-screencast', session: 'sess', binaryPath: '/usr/bin/curl' });
     closeBrowserSurface('iframe', { surfaceType: 'browser', renderMode: 'iframe', url: 'http://localhost:5173/' });
-    expect(platform.agentBrowserCommand).toHaveBeenCalledExactlyOnceWith('sess', ['close'], undefined);
+    expect(host.browser).toHaveBeenCalledExactlyOnceWith(onSess({ op: 'close' }));
   });
 });
 
 describe('relaunch (pop-out / pop-in)', () => {
-  type RelaunchPlatform = FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserPopOut' | 'agentBrowserPopIn' | 'agentBrowserAttach'>;
-  function relaunchPlatform(): RelaunchPlatform & { resolvePopOut: (res: { ok: boolean; wsPort?: number }) => void } {
-    const platform = new FakePtyAdapter() as RelaunchPlatform;
-    let resolvePopOut!: (res: { ok: boolean; wsPort?: number }) => void;
-    platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
-    platform.agentBrowserAttach = vi.fn(async () => ({ ok: true, wsPort: 9999 }));
-    platform.agentBrowserPopOut = vi.fn(() => new Promise<{ ok: boolean; wsPort?: number }>((r) => { resolvePopOut = r; }));
-    platform.agentBrowserPopIn = vi.fn(async () => ({ ok: true, wsPort: 5555 }));
-    setPlatform(platform);
-    return Object.assign(platform, { resolvePopOut: (res: { ok: boolean; wsPort?: number }) => resolvePopOut(res) });
+  /** A host whose pop-out (a headed relaunch) waits for `resolvePopOut`, and
+   *  whose pop-in answers port 5555. */
+  function relaunchHost() {
+    const popOut = pending();
+    const host = installBrowserHost({
+      attach: async () => ({ ok: true, wsPort: 9999 }),
+      launch: (request) => request.headed ? popOut.promise : Promise.resolve({ ok: true, wsPort: 5555 }),
+    });
+    /** The relaunches of a bound session, headed (pop-outs) or not (pop-ins). */
+    const relaunches = (headed: boolean) => host.requests('launch').filter((request) => request.binding.session !== undefined && request.headed === headed);
+    return { ...host, resolvePopOut: popOut.resolve, relaunches };
   }
 
   it('drops the stream up front and connects to the host\'s port only once the relaunch ends', async () => {
-    const platform = relaunchPlatform();
+    const host = relaunchHost();
     const controller = withPort('id', { session: 'sess' }, 1111);
     const sink = makeSink();
     controller.attachView(sink);
@@ -1156,19 +1129,19 @@ describe('relaunch (pop-out / pop-in)', () => {
     expect(controller.snapshot().poppedOut).toBe(true);
     // No daemon command while the relaunch is in flight: not even the popped-out
     // CDP observer's `get cdp-url`.
-    expect(platform.agentBrowserCommand).not.toHaveBeenCalledWith('sess', ['get', 'cdp-url'], undefined);
+    expect(host.requests('cdpUrl')).toEqual([]);
 
-    platform.resolvePopOut({ ok: true, wsPort: 3456 });
+    host.resolvePopOut({ ok: true, wsPort: 3456 });
     await flushMicrotasks();
     expect(controller.snapshot().phase).toBe('live');
     expect(streamSockets(3456).length).toBe(1);
     expect(streamSockets(1111).length).toBe(1);
-    expect(platform.agentBrowserCommand).toHaveBeenCalledWith('sess', ['get', 'cdp-url'], undefined);
-    expect(platform.agentBrowserAttach).not.toHaveBeenCalled();
+    expect(host.requests('cdpUrl')).toEqual([onSess({ op: 'cdpUrl' })]);
+    expect(host.requests('attach')).toEqual([]);
   });
 
   it('ignores a second pop-out or pop-in while one is in flight', async () => {
-    const platform = relaunchPlatform();
+    const host = relaunchHost();
     const controller = withPort('id', { session: 'sess' }, 1111);
     controller.attachView(makeSink());
     await flushMicrotasks();
@@ -1178,32 +1151,33 @@ describe('relaunch (pop-out / pop-in)', () => {
     getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout');
     await flushMicrotasks();
 
-    expect(platform.agentBrowserPopOut).toHaveBeenCalledTimes(1);
-    expect(platform.agentBrowserPopIn).not.toHaveBeenCalled();
+    expect(host.relaunches(true)).toHaveLength(1);
+    expect(host.relaunches(false)).toHaveLength(0);
     expect(controller.snapshot().poppedOut).toBe(true);
 
-    platform.resolvePopOut({ ok: true, wsPort: 3456 });
+    host.resolvePopOut({ ok: true, wsPort: 3456 });
     await flushMicrotasks();
     controller.popIn();
-    expect(platform.agentBrowserPopIn).toHaveBeenCalledTimes(1);
+    expect(host.relaunches(false)).toHaveLength(1);
   });
 
   it('pop-in while the first launch is in flight is a no-op', async () => {
-    const platform = relaunchPlatform();
-    Object.assign(platform, { agentBrowserOpen: vi.fn(() => new Promise<never>(() => {})) });
+    const host = relaunchHost();
+    // The first launch opens a new session, and never answers.
+    host.answers.launch = () => new Promise<never>(() => {});
     const controller = acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-popout', url: 'https://page.example/' });
     const sink = makeSink();
     controller.attachView(sink);
     await flushMicrotasks();
 
     controller.popIn();
-    expect(platform.agentBrowserPopIn).not.toHaveBeenCalled();
+    expect(host.requests('launch')).toEqual([{ provider: 'agent-browser', binding: {}, op: 'launch', url: 'https://page.example/', headed: true }]);
     expect(controller.snapshot()).toMatchObject({ poppedOut: true, phase: 'launching' });
     expect(sink.updateParameters).not.toHaveBeenCalledWith({ renderMode: 'ab-screencast' });
   });
 
   it('a relaunch carries the URL the stream committed, not the one the last tabs snapshot reported', async () => {
-    const platform = relaunchPlatform();
+    const host = relaunchHost();
     const controller = withPort('id', { session: 'sess', url: 'https://before.example/' }, 1111);
     const sink = makeSink();
     controller.attachView(sink);
@@ -1221,11 +1195,11 @@ describe('relaunch (pop-out / pop-in)', () => {
     expect(sink.updateParameters).toHaveBeenCalledWith({ url: 'https://slow.example/' });
 
     getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout');
-    expect(platform.agentBrowserPopOut).toHaveBeenCalledWith('sess', expect.objectContaining({ url: 'https://slow.example/' }), undefined);
+    expect(host.relaunches(true)).toEqual([onSess({ op: 'launch', url: 'https://slow.example/', headed: true })]);
   });
 
   it('relaunches at the last page the host can reopen, not a file: or data: tab', async () => {
-    const platform = relaunchPlatform();
+    const host = relaunchHost();
     const controller = withPort('id', { session: 'sess', url: 'https://before.example/' }, 1111);
     const sink = makeSink();
     controller.attachView(sink);
@@ -1238,7 +1212,7 @@ describe('relaunch (pop-out / pop-in)', () => {
     expect(sink.updateParameters).not.toHaveBeenCalledWith({ url: 'file:///tmp/report.html' });
 
     getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout');
-    expect(platform.agentBrowserPopOut).toHaveBeenCalledWith('sess', expect.objectContaining({ url: 'https://app.example/report' }), undefined);
+    expect(host.relaunches(true)).toEqual([onSess({ op: 'launch', url: 'https://app.example/report', headed: true })]);
   });
 
   it('clears a stale title when navigation commits at the same URL', async () => {
@@ -1269,9 +1243,7 @@ describe('relaunch (pop-out / pop-in)', () => {
   });
 
   it('reaches no daemon from the header, Display modal, tabs, sync or edit chords mid-relaunch, and carries a navigation to the new browser', async () => {
-    const platform = relaunchPlatform();
-    const edit = vi.fn(async () => ({ ok: true }));
-    Object.assign(platform, { agentBrowserEdit: edit });
+    const host = relaunchHost();
     const observers: ResizeObserverCallback[] = [];
     vi.stubGlobal('ResizeObserver', class {
       constructor(callback: ResizeObserverCallback) { observers.push(callback); }
@@ -1295,7 +1267,8 @@ describe('relaunch (pop-out / pop-in)', () => {
       }));
       const screen = getAgentBrowserScreenController('id')!;
       screen.actions.setRenderMode?.('ab-popout');
-      vi.mocked(platform.agentBrowserCommand!).mockClear();
+      expect(host.relaunches(true)).toHaveLength(1);
+      host.browser.mockClear();
 
       screen.chromeActions.back();
       screen.chromeActions.forward();
@@ -1313,23 +1286,22 @@ describe('relaunch (pop-out / pop-in)', () => {
       await vi.advanceTimersByTimeAsync(250);
       controller.handleKeyDownLike({ key: 'a', code: 'KeyA', metaKey: true, ctrlKey: false, altKey: false, shiftKey: false });
       await vi.advanceTimersByTimeAsync(0);
-      expect(platform.agentBrowserCommand).not.toHaveBeenCalled();
-      expect(edit).not.toHaveBeenCalled();
+      // Nothing at all reaches the host: no command, no edit, no capture.
+      expect(host.browser).not.toHaveBeenCalled();
 
       // The relaunch lands: only the latest navigation runs, once.
-      platform.resolvePopOut({ ok: true, wsPort: 3456 });
+      host.resolvePopOut({ ok: true, wsPort: 3456 });
       await vi.advanceTimersByTimeAsync(0);
-      const opens = vi.mocked(platform.agentBrowserCommand!).mock.calls.filter(([, args]) => args[0] === 'open');
-      expect(opens).toEqual([['sess', ['open', 'https://latest.example/'], undefined]]);
+      expect(host.requests('navigate')).toEqual([onSess({ op: 'navigate', url: 'https://latest.example/' })]);
     } finally {
       vi.useRealTimers();
     }
   });
 
   it('keeps sync-to-pane out of a pop-in gap, and re-syncs once the headless browser streams', async () => {
-    const platform = relaunchPlatform();
-    let resolvePopIn!: (res: { ok: boolean; wsPort?: number }) => void;
-    platform.agentBrowserPopIn = vi.fn(() => new Promise((r) => { resolvePopIn = r; }));
+    const host = relaunchHost();
+    const popIn = pending();
+    host.answers.launch = () => popIn.promise;
     const controller = withPort('id', { session: 'sess', renderMode: 'ab-popout' }, 1111);
     const sink = makeSink();
     sink.viewport.getBoundingClientRect = () => ({ width: 800, height: 600 }) as DOMRect;
@@ -1341,41 +1313,39 @@ describe('relaunch (pop-out / pop-in)', () => {
     expect(controller.snapshot().poppedOut).toBe(false);
     window.dispatchEvent(new Event('resize'));
     getAgentBrowserScreenController('id')!.actions.engageSync();
-    const viewports = () => vi.mocked(platform.agentBrowserCommand!).mock.calls.filter(([, args]) => args[1] === 'viewport');
-    expect(viewports()).toEqual([]);
+    expect(host.requests('viewport')).toEqual([]);
 
-    resolvePopIn({ ok: true, wsPort: 5555 });
+    popIn.resolve({ ok: true, wsPort: 5555 });
     await flushMicrotasks();
-    expect(viewports()).toEqual([['sess', ['set', 'viewport', '800', '600', '1'], undefined]]);
+    expect(host.requests('viewport')).toEqual([onSess({ op: 'viewport', width: 800, height: 600, dpr: 1 })]);
   });
 
   it('a pop-out asked for with a page relaunches there instead of navigating into the gap', async () => {
-    const platform = relaunchPlatform();
+    const host = relaunchHost();
     const controller = withPort('id', { session: 'sess', url: 'https://before.example/' }, 1111);
     controller.attachView(makeSink());
     await flushMicrotasks();
-    vi.mocked(platform.agentBrowserCommand!).mockClear();
 
     // The pane context menu's reuse of an existing port target.
     getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout', { url: 'http://localhost:5173/' });
-    expect(platform.agentBrowserPopOut).toHaveBeenCalledWith('sess', expect.objectContaining({ url: 'http://localhost:5173/' }), undefined);
-    platform.resolvePopOut({ ok: true, wsPort: 3456 });
+    expect(host.relaunches(true)).toEqual([onSess({ op: 'launch', url: 'http://localhost:5173/', headed: true })]);
+    host.resolvePopOut({ ok: true, wsPort: 3456 });
     await flushMicrotasks();
-    expect(platform.agentBrowserCommand).not.toHaveBeenCalledWith('sess', ['open', 'http://localhost:5173/'], undefined);
+    expect(host.requests('navigate')).toEqual([]);
   });
 
   it('a navigation to the page a relaunch is opening loads it once', async () => {
-    const platform = relaunchPlatform();
+    const host = relaunchHost();
     const controller = withPort('id', { session: 'sess', url: 'https://page.example/' }, 1111);
     controller.attachView(makeSink());
     await flushMicrotasks();
 
     getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout');
     getAgentBrowserScreenController('id')!.chromeActions.navigate('https://page.example/');
-    platform.resolvePopOut({ ok: true, wsPort: 3456 });
+    host.resolvePopOut({ ok: true, wsPort: 3456 });
     await flushMicrotasks();
-    expect(platform.agentBrowserPopOut).toHaveBeenCalledWith('sess', expect.objectContaining({ url: 'https://page.example/' }), undefined);
-    expect(opens(platform)).toEqual([]);
+    expect(host.relaunches(true)).toEqual([expect.objectContaining({ url: 'https://page.example/' })]);
+    expect(opens(host)).toEqual([]);
   });
 
   it.each([
@@ -1384,7 +1354,7 @@ describe('relaunch (pop-out / pop-in)', () => {
   ])('a pop-out from a parked pane opens %s, once', async (_name, asked, opened) => {
     vi.useFakeTimers();
     try {
-      const platform = relaunchPlatform();
+      const host = relaunchHost();
       const controller = withPort('id', { session: 'sess', url: 'https://page.example/' }, 1111);
       controller.attachView(makeSink());
       await vi.advanceTimersByTimeAsync(0);
@@ -1394,50 +1364,50 @@ describe('relaunch (pop-out / pop-in)', () => {
 
       getAgentBrowserScreenController('id')!.chromeActions.navigate('https://next.example/');
       getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout', asked ? { url: asked } : undefined);
-      expect(platform.agentBrowserPopOut).toHaveBeenCalledWith('sess', expect.objectContaining({ url: opened }), undefined);
-      platform.resolvePopOut({ ok: true, wsPort: 3456 });
+      expect(host.relaunches(true)).toEqual([expect.objectContaining({ url: opened })]);
+      host.resolvePopOut({ ok: true, wsPort: 3456 });
       await vi.advanceTimersByTimeAsync(0);
-      expect(opens(platform)).toEqual([]);
+      expect(opens(host)).toEqual([]);
     } finally {
       vi.useRealTimers();
     }
   });
 
   it('keeps a pop-out asked for before the browser is bound, and runs it with its page once live', async () => {
-    const platform = relaunchPlatform();
-    let attached!: (res: { ok: boolean; wsPort?: number }) => void;
-    platform.agentBrowserAttach = vi.fn(() => new Promise((resolve) => { attached = resolve; }));
+    const host = relaunchHost();
+    const attach = pending();
+    host.answers.attach = () => attach.promise;
     const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', url: 'https://page.example/' });
     // Before any view mounts it, as for a Door the context menu reveals.
     controller.setRenderMode('ab-popout', { url: 'http://localhost:5173/' });
     controller.attachView(makeSink());
     await flushMicrotasks();
-    expect(platform.agentBrowserAttach).toHaveBeenCalled();
-    expect(platform.agentBrowserPopOut).not.toHaveBeenCalled();
+    expect(host.requests('attach')).toHaveLength(1);
+    expect(host.relaunches(true)).toEqual([]);
 
-    attached({ ok: true, wsPort: 1111 });
+    attach.resolve({ ok: true, wsPort: 1111 });
     await flushMicrotasks();
-    expect(platform.agentBrowserPopOut).toHaveBeenCalledExactlyOnceWith('sess', expect.objectContaining({ url: 'http://localhost:5173/' }), undefined);
+    expect(host.relaunches(true)).toEqual([onSess({ op: 'launch', url: 'http://localhost:5173/', headed: true })]);
   });
 
   it('a failed pop-out comes back in the pane, relaunching headless at its page if no daemon came up', async () => {
-    const platform = relaunchPlatform();
+    const host = relaunchHost();
     const controller = withPort('id', { session: 'sess', url: 'https://page.example/' }, 1111);
     const sink = makeSink();
     controller.attachView(sink);
     await flushMicrotasks();
 
     getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout');
-    platform.resolvePopOut({ ok: false });
+    host.resolvePopOut({ ok: false });
     await flushMicrotasks();
-    expect(platform.agentBrowserAttach).toHaveBeenCalledExactlyOnceWith('sess', { url: 'https://page.example/', headed: false }, undefined);
+    expect(host.requests('attach')).toEqual([onSess({ op: 'attach', url: 'https://page.example/', headed: false })]);
     expect(sink.updateParameters).toHaveBeenLastCalledWith({ renderMode: 'ab-screencast' });
     expect(controller.snapshot()).toMatchObject({ poppedOut: false, phase: 'live' });
     expect(streamSocket(9999)?.readyState).toBe(1);
   });
 
   it('a `dor ab` re-run handing over a new port reconnects there and asks the daemon nothing', async () => {
-    const platform = relaunchPlatform();
+    const host = relaunchHost();
     const controller = withPort('id', { session: 'sess', url: 'https://x.example/' }, 1111);
     controller.attachView(makeSink());
     await flushMicrotasks();
@@ -1447,19 +1417,15 @@ describe('relaunch (pop-out / pop-in)', () => {
     await flushMicrotasks();
     expect(streamSocket(1111)?.readyState).toBe(3);
     expect(streamSockets(4321)).toHaveLength(1);
-    expect(platform.agentBrowserAttach).not.toHaveBeenCalled();
+    expect(host.requests('attach')).toEqual([]);
   });
 });
 
 describe('Playwright provider', () => {
   it('pastes as whole-text messages the host inserts, not a key pair per character', async () => {
-    const platform: PlatformAdapter = new FakePtyAdapter();
-    platform.playwright = vi.fn(async request => request.op === 'streamUrl'
-      ? { ok: true, url: `ws://127.0.0.1:${request.port}` }
-      : { ok: true, exitCode: 0, stdout: '', stderr: '' });
+    const host = installBrowserHost({ streamUrl: async (request) => ({ ok: true, url: `ws://127.0.0.1:${request.port}` }) });
     const pasted = `${'x'.repeat(PLAYWRIGHT_TEXT_INPUT_MAX + 10)}\r\nend`;
-    platform.readClipboardText = vi.fn(async () => pasted);
-    setPlatform(platform);
+    (host.platform as PlatformAdapter).readClipboardText = vi.fn(async () => pasted);
     const controller = withPort('pw', { renderMode: 'pw-screencast', session: 's' }, 4321);
     controller.attachView(makeSink());
     await flushMicrotasks();
@@ -1475,11 +1441,7 @@ describe('Playwright provider', () => {
   });
 
   it('names Playwright in a failed host command warning', async () => {
-    const platform: PlatformAdapter = new FakePtyAdapter();
-    platform.playwright = vi.fn(async request => request.op === 'command'
-      ? { ok: false, error: 'boom', exitCode: 1, stdout: '', stderr: 'boom' }
-      : { ok: true });
-    setPlatform(platform);
+    installBrowserHost({ history: async () => ({ ok: false, error: 'boom' }) });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const controller = withPort('pw', { renderMode: 'pw-screencast', session: 's' }, 4321);
     controller.attachView(makeSink());
@@ -1489,22 +1451,18 @@ describe('Playwright provider', () => {
   });
 
   it('uses the shared controller with provider-scoped host calls and cwd', async () => {
-    const platform: PlatformAdapter = new FakePtyAdapter();
-    platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
     // The swap back to agent-browser is offered only where the host can launch one.
-    platform.agentBrowserOpen = vi.fn(async () => ({ ok: true }));
-    platform.playwright = vi.fn(async request => request.op === 'streamUrl'
-      ? { ok: true, url: `ws://127.0.0.1:${request.port}` }
-      : { ok: true, exitCode: 0, stdout: '', stderr: '', wsPort: 4321 });
-    setPlatform(platform);
+    const host = installBrowserHost({ streamUrl: async (request) => ({ ok: true, url: `ws://127.0.0.1:${request.port}` }) });
     const controller = withPort('pw', { renderMode: 'pw-screencast', session: 'shared-name', cwd: '/first-project' }, 4321);
     const sink = makeSink();
     controller.attachView(sink);
     await flushMicrotasks();
     getAgentBrowserScreenController('pw')!.chromeActions.navigate('https://example.com/next');
     await flushMicrotasks();
-    expect(platform.playwright).toHaveBeenCalledWith(expect.objectContaining({ op: 'command', session: 'shared-name', cwd: '/first-project', args: ['open', 'https://example.com/next'] }));
-    expect(platform.agentBrowserCommand).not.toHaveBeenCalled();
+    expect(host.requests('navigate')).toEqual([{
+      provider: 'playwright', binding: { session: 'shared-name', cwd: '/first-project' }, op: 'navigate', url: 'https://example.com/next',
+    }]);
+    expect(host.browser.mock.calls.filter(([request]) => request.provider !== 'playwright')).toEqual([]);
     expect(getAgentBrowserScreenController('pw')!.snapshot().renderMode).toBe('pw-screencast');
     getAgentBrowserScreenController('pw')!.actions.setRenderMode?.('ab-screencast');
     expect(sink.requestRenderSwap).toHaveBeenCalledWith('ab-screencast');

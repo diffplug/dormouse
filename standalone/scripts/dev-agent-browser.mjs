@@ -2,7 +2,7 @@
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { readFile, unlink } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { sessionForKey } from 'dor-lib-common/browser-providers';
 // cross-spawn, not node:child_process: this script spawns `dor` and
@@ -128,22 +128,16 @@ const fireAndForget = {
 // stdio pipe). Production reads that file in Rust; this dev bridge has no Rust,
 // so read it in Node and re-encode to the base64 the browser-sidecar adapter
 // expects — the base64 travels in the HTTP invoke response, outside the event
-// stream. `remove` mirrors Rust deleting Playwright's one-shot frame files;
-// agent-browser reuses one file per session.
-async function readCapture(result, { remove = false } = {}) {
+// stream. Like Rust, it leaves the file: the host reuses one per session.
+async function readCapture(result) {
   if (!result?.ok || typeof result.path !== 'string') return result;
-  try {
-    return { ok: true, mime: result.mime, bytesBase64: (await readFile(result.path)).toString('base64') };
-  } finally {
-    if (remove) await unlink(result.path).catch(() => {});
-  }
+  return { ok: true, mime: result.mime, bytesBase64: (await readFile(result.path)).toString('base64') };
 }
 
 const invokeMap = {
-  // PLAYWRIGHT_REQUEST_TIMEOUT_MS in lib/src/lib/platform/browser-automation.ts.
-  playwright_request: async ({ request }) => readCapture(
-    await requestSidecar('playwright:request', { request }, 'agentBrowser:result', (data) => data.result, 40000),
-    { remove: true },
+  // BROWSER_REQUEST_TIMEOUT_MS in lib/src/lib/platform/browser-automation.ts.
+  browser_request: async ({ request }) => readCapture(
+    await requestSidecar('browser:request', { request }, 'browser:result', (data) => data.result, 40000),
   ),
   get_available_shells: (_args) => requestSidecar('pty:getShells', {}, 'pty:shells', (data) => data.shells ?? []),
   pty_get_cwd: ({ id }) => requestSidecar('pty:getCwd', { id }, 'pty:cwd', (data) => data.cwd ?? null),
@@ -155,19 +149,10 @@ const invokeMap = {
   read_clipboard_image_as_file_path: () => requestSidecar('clipboard:readImage', {}, 'clipboard:image', (data) => data.path ?? null),
   read_clipboard_text: () => requestSidecar('clipboard:readText', {}, 'clipboard:text', (data) => data.text ?? null),
   iframe_create_proxy_url: ({ target, embedderOrigins }) => requestSidecar('iframe:createProxyUrl', { target, embedderOrigins }, 'iframe:proxyUrl', (data) => data.result),
-  agent_browser_command: ({ session, args, binaryPath }) => requestSidecar('agentBrowser:command', { session, args, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
-  agent_browser_edit: ({ session, op, binaryPath }) => requestSidecar('agentBrowser:edit', { session, op, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
-  agent_browser_screenshot: async ({ session, format, quality, binaryPath }) => readCapture(
-    await requestSidecar('agentBrowser:screenshot', { session, format, quality, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
-  ),
-  agent_browser_attach: ({ session, url, headed, binaryPath }) => requestSidecar('agentBrowser:attach', { session, url, headed, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
   tool_control: ({ request }) =>
     requestSidecar('tool:control', { request }, 'tool:result', (data) => data.result),
   git_info: ({ paths }) =>
     requestSidecar('git:info', { paths }, 'git:infoResult', (data) => data.result),
-  agent_browser_open: ({ url, headed, session, binaryPath }) => requestSidecar('agentBrowser:open', { url, headed, session, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
-  agent_browser_pop_out: ({ session, url, rect, binaryPath }) => requestSidecar('agentBrowser:popOut', { session, url, rect, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
-  agent_browser_pop_in: ({ session, url, binaryPath }) => requestSidecar('agentBrowser:popIn', { session, url, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
   // Agent recovery (docs/specs/standalone.md -> "Agent recovery"). The harness
   // mirrors the persistence answer, so it claims exactly as Rust does, over the
   // identical sidecar half. There is no `capture_agent_recovery` here: capture

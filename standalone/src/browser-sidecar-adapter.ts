@@ -1,15 +1,9 @@
-import type { PlaywrightRequest, PlaywrightResult } from '../../lib/src/lib/platform/browser-automation';
+import { BROWSER_PROVIDER_IDS } from 'dor-lib-common/browser-providers';
+import type { BrowserRequest, BrowserResult } from '../../lib/src/lib/platform/browser-automation';
 import { recordToolEvents } from '../../lib/src/lib/tool-events';
 import type { TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
 import { installWorkspaceRegistry, type WorkspaceRegistrySnapshot } from "./workspace-registry";
 import type {
-  AgentBrowserAttachResult,
-  AgentBrowserCommandResult,
-  AgentBrowserEditOp,
-  AgentBrowserEditResult,
-  AgentBrowserOpenResult,
-  AgentBrowserPopResult,
-  AgentBrowserScreenshotResult,
   IframeProxyResult,
   OpenPort,
   PlatformAdapter,
@@ -109,13 +103,6 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     // adapter binds for the same reason; mirror it so any call style is safe.
     this.createIframeProxyUrl = this.createIframeProxyUrl.bind(this);
     this.toolControl = this.toolControl.bind(this);
-    this.agentBrowserCommand = this.agentBrowserCommand.bind(this);
-    this.agentBrowserEdit = this.agentBrowserEdit.bind(this);
-    this.agentBrowserScreenshot = this.agentBrowserScreenshot.bind(this);
-    this.agentBrowserAttach = this.agentBrowserAttach.bind(this);
-    this.agentBrowserOpen = this.agentBrowserOpen.bind(this);
-    this.agentBrowserPopOut = this.agentBrowserPopOut.bind(this);
-    this.agentBrowserPopIn = this.agentBrowserPopIn.bind(this);
   }
 
   async init(): Promise<void> {
@@ -270,57 +257,17 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     }
   }
 
-  async playwright(request: PlaywrightRequest): Promise<PlaywrightResult> {
+  readonly browserProviders = BROWSER_PROVIDER_IDS;
+
+  async browser(request: BrowserRequest): Promise<BrowserResult> {
     try {
-      // A screenshot's bytes arrive as base64, like agent_browser_screenshot's.
-      const { bytesBase64, ...result } = await this.host.invoke<PlaywrightResult & { bytesBase64?: string }>("playwright_request", { request });
+      // A screenshot's bytes arrive as base64: this bridge has no Rust to read
+      // the capture file (`readCapture` in standalone/scripts/dev-agent-browser.mjs).
+      const { bytesBase64, ...result } = await this.host.invoke<BrowserResult & { bytesBase64?: string }>("browser_request", { request });
       return bytesBase64 ? { ...result, bytes: decodeBase64Bytes(bytesBase64) } : result;
     } catch (err) {
       return { ok: false, error: errMessage(err) };
     }
-  }
-
-  async agentBrowserCommand(session: string, args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult> {
-    try { return await this.host.invoke("agent_browser_command", { session, args, binaryPath }); }
-    catch (err) { return { exitCode: 1, stdout: "", stderr: errMessage(err) }; }
-  }
-
-  async agentBrowserEdit(session: string, op: AgentBrowserEditOp, binaryPath?: string): Promise<AgentBrowserEditResult> {
-    try { return await this.host.invoke("agent_browser_edit", { session, op, binaryPath }); }
-    catch (err) { return { ok: false, error: errMessage(err) }; }
-  }
-
-  async agentBrowserScreenshot(session: string, opts: { format?: "jpeg" | "png"; quality?: number }, binaryPath?: string): Promise<AgentBrowserScreenshotResult> {
-    try {
-      const result = await this.host.invoke<{ ok: true; mime?: string; bytesBase64: string } | { ok: false; error?: string }>(
-        "agent_browser_screenshot",
-        { session, format: opts.format, quality: opts.quality, binaryPath },
-      );
-      if (!result.ok) return { ok: false, error: result.error };
-      return { ok: true, bytes: decodeBase64Bytes(result.bytesBase64), mime: result.mime ?? (opts.format === "png" ? "image/png" : "image/jpeg") };
-    } catch (err) {
-      return { ok: false, error: errMessage(err) };
-    }
-  }
-
-  async agentBrowserAttach(session: string, opts: { url?: string; headed?: boolean }, binaryPath?: string): Promise<AgentBrowserAttachResult> {
-    try { return await this.host.invoke("agent_browser_attach", { session, url: opts.url, headed: opts.headed, binaryPath }); }
-    catch (err) { return { ok: false, error: errMessage(err) }; }
-  }
-
-  async agentBrowserOpen(url: string, opts: { headed?: boolean; session?: string }, binaryPath?: string): Promise<AgentBrowserOpenResult> {
-    try { return await this.host.invoke("agent_browser_open", { url, headed: opts.headed, session: opts.session, binaryPath }); }
-    catch (err) { return { ok: false, error: errMessage(err) }; }
-  }
-
-  async agentBrowserPopOut(session: string, opts: { rect?: { x: number; y: number; width: number; height: number }; url?: string }, binaryPath?: string): Promise<AgentBrowserPopResult> {
-    try { return await this.host.invoke("agent_browser_pop_out", { session, url: opts.url, rect: opts.rect, binaryPath }); }
-    catch (err) { return { ok: false, error: errMessage(err) }; }
-  }
-
-  async agentBrowserPopIn(session: string, opts: { url?: string }, binaryPath?: string): Promise<AgentBrowserPopResult> {
-    try { return await this.host.invoke("agent_browser_pop_in", { session, url: opts.url, binaryPath }); }
-    catch (err) { return { ok: false, error: errMessage(err) }; }
   }
 
   openExternal(uri: string): void {

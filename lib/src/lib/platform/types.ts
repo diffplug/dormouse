@@ -1,4 +1,4 @@
-import type { PlaywrightRequest, PlaywrightResult } from './browser-automation';
+import type { BrowserAutomationProvider, BrowserRequest, BrowserResult } from './browser-automation';
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
 import type { AlertState, AwaitHandle, AwaitOptions, Engagement, EngagementLapse } from '../alert-manager';
 import type { AlertSettings } from '../alert-settings';
@@ -89,78 +89,7 @@ export function openPortRequestTimeoutMs(count: number, hops = 1): number {
 
 export type AlertStateDetail = { id: string } & AlertState;
 
-export interface AgentBrowserCommandResult {
-  exitCode: number;
-  stdout: string;
-  stderr: string;
-}
-
-export interface AgentBrowserScreenshotResult {
-  ok: boolean;
-  /** Raw image bytes (transferred over the host↔webview channel via structured
-   *  clone, so no base64 round-trip); present iff ok. */
-  bytes?: Uint8Array;
-  /** e.g. 'image/jpeg' | 'image/png'. */
-  mime?: string;
-  error?: string;
-}
-
-/** Native editing operations that the stream's input_keyboard path cannot
- * trigger on macOS (CDP drops the `commands` field — see
- * docs/specs/dor-browser.md and the upstream issue). The host owns the
- * exact JS for each; the webview only picks one of these names, so this stays
- * a purpose-built channel rather than an arbitrary-eval one. */
-export type AgentBrowserEditOp = 'selectAll' | 'copy' | 'cut';
-
-export interface AgentBrowserEditResult {
-  ok: boolean;
-  /** Text the host placed on the OS clipboard (copy/cut); omitted for selectAll. */
-  text?: string;
-  error?: string;
-}
-
 export type { IframeProxyResult };
-
-/** Result of attaching to a session's live stream (docs/specs/dor-browser.md →
- *  "Agent-Browser Connection"): the port its stream serves now, found without
- *  starting a daemon — or, when the caller named a page and the session is gone,
- *  the port of the browser relaunched there. */
-export interface AgentBrowserAttachResult {
-  headed?: boolean;
-  nativeIdentity?: string;
-  ok: boolean;
-  wsPort?: number;
-  /** The session was gone, and the host started a browser at the caller's
-   *  `url`: that page is already open. */
-  relaunched?: boolean;
-  error?: string;
-}
-
-/** Result of spawning a managed agent-browser session for a render swap
- *  (docs/specs/dor-browser.md → "Display Modal And Render Swaps"). */
-export interface AgentBrowserOpenResult {
-  nativeIdentity?: string;
-  cwd?: string;
-  ok: boolean;
-  /** The resolved/namespaced session name the new surface should bind to. */
-  session?: string;
-  /** The session's stream WebSocket port. */
-  wsPort?: number;
-  /** The binary path the host resolved, threaded back so later host commands
-   *  (close, screenshot…) reuse it. */
-  binaryPath?: string;
-  error?: string;
-}
-
-/** Result of a headed/headless relaunch (docs/specs/dor-browser.md →
- *  "Pop-Out"). The Chrome process is replaced, so the stream port
- *  changes; the session name is preserved. */
-export interface AgentBrowserPopResult {
-  ok: boolean;
-  /** The new stream WebSocket port after the relaunch. */
-  wsPort?: number;
-  error?: string;
-}
 
 /**
  * The webview end of a Node-resident Burrow
@@ -245,7 +174,6 @@ export interface WritePtyOptions {
 }
 
 export interface PlatformAdapter {
-  playwright?(request: PlaywrightRequest): Promise<PlaywrightResult>;
   // Lifecycle
   init(): Promise<void>;
   shutdown(): void;
@@ -360,34 +288,12 @@ export interface PlatformAdapter {
   // VS Code-only escape hatch for mirrored workbench shortcuts from webviews.
   runWorkbenchCommand?(command: VSCodeWorkbenchCommand): void;
 
-  // agent-browser surface support (see docs/specs/dor-browser.md).
-  // Runs the user's agent-browser binary against a session — only commands
-  // `parseWebviewCommand` (lib/src/host/browser-host-shared.ts) accepts, never a
-  // general exec path. `binaryPath` is the
-  // absolute path resolved by `dor ab` in the invoking terminal — the host's
-  // own PATH (e.g. a GUI-launched extension host) may not find the binary.
-  agentBrowserCommand?(session: string, args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult>;
-  // Performs a native editing operation (select-all/copy/cut) the stream input
-  // path can't, via the daemon's CDP-backed eval. The host owns the JS and,
-  // for copy/cut, writes the result to the OS clipboard. Absent on hosts that
-  // can't run the binary (degrades to plain key forwarding).
-  agentBrowserEdit?(session: string, op: AgentBrowserEditOp, binaryPath?: string): Promise<AgentBrowserEditResult>;
-  // Captures a single device-resolution (HiDPI) frame via the user's
-  // agent-browser `screenshot` command and returns the raw image bytes. The
-  // stream's screencast is CSS-resolution only (a Chromium limitation —
-  // Page.startScreencast ignores deviceScaleFactor), so the panel settles on
-  // these crisp screenshots, painting stream frames provisionally for latency.
-  // Absent on hosts that can't run the binary — the panel then keeps every
-  // changed stream frame as its final, lower-resolution image.
-  agentBrowserScreenshot?(session: string, opts: { format?: 'jpeg' | 'png'; quality?: number }, binaryPath?: string): Promise<AgentBrowserScreenshotResult>;
-  // The session's live stream port, read without spawning anything — a CLI
-  // verb would start a daemon to answer. With `url`, a session whose daemon is
-  // gone is relaunched there (headed with `headed`); without, it fails.
-  agentBrowserAttach?(session: string, opts: { url?: string; headed?: boolean }, binaryPath?: string): Promise<AgentBrowserAttachResult>;
-  // The WebSocket URL for a session's stream port. Hosts whose webview origin
-  // the agent-browser stream server rejects (VS Code) return a tokenized relay
-  // URL; absent or null falls back to ws://127.0.0.1:<port>.
-  getAgentBrowserStreamUrl?(port: number): Promise<string | null>;
+  // Browser automation (docs/specs/dor-browser.md → "Agent-Browser Host
+  // Capabilities"): the providers this host can drive, and the one typed
+  // request every browser operation of theirs rides. Both present or both
+  // absent; a host without them (the web demo) offers no automated renderer.
+  browserProviders?: readonly BrowserAutomationProvider[];
+  browser?(request: BrowserRequest): Promise<BrowserResult>;
 
   // iframe surface support (see docs/specs/dor-browser.md → "Iframe
   // Renderer"). Stands up a loopback proxy in front of a `dor iframe` target and
@@ -408,27 +314,6 @@ export interface PlatformAdapter {
   // (docs/specs/layout.md → "Workspace names"). Absent on a host with no local
   // filesystem, which names every Workspace by directory.
   gitInfo?(paths: string[]): Promise<GitInfoResult>;
-
-  // Render-swap support (docs/specs/dor-browser.md → "Display Modal And Render Swaps";
-  // docs/specs/dor-browser.md → "Pop-Out"). All optional
-  // so hosts degrade: the modal hides whatever isn't backed by a capability.
-  //
-  // Open <url> in a new managed session, or in `session` when the caller names
-  // one — the launch behind every GUI-created browser Surface, headless or
-  // straight into a popped-out window (`headed: true`, so embed→popout is one
-  // spawn, not a headless launch immediately torn down). Resolves once the
-  // browser is up, never waiting for the page. `binaryPath` is the last one a
-  // `dor ab` surface resolved (a GUI-launched host's own PATH may miss the
-  // binary); the host falls back to PATH / DORMOUSE_AGENT_BROWSER_BIN.
-  agentBrowserOpen?(url: string, opts: { headed?: boolean; session?: string }, binaryPath?: string): Promise<AgentBrowserOpenResult>;
-  // Relaunch a session's browser headed as a native OS window, reopening `url`
-  // (headed/headless is fixed at launch, so this is a close+relaunch — v1
-  // preserves the active tab URL). Best-effort positioned over `rect` (CSS px
-  // in screen space). Returns the new stream port. Absent ⇒ pop-out hidden.
-  agentBrowserPopOut?(session: string, opts: { rect?: { x: number; y: number; width: number; height: number }; url?: string }, binaryPath?: string): Promise<AgentBrowserPopResult>;
-  // Relaunch headless (pop back in) reopening `url`, resuming the screencast;
-  // returns the new stream port. Pairs with agentBrowserPopOut.
-  agentBrowserPopIn?(session: string, opts: { url?: string }, binaryPath?: string): Promise<AgentBrowserPopResult>;
 
   // PTY event listeners
   onPtyData(handler: (detail: PtyDataDetail) => void): void;

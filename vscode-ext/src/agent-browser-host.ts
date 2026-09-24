@@ -1,59 +1,50 @@
 /**
- * Extension-host wiring for the agent-browser surface
+ * Extension-host wiring for browser automation
  * (docs/specs/dor-browser.md → "Agent-Browser Host Capabilities").
  *
- * The capability logic itself is host-agnostic and lives in
- * `lib/src/host/agent-browser-host.ts` and `lib/src/host/playwright-host.ts`
+ * The host itself is host-agnostic and lives in `lib/src/host/browser-host.ts`
  * (shared verbatim with the standalone Node sidecar). This file only:
- *   1. instantiates those shared hosts with the two VS-Code-specific bits —
- *      writing the OS clipboard and logging — and re-exports their methods; and
- *   2. owns the **stream relay**, which is genuinely VS-Code-only: the
- *      agent-browser stream server returns 403 for `vscode-webview://` origins
- *      (only localhost or absent origins are accepted), so the webview cannot
- *      connect directly. It connects to a short-lived tokenized relay URL and
- *      the relay pipes bytes only to the authorized 127.0.0.1:<streamPort>.
+ *   1. instantiates it with the VS-Code-specific bits — writing the OS
+ *      clipboard, logging, and the relay below; and
+ *   2. owns the agent-browser **stream relay**, which is genuinely VS-Code-only:
+ *      the agent-browser stream server returns 403 for `vscode-webview://`
+ *      origins (only localhost or absent origins are accepted), so the webview
+ *      cannot connect directly. It connects to a short-lived tokenized relay URL
+ *      and the relay pipes bytes only to the authorized 127.0.0.1:<streamPort>.
  *      (The standalone webview's `tauri://localhost` origin is accepted, so it
  *      connects directly and needs no relay.)
  */
 import * as vscode from 'vscode';
 import * as net from 'net';
 import { log } from './log';
-import { createAgentBrowserHost } from '../../lib/src/host/agent-browser-host';
+import { createBrowserHost } from '../../lib/src/host/browser-host';
 import { BrowserStreamGrants } from '../../lib/src/host/browser-stream-guard';
 import { createPlaywrightHost } from '../../lib/src/host/playwright-host';
 
-const host = createAgentBrowserHost({
+const hostDeps = {
   // Awaited rather than returned: `vscode.env.clipboard.writeText` yields a
   // `Thenable`, VS Code's minimal promise interface, which is not a `Promise`.
-  writeClipboardText: async (text) => { await vscode.env.clipboard.writeText(text); },
-  log: (message) => log.info(message),
+  writeClipboardText: async (text: string) => { await vscode.env.clipboard.writeText(text); },
+  log: (message: string) => log.info(message),
+};
+const host = createBrowserHost({
+  ...hostDeps,
+  agentBrowserStreamUrl: createStreamRelayUrl,
+  playwright: () => createPlaywrightHost(hostDeps),
 });
 
-export const runAgentBrowserCommand = host.command;
-export const runAgentBrowserEdit = host.edit;
-export const runAgentBrowserScreenshot = host.screenshot;
-export const runAgentBrowserAttach = host.attach;
-export const runAgentBrowserOpen = host.open;
-export const runAgentBrowserPopOut = host.popOut;
-export const runAgentBrowserPopIn = host.popIn;
+export const runBrowserRequest = host.request;
 
-const playwright = createPlaywrightHost({
-  writeClipboardText: async (text) => { await vscode.env.clipboard.writeText(text); },
-  log: (message) => log.info(message),
-});
-
-export const runPlaywrightRequest = playwright.request;
-
-// Both providers' cleanup shares one deadline, as in the standalone sidecar's
+// Every provider's cleanup shares one deadline, as in the standalone sidecar's
 // shutdown: the Playwright host first waits out in-flight launches and connects,
 // and `deactivate` joins this ahead of the notepad archive and session flush,
 // which VS Code's unknown kill budget must still reach.
 const CLOSE_DEADLINE_MS = 1500;
 
-export async function closePoppedOutSessions(): Promise<void> {
+export async function closeBrowserSessions(): Promise<void> {
   let deadline: ReturnType<typeof setTimeout> | undefined;
   await Promise.race([
-    Promise.all([host.closePoppedOut(), playwright.close()]),
+    host.close(),
     new Promise<void>((resolve) => { deadline = setTimeout(resolve, CLOSE_DEADLINE_MS); }),
   ]).finally(() => clearTimeout(deadline));
 }
@@ -62,7 +53,7 @@ let relayPortPromise: Promise<number> | null = null;
 // The same single-use, 60s, port-bound grants that guard the Playwright viewer.
 const streamRelayGrants = new BrowserStreamGrants();
 
-export async function createStreamRelayUrl(streamPort: number): Promise<string> {
+async function createStreamRelayUrl(streamPort: number): Promise<string> {
   const relayPort = await ensureStreamRelayPort();
   return `ws://127.0.0.1:${relayPort}/stream/${streamPort}/${streamRelayGrants.issue(streamPort)}`;
 }

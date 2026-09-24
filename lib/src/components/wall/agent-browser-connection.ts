@@ -1,4 +1,4 @@
-import type { AgentBrowserCommandResult } from '../../lib/platform/types';
+import type { BrowserResult } from '../../lib/platform/browser-automation';
 import { type AgentBrowserTab, parseAgentBrowserTabs } from '../../lib/agent-browser-tab';
 
 // Re-exported so existing importers keep resolving the tab type/parser from here.
@@ -86,9 +86,9 @@ export interface AgentBrowserDebugEvent {
 export interface AgentBrowserConnectionDeps {
   session: string;
   streamPort: number;
-  binaryPath?: string;
   getStreamUrl?: (port: number) => Promise<string | undefined>;
-  runCommand?: (session: string, args: string[], binaryPath?: string) => Promise<AgentBrowserCommandResult>;
+  /** Make `tabId` the active tab. */
+  selectTab?: (tabId: string) => Promise<BrowserResult>;
   canSelectTabs?: () => boolean;
   /** Whether the current stream frame's JPEG bytes are useful to the consumer.
    *  False keeps the idle hot path at hash+pulse without parsing the large JSON. */
@@ -352,10 +352,8 @@ export class AgentBrowserConnection {
       if (!canSelect) return;
       this.log(`[ab-panel] selecting tab ${JSON.stringify({ tabId: tab.tabId, url: tab.url, reason })}`);
       this.debug('select-tab', { tabId: tab.tabId, url: tab.url, reason });
-      this.deps.runCommand?.(this.deps.session, ['tab', tab.tabId], this.deps.binaryPath).then((result) => {
-        if (result.exitCode !== 0) {
-          this.log(`[agent-browser] tab ${tab.tabId} failed: ${result.stderr || result.stdout || `exit ${result.exitCode}`}`);
-        }
+      this.deps.selectTab?.(tab.tabId).then((result) => {
+        if (!result.ok) this.log(`[agent-browser] tab ${tab.tabId} failed: ${result.error ?? 'no reason given'}`);
       }).catch((err) => this.log(`[agent-browser] tab ${tab.tabId} failed: ${err instanceof Error ? err.message : String(err)}`));
     };
 

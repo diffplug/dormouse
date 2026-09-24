@@ -46,7 +46,7 @@ import {
 import { attachSurfacePorts } from './surface-ports';
 import { browserSurfaceUrl, hostPathDisplay, iframeRefusal } from './browser-url';
 import { parseRenderMode, renderModeFor } from 'dor-lib-common/browser-providers';
-import { BROWSER_PROVIDER_GUI, browserPlatform, rememberLaunchBinaryPath } from './browser-automation';
+import { BROWSER_PROVIDER_GUI, browserHandle, rememberLaunchBinaryPath } from './browser-automation';
 import { BrowserBindingReservations } from './browser-binding-reservations';
 import {
   agentBrowserSessionFromParams,
@@ -1667,13 +1667,13 @@ export function useDorControl({
         // session exists even when no viewer can attach below (non-Chromium).
         if (key) browserReservations.current.confirm(key);
         const cwd = stringParam(params.cwd);
-        const platform = browserPlatform(provider, cwd);
-        if (!platform.agentBrowserAttach) {
+        const browser = browserHandle(provider, { session, cwd, binaryPath });
+        if (!browser) {
           detail.respond({ ok: false, error: 'Playwright is unavailable on this host' });
           return;
         }
         // No page named: a session the command left closed is not relaunched.
-        const status = await platform.agentBrowserAttach(session, {}, binaryPath);
+        const status = await browser.attach();
         if (!status.ok) {
           detail.respond({ ok: false, error: status.error ?? 'Playwright connection failed' });
           return;

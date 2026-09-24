@@ -1,40 +1,86 @@
-/** Host-owned operations for the Playwright provider. No arbitrary code or CDP crosses this boundary. */
-export type { BrowserAutomationProvider } from 'dor/commands/types';
-export type PlaywrightRequest = { binaryPath?: string; cwd?: string } & (
-  | { op: 'open'; url: string; headed?: boolean; session?: string }
-  | { op: 'streamUrl'; port: number }
-  | { op: 'command'; session: string; args: string[] }
-  | { op: 'edit'; session: string; edit: 'selectAll' | 'copy' | 'cut' }
-  | { op: 'screenshot'; session: string; format?: 'jpeg' | 'png'; quality?: number }
-  | { op: 'attach'; session: string; url?: string; headed?: boolean }
-  | { op: 'popOut' | 'popIn'; session: string; url?: string }
-);
-export interface PlaywrightResult {
-  headed?: boolean;
-  nativeIdentity?: string;
-  ok: boolean;
-  error?: string;
-  exitCode?: number;
-  stdout?: string;
-  stderr?: string;
-  text?: string;
+/**
+ * The one webview → host channel for browser automation
+ * (docs/specs/dor-browser.md → "Agent-Browser Host Capabilities"): a typed,
+ * provider-tagged request the host validates once and turns into fixed
+ * operations — no CLI argv, script or CDP method crosses it.
+ */
+import type { BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
+
+export type { BrowserAutomationProvider };
+
+/** What a request names its browser by: the provider's native session, the
+ *  directory its CLI runs in, and the executable. Only a `launch` may omit the
+ *  session, and the host then mints one. */
+export interface BrowserRequestBinding {
   session?: string;
   cwd?: string;
   binaryPath?: string;
+}
+
+/** A native editing operation the stream's input path cannot dispatch
+ *  (CDP drops the `commands` field on macOS). The host owns the script for
+ *  each; the webview only names one. */
+export type BrowserEditOp = 'selectAll' | 'copy' | 'cut';
+
+/** One operation on a provider's browser. */
+export type BrowserOp =
+  /** Open `url` — blank when it is not http(s) — in a new session, or
+   *  relaunch the named one there, headed or headless. Answers once the
+   *  browser is up, never waiting for the page. */
+  | { op: 'launch'; url?: string; headed: boolean }
+  /** Where the session streams now, found without starting a browser; one
+   *  that is gone relaunches at `url` when the caller names one. */
+  | { op: 'attach'; url?: string; headed?: boolean }
+  /** The URL the webview connects to for a stream port. */
+  | { op: 'streamUrl'; port: number }
+  /** One device-resolution frame. */
+  | { op: 'screenshot'; format?: 'jpeg' | 'png'; quality?: number }
+  | { op: 'edit'; edit: BrowserEditOp }
+  | { op: 'navigate'; url: string }
+  | { op: 'history'; dir: 'back' | 'forward' | 'reload' }
+  | { op: 'tab'; action: 'select' | 'close'; tabId: string }
+  | { op: 'viewport'; width: number; height: number; dpr: number }
+  | { op: 'device'; name: string }
+  /** agent-browser only: the browser's CDP endpoint, for the popped-out URL
+   *  observer. */
+  | { op: 'cdpUrl' }
+  | { op: 'close' };
+
+export type BrowserRequest = { provider: BrowserAutomationProvider; binding: BrowserRequestBinding } & BrowserOp;
+
+export interface BrowserResult {
+  ok: boolean;
+  error?: string;
+  /** `launch` / `attach`: what the browser is bound to — the session (minted
+   *  or named), the directory and executable the host ran it with, and the
+   *  provider's native identity for it. */
+  session?: string;
+  cwd?: string;
+  binaryPath?: string;
+  nativeIdentity?: string;
+  /** `launch` / `attach`: the stream port, and whether the browser runs
+   *  headed, when the host knows. */
   wsPort?: number;
-  /** `attach` only: see `AgentBrowserAttachResult`. */
+  headed?: boolean;
+  /** `attach`: the session was gone, and the host started a browser at the
+   *  caller's `url`, so that page is already open. */
   relaunched?: boolean;
+  /** `streamUrl` / `cdpUrl`. */
   url?: string;
+  /** `edit`: the text copy/cut placed on the OS clipboard. */
+  text?: string;
+  /** `screenshot`: the image bytes, or — to the standalone sidecar's caller —
+   *  the private file holding them. */
   bytes?: Uint8Array;
   path?: string;
   mime?: string;
 }
 
-/** How long the webview waits for any Playwright host request before its
- *  transport gives up. The host bounds a GUI launch to answer inside it, and
- *  every transport waits exactly this long (VS Code's `requestResponse`, the
- *  Tauri `playwright_request` command, the browser-dev harness). */
-export const PLAYWRIGHT_REQUEST_TIMEOUT_MS = 40_000;
+/** How long the webview waits for any browser request before its transport
+ *  gives up. The host bounds a launch to answer inside it, and every transport
+ *  waits exactly this long (VS Code's `requestResponse`, the Tauri
+ *  `browser_request` command, the browser-dev harness). */
+export const BROWSER_REQUEST_TIMEOUT_MS = 40_000;
 
 /** The most characters one Playwright viewer `input_text` message carries. A
  *  paste takes as many messages as it needs, each under the viewer socket's
@@ -62,7 +108,7 @@ export function playwrightTextInputs(text: string): { type: 'input_text'; text: 
 }
 
 /** A URL a browser provider may launch, relaunch or navigate to: http(s) only,
- *  untrimmed. The hosts refuse anything else (`parseWebviewCommand`), so the
+ *  untrimmed. The hosts refuse anything else (`parseBrowserRequest`), so the
  *  webview must never offer one — a relaunch would land on about:blank. */
 export function isBrowsableUrl(value: unknown): value is string {
   if (typeof value !== 'string' || value !== value.trim()) return false;

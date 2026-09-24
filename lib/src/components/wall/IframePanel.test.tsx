@@ -10,7 +10,7 @@ import type { PaneProps } from './pane-props';
 import { IframePanel } from './IframePanel';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
 import { PaneWriteContext, WallActionsContext, type PaneWriteActions, type WallActions } from './wall-context';
-import { stubWallActions as stubActions } from './wall-test-utils';
+import { installBrowserHost, stubWallActions as stubActions } from './wall-test-utils';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -204,9 +204,7 @@ describe('IframePanel', () => {
 
   it('drives iframe back and forward from the registered chrome actions', async () => {
     const updateParameters = vi.fn();
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserOpen'>;
-    platform.agentBrowserOpen = vi.fn();
-    setPlatform(platform);
+    installBrowserHost();
     await renderPanel(stubActions(), paneProps('iframe-history'), updateParameters);
 
     await act(async () => {
@@ -228,14 +226,12 @@ describe('IframePanel', () => {
 
   it('maps proxied frame location messages into chrome without updating params', async () => {
     const updateParameters = vi.fn();
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserOpen' | 'createIframeProxyUrl'>;
-    platform.agentBrowserOpen = vi.fn();
+    const { platform } = installBrowserHost();
     platform.createIframeProxyUrl = vi.fn(async () => ({
-      ok: true,
+      ok: true as const,
       url: 'http://127.0.0.1:61234/app',
       upstream: 'http://example.test/app',
     }));
-    setPlatform(platform);
     await renderPanel(stubActions(), paneProps('iframe-proxied'), updateParameters);
 
     await act(async () => {
@@ -251,13 +247,11 @@ describe('IframePanel', () => {
 
   it('re-resolves the proxy on Back after an observed in-frame navigation', async () => {
     const updateParameters = vi.fn();
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserOpen' | 'createIframeProxyUrl'>;
-    platform.agentBrowserOpen = vi.fn();
+    const { platform } = installBrowserHost();
     // Fixed URL so the proxy origin stays stable (the message handler gates on
     // it); re-resolution is observed via the call count, not a changed src.
-    const createProxy = vi.fn(async () => ({ ok: true, url: 'http://127.0.0.1:61234/app' }));
+    const createProxy = vi.fn(async () => ({ ok: true as const, url: 'http://127.0.0.1:61234/app' }));
     platform.createIframeProxyUrl = createProxy;
-    setPlatform(platform);
     await renderPanel(stubActions(), paneProps('iframe-back'), updateParameters);
 
     // Observe an in-frame navigation: it adds a history entry but, by design,
@@ -285,8 +279,8 @@ describe('IframePanel', () => {
 describe('iframe failures offer a way out', () => {
   const PROXY = 'http://127.0.0.1:61234';
   function proxyPlatform(result: Awaited<ReturnType<NonNullable<PlatformAdapter['createIframeProxyUrl']>>> = { ok: true, url: `${PROXY}/app` }, swapCapable = true) {
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserOpen' | 'createIframeProxyUrl'>;
-    if (swapCapable) platform.agentBrowserOpen = vi.fn();
+    // A host that drives agent-browser can swap the pane to it.
+    const platform: PlatformAdapter = swapCapable ? installBrowserHost().platform : new FakePtyAdapter();
     platform.createIframeProxyUrl = vi.fn(async () => result);
     setPlatform(platform);
     return platform;
@@ -460,11 +454,7 @@ describe('the render modes a tool is offered (regression: PR #493 review)', () =
   // `FakePtyAdapter` launches no browser, so every mode would be absent off the
   // stock fake — make the host capable first, or the assertion is vacuous.
   function withCapableHost() {
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserOpen' | 'agentBrowserPopOut' | 'playwright'>;
-    platform.agentBrowserOpen = async () => ({ ok: true });
-    platform.agentBrowserPopOut = async () => ({ ok: true });
-    platform.playwright = async () => ({ ok: true });
-    setPlatform(platform);
+    installBrowserHost();
   }
 
   it('offers every mode on a plain browser surface', async () => {

@@ -6,6 +6,7 @@ import { forgetLaunchBinaryPaths, launchBinaryPath, offeredRenderModes, remember
 import { browserDisplayMode } from './agent-browser-screen';
 import { BROWSER_DISPLAY_LABEL } from './BrowserDisplayIcon';
 import { resolveRenderMode } from './browser-surface';
+import { installBrowserHost } from './wall-test-utils';
 
 describe('automation render modes', () => {
   it('resolves every provider presentation, and anything else as the embed', () => {
@@ -35,39 +36,37 @@ describe('automation render modes', () => {
 describe('launchBinaryPath', () => {
   afterEach(forgetLaunchBinaryPaths);
 
-  it('hands GUI launches only the agent-browser binary path', () => {
+  it('hands each provider\'s GUI launches the binary path its own command resolved', () => {
     rememberLaunchBinaryPath('playwright', '/opt/bin/playwright-cli');
     expect(launchBinaryPath('agent-browser')).toBeUndefined();
+    expect(launchBinaryPath('playwright')).toBe('/opt/bin/playwright-cli');
     rememberLaunchBinaryPath('agent-browser', '/opt/bin/agent-browser');
     expect(launchBinaryPath('agent-browser')).toBe('/opt/bin/agent-browser');
-    expect(launchBinaryPath('playwright')).toBeUndefined();
+    expect(launchBinaryPath('playwright')).toBe('/opt/bin/playwright-cli');
   });
 });
 
 describe('offeredRenderModes', () => {
   afterEach(() => setPlatform(new FakePtyAdapter()));
 
-  function host(capabilities: Partial<PlatformAdapter>): void {
-    setPlatform(Object.assign(new FakePtyAdapter(), capabilities));
-  }
-  const ok = async () => ({ ok: true });
-
-  it('offers a provider only where the host can launch it, and its popout only where it can pop out', () => {
-    host({ agentBrowserOpen: ok, agentBrowserPopOut: ok });
+  it('offers a provider\'s screencast and popout only where the host drives it', () => {
+    installBrowserHost({}, ['agent-browser']);
     expect(offeredRenderModes(false, null)).toEqual(['ab-screencast', 'ab-popout', 'iframe']);
-    host({ agentBrowserOpen: ok, playwright: ok });
-    // Playwright's host wires every operation behind its one entry point.
-    expect(offeredRenderModes(false, null)).toEqual(['ab-screencast', 'pw-screencast', 'pw-popout', 'iframe']);
+    installBrowserHost({}, ['agent-browser', 'playwright']);
+    expect(offeredRenderModes(false, null)).toEqual(['ab-screencast', 'ab-popout', 'pw-screencast', 'pw-popout', 'iframe']);
   });
 
-  it('keeps the running provider, which relaunches in place rather than launching', () => {
-    host({ agentBrowserPopOut: ok });
-    expect(offeredRenderModes(false, 'agent-browser')).toEqual(['ab-screencast', 'ab-popout', 'iframe']);
+  it('keeps the running provider\'s screencast on a host that cannot drive it', () => {
+    installBrowserHost({}, ['playwright']);
+    expect(offeredRenderModes(false, 'agent-browser')).toEqual(['ab-screencast', 'pw-screencast', 'pw-popout', 'iframe']);
+    // A host with no browser request at all offers no automated renderer but that one.
+    setPlatform(Object.assign(new FakePtyAdapter(), { browserProviders: ['agent-browser'] } satisfies Partial<PlatformAdapter>));
+    expect(offeredRenderModes(false, 'agent-browser')).toEqual(['ab-screencast', 'iframe']);
     expect(offeredRenderModes(false, null)).toEqual(['iframe']);
   });
 
   it('offers a Tool only its declarable renders', () => {
-    host({ agentBrowserOpen: ok, agentBrowserPopOut: ok, playwright: ok });
+    installBrowserHost();
     expect(offeredRenderModes(true, null)).toEqual(['ab-screencast', 'iframe']);
     expect(offeredRenderModes(true, 'agent-browser')).toEqual(['ab-screencast', 'iframe']);
   });

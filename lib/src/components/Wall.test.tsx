@@ -22,6 +22,7 @@ import { setDevServerResolution } from './wall/agent-browser-ports';
 import { setPlatform } from '../lib/platform';
 import { FakePtyAdapter } from '../lib/platform/fake-adapter';
 import type { PlatformAdapter } from '../lib/platform/types';
+import type { BrowserRequest } from '../lib/platform/browser-automation';
 import type { PersistedSession } from '../lib/session-types';
 import * as terminalRegistry from '../lib/terminal-registry';
 import { UNNAMED_PANEL_TITLE } from '../lib/terminal-registry';
@@ -31,7 +32,7 @@ import { addPlainNote, beginClosing, clearAllNotepads, getNotes, setOpenNotepadI
 import type { NotepadArchiveV1 } from '../lib/notepad/types';
 import { createTerminalPaneState, type TerminalPaneState } from '../lib/terminal-state';
 import { getWallHandle, listWallHandles } from './wall/wall-handles';
-import { mountWallHarness, type WallHarness } from './wall/wall-test-utils';
+import { installBrowserHost, mountWallHarness, type WallHarness } from './wall/wall-test-utils';
 import { DEFAULT_WORKSPACE_ID } from '../lib/session-types';
 import { clearTerminalActivity, setTerminalActivity } from '../lib/session-activity-store';
 import { createAlertEpisode } from '../lib/alert-episode';
@@ -118,6 +119,13 @@ const promptBack = (id: string): void => terminalRegistry.applyTerminalSemanticE
 
 async function flushFrame(): Promise<void> {
   await act(async () => { await new Promise((r) => requestAnimationFrame(() => r(undefined))); });
+}
+
+/** `installBrowserHost`, on the adapter this file's tests read as `fake`. */
+function hostBrowsers(...args: Parameters<typeof installBrowserHost>): ReturnType<typeof installBrowserHost> {
+  const host = installBrowserHost(...args);
+  fake = host.platform;
+  return host;
 }
 
 describe('Wall on the Lath engine', () => {
@@ -719,8 +727,9 @@ describe('Wall on the Lath engine', () => {
   });
 
   it('keeps a Playwright key on its session when no viewer can attach to the browser it opened', async () => {
-    const playwright = vi.fn(async () => ({ ok: false, error: 'Dormouse currently views Chromium Playwright sessions only. The native CLI command still ran.' }));
-    Object.assign(fake, { playwright });
+    const { requests } = hostBrowsers({
+      attach: async () => ({ ok: false, error: 'Dormouse currently views Chromium Playwright sessions only. The native CLI command still ran.' }),
+    });
     await act(async () => { root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />); });
     await flush();
     const control = async (method: string, params: Record<string, unknown>) => {
@@ -737,6 +746,7 @@ describe('Wall on the Lath engine', () => {
     const first = (await control(SURFACE_CONTROL_METHODS.resolveBrowser, { provider: 'playwright', key: 'app', proposed: { cwd: '/project' } }))?.result?.binding;
     expect(first).toMatchObject({ cwd: '/project' });
     expect((await control(SURFACE_CONTROL_METHODS.browser, { provider: 'playwright', key: 'app', session: first!.session, cwd: '/project' }))?.ok).toBe(false);
+    expect(requests('attach')).toEqual([{ provider: 'playwright', binding: { session: first!.session, cwd: '/project' }, op: 'attach' }]);
 
     // Past the two minutes an unbound first launch is held for.
     const now = Date.now();
@@ -752,11 +762,7 @@ describe('Wall on the Lath engine', () => {
   it('reveals a restored context-port browser instead of opening a second', async () => {
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
     const helperSpy = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'context-helper', parentId: 'pane-a', command: '', status: 'preserved' });
-    const open = vi.fn(async () => ({ ok: true, session: 'second', wsPort: 1 }));
-    Object.assign(fake, {
-      agentBrowserOpen: open,
-      agentBrowserCommand: vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' })),
-    });
+    const { requests } = hostBrowsers({ launch: async () => ({ ok: true, session: 'second', wsPort: 1 }) });
     try {
       // The key a pre-Playwright build persisted for this port's agent-browser pane.
       await act(async () => {
@@ -779,7 +785,7 @@ describe('Wall on the Lath engine', () => {
       });
       await flush();
 
-      expect(open).not.toHaveBeenCalled();
+      expect(requests('launch')).toEqual([]);
       expect(container.querySelector('[data-lath-leaf="restored-ab"]')).not.toBeNull();
       expect(leafCount()).toBe(2);
     } finally {
@@ -791,13 +797,10 @@ describe('Wall on the Lath engine', () => {
   it('pops out a reused context-port browser at the port, never navigating into the relaunch', async () => {
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
     const helperSpy = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'context-helper', parentId: 'pane-a', command: '', status: 'preserved' });
-    const command = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
-    const popOut = vi.fn(() => new Promise<never>(() => {}));
-    Object.assign(fake, {
-      agentBrowserOpen: vi.fn(async () => ({ ok: true, session: 'second', wsPort: 1 })),
-      agentBrowserAttach: vi.fn(async () => ({ ok: true, wsPort: 4321 })),
-      agentBrowserCommand: command,
-      agentBrowserPopOut: popOut,
+    // A relaunch of the named session hangs; a mint answers at once.
+    const { browser, requests } = hostBrowsers({
+      launch: (request) => request.binding.session ? new Promise<never>(() => {}) : Promise.resolve({ ok: true, session: 'second', wsPort: 1 }),
+      attach: async () => ({ ok: true, wsPort: 4321 }),
     });
     try {
       // The port's browser, navigated away from the port's page since.
@@ -825,7 +828,7 @@ describe('Wall on the Lath engine', () => {
         }));
       });
       await flush();
-      command.mockClear();
+      browser.mockClear();
       await act(async () => {
         document.querySelector<HTMLButtonElement>('[data-terminal-context] button[aria-label="Open in agent-browser popout"]')!.click();
       });
@@ -834,8 +837,10 @@ describe('Wall on the Lath engine', () => {
       // One relaunch, at the port — not at the page it was on, with the port's
       // `open` queued behind it.
       expect(leafCount()).toBe(2);
-      expect(popOut).toHaveBeenCalledExactlyOnceWith('restored', expect.objectContaining({ url: 'http://localhost:5173/' }), undefined);
-      expect(command).not.toHaveBeenCalledWith('restored', ['open', 'http://localhost:5173/'], undefined);
+      expect(requests('launch')).toEqual([{
+        provider: 'agent-browser', binding: { session: 'restored' }, op: 'launch', url: 'http://localhost:5173/', headed: true,
+      }]);
+      expect(requests('navigate')).toEqual([]);
     } finally {
       helperSpy.mockRestore();
       untouchedSpy.mockRestore();
@@ -845,12 +850,10 @@ describe('Wall on the Lath engine', () => {
   it('pops out a restored context-port Door at the port', async () => {
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
     const helperSpy = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'context-helper', parentId: 'pane-a', command: '', status: 'preserved' });
-    const popOut = vi.fn(() => new Promise<never>(() => {}));
-    Object.assign(fake, {
-      agentBrowserOpen: vi.fn(async () => ({ ok: true, session: 'second', wsPort: 1 })),
-      agentBrowserAttach: vi.fn(async () => ({ ok: true, wsPort: 4321 })),
-      agentBrowserCommand: vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' })),
-      agentBrowserPopOut: popOut,
+    // A relaunch of the named session hangs; a mint answers at once.
+    const { requests } = hostBrowsers({
+      launch: (request) => request.binding.session ? new Promise<never>(() => {}) : Promise.resolve({ ok: true, session: 'second', wsPort: 1 }),
+      attach: async () => ({ ok: true, wsPort: 4321 }),
     });
     try {
       await act(async () => {
@@ -873,7 +876,9 @@ describe('Wall on the Lath engine', () => {
       });
       await flush();
 
-      expect(popOut).toHaveBeenCalledExactlyOnceWith('restored', expect.objectContaining({ url: 'http://localhost:5173/' }), undefined);
+      expect(requests('launch')).toEqual([{
+        provider: 'agent-browser', binding: { session: 'restored' }, op: 'launch', url: 'http://localhost:5173/', headed: true,
+      }]);
     } finally {
       helperSpy.mockRestore();
       untouchedSpy.mockRestore();
@@ -886,8 +891,9 @@ describe('Wall on the Lath engine', () => {
     // its parent closed — the one alert the context shows ahead of a port error.
     const helperSpy = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'context-helper', parentId: 'pane-a', command: '', status: 'preserved' });
     // A launch the host answers without a session or a reason of its own.
-    const playwright = vi.fn(async () => ({ ok: false }));
-    Object.assign(fake, { playwright, agentBrowserOpen: vi.fn(async () => ({ ok: true, session: 'ab', wsPort: 1 })) });
+    const { browser } = hostBrowsers({
+      launch: async (request) => request.provider === 'playwright' ? { ok: false } : { ok: true, session: 'ab', wsPort: 1 },
+    });
     try {
       await act(async () => {
         root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
@@ -906,7 +912,7 @@ describe('Wall on the Lath engine', () => {
       });
       await flush();
 
-      expect(playwright).toHaveBeenCalledWith(expect.objectContaining({ op: 'open', url: 'http://localhost:5173/' }));
+      expect(browser).toHaveBeenCalledWith(expect.objectContaining({ provider: 'playwright', op: 'launch', url: 'http://localhost:5173/' }));
       expect(document.querySelector('[data-terminal-context] [role="alert"]')?.textContent).toBe('Could not open Playwright');
       // The pane made for it goes with the failure.
       expect(leafCount()).toBe(1);
@@ -923,12 +929,10 @@ describe('Wall on the Lath engine', () => {
     const openResult = new Promise<{ ok: boolean; session: string; wsPort: number }>((resolve) => {
       resolveOpen = resolve;
     });
-    const agentBrowserCommand = vi.fn(async (_session: string, args: string[]) => {
-      return { exitCode: 0, stdout: '', stderr: '' };
+    const { requests } = hostBrowsers({
+      launch: () => openResult,
+      attach: async () => ({ ok: true, wsPort: 4321 }),
     });
-    (fake as PlatformAdapter).agentBrowserCommand = agentBrowserCommand;
-    (fake as PlatformAdapter).agentBrowserOpen = vi.fn(() => openResult);
-    (fake as PlatformAdapter).agentBrowserAttach = vi.fn(async () => ({ ok: true, wsPort: 4321 }));
 
     try {
       await act(async () => {
@@ -1001,7 +1005,7 @@ describe('Wall on the Lath engine', () => {
       expect(container.querySelectorAll('[data-door-id]')).toHaveLength(1);
 
       expect((await dispatchKill(browserId))?.ok).toBe(true);
-      expect(agentBrowserCommand).toHaveBeenCalledWith(defaultSession, ['close'], undefined);
+      expect(requests('close')).toContainEqual({ provider: 'agent-browser', binding: { session: defaultSession }, op: 'close' });
     } finally {
       untouchedSpy.mockRestore();
     }
@@ -1010,11 +1014,8 @@ describe('Wall on the Lath engine', () => {
   it('binds a minimized pane restored after a failed provider swap to a live controller', async () => {
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(true);
     const pwOpen = Promise.withResolvers<{ ok: boolean; error?: string }>();
-    const relaunch = vi.fn(async () => ({ ok: true, session: 'relaunched', wsPort: 4321 }));
-    Object.assign(fake, {
-      playwright: vi.fn((request: { op: string }) => request.op === 'open' ? pwOpen.promise : Promise.resolve({ ok: true })),
-      agentBrowserOpen: relaunch,
-      agentBrowserCommand: vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' })),
+    const { requests } = hostBrowsers({
+      launch: (request) => request.provider === 'playwright' ? pwOpen.promise : Promise.resolve({ ok: true, session: 'relaunched', wsPort: 4321 }),
     });
     try {
       await act(async () => {
@@ -1040,7 +1041,9 @@ describe('Wall on the Lath engine', () => {
       // the session it had.
       await act(async () => { pwOpen.resolve({ ok: false, error: 'playwright-cli is not installed' }); });
       await flush();
-      expect(relaunch).toHaveBeenCalledWith('http://localhost:5173/', { headed: false, session: 'ab-live' }, undefined);
+      expect(requests('launch')).toContainEqual({
+        provider: 'agent-browser', binding: { session: 'ab-live' }, op: 'launch', url: 'http://localhost:5173/', headed: false,
+      });
       expect(getAgentBrowserSurfaceController(eagerId)?.provider).toBe('agent-browser');
       expect(getAgentBrowserScreenController(eagerId)?.snapshot().renderMode).toBe('ab-screencast');
     } finally {
@@ -1050,10 +1053,7 @@ describe('Wall on the Lath engine', () => {
 
   it('gives a pane restored mid-launch its creator\'s fallback when the launch fails', async () => {
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(true);
-    Object.assign(fake, {
-      agentBrowserOpen: vi.fn(async () => ({ ok: false, error: 'agent-browser binary not found' })),
-      agentBrowserCommand: vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' })),
-    });
+    hostBrowsers({ launch: async () => ({ ok: false, error: 'agent-browser binary not found' }) });
     try {
       // Persisted before either launch answered: a new-tab pane, and a swap
       // away from the embed.
@@ -1091,9 +1091,7 @@ describe('Wall on the Lath engine', () => {
     const openResult = new Promise<{ ok: boolean; session?: string; wsPort?: number; binaryPath?: string }>((resolve) => {
       resolveOpen = resolve;
     });
-    (fake as PlatformAdapter).agentBrowserOpen = vi.fn(() => openResult);
-    const agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
-    (fake as PlatformAdapter).agentBrowserCommand = agentBrowserCommand;
+    const { requests } = hostBrowsers({ launch: () => openResult });
 
     try {
       await act(async () => {
@@ -1126,11 +1124,7 @@ describe('Wall on the Lath engine', () => {
         ok: true,
         result: { surfaceId: eagerId, surfaceRef: 'surface:1', session: 'dormouse.1.gui-minimized' },
       });
-      expect(agentBrowserCommand).not.toHaveBeenCalledWith(
-        'dormouse.1.gui-minimized',
-        ['close'],
-        '/usr/bin/agent-browser',
-      );
+      expect(requests('close').filter((request) => request.binding.session === 'dormouse.1.gui-minimized')).toEqual([]);
     } finally {
       untouchedSpy.mockRestore();
     }
@@ -1142,7 +1136,7 @@ describe('Wall on the Lath engine', () => {
     const openResult = new Promise<{ ok: boolean; error?: string }>((resolve) => {
       resolveOpen = resolve;
     });
-    (fake as PlatformAdapter).agentBrowserOpen = vi.fn(() => openResult);
+    hostBrowsers({ launch: () => openResult });
 
     try {
       await act(async () => {
@@ -1157,6 +1151,7 @@ describe('Wall on the Lath engine', () => {
       await flush();
       const eagerLeaf = container.querySelector<HTMLElement>('[data-lath-leaf]')!;
       const eagerId = eagerLeaf.dataset.lathLeaf!;
+      expect(eagerId).not.toBe(iframeId);
       await act(async () => {
         eagerLeaf.querySelector<HTMLButtonElement>('[aria-label="Minimize"]')!.click();
       });
@@ -1184,23 +1179,25 @@ describe('Wall on the Lath engine', () => {
     const events: string[] = [];
     let failPlaywright!: (result: { ok: boolean; error?: string }) => void;
     let landClose!: () => void;
-    Object.assign(fake, {
-      agentBrowserAttach: vi.fn(async () => ({ ok: true, wsPort: 4321 })),
-      agentBrowserCommand: vi.fn(async (session: string, args: string[]) => {
-        events.push(`${args.join(' ')} ${session}`);
-        if (args[0] === 'close') {
-          await new Promise<void>((resolve) => { landClose = resolve; });
-          events.push('close landed');
-        }
-        return { exitCode: 0, stdout: '', stderr: '' };
-      }),
-      agentBrowserOpen: vi.fn(async (url: string, opts: { session?: string }) => {
-        events.push(`open ${opts.session} ${url}`);
-        return { ok: true, session: opts.session, wsPort: 5555 };
-      }),
-      playwright: vi.fn((request: { op: string }) => (request.op === 'open'
-        ? new Promise((resolve) => { failPlaywright = resolve; })
-        : Promise.resolve({ ok: true }))),
+    // Every agent-browser command and launch, in order; attaching, the stream
+    // URL and captures are not what this test watches.
+    const { browser } = hostBrowsers();
+    browser.mockImplementation(async (request: BrowserRequest) => {
+      if (request.op === 'attach') return { ok: true, wsPort: 4321 };
+      if (request.provider === 'playwright') {
+        return request.op === 'launch' ? new Promise((resolve) => { failPlaywright = resolve; }) : { ok: true };
+      }
+      if (request.op === 'streamUrl' || request.op === 'screenshot') return { ok: true };
+      if (request.op === 'launch') {
+        events.push(`launch ${request.binding.session} ${request.url}`);
+        return { ok: true, session: request.binding.session, wsPort: 5555 };
+      }
+      events.push(`${request.op} ${request.binding.session}`);
+      if (request.op === 'close') {
+        await new Promise<void>((resolve) => { landClose = resolve; });
+        events.push('close landed');
+      }
+      return { ok: true };
     });
     try {
       await act(async () => {
@@ -1241,7 +1238,7 @@ describe('Wall on the Lath engine', () => {
       // Back to agent-browser in the Door it was minimized to, reopened in the
       // session its key names once that session's close has landed…
       expect(container.querySelector(`[data-door-id="${eagerId}"]`)).not.toBeNull();
-      expect(events).toEqual([`close ${defaultSession}`, 'close landed', `open ${defaultSession} http://localhost:5173/`]);
+      expect(events).toEqual([`close ${defaultSession}`, 'close landed', `launch ${defaultSession} http://localhost:5173/`]);
       expect(await dispatchResolveAgentBrowser(eagerId)).toMatchObject({ ok: true, result: { session: defaultSession } });
       // …so `dor ab --key default` drives it rather than opening a second pane.
       let reused: { ok: boolean; result?: { status: string; surfaceId: string } } | undefined;
@@ -1263,9 +1260,7 @@ describe('Wall on the Lath engine', () => {
 
   it('restores an eager render swap to iframe when launch rejects', async () => {
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(true);
-    (fake as PlatformAdapter).agentBrowserOpen = vi.fn(async () => {
-      throw new Error('transport failed');
-    });
+    hostBrowsers({ launch: async () => { throw new Error('transport failed'); } });
 
     try {
       await act(async () => {
@@ -1298,9 +1293,12 @@ describe('Wall on the Lath engine', () => {
     // and stranded the pane.
     const offered = vi.spyOn(browserAutomation, 'offeredRenderModes')
       .mockReturnValue(['ab-screencast', 'ab-popout', 'pw-screencast', 'pw-popout', 'iframe']);
-    const playwright = vi.fn(async () => ({ ok: true, session: 'gui-pw', wsPort: 4321 }));
-    const open = vi.fn(async () => ({ ok: true, session: 'gui-ab', wsPort: 4322 }));
-    Object.assign(fake, { playwright, agentBrowserOpen: open, agentBrowserPopOut: vi.fn(async () => ({ ok: true })) });
+    const { browser, requests } = hostBrowsers({
+      launch: async (request) => request.provider === 'playwright'
+        ? { ok: true, session: 'gui-pw', wsPort: 4321 }
+        : { ok: true, session: 'gui-ab', wsPort: 4322 },
+    });
+    const playwrightRequests = () => browser.mock.calls.filter(([request]) => request.provider === 'playwright');
     // Serving: a Tool whose command is not running retires its browser.
     terminalRegistry.applyTerminalSemanticEvents('tool-a', [
       { type: 'commandLine', commandLine: 'pnpm storybook' },
@@ -1341,13 +1339,15 @@ describe('Wall on the Lath engine', () => {
         await act(async () => { controller()?.actions.setRenderMode?.(mode); });
         await flush();
       }
-      expect(playwright).not.toHaveBeenCalled();
-      expect(open).not.toHaveBeenCalled();
+      expect(playwrightRequests()).toEqual([]);
+      expect(requests('launch')).toEqual([]);
       expect(controller()?.snapshot().renderMode).toBe('iframe');
 
       await act(async () => { controller()?.actions.setRenderMode?.('ab-screencast'); });
       await flush();
-      expect(open).toHaveBeenCalledWith('http://localhost:6006/', { headed: false, session: 'dormouse.1.tool.tool-a' }, undefined);
+      expect(requests('launch')).toEqual([{
+        provider: 'agent-browser', binding: { session: 'dormouse.1.tool.tool-a', cwd: '/repo' }, op: 'launch', url: 'http://localhost:6006/', headed: false,
+      }]);
     } finally {
       offered.mockRestore();
       act(() => terminalRegistry.removeTerminalPaneState('tool-a'));
@@ -1355,7 +1355,7 @@ describe('Wall on the Lath engine', () => {
   });
 
   it('gives a Tool its embed back when its swap to agent-browser cannot launch', async () => {
-    Object.assign(fake, { agentBrowserOpen: vi.fn(async () => ({ ok: false, error: 'agent-browser binary not found' })) });
+    const { requests } = hostBrowsers({ launch: async () => ({ ok: false, error: 'agent-browser binary not found' }) });
     terminalRegistry.applyTerminalSemanticEvents('tool-a', [
       { type: 'commandLine', commandLine: 'pnpm storybook' },
       { type: 'commandStart' },
@@ -1382,7 +1382,9 @@ describe('Wall on the Lath engine', () => {
       await flush();
       await act(async () => { getAgentBrowserScreenController('tool-a')?.actions.setRenderMode?.('ab-screencast'); });
       await flush();
-      expect(fake.agentBrowserOpen).toHaveBeenCalledWith('http://localhost:6006/', { headed: false, session: 'dormouse.1.tool.tool-a' }, undefined);
+      expect(requests('launch')).toEqual([{
+        provider: 'agent-browser', binding: { session: 'dormouse.1.tool.tool-a', cwd: '/repo' }, op: 'launch', url: 'http://localhost:6006/', headed: false,
+      }]);
       expect(getAgentBrowserScreenController('tool-a')?.snapshot().renderMode).toBe('iframe');
     } finally {
       act(() => terminalRegistry.removeTerminalPaneState('tool-a'));
@@ -1394,9 +1396,11 @@ describe('Wall on the Lath engine', () => {
     ['pw-screencast', 'Playwright'],
   ] as const)('refuses a render swap to %s away from an iframe surface holding a non-http(s) URL', async (mode, provider) => {
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(true);
-    const open = vi.fn(async () => ({ ok: true, session: 'dormouse.1.gui-a1b2c3', wsPort: 4321 }));
-    const playwright = vi.fn(async () => ({ ok: true, session: 'gui-pw', wsPort: 4322 }));
-    Object.assign(fake, { agentBrowserOpen: open, playwright });
+    const { requests } = hostBrowsers({
+      launch: async (request) => request.provider === 'playwright'
+        ? { ok: true, session: 'gui-pw', wsPort: 4322 }
+        : { ok: true, session: 'dormouse.1.gui-a1b2c3', wsPort: 4321 },
+    });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     try {
@@ -1421,8 +1425,7 @@ describe('Wall on the Lath engine', () => {
       });
       await flush();
 
-      expect(open).not.toHaveBeenCalled();
-      expect(playwright).not.toHaveBeenCalled();
+      expect(requests('launch')).toEqual([]);
       expect(getAgentBrowserScreenController(iframeId)?.snapshot().renderMode).toBe('iframe');
       // The Display modal closes itself on Apply, so the console is the only
       // channel this refusal has of its own.
@@ -1438,7 +1441,7 @@ describe('Wall on the Lath engine', () => {
 
   it('resolves a browser surface handle to its agent-browser session, and gates the rest', async () => {
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
-    (fake as PlatformAdapter).agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
+    hostBrowsers();
 
     try {
       await act(async () => {
@@ -1498,8 +1501,7 @@ describe('Wall on the Lath engine', () => {
       toJSON() {},
     }) as DOMRect;
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
-    const agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
-    (fake as PlatformAdapter).agentBrowserCommand = agentBrowserCommand;
+    const { requests } = hostBrowsers();
 
     try {
       await act(async () => {
@@ -1546,11 +1548,9 @@ describe('Wall on the Lath engine', () => {
       expect(container.querySelector(`[data-lath-leaf="${browserId}"]`)?.hasAttribute('data-lath-parked')).toBe(false);
 
       await dispatchKill(browserId);
-      expect(agentBrowserCommand).toHaveBeenCalledWith(
-        'browser-session',
-        ['close'],
-        '/new/agent-browser',
-      );
+      expect(requests('close')).toContainEqual({
+        provider: 'agent-browser', binding: { session: 'browser-session', binaryPath: '/new/agent-browser' }, op: 'close',
+      });
     } finally {
       untouchedSpy.mockRestore();
       HTMLElement.prototype.getBoundingClientRect = originalRect;
@@ -3570,8 +3570,7 @@ describe('Wall on the Lath engine', () => {
       });
       await flush();
 
-      (fake as PlatformAdapter).agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
-      (fake as PlatformAdapter).agentBrowserOpen = vi.fn(async () => ({ ok: true, session: 'context-browser', wsPort: 4321 }));
+      const { requests } = hostBrowsers({ launch: async () => ({ ok: true, session: 'context-browser', wsPort: 4321 }) });
       if (!fake.hasPty('pane-a')) fake.spawnPty('pane-a');
       fake.setOpenPorts('pane-a', [{
         protocol: 'tcp',
@@ -3610,7 +3609,9 @@ describe('Wall on the Lath engine', () => {
       expect(onEvent).toHaveBeenCalledWith({ type: 'selectionChange', id: expect.any(String), kind: 'pane' });
       expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
       expect(onEvent).toHaveBeenCalledWith({ type: 'modeChange', mode: 'passthrough' });
-      expect((fake as PlatformAdapter).agentBrowserOpen).toHaveBeenCalledWith('http://localhost:5173/', { headed: false }, undefined);
+      expect(requests('launch')).toContainEqual({
+        provider: 'agent-browser', binding: {}, op: 'launch', url: 'http://localhost:5173/', headed: false,
+      });
     } finally {
       untouchedSpy.mockRestore();
     }
@@ -4094,10 +4095,7 @@ describe('Wall on the Lath engine', () => {
   });
 
   it('names the command that drives a browser run by the other provider', async () => {
-    (fake as PlatformAdapter).playwright = vi.fn(async (request: { op: string }) => (
-      request.op === 'attach' ? { ok: true, wsPort: 4555 } : { ok: true }
-    ));
-    (fake as PlatformAdapter).agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
+    hostBrowsers({ attach: async (request) => request.provider === 'playwright' ? { ok: true, wsPort: 4555 } : { ok: true } });
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
     try {
       await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />));
@@ -4166,9 +4164,8 @@ describe('Wall on the Lath engine', () => {
 
   it('opens a new https:// tab from an iframe as an agent-browser pane bound to its launch', async () => {
     const launches: Array<(result: { ok: boolean; session?: string; wsPort?: number; error?: string }) => void> = [];
+    const { requests } = hostBrowsers({ launch: () => new Promise((resolve) => { launches.push(resolve); }) });
     (fake as PlatformAdapter).createIframeProxyUrl = vi.fn(async () => ({ ok: true as const, url: 'http://127.0.0.1:61234/' }));
-    (fake as PlatformAdapter).agentBrowserOpen = vi.fn(() => new Promise((resolve) => { launches.push(resolve); }));
-    (fake as PlatformAdapter).agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
     try {
       await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />));
@@ -4188,7 +4185,9 @@ describe('Wall on the Lath engine', () => {
       await openTab('https://accounts.example/login');
       const [tab] = leafIds().filter((id) => !before.includes(id));
       expect(tab).toBeTruthy();
-      expect(fake.agentBrowserOpen).toHaveBeenCalledWith('https://accounts.example/login', { headed: false }, undefined);
+      expect(requests('launch')).toEqual([{
+        provider: 'agent-browser', binding: {}, op: 'launch', url: 'https://accounts.example/login', headed: false,
+      }]);
       // The pane is there at once; `dor ab --surface` has nothing to drive until the launch names it.
       expect(await dispatchResolveAgentBrowser(tab)).toMatchObject({ ok: false });
       await act(async () => { launches[0]({ ok: true, session: 'dormouse.1.gui-abc', wsPort: 4321 }); });

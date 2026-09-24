@@ -4,11 +4,9 @@
  * released by Wall on kill/render swap: `closeBrowserSurface` closes the
  * session too, `disposeAgentBrowserSurfaceController` only the client side.
  */
-import type { AgentBrowserAttachResult, AgentBrowserCommandResult, AgentBrowserOpenResult } from '../../lib/platform/types';
-import { isBrowsableUrl, playwrightTextInputs, type BrowserAutomationProvider } from '../../lib/platform/browser-automation';
+import { isBrowsableUrl, playwrightTextInputs, type BrowserAutomationProvider, type BrowserResult } from '../../lib/platform/browser-automation';
 import { isAllowedBinaryFor } from '../../lib/agent-browser-binary';
 import { readTextFromClipboard } from '../../lib/clipboard';
-import { messageOf } from '../../lib/errors';
 import { isAbDebugLogsEnabled } from '../../lib/feature-flags';
 import {
   registerAgentBrowserScreen,
@@ -25,12 +23,13 @@ import { hostPathDisplay, tabDisplayTitle } from './browser-url';
 import { parseRenderMode, renderModeFor } from 'dor-lib-common/browser-providers';
 import {
   BROWSER_PROVIDER_GUI,
-  browserPlatform,
+  browserHandle,
+  hostSupportsBrowser,
   offeredRenderModes,
   launchBinaryPath,
   rememberLaunchBinaryPath,
   surfaceProvider,
-  type BrowserPlatform,
+  type BrowserHandle,
 } from './browser-automation';
 import { agentBrowserSessionFromParams, isToolParams } from './browser-surface';
 import {
@@ -90,31 +89,6 @@ function isShownUrl(url: string | null | undefined): url is string {
   if (typeof url !== 'string') return false;
   const trimmed = url.trim();
   return trimmed !== '' && trimmed !== 'about:blank';
-}
-
-function parseCdpUrl(stdout: string): string | null {
-  const trimmed = stdout.trim();
-  if (!trimmed) return null;
-  try {
-    const parsed = JSON.parse(trimmed) as { data?: { result?: unknown }; result?: unknown; url?: unknown };
-    const value = parsed.data?.result ?? parsed.result ?? parsed.url;
-    if (typeof value === 'string' && value.startsWith('ws://')) return value;
-  } catch {
-    // Plain text is the common CLI output.
-  }
-  return trimmed.match(/ws:\/\/\S+/)?.[0] ?? null;
-}
-
-/** Best-effort screen rect for positioning a popped-out window over the pane.
- *  VS Code webviews can't read true screen coords (the host then centers); on
- *  standalone, window.screenX/Y offset the pane's viewport rect into screen
- *  space. */
-function paneScreenRect(el: HTMLElement | null | undefined): { x: number; y: number; width: number; height: number } | undefined {
-  if (!el) return undefined;
-  const r = el.getBoundingClientRect();
-  const sx = typeof window.screenX === 'number' ? window.screenX : 0;
-  const sy = typeof window.screenY === 'number' ? window.screenY : 0;
-  return { x: Math.round(sx + r.left), y: Math.round(sy + r.top), width: Math.round(r.width), height: Math.round(r.height) };
 }
 
 /** The DOM-free key shape the controller's keyboard bridge consumes. A
@@ -192,8 +166,6 @@ type Phase =
 
 export type BrowserSurfacePhase = Phase['k'];
 
-type Driver = { platform: BrowserPlatform; session: string; binaryPath: string | undefined };
-
 /** The live DOM bindings a mounted view lends the controller. `attachView`
  *  wires these; `detach()` returns them. */
 export interface AgentBrowserViewSink {
@@ -236,11 +208,9 @@ export class AgentBrowserSurfaceController {
   readonly id: string;
   readonly provider: BrowserAutomationProvider;
   private cwd?: string;
-  /** Rebuilt only when `cwd` changes: the Playwright adapter closes over it,
-   *  and every stream frame reads it several times. */
-  private platformCache: BrowserPlatform | null = null;
-  private get platform(): BrowserPlatform {
-    return this.platformCache ??= browserPlatform(this.provider, this.cwd);
+  /** Whether this host can drive the Surface's provider at all. */
+  private get hosted(): boolean {
+    return hostSupportsBrowser(this.provider);
   }
   /** Gates the render modes offered; see `ensureStarted`. */
   private readonly isTool: boolean;
@@ -323,7 +293,7 @@ export class AgentBrowserSurfaceController {
   // content-box size cached (the viewport div has no border/padding, so
   // contentRect matches the gBCR those hot paths used to read). null ⇒ no attached
   // view — treat as 0×0 / skip, matching the old no-element behavior. The
-  // correctness-critical reads in issueSyncToPane / paneScreenRect stay live gBCR.
+  // correctness-critical read in issueSyncToPane stays live gBCR.
   // The same observer also drives viewport-sync (debounced), so there is one
   // observer on the pane, not two.
   private paneSize: { w: number; h: number } | null = null;
@@ -424,12 +394,12 @@ export class AgentBrowserSurfaceController {
       applyDevice: (name) => {
         this.lastIssued = null;
         this.setSyncEngaged(false);
-        this.runCommand(['set', 'device', name]);
+        this.drive(`set device ${name}`, (browser) => browser.device(name));
       },
       applyViewport: (w, h, dpr) => {
         this.lastIssued = null;
         this.setSyncEngaged(false);
-        this.runCommand(['set', 'viewport', String(w), String(h), String(dpr)]);
+        this.drive(`set viewport ${w} ${h} ${dpr}`, (browser) => browser.viewport(w, h, dpr));
       },
       openModal: () => openAgentBrowserScreenModal(this.id),
       setRenderMode: (mode, opts) => this.setRenderMode(mode, opts),
@@ -438,9 +408,9 @@ export class AgentBrowserSurfaceController {
     // Native history nav — issued like tab actions, through the daemon gate.
     this.chromeActions = {
       navigate: (url) => this.navigate(url),
-      back: () => this.runCommand(['back']),
-      forward: () => this.runCommand(['forward']),
-      reload: () => this.runCommand(['reload']),
+      back: () => this.drive('back', (browser) => browser.history('back')),
+      forward: () => this.drive('forward', (browser) => browser.history('forward')),
+      reload: () => this.drive('reload', (browser) => browser.history('reload')),
     };
 
     this.viewSnapshot = this.buildViewSnapshot();
@@ -526,7 +496,7 @@ export class AgentBrowserSurfaceController {
       actions: this.screenActions,
       chrome: this.chrome,
       chromeActions: this.chromeActions,
-      hostCapable: !!this.platform.agentBrowserCommand,
+      hostCapable: this.hosted,
       renderModes: this.renderModes,
     });
     this.lastPublishedScreen = null;
@@ -661,10 +631,7 @@ export class AgentBrowserSurfaceController {
     if (this.phase.k === 'disposed') return;
     // Mirror every field first, then rebind once: binding per field would bind
     // a new session with the cwd or binary of the old.
-    if (params.cwd !== undefined && params.cwd !== this.cwd) {
-      this.cwd = params.cwd;
-      this.platformCache = null;
-    }
+    if (params.cwd !== undefined) this.cwd = params.cwd;
     // First, so neither a stream this rebinds nor a port handed over next
     // (`handOverBrowserPort`) inherits a `set viewport` meant for the old mode.
     if (params.renderMode && this.echoed('renderMode', params.renderMode)) this.followParamsHeadedness(params.renderMode);
@@ -774,7 +741,7 @@ export class AgentBrowserSurfaceController {
     const { url, headed } = this.pendingIntent;
     this.pendingIntent = {};
     if (headed !== undefined && headed !== this.headed) this.relaunch(headed, url);
-    else if (url) this.runCommand(['open', url]);
+    else if (url) this.drive(`open ${url}`, (browser) => browser.navigate(url));
   }
 
   /** (Re)bind the current params: no session launches one, a session without a
@@ -811,7 +778,6 @@ export class AgentBrowserSurfaceController {
    * Wall's `whenBrowserLaunched` hears the outcome.
    */
   private launch(): void {
-    const platform = this.platform;
     const url = this.launchUrl();
     const session = this.launchSession;
     const phase: Phase = { k: 'launching', ...(session ? { session } : {}) };
@@ -822,19 +788,16 @@ export class AgentBrowserSurfaceController {
     // A named session's close still in flight — a failed swap reopening the
     // previous provider's — would land after this open and shut it.
     const opening = session ? closeLanded(this.provider, this.cwd, session) : Promise.resolve();
-    // Call through the adapter instance — detaching the method drops `this`.
+    const browser = browserHandle(this.provider, { session, cwd: this.cwd, binaryPath });
     // A launch that cannot start settles as late as one that fails, so whoever
     // created this Surface is always listening by then.
-    const opened: Promise<AgentBrowserOpenResult> = !platform.agentBrowserOpen
+    const opened: Promise<BrowserResult> = !browser
       ? Promise.resolve({ ok: false, error: `${this.label} is unavailable on this host` })
       : !url
         ? Promise.resolve({ ok: false, error: 'no page to open' })
         // Released while it waited, it opens nothing for a closed Surface.
-        : opening.then(() => this.phase === phase
-          ? platform.agentBrowserOpen!(url, { headed, ...(session ? { session } : {}) }, binaryPath)
-          : { ok: false });
+        : opening.then(() => this.phase === phase ? browser.launch(url, headed) : { ok: false });
     this.track(opened
-      .catch((err: unknown): AgentBrowserOpenResult => ({ ok: false, error: messageOf(err) }))
       .then((res) => {
         if (this.phase !== phase) {
           // The browser that came up belongs to nobody: close it — a session
@@ -855,10 +818,7 @@ export class AgentBrowserSurfaceController {
         }
         rememberLaunchBinaryPath(this.provider, res.binaryPath);
         this.session = res.session;
-        if (res.cwd !== undefined && res.cwd !== this.cwd) {
-          this.cwd = res.cwd;
-          this.platformCache = null;
-        }
+        if (res.cwd !== undefined) this.cwd = res.cwd;
         this.binaryPath = allowedBinaryPath(res.binaryPath, this.provider) ?? allowedBinaryPath(binaryPath, this.provider);
         this.writeParams({
           session: res.session,
@@ -909,18 +869,15 @@ export class AgentBrowserSurfaceController {
   private attach(relaunch: boolean): void {
     const session = this.session;
     if (!session) { this.launch(); return; }
-    const platform = this.platform;
-    if (!platform.agentBrowserAttach) {
+    const browser = this.handle();
+    if (!browser) {
       this.setPhase({ k: 'ended' });
       return;
     }
     const phase: Phase = { k: 'attaching' };
     this.setPhase(phase);
     const url = relaunch ? this.launchUrl() : undefined;
-    // Call through the adapter instance — pulling the method into a bare
-    // variable would detach `this` and break its internal `requestResponse`.
-    const attached = platform.agentBrowserAttach(session, { url, headed: this.headed }, this.binaryPath)
-      .catch((err: unknown): AgentBrowserAttachResult => ({ ok: false, error: messageOf(err) }))
+    const attached = browser.attach({ url, headed: this.headed })
       .then((res) => {
         if (this.phase !== phase) return url ? this.closeIfClosedMeanwhile(session) : undefined;
         // Only a gone daemon is relaunched at the page; a live one was only
@@ -1012,11 +969,8 @@ export class AgentBrowserSurfaceController {
     // reconnect always re-creates it — a disposed loop would silently drop every
     // frame pulse.
     const screenshotLoop = createScreenshotLoop({
-      capture: (opts) => {
-        const driver = this.driver();
-        return driver?.platform.agentBrowserScreenshot?.(driver.session, opts, driver.binaryPath) ?? null;
-      },
-      isCapable: () => !!this.driver()?.platform.agentBrowserScreenshot,
+      capture: (opts) => this.driver()?.screenshot(opts) ?? null,
+      isCapable: () => !!this.driver(),
       draw: this.drawBitmap,
       // A re-attach bumps drawGeneration so a fresh (blank) canvas repaints even
       // when the capture bytes are identical to the last displayed frame.
@@ -1028,10 +982,13 @@ export class AgentBrowserSurfaceController {
     const connection = createAgentBrowserConnection({
       session,
       streamPort,
-      binaryPath: this.binaryPath,
-      getStreamUrl: async (port) => (await this.platform.getAgentBrowserStreamUrl?.(port)) ?? undefined,
-      runCommand: (_session, args) => this.command(args)
-        ?? Promise.resolve({ exitCode: 1, stdout: '', stderr: `${this.label} commands unavailable` }),
+      getStreamUrl: async (port) => {
+        const answer = await this.handle()?.streamUrl(port);
+        if (answer && !answer.ok) throw new Error(answer.error ?? `${this.label} stream unavailable`);
+        return answer?.url;
+      },
+      selectTab: (tabId) => this.driver()?.tab('select', tabId)
+        ?? Promise.resolve({ ok: false, error: `${this.label} commands unavailable` }),
       canSelectTabs: () => !this.headed,
       wantFrameData: () => this.wantsProvisionalFrame(),
       log: abDebugLog,
@@ -1163,7 +1120,7 @@ export class AgentBrowserSurfaceController {
   }
 
   private wantsProvisionalFrame(): boolean {
-    const forInput = !this.hasFrame || !this.platform.agentBrowserScreenshot || performance.now() <= this.provisionalUntil;
+    const forInput = !this.hasFrame || !this.hosted || performance.now() <= this.provisionalUntil;
     this.paintingForOverdue = !forInput;
     return forInput || !!this.screenshotLoop?.captureOverdue();
   }
@@ -1176,7 +1133,7 @@ export class AgentBrowserSurfaceController {
     if (this.provider === 'playwright') return; // The host stream also observes headed navigation.
     const phase = this.phase;
     // `get cdp-url` is a daemon command, so it waits for `live` like every other.
-    const desired = phase.k === 'live' && this.headed && !!this.platform.agentBrowserCommand;
+    const desired = phase.k === 'live' && this.headed && this.hosted;
     const key = desired ? `${this.session}:${phase.port}` : null;
     if (key === this.cdpKey) return;
     this.cdpTeardown?.();
@@ -1225,14 +1182,9 @@ export class AgentBrowserSurfaceController {
     };
 
     const connect = async () => {
-      let cdpUrl: string | null = null;
-      try {
-        const result = await this.command(['get', 'cdp-url']);
-        if (result?.exitCode === 0) cdpUrl = parseCdpUrl(result.stdout);
-        else if (result) abDebugLog(`[ab-panel] cdp-url failed ${JSON.stringify({ stderr: result.stderr, stdout: result.stdout })}`);
-      } catch (err) {
-        abDebugLog(`[ab-panel] cdp-url error ${String(err)}`);
-      }
+      const result = await this.driver()?.cdpUrl();
+      const cdpUrl = result?.ok ? result.url ?? null : null;
+      if (result && !cdpUrl) abDebugLog(`[ab-panel] cdp-url failed ${JSON.stringify({ error: result.error })}`);
       if (disposed || !cdpUrl) return;
       abDebugLog(`[ab-panel] connecting cdp ${JSON.stringify({ cdpUrl })}`);
       ws = new WebSocket(cdpUrl);
@@ -1446,10 +1398,10 @@ export class AgentBrowserSurfaceController {
     // never force its viewport to the (now-stub) pane size. Sync resumes when it
     // pops back in — the new port's reclaim re-issues against the fresh session.
     if (this.headed) return;
-    // Hosts without agentBrowserCommand (e.g. the web demo) can't drive the
-    // viewport; stay silent rather than warn on every resize — the surface just
-    // reads SCALED.
-    if (!this.platform.agentBrowserCommand) return;
+    // A host that cannot drive the provider (e.g. the web demo) can't size
+    // the viewport; stay silent rather than warn on every resize — the surface
+    // just reads SCALED.
+    if (!this.hosted) return;
     const el = this.sink?.viewport;
     if (!el) return;
     const rect = el.getBoundingClientRect();
@@ -1461,7 +1413,7 @@ export class AgentBrowserSurfaceController {
     if (prev && prev.w === w && prev.h === h && dprMatch(prev.dpr, dpr)) return;
     this.lastIssued = { w, h, dpr };
     this.syncConfirmed = false;
-    this.runCommand(['set', 'viewport', String(w), String(h), String(dpr)]);
+    this.drive(`set viewport ${w} ${h} ${dpr}`, (browser) => browser.viewport(w, h, dpr));
   }
 
   // Last-writer-wins: drop sync when an external `dor ab set …` takes the
@@ -1505,9 +1457,8 @@ export class AgentBrowserSurfaceController {
    */
   private relaunch(headed: boolean, url?: string): void {
     const session = this.session;
-    const platform = this.platform;
     const k = this.phase.k;
-    const capable = headed ? !!platform.agentBrowserPopOut : !!platform.agentBrowserPopIn;
+    const capable = this.hosted;
     if (!capable || !session || (k !== 'live' && k !== 'parked' && k !== 'ended')) {
       // Before the browser is bound, the request waits for it; one arriving
       // mid-relaunch is dropped — one relaunch at a time.
@@ -1529,11 +1480,7 @@ export class AgentBrowserSurfaceController {
     this.setHeaded(headed);
     this.writeParams({ renderMode: this.renderMode() });
     abDebugLog(`[ab-panel] ${headed ? 'popOut' : 'popIn'} -> ${JSON.stringify({ session, url: target })}`);
-    // Call through the adapter instance — detaching the method drops `this`.
-    const relaunched = headed
-      ? platform.agentBrowserPopOut!(session, { rect: paneScreenRect(this.sink?.viewport), url: target }, this.binaryPath)
-      : platform.agentBrowserPopIn!(session, { url: target }, this.binaryPath);
-    this.track(relaunched.catch((err: unknown) => ({ ok: false, wsPort: undefined, error: messageOf(err) })).then((res) => {
+    this.track(this.handle(session)!.launch(target, headed).then((res) => {
       abDebugLog(`[ab-panel] relaunch result ${JSON.stringify(res)}`);
       if (this.phase !== phase) return this.closeIfClosedMeanwhile(session);
       if (res.ok && res.wsPort) {
@@ -1570,37 +1517,32 @@ export class AgentBrowserSurfaceController {
 
   // --- the daemon gate ---
 
-  /** The daemon to drive, only while `live` — and after an unpark, once its
+  /** The browser to drive, only while `live` — and after an unpark, once its
    *  stream opens: every command, edit and capture takes it from here, since
    *  mid-launch, mid-attach or mid-relaunch, or for a daemon gone while hidden,
    *  a CLI command starts a competing daemon at about:blank
-   *  (docs/specs/dor-browser.md → "Agent-Browser Connection"). Call through
-   *  `platform` — pulling a method into a bare variable would detach `this`
-   *  and break an adapter's internal `requestResponse`. */
-  private driver(): Driver | null {
+   *  (docs/specs/dor-browser.md → "Agent-Browser Connection"). */
+  private driver(): BrowserHandle | null {
     if (this.phase.k !== 'live' || this.phase.resumed || !this.session) return null;
-    return { platform: this.platform, session: this.session, binaryPath: this.binaryPath };
+    return this.handle();
   }
 
-  /** One daemon command; null when the gate refuses it or the host cannot run
-   *  one. */
-  private command(args: string[]): Promise<AgentBrowserCommandResult> | null {
-    const driver = this.driver();
-    if (!driver) abDebugLog(`[ab-panel] ${args.join(' ')} dropped in ${this.phase.k}`);
-    return driver?.platform.agentBrowserCommand?.(driver.session, args, driver.binaryPath) ?? null;
+  /** The bound session's browser, whatever the phase: for what the gate does
+   *  not cover — a launch, attach or relaunch, the stream URL, a close. */
+  private handle(session = this.session): BrowserHandle | null {
+    return browserHandle(this.provider, { session, cwd: this.cwd, binaryPath: this.binaryPath });
   }
 
-  private runCommand(args: string[]): void {
-    if (this.driver() && !this.platform.agentBrowserCommand) {
-      console.warn(`[${this.provider}] this host cannot run ${this.label} commands; tab actions are unavailable`);
+  /** One browser operation through the gate, warned about when it fails;
+   *  dropped outside `live`. */
+  private drive(label: string, act: (browser: BrowserHandle) => Promise<BrowserResult>): void {
+    const browser = this.driver();
+    if (!browser) {
+      abDebugLog(`[ab-panel] ${label} dropped in ${this.phase.k}`);
       return;
     }
-    this.command(args)?.then((result) => {
-      if (result.exitCode !== 0) {
-        console.warn(`[${this.provider}] ${args.join(' ')} failed:`, result.stderr || result.stdout || `exit ${result.exitCode}`);
-      }
-    }).catch((error) => {
-      console.warn(`[${this.provider}] ${args.join(' ')} failed:`, error);
+    void act(browser).then((result) => {
+      if (!result.ok) console.warn(`[${this.provider}] ${label} failed:`, result.error ?? 'no reason given');
     });
   }
 
@@ -1611,7 +1553,7 @@ export class AgentBrowserSurfaceController {
   private navigate(url: string): void {
     if (!url) return;
     if (this.driver()) {
-      this.runCommand(['open', url]);
+      this.drive(`open ${url}`, (browser) => browser.navigate(url));
       return;
     }
     if (this.phase.k === 'disposed') return;
@@ -1635,11 +1577,11 @@ export class AgentBrowserSurfaceController {
   }
 
   selectTab(tab: StreamTab): void {
-    if (!tab.active) this.runCommand(['tab', tab.tabId]);
+    if (!tab.active) this.drive(`tab ${tab.tabId}`, (browser) => browser.tab('select', tab.tabId));
   }
 
   closeTab(tab: StreamTab): void {
-    this.runCommand(['tab', 'close', tab.tabId]);
+    this.drive(`tab close ${tab.tabId}`, (browser) => browser.tab('close', tab.tabId));
   }
 
   private sendKey(e: KeyLike, eventType: 'keyDown' | 'keyUp'): void {
@@ -1697,19 +1639,15 @@ export class AgentBrowserSurfaceController {
     // Native editing chords (select-all/copy/cut) don't fire over the stream
     // input path (CDP commands field is dropped), on any platform — Cmd on
     // macOS, Ctrl elsewhere. Route the intent through the host's purpose-built
-    // edit channel instead — a daemon command, so gated like the rest. Every
-    // shipped host implements `agentBrowserEdit`; the fall-through covers a
-    // host that does not (the fake adapter), so the page still gets the chord
-    // for its own JS shortcuts.
+    // edit channel instead — a daemon command, so gated like the rest. A host
+    // that cannot drive the provider (the fake adapter) falls through, so the
+    // page still gets the chord for its own JS shortcuts.
     if (mod && !e.altKey && !e.shiftKey) {
       const op = EDIT_OPS[e.key.toLowerCase() as keyof typeof EDIT_OPS];
-      if (op && this.platform.agentBrowserEdit && this.session) {
-        const driver = this.driver();
-        if (!driver?.platform.agentBrowserEdit) return;
+      if (op && this.hosted && this.session) {
+        if (!this.driver()) return;
         this.openProvisionalWindow();
-        driver.platform.agentBrowserEdit(driver.session, op, driver.binaryPath).then((r) => {
-          if (!r.ok && r.error) console.warn(`[${this.provider}] ${op} failed:`, r.error);
-        }).catch((err) => console.warn(`[${this.provider}] ${op} failed:`, err));
+        this.drive(op, (browser) => browser.edit(op));
         return;
       }
     }
@@ -1826,9 +1764,8 @@ const closeKey = (provider: BrowserAutomationProvider, cwd: string | undefined, 
  * the host will spawn (`lib/src/lib/agent-browser-binary.ts`).
  */
 function closeSessionOn(provider: BrowserAutomationProvider, cwd: string | undefined, session: string, binaryPath: unknown): Promise<void> {
-  return trackClose(provider, cwd, session, browserPlatform(provider, cwd)
-    .agentBrowserCommand?.(session, ['close'], allowedBinaryPath(binaryPath, provider))
-    .then(() => {}, () => {}) ?? Promise.resolve());
+  return trackClose(provider, cwd, session, browserHandle(provider, { session, cwd, binaryPath: allowedBinaryPath(binaryPath, provider) })?.close()
+    .then(() => {}) ?? Promise.resolve());
 }
 
 /** Record `closing` as `session`'s close in flight until it settles. */

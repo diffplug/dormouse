@@ -88,6 +88,23 @@ describe("BrowserSidecarAdapter session persistence", () => {
   });
 });
 
+// The harness has no Rust to read a capture file, so its bridge answers a
+// screenshot with base64 (`readCapture` in standalone/scripts/dev-agent-browser.mjs).
+describe("BrowserSidecarAdapter browser requests", () => {
+  it("forwards every request through one browser_request, decoding a screenshot's base64", async () => {
+    const host = new BrowserSidecarHost("http://localhost:1234");
+    const invoke = vi.spyOn(host, "invoke").mockResolvedValueOnce({ ok: true, mime: "image/jpeg", bytesBase64: "/9gB" });
+    const adapter = new BrowserSidecarAdapter(host);
+    const request = { provider: "agent-browser" as const, binding: { session: "sess" }, op: "screenshot" as const };
+
+    expect(await adapter.browser(request)).toEqual({ ok: true, mime: "image/jpeg", bytes: Uint8Array.from([0xff, 0xd8, 0x01]) });
+    expect(invoke).toHaveBeenCalledWith("browser_request", { request });
+
+    invoke.mockRejectedValueOnce(new Error("bridge down"));
+    expect(await adapter.browser({ ...request, op: "close" })).toEqual({ ok: false, error: "bridge down" });
+  });
+});
+
 // The parse boundary and the alert transport both sidecar adapters share are
 // pinned once, for both, in `sidecar-adapters.test.ts`.
 describe("BrowserSidecarAdapter event stream", () => {

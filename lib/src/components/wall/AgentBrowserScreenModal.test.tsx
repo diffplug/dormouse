@@ -8,7 +8,7 @@ import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import type { PlatformAdapter } from '../../lib/platform/types';
 import { AgentBrowserScreenModal } from './AgentBrowserScreenModal';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
-import { registerStubScreen, STUB_SCREEN } from './wall-test-utils';
+import { installBrowserHost, registerStubScreen, STUB_SCREEN } from './wall-test-utils';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -69,9 +69,7 @@ describe('AgentBrowserScreenModal', () => {
   });
 
   it('offers Playwright with its own device registry and dispatches the selected provider', () => {
-    const platform: PlatformAdapter = new FakePtyAdapter();
-    platform.playwright = async () => ({ ok: true });
-    setPlatform(platform);
+    installBrowserHost();
     const registration = registerStubScreen('playwright', { snapshot: { ...STUB_SCREEN, renderMode: 'pw-screencast' } });
     const controller = getAgentBrowserScreenController('playwright')!;
     act(() => root.render(<AgentBrowserScreenModal controller={controller} label="surface:4" onClose={() => {}} />));
@@ -87,10 +85,7 @@ describe('AgentBrowserScreenModal', () => {
 
   it('offers only the render modes the controller declares, whatever the host supports', () => {
     // A tool on a host with every provider: Playwright and popout would strand it.
-    const platform: PlatformAdapter = new FakePtyAdapter();
-    platform.playwright = async () => ({ ok: true });
-    platform.agentBrowserPopOut = async () => ({ ok: true });
-    setPlatform(platform);
+    installBrowserHost();
     const registration = registerStubScreen('tool', {
       snapshot: { ...STUB_SCREEN, renderMode: 'ab-screencast' },
       renderModes: ['ab-screencast', 'iframe'],

@@ -24,7 +24,7 @@ const RemotePairingModalHost = lazy(() =>
   })),
 );
 import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
-import { BROWSER_PROVIDER_GUI, browserPlatform } from './wall/browser-automation';
+import { BROWSER_PROVIDER_GUI, hostSupportsBrowser } from './wall/browser-automation';
 import { parseRenderMode } from 'dor-lib-common/browser-providers';
 import { isToolRender } from '../lib/platform/tool-types';
 import { closeBrowserSurface, requestBrowserRenderMode, whenBrowserLaunched } from './wall/agent-browser-surface-controller';
@@ -1983,8 +1983,7 @@ export function Wall({
       if (isToolParams(params)) {
         if (mode === currentRenderMode || !isToolRender(mode)) return;
         const url = browserUrlFromParams(params);
-        const platform = getPlatform();
-        if (!url || (mode === 'ab-screencast' && !platform.agentBrowserOpen)) return;
+        if (!url || (mode === 'ab-screencast' && !hostSupportsBrowser('agent-browser'))) return;
         closeBrowserSurface(id, params);
         // The Tool's browser launches itself, in the Tool's own session.
         lath.store.updateParams(id, mode === 'ab-screencast'
@@ -2036,7 +2035,7 @@ export function Wall({
           console.warn(`[dormouse] cannot swap surface '${id}' to ${BROWSER_PROVIDER_GUI[provider].label}: ${why}`);
           return;
         }
-        if (!browserPlatform(provider, cwd).agentBrowserOpen) return;
+        if (!hostSupportsBrowser(provider)) return;
         // A browser that cannot come up gives the previous renderer back in
         // place, even minimized meanwhile, at the URL: the embed, or the
         // previous provider reopened in its own session, so its key and handle
@@ -2062,7 +2061,7 @@ export function Wall({
       // or an agent-browser pane for a page the iframe would refuse.
       const reference = buildDorSurfaces().find((s) => s.id === id);
       if (!reference) return;
-      const agentBrowser = !!iframeRefusal(url) && !!getPlatform().agentBrowserOpen;
+      const agentBrowser = !!iframeRefusal(url) && hostSupportsBrowser('agent-browser');
       createContentSurface({
         minimized: false,
         // A launch that fails takes its pane with it.
@@ -2103,7 +2102,6 @@ export function Wall({
     const cwd = getTerminalPaneState(id)?.cwd?.path;
     // Null for the iframe embed, which launches no browser.
     const provider = parseRenderMode(mode).provider;
-    const platform = provider ? browserPlatform(provider, cwd) : null;
     // Persisted as `contextPortKey`: agent-browser keeps the `agent` it had
     // before Playwright, so a restored pane is still found and revealed.
     const key = `${id}:${entry.port}:${provider === 'agent-browser' ? 'agent' : provider ?? 'iframe'}`;
@@ -2122,7 +2120,7 @@ export function Wall({
         else updateSurfaceParams(existing.id, { url: entry.url });
         return;
       }
-      if (provider && !platform?.agentBrowserOpen) throw new Error(`${BROWSER_PROVIDER_GUI[provider].label} is unavailable on this host`);
+      if (provider && !hostSupportsBrowser(provider)) throw new Error(`${BROWSER_PROVIDER_GUI[provider].label} is unavailable on this host`);
       const created = createContentSurface({ minimized: false, reference, preserveSource: true,
         params: {
           surfaceType: 'browser', renderMode: mode, url: entry.url, cwd, syncEngaged: true, contextPortKey: key,

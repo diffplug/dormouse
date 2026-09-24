@@ -16,7 +16,7 @@ import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
 import type { WebviewMessage, ExtensionMessage } from './message-types';
 import type { DorControlRequest } from './pty-manager';
 import { dorWorkspaceRefusal } from './dor-workspace-guard';
-import { createStreamRelayUrl, runAgentBrowserAttach, runAgentBrowserCommand, runAgentBrowserEdit, runAgentBrowserOpen, runAgentBrowserPopIn, runAgentBrowserPopOut, runAgentBrowserScreenshot, runPlaywrightRequest } from './agent-browser-host';
+import { runBrowserRequest } from './agent-browser-host';
 import { createIframeProxyUrl } from './iframe-proxy-host';
 import { toolControl } from './tool-host';
 import type { ToolHostRequest } from '../../lib/src/lib/platform/types';
@@ -667,96 +667,11 @@ export function attachRouter(
           void vscode.commands.executeCommand(msg.command);
         }
         break;
-      case 'playwright:request':
-        runPlaywrightRequest(msg.request).then(result => post({ type: 'playwright:result', requestId: msg.requestId, result } satisfies ExtensionMessage));
-        break;
-      case 'agentBrowser:command':
-        runAgentBrowserCommand(
-          msg.session,
-          Array.isArray(msg.args) ? msg.args : [],
-          typeof msg.binaryPath === 'string' ? msg.binaryPath : undefined,
-        ).then((result) => {
-          post({
-            type: 'agentBrowser:commandResult', requestId: msg.requestId, ...result,
-          } satisfies ExtensionMessage);
-        });
-        break;
-      case 'agentBrowser:edit':
-        runAgentBrowserEdit(
-          msg.session,
-          msg.op,
-          typeof msg.binaryPath === 'string' ? msg.binaryPath : undefined,
-        ).then((result) => {
-          post({
-            type: 'agentBrowser:editResult', requestId: msg.requestId, ...result,
-          } satisfies ExtensionMessage);
-        });
-        break;
-      case 'agentBrowser:screenshot':
-        runAgentBrowserScreenshot(
-          msg.session,
-          { format: msg.format, quality: msg.quality },
-          typeof msg.binaryPath === 'string' ? msg.binaryPath : undefined,
-        ).then((result) => {
-          post({
-            type: 'agentBrowser:screenshotResult', requestId: msg.requestId, ...result,
-          } satisfies ExtensionMessage);
-        });
-        break;
-      case 'agentBrowser:attach':
-        runAgentBrowserAttach(
-          msg.session,
-          {
-            url: typeof msg.url === 'string' ? msg.url : undefined,
-            headed: msg.headed === true,
-          },
-          typeof msg.binaryPath === 'string' ? msg.binaryPath : undefined,
-        ).then((result) => {
-          post({
-            type: 'agentBrowser:attachResult', requestId: msg.requestId, ...result,
-          } satisfies ExtensionMessage);
-        });
-        break;
-      case 'agentBrowser:getStreamUrl': {
-        const streamPort = Number.isInteger(msg.port) && msg.port > 0 && msg.port <= 65535 ? msg.port : null;
-        if (!streamPort) {
-          post({ type: 'agentBrowser:streamUrl', requestId: msg.requestId, url: null } satisfies ExtensionMessage);
-          break;
-        }
-        createStreamRelayUrl(streamPort).then(
-          (url) => post({
-            type: 'agentBrowser:streamUrl', requestId: msg.requestId,
-            url,
-          } satisfies ExtensionMessage),
-          () => post({ type: 'agentBrowser:streamUrl', requestId: msg.requestId, url: null } satisfies ExtensionMessage),
-        );
-        break;
-      }
-      case 'agentBrowser:open':
-        runAgentBrowserOpen(
-          typeof msg.url === 'string' ? msg.url : '',
-          { headed: msg.headed === true, session: typeof msg.session === 'string' ? msg.session : undefined },
-          typeof msg.binaryPath === 'string' ? msg.binaryPath : undefined,
-        ).then((result) => {
-          post({ type: 'agentBrowser:openResult', requestId: msg.requestId, ...result } satisfies ExtensionMessage);
-        });
-        break;
-      case 'agentBrowser:popOut':
-        runAgentBrowserPopOut(
-          msg.session,
-          { url: typeof msg.url === 'string' ? msg.url : undefined, rect: msg.rect },
-          typeof msg.binaryPath === 'string' ? msg.binaryPath : undefined,
-        ).then((result) => {
-          post({ type: 'agentBrowser:popResult', requestId: msg.requestId, ...result } satisfies ExtensionMessage);
-        });
-        break;
-      case 'agentBrowser:popIn':
-        runAgentBrowserPopIn(
-          msg.session,
-          { url: typeof msg.url === 'string' ? msg.url : undefined },
-          typeof msg.binaryPath === 'string' ? msg.binaryPath : undefined,
-        ).then((result) => {
-          post({ type: 'agentBrowser:popResult', requestId: msg.requestId, ...result } satisfies ExtensionMessage);
+      case 'browser:request':
+        // Validated host-side (`parseBrowserRequest`): the request arrives from
+        // the webview realm.
+        runBrowserRequest(msg.request).then((result) => {
+          post({ type: 'browser:result', requestId: msg.requestId, result } satisfies ExtensionMessage);
         });
         break;
       case 'tool:control':

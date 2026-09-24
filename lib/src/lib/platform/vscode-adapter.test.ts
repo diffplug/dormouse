@@ -37,6 +37,7 @@ import { HOST_MESSAGE_TOKEN_FIELD, HOST_MESSAGE_TOKEN_GLOBAL } from '../vscode-m
 import { NOTEPAD_VOLATILE_GLOBAL } from '../vscode-notepad-global';
 import type { NotepadArchiveV1, VolatileNotepadSnapshot } from '../notepad/types';
 import { VSCodeAdapter } from './vscode-adapter';
+import { BROWSER_REQUEST_TIMEOUT_MS } from './browser-automation';
 
 /** Stand-in for the per-boot token the extension host injects at webview boot. */
 const BURROW_TOKEN = 'test-host-message-token';
@@ -455,7 +456,7 @@ describe('VSCodeAdapter PTY exit handling', () => {
 // (docs/specs/notepad.md). What is covered here is what this transport adds: the
 // compare-and-swap shape on the wire, failures that reject rather than resolve,
 // and the boot mirror being consumable exactly once.
-describe('VSCodeAdapter agent-browser replies', () => {
+describe('VSCodeAdapter browser requests', () => {
   beforeEach(stubWebviewEnv);
   afterEach(() => {
     vi.useRealTimers();
@@ -463,34 +464,40 @@ describe('VSCodeAdapter agent-browser replies', () => {
     vi.clearAllMocks();
   });
 
+  it('declares both providers', () => {
+    expect(new VSCodeAdapter().browserProviders).toEqual(['agent-browser', 'playwright']);
+  });
+
   // A capture queued behind a page-loading `open` answers only after the
-  // CLI's 25s action timeout; giving up sooner makes the webview ask again.
+  // CLI's 25s action timeout, and a launch the host bounds to answer inside
+  // the same wait; giving up sooner makes the webview ask again.
   it('waits out a daemon command held behind a page load', async () => {
     vi.useFakeTimers();
     const adapter = new VSCodeAdapter();
+    const binding = { session: 'sess' };
     for (const request of [
-      () => adapter.agentBrowserScreenshot('sess', { format: 'jpeg' }),
-      () => adapter.agentBrowserCommand('sess', ['reload']),
-      () => adapter.agentBrowserEdit('sess', 'copy'),
+      () => adapter.browser({ provider: 'agent-browser', binding, op: 'screenshot', format: 'jpeg' }),
+      () => adapter.browser({ provider: 'agent-browser', binding, op: 'history', dir: 'reload' }),
+      () => adapter.browser({ provider: 'agent-browser', binding, op: 'edit', edit: 'copy' }),
     ]) {
       let settled: unknown;
       void request().then((result) => { settled = result; });
-      await vi.advanceTimersByTimeAsync(26_000);
+      await vi.advanceTimersByTimeAsync(BROWSER_REQUEST_TIMEOUT_MS - 1);
       expect(settled).toBeUndefined();
-      await vi.advanceTimersByTimeAsync(4_000);
-      expect(JSON.stringify(settled)).toMatch(/timed out/);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(settled).toEqual({ ok: false, error: expect.stringMatching(/timed out/) });
     }
   });
 
-  it('keeps everything an attach answers with', async () => {
+  it('carries the typed request out and keeps everything the host answers with', async () => {
     const adapter = new VSCodeAdapter();
-    const attached = adapter.agentBrowserAttach('sess', { url: 'https://example.com/' });
-    const request = postMessage.mock.calls.map(([message]) => message).find((message) => message.type === 'agentBrowser:attach');
-    expect(request).toMatchObject({ session: 'sess', url: 'https://example.com/' });
+    const attached = adapter.browser({ provider: 'agent-browser', binding: { session: 'sess' }, op: 'attach', url: 'https://example.com/' });
+    const request = postMessage.mock.calls.map(([message]) => message).find((message) => message.type === 'browser:request');
+    expect(request.request).toEqual({ provider: 'agent-browser', binding: { session: 'sess' }, op: 'attach', url: 'https://example.com/' });
     windowTarget.dispatchEvent(hostMessage({
-      type: 'agentBrowser:attachResult', requestId: request.requestId, ok: true, wsPort: 4321, relaunched: true, headed: true, nativeIdentity: 'id',
+      type: 'browser:result', requestId: request.requestId, result: { ok: true, wsPort: 4321, relaunched: true, headed: true, nativeIdentity: 'id' },
     }));
-    expect(await attached).toEqual({ ok: true, wsPort: 4321, relaunched: true, headed: true, nativeIdentity: 'id', error: undefined });
+    expect(await attached).toEqual({ ok: true, wsPort: 4321, relaunched: true, headed: true, nativeIdentity: 'id' });
   });
 });
 

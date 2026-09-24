@@ -1,30 +1,26 @@
 /**
  * Host-agnostic agent-browser support (docs/specs/dor-browser.md →
- * "Agent-Browser Host Capabilities"). The single source of truth for both hosts:
- *
- *   - VS Code: the extension host imports this directly
- *     (`vscode-ext/src/agent-browser-host.ts`).
- *   - Standalone: bundled to `standalone/sidecar/agent-browser-host.cjs` and run
- *     by the Node sidecar, fronted by thin Rust forwarders — exactly how the
- *     iframe proxy (`iframe-proxy.ts`) is shared.
+ * "Agent-Browser Host Capabilities"), run behind the shared browser host
+ * (`browser-host.ts`) on both hosts: imported by the VS Code extension host,
+ * bundled into the standalone sidecar's `browser-host.cjs`.
  *
  * Everything here is plain Node (child_process / fs / crypto), so the *same*
  * code runs on both hosts. Only two genuinely host-specific bits are injected:
  * writing the OS clipboard (for the macOS editing chords) and logging.
  *
- * Narrow capabilities, all on behalf of the webview:
+ * Narrow capabilities, all on behalf of the webview (validated by
+ * `parseBrowserRequest` before they arrive here):
  *
- * 1. `command` — runs the user's agent-browser binary against a session for tab
- *    actions, navigation, and teardown. Only what `parseWebviewCommand`
- *    accepts runs; not a general exec channel.
+ * 1. `act` — navigation, history, tab, viewport/device, CDP-endpoint and close
+ *    operations, each rendered to one fixed agent-browser argv; not a general
+ *    exec channel.
  * 2. `edit` — host-owned `eval` for the macOS editing chords
  *    (select-all/copy/cut) the stream input path can't dispatch; copy/cut land
  *    on the OS clipboard.
  * 3. `screenshot` — captures one device-resolution frame and returns the bytes.
  * 4. `attach` — reports a session's live stream port from its state files,
  *    never spawning a daemon; relaunches a gone one at the page the pane had.
- * 5. `open` — opens a url in a new managed session (or a caller-named one),
- *    backing every GUI launch (docs/specs/dor-browser.md → "Agent-Browser
+ * 5. `open` — opens a url in a new managed session, backing every GUI launch (docs/specs/dor-browser.md → "Agent-Browser
  *    Connection").
  * 6. `popOut` / `popIn` — relaunch a session headed/headless at its live active
  *    url (Chrome's mode is fixed at launch, so this is a close + relaunch).
@@ -55,16 +51,7 @@ import {
 import { randomBytes } from 'crypto';
 import { isAllowedAgentBrowserBinary } from '../lib/agent-browser-binary';
 import { type AgentBrowserTab, parseAgentBrowserTabs } from '../lib/agent-browser-tab';
-import type {
-  AgentBrowserAttachResult,
-  AgentBrowserCommandResult,
-  AgentBrowserEditOp,
-  AgentBrowserEditResult,
-  AgentBrowserOpenResult,
-  AgentBrowserPopResult,
-  AgentBrowserScreenshotResult,
-} from '../lib/platform/types';
-import { isBrowsableUrl } from '../lib/platform/browser-automation';
+import { isBrowsableUrl, type BrowserEditOp, type BrowserResult } from '../lib/platform/browser-automation';
 import { privateCaptureDir } from './private-capture-dir';
 import {
   captureFormat,
@@ -72,24 +59,39 @@ import {
   generateGuiSession,
   isAgentBrowserSession,
   jpegQuality,
-  parseWebviewCommand,
-  type WebviewCommand,
+  type BrowserAct,
 } from './browser-host-shared';
 
-/** The agent-browser argv for a parsed webview command — rebuilt here, so no
- *  webview token reaches the CLI as it came. */
-function webviewArgv(command: WebviewCommand): string[] {
-  switch (command.kind) {
-    case 'open': return ['open', command.url];
-    case 'cdp-url': return ['get', 'cdp-url'];
-    case 'tab-list': return ['tab', 'list', '--json'];
-    case 'tab-select': return ['tab', command.tab];
-    case 'tab-close': return ['tab', 'close', command.tab];
-    case 'viewport': return ['set', 'viewport', String(command.width), String(command.height), String(command.dpr)];
-    case 'device': return ['set', 'device', command.name];
-    default: return [command.kind];
+/** The agent-browser argv for an operation — rebuilt from its validated
+ *  fields, so no caller token reaches the CLI as it came. */
+function actArgv(act: BrowserAct): string[] {
+  switch (act.op) {
+    case 'navigate': return ['open', act.url];
+    case 'history': return [act.dir];
+    case 'tab': return act.action === 'select' ? ['tab', act.tabId] : ['tab', 'close', act.tabId];
+    case 'viewport': return ['set', 'viewport', String(act.width), String(act.height), String(act.dpr)];
+    case 'device': return ['set', 'device', act.name];
+    case 'cdpUrl': return ['get', 'cdp-url'];
+    case 'close': return ['close'];
   }
 }
+
+/** The browser-level CDP WebSocket `get cdp-url` printed, plain or JSON. */
+function parseCdpUrl(stdout: string): string | null {
+  const trimmed = stdout.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = JSON.parse(trimmed) as { data?: { result?: unknown }; result?: unknown; url?: unknown };
+    const value = parsed.data?.result ?? parsed.result ?? parsed.url;
+    if (typeof value === 'string' && value.startsWith('ws://')) return value;
+  } catch {
+    // Plain text is the common CLI output.
+  }
+  return trimmed.match(/ws:\/\/\S+/)?.[0] ?? null;
+}
+
+/** One CLI run's outcome. */
+type CliResult = { exitCode: number; stdout: string; stderr: string };
 
 // A capture can queue behind a page-loading `open` for the CLI's whole 25s
 // action timeout; past this it is wedged, and killed so it cannot pin
@@ -118,14 +120,14 @@ export type AgentBrowserScreenshotFileResult =
   | { ok: false; error: string };
 
 export interface AgentBrowserHost {
-  command(session: string, args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult>;
-  edit(session: string, op: AgentBrowserEditOp, binaryPath?: string): Promise<AgentBrowserEditResult>;
-  screenshot(session: string, opts: { format?: 'jpeg' | 'png'; quality?: number }, binaryPath?: string): Promise<AgentBrowserScreenshotResult>;
+  act(session: string, act: BrowserAct, binaryPath?: string): Promise<BrowserResult>;
+  edit(session: string, op: BrowserEditOp, binaryPath?: string): Promise<BrowserResult>;
+  screenshot(session: string, opts: { format?: 'jpeg' | 'png'; quality?: number }, binaryPath?: string): Promise<BrowserResult>;
   screenshotToFile(session: string, opts: { format?: 'jpeg' | 'png'; quality?: number }, binaryPath?: string): Promise<AgentBrowserScreenshotFileResult>;
-  attach(session: string, opts: { url?: string; headed?: boolean }, binaryPath?: string): Promise<AgentBrowserAttachResult>;
-  open(url: string, opts: { headed?: boolean; session?: string }, binaryPath?: string): Promise<AgentBrowserOpenResult>;
-  popOut(session: string, opts: { rect?: { x: number; y: number; width: number; height: number }; url?: string }, binaryPath?: string): Promise<AgentBrowserPopResult>;
-  popIn(session: string, opts: { url?: string }, binaryPath?: string): Promise<AgentBrowserPopResult>;
+  attach(session: string, opts: { url?: string; headed?: boolean }, binaryPath?: string): Promise<BrowserResult>;
+  open(url: string, opts: { headed?: boolean }, binaryPath?: string): Promise<BrowserResult>;
+  popOut(session: string, opts: { url?: string }, binaryPath?: string): Promise<BrowserResult>;
+  popIn(session: string, opts: { url?: string }, binaryPath?: string): Promise<BrowserResult>;
   closePoppedOut(): Promise<void>;
 }
 
@@ -161,12 +163,11 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   // realm and from a pane's persisted Lath params, so an unchecked one is
   // arbitrary local execution in the extension host or the Tauri sidecar — the
   // exact escape the nonce CSP exists to prevent, and reachable without any user
-  // interaction on the next launch. The argv check in `command()` does not
-  // cover it: `attach`, `open` and `popOut` supply their own args and
-  // take a `binaryPath` of their own. A refused path is dropped, not fatal: the
+  // interaction on the next launch. The request validation does not cover it:
+  // every entry point takes a `binaryPath` of its own. A refused path is dropped, not fatal: the
   // host's own candidates still run, so a stale or hostile value degrades to
   // "resolve it yourself" rather than to a broken surface.
-  async function runWithBinaryFallback(args: string[], binaryPath?: string, timeoutMs?: number): Promise<AgentBrowserCommandResult> {
+  async function runWithBinaryFallback(args: string[], binaryPath?: string, timeoutMs?: number): Promise<CliResult> {
     const configured = process.env[AGENT_BROWSER_BIN_ENV];
     if (binaryPath !== undefined && !isAllowedAgentBrowserBinary(binaryPath, configured)) {
       log(`[agent-browser] refused a caller-supplied binary path that is not an agent-browser: ${JSON.stringify(binaryPath)}`);
@@ -342,10 +343,10 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   type Launch = {
     wsPort: number | undefined;
     /** Settles when `open` itself returns — possibly long after the launch. */
-    opened: Promise<AgentBrowserCommandResult>;
+    opened: Promise<CliResult>;
   };
   async function launch(session: string, args: string[], binaryPath: string | undefined, replacedPid?: number): Promise<Launch> {
-    let settled: AgentBrowserCommandResult | undefined;
+    let settled: CliResult | undefined;
     const opened = runWithBinaryFallback(args, binaryPath).then((result) => {
       settled = result;
       return result;
@@ -368,13 +369,13 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     }
   }
 
-  function logOpened(label: string, opened: Promise<AgentBrowserCommandResult>): void {
+  function logOpened(label: string, opened: Promise<CliResult>): void {
     void opened.then((result) => {
       log(`[ab-relaunch] ${label} exit=${result.exitCode}${result.stderr.trim() ? ` stderr=${result.stderr.trim()}` : ''}`);
     });
   }
 
-  function launchFailure(label: string, result: AgentBrowserCommandResult): string {
+  function launchFailure(label: string, result: CliResult): string {
     const stderr = result.stderr.trim();
     if (stderr) return stderr;
     return result.exitCode === 0
@@ -462,28 +463,27 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     screenshotNames.delete(session);
   }
 
-  async function command(session: string, args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult> {
-    if (!isAgentBrowserSession(session)) {
-      return { exitCode: 1, stdout: '', stderr: 'a valid session name is required' };
-    }
-    const parsed = parseWebviewCommand(args);
-    if (!parsed) {
-      const shown = Array.isArray(args) ? args.map(String).join(' ') : String(args);
-      return { exitCode: 1, stdout: '', stderr: `agent-browser '${shown}' is not allowed from the webview` };
-    }
+  async function act(session: string, request: BrowserAct, binaryPath?: string): Promise<BrowserResult> {
+    if (!isAgentBrowserSession(session)) return { ok: false, error: 'a valid session name is required' };
     // An explicit close (kill / render-swap) tears the session down itself, so
     // it's no longer ours to clean up on shutdown. It also invalidates a
     // post-open sweep left by a fast-returning relaunch: once closed, no later
     // daemon command may recreate this otherwise-untracked session.
-    if (parsed.kind === 'close') {
+    if (request.op === 'close') {
       poppedOutSessions.delete(session);
       relaunchGenerations.delete(session);
       forgetInFlight(session);
     }
-    return runWithBinaryFallback(['--session', session, ...webviewArgv(parsed)], binaryPath);
+    const result = await runWithBinaryFallback(['--session', session, ...actArgv(request)], binaryPath);
+    if (result.exitCode !== 0) {
+      return { ok: false, error: result.stderr.trim() || result.stdout.trim() || `agent-browser exited ${result.exitCode}` };
+    }
+    if (request.op !== 'cdpUrl') return { ok: true };
+    const url = parseCdpUrl(result.stdout);
+    return url ? { ok: true, url } : { ok: false, error: 'agent-browser printed no CDP endpoint' };
   }
 
-  async function edit(session: string, op: AgentBrowserEditOp, binaryPath?: string): Promise<AgentBrowserEditResult> {
+  async function edit(session: string, op: BrowserEditOp, binaryPath?: string): Promise<BrowserResult> {
     if (!isAgentBrowserSession(session)) {
       return { ok: false, error: 'a valid session name is required' };
     }
@@ -573,11 +573,11 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     session: string,
     opts: { format?: 'jpeg' | 'png'; quality?: number },
     binaryPath?: string,
-  ): Promise<AgentBrowserScreenshotResult> {
+  ): Promise<BrowserResult> {
     // Joined whole, read and unlink included: a caller joining only the capture
     // would read a file the first caller has already removed.
     const format = captureFormat(opts.format);
-    return joinInFlight(session, `bytes:${format}`, async (): Promise<AgentBrowserScreenshotResult> => {
+    return joinInFlight(session, `bytes:${format}`, async (): Promise<BrowserResult> => {
       const shot = await screenshotToFile(session, opts, binaryPath);
       if (!shot.ok) return { ok: false, error: shot.error };
       try {
@@ -633,9 +633,9 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     session: string,
     opts: { url?: string; headed?: boolean },
     binaryPath?: string,
-  ): Promise<AgentBrowserAttachResult> {
+  ): Promise<BrowserResult> {
     if (!isAgentBrowserSession(session)) return { ok: false, error: 'a valid session name is required' };
-    return joinInFlight(session, 'attach', async (): Promise<AgentBrowserAttachResult> => {
+    return joinInFlight(session, 'attach', async (): Promise<BrowserResult> => {
       const daemon = await daemonState(session);
       if (daemon.wsPort !== undefined) return { ok: true, wsPort: daemon.wsPort };
       if (daemon.alive) return { ok: false, error: `agent-browser session '${session}' is not streaming` };
@@ -650,17 +650,14 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     });
   }
 
-  // Open <url> in a new managed session, or in the caller's `session` (a Tool's
-  // own, or the one a failed swap restores) — every GUI launch
-  // (docs/specs/dor-browser.md → "Agent-Browser Connection"). A live daemon for
-  // that session just navigates. With `headed`, the process launches headed in
-  // one shot so embed→popout doesn't open a headless browser only to tear it down.
-  async function open(url: string, opts: { headed?: boolean; session?: string }, binaryPath?: string): Promise<AgentBrowserOpenResult> {
+  // Open <url> in a new managed session — every GUI launch that names none
+  // (docs/specs/dor-browser.md → "Agent-Browser Connection"); one that names a
+  // session relaunches it (`popOut` / `popIn`). With `headed`, the process
+  // launches headed in one shot so embed→popout doesn't open a headless browser
+  // only to tear it down.
+  async function open(url: string, opts: { headed?: boolean }, binaryPath?: string): Promise<BrowserResult> {
     if (!isBrowsableUrl(url)) return { ok: false, error: 'an http(s) url is required' };
-    if (opts?.session !== undefined && !isAgentBrowserSession(opts.session)) {
-      return { ok: false, error: 'a valid session name is required' };
-    }
-    const session = opts?.session ?? generateGuiSession();
+    const session = generateGuiSession();
     const launched = await coldLaunch('open', session, openArgs(session, url, !!opts?.headed, binaryPath), binaryPath);
     if ('error' in launched) return { ok: false, error: launched.error };
     return { ok: true, session, wsPort: launched.wsPort, ...(binaryPath ? { binaryPath } : {}) };
@@ -669,14 +666,13 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   // Pop-out is a relaunch, not a live toggle: Chrome's headed/headless choice is
   // fixed at launch (spec → "Pop-Out"). Close the headless session, then
   // reopen it headed at the active URL. (v1 preserves the active tab URL only;
-  // multi-tab + profile/cookie restore are tracked follow-ups. Window
-  // positioning over opts.rect is deferred — neither host acts on it yet, so the
-  // window opens where Chrome places it.)
+  // multi-tab + profile/cookie restore are tracked follow-ups. The window opens
+  // where Chrome places it.)
   async function popOut(
     session: string,
-    opts: { rect?: { x: number; y: number; width: number; height: number }; url?: string },
+    opts: { url?: string },
     binaryPath?: string,
-  ): Promise<AgentBrowserPopResult> {
+  ): Promise<BrowserResult> {
     if (!isAgentBrowserSession(session)) return { ok: false, error: 'a valid session name is required' };
     const generation = beginRelaunch(session);
     const url = relaunchUrl(opts?.url);
@@ -700,7 +696,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     binaryPath: string | undefined,
     replacedPid: number | undefined,
     generation: number,
-  ): Promise<AgentBrowserPopResult> {
+  ): Promise<BrowserResult> {
     const { wsPort, opened } = await launch(session, args, binaryPath, replacedPid);
     logOpened(`${label} open`, opened);
     if (wsPort === undefined) {
@@ -725,7 +721,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     session: string,
     opts: { url?: string },
     binaryPath?: string,
-  ): Promise<AgentBrowserPopResult> {
+  ): Promise<BrowserResult> {
     if (!isAgentBrowserSession(session)) return { ok: false, error: 'a valid session name is required' };
     const generation = beginRelaunch(session);
     const url = relaunchUrl(opts?.url);
@@ -760,5 +756,5 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     ]);
   }
 
-  return { command, edit, screenshot, screenshotToFile, attach, open, popOut, popIn, closePoppedOut };
+  return { act, edit, screenshot, screenshotToFile, attach, open, popOut, popIn, closePoppedOut };
 }

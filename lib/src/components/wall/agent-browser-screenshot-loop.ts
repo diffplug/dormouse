@@ -1,4 +1,4 @@
-import type { AgentBrowserScreenshotResult } from '../../lib/platform/types';
+import type { BrowserResult } from '../../lib/platform/browser-automation';
 
 // Fast non-cryptographic hash (djb2, xor length) over the raw screenshot bytes —
 // the byte analogue of the connection's frame dedup. A static page the daemon
@@ -13,7 +13,7 @@ function djb2Bytes(bytes: Uint8Array): number {
 export interface ScreenshotLoopDeps {
   /** Start one host capture, or null when none can be taken now — the
    *  controller's daemon gate decides. */
-  capture: (opts: { format: 'jpeg'; quality: number }) => Promise<AgentBrowserScreenshotResult> | null;
+  capture: (opts: { format: 'jpeg'; quality: number }) => Promise<BrowserResult> | null;
   isCapable: () => boolean;
   draw: (bitmap: ImageBitmap) => void;
   /** A monotonic draw-target generation. Included in the byte-dedup key so a

@@ -1,6 +1,9 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { vi } from 'vitest';
+import { BROWSER_PROVIDER_IDS, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
+import { FakePtyAdapter, setPlatform } from '../../lib/platform';
+import type { BrowserOp, BrowserRequest, BrowserResult } from '../../lib/platform/browser-automation';
 import type { WallActions } from './wall-context';
 import {
   registerAgentBrowserScreen,
@@ -197,4 +200,30 @@ export function registerStubScreen(
     hostCapable: init.hostCapable ?? true,
     renderModes: init.renderModes ?? ['ab-screencast', 'ab-popout', 'pw-screencast', 'pw-popout', 'iframe'],
   });
+}
+
+/** How a fake browser host answers one kind of request. */
+export type BrowserAnswers = {
+  [K in BrowserOp['op']]?: (request: Extract<BrowserRequest, { op: K }>) => BrowserResult | Promise<BrowserResult>;
+};
+
+/**
+ * Install a platform whose host drives `providers`, answering each typed
+ * browser request from `answers` by operation — `{ ok: true }` where none is
+ * given. `answers` stays live, so a test may swap one mid-flight; `requests`
+ * reads back every request of one kind, in order.
+ */
+export function installBrowserHost(
+  answers: BrowserAnswers = {},
+  providers: readonly BrowserAutomationProvider[] = BROWSER_PROVIDER_IDS,
+) {
+  const browser = vi.fn(async (request: BrowserRequest): Promise<BrowserResult> => {
+    const answer = answers[request.op] as ((r: BrowserRequest) => BrowserResult | Promise<BrowserResult>) | undefined;
+    return (await answer?.(request)) ?? { ok: true };
+  });
+  const platform = Object.assign(new FakePtyAdapter(), { browserProviders: providers, browser });
+  setPlatform(platform);
+  const requests = <K extends BrowserOp['op']>(op: K): Extract<BrowserRequest, { op: K }>[] =>
+    browser.mock.calls.map(([request]) => request).filter((request): request is Extract<BrowserRequest, { op: K }> => request.op === op);
+  return { platform, browser, answers, requests };
 }
