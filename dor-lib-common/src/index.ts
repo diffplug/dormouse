@@ -7,13 +7,25 @@ export {
   resolveBinaryPath,
 } from './resolve-binary.js';
 export {
+  BROWSER_PROVIDER_IDS,
+  BROWSER_PROVIDERS,
   isAllowedAgentBrowserBinary,
   isAllowedPlaywrightBinary,
+  isBrowserProvider,
+  parseRenderMode,
   parseStreamPort,
+  renderModeFor,
   sessionForKey,
   streamStatusArgs,
   AGENT_BROWSER_BIN_ENV,
   DEFAULT_AGENT_BROWSER_BIN,
   PLAYWRIGHT_BIN_ENV,
   DEFAULT_PLAYWRIGHT_BIN,
-} from './agent-browser.js';
+} from './browser-providers.js';
+export type {
+  AutomatedRenderMode,
+  BrowserAutomationProvider,
+  BrowserPresentation,
+  ParsedRenderMode,
+  SurfaceRenderMode,
+} from './browser-providers.js';

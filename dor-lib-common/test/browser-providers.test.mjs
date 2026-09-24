@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseStreamPort, sessionForKey } from '../dist/index.js';
+import { BROWSER_PROVIDER_IDS, parseRenderMode, parseStreamPort, renderModeFor, sessionForKey } from '../dist/index.js';
 
 test('sessionForKey namespaces a key under the workspace', () => {
   assert.equal(sessionForKey('default'), 'dormouse.1.default');
@@ -28,4 +28,21 @@ test('parseStreamPort returns undefined for malformed or portless output', () =>
   assert.equal(parseStreamPort('not json'), undefined);
   assert.equal(parseStreamPort(JSON.stringify({ data: {} })), undefined);
   assert.equal(parseStreamPort(JSON.stringify({ port: 'nope' })), undefined);
+});
+
+test('parseRenderMode decodes every automated mode and renderModeFor inverts it', () => {
+  for (const provider of BROWSER_PROVIDER_IDS) {
+    for (const presentation of ['screencast', 'popout']) {
+      const mode = renderModeFor(provider, presentation);
+      assert.deepEqual(parseRenderMode(mode), { provider, presentation, mode });
+    }
+  }
+  assert.equal(renderModeFor('agent-browser', 'screencast'), 'ab-screencast');
+  assert.equal(renderModeFor('playwright', 'popout'), 'pw-popout');
+});
+
+test('parseRenderMode reads anything else as the embed, inherited names included', () => {
+  for (const mode of ['iframe', undefined, null, 'constructor', 'toString', 'ab-', 7]) {
+    assert.deepEqual(parseRenderMode(mode), { provider: null, presentation: 'iframe', mode: 'iframe' });
+  }
 });

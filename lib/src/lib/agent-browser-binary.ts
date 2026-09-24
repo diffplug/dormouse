@@ -6,12 +6,16 @@
  * webview and the Node hosts.
  */
 
-import { isAllowedAgentBrowserBinary, isAllowedPlaywrightBinary } from 'dor-lib-common/agent-browser';
-import type { BrowserAutomationProvider } from './platform/browser-automation';
+import {
+  BROWSER_PROVIDERS,
+  isAllowedAgentBrowserBinary,
+  isAllowedPlaywrightBinary,
+  type BrowserAutomationProvider,
+} from 'dor-lib-common/browser-providers';
 
 export { isAllowedAgentBrowserBinary, isAllowedPlaywrightBinary };
 
 /** The webview's gate for whichever provider will spawn `candidate`. */
 export function isAllowedBinaryFor(provider: BrowserAutomationProvider, candidate: unknown): candidate is string {
-  return provider === 'playwright' ? isAllowedPlaywrightBinary(candidate) : isAllowedAgentBrowserBinary(candidate);
+  return BROWSER_PROVIDERS[provider].isAllowedBinary(candidate);
 }

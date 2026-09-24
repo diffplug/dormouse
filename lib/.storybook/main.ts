@@ -50,7 +50,7 @@ const config: StorybookConfig = {
       // specifier to source too.
       'remote-lib-common': path.resolve(here, '..', '..', 'remote-lib-common', 'src'),
       // And `Wall` → `useDorControl` → `connect-port` imports
-      // `dor-lib-common/agent-browser`, whose `exports` point at the same kind of
+      // `dor-lib-common/browser-providers`, whose `exports` point at the same kind of
       // unbuilt `dist`. The directory alias covers the subpath and the bare
       // specifier both.
       'dor-lib-common': path.resolve(here, '..', '..', 'dor-lib-common', 'src'),

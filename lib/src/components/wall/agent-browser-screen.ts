@@ -1,25 +1,30 @@
 /** Per-surface bridge from browser bodies to their separate header and modal;
  * see docs/specs/dor-browser.md → "Browser Chrome". */
 import { useSyncExternalStore } from 'react';
+import { BROWSER_PROVIDERS, parseRenderMode, type SurfaceRenderMode } from 'dor-lib-common/browser-providers';
 
 export type ScreenState = 'SYNCED' | 'SCALED';
 
-/** Canonical renderer values; defaulting belongs to `resolveRenderMode`. */
-export type RenderMode = 'ab-screencast' | 'ab-popout' | 'pw-screencast' | 'pw-popout' | 'iframe';
+/** Canonical renderer values, one per provider presentation plus the embed
+ *  (`dor-lib-common/src/browser-providers.ts`); defaulting belongs to
+ *  `resolveRenderMode`. */
+export type RenderMode = SurfaceRenderMode;
+
+type ProviderAlias = (typeof BROWSER_PROVIDERS)[keyof typeof BROWSER_PROVIDERS]['alias'];
 
 /** Capability-first browser display identity shared by pane chrome, the Display
- *  modal, and minimized Doors. The agent-browser modes always carry the robot;
+ *  modal, and minimized Doors: a provider's screencast resizing with the pane or
+ *  fixed, its popout, or the embed. The automated modes always carry the robot;
  *  the second glyph describes where/how the human view is presented. */
-export type BrowserDisplayMode = 'ab-resize' | 'ab-fixed' | 'ab-popout' | 'pw-resize' | 'pw-fixed' | 'pw-popout' | 'iframe';
+export type BrowserDisplayMode = 'iframe' | `${ProviderAlias}-${'resize' | 'fixed' | 'popout'}`;
 
 export function browserDisplayMode(
   snapshot: Pick<ScreenSnapshot, 'renderMode' | 'syncEngaged'>,
 ): BrowserDisplayMode {
-  if (snapshot.renderMode === 'pw-popout') return 'pw-popout';
-  if (snapshot.renderMode === 'pw-screencast') return snapshot.syncEngaged ? 'pw-resize' : 'pw-fixed';
-  if (snapshot.renderMode === 'iframe') return 'iframe';
-  if (snapshot.renderMode === 'ab-popout') return 'ab-popout';
-  return snapshot.syncEngaged ? 'ab-resize' : 'ab-fixed';
+  const { provider, presentation } = parseRenderMode(snapshot.renderMode);
+  if (provider === null) return 'iframe';
+  const view = presentation === 'popout' ? 'popout' : snapshot.syncEngaged ? 'resize' : 'fixed';
+  return `${BROWSER_PROVIDERS[provider].alias}-${view}`;
 }
 
 export interface ScreenSnapshot {

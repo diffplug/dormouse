@@ -24,7 +24,8 @@ const RemotePairingModalHost = lazy(() =>
   })),
 );
 import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
-import { automationProvider, browserPlatform, PROVIDER_LABEL } from './wall/browser-automation';
+import { BROWSER_PROVIDER_GUI, browserPlatform } from './wall/browser-automation';
+import { parseRenderMode } from 'dor-lib-common/browser-providers';
 import { isToolRender } from '../lib/platform/tool-types';
 import { closeBrowserSurface, requestBrowserRenderMode, whenBrowserLaunched } from './wall/agent-browser-surface-controller';
 import { KILL_CONFIRM_MS, KILL_SHAKE_MS, KillConfirmOverlay, randomKillChar, type ConfirmKill } from './KillConfirm';
@@ -2014,8 +2015,8 @@ export function Wall({
       // the browser at the URL — headed for a popout, so it mounts already
       // popped out — and binds the session it answers with
       // (docs/specs/dor-browser.md → "Display Modal And Render Swaps").
-      const provider = automationProvider(mode);
-      const currentProvider = automationProvider(currentRenderMode);
+      const provider = parseRenderMode(mode).provider;
+      const currentProvider = parseRenderMode(currentRenderMode).provider;
       if (currentRenderMode !== null && provider !== null && provider !== currentProvider) {
         const chromeUrl = getAgentBrowserScreenController(id)?.chrome().url;
         const rawUrl = (typeof chromeUrl === 'string' && chromeUrl)
@@ -2032,7 +2033,7 @@ export function Wall({
         const url = browserSurfaceUrl(rawUrl);
         if (!url) {
           const why = rawUrl ? `'${rawUrl}' is not an http(s) URL` : 'no URL observed yet';
-          console.warn(`[dormouse] cannot swap surface '${id}' to ${PROVIDER_LABEL[provider]}: ${why}`);
+          console.warn(`[dormouse] cannot swap surface '${id}' to ${BROWSER_PROVIDER_GUI[provider].label}: ${why}`);
           return;
         }
         if (!browserPlatform(provider, cwd).agentBrowserOpen) return;
@@ -2101,7 +2102,7 @@ export function Wall({
     if (mode === 'system') { getPlatform().openExternal?.(entry.url); return; }
     const cwd = getTerminalPaneState(id)?.cwd?.path;
     // Null for the iframe embed, which launches no browser.
-    const provider = automationProvider(mode);
+    const provider = parseRenderMode(mode).provider;
     const platform = provider ? browserPlatform(provider, cwd) : null;
     // Persisted as `contextPortKey`: agent-browser keeps the `agent` it had
     // before Playwright, so a restored pane is still found and revealed.
@@ -2121,7 +2122,7 @@ export function Wall({
         else updateSurfaceParams(existing.id, { url: entry.url });
         return;
       }
-      if (provider && !platform?.agentBrowserOpen) throw new Error(`${PROVIDER_LABEL[provider]} is unavailable on this host`);
+      if (provider && !platform?.agentBrowserOpen) throw new Error(`${BROWSER_PROVIDER_GUI[provider].label} is unavailable on this host`);
       const created = createContentSurface({ minimized: false, reference, preserveSource: true,
         params: {
           surfaceType: 'browser', renderMode: mode, url: entry.url, cwd, syncEngaged: true, contextPortKey: key,

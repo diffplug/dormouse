@@ -3,12 +3,14 @@ import type {
   CommandContext,
   StricliProcess,
 } from '@stricli/core';
+import type { BrowserAutomationProvider, SurfaceRenderMode } from 'dor-lib-common/browser-providers';
+
+export type { BrowserAutomationProvider, SurfaceRenderMode };
 
 export type IdFormat = 'refs' | 'ids' | 'both';
 export type SplitDirection = 'left' | 'right' | 'up' | 'down' | 'auto';
 export type ResolvedSplitDirection = 'left' | 'right' | 'up' | 'down';
 export type SurfaceKind = 'terminal' | 'browser' | 'tool';
-export type SurfaceRenderMode = 'iframe' | 'ab-screencast' | 'ab-popout' | 'pw-screencast' | 'pw-popout';
 
 /** What each kind is backed by (`docs/specs/glossary.md` → Panes and Surfaces).
  *  The single source of capability gating; kind switches elsewhere go through
@@ -433,8 +435,6 @@ export interface ResolveAgentBrowserSessionResponse {
    *  GUI-minted sessions, which no `--key` can name. */
   session: string;
 }
-
-export type BrowserAutomationProvider = 'agent-browser' | 'playwright';
 
 /** What a provider's CLI command runs with: its native session, the project
  *  directory it runs in, and the executable. */

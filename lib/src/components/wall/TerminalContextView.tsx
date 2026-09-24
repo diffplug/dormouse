@@ -2,7 +2,9 @@ import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, 
 import { ArrowCounterClockwiseIcon, ArrowLineUpIcon, ArrowSquareOutIcon, BugBeetleIcon, CheckIcon, CircleNotchIcon, CopyIcon, FrameCornersIcon, PauseIcon, SlidersHorizontalIcon, TerminalIcon, WarningIcon, XIcon } from '@phosphor-icons/react';
 import { ELEVATED_PANE_SHADOW, OnOffSwitch, POPUP_SURFACE_CLASS, SUBTLE_ACTION_COLOR_CLASS, SUBTLE_ACTION_INTERACTION_CLASS, SUBTLE_ACTION_REST_COLOR_CLASS, TERMINAL_CONTEXT_SURFACE_CLASS, TERMINAL_CONTEXT_EXIT_MS, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
 import { stepFocus } from '../focus-step';
+import { BROWSER_PROVIDER_IDS, renderModeFor, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
 import { AgentRobotIcon } from './BrowserDisplayIcon';
+import { BROWSER_PROVIDER_GUI } from './browser-automation';
 import type { PortUrlEntry } from './port-url';
 import type { RenderMode } from './agent-browser-screen';
 import type { HelperStatus } from '../../lib/helper-terminal';
@@ -30,14 +32,19 @@ const HELPER_STATUS: Record<HelperStatus, { icon: ReactNode; label: (command: st
   exited: { icon: SETTLED, label: () => 'Helper exited', reset: true },
 };
 
-/** The port row's launch targets; `needs` names the host capability that enables one. */
-const PORT_ACTIONS: readonly ({ mode: PortMode; label: string; icon: ReactNode; text: string } & ({ needs?: undefined } | { needs: 'canIframe' | 'canAgent' | 'canPlaywright'; unavailable: string }))[] = [
+/** The port row's launch targets: the system browser, the embed, then each
+ *  provider's screencast and popout. `needs` names what the host must offer. */
+const PORT_ACTIONS: readonly ({ mode: PortMode; label: string; icon: ReactNode; text: string } & ({ needs?: undefined } | { needs: 'iframe' | BrowserAutomationProvider; unavailable: string }))[] = [
   { mode: 'system', label: 'Open in system browser', icon: <ArrowSquareOutIcon size={15} />, text: 'System browser' },
-  { mode: 'iframe', label: 'Open in iframe embed', needs: 'canIframe', unavailable: 'Iframe unavailable on this host', icon: <FrameCornersIcon size={15} />, text: 'Iframe' },
-  { mode: 'ab-screencast', label: 'Open in agent-browser screencast', needs: 'canAgent', unavailable: 'Agent browser unavailable on this host', icon: <AgentRobotIcon size={17} />, text: 'Agent browser' },
-  { mode: 'ab-popout', label: 'Open in agent-browser popout', needs: 'canAgent', unavailable: 'Popout unavailable on this host', icon: <><AgentRobotIcon size={17} /><ArrowSquareOutIcon size={13} /></>, text: 'Popout' },
-  { mode: 'pw-screencast', label: 'Open in Playwright screencast', needs: 'canPlaywright', unavailable: 'Playwright unavailable on this host', icon: <AgentRobotIcon size={17} />, text: 'Playwright' },
-  { mode: 'pw-popout', label: 'Open in Playwright popout', needs: 'canPlaywright', unavailable: 'Playwright unavailable on this host', icon: <><AgentRobotIcon size={17} /><ArrowSquareOutIcon size={13} /></>, text: 'Playwright popout' },
+  { mode: 'iframe', label: 'Open in iframe embed', needs: 'iframe', unavailable: 'Iframe unavailable on this host', icon: <FrameCornersIcon size={15} />, text: 'Iframe' },
+  ...BROWSER_PROVIDER_IDS.flatMap((provider) => {
+    const { label } = BROWSER_PROVIDER_GUI[provider];
+    const unavailable = `${label} unavailable on this host`;
+    return [
+      { mode: renderModeFor(provider, 'screencast'), label: `Open in ${label} screencast`, needs: provider, unavailable, icon: <AgentRobotIcon size={17} />, text: label },
+      { mode: renderModeFor(provider, 'popout'), label: `Open in ${label} popout`, needs: provider, unavailable, icon: <><AgentRobotIcon size={17} /><ArrowSquareOutIcon size={13} /></>, text: `${label} popout` },
+    ];
+  }),
 ];
 
 const DETAILS = {
@@ -58,8 +65,9 @@ export interface TerminalContextViewProps {
   scan: ContextScan; watchRule?: string | null; watching: boolean; todo: boolean;
   notification?: { title: string | null; body: string | null } | null;
   status: HelperStatus; command: string; warning?: string;
-  canPlaywright?: boolean;
-  explorerLabel: string; canExplore: boolean; canAgent: boolean; canIframe: boolean;
+  /** The providers this host can launch a browser with. */
+  browserProviders: readonly BrowserAutomationProvider[];
+  explorerLabel: string; canExplore: boolean; canIframe: boolean;
   children: ReactNode; notepadAction?: ReactNode; notepadPanel?: ReactNode;
   onClose(): void; onCopyRef: Action; onCopyPath: Action; onExplore: Action;
   onWatch(): void; onTodo(): void; onPort(entry: PortUrlEntry, mode: PortMode): void | Promise<void>;
@@ -224,7 +232,8 @@ export function TerminalContextView(p: TerminalContextViewProps) {
               {entries.length > 1 ? <div className="flex w-full min-w-0 items-center gap-2"><select aria-label="Port" value={selected.port} onChange={e => setPort(Number(e.target.value))} className="h-6 min-w-0 flex-1 rounded border border-input-border bg-input-bg px-1 text-foreground">{entries.map(entry => <option key={entry.port} value={entry.port}>{entry.host}:{entry.port}{entry.processName ? ` · ${entry.processName}` : ''}</option>)}</select><span className="text-muted">{entries.length} ports</span></div> : <><span>{selected.host}:{selected.port}</span><span className="text-muted">{selected.processName}</span></>}
               <div className="ml-1 flex min-w-0 flex-wrap items-center gap-1 border-l border-border pl-2">
                 {PORT_ACTIONS.map(action => {
-                  const unavailable = action.needs && !p[action.needs] ? action.unavailable : null;
+                  const offered = action.needs === 'iframe' ? p.canIframe : !action.needs || p.browserProviders.includes(action.needs);
+                  const unavailable = action.needs && !offered ? action.unavailable : null;
                   return <ContextAction key={action.mode} label={unavailable ?? action.label} disabled={!!unavailable} fit onClick={() => void attempt(() => p.onPort(selected, action.mode))}>{action.icon}<span className="truncate">{action.text}</span></ContextAction>;
                 })}
               </div>

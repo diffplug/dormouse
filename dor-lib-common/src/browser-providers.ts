@@ -1,3 +1,21 @@
+/**
+ * The browser-automation providers, as `dor`, the Node hosts and the webview
+ * all need them: each one's persisted render modes, its CLI, and what may be
+ * spawned as that CLI (docs/specs/dor-browser.md → "Providers"). The GUI half
+ * of the registry — labels, device lists — lives in lib
+ * (`lib/src/components/wall/browser-automation.ts`).
+ *
+ * Free of Node dependencies (no `node:path`), so the same module runs in the
+ * webview, the Node hosts, and `dor`.
+ */
+
+/** A browser-automation provider: whose CLI drives a browser Surface. */
+export type BrowserAutomationProvider = 'agent-browser' | 'playwright';
+
+/** Where an automated browser is shown: streamed into the pane, or as its own
+ *  headed OS window. */
+export type BrowserPresentation = 'screencast' | 'popout';
+
 // The scope a Window with one implicit Workspace answers with: a bare Wall (VS
 // Code, the website, Pocket) has no Workspace id of its own, so its keys keep
 // the names they have always had. Private: callers build session names through
@@ -39,9 +57,9 @@ export const DEFAULT_PLAYWRIGHT_BIN = 'playwright-cli';
  * Everything else is refused and the spawner falls through to its own
  * candidates.
  *
- * Free of Node dependencies (no `node:path`) so the same predicate runs in the
- * webview — which validates persisted params before they are ever sent — in
- * the Node hosts, which validate again at the spawn, and in `dor`.
+ * The same predicate runs in the webview — which validates persisted params
+ * before they are ever sent — in the Node hosts, which validate again at the
+ * spawn, and in `dor`.
  */
 
 // The Windows PATH shims npm/vfox install alongside the POSIX executable.
@@ -86,6 +104,77 @@ function isAllowedBrowserBinary(candidate: unknown, configuredPath: string | und
   const segments = candidate.split(/[\\/]/);
   if (segments.includes('..')) return false;
   return filename.test(segments[segments.length - 1] ?? '');
+}
+
+/** One provider's row. `alias` is its short `dor` command and the prefix of
+ *  its render modes; `modes` are the persisted `renderMode` strings, which are
+ *  also the public `render_mode` and `dormouse.yml` `render` values. */
+interface BrowserProviderSpec {
+  command: string;
+  alias: string;
+  modes: Readonly<Record<BrowserPresentation, string>>;
+  binEnv: string;
+  defaultBin: string;
+  installHint: string;
+  isAllowedBinary(candidate: unknown, configuredPath?: string): candidate is string;
+}
+
+export const BROWSER_PROVIDERS = {
+  'agent-browser': {
+    command: 'agent-browser',
+    alias: 'ab',
+    modes: { screencast: 'ab-screencast', popout: 'ab-popout' },
+    binEnv: AGENT_BROWSER_BIN_ENV,
+    defaultBin: DEFAULT_AGENT_BROWSER_BIN,
+    installHint: 'npm i -g agent-browser',
+    isAllowedBinary: isAllowedAgentBrowserBinary,
+  },
+  playwright: {
+    command: 'playwright',
+    alias: 'pw',
+    modes: { screencast: 'pw-screencast', popout: 'pw-popout' },
+    binEnv: PLAYWRIGHT_BIN_ENV,
+    defaultBin: DEFAULT_PLAYWRIGHT_BIN,
+    installHint: 'npm i -g @playwright/cli',
+    isAllowedBinary: isAllowedPlaywrightBinary,
+  },
+} as const satisfies Record<BrowserAutomationProvider, BrowserProviderSpec>;
+
+/** Every provider, in the order the GUI lists them. */
+export const BROWSER_PROVIDER_IDS = Object.keys(BROWSER_PROVIDERS) as BrowserAutomationProvider[];
+
+/** An automated render mode: a provider's screencast or popout. */
+export type AutomatedRenderMode = (typeof BROWSER_PROVIDERS)[BrowserAutomationProvider]['modes'][BrowserPresentation];
+
+/** Every render mode a browser Surface can take; `iframe` is the embed. */
+export type SurfaceRenderMode = 'iframe' | AutomatedRenderMode;
+
+/** A render mode decoded: its provider and presentation, or the embed. */
+export type ParsedRenderMode =
+  | { provider: BrowserAutomationProvider; presentation: BrowserPresentation; mode: AutomatedRenderMode }
+  | { provider: null; presentation: 'iframe'; mode: 'iframe' };
+
+const PARSED_MODES = new Map<string, ParsedRenderMode>(BROWSER_PROVIDER_IDS.flatMap((provider) =>
+  (Object.keys(BROWSER_PROVIDERS[provider].modes) as BrowserPresentation[]).map((presentation) => {
+    const mode = BROWSER_PROVIDERS[provider].modes[presentation];
+    return [mode, { provider, presentation, mode }] as const;
+  })));
+const EMBED: ParsedRenderMode = { provider: null, presentation: 'iframe', mode: 'iframe' };
+
+/** Decode a render mode. Anything but an automated mode — `iframe`, an absent
+ *  one, or an unknown persisted string — is the embed. */
+export function parseRenderMode(mode: unknown): ParsedRenderMode {
+  return (typeof mode === 'string' && PARSED_MODES.get(mode)) || EMBED;
+}
+
+/** The render mode showing `provider`'s browser as `presentation`. */
+export function renderModeFor(provider: BrowserAutomationProvider, presentation: BrowserPresentation): AutomatedRenderMode {
+  return BROWSER_PROVIDERS[provider].modes[presentation];
+}
+
+/** Whether `value` names a provider. */
+export function isBrowserProvider(value: unknown): value is BrowserAutomationProvider {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(BROWSER_PROVIDERS, value);
 }
 
 /** argv for `agent-browser stream status --json` against a session — the command

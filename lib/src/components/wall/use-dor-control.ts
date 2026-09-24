@@ -1,7 +1,7 @@
 import { recordToolDirty } from '../../lib/tool-dirty-store';
 import { createSerialQueue } from '../../host/remote/serial-queue';
 import { useCallback, useRef, type MutableRefObject } from 'react';
-import { sessionForKey } from 'dor-lib-common/agent-browser';
+import { sessionForKey } from 'dor-lib-common/browser-providers';
 import { getPlatform, PLATFORM_STRING } from '../../lib/platform';
 import { currentWindowRef, getActiveWorkspaceId } from '../../lib/workspace-store';
 import type { WorkspaceId } from '../../lib/session-types';
@@ -45,7 +45,8 @@ import {
 } from './tool-takeover';
 import { attachSurfacePorts } from './surface-ports';
 import { browserSurfaceUrl, hostPathDisplay, iframeRefusal } from './browser-url';
-import { automationCli, automationMode, automationProvider, browserPlatform, rememberLaunchBinaryPath } from './browser-automation';
+import { parseRenderMode, renderModeFor } from 'dor-lib-common/browser-providers';
+import { BROWSER_PROVIDER_GUI, browserPlatform, rememberLaunchBinaryPath } from './browser-automation';
 import { BrowserBindingReservations } from './browser-binding-reservations';
 import {
   agentBrowserSessionFromParams,
@@ -686,11 +687,11 @@ export function useDorControl({
     provider: BrowserAutomationProvider,
     detail: DorControlRequest,
   ): string | null => {
-    const rendering = automationProvider(target.renderMode);
+    const rendering = parseRenderMode(target.renderMode).provider;
     if (rendering !== provider) {
       // Name the command that does work on it, so the caller's next try lands.
       const remedy = rendering
-        ? `drive it with ${automationCli(rendering)} --surface ${target.ref}`
+        ? `drive it with ${BROWSER_PROVIDER_GUI[rendering].cli} --surface ${target.ref}`
         : `an iframe cannot be driven; open its page with dor ab open ${browserUrlFromParams(lath.getMeta(target.id)?.params) ?? '<url>'}`;
       detail.respond({
         ok: false,
@@ -740,7 +741,7 @@ export function useDorControl({
   /** The agent-browser session ↔ surface registry: the surface bound to
    *  `session`, or null if none exists. */
   const findAgentBrowserSurface = useCallback((session: string) => findSurfaceByParams(
-    (params) => automationProvider((params as { renderMode?: unknown } | undefined)?.renderMode) === 'agent-browser'
+    (params) => parseRenderMode((params as { renderMode?: unknown } | undefined)?.renderMode).provider === 'agent-browser'
       && agentBrowserSessionFromParams(params) === session,
   ), [findSurfaceByParams]);
 
@@ -754,7 +755,7 @@ export function useDorControl({
     cwd?: string;
   }) => findSurfaceByParams((params) => {
     const p = params as { renderMode?: unknown; key?: unknown; session?: unknown; cwd?: unknown; nativeIdentity?: unknown } | undefined;
-    if (automationProvider(p?.renderMode) !== 'playwright') return false;
+    if (parseRenderMode(p?.renderMode).provider !== 'playwright') return false;
     if (binding.key) return p?.key === binding.key;
     if (binding.nativeIdentity && p?.nativeIdentity) return p.nativeIdentity === binding.nativeIdentity;
     return p?.session === binding.session && p?.cwd === binding.cwd;
@@ -787,7 +788,7 @@ export function useDorControl({
     rememberLaunchBinaryPath(provider, binaryPath);
     const refreshedParams = {
       ...(nativeIdentity ? { nativeIdentity } : {}),
-      ...(provider === 'playwright' && headed !== undefined ? { renderMode: automationMode(provider, headed) } : {}),
+      ...(provider === 'playwright' && headed !== undefined ? { renderMode: renderModeFor(provider, headed ? 'popout' : 'screencast') } : {}),
       ...(binaryPath !== undefined ? { binaryPath } : {}),
     };
     // The stream port is no param: the command just learned it, so the
@@ -821,7 +822,7 @@ export function useDorControl({
       minimized,
       params: {
         surfaceType: 'browser',
-        renderMode: automationMode(provider, false),
+        renderMode: renderModeFor(provider, 'screencast'),
         ...(cwd ? { cwd } : {}),
         session,
         ...(key !== undefined ? { key } : {}),
@@ -1622,7 +1623,7 @@ export function useDorControl({
       // a Playwright key's concurrent first commands to one binding.
       const found = findSurfaceByParams((raw) => {
         const p = raw as { key?: unknown; renderMode?: unknown } | undefined;
-        return p?.key === params.key && automationProvider(p?.renderMode) === provider;
+        return p?.key === params.key && parseRenderMode(p?.renderMode).provider === provider;
       });
       let binding = found ? browserBindingFromParams(lath.getMeta(found.id)?.params) : null;
       if (!binding && provider === 'playwright' && typeof params.key === 'string') {

@@ -31,6 +31,26 @@ Source of truth: `lib/src/components/wall/BrowserPanel.tsx`,
 (`BODY_COMPONENTS`), `lib/src/components/Wall.tsx`
 (`surfaceRenderModeFromParams`, `createContentSurface`).
 
+## Providers
+
+An automated renderer belongs to one **provider**, the CLI that drives its
+browser. **Must read every per-provider fact from the one registry** — render
+modes, CLI, binary for `dor`, the hosts and the webview; label, device presets
+and viewport hint for the GUI — never a ternary on the provider or a mode
+prefix. **Never change a persisted mode string**: they are the public
+`render_mode` and `dormouse.yml` `render` values. `parseRenderMode` decodes one
+to its provider and presentation (`screencast` / `popout`), reading anything
+else as `iframe`.
+
+| Provider | CLI | Render modes | Binary override / name | Install |
+| --- | --- | --- | --- | --- |
+| agent-browser | `dor ab` | `ab-screencast`, `ab-popout` | `DORMOUSE_AGENT_BROWSER_BIN` / `agent-browser` | `npm i -g agent-browser` |
+| Playwright | `dor pw` | `pw-screencast`, `pw-popout` | `DORMOUSE_PLAYWRIGHT_BIN` / `playwright-cli` | `npm i -g @playwright/cli` |
+
+Source of truth: `BROWSER_PROVIDERS` and `parseRenderMode` in
+`dor-lib-common/src/browser-providers.ts`; `BROWSER_PROVIDER_GUI` in
+`lib/src/components/wall/browser-automation.ts`.
+
 ## Canonical Params
 
 Invariants on the flat persisted `BrowserPanelParams`:
@@ -262,7 +282,7 @@ Spawning External Binaries).
   or render-swapped mid-command leaves the trailing request to mint a fresh pane
   (rationale).
 
-Source of truth: `sessionForKey` in `dor-lib-common/src/agent-browser.ts`,
+Source of truth: `sessionForKey` in `dor-lib-common/src/browser-providers.ts`,
 `resolveSession` in `dor/src/commands/agent-browser.ts`, `dor/src/commands/types.ts`
 (`AgentBrowserSurfaceRequest`, `ResolveAgentBrowserSessionRequest`), `lib/src/components/Wall.tsx` /
 `lib/src/components/wall/use-dor-control.ts` (`findAgentBrowserSurface`, `surface.agentBrowser`,
@@ -469,7 +489,7 @@ header; standalone connects directly.
 Source of truth: `lib/src/host/agent-browser-host.ts` (`runWithBinaryFallback`),
 `lib/src/host/browser-host-shared.ts` (`parseWebviewCommand`,
 `isAgentBrowserSession`, `isPlaywrightSession`),
-`dor-lib-common/src/agent-browser.ts` (`isAllowedAgentBrowserBinary`),
+`dor-lib-common/src/browser-providers.ts` (`isAllowedAgentBrowserBinary`),
 `lib/src/host/private-capture-dir.ts`, `lib/src/host/browser-stream-guard.ts`,
 `vscode-ext/src/agent-browser-host.ts`, `vscode-ext/src/webview-html.ts`,
 `standalone/src/tauri-adapter.ts`, `standalone/src-tauri/src/lib.rs`,

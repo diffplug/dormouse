@@ -10,7 +10,7 @@ import { act } from 'react';
 import { type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
-import { sessionForKey } from 'dor-lib-common/agent-browser';
+import { sessionForKey } from 'dor-lib-common/browser-providers';
 import { Wall } from './Wall';
 import * as helpers from '../lib/helper-terminal';
 import * as agentBrowserScreen from './wall/agent-browser-screen';

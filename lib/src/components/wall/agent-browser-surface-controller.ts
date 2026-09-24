@@ -22,13 +22,11 @@ import {
   openAgentBrowserScreenModal,
 } from './agent-browser-screen';
 import { hostPathDisplay, tabDisplayTitle } from './browser-url';
+import { parseRenderMode, renderModeFor } from 'dor-lib-common/browser-providers';
 import {
-  automationMode,
-  automationProvider,
+  BROWSER_PROVIDER_GUI,
   browserPlatform,
-  isPopout,
   offeredRenderModes,
-  PROVIDER_LABEL,
   launchBinaryPath,
   rememberLaunchBinaryPath,
   surfaceProvider,
@@ -406,7 +404,7 @@ export class AgentBrowserSurfaceController {
     this.latestRestorableUrl = isBrowsableUrl(params.url) ? params.url : undefined;
     // Headedness is derived from the canonical renderMode; an unset mode (a
     // direct mount in tests) is not popped out.
-    this.headed = isPopout(params.renderMode);
+    this.headed = parseRenderMode(params.renderMode).presentation === 'popout';
     // A fresh surface auto-engages sync (no persisted flag); a re-attached one
     // restores whatever was persisted into the layout blob.
     this.syncEngaged = params.syncEngaged ?? true;
@@ -498,9 +496,20 @@ export class AgentBrowserSurfaceController {
    */
   setRenderMode(mode: RenderMode, opts?: { url?: string }): void {
     if (!this.renderModes.includes(mode)) return;
-    if (automationProvider(mode) !== this.provider) this.sink?.requestRenderSwap(mode);
-    else if (isPopout(mode) !== this.headed) this.relaunch(isPopout(mode), opts?.url);
+    const { provider, presentation } = parseRenderMode(mode);
+    const headed = presentation === 'popout';
+    if (provider !== this.provider) this.sink?.requestRenderSwap(mode);
+    else if (headed !== this.headed) this.relaunch(headed, opts?.url);
     else if (opts?.url) this.navigate(opts.url);
+  }
+
+  /** The render mode this Surface shows now. */
+  private renderMode(): RenderMode {
+    return renderModeFor(this.provider, this.headed ? 'popout' : 'screencast');
+  }
+
+  private get label(): string {
+    return BROWSER_PROVIDER_GUI[this.provider].label;
   }
 
   getDeviceSize(): { width: number; height: number } {
@@ -709,7 +718,7 @@ export class AgentBrowserSurfaceController {
    */
   private followParamsHeadedness(renderMode: RenderMode): void {
     if (this.provider !== 'playwright' || this.phase.k === 'relaunching') return;
-    const headed = isPopout(renderMode);
+    const headed = parseRenderMode(renderMode).presentation === 'popout';
     if (headed === this.headed) return;
     // The last status came from the old browser; auto-revert waits for the
     // new stream's own before it treats a disconnect as the window closing.
@@ -817,7 +826,7 @@ export class AgentBrowserSurfaceController {
     // A launch that cannot start settles as late as one that fails, so whoever
     // created this Surface is always listening by then.
     const opened: Promise<AgentBrowserOpenResult> = !platform.agentBrowserOpen
-      ? Promise.resolve({ ok: false, error: `${PROVIDER_LABEL[this.provider]} is unavailable on this host` })
+      ? Promise.resolve({ ok: false, error: `${this.label} is unavailable on this host` })
       : !url
         ? Promise.resolve({ ok: false, error: 'no page to open' })
         // Released while it waited, it opens nothing for a closed Surface.
@@ -838,7 +847,7 @@ export class AgentBrowserSurfaceController {
             : undefined;
         }
         if (!res.ok || !res.session) {
-          const error = res.error ?? `Could not open ${PROVIDER_LABEL[this.provider]}`;
+          const error = res.error ?? `Could not open ${this.label}`;
           this.setPhase({ k: 'ended', error });
           settleLaunch(this.id, error);
           this.reportLaunchFailure(error);
@@ -1022,7 +1031,7 @@ export class AgentBrowserSurfaceController {
       binaryPath: this.binaryPath,
       getStreamUrl: async (port) => (await this.platform.getAgentBrowserStreamUrl?.(port)) ?? undefined,
       runCommand: (_session, args) => this.command(args)
-        ?? Promise.resolve({ exitCode: 1, stdout: '', stderr: `${PROVIDER_LABEL[this.provider]} commands unavailable` }),
+        ?? Promise.resolve({ exitCode: 1, stdout: '', stderr: `${this.label} commands unavailable` }),
       canSelectTabs: () => !this.headed,
       wantFrameData: () => this.wantsProvisionalFrame(),
       log: abDebugLog,
@@ -1402,7 +1411,7 @@ export class AgentBrowserSurfaceController {
     // DPR can't be read back from frames, so report the density we'd sync to.
     const viewport = { w: device.width, h: device.height, dpr: displayDpr };
     const state: ScreenState = dimsMatch(viewport, paneCss) ? 'SYNCED' : 'SCALED';
-    const renderMode = automationMode(this.provider, this.headed);
+    const renderMode = this.renderMode();
     return { state, viewport, paneCss, displayDpr, syncEngaged: this.syncEngaged, renderMode };
   }
 
@@ -1518,7 +1527,7 @@ export class AgentBrowserSurfaceController {
     const phase: Phase = { k: 'relaunching' };
     this.setPhase(phase);
     this.setHeaded(headed);
-    this.writeParams({ renderMode: automationMode(this.provider, headed) });
+    this.writeParams({ renderMode: this.renderMode() });
     abDebugLog(`[ab-panel] ${headed ? 'popOut' : 'popIn'} -> ${JSON.stringify({ session, url: target })}`);
     // Call through the adapter instance — detaching the method drops `this`.
     const relaunched = headed
@@ -1536,7 +1545,7 @@ export class AgentBrowserSurfaceController {
       // there if no daemon came up.
       if (headed) {
         this.setHeaded(false);
-        this.writeParams({ renderMode: automationMode(this.provider, false) });
+        this.writeParams({ renderMode: this.renderMode() });
       }
       this.attach(true);
       return undefined;
@@ -1583,7 +1592,7 @@ export class AgentBrowserSurfaceController {
 
   private runCommand(args: string[]): void {
     if (this.driver() && !this.platform.agentBrowserCommand) {
-      console.warn(`[${this.provider}] this host cannot run ${PROVIDER_LABEL[this.provider]} commands; tab actions are unavailable`);
+      console.warn(`[${this.provider}] this host cannot run ${this.label} commands; tab actions are unavailable`);
       return;
     }
     this.command(args)?.then((result) => {
@@ -1858,7 +1867,7 @@ export function requestBrowserRenderMode(id: string, params: AgentBrowserSurface
 function closeBrowserSessionFromParams(params: unknown): Promise<void> {
   const session = agentBrowserSessionFromParams(params);
   const { renderMode, cwd, binaryPath } = params as { renderMode?: unknown; cwd?: string; binaryPath?: unknown };
-  const provider = automationProvider(renderMode);
+  const { provider } = parseRenderMode(renderMode);
   return session && provider ? closeSessionOn(provider, cwd, session, binaryPath) : Promise.resolve();
 }
 

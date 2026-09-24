@@ -107,7 +107,7 @@ function ContextPrototype({ scenario, initialDetail = null, paneWidth, paneHeigh
         scan={scenario === 'scanFailed' ? { status: 'failed' } : { status: 'loaded', entries: scenario === 'noPorts' ? [] : ports }}
         watchRule="pnpm" watching={watching} todo={todo} notification={scenario === 'notification' ? { title: 'Tests complete', body: '341 passed, 0 failed' } : null}
         status={preserved ? 'preserved' : scenario === 'running' ? 'running' : scenario === 'autorunOff' ? 'off' : 'completed'} command={command}
-        explorerLabel="Open in Finder" canExplore canAgent canIframe initialDetail={initialDetail}
+        explorerLabel="Open in Finder" canExplore browserProviders={['agent-browser']} canIframe initialDetail={initialDetail}
         notepadAction={<NotepadHeaderButton surfaceId="context-gallery" />} notepadPanel={<NotepadPanel surfaceId="context-gallery" pins={false} />}
         onClose={() => {}} onCopyRef={() => {}} onCopyPath={() => {}} onExplore={() => {}} onPort={() => {}}
         onWatch={() => setWatching(!watching)} onTodo={() => setTodo(!todo)} onModify={async value => setCommand(value)} onReset={async () => {}} onPromote={async () => {}}>

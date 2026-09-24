@@ -9,10 +9,9 @@ import {
   type BrowserDisplayMode,
   type RenderMode,
 } from './agent-browser-screen';
-import { isAutomationMode } from './browser-automation';
 import type { BrowserBinding, SurfaceKind } from 'dor/commands/types';
 import { isToolKeyScope, type ToolKeyScope } from '../../lib/platform/tool-types';
-import { sessionForKey } from 'dor-lib-common/agent-browser';
+import { parseRenderMode, renderModeFor, sessionForKey } from 'dor-lib-common/browser-providers';
 
 type BrowserParamsLike = {
   surfaceType?: unknown;
@@ -36,13 +35,12 @@ function asParams(params: unknown): BrowserParamsLike {
 
 /** Resolve the canonical render mode; defaults to `iframe` when unset. */
 export function resolveRenderMode(params: unknown): RenderMode {
-  const { renderMode } = asParams(params);
-  return isAutomationMode(renderMode) ? renderMode : 'iframe';
+  return parseRenderMode(asParams(params).renderMode).mode;
 }
 
-/** Whether params describe either automated browser provider. */
+/** Whether params describe an automated browser, of either provider. */
 export function isAgentBrowserParams(params: unknown): boolean {
-  return isAutomationMode(asParams(params).renderMode);
+  return parseRenderMode(asParams(params).renderMode).provider !== null;
 }
 
 /** Whether params describe a `tool` Surface — one Session with a terminal and,
@@ -244,7 +242,7 @@ export function launchFallbackFromParams(params: unknown): LaunchFallback | null
 export function toolBrowserLaunchParams(leafId: string, params: Record<string, unknown>, url: string): Record<string, unknown> {
   return {
     url,
-    renderMode: 'ab-screencast',
+    renderMode: renderModeFor('agent-browser', 'screencast'),
     session: undefined,
     launchSession: typeof params.session === 'string' ? params.session : sessionForKey(`tool.${leafId}`),
     launchFallback: 'embed' satisfies LaunchFallback,

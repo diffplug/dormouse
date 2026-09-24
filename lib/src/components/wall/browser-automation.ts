@@ -1,65 +1,61 @@
-/** Provider adaptation beneath the shared automated-browser viewer. */
+/**
+ * The GUI half of the browser-provider registry (docs/specs/dor-browser.md →
+ * "Providers"), beside provider adaptation beneath the shared automated-browser
+ * viewer. What `dor` and the hosts need too — CLI, render modes, binaries —
+ * lives in `dor-lib-common/src/browser-providers.ts`.
+ */
+import {
+  BROWSER_PROVIDER_IDS,
+  BROWSER_PROVIDERS,
+  parseRenderMode,
+  renderModeFor,
+  type BrowserAutomationProvider,
+} from 'dor-lib-common/browser-providers';
 import { getPlatform } from '../../lib/platform';
 import type { PlatformAdapter } from '../../lib/platform/types';
-import type { BrowserAutomationProvider, PlaywrightRequest } from '../../lib/platform/browser-automation';
+import type { PlaywrightRequest } from '../../lib/platform/browser-automation';
 import { isToolRender } from '../../lib/platform/tool-types';
 import type { RenderMode } from './agent-browser-screen';
 
-/** The automated render modes: which provider drives each, and whether its
- *  browser runs headed (popped out). Every other mode — `iframe`, or an
- *  unknown persisted string — is not automated. */
-const AUTOMATION_MODES: Record<Exclude<RenderMode, 'iframe'>, { provider: BrowserAutomationProvider; headed: boolean }> = {
-  'ab-screencast': { provider: 'agent-browser', headed: false },
-  'ab-popout': { provider: 'agent-browser', headed: true },
-  'pw-screencast': { provider: 'playwright', headed: false },
-  'pw-popout': { provider: 'playwright', headed: true },
+interface BrowserProviderGui {
+  /** The provider's name in user-facing text. */
+  label: string;
+  /** The `dor` command that drives it. */
+  cli: string;
+  /** The device presets its `set device` accepts, as the Display modal lists
+   *  them — the CLI's own registry, no custom descriptors. */
+  devices: readonly string[];
+  /** What to run from a terminal to size the viewport on a host that cannot. */
+  viewportHint: string;
+}
+
+export const BROWSER_PROVIDER_GUI: Record<BrowserAutomationProvider, BrowserProviderGui> = {
+  'agent-browser': {
+    label: 'agent-browser',
+    cli: `dor ${BROWSER_PROVIDERS['agent-browser'].alias}`,
+    // Touch and the mobile UA come only bundled inside `set device` (verified
+    // against 0.27.0).
+    devices: ['iPhone 15', 'iPhone 16', 'iPhone 16 Pro', 'iPhone 17', 'iPad', 'iPad Pro', 'Pixel 9', 'Galaxy S25'],
+    viewportHint: 'dor ab set …',
+  },
+  playwright: {
+    label: 'Playwright',
+    cli: `dor ${BROWSER_PROVIDERS.playwright.alias}`,
+    devices: ['iPhone 15', 'iPhone 16', 'iPhone 16 Pro', 'iPhone 17', 'iPad (gen 11)', 'iPad Pro 11', 'Pixel 9', 'Galaxy S24'],
+    viewportHint: 'dor pw resize …',
+  },
 };
-
-export type AutomationRenderMode = keyof typeof AUTOMATION_MODES;
-
-/** Whether `mode` is one of the automated render modes. */
-export function isAutomationMode(mode: unknown): mode is AutomationRenderMode {
-  // Own keys only: a persisted `renderMode` of `constructor` must not match the prototype.
-  return typeof mode === 'string' && Object.prototype.hasOwnProperty.call(AUTOMATION_MODES, mode);
-}
-
-/** The provider driving `mode`, or null when it is not automated. */
-export function automationProvider(mode: unknown): BrowserAutomationProvider | null {
-  return isAutomationMode(mode) ? AUTOMATION_MODES[mode].provider : null;
-}
 
 /** The provider an automated browser Surface drives; an unset mode (a direct
  *  mount in tests) is agent-browser. */
 export function surfaceProvider(mode: unknown): BrowserAutomationProvider {
-  return automationProvider(mode) ?? 'agent-browser';
+  return parseRenderMode(mode).provider ?? 'agent-browser';
 }
 
-export function isPopout(mode: unknown): boolean {
-  return isAutomationMode(mode) && AUTOMATION_MODES[mode].headed;
+/** The providers this host can launch a browser with. */
+export function hostBrowserProviders(): BrowserAutomationProvider[] {
+  return BROWSER_PROVIDER_IDS.filter((provider) => !!browserPlatform(provider).agentBrowserOpen);
 }
-
-export function isScreencast(mode: unknown): boolean {
-  return isAutomationMode(mode) && !AUTOMATION_MODES[mode].headed;
-}
-
-/** The `dor` command that drives `provider`'s browsers. */
-export function automationCli(provider: BrowserAutomationProvider): 'dor ab' | 'dor pw' {
-  return provider === 'playwright' ? 'dor pw' : 'dor ab';
-}
-
-export function automationMode(provider: BrowserAutomationProvider, headed: boolean): AutomationRenderMode {
-  if (provider === 'playwright') return headed ? 'pw-popout' : 'pw-screencast';
-  return headed ? 'ab-popout' : 'ab-screencast';
-}
-
-/** Each provider's name in user-facing text. */
-export const PROVIDER_LABEL: Record<BrowserAutomationProvider, string> = {
-  'agent-browser': 'agent-browser',
-  playwright: 'Playwright',
-};
-
-/** Both providers, in the order the GUI lists them. */
-export const AUTOMATION_PROVIDERS = Object.keys(PROVIDER_LABEL) as BrowserAutomationProvider[];
 
 /**
  * The render modes a browser Surface can take on this host — what its Display
@@ -71,11 +67,11 @@ export const AUTOMATION_PROVIDERS = Object.keys(PROVIDER_LABEL) as BrowserAutoma
  */
 export function offeredRenderModes(isTool: boolean, current: BrowserAutomationProvider | null): RenderMode[] {
   const modes: RenderMode[] = [];
-  for (const provider of AUTOMATION_PROVIDERS) {
+  for (const provider of BROWSER_PROVIDER_IDS) {
     const platform = browserPlatform(provider);
     if (provider !== current && !platform.agentBrowserOpen) continue;
-    modes.push(automationMode(provider, false));
-    if (platform.agentBrowserPopOut) modes.push(automationMode(provider, true));
+    modes.push(renderModeFor(provider, 'screencast'));
+    if (platform.agentBrowserPopOut) modes.push(renderModeFor(provider, 'popout'));
   }
   modes.push('iframe');
   return isTool ? modes.filter(isToolRender) : modes;

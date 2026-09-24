@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { readFile, unlink } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
-import { sessionForKey } from 'dor-lib-common/agent-browser';
+import { sessionForKey } from 'dor-lib-common/browser-providers';
 // cross-spawn, not node:child_process: this script spawns `dor` and
 // `agent-browser`, which are `.cmd` shims on Windows that a bare-name spawn
 // can't resolve (ENOENT) and Node >=22 won't run directly (EINVAL). cross-spawn
