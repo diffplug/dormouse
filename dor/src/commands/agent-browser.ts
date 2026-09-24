@@ -92,8 +92,9 @@ command surface. The binary is resolved from PATH (override with
 DORMOUSE_AGENT_BROWSER_BIN) and is never bundled; install it with:
   ${INSTALL_HINT}
 
-After a successful command, dor opens (or reuses) the browser surface bound to
-the session: one session is always exactly one surface.
+After a successful command, dor opens the browser surface bound to the session,
+or reuses the one it already has. A Playwright browser (render_mode pw-*) is
+driven with dor pw --surface instead.
 
 In an "open" command, dor also resolves a Dormouse target in place of a URL:
 a schemeless host:port (and the ":<port>" localhost shorthand) defaults to

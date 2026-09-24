@@ -21,6 +21,19 @@ These override your usual defaults. They matter more than anything else here:
 
 The rest of this guide is how to do everything well.
 
+## Which browser command
+
+- **`dor ab`** — the default: a browser you read and drive, in a pane the user
+  watches.
+- **`dor pw`** — when the user or the project uses Playwright, or the browser
+  you are handed already runs it (`render_mode` `pw-*`).
+- **`dor iframe`** — only to show the human a local `http://` page. You cannot
+  read or drive it, it keeps no logins, and it refuses `https://`.
+
+`dor list` shows each browser's `render_mode`: drive an `ab-*` browser with
+`dor ab --surface <ref>`, a `pw-*` one with `dor pw --surface <ref>`, and an
+`iframe` one with neither — open its page with `dor ab open <url>`.
+
 ## Targeting: three ways to name a surface
 
 Action commands (`read`, `send`, `await`, `kill`) take a surface handle — there is
@@ -41,8 +54,8 @@ three ways:
    (`--command`, `--cwd`, `--port`) into a handle.
 
 Text output is designed for you to read: it is terse and carries the same
-refs. Reach for `--json` (every command except `dor ab` supports it) only
-when a shell script or pipeline using `jq` consumes the output.
+refs. Reach for `--json` (every command except `dor ab` and `dor pw` supports it)
+only when a shell script or pipeline using `jq` consumes the output.
 
 ## Surface handles
 
@@ -181,7 +194,7 @@ A Window holds several Workspaces, each with its own surfaces and its own
 you were started in, and creating one is a change the user sees. When you do,
 name one as `workspace:<n>` (positional) or `workspace:<name>`, and pass
 `--workspace <ref>` to any command — `split`, `ensure`, `read`, `send`,
-`await`, `kill`, `iframe`, `ab` — to act in another one. A surface's stable id
+`await`, `kill`, `iframe`, `ab`, `pw` — to act in another one. A surface's stable id
 finds it in any Workspace without that flag; `surface:N` does not, since every
 Workspace has one. `close` refuses a Workspace holding your running work
 unless you pass `--force`.
@@ -209,19 +222,25 @@ independent browsers at once.
 `dor list` works here exactly as it does for `read` / `send` / `await` / `kill`.
 Prefer it whenever you hold a ref rather than a key — it is the only way to
 reach a browser the *user* opened from the GUI, which has no key. It fails on a
-terminal (no browser), and on an `iframe`-rendered surface (nothing to drive —
-open it with `dor ab` instead). The three identity flags are mutually exclusive.
+terminal (no browser), on a Playwright browser (drive it with `dor pw
+--surface`), and on an `iframe`-rendered surface (nothing to drive — open it
+with `dor ab` instead). The three identity flags are mutually exclusive.
 
 `dor ab` has no `--json` of its own; any JSON flags belong to `agent-browser`.
 
 ### `dor pw` / `dor playwright` — Playwright browser pane
 
-Use your installed `@playwright/cli` (`npm i -g @playwright/cli`). Override its
-path with `DORMOUSE_PLAYWRIGHT_BIN`. Chromium panes share the Display, viewport,
-input and popout controls of `dor ab`.
+For a user or project that uses Playwright, or a `pw-*` browser. Forwards to
+your installed `@playwright/cli` (`npm i -g @playwright/cli`; override its path
+with `DORMOUSE_PLAYWRIGHT_BIN`).
+
+**Launch once with `open`, then navigate with `goto`.** Playwright's `open`
+restarts the browser, dropping every tab and cookie, where `dor ab open` only
+navigates.
 
 ```sh
 dor pw --key app open :5173
+dor pw --key app goto http://localhost:5173/settings
 dor pw --key app snapshot
 dor pw --key app click e15
 dor pw --surface surface:4 goto :8080
@@ -230,8 +249,7 @@ dor pw --surface surface:4 goto :8080
 `--key` defaults to `default` and is separate from agent-browser keys. The first
 command fixes the native project cwd; later commands and relative paths use it.
 `--session` (or `-s`) uses a raw native session in the caller's project instead.
-These identities and `--surface` are mutually exclusive. Native Playwright
-`open` restarts the browser; `goto` navigates its current tab. Other arguments
+These identities and `--surface` are mutually exclusive. Other arguments
 belong to `playwright-cli`; `dor pw --help` describes the wrapper.
 
 ## Recipes
@@ -313,5 +331,5 @@ dor kill surface:N --confirm-if-read "npm run dev"
   just read the surface yourself.
 - **Scope:** `dor` sees the current workspace only. Terminals ring bells and
   carry todo flags (`[ringing]`/`[todo]` in `dor list`); browser surfaces are
-  the only ones with explicit keys, because their sessions live in
-  `agent-browser`.
+  the only ones with explicit keys, because their sessions live in the browser
+  CLI (`agent-browser` or `playwright-cli`).

@@ -118,6 +118,30 @@ async function renderPanel(
   });
 }
 
+describe('AgentBrowserPanel placeholders', () => {
+  // A bare `dor ab open` drives the caller's default key, which for a keyed or
+  // GUI-launched pane is a different browser; the internal session name means
+  // nothing to the person reading it.
+  it.each([
+    ['ab-screencast', 'dor ab'],
+    ['pw-screencast', 'dor pw'],
+  ])('names this pane in its command, never the raw session (%s)', async (renderMode, cli) => {
+    setPlatform(new FakePtyAdapter());
+    await act(async () => {
+      root.render(
+        <PaneWriteContext.Provider value={paneWriteFor(() => {})}>
+          <WallActionsContext.Provider value={stubActions({ resolveSurfaceRef: () => 'surface:7' })}>
+            <AgentBrowserPanel {...paneProps('ab-placeholder', { surfaceType: 'browser', renderMode, session: 'dormouse.1.gui-5f3a' })} />
+          </WallActionsContext.Provider>
+        </PaneWriteContext.Provider>,
+      );
+    });
+
+    expect(container.textContent).toContain(`run ${cli} --surface surface:7 open <url>`);
+    expect(container.textContent).not.toContain('dormouse.1.gui-5f3a');
+  });
+});
+
 describe('AgentBrowserPanel render mode controller', () => {
   it('relaunches screencast sessions as popout and publishes the mode immediately', async () => {
     const updateParameters = vi.fn();

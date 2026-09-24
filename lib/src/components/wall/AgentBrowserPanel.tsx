@@ -7,7 +7,7 @@ import { isEditableTarget } from '../../lib/dom';
 import type { RenderMode } from './agent-browser-screen';
 import { tabDisplayTitle } from './browser-url';
 import { resolveRenderMode } from './browser-surface';
-import { automationProvider } from './browser-automation';
+import { automationCli, automationProvider } from './browser-automation';
 import { MOUSE_BUTTONS, MOUSE_BUTTON_MASKS, modifiers } from './agent-browser-input';
 import {
   acquireAgentBrowserSurfaceController,
@@ -55,7 +55,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   // back to resolving it from params for a direct mount (tests) / legacy blob.
   const seededMode = renderModeProp ?? resolveRenderMode(params);
   const provider = automationProvider(seededMode) ?? 'agent-browser';
-  const cli = provider === 'playwright' ? 'dor pw' : 'dor ab';
+  const cli = automationCli(provider);
 
   // The surface-scoped controller: get-or-create, keyed by surface id. Survives
   // this component's unmount (minimize, layout churn, StrictMode). Keyed by
@@ -330,14 +330,17 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
     // Mid pop-in: the headed browser is closed by design and the headless one
     // is booting — not a session that ended.
     if (relaunching) return 'Relaunching browser…';
-    if (!streamPort) return `Waiting for browser session ${session} — run ${cli} open <url>`;
+    // Addressed to this pane: a bare `dor ab open` drives the caller's default
+    // key, which for a keyed or GUI-launched pane is some other browser.
+    const command = `${cli} --surface ${actions.resolveSurfaceRef(id)} open <url>`;
+    if (!streamPort) return `Waiting for the browser — run ${command}`;
     if (connectionLost || status?.connected === false) {
-      return `Browser session ${session ?? ''} ended — run ${cli} open <url> to restart it, or close this surface.`;
+      return `The browser session ended — run ${command} to restart it, or close this surface.`;
     }
     if (!hasFrame) {
       return status && !status.screencasting
-        ? `No page is open — run ${cli} open <url>`
-        : `Connecting to ${session ?? 'browser session'}…`;
+        ? `No page is open — run ${command}`
+        : 'Connecting to the browser…';
     }
     return null;
   })();

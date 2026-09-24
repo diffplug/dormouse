@@ -598,8 +598,11 @@ and the host applies two gates in order:
   with no browser fails with the shared capability wording under [`dor
   list`](#current-implemented-commands).
 - **Render-mode-gated.** Past that gate, a browser Surface on the `iframe`
-  renderer is a browser with nothing to drive: `surface 'surface:2' is not
-  agent-browser rendered (render_mode: iframe)`.
+  renderer is a browser with nothing to drive, and one the other provider
+  renders is driven by the other CLI. **The refusal must name the command that
+  works**: `surface 'surface:2' is not agent-browser rendered (render_mode:
+  pw-screencast) — drive it with dor pw --surface surface:2`, or for an iframe
+  `… open its page with dor ab open <its url>`.
 
 Neither gate covers an agent-browser Surface the context menu created eagerly,
 whose daemon boot has not yet named it ([dor-browser.md](dor-browser.md) → Pane
@@ -611,8 +614,8 @@ Like every handle target, `--surface` requires a live control endpoint.
 Source of truth: `extractSessionFlags` in `dor/src/commands/browser-cli.ts`,
 `resolveSession` in `dor/src/commands/agent-browser.ts`, `resolveAgentBrowser` in
 `dor/src/protocol.ts`, `ResolveAgentBrowserSessionRequest` / `Response` in
-`dor/src/commands/types.ts`, `requireBrowserSurface` and the
-`surface.resolveAgentBrowser` handler in
+`dor/src/commands/types.ts`, `requireBrowserSurface`,
+`requireAutomationSession` and the `surface.resolveAgentBrowser` handler in
 `lib/src/components/wall/use-dor-control.ts`, and
 `agentBrowserSessionFromParams` in `lib/src/components/wall/browser-surface.ts`.
 
@@ -628,8 +631,9 @@ stays unsupported.
 named by its Workspace-stable `surface:N` ref, or rediscovered after layout
 churn by `--command` / `--cwd` / `--port`, and `dor ensure`'s command+cwd match
 is an implicit key that also lets an agent adopt a command the user started by
-hand. Only browser Surfaces carry an explicit join key (`dor ab --key <name>`),
-because their session is held externally by `agent-browser`.
+hand. Only browser Surfaces carry an explicit join key (`dor ab --key <name>`,
+`dor pw --key <name>`), because their session is held externally by the browser
+CLI.
 
 The worked examples — dev-server sharing, sub-agent launch and await, paired
 browser keys, multi-worktree, minimized watchers, port-owner handoff, safe

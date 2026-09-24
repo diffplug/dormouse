@@ -44,11 +44,12 @@ import {
 } from './tool-takeover';
 import { attachSurfacePorts } from './surface-ports';
 import { browserSurfaceUrl, hostPathDisplay, isHttpsUrl } from './browser-url';
-import { automationMode, automationProvider, browserPlatform, type LaunchBinaryPath } from './browser-automation';
+import { automationCli, automationMode, automationProvider, browserPlatform, type LaunchBinaryPath } from './browser-automation';
 import { BrowserBindingReservations } from './browser-binding-reservations';
 import {
   agentBrowserSessionFromParams,
   browserBindingFromParams,
+  browserUrlFromParams,
   namespacedToolKey,
   surfaceKindFromParams,
   toolKeysEqual,
@@ -693,10 +694,16 @@ export function useDorControl({
     provider: BrowserAutomationProvider,
     detail: DorControlRequest,
   ): string | null => {
-    if (automationProvider(target.renderMode) !== provider) {
+    const rendering = automationProvider(target.renderMode);
+    if (rendering !== provider) {
+      // Name the command that does work on it, so the caller's next try lands.
+      const url = rendering ? undefined : browserUrlFromParams(lath.getMeta(target.id)?.params);
+      const remedy = rendering
+        ? `drive it with ${automationCli(rendering)} --surface ${target.ref}`
+        : `an iframe cannot be driven; open its page with ${automationCli(provider)} open ${url ?? '<url>'}`;
       detail.respond({
         ok: false,
-        error: `surface '${target.ref}' is not ${provider} rendered (render_mode: ${target.renderMode})`,
+        error: `surface '${target.ref}' is not ${provider} rendered (render_mode: ${target.renderMode}) — ${remedy}`,
       });
       return null;
     }

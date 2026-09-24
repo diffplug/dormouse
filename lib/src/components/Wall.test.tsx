@@ -1033,7 +1033,7 @@ describe('Wall on the Lath engine', () => {
       expect(container.querySelector(`[data-door-id="${eagerId}"]`)).not.toBeNull();
       expect(await dispatchResolveAgentBrowser(eagerId)).toEqual({
         ok: false,
-        error: "surface 'surface:1' is not agent-browser rendered (render_mode: iframe)",
+        error: "surface 'surface:1' is not agent-browser rendered (render_mode: iframe) — an iframe cannot be driven; open its page with dor ab open http://localhost:5173/",
       });
     } finally {
       untouchedSpy.mockRestore();
@@ -1063,7 +1063,7 @@ describe('Wall on the Lath engine', () => {
       expect(getAgentBrowserScreenController(restoredId)?.snapshot().renderMode).toBe('iframe');
       expect(await dispatchResolveAgentBrowser('surface:1')).toEqual({
         ok: false,
-        error: "surface 'surface:1' is not agent-browser rendered (render_mode: iframe)",
+        error: "surface 'surface:1' is not agent-browser rendered (render_mode: iframe) — an iframe cannot be driven; open its page with dor ab open http://localhost:5173/",
       });
     } finally {
       untouchedSpy.mockRestore();
@@ -1214,7 +1214,7 @@ describe('Wall on the Lath engine', () => {
       // Gate 2: an iframe renderer has a browser but no agent-browser session.
       expect(await dispatchResolveAgentBrowser(iframeRef)).toEqual({
         ok: false,
-        error: `surface '${iframeRef}' is not agent-browser rendered (render_mode: iframe)`,
+        error: `surface '${iframeRef}' is not agent-browser rendered (render_mode: iframe) — an iframe cannot be driven; open its page with dor ab open http://localhost:5173/`,
       });
 
       // A managed `--key` names no Surface, and a bare Wall — VS Code, the
@@ -3835,6 +3835,53 @@ describe('Wall on the Lath engine', () => {
     // The handle deregisters, so nothing addresses the gone Wall — but the
     // Sessions it held are untouched.
     expect(getWallHandle(DEFAULT_WORKSPACE_ID)).toBeNull();
+  });
+
+  it('names the command that drives a browser run by the other provider', async () => {
+    (fake as PlatformAdapter).playwright = vi.fn(async (request: { op: string }) => (
+      request.op === 'streamStatus' ? { ok: true, wsPort: 4555 } : { ok: true }
+    ));
+    (fake as PlatformAdapter).agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />));
+      await flush();
+      let created: { ok: boolean; result?: { surfaceRef: string } } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.browser,
+            params: { provider: 'playwright', session: 'dormouse.pw.abc', cwd: '/tmp/project' },
+            respond: (r: typeof created) => { created = r; },
+          },
+        }));
+      });
+      await flush();
+      const pwRef = created!.result!.surfaceRef;
+      expect(await dispatchResolveAgentBrowser(pwRef)).toEqual({
+        ok: false,
+        error: `surface '${pwRef}' is not agent-browser rendered (render_mode: pw-screencast) — drive it with dor pw --surface ${pwRef}`,
+      });
+
+      const abId = await dispatchAgentBrowser({ session: 'dormouse.1.default', wsPort: 4321 });
+      let resolved: unknown;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.resolveBrowser,
+            params: { provider: 'playwright', surface: abId },
+            respond: (r: unknown) => { resolved = r; },
+          },
+        }));
+      });
+      await flush();
+      expect(resolved).toEqual({
+        ok: false,
+        error: expect.stringMatching(/^surface '(surface:\d+)' is not playwright rendered \(render_mode: ab-screencast\) — drive it with dor ab --surface \1$/),
+      });
+    } finally {
+      untouchedSpy.mockRestore();
+    }
   });
 
   it('refuses an https:// surface.iframe on a host that proxies, naming dor ab open', async () => {

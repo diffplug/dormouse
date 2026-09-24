@@ -36,6 +36,11 @@ export function isScreencast(mode: unknown): boolean {
   return isAutomationMode(mode) && !AUTOMATION_MODES[mode].headed;
 }
 
+/** The `dor` command that drives `provider`'s browsers. */
+export function automationCli(provider: BrowserAutomationProvider): 'dor ab' | 'dor pw' {
+  return provider === 'playwright' ? 'dor pw' : 'dor ab';
+}
+
 export function automationMode(provider: BrowserAutomationProvider, headed: boolean): AutomationRenderMode {
   if (provider === 'playwright') return headed ? 'pw-popout' : 'pw-screencast';
   return headed ? 'ab-popout' : 'ab-screencast';
