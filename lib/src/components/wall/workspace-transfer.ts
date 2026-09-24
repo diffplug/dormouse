@@ -8,6 +8,7 @@ import { snapshotNotepadForTransfer, removeSurface } from '../../lib/notepad/not
 import type { TerminalGrid } from '../../lib/terminal-transfer';
 import { forgetHelper, getHelper } from '../../lib/helper-terminal';
 import { releaseSession, serializeTerminal, getTerminalInstance } from '../../lib/terminal-registry';
+import { disposeAgentBrowserSurfaceController } from './agent-browser-surface-controller';
 import type { VolatileNotepadSnapshot } from '../../lib/notepad/types';
 import type { PersistedSession, PersistedWorkspace, WorkspaceId } from '../../lib/session-types';
 import type { WorkspaceMeta } from '../../lib/workspace-store';
@@ -124,8 +125,11 @@ export async function prepareWorkspaceTransfer(
       // Forgotten before its Session goes, so the status poller stops and the
       // source pane does not re-open the helper it no longer holds.
       for (const parentId of helpers.keys()) forgetHelper(parentId);
-      // Browser Surfaces need nothing: their agent-browser session lives in the
-      // host, and the target reopens from the persisted params.
+      // A browser's session lives in the host, and the target attaches to it
+      // from the persisted params; this Window only lets go of its viewer, or
+      // a popped-out one would keep streaming here and both would auto-revert
+      // the same window.
+      for (const id of allIds) disposeAgentBrowserSurfaceController(id);
       for (const id of terminalIds) releaseSession(id);
     },
   };
