@@ -15,8 +15,8 @@
  * Narrow capabilities, all on behalf of the webview:
  *
  * 1. `command` — runs the user's agent-browser binary against a session for tab
- *    actions, navigation, and teardown. Only fixed argv shapes pass
- *    (`WEBVIEW_COMMANDS`); not a general exec channel.
+ *    actions, navigation, and teardown. Only what `parseWebviewCommand`
+ *    accepts runs; not a general exec channel.
  * 2. `edit` — host-owned `eval` for the macOS editing chords
  *    (select-all/copy/cut) the stream input path can't dispatch; copy/cut land
  *    on the OS clipboard.
@@ -64,64 +64,30 @@ import type {
   AgentBrowserStreamStatusResult,
 } from '../lib/platform/types';
 import { privateCaptureDir } from './private-capture-dir';
-import { editScript, generateGuiSession, jpegQuality } from './browser-host-shared';
+import {
+  captureFormat,
+  editScript,
+  generateGuiSession,
+  isAgentBrowserSession,
+  isBrowsableUrl,
+  jpegQuality,
+  parseWebviewCommand,
+  type WebviewCommand,
+} from './browser-host-shared';
 
-// Every token the webview hands this host — a session, a command's arguments, a
-// launch URL — lands on agent-browser's command line, and agent-browser reads
-// its launch options anywhere on that line (`open <url> --executable-path x`
-// launches x; `close --all` closes every session). So each token is checked
-// against the one shape its position takes, never the verb alone
-// (docs/specs/dor-browser.md → "Agent-Browser Host Capabilities").
-
-/** A session name the host will put after `--session` and into a state-file
- *  path: never option-shaped, never a path separator or control character. */
-function isSessionName(value: unknown): value is string {
-  return typeof value === 'string' && /^(?!-)[^/\\\x00-\x1f\x7f]{1,200}$/.test(value);
-}
-
-/** An absolute URL, untrimmed — a scheme must start with a letter, so it can
- *  never be read as an option. */
-function isAbsoluteUrl(value: unknown): value is string {
-  if (typeof value !== 'string' || value !== value.trim()) return false;
-  try {
-    new URL(value);
-    return true;
-  } catch {
-    return false;
+/** The agent-browser argv for a parsed webview command — rebuilt here, so no
+ *  webview token reaches the CLI as it came. */
+function webviewArgv(command: WebviewCommand): string[] {
+  switch (command.kind) {
+    case 'open': return ['open', command.url];
+    case 'cdp-url': return ['get', 'cdp-url'];
+    case 'tab-list': return ['tab', 'list', '--json'];
+    case 'tab-select': return ['tab', command.tab];
+    case 'tab-close': return ['tab', 'close', command.tab];
+    case 'viewport': return ['set', 'viewport', String(command.width), String(command.height), String(command.dpr)];
+    case 'device': return ['set', 'device', command.name];
+    default: return [command.kind];
   }
-}
-
-const TAB_REF = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
-// `tab <ref>` selects; these words are the verb's own operations instead.
-const TAB_OPERATIONS = new Set(['list', 'new', 'close']);
-const DEVICE_NAME = /^[A-Za-z0-9][A-Za-z0-9 ()._-]{0,63}$/;
-const isPositiveNumber = (value: string) => /^\d{1,6}(\.\d{1,20})?$/.test(value) && Number(value) > 0;
-
-/** The argv the webview sends through `command`, one shape per verb: the
- *  controller's chrome, tab, and Display actions, and a kill/swap `close`. */
-const WEBVIEW_COMMANDS: Record<string, (args: string[]) => boolean> = {
-  open: (args) => args.length === 1 && isAbsoluteUrl(args[0]),
-  back: (args) => args.length === 0,
-  forward: (args) => args.length === 0,
-  reload: (args) => args.length === 0,
-  close: (args) => args.length === 0,
-  // The popped-out pane's CDP observer.
-  get: (args) => args.length === 1 && args[0] === 'cdp-url',
-  tab: (args) => args.length === 1
-    ? TAB_REF.test(args[0]) && !TAB_OPERATIONS.has(args[0])
-    : args.length === 2 && args[0] === 'close' && TAB_REF.test(args[1]),
-  set: (args) => args[0] === 'viewport'
-    ? args.length === 4 && args.slice(1).every(isPositiveNumber)
-    : args[0] === 'device' && args.length === 2 && DEVICE_NAME.test(args[1]),
-};
-
-/** Whether `args` is exactly one of the `WEBVIEW_COMMANDS` shapes. `args` is
- *  typed but arrives from webview IPC unvalidated. */
-function isWebviewCommand(args: unknown): boolean {
-  if (!Array.isArray(args) || !args.every((arg) => typeof arg === 'string')) return false;
-  const [verb, ...rest] = args as string[];
-  // Own keys only: a verb of `constructor` must not find the prototype's.
-  return Object.prototype.hasOwnProperty.call(WEBVIEW_COMMANDS, verb) && WEBVIEW_COMMANDS[verb](rest);
 }
 
 const STREAM_PORT_READ_ATTEMPTS = 4;
@@ -241,11 +207,10 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     return undefined;
   }
 
-  function usableRelaunchUrl(value: unknown): string | undefined {
-    if (typeof value !== 'string') return undefined;
-    const trimmed = value.trim();
-    if (!isAbsoluteUrl(trimmed) || trimmed === 'about:blank') return undefined;
-    return trimmed;
+  /** A tab showing something other than the blank page a relaunch can leave. */
+  function isRealTab(url: string): boolean {
+    const trimmed = url.trim();
+    return !!trimmed && trimmed !== 'about:blank';
   }
 
   // Enumerate a session's tabs via `tab list --json`. Envelope mirrors the rest
@@ -269,7 +234,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   // `close` the daemon relaunches at about:blank, so a `get url` / `tab list`
   // would race the very transition it's meant to preserve and hand back blank.
   function relaunchUrl(requestedUrl: unknown): string {
-    return usableRelaunchUrl(requestedUrl) ?? 'about:blank';
+    return isBrowsableUrl(requestedUrl) ? requestedUrl : 'about:blank';
   }
 
   // agent-browser keeps a long-lived per-session daemon whose headed/headless
@@ -402,9 +367,9 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     // it waits. Never issue a tab close into that relaunch's daemon gap.
     if (!current()) return;
     log(`[ab-relaunch] tabs after open: ${JSON.stringify(tabs)}`);
-    if (tabs.length < 2 || !tabs.some((t) => usableRelaunchUrl(t.url))) return;
+    if (tabs.length < 2 || !tabs.some((t) => isRealTab(t.url))) return;
     for (const tab of tabs) {
-      if (!usableRelaunchUrl(tab.url)) {
+      if (!isRealTab(tab.url)) {
         if (!current()) return;
         log(`[ab-relaunch] closing stray blank tab ${tab.tabId}`);
         await runWithBinaryFallback(['--session', session, 'tab', 'close', tab.tabId], binaryPath);
@@ -452,10 +417,11 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   }
 
   async function command(session: string, args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult> {
-    if (!isSessionName(session)) {
+    if (!isAgentBrowserSession(session)) {
       return { exitCode: 1, stdout: '', stderr: 'a valid session name is required' };
     }
-    if (!isWebviewCommand(args)) {
+    const parsed = parseWebviewCommand(args);
+    if (!parsed) {
       const shown = Array.isArray(args) ? args.map(String).join(' ') : String(args);
       return { exitCode: 1, stdout: '', stderr: `agent-browser '${shown}' is not allowed from the webview` };
     }
@@ -463,15 +429,15 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     // it's no longer ours to clean up on shutdown. It also invalidates a
     // post-open sweep left by a fast-returning relaunch: once closed, no later
     // daemon command may recreate this otherwise-untracked session.
-    if (args[0] === 'close') {
+    if (parsed.kind === 'close') {
       poppedOutSessions.delete(session);
       relaunchGenerations.delete(session);
     }
-    return runWithBinaryFallback(['--session', session, ...args], binaryPath);
+    return runWithBinaryFallback(['--session', session, ...webviewArgv(parsed)], binaryPath);
   }
 
   async function edit(session: string, op: AgentBrowserEditOp, binaryPath?: string): Promise<AgentBrowserEditResult> {
-    if (!isSessionName(session)) {
+    if (!isAgentBrowserSession(session)) {
       return { ok: false, error: 'a valid session name is required' };
     }
     const script = editScript(op);
@@ -526,10 +492,10 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     opts: { format?: 'jpeg' | 'png'; quality?: number },
     binaryPath?: string,
   ): Promise<AgentBrowserScreenshotFileResult> {
-    if (!isSessionName(session)) {
+    if (!isAgentBrowserSession(session)) {
       return { ok: false, error: 'a valid session name is required' };
     }
-    const format = opts.format === 'png' ? 'png' : 'jpeg';
+    const format = captureFormat(opts.format);
     return oneCapture(`file:${format}:${session}`, async (): Promise<AgentBrowserScreenshotFileResult> => {
       const ext = format === 'png' ? 'png' : 'jpg';
       let out: string;
@@ -563,7 +529,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   ): Promise<AgentBrowserScreenshotResult> {
     // Joined whole, read and unlink included: a caller joining only the capture
     // would read a file the first caller has already removed.
-    const format = opts.format === 'png' ? 'png' : 'jpeg';
+    const format = captureFormat(opts.format);
     return oneCapture(`bytes:${format}:${session}`, async (): Promise<AgentBrowserScreenshotResult> => {
       const shot = await screenshotToFile(session, opts, binaryPath);
       if (!shot.ok) return { ok: false, error: shot.error };
@@ -585,7 +551,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   }
 
   async function streamStatus(session: string, binaryPath?: string): Promise<AgentBrowserStreamStatusResult> {
-    if (!isSessionName(session)) return { ok: false, error: 'a valid session name is required' };
+    if (!isAgentBrowserSession(session)) return { ok: false, error: 'a valid session name is required' };
     const wsPort = await readStreamPort(session, binaryPath);
     if (!wsPort) return { ok: false, error: 'stream port unavailable' };
     return { ok: true, wsPort };
@@ -596,7 +562,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   // the process launches headed in one shot so embed→popout doesn't open a
   // headless browser only to tear it down.
   async function open(url: string, opts: { headed?: boolean }, binaryPath?: string): Promise<AgentBrowserOpenResult> {
-    if (!isAbsoluteUrl(url)) return { ok: false, error: 'an absolute url is required' };
+    if (!isBrowsableUrl(url)) return { ok: false, error: 'an http(s) url is required' };
     const session = generateGuiSession();
     const args = ['--session', session, ...(opts?.headed ? ['--headed'] : []), 'open', url];
     // A headed spawn is a real OS window — track it before the launch so a
@@ -627,7 +593,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     opts: { rect?: { x: number; y: number; width: number; height: number }; url?: string },
     binaryPath?: string,
   ): Promise<AgentBrowserPopResult> {
-    if (!isSessionName(session)) return { ok: false, error: 'a valid session name is required' };
+    if (!isAgentBrowserSession(session)) return { ok: false, error: 'a valid session name is required' };
     const generation = beginRelaunch(session);
     const url = relaunchUrl(opts?.url);
     log(`[ab-relaunch] popOut session=${session} requestedUrl=${JSON.stringify(opts?.url)} -> open ${url}`);
@@ -679,7 +645,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     opts: { url?: string },
     binaryPath?: string,
   ): Promise<AgentBrowserPopResult> {
-    if (!isSessionName(session)) return { ok: false, error: 'a valid session name is required' };
+    if (!isAgentBrowserSession(session)) return { ok: false, error: 'a valid session name is required' };
     const generation = beginRelaunch(session);
     const url = relaunchUrl(opts?.url);
     log(`[ab-relaunch] popIn session=${session} requestedUrl=${JSON.stringify(opts?.url)} -> open ${url}`);

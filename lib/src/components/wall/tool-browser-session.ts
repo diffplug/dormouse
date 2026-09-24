@@ -26,8 +26,7 @@ export async function attachAgentBrowserSession({
   refreshSurface: (surfaceId: string, patch: Record<string, unknown>) => void;
 }): Promise<void> {
   if (!platform.agentBrowserCommand) return;
-  // `open <url>` is one of the host's fixed webview argv shapes; the CLI boots
-  // the daemon/browser if it isn't already running.
+  // The CLI boots the daemon/browser if it isn't already running.
   const opened = await platform.agentBrowserCommand(session, ['open', url], binaryPath);
   if (opened.exitCode !== 0) {
     refreshSurface(surfaceId, { session });

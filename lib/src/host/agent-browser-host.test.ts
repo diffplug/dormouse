@@ -530,10 +530,7 @@ describe('agent-browser host screenshot transport', () => {
   });
 });
 
-// Every webview token lands on agent-browser's command line, and agent-browser
-// reads launch options anywhere on it (`open <url> --executable-path x` launches
-// x — checked against 0.31.1), so matching only the verb would let an
-// allowlisted command walk around the `binaryPath` gate.
+// `parseWebviewCommand` in browser-host-shared.ts says why every token is checked.
 describe('agent-browser host webview argv', () => {
   const originalSocketDir = process.env.AGENT_BROWSER_SOCKET_DIR;
 
@@ -550,7 +547,7 @@ describe('agent-browser host webview argv', () => {
   it('runs exactly the argv shapes the webview sends', async () => {
     const shapes = [
       ['open', 'https://example.com/path?q=1'],
-      ['open', 'about:blank'],
+      ['open', 'http://localhost:5173/'],
       ['back'],
       ['forward'],
       ['reload'],
@@ -558,6 +555,7 @@ describe('agent-browser host webview argv', () => {
       ['get', 'cdp-url'],
       ['tab', 't2'],
       ['tab', 'close', 't2'],
+      ['tab', 'list', '--json'],
       ['set', 'viewport', '1280', '720', '2'],
       ['set', 'viewport', '801', '599', '1.100000023841858'],
       ['set', 'device', 'iPhone 16 Pro'],
@@ -567,7 +565,9 @@ describe('agent-browser host webview argv', () => {
     for (const args of shapes) {
       spawnMock.mockReset();
       enqueueSpawnResults([{}]);
-      expect(await host.command('dormouse.1.gui-abc', args)).toEqual({ exitCode: 0, stdout: '', stderr: '' });
+      // The one shape with a flag of its own is the host's: the webview asks for `tab list`.
+      const sent = args[2] === '--json' ? ['tab', 'list'] : args;
+      expect(await host.command('dormouse.1.gui-abc', sent)).toEqual({ exitCode: 0, stdout: '', stderr: '' });
       expect(spawnMock.mock.calls[0][1]).toEqual(['--session', 'dormouse.1.gui-abc', ...args]);
     }
   });
@@ -577,6 +577,9 @@ describe('agent-browser host webview argv', () => {
       ['open', 'https://example.com/', '--executable-path', '/tmp/evil'],
       ['open', '--executable-path=/tmp/evil'],
       ['open', ' https://example.com/'],
+      ['open', 'file:///etc/passwd'],
+      ['open', 'javascript:alert(1)'],
+      ['set', 'viewport', '100', '100', '11'],
       ['close', '--all'],
       ['back', '--profile', '/tmp/p'],
       ['get', 'cdp-url', '--init-script', '/tmp/x.js'],
@@ -617,9 +620,10 @@ describe('agent-browser host webview argv', () => {
     expect(spawnMock).not.toHaveBeenCalled();
   });
 
-  it('refuses a launch URL that is not an absolute URL, and relaunches at about:blank instead', async () => {
+  it('refuses a launch URL that is not http(s), and relaunches at about:blank instead', async () => {
     const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });
-    expect(await host.open('--executable-path=/tmp/evil', {})).toEqual({ ok: false, error: 'an absolute url is required' });
+    expect(await host.open('--executable-path=/tmp/evil', {})).toEqual({ ok: false, error: 'an http(s) url is required' });
+    expect(await host.open('file:///etc/passwd', {})).toEqual({ ok: false, error: 'an http(s) url is required' });
     expect(spawnMock).not.toHaveBeenCalled();
 
     const calls = mockSpawnByCommand({

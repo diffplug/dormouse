@@ -358,10 +358,9 @@ export interface PlatformAdapter {
   runWorkbenchCommand?(command: VSCodeWorkbenchCommand): void;
 
   // agent-browser surface support (see docs/specs/dor-browser.md).
-  // Runs the user's agent-browser binary against a session — only the fixed
-  // argv shapes the host's `WEBVIEW_COMMANDS` table accepts (tab select/close,
-  // `set viewport`/`set device`, `open <url>`, back/forward/reload, `close`,
-  // `get cdp-url`), never a general exec path. `binaryPath` is the
+  // Runs the user's agent-browser binary against a session — only commands
+  // `parseWebviewCommand` (lib/src/host/browser-host-shared.ts) accepts, never a
+  // general exec path. `binaryPath` is the
   // absolute path resolved by `dor ab` in the invoking terminal — the host's
   // own PATH (e.g. a GUI-launched extension host) may not find the binary.
   agentBrowserCommand?(session: string, args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult>;
@@ -379,7 +378,7 @@ export interface PlatformAdapter {
   // changed stream frame as its final, lower-resolution image.
   agentBrowserScreenshot?(session: string, opts: { format?: 'jpeg' | 'png'; quality?: number }, binaryPath?: string): Promise<AgentBrowserScreenshotResult>;
   // Reads the current stream port for an already-running session. This is a
-  // purpose-built status channel, not one of agentBrowserCommand's argv shapes,
+  // purpose-built status channel, not an agentBrowserCommand,
   // so restored panels can recover from a stale persisted wsPort after reload.
   agentBrowserStreamStatus?(session: string, binaryPath?: string): Promise<AgentBrowserStreamStatusResult>;
   // The WebSocket URL for a session's stream port. Hosts whose webview origin

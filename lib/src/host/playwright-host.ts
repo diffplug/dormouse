@@ -14,7 +14,15 @@ import {
   type PlaywrightRequest,
   type PlaywrightResult,
 } from '../lib/platform/browser-automation';
-import { editScript, generateGuiSession, jpegQuality } from './browser-host-shared';
+import {
+  captureFormat,
+  editScript,
+  generateGuiSession,
+  isBrowsableUrl,
+  isPlaywrightSession,
+  jpegQuality,
+  parseWebviewCommand,
+} from './browser-host-shared';
 import { resolvePlaywrightInstall, playwrightWorkspace, type PlaywrightInstall } from './playwright-install';
 import { isLoopbackHost } from './loopback-guard';
 import { BrowserStreamGrants } from './browser-stream-guard';
@@ -39,9 +47,6 @@ const REQUEST_BUDGET_MS = PLAYWRIGHT_REQUEST_TIMEOUT_MS - 2_000;
 const OPEN_SETTLE_MS = 4_000;
 const LAUNCH_CLOSE_RESERVE_MS = OPEN_SETTLE_MS + 4_000;
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-const validSession = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9._-]+$/.test(value) && value.length <= 200;
-const validUrl = (value: unknown): value is string => { try { return typeof value === 'string' && ['http:', 'https:'].includes(new URL(value).protocol); } catch { return false; } };
-const positive = (n: unknown) => typeof n === 'number' && Number.isFinite(n) && n > 0 && n <= 16384;
 
 function realpathOrUndefined(file: string): string | undefined {
   try {
@@ -377,7 +382,7 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
         void opening.then(async () => {
           if (closed || generation !== generations.get(key) || v.disposed) return;
           const pages = pagesOf(v);
-          if (!pages.some(p => validUrl(p.url()))) return;
+          if (!pages.some(p => isBrowsableUrl(p.url()))) return;
           for (let i = pages.length - 1; i >= 0; i--) {
             if (closed || generation !== generations.get(key) || v.disposed) return;
             if (pages[i].url() === 'about:blank') await cli(b, ['tab-close', String(i)]);
@@ -411,22 +416,25 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
     const install = resolvePlaywrightInstall(request.binaryPath);
     const cwd = typeof request.cwd === 'string' && path.isAbsolute(request.cwd) ? request.cwd : process.cwd();
     const session = request.op === 'open' ? generateGuiSession() : request.session;
-    if (!validSession(session)) throw new Error('Invalid Playwright session name');
+    if (!isPlaywrightSession(session)) throw new Error('Invalid Playwright session name');
     const b = bind(session, cwd, install);
     if (request.op === 'open' || request.op === 'popOut' || request.op === 'popIn') {
       // A GUI open navigates where it was asked, so that URL must pass the
       // http(s) check. A relaunch only carries the page along: one Dormouse may
       // not navigate to (about:blank, `file:`, `data:`, an error page) reopens
       // blank rather than failing the pop-out or pop-in.
-      if (request.op === 'open' && !validUrl(request.url)) throw new Error('Browser navigation requires an http(s) URL');
-      const url = validUrl(request.url) ? request.url : undefined;
+      if (request.op === 'open' && !isBrowsableUrl(request.url)) throw new Error('Browser navigation requires an http(s) URL');
+      const url = isBrowsableUrl(request.url) ? request.url : undefined;
       const isHeaded = request.op === 'open' ? !!request.headed : request.op === 'popOut';
       const fresh = request.op === 'open';
       const deadline = Date.now() + REQUEST_BUDGET_MS;
       const v = await serialize(b, () => launch(b, url, isHeaded, fresh, deadline));
       return { ok: true, session, cwd, binaryPath: install.binary, wsPort: v.port, nativeIdentity: b.key };
     }
-    if (request.op === 'command' && request.args?.[0] === 'close') {
+    // Parsed before anything connects, so a refused command costs nothing.
+    const command = request.op === 'command' ? parseWebviewCommand(request.args) : undefined;
+    if (command === null) throw new Error('Unsupported Playwright host command');
+    if (command?.kind === 'close') {
       return serialize(b, async () => {
         await invalidate(b);
         headed.delete(b.key);
@@ -443,7 +451,7 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
     const page = v.page;
     if (!page) throw new Error('No Playwright page is open');
     if (request.op === 'screenshot') {
-      const format = request.format === 'png' ? 'png' : 'jpeg';
+      const format = captureFormat(request.format);
       const cdp = await control(v, page);
       const { data } = await cdp.send('Page.captureScreenshot', { format, ...(format === 'jpeg' ? { quality: jpegQuality(request.quality) } : {}), captureBeyondViewport: false });
       // Keep the cross-host contract a plain typed array, including VS Code's message transport.
@@ -459,34 +467,38 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
       if (request.edit !== 'selectAll' && text) await deps.writeClipboardText(text);
       return { ok: true, text };
     }
-    if (request.op !== 'command' || !Array.isArray(request.args) || !request.args.every(a => typeof a === 'string')) throw new Error('Invalid browser operation');
-    const [cmd, sub, ...args] = request.args;
-    if (cmd === 'open' && request.args.length === 2 && validUrl(sub)) await page.goto(sub, { waitUntil: 'commit' });
-    else if (cmd === 'reload' && !sub) await page.reload({ waitUntil: 'commit' });
-    else if (cmd === 'back' && !sub) await page.goBack({ waitUntil: 'commit' });
-    else if (cmd === 'forward' && !sub) await page.goForward({ waitUntil: 'commit' });
-    else if (cmd === 'tab') {
-      if (sub === 'list') return { ok: true, exitCode: 0, stdout: JSON.stringify({ tabs: await tabsOf(v) }), stderr: '' };
-      let nativeArgs: string[];
-      if (sub === 'close' && args.length === 1 && /^\d+$/.test(args[0])) nativeArgs = ['tab-close', args[0]];
-      else if (request.args.length === 2 && /^\d+$/.test(sub ?? '')) nativeArgs = ['tab-select', sub];
-      else throw new Error('Unsupported tab operation');
-      const r = await cli(b, nativeArgs);
-      await refresh(v);
-      return { ok: r.exitCode === 0, ...r };
-    } else if (cmd === 'set') {
-      const device = sub === 'device' && args.length === 1 ? install.library.devices[args[0]] : undefined;
-      if (!device && !(sub === 'viewport' && args.length === 3)) throw new Error('Invalid viewport/device');
-      const [width, height, dpr] = device
-        ? [device.viewport.width, device.viewport.height, device.deviceScaleFactor]
-        : args.map(Number);
-      if (!positive(width) || !positive(height) || !positive(dpr) || dpr > 10) throw new Error('Invalid viewport/device');
-      await page.setViewportSize({ width, height });
-      const cdp = await control(v, page);
-      await cdp.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: dpr, mobile: device?.isMobile ?? false });
-      await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: device?.hasTouch ?? false });
-      if (device) await cdp.send('Emulation.setUserAgentOverride', { userAgent: device.userAgent });
-    } else throw new Error('Unsupported Playwright host command');
+    if (!command) throw new Error('Invalid browser operation');
+    switch (command.kind) {
+      case 'open': await page.goto(command.url, { waitUntil: 'commit' }); break;
+      case 'reload': await page.reload({ waitUntil: 'commit' }); break;
+      case 'back': await page.goBack({ waitUntil: 'commit' }); break;
+      case 'forward': await page.goForward({ waitUntil: 'commit' }); break;
+      case 'tab-list': return { ok: true, exitCode: 0, stdout: JSON.stringify({ tabs: await tabsOf(v) }), stderr: '' };
+      case 'tab-select':
+      case 'tab-close': {
+        // The Playwright CLI names tabs by index.
+        if (!/^\d+$/.test(command.tab)) throw new Error('Unsupported tab operation');
+        const r = await cli(b, [command.kind, command.tab]);
+        await refresh(v);
+        return { ok: r.exitCode === 0, ...r };
+      }
+      case 'viewport':
+      case 'device': {
+        const devices = install.library.devices;
+        const device = command.kind === 'device' && Object.prototype.hasOwnProperty.call(devices, command.name) ? devices[command.name] : undefined;
+        const size = command.kind === 'viewport' ? command
+          : device ? { width: device.viewport.width, height: device.viewport.height, dpr: device.deviceScaleFactor } : undefined;
+        if (!size) throw new Error('Invalid viewport/device');
+        const { width, height, dpr } = size;
+        await page.setViewportSize({ width, height });
+        const cdp = await control(v, page);
+        await cdp.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: dpr, mobile: device?.isMobile ?? false });
+        await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: device?.hasTouch ?? false });
+        if (device) await cdp.send('Emulation.setUserAgentOverride', { userAgent: device.userAgent });
+        break;
+      }
+      default: throw new Error('Unsupported Playwright host command');
+    }
     await refresh(v);
     return { ok: true, exitCode: 0, stdout: '', stderr: '' };
   }

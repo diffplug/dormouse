@@ -396,7 +396,7 @@ sidecar/Rust adapter.
 
 | Method | Contract |
 | --- | --- |
-| `agentBrowserCommand` | One fixed argv shape per verb: `open <absolute url>`, `back`/`forward`/`reload`, bare `close`, `get cdp-url`, `tab <ref>`, `tab close <ref>`, `set viewport <w> <h> <dpr>`, `set device <name>`. |
+| `agentBrowserCommand` | Navigation, tab, viewport/device, `get cdp-url` and `close` commands, one shape per verb. |
 | `agentBrowserScreenshot` | One device-resolution JPEG/PNG frame. VS Code structured-clones the bytes; standalone passes Rust the capture's temp-file **path** over the sidecar stdio, for Rust to read (rationale). **One capture per session in flight**: a request made meanwhile joins it, since the webview re-asks when its adapter times out. |
 | `agentBrowserStreamStatus` | Current stream port, for stale-`wsPort` recovery. |
 | `agentBrowserEdit` | select-all/copy/cut via fixed host-owned JS plus an OS clipboard write. |
@@ -404,12 +404,11 @@ sidecar/Rust adapter.
 | `agentBrowserOpen` | Spawn a GUI-owned session for iframe -> agent-browser; resolves when the daemon is up, not when the page loads ([Pop-Out](#pop-out)). |
 | `agentBrowserPopOut` / `agentBrowserPopIn` | Headed/headless relaunch. |
 
-**Host-side validation is the security boundary, and it checks every token,
-never only the verb** — agent-browser reads launch options anywhere on its
-command line (rationale). **Must refuse an argv that is not exactly one of those
-shapes, an option- or path-shaped session name, and a launch URL that is not
-absolute**, on every entry point; the webview is not trusted to pre-filter.
-Pinned by `lib/src/host/agent-browser-host.test.ts`.
+**Host-side validation is the security boundary: both provider hosts run only
+what the shared `parseWebviewCommand` accepts, rebuilt from its parsed value,
+and refuse an option- or path-shaped session name and a non-http(s) launch URL
+on every entry point** (rationale). Pinned by
+`lib/src/host/agent-browser-host.test.ts`.
 
 **`binaryPath` crosses from the webview realm, so it is checked at the spawn**
 (rationale) — the gate is `runWithBinaryFallback`, the one call every entry point
@@ -428,10 +427,11 @@ stream server rejects `vscode-webview://` origins. The relay grants one
 single-use, short-TTL token bound to one stream port and strips the Origin
 header; standalone connects directly.
 
-Source of truth: `lib/src/host/agent-browser-host.ts` (`WEBVIEW_COMMANDS`,
-`isSessionName`, `runWithBinaryFallback`),
+Source of truth: `lib/src/host/agent-browser-host.ts` (`runWithBinaryFallback`),
+`lib/src/host/browser-host-shared.ts` (`parseWebviewCommand`,
+`isAgentBrowserSession`, `isPlaywrightSession`),
 `dor-lib-common/src/agent-browser.ts` (`isAllowedAgentBrowserBinary`),
-`lib/src/host/private-capture-dir.ts`, `lib/src/host/browser-host-shared.ts`, `lib/src/host/browser-stream-guard.ts`,
+`lib/src/host/private-capture-dir.ts`, `lib/src/host/browser-stream-guard.ts`,
 `vscode-ext/src/agent-browser-host.ts`, `vscode-ext/src/webview-html.ts`,
 `standalone/src/tauri-adapter.ts`, `standalone/src-tauri/src/lib.rs`,
 `standalone/sidecar/main.js`.
@@ -446,7 +446,7 @@ Source of truth: `lib/src/host/agent-browser-host.ts` (`WEBVIEW_COMMANDS`,
 
 **Must discover the native session in its CLI project scope and connect using that installation's matching Playwright client.** Accept only a unique registry entry matching session, workspace and library, with a local pipe endpoint and Chromium engine. Never load modules from the registry's library path. The host derives the client from the validated CLI installation. Raw sessions reuse Surfaces by that native identity, including callers in different subdirectories of one project. Native CLI tabs and the pane share the selected tab; the host polls tab selection and metadata every 750ms while viewed, broadcasting only changes, and the current state to each connecting viewer. Screenshots reuse tab state for up to 750ms; explicit host controls refresh immediately. A native launch updates headed shutdown ownership and the pane's display mode. **Must apply that host-reported mode in the controller before the new viewer port**, so sync never sizes a headed window; ignore it mid-relaunch, and until params show the controller's own last mode write.
 
-**Must expose only fixed host operations.** Navigation, tabs, viewport/device, screenshots, editing and close are validated host-side; arbitrary CLI arguments, JavaScript and CDP methods are unavailable through the webview channel. The trusted `dor pw` process retains native passthrough. Executable hints use the same filename/exact-host-override boundary as agent-browser, with `playwright-cli` as the accepted name; `dor pw` applies it to the executable a binding returns (`docs/specs/dor-cli.md` → Playwright Surface Addressing).
+**Must expose only fixed host operations.** Navigation, tabs, viewport/device, screenshots, editing and close are validated host-side (commands by the shared parser above); arbitrary CLI arguments, JavaScript and CDP methods are unavailable through the webview channel. The trusted `dor pw` process retains native passthrough. Executable hints use the same filename/exact-host-override boundary as agent-browser, with `playwright-cli` as the accepted name; `dor pw` applies it to the executable a binding returns (`docs/specs/dor-cli.md` → Playwright Surface Addressing).
 
 **Must serialize GUI relaunches and closes per native session.** Close the previous CLI session before polling for its replacement; return when the browser endpoint is ready, without waiting for page load. **A pop-out or pop-in whose page is not http(s) must reopen blank**, never fail; only a GUI open's URL must pass the http(s) check. **Must answer a GUI launch inside the transports' `PLAYWRIGHT_REQUEST_TIMEOUT_MS`**: startup, queueing included, gets 30 s from the request's arrival, and every CLI call it waits on is killed at that deadline. **Must bound every other CLI call to 10 s, except `open`**, which lasts as long as the page load and whose end could take its browser down; nothing waits on it past a launch's own bounds. **A launch that gives up must let its `open` land, for up to 4 s, before closing the session**, and close again when a later `open` lands unless a newer launch owns the session (rationale). Only a completed, still-current GUI launch may close startup blank tabs, and only while a real page exists. Shutdown cancels pending launches, disconnects viewers and closes tracked headed sessions. Viewer disconnect alone leaves the CLI browser alive. Concurrent input/captures share CDP attachments; disposal releases late attachments. **A screencast that fails to start must forget its page**, so the next poll releases the attachment and retries. Temporary screenshots follow the agent-browser private-directory contract.
 
