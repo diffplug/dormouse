@@ -122,8 +122,8 @@ function noteOutput(set: SourceSet | null): void {
 /** The one ring latch a Session holds (`docs/specs/alert.md` -> Public State). */
 interface Ring extends SourceSet {
   episode: AlertEpisode;
-  /** What this ring found, restored whole when a withdrawal empties it. */
-  prior: { todo: TodoState; notification: ActivityNotification | null };
+  /** What it shows, and what the TODO a look turns it into keeps. */
+  detail: ActivityNotification;
 }
 
 /**
@@ -259,7 +259,9 @@ export interface AlertState {
   episode: AlertEpisode | null;
   status: SessionStatus;
   watchingEnabled: boolean;
+  /** Set by a look at a ring or by hand, never by a ring opening. */
   todo: TodoState;
+  /** The ring's detail while ringing, else the TODO's. */
   notification: ActivityNotification | null;
   /** At least one `dor await` is parked on this Session. Never persisted. */
   awaited: boolean;
@@ -291,6 +293,7 @@ interface AlertEntry {
   commandExitWatch: CommandExitWatch | null;
   pendingCommandLine: string | null;
   todo: TodoState;
+  /** The TODO's detail: null without one. A ring shows its own instead. */
   notification: ActivityNotification | null;
   /**
    * The terminal notification held behind animation, never public or
@@ -489,12 +492,12 @@ export class AlertManager {
 
   /**
    * Void the `watching` source whose key `voids` names, ringing or held alike,
-   * leaving the detector running. Never an acknowledgement: a ring left empty
-   * restores what it found, a hold left empty goes.
+   * leaving the detector running. Never an acknowledgement: a ring or a hold
+   * left empty goes, leaving no TODO.
    */
   private invalidateWatching(entry: AlertEntry, voids: (key: string) => boolean): void {
     const { ring, held } = entry;
-    if (ring?.watching && voids(ring.watching.key) && dropWatching(ring)) this.closeRing(entry, ring);
+    if (ring?.watching && voids(ring.watching.key) && dropWatching(ring)) entry.ring = null;
     if (held?.watching && voids(held.watching.key) && dropWatching(held)) entry.held = null;
   }
 
@@ -633,8 +636,8 @@ export class AlertManager {
    * instead of ringing anyone.
    *
    * Resolves immediately when the Session is already ringing, consuming only
-   * the one ring source it resolved on. That withdraws the TODO the ring
-   * itself set, never a TODO that was already there, and never acknowledges.
+   * the one ring source it resolved on. That never acknowledges, so it leaves
+   * no TODO and clears none.
    */
   awaitCompletion(id: string, options: AwaitOptions): AwaitHandle {
     if (this.inert(id)) return settledAwait({ kind: 'cancelled', waitedMs: 0 });
@@ -1029,9 +1032,9 @@ export class AlertManager {
 
   /**
    * The one path every ring takes (`docs/specs/alert.md` -> Clearing And TODO),
-   * whatever the source. Opening a ring starts an episode, sets TODO and shows
-   * its own detail; a source joining an active ring enriches that same
-   * summons, its detail shown only if at least as rich as what is shown.
+   * whatever the source. Opening a ring starts an episode and shows its own
+   * detail, leaving TODO alone; a source joining an active ring enriches that
+   * same summons, its detail shown only if at least as rich as what is shown.
    */
   private raiseRing(
     entry: AlertEntry,
@@ -1040,25 +1043,18 @@ export class AlertManager {
   ): void {
     let ring = entry.ring;
     if (ring === null) {
-      ring = {
-        episode: createAlertEpisode(),
-        sources: [],
-        watching: null,
-        prior: { todo: entry.todo, notification: entry.notification },
-      };
+      ring = { episode: createAlertEpisode(), sources: [], watching: null, detail };
       entry.ring = ring;
-      entry.todo = true;
-      entry.notification = detail;
       entry.ackedQuiet = false;
     } else {
-      entry.notification = richer(entry.notification, detail);
+      ring.detail = richer(ring.detail, detail);
     }
     addSource(ring, source);
   }
 
   /**
    * An await answers one source, taking it off the ring. Never an
-   * acknowledgement: a ring left empty restores what it found. Returns whether
+   * acknowledgement: a ring left empty goes, leaving no TODO. Returns whether
    * the source was there.
    */
   private withdrawRingSource(entry: AlertEntry, source: RingSource): boolean {
@@ -1073,32 +1069,34 @@ export class AlertManager {
       ring.sources = ring.sources.filter((candidate) => candidate !== source);
       empty = ring.sources.length === 0 && ring.watching === null;
     }
-    if (empty) this.closeRing(entry, ring);
+    if (empty) entry.ring = null;
     if (source === 'watching') this.answeredWatching(entry);
     return true;
-  }
-
-  /** A ring left empty is withdrawn, restoring the TODO and notification it found. */
-  private closeRing(entry: AlertEntry, ring: Ring): void {
-    entry.ring = null;
-    entry.todo = ring.prior.todo;
-    entry.notification = ring.prior.notification;
   }
 
   /**
    * A user verb stops the summons: the whole ring goes, with whatever was held
    * or deferred behind animation — a path that stops summoning the user must
    * never leave a timer that summons them a second later. TODO is the caller's
-   * to decide. Only clearing a ring or a hold records an acknowledgement.
+   * to decide, from the ring returned. Only clearing a ring or a hold records
+   * an acknowledgement.
    */
-  private clearRingForUser(entry: AlertEntry): void {
+  private clearRingForUser(entry: AlertEntry): Ring | null {
     this.clearDeferredNotification(entry);
-    const sets = [entry.ring, entry.held];
-    if (sets.every((set) => set === null)) return;
+    const { ring, held } = entry;
+    if (ring === null && held === null) return null;
     entry.ring = null;
     entry.held = null;
     entry.ackedQuiet = true;
-    if (sets.some((set) => set?.watching)) this.answeredWatching(entry);
+    if (ring?.watching || held?.watching) this.answeredWatching(entry);
+    return ring;
+  }
+
+  /** A look at a ring: it becomes a TODO, keeping its detail. */
+  private ringToTodo(entry: AlertEntry, ring: Ring | null): void {
+    if (ring === null) return;
+    entry.todo = true;
+    entry.notification = ring.detail;
   }
 
   /**
@@ -1168,11 +1166,11 @@ export class AlertManager {
 
   /**
    * A human interacted with the Session. Both kinds clear the ring and whatever
-   * it held or deferred, and mark the running command seen; `input` — keys, a
-   * paste, a drop, acknowledged as the host writes them — also turns TODO off
-   * and opens the echo window, a helper's included, since its detector runs.
-   * Never creates an entry: an id with none — a browser Surface — has nothing
-   * to clear.
+   * it held or deferred, and mark the running command seen; without `input` a
+   * cleared ring becomes a TODO, while `input` — keys, a paste, a drop,
+   * acknowledged as the host writes them — turns TODO off and opens the echo
+   * window, a helper's included, since its detector runs. Never creates an
+   * entry: an id with none — a browser Surface — has nothing to clear.
    */
   acknowledge(id: string, { input }: { input: boolean }): void {
     const entry = this.entries.get(id);
@@ -1184,7 +1182,7 @@ export class AlertManager {
       this.setTodoForUser(id, entry, false);
       return;
     }
-    this.clearRingForUser(entry);
+    this.ringToTodo(entry, this.clearRingForUser(entry));
     this.notify(id);
   }
 
@@ -1224,11 +1222,11 @@ export class AlertManager {
     const entry = this.entries.get(id);
     if (!entry) return;
 
-    // Dismissing a ring leaves its TODO behind, so the summons is not lost. A
+    // Dismissing a ring leaves a TODO behind, so the summons is not lost. A
     // Session with nothing ringing has nothing to dismiss, and must keep any
     // notification still deferred behind animation.
     if (entry.ring === null) return;
-    this.clearRingForUser(entry);
+    this.ringToTodo(entry, this.clearRingForUser(entry));
     this.notify(id);
   }
 
@@ -1245,12 +1243,14 @@ export class AlertManager {
     this.setTodoForUser(id, this.getOrCreateEntry(id), false);
   }
 
-  /** A TODO verb: off drops the notification, and either way the ring goes
-   *  with any deferred notification. `notify` dedupes unchanged state. */
+  /** A TODO verb: the ring goes with any deferred notification, on keeps the
+   *  ring's detail, and off drops the notification. `notify` dedupes unchanged
+   *  state. */
   private setTodoForUser(id: string, entry: AlertEntry, todo: TodoState): void {
+    const ring = this.clearRingForUser(entry);
+    if (todo) this.ringToTodo(entry, ring);
     entry.todo = todo;
     if (!todo) entry.notification = null;
-    this.clearRingForUser(entry);
     this.notify(id);
   }
 
@@ -1263,7 +1263,7 @@ export class AlertManager {
       status: this.getProjectedStatus(id, entry),
       watchingEnabled: this.isWatching(entry),
       todo: entry.todo,
-      notification: entry.notification,
+      notification: entry.ring?.detail ?? entry.notification,
       awaited: (this.awaits.get(id)?.waiters.size ?? 0) > 0,
       episode: entry.ring?.episode ?? null,
     };

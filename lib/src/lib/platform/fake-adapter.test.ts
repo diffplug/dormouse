@@ -76,7 +76,7 @@ describe('FakePtyAdapter', () => {
     expect(alertEvents.at(-1)).toMatchObject({
       id: 't1',
       status: 'ALERT_RINGING',
-      todo: true,
+      todo: false,
       notification: { source: 'OSC 9', title: null, body: 'Build finished' },
     });
   });
@@ -105,7 +105,7 @@ describe('FakePtyAdapter', () => {
     expect(alertEvents.at(-1)).toMatchObject({
       id: 't1',
       status: 'ALERT_RINGING',
-      todo: true,
+      todo: false,
       notification: { source: 'BEL', title: 'Terminal bell', body: null },
     });
   });

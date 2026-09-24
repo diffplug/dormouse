@@ -113,7 +113,7 @@ describe('held completions', () => {
     expect(manager.getState(PANE).todo).toBe(false);
 
     goIdle(manager, PANE);
-    expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', todo: true });
+    expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', todo: false });
   });
 
   it.each([
@@ -356,7 +356,7 @@ describe('walking away from a permission prompt', () => {
     replay(120_000);
     expect(manager.getState(PANE)).toMatchObject({
       status: 'ALERT_RINGING',
-      todo: true,
+      todo: false,
       notification: { body: 'Claude needs your permission' },
     });
   });
@@ -448,7 +448,7 @@ describe('a Claude Code turn', () => {
     run.to(ringAt - 1);
     expect(ringing(PANE)).toBe(false);
     run.to(ringAt);
-    expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', todo: true, notification: FINISHED });
+    expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', todo: false, notification: FINISHED });
     run.to(ringAt + 30_000);
     expect(episodes.size).toBe(1);
   });
@@ -479,6 +479,6 @@ describe('a Claude Code turn', () => {
     run.to(idleAt - 1);
     expect(manager.getState(PANE)).toMatchObject({ todo: false, notification: null });
     run.to(idleAt);
-    expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', todo: true, notification: FINISHED });
+    expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', todo: false, notification: FINISHED });
   });
 });

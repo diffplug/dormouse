@@ -40,7 +40,7 @@ Dormouse never guesses which commands deserve an alert. Watching is a rule you c
 
 A ringing pane is outlined and washed in the alarm color until you answer it, so one glance across a full wall finds it. Clicking or typing into the pane — or pressing `a` — puts the alarm out. Nothing rings while you are working in that pane; if you walk away from it instead, it rings then.
 
-Whichever way a pane rings, the ring becomes a **TODO** — a marker beside the pane's title that outlives the alert, so a ring you dismissed does not disappear without a trace. Clear it by typing into the pane, clicking it, or pressing `t` in command mode.
+An alarm you look at without typing — a click, `a` — becomes a **TODO**, a marker beside the pane's title, so a ring you dismissed does not disappear without a trace. Typing into the pane deals with it, clearing both. Clear a TODO by typing into the pane, clicking the marker, or pressing `t` in command mode. An alarm nobody looked at comes back after a restart as a TODO.
 
 Spoken alarms use your browser or system voice today. An optional [managed ElevenLabs voice](https://dormouse.sh/hosted/#voice) is coming for people who want something more natural without managing a separate voice account.
 

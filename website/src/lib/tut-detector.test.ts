@@ -181,18 +181,18 @@ describe("TutDetector", () => {
     expect(state.isComplete("al-ring")).toBe(true);
   });
 
-  it("credits al-todo-auto when a ring is dismissed and its TODO stays", () => {
+  it("credits al-todo-auto when a dismissed ring leaves a TODO behind", () => {
     const { state, setActivitySnapshot } = makeDetectorHarness();
     const watching = { source: "WATCHING", title: "longtask went quiet", body: null } as const;
 
     setActivitySnapshot(new Map([["pane-a", activity("BUSY")]]));
-    // The ring sets TODO itself as it opens.
-    setActivitySnapshot(new Map([["pane-a", { ...activity("ALERT_RINGING", true), notification: watching }]]));
+    setActivitySnapshot(new Map([["pane-a", { ...activity("ALERT_RINGING"), notification: watching }]]));
     expect(state.isComplete("al-todo-auto")).toBe(false);
-    expect(state.isComplete("al-todo-manual")).toBe(false);
 
+    // The look turns the ring into a TODO carrying its detail: not a hand-added one.
     setActivitySnapshot(new Map([["pane-a", { ...activity("NOTHING_TO_SHOW", true), notification: watching }]]));
     expect(state.isComplete("al-todo-auto")).toBe(true);
+    expect(state.isComplete("al-todo-manual")).toBe(false);
   });
 
   it("credits al-watch-cmd once a rule exists", () => {
@@ -289,18 +289,16 @@ describe("TutDetector", () => {
     setActivitySnapshot(new Map([["pane-a", activity("WATCHING_DISABLED", false, false)]]));
     setActivitySnapshot(new Map([
       ["pane-a", {
-        ...activity("ALERT_RINGING", true, false),
+        ...activity("ALERT_RINGING", false, false),
         notification: { source: "OSC 777", title: "Build finished", body: "3 packages" },
       }],
     ]));
     expect(state.isComplete("al-notif")).toBe(true);
     expect(state.isComplete("al-cmd-exit")).toBe(false);
-    // The ring set TODO itself, so this is not a hand-added one.
-    expect(state.isComplete("al-todo-manual")).toBe(false);
 
     setActivitySnapshot(new Map([
       ["pane-a", {
-        ...activity("ALERT_RINGING", true, false),
+        ...activity("ALERT_RINGING", false, false),
         notification: { source: "COMMAND_EXIT", title: "Command finished", body: "slowbuild exited 0" },
       }],
     ]));

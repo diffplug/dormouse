@@ -528,7 +528,7 @@ export const ExtremelyNarrowControlsVisible: Story = {
   args: {
     width: 76,
   },
-  parameters: primedPane({ status: 'ALERT_RINGING', todo: true }),
+  parameters: primedPane({ status: 'ALERT_RINGING' }),
   play: assertPaneActions(['Zoom']),
 };
 
@@ -562,6 +562,6 @@ export const NarrowLongTitleControlsVisible: Story = {
   args: {
     width: 130,
   },
-  parameters: primedPane({ status: 'ALERT_RINGING', todo: true, userTitle: LONG_TITLE }),
+  parameters: primedPane({ status: 'ALERT_RINGING', userTitle: LONG_TITLE }),
   play: assertPaneActions(PANE_ACTIONS),
 };

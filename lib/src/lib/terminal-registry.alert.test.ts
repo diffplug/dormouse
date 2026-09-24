@@ -279,12 +279,13 @@ describe('terminal-registry alert behavior', () => {
 
   it('preserves pre-registration activity through terminal creation and orphaning', () => {
     const id = 'early-host-state';
-    setTerminalActivity(id, { status: 'ALERT_RINGING', episode: createAlertEpisode(), todo: true, awaited: true });
+    setTerminalActivity(id, { status: 'ALERT_RINGING', episode: createAlertEpisode(), awaited: true });
     const activity = getActivity(id);
     expect(getLivePersistedAlertState(id)).toBeNull();
 
     createSession(id);
     expect(getActivity(id)).toEqual(activity);
+    // A ring no one has looked at persists as the TODO a look would leave.
     expect(getLivePersistedAlertState(id)).toMatchObject({ status: 'ALERT_RINGING', todo: true });
 
     unmountElement(id);
@@ -553,7 +554,7 @@ describe('terminal-registry alert behavior', () => {
     advance(3_000);
     expect(getActivity(id)).toMatchObject({
       status: 'ALERT_RINGING',
-      todo: true,
+      todo: false,
     });
   });
 
@@ -601,7 +602,7 @@ describe('terminal-registry alert behavior', () => {
     });
   });
 
-  it('Story 6: dismiss resets to NOTHING_TO_SHOW and keeps the TODO; can ring again later', () => {
+  it('Story 6: dismiss resets to NOTHING_TO_SHOW and leaves a TODO; can ring again over it', () => {
     const id = 'story-6';
     createSession(id);
     enableAlert(id);
@@ -625,7 +626,7 @@ describe('terminal-registry alert behavior', () => {
     });
   });
 
-  it('Story 7: toggling TODO on a ringing pane clears both, leaves alerts enabled', () => {
+  it('Story 7: toggling TODO on a ringing pane turns the ring into a TODO, leaves alerts enabled', () => {
     const id = 'story-7';
     createSession(id);
     enableAlert(id);
@@ -636,7 +637,7 @@ describe('terminal-registry alert behavior', () => {
     expect(getActivity(id)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
       watchingEnabled: true,
-      todo: false,
+      todo: true,
     });
   });
 
@@ -761,7 +762,7 @@ describe('terminal-registry alert behavior', () => {
 
     expect(getActivity(id)).toMatchObject({
       status: 'ALERT_RINGING',
-      todo: true,
+      todo: false,
     });
   });
 
@@ -810,8 +811,9 @@ describe('terminal-registry alert behavior', () => {
     const id = 'story-14';
     createSession(id);
     enableAlert(id);
+    toggleSessionTodo(id);
     driveToRingingNeedsAttention(id);
-    expect(getActivity(id).todo).toBe(true);
+    expect(getActivity(id)).toMatchObject({ status: 'ALERT_RINGING', todo: true });
 
     disposeSession(id);
     expect(getActivity(id)).toEqual(DEFAULT_ACTIVITY_STATE);
@@ -827,7 +829,7 @@ describe('terminal-registry alert behavior', () => {
 
     expect(getActivity(id)).toMatchObject({
       status: 'ALERT_RINGING',
-      todo: true,
+      todo: false,
     });
   });
 
@@ -957,7 +959,7 @@ describe('terminal-registry alert behavior', () => {
     const id = 'paste-acknowledges';
     createSession(id);
     fakePlatform.sendOutput(id, '\x07');
-    expect(getActivity(id)).toMatchObject({ status: 'ALERT_RINGING', todo: true });
+    expect(getActivity(id)).toMatchObject({ status: 'ALERT_RINGING', todo: false });
     await paste(id);
     expect(getActivity(id)).toMatchObject({ status: 'WATCHING_DISABLED', todo: false });
   });
@@ -1183,7 +1185,7 @@ describe('terminal-registry alert behavior', () => {
 
     expect(getActivity(id)).toMatchObject({
       status: 'ALERT_RINGING',
-      todo: true,
+      todo: false,
     });
   });
 

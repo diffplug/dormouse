@@ -795,7 +795,7 @@ describe("the target half", () => {
     const episode = createAlertEpisode();
     const platform = fakePlatform([], {
       beforeReplay: () => setTerminalActivity("pane-a", {
-        status: "ALERT_RINGING", todo: true, episode, notification: { source: "OSC 9", title: "Done", body: null },
+        status: "ALERT_RINGING", episode, notification: { source: "OSC 9", title: "Done", body: null },
       }),
     });
     const kill = vi.spyOn(platform, "killPty");

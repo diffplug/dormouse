@@ -229,8 +229,8 @@ export class TutDetector {
         else if (TERMINAL_REPORT_SOURCES.has(source)) this.state.markComplete("al-notif");
       }
 
-      // Every ring sets TODO when it opens, so the dismissal is the ring
-      // ending with that TODO still standing.
+      // A look without typing turns a ring into a TODO, so the dismissal is
+      // the ring ending with a TODO standing.
       if (prev.status === "ALERT_RINGING" && current.status !== "ALERT_RINGING" && current.todo) {
         this.state.markComplete("al-todo-auto");
       }

@@ -130,7 +130,7 @@ describe('AlertRingIndicator', () => {
     ring(first);
     const before = ringLayer();
 
-    act(() => setTerminalActivity('pty-1', { status: 'ALERT_RINGING', episode: first, todo: true }));
+    act(() => setTerminalActivity('pty-1', { status: 'ALERT_RINGING', episode: first, awaited: true }));
     expect(ringLayer()).toBe(before);
 
     ring({ id: 'episode-2', startedAt: Date.now() });

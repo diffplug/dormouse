@@ -344,7 +344,7 @@ describe('PTYs', () => {
     alerts.notifyFromProtocol('pty-1', REPORT);
     bridge.provider.writePty('pty-1', report);
     expect(written).toEqual([{ id: 'pty-1', data: report }]);
-    expect(alerts.getState('pty-1')).toMatchObject({ status: 'ALERT_RINGING', todo: true });
+    expect(alerts.getState('pty-1')).toMatchObject({ status: 'ALERT_RINGING', todo: false });
   });
 
   it('gives a Client\'s repaint bounce the resize grace', () => {
@@ -721,7 +721,7 @@ describe('the sidecar host', () => {
     host.handleCommand('pty:input', { id: 'pty-1', data: '\x1b[I', paced: true });
     host.handleCommand('pty:input', { id: 'pty-1', data: 'y', userInput: true });
     expect(calls).toEqual([
-      { op: 'write', args: ['pty-1', '\x1b[I', { paced: true }], state: { status: 'ALERT_RINGING', todo: true } },
+      { op: 'write', args: ['pty-1', '\x1b[I', { paced: true }], state: { status: 'ALERT_RINGING', todo: false } },
       { op: 'write', args: ['pty-1', 'y', undefined], state: { status: 'WATCHING_DISABLED', todo: false } },
     ]);
   });
@@ -853,7 +853,7 @@ describe('the sidecar host', () => {
     host.handleCommand('pty:requestInit', { ids: ['ringing', 'flagged'], forWindow: 'main' });
     for (const line of out) after.realm.onEvent(line.event, line.data);
 
-    expect(after.seen.get('ringing')).toMatchObject({ status: 'ALERT_RINGING', todo: true });
+    expect(after.seen.get('ringing')).toMatchObject({ status: 'ALERT_RINGING', todo: false });
     expect(after.seen.get('flagged')).toMatchObject({ status: 'WATCHING_DISABLED', todo: true });
   });
 

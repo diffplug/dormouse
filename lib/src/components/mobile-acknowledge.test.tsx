@@ -58,7 +58,7 @@ function render(touchMode: MobileTerminalTouchMode): void {
 /** Ring the pane: a bell from the program. */
 function ring(): void {
   act(() => platform.sendOutput(PANE, '\x07'));
-  expect(getActivity(PANE)).toMatchObject({ status: 'ALERT_RINGING', todo: true });
+  expect(getActivity(PANE)).toMatchObject({ status: 'ALERT_RINGING', todo: false });
 }
 
 beforeEach(() => {
@@ -104,7 +104,7 @@ const AWAY = { clientX: 10, clientY: 12 + (RADIUS_FADE_START + RADIUS_SELECT) / 
 
 describe('mobile acknowledge', () => {
   it.each<MobileTerminalTouchMode>(['gestures', 'selection', 'cursor'])(
-    'a tap on the terminal puts out a ring and keeps its TODO in %s mode',
+    'a tap on the terminal turns a ring into a TODO in %s mode',
     (mode) => {
       render(mode);
       ring();
@@ -127,7 +127,7 @@ describe('mobile acknowledge', () => {
       press(ORIGIN, [AWAY, ORIGIN], ORIGIN);
       // Lifted away with no move reported between.
       press(ORIGIN, [], AWAY);
-      expect(getActivity(PANE)).toMatchObject({ status: 'ALERT_RINGING', todo: true });
+      expect(getActivity(PANE)).toMatchObject({ status: 'ALERT_RINGING', todo: false });
     },
   );
 

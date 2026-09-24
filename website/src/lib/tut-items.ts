@@ -229,7 +229,7 @@ export const DESKTOP_SECTIONS: readonly Section[] = [
       {
         id: 'al-notif',
         title: 'A program can ring on its own',
-        hint: 'Press `n` for a fake build that sends a notification. This needs no rule at all — any program that emits `BEL`, `OSC 9`, `OSC 777`, or `OSC 99` rings, and its message shows on the TODO tag.',
+        hint: 'Press `n` for a fake build that sends a notification. This needs no rule at all — any program that emits `BEL`, `OSC 9`, `OSC 777`, or `OSC 99` rings, and once you look its message stays on the TODO tag.',
       },
       {
         id: 'al-cmd-exit',

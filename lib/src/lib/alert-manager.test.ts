@@ -299,40 +299,50 @@ describe('AlertManager in isolation', () => {
     expect(manager.getState(id).status).toBe('ALERT_RINGING');
   }
 
-  it('a WATCHING ring sets TODO the moment it opens, with its own detail', () => {
-    const id = 'watching-sets-todo';
-    driveToRinging(id);
-    expect(manager.getState(id)).toMatchObject({
-      todo: true,
-      notification: { source: 'WATCHING', title: 'longtask went quiet', body: null },
-    });
+  /** The detail `ringFrom` raises from each source. */
+  const RING_DETAIL = {
+    watching: { source: 'WATCHING', title: 'longtask went quiet', body: null },
+    report: REPORT,
+    exit: { source: 'COMMAND_EXIT', title: 'Command finished', body: 'pnpm build exited 0' },
+  } as const;
+
+  it.each(['watching', 'report', 'exit'] as const)('a %s ring shows its own detail and never sets TODO', (source) => {
+    const id = `ring-no-todo-${source}`;
+    ringFrom(id, source);
+    expect(manager.getState(id)).toMatchObject({ todo: false, notification: RING_DETAIL[source] });
+
+    // A TODO already standing stays as it was, the ring showing its own detail.
+    const flagged = `ring-over-todo-${source}`;
+    manager.toggleTodo(flagged);
+    ringFrom(flagged, source);
+    expect(manager.getState(flagged)).toMatchObject({ todo: true, notification: RING_DETAIL[source] });
   });
 
-  /** The verbs that clear a ring and leave its TODO. */
-  const leaveTodoVerbs = {
+  /** The verbs that turn a ring into a TODO: a look without typing. */
+  const lookVerbs = {
     acknowledge: (id: string) => manager.acknowledge(id, { input: false }),
     dismissAlert: (id: string) => manager.dismissAlert(id),
+    toggleTodo: (id: string) => manager.toggleTodo(id),
   };
 
-  it.each(['watching', 'report', 'exit'] as const)('acknowledging without input or dismissing a %s ring leaves its TODO', (source) => {
-    for (const verb of ['acknowledge', 'dismissAlert'] as const) {
+  it.each(['watching', 'report', 'exit'] as const)('acknowledging without input, dismissing, or toggling TODO on a %s ring leaves a TODO with its detail', (source) => {
+    for (const verb of ['acknowledge', 'dismissAlert', 'toggleTodo'] as const) {
       const id = `ring-leaves-todo-${source}-${verb}`;
       ringFrom(id, source);
-      leaveTodoVerbs[verb](id);
-      expect(manager.getState(id)).toMatchObject({ episode: null, todo: true });
+      lookVerbs[verb](id);
+      expect(manager.getState(id)).toMatchObject({ episode: null, todo: true, notification: RING_DETAIL[source] });
       expect(manager.getState(id).status).not.toBe('ALERT_RINGING');
-      expect(manager.getState(id).notification).not.toBeNull();
     }
   });
 
-  it.each(['watching', 'report', 'exit'] as const)('typing, toggling, or clearing TODO on a %s ring turns it off with its detail', (source) => {
+  it.each(['watching', 'report', 'exit'] as const)('typing or clearing TODO on a %s ring leaves no TODO and no detail', (source) => {
     const verbs = {
       acknowledgeInput: (id: string) => manager.acknowledge(id, { input: true }),
-      toggleTodo: (id: string) => manager.toggleTodo(id),
       clearTodo: (id: string) => manager.clearTodo(id),
     };
-    for (const verb of ['acknowledgeInput', 'toggleTodo', 'clearTodo'] as const) {
+    for (const verb of ['acknowledgeInput', 'clearTodo'] as const) {
       const id = `todo-off-ringing-${source}-${verb}`;
+      manager.toggleTodo(id);
       ringFrom(id, source);
       verbs[verb](id);
       expect(manager.getState(id)).toMatchObject({ episode: null, todo: false, notification: null });
@@ -340,16 +350,28 @@ describe('AlertManager in isolation', () => {
     }
   });
 
-  it('an unattended WATCHING ring leaves its TODO across a restart, without its live-only detail', () => {
-    const id = 'watching-restart';
-    driveToRinging(id);
+  it('toggles a TODO that was already standing off when its ring is toggled', () => {
+    const id = 'toggle-ring-over-todo';
+    manager.toggleTodo(id);
+    ringFrom(id, 'report');
+    manager.toggleTodo(id);
+    expect(manager.getState(id)).toMatchObject({ episode: null, todo: false, notification: null });
+  });
+
+  it.each([
+    ['WATCHING', 'watching', null],
+    ['report', 'report', REPORT],
+  ] as const)('persists an unacknowledged %s ring as the TODO a look would leave', (_what, source, notification) => {
+    const id = `restart-${source}`;
+    ringFrom(id, source);
     const persisted = JSON.parse(JSON.stringify(toPersistedAlertState(manager.getState(id))));
-    expect(persisted).toEqual({ status: 'ALERT_RINGING', todo: true, notification: null });
+    // A WATCHING detail is live-only (`STRICT_READER_NOTIFICATION_SOURCES`).
+    expect(persisted).toEqual({ status: 'ALERT_RINGING', todo: true, notification });
 
     const restarted = new AlertManager();
     try {
       restarted.seed(id, persisted);
-      expect(restarted.getState(id)).toMatchObject({ episode: null, todo: true });
+      expect(restarted.getState(id)).toMatchObject({ status: 'WATCHING_DISABLED', episode: null, todo: true, notification });
     } finally {
       restarted.dispose();
     }
@@ -378,7 +400,7 @@ describe('AlertManager in isolation', () => {
     });
   });
 
-  it.each(['acknowledge', 'dismissAlert'] as const)(
+  it.each(['acknowledge', 'dismissAlert', 'toggleTodo'] as const)(
     'a report about a state acknowledged by %s updates the TODO without summoning again',
     (verb) => {
       // Claude Code: the turn settles and WATCHING rings; the user acknowledges
@@ -386,7 +408,7 @@ describe('AlertManager in isolation', () => {
       const id = `acknowledged-${verb}`;
       const episodes = collectEpisodes(manager, id);
       driveToRinging(id);
-      leaveTodoVerbs[verb](id);
+      lookVerbs[verb](id);
       vi.advanceTimersByTime(60_000);
 
       manager.notifyFromProtocol(id, { source: 'OSC 99', title: 'Claude Code', body: 'Claude is waiting for your input' });
@@ -436,7 +458,7 @@ describe('AlertManager in isolation', () => {
 
     expect(manager.getState(id)).toMatchObject({
       status: 'ALERT_RINGING',
-      todo: true,
+      todo: false,
       notification: { source: 'OSC 9', title: null, body: 'Build finished' },
     });
 
@@ -464,7 +486,7 @@ describe('AlertManager in isolation', () => {
 
     expect(manager.getState(id)).toMatchObject({
       status: 'ALERT_RINGING',
-      todo: true,
+      todo: false,
       notification: { source: 'BEL', title: 'Terminal bell', body: null },
     });
   });
@@ -486,7 +508,7 @@ describe('AlertManager in isolation', () => {
     manager.updateProtocolProgress(id, { state: 'clear', percent: null });
     expect(manager.getState(id)).toMatchObject({
       status: 'ALERT_RINGING',
-      todo: true,
+      todo: false,
       notification: { source: 'OSC 9;4', title: 'Progress complete', body: 'Progress 25%' },
     });
   });
@@ -592,7 +614,7 @@ describe('AlertManager in isolation', () => {
     vi.advanceTimersByTime(5_000);
     expect(manager.getState(id)).toMatchObject({
       status: 'ALERT_RINGING',
-      todo: true,
+      todo: false,
       notification: { source: 'OSC 9', title: null, body: 'Build finished' },
     });
   });
@@ -666,7 +688,7 @@ describe('AlertManager in isolation', () => {
     finishCommand(manager, id);
     expect(manager.getState(id)).toMatchObject({
       status: 'ALERT_RINGING',
-      todo: true,
+      todo: false,
       notification: { source: 'COMMAND_EXIT', title: 'Command finished', body: 'pnpm build exited 0' },
     });
   });
@@ -729,7 +751,7 @@ describe('AlertManager in isolation', () => {
     manager.onExit(id, 1);
     expect(manager.getState(id)).toMatchObject({
       status: 'ALERT_RINGING',
-      todo: true,
+      todo: false,
       notification: { source: 'COMMAND_EXIT', title: 'Command finished', body: 'exec pnpm build exited 1' },
     });
   });
@@ -897,6 +919,7 @@ describe('AlertManager in isolation', () => {
       status: 'WATCHING_DISABLED',
       watchingEnabled: false,
       todo: false,
+      notification: null,
     });
   });
 
@@ -1082,7 +1105,7 @@ describe('AlertManager in isolation', () => {
     expect(manager.getState(id)).toMatchObject({ todo: false, notification: null });
 
     vi.advanceTimersByTime(5_000);
-    expect(manager.getState(id)).toMatchObject({ status: 'ALERT_RINGING', todo: true });
+    expect(manager.getState(id)).toMatchObject({ status: 'ALERT_RINGING', todo: false });
   });
 
   describe('defer terminal notifications until quiet', () => {
@@ -1108,7 +1131,7 @@ describe('AlertManager in isolation', () => {
       vi.advanceTimersByTime(1);
       expect(manager.getState(id)).toMatchObject({
         status: 'ALERT_RINGING',
-        todo: true,
+        todo: false,
         notification: { source: 'OSC 9', title: null, body: 'Done' },
       });
     });
@@ -1175,7 +1198,7 @@ describe('AlertManager in isolation', () => {
       finishCommand(manager, id);
       expect(manager.getState(id)).toMatchObject({
         status: 'ALERT_RINGING',
-        todo: true,
+        todo: false,
         notification: { source: 'COMMAND_EXIT', title: 'Command finished', body: 'pnpm build exited 0' },
       });
     });
@@ -1191,7 +1214,7 @@ describe('AlertManager in isolation', () => {
 
       expect(manager.getState(id)).toMatchObject({
         status: 'ALERT_RINGING',
-        todo: true,
+        todo: false,
         // Protocol detail is richer than the generic command-exit receipt.
         notification: { source: 'OSC 9', title: null, body: 'Build done' },
       });
@@ -1215,7 +1238,7 @@ describe('AlertManager in isolation', () => {
       vi.advanceTimersByTime(5_000);
       expect(manager.getState(id)).toMatchObject({
         status: 'ALERT_RINGING',
-        todo: true,
+        todo: false,
         notification: { source: 'OSC 9', title: null, body: 'Done' },
       });
     });
@@ -1549,7 +1572,7 @@ describe('AlertManager in isolation', () => {
       // Declined, so the ring rule still ran afterwards.
       expect(manager.getState(id)).toMatchObject({
         status: 'ALERT_RINGING',
-        todo: true,
+        todo: false,
         notification: { source: 'COMMAND_EXIT', title: 'Command finished', body: 'pnpm build exited 1' },
       });
     });
@@ -1610,9 +1633,9 @@ describe('AlertManager in isolation', () => {
       expect(await parked.promise).toMatchObject({ kind: 'resolved', cause: 'bell' });
 
       // Already latched when the await arrives: it resolves on the spot and
-      // withdraws the ring with the TODO it set.
+      // withdraws the ring, whose detail goes with it.
       manager.notifyFromProtocol('bell-first', { source: 'OSC 9', title: null, body: 'done' });
-      expect(manager.getState('bell-first')).toMatchObject({ status: 'ALERT_RINGING', todo: true });
+      expect(manager.getState('bell-first')).toMatchObject({ status: 'ALERT_RINGING', todo: false });
       const consumed = manager.awaitCompletion('bell-first', { until: 'quiet', timeoutMs: NEVER });
       expect(await consumed.promise).toEqual({ kind: 'resolved', cause: 'bell', waitedMs: 0 });
 
@@ -1626,10 +1649,9 @@ describe('AlertManager in isolation', () => {
       }
     });
 
-    it('resolves on a latched WATCHING ring and withdraws its TODO', async () => {
+    it('resolves on a latched WATCHING ring and withdraws it with its detail', async () => {
       const id = 'await-standing-quiet';
       driveToRinging(id);
-      expect(manager.getState(id).todo).toBe(true);
 
       const handle = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
 
@@ -1646,7 +1668,6 @@ describe('AlertManager in isolation', () => {
       for (const until of ['quiet', 'exit'] as const) {
         const id = `await-standing-exit-${until}`;
         ringFrom(id, 'exit');
-        expect(manager.getState(id).todo).toBe(true);
 
         const handle = manager.awaitCompletion(id, { until, timeoutMs: NEVER });
 
@@ -1742,7 +1763,7 @@ describe('AlertManager in isolation', () => {
 
       expect(await outcome()).toBeNull();
       // The bell is the human's; only a command exit wakes this caller.
-      expect(manager.getState(id)).toMatchObject({ status: 'ALERT_RINGING', todo: true, awaited: true });
+      expect(manager.getState(id)).toMatchObject({ status: 'ALERT_RINGING', todo: false, awaited: true });
     });
 
     it('never acknowledges, so the next completion still rings the human', async () => {

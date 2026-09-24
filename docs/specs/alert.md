@@ -40,7 +40,7 @@ Public `status` is a projection — first match wins:
 
 `awaited` sits beside `status`: true while at least one `dor await` is parked on the Session (Await). It is derived from live waiters and **never persisted**.
 
-**Persist only** `todo` and the sanitized `notification` (plus `status` for diagnostics). Every spawn starts the id's alert state over; **a cold restore carries those two on the pane's spawn** (`SpawnPtyOptions.alert`), seeded **before the PTY spawns**; a live resume keeps the host's. Restore **must not** recreate a ring, a progress cycle, or a command-exit arm. Pinned by `restores a pane's persisted TODO through its spawn` in `lib/src/lib/terminal-registry.alert.test.ts`. **Must read a notification this build cannot validate as none, keeping the pane** (pinned by `keeps a pane whose notification this build cannot read, seeding its TODO without the detail` in `lib/src/lib/session-restore.test.ts`), and **never write a source outside `STRICT_READER_NOTIFICATION_SOURCES`** until no strict pre-tolerant build reads the file (rationale). **WATCHING is never persisted per Session** — it is re-derived from the rule set below at the next command start. Replay filtering in `docs/specs/terminal-escapes.md` keeps old terminal output from firing notification side effects again.
+**Persist only** `todo` and the sanitized `notification` (plus `status` for diagnostics); **an unacknowledged ring persists as the TODO a look would leave**, with its detail (pinned by `persists an unacknowledged %s ring as the TODO a look would leave` in `lib/src/lib/alert-manager.test.ts`). Every spawn starts the id's alert state over; **a cold restore carries those two on the pane's spawn** (`SpawnPtyOptions.alert`), seeded **before the PTY spawns**; a live resume keeps the host's. Restore **must not** recreate a ring, a progress cycle, or a command-exit arm. Pinned by `restores a pane's persisted TODO through its spawn` in `lib/src/lib/terminal-registry.alert.test.ts`. **Must read a notification this build cannot validate as none, keeping the pane** (pinned by `keeps a pane whose notification this build cannot read, seeding its TODO without the detail` in `lib/src/lib/session-restore.test.ts`), and **never write a source outside `STRICT_READER_NOTIFICATION_SOURCES`** until no strict pre-tolerant build reads the file (rationale). **WATCHING is never persisted per Session** — it is re-derived from the rule set below at the next command start. Replay filtering in `docs/specs/terminal-escapes.md` keeps old terminal output from firing notification side effects again.
 
 **Must retain host Activity before xterm initialization and clear it on Session disposal.** Test: `preserves pre-registration activity through terminal creation and orphaning` in `lib/src/lib/terminal-registry.alert.test.ts`.
 
@@ -254,28 +254,28 @@ Source of truth: `dispatchCompletion` / `setViewer` / `formatCommandExitBody` in
 
 ## Clearing And TODO
 
-`todo` is a boolean reminder. **Every ring sets it the moment it opens, whatever its source**, recording the TODO and notification it found (rationale). Pinned by `a WATCHING ring sets TODO the moment it opens, with its own detail` in `lib/src/lib/alert-manager.test.ts`.
+`todo` is a boolean reminder. **A ring never sets it**: a look at a ring without typing turns it into a TODO carrying the ring's detail, and dealing with it — typing, the pill — clears it (rationale). **`notification` is the ring's detail while ringing, else the TODO's.** Pinned by `a %s ring shows its own detail and never sets TODO` and `acknowledging without input, dismissing, or toggling TODO on a %s ring leaves a TODO with its detail` in `lib/src/lib/alert-manager.test.ts`.
 
 **Detail follows one richness order:** a text report (`OSC 9`, `OSC 99`, `OSC 777`) > `COMMAND_EXIT` > `OSC 9;4` > `WATCHING` > `BEL`. A new ring shows its own detail; a source joining an active ring, a deferred notification, and an acknowledged receipt each replace the detail only at an equal or higher rank (rationale). Pinned by `detail joining a ring` in `lib/src/lib/alert-manager.test.ts`.
 
 | Verb | Effect |
 |---|---|
-| acknowledge without input (Engagement) | clears the ring; `todo` stays |
+| acknowledge without input (Engagement) | clears the ring, leaving `todo` on with its detail |
 | acknowledge with input — any keystroke, paste, or drop — or clear TODO (pill click) | clears the ring; `todo` off, notification dropped, even if already off |
-| dismiss (`a`, Pane Header) | clears the ring; `todo` stays. **With nothing ringing: no change, no notify, a deferred notification kept** |
-| toggle TODO (`t`) | clears the ring; `todo` flips, off dropping the notification |
+| dismiss (`a`, Pane Header) | clears the ring, leaving `todo` on with its detail. **With nothing ringing: no change, no notify, a deferred notification kept** |
+| toggle TODO (`t`) | clears the ring; `todo` flips, on keeping the ring's detail, off dropping the notification |
 | an await consumes a source (Await) | withdraws that source |
 | watched work resumes (WATCHING Track) | withdraws `watching` |
 | a rule stops covering the `watching` key | withdraws `watching` |
 
-- **The user verbs acknowledge; a withdrawal never does.** Each also drops whatever was held or deferred, except a dismiss with nothing ringing. A ring a withdrawal empties restores the TODO and notification it found.
+- **The user verbs acknowledge; a withdrawal never does.** Each also drops whatever was held or deferred, except a dismiss with nothing ringing, and **a dropped hold or deferral leaves no TODO**. A ring a withdrawal empties goes with its detail, leaving `todo` and its notification as they stood.
 - **Any keystroke into the pane clears TODO** (rationale).
 - **Never summon twice for an acknowledged state.** After a user verb clears a ring or drops a held completion, a report arriving before any output opens no ring: it sets `todo`, updates the notification, and publishes. Settles and exits ring as usual, and opening a ring or starting a command forgets the acknowledgement (rationale). Pinned by `a report about a state acknowledged by %s updates the TODO without summoning again` and `rings a report again once a command starts after the acknowledgement` in `lib/src/lib/alert-manager.test.ts`.
 - Command-mode `Enter` that only enters passthrough does not clear TODO.
 - Removing a WATCHING rule turns watching off wherever it matched. It does not stop the detector, nor clear a progress cycle or a command-exit arm.
 - Destroying the Session clears all alert, TODO, notification, held, progress, and command-exit state.
 
-Source of truth: `raiseRing` / `withdrawRingSource` / `clearRingForUser` in `lib/src/lib/alert-manager.ts`.
+Source of truth: `raiseRing` / `withdrawRingSource` / `clearRingForUser` / `ringToTodo` in `lib/src/lib/alert-manager.ts`; `toPersistedAlertState` in `lib/src/lib/session-types.ts`.
 
 ## Live Workspace transfer
 
@@ -414,7 +414,7 @@ The header shows a fixed-text `TODO` pill when `todo === true`, a hover/focus no
 - **`a` on the selected Pane in command mode dismisses a ringing Session and opens the terminal context, whatever the status; it never edits a WATCHING rule.**
 - **A WATCHING rule is created only in the terminal context** ("Watch all `<key>` commands"), which offers the row whenever a foreground command has a watch key — naming the bare runner rule instead when one already covers the running script — and removed there or in Settings. Removing it anywhere drops it for every Session running that command.
 - Right-click always opens the context. Pressing `t` toggles TODO.
-- **The mobile composition dismisses by acknowledgement alone** — a tap, or a keystroke that also clears TODO — and wears its ring as the alarm inset, never an icon (`docs/specs/mobile-terminal-ui.md`). In Pocket only the keystroke reaches the host, as a Client's write (Engagement); a Client cannot dismiss yet (`docs/specs/remote-api.md` → Future).
+- **The mobile composition dismisses by acknowledgement alone** — a tap, leaving a TODO, or a keystroke, clearing it — and wears its ring as the alarm inset, never an icon (`docs/specs/mobile-terminal-ui.md`). In Pocket only the keystroke reaches the host, as a Client's write (Engagement); a Client cannot dismiss yet (`docs/specs/remote-api.md` → Future).
 
 **Must keep context alert controls scoped to the source**, with TODO, running-command WATCHING, and notification detail. Settings owns the global watched-command list. **Must suppress helper alerting until promotion, including after exit**: no completion dispatch (await, ring, TODO, speech, push), protocol report, acknowledgement, or TODO control, and only the default state published. **A helper still tracks its command and feeds its detector**, so one promoted mid-command is WATCHING what it runs; promotion publishes that state and never replays a suppressed event (rationale). Pinned by `helper Sessions` in `lib/src/lib/alert-manager.test.ts`.
 
@@ -432,7 +432,7 @@ A Door is display-only for alert state:
 
 - show the TODO pill when `todo === true`
 - while ringing with no speech state, wear the ring `spoken` uses, unlabelled, named `needs attention`
-- while its Session is `speaking`, replace the compact TODO cluster with the explicit `SPEAKING` label and invert + pulse the whole Door — that state lasts one utterance. `spoken` persists until the ring clears, so it keeps a static high-contrast inset and adds a speaker icon *beside* the TODO pill instead of replacing it; those are the baseboard's persistent signals and **must not go dark for an unbounded window**
+- while its Session is `speaking`, replace the compact TODO cluster with the explicit `SPEAKING` label and invert + pulse the whole Door — that state lasts one utterance. `spoken` persists until the ring clears, so it keeps a static high-contrast inset and adds a speaker icon *beside* any TODO pill instead of replacing it; those are the baseboard's persistent signals and **must not go dark for an unbounded window**
 - do not expose a Door-specific alert menu
 - scrolled out of view, its overflow arrow carries its ring and TODO (`docs/specs/layout.md` → Baseboard responsive sizing)
 

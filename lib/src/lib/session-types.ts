@@ -63,13 +63,14 @@ const STRICT_READER_NOTIFICATION_SOURCES: readonly ActivityNotificationSource[] 
  * Narrow Activity down to what may reach disk. The parameter deliberately uses
  * the persisted shape: live `AlertState` is structurally assignable to it, and
  * this explicit projection keeps `JSON.stringify` from writing extra live or
- * stale fields (`docs/specs/alert.md` -> Public State, "Persist only").
+ * stale fields (`docs/specs/alert.md` -> Public State, "Persist only"). A ring
+ * no one has looked at is written as the TODO a look would have left.
  */
 export function toPersistedAlertState(state: PersistedAlertState): PersistedAlertState {
   const notification = state.notification ?? null;
   return {
     status: state.status,
-    todo: state.todo,
+    todo: state.todo || state.status === 'ALERT_RINGING',
     notification: notification !== null && STRICT_READER_NOTIFICATION_SOURCES.includes(notification.source)
       ? notification
       : null,
