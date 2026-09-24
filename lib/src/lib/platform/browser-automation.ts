@@ -1,6 +1,6 @@
 /**
  * The one webview → host channel for browser automation
- * (docs/specs/dor-browser.md → "Agent-Browser Host Capabilities"): a typed,
+ * (docs/specs/dor-browser.md → "Browser Host"): a typed,
  * provider-tagged request the host validates once and turns into fixed
  * operations — no CLI argv, script or CDP method crosses it.
  */

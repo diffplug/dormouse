@@ -23,10 +23,13 @@ export const SURFACE_CONTROL_METHODS = {
   await: 'surface.await',
   kill: 'surface.kill',
   iframe: 'surface.iframe',
-  agentBrowser: 'surface.agentBrowser',
   browser: 'surface.browser',
   resolveBrowser: 'surface.resolveBrowser',
   resolveOpen: 'surface.resolveOpen',
+  /** Legacy aliases of `browser` / `resolveBrowser` for agent-browser, which a
+   *  `dor` older than its host still sends (docs/specs/dor-cli.md → "Browser
+   *  Surface Addressing"). No current `dor` sends them. */
+  agentBrowser: 'surface.agentBrowser',
   resolveAgentBrowser: 'surface.resolveAgentBrowser',
 } as const;
 

@@ -19,7 +19,7 @@ const { gitInfo } = require('./git-info.cjs');
 // Same pattern: lib/src/host/browser-host.ts is the single source of truth for
 // browser automation, run here exactly as the VS Code extension host runs it,
 // over the providers in lib/src/host/agent-browser-host.ts and
-// playwright-host.ts. See docs/specs/dor-browser.md → "Agent-Browser Host Capabilities".
+// playwright-host.ts. See docs/specs/dor-browser.md → "Browser Host".
 const { createBrowserHost } = require('./browser-host.cjs');
 const { createAgentBrowserProvider } = require('./agent-browser-host.cjs');
 // Same pattern again: lib/src/host/remote/sidecar-entry.ts is the Burrow —

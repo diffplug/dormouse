@@ -1,7 +1,6 @@
 import { recordToolDirty } from '../../lib/tool-dirty-store';
 import { createSerialQueue } from '../../host/remote/serial-queue';
 import { useCallback, useRef, type MutableRefObject } from 'react';
-import { sessionForKey } from 'dor-lib-common/browser-providers';
 import { getPlatform, PLATFORM_STRING } from '../../lib/platform';
 import { currentWindowRef, getActiveWorkspaceId } from '../../lib/workspace-store';
 import type { WorkspaceId } from '../../lib/session-types';
@@ -45,7 +44,7 @@ import {
 } from './tool-takeover';
 import { attachSurfacePorts } from './surface-ports';
 import { browserSurfaceUrl, hostPathDisplay, iframeRefusal } from './browser-url';
-import { parseRenderMode, renderModeFor } from 'dor-lib-common/browser-providers';
+import { isBrowserProvider, parseRenderMode, renderModeFor } from 'dor-lib-common/browser-providers';
 import { BROWSER_PROVIDER_GUI, browserHandle, rememberLaunchBinaryPath } from './browser-automation';
 import { BrowserBindingReservations } from './browser-binding-reservations';
 import {
@@ -121,23 +120,22 @@ export type DorControlRequest = Omit<DorControlRequestPayload, 'params'> & {
   signal?: AbortSignal;
 };
 
-/** Outcome of {@link EnsureAgentBrowserSurface}: the fields the caller maps onto
+/** Outcome of {@link EnsureBrowserSurface}: the fields the caller maps onto
  *  its response, or a failure message. `minimized` is the surface's current
  *  minimized state (the reused surface's, or the requested value for a fresh one). */
-type EnsureAgentBrowserSurfaceResult =
+type EnsureBrowserSurfaceResult =
   | { ok: true; status: 'created' | 'existing' | 'replaced'; surfaceId: string; surfaceRef: string; minimized: boolean }
   | { ok: false; message: string };
 
 /** Reuse-or-create an automated browser surface for the session a `dor ab` /
  *  `dor pw` command just drove — the surface half of the control plane. */
-type EnsureAgentBrowserSurface = (args: {
-  provider?: BrowserAutomationProvider;
+type EnsureBrowserSurface = (args: {
+  provider: BrowserAutomationProvider;
   headed?: boolean;
-  nativeIdentity?: string;
+  nativeIdentity: string;
   cwd?: string;
   key?: string;
   session: string;
-  url?: string;
   wsPort?: number;
   binaryPath?: string;
   /** Resolved lazily, only when a fresh surface must be created: the reuse path
@@ -145,7 +143,7 @@ type EnsureAgentBrowserSurface = (args: {
    *  terminal refreshing an existing surface). */
   reference: () => ParseResult<DorSurface>;
   minimized?: boolean;
-}) => EnsureAgentBrowserSurfaceResult;
+}) => EnsureBrowserSurfaceResult;
 
 /**
  * What a `dor` Surface target names, in the one grammar
@@ -359,8 +357,8 @@ const CREATING_CONTROL_METHODS = new Set<string>([
   SURFACE_CONTROL_METHODS.split,
   SURFACE_CONTROL_METHODS.ensure,
   SURFACE_CONTROL_METHODS.iframe,
-  SURFACE_CONTROL_METHODS.agentBrowser,
   SURFACE_CONTROL_METHODS.browser,
+  SURFACE_CONTROL_METHODS.agentBrowser,
 ]);
 
 const ENSURE_CANCELLED = 'ensure was cancelled';
@@ -597,9 +595,9 @@ export function useDorControl({
    *  The Window's own ref rides beside it, so `dor list` says which Window
    *  answered too (`currentWindowRef`). */
   workspaceRef: () => string;
-  /** This Wall's Workspace id, which namespaces the managed `dor ab --key`
-   *  sessions it answers for; `undefined` on a bare Wall, whose keys keep the
-   *  unscoped names (docs/specs/dor-browser.md → Managed identity). */
+  /** This Wall's Workspace id, which namespaces the managed browser `--key`
+   *  sessions it answers for; `undefined` on a bare Wall, which mints a scope
+   *  of its own (docs/specs/dor-browser.md → Managed identity). */
   workspaceScope: () => WorkspaceId | undefined;
 }): {
   /** The live surface (visible pane or minimized door) whose params match, or
@@ -705,7 +703,7 @@ export function useDorControl({
     const session = agentBrowserSessionFromParams(lath.getMeta(target.id)?.params);
     if (!session) {
       // A pane whose launch has not yet named its session
-      // (docs/specs/dor-browser.md → "Agent-Browser Connection").
+      // (docs/specs/dor-browser.md → "Browser Connection").
       detail.respond({ ok: false, error: `surface '${target.ref}' has no ${provider} session yet` });
       return null;
     }
@@ -738,31 +736,30 @@ export function useDorControl({
     return null;
   }, [lath, isTargetable]);
 
-  /** The agent-browser session ↔ surface registry: the surface bound to
-   *  `session`, or null if none exists. */
-  const findAgentBrowserSurface = useCallback((session: string) => findSurfaceByParams(
-    (params) => parseRenderMode((params as { renderMode?: unknown } | undefined)?.renderMode).provider === 'agent-browser'
-      && agentBrowserSessionFromParams(params) === session,
-  ), [findSurfaceByParams]);
-
-  /** The Playwright Surface a binding names: by managed key; else by the host's
-   *  native identity, which a raw `--session` shares across one project's
-   *  subdirectories; else by session and cwd. */
-  const findPlaywrightSurface = useCallback((binding: {
-    key?: string;
-    session: string;
-    nativeIdentity?: string;
-    cwd?: string;
-  }) => findSurfaceByParams((params) => {
-    const p = params as { renderMode?: unknown; key?: unknown; session?: unknown; cwd?: unknown; nativeIdentity?: unknown } | undefined;
-    if (parseRenderMode(p?.renderMode).provider !== 'playwright') return false;
-    if (binding.key) return p?.key === binding.key;
-    if (binding.nativeIdentity && p?.nativeIdentity) return p.nativeIdentity === binding.nativeIdentity;
-    return p?.session === binding.session && p?.cwd === binding.cwd;
+  /** The automated browser Surface of `provider` that `key` names, else the
+   *  one bound to `nativeIdentity` — which a raw `--session` shares across one
+   *  Playwright project's subdirectories. A Surface saved before native
+   *  identities is found by its agent-browser session, the identity it had. */
+  const findBrowserSurface = useCallback((provider: BrowserAutomationProvider, match: { key?: string; nativeIdentity?: string }) => findSurfaceByParams((params) => {
+    const p = params as { renderMode?: unknown; key?: unknown; nativeIdentity?: unknown } | undefined;
+    if (parseRenderMode(p?.renderMode).provider !== provider) return false;
+    if (match.key !== undefined) return p?.key === match.key;
+    const identity = typeof p?.nativeIdentity === 'string' ? p.nativeIdentity : provider === 'agent-browser' ? agentBrowserSessionFromParams(params) : null;
+    return identity !== null && identity === match.nativeIdentity;
   }), [findSurfaceByParams]);
 
+  // A bare Wall has no Workspace id, but its managed keys must not share names
+  // with another bare Wall's (every VS Code webview is one): it mints a scope
+  // for its own life. A Surface it restores keeps the session it was bound to.
+  const bareWallScope = useRef<string | null>(null);
+  const browserKeyScope = useCallback((): string => {
+    const scope = workspaceScope();
+    if (scope) return scope;
+    return bareWallScope.current ??= `w${crypto.randomUUID().slice(0, 8)}`;
+  }, [workspaceScope]);
+
   // Fold a params patch onto a surface, pane or door alike — the store holds both,
-  // so there is one write path. Shared by `ensureAgentBrowserSurface`'s reuse arm and
+  // so there is one write path. Shared by `ensureBrowserSurface`'s reuse arm and
   // the context's port launches in Wall.tsx. A no-op on an empty patch.
   const updateSurfaceParams = useCallback((id: string, patch: Record<string, unknown>) => {
     if (Object.keys(patch).length === 0) return;
@@ -771,24 +768,25 @@ export function useDorControl({
 
   const browserReservations = useRef(new BrowserBindingReservations());
 
-  const ensureAgentBrowserSurface = useCallback<EnsureAgentBrowserSurface>(({
+  const ensureBrowserSurface = useCallback<EnsureBrowserSurface>(({
     key,
-    provider = 'agent-browser',
+    provider,
     headed,
     nativeIdentity,
     cwd,
     session,
-    url,
     wsPort,
     binaryPath,
     reference,
     minimized = false,
   }) => {
-    // Remember the resolved binary so an embed→screencast swap can spawn one.
+    // Remember the resolved binary so a GUI launch can spawn one.
     rememberLaunchBinaryPath(provider, binaryPath);
     const refreshedParams = {
-      ...(nativeIdentity ? { nativeIdentity } : {}),
-      ...(provider === 'playwright' && headed !== undefined ? { renderMode: renderModeFor(provider, headed ? 'popout' : 'screencast') } : {}),
+      nativeIdentity,
+      // The host reports headedness a native launch changed; the controller
+      // follows it (`followParamsHeadedness`).
+      ...(headed !== undefined ? { renderMode: renderModeFor(provider, headed ? 'popout' : 'screencast') } : {}),
       ...(binaryPath !== undefined ? { binaryPath } : {}),
     };
     // The stream port is no param: the command just learned it, so the
@@ -797,9 +795,7 @@ export function useDorControl({
       if (wsPort !== undefined) handOverBrowserPort(id, lath.getMeta(id)?.params ?? {}, wsPort);
     };
 
-    const existing = provider === 'agent-browser'
-      ? findAgentBrowserSurface(session)
-      : findPlaywrightSurface({ key, session, nativeIdentity, cwd });
+    const existing = findBrowserSurface(provider, key !== undefined ? { key } : { nativeIdentity });
     if (existing) {
       // Reuse: hand over the stream port (OS-assigned, churns across session
       // restarts) so the pane reconnects to the live stream, and refresh the
@@ -826,7 +822,6 @@ export function useDorControl({
         ...(cwd ? { cwd } : {}),
         session,
         ...(key !== undefined ? { key } : {}),
-        ...(url !== undefined ? { url } : {}),
         ...refreshedParams,
       },
       reference: target.value,
@@ -843,7 +838,7 @@ export function useDorControl({
       surfaceRef: result.value.ref,
       minimized,
     };
-  }, [createContentSurface, findAgentBrowserSurface, findPlaywrightSurface, updateSurfaceParams, surfaceRefForId, lath]);
+  }, [createContentSurface, findBrowserSurface, updateSurfaceParams, surfaceRefForId, lath]);
 
 
   // The request handler itself. The window listener that picks WHICH Wall runs it
@@ -1610,32 +1605,35 @@ export function useDorControl({
       return;
     }
 
-    if (detail.method === SURFACE_CONTROL_METHODS.resolveBrowser) {
-      const provider = params.provider === 'playwright' ? 'playwright' : 'agent-browser';
+    // `surface.resolveAgentBrowser` is the pre-merge spelling an older `dor ab`
+    // sends: the same answer, as the bare session it read.
+    if (detail.method === SURFACE_CONTROL_METHODS.resolveBrowser || detail.method === SURFACE_CONTROL_METHODS.resolveAgentBrowser) {
+      const legacy = detail.method === SURFACE_CONTROL_METHODS.resolveAgentBrowser;
+      const provider = !legacy && isBrowserProvider(params.provider) ? params.provider : 'agent-browser';
       // `--surface`: that Surface's binding, once it is this provider's and named.
-      if (params.surface) {
+      const key = stringParam(params.key);
+      if (key === undefined) {
         const target = requireBrowserSurface(params.surface, detail);
         if (!target || !requireAutomationSession(target, provider, detail)) return;
-        detail.respond({ ok: true, result: { binding: browserBindingFromParams(lath.getMeta(target.id)?.params) } });
+        const binding = browserBindingFromParams(lath.getMeta(target.id)?.params)!;
+        detail.respond({ ok: true, result: legacy ? { surfaceId: target.id, surfaceRef: target.ref, session: binding.session } : { binding } });
         return;
       }
-      // `--key`: the Surface bound to that key, else the reservation that pins
-      // a Playwright key's concurrent first commands to one binding.
-      const found = findSurfaceByParams((raw) => {
-        const p = raw as { key?: unknown; renderMode?: unknown } | undefined;
-        return p?.key === params.key && parseRenderMode(p?.renderMode).provider === provider;
-      });
-      let binding = found ? browserBindingFromParams(lath.getMeta(found.id)?.params) : null;
-      if (!binding && provider === 'playwright' && typeof params.key === 'string') {
-        binding = browserReservations.current.resolve(params.key, params.proposed);
-      }
-      detail.respond({ ok: true, result: { binding } });
+      // `--key`: the Surface in this Wall bound to that key, else the key's
+      // own session in this Workspace, its first commands pinned to one cwd
+      // and executable (docs/specs/dor-browser.md → Managed identity).
+      const found = findBrowserSurface(provider, { key });
+      const binding = (found ? browserBindingFromParams(lath.getMeta(found.id)?.params) : null)
+        ?? browserReservations.current.resolve(provider, key, browserKeyScope(), params.proposed);
+      detail.respond({ ok: true, result: legacy ? { session: binding.session } : { binding } });
       return;
     }
 
-    if (detail.method === SURFACE_CONTROL_METHODS.agentBrowser || detail.method === SURFACE_CONTROL_METHODS.browser) {
-      const provider = detail.method === SURFACE_CONTROL_METHODS.browser && params.provider === 'playwright'
-        ? 'playwright'
+    // `surface.agentBrowser` is the pre-merge spelling an older `dor ab` sends,
+    // with a stream port it read itself; the host's own answer is the one used.
+    if (detail.method === SURFACE_CONTROL_METHODS.browser || detail.method === SURFACE_CONTROL_METHODS.agentBrowser) {
+      const provider = detail.method === SURFACE_CONTROL_METHODS.browser && isBrowserProvider(params.provider)
+        ? params.provider
         : 'agent-browser';
       const session = stringParam(params.session);
       if (!session) {
@@ -1657,42 +1655,40 @@ export function useDorControl({
       const binaryPath = isAllowedBinaryFor(provider, requestedBinaryPath)
         ? requestedBinaryPath
         : undefined;
-      // `dor ab` reads the stream port itself; the Playwright host serves the
-      // stream, so it is asked here, along with the display mode and native
-      // identity of the session `dor pw` just drove.
+      const cwd = stringParam(params.cwd);
       const key = stringParam(params.key);
-      let launch: { wsPort?: number; minimized: boolean; cwd?: string; headed?: boolean; nativeIdentity?: string };
-      if (provider === 'playwright') {
-        // `dor pw` asks only after its native command succeeded, so the key's
-        // session exists even when no viewer can attach below (non-Chromium).
-        if (key) browserReservations.current.confirm(key);
-        const cwd = stringParam(params.cwd);
-        const browser = browserHandle(provider, { session, cwd, binaryPath });
-        if (!browser) {
-          detail.respond({ ok: false, error: 'Playwright is unavailable on this host' });
-          return;
-        }
-        // No page named: a session the command left closed is not relaunched.
-        const status = await browser.attach();
-        if (!status.ok) {
-          detail.respond({ ok: false, error: status.error ?? 'Playwright connection failed' });
-          return;
-        }
-        // The Workspace may have begun closing while the host connected.
-        if (isClosingWorkspace()) {
-          detail.respond({ ok: false, error: 'this workspace is closing' });
-          return;
-        }
-        launch = { wsPort: status.wsPort, minimized: false, cwd, headed: status.headed, nativeIdentity: status.nativeIdentity };
-      } else {
-        launch = { wsPort: numberParam(params.wsPort), minimized: booleanParam(params.minimized) };
+      // The command asks only after it succeeded, so the key's session exists
+      // even when no viewer can attach below (a non-Chromium Playwright).
+      if (key) browserReservations.current.confirm(provider, key);
+      const browser = browserHandle(provider, { session, cwd, binaryPath });
+      if (!browser) {
+        detail.respond({ ok: false, error: `${BROWSER_PROVIDER_GUI[provider].label} is unavailable on this host` });
+        return;
       }
-      const result = ensureAgentBrowserSurface({
+      // The host reports where the session the command just drove streams,
+      // its headedness when it can tell, and its native identity. No page
+      // named: a session the command left closed is not relaunched.
+      const status = await browser.attach();
+      if (!status.ok) {
+        detail.respond({ ok: false, error: status.error ?? `${BROWSER_PROVIDER_GUI[provider].label} connection failed` });
+        return;
+      }
+      // The Workspace may have begun closing while the host answered.
+      if (isClosingWorkspace()) {
+        detail.respond({ ok: false, error: 'this workspace is closing' });
+        return;
+      }
+      const result = ensureBrowserSurface({
         provider,
         key,
         session,
+        cwd,
         binaryPath,
-        ...launch,
+        wsPort: status.wsPort,
+        headed: status.headed,
+        // agent-browser's is its session; every host answer names one.
+        nativeIdentity: status.nativeIdentity ?? session,
+        minimized: booleanParam(params.minimized),
         reference: () => resolveVisibleSurface(stringParam(params.surface), detail.surfaceId),
       });
       if (!result.ok) {
@@ -1700,7 +1696,7 @@ export function useDorControl({
         return;
       }
       // Bound: later commands for the key resolve to this Surface.
-      if (provider === 'playwright' && key) browserReservations.current.delete(key);
+      if (key) browserReservations.current.delete(provider, key);
       detail.respond({
         ok: true,
         result: {
@@ -1754,32 +1750,8 @@ export function useDorControl({
       return;
     }
 
-    if (detail.method === SURFACE_CONTROL_METHODS.resolveAgentBrowser) {
-      // A managed `--key` names no Surface: it names this Workspace's browser of
-      // that name, so the answer is the key namespaced under the Workspace that
-      // will hold it (docs/specs/dor-browser.md → Managed identity). Answered
-      // whether or not a Surface holds that session yet — `surface.agentBrowser`
-      // is what creates or reuses one.
-      const keyParam = stringParam(params.key);
-      if (keyParam) {
-        detail.respond({ ok: true, result: { session: sessionForKey(keyParam, workspaceScope()) } });
-        return;
-      }
-      // Resolve a browser Surface handle to the agent-browser session bound to
-      // it, for `dor ab --surface <handle> <verb...>`.
-      const target = requireBrowserSurface(params.surface, detail);
-      if (!target) return;
-      const session = requireAutomationSession(target, 'agent-browser', detail);
-      if (!session) return;
-      detail.respond({
-        ok: true,
-        result: { surfaceId: target.id, surfaceRef: target.ref, session },
-      });
-      return;
-    }
-
     detail.respond({ ok: false, error: unsupportedControlMethodMessage(detail.method) });
-  }, [buildDorSurfaces, buildDorSurfaceList, closeSurface, createContentSurface, createSplitSurface, ensureAgentBrowserSurface, findSurfaceIdRunningCommand, findSurfaceByParams, revealSurface, isClosingWorkspace, requireAutomationSession, requireBrowserSurface, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav, workspaceRef, workspaceScope]);
+  }, [browserKeyScope, buildDorSurfaces, buildDorSurfaceList, closeSurface, createContentSurface, createSplitSurface, ensureBrowserSurface, findBrowserSurface, findSurfaceIdRunningCommand, findSurfaceByParams, revealSurface, isClosingWorkspace, requireAutomationSession, requireBrowserSurface, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav, workspaceRef, workspaceScope]);
 
   return { findSurfaceByParams, updateSurfaceParams, handleDorControl };
 }

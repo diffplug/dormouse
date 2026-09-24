@@ -1,6 +1,6 @@
 /**
  * Extension-host wiring for browser automation
- * (docs/specs/dor-browser.md → "Agent-Browser Host Capabilities").
+ * (docs/specs/dor-browser.md → "Browser Host").
  *
  * The host itself is host-agnostic and lives in `lib/src/host/browser-host.ts`
  * (shared verbatim with the standalone Node sidecar). This file only:

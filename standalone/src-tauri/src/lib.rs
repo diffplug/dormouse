@@ -1484,7 +1484,7 @@ fn tool_control(
     Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
 }
 
-// ── Browser automation (docs/specs/dor-browser.md → "Agent-Browser Host Capabilities").
+// ── Browser automation (docs/specs/dor-browser.md → "Browser Host").
 // Thin forwarders to the Node sidecar, which runs the shared
 // lib/src/host/browser-host.ts — the very same module the VS Code extension
 // host runs, and the one place a request is validated. Mirrors

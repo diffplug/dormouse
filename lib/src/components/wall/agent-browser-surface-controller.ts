@@ -1,6 +1,6 @@
 /**
  * Surface-scoped browser lifecycle; see docs/specs/dor-browser.md →
- * "Agent-Browser Connection". The registry survives panel unmount and is
+ * "Browser Connection". The registry survives panel unmount and is
  * released by Wall on kill/render swap: `closeBrowserSurface` closes the
  * session too, `disposeAgentBrowserSurfaceController` only the client side.
  */
@@ -136,7 +136,7 @@ function allowedBinaryPath(candidate: unknown, provider: BrowserAutomationProvid
 
 /**
  * Where the Surface's browser is in its life (docs/specs/dor-browser.md →
- * "Agent-Browser Connection" has the transition table). The stream connection
+ * "Browser Connection" has the transition table). The stream connection
  * exists exactly in `live`, and so does every daemon command (`driver`).
  */
 type Phase =
@@ -675,14 +675,14 @@ export class AgentBrowserSurfaceController {
   }
 
   /**
-   * Playwright's native `open` can change headedness outside the Display modal,
-   * and the Wall records the host-reported mode in params
-   * (`ensureAgentBrowserSurface`). Everything else that arrives here is this
-   * controller's own popOut/popIn write coming back, so agent-browser ignores
-   * it, and so does a relaunch in flight.
+   * A provider's native launch (Playwright's `open --headed`) can change
+   * headedness outside the Display modal; the host reports it, and the Wall
+   * records it in params (`ensureBrowserSurface`). This controller's own
+   * popOut/popIn write never reaches here (`echoed`), and a relaunch in flight
+   * owns the mode.
    */
   private followParamsHeadedness(renderMode: RenderMode): void {
-    if (this.provider !== 'playwright' || this.phase.k === 'relaunching') return;
+    if (this.phase.k === 'relaunching') return;
     const headed = parseRenderMode(renderMode).presentation === 'popout';
     if (headed === this.headed) return;
     // The last status came from the old browser; auto-revert waits for the
@@ -1499,7 +1499,7 @@ export class AgentBrowserSurfaceController {
    *  stream opens: every command, edit and capture takes it from here, since
    *  mid-launch, mid-attach or mid-relaunch, or for a daemon gone while hidden,
    *  a CLI command starts a competing daemon at about:blank
-   *  (docs/specs/dor-browser.md → "Agent-Browser Connection"). */
+   *  (docs/specs/dor-browser.md → "Browser Connection"). */
   private driver(): BrowserHandle | null {
     if (this.phase.k !== 'live' || this.phase.resumed || !this.session) return null;
     return this.handle();

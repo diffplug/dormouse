@@ -4,7 +4,7 @@ import { isAllowedAgentBrowserBinary, isAllowedPlaywrightBinary } from './agent-
 // `binaryPath` reaches the host from the webview realm and off the persisted
 // session blob, and the host hands it to `spawnAndCapture`. The predicate is
 // what keeps that from being an arbitrary-exec channel, so its edges are the
-// test (docs/specs/dor-browser.md → "Agent-Browser Host Capabilities").
+// test (docs/specs/dor-browser.md → "Browser Host").
 describe('isAllowedAgentBrowserBinary', () => {
   it('accepts the bare name and an absolute path to an agent-browser', () => {
     expect(isAllowedAgentBrowserBinary('agent-browser')).toBe(true);

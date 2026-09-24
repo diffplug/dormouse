@@ -1,6 +1,6 @@
 /**
  * The private per-process directory a browser host writes screenshot frames
- * into (docs/specs/dor-browser.md → "Agent-Browser Host Capabilities"), shared
+ * into (docs/specs/dor-browser.md → "Browser Host"), shared
  * by the agent-browser and Playwright hosts.
  *
  * A frame is a picture of the user's authenticated browser, so the *directory*

@@ -36,11 +36,15 @@ views without weakening that first signal.
 
 **Why a failed swap's restore reopens the previous session.** A fresh `gui-<hex>` session kept a `key` badge that `dor ab --key` no longer resolved to, and the next command opened a second pane.
 
-## Agent-Browser Renderer
+## Automated Browser
 
-**Why one-session-one-surface is not an invariant.** `dor ab` forwards the user's command and then runs `stream status` before it asks the host for a surface, so a surface killed or render-swapped inside that window is gone by the time the trailing request arrives — and the session behind it is still live and needs somewhere to render.
+**Why one-session-one-surface is not an invariant.** `dor` forwards the user's command before it asks the host for a surface, so a surface killed or render-swapped inside that window is gone by the time the trailing request arrives — and the session behind it is still live and needs somewhere to render.
 
-## Agent-Browser Connection
+**Why a bare Wall mints its own key scope.** Every VS Code webview is a bare Wall, and each named `--key default` `dormouse.1.default`: two webviews' default browsers were one browser behind two Surfaces, and killing either closed it under the other. Playwright had avoided it with random session names and a reservation; one deterministic scheme with a scope unique per bare Wall covers both, and needs no migration because a key finds its Surface's stored session first (review of the browser stack, 2026-09).
+
+**Why the host, not `dor ab`, reports the stream port.** `dor ab` ran `agent-browser stream status` after every command — one more Node process per invocation — to learn a port the host reads from the daemon's state files; Playwright's host already answered it. Reading them host-side needs the host and the terminal to share the socket directory, which a host-issued relaunch needs anyway.
+
+## Browser Connection
 
 **What parking is worth.** Lath leaves stay mounted, so a background window would otherwise retain every pane's ~20Hz decode and screenshot round trips. The ~1s debounce rides through transient visibility flips and StrictMode remounts without rebuilding the connection.
 
@@ -88,7 +92,7 @@ views without weakening that first signal.
 
 A post-open blank-tab sweep can become such a query when a later relaunch, explicit Surface close, or host shutdown starts before the earlier page finishes loading, so the host invalidates the sweep before any close can release that pending launch.
 
-## Agent-Browser Host Capabilities
+## Browser Host
 
 **Why standalone passes a screenshot path, not bytes.** The sidecar stdio is a JSON-lines pipe shared with PTY traffic; a base64 frame on it would bloat every capture and interleave with terminal output.
 
@@ -106,7 +110,7 @@ A post-open blank-tab sweep can become such a query when a later relaunch, expli
 
 **Why the screenshot path is private.** The frame is a picture of the user's authenticated browser, written by an external process under the ambient umask, so a derivable name in the shared temp directory is readable by anything else on the machine for as long as it exists. Precedent: `standalone/sidecar/clipboard-ops.js` applies the same discipline, cleanup included, to clipboard images.
 
-## Playwright Renderer
+## Playwright
 
 **Why a paste is text, not keys.** agent-browser's stream takes only key and mouse events, so its paste replays a key down and up per character. Sent to the Playwright host, whose input queue closes the viewer (1008) at 256 queued messages, any paste over about 128 characters arriving as one burst truncated and dropped the pane into a 2 s reconnect (static reading, 2026-09). The 8192-character chunk keeps a message under the 64 KiB socket cap even when every character JSON-escapes to six bytes.
 

@@ -530,6 +530,7 @@ describe('Wall on the Lath engine', () => {
   // this realm cannot (`DORMOUSE_AGENT_BROWSER_BIN` matches by exact value, and
   // only the host reads its own environment).
   it('drops a binaryPath that is not an agent-browser without failing the request', async () => {
+    const { requests } = hostBrowsers();
     await act(async () => {
       root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
     });
@@ -551,6 +552,7 @@ describe('Wall on the Lath engine', () => {
     expect(response?.ok).toBe(true);
     expect(response?.error).toBeUndefined();
     expect(response?.result?.surfaceId).toBeTruthy();
+    expect(requests('attach')[0]).toEqual({ provider: 'agent-browser', binding: { session: 'dormouse.1.gate' }, op: 'attach' });
   });
 
   // The control socket is a wire protocol, not the CLI: `dor iframe` validates
@@ -1476,12 +1478,36 @@ describe('Wall on the Lath engine', () => {
         error: `surface '${iframeRef}' is not agent-browser rendered (render_mode: iframe) — an iframe cannot be driven; open its page with dor ab open http://localhost:5173/`,
       });
 
-      // A managed `--key` names no Surface, and a bare Wall — VS Code, the
-      // website — keeps the unscoped session names it always had.
-      expect(await dispatchResolveAgentBrowserKey('storybook')).toEqual({
-        ok: true,
-        result: { session: sessionForKey('storybook') },
+      // A managed `--key` no Surface holds is the key's own session. A bare
+      // Wall — a VS Code webview, the website — has no Workspace id, so it
+      // mints a scope of its own: two webviews' `--key default` are two
+      // browsers, and a Wall mounted afresh is another scope again.
+      const keyed = await dispatchResolveAgentBrowserKey('storybook') as { ok: boolean; result: { session: string } };
+      expect(keyed.result.session).toMatch(/^dormouse\.w[0-9a-f]{8}\.storybook$/);
+      expect(await dispatchResolveAgentBrowserKey('storybook')).toEqual(keyed);
+      await act(async () => {
+        root.render(<Wall key="remounted" initialPaneIds={['pane-a']} initialMode="command" />);
       });
+      await flush();
+      const remounted = await dispatchResolveAgentBrowserKey('storybook') as { ok: boolean; result: { session: string } };
+      expect(remounted.result.session).toMatch(/^dormouse\.w[0-9a-f]{8}\.storybook$/);
+      expect(remounted.result.session).not.toBe(keyed.result.session);
+
+      // A key a Surface holds keeps the session it was bound to — a pane saved
+      // under the old bare-Wall name included — through the merged pair.
+      await dispatchAgentBrowser({ key: 'app', session: 'dormouse.1.app', surface: 'surface:1' });
+      let resolved: unknown;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.resolveBrowser,
+            params: { provider: 'agent-browser', key: 'app', proposed: { cwd: '/elsewhere' } },
+            respond: (r: unknown) => { resolved = r; },
+          },
+        }));
+      });
+      await flush();
+      expect(resolved).toEqual({ ok: true, result: { binding: { session: 'dormouse.1.app' } } });
     } finally {
       untouchedSpy.mockRestore();
     }
@@ -3543,6 +3569,7 @@ describe('Wall on the Lath engine', () => {
 
   it('keeps dor agent-browser focus-neutral but enters passthrough for a user port activation', async () => {
     const defaultSession = sessionForKey('default');
+    hostBrowsers();
     const onEvent = vi.fn();
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
 

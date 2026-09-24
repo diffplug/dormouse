@@ -201,7 +201,7 @@ export function surfaceKindFromParams(params: unknown): SurfaceKind {
 /** The automation session a browser surface is bound to — the join key
  *  of the session↔surface registry — or null when the surface is not
  *  automated, or its launch has not yet named one (`docs/specs/dor-browser.md`
- *  → "Agent-Browser Connection"). */
+ *  → "Browser Connection"). */
 export function agentBrowserSessionFromParams(params: unknown): string | null {
   if (!isAgentBrowserParams(params)) return null;
   const session = asParams(params).session;
@@ -223,7 +223,7 @@ export function browserBindingFromParams(params: unknown): BrowserBinding | null
 
 /**
  * What the Wall does when a Surface's first launch fails
- * (docs/specs/dor-browser.md → "Agent-Browser Connection"), stored by whoever
+ * (docs/specs/dor-browser.md → "Browser Connection"), stored by whoever
  * created it so a pane restored mid-launch still gets it: close the pane, fall
  * a Tool back to its embed, or restore the renderer a swap replaced.
  */

@@ -1,6 +1,6 @@
 /**
  * The one browser-automation host behind every webview
- * (docs/specs/dor-browser.md → "Agent-Browser Host Capabilities"), shared by
+ * (docs/specs/dor-browser.md → "Browser Host"), shared by
  * the VS Code extension host and the standalone sidecar. Every request arrives
  * as one provider-tagged `BrowserRequest`, is validated here once — the
  * security boundary for both providers — and runs under one lifecycle: launches
@@ -178,7 +178,7 @@ function jpegQuality(quality: unknown): number {
  * field: a provider renders its own argv or client call from these values, and
  * no caller token reaches a CLI as it came — agent-browser reads launch
  * options anywhere on its command line (rationale in docs/specs/dor-browser.md
- * → "Agent-Browser Host Capabilities").
+ * → "Browser Host").
  */
 export function parseBrowserRequest(raw: unknown): BrowserRequest | string {
   if (!raw || typeof raw !== 'object') return 'invalid browser request';

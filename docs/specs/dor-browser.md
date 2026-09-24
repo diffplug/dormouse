@@ -63,9 +63,8 @@ Invariants on the flat persisted `BrowserPanelParams`:
   relaunches at nothing else; iframe persists only navigations initiated by
   Dormouse chrome.
 - **Must keep automation state flat** (`session`, `launchSession`,
-  `launchFallback`, `binaryPath`, `syncEngaged`, `key`, plus Playwright
-  `cwd`/`nativeIdentity`), never nested but for a `launchFallback` restore's
-  params. Pop-out is not a param — it derives from `renderMode`
+  `launchFallback`, `binaryPath`, `cwd`, `nativeIdentity`, `syncEngaged`,
+  `key`), never nested but for a `launchFallback` restore's params. Pop-out is not a param — it derives from `renderMode`
   once, at controller construction.
 - **Never carry a stream port in params**: the port `dor ab` reads, or the one
   the Playwright host's `attach` answers for `dor pw`, goes straight to the
@@ -100,7 +99,7 @@ the pane the user is currently selected on moves selection to the replacement
 Surface lifetime owns backing resources:
 
 - **Must retain the mounted DOM when minimizing.** Agent-browser connection
-  parking follows [Agent-Browser Connection](#agent-browser-connection).
+  parking follows [Browser Connection](#browser-connection).
   **Must unpark a doored pane before killing it**, so its DOM dies with the Surface.
 - **Killing an automated pane — or swapping away from that renderer — must go
   through `closeBrowserSurface`**: it closes the session through the controller
@@ -129,11 +128,11 @@ Header contract:
 - **Must open the Display modal from this capability-first identity**
   (rationale):
 
-  | Display | Icon cluster |
+  | Display, labelled `<provider> <view>` | Icon cluster |
   | --- | --- |
-  | agent-browser resizes with pane (`syncEngaged`) | wide robot + frame corners |
-  | agent-browser fixed size | wide robot + picture-in-picture |
-  | agent-browser popout | wide robot + arrow-square-out |
+  | resizes with pane (`syncEngaged`) | wide robot + frame corners |
+  | fixed size | wide robot + picture-in-picture |
+  | popout | wide robot + arrow-square-out |
   | iframe embed | frame corners only |
 
 - **Must reuse this mapping in browser Doors** (`docs/specs/layout.md` →
@@ -185,7 +184,7 @@ Source of truth: `lib/src/components/wall/use-dev-server-ports.ts`,
 
 **Must reuse targets per source, port, and provider**: each provider’s screencast and popout share a browser session and switch display modes. **A reuse is one intent, `setRenderMode(mode, { url })`, reaching the Surface's controller by id** (`requestBrowserRenderMode`), so a mode switch relaunches at the port's page rather than racing a navigation into it, even in an unmounted Door. Reattach minimized targets and recreate closed ones. System browser follows the OS opener's behavior.
 
-**Must create automated browser Surfaces at once with the URL and no session**, their controller launching ([Agent-Browser Connection](#agent-browser-connection)); a failure is reported in context and closes the pane (`launchFallback: 'close'`). Concurrent requests for the same target are serialized.
+**Must create automated browser Surfaces at once with the URL and no session**, their controller launching ([Browser Connection](#browser-connection)); a failure is reported in context and closes the pane (`launchFallback: 'close'`). Concurrent requests for the same target are serialized.
 
 Source of truth: `openContextPort` in `lib/src/components/Wall.tsx`; `listenerUrlsByPort` in `lib/src/components/wall/port-url.ts`; `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`.
 
@@ -227,26 +226,23 @@ Source of truth: `lib/src/components/wall/AgentBrowserScreenModal.tsx`,
 pop-out/pop-in), `lib/src/components/Wall.tsx` (`onSwapRenderMode`), Storybook
 `lib/src/stories/AgentBrowserScreenModal.stories.tsx`. Pinned by `restores a failed provider swap minimized meanwhile in place` in `lib/src/components/Wall.test.tsx`.
 
-## Agent-Browser Renderer
+## Automated Browser
 
-**Dormouse is a viewer/client for the user's installed `agent-browser`** — it
-neither bundles nor forks Chromium behavior. `dor ab` intercepts only the three
-mutually exclusive identity flags `--key`, `--session`, `--surface` and forwards
-everything else verbatim to
-`agent-browser --session <resolved-session> <args...>`.
-The only rewrite is inside `open` / `goto` / `navigate`, where a
-Dormouse target (`surface:N`, `:port`, `host:port`) resolves to a URL first
-(`docs/specs/dor-cli.md` → Browser Open Target Resolution). Flags Dormouse does
-not model still pass through: `--headed` is a no-op against a *live* daemon, and
-only pop-out's kill-then-relaunch changes the mode ([Pop-Out](#pop-out)).
+**Dormouse is a viewer/client for the user's installed provider CLI** — it
+neither bundles nor forks a browser ([Providers](#providers)). `dor ab` / `dor
+pw` intercept only the identity flags and forward everything else verbatim to
+the provider's CLI against the resolved session; the only rewrite is a
+navigation verb's Dormouse target (`surface:N`, `:port`, `host:port`), resolved
+to a URL first (`docs/specs/dor-cli.md` → Browser Surface Addressing). Flags
+Dormouse does not model still pass through.
 
-The binary comes from `DORMOUSE_AGENT_BROWSER_BIN` or `PATH`; `dor ab` resolves
-an absolute `binaryPath` for the host, which may not share the terminal's shell
-PATH; **a GUI launch passes the one a `dor ab` Surface last resolved, and
-remembers the one it ran**. **Both `dor ab` and the host must spawn `agent-browser` through
-`spawnAndCapture`** (`dor-lib-common`), never raw `child_process` — the Windows
-`.cmd`-shim recipe applies even to that absolute path (`docs/specs/dor-cli.md` →
-Spawning External Binaries).
+The binary comes from the provider's override variable or `PATH`; `dor`
+resolves an absolute `binaryPath` for the host, which may not share the
+terminal's shell PATH; **a GUI launch passes the one that provider's `dor`
+command last resolved, and remembers the one it ran**. **Both `dor` and the host
+must spawn a provider CLI through `spawnAndCapture`** (`dor-lib-common`), never
+raw `child_process` — the Windows `.cmd`-shim recipe applies even to that
+absolute path (`docs/specs/dor-cli.md` → Spawning External Binaries).
 
 ### Managed identity
 
@@ -254,41 +250,50 @@ Spawning External Binaries).
   because it becomes part of a session name that becomes a filesystem path.
   **`--key`, raw `--session`, and `--surface` are mutually exclusive** — naming
   a browser twice is a mistake, never a precedence question.
-- **A key is namespaced by the Workspace that holds the browser** —
-  `dormouse.<workspaceId>.<name>`, the Workspace's *stable* id so a strip reorder
-  renames nothing — and `dormouse.1.<name>` for a bare Wall, which has no
-  Workspace id (VS Code, the website, Pocket). The same key in two Workspaces is
-  therefore two browsers, which is what keeps one Surface per session (below)
-  once several Workspaces each run `dor ab --key default`. **Only the answering Workspace can name it**,
-  so `dor ab` asks the host (`surface.resolveAgentBrowser` with `key`) before it
-  forwards anything, and namespaces the key itself only when there is no control
-  endpoint at all — outside Dormouse, where `dor ab` is a pure passthrough.
-  **Every managed `dor ab` invocation depends on the host answering** — a
-  passthrough verb included — with no CLI-side fallback: a refusal (a Wall still
-  mounting, a webview mid-reload, the VS Code guard) fails the command with the
-  host's message before the binary runs, and the router answers the no-Wall
-  case after its bounded retry rather than leaving `dor ab` to its deadline
-  (`docs/specs/dor-cli.md` → "Handle Model"). A CLI-namespaced fallback would
-  name the wrong Workspace's browser.
-- GUI-spawned sessions use `dormouse.1.gui-<hex>`, minted host-wide (the Window's
-  one agent-browser host, not a Workspace), which no `--key` names; they
-  are reachable by `dor ab --surface <handle>` (`docs/specs/dor-cli.md` →
-  Agent-Browser Surface Addressing). **The host answers only for an
-  agent-browser-rendered Surface** — an `iframe`-rendered Surface has a browser
-  but no session to drive.
-- **One agent-browser session maps to one Dormouse surface.** Re-running `dor ab`
-  for an existing session hands its port over, refreshes `binaryPath` and reuses the pane, as
-  does a `--surface`-addressed run — not an invariant, though: a surface killed
-  or render-swapped mid-command leaves the trailing request to mint a fresh pane
-  (rationale).
+- **A key names the Surface of that provider holding it in the answering Wall**,
+  whose stored binding — session, cwd, executable — the command runs with; so a
+  Surface keeps its session however keys were named when it was made.
+- **A key no Surface holds is minted `dormouse.<scope>.<name>`**, scoped by the
+  Workspace that will hold the browser — its *stable* id, so a strip reorder
+  renames nothing. **A bare Wall, which has no Workspace id (a VS Code webview,
+  the website, Pocket), mints a scope of its own for its life**, so two
+  webviews' `--key default` are two browsers. Its first commands that may bind
+  reserve the caller's cwd and executable for two minutes, shared by concurrent
+  first commands; one that succeeds without a viewer (a non-Chromium Playwright)
+  keeps it until a Surface binds, and binding removes it.
+- **Only the answering Workspace can name a key**, so `dor` asks the host
+  (`surface.resolveBrowser`) before it forwards anything, and names the key
+  itself (`dormouse.1.<name>`) only when there is no control endpoint at all —
+  outside Dormouse, where `dor` is a pure passthrough. **Every managed
+  invocation depends on the host answering** — a passthrough verb included —
+  with no CLI-side fallback: a refusal (a Wall still mounting, a webview
+  mid-reload, the VS Code guard) fails the command with the host's message
+  before the binary runs, and the router answers the no-Wall case after its
+  bounded retry rather than leaving `dor` to its deadline (`docs/specs/dor-cli.md`
+  → "Handle Model"). A CLI-namespaced fallback would name the wrong Workspace's
+  browser.
+- GUI-spawned sessions use `dormouse.1.gui-<hex>`, minted host-wide, which no
+  `--key` names; they are reachable by `--surface <handle>`
+  (`docs/specs/dor-cli.md` → Browser Surface Addressing). **The host answers only
+  for a Surface its provider renders** — an `iframe`-rendered Surface has a
+  browser but no session to drive.
+- **One browser maps to one Dormouse surface**, found by its host-reported
+  native identity (agent-browser: the session; Playwright: installation,
+  project scope and session, which a raw `--session` shares across one
+  project's subdirectories). A command for a browser that has a Surface hands
+  its port over, refreshes `binaryPath` and reuses the pane — not an invariant,
+  though: a surface killed or render-swapped mid-command leaves the trailing
+  request to mint a fresh pane (rationale).
 
 Source of truth: `sessionForKey` in `dor-lib-common/src/browser-providers.ts`,
-`resolveSession` in `dor/src/commands/agent-browser.ts`, `dor/src/commands/types.ts`
-(`AgentBrowserSurfaceRequest`, `ResolveAgentBrowserSessionRequest`), `lib/src/components/Wall.tsx` /
-`lib/src/components/wall/use-dor-control.ts` (`findAgentBrowserSurface`, `surface.agentBrowser`,
-`surface.resolveAgentBrowser`).
+`runBrowserCli` in `dor/src/commands/browser-cli.ts`, `BrowserBindingReservations`
+in `lib/src/components/wall/browser-binding-reservations.ts`,
+`lib/src/components/wall/use-dor-control.ts` (`findBrowserSurface`,
+`ensureBrowserSurface`, `browserKeyScope`). Pinned by `resolves a browser surface
+handle to its agent-browser session, and gates the rest` in
+`lib/src/components/Wall.test.tsx`.
 
-### Agent-Browser Connection
+### Browser Connection
 
 A surface-id-keyed controller registry (mirroring `terminal-lifecycle.ts`) owns
 one `AgentBrowserConnection` plus its screenshot loop. **The controller is
@@ -333,7 +338,7 @@ place of `live`; a `dor` handover moves any phase but `launching` and
   `{ restore }` the params a swap replaced. A param cleared on success, it
   survives a restore mid-launch (rationale). **A launch into a named session is
   sent at once, and so is a close of a Surface whose launch names one**: the
-  host orders them ([Agent-Browser Host Capabilities](#agent-browser-host-capabilities)).
+  host orders them ([Browser Host](#browser-host)).
 - **Params predating the controller's own `session` or `renderMode` write are
   ignored until they show it back.**
 - **One relaunch at a time, only of a bound browser** (`live`, `parked`,
@@ -392,12 +397,13 @@ Input rules:
 - **`windowsVirtualKeyCode` comes from a real key map, never
   `key.charCodeAt(0)`** (`.` is char 46 = VK_DELETE, so periods would otherwise
   become Delete presses).
-- Local paste is replayed as per-character key input.
+- Local paste is replayed as per-character key input — as `input_text` on
+  [Playwright](#playwright).
 - **Select-all/copy/cut go through the host `edit` operation on every
   platform**, since those chords do not survive CDP input. Undo/redo is not
   emulated.
 
-Tabs live in the agent-browser surface: **the in-body strip renders only at two
+Tabs live in the automated browser surface: **the in-body strip renders only at two
 or more**, one tab getting the ordinary URL header and nothing tab-shaped.
 Select/close go through the host `tab` operation. The daemon gate is pinned by
 `reaches no daemon from the header, Display modal, tabs, sync or edit chords
@@ -413,15 +419,15 @@ shared by the stream and `tab list --json`).
 
 ### Pop-Out
 
-`ab-popout` relaunches the same session headed, because Chrome fixes
-headed/headless at daemon launch. The pane becomes a stub with Pop back in;
+A popout (`ab-popout`, `pw-popout`) relaunches the same session headed, because
+Chrome fixes headed/headless at launch. The pane becomes a stub with Pop back in;
 while the window is still opening (a launch, attach or relaunch in flight) the
 stub offers nothing. **State carried in v1 is only the last
 http(s) active URL**: other tabs, DOM state, scroll, form inputs, session storage,
 cookies/logins do not survive.
 
 A pop-out or pop-in is a `launch` of the bound session, under the host's
-lifecycle ([Agent-Browser Host Capabilities](#agent-browser-host-capabilities)).
+lifecycle ([Browser Host](#browser-host)).
 agent-browser's relaunch runs `close`, **then terminates the daemon by its pid
 file and waits for it to exit** (rationale), then reopens. **Never wait for the
 page to load** (rationale): its launch resolves once the *relaunched* daemon is
@@ -439,7 +445,7 @@ Source of truth: `lib/src/components/wall/agent-browser-surface-controller.ts` (
 observer, auto-revert), `lib/src/host/agent-browser-host.ts` (`killDaemon`),
 VS Code/standalone shutdown wiring.
 
-### Agent-Browser Host Capabilities
+### Browser Host
 
 **Every browser operation rides one `PlatformAdapter.browser(request)`**: a
 provider-tagged `BrowserRequest` — `{ provider, binding: { session?, cwd?,
@@ -452,10 +458,10 @@ plus `browser_screenshot` for raw bytes.
 | Operation | Contract |
 | --- | --- |
 | `launch` | Without a session, open an http(s) `url` in a new GUI session; with one, relaunch it headed or headless at `url`, blank when that page is not http(s). Resolves when the browser is up, not when the page loads ([Pop-Out](#pop-out)). |
-| `attach` | The live stream port — for agent-browser from `<session>.pid` / `<session>.stream` and a port probe, never spawning. Only a gone browser, for a caller naming a page, is relaunched there (headed on request), answering `relaunched`; one up but not streaming is left alone. Concurrent attaches join. |
+| `attach` | The live stream port, found without starting a browser ([agent-browser](#agent-browser), [Playwright](#playwright)), with headedness where the provider can tell. Only a gone browser, for a caller naming a page, is relaunched there (headed on request), answering `relaunched`; one it cannot view is left alone. |
 | `screenshot` | One device-resolution JPEG/PNG frame. VS Code structured-clones the bytes; standalone passes Rust the capture's temp-file **path** over the sidecar stdio, for Rust to read (rationale). **One capture per session and format in flight**: a request made meanwhile joins it — never one from before the session's close or relaunch — and the capture's spawn is killed past 30s. |
 | `edit` | select-all/copy/cut via fixed host-owned JS plus an OS clipboard write. |
-| `streamUrl` | Direct stream URL, or the VS Code relay URL. |
+| `streamUrl` | The URL the webview connects to for a stream port. |
 | `navigate`, `history`, `tab`, `viewport`, `device`, `close` | One fixed argv (agent-browser) or client call (Playwright) each. |
 | `cdpUrl` | agent-browser only: the browser's CDP endpoint, for the popped-out URL observer. |
 
@@ -498,11 +504,10 @@ CLI reads as an option or a path (rationale). Pinned by
 `lib/src/host/agent-browser-host.test.ts`.
 
 **`binaryPath` crosses from the webview realm, so it is checked at the spawn**
-(rationale) — the gate is `runWithBinaryFallback`, the one call every entry point
-shares. Accepted: the agent-browser executable by file name — absolute, or bare
-and resolved on `PATH` — plus the host's own `DORMOUSE_AGENT_BROWSER_BIN` by
-exact match. **A refused path is dropped, never fatal**, so the host's own
-candidates run. The webview applies the same predicate before sending one
+(rationale). Accepted: the provider's executable by file name — absolute, or
+bare and resolved on `PATH` — plus the host's own override variable by exact
+match. **A refused path is dropped, never fatal**, so the host's own candidates
+run. The webview applies the same predicate before sending one
 (`browserHandle`) or storing one.
 
 **Screenshots are captured into a private per-process directory, and it is
@@ -511,40 +516,55 @@ removed** (rationale). **A tmpdir that cannot be created is answered
 file is reused per session: its reader leaves it, the next capture overwrites
 it.
 
-**VS Code must reach the stream through a loopback relay** — the agent-browser
-stream server rejects `vscode-webview://` origins. The relay grants one
-single-use, short-TTL token bound to one stream port and strips the Origin
-header; standalone connects directly.
-
 Source of truth: `lib/src/host/browser-host.ts` (`parseBrowserRequest`,
 `createBrowserHost`, `BrowserProvider`, `isAgentBrowserSession`,
-`isPlaywrightSession`), `lib/src/host/agent-browser-host.ts`
-(`runWithBinaryFallback`),
-`dor-lib-common/src/browser-providers.ts` (`isAllowedAgentBrowserBinary`),
-`BrowserRequest` in `lib/src/lib/platform/browser-automation.ts`, `browserHandle`
-in `lib/src/components/wall/browser-automation.ts`,
-`lib/src/host/private-capture-dir.ts`, `lib/src/host/browser-stream-guard.ts`,
-`vscode-ext/src/agent-browser-host.ts`, `vscode-ext/src/webview-html.ts`,
-`standalone/src/tauri-adapter.ts`, `standalone/src-tauri/src/lib.rs`
-(`browser_request`, `browser_screenshot`), `standalone/sidecar/main.js`.
+`isPlaywrightSession`), `BROWSER_PROVIDERS` in
+`dor-lib-common/src/browser-providers.ts`, `BrowserRequest` in
+`lib/src/lib/platform/browser-automation.ts`, `browserHandle` in
+`lib/src/components/wall/browser-automation.ts`,
+`lib/src/host/private-capture-dir.ts`, `vscode-ext/src/agent-browser-host.ts`,
+`vscode-ext/src/webview-html.ts`, `standalone/src/tauri-adapter.ts`,
+`standalone/src-tauri/src/lib.rs` (`browser_request`, `browser_screenshot`),
+`standalone/sidecar/main.js`.
 
-## Playwright Renderer
+### agent-browser
 
-**Must share browser chrome, Display controls, input, screenshot scheduling, parking, and pop-out behavior with agent-browser.** `pw-screencast` and `pw-popout` select providers within the existing Surface kind. Cross-provider swaps preserve only the active URL, warn when other tabs will be lost, and close the old provider. Failed launches restore the previous renderer for visible and minimized Surfaces.
+What is agent-browser's alone: its per-session daemon, the state files beside
+its socket, the pid kill a relaunch needs ([Pop-Out](#pop-out)), and one fixed
+argv per operation. `--headed` is a no-op against a *live* daemon; only a
+relaunch changes the mode.
 
-**Must use the user's installed `@playwright/cli`, resolved from `DORMOUSE_PLAYWRIGHT_BIN` or `PATH`.** GUI launches use Chromium. Native commands retain Playwright semantics: `open` restarts, `goto` navigates; commands for unsupported engines still run, with a viewer warning. The viewer requires CLI 0.1.19’s local browser-binding endpoint; installation errors name this requirement.
+- **`attach` reads the live port from `<session>.pid` / `<session>.stream` and a
+  port probe, never spawning** — any CLI verb starts a daemon to answer. A
+  daemon up but not streaming is left alone; its native identity is its session.
+- **A launch runs `open` in the binding's project directory while it exists**,
+  so a relaunch reads the same `./agent-browser.json` the `dor ab` there did;
+  every other call runs in the host's.
+- **Every spawn passes the `binaryPath` gate in `runWithBinaryFallback`**, the
+  host's `DORMOUSE_AGENT_BROWSER_BIN` being the exact-match override.
+- **VS Code must reach the stream through a loopback relay** — the agent-browser
+  stream server rejects `vscode-webview://` origins. The relay grants one
+  single-use, short-TTL token bound to one stream port and strips the Origin
+  header; standalone connects directly.
 
-**Must scope managed keys by provider and Dormouse workspace.** Managed bindings retain unique native session names. The first command reserves its cwd and executable for two minutes while binding the Surface; concurrent first commands share the reservation, and one that succeeds without a viewer (a non-Chromium browser) keeps it until a Surface binds. Successful bindings remove reservations; Surfaces retain cwd/executable for later commands, including relative paths. `--session` bypasses managed-key addressing and uses the caller's native project scope. `--surface` requires a Playwright renderer. GUI Connect inherits the source terminal's cwd; a swap without one uses the host cwd.
+Source of truth: `createAgentBrowserProvider` and `runWithBinaryFallback` in
+`lib/src/host/agent-browser-host.ts`, `isAllowedAgentBrowserBinary` in
+`dor-lib-common/src/browser-providers.ts`, `vscode-ext/src/agent-browser-host.ts`.
+Pinned by `lib/src/host/agent-browser-host.test.ts`.
 
-**Must discover the native session in its CLI project scope and connect using that installation's matching Playwright client.** Accept only a unique registry entry matching session, workspace and library, with a local pipe endpoint and Chromium engine. Never load modules from the registry's library path. The host derives the client from the validated CLI installation. Raw sessions reuse Surfaces by that native identity, including callers in different subdirectories of one project. **`attach` relaunches at the page only when the registry lists no browser for the session**, answering `relaunched`, never one it cannot view; `dor pw`'s binding attaches with no page. Native CLI tabs and the pane share the selected tab; the host polls tab selection and metadata every 750ms while viewed, broadcasting only changes, and the current state to each connecting viewer. Screenshots reuse tab state for up to 750ms; explicit host controls refresh immediately. A native launch updates headed shutdown ownership and the pane's display mode. **Must apply that host-reported mode in the controller before the new viewer port**, so sync never sizes a headed window, except mid-relaunch or as an echo ([Agent-Browser Connection](#agent-browser-connection)).
+### Playwright
 
-**Must expose only fixed host operations.** Navigation, tabs, viewport/device, screenshots, editing and close are validated host-side (`parseBrowserRequest`, above); arbitrary CLI arguments, JavaScript and CDP methods are unavailable through the webview channel. The trusted `dor pw` process retains native passthrough. Executable hints use the same filename/exact-host-override boundary as agent-browser, with `playwright-cli` as the accepted name; `dor pw` applies it to the executable a binding returns (`docs/specs/dor-cli.md` → Playwright Surface Addressing).
+**Must use the user's installed `@playwright/cli`, resolved from `DORMOUSE_PLAYWRIGHT_BIN` or `PATH`.** GUI launches use Chromium. Native commands retain Playwright semantics: `open` restarts, `goto` navigates; commands for unsupported engines still run, with a viewer warning. The viewer requires CLI 0.1.19’s local browser-binding endpoint; installation errors name this requirement. A Playwright session lives in its CLI project scope, so a binding's cwd and executable pin every later command, relative paths included; `--session` uses the caller's own scope. GUI Connect inherits the source terminal's cwd; a swap without one uses the host cwd.
 
-Launches follow the host's lifecycle (above): the relaunch closes the previous CLI session, and the launch completes when the browser endpoint is ready. **Every CLI call a launch waits on is killed at its deadline; every other one at 10 s, except `open`**, which lasts as long as the page load and whose end could take its browser down; nothing waits on it past a launch's own bounds. Shutdown also disconnects viewers. Viewer disconnect alone leaves the CLI browser alive. Concurrent input/captures share CDP attachments; disposal releases late attachments. **A screencast that fails to start must forget its page**, so the next poll releases the attachment and retries.
+**Must discover the native session in its CLI project scope and connect using that installation's matching Playwright client.** Accept only a unique registry entry matching session, workspace and library, with a local pipe endpoint and Chromium engine. Never load modules from the registry's library path. The host derives the client from the validated CLI installation. **`attach` relaunches at the page only when the registry lists no browser for the session**, never one it cannot view; `dor pw`'s binding attaches with no page, and reports the browser's headedness. Native CLI tabs and the pane share the selected tab; the host polls tab selection and metadata every 750ms while viewed, broadcasting only changes, and the current state to each connecting viewer. Screenshots reuse tab state for up to 750ms; explicit host controls refresh immediately. **The controller must apply a host-reported mode before the new viewer port**, so sync never sizes a headed window, except mid-relaunch or as an echo ([Browser Connection](#browser-connection)).
+
+Arbitrary CLI arguments, JavaScript and CDP methods are unavailable through the webview channel; the trusted `dor pw` process retains native passthrough. Executable hints use the same filename/exact-host-override boundary as agent-browser, with `playwright-cli` as the accepted name; `dor pw` applies it to the executable a binding returns (`docs/specs/dor-cli.md` → Browser Surface Addressing).
+
+A relaunch closes the previous CLI session, and a launch completes when the browser endpoint is ready. **Every CLI call a launch waits on is killed at its deadline; every other one at 10 s, except `open`**, which lasts as long as the page load and whose end could take its browser down; nothing waits on it past a launch's own bounds. Shutdown also disconnects viewers. Viewer disconnect alone leaves the CLI browser alive. Concurrent input/captures share CDP attachments; disposal releases late attachments. **A screencast that fails to start must forget its page**, so the next poll releases the attachment and retries.
 
 **Must authorize every stream upgrade with an own-loopback Host and a single-use, 60-second token bound to that viewer port.** Grants are capped at 1024; normal HTTP requests are refused. Input is limited to 64 KiB per message and 256 queued messages; frame backpressure drops frames above 2 MB queued. **Must send a paste as `input_text` messages of at most 8192 characters**, which the host inserts with CDP `Input.insertText`, never as a key pair per character (rationale). The same guarded stream serves all three hosts.
 
-Source of truth: `followParamsHeadedness` in `lib/src/components/wall/agent-browser-surface-controller.ts`; `playwrightTextInputs` in `lib/src/lib/platform/browser-automation.ts`; `BrowserBindingReservations` in `lib/src/components/wall/browser-binding-reservations.ts`; `createPlaywrightProvider` in `lib/src/host/playwright-host.ts`; `resolvePlaywrightInstall` in `lib/src/host/playwright-install.ts`; `BrowserStreamGrants` in `lib/src/host/browser-stream-guard.ts`. Pinned by `lib/src/host/playwright-host.test.ts` (opt-in real CLI via `DORMOUSE_PLAYWRIGHT_TEST_BIN`), `lib/src/host/playwright-host.lifecycle.test.ts`, `lib/src/host/browser-stream-guard.test.ts`, `lib/src/components/wall/browser-binding-reservations.test.ts`, and `AgentBrowserPanel Playwright params` in `lib/src/components/wall/AgentBrowserPanel.test.tsx`.
+Source of truth: `followParamsHeadedness` in `lib/src/components/wall/agent-browser-surface-controller.ts`; `playwrightTextInputs` in `lib/src/lib/platform/browser-automation.ts`; `createPlaywrightProvider` in `lib/src/host/playwright-host.ts`; `resolvePlaywrightInstall` in `lib/src/host/playwright-install.ts`; `BrowserStreamGrants` in `lib/src/host/browser-stream-guard.ts`. Pinned by `lib/src/host/playwright-host.test.ts` (opt-in real CLI via `DORMOUSE_PLAYWRIGHT_TEST_BIN`), `lib/src/host/playwright-host.lifecycle.test.ts`, `lib/src/host/browser-stream-guard.test.ts`, and `AgentBrowserPanel Playwright params` in `lib/src/components/wall/AgentBrowserPanel.test.tsx`.
 
 ## Iframe Renderer
 

@@ -399,9 +399,9 @@ mode under `dor ab` belongs to the delegated `agent-browser`.
 positional handle** (`read` / `send` / `await` / `kill`); **a command that
 creates or places a Surface keeps `--surface` as an optional *reference*
 Surface** (`split`, `ensure`, `iframe`, browser creation). So `--surface` means
-"place near this" everywhere except [`dor
-ab`](#agent-browser-surface-addressing), whose whole positional space belongs to
-`agent-browser`, leaving `--surface` its only room for a real target.
+"place near this" everywhere except [`dor ab` and `dor
+pw`](#browser-surface-addressing), whose whole positional space belongs to the
+provider's CLI, leaving `--surface` its only room for a real target.
 
 The generated help snapshots own command names, syntax, flags, and defaults.
 Where `stricli` cannot express a shape, a command may declare narrow,
@@ -422,7 +422,7 @@ The spec keeps the behavior help cannot express:
 | `read` | Clean, ANSI-free rendered lines; line limits count rendered lines. |
 | `await` | **Must name `--until quiet\|exit`; never infer it.** Timeout 1–86400 whole seconds, default 600; `alert.md` owns wake semantics. |
 | `kill` | **Must select exactly one confirmation mode.** Conditional text needs four non-whitespace characters and must match `read`; browser Surfaces are killable. |
-| `iframe`, `agent-browser` / `ab`, `playwright` / `pw` | `dor-browser.md` owns the renderers; see [target resolution](#browser-open-target-resolution) and [addressing](#agent-browser-surface-addressing). The passthrough is intercepted before stricli parses it. |
+| `iframe`, `agent-browser` / `ab`, `playwright` / `pw` | `dor-browser.md` owns the renderers; see [target resolution](#browser-open-target-resolution) and [addressing](#browser-surface-addressing). The passthrough is intercepted before stricli parses it. |
 | `list` | Filters are ANDed client-side; `--port` filters terminals (browser Surfaces never match) and implies the opt-in detail scan, `--ports` only requests it. **Owns every Workspace read**: `--workspace` narrows to one, `--all` groups every Workspace's rows under its header — **every Workspace keeps its header**, including one a filter emptied, so the text listing and the JSON `workspaces` array name the same Workspaces — `--workspaces` is the overview, and the three cannot be combined. **`--all --json` adds `caller_workspace_ref` / `focused_workspace_ref`** beside the `_surface_ref` pair, which under `--all` names a `surface:N` every Workspace has; the `_surface_id` halves stay unique. **`--workspaces` takes `--json` and `--window` and nothing else**, by an allowlist, so a flag added to `list` is refused there until it is named. |
 | `workspace` | **Mutation only** ([dor workspace](#dor-workspace)). |
 | `app` | Standalone only ([dor app](#dor-app)). |
@@ -441,7 +441,7 @@ Activity/state filters are staged (see [Future](#future)).
 
 **Every command that acts on a Surface accepts `--workspace <ref>`** — `split`,
 `ensure`, `read`, `send`, `await`, `kill`, `iframe`, `tool`, `open`, and the
-`dor ab` passthrough, which intercepts it beside its identity flags — naming the
+`dor ab` and `dor pw` passthroughs, which intercept it beside their identity flags — naming the
 Workspace its targets resolve in and, for a creating verb, the Workspace the new
 Surface joins.
 
@@ -561,63 +561,74 @@ in `dor/src/protocol.ts`, the `surface.resolveOpen` handler in
 `lib/src/components/wall/use-dor-control.ts`, `listenerUrlsByPort` in
 `lib/src/components/wall/port-url.ts`.
 
-## Playwright Surface Addressing
+## Browser Surface Addressing
 
-**Must intercept `dor playwright` / `dor pw` before stricli parses native arguments.** Identity flags are the same mutually exclusive `--key`, `--session`, `--surface` set as agent-browser, plus the same `--workspace`, with native `-s` accepted for `--session`. `open` and `goto` share Browser Open Target Resolution. All other native arguments, stdout, stderr and exit status pass through; a failed viewer attachment adds a stderr warning without changing command success. Help, install, listing, and close commands never create a Surface.
+**Must intercept `dor agent-browser` / `dor ab` and `dor playwright` / `dor pw`
+before stricli parses provider arguments.** One runner drives both; what differs
+is each provider's descriptor:
 
-**Must resolve a managed key or Surface before invoking the CLI**, so commands run in the bound native project cwd and executable. The `surface.resolveBrowser` request and subsequent `surface.browser` binding carry an explicit provider; legacy agent-browser methods retain their contract. Identity scope and lifetime belong to `docs/specs/dor-browser.md` → Playwright Renderer.
+| | `dor ab` | `dor pw` |
+| --- | --- | --- |
+| Session flag forwarded | `--session <s>` | `--session=<s>`; native `-s` read as `--session` |
+| Targets resolved in | `open`, `goto`, `navigate` | `open`, `goto` |
+| Never binds a Surface | `close` | `close`, `detach`, `close-all`, `kill-all`, `delete-data`, `list`, `show`, `install`, `install-browser` |
+| Informational flags | `--help`, `-h` | `--help`, `-h`, `--version`, `-v` |
+| Runs in / with | the caller's cwd and executable | the binding's project cwd and pinned executable |
 
-**Must pass the bound cwd through `spawnAndCapture`'s optional cwd argument.** Omission preserves inherited cwd for existing callers.
+- **Exactly one identity flag**: `--key` (default `default`), `--session`, or
+  `--surface`, plus `--workspace`; any two fail (`--key and --surface are
+  mutually exclusive`). Everything else is forwarded verbatim; stdout, stderr and
+  exit status pass through. Target resolution: [Browser Open Target
+  Resolution](#browser-open-target-resolution).
+- **Resolution is host-side**, mirroring `surface.resolveOpen`: a `--key` or
+  `--surface` takes one `surface.resolveBrowser { provider, key | surface,
+  proposed? }` round trip before the binary runs, answered with a binding
+  `{ session, cwd?, binaryPath? }` (`docs/specs/dor-browser.md` → Managed
+  identity). `proposed` — the caller's cwd and executable — rides only a command
+  that may bind. `--session` and an informational command ask nothing. Outside
+  Dormouse a key names its unscoped session itself; a `--surface` fails.
+- **After a command that may bind succeeds, `surface.browser { provider, key?,
+  session, cwd, binaryPath }` opens or reuses its Surface**; the host reports the
+  stream port. A failure there adds a stderr warning without changing the
+  command's success.
+- **The host must keep `surface.resolveAgentBrowser` and `surface.agentBrowser`
+  as agent-browser aliases of the pair for one release**, in their old answer
+  shapes, for a terminal still running the `dor` it was staged with before an
+  update.
 
-**Never spawn a bound executable the host's Playwright allowlist refuses**, since the binding comes back off persisted params; run the caller's own resolution instead. The caller's `DORMOUSE_PLAYWRIGHT_BIN` is the exact-match override. **Must run the caller's own executable, with a stderr warning, when the bound one is gone**, and **must fail naming a bound cwd that no longer exists** rather than report playwright-cli missing.
-
-Source of truth: `runPlaywrightCli` and `resolveBinding` in `dor/src/commands/playwright.ts`; `BrowserBinding` in `dor/src/commands/types.ts`; `isAllowedPlaywrightBinary` in `dor-lib-common/src/browser-providers.ts`; `spawnAndCapture` in `dor-lib-common/src/spawn.ts`. Pinned by `dor/test/playwright.test.mjs`.
-
-## Agent-Browser Surface Addressing
-
-`dor ab --surface <handle> <verb...>` drives the browser Surface a handle names
-rather than a session the caller must already know — the same handle addressing
-terminal verbs use (`dor read surface:3`).
-
-`--surface` is the third of the mutually exclusive identity flags
-(`docs/specs/dor-browser.md` → Managed identity); any two of the three fail
-(`--key and --surface are mutually exclusive`). It changes *addressing* only:
-every other argument is still forwarded verbatim, and the host's webview argv
-shapes are untouched (`docs/specs/dor-browser.md` → Agent-Browser Host
-Capabilities).
-
-**Resolution is host-side**, mirroring `surface.resolveOpen`: the CLI sends the
-handle to `surface.resolveAgentBrowser` and forwards the session it gets back.
-A managed `--key` takes the same method (with `key` in place of `surface`),
-because the Workspace that will hold the browser is what namespaces a key
-(`docs/specs/dor-browser.md` → Managed identity).
-The handle resolves against **listed** Surfaces ([Handle Model](#handle-model)),
-and the host applies two gates in order:
+A `--surface` handle resolves against **listed** Surfaces ([Handle
+Model](#handle-model)), and the host applies two gates in order:
 
 - **Browser-gated** (`docs/specs/glossary.md` → Panes and Surfaces). A target
   with no browser fails with the shared capability wording under [`dor
   list`](#current-implemented-commands).
-- **Render-mode-gated.** Past that gate, a browser Surface on the `iframe`
-  renderer is a browser with nothing to drive, and one the other provider
-  renders is driven by the other CLI. **The refusal must name the command that
-  works**: `surface 'surface:2' is not agent-browser rendered (render_mode:
-  pw-screencast) — drive it with dor pw --surface surface:2`, or for an iframe
-  `… open its page with dor ab open <its url>`.
+- **Render-mode-gated.** A browser Surface on the `iframe` renderer has nothing
+  to drive, and one the other provider renders is driven by the other CLI. **The
+  refusal must name the command that works**: `surface 'surface:2' is not
+  agent-browser rendered (render_mode: pw-screencast) — drive it with dor pw
+  --surface surface:2`, or for an iframe `… open its page with dor ab open <its
+  url>`.
 
-Neither gate covers an agent-browser Surface whose launch has not yet named its
-session ([dor-browser.md](dor-browser.md) → Agent-Browser Connection):
-capability and renderer but no session, failing with
+Neither gate covers a Surface whose launch has not yet named its session
+([dor-browser.md](dor-browser.md) → Browser Connection): it fails with
 `surface 'surface:2' has no agent-browser session yet`.
 
-Like every handle target, `--surface` requires a live control endpoint.
+For a project-scoped provider: **must pass the bound cwd through
+`spawnAndCapture`'s optional cwd argument**; **never spawn a bound executable
+the provider's allowlist refuses**, since the binding comes back off persisted
+params — run the caller's own resolution instead, whose `DORMOUSE_PLAYWRIGHT_BIN`
+is the exact-match override; **must run the caller's own executable, with a
+stderr warning, when the bound one is gone**, and **must fail naming a bound cwd
+that no longer exists** rather than report the CLI missing.
 
-Source of truth: `extractSessionFlags` in `dor/src/commands/browser-cli.ts`,
-`resolveSession` in `dor/src/commands/agent-browser.ts`, `resolveAgentBrowser` in
-`dor/src/protocol.ts`, `ResolveAgentBrowserSessionRequest` / `Response` in
-`dor/src/commands/types.ts`, `requireBrowserSurface`,
-`requireAutomationSession` and the `surface.resolveAgentBrowser` handler in
-`lib/src/components/wall/use-dor-control.ts`, and
-`agentBrowserSessionFromParams` in `lib/src/components/wall/browser-surface.ts`.
+Source of truth: `runBrowserCli`, `resolveBinding` and `extractSessionFlags` in
+`dor/src/commands/browser-cli.ts`; `runAgentBrowserCli` in
+`dor/src/commands/agent-browser.ts`; `runPlaywrightCli` in
+`dor/src/commands/playwright.ts`; `SURFACE_CONTROL_METHODS` in
+`dor/src/protocol.ts`; `ResolveBrowserRequest`, `BrowserSurfaceRequest` and
+`BrowserBinding` in `dor/src/commands/types.ts`; `requireBrowserSurface` and
+`requireAutomationSession` in `lib/src/components/wall/use-dor-control.ts`.
+Pinned by `dor/test/cli-output.test.mjs` and `dor/test/playwright.test.mjs`.
 
 ## Agent Workflows
 

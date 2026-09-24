@@ -36,16 +36,16 @@ import type {
 } from './commands/types.js';
 
 export type {
-  AgentBrowserExec,
-  AgentBrowserExecResult,
-  AgentBrowserSurfaceRequest,
-  AgentBrowserSurfaceResponse,
   AppRestartResponse,
   AwaitCause,
   AwaitSurfaceOutcome,
   AwaitSurfaceRequest,
   AwaitSurfaceResponse,
   AwaitUntil,
+  BrowserExec,
+  BrowserExecResult,
+  BrowserSurfaceRequest,
+  BrowserSurfaceResponse,
   CliEnv,
   CliOptions,
   CliResult,

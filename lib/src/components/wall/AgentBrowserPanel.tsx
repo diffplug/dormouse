@@ -98,8 +98,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
 
   // Feed later param changes into the controller (diffed internally). The
   // renderMode it gets back is mostly its own popOut/popIn write; it follows
-  // one only for Playwright, whose native `open` can change headedness outside
-  // Dormouse (`followParamsHeadedness`).
+  // one the host reported for a native launch (`followParamsHeadedness`).
   useEffect(() => {
     if (controller.released) setGeneration((current) => current + 1);
     else controller.updateParams({ session, launchSession, binaryPath, url, syncEngaged, key, cwd, renderMode: seededMode });

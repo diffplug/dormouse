@@ -16,9 +16,8 @@ export type BrowserAutomationProvider = 'agent-browser' | 'playwright';
  *  headed OS window. */
 export type BrowserPresentation = 'screencast' | 'popout';
 
-// The scope a Window with one implicit Workspace answers with: a bare Wall (VS
-// Code, the website, Pocket) has no Workspace id of its own, so its keys keep
-// the names they have always had. Private: callers build session names through
+// The scope a caller with no scope of its own names: `dor` outside Dormouse,
+// and the host's GUI sessions. Private: callers build session names through
 // sessionForKey, never by hand.
 const BARE_WALL_SCOPE = '1';
 
@@ -41,7 +40,7 @@ export const DEFAULT_PLAYWRIGHT_BIN = 'playwright-cli';
 
 /*
  * What may be spawned as a browser provider's CLI (docs/specs/dor-browser.md →
- * "Agent-Browser Host Capabilities").
+ * "Browser Host").
  *
  * `binaryPath` exists because the GUI host's `PATH` is often the login `PATH`
  * with no nvm/volta shims, so `dor ab` / `dor pw` resolve an absolute path in
@@ -184,15 +183,17 @@ export function streamStatusArgs(session: string): string[] {
 }
 
 /**
- * Managed, workspace-scoped agent-browser session name:
- * `dormouse.<workspaceId>.<key>`, and `dormouse.1.<key>` for a Window whose one
- * Wall has no Workspace id (`workspaceId` omitted). The scope is what keeps one
- * `--key default` per Workspace from being one shared browser
- * (`docs/specs/dor-browser.md` → Managed identity).
+ * Managed, scoped browser session name, `dormouse.<scope>.<key>`, for either
+ * provider: the host passes the Workspace's id, or the scope a bare Wall mints
+ * for itself; `dormouse.1.<key>` is what a caller with no host — `dor` outside
+ * Dormouse — names. The scope is what keeps one `--key default` per Workspace
+ * from being one shared browser (`docs/specs/dor-browser.md` → Managed
+ * identity).
  *
  * agent-browser session names become filesystem paths (the socket dir), so `/`
  * can't separate the namespace — the daemon fails to start; dots keep it
- * readable. Shared by `dor ab` (--key resolution) and the lib host (GUI sessions).
+ * readable. Shared by `dor` (--key outside Dormouse) and the lib host (key
+ * and GUI sessions).
  */
 export function sessionForKey(key: string, workspaceId?: string): string {
   const scope = workspaceId ? workspaceId.replace(UNSAFE_SESSION_CHARS, '-') : BARE_WALL_SCOPE;

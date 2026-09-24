@@ -539,6 +539,18 @@ describe('updateParams', () => {
     expect(streamSockets(1111).length).toBe(1);
   });
 
+  it('follows a headedness the host reports, for either provider', async () => {
+    installBrowserHost();
+    for (const [id, screencast, popout] of [['ab', 'ab-screencast', 'ab-popout'], ['pw', 'pw-screencast', 'pw-popout']] as const) {
+      const controller = withPort(id, { renderMode: screencast, session: 'sess' }, 1111);
+      controller.attachView(makeSink());
+      await flushMicrotasks();
+      // `surface.browser` records a native `open --headed` in params.
+      controller.updateParams({ renderMode: popout, session: 'sess' });
+      expect(controller.snapshot().poppedOut, id).toBe(true);
+      expect(getAgentBrowserScreenController(id)!.snapshot().renderMode).toBe(popout);
+    }
+  });
 });
 
 describe('launch', () => {

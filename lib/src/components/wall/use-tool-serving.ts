@@ -223,7 +223,7 @@ export function useToolServing({
         // session it had, which a changed destination just navigates — and
         // binds the session once it is up; until then the pane shows the
         // destination and Workspace transfer waits (docs/specs/dor-browser.md
-        // -> "Agent-Browser Connection").
+        // -> "Browser Connection").
         const url = new URL(announcedPath, entry.url).href;
         lath.store.updateParams(leaf.id, {
           ...(leaf.params.toolRender === 'ab-screencast'

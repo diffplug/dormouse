@@ -1,6 +1,6 @@
 /**
  * The Playwright provider beneath the shared browser host (`browser-host.ts`;
- * docs/specs/dor-browser.md → "Playwright Renderer"). The installed Playwright
+ * docs/specs/dor-browser.md → "Playwright"). The installed Playwright
  * CLI owns browsers; this provider owns what is genuinely Playwright's — the
  * install and registry discovery, and the Dormouse viewer each browser is
  * streamed through over CDP. The host owns everything the providers share.
