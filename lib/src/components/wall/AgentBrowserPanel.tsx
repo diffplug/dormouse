@@ -50,6 +50,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   const url = params?.url;
   const key = params?.key;
   const syncEngaged = params?.syncEngaged;
+  const cwd = params?.cwd;
   // poppedOut is derived from the canonical renderMode the shell passes; fall
   // back to resolving it from params for a direct mount (tests) / legacy blob.
   const seededMode = renderModeProp ?? resolveRenderMode(params);
@@ -88,12 +89,13 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   const passthroughRef = useRef(passthrough);
   passthroughRef.current = passthrough;
 
-  // Feed later param changes into the controller (diffed internally). renderMode
-  // is deliberately omitted: the controller owns poppedOut (seeded once from
-  // seededMode at acquire above) and never reacts to a later renderMode param.
+  // Feed later param changes into the controller (diffed internally). The
+  // renderMode it gets back is mostly its own popOut/popIn write; it follows
+  // one only for Playwright, whose native `open` can change headedness outside
+  // Dormouse (`followParamsHeadedness`).
   useEffect(() => {
-    controller.updateParams({ session, wsPort, binaryPath, url, syncEngaged, key });
-  }, [controller, session, wsPort, binaryPath, url, syncEngaged, key]);
+    controller.updateParams({ session, wsPort, binaryPath, url, syncEngaged, key, cwd, renderMode: seededMode });
+  }, [controller, session, wsPort, binaryPath, url, syncEngaged, key, cwd, seededMode]);
 
   // Lend the controller this view's live DOM bindings. Last attach wins; the
   // detach is identity-guarded inside the controller so a stale StrictMode

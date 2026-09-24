@@ -22,6 +22,7 @@ type TestPanelParams = {
   wsPort?: number;
   url?: string;
   poppedOut?: boolean;
+  cwd?: string;
 };
 
 const DEFAULT_PARAMS: TestPanelParams = { surfaceType: 'agent-browser', session: 'browser-session' };
@@ -435,6 +436,47 @@ describe('AgentBrowserPanel render mode controller', () => {
     });
 
     expect(onSwapRenderMode).toHaveBeenCalledWith('ab-panel', 'iframe');
+  });
+});
+
+describe('AgentBrowserPanel Playwright params', () => {
+  // `dor pw open --headed` relaunches the native browser outside Dormouse; the
+  // Wall records the host-reported mode (and a fresh viewer port) in params,
+  // which reach the controller only through this panel.
+  it('follows a native headed relaunch and its cwd, and never sizes the headed window', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
+      { width: 800, height: 600, left: 0, top: 0, right: 800, bottom: 600, x: 0, y: 0, toJSON() {} } as DOMRect,
+    );
+    const playwright = vi.fn<NonNullable<PlatformAdapter['playwright']>>(async (request) => request.op === 'streamUrl'
+      ? { ok: true, url: `ws://127.0.0.1:${request.port}` }
+      : { ok: true, exitCode: 0, stdout: '', stderr: '' });
+    const platform: PlatformAdapter = new FakePtyAdapter();
+    platform.playwright = playwright;
+    setPlatform(platform);
+    const commands = (cwd?: string) => playwright.mock.calls
+      .map(([request]) => request)
+      .filter((request) => request.op === 'command' && (cwd === undefined || request.cwd === cwd))
+      .map((request) => (request as { args: string[] }).args.join(' '));
+    const params = { surfaceType: 'browser', renderMode: 'pw-screencast', session: 'app', cwd: '/first', wsPort: 4321 };
+
+    await renderPanel(paneProps('pw-panel', params));
+    expect(commands()).toContain('set viewport 800 600 1');
+    const stream = (port: number) => WebSocketMock.instances.findLast((ws) => ws.url === `ws://127.0.0.1:${port}`)!;
+    await act(async () => { stream(4321).emitMessage(JSON.stringify({ type: 'status', connected: true, screencasting: true })); });
+    playwright.mockClear();
+
+    await renderPanel(paneProps('pw-panel', { ...params, renderMode: 'pw-popout', wsPort: 4322 }));
+    expect(getAgentBrowserScreenController('pw-panel')?.snapshot().renderMode).toBe('pw-popout');
+    expect(container.textContent).toContain('This browser is running in a separate window.');
+    expect(commands()).toEqual([]);
+    // The old browser's status is not the new window's: a disconnect before
+    // the new stream reports is not the user closing that window.
+    await act(async () => { stream(4322).emitMessage(JSON.stringify({ type: 'status', connected: false, screencasting: false })); });
+    expect(playwright.mock.calls.map(([request]) => request.op)).not.toContain('popIn');
+
+    await renderPanel(paneProps('pw-panel', { ...params, cwd: '/second', wsPort: 4323 }));
+    expect(getAgentBrowserScreenController('pw-panel')?.snapshot().renderMode).toBe('pw-screencast');
+    expect(commands('/second')).toContain('set viewport 800 600 1');
   });
 });
 

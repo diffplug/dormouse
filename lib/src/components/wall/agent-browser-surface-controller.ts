@@ -602,6 +602,9 @@ export class AgentBrowserSurfaceController {
       this.cwd = params.cwd;
       this.platformCache = null;
     }
+    // Before the port below, so the new stream never inherits a `set viewport`
+    // meant for the old mode.
+    if (params.renderMode) this.followParamsHeadedness(params.renderMode);
     if (params.session !== this.session) {
       this.session = params.session;
       if (params.session) clearAgentBrowserSessionClosed(this.sessionKey(params.session));
@@ -640,12 +643,25 @@ export class AgentBrowserSurfaceController {
       this.recomputeChrome();
     }
     if (params.syncEngaged !== undefined) this.paramsSyncEngaged = params.syncEngaged;
-    // Native Playwright open can change headed mode outside the Display modal.
-    if (this.provider === 'playwright' && !this.relaunching && params.renderMode) {
-      if (isPopout(params.renderMode) !== this.poppedOut) this.headedConnected = false;
-      this.setPoppedOut(isPopout(params.renderMode));
-    }
-    // For agent-browser, renderMode only echoes the controller-owned popOut/popIn state.
+  }
+
+  /**
+   * Playwright's native `open` can change headedness outside the Display modal,
+   * and the Wall records the host-reported mode in params
+   * (`ensureAgentBrowserSurface`). Everything else that arrives here is this
+   * controller's own popOut/popIn write coming back, so agent-browser ignores
+   * it, and so does a relaunch in flight or a write still buffered while
+   * detached (the store is behind it until the next attach flushes it).
+   */
+  private followParamsHeadedness(renderMode: RenderMode): void {
+    if (this.provider !== 'playwright' || this.relaunching || this.pendingParams.has('renderMode')) return;
+    const headed = isPopout(renderMode);
+    if (headed === this.poppedOut) return;
+    // The last status came from the old browser; auto-revert waits for the
+    // new stream's own before it treats a disconnect as the window closing.
+    this.headedConnected = false;
+    this.setStatus(null);
+    this.setPoppedOut(headed);
   }
 
   setVisible(visible: boolean): void {
