@@ -78,6 +78,10 @@ afterEach(() => {
 
 const flush = (): Promise<void> => harness.flush();
 
+async function flushFrame(): Promise<void> {
+  await act(async () => { await new Promise((r) => requestAnimationFrame(() => r(undefined))); });
+}
+
 function walls(): HTMLElement[] {
   return [...container.querySelectorAll<HTMLElement>('[data-workspace-wall]')];
 }
@@ -273,40 +277,69 @@ describe('WorkspaceWindow', () => {
     expect(wallFor(created).querySelector('[data-focused="true"]')).not.toBeNull();
   });
 
-  it('activates a Workspace from its tab TODO pill onto its TODO pane', async () => {
+  /** docs/specs/layout.md -> "Workspace tabs": the pill is a click on the TODO
+   *  member, so keys go there next — from the Workspace the click left too. */
+  it('enters a Workspace\'s TODO pane from its tab pill in passthrough, keyboard focus included, hidden or visible', async () => {
     const first = getActiveWorkspaceId();
     createWorkspace({ id: 'ws-2', activate: false });
     await render(<><WorkspaceStrip /><WorkspaceWindow initialPlans={{
       [first]: { initialPaneIds: ['pane-a'] },
       'ws-2': { initialPaneIds: ['pane-x', 'pane-y'] },
     }} /></>);
+    // Left in passthrough, so the switch hands keyboard focus over.
+    await act(async () => { getWallHandle(first)!.enterSelectedPane(); });
+    await flush();
     await act(async () => { setTerminalActivity('pane-y', { todo: true }); });
-    const verbs = [
-      vi.spyOn(fake, 'alertAcknowledge'), vi.spyOn(fake, 'alertDismiss'),
-      vi.spyOn(fake, 'alertClearTodo'), vi.spyOn(fake, 'alertToggleTodo'),
-    ];
-    try {
-      await act(async () => {
-        container.querySelector<HTMLButtonElement>('[data-workspace-tab="ws-2"] [data-workspace-tab-todo]')!.click();
-      });
+    // Stand-ins for the panes' xterms, focusable as a browser allows: never
+    // inside an inert (hidden) Workspace.
+    const releases: Array<() => void> = [];
+    const keysFor = (id: string) => {
+      const keys = document.createElement('textarea');
+      wallFor('ws-2').append(keys);
+      releases.push(terminalRegistry.registerSurfaceFocusHandle(id, {
+        focus: () => { if (!keys.closest('[inert]')) keys.focus(); },
+        blur: () => keys.blur(),
+      }), () => keys.remove());
+      return keys;
+    };
+    const keysY = keysFor('pane-y');
+    const keysX = keysFor('pane-x');
+    const acknowledge = vi.spyOn(fake, 'alertAcknowledge');
+    const clearing = [vi.spyOn(fake, 'alertDismiss'), vi.spyOn(fake, 'alertClearTodo'), vi.spyOn(fake, 'alertToggleTodo')];
+    const clickPill = async () => {
+      const pill = container.querySelector<HTMLButtonElement>('[data-workspace-tab="ws-2"] [data-workspace-tab-todo]')!;
+      // Chromium focuses a pressed button; the click must not leave it there.
+      pill.focus();
+      await act(async () => { pill.click(); });
       await flush();
+      await flushFrame();
+    };
+    try {
+      await clickPill();
       expect(getActiveWorkspaceId()).toBe('ws-2');
-      expect(wallFor('ws-2').querySelector('[data-focused="true"]')).toBeNull();
-      for (const verb of verbs) expect(verb).not.toHaveBeenCalled();
+      expect(wallFor('ws-2').querySelector('[data-session-id="pane-y"][data-focused="true"]')).not.toBeNull();
+      expect(document.activeElement).toBe(keysY);
+      // As a click on the pane: acknowledged without input, so a ring would
+      // leave its TODO, and no verb clears the TODO it has.
+      expect(acknowledge.mock.calls).toEqual([['pane-y']]);
+      for (const verb of clearing) expect(verb).not.toHaveBeenCalled();
       expect(getActivitySnapshot().get('pane-y')?.todo).toBe(true);
 
-      // The pill left the selection on the TODO pane, which Enter goes into.
-      await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); });
-      await flush();
-      expect(wallFor('ws-2').querySelector('[data-session-id="pane-y"][data-focused="true"]')).not.toBeNull();
+      // The visible tab's pill moves the keys on to the next TODO the same way.
+      await act(async () => { setTerminalActivity('pane-x', { todo: true }); });
+      await clickPill();
+      expect(wallFor('ws-2').querySelector('[data-session-id="pane-x"][data-focused="true"]')).not.toBeNull();
+      expect(document.activeElement).toBe(keysX);
+      expect(acknowledge.mock.calls).toEqual([['pane-y'], ['pane-x']]);
     } finally {
+      for (const release of releases) release();
       terminalRegistry.clearTerminalActivity();
     }
   });
 
   /** docs/specs/alert.md -> Pane Header: where a tab pill's click lands, that
-   *  Surface's own pill says so — a pane's header pill or a Door's. */
-  it('spotlights the pill a tab TODO pill lands on, header or Door, replaying a repeat, with no alert verb', async () => {
+   *  Surface's header pill says so — a Door's once the click reattached it. */
+  it('spotlights the header pill a tab TODO pill enters, reattaching a Door, replaying a repeat, never clearing a TODO', async () => {
     const first = getActiveWorkspaceId();
     createWorkspace({ id: 'ws-2', activate: false });
     await render(<><WorkspaceStrip /><WorkspaceWindow initialPlans={{
@@ -314,16 +347,15 @@ describe('WorkspaceWindow', () => {
       'ws-2': { initialPaneIds: ['pane-x', 'pane-y'], initialDoors: [{ id: 'door-z', title: 'Z' }] },
     }} /></>);
     await act(async () => { setTerminalActivity('pane-y', { todo: true }); });
-    const verbs = [
-      vi.spyOn(fake, 'alertAcknowledge'), vi.spyOn(fake, 'alertDismiss'),
-      vi.spyOn(fake, 'alertClearTodo'), vi.spyOn(fake, 'alertToggleTodo'),
-      vi.spyOn(terminalRegistry, 'acknowledgeSession'), vi.spyOn(terminalRegistry, 'dismissSessionAlert'),
-      vi.spyOn(terminalRegistry, 'clearSessionTodo'), vi.spyOn(terminalRegistry, 'toggleSessionTodo'),
+    const acknowledge = vi.spyOn(fake, 'alertAcknowledge');
+    const clearing = [
+      vi.spyOn(fake, 'alertDismiss'), vi.spyOn(fake, 'alertClearTodo'), vi.spyOn(fake, 'alertToggleTodo'),
+      vi.spyOn(terminalRegistry, 'dismissSessionAlert'), vi.spyOn(terminalRegistry, 'clearSessionTodo'),
+      vi.spyOn(terminalRegistry, 'toggleSessionTodo'),
     ];
     const pill = () => container.querySelector<HTMLButtonElement>('[data-workspace-tab="ws-2"] [data-workspace-tab-todo]')!;
-    const spotlightOn = (pillSelector: string) => wallFor('ws-2').querySelector(`${pillSelector} [data-todo-spotlight]`);
-    const paneY = '[data-session-todo-for="pane-y"]';
-    const doorZ = '[data-door-id="door-z"]';
+    const spotlightOn = (id: string) => wallFor('ws-2').querySelector(`[data-session-todo-for="${id}"] [data-todo-spotlight]`);
+    const inPassthrough = (id: string) => wallFor('ws-2').querySelector(`[data-session-id="${id}"][data-focused="true"]`) !== null;
     const clickPill = async () => {
       await act(async () => { pill().click(); });
       await flush();
@@ -332,24 +364,30 @@ describe('WorkspaceWindow', () => {
       // The hover asks the hidden Workspace's Wall where the click will land.
       await act(async () => { pill().dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body })); });
       expect(pill().title).toMatch(/^Next TODO: \S/);
-      expect(spotlightOn(paneY)).toBeNull();
+      expect(spotlightOn('pane-y')).toBeNull();
 
       await clickPill();
       expect(getActiveWorkspaceId()).toBe('ws-2');
-      const landed = spotlightOn(paneY);
+      expect(inPassthrough('pane-y')).toBe(true);
+      const landed = spotlightOn('pane-y');
       expect(landed).not.toBeNull();
-      // Its only TODO again: the same pill, replayed.
+      // Its only TODO again, from passthrough on it: the same pill, replayed.
       await clickPill();
-      expect(spotlightOn(paneY)).not.toBeNull();
-      expect(spotlightOn(paneY)).not.toBe(landed);
+      expect(inPassthrough('pane-y')).toBe(true);
+      expect(spotlightOn('pane-y')).not.toBeNull();
+      expect(spotlightOn('pane-y')).not.toBe(landed);
 
-      // A Door's pill, where it stands; the pane's pulse ends.
+      // Next after pane-y, the Door: reattached into passthrough, where its
+      // header's pill takes the pulse; pane-y's ends.
       await act(async () => { setTerminalActivity('door-z', { todo: true }); });
       await clickPill();
-      expect(spotlightOn(doorZ)).not.toBeNull();
-      expect(spotlightOn(paneY)).toBeNull();
+      expect(wallFor('ws-2').querySelector('[data-door-id="door-z"]')).toBeNull();
+      expect(inPassthrough('door-z')).toBe(true);
+      expect(spotlightOn('door-z')).not.toBeNull();
+      expect(spotlightOn('pane-y')).toBeNull();
 
-      for (const verb of verbs) expect(verb).not.toHaveBeenCalled();
+      expect(acknowledge.mock.calls).toEqual([['pane-y'], ['pane-y'], ['door-z']]);
+      for (const verb of clearing) expect(verb).not.toHaveBeenCalled();
       expect(['pane-y', 'door-z'].map((id) => getActivitySnapshot().get(id)?.todo)).toEqual([true, true]);
     } finally {
       terminalRegistry.clearTerminalActivity();

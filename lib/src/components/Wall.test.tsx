@@ -4187,7 +4187,7 @@ describe('Wall on the Lath engine', () => {
 
   /** docs/specs/layout.md -> "Workspace tabs": what a tab's TODO pill does, and
    *  the destination its tooltip names before each click. */
-  it('cycles through TODO members in command mode, Doors included, with no alert verb', async () => {
+  it('enters each TODO member in turn as a click on it would, reattaching a Door, never clearing a TODO', async () => {
     const onEvent = vi.fn();
     await act(async () => root.render(<Wall
       restoredLathLayout={{
@@ -4209,7 +4209,7 @@ describe('Wall on the Lath engine', () => {
         },
       }}
       initialDoors={[{ id: 'door-a', title: 'A' }]}
-      initialMode="passthrough"
+      initialMode="command"
       onEvent={onEvent}
     />));
     await flush();
@@ -4223,54 +4223,68 @@ describe('Wall on the Lath engine', () => {
     // A terminal is named as its header or Door shows it, over the stored title.
     await act(async () => { setTerminalUserTitle('pane-b', 'deploy watcher'); });
     try {
-      const verbs = [
-        vi.spyOn(fake, 'alertAcknowledge'), vi.spyOn(fake, 'alertDismiss'),
-        vi.spyOn(fake, 'alertClearTodo'), vi.spyOn(fake, 'alertToggleTodo'),
-        vi.spyOn(terminalRegistry, 'acknowledgeSession'), vi.spyOn(terminalRegistry, 'dismissSessionAlert'),
-        vi.spyOn(terminalRegistry, 'clearSessionTodo'), vi.spyOn(terminalRegistry, 'toggleSessionTodo'),
+      const acknowledge = vi.spyOn(terminalRegistry, 'acknowledgeSession');
+      const clearing = [
+        vi.spyOn(fake, 'alertDismiss'), vi.spyOn(fake, 'alertClearTodo'), vi.spyOn(fake, 'alertToggleTodo'),
+        vi.spyOn(terminalRegistry, 'dismissSessionAlert'), vi.spyOn(terminalRegistry, 'clearSessionTodo'),
+        vi.spyOn(terminalRegistry, 'toggleSessionTodo'),
       ];
+      const focus = vi.spyOn(terminalRegistry, 'focusSession');
       const last = (type: string) => onEvent.mock.calls.filter(([event]) => event.type === type).at(-1)?.[0];
       const selection = () => last('selectionChange');
       const next = async () => {
         let found: string | null = null;
-        await act(async () => { found = handle.selectNextTodo(); });
+        await act(async () => { found = handle.enterNextTodo(); });
         await flush();
+        await flushFrame();
         return found;
       };
+      /** Passthrough on `id` with DOM focus asked for, as its click leaves it. */
+      const entered = (id: string) => {
+        expect(selection()).toEqual({ type: 'selectionChange', id, kind: 'pane' });
+        expect(last('modeChange')).toEqual({ type: 'modeChange', mode: 'passthrough' });
+        expect(focus).toHaveBeenLastCalledWith(id, true);
+        expect(acknowledge).toHaveBeenLastCalledWith(id);
+      };
 
-      // The peek names what the click then selects, as its header or Door shows it.
+      // The peek names what the click then enters, as its header or Door shows it.
       expect(handle.peekNextTodo()).toEqual({ id: 'pane-b', label: 'deploy watcher' });
       expect(container.querySelector('[data-pane-title-for="pane-b"]')!.textContent).toContain('deploy watcher');
       expect(await next()).toBe('pane-b');
-      expect(selection()).toEqual({ type: 'selectionChange', id: 'pane-b', kind: 'pane' });
-      expect(last('modeChange')).toEqual({ type: 'modeChange', mode: 'command' });
-      expect(container.querySelector('[data-focused="true"]')).toBeNull();
+      entered('pane-b');
+      expect(container.querySelector('[data-session-id="pane-b"][data-focused="true"]')).not.toBeNull();
+      // From a passthrough pane the next is the one after it.
       expect(handle.peekNextTodo()).toEqual({ id: 'browser-a', label: 'example.com' });
       expect(await next()).toBe('browser-a');
-      expect(selection()).toEqual({ type: 'selectionChange', id: 'browser-a', kind: 'pane' });
-      // A Door is selected where it stands, never reattached.
+      // Its acknowledgement has no host entry to reach: the TODO stays.
+      entered('browser-a');
+      // A Door is reattached into passthrough, as its click does.
       // An idle terminal is `<idle>` on screen, so in the tooltip too.
       expect(handle.peekNextTodo()).toEqual({ id: 'door-a', label: '<idle>' });
       expect(container.querySelector('[data-door-id="door-a"]')!.textContent).toContain('<idle>');
       expect(await next()).toBe('door-a');
-      expect(selection()).toEqual({ type: 'selectionChange', id: 'door-a', kind: 'door' });
-      expect(container.querySelector('[data-lath-leaf="door-a"]')).toBeNull();
+      entered('door-a');
+      expect(container.querySelector('[data-door-id="door-a"]')).toBeNull();
+      expect(container.querySelector('[data-session-id="door-a"][data-focused="true"]')).not.toBeNull();
+      // Now a pane beside the one it left, it cycles on from where it stands.
       expect(handle.surfaceIds()).toEqual(['pane-a', 'pane-b', 'browser-a', 'door-a']);
       expect(await next()).toBe('pane-b');
-      expect(selection()).toEqual({ type: 'selectionChange', id: 'pane-b', kind: 'pane' });
+      entered('pane-b');
 
-      for (const verb of verbs) expect(verb).not.toHaveBeenCalled();
+      for (const verb of clearing) expect(verb).not.toHaveBeenCalled();
       const activity = terminalRegistry.getActivitySnapshot();
       expect(['pane-b', 'browser-a', 'door-a'].map((id) => activity.get(id)?.todo)).toEqual([true, true, true]);
 
-      // With no TODO left it answers null and leaves the selection alone.
+      // With no TODO left it answers null and leaves mode and selection alone.
       setTerminalActivity('pane-b', {});
       setTerminalActivity('door-a', {});
       terminalRegistry.clearLocalSurfaceActivity('browser-a');
       const before = onEvent.mock.calls.length;
+      acknowledge.mockClear();
       expect(handle.peekNextTodo()).toBeNull();
       expect(await next()).toBeNull();
       expect(onEvent.mock.calls.slice(before)).toEqual([]);
+      expect(acknowledge).not.toHaveBeenCalled();
     } finally {
       terminalRegistry.clearLocalSurfaceActivity('browser-a');
       resetTerminalPaneState('pane-b');

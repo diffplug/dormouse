@@ -3,11 +3,9 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { Door } from '../components/Door';
 import { Baseboard } from '../components/Baseboard';
 import { addPlainNote, clearAllNotepads } from '../lib/notepad/notepad-store';
-import { resetTodoSpotlight, spotlightTodo } from '../lib/todo-spotlight';
-import { requireElement, TODO_SPOTLIGHT_HELD_CLASS } from './settle-terminals';
+import { requireElement } from './settle-terminals';
 
 const NOTED_DOOR_ID = 'door-story';
-const SPOTLIGHT_DOOR_ID = 'door-spotlight-story';
 
 function DoorStory({
   width = 260,
@@ -59,8 +57,6 @@ async function openDoorNotepad() {
 const meta: Meta<typeof DoorStory> = {
   title: 'Components/Door',
   component: DoorStory,
-  // The spotlight signal is module state: no story inherits another's.
-  beforeEach: () => { resetTodoSpotlight(); },
   args: {
     title: 'build-server',
     status: 'WATCHING_DISABLED',
@@ -108,17 +104,6 @@ export const WithNotes: Story = {
 
 export const WithNotesAndIndicators: Story = {
   args: { noteCount: 1, todo: true, status: 'ALERT_RINGING' },
-};
-
-/** A Workspace tab's TODO pill selected this Door: its own pill takes the
- *  landing spotlight (`docs/specs/alert.md` -> Pane Header), held at its peak. */
-export const LandingSpotlight: Story = {
-  args: { todo: true, doorId: SPOTLIGHT_DOOR_ID },
-  decorators: [(Story) => <div className={TODO_SPOTLIGHT_HELD_CLASS}><Story /></div>],
-  play: async () => {
-    spotlightTodo(SPOTLIGHT_DOOR_ID);
-    await requireElement(`[data-door-id="${SPOTLIGHT_DOOR_ID}"] [data-todo-spotlight]`, 'landing spotlight');
-  },
 };
 
 export const NotepadPopover: StoryObj<typeof NotedDoorStory> = {

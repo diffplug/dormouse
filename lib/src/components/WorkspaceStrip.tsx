@@ -87,13 +87,13 @@ export function WorkspaceStrip({
     setActiveWorkspace(id);
   }, []);
 
-  // The TODO pill's click: activation in command mode, landing on the next
-  // member owing a TODO — or plain activation when none does any more, never a
-  // rename — and a spotlight on the pill it landed on (`docs/specs/layout.md` →
-  // "Workspace tabs").
-  const selectNextTodo = useCallback((id: WorkspaceId) => {
+  // The TODO pill's click: activation entering the next member owing a TODO as
+  // a click on it would — or plain activation in command mode when none does
+  // any more, never a rename — and a spotlight on the pill it landed on
+  // (`docs/specs/layout.md` → "Workspace tabs").
+  const enterNextTodo = useCallback((id: WorkspaceId) => {
     const handle = getWallHandle(id);
-    const target = handle?.selectNextTodo() ?? null;
+    const target = handle?.enterNextTodo() ?? null;
     if (target === null) handle?.enterCommandMode();
     setActiveWorkspace(id);
     if (target !== null) spotlightTodo(target);
@@ -209,7 +209,7 @@ export function WorkspaceStrip({
             dragging={draggingId === workspace.id}
             registerElement={registerElement}
             onActivate={activate}
-            onSelectNextTodo={selectNextTodo}
+            onEnterNextTodo={enterNextTodo}
             onPeekNextTodo={peekNextTodo}
             onStartRename={requestWorkspaceRename}
             onFinishRename={finishRename}
@@ -286,7 +286,7 @@ const WorkspaceTab = memo(function WorkspaceTab({
   dragging,
   registerElement,
   onActivate,
-  onSelectNextTodo,
+  onEnterNextTodo,
   onPeekNextTodo,
   onStartRename,
   onFinishRename,
@@ -304,8 +304,8 @@ const WorkspaceTab = memo(function WorkspaceTab({
   dragging: boolean;
   registerElement: (element: HTMLElement | null) => (() => void) | undefined;
   onActivate: (id: WorkspaceId) => void;
-  onSelectNextTodo: (id: WorkspaceId) => void;
-  /** The label of the Surface the pill's click would select, or null. */
+  onEnterNextTodo: (id: WorkspaceId) => void;
+  /** The label of the Surface the pill's click would enter, or null. */
   onPeekNextTodo: (id: WorkspaceId) => string | null;
   onStartRename: (id: WorkspaceId) => void;
   onFinishRename: (id: WorkspaceId, value: string) => void;
@@ -412,7 +412,7 @@ const WorkspaceTab = memo(function WorkspaceTab({
               onFocus={peekTodoTarget}
               onClick={() => {
                 if (wasDragged()) return;
-                onSelectNextTodo(id);
+                onEnterNextTodo(id);
                 peekTodoTarget();
               }}
             >

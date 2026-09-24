@@ -51,7 +51,7 @@ export function computeWorkspaceUnion(
 }
 
 /**
- * The member a Workspace tab's TODO pill selects next: the first after
+ * The member a Workspace tab's TODO pill enters next: the first after
  * `current` in `order` whose Activity has `todo === true`, wrapping, so
  * `current` itself comes last; from the start when `current` is null or not a
  * member; null when no member has a TODO. `order` is the Wall's member order

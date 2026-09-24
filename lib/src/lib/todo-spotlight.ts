@@ -1,8 +1,8 @@
 /**
  * The TODO landing spotlight: a renderer-local, one-shot signal that a Workspace
- * tab's TODO pill raises on the Surface its click selected, so that Surface's own
- * TODO pill — pane header or Door — plays one highlight
- * (`docs/specs/alert.md` → Pane Header).
+ * tab's TODO pill raises on the Surface its click entered, so that Surface's
+ * pane header TODO pill plays one highlight (`docs/specs/alert.md` → Pane
+ * Header).
  *
  * Only the latest signal is held: one click lands on one Surface, and a newer
  * signal ends the one before it. Every signal takes the next `seq`, so a repeat

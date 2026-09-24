@@ -410,7 +410,7 @@ export const TodoOnly: Story = {
   parameters: primedPane({ status: 'WATCHING_DISABLED', todo: true }),
 };
 
-/** A Workspace tab's TODO pill selected this pane: its header pill takes the
+/** A Workspace tab's TODO pill entered this pane: its header pill takes the
  *  landing spotlight (`docs/specs/alert.md` -> Pane Header), held at its peak. */
 export const TodoLandingSpotlight: Story = {
   parameters: primedPane({ status: 'WATCHING_DISABLED', todo: true }),

@@ -44,6 +44,10 @@ xterm.js paints only its own rendered surface, and integer row fitting leaves a 
 
 **Why the modal hosts are gated rather than hoisted.** Each calls `useDialogKeyboardOwner`, which reads the *active* Wall's `DialogKeyboardContext`; hoisting them above `WorkspaceWindow` would leave them with no coordinator to suppress command-mode dispatch through. The cost is that a modal's React-local state resets on a switch — accepted, since every modal that matters keeps its state in a store.
 
+## Workspace tabs
+
+**Why the tab's TODO pill enters passthrough and the tab does not.** Clicking the pill is a focused task, going to deal with one TODO, so it lands where a click on that Surface would, with the keys there. A tab click is an arrival in a Workspace: it stays in command mode, where the user looks around and confirms with `Enter` (product decision, 2026-09). The pill first shipped as selection only, in command mode, which left an `Enter` between the click and the TODO (2026-09).
+
 ## Workspace names
 
 **Why the name holds while git is unanswered.** Naming by directory first would flash the folder name for one round trip, then flip to `repo @ branch`, on every new directory. The hold is bounded because a mount that stays hung is durable, not slow: its `realpath` never returns, so an unbounded hold froze the name for the life of the Window and drowned out the Workspace's healthy members (found in review, 2026-09).

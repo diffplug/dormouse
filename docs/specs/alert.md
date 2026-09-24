@@ -64,7 +64,7 @@ Three separate signals, never one lease (rationale):
 | Gesture | Acknowledges |
 |---|---|
 | typing into the pane (CSI/SS3 key encodings included), a paste, a file drop, the mobile input bar or a gesture key, a remote Client's write | with input |
-| a Pane body or header click, zoom or unzoom, the dev-server chip, entering passthrough by keyboard, a Door click or `Enter`, a mobile tap | without input |
+| a Pane body or header click, zoom or unzoom, the dev-server chip, a Workspace tab's TODO pill on the member it enters, entering passthrough by keyboard, a Door click or `Enter`, a mobile tap | without input |
 | a terminal reply, a mouse-only report chunk, `d` reattach, a spawn, split, or promotion, a `dor` reveal, an embed focusing itself, DOM focus alone | nothing |
 
 - **Must acknowledge at each gesture's handler, never in the passthrough entry the silent paths share.**
@@ -419,7 +419,7 @@ The header shows a fixed-text `TODO` pill when `todo === true`, a hover/focus no
 
 Source of truth: `TerminalContext` in `lib/src/components/wall/TerminalContext.tsx`; `setHelper` in `lib/src/lib/alert-manager.ts`, which every host calls at helper spawn and promotion.
 
-The TODO pill always displays `TODO`; remote notification text belongs in preview/detail surfaces, not inside the pill. Clicking the pill clears TODO, and on clear the pill briefly shows the success flourish before unmounting. **A Workspace tab's TODO pill never clears a TODO or acknowledges a ring**: its click only selects (`docs/specs/layout.md` → Workspace tabs). **The Surface it selects plays the landing spotlight on its own pill**, header or Door: one wash of the pill's colour rising and fading within 480 ms, unlike the flourish or the alarm. Each click replays it, a later mount lands past its end, and reduced motion drops it. Pinned by `spotlights the pill a tab TODO pill lands on, header or Door, replaying a repeat, with no alert verb` in `lib/src/components/WorkspaceWindow.test.tsx` and `lib/src/components/TodoPillBody.test.tsx`.
+The TODO pill always displays `TODO`; remote notification text belongs in preview/detail surfaces, not inside the pill. Clicking the pill clears TODO, and on clear the pill briefly shows the success flourish before unmounting. **A Workspace tab's TODO pill never clears a TODO**: its click enters the member as a click on it would, an acknowledgement without input (Engagement; `docs/specs/layout.md` → Workspace tabs). **The Surface it enters plays the landing spotlight on its header's pill**, a Door's once reattached: one wash of the pill's colour rising and fading within 480 ms, unlike the flourish or the alarm. Each click replays it, a later mount lands past its end, and reduced motion drops it. Pinned by `spotlights the header pill a tab TODO pill enters, reattaching a Door, replaying a repeat, never clearing a TODO` in `lib/src/components/WorkspaceWindow.test.tsx` and `lib/src/components/TodoPillBody.test.tsx`.
 
 **Must wear the alarm treatment on every ringing terminal Pane**, labelled only once the speech sink acts. **Must bound the unlabelled pulse to one finite burst per episode, never replayed by a remount; `SPEAKING` pulses for its utterance, `SPOKEN` never** (rationale). **`prefers-reduced-motion` keeps the strong static treatment and suppresses only the pulse**, as does `cfg.alert.ringingPaused` (rationale). The three rows, their layers, strengths, and sizing are inventoried by `docs/specs/layout.md` → Alarm overlay.
 
@@ -435,7 +435,7 @@ A Door is display-only for alert state:
 - do not expose a Door-specific alert menu
 - scrolled out of view, its overflow arrow carries its ring and TODO (`docs/specs/layout.md` → Baseboard responsive sizing)
 
-Reattaching by click or `Enter` acknowledges; `d` does not (Engagement).
+Reattaching by click, `Enter`, or a Workspace tab's TODO pill acknowledges; `d` does not (Engagement).
 
 ## Text And Security
 

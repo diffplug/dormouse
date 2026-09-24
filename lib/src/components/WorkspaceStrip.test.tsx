@@ -257,12 +257,12 @@ describe('WorkspaceStrip', () => {
 
   /** docs/specs/layout.md -> "Workspace tabs": the pill is its own click
    *  target, beside the tab's button rather than inside it. */
-  it('selects the next TODO from its own pill, activating the Workspace and never renaming it', async () => {
+  it('enters the next TODO from its own pill, activating the Workspace and never renaming it', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await act(async () => { createWorkspace({ id: 'ws-2' }); });
     setWorkspaceSurfaces(first, ['pane-a']);
     setTerminalActivity('pane-a', { todo: true });
-    const handle = stubHandle(first, { selectNextTodo: vi.fn(() => 'pane-a'), enterCommandMode: vi.fn() });
+    const handle = stubHandle(first, { enterNextTodo: vi.fn(() => 'pane-a'), enterCommandMode: vi.fn() });
     await render();
 
     const pill = todoPill(first)!;
@@ -273,21 +273,21 @@ describe('WorkspaceStrip', () => {
 
     await act(async () => { pill.click(); });
     expect(getActiveWorkspaceId()).toBe(first);
-    expect(handle.selectNextTodo).toHaveBeenCalledTimes(1);
+    expect(handle.enterNextTodo).toHaveBeenCalledTimes(1);
     expect(handle.enterCommandMode).not.toHaveBeenCalled();
     // On the visible tab it moves on to the next TODO, where the tab renames.
     await act(async () => { todoPill(first)!.click(); });
-    expect(handle.selectNextTodo).toHaveBeenCalledTimes(2);
+    expect(handle.enterNextTodo).toHaveBeenCalledTimes(2);
     expect(getWorkspaceUiSnapshot().renamingId).toBeNull();
   });
 
-  /** A TODO cleared between render and click leaves nothing to select. */
+  /** A TODO cleared between render and click leaves nothing to enter. */
   it('activates in command mode from a pill with no TODO behind it, and never renames', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await act(async () => { createWorkspace({ id: 'ws-2' }); });
     setWorkspaceSurfaces(first, ['pane-a']);
     setTerminalActivity('pane-a', { todo: true });
-    const handle = stubHandle(first, { selectNextTodo: () => null, enterCommandMode: vi.fn() });
+    const handle = stubHandle(first, { enterNextTodo: () => null, enterCommandMode: vi.fn() });
     await render();
 
     await act(async () => { todoPill(first)!.click(); });
@@ -296,7 +296,7 @@ describe('WorkspaceStrip', () => {
     await act(async () => { todoPill(first)!.click(); });
     expect(handle.enterCommandMode).toHaveBeenCalledTimes(2);
     expect(getWorkspaceUiSnapshot().renamingId).toBeNull();
-    // Nothing selected, so nothing to spotlight.
+    // Nothing entered, so nothing to spotlight.
     expect(getTodoSpotlight()).toBeNull();
   });
 
@@ -321,7 +321,7 @@ describe('WorkspaceStrip', () => {
 
   /** The tooltip names where the click lands, which moves with the Wall's
    *  selection, so it is read on arrival and again after each click. */
-  it('names the Surface the click will select in the pill tooltip', async () => {
+  it('names the Surface the click will enter in the pill tooltip', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await act(async () => { createWorkspace({ id: 'ws-2' }); });
     setWorkspaceSurfaces(first, ['pane-a', 'pane-b']);
@@ -333,7 +333,7 @@ describe('WorkspaceStrip', () => {
       .mockReturnValueOnce({ id: 'pane-a', label: 'pnpm dev' })
       .mockReturnValueOnce({ id: 'pane-b', label: 'vim notes.md' })
       .mockReturnValue({ id: 'pane-a', label: 'pnpm dev' });
-    stubHandle(first, { peekNextTodo, selectNextTodo: () => 'pane-a' });
+    stubHandle(first, { peekNextTodo, enterNextTodo: () => 'pane-a' });
     await render();
 
     const pill = todoPill(first)!;
@@ -355,13 +355,13 @@ describe('WorkspaceStrip', () => {
   });
 
   /** docs/specs/alert.md -> Pane Header: the landing spotlight is raised on the
-   *  Surface the click selected, and a repeat is a new signal. */
+   *  Surface the click entered, and a repeat is a new signal. */
   it('spotlights the Surface the pill lands on, again on a repeat click', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await act(async () => { createWorkspace({ id: 'ws-2' }); });
     setWorkspaceSurfaces(first, ['pane-a']);
     setTerminalActivity('pane-a', { todo: true });
-    stubHandle(first, { selectNextTodo: () => 'pane-a' });
+    stubHandle(first, { enterNextTodo: () => 'pane-a' });
     await render();
 
     await act(async () => { todoPill(first)!.click(); });
@@ -375,7 +375,7 @@ describe('WorkspaceStrip', () => {
     await act(async () => { createWorkspace({ id: 'ws-2' }); });
     setWorkspaceSurfaces(first, ['pane-a']);
     setTerminalActivity('pane-a', { todo: true });
-    const handle = stubHandle(first, { selectNextTodo: vi.fn(() => 'pane-a') });
+    const handle = stubHandle(first, { enterNextTodo: vi.fn(() => 'pane-a') });
     await render();
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
       { left: 0, right: 100, width: 100, top: 0, bottom: 24, height: 24, x: 0, y: 0, toJSON: () => ({}) } as DOMRect,
@@ -387,10 +387,10 @@ describe('WorkspaceStrip', () => {
     await act(async () => { window.dispatchEvent(pointer('pointermove', { clientX: 90, clientY: 12 })); });
     await act(async () => { window.dispatchEvent(pointer('pointerup', { clientX: 90, clientY: 12 })); });
     await act(async () => { todoPill(first)!.click(); });
-    expect(handle.selectNextTodo).not.toHaveBeenCalled();
+    expect(handle.enterNextTodo).not.toHaveBeenCalled();
     expect(getActiveWorkspaceId()).toBe('ws-2');
     await act(async () => { todoPill(first)!.click(); });
-    expect(handle.selectNextTodo).toHaveBeenCalledTimes(1);
+    expect(handle.enterNextTodo).toHaveBeenCalledTimes(1);
   });
 
   it('renames the active tab on click, holding the chrome keyboard lease while the editor is open', async () => {

@@ -214,7 +214,7 @@ body {
 }
 
 /* TODO landing spotlight (docs/specs/alert.md → Pane Header): a Workspace tab's
- * pill selected this Surface, so its own pill takes one wash of its own colour —
+ * pill entered this Surface, so its header pill takes one wash of its own colour —
  * rising, held while the focus ring lands, then fading. Not the flourish (no
  * check, no dissolve) and not the alarm (no edge, no alarm colour, no repeat).
  * Resting opacity is 0, so a finished pulse, or one reduced motion drops,

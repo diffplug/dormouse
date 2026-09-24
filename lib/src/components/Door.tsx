@@ -5,7 +5,7 @@ import { NotepadIcon, SpeakerHighIcon } from '@phosphor-icons/react';
 import type { AlertSpeechState, SessionStatus, TodoState } from '../lib/terminal-registry';
 import type { BrowserDisplayMode } from './wall/agent-browser-screen';
 import { BROWSER_DISPLAY_LABEL, BrowserDisplayIcon } from './wall/BrowserDisplayIcon';
-import { TodoSpotlight, useTodoPillContent } from './TodoPillBody';
+import { useTodoPillContent } from './TodoPillBody';
 import { notepadLabel } from './use-notepad';
 import type { AlertEpisode } from '../lib/alert-episode';
 import { ALERT_RING_LABEL, AlertRingInset, alarmPulseClass, alertRingRow, useAlertRingBurst } from './alert-ring';
@@ -143,12 +143,10 @@ export function Door({
             )}
             {todoPill.visible && (
               <span
-                className={`todo-pill-shell relative text-xs font-semibold ${TODO_PILL_TRACKING_CLASS}`}
+                className={`todo-pill-shell text-xs font-semibold ${TODO_PILL_TRACKING_CLASS}`}
                 data-flourishing={todoPill.flourishing ? 'true' : 'false'}
               >
                 {todoPill.body}
-                {/* The Door's pill is bare text, so the wash reaches past it. */}
-                <TodoSpotlight surfaceId={doorId} className="-inset-x-1 -inset-y-0.5 rounded" />
               </span>
             )}
           </span>

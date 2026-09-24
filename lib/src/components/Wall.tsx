@@ -1784,7 +1784,7 @@ export function Wall({
     focusSession(id, focused && modeRef.current === 'passthrough');
   }, [nav]);
 
-  /** What a tab's TODO pill selects next. A selected Workspace tab is no
+  /** What a tab's TODO pill enters next. A selected Workspace tab is no
    *  member, so the search starts from the top. */
   const nextTodo = () => nextTodoMember(memberSurfaceIds(), selectedIdRef.current, getActivitySnapshot());
 
@@ -1810,13 +1810,11 @@ export function Wall({
     },
     enterCommandMode: exitTerminalMode,
     selectWorkspaceTab: () => { exitTerminalMode(); selectWorkspace(effectiveWorkspaceId); },
-    selectNextTodo: () => {
+    enterNextTodo: () => {
       const next = nextTodo();
-      if (next === null) return null;
-      // Command mode first, so the pane leaving passthrough is the one blurred.
-      exitTerminalMode();
-      if (nav.hasPane(next)) selectPane(next);
-      else selectDoor(next);
+      // Exactly the gesture a click on it is — a pane body's or a Door's — so
+      // it acknowledges as that click does (`docs/specs/alert.md` -> Engagement).
+      if (next !== null) wallActionsRef.current.onFocusPane(next);
       return next;
     },
     peekNextTodo: () => {
