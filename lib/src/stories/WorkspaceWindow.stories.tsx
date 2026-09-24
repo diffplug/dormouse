@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { AppBar } from '../../../standalone/src/AppBar';
 import { WorkspaceWindow } from '../components/WorkspaceWindow';
+import { getWallHandle } from '../components/wall/wall-handles';
 import { flattenScenario, SCENARIO_LS_OUTPUT } from '../lib/platform';
 import { requireElement, settleTerminals, waitForCondition } from './settle-terminals';
 
@@ -54,24 +55,19 @@ export const TwoWorkspaces: Story = {
   },
 };
 
-async function selectWorkspaceChrome(next: number) {
-  await settleTerminals();
-  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
-  for (let i = 0; i < next; i++) {
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
-  }
-  const target = await requireElement<HTMLElement>(
-    next === WORKSPACES.length ? '[data-workspace-new]' : `[data-workspace-tab="${WORKSPACES[next].id}"]`,
-    'command selection target',
-  );
-  await waitForCondition(() => {
-    const ring = document.querySelector('[data-ring="outline"]')?.closest('svg')?.parentElement;
-    if (!ring) return false;
-    const from = ring.getBoundingClientRect();
-    const to = target.getBoundingClientRect();
-    return Math.abs(from.left - to.left) < 0.1 && Math.abs(from.width - to.width) < 0.1;
-  });
-}
-
-export const WorkspaceSelected: Story = { play: () => selectWorkspaceChrome(1) };
-export const NewWorkspaceSelected: Story = { play: () => selectWorkspaceChrome(WORKSPACES.length) };
+/** The active Workspace's tab holding the command-mode selection ring, as a
+ *  user close leaves its successor (`docs/specs/layout.md` → "Workspace tabs"). */
+export const WorkspaceSelected: Story = {
+  play: async () => {
+    await settleTerminals();
+    getWallHandle(WORKSPACES[0].id)!.selectWorkspaceTab();
+    const target = await requireElement<HTMLElement>(`[data-workspace-tab="${WORKSPACES[0].id}"]`, 'selected workspace tab');
+    await waitForCondition(() => {
+      const ring = document.querySelector('[data-ring="outline"]')?.closest('svg')?.parentElement;
+      if (!ring) return false;
+      const from = ring.getBoundingClientRect();
+      const to = target.getBoundingClientRect();
+      return Math.abs(from.left - to.left) < 0.1 && Math.abs(from.width - to.width) < 0.1;
+    });
+  },
+};

@@ -42,9 +42,9 @@ export interface WallHandle {
    *  changing nothing, when no member has a TODO. Never clears a TODO
    *  (`docs/specs/layout.md` → "Workspace tabs"). */
   enterNextTodo(): string | null;
-  /** The member `enterNextTodo` would enter now, with the label its Door and
-   *  pane header show, for the tab pill's tooltip. Reads only. */
-  peekNextTodo(): { id: string; label: string } | null;
+  /** The label, as its Door and pane header show it, of the member
+   *  `enterNextTodo` would enter now, for the tab pill's tooltip. Reads only. */
+  peekNextTodo(): string | null;
   /** Persist now. `probeCwd: false` skips the cwd re-read (`SessionFlushRequest`). */
   flushPersistence(options?: SaveOptions): Promise<void>;
   /** Build what another Window needs to take this Workspace, without touching

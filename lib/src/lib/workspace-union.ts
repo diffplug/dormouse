@@ -17,8 +17,6 @@ export interface WorkspaceUnion {
   ringingSince: number | null;
 }
 
-export const EMPTY_WORKSPACE_UNION: WorkspaceUnion = { ringing: false, todo: false, count: 0, ringingSince: null };
-
 /**
  * Project the union over a Workspace's member Surfaces. `surfaceIds` are the
  * Workspace's panes + doors; `activity` is `getActivitySnapshot()`. Surfaces

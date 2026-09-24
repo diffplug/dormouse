@@ -65,9 +65,9 @@ export function useTodoPillContent(todo: TodoState): {
  * carries the pill's own extent and corners. The CSS (`.todo-spotlight` in
  * `theme.css`) animates it and drops it under reduced motion.
  */
-export function TodoSpotlight({ surfaceId, className }: { surfaceId: string | undefined; className?: string }) {
+export function TodoSpotlight({ surfaceId, className }: { surfaceId: string; className?: string }) {
   const spotlight = useSyncExternalStore(subscribeToTodoSpotlight, getTodoSpotlight);
-  const mine = surfaceId !== undefined && spotlight?.surfaceId === surfaceId ? spotlight : null;
+  const mine = spotlight?.surfaceId === surfaceId ? spotlight : null;
   // Anchored once per signal: recomputing the clock on a later render would
   // shove a live pulse back to its start.
   const style = useMemo(() => (mine ? animationClockStyle(mine.startedAt) : undefined), [mine]);

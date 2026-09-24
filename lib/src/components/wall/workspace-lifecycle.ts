@@ -10,7 +10,7 @@ import type { CloseSurfaceMode } from './wall-types';
 
 /**
  * The Workspace close and rename verbs, outside any component: the strip's
- * buttons, the command-mode keys, and `dor workspace` all take the same route
+ * buttons and `dor workspace` take the same route
  * (`docs/specs/layout.md` → "Workspaces"). The strip renders the confirmation
  * these open; it decides nothing.
  */
@@ -27,23 +27,6 @@ export async function enterWorkspace(id: WorkspaceId): Promise<void> {
   setActiveWorkspace(id);
   const handle = await awaitWallHandle(id);
   if (getActiveWorkspaceId() === id) handle?.enterSelectedPane();
-}
-
-/**
- * Keyboard Enter on an inactive tab: activate it in command mode with the ring
- * still on its tab, as a click leaves the user in command mode. Activation never
- * waits on the Wall, as a click does not; selecting in the same tick keeps the
- * ring from gliding to the Wall's pane first.
- */
-export async function activateWorkspaceTab(id: WorkspaceId): Promise<void> {
-  const handle = getWallHandle(id);
-  handle?.selectWorkspaceTab();
-  setActiveWorkspace(id);
-  if (handle) return;
-  // A Wall still registering selects its tab once it does, unless the user
-  // has moved to another Workspace in the meantime.
-  const late = await awaitWallHandle(id);
-  if (getActiveWorkspaceId() === id) late?.selectWorkspaceTab();
 }
 
 const CLOSE_IN_FLIGHT_REFUSAL = 'another Workspace is closing';
@@ -106,26 +89,26 @@ export async function closeWorkspaceWithSurfaces(
 }
 
 /**
- * Begin closing a Workspace. Reveal it first; work or forceConfirm raises the typed
+ * Begin closing a Workspace. Reveal it first; work raises the typed
  * confirmation, otherwise close immediately.
  */
-export function requestWorkspaceClose(id: WorkspaceId, options: { forceConfirm?: boolean } = {}): void {
+export function requestWorkspaceClose(id: WorkspaceId): void {
   if (closeInFlight || isWorkspaceTransferPending(id)) return;
-  void closeOnceWallRegisters(id, options.forceConfirm ?? false);
+  void closeOnceWallRegisters(id);
 }
 
 /**
  * The Wall is what says whether the Workspace holds work, so a gesture landing
- * in the registration gap — the strip's `×` or the `&` key right after a create
- * — waits it out, as `dor workspace close` does, rather than deciding on a
- * handle that is one effect away and having the close refused where nobody
- * reads the refusal (`docs/specs/layout.md` → "Workspaces").
+ * in the registration gap — the strip's `×` right after a create — waits it
+ * out, as `dor workspace close` does, rather than deciding on a handle that is
+ * one effect away and having the close refused where nobody reads the refusal
+ * (`docs/specs/layout.md` → "Workspaces").
  */
-async function closeOnceWallRegisters(id: WorkspaceId, forceConfirm: boolean): Promise<void> {
+async function closeOnceWallRegisters(id: WorkspaceId): Promise<void> {
   const handle = await awaitWallHandle(id);
   if (closeInFlight || isWorkspaceTransferPending(id)) return;
   if (!handle) return;
-  if (forceConfirm || workspaceNeedsCloseConfirmation(id)) {
+  if (workspaceNeedsCloseConfirmation(id)) {
     // An immediate close reveals the Workspace itself.
     setActiveWorkspace(id);
     handle.selectWorkspaceTab();

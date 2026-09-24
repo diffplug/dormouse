@@ -78,10 +78,7 @@ afterEach(() => {
 });
 
 const flush = (): Promise<void> => harness.flush();
-
-async function flushFrame(): Promise<void> {
-  await act(async () => { await new Promise((r) => requestAnimationFrame(() => r(undefined))); });
-}
+const flushFrame = (): Promise<void> => harness.flushFrame();
 
 function walls(): HTMLElement[] {
   return [...container.querySelectorAll<HTMLElement>('[data-workspace-wall]')];
@@ -146,6 +143,8 @@ describe('WorkspaceWindow', () => {
   });
 
   it('reveals and confirms a requested workspace close, then selects the next tab', async () => {
+    // Every Workspace holds running work, so every close confirms.
+    vi.spyOn(terminalRegistry, 'countRunningSessionsIn').mockReturnValue(1);
     const first = getActiveWorkspaceId();
     createWorkspace({ id: 'ws-2', activate: false });
     createWorkspace({ id: 'ws-3', activate: false });
@@ -155,10 +154,10 @@ describe('WorkspaceWindow', () => {
       await flush();
     };
     const close = async () => {
-      await act(async () => { requestWorkspaceClose(getActiveWorkspaceId(), { forceConfirm: true }); });
+      await act(async () => { requestWorkspaceClose(getActiveWorkspaceId()); });
       await flush();
     };
-    await act(async () => { requestWorkspaceClose('ws-2', { forceConfirm: true }); });
+    await act(async () => { requestWorkspaceClose('ws-2'); });
     await flush();
     expect(getActiveWorkspaceId()).toBe('ws-2');
     expect(getWorkspaceUiSnapshot().pendingClose?.id).toBe('ws-2');

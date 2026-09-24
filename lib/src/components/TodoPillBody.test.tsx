@@ -28,8 +28,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function Pills({ ids }: { ids: (string | undefined)[] }) {
-  return <>{ids.map((id, index) => <span key={index} data-pill={id ?? 'none'}><TodoSpotlight surfaceId={id} /></span>)}</>;
+function Pills({ ids }: { ids: string[] }) {
+  return <>{ids.map((id) => <span key={id} data-pill={id}><TodoSpotlight surfaceId={id} /></span>)}</>;
 }
 
 function spotlightIn(id: string): HTMLElement | null {
@@ -39,7 +39,7 @@ function spotlightIn(id: string): HTMLElement | null {
 /** docs/specs/alert.md -> Pane Header: the landing spotlight. */
 describe('TodoSpotlight', () => {
   it('plays on the Surface the latest signal names only, and replays on a repeat', () => {
-    act(() => root.render(<Pills ids={['a', 'b', undefined]} />));
+    act(() => root.render(<Pills ids={['a', 'b']} />));
     expect(container.querySelector('[data-todo-spotlight]')).toBeNull();
 
     act(() => spotlightTodo('a'));
@@ -53,11 +53,10 @@ describe('TodoSpotlight', () => {
     expect(spotlightIn('a')).not.toBeNull();
     expect(spotlightIn('a')).not.toBe(first);
 
-    // A newer signal elsewhere ends this one; a pill with no Surface never plays.
+    // A newer signal elsewhere ends this one.
     act(() => spotlightTodo('b'));
     expect(spotlightIn('a')).toBeNull();
     expect(spotlightIn('b')).not.toBeNull();
-    expect(spotlightIn('none')).toBeNull();
   });
 
   it('runs on the signal\'s clock, so a pill mounting later lands past its end', () => {

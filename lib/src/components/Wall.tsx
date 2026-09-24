@@ -71,8 +71,8 @@ import { hasBrowser, hasTerminal } from 'dor/commands/types';
 import { DEFAULT_WORKSPACE_ID, type PersistedSurfaceRefs, type WorkspaceId } from '../lib/session-types';
 import { clearWorkspaceSurfaces, setWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { nextTodoMember } from '../lib/workspace-union';
-import { deriveDisplayedSessionLabel } from '../lib/session-label';
-import { getWorkspace, getWorkspacesSnapshot, subscribeToWorkspaces, workspaceRefFor } from '../lib/workspace-store';
+import { deriveDisplayedSurfaceLabel } from '../lib/session-label';
+import { getWorkspace, workspaceRefFor } from '../lib/workspace-store';
 import { awaitWallEmpty } from './wall/close-all';
 import { registerWallHandle, type WallHandle } from './wall/wall-handles';
 import { prepareWorkspaceTransfer } from './wall/workspace-transfer';
@@ -171,13 +171,6 @@ export { TerminalPaneHeader } from './wall/TerminalPaneHeader';
 function persistedPanelTitle(title: string | null | undefined): string {
   const trimmed = title?.trim();
   return trimmed || UNNAMED_PANEL_TITLE;
-}
-
-/** The label a member's Door and pane header show, `<idle>` included: a
- *  terminal's derived label, else the stored title. */
-function displayedSurfaceLabel(surfaceId: string, meta: LeafMeta): string {
-  const title = persistedPanelTitle(meta.title);
-  return hasTerminal(surfaceKindFromParams(meta.params)) ? deriveDisplayedSessionLabel(surfaceId, title) : title;
 }
 
 function surfaceRenderModeFromParams(params: unknown): DorSurfaceRenderMode | null {
@@ -582,22 +575,17 @@ export function Wall({
     if (id) selectPane(id);
   }, [livePaneId, selectPane]);
 
-  const selectWorkspace = useCallback((id: string | null) => {
+  const selectWorkspace = useCallback((id: string) => {
     doorKillReturnRef.current = null;
     const element = workspaceTabElement(id);
     if (workspaceId === undefined || !element) return;
     releaseZoomExcept();
-    selectedIdRef.current = id ?? '+';
-    selectedTypeRef.current = id === null ? 'workspace-new' : 'workspace';
-    setSelectedId(selectedIdRef.current);
-    setSelectedType(selectedTypeRef.current);
+    selectedIdRef.current = id;
+    selectedTypeRef.current = 'workspace';
+    setSelectedId(id);
+    setSelectedType('workspace');
     revealWorkspaceTab(element);
   }, [workspaceId, releaseZoomExcept]);
-
-  useEffect(() => subscribeToWorkspaces(() => {
-    if (selectedTypeRef.current === 'workspace'
-      && !getWorkspacesSnapshot().workspaces.some(workspace => workspace.id === selectedIdRef.current)) returnToPane();
-  }), [returnToPane]);
 
   // The shared tail of both reattach paths (click-reattach + drag-out): drop the Door
   // chip from the baseboard and select the now-restored pane.
@@ -1819,8 +1807,9 @@ export function Wall({
     },
     peekNextTodo: () => {
       const next = nextTodo();
-      const meta = next === null ? undefined : lath.getMeta(next);
-      return next === null || !meta ? null : { id: next, label: displayedSurfaceLabel(next, meta) };
+      if (next === null) return null;
+      const meta = lath.getMeta(next);
+      return meta ? deriveDisplayedSurfaceLabel(surfaceKindFromParams(meta.params), next, persistedPanelTitle(meta.title)) : null;
     },
     flushPersistence: (options) => persistence.flush(options),
     prepareWorkspaceTransfer: () => prepareWorkspaceTransfer({
@@ -2231,8 +2220,6 @@ export function Wall({
     handleReattachRef,
     selectPane,
     selectDoor,
-    selectWorkspace,
-    returnToPane,
     enterTerminalMode,
     exitTerminalMode,
     minimizePane,

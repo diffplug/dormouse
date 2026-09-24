@@ -330,9 +330,9 @@ describe('WorkspaceStrip', () => {
     setTerminalActivity('pane-b', { todo: true });
     setTerminalActivity('pane-x', { todo: true });
     const peekNextTodo = vi.fn()
-      .mockReturnValueOnce({ id: 'pane-a', label: 'pnpm dev' })
-      .mockReturnValueOnce({ id: 'pane-b', label: 'vim notes.md' })
-      .mockReturnValue({ id: 'pane-a', label: 'pnpm dev' });
+      .mockReturnValueOnce('pnpm dev')
+      .mockReturnValueOnce('vim notes.md')
+      .mockReturnValue('pnpm dev');
     stubHandle(first, { peekNextTodo, enterNextTodo: () => 'pane-a' });
     await render();
 

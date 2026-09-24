@@ -41,8 +41,6 @@ export interface WallKeyboardCtx {
   handleReattachRef: RefObject<(item: DooredItem, options?: { enterPassthrough?: boolean; afterRestore?: DoorAfterRestoreAction }) => void>;
   selectPane: (id: string) => void;
   selectDoor: (id: string) => void;
-  selectWorkspace: (id: string | null) => void;
-  returnToPane: () => void;
   enterTerminalMode: (id: string) => void;
   exitTerminalMode: () => void;
   minimizePane: (id: string) => void;

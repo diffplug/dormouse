@@ -218,21 +218,21 @@ describe('WorkspaceSelectionOverlay ring travel', () => {
     tab.remove();
   });
 
-  it('moves onto + and follows its horizontal scroll position', async () => {
+  it('moves onto a tab and follows its horizontal scroll position', async () => {
     const store = makeStore();
     const panes = twoPanes();
-    const plus = document.createElement('button');
-    plus.dataset.workspaceNew = '';
-    stubRect(plus, { top: 8, left: 400, width: 20, height: 20 });
-    document.body.append(plus);
+    const tab = document.createElement('div');
+    tab.dataset.workspaceTab = 'ws-a';
+    stubRect(tab, { top: 8, left: 400, width: 80, height: 24 });
+    document.body.append(tab);
     await act(async () => root.render(<Harness selectedId="a" mode="command" store={store} panes={panes} />));
-    await act(async () => root.render(<Harness selectedId="+" selectedType="workspace-new" mode="command" store={store} panes={panes} />));
+    await act(async () => root.render(<Harness selectedId="ws-a" selectedType="workspace" mode="command" store={store} panes={panes} />));
     await frame(300);
-    expect(ringRect()).toEqual({ top: 8, left: 400, width: 20, height: 20 });
-    stubRect(plus, { top: 8, left: 200, width: 20, height: 20 });
+    expect(ringRect()).toEqual({ top: 8, left: 400, width: 80, height: 24 });
+    stubRect(tab, { top: 8, left: 200, width: 80, height: 24 });
     await act(async () => document.dispatchEvent(new Event('scroll')));
     expect(ringRect()!.left).toBe(200);
-    plus.remove();
+    tab.remove();
   });
 
   it.each(['detached', 'empty'])('restores from the last painted Door through a %s target', async (missing) => {

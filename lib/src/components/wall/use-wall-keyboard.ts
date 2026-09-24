@@ -13,7 +13,7 @@ import type { NavHistoryRef, WallKeyboardCtx } from './keyboard/types';
 // Keystrokes an active Wall has already answered. A key that activates another
 // Workspace commits that Wall's `active` in the microtask checkpoint the browser
 // runs between listeners, so without this claim its listener would answer the
-// same key too — `n` switching straight back, `Enter` activating then renaming.
+// same key too.
 const answeredKeys = new WeakSet<KeyboardEvent>();
 
 export function useWallKeyboard(ctx: WallKeyboardCtx): void {

@@ -49,9 +49,9 @@ import { revealWorkspaceTab } from './workspace-tab-elements';
 /**
  * The Window's Workspace tabs. Store-driven end to end (Workspaces, membership,
  * Activity, and the strip's own UI state), so it renders in the AppBar — outside
- * every Wall's React tree — and shows the same rename editor and confirmation
- * whether the gesture came from a tab or from a command-mode key
- * (`docs/specs/layout.md` → "Workspaces"; `docs/specs/standalone.md` → AppBar).
+ * every Wall's React tree — and shows the rename editor and confirmation the
+ * Workspace verbs open (`docs/specs/layout.md` → "Workspaces";
+ * `docs/specs/standalone.md` → AppBar).
  * The close verb itself lives in `wall/workspace-lifecycle.ts`; this renders it.
  */
 export function WorkspaceStrip({
@@ -92,13 +92,15 @@ export function WorkspaceStrip({
   // any more, never a rename — and a spotlight on the pill it landed on
   // (`docs/specs/layout.md` → "Workspace tabs").
   const enterNextTodo = useCallback((id: WorkspaceId) => {
-    const handle = getWallHandle(id);
-    const target = handle?.enterNextTodo() ?? null;
-    if (target === null) handle?.enterCommandMode();
+    const target = getWallHandle(id)?.enterNextTodo() ?? null;
+    if (target === null) {
+      activate(id);
+      return;
+    }
     setActiveWorkspace(id);
-    if (target !== null) spotlightTodo(target);
-  }, []);
-  const peekNextTodo = useCallback((id: WorkspaceId) => getWallHandle(id)?.peekNextTodo()?.label ?? null, []);
+    spotlightTodo(target);
+  }, [activate]);
+  const peekNextTodo = useCallback((id: WorkspaceId) => getWallHandle(id)?.peekNextTodo() ?? null, []);
 
   // Activation changes the close button and therefore the intrinsic tab width.
   // Reveal it after layout, including activation through a shortcut or create.

@@ -87,6 +87,7 @@ afterEach(() => {
 });
 
 const flush = (): Promise<void> => harness.flush();
+const flushFrame = (): Promise<void> => harness.flushFrame();
 
 /** Wait out the host's own 100ms state polls (a tool taking over a pane, a
  *  split waiting on OSC 633), which no event can flush. Throws on timeout. */
@@ -116,10 +117,6 @@ const reportRunning = (id: string, line: string): void => terminalRegistry.apply
 
 /** The shell in `id` is back at its prompt. */
 const promptBack = (id: string): void => terminalRegistry.applyTerminalSemanticEvents(id, [{ type: 'promptStart' }]);
-
-async function flushFrame(): Promise<void> {
-  await act(async () => { await new Promise((r) => requestAnimationFrame(() => r(undefined))); });
-}
 
 /** `installBrowserHost`, on the adapter this file's tests read as `fake`. */
 function hostBrowsers(...args: Parameters<typeof installBrowserHost>): ReturnType<typeof installBrowserHost> {
@@ -4248,19 +4245,19 @@ describe('Wall on the Lath engine', () => {
       };
 
       // The peek names what the click then enters, as its header or Door shows it.
-      expect(handle.peekNextTodo()).toEqual({ id: 'pane-b', label: 'deploy watcher' });
+      expect(handle.peekNextTodo()).toBe('deploy watcher');
       expect(container.querySelector('[data-pane-title-for="pane-b"]')!.textContent).toContain('deploy watcher');
       expect(await next()).toBe('pane-b');
       entered('pane-b');
       expect(container.querySelector('[data-session-id="pane-b"][data-focused="true"]')).not.toBeNull();
       // From a passthrough pane the next is the one after it.
-      expect(handle.peekNextTodo()).toEqual({ id: 'browser-a', label: 'example.com' });
+      expect(handle.peekNextTodo()).toBe('example.com');
       expect(await next()).toBe('browser-a');
       // Its acknowledgement has no host entry to reach: the TODO stays.
       entered('browser-a');
       // A Door is reattached into passthrough, as its click does.
       // An idle terminal is `<idle>` on screen, so in the tooltip too.
-      expect(handle.peekNextTodo()).toEqual({ id: 'door-a', label: '<idle>' });
+      expect(handle.peekNextTodo()).toBe('<idle>');
       expect(container.querySelector('[data-door-id="door-a"]')!.textContent).toContain('<idle>');
       expect(await next()).toBe('door-a');
       entered('door-a');

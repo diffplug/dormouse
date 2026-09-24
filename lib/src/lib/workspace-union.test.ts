@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeWorkspaceUnion, EMPTY_WORKSPACE_UNION, nextTodoMember } from './workspace-union';
+import { computeWorkspaceUnion, nextTodoMember, type WorkspaceUnion } from './workspace-union';
 import type { ActivityState } from './session-activity-store';
 
 function activity(entries: Record<string, Partial<ActivityState>>): Map<string, ActivityState> {
@@ -15,10 +15,12 @@ function activity(entries: Record<string, Partial<ActivityState>>): Map<string, 
 
 const episode = (id: string, startedAt: number) => ({ id, startedAt });
 
+const EMPTY: WorkspaceUnion = { ringing: false, todo: false, count: 0, ringingSince: null };
+
 describe('computeWorkspaceUnion', () => {
   it('is empty when no surface owes attention', () => {
     const union = computeWorkspaceUnion(['a', 'b'], activity({ a: {}, b: { status: 'BUSY' } }));
-    expect(union).toEqual(EMPTY_WORKSPACE_UNION);
+    expect(union).toEqual(EMPTY);
   });
 
   it('reports ringing when any terminal Session is ALERT_RINGING', () => {
@@ -78,7 +80,7 @@ describe('computeWorkspaceUnion', () => {
   });
 
   it('is empty for an empty surface set', () => {
-    expect(computeWorkspaceUnion([], activity({ a: { todo: true } }))).toEqual(EMPTY_WORKSPACE_UNION);
+    expect(computeWorkspaceUnion([], activity({ a: { todo: true } }))).toEqual(EMPTY);
   });
 });
 

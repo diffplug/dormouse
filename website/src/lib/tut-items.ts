@@ -1,4 +1,3 @@
-
 // Item ids are the persistence key — keep them stable across releases.
 const THEME_ITEM_IDS = ["th-theme"] as const;
 

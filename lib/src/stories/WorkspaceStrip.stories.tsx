@@ -41,7 +41,7 @@ function StripStory({ width = 640, busyIndex, todoLabels }: {
           runningCount: () => 1,
           closeAll: () => new Promise<null>(() => {}),
         } : {}),
-        ...(label === undefined ? {} : { peekNextTodo: () => ({ id: `${ws(index)}-todo`, label }) }),
+        ...(label === undefined ? {} : { peekNextTodo: () => label }),
       }));
     });
     return () => releases.forEach((release) => release());

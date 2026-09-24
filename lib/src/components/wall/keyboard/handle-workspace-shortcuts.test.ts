@@ -15,7 +15,7 @@ import type { WallKeyboardCtx } from './types';
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
 
 function ctxWith(workspaceId?: string): WallKeyboardCtx {
-  return { activeRef: { current: true }, selectedTypeRef: { current: 'pane' }, workspaceId } as unknown as WallKeyboardCtx;
+  return { workspaceId } as unknown as WallKeyboardCtx;
 }
 
 function keydown(key: string, init: KeyboardEventInit = {}): KeyboardEvent {
@@ -45,21 +45,6 @@ describe('handleWorkspaceShortcuts', () => {
     expect(ids()).toHaveLength(1);
   });
 
-  it.each(['pane', 'workspace', 'workspace-new'] as const)('leaves removed Workspace keys inert with a %s selection', kind => {
-    createWorkspace({ id: 'ws-2', activate: false });
-    ctx.selectedTypeRef.current = kind;
-    ctx.selectedIdRef = { current: 'ws-2' };
-    const before = getWorkspacesSnapshot();
-    for (const key of ['c', 'n', 'p', '&', '$', 'x', 'Enter']) {
-      const event = keydown(key);
-      expect(handleWorkspaceShortcuts(event, ctx)).toBe(false);
-      expect(event.defaultPrevented).toBe(false);
-    }
-    expect(getWorkspacesSnapshot()).toBe(before);
-    expect(getWorkspaceUiSnapshot().renamingId).toBeNull();
-    expect(getWorkspaceUiSnapshot().pendingClose).toBeNull();
-  });
-
   it('selects each position 1–9 through the store', () => {
     for (let i = 2; i <= 9; i++) createWorkspace({ id: `ws-${i}` });
     const ordered = ids();
@@ -79,14 +64,17 @@ describe('handleWorkspaceShortcuts', () => {
     expect(getActiveWorkspaceId()).toBe(first);
   });
 
-  it('claims the key it handles and leaves every other one alone', () => {
-    const handled = keydown('1');
-    handleWorkspaceShortcuts(handled, ctx);
-    expect(handled.defaultPrevented).toBe(true);
-
-    for (const key of ['0', 'c', 'x', 'k', ',', 'z', 'Enter', '|']) {
-      expect(handleWorkspaceShortcuts(keydown(key), ctx)).toBe(false);
+  it('leaves every other key alone, the removed Workspace keys included', () => {
+    createWorkspace({ id: 'ws-2', activate: false });
+    const before = getWorkspacesSnapshot();
+    for (const key of ['0', 'c', 'n', 'p', '&', '$', 'x', 'k', ',', 'z', 'Enter', '|', '12']) {
+      const event = keydown(key);
+      expect(handleWorkspaceShortcuts(event, ctx)).toBe(false);
+      expect(event.defaultPrevented).toBe(false);
     }
+    expect(getWorkspacesSnapshot()).toBe(before);
+    expect(getWorkspaceUiSnapshot().renamingId).toBeNull();
+    expect(getWorkspaceUiSnapshot().pendingClose).toBeNull();
   });
 
   it('ignores a modified key, so a host or clipboard chord passes through', () => {
