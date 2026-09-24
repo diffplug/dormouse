@@ -159,6 +159,30 @@ describe('createBrowserHost', () => {
     }
   });
 
+  it('paints the stream at once after an editing op, as after input', async () => {
+    const fake = fakeProvider();
+    const host = createBrowserHost({ writeClipboardText: vi.fn(), providers: { 'agent-browser': () => fake.provider } });
+    const s1 = { provider: 'agent-browser', binding: { session: 's1' } } as const;
+    try {
+      const viewer = await openViewer((await host.request({ ...s1, op: 'view', stream: 4321 })).url!);
+      await vi.waitFor(() => expect(fake.views).toHaveLength(1));
+      const { sink } = fake.views[0];
+      sink.frame(new Uint8Array([0xff, 0xd8, 1]));
+      await vi.waitFor(() => expect(viewer.frames.map((frame) => frame.kind)).toEqual(['provisional', 'crisp']));
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      // At rest, a changed frame only pulses the crisp loop.
+      sink.frame(new Uint8Array([0xff, 0xd8, 2]));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(viewer.frames.filter((frame) => frame.kind === 'provisional')).toHaveLength(1);
+      // Select-all changed the page without any input on the socket.
+      await host.request({ ...s1, op: 'edit', edit: 'selectAll' });
+      sink.frame(new Uint8Array([0xff, 0xd8, 3]));
+      await vi.waitFor(() => expect(viewer.frames.filter((frame) => frame.kind === 'provisional')).toHaveLength(2));
+    } finally {
+      await host.close();
+    }
+  });
+
   it('joins no capture of the browser a relaunch replaced', async () => {
     const fake = fakeProvider();
     const host = createBrowserHost({ writeClipboardText: vi.fn(), providers: { 'agent-browser': () => fake.provider } });
