@@ -2,7 +2,7 @@ import { parseToolState, type ToolState } from './tool-state';
 import type { ActivityNotification, ProtocolProgressUpdate } from './alert-manager';
 import { parseColor } from './css-color';
 import { sanitizeCommandLine, sanitizeText, truncateText } from './osc-sanitize';
-import { isProtocolCommandStart, recordToolEvents } from './tool-events';
+import { isProtocolCommandStart } from './tool-events';
 import { parseToolAnnounce, type ToolAnnounce } from './tool-announce';
 import {
   STRING_CONTROL_INTRODUCER,
@@ -483,18 +483,14 @@ export function textProjectionOf(
  * Apply one parse batch in stream order, so a report written after a command
  * boundary is judged after it (`docs/specs/alert.md` -> Terminal reports).
  * Semantic events are timestamped once, handed to the sink in the runs between
- * reports, and returned for the terminal-state store. `recordTools` also
- * records the batch's Tool reports, for an owner whose renderer state is
- * reachable from here.
+ * reports, and returned for the terminal-state store.
  */
 export function applyTerminalEvents(
   sink: TerminalEventSink,
   id: string,
   events: readonly TerminalProtocolEvent[],
-  options: { recordTools?: boolean } = {},
 ): TerminalSemanticEvent[] {
   if (events.length === 0) return [];
-  if (options.recordTools) recordToolEvents(id, events);
   const semanticEvents: TerminalSemanticEvent[] = [];
   let applied = 0;
   const applySemantic = (): void => {

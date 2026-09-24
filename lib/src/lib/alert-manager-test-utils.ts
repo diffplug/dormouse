@@ -1,17 +1,20 @@
 /**
- * Drivers the suites that feed an `AlertManager` directly share
+ * Drivers and fixtures the suites that feed an `AlertManager` share
  * (`alert-manager.test.ts`, `alert-engagement.test.ts`,
- * `alert-resumed-output.test.ts`). Each takes the manager it drives and runs
- * under fake timers.
+ * `alert-resumed-output.test.ts`, the host suites). Each driver takes the
+ * manager it drives and runs under fake timers.
  *
  * Timing from cfg.alert: busyCandidateGap=1500, busyConfirmGap=500,
  * mightNeedAttention=2000, needsAttentionConfirm=3000.
  */
 import { vi } from 'vitest';
-import type { AlertManager } from './alert-manager';
+import type { ActivityNotification, AlertManager } from './alert-manager';
 
 /** The viewer a suite reports for when one renderer realm is enough. */
 export const VIEWER = 'viewer';
+
+/** A terminal report asking for the human, as `OSC 9` parses. */
+export const REPORT: ActivityNotification = { source: 'OSC 9', title: null, body: 'needs input' };
 
 /** The user is present, `viewer` pointing at `id` (`docs/specs/alert.md` -> Engagement). */
 export function engage(manager: AlertManager, id: string, viewer = VIEWER): void {

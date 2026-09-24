@@ -54,7 +54,10 @@ export class AlertSettingsHost {
     this.target.applySettings(this.settings);
   }
 
-  private publish(): void {
+  /** The canonical blob to every subscriber, once there is one: a snapshot
+   *  sent before any renderer seeded would replace their persisted settings. */
+  publish(): void {
+    if (!this.initialized) return;
     for (const listener of this.listeners) listener(this.settings);
   }
 }

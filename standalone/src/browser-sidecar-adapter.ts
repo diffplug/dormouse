@@ -1,5 +1,5 @@
 import { recordToolEvents } from '../../lib/src/lib/tool-events';
-import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
+import type { TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
 import { installWorkspaceRegistry, type WorkspaceRegistrySnapshot } from "./workspace-registry";
 import type {
   AgentBrowserCommandResult,
@@ -20,6 +20,7 @@ import type {
   GitInfoResult,
   ToolControlResult,
   ToolHostRequest,
+  SpawnPtyOptions,
   WritePtyOptions,
 } from "dormouse-lib/lib/platform/types";
 import {
@@ -36,19 +37,16 @@ import {
   type BurrowResult,
 } from "dormouse-lib/host/remote/service-protocol";
 import { embedderOrigins } from "dormouse-lib/lib/embedder-origins";
-import { createSidecarAlertClient } from "dormouse-lib/host/alert-client";
+import { createAlertClient, type AlertClientMethods } from "dormouse-lib/host/alert-client";
 import type { AlertCommand } from "dormouse-lib/host/alert-protocol";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
 import { createMemoryNotepadArchivePort } from "dormouse-lib/lib/notepad/memory-archive-port";
 import type { PersistedWindow } from "dormouse-lib/lib/session-types";
 import { claimRecoveryCommands, windowStateSlot } from "./window-recovery";
 import { coalesceCwds } from "./coalesce-cwds";
-import {
-  collectTerminalSemanticEvents,
-  TerminalProtocolParser,
-  type TerminalProtocolEvent,
-} from "dormouse-lib/lib/terminal-protocol";
-import { getTerminalTheme, onTerminalThemeChange, themeColorProvider } from "dormouse-lib/lib/terminal-theme";
+import type { TerminalProtocolEvent } from "dormouse-lib/lib/terminal-protocol";
+import { getTerminalTheme, onTerminalThemeChange } from "dormouse-lib/lib/terminal-theme";
+import { parseReplay } from "dormouse-lib/lib/platform/replay-parse";
 import type { TerminalSemanticEvent } from "dormouse-lib/lib/terminal-state";
 import { applyTerminalSemanticEvents } from "dormouse-lib/lib/terminal-state-store";
 import type { DorControlCancelPayload, DorControlRequestPayload } from "dor/protocol";
@@ -66,6 +64,9 @@ function decodeBase64Bytes(base64: string): Uint8Array {
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes;
 }
+
+/** The `alert*` platform methods, taken from the shared client in the constructor. */
+export interface BrowserSidecarAdapter extends AlertClientMethods {}
 
 export class BrowserSidecarAdapter implements PlatformAdapter {
   private dataHandlers = new Set<(detail: PtyDataDetail) => void>();
@@ -91,26 +92,12 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
 
   // The sidecar's alerts, through the same client TauriAdapter uses; the dev
   // host stamps this page's one fixed window label on each command.
-  private readonly alerts = createSidecarAlertClient((payload: AlertCommand) => {
+  private readonly alerts = createAlertClient((payload: AlertCommand) => {
     this.host.send("alert_command", { payload });
   });
-  readonly alertRemove = this.alerts.alertRemove;
-  readonly alertSeed = this.alerts.alertSeed;
-  readonly alertSetWatchedCommands = this.alerts.alertSetWatchedCommands;
-  readonly alertSetCommandWatched = this.alerts.alertSetCommandWatched;
-  readonly alertPublishSettings = this.alerts.alertPublishSettings;
-  readonly alertDismiss = this.alerts.alertDismiss;
-  readonly alertEngagement = this.alerts.alertEngagement;
-  readonly alertAcknowledge = this.alerts.alertAcknowledge;
-  readonly alertResize = this.alerts.alertResize;
-  readonly alertToggleTodo = this.alerts.alertToggleTodo;
-  readonly alertClearTodo = this.alerts.alertClearTodo;
-  readonly alertAwait = this.alerts.alertAwait;
-  readonly onAlertState = this.alerts.onAlertState;
-  readonly onWatchedCommands = this.alerts.onWatchedCommands;
-  readonly onAlertSettings = this.alerts.onAlertSettings;
 
   constructor(private readonly host: BrowserSidecarHost) {
+    Object.assign(this, this.alerts.methods);
     // See TauriAdapter: the sidecar parses and has no DOM, so it is told the
     // resolved terminal colors whenever they change.
     onTerminalThemeChange(() => this.pushThemeColors());
@@ -133,11 +120,10 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   async init(): Promise<void> {
     await this.host.init();
     this.unlistenHost = this.host.onEvent(({ event, data }) => this.handleHostEvent(event, data));
-    // The SSE stream is the only way a store's snapshot reaches this adapter,
-    // and a dropped stream takes the bridge's fan-out entry with it; re-offering
-    // the seeds makes the sidecar republish both stores (a repeat seed is
-    // ignored as a seed but still answered with the canonical snapshot).
-    this.unlistenReconnect = this.host.onReconnect(() => this.alerts.reofferSeeds());
+    // The SSE stream is the only way the alerts' events reach this adapter,
+    // and whatever the sidecar sent while it was down is lost: `sync` has the
+    // sidecar re-send this window's Sessions' state and both stores.
+    this.unlistenReconnect = this.host.onReconnect(() => this.alerts.sync());
     // A reload is a new realm under the same label; see TauriAdapter.
     this.alerts.hello();
     this.installConsoleForwarder();
@@ -187,7 +173,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     if (result.error) throw new Error(result.error);
     return result;
   }
-  spawnPty(id: string, options?: { cols?: number; rows?: number; cwd?: string; shell?: string; args?: string[]; helper?: HelperIdentity }): void {
+  spawnPty(id: string, options?: SpawnPtyOptions): void {
     this.host.send("pty_spawn", { id, options });
   }
 
@@ -395,7 +381,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
       // the two messages below (docs/specs/terminal-escapes.md).
       const payload = data as PtyDataDetail;
       for (const handler of this.dataHandlers) handler(payload);
-    } else if (event === "terminal:protocolEvents") {
+    } else if (event === "terminal:toolEvents") {
       const payload = data as { id: string; events: TerminalProtocolEvent[] };
       recordToolEvents(payload.id, payload.events);
     } else if (event === "terminal:semanticEvents") {
@@ -409,13 +395,9 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     } else if (event === "pty:marked") {
       for (const handler of this.markedHandlers) handler(data as PtyMarkedDetail);
     } else if (event === "pty:replay") {
-      // The one stream the sidecar does not parse; see TauriAdapter, including
-      // why the one-shot parser still needs the theme.
       const { id, data: text, requestId } = data as PtyReplayDetail;
-      const parsed = new TerminalProtocolParser(themeColorProvider).process(text);
-      recordToolEvents(id, parsed.events);
-      applyTerminalSemanticEvents(id, collectTerminalSemanticEvents(parsed.events));
-      for (const handler of this.replayHandlers) handler({ id, data: parsed.visibleData, requestId });
+      const visibleData = parseReplay(id, text);
+      for (const handler of this.replayHandlers) handler({ id, data: visibleData, requestId });
     } else if (event === BURROW_RESULT_EVENT) {
       this.burrowClient.onResult(data as BurrowResult);
     } else if (event === BURROW_ASK_EVENT) {

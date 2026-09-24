@@ -11,6 +11,7 @@ import { shellCommandKind, type ShellCommandKind } from 'dor/commands/shell-quot
 import { getPlatform, IS_MAC, IS_WINDOWS, PLATFORM_STRING } from './platform';
 import type { PtyDataDetail } from './platform/types';
 import type { HelperIdentity } from './terminal-context-types';
+import type { PersistedAlertState } from './session-types';
 import { DIM, RESET } from './ansi';
 import { cfg } from '../cfg';
 import { requestExternalLinkConfirmation } from './external-link-confirmation';
@@ -269,7 +270,6 @@ function wireXtermHandlers(
   });
 
   const resizeDisposable = terminal.onResize(({ cols, rows }) => {
-    getPlatform().alertResize(id);
     getPlatform().resizePty(id, cols, rows);
     bumpRenderTick();
     if (getMouseSelectionState(id).selection) setMouseSelection(id, null);
@@ -497,6 +497,8 @@ export function restoreTerminal(
     resumeCommand?: string | null;
     command?: string | null;
     requireIntegration?: boolean;
+    /** The pane's persisted TODO, seeded by the host at the spawn. */
+    alert?: PersistedAlertState | null;
   },
 ): TerminalEntry {
   const existing = registry.get(id);
@@ -520,6 +522,7 @@ export function restoreTerminal(
     cwd: opts.cwd ?? undefined,
     shell: opts.shell,
     args: opts.args,
+    ...(opts.alert ? { alert: opts.alert } : {}),
   });
   seedProcessCwdAfterSpawn(id);
 
@@ -623,14 +626,13 @@ export function disposeAllSessions(): void {
  *
  * `kill` is the only difference between the two verbs below, and it is the
  * whole difference between ending a Session and letting another Window take it:
- * a kill also removes the host's alert entry, which a release leaves to the
- * Window that takes the Session over (`docs/specs/alert.md` → Live Workspace
- * transfer).
+ * the host removes a killed Session's alert entry, and keeps a released one's
+ * for the Window that takes the Session over (`docs/specs/alert.md` → Live
+ * Workspace transfer).
  */
 function teardownSession(id: string, { kill }: { kill: boolean }): void {
   const entry = registry.get(id);
   if (!entry) return;
-  if (kill) getPlatform().alertRemove(id);
   // Before the xterm instance goes: its markers are what notepad pins hold, and
   // a disposed marker cannot be dropped cleanly afterwards. The notes stay.
   dropSourcesForTerminal(id);

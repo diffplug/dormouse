@@ -44,12 +44,10 @@ function createPlatform(
     onRequestSessionFlush: vi.fn(),
     offRequestSessionFlush: vi.fn(),
     notifySessionFlushComplete: vi.fn(),
-    alertRemove: vi.fn(),
     alertSetWatchedCommands: vi.fn(),
     alertSetCommandWatched: vi.fn(),
     alertDismiss: vi.fn(),
     alertEngagement: vi.fn(),
-    alertResize: vi.fn(),
     alertAcknowledge: vi.fn(),
     alertToggleTodo: vi.fn(),
     alertClearTodo: vi.fn(),
@@ -396,7 +394,11 @@ describe('restoreSession alert seeding', () => {
 
   const alert = { status: 'WATCHING_DISABLED' as const, todo: true, notification: null };
 
-  it('seeds a terminal pane\'s persisted TODO and leaves browser panes to the todo restore', () => {
+  /** What each restored terminal's spawn will carry as its persisted alert. */
+  const spawnedAlerts = () => terminalRegistryMocks.restoreTerminal.mock.calls
+    .map(([id, options]) => [id, (options as { alert?: unknown }).alert]);
+
+  it('spawns a terminal pane with its persisted TODO and leaves browser panes to the todo restore', () => {
     const saved: PersistedSession = {
       version: 3,
       panes: [
@@ -406,13 +408,12 @@ describe('restoreSession alert seeding', () => {
       ],
     };
     const platform = createPlatform(saved);
-    const alertSeed = vi.fn();
-    platform.alertSeed = alertSeed;
 
     restoreSession(platform);
 
-    // Only the terminal pane that carried one, and only that pane's blob.
-    expect(alertSeed.mock.calls).toEqual([['shell', alert]]);
+    // Only the terminal pane that carried one, and only that pane's blob: the
+    // host seeds it at the spawn.
+    expect(spawnedAlerts()).toEqual([['shell', alert], ['quiet', undefined]]);
   });
 
   it('keeps a pane whose notification this build cannot read, seeding its TODO without the detail', () => {
@@ -429,20 +430,9 @@ describe('restoreSession alert seeding', () => {
       ],
     } as unknown as PersistedSession;
     const platform = createPlatform(saved);
-    const alertSeed = vi.fn();
-    platform.alertSeed = alertSeed;
 
     expect(restoreSession(platform)?.paneIds).toEqual(['newer']);
-    expect(alertSeed.mock.calls).toEqual([['newer', { status: 'ALERT_RINGING', todo: true, notification: null }]]);
-  });
-
-  it('restores without a seeding host', () => {
-    const saved: PersistedSession = {
-      version: 3,
-      panes: [{ id: 'shell', title: 'Shell', cwd: '/tmp', untouched: false, alert }],
-    };
-    // VS Code omits `alertSeed`; its extension host seeds its own manager.
-    expect(restoreSession(createPlatform(saved))?.paneIds).toEqual(['shell']);
+    expect(spawnedAlerts()).toEqual([['newer', { status: 'ALERT_RINGING', todo: true, notification: null }]]);
   });
 
   it('restores the record it is handed with the commands it is handed', () => {

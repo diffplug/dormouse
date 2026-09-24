@@ -225,6 +225,16 @@ export interface SessionFlushRequest {
   probeCwd?: boolean;
 }
 
+export interface SpawnPtyOptions {
+  cols?: number;
+  rows?: number;
+  cwd?: string;
+  shell?: string;
+  args?: string[];
+  helper?: HelperIdentity;
+  alert?: PersistedAlertState;
+}
+
 export interface WritePtyOptions {
   /** Deliver at typing pace (`docs/specs/transport.md` → "Paced input"). */
   paced?: boolean;
@@ -252,7 +262,12 @@ export interface PlatformAdapter {
   terminalContext?(request: TerminalContextRequest): Promise<TerminalContextInfo>;
 
   // PTY operations
-  spawnPty(id: string, options?: { cols?: number; rows?: number; cwd?: string; shell?: string; args?: string[]; helper?: HelperIdentity }): void;
+  /**
+   * `alert` is a cold-restored pane's persisted TODO: the host starts the id's
+   * alert state over at every spawn, then seeds it from this
+   * (`docs/specs/alert.md` -> "Persist only").
+   */
+  spawnPty(id: string, options?: SpawnPtyOptions): void;
   writePty(id: string, data: string, options?: WritePtyOptions): void;
   resizePty(id: string, cols: number, rows: number): void;
   killPty(id: string): void;
@@ -303,17 +318,6 @@ export interface PlatformAdapter {
    */
   requestAppRestart?(requester?: string): Promise<boolean>;
 
-  /**
-   * Seed a cold-restored Surface's persisted TODO/alert into the host's
-   * `AlertManager`, so the freshly spawned PTY inherits the state its saved pane
-   * carried (`docs/specs/alert.md` -> "Persist only"). Called after the spawn.
-   *
-   * Present only on standalone, whose sidecar holds no persisted session, so
-   * the restore path is the only thing that can seed it. VS Code omits it — its
-   * extension host seeds its own manager while answering the webview's boot
-   * (`vscode-ext/src/message-router.ts`).
-   */
-  alertSeed?(id: string, state: PersistedAlertState): void;
 
   // PTY queries
   getCwd(id: string): Promise<string | null>;
@@ -455,8 +459,8 @@ export interface PlatformAdapter {
   offRequestSessionFlush(handler: (detail: SessionFlushRequest) => void): void;
   notifySessionFlushComplete(requestId: string): void;
 
-  // Alert management
-  alertRemove(id: string): void;
+  // Alert management: a Session's alert state follows its PTY — `writePty`'s
+  // `userInput` acknowledges, a resize opens its grace window, a kill removes it.
   /** Offer persisted WATCHING rules as the host's startup seed. */
   alertSetWatchedCommands(names: string[]): void;
   /** Mutate one bare-command WATCHING rule without replacing unrelated rules. */
@@ -475,7 +479,6 @@ export interface PlatformAdapter {
   alertEngagement(state: Engagement, lapse?: EngagementLapse): void;
   /** A human gesture reached the Session without input; input rides `writePty`'s `userInput`. */
   alertAcknowledge(id: string): void;
-  alertResize(id: string): void;
   alertToggleTodo(id: string): void;
   alertClearTodo(id: string): void;
   /**

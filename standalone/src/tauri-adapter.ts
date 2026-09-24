@@ -1,5 +1,5 @@
 import { recordToolEvents } from '../../lib/src/lib/tool-events';
-import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
+import type { TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-shell";
 import { coalesceCwds } from "./coalesce-cwds";
@@ -24,6 +24,7 @@ import type {
   ToolControlResult,
   ToolHostRequest,
   SessionFlushRequest,
+  SpawnPtyOptions,
   WritePtyOptions,
 } from "dormouse-lib/lib/platform/types";
 import type {
@@ -45,8 +46,8 @@ import {
   type BurrowResult,
 } from "dormouse-lib/host/remote/service-protocol";
 import { embedderOrigins } from "dormouse-lib/lib/embedder-origins";
-import { createSidecarAlertClient } from "dormouse-lib/host/alert-client";
-import type { AlertCommand } from "dormouse-lib/host/alert-protocol";
+import { createAlertClient, type AlertClientMethods } from "dormouse-lib/host/alert-client";
+import { ALERT_EVENTS, type AlertCommand } from "dormouse-lib/host/alert-protocol";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
 import type { PersistedWindow } from "dormouse-lib/lib/session-types";
 import { TauriSessionStore } from "./tauri-session-store";
@@ -54,12 +55,9 @@ import { claimRecoveryCommands, windowStateSlot } from "./window-recovery";
 import { listenToWindow } from "./window-label";
 import { installWorkspaceRegistry, type WorkspaceRegistrySnapshot } from "./workspace-registry";
 import { withTimeout } from "./with-timeout";
-import {
-  collectTerminalSemanticEvents,
-  TerminalProtocolParser,
-  type TerminalProtocolEvent,
-} from "dormouse-lib/lib/terminal-protocol";
-import { getTerminalTheme, onTerminalThemeChange, themeColorProvider } from "dormouse-lib/lib/terminal-theme";
+import type { TerminalProtocolEvent } from "dormouse-lib/lib/terminal-protocol";
+import { getTerminalTheme, onTerminalThemeChange } from "dormouse-lib/lib/terminal-theme";
+import { parseReplay } from "dormouse-lib/lib/platform/replay-parse";
 import type { TerminalSemanticEvent } from "dormouse-lib/lib/terminal-state";
 import {
   applyTerminalSemanticEvents,
@@ -78,6 +76,9 @@ function invoke(cmd: string, args?: Record<string, unknown>): void {
 
 const errMessage = (err: unknown): string =>
   err instanceof Error ? err.message : String(err);
+
+/** The `alert*` platform methods, taken from the shared client in the constructor. */
+export interface TauriAdapter extends AlertClientMethods {}
 
 /**
  * Platform adapter for the Tauri standalone app.
@@ -130,26 +131,12 @@ export class TauriAdapter implements PlatformAdapter {
   // The app's one AlertManager is the sidecar's; this window is one of its
   // viewers. Every `alert*` method is one `alert_command`, which Rust stamps
   // with this window's label, and the answers come back as sidecar events.
-  private readonly alerts = createSidecarAlertClient((payload: AlertCommand) => {
+  private readonly alerts = createAlertClient((payload: AlertCommand) => {
     invoke("alert_command", { payload });
   });
-  readonly alertRemove = this.alerts.alertRemove;
-  readonly alertSeed = this.alerts.alertSeed;
-  readonly alertSetWatchedCommands = this.alerts.alertSetWatchedCommands;
-  readonly alertSetCommandWatched = this.alerts.alertSetCommandWatched;
-  readonly alertPublishSettings = this.alerts.alertPublishSettings;
-  readonly alertDismiss = this.alerts.alertDismiss;
-  readonly alertEngagement = this.alerts.alertEngagement;
-  readonly alertAcknowledge = this.alerts.alertAcknowledge;
-  readonly alertResize = this.alerts.alertResize;
-  readonly alertToggleTodo = this.alerts.alertToggleTodo;
-  readonly alertClearTodo = this.alerts.alertClearTodo;
-  readonly alertAwait = this.alerts.alertAwait;
-  readonly onAlertState = this.alerts.onAlertState;
-  readonly onWatchedCommands = this.alerts.onWatchedCommands;
-  readonly onAlertSettings = this.alerts.onAlertSettings;
 
   constructor() {
+    Object.assign(this, this.alerts.methods);
     // The sidecar parses, and it has no DOM to read the theme from, so push the
     // resolved colors up whenever they change (the initial push is in
     // requestInit) — mirroring VSCodeAdapter.pushThemeColors.
@@ -175,7 +162,7 @@ export class TauriAdapter implements PlatformAdapter {
 
       // The Tool half of the sidecar's parse; its reports stayed with the
       // sidecar's AlertManager.
-      listenToWindow<{ id: string; events: TerminalProtocolEvent[] }>("terminal:protocolEvents", (event) => {
+      listenToWindow<{ id: string; events: TerminalProtocolEvent[] }>("terminal:toolEvents", (event) => {
         recordToolEvents(event.payload.id, event.payload.events);
       }),
 
@@ -201,21 +188,11 @@ export class TauriAdapter implements PlatformAdapter {
       }),
 
       listenToWindow<{ id: string; data: string; requestId?: string }>("pty:replay", (event) => {
-        // Replay arrives as raw buffered output, the one stream the sidecar does
-        // not parse for this window. A one-shot parser here repopulates the
-        // renderer's semantic and Tool state and strips OSCs before xterm sees
-        // them; its reports and responses are dropped — the sidecar's own parse
-        // already fed its AlertManager, and the asker is long gone
-        // (docs/specs/terminal-escapes.md). It still needs the theme: a
-        // *declined* colour query is not consumed, so it reaches xterm.js
-        // instead, and answering is the owner's alone. A replay is the whole of
-        // what a transferred pane's new window has: Rust drops the gap's
-        // semantic events rather than holding them (docs/specs/standalone.md →
-        // "Routing").
+        // A replay is the whole of what a transferred pane's new window has:
+        // Rust drops the gap's semantic and Tool events rather than holding
+        // them (docs/specs/standalone.md → "Routing").
         const { id, data, requestId } = event.payload;
-        const parsed = new TerminalProtocolParser(themeColorProvider).process(data);
-        recordToolEvents(id, parsed.events);
-        applyTerminalSemanticEvents(id, collectTerminalSemanticEvents(parsed.events));
+        const visibleData = parseReplay(id, data);
         // A listed exited buffer can contain a command-start with no finish.
         // Apply its exit after rebuilding the replay's command state, for
         // either target adoption or source hand-back.
@@ -226,7 +203,7 @@ export class TauriAdapter implements PlatformAdapter {
           applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode }]);
         }
         for (const handler of this.replayHandlers) {
-          handler({ id, data: parsed.visibleData, requestId });
+          handler({ id, data: visibleData, requestId });
         }
       }),
 
@@ -277,9 +254,8 @@ export class TauriAdapter implements PlatformAdapter {
       }),
 
       // The sidecar's alerts: this window's Sessions' state, routed here by
-      // ownership, and the two stores' canonical snapshots and every await's
-      // result, broadcast to every window.
-      ...["alert:state", "alert:awaitResult", "alert:watchedCommands", "alert:settings"].map((name) =>
+      // ownership, its awaits' results, and the two stores' snapshots.
+      ...ALERT_EVENTS.map((name) =>
         listenToWindow<unknown>(name, (event) => void this.alerts.onEvent(name, event.payload))),
     ])));
     // This realm is new, whether the window just opened or reloaded: the
@@ -342,7 +318,7 @@ export class TauriAdapter implements PlatformAdapter {
     return result;
   }
 
-  spawnPty(id: string, options?: { cols?: number; rows?: number; cwd?: string; shell?: string; args?: string[]; helper?: HelperIdentity }): void {
+  spawnPty(id: string, options?: SpawnPtyOptions): void {
     invoke("pty_spawn", { id, options });
   }
 

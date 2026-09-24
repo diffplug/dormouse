@@ -139,7 +139,7 @@ describe("TutRunner snapshots", () => {
       adapter.setScenario(demoId, { name: "none", chunks: [] });
       adapter.spawnPty(demoId);
       currentTimeoutMs = inactivityTimeoutMs;
-      adapter.alertPublishSettings(settings);
+      adapter.alertPublishSettings(settings, { seed: false });
       adapter.onAlertState((event) => { if (event.id === demoId) events.push(event); });
       sendKeys(sectionRow("alert") + ENTER + "x");
       expect(durationMs).toBeGreaterThan(inactivityTimeoutMs);

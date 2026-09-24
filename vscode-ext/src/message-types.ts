@@ -1,16 +1,10 @@
-import type { ToolAnnounce } from '../../lib/src/lib/tool-announce';
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
-import type {
-  AwaitOutcome,
-  AwaitUntil,
-  Engagement,
-  EngagementLapse,
-} from '../../lib/src/lib/alert-manager';
-import type { AlertSettings } from '../../lib/src/lib/alert-settings';
 import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
-import type { TerminalColors } from '../../lib/src/lib/terminal-protocol';
+import type { TerminalColors, TerminalProtocolEvent } from '../../lib/src/lib/terminal-protocol';
+import type { AlertCommand, AlertEvents } from '../../lib/src/host/alert-protocol';
+import type { PersistedAlertState } from '../../lib/src/lib/session-types';
 import type { DorControlCancelPayload, DorControlRequestPayload, DorControlResponsePayload } from '../../dor/src/protocol';
-import type { AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort, ToolControlResult, ToolHostRequest } from '../../lib/src/lib/platform/types';
+import type { AgentBrowserStreamStatusResult, IframeProxyResult, OpenPort, ToolControlResult, ToolHostRequest } from '../../lib/src/lib/platform/types';
 import type { VSCodeWorkbenchCommand } from '../../lib/src/lib/vscode-keybindings';
 import type { BurrowCommand, BurrowResult } from '../../lib/src/host/remote/service-protocol';
 import type { VolatileNotepadSnapshot } from '../../lib/src/lib/notepad/types';
@@ -18,7 +12,7 @@ import type { VolatileNotepadSnapshot } from '../../lib/src/lib/notepad/types';
 // Messages from webview → extension host
 export type WebviewMessage =
   | { type: 'pty:context'; request: TerminalContextRequest; requestId: string }
-  | { type: 'pty:spawn'; id: string; options?: { cols?: number; rows?: number; cwd?: string; shell?: string; args?: string[]; helper?: HelperIdentity } }
+  | { type: 'pty:spawn'; id: string; options?: { cols?: number; rows?: number; cwd?: string; shell?: string; args?: string[]; helper?: HelperIdentity; alert?: PersistedAlertState } }
   | { type: 'pty:input'; id: string; data: string; paced?: boolean; userInput?: true }
   | { type: 'pty:resize'; id: string; cols: number; rows: number }
   | { type: 'pty:kill'; id: string }
@@ -62,23 +56,8 @@ export type WebviewMessage =
   | { type: 'dormouse:saveState'; state: unknown }
   | { type: 'dormouse:flushSessionSaveDone'; requestId: string }
   | ({ type: 'dor:controlResponse' } & DorControlResponsePayload)
-  // Alert actions
-  | { type: 'alert:remove'; id: string }
-  | { type: 'alert:initializeWatchedCommands'; names: string[] }
-  | { type: 'alert:setCommandWatched'; name: string; watched: boolean }
-  | { type: 'alert:initializeSettings'; settings: AlertSettings }
-  | { type: 'alert:updateSettings'; settings: AlertSettings }
-  | { type: 'alert:dismiss'; id: string }
-  // This webview is one engagement viewer (docs/specs/alert.md → Engagement).
-  | { type: 'alert:engagement'; state: Engagement; lapse?: EngagementLapse }
-  | { type: 'alert:acknowledge'; id: string }
-  | { type: 'alert:resize'; id: string }
-  | { type: 'alert:toggleTodo'; id: string }
-  | { type: 'alert:clearTodo'; id: string }
-  // `dor await`: the AlertManager lives here, so the wait is parked in the
-  // extension host and only its outcome crosses back (docs/specs/alert.md → Await).
-  | { type: 'alert:await'; requestId: string; id: string; until: AwaitUntil; timeoutMs: number }
-  | { type: 'alert:awaitCancel'; requestId: string };
+  // Every alert verb, in the wire both hosts share (`lib/src/host/alert-protocol.ts`).
+  | { type: 'alert:command'; command: AlertCommand };
 
 export interface PtyInfo {
   helper?: HelperIdentity;
@@ -96,8 +75,8 @@ export type ExtensionMessage =
   // so this never doubles the bytes on the wire (docs/specs/transport.md).
   | { type: 'pty:data'; id: string; data: string; textData?: string }
   | { type: 'pty:exit'; id: string; exitCode: number }
-  | { type: 'terminal:toolAnnounce'; id: string; announce: ToolAnnounce | null }
-  | { type: 'terminal:toolState'; id: string; dirty: boolean | null }
+  // A parse's Tool announcements, state and command-start resets, in stream order.
+  | { type: 'terminal:toolEvents'; id: string; events: TerminalProtocolEvent[] }
   | { type: 'terminal:semanticEvents'; id: string; events: TerminalSemanticEvent[] }
   | { type: 'pty:list'; ptys: PtyInfo[] }
   | { type: 'pty:replay'; id: string; data: string }
@@ -137,9 +116,5 @@ export type ExtensionMessage =
   | { type: 'dormouse:flushSessionSave'; requestId: string }
   | ({ type: 'dor:controlRequest' } & DorControlRequestPayload)
   | ({ type: 'dor:controlCancel' } & DorControlCancelPayload)
-  // Alert state updates. The whole `AlertState` crosses as one piece, so a new
-  // alert field needs no edit here — the other three adapters already spread it.
-  | ({ type: 'alert:state' } & AlertStateDetail)
-  | { type: 'alert:awaitResult'; requestId: string; outcome: AwaitOutcome }
-  | { type: 'alert:watchedCommands'; names: string[] }
-  | { type: 'alert:settings'; settings: AlertSettings };
+  // The alerts' events, named and shaped as in every host.
+  | { [Event in keyof AlertEvents]: { type: Event } & AlertEvents[Event] }[keyof AlertEvents];

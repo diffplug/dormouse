@@ -16,6 +16,7 @@ import {
   goIdle,
   heartbeat,
   leave,
+  REPORT,
   runCommand,
   settle,
 } from './alert-manager-test-utils';
@@ -288,7 +289,7 @@ describe('AlertManager in isolation', () => {
     if (source === 'watching') {
       driveToRinging(id);
     } else if (source === 'report') {
-      manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'needs input' });
+      manager.notifyFromProtocol(id, REPORT);
     } else {
       armCommandExit(manager, id);
       vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
@@ -1810,7 +1811,7 @@ describe('AlertManager in isolation', () => {
       runCommand(manager, id);
 
       const handle = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
-      manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'needs input' });
+      manager.notifyFromProtocol(id, REPORT);
 
       expect(await handle.promise).toEqual({ kind: 'resolved', cause: 'bell', waitedMs: 0 });
       expect(manager.getState(id)).toMatchObject({ todo: false, notification: null });

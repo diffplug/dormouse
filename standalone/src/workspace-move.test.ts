@@ -177,9 +177,6 @@ function fakePlatform(
   vi.spyOn(platform, "requestInit").mockImplementation(() => {
     throw new Error("an arrival must never ask for the whole Window");
   });
-  // The optional seed hook standalone has, so a test can show an arrival
-  // never reaches for it.
-  (platform as unknown as { alertSeed: unknown }).alertSeed = vi.fn();
   mocks.invoke.mockImplementation(async (cmd: string, args?: unknown) => {
     order.push(cmd);
     const workspaceId = (args as { workspaceId?: string; payload?: { workspaceId?: string } } | undefined)?.workspaceId
@@ -644,19 +641,20 @@ describe("the target half", () => {
   });
 
   // The Sessions' alert state never left the sidecar's one manager, which
-  // re-sends it to whichever window collects them: an arrival that seeded or
-  // removed it would overwrite a live ring or TODO (docs/specs/alert.md →
-  // Live Workspace transfer).
-  it("never seeds or removes the host's alert state for an arrival", async () => {
+  // re-sends it to whichever window collects them. A spawn starts it over and a
+  // kill removes it, so an arrival that did either would overwrite a live ring
+  // or TODO (docs/specs/alert.md → Live Workspace transfer).
+  it("never spawns or kills over an arrival's live Sessions", async () => {
     const platform = fakePlatform();
-    const remove = vi.spyOn(platform, "alertRemove");
+    const spawn = vi.spyOn(platform, "spawnPty");
+    const kill = vi.spyOn(platform, "killPty");
     arrivals = [payload()];
     arrivals[0].workspace.session.panes[0].alert = { status: "WATCHING_DISABLED", todo: true, notification: null };
     initWorkspaceMoves(platform);
     await settle();
     expect(getWorkspaceBootPlan(WORKSPACE_ID)?.initialPaneIds).toEqual(["pane-a"]);
-    expect(platform.alertSeed).not.toHaveBeenCalled();
-    expect(remove).not.toHaveBeenCalled();
+    expect(spawn).not.toHaveBeenCalled();
+    expect(kill).not.toHaveBeenCalled();
   });
 
   it("resumes each of two simultaneous arrivals over its own PTYs", async () => {
@@ -742,12 +740,13 @@ describe("the target half", () => {
       const moving = payload();
       moving.workspace.session.panes.push({ ...moving.workspace.session.panes[0]!, id: "browser-1", surfaceType: "browser" });
       moving.allIds.push("browser-1");
-      const removeAlert = vi.spyOn(platform, "alertRemove");
+      const kill = vi.spyOn(platform, "killPty");
       arrivals = [moving];
       initWorkspaceMoves(platform);
       await vi.advanceTimersByTimeAsync(5000);
-      // The source still shows these Sessions: their alert entries are its.
-      expect(removeAlert).not.toHaveBeenCalled();
+      // The source still shows these Sessions: their processes and alert
+      // entries are its.
+      expect(kill).not.toHaveBeenCalled();
 
       expect(getWorkspacesSnapshot().workspaces.map((w) => w.name)).not.toContain("Deploys");
       expect(getWorkspaceBootPlan(WORKSPACE_ID)).toEqual({});
@@ -803,7 +802,7 @@ describe("the target half", () => {
         status: "ALERT_RINGING", todo: true, episode, notification: { source: "OSC 9", title: "Done", body: null },
       }),
     });
-    const removeAlert = vi.spyOn(platform, "alertRemove");
+    const kill = vi.spyOn(platform, "killPty");
     const host = mocks.invoke.getMockImplementation()!;
     mocks.invoke.mockImplementation(async (cmd: string, args?: unknown) => {
       if (cmd === "adopt_done") arrivals = [];
@@ -824,7 +823,7 @@ describe("the target half", () => {
       expect(isAlertDeliveryPaused("pane-a")).toBe(false);
       expect(getAlertDeliveryReceipts("speech").has("pane-a")).toBe(false);
       // The ring is the source's again, still live in the sidecar.
-      expect(removeAlert).not.toHaveBeenCalled();
+      expect(kill).not.toHaveBeenCalled();
       await settle();
       expect(fire).not.toHaveBeenCalled();
     } finally {

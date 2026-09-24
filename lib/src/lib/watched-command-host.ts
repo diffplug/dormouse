@@ -38,7 +38,10 @@ export class WatchedCommandHost {
     };
   }
 
-  private publish(): void {
+  /** The canonical set to every subscriber, once there is one: a snapshot
+   *  sent before any renderer seeded would replace their persisted rules. */
+  publish(): void {
+    if (!this.initialized) return;
     const names = this.target.getWatchedCommands();
     for (const listener of this.listeners) listener(names);
   }

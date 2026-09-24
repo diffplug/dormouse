@@ -480,6 +480,14 @@ describe('terminal-registry alert behavior', () => {
     expect(entry.terminal.writes.join('')).toContain('codex resume 01JCX8ZK');
   });
 
+  // The host seeds it at the spawn, having started the id over: the reminder
+  // comes back, never the ring (docs/specs/alert.md -> "Persist only").
+  it('restores a pane\'s persisted TODO through its spawn', () => {
+    const notification = { source: 'OSC 9' as const, title: null, body: 'needs input' };
+    restoreTerminal('restore-todo', { alert: { status: 'ALERT_RINGING', todo: true, notification } });
+    expect(getActivity('restore-todo')).toMatchObject({ status: 'WATCHING_DISABLED', todo: true, notification });
+  });
+
   it('seeds untouched state on resume and restore while defaulting missing state to touched', () => {
     resumeTerminal('resume-untouched', null, { alive: true, untouched: true });
     resumeTerminal('resume-legacy', null, { alive: true });

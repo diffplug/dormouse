@@ -1265,7 +1265,11 @@ module.exports.pacedInputSegments = pacedInputSegments;
 // which reaches this process only as the generated `recovery.cjs` bundle. Taking
 // it as an option keeps this file — and its `node --test` suite — free of any
 // build artifact. `main.js` supplies the real one.
-module.exports.create = function create(send, ptyModule, { replay = false, sliceSince = null } = {}) {
+//
+// `onHelper(id, isHelper)` hears every helper decision — each spawn and each
+// promotion that succeeds — so the host's alerts, which keep a helper inert,
+// read this map's answer rather than keeping their own (docs/specs/alert.md).
+module.exports.create = function create(send, ptyModule, { replay = false, sliceSince = null, onHelper = () => {} } = {}) {
   if (!ptyModule || typeof ptyModule.spawn !== 'function') {
     throw new TypeError('create() requires a node-pty compatible module');
   }
@@ -1351,6 +1355,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
       send("exit", { id, exitCode: 1 });
       return;
     } else helpers.delete(id);
+    onHelper(id, helpers.has(id));
 
     let p;
     try {
@@ -1504,12 +1509,6 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
     return ptys.has(id);
   }
 
-  /** Whether `id` is a helper, as validated at its spawn or promotion: the
-   *  host's alerts mirror this after each (docs/specs/alert.md -> Pane Header). */
-  function isHelper(id) {
-    return helpers.has(id);
-  }
-
   function kill(id) {
     helpers.delete(id);
     sessions.delete(id);
@@ -1623,6 +1622,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
           if (!sessions.has(request.id) || !validHelperOwner(request.id, request.restore)) throw new Error('Invalid helper owner');
           helpers.set(request.id, { parentId: request.restore.parentId, command: request.restore.command });
         } else helpers.delete(request.id);
+        onHelper(request.id, helpers.has(request.id));
       } else if (request.op === 'openDirectory') {
         if (typeof request.path !== 'string' || !path.isAbsolute(request.path) || request.path.includes('\0') || !directoryExists(request.path)) throw new Error('Directory is unavailable');
         const nativePath = fs.realpathSync(request.path);
@@ -1765,7 +1765,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
     send('shells', { shells: detectAvailableShells(), requestId });
   }
 
-  return { spawn, write, resize, hasPty, isHelper, kill, killAll, list, context,
+  return { spawn, write, resize, hasPty, kill, killAll, list, context,
     getCwd, getCwds, getOpenPorts, getOpenPortsMany, interrupt, gracefulKill, getShells,
     liveIds, receivedChars, outputSince, mark };
 };

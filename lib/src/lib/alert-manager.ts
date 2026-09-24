@@ -158,10 +158,6 @@ export type EngagementLapse = 'idle' | 'leave';
 
 const NOT_ENGAGED: Engagement = { present: false, focusId: null };
 
-/** The one viewer of a manager that serves a single renderer realm: the fake
- *  adapter's. */
-export const LOCAL_VIEWER = 'local';
-
 export function normalizeActivityNotification(value: unknown): ActivityNotification | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
@@ -1148,6 +1144,11 @@ export class AlertManager {
     this.setViewer(viewerId, NOT_ENGAGED, 'leave');
   }
 
+  /** Every present viewer. An absent one engages nothing, so it is not kept. */
+  viewerIds(): string[] {
+    return [...this.viewers.keys()];
+  }
+
   /**
    * A human interacted with the Session. Both kinds clear the ring and whatever
    * it held or deferred, and mark the running command seen; `input` — keys, a
@@ -1249,6 +1250,12 @@ export class AlertManager {
     };
   }
 
+  /** Whether `id` has state to publish: an entry that is not a helper's.
+   *  Exactly the ids {@link getAllStates} answers. */
+  has(id: string): boolean {
+    return this.entries.has(id) && !this.helpers.has(id);
+  }
+
   getAllStates(): Map<string, AlertState> {
     const result = new Map<string, AlertState>();
     for (const [id] of this.entries) {
@@ -1280,8 +1287,7 @@ export class AlertManager {
   /**
    * A new PTY generation under `id`: what the old one left goes as on
    * `remove`, but no tombstone, since the output about to arrive is the new
-   * Session's own. A host whose restore seeds after the spawn calls this at
-   * the spawn; one that seeds before it must not.
+   * Session's own.
    */
   restart(id: string): void {
     this.remove(id);

@@ -24,6 +24,8 @@
 
 **Why the reply classifier is the narrow one.** The prompt recorder filters every CSI/SS3 sequence because it cannot interpret them as command text. Reusing that filter here ignored real encoded keys, while its omission of DCS let device-query replies acknowledge background panes; regression tests reproduced both failures in September 2026. The narrower reply classifier already used for replay and untouched-session tracking separates keys from replies without changing live PTY forwarding. Mouse-only chunks need a separate guard: the narrower classifier does not include mouse encodings, and inside programs can request hover and wheel reports without a click. Those reports otherwise dismiss a ring and cancel its pending alarms. Actual clicks already acknowledge through the Pane's DOM handler.
 
+**Why human input rides its write.** The echo of a keystroke comes back from the PTY within milliseconds, so the acknowledgement that opens the echo window has to be in effect before the bytes are written. As a separate command it would race the write across the host boundary, and an echo that won would count as the program working.
+
 **Why the echo window.** The detector cannot tell a program's output from the echo of the user's own keys: typing a draft into a watched `claude` pane at seven keys a second built BUSY from echo alone, so leaving the pane mid-draft rang it, and a parked `dor await --until quiet` resolved on the half-typed draft (audit probes, 2026-09-23). A recorded Claude Code 2.1 session echoed each key within 10 ms; 250 ms covers a TUI's redraw of its input box and still leaves a program's real response to `Enter` counted from its first quarter second.
 
 **Why a completion inside the echo window neither rings nor holds.** It answers the keystroke: a bell on a failed Tab completion, the exit `Ctrl-C` just caused, a `q` quitting a pager. Held, it would ring the pane the user is looking at the moment they sat back for the inactivity timeout.
@@ -68,7 +70,7 @@
 
 **Why the timeout ceiling exists at all.** `timeoutMs` is a safety rail on a blocking call inside an agent loop, not an alert-tuning knob. Like the inactivity timeout it originates a process away and ends up in `setTimeout`, whose delay is a signed 32-bit millisecond count. Anything past ~24.9 days overflows and fires immediately, turning a long park into an instant `timeout`.
 
-**Why an ended realm's awaits are cancelled, and answered synchronously.** A caller that can no longer be answered would otherwise go on absorbing completions the human would have been shown. Synchronously, because in VS Code the cancelled outcome would arrive a microtask after the router stopped posting and be dropped, leaving `dor` blocked on a reply that never comes. Standalone's sidecar answers the same way for one rule across both hosts; a standalone reload keeps its window label, so the window says `hello` rather than the host inferring a new realm from a label list that never changed.
+**Why an ended realm's awaits are cancelled, and answered synchronously.** A caller that can no longer be answered would otherwise go on absorbing completions the human would have been shown. Synchronously, because in VS Code the cancelled outcome would arrive a microtask after the router stopped posting and be dropped, leaving `dor` blocked on a reply that never comes. A standalone reload keeps its window label, so the window says `hello` rather than the host inferring a new realm from a label list that never changed.
 
 ## WATCHING Track
 
@@ -170,7 +172,7 @@ Guarding only completion leaves a stale `start` free to replace the active utter
 
 ## Live Workspace transfer
 
-The manager used to live in each standalone window, so a move had to snapshot its runtime — the ring and its episode, detector deadlines, the deferred notification — into the transfer content, resume it in the target, and bind a replay token so the since-mark replay's reports fired once; a reused persisted reminder had erased episodes and pending delivery instead, and a release removed the entry the other window still showed. With one manager in the host process nothing moves, and all of that went (2026-09). Per-sink receipts still travel because ring delivery is still scheduled in the renderer. Receipt consumption occurs at sink admission because there is no transactional acknowledgement tying audible sound or phone display to Workspace ownership (2026-09).
+Nothing moves because the manager left the standalone windows for the host process (`docs/specs/standalone.rationale.md` → Alerts). Per-sink receipts still travel because ring delivery is still scheduled in the renderer. Receipt consumption occurs at sink admission because there is no transactional acknowledgement tying audible sound or phone display to Workspace ownership (2026-09).
 
 ## Workspace union
 

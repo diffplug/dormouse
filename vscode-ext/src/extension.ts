@@ -69,7 +69,6 @@ function setupPanel(
   const router = attachRouter(channel, {
     reconnect: !!savedState,
     killOnDispose: true,
-    savedSession,
     getSelectedShell,
     context,
     // Reflect this panel's Workspace union onto the editor-tab title

@@ -22,10 +22,11 @@ const { gitInfo } = require('./git-info.cjs');
 const { createAgentBrowserHost } = require('./agent-browser-host.cjs');
 // Same pattern again: lib/src/host/remote/sidecar-entry.ts is the Burrow —
 // the relay socket, the enrollment, the ACL, and remote-api v1 — running next to
-// the PTYs it serves. See docs/specs/remote-api.md. The same bundle carries the
-// app's one AlertManager (lib/src/host/alert-host.ts), which its parse feeds,
-// and the two app-global alert stores bound to it. See docs/specs/alert.md.
-const { createSidecarBurrow, createSidecarAlerts } = require('./burrow.cjs');
+// the PTYs it serves (docs/specs/remote-api.md), and the app's one
+// AlertManager, which its parse feeds, in the host role VS Code's extension
+// host runs too (docs/specs/standalone.md -> "Alerts"). It handles every PTY
+// command the alerts must see.
+const { createSidecarHost } = require('./burrow.cjs');
 // Same pattern again: lib/src/host/recovery.ts is the agent-recovery capture
 // machine (shared with the VS Code extension host) plus the single-use record
 // store. See docs/specs/standalone.md -> "Agent recovery".
@@ -55,26 +56,21 @@ const mgr = create((event, data) => {
   // `pty:data` the host emits, never raw. A remote sink runs only after that
   // send, and the whole tap is wrapped so a throw is logged rather than fatal.
   try {
-    burrow.onPtyEvent(event, data);
+    host.onPtyEvent(event, data);
   } catch (err) {
     console.error(`[sidecar] burrow ${event} tap failed:`, err && err.message || err);
   }
   if (event !== 'data') send(`pty:${event}`, data);
   // `sliceSince` comes from the shared bundle above rather than living in
   // pty-core, so this host and the VS Code extension host read their replay
-  // buffers through one implementation.
-}, nodePty, { replay: true, sliceSince });
+  // buffers through one implementation. Each helper decision pty-core makes
+  // reaches the alerts, which keep a helper inert (docs/specs/alert.md).
+}, nodePty, { replay: true, sliceSince, onHelper: (id, helper) => host.alerts.setHelper(id, helper) });
 
-// One per app, like VS Code's extension host: every window is a viewer of it,
-// and its `alert:state` is routed to each Session's owner (docs/specs/standalone.md
-// -> "Alerts").
-const alerts = createSidecarAlerts({ send });
-
-const burrow = createSidecarBurrow({
+const host = createSidecarHost({
   send,
   stateDir: process.env.DORMOUSE_STATE_DIR,
   mgr,
-  alerts: alerts.manager,
 });
 
 // Dor Tools. Shares the app's state directory, so an approved repo stays
@@ -145,37 +141,11 @@ rl.on('line', (line) => {
 function handleLine(line) {
   try {
     const { event, data } = JSON.parse(line);
+    // The PTY lifecycle and I/O, the alerts and the Burrow.
+    if (host.handleCommand(event, data)) return;
     switch (event) {
-      // Told before the spawn: the id may be a live PTY's, and the parser for
-      // that generation must not carry a half-read sequence into the new one.
-      // pty-core validates a helper, so the alerts mirror its answer.
-      case 'pty:spawn':
-        burrow.onPtySpawn(data.id);
-        mgr.spawn(data.id, data.options);
-        alerts.setHelper(data.id, mgr.isHelper(data.id));
-        break;
-      // Human input is acknowledged in the same message as its write, so the
-      // echo window is open before any echo can arrive (docs/specs/alert.md ->
-      // Engagement).
-      case 'pty:input':
-        if (data.userInput === true) alerts.acknowledgeInput(data.id);
-        mgr.write(data.id, data.data, { paced: data.paced === true });
-        break;
-      case 'pty:resize':  mgr.resize(data.id, data.cols, data.rows); break;
-      case 'pty:kill':    mgr.kill(data.id); break;
-      // One window's own PTYs, and the answer names it so the host can route
-      // the list and every replay behind it back (docs/specs/standalone.md).
-      // Their alert state follows, routed to each owner: a reloaded or arriving
-      // window has no other way to learn it.
-      case 'pty:requestInit':
-        mgr.list(data?.ids, data?.forWindow, data?.requestId, data?.marks);
-        alerts.publish(data?.ids);
-        break;
       case 'pty:mark': mgr.mark(data?.ids, data?.requestId); break;
-      case 'pty:context':
-        mgr.context(data, data.requestId);
-        if (data.op === 'promote') alerts.setHelper(data.id, mgr.isHelper(data.id));
-        break;
+      case 'pty:context': mgr.context(data, data.requestId); break;
       case 'pty:getCwd':  mgr.getCwd(data.id, data.requestId); break;
       case 'pty:getCwds': mgr.getCwds(data.ids, data.requestId); break;
       case 'pty:getOpenPorts': mgr.getOpenPorts(data.id, data.requestId); break;
@@ -211,23 +181,8 @@ function handleLine(line) {
         }));
         break;
       case 'pty:gracefulKill': mgr.gracefulKill(data.ids, data.timeout, data.requestId); break;
-      // The webview's resolved terminal theme, so the parser here can answer
-      // OSC 10/11/12 (docs/specs/terminal-escapes.md → Supported OSCs).
-      // Which webviews will answer a Burrow ask (docs/specs/standalone.md
-      // -> "Burrow service"), and which are still alert viewers.
-      case 'burrow:windows':
-        burrow.setWindows(data?.labels);
-        alerts.setWindows(data?.labels);
-        break;
-      // Which windows an ask actually reached. Only the host knows: one naming
-      // a Surface goes to its owner alone (docs/specs/standalone.md ->
-      // "Burrow service").
-      case 'burrow:askDelivered': burrow.setAskDelivery(data); break;
-      case 'alert:command': alerts.handle(data); break;
-      case 'pty:themeColors': burrow.setThemeColors(data); break;
       case 'sidecar:shutdown': shutdown(); break;
       case 'dor:controlResponse': dorControl?.respond(data); break;
-      case 'burrow:command': burrow.handleCommand(data); break;
       case 'tool:control':
         respondAsync('tool:result', data.requestId, async () => ({
           result: await toolHost.handle(data.request),
@@ -329,8 +284,7 @@ async function shutdown() {
     ]);
   } catch {}
   dorControl?.close();
-  alerts.dispose();
-  burrow.dispose();
+  host.dispose();
   mgr.killAll();
   process.exit(0);
 }

@@ -175,7 +175,7 @@ Source of truth: `standalone/sidecar/package.json`,
 
 **The bridge.** Webview → sidecar is one generic passthrough invoke,
 `burrow_command(payload)`, writing `{"event":"burrow:command",
-"data":payload}` to stdin for the dispatch table's `handleCommand`. Sidecar →
+"data":payload}` to stdin for `createSidecarHost`. Sidecar →
 webview is three ordinary stdout events — `burrow:result`, `burrow:ask`,
 `burrow:event` — forwarded by Rust's generic `handle.emit`. **The correlation
 field is `burrowRequestId`, never `requestId`**: Rust swallows any sidecar line whose
@@ -208,7 +208,7 @@ rather than being dropped (`docs/specs/remote-api.md` → Directory).
 **The sidecar owns the parse**, standalone's only one
 (`docs/specs/terminal-escapes.md` → Parsing location, which owns the rules): a
 `pty-core` `data` event reaches the webview as the `pty:data`,
-`terminal:semanticEvents` and `terminal:protocolEvents` the bridge emits, never
+`terminal:semanticEvents` and `terminal:toolEvents` the bridge emits, never
 raw, and every attached Client and the app's `AlertManager` (§Alerts) read the
 same parse. **The webview pushes its
 resolved terminal colours** (`pty_theme_colors` → `pty:themeColors`) because this
@@ -226,56 +226,49 @@ before attach acknowledgement, and **a spawn or an exit retires that PTY
 generation's parser** so a half-read sequence cannot splice onto the next one.
 
 Source of truth: `lib/src/host/remote/service.ts`,
-`createSidecarSurfaceBridge` in `lib/src/host/remote/sidecar-entry.ts`,
-`standalone/sidecar/main.js` (the tap and the `burrow:command` case),
+`createSidecarSurfaceBridge` / `createSidecarHost` in
+`lib/src/host/remote/sidecar-entry.ts`, `standalone/sidecar/main.js` (the tap),
 `burrow_command` / `burrow_state_dir` / `pty_theme_colors` in
 `standalone/src-tauri/src/lib.rs`.
 
 ### Alerts
 
-The app's one `AlertManager` runs **in the sidecar**, beside the PTYs and the
-parse that feeds it, as VS Code's runs in its extension host
-(`docs/specs/vscode.md`); every window is one of its viewers
-(`docs/specs/alert.md` → Engagement) (rationale).
+The sidecar runs the alerts' host role (`docs/specs/alert.md`), the same
+`createAlertHost` VS Code's extension host runs, beside the PTYs and the parse
+that feeds it: one `AlertManager`, every window a realm under its label
+(rationale).
 
-- **Must feed it at the parse**, per batch: reports and command boundaries in
-  stream order (`applyTerminalEvents`), then visible output, and each exit. The
-  webview gets the semantic and Tool events alone; **never apply a report in a
-  webview**.
-- **Must start a respawned id's alert state over at `pty:spawn`**, ahead of the
-  cold-restore seed the webview sends after the spawn. Helper status mirrors
-  `pty-core` after each spawn and promotion (`isHelper`).
-- **Webview → sidecar is one passthrough, `alert_command(payload)`**, carrying
-  every `alert*` platform verb as an op (`AlertCommand` in
-  `lib/src/host/alert-protocol.ts`). **Rust stamps the invoking window's label**
-  on it as `window`, exactly as on `burrow_command`: the label is the viewer id
-  and the owner of the awaits a window parks.
-- **Human input rides its write**: `pty_write` carries `userInput`, and the
-  sidecar acknowledges before writing — never a separate `alert_command`. A
-  Client's write through the Burrow acknowledges the same way, and a Client's
-  repaint resize gets the resize grace.
-- **`hello` ends a label's previous realm** — sent at adapter init, a reload
-  keeping the label: its viewer is removed, its parked awaits cancelled and
-  answered. **A label gone from `burrow:windows` gets the same.**
-- **Sidecar → webview**: `alert:state {id, …}` on every change, routed to the
-  Session's owner (§Routing); `alert:awaitResult {awaitId, window, outcome}`,
-  broadcast and matched by the asking adapter's own random `awaitId` — **never
-  carrying a Session `id`**, which would route it to that Session's owner, **nor
-  a `requestId`**, which Rust swallows; and the two app-global stores' snapshots
-  (`docs/specs/alert.md` → Alarm settings).
+- **Must offer every stdin line to `createSidecarHost`'s `handleCommand` before
+  `main.js` dispatches it**: it owns the PTY commands the alerts must see —
+  spawn, input, resize, kill, reap, `pty:requestInit` — every alert and Burrow
+  command, the theme push.
+- **Webview → sidecar is one passthrough, `alert_command(payload)`**, and **Rust
+  stamps the invoking window's label on it as `window`**, over any the payload
+  claimed, exactly as on `burrow_command`. **An unstamped `alert:command` is
+  ignored.** Human input rides `pty_write`'s `userInput` instead
+  (`docs/specs/alert.md` → Engagement).
+- **`hello` at adapter init ends the label's previous realm**, a reload keeping
+  the label; **a label gone from `burrow:windows` ends its realm too.**
+- **An await's answer carries `forWindow`**, the label that parked it, which
+  Rust routes it to — **never a Session `id`**, which would route it to that
+  Session's owner, **nor a `requestId`**, which Rust swallows (rationale).
 - **Must re-send each listed Session's `alert:state` behind the answer to
   `pty:requestInit`**: a reloaded window and an arriving Workspace learn their
-  rings and TODOs nowhere else, since a live resume seeds nothing.
-- **A disposing adapter settles its own parked awaits `cancelled`.**
+  rings and TODOs nowhere else. A `sync` re-sends every Session's, and Rust
+  routes each to its owner.
+- **Rust passes a spawn's `options.alert` through opaque**
+  (`a_spawn_carries_its_persisted_alert_to_the_sidecar`); the sidecar seeds from
+  it (`docs/specs/alert.md` → Public State) and strips it before `pty-core`.
+- **`pty-core` is the one source of helper status**, reporting each spawn's
+  validation and each successful promotion through `onHelper`.
 
-Source of truth: `createSidecarAlerts` in `lib/src/host/alert-host.ts`;
-`createSidecarAlertClient` in `lib/src/host/alert-client.ts`;
-`createSidecarSurfaceBridge` in `lib/src/host/remote/sidecar-entry.ts`;
-`alert_command` / `pty_input_message` / `stamp_window` in
-`standalone/src-tauri/src/lib.rs`; the `pty:spawn`, `pty:input` and
-`pty:requestInit` cases in `standalone/sidecar/main.js`. Pinned by
-`lib/src/host/alert-host.test.ts`, `lib/src/host/alert-client.test.ts` and
-`standalone/sidecar/main-wiring.test.js`.
+Source of truth: `createSidecarHost` in `lib/src/host/remote/sidecar-entry.ts`;
+`create` in `standalone/sidecar/pty-core.js`; `alert_command` /
+`forward_stamped` / `stamped_message` / `pty_input_message` /
+`pty_spawn_message` in
+`standalone/src-tauri/src/lib.rs`. Pinned by `the sidecar host` in
+`lib/src/host/remote/sidecar-entry.test.ts` and
+`standalone/src/sidecar-adapters.test.ts`.
 
 ### Windows node subsystem
 
@@ -320,10 +313,10 @@ ordered**:
    headed Chrome window, and a hung agent-browser must not wedge the exit (as in
    the VS Code host's `deactivate()`; `docs/specs/dor-browser.md`).
 2. Close the dor control socket.
-3. `alerts.dispose()` (§Alerts).
-4. Dispose the Burrow service, dropping the relay socket and settling every
-   outstanding ask so nothing waits on a webview that is going away.
-5. `mgr.killAll()` (all PTYs), then `process.exit(0)`.
+3. `host.dispose()`: the alerts (§Alerts), then the Burrow service, dropping
+   the relay socket and settling every outstanding ask so nothing waits on a
+   webview that is going away.
+4. `mgr.killAll()` (all PTYs), then `process.exit(0)`.
 
 **A parent-PID watchdog polls every 2s** and self-triggers shutdown if the Tauri
 process disappears: stdin EOF is not always delivered when the host is
@@ -475,34 +468,37 @@ Source of truth: `standalone/src-tauri/src/workspaces.rs`;
 
 ### Routing
 
-Source of truth: `route` in `standalone/src-tauri/src/routing.rs`,
-`dispatch_sidecar_event` in `standalone/src-tauri/src/lib.rs`.
+*Showing* an id is the source still consuming it until its transfer mark, otherwise its owner.
 
 | Sidecar event | Key | Goes to |
 |---|---|---|
-| `pty:data` | `data.id` | its owner; the source until the id's mark passes, then dropped until its replay, its bytes being in it |
-| `terminal:semanticEvents` | `data.id` | its owner; the source until the id's mark passes, then dropped until its replay — the window receiving the replay re-derives them from it (rationale) |
-| `terminal:protocolEvents` | `data.id` | its owner; the source until the id's mark passes, then **held** and delivered, in order, behind the replay — or by a fail-open sweep, which sends none; at most `HELD_EVENTS_MAX` (256) per id, the oldest dropped past it (`held_events_come_back_in_order_and_bounded`) |
-| `pty:exit` | `data.id` | its owner, never suppressed |
+| `pty:data`, `terminal:semanticEvents`, `terminal:toolEvents` | `data.id` | the window showing it; after the mark, dropped until its replay, which carries the bytes and from which the receiving window re-derives the events (rationale) |
+| `pty:exit` | `data.id` | the window showing it, never suppressed |
 | `pty:replay` | `data.forWindow`, then `data.id` | the requesting window, including exited buffers; without an address, its owner; never suppressed |
-| `pty:marked` | `data.id` | the source still consuming the id, which then falls silent until its replay; otherwise its owner |
+| `pty:marked` | `data.id` | the window showing it; the id then falls silent until its replay |
 | `pty:list` | `data.forWindow` | the window that asked |
-| `alert:*` carrying `data.id` | `data.id` | its owner; the source until the id's mark passes (`an_exited_pty_stays_owned_until_it_is_killed`) |
+| `alert:*` | `data.forWindow`, then `data.id` | that window; else the window showing the Session; neither → every window |
 | `dor:controlRequest` | `params.workspace`, `params.window`, `data.surfaceId` | in that precedence: the window holding the named Workspace (§Workspace registry), the named window, the caller's Surface's owner; none → the focused window |
 | `dor:controlCancel` | `data.requestId` | the window its request went to; unknown → every window |
 | `burrow:ask` | `data.params.surfaceId` | its owner; a Surface with no PTY here, or an ask naming none, → every window (§Burrow service) |
 | everything else | — | every window |
 
 - **Ownership is minted only in `pty_spawn`**, dropped by `pty_kill` or the
-  window going away, and reassigned by a transfer. **Never dropped by an exit**:
-  the exited pane is still shown, and its `alert:state` must still reach it.
-  Minting also clears any suppression left under that id: no replay is coming
-  for a fresh PTY.
-- **A PTY event no window owns is dropped, and the shell is reaped.** Every PTY
-  is owned until killed, so an unowned id is one whose window went away, and a
-  broadcast would hand every sibling state for a pane none of them shows.
-  `Destroyed` SIGTERMs whatever the departing window still owned, which is what
-  the close ack-timeout path never killed.
+  window going away, and reassigned by a transfer. **Never dropped by an exit,
+  nor does an exit end a transfer's marking phase**: the exited pane is still
+  shown, its `alert:state` must still reach it, and the sidecar marks an exited
+  id like a live one (rationale; `an_exited_pty_stays_owned_until_it_is_killed`,
+  `an_exit_before_the_mark_leaves_the_transfer_to_finish`). Minting also clears
+  any suppression left under that id: no replay is coming for a fresh PTY.
+  `pty_kill` drops the owner before the sidecar removes the Session's alert
+  entry, so the removal's state reaches no window.
+- **A PTY event no window owns is dropped, and the shell is reaped.** An
+  unowned id is one whose window went away, and a broadcast would hand every
+  sibling state for a pane none of them shows. `Destroyed` sends `pty:reap` for
+  whatever the departing window still owned — the close ack-timeout path killed
+  nothing — and the sidecar removes those Sessions' alert entries and SIGTERMs
+  them. **The quit teardown's `pty:gracefulKill` removes no entry**: windows
+  still show those PTYs (`an_orphan_reap_removes_the_sessions_it_kills`).
 - **A `dor` request naming a Surface no window owns is answered with an error**
   — `No Dormouse window owns surface '<id>'` — never handed to a sibling, since
   acting on the wrong terminal is worse than failing.
@@ -522,6 +518,9 @@ Source of truth: `route` in `standalone/src-tauri/src/routing.rs`,
   by `standalone/scripts/window-listeners.test.mjs`.
 - **The focus order is the fallback owner** for a `dor` request naming no
   Surface, and the drag hit test's stand-in for a z-order the OS does not expose.
+
+Source of truth: `route` / `showing` in `standalone/src-tauri/src/routing.rs`;
+`dispatch_sidecar_event` / `pty_reap_message` in `standalone/src-tauri/src/lib.rs`.
 
 ### Boot and geometry
 
@@ -706,10 +705,9 @@ below reads that record rather than inferring itself from the suppression map.
    `pty:requestInit` with **that arrival's ids and no others**; `pty:list` and
    each `pty:replay` echo the collector's token. The target resumes over them,
    hydrates the notes and mounts the Workspace at the payload’s index, else the drop index.
-   **Never seeds or removes alert state**: it never left the sidecar, whose
-   answer to that `pty:requestInit` re-sends it (§Alerts; `never seeds or
-   removes the host's alert state for an arrival` in
-   `standalone/src/workspace-move.test.ts`).
+   **Never spawns or kills**: the Sessions' alert state never left the
+   sidecar, whose answer to that `pty:requestInit` re-sends it (§Alerts;
+   `docs/specs/alert.md` → Live Workspace transfer).
 4. **Target adopted** invokes `adopt_done(workspaceId)`. Rust retires the record,
    clears pending marks and suppression so live output routes to the target,
    and emits `workspace-departed` for
@@ -735,8 +733,8 @@ below reads that record rather than inferring itself from the suppression map.
   target releases its Sessions (never kills them), drops the notes, and closes
   the Workspace rather than leaving it live and persisted in two windows. **Must unwind from the received payload without preparing another move.**
 - **Must remove this window's unmounted semantic and Activity state when arrival
-  collection times out**, and never the host's alert entries, which the source
-  goes on showing. Source of truth: `discardArrival` in
+  collection times out**, and kill nothing: the source goes on showing those
+  Sessions. Source of truth: `discardArrival` in
   `standalone/src/workspace-move.ts`.
 - **A refused arrival hands the shells back.** The target's `adopt_failed`
   (a `planArrival` timeout, a missing list, a mount error) and a target
@@ -756,12 +754,13 @@ below reads that record rather than inferring itself from the suppression map.
   returns each id the content marked to the source *suppressed* and asks the
   sidecar for `outputSince(mark)` scoped to the source (`requestId`
   `handback-<workspaceId>`); that replay lifts the suppression and lands in the
-  existing xterms (`acceptHandBackReplay`), the held Tool events behind it.
+  existing xterms (`acceptHandBackReplay`).
   **Must record source cuts at `pty:marked`, retaining them through target
   replay and natural PTY exit until settlement, and carry replay ids in the failure event**; content
   submission and the source invoke reply may both still be pending. **Must discard
-  cuts on explicit kill**; an exited PTY is still owned, so a hand-back returns
-  it to the source like a live one (`a_pty_exit_keeps_its_cut_until_the_arrival_settles`).
+  cuts on explicit kill**; an exited PTY is still owned (§Routing), so a
+  hand-back returns it to the source like a live one
+  (`a_pty_exit_keeps_its_cut_until_the_arrival_settles`).
   **Must apply a handed-back PTY’s exit status after its replay**, leaving its
   existing pane dead with no running command
   (`settles the replayed command when a marked buffer belongs to an exited PTY` in
@@ -1343,6 +1342,6 @@ The bridge is a transport shim over the same sidecar protocol, not a second PTY 
 
 **A CORS preflight is the one carve-out**: an `OPTIONS` answers `204` carrying those headers *before* the token check, since it can never present the non-GET content type the gate demands. **Any other unauthorized caller gets the same `404 not found` as an unknown path**, so the port does not identify itself. The harness prints the token and a ready-made `curl` on startup.
 
-The harness **may omit** native-only desktop chrome (window controls, update checks) but **must preserve** every `PlatformAdapter` contract the app uses — PTY, control-request, clipboard, iframe-proxy, Burrow, agent-browser, and the sidecar's alerts (`alert_command` in, stamped with the one window label the harness simulates, `main`; their events back; §Alerts) — so a rule that only holds across the host boundary is exercised rather than answered by a private copy. **`BrowserSidecarHost.init()` resolves on the SSE stream being open, not on its construction**, so a seed cannot precede the stream that carries its reply; **must let retryable connection failures reconnect within the open timeout**; after a reconnect the adapter re-sends its last seeds so the stores republish (`resolves on the stream's open event, not on construction` in `standalone/src/browser-sidecar-host.test.ts`; `re-sends its last seeds when the event stream reconnects` in `standalone/src/browser-sidecar-adapter.test.ts`). Fatal startup handling follows §Boot sequence. It **must mirror** standalone's Session-persistence answer (`docs/specs/transport.md` → "The governing rule"): one `PersistedWindow` per window, in `localStorage` rather than the Rust file store, and the same agent-recovery *claim* against a per-run temp state directory. **The harness must never capture**: a reload there is a live resume over PTYs that survive it, and capture is a quit-only step (§Agent recovery). **Tauri APIs must not be required at static module-evaluation time** when `VITE_DORMOUSE_BROWSER_DEV_HOST` is set — a normal browser loads the page, not the Tauri WebView.
+The harness **may omit** native-only desktop chrome (window controls, update checks) but **must preserve** every `PlatformAdapter` contract the app uses — PTY, control-request, clipboard, iframe-proxy, Burrow, agent-browser, and the sidecar's alerts (`alert_command` in, stamped with the one window label the harness simulates, `main`; their events back; §Alerts) — so a rule that only holds across the host boundary is exercised rather than answered by a private copy. **`BrowserSidecarHost.init()` resolves on the SSE stream being open, not on its construction**, so a seed cannot precede the stream that carries its reply; **must let retryable connection failures reconnect within the open timeout**; after a reconnect the adapter sends `sync`, since whatever the sidecar sent while the stream was down is gone (`resolves on the stream's open event, not on construction` in `standalone/src/browser-sidecar-host.test.ts`; `asks the sidecar to sync when the event stream reconnects` in `standalone/src/browser-sidecar-adapter.test.ts`). Fatal startup handling follows §Boot sequence. It **must mirror** standalone's Session-persistence answer (`docs/specs/transport.md` → "The governing rule"): one `PersistedWindow` per window, in `localStorage` rather than the Rust file store, and the same agent-recovery *claim* against a per-run temp state directory. **The harness must never capture**: a reload there is a live resume over PTYs that survive it, and capture is a quit-only step (§Agent recovery). **Tauri APIs must not be required at static module-evaluation time** when `VITE_DORMOUSE_BROWSER_DEV_HOST` is set — a normal browser loads the page, not the Tauri WebView.
 
 Source of truth: `standalone/scripts/dev-agent-browser.mjs`, `standalone/scripts/dev-run.mjs`, `standalone/scripts/dev-host-guard.mjs`, `standalone/src/browser-sidecar-host.ts`, `standalone/src/browser-sidecar-adapter.ts`; `stepBurrow` in `scripts/pairing-walkthrough/steps.mjs`; `sessionForKey` in `dor-lib-common/src/agent-browser.ts`.

@@ -1,93 +1,88 @@
 import type { AwaitHandle, AwaitOptions, AwaitOutcome, Engagement, EngagementLapse } from '../lib/alert-manager';
 import type { AlertSettings } from '../lib/alert-settings-model';
 import type { AlertStateDetail, PlatformAdapter } from '../lib/platform/types';
-import type { PersistedAlertState } from '../lib/session-types';
-import {
-  ALERT_AWAIT_RESULT_EVENT,
-  ALERT_STATE_EVENT,
-  type AlertAwaitResult,
-  type AlertCommand,
-} from './alert-protocol';
+import { isAlertEvent, type AlertAwaitResult, type AlertCommand, type AlertEvents } from './alert-protocol';
 
 /**
- * A standalone window's end of the sidecar's alerts (`lib/src/host/alert-host.ts`):
- * every `alert*` platform method as one command, and the sidecar's events back
- * to the renderer's handlers. Shared by both standalone adapters, which differ
- * only in how a command travels and an event arrives.
- *
- * Every method is a closure, so an adapter may take them as its own members.
+ * A renderer realm's end of its host's alerts (`lib/src/host/alert-host.ts`),
+ * shared by every adapter whose host holds the `AlertManager` — VS Code and
+ * both standalone adapters, which differ only in how a command travels and an
+ * event arrives: each `alert*` platform verb is one `AlertCommand`, and the
+ * host's events reach the renderer's handlers.
  */
-export type SidecarAlertMethods = Required<Pick<
+export type AlertClientMethods = Required<Pick<
   PlatformAdapter,
-  | 'alertRemove'
   | 'alertSetWatchedCommands'
   | 'alertSetCommandWatched'
   | 'alertPublishSettings'
   | 'alertDismiss'
   | 'alertEngagement'
   | 'alertAcknowledge'
-  | 'alertResize'
   | 'alertToggleTodo'
   | 'alertClearTodo'
   | 'alertAwait'
-  | 'alertSeed'
   | 'onAlertState'
   | 'onWatchedCommands'
   | 'onAlertSettings'
 >>;
 
-export interface SidecarAlertClient extends SidecarAlertMethods {
-  /** One sidecar event. Returns whether it was an alert event. */
+export interface AlertClient {
+  /** Every `alert*` platform method, each a closure, so an adapter can take
+   *  them as its own members (`Object.assign(this, client.methods)`). */
+  readonly methods: AlertClientMethods;
+  /** One host event. Returns whether it was an alert event. */
   onEvent(event: string, data: unknown): boolean;
-  /** This realm is new — a boot or a reload: what the window's previous realm
-   *  engaged or parked is gone (`hello`). */
+  /** This realm is new — a boot or a reload: what the previous realm under
+   *  the same name engaged or parked is gone. */
   hello(): void;
-  /** Offer the last startup seeds again, so the sidecar republishes both
-   *  stores to a stream that dropped their broadcasts. */
-  reofferSeeds(): void;
+  /** Ask the host to re-send this realm's Sessions' state and both stores,
+   *  for a transport that may have dropped them. */
+  sync(): void;
   /** Settle every await this realm parked `cancelled`, synchronously: nothing
    *  will deliver their outcomes once the adapter is gone. */
   dispose(): void;
 }
 
-export function createSidecarAlertClient(send: (command: AlertCommand) => void): SidecarAlertClient {
+/**
+ * A short random component for this realm's `awaitId`s: a standalone host
+ * answers from one process for every window, so a plain counter would let two
+ * realms mint the same id.
+ */
+function randomTag(): string {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  return uuid ? uuid.slice(0, 8) : Math.random().toString(36).slice(2, 10);
+}
+
+export function createAlertClient(send: (command: AlertCommand) => void): AlertClient {
   const stateHandlers = new Set<(detail: AlertStateDetail) => void>();
   const watchedHandlers = new Set<(names: string[]) => void>();
   const settingsHandlers = new Set<(settings: AlertSettings) => void>();
   const awaits = new Map<string, { resolve: (outcome: AwaitOutcome) => void; startedAt: number }>();
-  const seeds = new Map<string, AlertCommand>();
+  const tag = randomTag();
+  let awaitSeq = 0;
 
-  const seed = (command: AlertCommand): void => {
-    seeds.set(command.op, command);
-    send(command);
-  };
-
-  return {
-    alertRemove: (id) => send({ op: 'remove', id }),
-    alertSeed: (id: string, state: PersistedAlertState) => send({ op: 'seed', id, state }),
-    alertSetWatchedCommands: (names) => seed({ op: 'initializeWatchedCommands', names }),
-    // A delta, never a replacement, so a window that has not heard about a
-    // rule cannot drop it.
+  const methods: AlertClientMethods = {
+    alertSetWatchedCommands: (names) => send({ op: 'initializeWatchedCommands', names }),
+    // A delta, never a replacement, so a realm that has not heard about a rule
+    // cannot drop it.
     alertSetCommandWatched: (name, watched) => send({ op: 'setCommandWatched', name, watched }),
-    alertPublishSettings: (settings, opts) => {
-      if (opts.seed) seed({ op: 'initializeSettings', settings });
-      else send({ op: 'updateSettings', settings });
-    },
+    alertPublishSettings: (settings, opts) =>
+      send({ op: opts.seed ? 'initializeSettings' : 'updateSettings', settings }),
     alertDismiss: (id) => send({ op: 'dismiss', id }),
-    alertEngagement: (state: Engagement, lapse?: EngagementLapse) => send({ op: 'engagement', state, ...(lapse ? { lapse } : {}) }),
+    alertEngagement: (state: Engagement, lapse?: EngagementLapse) =>
+      send({ op: 'engagement', state, ...(lapse ? { lapse } : {}) }),
     alertAcknowledge: (id) => send({ op: 'acknowledge', id }),
-    alertResize: (id) => send({ op: 'resize', id }),
     alertToggleTodo: (id) => send({ op: 'toggleTodo', id }),
     alertClearTodo: (id) => send({ op: 'clearTodo', id }),
 
     /**
-     * Parked in the sidecar, which owns the wake condition and the ceiling; only
-     * the outcome crosses back, broadcast under this adapter's own random id.
-     * `cancel()` asks rather than answers: the `cancelled` outcome arrives on
-     * the same result as every other, so a claim is never released twice.
+     * Parked in the host, which owns the wake condition and the ceiling; only
+     * the outcome crosses back, under this realm's own id. `cancel()` asks
+     * rather than answers: the `cancelled` outcome arrives like every other, so
+     * a claim is never released twice.
      */
     alertAwait(id: string, options: AwaitOptions): AwaitHandle {
-      const awaitId = `await-${crypto.randomUUID()}`;
+      const awaitId = `await-${tag}-${++awaitSeq}`;
       const promise = new Promise<AwaitOutcome>((resolve) => {
         awaits.set(awaitId, { resolve, startedAt: Date.now() });
       });
@@ -103,45 +98,48 @@ export function createSidecarAlertClient(send: (command: AlertCommand) => void):
     onAlertState: (handler) => void stateHandlers.add(handler),
     onWatchedCommands: (handler) => void watchedHandlers.add(handler),
     onAlertSettings: (handler) => void settingsHandlers.add(handler),
+  };
+
+  return {
+    methods,
 
     onEvent(event, data) {
+      if (!isAlertEvent(event)) return false;
       switch (event) {
-        case ALERT_STATE_EVENT: {
-          const detail = data as AlertStateDetail;
-          if (typeof detail?.id !== 'string') return true;
-          for (const handler of stateHandlers) handler(detail);
-          return true;
+        case 'alert:state': {
+          // Forwarded whole, so a new `AlertState` field needs no edit here.
+          const detail = data as AlertEvents['alert:state'] | null;
+          if (typeof detail?.id === 'string') for (const handler of stateHandlers) handler(detail);
+          break;
         }
-        case ALERT_AWAIT_RESULT_EVENT: {
+        case 'alert:awaitResult': {
           const result = data as Partial<AlertAwaitResult> | null;
           const parked = typeof result?.awaitId === 'string' ? awaits.get(result.awaitId) : undefined;
-          // Another window's await, or one this realm already settled.
-          if (!parked || !result?.outcome) return true;
+          // Another realm's await, or one this realm already settled.
+          if (!parked || !result?.outcome) break;
           awaits.delete(result.awaitId!);
           parked.resolve(result.outcome);
-          return true;
+          break;
         }
         case 'alert:watchedCommands': {
-          const names = (data as { names?: string[] } | null)?.names ?? [];
+          const names = (data as Partial<AlertEvents['alert:watchedCommands']> | null)?.names ?? [];
           for (const handler of watchedHandlers) handler(names);
-          return true;
+          break;
         }
         case 'alert:settings': {
-          const settings = (data as { settings?: AlertSettings } | null)?.settings;
-          // A broadcast with no blob is dropped, not applied as "no settings".
+          const settings = (data as Partial<AlertEvents['alert:settings']> | null)?.settings;
+          // A snapshot with no blob is dropped, not applied as "no settings".
           if (settings) for (const handler of settingsHandlers) handler(settings);
-          return true;
+          break;
         }
         default:
-          return false;
+          event satisfies never;
       }
+      return true;
     },
 
     hello: () => send({ op: 'hello' }),
-
-    reofferSeeds() {
-      for (const command of seeds.values()) send(command);
-    },
+    sync: () => send({ op: 'sync' }),
 
     dispose() {
       for (const [awaitId, parked] of [...awaits]) {

@@ -42,14 +42,10 @@ pub enum Route<'a> {
     Broadcast,
     /// Nothing is delivered: the id is mid-transfer and what this carries is
     /// already in the replay the new owner is about to receive (its bytes, or
-    /// the semantic events the owner re-derives from them), or no window owns it
-    /// at all and every window would otherwise take state for a pane none of
-    /// them shows.
+    /// the semantic and Tool events the owner re-derives from them), or no
+    /// window owns it at all and every window would otherwise take state for a
+    /// pane none of them shows.
     Drop,
-    /// Kept for the id's next owner: the id is mid-transfer. The caller queues
-    /// it and delivers the queue, in order, right after the replay that lifts
-    /// the suppression — or when a fail-open sweep lifts it with no replay.
-    Hold,
     /// A `dor` request naming no Surface belongs to whichever window the user
     /// is looking at. Resolved by the caller, which alone holds the focus order.
     Focused,
@@ -74,7 +70,9 @@ pub struct RouteView<'a> {
     /// Every window's Workspaces, for a request naming one explicitly.
     pub registry: &'a crate::workspaces::Registry,
     /// Ids whose transfer is between the invoke and the sidecar's `marked`
-    /// line, each with the source still consuming its output.
+    /// line, each with the source still consuming its output. An id is in at
+    /// most one of `marking` and `awaiting_replay`: its mark ends the one and
+    /// begins the other.
     pub marking: &'a HashMap<String, String>,
 }
 
@@ -102,65 +100,34 @@ fn owner<'a>(map: &'a HashMap<String, String>, id: &str) -> Route<'a> {
     }
 }
 
+/// The window showing `id`: the source still consuming it until its mark
+/// passes, otherwise its owner.
+fn showing<'a>(view: &RouteView<'a>, id: &str) -> Route<'a> {
+    match view.marking.get(id) {
+        Some(source) => Route::EmitTo(source.as_str()),
+        None => owner(view.owners, id),
+    }
+}
+
 /// The one decision every sidecar stdout line passes through.
 pub fn route<'a>(event: &str, data: &'a JsonValue, view: &RouteView<'a>) -> Route<'a> {
     match event {
         // Terminal traffic, keyed by the PTY it came from. Until the sidecar's
         // `marked` line passes, the source keeps consuming: it serializes what
         // it holds at that line, and the target replays only what follows.
-        "pty:data" => {
-            let Some(id) = str_field(data, "id") else {
-                return Route::Broadcast;
-            };
-            if let Some(source) = view.marking.get(id) {
-                return Route::EmitTo(source.as_str());
-            }
-            if view.awaiting_replay.contains_key(id) {
-                return Route::Drop;
-            }
-            owner(view.owners, id)
-        }
-        // Derived once at the sidecar's parse site. The replay is the raw bytes,
-        // OSCs included, and the window receiving it re-derives these from it —
-        // a held copy would apply on top of what the replay rebuilt, and
-        // `commandStart` is not idempotent — so a semantic event goes with its
-        // chunk: to the source until the mark, dropped while suppressed.
-        "terminal:semanticEvents" => {
-            let Some(id) = str_field(data, "id") else {
-                return Route::Broadcast;
-            };
-            if let Some(source) = view.marking.get(id) {
-                return Route::EmitTo(source.as_str());
-            }
-            if view.awaiting_replay.contains_key(id) {
-                return Route::Drop;
-            }
-            owner(view.owners, id)
-        }
-        // The Tool half of a parse (announcements, state, command-start resets;
-        // reports stay with the sidecar's AlertManager): held for the id's next
-        // owner and delivered behind its replay. The replay re-derives the same
-        // events, and applying that ordered run again leaves the state it left;
-        // the hold is what a fail-open sweep, which sends no replay, delivers.
-        "terminal:protocolEvents" => {
-            let Some(id) = str_field(data, "id") else {
-                return Route::Broadcast;
-            };
-            if let Some(source) = view.marking.get(id) {
-                return Route::EmitTo(source.as_str());
-            }
-            if view.awaiting_replay.contains_key(id) {
-                return Route::Hold;
-            }
-            owner(view.owners, id)
-        }
+        // After it, dropped until the replay: the replay is the raw bytes, OSCs
+        // included, and the window receiving it re-derives the semantic and
+        // Tool events from them — a held copy would apply on top of what the
+        // replay rebuilt, and `commandStart` is not idempotent.
+        "pty:data" | "terminal:semanticEvents" | "terminal:toolEvents" => match str_field(data, "id") {
+            Some(id) if view.awaiting_replay.contains_key(id) => Route::Drop,
+            Some(id) => showing(view, id),
+            None => Route::Broadcast,
+        },
         // The split point itself goes to the window still consuming; the
         // caller then turns the id's suppression on behind it.
         "pty:marked" => match str_field(data, "id") {
-            Some(id) => match view.marking.get(id) {
-                Some(source) => Route::EmitTo(source.as_str()),
-                None => owner(view.owners, id),
-            },
+            Some(id) => showing(view, id),
             None => Route::Broadcast,
         },
         // Never suppressed: a replay is exactly what the suppression is waiting
@@ -168,8 +135,15 @@ pub fn route<'a>(event: &str, data: &'a JsonValue, view: &RouteView<'a>) -> Rout
         "pty:replay" if str_field(data, "forWindow").is_some() => {
             Route::EmitTo(str_field(data, "forWindow").unwrap())
         }
-        "pty:exit" | "pty:replay" => match str_field(data, "id") {
+        "pty:replay" => match str_field(data, "id") {
             Some(id) => owner(view.owners, id),
+            None => Route::Broadcast,
+        },
+        // Never suppressed either: no replay carries an exit — the list ahead
+        // of it does. Before the mark it goes to the source, which serializes
+        // the pane it holds.
+        "pty:exit" => match str_field(data, "id") {
+            Some(id) => showing(view, id),
             None => Route::Broadcast,
         },
         // The list answers one window's `pty:requestInit`, which named itself.
@@ -234,17 +208,19 @@ pub fn route<'a>(event: &str, data: &'a JsonValue, view: &RouteView<'a>) -> Rout
             Some(surface_id) => lookup(view.owners, surface_id),
             None => Route::Broadcast,
         },
-        // `alert:*` carrying an id is about one Session, and goes where its
-        // output does until the mark: the source still shows it. After the mark
-        // the new owner's collection re-sends it (§Alerts). What carries none —
-        // the two app-global stores, an await's result — reaches everyone.
-        _ if event.starts_with("alert:") => match str_field(data, "id") {
-            Some(id) => match view.marking.get(id) {
-                Some(source) => Route::EmitTo(source.as_str()),
-                None => owner(view.owners, id),
-            },
-            None => Route::Broadcast,
-        },
+        // `alert:*` naming a window (an await's result) goes to it. One
+        // carrying an id is about one Session, and goes to the window showing
+        // it: after the mark the new owner's collection re-sends it (§Alerts).
+        // What carries neither — the two app-global stores — reaches everyone.
+        _ if event.starts_with("alert:") => {
+            if let Some(label) = str_field(data, "forWindow") {
+                return Route::EmitTo(label);
+            }
+            match str_field(data, "id") {
+                Some(id) => showing(view, id),
+                None => Route::Broadcast,
+            }
+        }
         _ => Route::Broadcast,
     }
 }
@@ -422,7 +398,7 @@ pub fn boot_list_ids(owned: Vec<String>, arrivals: &Arrivals) -> Vec<String> {
 }
 
 /// Release every suppression older than `max` that **no arrival claims**,
-/// returning each released id and its held events together.
+/// returning each released id.
 ///
 /// Fail open, but only defensively: a suppression whose arrival record is gone
 /// is bookkeeping nothing will ever lift, while a real arrival's is lifted by
@@ -430,61 +406,19 @@ pub fn boot_list_ids(owned: Vec<String>, arrivals: &Arrivals) -> Vec<String> {
 /// have its shells unsilenced into a window that has not resumed them yet.
 pub fn sweep_awaiting(
     map: &mut HashMap<String, Instant>,
-    held: &mut HashMap<String, Vec<HeldEvent>>,
     now: Instant,
     max: Duration,
     arriving: &HashSet<String>,
-) -> Vec<(String, Vec<HeldEvent>)> {
-    // The steady state: nothing is transferring, so this costs one branch.
-    if map.is_empty() {
-        return Vec::new();
-    }
-    let stale: Vec<String> = map
-        .iter()
-        .filter(|(id, at)| now.duration_since(**at) >= max && !arriving.contains(*id))
-        .map(|(id, _)| id.clone())
-        .collect();
-    stale.into_iter().map(|id| {
-        let queue = lift_suppression(map, held, &id);
-        (id, queue)
-    }).collect()
-}
-
-/// One event held for an id mid-transfer, in arrival order.
-pub type HeldEvent = (String, JsonValue);
-
-/// Queue an event for an id whose suppression is up. Bounded per id: a
-/// transfer lasts seconds, and an id that outruns the bound is one whose
-/// arrival is wedged, which the arrival watchdog hands back anyway. Past the
-/// bound the oldest goes, so a long gap delivers its suffix.
-pub fn hold_event(
-    held: &mut HashMap<String, Vec<HeldEvent>>,
-    id: &str,
-    event: &str,
-    data: JsonValue,
-) {
-    let queue = held.entry(id.to_string()).or_default();
-    if queue.len() >= HELD_EVENTS_MAX {
-        queue.remove(0);
-    }
-    queue.push((event.to_string(), data));
-}
-
-/// Cap on events held per id.
-pub const HELD_EVENTS_MAX: usize = 256;
-
-/// Lift `id`'s transfer suppression. The suppression and what was held under
-/// it go together — one site clearing the map and leaving the queue would
-/// deliver a stale gap ahead of the next transfer's own — so this is the one
-/// way out of both, and the caller decides whether the queue is delivered
-/// (behind the replay) or discarded (a hand-back, a reuse, an exit).
-pub fn lift_suppression(
-    awaiting_replay: &mut HashMap<String, Instant>,
-    held: &mut HashMap<String, Vec<HeldEvent>>,
-    id: &str,
-) -> Vec<HeldEvent> {
-    awaiting_replay.remove(id);
-    held.remove(id).unwrap_or_default()
+) -> Vec<String> {
+    let mut released = Vec::new();
+    map.retain(|id, at| {
+        let stale = now.duration_since(*at) >= max && !arriving.contains(id);
+        if stale {
+            released.push(id.clone());
+        }
+        !stale
+    });
+    released
 }
 
 /// The next `ws-<n>`, above every label given — live windows and saved
@@ -620,14 +554,16 @@ mod tests {
         ids.iter().map(|id| ((*id).to_string(), now)).collect()
     }
 
+    /// A routing state whose `owners` are exactly these pairs.
+    fn owning(pairs: &[(&str, &str)]) -> crate::RoutingState {
+        crate::RoutingState { owners: labels(pairs), ..Default::default() }
+    }
+
     /// An explicit target crosses windows; an unplaceable one falls through to
     /// the caller's window, which refuses it by name.
     #[test]
     fn an_explicit_target_routes_to_the_window_holding_it() {
-        let owned = labels(&[("a", "main"), ("b", "ws-2")]);
-        let none = awaiting(&[]);
-        let no_dor = HashMap::new();
-        let no_marking: HashMap<String, String> = HashMap::new();
+        let state = owning(&[("a", "main"), ("b", "ws-2")]);
         let mut registry = crate::workspaces::Registry::default();
         crate::workspaces::report(
             &mut registry,
@@ -639,13 +575,7 @@ mod tests {
             "ws-2",
             vec![crate::workspaces::Entry { id: "workspace-5".into(), name: "Docs".into(), active: true }],
         );
-        let view = RouteView {
-            owners: &owned,
-            awaiting_replay: &none,
-            dor_targets: &no_dor,
-            registry: &registry,
-            marking: &no_marking,
-        };
+        let view = state.view(&registry);
         let from_main = |params: JsonValue| json!({ "surfaceId": "a", "params": params });
         assert_eq!(
             route("dor:controlRequest", &from_main(json!({ "workspace": "workspace:5" })), &view),
@@ -678,18 +608,12 @@ mod tests {
     /// Every row of the routing table (docs/specs/standalone.md -> "Windows").
     #[test]
     fn routes_every_sidecar_event_to_its_window() {
-        let owned = labels(&[("a", "main"), ("b", "ws-2")]);
-        let none = awaiting(&[]);
-        let dor = labels(&[("dor-7", "ws-2")]);
-        let no_registry = crate::workspaces::Registry::default();
-        let no_marking: HashMap<String, String> = HashMap::new();
-        let view = RouteView {
-            owners: &owned,
-            awaiting_replay: &none,
-            dor_targets: &dor,
-            registry: &no_registry,
-            marking: &no_marking,
+        let state = crate::RoutingState {
+            dor_targets: labels(&[("dor-7", "ws-2")]),
+            ..owning(&[("a", "main"), ("b", "ws-2")])
         };
+        let no_registry = crate::workspaces::Registry::default();
+        let view = state.view(&no_registry);
         let cases: &[(&str, JsonValue, Route)] = &[
             ("pty:data", json!({"id":"a"}), Route::EmitTo("main")),
             ("pty:data", json!({"id":"b"}), Route::EmitTo("ws-2")),
@@ -704,7 +628,7 @@ mod tests {
                 Route::EmitTo("ws-2"),
             ),
             (
-                "terminal:protocolEvents",
+                "terminal:toolEvents",
                 json!({"id":"a"}),
                 Route::EmitTo("main"),
             ),
@@ -721,12 +645,12 @@ mod tests {
             ("pty:list", json!({"ptys":[]}), Route::Broadcast),
             ("alert:state", json!({"id":"a"}), Route::EmitTo("main")),
             ("alert:settings", json!({"speech":true}), Route::Broadcast),
-            // An await's result names the window that asked, never a Session:
-            // every adapter hears it and matches its own `awaitId`.
+            // An await's result goes to the window that parked it, never to a
+            // Session's owner.
             (
                 "alert:awaitResult",
-                json!({"awaitId":"await-1","window":"ws-2","outcome":{"kind":"cancelled","waitedMs":0}}),
-                Route::Broadcast,
+                json!({"awaitId":"await-1","forWindow":"ws-2","outcome":{"kind":"cancelled","waitedMs":0}}),
+                Route::EmitTo("ws-2"),
             ),
             (
                 "dor:controlRequest",
@@ -780,18 +704,9 @@ mod tests {
 
     #[test]
     fn an_unowned_dor_surface_is_an_error_never_a_sibling() {
-        let owned = labels(&[("a", "main")]);
-        let none = awaiting(&[]);
-        let no_dor = HashMap::new();
+        let state = owning(&[("a", "main")]);
         let no_registry = crate::workspaces::Registry::default();
-        let no_marking: HashMap<String, String> = HashMap::new();
-        let view = RouteView {
-            owners: &owned,
-            awaiting_replay: &none,
-            dor_targets: &no_dor,
-            registry: &no_registry,
-            marking: &no_marking,
-        };
+        let view = state.view(&no_registry);
         assert_eq!(
             route(
                 "dor:controlRequest",
@@ -806,81 +721,43 @@ mod tests {
     }
 
     #[test]
-    fn held_events_come_back_in_order_and_bounded() {
-        let mut awaiting = awaiting(&["a", "b", "c"]);
-        let mut held = HashMap::new();
-        hold_event(&mut held, "a", "terminal:protocolEvents", json!({"n":1}));
-        hold_event(&mut held, "a", "terminal:protocolEvents", json!({"n":2}));
-        hold_event(&mut held, "b", "terminal:protocolEvents", json!({"n":3}));
-        assert_eq!(
-            lift_suppression(&mut awaiting, &mut held, "a"),
-            vec![
-                ("terminal:protocolEvents".to_string(), json!({"n":1})),
-                ("terminal:protocolEvents".to_string(), json!({"n":2})),
-            ]
-        );
-        // Both halves went together, and nothing of "b" went with them.
-        assert!(!awaiting.contains_key("a"));
-        assert!(awaiting.contains_key("b"));
-        assert!(lift_suppression(&mut awaiting, &mut held, "a").is_empty());
-        assert_eq!(held.len(), 1);
-
-        for n in 0..(HELD_EVENTS_MAX + 5) {
-            hold_event(&mut held, "c", "terminal:protocolEvents", json!({"n":n}));
-        }
-        let queue = lift_suppression(&mut awaiting, &mut held, "c");
-        assert_eq!(queue.len(), HELD_EVENTS_MAX);
-        assert_eq!(queue[0].1, json!({"n":5}));
-    }
-
-    #[test]
     fn a_transferring_pty_is_suppressed_until_its_replay() {
-        let owned = labels(&[("a", "ws-2")]);
-        let held = awaiting(&["a"]);
-        let none = awaiting(&[]);
-        let no_dor = HashMap::new();
         let no_registry = crate::workspaces::Registry::default();
-        let no_marking: HashMap<String, String> = HashMap::new();
-        let suppressed = RouteView {
-            owners: &owned,
-            awaiting_replay: &held,
-            dor_targets: &no_dor,
-            registry: &no_registry,
-            marking: &no_marking,
+        let suppressed = crate::RoutingState {
+            awaiting_replay: awaiting(&["a"]),
+            ..owning(&[("a", "ws-2")])
         };
+        let suppressed = suppressed.view(&no_registry);
         assert_eq!(route("pty:data", &json!({"id":"a"}), &suppressed), Route::Drop);
         // Before the mark passes, the source still consumes — and the mark
         // itself goes to it, so it knows where it stands.
-        let marking = labels(&[("a", "main")]);
-        let marking_view = RouteView {
-            owners: &owned,
-            awaiting_replay: &none,
-            dor_targets: &no_dor,
-            registry: &no_registry,
-            marking: &marking,
+        let marking = crate::RoutingState {
+            marking: labels(&[("a", "main")]),
+            ..owning(&[("a", "ws-2")])
         };
+        let marking_view = marking.view(&no_registry);
         assert_eq!(route("pty:data", &json!({"id":"a"}), &marking_view), Route::EmitTo("main"));
         assert_eq!(
             route("terminal:semanticEvents", &json!({"id":"a"}), &marking_view),
             Route::EmitTo("main")
         );
         assert_eq!(
-            route("terminal:protocolEvents", &json!({"id":"a"}), &marking_view),
+            route("terminal:toolEvents", &json!({"id":"a"}), &marking_view),
             Route::EmitTo("main")
         );
         assert_eq!(route("pty:marked", &json!({"id":"a"}), &marking_view), Route::EmitTo("main"));
+        assert_eq!(route("pty:exit", &json!({"id":"a"}), &marking_view), Route::EmitTo("main"));
         // Its alert state goes with its output: the source is still showing it.
         assert_eq!(route("alert:state", &json!({"id":"a"}), &marking_view), Route::EmitTo("main"));
-        // A chunk's semantic events are re-derived from the replay by whoever
-        // receives it: dropped with the chunk. Its Tool events are held, which
-        // is all a fail-open sweep has to deliver.
+        // A chunk's semantic and Tool events are re-derived from the replay by
+        // whoever receives it: dropped with the chunk.
         assert_eq!(
             route("terminal:semanticEvents", &json!({"id":"a"}), &suppressed),
             Route::Drop
         );
         assert_eq!(
-            route("terminal:protocolEvents", &json!({"id":"a"}), &suppressed),
-            Route::Hold
+            route("terminal:toolEvents", &json!({"id":"a"}), &suppressed),
+            Route::Drop
         );
         // The replay itself is never suppressed — it is what is being waited for.
         assert_eq!(
@@ -889,15 +766,9 @@ mod tests {
         );
         // Once the replay has been emitted the suppression is lifted and live
         // data reaches the new owner, behind the replay it belongs after.
-        let released = RouteView {
-            owners: &owned,
-            awaiting_replay: &none,
-            dor_targets: &no_dor,
-            registry: &no_registry,
-            marking: &no_marking,
-        };
+        let released = owning(&[("a", "ws-2")]);
         assert_eq!(
-            route("pty:data", &json!({"id":"a"}), &released),
+            route("pty:data", &json!({"id":"a"}), &released.view(&no_registry)),
             Route::EmitTo("ws-2")
         );
     }
@@ -908,19 +779,10 @@ mod tests {
         let now = Instant::now();
         map.insert("old".to_string(), now - Duration::from_secs(9));
         map.insert("fresh".to_string(), now);
-        let mut held = HashMap::new();
-        let event = ("pty:exit".to_string(), json!({"id": "old", "exitCode": 0}));
-        held.insert("old".to_string(), vec![event.clone()]);
-        held.insert("fresh".to_string(), vec![("pty:title".into(), json!({"id": "fresh"}))]);
-        let swept = sweep_awaiting(&mut map, &mut held, now, AWAITING_REPLAY_MAX, &HashSet::new());
-        assert_eq!(swept, vec![("old".to_string(), vec![event])]);
+        let swept = sweep_awaiting(&mut map, now, AWAITING_REPLAY_MAX, &HashSet::new());
+        assert_eq!(swept, vec!["old".to_string()]);
         assert!(!map.contains_key("old"));
-        assert!(!held.contains_key("old"));
         assert!(map.contains_key("fresh"));
-        assert!(held.contains_key("fresh"));
-        // Reusing this id cannot flush the previous gap's events.
-        map.insert("old".to_string(), now);
-        assert!(lift_suppression(&mut map, &mut held, "old").is_empty());
     }
 
     /// A cold boot slower than `AWAITING_REPLAY_MAX` must not have its shells
@@ -935,19 +797,15 @@ mod tests {
         let mut arrivals = Arrivals::new();
         queue_arrival(&mut arrivals, arrival("w1", "main", "ws-2", &["arriving"]));
 
-        let mut held = HashMap::new();
-        let event = ("pty:title".to_string(), json!({"id": "arriving"}));
-        held.insert("arriving".to_string(), vec![event.clone()]);
-        let swept = sweep_awaiting(&mut map, &mut held, now, AWAITING_REPLAY_MAX, &arrival_ids(&arrivals));
-        assert_eq!(swept, vec![("orphan".to_string(), vec![])]);
-        assert_eq!(held.get("arriving"), Some(&vec![event.clone()]));
+        let swept = sweep_awaiting(&mut map, now, AWAITING_REPLAY_MAX, &arrival_ids(&arrivals));
+        assert_eq!(swept, vec!["orphan".to_string()]);
         assert!(map.contains_key("arriving"));
 
         // Its record settled: the suppression is ordinary bookkeeping again.
         take_arrival(&mut arrivals, "w1", "ws-2").unwrap();
         assert_eq!(
-            sweep_awaiting(&mut map, &mut held, now, AWAITING_REPLAY_MAX, &arrival_ids(&arrivals)),
-            vec![("arriving".to_string(), vec![event])]
+            sweep_awaiting(&mut map, now, AWAITING_REPLAY_MAX, &arrival_ids(&arrivals)),
+            vec!["arriving".to_string()]
         );
     }
 

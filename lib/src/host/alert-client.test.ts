@@ -1,85 +1,72 @@
 import { describe, expect, it } from 'vitest';
-import { createSidecarAlertClient } from './alert-client';
-import { createSidecarAlerts } from './alert-host';
-import type { AlertCommand } from './alert-protocol';
+import { createAlertClient } from './alert-client';
+import { createAlertHost } from './alert-host';
+import { ALERT_EVENTS, type AlertCommand } from './alert-protocol';
 import type { AlertStateDetail } from '../lib/platform/types';
 import { DEFAULT_ALERT_SETTINGS } from '../lib/alert-settings-model';
+import { REPORT } from '../lib/alert-manager-test-utils';
 
 /**
- * A standalone window's end of the sidecar's alerts: every `alert*` platform
- * method is one command, and every answer comes back as a sidecar event
- * (`docs/specs/standalone.md` → "Alerts").
+ * A renderer realm's end of its host's alerts, shared by every adapter whose
+ * host holds the manager: every `alert*` platform method is one command, and
+ * every answer comes back as a host event (`docs/specs/alert.md`).
  */
 
 function client() {
   const commands: AlertCommand[] = [];
-  const alerts = createSidecarAlertClient((command) => void commands.push(command));
-  return { alerts, commands };
+  const alerts = createAlertClient((command) => void commands.push(command));
+  return { alerts, methods: alerts.methods, commands };
 }
 
-describe('commands', () => {
-  it('sends each alert verb as one command naming its op', () => {
-    const { alerts, commands } = client();
-    alerts.alertDismiss('p');
-    alerts.alertAcknowledge('p');
-    alerts.alertResize('p');
-    alerts.alertToggleTodo('p');
-    alerts.alertClearTodo('p');
-    alerts.alertRemove('p');
-    alerts.alertSeed('p', { status: 'WATCHING_DISABLED', todo: true, notification: null });
-    alerts.alertEngagement({ present: true, focusId: 'p' });
-    alerts.alertEngagement({ present: false, focusId: 'p' }, 'idle');
-    alerts.alertSetCommandWatched('cargo', true);
-    alerts.hello();
-    expect(commands).toEqual([
-      { op: 'dismiss', id: 'p' },
-      { op: 'acknowledge', id: 'p' },
-      { op: 'resize', id: 'p' },
-      { op: 'toggleTodo', id: 'p' },
-      { op: 'clearTodo', id: 'p' },
-      { op: 'remove', id: 'p' },
-      { op: 'seed', id: 'p', state: { status: 'WATCHING_DISABLED', todo: true, notification: null } },
-      { op: 'engagement', state: { present: true, focusId: 'p' } },
-      { op: 'engagement', state: { present: false, focusId: 'p' }, lapse: 'idle' },
-      { op: 'setCommandWatched', name: 'cargo', watched: true },
-      { op: 'hello' },
-    ]);
-  });
-
-  // The stream is the only path a store's snapshot takes back; a repeat seed is
-  // refused as a seed but still answered (`lib/src/lib/watched-command-host.ts`).
-  it('re-offers only its last seeds', () => {
-    const { alerts, commands } = client();
-    const quiet = { ...DEFAULT_ALERT_SETTINGS, speakEnabled: false };
-    alerts.alertSetWatchedCommands(['cargo']);
-    alerts.alertPublishSettings(quiet, { seed: true });
-    // Neither a mutation nor a non-seed publish is a seed.
-    alerts.alertSetCommandWatched('make', true);
-    alerts.alertPublishSettings({ ...quiet, pushEnabled: true }, { seed: false });
-    commands.length = 0;
-
-    alerts.reofferSeeds();
-    expect(commands).toEqual([
-      { op: 'initializeWatchedCommands', names: ['cargo'] },
-      { op: 'initializeSettings', settings: quiet },
-    ]);
-  });
+it('sends each alert verb as one command naming its op', () => {
+  const { alerts, methods, commands } = client();
+  methods.alertDismiss('p');
+  methods.alertAcknowledge('p');
+  methods.alertToggleTodo('p');
+  methods.alertClearTodo('p');
+  methods.alertEngagement({ present: true, focusId: 'p' });
+  methods.alertEngagement({ present: false, focusId: 'p' }, 'idle');
+  methods.alertSetWatchedCommands(['cargo']);
+  // A delta, never a replacement.
+  methods.alertSetCommandWatched('cargo', true);
+  methods.alertPublishSettings(DEFAULT_ALERT_SETTINGS, { seed: true });
+  methods.alertPublishSettings(DEFAULT_ALERT_SETTINGS, { seed: false });
+  alerts.hello();
+  alerts.sync();
+  expect(commands).toEqual([
+    { op: 'dismiss', id: 'p' },
+    { op: 'acknowledge', id: 'p' },
+    { op: 'toggleTodo', id: 'p' },
+    { op: 'clearTodo', id: 'p' },
+    { op: 'engagement', state: { present: true, focusId: 'p' } },
+    { op: 'engagement', state: { present: false, focusId: 'p' }, lapse: 'idle' },
+    { op: 'initializeWatchedCommands', names: ['cargo'] },
+    { op: 'setCommandWatched', name: 'cargo', watched: true },
+    { op: 'initializeSettings', settings: DEFAULT_ALERT_SETTINGS },
+    { op: 'updateSettings', settings: DEFAULT_ALERT_SETTINGS },
+    { op: 'hello' },
+    { op: 'sync' },
+  ]);
 });
 
 describe('events', () => {
+  it.each(ALERT_EVENTS)('claims %s, which every host sends', (event) => {
+    expect(client().alerts.onEvent(event, null)).toBe(true);
+  });
+
   it('hands the host\'s state and store snapshots to the renderer, and claims nothing else', () => {
-    const { alerts } = client();
+    const { alerts, methods } = client();
     const seen: unknown[] = [];
-    alerts.onAlertState((detail) => void seen.push(['state', detail]));
-    alerts.onWatchedCommands((names) => void seen.push(['watched', names]));
-    alerts.onAlertSettings((settings) => void seen.push(['settings', settings]));
+    methods.onAlertState((detail) => void seen.push(['state', detail]));
+    methods.onWatchedCommands((names) => void seen.push(['watched', names]));
+    methods.onAlertSettings((settings) => void seen.push(['settings', settings]));
 
     const detail = { id: 'p', status: 'ALERT_RINGING', todo: true } as unknown as AlertStateDetail;
-    expect(alerts.onEvent('alert:state', detail)).toBe(true);
-    expect(alerts.onEvent('alert:watchedCommands', { names: ['make'] })).toBe(true);
-    expect(alerts.onEvent('alert:settings', { settings: DEFAULT_ALERT_SETTINGS })).toBe(true);
-    // A broadcast with no blob is dropped, not applied as "no settings".
-    expect(alerts.onEvent('alert:settings', {})).toBe(true);
+    alerts.onEvent('alert:state', detail);
+    alerts.onEvent('alert:watchedCommands', { names: ['make'] });
+    alerts.onEvent('alert:settings', { settings: DEFAULT_ALERT_SETTINGS });
+    // A snapshot with no blob is dropped, not applied as "no settings".
+    alerts.onEvent('alert:settings', {});
     expect(alerts.onEvent('pty:data', { id: 'p', data: 'x' })).toBe(false);
 
     expect(seen).toEqual([['state', detail], ['watched', ['make']], ['settings', DEFAULT_ALERT_SETTINGS]]);
@@ -88,32 +75,39 @@ describe('events', () => {
 
 describe('awaits', () => {
   it('parks in the host and resolves on its own awaitId alone', async () => {
-    const { alerts, commands } = client();
-    const handle = alerts.alertAwait('p', { until: 'quiet', timeoutMs: 600_000 });
+    const { alerts, methods, commands } = client();
+    const handle = methods.alertAwait('p', { until: 'quiet', timeoutMs: 600_000 });
     const [parked] = commands as Array<Extract<AlertCommand, { op: 'await' }>>;
     expect(parked).toMatchObject({ op: 'await', id: 'p', until: 'quiet', timeoutMs: 600_000 });
-    expect(parked!.awaitId).toMatch(/^await-/);
 
     let outcome: unknown = null;
     void handle.promise.then((value) => { outcome = value; });
-    // Another window's await, broadcast to this one too.
-    alerts.onEvent('alert:awaitResult', { awaitId: 'await-other', window: 'ws-2', outcome: { kind: 'timeout', waitedMs: 1 } });
+    alerts.onEvent('alert:awaitResult', { awaitId: 'await-other', outcome: { kind: 'timeout', waitedMs: 1 } });
     await Promise.resolve();
     expect(outcome).toBeNull();
 
-    alerts.onEvent('alert:awaitResult', { awaitId: parked!.awaitId, window: 'main', outcome: { kind: 'resolved', cause: 'quiet', waitedMs: 7 } });
+    alerts.onEvent('alert:awaitResult', { awaitId: parked!.awaitId, outcome: { kind: 'resolved', cause: 'quiet', waitedMs: 7 } });
     await Promise.resolve();
     expect(outcome).toEqual({ kind: 'resolved', cause: 'quiet', waitedMs: 7 });
   });
 
+  it('never mints an id another realm has', () => {
+    const a = client();
+    const b = client();
+    a.methods.alertAwait('p', { until: 'exit', timeoutMs: 600_000 });
+    b.methods.alertAwait('p', { until: 'exit', timeoutMs: 600_000 });
+    const ids = [...a.commands, ...b.commands].map((command) => (command as { awaitId: string }).awaitId);
+    expect(new Set(ids).size).toBe(2);
+  });
+
   it('asks the host to cancel, and takes the answer the host sends', async () => {
-    const { alerts, commands } = client();
-    const handle = alerts.alertAwait('p', { until: 'exit', timeoutMs: 600_000 });
+    const { alerts, methods, commands } = client();
+    const handle = methods.alertAwait('p', { until: 'exit', timeoutMs: 600_000 });
     const awaitId = (commands[0] as { awaitId: string }).awaitId;
     handle.cancel();
     expect(commands[1]).toEqual({ op: 'awaitCancel', awaitId });
 
-    alerts.onEvent('alert:awaitResult', { awaitId, window: 'main', outcome: { kind: 'cancelled', waitedMs: 3 } });
+    alerts.onEvent('alert:awaitResult', { awaitId, outcome: { kind: 'cancelled', waitedMs: 3 } });
     await expect(handle.promise).resolves.toEqual({ kind: 'cancelled', waitedMs: 3 });
     // Settled: a late cancel asks nothing more.
     handle.cancel();
@@ -121,42 +115,26 @@ describe('awaits', () => {
   });
 
   it('settles what it parked cancelled when disposed, since no answer can reach it', async () => {
-    const { alerts } = client();
-    const handle = alerts.alertAwait('p', { until: 'exit', timeoutMs: 600_000 });
+    const { alerts, methods } = client();
+    const handle = methods.alertAwait('p', { until: 'exit', timeoutMs: 600_000 });
     alerts.dispose();
     await expect(handle.promise).resolves.toMatchObject({ kind: 'cancelled' });
   });
-});
 
-/**
- * The whole path a reload takes, host and client wired as Rust wires them: the
- * manager never lived in the webview, so a reloaded window gets its rings and
- * TODOs back from the sidecar's answer to its collection, without seeding.
- */
-it('gives a reloaded window its rings and TODOs back', () => {
-  // The window's current realm: a reload replaces it under the same label.
-  let realm: ReturnType<typeof createSidecarAlertClient> | null = null;
-  const host = createSidecarAlerts({ send: (event, data) => realm?.onEvent(event, data) });
-  const open = () => {
-    realm = createSidecarAlertClient((command) => host.handle({ ...command, window: 'main' }));
-    return realm;
-  };
-  try {
-    const before = open();
-    before.alertEngagement({ present: true, focusId: 'watched' });
-    host.manager.notifyFromProtocol('ringing', { source: 'OSC 9', title: null, body: 'done' });
-    before.alertToggleTodo('flagged');
-
-    const after = open();
-    const seen = new Map<string, AlertStateDetail>();
-    after.onAlertState((detail) => void seen.set(detail.id, detail));
-    after.hello();
-    // What `pty:requestInit` makes the sidecar send behind its list.
-    host.publish(['ringing', 'flagged']);
-
-    expect(seen.get('ringing')).toMatchObject({ status: 'ALERT_RINGING', todo: true });
-    expect(seen.get('flagged')).toMatchObject({ status: 'WATCHING_DISABLED', todo: true });
-  } finally {
-    host.dispose();
-  }
+  it('takes the host\'s answer through the real host, a claim included', async () => {
+    const host = createAlertHost();
+    const realm = createAlertClient((command) => host.handle('main', command, {
+      answer: (result) => void realm.onEvent('alert:awaitResult', result),
+      resendStates: () => {},
+    }));
+    try {
+      const handle = realm.methods.alertAwait('p', { until: 'quiet', timeoutMs: 600_000 });
+      host.manager.notifyFromProtocol('p', REPORT);
+      await expect(handle.promise).resolves.toMatchObject({ kind: 'resolved', cause: 'bell' });
+      // Claimed: the bell reached the program, not the human.
+      expect(host.manager.getState('p').status).not.toBe('ALERT_RINGING');
+    } finally {
+      host.dispose();
+    }
+  });
 });

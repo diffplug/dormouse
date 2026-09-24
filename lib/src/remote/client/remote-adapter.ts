@@ -343,14 +343,12 @@ export class RemotePtyAdapter implements PlatformAdapter {
 
   // Alerts are Burrow-authoritative (surfaced via the directory snapshot), so the
   // phone-side alert controls are inert.
-  alertRemove(): void {}
   alertSetWatchedCommands(): void {}
   alertSetCommandWatched(): void {}
   alertPublishSettings(): void {}
   alertDismiss(): void {}
   alertEngagement(): void {}
   alertAcknowledge(): void {}
-  alertResize(): void {}
   alertToggleTodo(): void {}
   alertClearTodo(): void {}
   /**

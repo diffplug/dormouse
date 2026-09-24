@@ -1,114 +1,123 @@
-import { AlertManager, type AwaitHandle, type AwaitOutcome, type Engagement } from '../lib/alert-manager';
+import { AlertManager, type AwaitHandle, type Engagement } from '../lib/alert-manager';
 import { AlertSettingsHost } from '../lib/alert-settings-host';
 import { WatchedCommandHost } from '../lib/watched-command-host';
 import type { PersistedAlertState } from '../lib/session-types';
-import { ALERT_AWAIT_RESULT_EVENT, ALERT_STATE_EVENT, type AlertAwaitResult } from './alert-protocol';
+import type { AlertAwaitResult } from './alert-protocol';
 
 /**
- * Standalone's one `AlertManager`, in the Node sidecar beside the PTYs and the
- * parse site, exactly as VS Code keeps one in its extension host
- * (`docs/specs/standalone.md` → "Alerts"). Windows are its viewers: each
- * reports engagement, sends the user's verbs, and renders the `alert:state` it
- * is routed. The two app-global stores run the same classes VS Code runs
- * (`vscode-ext/src/message-router.ts`), bound to this manager.
+ * The host role of the alerts, run beside the PTYs by both hosts: VS Code's
+ * extension host (`vscode-ext/src/message-router.ts`) and standalone's sidecar
+ * (`lib/src/host/remote/sidecar-entry.ts`). One `AlertManager`, the two
+ * app-global stores bound to it, and every renderer realm one of its viewers,
+ * driving it with `AlertCommand`s (`lib/src/host/alert-protocol.ts`). How
+ * state and snapshots reach the realms is each host's own.
  */
 
-export interface SidecarAlerts {
-  /** The one manager. The parse site feeds it (`createSidecarSurfaceBridge`). */
+/** Where the host answers the realm a command came from. */
+export interface AlertRealm {
+  /** One await's outcome. May throw from a realm being torn down. */
+  answer(result: AlertAwaitResult): void;
+  /** `sync`: re-send this realm the state of the Sessions it shows. */
+  resendStates(): void;
+}
+
+export interface AlertHost {
   readonly manager: AlertManager;
-  /** One `alert:command` line. */
-  handle(command: unknown): void;
-  /** Every live window label, pushed on each create and destroy: a window
-   *  that is gone engages nothing and waits on nothing. */
-  setWindows(labels: unknown): void;
-  /** A PTY's helper status as `pty-core` holds it, after a spawn or a promotion. */
-  setHelper(id: unknown, helper: boolean): void;
-  /** Human input about to be written, in the same message as the write:
-   *  acknowledged, echo window opened, before the bytes reach the PTY. */
-  acknowledgeInput(id: unknown): void;
-  /** Re-send each listed Session's state, every Session when `ids` is absent:
-   *  a window collecting its PTYs has no other way to learn it. */
-  publish(ids: unknown): void;
+  readonly watched: WatchedCommandHost;
+  readonly settings: AlertSettingsHost;
+  /** One command from `realmId`, revalidated: nothing a renderer sends is trusted. */
+  handle(realmId: string, command: unknown, realm: AlertRealm): void;
+  /**
+   * The realm's content is gone — disposed, recreated, reloaded, closed: its
+   * engagement ends, and what it parked is cancelled and answered here,
+   * **synchronously** and once (`docs/specs/alert.md` → Await).
+   */
+  endRealm(realmId: string): void;
+  /** End every realm that is not `live`. */
+  retainRealms(live: Iterable<string>): void;
+  /**
+   * A new PTY generation under `id`: its alert state starts over, from the
+   * persisted state a cold restore spawned it with. Before the PTY spawns, so
+   * nothing it emits lands on the previous generation's state.
+   */
+  respawn(id: string, persisted?: unknown): void;
   dispose(): void;
 }
 
-/** The label a command carries when no host stamped one (a test). */
-const UNNAMED_WINDOW = '';
+interface Parked {
+  handle: AwaitHandle;
+  realm: AlertRealm;
+  startedAt: number;
+}
 
 const isId = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
 
-export function createSidecarAlerts(options: {
-  /** Writes one event line; the host routes it (`docs/specs/standalone.md` → "Routing"). */
-  send: (event: string, data: unknown) => void;
-}): SidecarAlerts {
-  const { send } = options;
+export function createAlertHost(): AlertHost {
   const manager = new AlertManager();
   const watched = new WatchedCommandHost(manager);
   const settings = new AlertSettingsHost(manager);
+  /** Each realm's parked `dor await`s, by the id its client minted. */
+  const parked = new Map<string, Map<string, Parked>>();
 
-  // `dor await`s parked here, by the random id the asking adapter minted.
-  const awaits = new Map<string, { handle: AwaitHandle; window: string; startedAt: number }>();
-  /** Labels that have reported engagement, so a departed one can be dropped. */
-  const viewers = new Set<string>();
-
-  const stops = [
-    watched.subscribe((names) => send('alert:watchedCommands', { names })),
-    settings.subscribe((value) => send('alert:settings', { settings: value })),
-    manager.onStateChange((id, state) => send(ALERT_STATE_EVENT, { id, ...state })),
-  ];
-
-  function answer(awaitId: string, window: string, outcome: AwaitOutcome): void {
-    send(ALERT_AWAIT_RESULT_EVENT, { awaitId, window, outcome } satisfies AlertAwaitResult);
-  }
-
-  function parkAwait(window: string, message: Record<string, unknown>): void {
+  function park(realmId: string, realm: AlertRealm, message: Record<string, unknown>): void {
     const { awaitId, id, until, timeoutMs } = message;
+    let awaits = parked.get(realmId);
     // A repeated id would owe two answers to one caller; the first keeps it.
-    if (!isId(awaitId) || awaits.has(awaitId)) return;
+    if (!isId(awaitId) || awaits?.has(awaitId)) return;
     if (!isId(id) || (until !== 'quiet' && until !== 'exit')) {
-      answer(awaitId, window, { kind: 'cancelled', waitedMs: 0 });
+      realm.answer({ awaitId, outcome: { kind: 'cancelled', waitedMs: 0 } });
       return;
     }
     // `timeoutMs` is revalidated by `awaitCompletion`, which settles nonsense
     // `cancelled` rather than installing it.
     const handle = manager.awaitCompletion(id, { until, timeoutMs: Number(timeoutMs) });
-    awaits.set(awaitId, { handle, window, startedAt: Date.now() });
+    const entry: Parked = { handle, realm, startedAt: Date.now() };
+    if (!awaits) parked.set(realmId, awaits = new Map());
+    awaits.set(awaitId, entry);
     void handle.promise.then((outcome) => {
-      // Gone from the map means `endRealm` already answered it.
-      if (awaits.delete(awaitId)) answer(awaitId, window, outcome);
+      // Gone, or replaced, means `endRealm` already answered it.
+      const current = parked.get(realmId);
+      if (current?.get(awaitId) !== entry) return;
+      current.delete(awaitId);
+      if (current.size === 0) parked.delete(realmId);
+      realm.answer({ awaitId, outcome });
     });
   }
 
-  /**
-   * A window's content is gone — reloaded, or the window closed: its
-   * engagement ends, and what it parked is cancelled and answered here, once,
-   * so no await absorbs completions for a caller that cannot hear the outcome.
-   */
-  function endRealm(window: string): void {
-    viewers.delete(window);
-    manager.removeViewer(window);
-    for (const [awaitId, parked] of [...awaits]) {
-      if (parked.window !== window) continue;
-      awaits.delete(awaitId);
-      parked.handle.cancel();
-      answer(awaitId, window, { kind: 'cancelled', waitedMs: Date.now() - parked.startedAt });
+  function endRealm(realmId: string): void {
+    manager.removeViewer(realmId);
+    const awaits = parked.get(realmId);
+    if (!awaits) return;
+    parked.delete(realmId);
+    for (const [awaitId, { handle, realm, startedAt }] of awaits) {
+      handle.cancel();
+      try {
+        realm.answer({ awaitId, outcome: { kind: 'cancelled', waitedMs: Date.now() - startedAt } });
+      } catch {
+        // A realm being torn down can refuse the answer. Keep cancelling.
+      }
     }
   }
 
   return {
     manager,
+    watched,
+    settings,
 
-    handle(command) {
+    handle(realmId, command, realm) {
       if (!command || typeof command !== 'object') return;
       const message = command as Record<string, unknown>;
-      const window = typeof message.window === 'string' ? message.window : UNNAMED_WINDOW;
-      const id = message.id;
       switch (message.op) {
         case 'hello':
-          endRealm(window);
+          endRealm(realmId);
+          return;
+        case 'sync':
+          realm.resendStates();
+          watched.publish();
+          settings.publish();
           return;
         case 'initializeWatchedCommands':
-          // Only the first window's offer is taken; every later one is answered
+          // Only the first realm's offer is taken; every later one is answered
           // with what the host already holds.
           watched.initialize(Array.isArray(message.names) ? message.names.filter(isId) : []);
           return;
@@ -118,8 +127,8 @@ export function createSidecarAlerts(options: {
           watched.setCommandWatched(name, message.watched);
           return;
         }
-        // Revalidated by `normalizeAlertSettings`: a webview must never install a
-        // NaN or an absurd timer (`docs/specs/transport.md`).
+        // Revalidated by `normalizeAlertSettings`: a renderer must never install
+        // a NaN or an absurd timer (`docs/specs/transport.md`).
         case 'initializeSettings':
           settings.initialize(message.settings);
           return;
@@ -127,20 +136,20 @@ export function createSidecarAlerts(options: {
           settings.update(message.settings);
           return;
         case 'engagement': {
-          viewers.add(window);
           // `setViewer` revalidates the shape: only a literal `idle` escalates.
           const lapse = message.lapse === 'idle' || message.lapse === 'leave' ? message.lapse : undefined;
-          manager.setViewer(window, message.state as Engagement, lapse);
+          manager.setViewer(realmId, message.state as Engagement, lapse);
           return;
         }
         case 'await':
-          parkAwait(window, message);
+          park(realmId, realm, message);
           return;
         case 'awaitCancel':
-          // The cancelled outcome arrives as `alert:awaitResult` like any other.
-          if (isId(message.awaitId)) awaits.get(message.awaitId)?.handle.cancel();
+          // The cancelled outcome is answered like any other.
+          if (isId(message.awaitId)) parked.get(realmId)?.get(message.awaitId)?.handle.cancel();
           return;
       }
+      const id = message.id;
       if (!isId(id)) return;
       switch (message.op) {
         case 'acknowledge':
@@ -155,50 +164,26 @@ export function createSidecarAlerts(options: {
         case 'clearTodo':
           manager.clearTodo(id);
           return;
-        case 'resize':
-          manager.onResize(id);
-          return;
-        case 'remove':
-          manager.remove(id);
-          return;
-        case 'seed':
-          if (message.state && typeof message.state === 'object') {
-            manager.seed(id, message.state as PersistedAlertState);
-          }
-          return;
       }
     },
 
-    setWindows(labels) {
-      if (!Array.isArray(labels)) return;
-      const live = new Set(labels.filter((label): label is string => typeof label === 'string'));
-      const known = new Set([...viewers, ...[...awaits.values()].map((parked) => parked.window)]);
-      for (const window of known) {
-        if (!live.has(window)) endRealm(window);
+    endRealm,
+
+    retainRealms(live) {
+      const keep = new Set(live);
+      for (const realmId of new Set([...manager.viewerIds(), ...parked.keys()])) {
+        if (!keep.has(realmId)) endRealm(realmId);
       }
     },
 
-    setHelper(id, helper) {
-      if (isId(id)) manager.setHelper(id, helper);
-    },
-
-    acknowledgeInput(id) {
-      if (isId(id)) manager.acknowledge(id, { input: true });
-    },
-
-    publish(ids) {
-      const states = manager.getAllStates();
-      const wanted = Array.isArray(ids) ? ids.filter(isId) : [...states.keys()];
-      for (const id of wanted) {
-        const state = states.get(id);
-        if (state) send(ALERT_STATE_EVENT, { id, ...state });
-      }
+    respawn(id, persisted) {
+      manager.restart(id);
+      if (persisted && typeof persisted === 'object') manager.seed(id, persisted as PersistedAlertState);
     },
 
     dispose() {
-      for (const stop of stops) stop();
-      awaits.clear();
-      viewers.clear();
+      // Cleared first: nothing is answered for a host that is going away.
+      parked.clear();
       manager.dispose();
     },
   };

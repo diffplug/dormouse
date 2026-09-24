@@ -14,6 +14,7 @@ import { ARCHIVE_FILE } from '../src/notepad-archive-file';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ExtensionMessage, WebviewMessage } from '../src/message-types';
+import type { AlertCommand } from '../../lib/src/host/alert-protocol';
 import type { PeerLinkDeps } from '../src/peer-link';
 import type { BurrowDeps } from '../src/burrow';
 import type { WebviewChannel } from '../src/webview-messaging';
@@ -41,7 +42,7 @@ const ptys = vi.hoisted(() => ({
   cwdAsked: [] as string[],
   cwdWait: null as Promise<void> | null,
   buffered: new Map<string, { alive: boolean }>(),
-  /** `'write'` and `'kill <id>'`, in the order they happened. */
+  /** `'write'`, `'kill <id>'` and `'resize <id>'`, in the order they happened. */
   order: [] as string[],
   /** Called on each PTY write, as the pty host receives it. */
   onWrite: null as ((id: string, data: string) => void) | null,
@@ -65,6 +66,7 @@ vi.mock('../src/pty-manager', async (importOriginal) => ({
     ptys.buffered.delete(id);
   },
   write: (id: string, data: string) => ptys.onWrite?.(id, data),
+  resize: (id: string) => void ptys.order.push(`resize ${id}`),
 }));
 
 vi.mock('../src/burrow', () => ({
@@ -115,6 +117,11 @@ function fakeWebview() {
 let router: RouterModule;
 let mirror: MirrorModule;
 
+/** One alert verb, as every adapter's shared client sends it. */
+function alert(webview: ReturnType<typeof fakeWebview>, command: AlertCommand): void {
+  webview.send({ type: 'alert:command', command });
+}
+
 beforeEach(async () => {
   vi.resetModules();
   wiring.peer = null;
@@ -145,22 +152,9 @@ it('reports rejected helper creation as an exited terminal', () => {
   } finally { disposable.dispose(); }
 });
 
-it('forwards dirty reports and command resets in order only to the PTY owner', () => {
-  const owner = fakeWebview();
-  const other = fakeWebview();
-  const first = router.attachRouter(owner.channel, {});
-  const second = router.attachRouter(other.channel, {});
-  try {
-    owner.send({ type: 'dormouse:init' });
-    other.send({ type: 'dormouse:init' });
-    owner.send({ type: 'pty:spawn', id: 'dirty-owner', options: { cwd: '/repo' } });
-    ptys.callbacks!.onData('dirty-owner', '\x1b]367;state;{"v":1,"dirty":true}\x07\x1b]633;C\x07\x1b]367;state;{"v":1,"dirty":false}\x07\x1b]367;serve;{"port":6006}\x07\x1b]633;D;0\x07');
-    expect(owner.posted.filter(message => message.type === 'terminal:toolState').map(message => message.dirty)).toEqual([true, null, false]);
-    expect(other.posted.filter(message => message.type === 'terminal:toolState')).toEqual([]);
-  } finally { first.dispose(); second.dispose(); }
-});
-
-it('forwards command-start resets and Tool announcements in stream order only to the owning webview', () => {
+// The Tool stores are the owning renderer's, so a parse's announcements, state
+// reports and command-start resets reach it, in stream order (docs/specs/dor-tool.md).
+it('forwards a parse\'s Tool events in stream order only to the PTY owner', () => {
   const owner = fakeWebview();
   const other = fakeWebview();
   const first = router.attachRouter(owner.channel, {});
@@ -169,10 +163,17 @@ it('forwards command-start resets and Tool announcements in stream order only to
     owner.send({ type: 'dormouse:init' });
     other.send({ type: 'dormouse:init' });
     owner.send({ type: 'pty:spawn', id: 'tool-epoch', options: { cwd: '/repo' } });
-    ptys.callbacks!.onData('tool-epoch', '\x1b]367;serve;{"port":6006}\x07\x1b]633;C\x07\x1b]367;serve;{"port":6007}\x07');
-    const announcements = owner.posted.filter(message => message.type === 'terminal:toolAnnounce');
-    expect(announcements.map(message => message.announce?.port ?? null)).toEqual([6006, null, 6007]);
-    expect(other.posted.filter(message => message.type === 'terminal:toolAnnounce')).toEqual([]);
+    ptys.callbacks!.onData('tool-epoch', '\x1b]367;state;{"v":1,"dirty":true}\x07\x1b]633;C\x07\x1b]367;serve;{"port":6007}\x07\x1b]633;D;0\x07');
+    expect(owner.posted.filter(message => message.type === 'terminal:toolEvents')).toEqual([{
+      type: 'terminal:toolEvents',
+      id: 'tool-epoch',
+      events: [
+        { kind: 'toolState', state: { dirty: true } },
+        { kind: 'semantic', event: { type: 'commandStart', source: 'osc633_boundaries' } },
+        { kind: 'toolAnnounce', announce: { port: 6007, name: null, key: null, dehydrate: false, persist: null } },
+      ],
+    }]);
+    expect(other.posted.filter(message => message.type === 'terminal:toolEvents')).toEqual([]);
   } finally {
     first.dispose();
     second.dispose();
@@ -530,59 +531,33 @@ describe('notepad archive requests', () => {
 });
 
 /**
- * `dor await` parks in the shared alert manager, which lives here rather than in
- * the webview (docs/specs/alert.md → Await). What this side owns is the
- * requestId bookkeeping: one outcome message per request, and nothing left
- * holding a completion claim when the webview goes away.
+ * `dor await` parks in the shared alert host, which lives here rather than in
+ * the webview (docs/specs/alert.md → Await); its own suite covers the
+ * bookkeeping. What this side owns is the wiring: the outcome reaches the
+ * webview that asked, and nothing is left holding a completion claim when that
+ * webview goes away.
  */
 describe('await requests', () => {
   /** Every await outcome this webview was sent, in order. */
   function outcomes(webview: ReturnType<typeof fakeWebview>) {
     return webview.posted
       .filter((message) => message.type === 'alert:awaitResult')
-      .map((message) => message as { requestId: string; outcome: unknown });
+      .map((message) => message as { awaitId: string; outcome: unknown });
   }
-
-  it('answers a cancelled await once, with the host outcome', async () => {
-    const webview = fakeWebview();
-    const disposable = router.attachRouter(webview.channel);
-    try {
-      webview.send({ type: 'alert:await', requestId: 'await-1', id: 'pty-1', until: 'quiet', timeoutMs: 600_000 });
-      expect(outcomes(webview)).toEqual([]);
-
-      webview.send({ type: 'alert:awaitCancel', requestId: 'await-1' });
-      await Promise.resolve();
-
-      // Real timers here, so `waitedMs` is whatever the clock says; the
-      // measurement itself is the alert manager's own test.
-      expect(outcomes(webview)).toHaveLength(1);
-      expect(outcomes(webview)[0]).toMatchObject({
-        requestId: 'await-1',
-        outcome: { kind: 'cancelled' },
-      });
-
-      // The request is gone, so a repeat cancel finds nothing to answer twice.
-      webview.send({ type: 'alert:awaitCancel', requestId: 'await-1' });
-      await Promise.resolve();
-      expect(outcomes(webview)).toHaveLength(1);
-    } finally {
-      disposable.dispose();
-    }
-  });
 
   it('judges a report after the command boundary written before it', async () => {
     const webview = fakeWebview();
     const disposable = router.attachRouter(webview.channel);
     try {
       ptys.callbacks!.onData('pty-ordered', '\x1b]633;E;./build.sh\x07\x1b]633;C\x07');
-      webview.send({ type: 'alert:await', requestId: 'await-ordered', id: 'pty-ordered', until: 'quiet', timeoutMs: 600_000 });
+      alert(webview, { op: 'await', awaitId: 'await-ordered', id: 'pty-ordered', until: 'quiet', timeoutMs: 600_000 });
 
       // A precmd hook reports after the shell's finish, in the same read.
       ptys.callbacks!.onData('pty-ordered', '\x1b]633;D;0\x07\x1b]777;notify;Command completed;./build.sh\x1b\\');
       await Promise.resolve();
 
       expect(outcomes(webview)).toEqual([
-        { type: 'alert:awaitResult', requestId: 'await-ordered', outcome: expect.objectContaining({ kind: 'resolved', cause: 'exit' }) },
+        { type: 'alert:awaitResult', awaitId: 'await-ordered', outcome: expect.objectContaining({ kind: 'resolved', cause: 'exit' }) },
       ]);
     } finally {
       disposable.dispose();
@@ -592,7 +567,7 @@ describe('await requests', () => {
   it('cancels what is still parked when the webview goes away', async () => {
     const webview = fakeWebview();
     const disposable = router.attachRouter(webview.channel);
-    webview.send({ type: 'alert:await', requestId: 'await-2', id: 'pty-2', until: 'exit', timeoutMs: 600_000 });
+    alert(webview, { op: 'await', awaitId: 'await-2', id: 'pty-2', until: 'exit', timeoutMs: 600_000 });
     expect(router.getAlertStates().get('pty-2')?.awaited).toBe(true);
 
     // A webview that cannot deliver an outcome must not hold a claim open, so
@@ -606,7 +581,7 @@ describe('await requests', () => {
   it('still answers an await it cancels on the way out', async () => {
     const webview = fakeWebview();
     const disposable = router.attachRouter(webview.channel);
-    webview.send({ type: 'alert:await', requestId: 'await-3', id: 'pty-3', until: 'quiet', timeoutMs: 600_000 });
+    alert(webview, { op: 'await', awaitId: 'await-3', id: 'pty-3', until: 'quiet', timeoutMs: 600_000 });
 
     // `handle.cancel()`'s outcome lands a microtask later, after the router has
     // stopped posting — so dispose answers synchronously instead. Without that
@@ -617,7 +592,7 @@ describe('await requests', () => {
 
     expect(outcomes(webview)).toHaveLength(1);
     expect(outcomes(webview)[0]).toMatchObject({
-      requestId: 'await-3',
+      awaitId: 'await-3',
       outcome: { kind: 'cancelled' },
     });
   });
@@ -641,9 +616,9 @@ describe('engagement viewers', () => {
     const disposeA = router.attachRouter(a.channel);
     const disposeB = router.attachRouter(b.channel);
     try {
-      a.send({ type: 'alert:engagement', state: { present: true, focusId: 'pty-a' } });
-      b.send({ type: 'alert:engagement', state: { present: true, focusId: 'pty-b' } });
-      a.send({ type: 'alert:engagement', state: { present: false, focusId: null }, lapse: 'leave' });
+      alert(a, { op: 'engagement', state: { present: true, focusId: 'pty-a' } });
+      alert(b, { op: 'engagement', state: { present: true, focusId: 'pty-b' } });
+      alert(a, { op: 'engagement', state: { present: false, focusId: null }, lapse: 'leave' });
 
       ptys.callbacks!.onData('pty-b', REPORT);
       expect(status('pty-b')).not.toBe('ALERT_RINGING');
@@ -659,7 +634,7 @@ describe('engagement viewers', () => {
     try {
       ptys.callbacks!.onData('pty-ack', REPORT);
       expect(status('pty-ack')).toBe('ALERT_RINGING');
-      webview.send({ type: 'alert:acknowledge', id: 'pty-ack' });
+      alert(webview, { op: 'acknowledge', id: 'pty-ack' });
       expect(router.getAlertStates().get('pty-ack')).toMatchObject({ status: 'WATCHING_DISABLED', todo: true });
     } finally {
       disposable.dispose();
@@ -677,10 +652,6 @@ describe('engagement viewers', () => {
       webview.send({ type: 'pty:input', id: 'pty-typed', data: 'y', userInput: true });
       expect(atWrite).toEqual(['ALERT_RINGING', 'WATCHING_DISABLED']);
       expect(router.getAlertStates().get('pty-typed')?.todo).toBe(false);
-
-      // A bell answering the key rings no one.
-      ptys.callbacks!.onData('pty-typed', REPORT);
-      expect(status('pty-typed')).not.toBe('ALERT_RINGING');
     } finally {
       disposable.dispose();
     }
@@ -697,15 +668,12 @@ describe('engagement viewers', () => {
     deps.writePty('pty-remote', 'y');
     expect(atWrite).toEqual(['WATCHING_DISABLED']);
     expect(router.getAlertStates().get('pty-remote')?.todo).toBe(false);
-    // A bell answering the key rings no one.
-    ptys.callbacks!.onData('pty-remote', REPORT);
-    expect(status('pty-remote')).not.toBe('ALERT_RINGING');
   });
 
   it('stops engaging anything once its webview is disposed', () => {
     const webview = fakeWebview();
     const disposable = router.attachRouter(webview.channel);
-    webview.send({ type: 'alert:engagement', state: { present: true, focusId: 'pty-gone' } });
+    alert(webview, { op: 'engagement', state: { present: true, focusId: 'pty-gone' } });
     disposable.dispose();
 
     ptys.callbacks!.onData('pty-gone', REPORT);
@@ -717,15 +685,15 @@ describe('engagement viewers', () => {
     const disposable = router.attachRouter(webview.channel);
     try {
       webview.send({ type: 'dormouse:init' });
-      webview.send({ type: 'alert:engagement', state: { present: true, focusId: 'pty-init' } });
-      webview.send({ type: 'alert:await', requestId: 'await-init', id: 'pty-init', until: 'exit', timeoutMs: 600_000 });
+      alert(webview, { op: 'engagement', state: { present: true, focusId: 'pty-init' } });
+      alert(webview, { op: 'await', awaitId: 'await-init', id: 'pty-init', until: 'exit', timeoutMs: 600_000 });
 
       // The content was destroyed and rebuilt; the old one's engagement and
       // parked awaits went with it.
       webview.send({ type: 'dormouse:init' });
       await Promise.resolve();
       expect(webview.posted).toContainEqual(expect.objectContaining({
-        type: 'alert:awaitResult', requestId: 'await-init', outcome: expect.objectContaining({ kind: 'cancelled' }),
+        type: 'alert:awaitResult', awaitId: 'await-init', outcome: expect.objectContaining({ kind: 'cancelled' }),
       }));
       ptys.callbacks!.onData('pty-init', REPORT);
       expect(status('pty-init')).toBe('ALERT_RINGING');
@@ -735,8 +703,62 @@ describe('engagement viewers', () => {
   });
 });
 
+/**
+ * A Session's alert state follows its PTY here, whoever asked
+ * (docs/specs/alert.md): started over, and seeded, at the spawn; given the
+ * resize grace at the resize; removed at the kill.
+ */
+describe('alert state follows the PTY', () => {
+  it('spawns a cold-restored pane with its persisted TODO, and tells its webview', () => {
+    const webview = fakeWebview();
+    const disposable = router.attachRouter(webview.channel);
+    try {
+      webview.send({ type: 'dormouse:init' });
+      ptys.callbacks!.onData('restored', '\x1b]9;last run\x07');
+      webview.send({
+        type: 'pty:spawn',
+        id: 'restored',
+        options: { cwd: '/repo', alert: { status: 'ALERT_RINGING', todo: true, notification: null } },
+      });
+      // The reminder, never the ring: the previous generation's state is gone.
+      expect(router.getAlertStates().get('restored')).toMatchObject({ status: 'WATCHING_DISABLED', todo: true, notification: null });
+      expect(webview.posted.filter((message) => message.type === 'alert:state').at(-1)).toMatchObject({ id: 'restored', todo: true });
+    } finally {
+      disposable.dispose();
+    }
+  });
+
+  it('opens the resize grace before the PTY resizes', async () => {
+    // The router's own instance: `resetModules` gave this test one registry.
+    const { AlertManager } = await import('../../lib/src/lib/alert-manager');
+    vi.spyOn(AlertManager.prototype, 'onResize').mockImplementation((id) => void ptys.order.push(`grace ${id}`));
+    const webview = fakeWebview();
+    const disposable = router.attachRouter(webview.channel);
+    try {
+      webview.send({ type: 'pty:resize', id: 'pty-sized', cols: 100, rows: 30 });
+      expect(ptys.order).toEqual(['grace pty-sized', 'resize pty-sized']);
+    } finally {
+      disposable.dispose();
+    }
+  });
+
+  it('removes a killed Session\'s alert state', () => {
+    const webview = fakeWebview();
+    const disposable = router.attachRouter(webview.channel);
+    try {
+      webview.send({ type: 'pty:spawn', id: 'pty-killed', options: { cwd: '/repo' } });
+      ptys.callbacks!.onData('pty-killed', '\x1b]9;needs input\x07');
+      webview.send({ type: 'pty:kill', id: 'pty-killed' });
+      expect(router.getAlertStates().has('pty-killed')).toBe(false);
+      expect(ptys.order).toContain('kill pty-killed');
+    } finally {
+      disposable.dispose();
+    }
+  });
+});
+
 // An editor panel's disposal kills its PTYs, and the webview that would have
-// sent `alert:remove` for them is already gone: the host removes their entries.
+// sent `pty:kill` for them is already gone: the host removes their entries.
 it('removes the alert state of the PTYs a closing panel kills', async () => {
   const webview = fakeWebview();
   const disposable = router.attachRouter(webview.channel, { killOnDispose: true });

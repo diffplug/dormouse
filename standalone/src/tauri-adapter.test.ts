@@ -1,5 +1,4 @@
-import { getToolDirty, resetToolDirty } from 'dormouse-lib/lib/tool-dirty-store';
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 // The in-process session-flush handshake and drain wrappers on TauriAdapter are
 // pure webview-side logic — they never invoke Tauri — so we only need to stub the
@@ -18,7 +17,7 @@ vi.mock("@tauri-apps/plugin-shell", () => ({
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { NotepadArchiveV1 } from "dormouse-lib/lib/notepad/types";
-import type { AlertStateDetail, PtyDataDetail } from "dormouse-lib/lib/platform/types";
+import type { AlertStateDetail } from "dormouse-lib/lib/platform/types";
 import { getTerminalPaneState } from "dormouse-lib/lib/terminal-state-store";
 import { TauriAdapter } from "./tauri-adapter";
 
@@ -375,9 +374,9 @@ describe("TauriAdapter remote host link", () => {
 // The sidecar owns the parse (docs/specs/terminal-escapes.md → "Parsing
 // location"), so this adapter forwards what it is given and never re-derives
 // it. What is covered here is exactly that boundary.
+// The parse boundary both sidecar adapters share is pinned once, for both, in
+// `sidecar-adapters.test.ts`; what is Tauri's alone is here.
 describe("TauriAdapter terminal stream", () => {
-  afterEach(resetToolDirty);
-
   async function listening() {
     const handlers = new Map<string, (event: { payload: unknown }) => void>();
     vi.mocked(listen).mockImplementation((async (
@@ -402,48 +401,6 @@ describe("TauriAdapter terminal stream", () => {
     };
   }
 
-  it("applies dirty live/replay reports in order and preserves explicit clean across exit", async () => {
-    const { deliver } = await listening();
-    const id = 'dirty-stream';
-    deliver('terminal:protocolEvents', { id, events: [
-      { kind: 'toolState', state: { dirty: true } },
-      { kind: 'semantic', event: { type: 'commandStart', source: 'osc633_boundaries' } },
-      { kind: 'toolState', state: { dirty: false } },
-    ] });
-    deliver('terminal:semanticEvents', { id, events: [{ type: 'commandStart', source: 'osc633_boundaries' }] });
-    expect(getToolDirty(id)).toBe(false);
-    deliver('pty:exit', { id, exitCode: 0 });
-    expect(getToolDirty(id)).toBe(false);
-    deliver('pty:replay', { id, data: '\x1b]633;C\x07\x1b]367;state;{"v":1,"dirty":true}\x07' });
-    expect(getToolDirty(id)).toBe(true);
-    deliver('pty:replay', { id, data: 'since-mark output without a new command' });
-    expect(getToolDirty(id)).toBe(true);
-    deliver('pty:replay', { id, data: '\x1b]633;C\x07' });
-    expect(getToolDirty(id)).toBeNull();
-  });
-
-  it("forwards the projection pair it was handed, parsing nothing again", async () => {
-    const { adapter, deliver, invoke } = await listening();
-    const seen: PtyDataDetail[] = [];
-    adapter.onPtyData((detail) => void seen.push(detail));
-
-    // An image sequence: a second parse here would strip nothing but would
-    // answer the query below twice.
-    deliver("pty:data", {
-      id: "t1",
-      data: "pre\x1b]1337;File=inline=1:AAAA\x07post",
-      textData: "prepost",
-    });
-    deliver("pty:data", { id: "t1", data: "\x1b]11;?\x07" });
-
-    expect(seen).toEqual([
-      { id: "t1", data: "pre\x1b]1337;File=inline=1:AAAA\x07post", textData: "prepost" },
-      { id: "t1", data: "\x1b]11;?\x07", textData: undefined },
-    ]);
-    // No reply written back: the owner answered, or deliberately did not.
-    expect(invoke.mock.calls.filter(([cmd]) => cmd === "pty_write")).toEqual([]);
-  });
-
   it("applies the semantic and Tool events the sidecar derived, and no report", async () => {
     const { adapter, deliver, invoke } = await listening();
     const alerts: AlertStateDetail[] = [];
@@ -465,7 +422,7 @@ describe("TauriAdapter terminal stream", () => {
       ],
     });
     // A report reaching this window is inert: the sidecar's manager judged it.
-    deliver("terminal:protocolEvents", {
+    deliver("terminal:toolEvents", {
       id: "sem-pty",
       events: [
         { kind: "notification", notification: { source: "OSC 9", title: null, body: "done" } },
@@ -473,42 +430,6 @@ describe("TauriAdapter terminal stream", () => {
     });
 
     expect(getTerminalPaneState("sem-pty").cwd?.path).toBe("/tmp/here");
-    expect(alerts).toEqual([]);
-    expect(invoke).not.toHaveBeenCalled();
-  });
-
-  it("renders the alert state the sidecar routes to this window", async () => {
-    const { adapter, deliver } = await listening();
-    const alerts: AlertStateDetail[] = [];
-    adapter.onAlertState((detail) => void alerts.push(detail));
-    const ringing = { id: "ring-pty", status: "ALERT_RINGING", watchingEnabled: false, todo: true, notification: null, awaited: false, episode: { id: "e1", startedAt: 1 } };
-    deliver("alert:state", ringing);
-    expect(alerts).toEqual([ringing]);
-  });
-
-  // The sidecar acknowledges it and opens the echo window before it writes, so
-  // the flag must ride the write itself — a separate command could lose the race.
-  it("writes user input with its acknowledgement in one message", async () => {
-    const { adapter, invoke } = await listening();
-    adapter.writePty("typed-pty", "\x1b[I");
-    adapter.writePty("typed-pty", "y", { userInput: true });
-    expect(invoke.mock.calls).toEqual([
-      ["pty_write", { id: "typed-pty", data: "\x1b[I", paced: undefined, userInput: undefined }],
-      ["pty_write", { id: "typed-pty", data: "y", paced: undefined, userInput: true }],
-    ]);
-  });
-
-  it("rebuilds pane state from a replay, and asks nothing of the alerts", async () => {
-    const { adapter, deliver, invoke } = await listening();
-    const alerts: AlertStateDetail[] = [];
-    adapter.onAlertState((detail) => void alerts.push(detail));
-
-    deliver("pty:replay", {
-      id: "replay-pty",
-      data: "\x1b]633;E;sleep 5\x07\x1b]633;C\x07\x1b]9;Historical\x07",
-    });
-
-    expect(getTerminalPaneState("replay-pty").currentCommand?.rawCommandLine).toBe("sleep 5");
     expect(alerts).toEqual([]);
     expect(invoke).not.toHaveBeenCalled();
   });
@@ -521,97 +442,5 @@ describe("TauriAdapter terminal stream", () => {
       data: "\x1b]633;E;sleep 5\x07\x1b]633;C\x07",
     });
     expect(getTerminalPaneState("exited-replay").currentCommand).toBeNull();
-  });
-
-  it("pushes the resolved theme so the sidecar can answer a colour query", async () => {
-    const { adapter, invoke } = await listening();
-    adapter.requestInit();
-
-    const pushed = invoke.mock.calls.filter(([cmd]) => cmd === "pty_theme_colors");
-    expect(pushed).toHaveLength(1);
-    expect(pushed[0]![1]).toEqual({
-      colors: {
-        foreground: expect.any(String),
-        background: expect.any(String),
-        cursor: expect.any(String),
-      },
-    });
-  });
-});
-
-// The app's one AlertManager is the sidecar's (docs/specs/standalone.md →
-// "Alerts"); this window is a viewer of it. The command shapes and the await
-// wiring are the shared client's (lib/src/host/alert-client.test.ts); covered
-// here is this transport: one `alert_command` invoke, and the events back.
-describe("TauriAdapter alerts", () => {
-  async function wired() {
-    const handlers = new Map<string, (event: { payload: unknown }) => void>();
-    const order: string[] = [];
-    vi.mocked(listen).mockImplementation((async (
-      event: string,
-      handler: (e: { payload: unknown }) => void,
-    ) => {
-      order.push(`listen ${event}`);
-      handlers.set(event, handler);
-      return () => {};
-    }) as unknown as typeof listen);
-    const invoke = vi.mocked(rawInvoke);
-    invoke.mockClear();
-    invoke.mockImplementation((async (cmd: string, args?: { payload?: { op?: string } }) => {
-      if (cmd === "alert_command") order.push(`alert ${args?.payload?.op}`);
-      return undefined;
-    }) as unknown as typeof rawInvoke);
-
-    const adapter = new TauriAdapter();
-    await adapter.init();
-    const commands = () =>
-      invoke.mock.calls.filter(([cmd]) => cmd === "alert_command").map(([, args]) => (args as { payload: unknown }).payload);
-    const deliver = (event: string, payload: unknown) => void handlers.get(event)?.({ payload });
-    return { adapter, commands, deliver, order };
-  }
-
-  // A reload keeps the window label, so only this tells the sidecar the old
-  // realm's engagement and parked awaits are gone — and only once this realm
-  // can hear the answers.
-  it("says hello once its listeners are installed", async () => {
-    const { commands, order } = await wired();
-    expect(commands()).toEqual([{ op: "hello" }]);
-    const hello = order.indexOf("alert hello");
-    for (const event of ["alert:state", "alert:awaitResult"]) {
-      expect(order.indexOf(`listen ${event}`)).toBeGreaterThanOrEqual(0);
-      expect(order.indexOf(`listen ${event}`)).toBeLessThan(hello);
-    }
-  });
-
-  it("sends its alert verbs as commands and resolves an await from the broadcast result", async () => {
-    const { adapter, commands, deliver } = await wired();
-    adapter.alertEngagement({ present: true, focusId: "p" });
-    adapter.alertSeed!("p", { status: "WATCHING_DISABLED", todo: true, notification: null });
-    const handle = adapter.alertAwait("p", { until: "exit", timeoutMs: 600_000 });
-    const sent = commands();
-    const parked = sent[sent.length - 1] as { op: string; awaitId: string };
-    expect(commands()).toEqual([
-      { op: "hello" },
-      { op: "engagement", state: { present: true, focusId: "p" } },
-      { op: "seed", id: "p", state: { status: "WATCHING_DISABLED", todo: true, notification: null } },
-      { op: "await", awaitId: parked.awaitId, id: "p", until: "exit", timeoutMs: 600_000 },
-    ]);
-    deliver("alert:awaitResult", { awaitId: parked.awaitId, window: "main", outcome: { kind: "resolved", cause: "exit", waitedMs: 4 } });
-    await expect(handle.promise).resolves.toEqual({ kind: "resolved", cause: "exit", waitedMs: 4 });
-  });
-
-  it("settles what it parked when it shuts down", async () => {
-    const { adapter } = await wired();
-    const handle = adapter.alertAwait("p", { until: "quiet", timeoutMs: 600_000 });
-    adapter.shutdown();
-    await expect(handle.promise).resolves.toMatchObject({ kind: "cancelled" });
-  });
-
-  it("hands the stores' broadcasts to the renderer mirrors", async () => {
-    const { adapter, deliver } = await wired();
-    const names: string[][] = [];
-    adapter.onWatchedCommands((next) => void names.push(next));
-    deliver("alert:watchedCommands", { names: ["cargo"] });
-    expect(names).toEqual([["cargo"]]);
   });
 });
