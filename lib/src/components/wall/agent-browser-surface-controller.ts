@@ -28,6 +28,7 @@ import {
   browserSessionKey,
   isPopout,
   offeredRenderModes,
+  PROVIDER_LABEL,
   type BrowserPlatform,
 } from './browser-automation';
 import { isToolParams } from './browser-surface';
@@ -747,7 +748,7 @@ export class AgentBrowserSurfaceController {
       binaryPath: this.binaryPath,
       getStreamUrl: async (port) => (await this.platform.getAgentBrowserStreamUrl?.(port)) ?? undefined,
       runCommand: (targetSession, args, targetBinaryPath) => this.platform.agentBrowserCommand?.(targetSession, args, targetBinaryPath)
-        ?? Promise.resolve({ exitCode: 1, stdout: '', stderr: 'agent-browser commands unavailable' }),
+        ?? Promise.resolve({ exitCode: 1, stdout: '', stderr: `${PROVIDER_LABEL[this.provider]} commands unavailable` }),
       canSelectTabs: () => !this.poppedOut && !this.relaunching,
       wantFrameData: () => this.wantsProvisionalFrame(),
       log: abDebugLog,
@@ -1433,15 +1434,15 @@ export class AgentBrowserSurfaceController {
     // would detach `this` and break its internal `requestResponse`.
     const platform = this.platform;
     if (!platform.agentBrowserCommand) {
-      console.warn('[agent-browser] this host cannot run agent-browser commands; tab actions are unavailable');
+      console.warn(`[${this.provider}] this host cannot run ${PROVIDER_LABEL[this.provider]} commands; tab actions are unavailable`);
       return;
     }
     platform.agentBrowserCommand(session, args, this.binaryPath).then((result) => {
       if (result.exitCode !== 0) {
-        console.warn(`[agent-browser] ${args.join(' ')} failed:`, result.stderr || result.stdout || `exit ${result.exitCode}`);
+        console.warn(`[${this.provider}] ${args.join(' ')} failed:`, result.stderr || result.stdout || `exit ${result.exitCode}`);
       }
     }).catch((error) => {
-      console.warn(`[agent-browser] ${args.join(' ')} failed:`, error);
+      console.warn(`[${this.provider}] ${args.join(' ')} failed:`, error);
     });
   }
 
@@ -1520,8 +1521,8 @@ export class AgentBrowserSurfaceController {
       const session = this.session;
       if (op && platform.agentBrowserEdit && session) {
         platform.agentBrowserEdit(session, op, this.binaryPath).then((r) => {
-          if (!r.ok && r.error) console.warn(`[agent-browser] ${op} failed:`, r.error);
-        }).catch((err) => console.warn(`[agent-browser] ${op} failed:`, err));
+          if (!r.ok && r.error) console.warn(`[${this.provider}] ${op} failed:`, r.error);
+        }).catch((err) => console.warn(`[${this.provider}] ${op} failed:`, err));
         return;
       }
     }

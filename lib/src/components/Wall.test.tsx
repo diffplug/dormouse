@@ -709,6 +709,40 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('names Playwright when a context-menu Playwright launch fails', async () => {
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    // The mocked TerminalPane registers no terminal, so the helper would report
+    // its parent closed — the one alert the context shows ahead of a port error.
+    const helperSpy = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'context-helper', parentId: 'pane-a', command: '', status: 'preserved' });
+    // A launch the host answers without a session or a reason of its own.
+    const playwright = vi.fn(async () => ({ ok: false }));
+    Object.assign(fake, { playwright, agentBrowserOpen: vi.fn(async () => ({ ok: true, session: 'ab', wsPort: 1 })) });
+    try {
+      await act(async () => {
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
+      });
+      await flush();
+      if (!fake.hasPty('pane-a')) fake.spawnPty('pane-a');
+      fake.setOpenPorts('pane-a', [{ protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port: 5173, pid: 100, processName: 'vite' }]);
+      await act(async () => {
+        container.querySelector<HTMLElement>('[data-pane-header-for="pane-a"]')!.dispatchEvent(new MouseEvent('contextmenu', {
+          bubbles: true, cancelable: true, clientX: 10, clientY: 10,
+        }));
+      });
+      await flush();
+      await act(async () => {
+        document.querySelector<HTMLButtonElement>('[data-terminal-context] button[aria-label="Open in Playwright screencast"]')!.click();
+      });
+      await flush();
+
+      expect(playwright).toHaveBeenCalledWith(expect.objectContaining({ op: 'open', url: 'http://localhost:5173/' }));
+      expect(document.querySelector('[data-terminal-context] [role="alert"]')?.textContent).toBe('Could not open Playwright');
+    } finally {
+      helperSpy.mockRestore();
+      untouchedSpy.mockRestore();
+    }
+  });
+
   it('reuses and closes a parked browser that gains its session after minimization', async () => {
     const defaultSession = sessionForKey('default');
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);

@@ -815,7 +815,7 @@ export function useDorControl({
     }
 
     const title = key ?? session;
-    if (title === undefined) return { ok: false, message: 'an agent-browser surface needs a key or a session' };
+    if (title === undefined) return { ok: false, message: 'a browser surface needs a key or a session' };
     const target = reference();
     if (!target.ok) return { ok: false, message: target.message };
     const result = createContentSurface({

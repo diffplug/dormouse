@@ -25,7 +25,7 @@ const RemotePairingModalHost = lazy(() =>
 );
 import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
 import { markAgentBrowserSessionClosed } from './wall/agent-browser-sessions';
-import { automationProvider, browserPlatform, browserSessionKey, isPopout, LaunchBinaryPath } from './wall/browser-automation';
+import { automationProvider, browserPlatform, browserSessionKey, isPopout, LaunchBinaryPath, PROVIDER_LABEL } from './wall/browser-automation';
 import { isAllowedBinaryFor } from '../lib/agent-browser-binary';
 import { isToolRender } from '../lib/platform/tool-types';
 import { disposeAgentBrowserSurfaceController } from './wall/agent-browser-surface-controller';
@@ -2064,7 +2064,7 @@ export function Wall({
         const url = browserSurfaceUrl(rawUrl);
         if (!url) {
           const why = rawUrl ? `'${rawUrl}' is not an http(s) URL` : 'no URL observed yet';
-          console.warn(`[dormouse] cannot swap surface '${id}' to agent-browser: ${why}`);
+          console.warn(`[dormouse] cannot swap surface '${id}' to ${PROVIDER_LABEL[provider]}: ${why}`);
           return;
         }
         if (!platform.agentBrowserOpen) return;
@@ -2107,7 +2107,7 @@ export function Wall({
         };
         platform.agentBrowserOpen(url, { headed }, launchBinaryPath.get(provider)).then((res) => {
           if (!res.ok || !res.session) {
-            console.warn(`[dormouse] failed to swap iframe surface '${id}' to agent-browser:`, res.error ?? '(no session)');
+            console.warn(`[dormouse] failed to swap surface '${id}' to ${PROVIDER_LABEL[provider]}:`, res.error ?? '(no session)');
             // Nothing came up to bind: give the iframe back if the eager Surface
             // still exists, whether it is visible or minimized meanwhile.
             restorePrevious();
@@ -2124,7 +2124,7 @@ export function Wall({
           }
           updateSurfaceParams(eagerId, bound);
         }).catch((err) => {
-          console.warn('[dormouse] failed to swap iframe surface to agent-browser:', err);
+          console.warn(`[dormouse] failed to swap surface '${id}' to ${PROVIDER_LABEL[provider]}:`, err);
           restorePrevious();
         });
       }
@@ -2170,7 +2170,7 @@ export function Wall({
         } else updateSurfaceParams(existing.id, { url: entry.url });
         return;
       }
-      if (platform && !platform.agentBrowserOpen) throw new Error('Agent browser is unavailable');
+      if (provider && !platform?.agentBrowserOpen) throw new Error(`${PROVIDER_LABEL[provider]} is unavailable on this host`);
       const created = createContentSurface({ minimized: false, reference, preserveSource: true,
         params: { surfaceType: 'browser', renderMode: mode, url: entry.url, cwd, syncEngaged: true, contextPortKey: key }, title: hostPathDisplay(entry.url, true) });
       if (!created.ok) throw new Error(created.message);
@@ -2179,7 +2179,7 @@ export function Wall({
       const result = await platform.agentBrowserOpen!(entry.url, { headed: isPopout(mode) }, launchBinaryPath.get(provider));
       if (!result.ok || !result.session) {
         await closeSurface(created.value.id);
-        throw new Error(result.error ?? 'Could not open agent browser');
+        throw new Error(result.error ?? `Could not open ${PROVIDER_LABEL[provider]}`);
       }
       launchBinaryPath.remember(provider, result.binaryPath);
       const binding = boundBrowserParams(result.session, result, cwd);
