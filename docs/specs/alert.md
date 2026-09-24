@@ -59,20 +59,21 @@ Three separate signals, never one lease (rationale):
 **A Session is engaged while some present viewer focuses it**, and engagement alone decides holding over ringing.
 
 - **Must compute presence in the renderer and report transitions only**: an input event only stamps a time, and the host keeps no presence timer. **An end of presence names its lapse** — `idle` when the timeout ran out, `leave` on a window blur or hide. **A blur is a leave only when `document.hasFocus()` is false** (`docs/specs/layout.md` → Corner cases #2). Focus or visibility returning counts as input.
-- **Must keep engagement per viewer**, deduped at the renderer, so one viewer's leave never disengages a Session another viewer engages. VS Code gives each webview its own viewer (`docs/specs/vscode.md`); a standalone window and the fake adapter are their local manager's one viewer. The mobile composition only acknowledges.
+- **Must keep engagement per viewer**, deduped at the renderer, so one viewer's leave never disengages a Session another viewer engages. **An absent viewer reports no focus change.** VS Code gives each webview its own viewer (`docs/specs/vscode.md`); any other manager has one, `LOCAL_VIEWER`.
 
 | Gesture | Acknowledges |
 |---|---|
 | typing into the pane (CSI/SS3 key encodings included), a paste, a file drop, the mobile input bar or a gesture key | with input |
-| a Pane body or header click, entering passthrough by keyboard, a Door click or `Enter`, a mobile tap | without input |
-| a terminal reply, a mouse-only report chunk, `d` reattach, a `dor` reveal, an embed focusing itself, DOM focus alone | nothing |
+| a Pane body or header click, zoom, the dev-server chip, entering passthrough by keyboard, a Door click or `Enter`, a mobile tap | without input |
+| a terminal reply, a mouse-only report chunk, `d` reattach, a spawn, split, or promotion, a `dor` reveal, an embed focusing itself, DOM focus alone | nothing |
 
+- **Must acknowledge at each gesture's handler, never in the passthrough entry the silent paths share.**
 - **Never treat terminal replies or mouse-only report chunks as keyboard input** (rationale).
-- **Must acknowledge every human-originated PTY write before writing it**: `writeUserInput` for keys, pastes, and drops; `MobileTerminalUi` for its own input bar and gestures.
-- **Never create an Activity entry to acknowledge**: a browser Surface has none, and keeps its own TODO.
-- **Input opens the echo window** (`cfg.alert.echoWindow`). Output inside it is ignored entirely — detector, `outputSince`, the acknowledged state, awaits — and a completion inside it neither rings nor is held (rationale).
+- **Must write all human-originated PTY input through `writeUserInput`**, the mobile input bar's included: it carries `userInput`, and the host acknowledges it with input before writing it, in the one message.
+- **Never create an Activity entry to acknowledge**, the host's one check, so a browser Surface keeps its own TODO.
+- **User input opens the echo window** (`cfg.alert.echoWindow`) even when acknowledging clears nothing, a helper's included. Output inside it is ignored entirely — detector, `outputSince`, the acknowledged state, awaits — and a completion inside it neither rings nor is held (rationale).
 
-Source of truth: `setViewer` / `acknowledge` in `lib/src/lib/alert-manager.ts`; `createPresenceTracker` in `lib/src/lib/presence.ts`; `retainEngagementReporter` in `lib/src/lib/engagement.ts`, fed by `useEngagementFocus` in `lib/src/components/wall/use-engagement-focus.ts`; `writeUserInput` in `lib/src/lib/terminal-lifecycle.ts`; `acknowledgeSession` in `lib/src/lib/session-activity-store.ts`. Pinned by `lib/src/lib/alert-engagement.test.ts`, `lib/src/lib/presence.test.ts`, `lib/src/lib/engagement.test.ts`, `lib/src/lib/terminal-registry.alert.test.ts`, `lib/src/components/mobile-acknowledge.test.tsx`, and `engagement` in `lib/src/components/Wall.test.tsx`.
+Source of truth: `setViewer` / `acknowledge` in `lib/src/lib/alert-manager.ts`; `createPresenceTracker` in `lib/src/lib/presence.ts`; `retainEngagementReporter` in `lib/src/lib/engagement.ts`; `writeUserInput` in `lib/src/lib/terminal-lifecycle.ts`. Pinned by `lib/src/lib/alert-engagement.test.ts`.
 
 ## Completion events
 
@@ -80,16 +81,7 @@ Every completion — a detector settle, a command finish, a direct notification,
 
 Claimants get first refusal per Session in registration order; the first to return `true` claims the event and the rest are not offered it. **A claimed event never rings, never sets TODO, and never stores an `ActivityNotification`** — it stops before the ring rules, where the echo window, holding, and the command-exit seen and minimum-runtime checks live.
 
-**Must hold a completion that would ring an engaged Session**: the sources it would raise and the richest detail (Clearing And TODO), repeated holds merging, never public. A deferred report that comes due while engaged is held too. How engagement ends decides the rest (rationale):
-
-| Released by | What was held |
-|---|---|
-| an acknowledgement, or any user verb that clears a ring | dropped, as acknowledged |
-| focus moving away, or the viewer leaving (blur, hide, removal) | dropped |
-| presence lapsing `idle` with focus unchanged | rings: a report through the acknowledged check and deferral, a settle or exit directly |
-| live-transfer suspension, seeding, removal, teardown | dropped |
-
-**Dropping on an explicit disengage may be a mistake** (rationale). Resumed watched work and rule removal withdraw a held `watching` source as they withdraw a ringing one (WATCHING Track).
+**Must hold a completion that would ring an engaged Session**: the sources it would raise and the richest detail (Clearing And TODO), repeated holds merging, never public. A deferred report that comes due while engaged is held too. **Presence lapsing `idle` with focus unchanged rings what was held**, each source by its unengaged path; any other end drops it — a user verb (Clearing And TODO), focus moving away, the viewer leaving, live-transfer suspension, seeding, removal, or teardown (rationale). **Dropping on an explicit disengage may be a mistake** (rationale). Resumed watched work and rule removal withdraw a held `watching` source as they withdraw a ringing one (WATCHING Track).
 
 With `deferAlertsUntilQuiet` enabled:
 
@@ -106,7 +98,7 @@ Two ordering rules:
 - **Clear the progress cycle *before* dispatch**, so a completion or error ends the cycle whether or not the event is claimed and `OSC_NOTIF_BUSY` falls back either way.
 - **Dispatch a command finish for every watch that existed**, including the short, unseen, and engaged ones the ring rule then discards or holds.
 
-Source of truth: `registerCompletionClaimant` / `dispatchCompletion` / `deferOrDeliverNotification` / `scheduleDeferredNotification` / `flushDeferredNotification` / `escalateHeld` in `lib/src/lib/alert-manager.ts`; `quietAt` in `lib/src/lib/quiesce-detector.ts`. Pinned by `held completions` in `lib/src/lib/alert-engagement.test.ts`.
+Source of truth: `registerCompletionClaimant` / `dispatchCompletion` / `holdOrDeliver` / `deferOrDeliverNotification` / `scheduleDeferredNotification` / `flushDeferredNotification` / `escalateHeld` in `lib/src/lib/alert-manager.ts`; `quietAt` in `lib/src/lib/quiesce-detector.ts`. Pinned by `held completions` in `lib/src/lib/alert-engagement.test.ts`.
 
 ## Await
 
@@ -268,10 +260,9 @@ Source of truth: `dispatchCompletion` / `setViewer` / `formatCommandExitBody` in
 | Verb | Effect |
 |---|---|
 | acknowledge without input (Engagement) | clears the ring; `todo` stays |
-| acknowledge with input — any keystroke, paste, or drop | clears the ring; `todo` off, notification dropped |
+| acknowledge with input — any keystroke, paste, or drop — or clear TODO (pill click) | clears the ring; `todo` off, notification dropped, even if already off |
 | dismiss (`a`, Pane Header) | clears the ring; `todo` stays. **With nothing ringing: no change, no notify, a deferred notification kept** |
 | toggle TODO (`t`) | clears the ring; `todo` flips, off dropping the notification |
-| clear TODO (pill click) | clears the ring; `todo` off, notification dropped, even if already off |
 | an await consumes a source (Await) | withdraws that source |
 | watched work resumes (WATCHING Track) | withdraws `watching` |
 | a rule stops covering the `watching` key | withdraws `watching` |
@@ -440,7 +431,7 @@ A Door is display-only for alert state:
 - do not expose a Door-specific alert menu
 - scrolled out of view, its overflow arrow carries its ring and TODO (`docs/specs/layout.md` → Baseboard responsive sizing)
 
-Click or `Enter` on a Door reattaches into passthrough and clears a ring; `d` reattaches in command mode and leaves the ring intact (Engagement).
+Reattaching by click or `Enter` acknowledges; `d` does not (Engagement).
 
 ## Text And Security
 

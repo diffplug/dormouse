@@ -31,7 +31,7 @@ export const MAX_DELAY_MS = 600_000;
 
 export const DEFAULT_ALERT_SETTINGS: AlertSettings = {
   // cfg.ts stays the single source of the shipped default.
-  inactivityTimeoutMs: cfg.alert.userAttention,
+  inactivityTimeoutMs: cfg.alert.inactivityTimeout,
   deferAlertsUntilQuiet: true,
   speakEnabled: false,
   speakDelayMs: 10_000,

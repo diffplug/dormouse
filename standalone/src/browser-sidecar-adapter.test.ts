@@ -161,6 +161,20 @@ describe("BrowserSidecarAdapter terminal stream", () => {
     expect(send.mock.calls.filter(([cmd]) => cmd === "pty_write")).toEqual([]);
   });
 
+  it("acknowledges user input before writing it", async () => {
+    const { adapter, send, manager } = await listening();
+    manager.notifyFromProtocol("typed", { source: "OSC 9", title: null, body: "needs input" });
+    let atWrite: string | undefined;
+    send.mockImplementation(() => { atWrite = manager.getState("typed").status; });
+
+    adapter.writePty("typed", "\x1b[I");
+    expect(atWrite).toBe("ALERT_RINGING");
+    adapter.writePty("typed", "y", { userInput: true });
+    expect(send).toHaveBeenLastCalledWith("pty_write", { id: "typed", data: "y", paced: undefined });
+    expect(atWrite).toBe("WATCHING_DISABLED");
+    expect(manager.getState("typed").todo).toBe(false);
+  });
+
   it("routes the alert stores through the sidecar and applies their broadcasts", async () => {
     const { adapter, manager, alertCommands, deliver } = await listening();
     const quiet: AlertSettings = { ...DEFAULT_ALERT_SETTINGS, speakEnabled: false };

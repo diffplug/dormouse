@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AlertManager, type ActivityNotification, type AwaitOutcome } from './alert-manager';
 import { applyTerminalProtocolEvents, TerminalProtocolParser } from './terminal-protocol';
 import { cfg } from '../cfg';
+import { engage, finishCommand, goIdle, leave, runCommand, VIEWER } from './alert-manager-test-utils';
 
 /**
  * Engagement (`docs/specs/alert.md` -> Engagement): presence and focus arrive
@@ -11,7 +12,6 @@ import { cfg } from '../cfg';
 
 const PANE = 'pane';
 const OTHER = 'other';
-const VIEWER = 'viewer';
 
 const PERMISSION: ActivityNotification = { source: 'OSC 9', title: null, body: 'Claude needs your permission' };
 const BELL: ActivityNotification = { source: 'BEL', title: 'Terminal bell', body: null };
@@ -27,31 +27,6 @@ afterEach(() => {
   manager.dispose();
   vi.useRealTimers();
 });
-
-function engage(id: string, viewer = VIEWER): void {
-  manager.setViewer(viewer, { present: true, focusId: id });
-}
-
-/** Focus moved off, or the window blurred or hid. */
-function leave(viewer = VIEWER): void {
-  manager.setViewer(viewer, { present: false, focusId: null }, 'leave');
-}
-
-/** No input for the inactivity timeout; focus unchanged. */
-function goIdle(id: string, viewer = VIEWER): void {
-  manager.setViewer(viewer, { present: false, focusId: id }, 'idle');
-}
-
-function runCommand(id: string, commandLine: string): void {
-  manager.applyTerminalSemanticEvents(id, [
-    { type: 'commandLine', commandLine },
-    { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
-  ]);
-}
-
-function finishCommand(id: string, exitCode = 0): void {
-  manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode }, { type: 'promptStart' }]);
-}
 
 /** Output every `everyMs` for `ms`. */
 function output(id: string, ms: number, everyMs = 100): void {
@@ -83,55 +58,55 @@ function ringing(id: string): boolean {
 /** A watched command, busy and then quiet: the settle a WATCHING ring needs. */
 function watchedTurn(id: string): void {
   manager.setWatchedCommands(['claude']);
-  runCommand(id, 'claude');
+  runCommand(manager, id, 'claude');
   output(id, 3_000);
   vi.advanceTimersByTime(5_000);
 }
 
 /** A seen command that outlasted the minimum runtime, finished while engaged. */
 function longRunFinishedEngaged(id: string): void {
-  engage(id);
-  runCommand(id, 'pnpm build');
+  engage(manager, id);
+  runCommand(manager, id, 'pnpm build');
   vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
-  finishCommand(id, 2);
+  finishCommand(manager, id, 2, { promptStart: true });
 }
 
 describe('held completions', () => {
   it.each([
     ['report', (id: string) => manager.notifyFromProtocol(id, PERMISSION)],
     ['settle', (id: string) => watchedTurn(id)],
-    ['exit', (id: string) => { runCommand(id, 'pnpm build'); vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime); finishCommand(id); }],
+    ['exit', (id: string) => { runCommand(manager, id, 'pnpm build'); vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime); finishCommand(manager, id, 0, { promptStart: true }); }],
   ] as const)('holds a %s while engaged and rings it once presence lapses from inactivity', (_kind, complete) => {
     manager.onData(PANE);
-    engage(PANE);
+    engage(manager, PANE);
     complete(PANE);
     expect(ringing(PANE)).toBe(false);
     expect(manager.getState(PANE).todo).toBe(false);
 
-    goIdle(PANE);
+    goIdle(manager, PANE);
     expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', todo: true });
   });
 
   it.each([
-    ['the window leaving', () => leave()],
-    ['focus moving to another pane', () => engage(OTHER)],
+    ['the window leaving', () => leave(manager)],
+    ['focus moving to another pane', () => engage(manager, OTHER)],
     ['focus moving away while presence lapses', () => manager.setViewer(VIEWER, { present: false, focusId: OTHER }, 'idle')],
     ['the viewer going away', () => manager.removeViewer(VIEWER)],
   ] as const)('drops a held completion on an explicit disengage: %s', (_how, disengage) => {
     manager.onData(PANE);
-    engage(PANE);
+    engage(manager, PANE);
     manager.notifyFromProtocol(PANE, PERMISSION);
 
     disengage();
     vi.advanceTimersByTime(120_000);
-    goIdle(PANE);
+    goIdle(manager, PANE);
     expect(manager.getState(PANE)).toMatchObject({ status: 'WATCHING_DISABLED', todo: false, notification: null });
   });
 
   it('rings a held exit with its exit code', () => {
     longRunFinishedEngaged(PANE);
     expect(ringing(PANE)).toBe(false);
-    goIdle(PANE);
+    goIdle(manager, PANE);
     expect(manager.getState(PANE).notification).toEqual({
       source: 'COMMAND_EXIT', title: 'Command finished', body: 'pnpm build exited 2',
     });
@@ -139,20 +114,20 @@ describe('held completions', () => {
 
   it('escalates with the richest detail it held', () => {
     manager.onData(PANE);
-    engage(PANE);
+    engage(manager, PANE);
     manager.notifyFromProtocol(PANE, PERMISSION);
     manager.notifyFromProtocol(PANE, BELL);
-    goIdle(PANE);
+    goIdle(manager, PANE);
     expect(manager.getState(PANE).notification).toEqual(PERMISSION);
   });
 
   it('sends an escalated report through animation deferral', () => {
     output(PANE, 3_000);
-    engage(PANE);
+    engage(manager, PANE);
     manager.notifyFromProtocol(PANE, PERMISSION);
     output(PANE, 1_000);
 
-    goIdle(PANE);
+    goIdle(manager, PANE);
     // Still animating: the report waits for quiet, like any other.
     expect(ringing(PANE)).toBe(false);
     vi.advanceTimersByTime(5_000);
@@ -162,20 +137,20 @@ describe('held completions', () => {
   it('holds a deferred report that comes due while engaged', () => {
     output(PANE, 3_000);
     manager.notifyFromProtocol(PANE, PERMISSION);
-    engage(PANE);
+    engage(manager, PANE);
     vi.advanceTimersByTime(5_000);
     expect(ringing(PANE)).toBe(false);
 
-    goIdle(PANE);
+    goIdle(manager, PANE);
     expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', notification: PERMISSION });
   });
 
   it('acknowledging drops what was held and records it as answered', () => {
     manager.setWatchedCommands(['claude']);
-    engage(PANE);
+    engage(manager, PANE);
     watchedTurn(PANE);
     manager.acknowledge(PANE, { input: false });
-    goIdle(PANE);
+    goIdle(manager, PANE);
     expect(ringing(PANE)).toBe(false);
 
     // Claude's idle ping about the same turn is a receipt, not a second summons.
@@ -184,10 +159,10 @@ describe('held completions', () => {
   });
 
   it('withdraws a held settle once watched work resumes', () => {
-    engage(PANE);
+    engage(manager, PANE);
     watchedTurn(PANE);
     output(PANE, 3_000);
-    goIdle(PANE);
+    goIdle(manager, PANE);
     expect(ringing(PANE)).toBe(false);
   });
 });
@@ -196,32 +171,32 @@ describe('viewers', () => {
   it('lets no viewer disengage a Session another viewer engages', () => {
     // Two VS Code webviews on one manager: the user clicks into webview B,
     // and webview A's blur arrives after.
-    engage('p1', 'webview-a');
-    runCommand('p2', 'cargo build');
-    engage('p2', 'webview-b');
-    leave('webview-a');
+    engage(manager, 'p1', 'webview-a');
+    runCommand(manager, 'p2', 'cargo build');
+    engage(manager, 'p2', 'webview-b');
+    leave(manager, 'webview-a');
 
     vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
-    finishCommand('p2');
+    finishCommand(manager, 'p2', 0, { promptStart: true });
     expect(ringing('p2')).toBe(false);
   });
 
   it('derives the command-exit arm from engagement, publishing each edge', () => {
     const statuses: string[] = [];
     manager.onStateChange((id, state) => { if (id === PANE) statuses.push(state.status); });
-    engage(PANE);
-    runCommand(PANE, 'pnpm build');
+    engage(manager, PANE);
+    runCommand(manager, PANE, 'pnpm build');
     expect(manager.getState(PANE).status).toBe('WATCHING_DISABLED');
 
-    leave();
+    leave(manager);
     expect(manager.getState(PANE).status).toBe('COMMAND_EXIT_ARMED');
-    engage(PANE);
+    engage(manager, PANE);
     expect(manager.getState(PANE).status).toBe('WATCHING_DISABLED');
     expect(statuses).toEqual(['WATCHING_DISABLED', 'COMMAND_EXIT_ARMED', 'WATCHING_DISABLED']);
   });
 
   it('counts an acknowledgement as seeing the running command', () => {
-    runCommand(PANE, 'pnpm build');
+    runCommand(manager, PANE, 'pnpm build');
     expect(manager.getState(PANE).status).toBe('WATCHING_DISABLED');
     manager.acknowledge(PANE, { input: false });
     expect(manager.getState(PANE).status).toBe('COMMAND_EXIT_ARMED');
@@ -250,19 +225,19 @@ describe('acknowledge', () => {
 describe('echo window', () => {
   it('never builds BUSY from the echo of the user typing', () => {
     manager.setWatchedCommands(['claude']);
-    runCommand(PANE, 'claude');
-    engage(PANE);
+    runCommand(manager, PANE, 'claude');
+    engage(manager, PANE);
     typeFor(PANE, 3_000);
     expect(manager.getState(PANE).status).toBe('NOTHING_TO_SHOW');
 
     // The draft is left unsubmitted and the user clicks another pane.
-    engage(OTHER);
+    engage(manager, OTHER);
     vi.advanceTimersByTime(10_000);
     expect(ringing(PANE)).toBe(false);
   });
 
   it('does not resolve a quiet await on a half-typed draft', async () => {
-    runCommand(PANE, 'claude');
+    runCommand(manager, PANE, 'claude');
     const handle = manager.awaitCompletion(PANE, { until: 'quiet', timeoutMs: 600_000 });
     let outcome: AwaitOutcome | undefined;
     void handle.promise.then((value) => { outcome = value; });
@@ -285,15 +260,15 @@ describe('echo window', () => {
   });
 
   it.each([
-    ['the exit Ctrl-C caused', () => { vi.advanceTimersByTime(20); finishCommand(PANE, 130); }],
+    ['the exit Ctrl-C caused', () => { vi.advanceTimersByTime(20); finishCommand(manager, PANE, 130, { promptStart: true }); }],
     ['a bell answering Tab', () => { vi.advanceTimersByTime(5); manager.notifyFromProtocol(PANE, BELL); }],
   ] as const)('neither rings nor holds %s', (_what, answer) => {
-    engage(PANE);
-    runCommand(PANE, 'pnpm build');
+    engage(manager, PANE);
+    runCommand(manager, PANE, 'pnpm build');
     vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
     manager.acknowledge(PANE, { input: true });
     answer();
-    goIdle(PANE);
+    goIdle(manager, PANE);
     expect(ringing(PANE)).toBe(false);
     expect(manager.getState(PANE)).toMatchObject({ todo: false, notification: null });
   });
@@ -312,7 +287,7 @@ describe('walking away from a permission prompt', () => {
   function replay(untilMs: number): void {
     const parser = new TerminalProtocolParser();
     const timeline: { at: number; step: () => void }[] = [];
-    timeline.push({ at: 0, step: () => { engage(PANE); runCommand(PANE, 'claude'); } });
+    timeline.push({ at: 0, step: () => { engage(manager, PANE); runCommand(manager, PANE, 'claude'); } });
     // First paint.
     for (let at = 230; at < 830; at += 100) timeline.push({ at, step: () => manager.onData(PANE) });
     // The prompt, typed at 40ms a key, each key echoed.
@@ -327,7 +302,7 @@ describe('walking away from a permission prompt', () => {
     // The idle prompt's cursor redraw.
     for (let at = 12_415; at < untilMs; at += 605) timeline.push({ at, step: () => manager.onData(PANE) });
     // The renderer's presence lapses 15s after the last input.
-    timeline.push({ at: ENTER_AT + cfg.alert.userAttention, step: () => goIdle(PANE) });
+    timeline.push({ at: ENTER_AT + cfg.alert.inactivityTimeout, step: () => goIdle(manager, PANE) });
 
     timeline.sort((a, b) => a.at - b.at);
     let now = 0;
@@ -341,7 +316,7 @@ describe('walking away from a permission prompt', () => {
   }
 
   it('holds the permission request while the user is still there', () => {
-    replay(ENTER_AT + cfg.alert.userAttention - 1);
+    replay(ENTER_AT + cfg.alert.inactivityTimeout - 1);
     expect(manager.getState(PANE)).toMatchObject({ todo: false, notification: null });
   });
 

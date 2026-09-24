@@ -168,9 +168,10 @@ describe('IframePanel', () => {
     expect(getAgentBrowserScreenController('iframe-bare-nav')?.chrome().url).toBe('http://localhost:5173/app');
   });
 
-  it('adopts clicks into the raw iframe fallback via window blur focus', async () => {
+  it('enters the raw iframe fallback on window blur focus, as focus alone and never a click', async () => {
     const onClickPanel = vi.fn();
-    const actions = stubActions({ onClickPanel });
+    const onEnterPanel = vi.fn();
+    const actions = stubActions({ onClickPanel, onEnterPanel });
     const iframe = await renderPanel(actions);
 
     vi.spyOn(document, 'hasFocus').mockReturnValue(true);
@@ -180,12 +181,14 @@ describe('IframePanel', () => {
       window.dispatchEvent(new Event('blur'));
     });
 
-    expect(onClickPanel).toHaveBeenCalledWith('iframe-raw');
+    expect(onEnterPanel).toHaveBeenCalledWith('iframe-raw');
+    // A click acknowledges the Session; DOM focus never does (docs/specs/alert.md -> Engagement).
+    expect(onClickPanel).not.toHaveBeenCalled();
   });
 
   it('does not adopt a raw iframe blur when the app itself lost focus', async () => {
-    const onClickPanel = vi.fn();
-    const actions = stubActions({ onClickPanel });
+    const onEnterPanel = vi.fn();
+    const actions = stubActions({ onEnterPanel });
     const iframe = await renderPanel(actions);
 
     vi.spyOn(document, 'hasFocus').mockReturnValue(false);
@@ -195,7 +198,7 @@ describe('IframePanel', () => {
       window.dispatchEvent(new Event('blur'));
     });
 
-    expect(onClickPanel).not.toHaveBeenCalled();
+    expect(onEnterPanel).not.toHaveBeenCalled();
   });
 
   it('drives iframe back and forward from the registered chrome actions', async () => {

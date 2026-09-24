@@ -18,9 +18,11 @@ beforeEach(() => {
   visibility = 'visible';
   vi.spyOn(document, 'hasFocus').mockImplementation(() => focused);
   vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility);
-  tracker = createPresenceTracker({ timeoutMs: () => timeoutMs });
   transitions = [];
-  tracker.subscribe((present, lapse) => transitions.push([present, lapse]));
+  tracker = createPresenceTracker({
+    timeoutMs: () => timeoutMs,
+    onChange: (present, lapse) => transitions.push([present, lapse]),
+  });
 });
 
 afterEach(() => {

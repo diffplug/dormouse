@@ -176,11 +176,10 @@ function broadcastToWebviews(message: ExtensionMessage): void {
 
 const activeRouters = new Set<ActiveRouter>();
 let nextFlushRequestId = 0;
-/** Tags each router's contribution to the volatile notepad mirror. Per
- *  extension-host lifetime, like the mirror itself (`notepad-volatile.ts`). */
-let nextNotepadRouterId = 0;
-/** Tags each router's engagement viewer in the shared alert manager. */
-let nextViewerId = 0;
+/** Tags each router's contribution to the volatile notepad mirror and its
+ *  engagement viewer in the shared alert manager. Per extension-host lifetime,
+ *  like the mirror itself (`notepad-volatile.ts`). */
+let nextRouterId = 0;
 const ALLOWED_WORKBENCH_COMMANDS = new Set<string>(VSCODE_WORKBENCH_COMMANDS);
 
 // Shared alert manager — survives router disposal so alert state persists
@@ -378,10 +377,9 @@ export function attachRouter(
 ): vscode.Disposable {
   const reconnect = options?.reconnect ?? false;
   const killOnDispose = options?.killOnDispose ?? false;
-  const notepadRouterId = `notepad-router-${++nextNotepadRouterId}`;
-  // This webview is one engagement viewer of the shared manager, so one
-  // webview's blur never touches another's (docs/specs/alert.md → Engagement).
-  const viewerId = `viewer-${++nextViewerId}`;
+  // Also this webview's engagement viewer, so one webview's blur never touches
+  // another's (docs/specs/alert.md → Engagement).
+  const routerId = `router-${++nextRouterId}`;
 
   // The router's only send path — it stamps this webview's message token, which
   // the webview requires (docs/specs/vscode.md → "Webview message
@@ -470,6 +468,13 @@ export function attachRouter(
         // make `postMessage` throw. Nothing left to tell — keep cancelling.
       }
     }
+  }
+
+  /** This webview's content is gone — disposed, or destroyed and recreated:
+   *  its engagement and the awaits it parked go with it (docs/specs/vscode.md). */
+  function endRealm(): void {
+    cancelAllPendingAwaits();
+    alertManager.removeViewer(routerId);
   }
 
   function flushSessionSave(timeoutMs = 1000): Promise<void> {
@@ -624,6 +629,9 @@ export function attachRouter(
         break;
       }
       case 'pty:input':
+        // Acknowledged before the write, so the echo window is open before any
+        // echo can arrive (docs/specs/alert.md → Engagement).
+        if (msg.userInput === true) alertManager.acknowledge(msg.id, { input: true });
         ptyManager.write(msg.id, msg.data, { paced: msg.paced });
         break;
       case 'pty:resize':
@@ -839,7 +847,7 @@ export function attachRouter(
       case 'notepad:volatile':
         // Memory only, and nothing to answer: the mirror exists so a teardown
         // that finds no webview left can still archive (docs/specs/notepad.md).
-        setVolatileForRouter(notepadRouterId, msg.snapshot);
+        setVolatileForRouter(routerId, msg.snapshot);
         break;
       case 'dormouse:themeColors':
         // Webview reports its resolved terminal theme; cache for OSC color replies.
@@ -850,10 +858,8 @@ export function attachRouter(
         // Tear down previous subscriptions first (webview was destroyed and recreated).
         disconnectWebview?.();
         disconnectWebview = connectWebview();
-        // Recreated content is a new realm: the old one's engagement and the
-        // awaits it parked went with it.
-        alertManager.removeViewer(viewerId);
-        cancelAllPendingAwaits();
+        // Recreated content is a new realm.
+        endRealm();
 
         // Re-publish the currently-selected shell so split-spawns in the
         // freshly-mounted webview know what to use.
@@ -983,10 +989,10 @@ export function attachRouter(
         break;
       case 'alert:engagement':
         // `setViewer` revalidates the shape: only a literal `idle` escalates.
-        alertManager.setViewer(viewerId, { present: msg.present, focusId: msg.focusId }, msg.lapse);
+        alertManager.setViewer(routerId, msg.state, msg.lapse);
         break;
       case 'alert:acknowledge':
-        alertManager.acknowledge(msg.id, { input: msg.input === true });
+        alertManager.acknowledge(msg.id, { input: false });
         break;
       case 'alert:resize':
         alertManager.onResize(msg.id);
@@ -1048,8 +1054,7 @@ export function attachRouter(
         if (!request.pending.delete(router)) continue;
         if (request.pending.size === 0) request.settle();
       }
-      cancelAllPendingAwaits();
-      alertManager.removeViewer(viewerId);
+      endRealm();
       removeWatchedCommandListener();
       removeAlertSettingsListener();
       resolveAllFlushRequests();
@@ -1087,11 +1092,11 @@ export function attachRouter(
         ? Promise.resolve()
         : killOnDispose
           ? refreshMirrorCwds(
-            takeVolatileForRouter(notepadRouterId),
+            takeVolatileForRouter(routerId),
             ptyManager.getCwd,
             TEARDOWN_CWD_REFRESH_MS,
           ).then((refreshed) => archiveVolatileMirror(notepadContext, refreshed))
-          : mutateNotepadArchive(notepadContext, takeStagedForRouter(notepadRouterId));
+          : mutateNotepadArchive(notepadContext, takeStagedForRouter(routerId));
       void write
         .catch((err) => {
           log.error('[notepad] could not commit a disposed webview\'s archive write:', String(err));

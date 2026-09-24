@@ -1,7 +1,7 @@
 import type { AlertRuntimeSnapshot } from '../alert-manager';
 import { DEFAULT_HELPER_COMMAND, type HelperIdentity, type TerminalContextRequest, type TerminalContextInfo } from '../terminal-context-types';
-import type { AlertStateDetail, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink } from './types';
-import { AlertManager } from '../alert-manager';
+import type { AlertStateDetail, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink, WritePtyOptions } from './types';
+import { AlertManager, LOCAL_VIEWER } from '../alert-manager';
 import type { AwaitHandle, AwaitOptions, Engagement, EngagementLapse } from '../alert-manager';
 import type { AlertSettings } from '../alert-settings';
 import { normalizeExternalUri } from '../external-links';
@@ -40,9 +40,6 @@ export interface FakePtyResizeDetail extends FakePtySize {
 }
 
 const DEFAULT_PTY_SIZE: FakePtySize = { cols: 80, rows: 30 };
-
-/** This adapter's local manager serves one renderer realm, so one viewer. */
-const FAKE_VIEWER = 'fake';
 
 export class FakePtyAdapter implements PlatformAdapter {
   private dataHandlers = new Set<(detail: PtyDataDetail) => void>();
@@ -212,7 +209,8 @@ export class FakePtyAdapter implements PlatformAdapter {
     return this.scenarioMap.get(id) ?? this.defaultScenario;
   }
 
-  writePty(id: string, data: string): void {
+  writePty(id: string, data: string, options?: WritePtyOptions): void {
+    if (options?.userInput) this.alertManager.acknowledge(id, { input: true });
     if (!this.terminals.has(id)) return;
     // Only echo if no scenario is actively playing
     if (this.activeTimers.has(id)) return;
@@ -338,8 +336,8 @@ export class FakePtyAdapter implements PlatformAdapter {
   alertSetCommandWatched(name: string, watched: boolean): void { this.alertManager.setCommandWatched(name, watched); }
   alertPublishSettings(settings: AlertSettings): void { this.alertManager.applySettings(settings); }
   alertDismiss(id: string): void { this.alertManager.dismissAlert(id); }
-  alertEngagement(state: Engagement, lapse?: EngagementLapse): void { this.alertManager.setViewer(FAKE_VIEWER, state, lapse); }
-  alertAcknowledge(id: string, options: { input: boolean }): void { this.alertManager.acknowledge(id, options); }
+  alertEngagement(state: Engagement, lapse?: EngagementLapse): void { this.alertManager.setViewer(LOCAL_VIEWER, state, lapse); }
+  alertAcknowledge(id: string): void { this.alertManager.acknowledge(id, { input: false }); }
   alertResize(id: string): void { this.alertManager.onResize(id); }
   alertToggleTodo(id: string): void { this.alertManager.toggleTodo(id); }
   alertClearTodo(id: string): void { this.alertManager.clearTodo(id); }

@@ -117,6 +117,7 @@ import {
   WorkspaceIdContext,
   PaneElementsContext,
   PaneWriteContext,
+  PassthroughPaneIdContext,
   WallActionsContext,
   RenamingIdContext,
   SelectedIdContext,
@@ -414,6 +415,10 @@ export function Wall({
   const [mode, setMode] = useState<WallMode>(initialMode);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<WallSelectionKind>('pane');
+  /** The Session an open terminal context holds — null while none is open or one is exiting. */
+  const contextSourceId = terminalContext && !terminalContext.closing ? terminalContext.id : null;
+  /** The pane whose Surface takes the keyboard in passthrough. */
+  const passthroughPaneId = mode === 'passthrough' && selectedType === 'pane' ? selectedId : null;
   const lastPaneIdRef = useRef<string | null>(null);
   const doorKillReturnRef = useRef<{ id: string; neighbors: string[] } | null>(null);
 
@@ -843,14 +848,13 @@ export function Wall({
     confirmTimerRef.current = setTimeout(() => setConfirmKill(null), KILL_CONFIRM_MS);
   }, [closeSurface]);
 
-  /** Enter terminal mode for the given panel. A human gesture acknowledges the
-   *  Session; `acknowledge: false` only moves focus there — a `dor` reveal, an
-   *  embed focusing itself (`docs/specs/alert.md` -> Engagement). */
-  const enterTerminalMode = useCallback((id: string, options?: { acknowledge?: boolean }) => {
+  /** Enter terminal mode for the given panel. This only moves focus there: the
+   *  human gestures acknowledge at their own handlers, and spawns, reveals, and
+   *  embeds focusing themselves never do (`docs/specs/alert.md` -> Engagement). */
+  const enterTerminalMode = useCallback((id: string) => {
     selectPane(id);
     modeRef.current = 'passthrough';
     setMode('passthrough');
-    if (options?.acknowledge !== false) acknowledgeSession(id, false);
     // Defer focus so it happens after the mousedown/click event finishes.
     requestAnimationFrame(() => focusSession(id, true));
   }, [selectPane]);
@@ -1022,8 +1026,7 @@ export function Wall({
   // The terminal Session this Wall points its realm at (`docs/specs/alert.md` ->
   // Engagement): an open terminal context's source, else the passthrough pane —
   // never a command-mode selection, a Door, a browser Surface, or a hidden Wall.
-  const contextSourceId = terminalContext && !terminalContext.closing ? terminalContext.id : null;
-  const focusCandidate = contextSourceId ?? (mode === 'passthrough' && selectedType === 'pane' ? selectedId : null);
+  const focusCandidate = contextSourceId ?? passthroughPaneId;
   useEngagementFocus(
     active && focusCandidate !== null && surfaceHasTerminal(focusCandidate)
       ? focusCandidate
@@ -1176,7 +1179,7 @@ export function Wall({
 
   const handleReattach = useCallback((
     item: DooredItem,
-    options?: { enterPassthrough?: boolean; afterRestore?: DoorAfterRestoreAction; acknowledge?: boolean },
+    options?: { enterPassthrough?: boolean; afterRestore?: DoorAfterRestoreAction },
   ) => {
     const enterPassthrough = options?.enterPassthrough ?? true;
     const afterRestore = options?.afterRestore;
@@ -1198,7 +1201,7 @@ export function Wall({
 
     removeDoorAndSelect(item.id);
     if (enterPassthrough) {
-      enterTerminalMode(item.id, { acknowledge: options?.acknowledge });
+      enterTerminalMode(item.id);
     } else {
       modeRef.current = 'command';
       setMode('command');
@@ -1230,6 +1233,13 @@ export function Wall({
   const handleReattachRef = useRef(handleReattach);
   handleReattachRef.current = handleReattach;
 
+  /** A Door click, or a pin in its popover: reattach into passthrough, a human
+   *  gesture that acknowledges the Session. */
+  const reattachFromDoor = useCallback((item: DooredItem) => {
+    handleReattach(item);
+    acknowledgeSession(item.id);
+  }, [handleReattach]);
+
   /** Focus a surface for the human half of the context's port actions: activating
    *  a port row is an explicit request to look at and control that browser. A visible pane
    *  enters passthrough in place; a minimized one reattaches on the same terms
@@ -1243,11 +1253,11 @@ export function Wall({
    *  returns, and `nav.hasPane` reads the store, not React state. */
   const revealSurface = useCallback((id: string): boolean => {
     if (nav.hasPane(id)) {
-      enterTerminalMode(id, { acknowledge: false });
+      enterTerminalMode(id);
       return true;
     }
     const door = doorsRef.current.find((item) => item.id === id);
-    if (door) handleReattachRef.current(door, { acknowledge: false });
+    if (door) handleReattachRef.current(door);
     return nav.hasPane(id);
   }, [nav, enterTerminalMode]);
 
@@ -1927,10 +1937,16 @@ export function Wall({
         selectedIdRef.current !== id
       ) {
         enterTerminalMode(id);
+        acknowledgeSession(id);
       }
       lath.store.setZoomed(id);
     },
     onClickPanel: (id: string) => {
+      setConfirmKill(null);
+      enterTerminalMode(id);
+      acknowledgeSession(id);
+    },
+    onEnterPanel: (id: string) => {
       setConfirmKill(null);
       enterTerminalMode(id);
     },
@@ -1940,10 +1956,12 @@ export function Wall({
       const visible = nav.hasPane(id);
       if (visible) {
         enterTerminalMode(id);
-        return;
+      } else {
+        const door = doorsRef.current.find((item) => item.id === id);
+        if (!door) return;
+        handleReattachRef.current(door, { enterPassthrough: true });
       }
-      const door = doorsRef.current.find((item) => item.id === id);
-      if (door) handleReattachRef.current(door, { enterPassthrough: true });
+      acknowledgeSession(id);
     },
     onStartRename: (id: string) => {
       setRenamingPaneId(id);
@@ -2159,7 +2177,7 @@ export function Wall({
     try { await operation; } finally { contextPortLaunches.current.delete(key); }
   }, [buildDorSurfaces, findSurfaceByParams, createContentSurface, enterTerminalMode, closeSurface, lath, revealSurface, updateSurfaceParams]);
   const contextActions = useMemo(() => ({
-    id: terminalContext && !terminalContext.closing ? terminalContext.id : null,
+    id: contextSourceId,
     mounted: terminalContext,
     open: (id: string, options?: TerminalContextOpenOptions) => { if (toolPendingFromParams(lath.getMeta(id)?.params) || isHelperSession(id) || isSurfaceClosing(id) || lath.isDying(id)) return; setTerminalContext({ id, ...options }); },
     close: () => {
@@ -2185,7 +2203,7 @@ export function Wall({
       enterTerminalMode(helper.id);
     },
     openPort: openContextPort,
-  }), [terminalContext, lath, nav, surfaceRefForId, enterTerminalMode, openContextPort]);
+  }), [contextSourceId, terminalContext, lath, nav, surfaceRefForId, enterTerminalMode, openContextPort]);
 
   const wallActionsRef = useRef(wallActions);
   wallActionsRef.current = wallActions;
@@ -2235,7 +2253,7 @@ export function Wall({
   const onLeafFocused = useCallback((id: string) => {
     if (modeRef.current === 'passthrough') {
       // The embed moved DOM focus; no human gesture reached this Session.
-      if (selectedIdRef.current !== id) enterTerminalMode(id, { acknowledge: false });
+      if (selectedIdRef.current !== id) enterTerminalMode(id);
       return;
     }
     if (selectedTypeRef.current !== 'pane' || selectedIdRef.current !== id) selectPane(id);
@@ -2302,6 +2320,7 @@ export function Wall({
     <WorkspaceActiveContext.Provider value={active}>
     <ModeContext.Provider value={mode}>
       <SelectedIdContext.Provider value={selectedId}>
+      <PassthroughPaneIdContext.Provider value={passthroughPaneId}>
         <WallActionsContext.Provider value={wallActions}>
           <TerminalContextContext.Provider value={contextActions}>
           <PaneWriteContext.Provider value={paneWrite}>
@@ -2333,7 +2352,7 @@ export function Wall({
             {/* Baseboard — always present; the mobile composition is `MobileWall`, not a baseboard-less Wall. */}
             <Baseboard
               items={doorChips}
-              onReattach={handleReattach}
+              onReattach={reattachFromDoor}
               notice={baseboardNotice}
               onDoorDragStart={onDoorDragStart}
             />
@@ -2401,6 +2420,7 @@ export function Wall({
           </PaneWriteContext.Provider>
           </TerminalContextContext.Provider>
         </WallActionsContext.Provider>
+      </PassthroughPaneIdContext.Provider>
       </SelectedIdContext.Provider>
     </ModeContext.Provider>
     </WorkspaceActiveContext.Provider>

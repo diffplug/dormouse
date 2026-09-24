@@ -10,41 +10,16 @@ import { startAlertSpeech } from './alert-speech';
 import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS } from './alert-settings';
 import { clearTerminalActivity, setTerminalActivity } from './session-activity-store';
 import { cfg } from '../cfg';
+import { armCommandExit, driveToBusy, finishCommand, runCommand, settle } from './alert-manager-test-utils';
 
 const ID = 'resumed-watched-work';
+const WATCHED = 'longtask';
 const DELAY = 10_000;
 let manager: AlertManager;
 let stopSpeech: () => void;
 let stopPush: () => void;
 let spoken: ReturnType<typeof vi.fn>;
 let pushed: ReturnType<typeof vi.fn>;
-
-function busy(): void {
-  manager.onData(ID);
-  vi.advanceTimersByTime(1_600);
-  manager.onData(ID);
-  manager.onData(ID);
-}
-
-function settle(): void {
-  vi.advanceTimersByTime(5_000);
-}
-
-/** Start the watched command the way shell integration reports it. */
-function runCommand(): void {
-  manager.applyTerminalSemanticEvents(ID, [
-    { type: 'commandLine', commandLine: 'longtask' },
-    { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
-  ]);
-}
-
-/** Run it seen and then left: armed, so its exit rings once it has outlasted
- *  `cfg.alert.commandExitMinRuntime`. */
-function armCommandExit(): void {
-  manager.setViewer('viewer', { present: true, focusId: ID });
-  runCommand();
-  manager.setViewer('viewer', { present: false, focusId: null }, 'leave');
-}
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -59,8 +34,8 @@ beforeEach(() => {
   manager = new AlertManager();
   manager.setDeferAlertsUntilQuiet(true);
   manager.onStateChange(setTerminalActivity);
-  manager.setWatchedCommands(['longtask']);
-  runCommand();
+  manager.setWatchedCommands([WATCHED]);
+  runCommand(manager, ID, WATCHED);
   stopSpeech = startAlertSpeech();
   // Push shares the ring watcher; exercise its delivery decision without a Relay.
   stopPush = watchUnattendedRings({ sink: 'push', subscribe: () => () => {}, enabled: () => true, delayMs: () => DELAY, fire: pushed });
@@ -78,13 +53,13 @@ afterEach(() => {
 
 describe('WATCHING output resuming before alarm delivery', () => {
   it('cancels pending speech and push during animation, then gives the next settle a fresh delay', () => {
-    busy();
+    driveToBusy(manager, ID);
     settle();
     const firstEpisode = manager.getState(ID).episode;
     expect(firstEpisode?.id).toBeTruthy();
     expect(manager.getState(ID).status).toBe('ALERT_RINGING');
     vi.advanceTimersByTime(1_000);
-    busy();
+    driveToBusy(manager, ID);
     expect(manager.getState(ID)).toMatchObject({ status: 'BUSY', todo: false, episode: null });
 
     // Keep animating across the old speech deadline, as in the marked incident.
@@ -109,7 +84,7 @@ describe('WATCHING output resuming before alarm delivery', () => {
   });
 
   it('keeps an inferred ring through a short redraw that never confirms BUSY', () => {
-    busy();
+    driveToBusy(manager, ID);
     settle();
     manager.onData(ID);
     vi.advanceTimersByTime(62);
@@ -121,9 +96,9 @@ describe('WATCHING output resuming before alarm delivery', () => {
 
   it('retains the latched ring with animation deferral disabled', () => {
     manager.setDeferAlertsUntilQuiet(false);
-    busy();
+    driveToBusy(manager, ID);
     settle();
-    busy();
+    driveToBusy(manager, ID);
     expect(manager.getState(ID).status).toBe('ALERT_RINGING');
     vi.advanceTimersByTime(DELAY);
     expect(spoken).toHaveBeenCalledOnce();
@@ -134,43 +109,43 @@ describe('WATCHING output resuming before alarm delivery', () => {
     manager.dismissAlert(ID);
     const receipt = manager.getState(ID);
     expect(receipt.todo).toBe(true);
-    busy();
+    driveToBusy(manager, ID);
     settle();
-    busy();
+    driveToBusy(manager, ID);
     expect(manager.getState(ID)).toMatchObject({ status: 'BUSY', todo: true, notification: receipt.notification });
   });
 
   it.each(['report', 'exit'] as const)('preserves an authoritative %s source behind WATCHING', (source) => {
-    armCommandExit();
+    armCommandExit(manager, ID, WATCHED);
     vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
-    busy();
+    driveToBusy(manager, ID);
     settle();
     if (source === 'report') {
       manager.notifyFromProtocol(ID, { source: 'OSC 9', title: 'input needed', body: null });
     } else {
-      manager.applyTerminalSemanticEvents(ID, [{ type: 'commandFinish', exitCode: 0 }]);
+      finishCommand(manager, ID);
       expect(manager.getState(ID).notification?.source).toBe('COMMAND_EXIT');
-      runCommand();
+      runCommand(manager, ID, WATCHED);
     }
     const episode = manager.getState(ID).episode;
-    busy();
+    driveToBusy(manager, ID);
     expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', episode });
     vi.advanceTimersByTime(DELAY);
     expect(spoken).toHaveBeenCalledOnce();
   });
 
   it('keeps a WATCHING ring through output after the watched command exits', () => {
-    busy();
+    driveToBusy(manager, ID);
     settle();
-    manager.applyTerminalSemanticEvents(ID, [{ type: 'commandFinish', exitCode: 0 }]);
-    busy();
+    finishCommand(manager, ID);
+    driveToBusy(manager, ID);
     expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', watchingEnabled: false });
   });
 
   it('keeps the resumed detector alive so an await can claim its next settle', async () => {
-    busy();
+    driveToBusy(manager, ID);
     settle();
-    busy();
+    driveToBusy(manager, ID);
     const handle = manager.awaitCompletion(ID, { until: 'quiet', timeoutMs: 60_000 });
     settle();
     expect(await handle.promise).toMatchObject({ kind: 'resolved', cause: 'quiet' });

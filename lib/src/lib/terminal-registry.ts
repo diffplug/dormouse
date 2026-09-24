@@ -40,7 +40,6 @@ export {
   getTerminalInstance,
   getTerminalOverlayDims,
   isUntouched,
-  markSessionTouched,
   mountElement,
   writeUserInput,
   refitSession,

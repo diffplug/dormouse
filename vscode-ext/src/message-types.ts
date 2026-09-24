@@ -3,6 +3,7 @@ import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from
 import type {
   AwaitOutcome,
   AwaitUntil,
+  Engagement,
   EngagementLapse,
 } from '../../lib/src/lib/alert-manager';
 import type { AlertSettings } from '../../lib/src/lib/alert-settings';
@@ -18,7 +19,7 @@ import type { VolatileNotepadSnapshot } from '../../lib/src/lib/notepad/types';
 export type WebviewMessage =
   | { type: 'pty:context'; request: TerminalContextRequest; requestId: string }
   | { type: 'pty:spawn'; id: string; options?: { cols?: number; rows?: number; cwd?: string; shell?: string; args?: string[]; helper?: HelperIdentity } }
-  | { type: 'pty:input'; id: string; data: string; paced?: boolean }
+  | { type: 'pty:input'; id: string; data: string; paced?: boolean; userInput?: true }
   | { type: 'pty:resize'; id: string; cols: number; rows: number }
   | { type: 'pty:kill'; id: string }
   | { type: 'pty:getCwd'; id: string; requestId?: string }
@@ -69,8 +70,8 @@ export type WebviewMessage =
   | { type: 'alert:updateSettings'; settings: AlertSettings }
   | { type: 'alert:dismiss'; id: string }
   // This webview is one engagement viewer (docs/specs/alert.md → Engagement).
-  | { type: 'alert:engagement'; present: boolean; focusId: string | null; lapse?: EngagementLapse }
-  | { type: 'alert:acknowledge'; id: string; input: boolean }
+  | { type: 'alert:engagement'; state: Engagement; lapse?: EngagementLapse }
+  | { type: 'alert:acknowledge'; id: string }
   | { type: 'alert:resize'; id: string }
   | { type: 'alert:toggleTodo'; id: string }
   | { type: 'alert:clearTodo'; id: string }

@@ -2,17 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AlertManager } from './alert-manager';
 import { QuiesceDetector } from './quiesce-detector';
 import { cfg } from '../cfg';
+import { engage, goIdle, heartbeat, runCommand } from './alert-manager-test-utils';
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
-
-/** One output chunk a second for `ms`, which never lets the pane go quiet. */
-function heartbeat(target: AlertManager, ms: number): void {
-  for (let elapsed = 0; elapsed < ms; elapsed += 1_000) {
-    vi.advanceTimersByTime(1_000);
-    target.onData('pane');
-  }
-}
 
 describe('live alert handoff', () => {
   it('preserves an episode across live handoff, while cold restore remains silent', () => {
@@ -40,11 +33,8 @@ describe('live alert handoff', () => {
 
   it('leaves behind what the source held, and arms the command it saw', () => {
     const source = new AlertManager();
-    source.setViewer('source', { present: true, focusId: 'pane' });
-    source.applyTerminalSemanticEvents('pane', [
-      { type: 'commandLine', commandLine: 'pnpm build' },
-      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
-    ]);
+    engage(source, 'pane');
+    runCommand(source, 'pane');
     source.notifyFromProtocol('pane', { source: 'OSC 9', title: null, body: 'needs input' });
     const snapshot = source.pauseForTransfer('pane')!;
 
@@ -52,8 +42,8 @@ describe('live alert handoff', () => {
     target.resumeFromTransfer('pane', JSON.parse(JSON.stringify(snapshot)));
     expect(target.getState('pane').status).toBe('COMMAND_EXIT_ARMED');
     // Leaving the source window disengaged it: nothing it held escalates here.
-    target.setViewer('target', { present: true, focusId: 'pane' });
-    target.setViewer('target', { present: false, focusId: 'pane' }, 'idle');
+    engage(target, 'pane');
+    goIdle(target, 'pane');
     expect(target.getState('pane')).toMatchObject({ todo: false, notification: null });
     source.dispose(); target.dispose();
   });
@@ -65,11 +55,11 @@ describe('live alert handoff', () => {
     source.onData('pane'); source.onData('pane');
     // Confirmed busy, so the report waits behind the animation.
     source.notifyFromProtocol('pane', { source: 'OSC 9', title: null, body: 'Done' });
-    heartbeat(source, 20_000);
+    heartbeat(source, 'pane', 20_000);
     const snapshot = source.pauseForTransfer('pane')!;
     const target = new AlertManager();
     target.resumeFromTransfer('pane', JSON.parse(JSON.stringify(snapshot)));
-    heartbeat(target, cfg.alert.deferCeiling - 21_000);
+    heartbeat(target, 'pane', cfg.alert.deferCeiling - 21_000);
     expect(target.getState('pane').status).toBe('WATCHING_DISABLED');
     vi.advanceTimersByTime(1_000);
     expect(target.getState('pane').status).toBe('ALERT_RINGING');

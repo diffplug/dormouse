@@ -41,6 +41,8 @@ const ptys = vi.hoisted(() => ({
   buffered: new Map<string, { alive: boolean }>(),
   /** `'write'` and `'kill <id>'`, in the order they happened. */
   order: [] as string[],
+  /** Called on each PTY write, as the pty host receives it. */
+  onWrite: null as ((id: string, data: string) => void) | null,
 }));
 
 vi.mock('../src/pty-manager', async (importOriginal) => ({
@@ -60,6 +62,7 @@ vi.mock('../src/pty-manager', async (importOriginal) => ({
     ptys.order.push(`kill ${id}`);
     ptys.buffered.delete(id);
   },
+  write: (id: string, data: string) => ptys.onWrite?.(id, data),
 }));
 
 vi.mock('../src/burrow', () => ({
@@ -117,6 +120,7 @@ beforeEach(async () => {
   ptys.cwdWait = null;
   ptys.buffered.clear();
   ptys.order = [];
+  ptys.onWrite = null;
   router = (await import('../src/message-router')) as RouterModule;
   // The same instance the router holds — `resetModules` gave this test its own
   // extension host, and both imports land in that one registry.
@@ -632,9 +636,9 @@ describe('engagement viewers', () => {
     const disposeA = router.attachRouter(a.channel);
     const disposeB = router.attachRouter(b.channel);
     try {
-      a.send({ type: 'alert:engagement', present: true, focusId: 'pty-a' });
-      b.send({ type: 'alert:engagement', present: true, focusId: 'pty-b' });
-      a.send({ type: 'alert:engagement', present: false, focusId: null, lapse: 'leave' });
+      a.send({ type: 'alert:engagement', state: { present: true, focusId: 'pty-a' } });
+      b.send({ type: 'alert:engagement', state: { present: true, focusId: 'pty-b' } });
+      a.send({ type: 'alert:engagement', state: { present: false, focusId: null }, lapse: 'leave' });
 
       ptys.callbacks!.onData('pty-b', REPORT);
       expect(status('pty-b')).not.toBe('ALERT_RINGING');
@@ -650,8 +654,28 @@ describe('engagement viewers', () => {
     try {
       ptys.callbacks!.onData('pty-ack', REPORT);
       expect(status('pty-ack')).toBe('ALERT_RINGING');
-      webview.send({ type: 'alert:acknowledge', id: 'pty-ack', input: false });
+      webview.send({ type: 'alert:acknowledge', id: 'pty-ack' });
       expect(router.getAlertStates().get('pty-ack')).toMatchObject({ status: 'WATCHING_DISABLED', todo: true });
+    } finally {
+      disposable.dispose();
+    }
+  });
+
+  it('acknowledges user input, echo window included, before writing it', () => {
+    const webview = fakeWebview();
+    const disposable = router.attachRouter(webview.channel);
+    try {
+      ptys.callbacks!.onData('pty-typed', REPORT);
+      const atWrite: Array<string | undefined> = [];
+      ptys.onWrite = (id) => void atWrite.push(status(id));
+      webview.send({ type: 'pty:input', id: 'pty-typed', data: '\x1b[I' });
+      webview.send({ type: 'pty:input', id: 'pty-typed', data: 'y', userInput: true });
+      expect(atWrite).toEqual(['ALERT_RINGING', 'WATCHING_DISABLED']);
+      expect(router.getAlertStates().get('pty-typed')?.todo).toBe(false);
+
+      // A bell answering the key rings no one.
+      ptys.callbacks!.onData('pty-typed', REPORT);
+      expect(status('pty-typed')).not.toBe('ALERT_RINGING');
     } finally {
       disposable.dispose();
     }
@@ -660,7 +684,7 @@ describe('engagement viewers', () => {
   it('stops engaging anything once its webview is disposed', () => {
     const webview = fakeWebview();
     const disposable = router.attachRouter(webview.channel);
-    webview.send({ type: 'alert:engagement', present: true, focusId: 'pty-gone' });
+    webview.send({ type: 'alert:engagement', state: { present: true, focusId: 'pty-gone' } });
     disposable.dispose();
 
     ptys.callbacks!.onData('pty-gone', REPORT);
@@ -672,7 +696,7 @@ describe('engagement viewers', () => {
     const disposable = router.attachRouter(webview.channel);
     try {
       webview.send({ type: 'dormouse:init' });
-      webview.send({ type: 'alert:engagement', present: true, focusId: 'pty-init' });
+      webview.send({ type: 'alert:engagement', state: { present: true, focusId: 'pty-init' } });
       webview.send({ type: 'alert:await', requestId: 'await-init', id: 'pty-init', until: 'exit', timeoutMs: 600_000 });
 
       // The content was destroyed and rebuilt; the old one's engagement and

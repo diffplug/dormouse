@@ -25,7 +25,7 @@ export const cfg = {
     /** ms — ignore resize redraw noise. */
     resizeDebounce: 500,
     /** ms — default inactivity timeout: presence lapses this long after the last typing, mouse, or scroll input. */
-    userAttention: 15_000,
+    inactivityTimeout: 15_000,
     /** ms — output and completions this soon after a keystroke into a Session answer that keystroke and are ignored. */
     echoWindow: 250,
     /** ms — shortest run a command-exit ring reports; anything quicker was probably watched. */

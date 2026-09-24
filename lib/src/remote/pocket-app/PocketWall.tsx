@@ -20,7 +20,7 @@ import {
   setOverride as setMouseOverride,
   subscribeToMouseSelection,
 } from '../../lib/mouse-selection';
-import { getTerminalInstance, refitSession } from '../../lib/terminal-registry';
+import { getTerminalInstance, refitSession, writeUserInput } from '../../lib/terminal-registry';
 import { doPaste } from '../../lib/clipboard';
 import type { RemotePtyAdapter } from '../client/remote-adapter';
 import { usePocketTheme } from './pocket-theme';
@@ -100,9 +100,9 @@ export function PocketWall({ adapter, onError }: {
 
   const handleSendInput = useCallback(
     (data: string) => {
-      if (activePaneId) adapter.writePty(activePaneId, data);
+      if (activePaneId) writeUserInput(activePaneId, data);
     },
-    [adapter, activePaneId],
+    [activePaneId],
   );
 
   const handlePaste = useCallback(async () => {

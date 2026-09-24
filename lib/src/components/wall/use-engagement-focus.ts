@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { publishEngagementFocus, retainEngagementReporter, withdrawEngagementFocus } from '../../lib/engagement';
+import { publishEngagementFocus, retainEngagementReporter } from '../../lib/engagement';
 
 /**
  * Report the terminal Session this Wall points its realm at (`docs/specs/alert.md`
@@ -10,7 +10,7 @@ export function useEngagementFocus(focusId: string | null): void {
   useEffect(() => {
     const release = retainEngagementReporter();
     return () => {
-      withdrawEngagementFocus(slot);
+      publishEngagementFocus(slot, null);
       release();
     };
   }, [slot]);

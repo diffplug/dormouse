@@ -150,13 +150,13 @@ export function dismissSessionAlert(id: string): void {
 }
 
 /**
- * A human interacted with this Session (`docs/specs/alert.md` -> Engagement):
- * `input` for keys, a paste, or a drop, else a click, tap, or reattach. Only a
- * terminal Session is acknowledged — a browser Surface has no Activity machine.
+ * A human gesture reached this Session without input — a click, a Door
+ * reattach, a tap (`docs/specs/alert.md` -> Engagement). Input acknowledges
+ * through `writeUserInput`. The host acknowledges nothing it has no Activity
+ * for, a browser Surface included.
  */
-export function acknowledgeSession(id: string, input: boolean): void {
-  if (!registry.has(id)) return;
-  getPlatform().alertAcknowledge(id, { input });
+export function acknowledgeSession(id: string): void {
+  getPlatform().alertAcknowledge(id);
 }
 
 export function toggleSessionTodo(id: string): void {

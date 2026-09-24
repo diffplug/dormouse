@@ -47,7 +47,7 @@ import {
   type BurrowResult,
 } from "dormouse-lib/host/remote/service-protocol";
 import { embedderOrigins } from "dormouse-lib/lib/embedder-origins";
-import { AlertManager } from "dormouse-lib/lib/alert-manager";
+import { AlertManager, LOCAL_VIEWER } from "dormouse-lib/lib/alert-manager";
 import type { AwaitHandle, AwaitOptions, Engagement, EngagementLapse } from "dormouse-lib/lib/alert-manager";
 import type { AlertSettings } from "dormouse-lib/lib/alert-settings";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
@@ -350,6 +350,7 @@ export class TauriAdapter implements PlatformAdapter {
   }
 
   writePty(id: string, data: string, options?: WritePtyOptions): void {
+    if (options?.userInput) this.alertManager.acknowledge(id, { input: true });
     invoke("pty_write", { id, data, paced: options?.paced });
   }
 
@@ -744,11 +745,11 @@ export class TauriAdapter implements PlatformAdapter {
   // This window's webview is the manager's one viewer until the manager moves
   // to the sidecar (docs/specs/alert.md -> Engagement).
   alertEngagement(state: Engagement, lapse?: EngagementLapse): void {
-    this.alertManager.setViewer("window", state, lapse);
+    this.alertManager.setViewer(LOCAL_VIEWER, state, lapse);
   }
 
-  alertAcknowledge(id: string, options: { input: boolean }): void {
-    this.alertManager.acknowledge(id, options);
+  alertAcknowledge(id: string): void {
+    this.alertManager.acknowledge(id, { input: false });
   }
 
   alertResize(id: string): void {

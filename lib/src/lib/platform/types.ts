@@ -229,6 +229,9 @@ export interface SessionFlushRequest {
 export interface WritePtyOptions {
   /** Deliver at typing pace (`docs/specs/transport.md` → "Paced input"). */
   paced?: boolean;
+  /** A human typed, pasted, or dropped this: the host acknowledges it with
+   *  input before writing (`docs/specs/alert.md` -> Engagement). */
+  userInput?: true;
 }
 
 export interface PlatformAdapter {
@@ -476,8 +479,8 @@ export interface PlatformAdapter {
    * Engagement), sent only when it changes; `lapse` says why presence ended.
    */
   alertEngagement(state: Engagement, lapse?: EngagementLapse): void;
-  /** A human interacted with the Session; `input` when they typed, pasted, or dropped into it. */
-  alertAcknowledge(id: string, options: { input: boolean }): void;
+  /** A human gesture reached the Session without input; input rides `writePty`'s `userInput`. */
+  alertAcknowledge(id: string): void;
   alertResize(id: string): void;
   alertToggleTodo(id: string): void;
   alertClearTodo(id: string): void;

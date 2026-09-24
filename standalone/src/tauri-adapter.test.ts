@@ -478,6 +478,28 @@ describe("TauriAdapter terminal stream", () => {
   // A transferred pane's new window sees nothing but the replay: Rust drops the
   // gap's semantic events because this path re-derives them, so it must rebuild
   // both halves — pane state and the AlertManager's watch.
+  it("acknowledges user input with its echo window before writing it", async () => {
+    const { adapter, deliver, invoke } = await listening();
+    const alerts: AlertStateDetail[] = [];
+    adapter.onAlertState((detail) => void alerts.push(detail));
+    const ring = { kind: "notification", notification: { source: "OSC 9", title: null, body: "needs input" } };
+    deliver("terminal:protocolEvents", { id: "typed-pty", events: [ring] });
+    expect(alerts[alerts.length - 1]).toMatchObject({ status: "ALERT_RINGING", todo: true });
+
+    // A write that is not user input leaves the ring alone.
+    adapter.writePty("typed-pty", "\x1b[I");
+    expect(alerts[alerts.length - 1]?.status).toBe("ALERT_RINGING");
+
+    let atWrite: AlertStateDetail | undefined;
+    invoke.mockImplementation(async () => { atWrite = alerts[alerts.length - 1]; });
+    adapter.writePty("typed-pty", "y", { userInput: true });
+    expect(invoke).toHaveBeenLastCalledWith("pty_write", { id: "typed-pty", data: "y", paced: undefined });
+    expect(atWrite).toMatchObject({ status: "WATCHING_DISABLED", todo: false });
+    // The echo window is open: a bell answering the key rings no one.
+    deliver("terminal:protocolEvents", { id: "typed-pty", events: [ring] });
+    expect(alerts[alerts.length - 1]?.status).not.toBe("ALERT_RINGING");
+  });
+
   it("rebuilds alert state from a replay, not only pane state", async () => {
     const { adapter, deliver } = await listening();
     const alerts: AlertStateDetail[] = [];

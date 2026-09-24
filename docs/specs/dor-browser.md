@@ -501,8 +501,9 @@ Source of truth: `lib/src/host/iframe-proxy-rewrite.ts` (`iframeShim`),
 
 - Cross-origin iframe focus blurs the parent window while `document.hasFocus()`
   remains true; **focus code must distinguish this from app backgrounding**.
-- Proxied frames adopt clicks from shim `pointerdown`; the raw fallback uses the
-  older `window.blur` + active iframe heuristic.
+- Proxied frames adopt clicks from shim `pointerdown`; the raw fallback adopts
+  focus alone, acknowledging nothing, by the older `window.blur` + active iframe
+  heuristic.
 - **`IframePanel` must apply `transform: translateZ(0)` to its immediate
   container**, or Chromium offsets out-of-process iframe pointer events from a
   far-away compositing ancestor.
@@ -511,7 +512,7 @@ Source of truth: `lib/src/host/iframe-proxy-rewrite.ts` (`iframeShim`),
 - **The `allow` attribute grants no device or clipboard-read permission** —
   `autoplay`, `clipboard-write`, `fullscreen` only. (rationale)
 
-Source of truth: `lib/src/components/wall/IframePanel.tsx`, `lib/src/components/wall/use-window-focused.ts`,
+Source of truth: `lib/src/components/wall/IframePanel.tsx`, `subscribeWindowFocus` in `lib/src/lib/window-focus.ts`,
 `lib/src/lib/terminal-lifecycle.ts` (`registerSurfaceFocusHandle`, which
 focuses/blurs the iframe element like other surfaces).
 

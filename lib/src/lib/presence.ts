@@ -1,4 +1,5 @@
 import type { EngagementLapse } from './alert-manager';
+import { subscribeWindowFocus } from './window-focus';
 
 /** What counts as a human at this window (`docs/specs/alert.md` -> Engagement). */
 const INPUT_EVENTS = ['keydown', 'pointerdown', 'pointermove', 'wheel', 'compositionupdate'] as const;
@@ -14,7 +15,6 @@ const LISTENER_OPTIONS: AddEventListenerOptions = { capture: true, passive: true
  */
 export interface PresenceTracker {
   readonly present: boolean;
-  subscribe(listener: (present: boolean, lapse?: EngagementLapse) => void): () => void;
   /** The timeout changed: re-arm against the new value from the last input. */
   refresh(): void;
   dispose(): void;
@@ -23,26 +23,21 @@ export interface PresenceTracker {
 export interface PresenceTrackerOptions {
   /** Read at every deadline, so a settings edit needs only `refresh`. */
   timeoutMs: () => number;
-  target?: Window;
-  doc?: Document;
+  /** Each transition; an end of presence names its lapse. */
+  onChange: (present: boolean, lapse?: EngagementLapse) => void;
 }
 
-export function createPresenceTracker({
-  timeoutMs,
-  target = window,
-  doc = document,
-}: PresenceTrackerOptions): PresenceTracker {
+export function createPresenceTracker({ timeoutMs, onChange }: PresenceTrackerOptions): PresenceTracker {
   let lastInputAt = Number.NEGATIVE_INFINITY;
   let present = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
-  const listeners = new Set<(present: boolean, lapse?: EngagementLapse) => void>();
 
-  const windowActive = (): boolean => doc.hasFocus() && doc.visibilityState === 'visible';
+  const windowActive = (): boolean => document.hasFocus() && document.visibilityState === 'visible';
 
   const set = (next: boolean, lapse?: EngagementLapse): void => {
     if (next === present) return;
     present = next;
-    for (const listener of [...listeners]) listener(present, present ? undefined : lapse);
+    onChange(present, lapse);
   };
 
   const clearTimer = (): void => {
@@ -76,32 +71,19 @@ export function createPresenceTracker({
     set(false, 'leave');
   };
 
-  // An iframe Surface taking focus blurs this window while the document keeps
-  // it (`docs/specs/layout.md` -> Corner cases #2): not a leave.
-  const onBlur = (): void => {
-    if (!doc.hasFocus()) leave();
-  };
-
   // Bringing the window back is a human act, so it counts as input.
   const onVisibility = (): void => {
-    if (doc.visibilityState === 'visible') onInput();
+    if (document.visibilityState === 'visible') onInput();
     else leave();
   };
 
-  for (const type of INPUT_EVENTS) target.addEventListener(type, onInput, LISTENER_OPTIONS);
-  target.addEventListener('focus', onInput);
-  target.addEventListener('blur', onBlur);
-  doc.addEventListener('visibilitychange', onVisibility);
+  for (const type of INPUT_EVENTS) window.addEventListener(type, onInput, LISTENER_OPTIONS);
+  const unsubscribeFocus = subscribeWindowFocus((focused) => (focused ? onInput() : leave()));
+  document.addEventListener('visibilitychange', onVisibility);
 
   return {
     get present() {
       return present;
-    },
-    subscribe(listener) {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
     },
     refresh() {
       clearTimer();
@@ -109,11 +91,9 @@ export function createPresenceTracker({
     },
     dispose() {
       clearTimer();
-      listeners.clear();
-      for (const type of INPUT_EVENTS) target.removeEventListener(type, onInput, LISTENER_OPTIONS);
-      target.removeEventListener('focus', onInput);
-      target.removeEventListener('blur', onBlur);
-      doc.removeEventListener('visibilitychange', onVisibility);
+      for (const type of INPUT_EVENTS) window.removeEventListener(type, onInput, LISTENER_OPTIONS);
+      unsubscribeFocus();
+      document.removeEventListener('visibilitychange', onVisibility);
     },
   };
 }

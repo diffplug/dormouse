@@ -38,7 +38,7 @@ import {
   type BurrowResult,
 } from "dormouse-lib/host/remote/service-protocol";
 import { embedderOrigins } from "dormouse-lib/lib/embedder-origins";
-import { AlertManager } from "dormouse-lib/lib/alert-manager";
+import { AlertManager, LOCAL_VIEWER } from "dormouse-lib/lib/alert-manager";
 import type { AwaitHandle, AwaitOptions, Engagement, EngagementLapse } from "dormouse-lib/lib/alert-manager";
 import type { AlertSettings } from "dormouse-lib/lib/alert-settings";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
@@ -186,6 +186,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   }
 
   writePty(id: string, data: string, options?: WritePtyOptions): void {
+    if (options?.userInput) this.alertManager.acknowledge(id, { input: true });
     this.host.send("pty_write", { id, data, paced: options?.paced });
   }
 
@@ -378,9 +379,8 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     this.host.send("alert_command", { payload });
   }
   alertDismiss(id: string): void { this.alertManager.dismissAlert(id); }
-  // The page is the local manager's one viewer, as in `TauriAdapter`.
-  alertEngagement(state: Engagement, lapse?: EngagementLapse): void { this.alertManager.setViewer("window", state, lapse); }
-  alertAcknowledge(id: string, options: { input: boolean }): void { this.alertManager.acknowledge(id, options); }
+  alertEngagement(state: Engagement, lapse?: EngagementLapse): void { this.alertManager.setViewer(LOCAL_VIEWER, state, lapse); }
+  alertAcknowledge(id: string): void { this.alertManager.acknowledge(id, { input: false }); }
   alertResize(id: string): void { this.alertManager.onResize(id); }
   alertToggleTodo(id: string): void { this.alertManager.toggleTodo(id); }
   alertClearTodo(id: string): void { this.alertManager.clearTodo(id); }

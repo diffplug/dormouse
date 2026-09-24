@@ -1,95 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@xterm/addon-fit', () => {
-  class FitAddon {
-    fit(): void {}
-
-    proposeDimensions(): { cols: number; rows: number } {
-      return { cols: 80, rows: 24 };
-    }
-  }
-
-  return { FitAddon };
-});
-
-vi.mock('@xterm/addon-image', () => {
-  class ImageAddon {
-    constructor(readonly options: Record<string, unknown>) {}
-  }
-
-  return { ImageAddon };
-});
-
-vi.mock('@xterm/addon-unicode-graphemes', () => {
-  class UnicodeGraphemesAddon {}
-
-  return { UnicodeGraphemesAddon };
-});
-
-vi.mock('@xterm/xterm', () => {
-  class MockTerminal {
-    writes: string[] = [];
-    addons: unknown[] = [];
-    private dataListeners = new Set<(data: string) => void>();
-    private resizeListeners = new Set<(size: { cols: number; rows: number }) => void>();
-
-    parser = {
-      registerCsiHandler: () => ({ dispose: () => {} }),
-    };
-    modes = {
-      mouseTrackingMode: 'none' as const,
-      bracketedPasteMode: false,
-    };
-
-    loadAddon(addon: unknown): void {
-      this.addons.push(addon);
-    }
-
-    open(): void {}
-
-    write(data: string, _callback?: () => void): void {
-      this.writes.push(data);
-    }
-
-    onData(listener: (data: string) => void): { dispose: () => void } {
-      this.dataListeners.add(listener);
-      return {
-        dispose: () => {
-          this.dataListeners.delete(listener);
-        },
-      };
-    }
-
-    onResize(listener: (size: { cols: number; rows: number }) => void): { dispose: () => void } {
-      this.resizeListeners.add(listener);
-      return {
-        dispose: () => {
-          this.resizeListeners.delete(listener);
-        },
-      };
-    }
-
-    onRender(): { dispose: () => void } {
-      return { dispose: () => {} };
-    }
-
-    focus(): void {}
-
-    blur(): void {}
-
-    dispose(): void {}
-
-    emitInput(data: string): void {
-      this.dataListeners.forEach((listener) => listener(data));
-    }
-
-    emitResize(cols: number, rows: number): void {
-      this.resizeListeners.forEach((listener) => listener({ cols, rows }));
-    }
-  }
-
-  return { Terminal: MockTerminal };
-});
+vi.mock('@xterm/xterm', () => import('./xterm-test-mock'));
+vi.mock('@xterm/addon-fit', () => import('./xterm-test-mock'));
+vi.mock('@xterm/addon-image', () => import('./xterm-test-mock'));
+vi.mock('@xterm/addon-unicode-graphemes', () => import('./xterm-test-mock'));
 
 vi.mock('./platform', async () => {
   const actual = await vi.importActual<typeof import('./platform')>('./platform');
@@ -234,7 +148,7 @@ function leaveSession(): void {
 
 /** A click on the pane, or a Door reattach into passthrough. */
 function clickSession(id: string): void {
-  acknowledgeSession(id, false);
+  acknowledgeSession(id);
 }
 
 function minimizeSession(id: string): void {
@@ -400,11 +314,11 @@ describe('terminal-registry alert behavior', () => {
   });
 
   it('keeps the TODO an early acknowledgement left behind', () => {
-    const id = 'early-attention-dismissal';
+    const id = 'early-acknowledgement';
     fakePlatform.spawnPty(id);
     fakePlatform.sendOutput(id, '\x07');
     expect(getActivity(id).status).toBe('ALERT_RINGING');
-    fakePlatform.alertAcknowledge(id, { input: false });
+    fakePlatform.alertAcknowledge(id);
     expect(getActivity(id)).toMatchObject({ status: 'WATCHING_DISABLED', todo: true });
 
     resumeTerminal(id, null, { alive: true });
@@ -909,7 +823,7 @@ describe('terminal-registry alert behavior', () => {
   });
 
   it('acknowledges terminal input, clearing the ring and its TODO at once', () => {
-    const id = 'input-attention';
+    const id = 'input-acknowledges';
     const entry = createSession(id);
     enableAlert(id);
 
@@ -927,14 +841,14 @@ describe('terminal-registry alert behavior', () => {
     ['SS3 key', '\x1bOA'],
     ['mouse report with a real key', '\x1b[<35;10;20Mx'],
   ])('counts a %s as a keystroke and forwards it unchanged', (_name, input) => {
-    const id = 'encoded-input-attention';
+    const id = 'encoded-input-acknowledges';
     const entry = createSession(id);
     enableAlert(id);
     driveToRingingNeedsAttention(id);
     const write = vi.spyOn(fakePlatform, 'writePty');
     try {
       entry.terminal.emitInput(input);
-      expect(write).toHaveBeenCalledWith(id, input);
+      expect(write.mock.calls).toEqual([[id, input, { userInput: true }]]);
       expect(getActivity(id)).toMatchObject({ status: 'NOTHING_TO_SHOW', todo: false });
     } finally {
       write.mockRestore();
@@ -956,19 +870,17 @@ describe('terminal-registry alert behavior', () => {
     ['X10 mouse report', '\x1b[M@!!'],
     ['combined mouse reports', '\x1b[<35;10;20M\x1b[64;10;20M\x1b[M@!!'],
   ])('forwards a live %s without acknowledging it', (_name, input) => {
-    const id = 'reply-attention';
+    const id = 'reply-acknowledges-nothing';
     const entry = createSession(id);
     enableAlert(id);
     driveToRingingNeedsAttention(id);
-    const acknowledge = vi.spyOn(fakePlatform, 'alertAcknowledge');
     const write = vi.spyOn(fakePlatform, 'writePty');
     try {
       entry.terminal.emitInput(input);
-      expect(write).toHaveBeenCalledWith(id, input);
-      expect(acknowledge).not.toHaveBeenCalled();
+      // Written as it came, and not as user input.
+      expect(write.mock.calls).toEqual([[id, input]]);
       expect(getActivity(id)).toMatchObject({ status: 'ALERT_RINGING' });
     } finally {
-      acknowledge.mockRestore();
       write.mockRestore();
     }
   });
@@ -1042,14 +954,12 @@ describe('terminal-registry alert behavior', () => {
 
   it('acknowledges nothing for a click on a browser Surface, keeping its TODO', () => {
     const browserId = 'pane-browser-click';
-    const acknowledge = vi.spyOn(fakePlatform, 'alertAcknowledge');
     try {
       toggleSessionTodo(browserId);
-      acknowledgeSession(browserId, false);
-      expect(acknowledge).not.toHaveBeenCalled();
-      expect(getActivity(browserId).todo).toBe(true);
+      acknowledgeSession(browserId);
+      // The host has no Activity for it, so it creates none.
+      expect(getActivity(browserId)).toEqual({ ...DEFAULT_ACTIVITY_STATE, todo: true });
     } finally {
-      acknowledge.mockRestore();
       clearLocalSurfaceActivity(browserId);
     }
   });
@@ -1254,7 +1164,7 @@ describe('terminal-registry alert behavior', () => {
   });
 
   it('programmatic terminal focus acknowledges nothing', () => {
-    const id = 'focus-without-attention';
+    const id = 'focus-acknowledges-nothing';
     createSession(id);
     enableAlert(id);
 

@@ -185,7 +185,7 @@ export class TutRunner implements InteractiveProgram {
     this.state = options.state;
     this.profile = options.profile ?? DESKTOP_TUTORIAL_PROFILE;
     this.onExit = options.onExit;
-    this.getInactivityTimeoutMs = options.getInactivityTimeoutMs ?? (() => cfg.alert.userAttention);
+    this.getInactivityTimeoutMs = options.getInactivityTimeoutMs ?? (() => cfg.alert.inactivityTimeout);
     this.onTriggerBusyDemo = options.onTriggerBusyDemo;
     this.onTriggerNotifyDemo = options.onTriggerNotifyDemo;
     this.onTriggerCommandExitDemo = options.onTriggerCommandExitDemo;

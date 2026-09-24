@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from './platform';
-import { publishEngagementFocus, retainEngagementReporter, withdrawEngagementFocus } from './engagement';
+import { publishEngagementFocus, retainEngagementReporter } from './engagement';
 import { getAlertSettings } from './alert-settings';
 
 let platform: FakePtyAdapter;
@@ -19,7 +19,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  withdrawEngagementFocus(wall);
+  publishEngagementFocus(wall, null);
   release();
   platform.shutdown();
   vi.restoreAllMocks();
@@ -54,14 +54,24 @@ describe('engagement reporter', () => {
   });
 
   it('reports changes only, never each input event', () => {
+    window.dispatchEvent(new Event('pointermove'));
     publishEngagementFocus(wall, 'pane-a');
     for (let i = 0; i < 50; i++) window.dispatchEvent(new Event('pointermove'));
     publishEngagementFocus(wall, 'pane-a');
 
     expect(report.mock.calls).toEqual([
-      [{ present: false, focusId: 'pane-a' }, undefined],
+      [{ present: true, focusId: null }, undefined],
       [{ present: true, focusId: 'pane-a' }, undefined],
     ]);
+  });
+
+  it('sends no focus change while absent, and the focus it has once present', () => {
+    publishEngagementFocus(wall, 'pane-a');
+    publishEngagementFocus(wall, 'pane-b');
+    expect(report).not.toHaveBeenCalled();
+
+    window.dispatchEvent(new Event('keydown'));
+    expect(report.mock.calls).toEqual([[{ present: true, focusId: 'pane-b' }, undefined]]);
   });
 
   it('names an inactivity lapse as idle, keeping the focus', () => {
@@ -87,7 +97,7 @@ describe('engagement reporter', () => {
     second();
     expect(report.mock.calls.at(-1)).toEqual([{ present: true, focusId: 'pane-a' }, undefined]);
 
-    withdrawEngagementFocus(wall);
+    publishEngagementFocus(wall, null);
     release();
     expect(report.mock.calls.at(-1)).toEqual([{ present: false, focusId: null }, 'leave']);
     release = retainEngagementReporter();

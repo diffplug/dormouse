@@ -352,7 +352,7 @@ export class VSCodeAdapter implements PlatformAdapter {
   }
 
   writePty(id: string, data: string, options?: WritePtyOptions): void {
-    this.vscode.postMessage({ type: 'pty:input', id, data, paced: options?.paced });
+    this.vscode.postMessage({ type: 'pty:input', id, data, paced: options?.paced, userInput: options?.userInput });
   }
 
   resizePty(id: string, cols: number, rows: number): void {
@@ -587,11 +587,11 @@ export class VSCodeAdapter implements PlatformAdapter {
   }
 
   alertEngagement(state: Engagement, lapse?: EngagementLapse): void {
-    this.vscode.postMessage({ type: 'alert:engagement', present: state.present, focusId: state.focusId, lapse });
+    this.vscode.postMessage({ type: 'alert:engagement', state, lapse });
   }
 
-  alertAcknowledge(id: string, options: { input: boolean }): void {
-    this.vscode.postMessage({ type: 'alert:acknowledge', id, input: options.input });
+  alertAcknowledge(id: string): void {
+    this.vscode.postMessage({ type: 'alert:acknowledge', id });
   }
 
   alertResize(id: string): void {

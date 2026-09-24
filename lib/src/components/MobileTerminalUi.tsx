@@ -514,19 +514,11 @@ export function MobileTerminalUi({
   const [gestureState, setGestureState] = useState<MobileGestureTrackingState>(MOBILE_GESTURE_IDLE_STATE);
   const [pendingGestureConfirmation, setPendingGestureConfirmation] = useState<MobileGestureConfirmationAction | null>(null);
   const [inputValue, setInputValue] = useState('');
-  // The composition's own input bar and gestures write around xterm, so it
-  // acknowledges the Session they reach itself (`docs/specs/alert.md` ->
-  // Engagement): a keystroke with input, a touch without.
-  const activeSessionId = sessions.find((session) => session.active)?.id ?? null;
-  const acknowledgeActive = useCallback((input: boolean) => {
-    if (activeSessionId !== null) acknowledgeSession(activeSessionId, input);
-  }, [activeSessionId]);
 
   const sendInput = useCallback((data: string) => {
     if (!interactive || data.length === 0) return;
-    acknowledgeActive(true);
     onSendInput?.(data);
-  }, [acknowledgeActive, interactive, onSendInput]);
+  }, [interactive, onSendInput]);
 
   const commitGestureState = useCallback((nextState: MobileGestureTrackingState) => {
     gestureStateRef.current = nextState;
@@ -722,8 +714,10 @@ export function MobileTerminalUi({
 
   const handlePanePointerDownCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
     if (isGestureDialogTarget(event.target)) return;
-    // Capture on the host runs before any mode below consumes the touch.
-    if (interactive) acknowledgeActive(false);
+    // A tap acknowledges the active Session (`docs/specs/alert.md` ->
+    // Engagement); capture on the host runs before any mode below consumes it.
+    const active = interactive ? sessions.find((session) => session.active) : undefined;
+    if (active) acknowledgeSession(active.id);
     blurPaneTextInputs();
     if (interactive && touchMode === 'cursor' && isTouchLikePrimaryPointer(event)) {
       event.preventDefault();
@@ -749,7 +743,7 @@ export function MobileTerminalUi({
       origin,
       displayOriginAwayFromThumb(origin, event.currentTarget.getBoundingClientRect()),
     ));
-  }, [acknowledgeActive, blurPaneTextInputs, clearGestureCompletionTimer, commitGestureState, interactive, touchMode]);
+  }, [blurPaneTextInputs, clearGestureCompletionTimer, commitGestureState, interactive, sessions, touchMode]);
 
   const handlePanePointerMoveCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
     if (touchMode === 'cursor' && cursorPointerIdRef.current === event.pointerId && isTouchLikePrimaryPointer(event)) {

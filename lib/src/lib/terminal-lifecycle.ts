@@ -32,7 +32,7 @@ import {
   type TerminalEntry,
   type TerminalOverlayDims,
 } from './terminal-store';
-import { acknowledgeSession, clearTerminalActivity, notifyActivityListeners } from './session-activity-store';
+import { clearTerminalActivity, notifyActivityListeners } from './session-activity-store';
 import { attachTerminalMouseRouter } from './terminal-mouse-router';
 import {
   inputIsReplayTerminalReport,
@@ -715,14 +715,13 @@ export function isUntouched(id: string): boolean {
 }
 
 /**
- * Write human-originated input — a keystroke, a paste, a file drop — so every
- * path acknowledges alike (`docs/specs/alert.md` -> Engagement). Acknowledged
- * before the write, so the echo window is open before any echo can arrive.
+ * Write human-originated input — a keystroke, a paste, a file drop, the mobile
+ * input bar — so every path acknowledges alike (`docs/specs/alert.md` ->
+ * Engagement): the host acknowledges it with input as it writes it.
  */
 export function writeUserInput(id: string, data: string): void {
   markSessionTouched(id);
-  acknowledgeSession(id, true);
-  getPlatform().writePty(id, data);
+  getPlatform().writePty(id, data, { userInput: true });
 }
 
 export function markSessionTouched(id: string): void {
