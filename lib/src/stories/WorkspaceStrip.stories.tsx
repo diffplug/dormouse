@@ -59,8 +59,9 @@ export const ContentSized: Story = {
   parameters: { primedWorkspaces: primed(['App', 'Agents', 'Release pipeline', 'Docs'], 0) },
 };
 
-/** Only a HIDDEN Workspace shows indicators — the visible one's panes already
- *  say it (`docs/specs/alert.md` → the Workspace union). */
+/** Every tab shows its Workspace's TODO pill; only a HIDDEN one wears the alarm
+ *  inset, the visible one's panes already ringing (`docs/specs/alert.md` → the
+ *  Workspace union). */
 export const Indicators: Story = {
   parameters: {
     primedWorkspaces: primed(['Builds', 'Agents', 'Workspace 3'], 2, {
@@ -75,8 +76,8 @@ export const Indicators: Story = {
         'builds-a': { status: 'ALERT_RINGING' },
         'builds-b': { todo: true },
         'agents-a': { todo: true },
-        // The visible Workspace owes attention too, and still shows nothing.
-        'visible-a': { status: 'ALERT_RINGING' },
+        // The visible Workspace owes attention too: its TODO pill, no inset.
+        'visible-a': { status: 'ALERT_RINGING', todo: true },
       },
     },
   },

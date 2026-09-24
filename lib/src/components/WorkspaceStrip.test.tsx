@@ -118,11 +118,11 @@ describe('WorkspaceStrip', () => {
     expect(tabFor('ws-2').querySelector('[data-workspace-tab-close]')).toBeNull();
   });
 
-  it('shows indicators for a hidden Workspace only, counting them in its label', async () => {
+  it('shows the TODO pill on every tab and the alarm inset on hidden ones, counting them in the label', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await act(async () => { createWorkspace({ id: 'ws-2' }); });
     setWorkspaceSurfaces(first, ['pane-a', 'pane-b']);
-    setWorkspaceSurfaces('ws-2', ['pane-c']);
+    setWorkspaceSurfaces('ws-2', ['pane-c', 'pane-d']);
     setTerminalActivity('pane-a', { status: 'ALERT_RINGING', episode: createAlertEpisode() });
     setTerminalActivity('pane-b', { todo: true });
     setTerminalActivity('pane-c', { status: 'ALERT_RINGING', episode: createAlertEpisode() });
@@ -131,9 +131,36 @@ describe('WorkspaceStrip', () => {
     expect(activateButton(first).getAttribute('aria-label')).toBe('Workspace 1, 2 needing attention');
     expect(tabFor(first).querySelector('.todo-pill-shell')).not.toBeNull();
     expect(tabFor(first).querySelector('[data-alert-ring-inset]')).not.toBeNull();
-    // The visible Workspace shows its Surfaces, so its tab stays plain.
+    // The visible Workspace's panes ring for it, so its tab wears no inset, and
+    // with no TODO it shows nothing at all.
     expect(tabFor('ws-2').querySelector('.todo-pill-shell')).toBeNull();
     expect(tabFor('ws-2').querySelector('[data-alert-ring-inset]')).toBeNull();
+    expect(activateButton('ws-2').getAttribute('aria-label')).toBe('Workspace 2');
+
+    // A TODO shows on the visible tab as on a hidden one.
+    await act(async () => { setTerminalActivity('pane-d', { todo: true }); });
+    expect(tabFor('ws-2').querySelector('.todo-pill-shell')).not.toBeNull();
+    expect(tabFor('ws-2').querySelector('[data-alert-ring-inset]')).toBeNull();
+    expect(activateButton('ws-2').getAttribute('aria-label')).toBe('Workspace 2, 2 needing attention');
+  });
+
+  /** Nothing else on screen appears or disappears with selection, so neither
+   *  does the tab's TODO pill. */
+  it('keeps the TODO pill through activating and leaving its Workspace', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    setWorkspaceSurfaces(first, ['pane-a']);
+    setTerminalActivity('pane-a', { todo: true });
+    await render();
+    const pill = tabFor(first).querySelector('.todo-pill-shell');
+    expect(pill).not.toBeNull();
+
+    await act(async () => { activateButton(first).click(); });
+    expect(getActiveWorkspaceId()).toBe(first);
+    expect(tabFor(first).querySelector('.todo-pill-shell')).toBe(pill);
+
+    await act(async () => { activateButton('ws-2').click(); });
+    expect(tabFor(first).querySelector('.todo-pill-shell')).toBe(pill);
   });
 
   /** The inset is the ring's only presence on a tab, so a Workspace whose
@@ -191,6 +218,27 @@ describe('WorkspaceStrip', () => {
     // Leaving reveals the summons: a burst 100ms old, not one clocked from the
     // ring that ended eight seconds ago and already past the animation's end.
     now.mockReturnValue(9_100);
+    await act(async () => { activateButton('ws-2').click(); });
+    const inset = tabFor(first).querySelector<HTMLElement>('[data-alert-ring-inset]')!;
+    expect(inset.style.animationDelay).toBe('-100ms');
+  });
+
+  /** The visible tab wears no inset, so a ring attended while it was visible
+   *  must not anchor the summons its tab shows once left. */
+  it('clocks the burst on leaving from the rings still sounding', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    setWorkspaceSurfaces(first, ['pane-a', 'pane-b']);
+    const now = vi.spyOn(Date, 'now').mockReturnValue(2_000);
+    await render();
+    await act(async () => { activateButton(first).click(); });
+    await act(async () => {
+      setTerminalActivity('pane-a', { status: 'ALERT_RINGING', episode: { id: 'older', startedAt: 1_000 } });
+      setTerminalActivity('pane-b', { status: 'ALERT_RINGING', episode: { id: 'newer', startedAt: 2_000 } });
+    });
+    await act(async () => { setTerminalActivity('pane-a', { status: 'NOTHING_TO_SHOW' }); });
+
+    now.mockReturnValue(2_100);
     await act(async () => { activateButton('ws-2').click(); });
     const inset = tabFor(first).querySelector<HTMLElement>('[data-alert-ring-inset]')!;
     expect(inset.style.animationDelay).toBe('-100ms');

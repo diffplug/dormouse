@@ -23,7 +23,7 @@ import { useDialogKeyboardOwner } from './wall/wall-context';
 import { closeWorkspaceWithSurfaces, requestWorkspaceClose, requestWorkspaceRename } from './wall/workspace-lifecycle';
 import { getActivitySnapshot, subscribeToActivity } from '../lib/terminal-registry';
 import { getWorkspaceSurfacesSnapshot, subscribeToWorkspaceSurfaces } from '../lib/workspace-surfaces';
-import { computeWorkspaceUnion, EMPTY_WORKSPACE_UNION, type WorkspaceUnion } from '../lib/workspace-union';
+import { computeWorkspaceUnion, type WorkspaceUnion } from '../lib/workspace-union';
 import { isWorkspaceTransferPending } from '../lib/window-session-aggregator';
 import {
   getWorkspaceUiSnapshot,
@@ -148,8 +148,8 @@ export function WorkspaceStrip({
     [pendingClose, pendingMove, moveError],
   );
 
-  // One union per tab, computed in the loop it is rendered in. The visible
-  // Workspace never shows indicators, so it skips the projection entirely.
+  // One union per tab, computed in the loop it is rendered in: every tab shows
+  // its TODO pill, the visible one included.
   const unionsRef = useRef(new Map<WorkspaceId, WorkspaceUnion>());
   // Closed Workspaces leave the strip and must leave this cache with them, or a
   // long session accumulates one entry per Workspace it ever had.
@@ -157,20 +157,14 @@ export function WorkspaceStrip({
     if (!workspaces.some((workspace) => workspace.id === id)) unionsRef.current.delete(id);
   }
   const unionFor = (id: WorkspaceId, active: boolean): WorkspaceUnion => {
-    // A visible Workspace shows no indicators, and its cached union must not
-    // outlive the ring it described: a ring that ends while the Workspace is
-    // active would otherwise carry its `ringingSince` into the next one.
-    if (active) {
-      unionsRef.current.delete(id);
-      return EMPTY_WORKSPACE_UNION;
-    }
     const projected = computeWorkspaceUnion(membership.get(id) ?? [], activity);
     const previous = unionsRef.current.get(id);
-    // One uninterrupted ringing interval per tab: while the Workspace stays
-    // ringing its summons is the first moment it did, so attending the member
-    // that set `ringingSince` must not advance it to a survivor's later start
-    // and re-burst the tab.
-    const next = previous?.ringing && projected.ringing
+    // One uninterrupted ringing interval per hidden tab: while the Workspace
+    // stays ringing its summons is the first moment it did, so attending the
+    // member that set `ringingSince` must not advance it to a survivor's later
+    // start and re-burst the tab. The visible tab wears no inset, so it carries
+    // nothing: leaving it clocks the summons from the rings still sounding.
+    const next = !active && previous?.ringing && projected.ringing
       ? { ...projected, ringingSince: previous.ringingSince }
       : projected;
     // Hand back the previous object when nothing in it changed, so a memoized
@@ -300,10 +294,10 @@ const WorkspaceTab = memo(function WorkspaceTab({
   wasDragged: () => boolean;
 }) {
   const todoPill = useTodoPillContent(union.todo);
-  // The visible Workspace shows its Surfaces, so its indicators would say what
-  // the panes already say; only a hidden one needs them.
+  // The TODO pill shows whichever Workspace is visible, as a pane's does. The
+  // alarm inset is a hidden Workspace's summons: the visible one's panes ring.
   const showAlarmInset = !active && union.ringing;
-  const showTodoPill = !active && todoPill.visible;
+  const showTodoPill = todoPill.visible;
   const burst = useAlertRingBurst(
     showAlarmInset ? 'ringing' : null,
     union.ringingSince === null ? null : { startedAt: union.ringingSince },

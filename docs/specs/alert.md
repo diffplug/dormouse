@@ -389,7 +389,7 @@ Source of truth: `lib/src/components/SettingsDialog.tsx`; `WorkspaceAlarmSetting
 | `count` | Number of members ringing or TODO; each Surface counts once. |
 | `ringingSince` | The earliest ringing member's episode start, else `null`. |
 
-**Must key the hidden tab's arrival burst on `ringingSince`**, held only for that ringing interval, so no later member, acknowledged member, or Workspace switch replays it (rationale). Pinned by `keeps one burst while a Workspace stays ringing` and `clocks the burst from the ring that began while the Workspace was visible` in `lib/src/components/WorkspaceStrip.test.tsx`.
+**Must key the hidden tab's arrival burst on `ringingSince`**, held only for that ringing interval and only while the tab is hidden, so no later member, acknowledged member, or Workspace switch replays it (rationale). Pinned by `keeps one burst while a Workspace stays ringing`, `clocks the burst from the ring that began while the Workspace was visible`, and `clocks the burst on leaving from the rings still sounding` in `lib/src/components/WorkspaceStrip.test.tsx`.
 
 **Must keep the projection display-only:** it never enters the Activity machine or fires its own ring. A Surface with no activity entry contributes nothing. Callers **must include** minimized (`Doored`) Surfaces.
 
@@ -400,7 +400,7 @@ Source of truth: `computeWorkspaceUnion` in `lib/src/lib/workspace-union.ts`; `s
 Where it surfaces is host-specific:
 
 - **VS Code** reflects the terminal portion onto native chrome — `docs/specs/vscode.md`, which also owns why browser-surface TODO stays webview-local.
-- **Standalone** shows terminal rings/TODOs on panes and doors, and a browser Surface's `todo` on its own door. A **hidden** Workspace's tab additionally carries its union's TODO pill and, while ringing, the alarm inset, with `count` in the tab's accessible name; the visible Workspace's tab carries none, its panes and doors already saying it (`WorkspaceStrip` in `lib/src/components/WorkspaceStrip.tsx`).
+- **Standalone** shows terminal rings/TODOs on panes and doors, and a browser Surface's `todo` on its own door. **Every Workspace tab, the visible one included, carries its union's TODO pill** (rationale). **Only a hidden Workspace's tab wears the alarm inset while ringing**, the visible one's panes already ringing. Whenever a tab shows either, `count` joins its accessible name (`WorkspaceStrip` in `lib/src/components/WorkspaceStrip.tsx`; `keeps the TODO pill through activating and leaving its Workspace` in `lib/src/components/WorkspaceStrip.test.tsx`).
 
 **Must use `alarm-vs-header-inactive` for the hidden Workspace tab's inset**, matching its inactive-header background.
 
