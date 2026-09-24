@@ -348,9 +348,9 @@ export class RemotePtyAdapter implements PlatformAdapter {
   alertSetCommandWatched(): void {}
   alertPublishSettings(): void {}
   alertDismiss(): void {}
-  alertAttend(): void {}
+  alertEngagement(): void {}
+  alertAcknowledge(): void {}
   alertResize(): void {}
-  alertClearAttention(): void {}
   alertToggleTodo(): void {}
   alertClearTodo(): void {}
   /**

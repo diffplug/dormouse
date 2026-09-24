@@ -33,13 +33,12 @@ import { messageOf } from '../lib/errors';
 import { archiveSurfaceNotes } from '../lib/notepad/close-coordinator';
 import { beginClosing, isSurfaceClosing, registerNotepadSurfaceMetaResolver, removeSurface, transferNotepad } from '../lib/notepad/notepad-store';
 import {
-  clearSessionAttention,
+  acknowledgeSession,
   clearLocalSurfaceActivity,
   deriveSessionLabel,
   disposeSession,
   focusSession,
   refitSession,
-  markSessionAttention,
   toggleSessionTodo,
   setPendingShellOpts,
   getDefaultShellOpts,
@@ -109,6 +108,7 @@ import { useAlertSpeech } from './wall/use-alert-speech';
 import { queueToolSpawn, restartSurfaceInPlace, toolRunCommand, useDorControl, waitForNewToolCommand } from './wall/use-dor-control';
 import { errorText } from './wall/dor-control-shared';
 import { useWindowFocused } from './wall/use-window-focused';
+import { useEngagementFocus } from './wall/use-engagement-focus';
 import {
   DialogKeyboardContext,
   DoorElementsContext,
@@ -843,12 +843,14 @@ export function Wall({
     confirmTimerRef.current = setTimeout(() => setConfirmKill(null), KILL_CONFIRM_MS);
   }, [closeSurface]);
 
-  /** Enter terminal mode for the given panel */
-  const enterTerminalMode = useCallback((id: string) => {
+  /** Enter terminal mode for the given panel. A human gesture acknowledges the
+   *  Session; `acknowledge: false` only moves focus there — a `dor` reveal, an
+   *  embed focusing itself (`docs/specs/alert.md` -> Engagement). */
+  const enterTerminalMode = useCallback((id: string, options?: { acknowledge?: boolean }) => {
     selectPane(id);
     modeRef.current = 'passthrough';
     setMode('passthrough');
-    markSessionAttention(id);
+    if (options?.acknowledge !== false) acknowledgeSession(id, false);
     // Defer focus so it happens after the mousedown/click event finishes.
     requestAnimationFrame(() => focusSession(id, true));
   }, [selectPane]);
@@ -871,7 +873,6 @@ export function Wall({
     // the store (it keeps changing while minimized).
     const { token } = lath.store.doorLeaf(id, { park: shouldParkOnMinimize(meta) });
     if (!token) return;
-    clearSessionAttention(id);
     // The runtime Door is identity + the core restore payload only
     // (docs/specs/tiling-engine.md → "Restore tokens"); its metadata stays in the
     // store, and the persisted row is materialized from there at save time.
@@ -951,20 +952,6 @@ export function Wall({
   const anyArchiveFailure = archiveFailures.length > 0;
   useDialogKeyboardOwner(anyArchiveFailure, acquireDialogKeyboard);
 
-  useEffect(() => {
-    // An iframe surface taking focus blurs this window without backgrounding the
-    // app (document.hasFocus() stays true). Only clear cross-session attention
-    // on a real blur, else focusing an iframe wipes attention
-    // (docs/specs/layout.md → Corner cases #2).
-    const handleBlur = () => {
-      if (!activeRef.current) return;
-      if (document.hasFocus()) return;
-      clearSessionAttention();
-    };
-    window.addEventListener('blur', handleBlur);
-    return () => window.removeEventListener('blur', handleBlur);
-  }, []);
-
   // --- Lath seed + auto-spawn ---
   const lathSeededRef = useRef(false);
   // The leaf-id set as of the last commit, so the store subscription can fire
@@ -1030,6 +1017,17 @@ export function Wall({
   const surfaceHasTerminal = useCallback(
     (id: string): boolean => hasTerminal(surfaceKindFromParams(lath.getMeta(id)?.params)),
     [lath],
+  );
+
+  // The terminal Session this Wall points its realm at (`docs/specs/alert.md` ->
+  // Engagement): an open terminal context's source, else the passthrough pane —
+  // never a command-mode selection, a Door, a browser Surface, or a hidden Wall.
+  const contextSourceId = terminalContext && !terminalContext.closing ? terminalContext.id : null;
+  const focusCandidate = contextSourceId ?? (mode === 'passthrough' && selectedType === 'pane' ? selectedId : null);
+  useEngagementFocus(
+    active && focusCandidate !== null && surfaceHasTerminal(focusCandidate)
+      ? focusCandidate
+      : null,
   );
 
   /** Whether a Surface belongs to this Wall — the membership test in the hot
@@ -1178,7 +1176,7 @@ export function Wall({
 
   const handleReattach = useCallback((
     item: DooredItem,
-    options?: { enterPassthrough?: boolean; afterRestore?: DoorAfterRestoreAction },
+    options?: { enterPassthrough?: boolean; afterRestore?: DoorAfterRestoreAction; acknowledge?: boolean },
   ) => {
     const enterPassthrough = options?.enterPassthrough ?? true;
     const afterRestore = options?.afterRestore;
@@ -1200,7 +1198,7 @@ export function Wall({
 
     removeDoorAndSelect(item.id);
     if (enterPassthrough) {
-      enterTerminalMode(item.id);
+      enterTerminalMode(item.id, { acknowledge: options?.acknowledge });
     } else {
       modeRef.current = 'command';
       setMode('command');
@@ -1235,7 +1233,9 @@ export function Wall({
   /** Focus a surface for the human half of the context's port actions: activating
    *  a port row is an explicit request to look at and control that browser. A visible pane
    *  enters passthrough in place; a minimized one reattaches on the same terms
-   *  as clicking its Door chip. This is deliberately unlike `dor ab`, whose
+   *  as clicking its Door chip, except that a reveal moves focus without
+   *  acknowledging — `dor` reveals too, and an agent showing a pane is not the
+   *  human answering it. This is deliberately unlike `dor ab`, whose
    *  agent-initiated control path remains focus-neutral.
    *
    *  Returns whether the Surface ended up visible, so `dor` can report the
@@ -1243,11 +1243,11 @@ export function Wall({
    *  returns, and `nav.hasPane` reads the store, not React state. */
   const revealSurface = useCallback((id: string): boolean => {
     if (nav.hasPane(id)) {
-      enterTerminalMode(id);
+      enterTerminalMode(id, { acknowledge: false });
       return true;
     }
     const door = doorsRef.current.find((item) => item.id === id);
-    if (door) handleReattachRef.current(door);
+    if (door) handleReattachRef.current(door, { acknowledge: false });
     return nav.hasPane(id);
   }, [nav, enterTerminalMode]);
 
@@ -2234,7 +2234,8 @@ export function Wall({
   // command → move selection onto it.
   const onLeafFocused = useCallback((id: string) => {
     if (modeRef.current === 'passthrough') {
-      if (selectedIdRef.current !== id) enterTerminalMode(id);
+      // The embed moved DOM focus; no human gesture reached this Session.
+      if (selectedIdRef.current !== id) enterTerminalMode(id, { acknowledge: false });
       return;
     }
     if (selectedTypeRef.current !== 'pane' || selectedIdRef.current !== id) selectPane(id);

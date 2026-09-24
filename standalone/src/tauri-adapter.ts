@@ -48,7 +48,7 @@ import {
 } from "dormouse-lib/host/remote/service-protocol";
 import { embedderOrigins } from "dormouse-lib/lib/embedder-origins";
 import { AlertManager } from "dormouse-lib/lib/alert-manager";
-import type { AwaitHandle, AwaitOptions } from "dormouse-lib/lib/alert-manager";
+import type { AwaitHandle, AwaitOptions, Engagement, EngagementLapse } from "dormouse-lib/lib/alert-manager";
 import type { AlertSettings } from "dormouse-lib/lib/alert-settings";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
 import type { PersistedAlertState, PersistedWindow } from "dormouse-lib/lib/session-types";
@@ -741,16 +741,18 @@ export class TauriAdapter implements PlatformAdapter {
     this.alertManager.dismissAlert(id);
   }
 
-  alertAttend(id: string): void {
-    this.alertManager.attend(id);
+  // This window's webview is the manager's one viewer until the manager moves
+  // to the sidecar (docs/specs/alert.md -> Engagement).
+  alertEngagement(state: Engagement, lapse?: EngagementLapse): void {
+    this.alertManager.setViewer("window", state, lapse);
+  }
+
+  alertAcknowledge(id: string, options: { input: boolean }): void {
+    this.alertManager.acknowledge(id, options);
   }
 
   alertResize(id: string): void {
     this.alertManager.onResize(id);
-  }
-
-  alertClearAttention(id?: string): void {
-    this.alertManager.clearAttention(id);
   }
 
   alertToggleTodo(id: string): void {

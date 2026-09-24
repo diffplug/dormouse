@@ -20,7 +20,7 @@ describe('live alert handoff', () => {
     source.notifyFromProtocol('pane', { source: 'OSC 9', title: 'Done', body: null });
     const first = source.getState('pane');
     const snapshot = source.pauseForTransfer('pane')!;
-    source.attend('pane');
+    source.acknowledge('pane', { input: true });
     source.clearTodo('pane');
     expect(source.getState('pane')).toEqual(first);
     const target = new AlertManager();
@@ -35,6 +35,26 @@ describe('live alert handoff', () => {
     expect(target.getState('pane').episode?.id).not.toBe(first.episode?.id);
     target.seed('pane', snapshot);
     expect(target.getState('pane')).toMatchObject({ todo: true, episode: null });
+    source.dispose(); target.dispose();
+  });
+
+  it('leaves behind what the source held, and arms the command it saw', () => {
+    const source = new AlertManager();
+    source.setViewer('source', { present: true, focusId: 'pane' });
+    source.applyTerminalSemanticEvents('pane', [
+      { type: 'commandLine', commandLine: 'pnpm build' },
+      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
+    ]);
+    source.notifyFromProtocol('pane', { source: 'OSC 9', title: null, body: 'needs input' });
+    const snapshot = source.pauseForTransfer('pane')!;
+
+    const target = new AlertManager();
+    target.resumeFromTransfer('pane', JSON.parse(JSON.stringify(snapshot)));
+    expect(target.getState('pane').status).toBe('COMMAND_EXIT_ARMED');
+    // Leaving the source window disengaged it: nothing it held escalates here.
+    target.setViewer('target', { present: true, focusId: 'pane' });
+    target.setViewer('target', { present: false, focusId: 'pane' }, 'idle');
+    expect(target.getState('pane')).toMatchObject({ todo: false, notification: null });
     source.dispose(); target.dispose();
   });
 

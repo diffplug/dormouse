@@ -41,9 +41,9 @@ function runCommand(): void {
 /** Run it seen and then left: armed, so its exit rings once it has outlasted
  *  `cfg.alert.commandExitMinRuntime`. */
 function armCommandExit(): void {
-  manager.attend(ID);
+  manager.setViewer('viewer', { present: true, focusId: ID });
   runCommand();
-  manager.clearAttention(ID);
+  manager.setViewer('viewer', { present: false, focusId: null }, 'leave');
 }
 
 beforeEach(() => {

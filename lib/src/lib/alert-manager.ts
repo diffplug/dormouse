@@ -113,16 +113,39 @@ interface Ring {
   prior: { todo: TodoState; notification: ActivityNotification | null };
 }
 
+/**
+ * Completions withheld because the Session was engaged when they happened
+ * (`docs/specs/alert.md` -> Completion events): the sources they would have
+ * raised, and the richest detail among them.
+ */
+interface HeldCompletion {
+  sources: ListedRingSource[];
+  watching: WatchingSource | null;
+  detail: ActivityNotification;
+}
+
 interface CommandExitWatch {
   displayCommand: string;
   /** `commandWatchKey` of the command line; null without one to key on. */
   watchKey: string | null;
   source: CommandRunSource;
   startedAt: number;
-  seenWithAttentionAt: number | null;
-  /** Attention was lost after the command was seen, so its exit may ring. */
-  armed: boolean;
+  /** Engaged at its start, or engaged or acknowledged since: its exit may ring. */
+  seen: boolean;
 }
+
+/** One renderer realm's report (`docs/specs/alert.md` -> Engagement). */
+export interface Engagement {
+  present: boolean;
+  /** The terminal Session this viewer points at, or null. */
+  focusId: string | null;
+}
+
+/** Why a viewer stopped being present: its inactivity timeout ran out
+ *  (`idle`), or its window blurred or hid (`leave`). */
+export type EngagementLapse = 'idle' | 'leave';
+
+const NOT_ENGAGED: Engagement = { present: false, focusId: null };
 
 export function normalizeActivityNotification(value: unknown): ActivityNotification | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -156,8 +179,8 @@ export type CompletionEvent =
       exitCode: number | undefined;
       /** Wall time from commandStart to this finish. */
       ranMs: number;
-      /** Command-exit alerting was armed (attention was lost mid-run) when it finished. */
-      armed: boolean;
+      /** The run was seen: engaged at its start, or engaged or acknowledged since. */
+      seen: boolean;
     }
   | { kind: 'notification'; notification: ActivityNotification };
 
@@ -262,6 +285,10 @@ interface AlertEntry {
    */
   deferred: { notification: ActivityNotification; since: number } | null;
   deferredTimer: ReturnType<typeof setTimeout> | null;
+  /** Completions withheld while engaged: escalated or dropped as engagement ends (`setViewer`), dropped by a user verb. */
+  held: HeldCompletion | null;
+  /** Output and completions before this instant answer the user's own input (`acknowledge`). */
+  echoUntil: number;
 }
 
 /** Explicit live handoff only: timers are deadlines, and no caller closures travel. */
@@ -281,8 +308,8 @@ export class AlertManager {
   private removed = new Set<string>();
   private claimants = new Map<string, Set<CompletionClaimant>>();
   private awaits = new Map<string, AwaitGroup>();
-  private attentionId: string | null = null;
-  private attentionTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Renderer realms by viewer id; a default (absent, unfocused) viewer is not kept. */
+  private viewers = new Map<string, Engagement>();
   private listeners = new Set<(id: string, state: AlertState) => void>();
   private lastEmitted = new Map<string, AlertState>();
   private watchedCommands = new Set<string>();
@@ -292,7 +319,6 @@ export class AlertManager {
    *  controls, awaits, completion dispatch, publishing — drops them, so a host
    *  marks the id once instead of guarding each call. */
   private helpers = new Set<string>();
-  private inactivityTimeoutMs = cfg.alert.userAttention;
   /** The shipped default (platform-free module: this runs in both hosts), so a
    *  manager that never receives a settings blob behaves like one that does. */
   private deferAlertsUntilQuiet = DEFAULT_ALERT_SETTINGS.deferAlertsUntilQuiet;
@@ -306,19 +332,9 @@ export class AlertManager {
    * already-normalized blob; the sinks below revalidate anyway.
    */
   applySettings(settings: AlertSettings): void {
-    this.setInactivityTimeoutMs(settings.inactivityTimeoutMs);
+    // `inactivityTimeoutMs` is the renderer's presence window: presence arrives
+    // here already computed (`setViewer`), so the manager keeps no timer for it.
     this.setDeferAlertsUntilQuiet(settings.deferAlertsUntilQuiet);
-  }
-
-  /** Walk-away window for attention. Revalidate at this timer sink. */
-  setInactivityTimeoutMs(ms: number): void {
-    if (!Number.isFinite(ms) || ms <= 0 || ms === this.inactivityTimeoutMs) return;
-    this.inactivityTimeoutMs = ms;
-    // Re-arm from now so a shortened window takes effect immediately instead of
-    // waiting out the window that was already running.
-    if (this.attentionTimer !== null && this.attentionId !== null) {
-      this.setAttention(this.attentionId);
-    }
   }
 
   /** Let confirmed terminal activity finish before terminal-notification rings. */
@@ -358,8 +374,11 @@ export class AlertManager {
     // produced a semantic or protocol event, so output creates the entry.
     const entry = this.streamEntry(id);
     if (!entry) return;
+    // The echo of the user's own keystroke is not the program working.
+    if (this.inEchoWindow(entry)) return;
     entry.detector.onData();
     if (entry.ring?.watching) entry.ring.watching.outputSince = true;
+    if (entry.held?.watching) entry.held.watching.outputSince = true;
     entry.ackedQuiet = false;
     this.eachWaiter(id, (waiter) => waiter.onOutput());
   }
@@ -448,6 +467,7 @@ export class AlertManager {
   private withdrawResumedWatchingRing(entry: AlertEntry): void {
     if (!this.deferAlertsUntilQuiet || !entry.detector.isConfirmedBusy()) return;
     this.withdrawRingSource(entry, 'watching', 'invalidated');
+    this.withdrawHeldWatching(entry);
   }
 
   /**
@@ -457,8 +477,20 @@ export class AlertManager {
    * works at a prompt.
    */
   private withdrawUncoveredWatchingRing(entry: AlertEntry): void {
-    if (watchRuleFor(this.watchedCommands, entry.ring?.watching?.key ?? null) !== null) return;
-    this.withdrawRingSource(entry, 'watching', 'invalidated');
+    if (watchRuleFor(this.watchedCommands, entry.ring?.watching?.key ?? null) === null) {
+      this.withdrawRingSource(entry, 'watching', 'invalidated');
+    }
+    if (watchRuleFor(this.watchedCommands, entry.held?.watching?.key ?? null) === null) {
+      this.withdrawHeldWatching(entry);
+    }
+  }
+
+  /** The held twin of a `watching` withdrawal: the settle it kept is void. */
+  private withdrawHeldWatching(entry: AlertEntry): void {
+    const held = entry.held;
+    if (held?.watching == null) return;
+    held.watching = null;
+    if (held.sources.length === 0) entry.held = null;
   }
 
   /** A busy Session went quiet. Whether that rings is decided downstream. */
@@ -510,51 +542,66 @@ export class AlertManager {
     const claimants = [...(this.claimants.get(id) ?? [])];
     if (claimants.some((claimant) => claimant(event))) return true;
 
+    // A completion inside the echo window answers the keystroke that opened
+    // it — a bell on Tab, the exit `Ctrl-C` caused — so it neither rings nor
+    // holds. A cleared progress cycle still publishes (see below).
+    if (this.inEchoWindow(entry)) {
+      this.notify(id);
+      return false;
+    }
+
     switch (event.kind) {
       case 'settled': {
-        // Only a watched command rings, and only if the user is not looking at
-        // it right now. The originating command key latches on the ring so it
-        // outlives the command that raised it.
+        // Only a watched command rings. The originating command key latches on
+        // the ring so it outlives the command that raised it.
         const key = entry.commandExitWatch?.watchKey;
-        if (!key || !this.isWatching(entry) || this.hasAttention(id)) break;
-        this.raiseRing(entry, { key, outputSince: false }, { source: 'WATCHING', title: `${key} went quiet`, body: null });
+        if (!key || !this.isWatching(entry)) break;
+        this.raiseOrHold(id, entry, { key, outputSince: false }, { source: 'WATCHING', title: `${key} went quiet`, body: null });
         this.notify(id);
         break;
       }
       case 'commandFinished':
-        if (!event.armed || this.hasAttention(id) || event.ranMs < cfg.alert.commandExitMinRuntime) break;
+        if (!event.seen || event.ranMs < cfg.alert.commandExitMinRuntime) break;
         // A shell-reported exit is authoritative, so recent animation never
         // delays it. The detector only gates in-band terminal notifications.
-        this.raiseRing(entry, 'exit', {
+        this.raiseOrHold(id, entry, 'exit', {
           source: 'COMMAND_EXIT',
           title: 'Command finished',
           body: formatCommandExitBody(event.displayCommand, event.exitCode),
         });
         // If a terminal notification was already waiting, it can enrich this
-        // ring immediately; keeping its timer would publish stale detail later.
+        // ring (or hold) immediately; keeping its timer would publish stale
+        // detail later.
         if (entry.deferred !== null) this.flushDeferredNotification(id, entry);
         else this.notify(id);
         break;
       case 'notification':
-        if (this.hasAttention(id)) {
+        if (this.engaged(id)) {
+          this.hold(entry, 'report', event.notification);
           // A progress cycle was already cleared before dispatch, so publish
           // that; a plain direct notification changes nothing and dedupes away.
           this.notify(id);
           break;
         }
-        if (entry.ring === null && entry.ackedQuiet) {
-          // A report about the state the user just acknowledged updates the
-          // receipt instead of summoning again. Nothing is deferred while
-          // acknowledged: no output has arrived to animate.
-          entry.todo = true;
-          entry.notification = richer(entry.notification, event.notification);
-          this.notify(id);
-          break;
-        }
-        this.deferOrDeliverNotification(id, entry, event.notification);
+        this.deliverReport(id, entry, event.notification);
         break;
     }
     return false;
+  }
+
+  /** A report reaching the ring rules unengaged: the acknowledged-state check,
+   *  then animation deferral. The one path for a live report and a held one. */
+  private deliverReport(id: string, entry: AlertEntry, notification: ActivityNotification): void {
+    if (entry.ring === null && entry.ackedQuiet) {
+      // A report about the state the user just acknowledged updates the
+      // receipt instead of summoning again. Nothing is deferred while
+      // acknowledged: no output has arrived to animate.
+      entry.todo = true;
+      entry.notification = richer(entry.notification, notification);
+      this.notify(id);
+      return;
+    }
+    this.deferOrDeliverNotification(id, entry, notification);
   }
 
   // --- Await ---
@@ -567,7 +614,7 @@ export class AlertManager {
    *
    * Resolves immediately when the Session is already ringing, consuming only
    * the one ring source it resolved on. That withdraws the TODO the ring
-   * itself set, never a TODO that was already there, and never sets attention.
+   * itself set, never a TODO that was already there, and never acknowledges.
    */
   awaitCompletion(id: string, options: AwaitOptions): AwaitHandle {
     if (this.inert(id)) return settledAwait({ kind: 'cancelled', waitedMs: 0 });
@@ -841,8 +888,7 @@ export class AlertManager {
       watchKey: resolved.rawCommandLine === null ? null : commandWatchKey(resolved.rawCommandLine),
       source: resolved.source,
       startedAt: resolved.startedAt,
-      seenWithAttentionAt: this.hasAttention(id) ? Date.now() : null,
-      armed: false,
+      seen: this.engaged(id),
     };
     // Every command boundary starts the detector over, so one command's output
     // history can never leak into the next one's busy/quiet reading.
@@ -862,7 +908,7 @@ export class AlertManager {
     const endedProgress = entry.progress !== null;
     entry.progress = null;
 
-    // Every finish is observable, including the short, unarmed, and attended
+    // Every finish is observable, including the short, unseen, and engaged
     // ones that can never ring — the ring rule is what filters them.
     if (watch !== null) {
       this.dispatchCompletion(id, entry, {
@@ -871,7 +917,7 @@ export class AlertManager {
         watchKey: watch.watchKey,
         exitCode,
         ranMs: Date.now() - watch.startedAt,
-        armed: watch.armed,
+        seen: watch.seen,
       });
     }
 
@@ -883,20 +929,6 @@ export class AlertManager {
     // the status even when command-exit never armed, so subscribers must hear
     // about any finish — `notify` dedupes if nothing is visible.
     return watch !== null || endedProgress;
-  }
-
-  private markCommandExitSeen(entry: AlertEntry): void {
-    const watch = entry.commandExitWatch;
-    if (!watch) return;
-    watch.seenWithAttentionAt ??= Date.now();
-    watch.armed = false;
-  }
-
-  private armCommandExitOnAttentionLoss(id: string): boolean {
-    const watch = this.entries.get(id)?.commandExitWatch;
-    if (!watch || watch.armed || watch.seenWithAttentionAt === null) return false;
-    watch.armed = true;
-    return true;
   }
 
   // --- Deferred terminal notifications ---
@@ -960,12 +992,8 @@ export class AlertManager {
     const deferred = entry.deferred;
     if (deferred === null) return;
     this.clearDeferredNotification(entry);
-
-    // Attending the Session clears this eagerly too; retain the recheck as the
-    // timer-side safety rule shared by every delayed alarm path.
-    if (this.hasAttention(id)) return;
-
-    this.raiseRing(entry, 'report', deferred.notification);
+    // Due while engaged, it waits on engagement instead of animation.
+    this.raiseOrHold(id, entry, 'report', deferred.notification);
     this.notify(id);
   }
 
@@ -1039,11 +1067,12 @@ export class AlertManager {
    */
   private clearRingForUser(entry: AlertEntry): void {
     this.clearDeferredNotification(entry);
-    const ring = entry.ring;
-    if (ring === null) return;
+    const { ring, held } = entry;
+    entry.held = null;
+    if (ring === null && held === null) return;
     entry.ring = null;
     entry.ackedQuiet = true;
-    if (ring.watching !== null) this.watchingLeft(entry, 'answered');
+    if (ring?.watching || held?.watching) this.watchingLeft(entry, 'answered');
   }
 
   /**
@@ -1055,55 +1084,118 @@ export class AlertManager {
     if (why === 'answered') entry.detector.reset();
   }
 
-  // --- Attention tracking ---
+  // --- Engagement (`docs/specs/alert.md` -> Engagement) ---
 
-  private hasAttention(id: string): boolean {
-    return this.attentionId === id;
+  /** Some present viewer points at `id`. The only thing the ring rules read. */
+  private engaged(id: string): boolean {
+    for (const viewer of this.viewers.values()) {
+      if (viewer.present && viewer.focusId === id) return true;
+    }
+    return false;
   }
 
-  private clearAttentionTimer(): void {
-    if (this.attentionTimer !== null) {
-      clearTimeout(this.attentionTimer);
-      this.attentionTimer = null;
-    }
-  }
+  /**
+   * One renderer realm's presence and focus, as its reporter computed them.
+   * `lapse` says why presence ended, and decides what a Session that stops
+   * being engaged does with the completions it held: an `idle` lapse with focus
+   * unchanged escalates them, anything else drops them.
+   */
+  setViewer(viewerId: string, state: Engagement, lapse?: EngagementLapse): void {
+    const previous = this.viewers.get(viewerId) ?? NOT_ENGAGED;
+    const next: Engagement = {
+      present: state.present === true,
+      focusId: typeof state.focusId === 'string' ? state.focusId : null,
+    };
+    if (previous.present === next.present && previous.focusId === next.focusId) return;
+    // Only this viewer moved, so only the two Sessions it pointed at can change.
+    const touched = [...new Set([previous.focusId, next.focusId])]
+      .filter((id): id is string => id !== null)
+      .map((id) => ({ id, was: this.engaged(id) }));
+    if (next.present || next.focusId !== null) this.viewers.set(viewerId, next);
+    else this.viewers.delete(viewerId);
 
-  private setAttention(id: string): void {
-    const previousAttentionId = this.attentionId;
-    if (previousAttentionId && previousAttentionId !== id && this.armCommandExitOnAttentionLoss(previousAttentionId)) {
-      this.notify(previousAttentionId);
-    }
-    this.attentionId = id;
-    this.clearAttentionTimer();
-    this.attentionTimer = setTimeout(() => {
-      if (this.attentionId === id) {
-        this.attentionId = null;
-        if (this.armCommandExitOnAttentionLoss(id)) {
-          this.notify(id);
-        }
+    for (const { id, was } of touched) {
+      const entry = this.entries.get(id);
+      if (!entry || this.inert(id) || this.engaged(id) === was) continue;
+      if (!was) {
+        this.markSeen(entry);
+      } else if (lapse === 'idle' && previous.focusId === id && next.focusId === id) {
+        this.escalateHeld(id, entry);
+      } else {
+        // An explicit disengage: focus moved, or the window left.
+        entry.held = null;
       }
-      this.attentionTimer = null;
-    }, this.inactivityTimeoutMs);
+      // COMMAND_EXIT_ARMED is derived from engagement.
+      this.notify(id);
+    }
   }
 
-  attend(id: string): void {
+  /** The realm is gone: a disengage for whatever it pointed at. */
+  removeViewer(viewerId: string): void {
+    this.setViewer(viewerId, NOT_ENGAGED, 'leave');
+  }
+
+  /**
+   * A human interacted with the Session. Both kinds clear the ring and whatever
+   * it held or deferred, and mark the running command seen; `input` (keys,
+   * paste, drop) also turns TODO off and opens the echo window. Never creates
+   * an entry: an id with none — a browser Surface — has nothing to clear.
+   */
+  acknowledge(id: string, options: { input: boolean }): void {
     if (this.inert(id)) return;
-    const entry = this.getOrCreateEntry(id);
-    this.setAttention(id);
-    // A ring already set TODO, so clearing it leaves the TODO behind.
+    const entry = this.entries.get(id);
+    if (!entry) return;
+    this.markSeen(entry);
+    if (options.input) {
+      entry.echoUntil = Date.now() + cfg.alert.echoWindow;
+      this.setTodoForUser(id, entry, false);
+      return;
+    }
     this.clearRingForUser(entry);
-    this.markCommandExitSeen(entry);
     this.notify(id);
   }
 
-  clearAttention(id?: string): void {
-    if (id !== undefined && (this.attentionId !== id || this.helpers.has(id))) return;
-    const lostAttentionId = this.attentionId;
-    this.attentionId = null;
-    this.clearAttentionTimer();
-    if (lostAttentionId && this.armCommandExitOnAttentionLoss(lostAttentionId)) {
-      this.notify(lostAttentionId);
-    }
+  private markSeen(entry: AlertEntry): void {
+    if (entry.commandExitWatch) entry.commandExitWatch.seen = true;
+  }
+
+  private inEchoWindow(entry: AlertEntry): boolean {
+    return Date.now() < entry.echoUntil;
+  }
+
+  /** Ring, unless the Session is engaged: then hold for engagement to end. */
+  private raiseOrHold(
+    id: string,
+    entry: AlertEntry,
+    source: ListedRingSource | WatchingSource,
+    detail: ActivityNotification,
+  ): void {
+    if (this.engaged(id)) this.hold(entry, source, detail);
+    else this.raiseRing(entry, source, detail);
+  }
+
+  private hold(entry: AlertEntry, source: ListedRingSource | WatchingSource, detail: ActivityNotification): void {
+    const held = entry.held ??= { sources: [], watching: null, detail };
+    held.detail = richer(held.detail, detail);
+    if (typeof source !== 'string') held.watching = source;
+    else if (!held.sources.includes(source)) held.sources.push(source);
+  }
+
+  /**
+   * Presence lapsed from inactivity with focus unchanged: what was held rings
+   * now, through the ordinary raise path — a report through the acknowledged
+   * check and animation deferral, a settle or exit directly — with the richest
+   * held detail.
+   */
+  private escalateHeld(id: string, entry: AlertEntry): void {
+    const held = entry.held;
+    if (held === null) return;
+    entry.held = null;
+    if (held.watching !== null) this.raiseRing(entry, held.watching, held.detail);
+    if (held.sources.includes('exit')) this.raiseRing(entry, 'exit', held.detail);
+    if (held.sources.includes('report')) this.deliverReport(id, entry, held.detail);
+    // A ring is open now, so a notification still waiting on animation joins it.
+    if (entry.ring !== null && entry.deferred !== null) this.flushDeferredNotification(id, entry);
   }
 
   // --- Alert controls ---
@@ -1149,7 +1241,7 @@ export class AlertManager {
     const entry = this.entries.get(id);
     if (!entry || this.helpers.has(id)) return DEFAULT_ALERT_STATE;
     return {
-      status: this.getProjectedStatus(entry),
+      status: this.getProjectedStatus(id, entry),
       watchingEnabled: this.isWatching(entry),
       todo: entry.todo,
       notification: entry.notification,
@@ -1181,10 +1273,6 @@ export class AlertManager {
       this.clearDeferredNotification(entry);
       entry.detector.dispose();
       this.entries.delete(id);
-      if (this.attentionId === id) {
-        this.attentionId = null;
-        this.clearAttentionTimer();
-      }
       this.notify(id);
     }
     // Last, so `notify` still knows a helper that never published has nothing
@@ -1204,6 +1292,7 @@ export class AlertManager {
     entry.todo = state.todo === true;
     entry.notification = entry.todo ? normalizeActivityNotification(state.notification) : null;
     entry.ring = null;
+    entry.held = null;
     entry.ackedQuiet = false;
     entry.progress = null;
     entry.commandExitWatch = null;
@@ -1226,11 +1315,9 @@ export class AlertManager {
     const entry = this.entries.get(id);
     if (!entry) return null;
     this.settleWaiters(id, 'cancelled');
-    if (this.attentionId === id) {
-      this.attentionId = null;
-      this.clearAttentionTimer();
-      this.armCommandExitOnAttentionLoss(id);
-    }
+    // Leaving this window is an explicit disengage, and a seen command stays
+    // seen: unengaged at the destination, it is armed there.
+    entry.held = null;
     this.suspendedForTransfer.add(id);
     const { detector, deferredTimer: _timer, ...state } = entry;
     const snapshot = structuredClone({ ...state, detector: detector.snapshot() });
@@ -1299,9 +1386,9 @@ export class AlertManager {
     this.helpers.clear();
     this.awaits.clear();
     this.claimants.clear();
+    this.viewers.clear();
     this.listeners.clear();
     this.lastEmitted.clear();
-    this.clearAttentionTimer();
   }
 
   // --- Internals ---
@@ -1328,7 +1415,7 @@ export class AlertManager {
     return this.getOrCreateEntry(id);
   }
 
-  private getProjectedStatus(entry: AlertEntry): SessionStatus {
+  private getProjectedStatus(id: string, entry: AlertEntry): SessionStatus {
     if (entry.ring !== null) return 'ALERT_RINGING';
     if (entry.progress !== null) return 'OSC_NOTIF_BUSY';
     // WATCHING outranks the command-exit arm: a watched command is by
@@ -1336,7 +1423,8 @@ export class AlertManager {
     // detector's busy/quiet states for the entire run. The detector is derived
     // from real output, so it is the more informative of the two.
     if (this.isWatching(entry)) return entry.detector.getStatus();
-    if (entry.commandExitWatch?.armed) return 'COMMAND_EXIT_ARMED';
+    // Armed: a seen command running while nobody engages it.
+    if (entry.commandExitWatch?.seen && !this.engaged(id)) return 'COMMAND_EXIT_ARMED';
     return 'WATCHING_DISABLED';
   }
 
@@ -1354,6 +1442,8 @@ export class AlertManager {
         notification: null,
         deferred: null,
         deferredTimer: null,
+        held: null,
+        echoUntil: 0,
       };
       this.entries.set(id, entry);
     }

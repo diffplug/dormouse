@@ -210,16 +210,16 @@ export const DESKTOP_SECTIONS: readonly Section[] = [
         id: 'al-ring',
         title: 'It rings when the command goes quiet',
         hint:
-          `Don't type! If you type, Dormouse will think you are paying attention to this task and the pane will not ring. It waits until you attend another pane or stop interacting for the inactivity timeout in Alarm settings.`,
+          `It rings when the command goes quiet, unless you are looking at that pane. The pane you are typing in or clicked into counts as looked at while you keep using Dormouse; stop for the inactivity timeout in Alarm settings and it rings.`,
       },
       {
         id: 'al-todo-auto',
         title: 'Dismissing a ringing alert leaves a TODO behind',
-        hint: 'Interact with the pane, or press `a`, to dismiss. The TODO is there so a ring you waved away does not vanish without a trace.',
+        hint: 'Click the pane, or press `a`, to dismiss. The TODO is there so a ring you waved away does not vanish without a trace.',
       },
       {
         id: 'al-todo-clear',
-        title: 'Press `Enter` inside the pane to clear the TODO',
+        title: 'Type anything inside the pane to clear the TODO',
       },
       {
         id: 'al-todo-manual',
@@ -239,7 +239,7 @@ export const DESKTOP_SECTIONS: readonly Section[] = [
       },
     ],
     prose: [
-      'Three different things can make a pane ring: a rule you set on a command name, a notification the program sends, and a long command finishing while you were elsewhere. None of them ring while you are actually looking at the pane.',
+      'Three different things can make a pane ring: a rule you set on a command name, a notification the program sends, and a long command finishing while you were elsewhere. None of them ring while you are looking at the pane — they wait until you go idle.',
     ],
   },
   COPY_PASTE_SECTION,

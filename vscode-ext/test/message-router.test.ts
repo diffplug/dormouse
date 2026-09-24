@@ -613,3 +613,79 @@ describe('await requests', () => {
     });
   });
 });
+
+/**
+ * Each webview is one engagement viewer of the shared alert manager
+ * (docs/specs/alert.md → Engagement), so what one webview reports can never
+ * disengage a Session another one is showing.
+ */
+describe('engagement viewers', () => {
+  const REPORT = '\x1b]9;needs input\x07';
+
+  function status(id: string): string | undefined {
+    return router.getAlertStates().get(id)?.status;
+  }
+
+  it('keeps one webview blurring from disengaging another', () => {
+    const a = fakeWebview();
+    const b = fakeWebview();
+    const disposeA = router.attachRouter(a.channel);
+    const disposeB = router.attachRouter(b.channel);
+    try {
+      a.send({ type: 'alert:engagement', present: true, focusId: 'pty-a' });
+      b.send({ type: 'alert:engagement', present: true, focusId: 'pty-b' });
+      a.send({ type: 'alert:engagement', present: false, focusId: null, lapse: 'leave' });
+
+      ptys.callbacks!.onData('pty-b', REPORT);
+      expect(status('pty-b')).not.toBe('ALERT_RINGING');
+    } finally {
+      disposeA.dispose();
+      disposeB.dispose();
+    }
+  });
+
+  it('acknowledges for the webview that sent it', () => {
+    const webview = fakeWebview();
+    const disposable = router.attachRouter(webview.channel);
+    try {
+      ptys.callbacks!.onData('pty-ack', REPORT);
+      expect(status('pty-ack')).toBe('ALERT_RINGING');
+      webview.send({ type: 'alert:acknowledge', id: 'pty-ack', input: false });
+      expect(router.getAlertStates().get('pty-ack')).toMatchObject({ status: 'WATCHING_DISABLED', todo: true });
+    } finally {
+      disposable.dispose();
+    }
+  });
+
+  it('stops engaging anything once its webview is disposed', () => {
+    const webview = fakeWebview();
+    const disposable = router.attachRouter(webview.channel);
+    webview.send({ type: 'alert:engagement', present: true, focusId: 'pty-gone' });
+    disposable.dispose();
+
+    ptys.callbacks!.onData('pty-gone', REPORT);
+    expect(status('pty-gone')).toBe('ALERT_RINGING');
+  });
+
+  it('treats recreated webview content as a new realm', async () => {
+    const webview = fakeWebview();
+    const disposable = router.attachRouter(webview.channel);
+    try {
+      webview.send({ type: 'dormouse:init' });
+      webview.send({ type: 'alert:engagement', present: true, focusId: 'pty-init' });
+      webview.send({ type: 'alert:await', requestId: 'await-init', id: 'pty-init', until: 'exit', timeoutMs: 600_000 });
+
+      // The content was destroyed and rebuilt; the old one's engagement and
+      // parked awaits went with it.
+      webview.send({ type: 'dormouse:init' });
+      await Promise.resolve();
+      expect(webview.posted).toContainEqual(expect.objectContaining({
+        type: 'alert:awaitResult', requestId: 'await-init', outcome: expect.objectContaining({ kind: 'cancelled' }),
+      }));
+      ptys.callbacks!.onData('pty-init', REPORT);
+      expect(status('pty-init')).toBe('ALERT_RINGING');
+    } finally {
+      disposable.dispose();
+    }
+  });
+});

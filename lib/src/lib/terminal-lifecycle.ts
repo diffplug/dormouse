@@ -32,10 +32,9 @@ import {
   type TerminalEntry,
   type TerminalOverlayDims,
 } from './terminal-store';
-import { clearTerminalActivity, getActivity, notifyActivityListeners } from './session-activity-store';
+import { acknowledgeSession, clearTerminalActivity, notifyActivityListeners } from './session-activity-store';
 import { attachTerminalMouseRouter } from './terminal-mouse-router';
 import {
-  inputContainsEnter,
   inputIsReplayTerminalReport,
   inputIsSyntheticTerminalReport,
   REPLAY_MODE_RESET,
@@ -251,25 +250,22 @@ function wireXtermHandlers(
 
     if (isReplayTerminalReport && registry.get(id)?.isReplaying) return;
 
-    // Forwarded mouse interaction still counts as touched for kill confirmation.
-    if (!isReplayTerminalReport) markSessionTouched(id);
-
     // Inside programs can request hover and wheel reports. Mouse-only chunks
-    // are not keystrokes; actual clicks attend through the Pane's DOM handler.
-    if (!isReplayTerminalReport && withoutMouseReports.length > 0) {
-      // CSI/SS3 can encode real keys. The broader filter protects the prompt
-      // recorder only; terminal replies must neither record input nor attend.
-      if (!inputIsSyntheticTerminalReport(input)) {
-        recordTerminalUserInput(id, input, makePromptLineReader(terminal));
-      }
-      const hadTodo = getActivity(id).todo;
-      getPlatform().alertAttend(id);
-      if (hadTodo && inputContainsEnter(input)) {
-        getPlatform().alertClearTodo(id);
-      }
+    // are not keystrokes; actual clicks acknowledge through the Pane's DOM
+    // handler. Terminal replies are never keystrokes either.
+    if (isReplayTerminalReport || withoutMouseReports.length === 0) {
+      // Forwarded mouse interaction still counts as touched for kill confirmation.
+      if (!isReplayTerminalReport) markSessionTouched(id);
+      getPlatform().writePty(id, input);
+      return;
     }
 
-    getPlatform().writePty(id, input);
+    // CSI/SS3 can encode real keys. The broader filter protects the prompt
+    // recorder only.
+    if (!inputIsSyntheticTerminalReport(input)) {
+      recordTerminalUserInput(id, input, makePromptLineReader(terminal));
+    }
+    writeUserInput(id, input);
   });
 
   const resizeDisposable = terminal.onResize(({ cols, rows }) => {
@@ -718,6 +714,17 @@ export function isUntouched(id: string): boolean {
   return registry.get(id)?.untouched ?? false;
 }
 
+/**
+ * Write human-originated input — a keystroke, a paste, a file drop — so every
+ * path acknowledges alike (`docs/specs/alert.md` -> Engagement). Acknowledged
+ * before the write, so the echo window is open before any echo can arrive.
+ */
+export function writeUserInput(id: string, data: string): void {
+  markSessionTouched(id);
+  acknowledgeSession(id, true);
+  getPlatform().writePty(id, data);
+}
+
 export function markSessionTouched(id: string): void {
   const entry = registry.get(id);
   if (!entry) return;
@@ -759,10 +766,8 @@ export function focusSession(id: string, focused: boolean, target: 'surface' | '
   const entry = registry.get(id);
   if (!entry) return;
 
-  if (focused) {
-    entry.terminal.focus();
-  } else {
-    entry.terminal.blur();
-    getPlatform().alertClearAttention(id);
-  }
+  // DOM focus is never engagement: the Wall reports that from its mode and
+  // selection (`docs/specs/alert.md` -> Engagement).
+  if (focused) entry.terminal.focus();
+  else entry.terminal.blur();
 }

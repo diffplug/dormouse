@@ -21,7 +21,7 @@ import {
 import type { TutorialState } from "./tutorial-state";
 
 /** Snapshot each launch: both the countdown and the fake command use this
- *  duration. The floor keeps a shortened attention setting from ending output
+ *  duration. The floor keeps a shortened inactivity setting from ending output
  *  before the WATCHING detector can confirm BUSY. */
 function getDemoDurationMs(inactivityTimeoutMs: number): number {
   return Math.max(

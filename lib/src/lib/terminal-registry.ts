@@ -15,9 +15,9 @@ export type {
 } from './terminal-state';
 
 export {
+  acknowledgeSession,
   clearLocalSurfaceActivity,
   clearTerminalActivity,
-  clearSessionAttention,
   clearSessionTodo,
   DEFAULT_ACTIVITY_STATE,
   dismissSessionAlert,
@@ -25,7 +25,6 @@ export {
   getActivitySnapshot,
   getLivePersistedAlertState,
   initAlertStateReceiver,
-  markSessionAttention,
   setTerminalActivity,
   restoreBrowserSurfaceTodo,
   subscribeToActivity,
@@ -43,6 +42,7 @@ export {
   isUntouched,
   markSessionTouched,
   mountElement,
+  writeUserInput,
   refitSession,
   registerSurfaceFocusHandle,
   releaseSession,

@@ -274,7 +274,7 @@ describe('spoken alarms', () => {
     expect(getAlertSpeechState('pty-1')).toBe('spoken');
   });
 
-  it('cuts the utterance off and clears delivery state when the ring is attended', () => {
+  it('cuts the utterance off and clears delivery state when the ring clears', () => {
     start();
     ring('pty-1');
     vi.advanceTimersByTime(SPEAK_DELAY_MS);
@@ -288,7 +288,7 @@ describe('spoken alarms', () => {
     expect(getAlertSpeechState('pty-1')).toBeNull();
 
     // The engine reports the cut, and can also finish an utterance after the
-    // user attends. Either stale callback must not resurrect HAS SPOKEN.
+    // ring clears. Either stale callback must not resurrect HAS SPOKEN.
     utterances[0].onend?.();
     expect(getAlertSpeechState('pty-1')).toBeNull();
   });

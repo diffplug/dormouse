@@ -26,7 +26,7 @@
 
 **Why `s` pumps only `tut-boxed`.** `tut-splash` animates continuously and so is never silent; only the quiet pane needs pumping for WATCHING's silence chain to be worth watching.
 
-**Why the `x` demo uses an unwatched command name.** WATCHING and a command exit both raise the ring, so a watched name would leave the user unable to tell which fired. `slowbuild` sits outside the WATCHING rule set, leaving the command exit as the only source — and command-exit alerting arms only once the user has attended the pane and left it, which is what the demo asks for.
+**Why the `x` demo uses an unwatched command name.** WATCHING and a command exit both raise the ring, so a watched name would leave the user unable to tell which fired. `slowbuild` sits outside the WATCHING rule set, leaving the command exit as the only source — and command-exit alerting arms only once the user has clicked into the pane and left it, which is what the demo asks for.
 
 ## Fake shell behavior
 

@@ -129,8 +129,9 @@ describe("TutRunner snapshots", () => {
       onTriggerCommandExitDemo: (duration) => {
         durationMs = duration;
         adapter.sendOutput(demoId, "\x1b]633;E;slowbuild\x07\x1b]633;C\x07");
-        adapter.alertAttend(demoId);
-        adapter.alertClearAttention(demoId);
+        // The user clicks into the demo pane, then back to the tutorial.
+        adapter.alertEngagement({ present: true, focusId: demoId });
+        adapter.alertEngagement({ present: true, focusId: "test-pane" });
         finishTimer = setTimeout(() => adapter.sendOutput(demoId, "\x1b]633;D;0\x07"), duration);
       },
     });

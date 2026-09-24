@@ -228,7 +228,7 @@ function PlaygroundDesktopExperience() {
                 );
               },
               // An unwatched command, so its exit, not WATCHING, raises the ring:
-              // the user attends the pane, leaves, and the exit rings.
+              // the user clicks into the pane, clicks away, and the exit rings.
               onTriggerCommandExitDemo: (durationMs) => {
                 if (commandExitDemoFinishTimerRef.current !== null) {
                   window.clearTimeout(commandExitDemoFinishTimerRef.current);

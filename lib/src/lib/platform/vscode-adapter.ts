@@ -5,7 +5,7 @@ import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from
 import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink, ToolControlResult, ToolHostRequest, WritePtyOptions } from './types';
 import { openPortRequestTimeoutMs } from './types';
 import { createBurrowLinkClient } from '../../host/remote/link-client';
-import type { AwaitHandle, AwaitOptions, AwaitOutcome } from '../alert-manager';
+import type { AwaitHandle, AwaitOptions, AwaitOutcome, Engagement, EngagementLapse } from '../alert-manager';
 import type { AlertSettings } from '../alert-settings';
 import type {
   NotepadArchiveLoadResult,
@@ -586,16 +586,16 @@ export class VSCodeAdapter implements PlatformAdapter {
     this.vscode.postMessage({ type: 'alert:dismiss', id });
   }
 
-  alertAttend(id: string): void {
-    this.vscode.postMessage({ type: 'alert:attend', id });
+  alertEngagement(state: Engagement, lapse?: EngagementLapse): void {
+    this.vscode.postMessage({ type: 'alert:engagement', present: state.present, focusId: state.focusId, lapse });
+  }
+
+  alertAcknowledge(id: string, options: { input: boolean }): void {
+    this.vscode.postMessage({ type: 'alert:acknowledge', id, input: options.input });
   }
 
   alertResize(id: string): void {
     this.vscode.postMessage({ type: 'alert:resize', id });
-  }
-
-  alertClearAttention(id?: string): void {
-    this.vscode.postMessage({ type: 'alert:clearAttention', id });
   }
 
   alertToggleTodo(id: string): void {

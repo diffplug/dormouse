@@ -42,9 +42,10 @@ Chrome rules:
   radius. Order: title, secondary detail, TODO pill, minimize, kill (suppressed
   by `showKillButton={false}`, as Pocket does). Both consumers wire minimize to
   the Sessions reserve, not a desktop Door. A ring shows as the alarm inset on
-  the bar and on its session-list row, and **a tap on the terminal attends the
-  Session**, which is how it is dismissed here (`docs/specs/alert.md` -> Pane
-  Header).
+  the bar and on its session-list row. **`MobileTerminalUi` acknowledges the
+  active Session itself** — a touch in the host's capture phase, before any
+  touch mode consumes it, and each input-bar or gesture key with input — since
+  its writes bypass xterm (`docs/specs/alert.md` -> Engagement).
 * **Must install `useDynamicPalette` in `MobileTerminalUi`** for gesture tokens;
   it never mounts the desktop `Wall`. `docs/specs/theme.md` owns publication
   and the CSS baselines available before the effect runs.

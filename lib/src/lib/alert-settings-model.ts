@@ -11,7 +11,7 @@ import { cfg } from '../cfg';
  * drag in. `alert-settings.ts` is the renderer's own mirror over the top.
  */
 export interface AlertSettings {
-  /** ms — how long "looking at this pane" lasts before the user counts as away. */
+  /** ms — how long without typing, pointer, or wheel input before the user counts as away (the renderer's presence window). */
   inactivityTimeoutMs: number;
   /** Delay terminal-notification rings behind confirmed animation. */
   deferAlertsUntilQuiet: boolean;

@@ -3798,3 +3798,157 @@ it('leaves a reveal for a hidden Workspace unanswered', async () => {
   expect(refit).not.toHaveBeenCalled();
   expect(container.querySelector('[data-terminal-context]')).toBeNull();
 });
+
+/**
+ * Engagement (`docs/specs/alert.md` -> Engagement): the Wall reports which
+ * terminal Session it points the realm at, and which gestures acknowledge.
+ */
+describe('engagement', () => {
+  function reportedFocus(report: ReturnType<typeof vi.spyOn>): string | null | undefined {
+    return (report.mock.calls.at(-1)?.[0] as { focusId: string | null } | undefined)?.focusId;
+  }
+
+  async function commandMode(): Promise<void> {
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', location: 1, bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', location: 2, bubbles: true }));
+    });
+  }
+
+  it('points at the passthrough pane, and at nothing from command mode or a Door', async () => {
+    const report = vi.spyOn(fake, 'alertEngagement');
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="passthrough" />));
+    await flush();
+    expect(reportedFocus(report)).toBe('pane-a');
+
+    await commandMode();
+    expect(reportedFocus(report)).toBeNull();
+
+    await act(async () => {
+      container.querySelector('[data-lath-leaf="pane-b"] [data-session-id="pane-b"]')!
+        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    });
+    expect(reportedFocus(report)).toBe('pane-b');
+
+    await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', bubbles: true })); });
+    await commandMode();
+    await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', bubbles: true })); });
+    await flush();
+    expect(container.querySelector('[data-door-id="pane-b"]')).not.toBeNull();
+    expect(reportedFocus(report)).toBeNull();
+  });
+
+  it('points at the source while its terminal context is open, even from command mode', async () => {
+    const report = vi.spyOn(fake, 'alertEngagement');
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />));
+    await flush();
+    expect(reportedFocus(report)).toBeUndefined();
+
+    const header = container.querySelector<HTMLElement>('[data-pane-header-for="pane-a"]')!;
+    await act(async () => { header.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 120, clientY: 90 })); });
+    expect(reportedFocus(report)).toBe('pane-a');
+  });
+
+  it('points at nothing from a browser Surface in passthrough', async () => {
+    const report = vi.spyOn(fake, 'alertEngagement');
+    await act(async () => root.render(<Wall
+      restoredLathLayout={{
+        version: 1,
+        tree: { root: { kind: 'leaf', id: 'browser-a' } },
+        leafMeta: {
+          'browser-a': {
+            component: 'browser',
+            tabComponent: 'browser',
+            title: 'example.com',
+            params: { surfaceType: 'browser', renderMode: 'iframe', url: 'https://example.com' },
+          },
+        },
+      }}
+      initialMode="passthrough"
+    />));
+    await flush();
+    expect(reportedFocus(report) ?? null).toBeNull();
+  });
+
+  it('points at nothing from a hidden Workspace', async () => {
+    const report = vi.spyOn(fake, 'alertEngagement');
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="passthrough" active={false} />));
+    await flush();
+    expect(reportedFocus(report) ?? null).toBeNull();
+  });
+
+  it('acknowledges a click on a pane and a Door, but not a `d` reattach', async () => {
+    const acknowledge = vi.spyOn(terminalRegistry, 'acknowledgeSession');
+    await act(async () => root.render(
+      <Wall initialPaneIds={['pane-a']} initialDoors={[{ id: 'door-a', title: 'A' }]} initialMode="command" />,
+    ));
+    await flush();
+
+    await act(async () => {
+      container.querySelector('[data-session-id="pane-a"]')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    });
+    expect(acknowledge.mock.calls).toEqual([['pane-a', false]]);
+
+    await act(async () => { container.querySelector<HTMLElement>('[data-door-id="door-a"] button')!.click(); });
+    await flush();
+    expect(container.querySelector('[data-lath-leaf="door-a"]')).not.toBeNull();
+    expect(acknowledge.mock.calls.at(-1)).toEqual(['door-a', false]);
+
+    // `m` leaves the new Door selected in command mode; `d` brings it back there.
+    await commandMode();
+    await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', bubbles: true })); });
+    await flush();
+    expect(container.querySelector('[data-door-id="door-a"]')).not.toBeNull();
+    acknowledge.mockClear();
+    await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true })); });
+    await flush();
+    expect(container.querySelector('[data-door-id="door-a"]')).toBeNull();
+    expect(acknowledge).not.toHaveBeenCalled();
+  });
+
+  it('moves focus to a Surface `dor` reveals without acknowledging it', async () => {
+    const toolId = 'tool-revealed';
+    terminalRegistry.applyTerminalSemanticEvents(toolId, [
+      { type: 'commandLine', commandLine: 'pnpm storybook' },
+      { type: 'commandStart' },
+    ]);
+    (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = vi.fn(async () => okToolLookup(['/repo']));
+    const acknowledge = vi.spyOn(terminalRegistry, 'acknowledgeSession');
+    const report = vi.spyOn(fake, 'alertEngagement');
+    try {
+      await act(async () => root.render(
+        <Wall
+          initialPaneIds={['pane-a']}
+          initialDoors={[{
+            id: toolId,
+            title: 'storybook',
+            component: 'tool',
+            tabComponent: 'tool',
+            params: {
+              surfaceType: 'tool', command: 'pnpm storybook', cwd: '/repo', toolName: 'storybook',
+              toolRender: 'iframe', toolPort: 'announced', toolKey: ['storybook', '/repo'],
+            },
+          }]}
+          initialMode="command"
+        />,
+      ));
+      await flush();
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.tool,
+            params: { name: 'storybook', cwd: '/repo', minimized: false, fresh: false },
+            respond: () => {},
+          },
+        }));
+      });
+      await flush();
+
+      expect(container.querySelector(`[data-lath-leaf="${toolId}"]`)).not.toBeNull();
+      expect(reportedFocus(report)).toBe(toolId);
+      expect(acknowledge).not.toHaveBeenCalled();
+    } finally {
+      act(() => terminalRegistry.removeTerminalPaneState(toolId));
+    }
+  });
+});

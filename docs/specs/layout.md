@@ -537,7 +537,7 @@ A store commit that empties the tree (last pane killed or minimized) triggers th
 
 > Numbered for cross-spec reference; the numbers are stable, so append rather than renumber and leave a retired one retired.
 
-- **#2 — A focused iframe surface is not a window blur**: it blurs the window while `document.hasFocus()` stays true, so **cross-session attention is cleared only on a *real* blur** — otherwise focusing an embed would wipe attention across the Wall.
+- **#2 — A focused iframe surface is not a window blur**: it blurs the window while `document.hasFocus()` stays true, so **presence ends only on a *real* blur** (`docs/specs/alert.md` → Engagement) — otherwise focusing an embed would end it across the window.
 - **#6 — Focus-neutral surface creation (`dor ensure` / `dor iframe` / `dor ab`)**: unlike `dor split`, these open in the background without moving focus off the caller (`docs/specs/dor-cli.md`, `docs/specs/dor-browser.md`). An add never re-parents the caller's subtree or steals activation, and the create does not call `selectPane` (`settleAddSelection` returns false for a focus-neutral, non-selection-replacing add). **The one exception**: `dor iframe` / `dor ab` replacing the pane the user is *currently selected on* moves selection to the replacement, else it would dangle on the removed leaf; any other pane, or a door selection, is left untouched. Cleanup of a `dor ensure` temporary Surface follows `docs/specs/notepad.md` → "Closure"; any completed teardown preserves the caller's live selection.
 
 ## Future

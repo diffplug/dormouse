@@ -39,7 +39,7 @@ import {
 } from "dormouse-lib/host/remote/service-protocol";
 import { embedderOrigins } from "dormouse-lib/lib/embedder-origins";
 import { AlertManager } from "dormouse-lib/lib/alert-manager";
-import type { AwaitHandle, AwaitOptions } from "dormouse-lib/lib/alert-manager";
+import type { AwaitHandle, AwaitOptions, Engagement, EngagementLapse } from "dormouse-lib/lib/alert-manager";
 import type { AlertSettings } from "dormouse-lib/lib/alert-settings";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
 import { createMemoryNotepadArchivePort } from "dormouse-lib/lib/notepad/memory-archive-port";
@@ -378,9 +378,10 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     this.host.send("alert_command", { payload });
   }
   alertDismiss(id: string): void { this.alertManager.dismissAlert(id); }
-  alertAttend(id: string): void { this.alertManager.attend(id); }
+  // The page is the local manager's one viewer, as in `TauriAdapter`.
+  alertEngagement(state: Engagement, lapse?: EngagementLapse): void { this.alertManager.setViewer("window", state, lapse); }
+  alertAcknowledge(id: string, options: { input: boolean }): void { this.alertManager.acknowledge(id, options); }
   alertResize(id: string): void { this.alertManager.onResize(id); }
-  alertClearAttention(id?: string): void { this.alertManager.clearAttention(id); }
   alertToggleTodo(id: string): void { this.alertManager.toggleTodo(id); }
   alertClearTodo(id: string): void { this.alertManager.clearTodo(id); }
   alertAwait(id: string, options: AwaitOptions): AwaitHandle { return this.alertManager.awaitCompletion(id, options); }

@@ -149,12 +149,14 @@ export function dismissSessionAlert(id: string): void {
   getPlatform().alertDismiss(id);
 }
 
-export function markSessionAttention(id: string): void {
-  getPlatform().alertAttend(id);
-}
-
-export function clearSessionAttention(id?: string): void {
-  getPlatform().alertClearAttention(id);
+/**
+ * A human interacted with this Session (`docs/specs/alert.md` -> Engagement):
+ * `input` for keys, a paste, or a drop, else a click, tap, or reattach. Only a
+ * terminal Session is acknowledged — a browser Surface has no Activity machine.
+ */
+export function acknowledgeSession(id: string, input: boolean): void {
+  if (!registry.has(id)) return;
+  getPlatform().alertAcknowledge(id, { input });
 }
 
 export function toggleSessionTodo(id: string): void {

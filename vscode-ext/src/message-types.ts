@@ -3,6 +3,7 @@ import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from
 import type {
   AwaitOutcome,
   AwaitUntil,
+  EngagementLapse,
 } from '../../lib/src/lib/alert-manager';
 import type { AlertSettings } from '../../lib/src/lib/alert-settings';
 import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
@@ -67,9 +68,10 @@ export type WebviewMessage =
   | { type: 'alert:initializeSettings'; settings: AlertSettings }
   | { type: 'alert:updateSettings'; settings: AlertSettings }
   | { type: 'alert:dismiss'; id: string }
-  | { type: 'alert:attend'; id: string }
+  // This webview is one engagement viewer (docs/specs/alert.md → Engagement).
+  | { type: 'alert:engagement'; present: boolean; focusId: string | null; lapse?: EngagementLapse }
+  | { type: 'alert:acknowledge'; id: string; input: boolean }
   | { type: 'alert:resize'; id: string }
-  | { type: 'alert:clearAttention'; id?: string }
   | { type: 'alert:toggleTodo'; id: string }
   | { type: 'alert:clearTodo'; id: string }
   // `dor await`: the AlertManager lives here, so the wait is parked in the

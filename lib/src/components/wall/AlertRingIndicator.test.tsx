@@ -99,7 +99,7 @@ describe('AlertRingIndicator', () => {
   });
 
   /**
-   * `spoken` lasts until the ring is attended, which is unbounded, so it goes
+   * `spoken` lasts until the ring clears, which is unbounded, so it goes
    * static and keeps a wash lighter than the speaking one — present enough to
    * read as an unhandled alarm, light enough not to fight terminal text for that
    * whole window.

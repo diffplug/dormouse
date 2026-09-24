@@ -10,11 +10,29 @@
 
 **Why the detector outranks the command-exit arm.** A watched command is by definition running, so a WATCHING Session is almost always also command-exit armed; ranking the arm first would mask the detector's busy/quiet states for the whole run, and the detector's state is the one derived from real output.
 
-## Attention
+## Engagement
 
-**Why attention uses the narrow reply classifier.** The prompt recorder filters every CSI/SS3 sequence because it cannot interpret them as command text. Reusing that filter for attention ignored real encoded keys, while its omission of DCS let device-query replies attend background panes; regression tests reproduced both failures in September 2026. The narrower reply classifier already used for replay and untouched-session tracking separates keys from replies without changing live PTY forwarding. Mouse-only chunks need a separate guard: the narrower classifier does not include mouse encodings, and inside programs can request hover and wheel reports without a click. Those reports otherwise dismiss a ring and cancel its pending alarms. Actual clicks already attend through the Pane’s DOM handler.
+**Why three signals instead of one attention lease.** `attend()` used to acknowledge the Session, stand in for presence, and name the focus all at once, as a 15-second keystroke lease read once at completion time. Each merge failed on its own (audit, 2026-09-23): a user who pressed `Enter` and sat back watching a build had the pane they were staring at ring 15 seconds later; a Claude Code permission prompt arriving 8 seconds after the user submitted a prompt was dropped outright because the lease was still running, and nothing re-raised it after they walked away; a click that attended one pane armed another; and a browser Surface click created a manager entry that masked its local TODO. Presence belongs to a window, focus to a Wall, acknowledgement to a Session, so each is reported where it is known.
+
+**Why pointer movement and the wheel count as presence.** Reading output is the common way to watch a pane, and it involves scrolling and moving the mouse but no typing; only keystrokes counted before, so reading a scrolling build for 15 seconds counted as walking away.
+
+**Why a command-mode selection is not focus.** Command mode is navigation: the selection passes over panes while the user looks for one, and none of them receives the keyboard. Treating it as focus would hold completions on whatever pane the cursor was left on.
+
+**Why the renderer computes presence.** It is the only side that sees input events, and a presence timer in the host would need an IPC message per event to refresh it; one message per transition carries the same information.
+
+**Why each VS Code webview is its own viewer.** The webviews share one manager. With one attention slot, a webview's window blur sent an id-less clear that wiped the attention another webview had just set, arming its running build (audit, 2026-09-23).
+
+**Why the reply classifier is the narrow one.** The prompt recorder filters every CSI/SS3 sequence because it cannot interpret them as command text. Reusing that filter here ignored real encoded keys, while its omission of DCS let device-query replies acknowledge background panes; regression tests reproduced both failures in September 2026. The narrower reply classifier already used for replay and untouched-session tracking separates keys from replies without changing live PTY forwarding. Mouse-only chunks need a separate guard: the narrower classifier does not include mouse encodings, and inside programs can request hover and wheel reports without a click. Those reports otherwise dismiss a ring and cancel its pending alarms. Actual clicks already acknowledge through the Pane's DOM handler.
+
+**Why the echo window.** The detector cannot tell a program's output from the echo of the user's own keys: typing a draft into a watched `claude` pane at seven keys a second built BUSY from echo alone, so leaving the pane mid-draft rang it, and a parked `dor await --until quiet` resolved on the half-typed draft (audit probes, 2026-09-23). A recorded Claude Code 2.1 session echoed each key within 10 ms; 250 ms covers a TUI's redraw of its input box and still leaves a program's real response to `Enter` counted from its first quarter second.
+
+**Why a completion inside the echo window neither rings nor holds.** It answers the keystroke: a bell on a failed Tab completion, the exit `Ctrl-C` just caused, a `q` quitting a pager. Held, it would ring the pane the user is looking at the moment they sat back for the inactivity timeout.
 
 ## Completion events
+
+**Why hold instead of drop.** A completion on an engaged Session used to be discarded, so a report the user never acted on was lost once they walked away — the permission prompt under Engagement is the recorded case. Holding keeps the summons owed without ringing a pane the user is looking at: acting on it answers it, and walking away rings it.
+
+**Why dropping on an explicit disengage may be a mistake.** Moving focus to another pane, or leaving the window, is a deliberate act by someone who was looking at the completion, so ringing it then would summon them for something they just saw (decision, 2026-09-23). It also forgets a prompt the user glanced at and clicked away from to look something up. If that proves common, escalating on every disengage and letting the acknowledged-state check absorb the repeat is the alternative.
 
 **Why nothing is decided at the point of detection.** Dispatching before suppression lets an observer see the three-second `npm test` that finished attended and would never have rung anyone. A seam firing only the events a human would have been shown could not serve `dor await` at all.
 
@@ -86,6 +104,8 @@
 
 ## Clearing And TODO
 
+**Why any keystroke clears TODO.** The rule was `Enter` only, and missed `Enter` sent as a win32-input-mode or kitty `CSI 13 u` sequence and a one-key answer such as `y`; it also read the renderer's copy of TODO before the attend it had just sent had come back, so a TODO that attend created survived the key (audit, 2026-09-23). Typing into the pane is dealing with it.
+
 **Why every ring sets TODO when it opens.** WATCHING rings used to create TODO only when attended or dismissed, while report and exit rings created it at once. Every verb then diverged by source: `t` on a ringing WATCHING pane turned TODO on and on a report ring turned it off; an `Enter` as the first key kept one and cleared the other; a restart dropped an unattended WATCHING ring without trace while a report ring came back as TODO (audit, 2026-09-23). Setting it at ring time makes the verbs identical. Recording the TODO the ring found lets a withdrawal take back only its own.
 
 **Why detail goes by richness.** The last writer used to win, with one special case keeping a report's text over an exit: an `OSC 9` reading `Build finished: 3 warnings` followed by a bell in the next PTY read showed `Terminal bell`, and `make; printf '\a'` showed `Terminal bell` over `make exited 2` (audit, 2026-09-23). One order covers every pair; equal ranks still take the newer text. A notification deferred behind animation used to be replaced by whatever came next, so the same bell in the next read replaced the message it followed; the deferral now keeps the richer of the two.
@@ -138,7 +158,7 @@ Guarding only completion leaves a stale `start` free to replace the active utter
 
 **Why a helper tracks its command before promotion.** A helper dropped every semantic event, so one promoted while running `claude` had no command watch until its next command: no WATCHING, and no command-exit arm (audit, 2026-09-23). Command state alerts no one by itself; only dispatch and publishing have to wait for promotion.
 
-**Why `SPEAKING` may pulse unbounded and `SPOKEN` may not.** An utterance is seconds long and stops on its own, so the pulse it carries is self-bounding. `SPOKEN` persists until the ring is attended, so animating it would be exactly the per-Session animation with no end that bounding the burst exists to remove.
+**Why `SPEAKING` may pulse unbounded and `SPOKEN` may not.** An utterance is seconds long and stops on its own, so the pulse it carries is self-bounding. `SPOKEN` persists until the ring clears, so animating it would be exactly the per-Session animation with no end that bounding the burst exists to remove.
 
 **Why `cfg.alert.ringingPaused` suppresses the pulse.** It is the visual-snapshot freeze that pins the alarm; even a bounded animation could otherwise snapshot at an arbitrary phase during its first 2.6 seconds.
 

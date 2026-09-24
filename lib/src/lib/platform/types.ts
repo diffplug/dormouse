@@ -1,6 +1,6 @@
 import type { AlertRuntimeSnapshot } from '../alert-manager';
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
-import type { AlertState, AwaitHandle, AwaitOptions } from '../alert-manager';
+import type { AlertState, AwaitHandle, AwaitOptions, Engagement, EngagementLapse } from '../alert-manager';
 import type { AlertSettings } from '../alert-settings';
 import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
 import type { ShellEntry } from '../shell-defaults';
@@ -471,9 +471,14 @@ export interface PlatformAdapter {
    */
   alertPublishSettings(settings: AlertSettings, opts: { seed: boolean }): void;
   alertDismiss(id: string): void;
-  alertAttend(id: string): void;
+  /**
+   * This renderer realm's presence and focus (`docs/specs/alert.md` ->
+   * Engagement), sent only when it changes; `lapse` says why presence ended.
+   */
+  alertEngagement(state: Engagement, lapse?: EngagementLapse): void;
+  /** A human interacted with the Session; `input` when they typed, pasted, or dropped into it. */
+  alertAcknowledge(id: string, options: { input: boolean }): void;
   alertResize(id: string): void;
-  alertClearAttention(id?: string): void;
   alertToggleTodo(id: string): void;
   alertClearTodo(id: string): void;
   /**

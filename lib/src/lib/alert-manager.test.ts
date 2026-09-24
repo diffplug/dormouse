@@ -34,12 +34,30 @@ describe('AlertManager in isolation', () => {
     ]);
   }
 
+  /** The one viewer these tests report for: a single renderer realm. */
+  const VIEWER = 'viewer';
+
+  /** The user is present, pointing at `id` (`docs/specs/alert.md` -> Engagement). */
+  function engage(id: string): void {
+    manager.setViewer(VIEWER, { present: true, focusId: id });
+  }
+
+  /** An explicit disengage: focus moved off, or the window left. */
+  function disengage(): void {
+    manager.setViewer(VIEWER, { present: false, focusId: null }, 'leave');
+  }
+
+  /** Presence lapses from inactivity while `id` keeps the focus. */
+  function goIdle(id: string): void {
+    manager.setViewer(VIEWER, { present: false, focusId: id }, 'idle');
+  }
+
   /** Run `commandLine` seen and then left: armed, so its exit rings once it
    *  has outlasted `cfg.alert.commandExitMinRuntime`. */
   function armCommandExit(id: string, commandLine = 'pnpm build'): void {
-    manager.attend(id);
+    engage(id);
     runCommand(id, commandLine);
-    manager.clearAttention(id);
+    disengage();
   }
 
   function finishCommand(id: string, exitCode = 0): void {
@@ -68,7 +86,9 @@ describe('AlertManager in isolation', () => {
       settle();
       applyTerminalProtocolEvents(manager, HELPER, [{ kind: 'notification', notification: { source: 'OSC 9', title: null, body: 'done' } }]);
       applyTerminalProtocolEvents(manager, HELPER, [{ kind: 'progress', progress: { state: 'normal', percent: 40 } }]);
-      manager.attend(HELPER);
+      engage(HELPER);
+      manager.acknowledge(HELPER, { input: true });
+      disengage();
       manager.toggleTodo(HELPER);
       manager.clearTodo(HELPER);
       manager.seed(HELPER, { todo: true });
@@ -123,7 +143,7 @@ describe('AlertManager in isolation', () => {
       expect(manager.getState(HELPER)).toMatchObject({ status: 'NOTHING_TO_SHOW', todo: false, notification: null });
     });
 
-    it('does not ring the exit of a command it never saw with attention', () => {
+    it('does not ring the exit of a command it never saw engaged', () => {
       manager.setHelper(HELPER, true);
       runCommand(HELPER, 'npm run build');
       manager.setHelper(HELPER, false);
@@ -133,8 +153,8 @@ describe('AlertManager in isolation', () => {
 
       // The ordinary seen rule applies from promotion on.
       runCommand(HELPER, 'npm run build');
-      manager.attend(HELPER);
-      manager.clearAttention(HELPER);
+      engage(HELPER);
+      disengage();
       vi.advanceTimersByTime(30_000);
       finishCommand(HELPER);
       expect(manager.getState(HELPER).status).toBe('ALERT_RINGING');
@@ -168,9 +188,6 @@ describe('AlertManager in isolation', () => {
     manager.onData(id);
     expect(manager.getState(id).status).toBe('BUSY');
 
-    // Clear attention so alert can ring
-    manager.clearAttention(id);
-
     // Now silence — task finished. Advance past mightNeedAttention (2000ms)
     vi.advanceTimersByTime(2_000);
     expect(manager.getState(id).status).toBe('MIGHT_NEED_ATTENTION');
@@ -184,7 +201,6 @@ describe('AlertManager in isolation', () => {
     const id = 'user-scenario';
 
     runWatchedCommand(id);
-    manager.clearAttention(id);
 
     for (let t = 0; t < 5_000; t += 200) {
       manager.onData(id);
@@ -197,13 +213,12 @@ describe('AlertManager in isolation', () => {
     expect(manager.getState(id).status).toBe('ALERT_RINGING');
   });
 
-  it('ALERT_RINGING latches when user has no attention (view hidden)', () => {
+  it('ALERT_RINGING latches through output until acknowledged', () => {
     const id = 'latch-test';
     // Deferral ships on and withdraws a WATCHING ring once output resumes
     // confirmed BUSY; latching through output is the switched-off timing.
     manager.setDeferAlertsUntilQuiet(false);
     runWatchedCommand(id);
-    manager.clearAttention(id);
 
     driveToBusy(id);
     expect(manager.getState(id).status).toBe('BUSY');
@@ -220,23 +235,24 @@ describe('AlertManager in isolation', () => {
     }
     expect(manager.getState(id).status).toBe('ALERT_RINGING');
 
-    manager.attend(id);
+    manager.acknowledge(id, { input: false });
     manager.onData(id);
     expect(manager.getState(id).status).not.toBe('ALERT_RINGING');
   });
 
-  it('ALERT_RINGING resets on data when user has attention', () => {
+  it('rings a watched settle once the user has left, and acknowledging puts it out', () => {
     const id = 'reset-test';
     runWatchedCommand(id);
 
-    manager.attend(id);
+    engage(id);
     driveToBusy(id);
 
-    manager.clearAttention(id);
+    disengage();
     settle();
     expect(manager.getState(id).status).toBe('ALERT_RINGING');
 
-    manager.attend(id);
+    engage(id);
+    manager.acknowledge(id, { input: false });
     manager.onData(id);
     expect(manager.getState(id).status).not.toBe('ALERT_RINGING');
   });
@@ -249,7 +265,6 @@ describe('AlertManager in isolation', () => {
     });
 
     runWatchedCommand(id);
-    manager.clearAttention(id);
 
     driveToBusy(id);
 
@@ -298,7 +313,6 @@ describe('AlertManager in isolation', () => {
 
   function driveToRinging(id: string): void {
     runWatchedCommand(id);
-    manager.clearAttention(id);
     driveToBusy(id);
     settle();
     expect(manager.getState(id).status).toBe('ALERT_RINGING');
@@ -329,22 +343,33 @@ describe('AlertManager in isolation', () => {
     });
   });
 
-  it.each(['watching', 'report', 'exit'] as const)('attending or dismissing a %s ring leaves its TODO', (source) => {
-    for (const verb of ['attend', 'dismissAlert'] as const) {
+  /** The verbs that clear a ring and leave its TODO. */
+  const leaveTodoVerbs = {
+    acknowledge: (id: string) => manager.acknowledge(id, { input: false }),
+    dismissAlert: (id: string) => manager.dismissAlert(id),
+  };
+
+  it.each(['watching', 'report', 'exit'] as const)('acknowledging without input or dismissing a %s ring leaves its TODO', (source) => {
+    for (const verb of ['acknowledge', 'dismissAlert'] as const) {
       const id = `ring-leaves-todo-${source}-${verb}`;
       ringFrom(id, source);
-      manager[verb](id);
+      leaveTodoVerbs[verb](id);
       expect(manager.getState(id)).toMatchObject({ episode: null, todo: true });
       expect(manager.getState(id).status).not.toBe('ALERT_RINGING');
       expect(manager.getState(id).notification).not.toBeNull();
     }
   });
 
-  it.each(['watching', 'report', 'exit'] as const)('toggling or clearing TODO on a %s ring turns it off with its detail', (source) => {
-    for (const verb of ['toggleTodo', 'clearTodo'] as const) {
+  it.each(['watching', 'report', 'exit'] as const)('typing, toggling, or clearing TODO on a %s ring turns it off with its detail', (source) => {
+    const verbs = {
+      acknowledgeInput: (id: string) => manager.acknowledge(id, { input: true }),
+      toggleTodo: (id: string) => manager.toggleTodo(id),
+      clearTodo: (id: string) => manager.clearTodo(id),
+    };
+    for (const verb of ['acknowledgeInput', 'toggleTodo', 'clearTodo'] as const) {
       const id = `todo-off-ringing-${source}-${verb}`;
       ringFrom(id, source);
-      manager[verb](id);
+      verbs[verb](id);
       expect(manager.getState(id)).toMatchObject({ episode: null, todo: false, notification: null });
       expect(manager.getState(id).status).not.toBe('ALERT_RINGING');
     }
@@ -388,7 +413,7 @@ describe('AlertManager in isolation', () => {
     });
   });
 
-  it.each(['attend', 'dismissAlert'] as const)(
+  it.each(['acknowledge', 'dismissAlert'] as const)(
     'a report about a state acknowledged by %s updates the TODO without summoning again',
     (verb) => {
       // Claude Code: the turn settles and WATCHING rings; the user acknowledges
@@ -399,7 +424,7 @@ describe('AlertManager in isolation', () => {
         if (changed === id && state.episode) episodes.add(state.episode.id);
       });
       driveToRinging(id);
-      manager[verb](id);
+      leaveTodoVerbs[verb](id);
       vi.advanceTimersByTime(60_000);
 
       manager.notifyFromProtocol(id, { source: 'OSC 99', title: 'Claude Code', body: 'Claude is waiting for your input' });
@@ -526,8 +551,7 @@ describe('AlertManager in isolation', () => {
     const id = 'ring-keeps-progress';
     manager.updateProtocolProgress(id, { state: 'indeterminate', percent: null });
     manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'needs permission' });
-    manager.attend(id);
-    manager.clearAttention(id);
+    manager.acknowledge(id, { input: false });
     expect(manager.getState(id).status).toBe('OSC_NOTIF_BUSY');
 
     // The run goes on after the answer, then its cycle ends.
@@ -600,10 +624,10 @@ describe('AlertManager in isolation', () => {
     });
   });
 
-  it('protocol completion is suppressed while the user has attention', () => {
+  it('protocol completion is held while the Session is engaged', () => {
     const id = 'osc-progress-attention';
 
-    manager.attend(id);
+    engage(id);
     manager.updateProtocolProgress(id, { state: 'normal', percent: 25 });
     expect(manager.getState(id).status).toBe('OSC_NOTIF_BUSY');
 
@@ -615,10 +639,10 @@ describe('AlertManager in isolation', () => {
     });
   });
 
-  it('direct protocol notifications are suppressed while the user has attention', () => {
+  it('direct protocol notifications are held while the Session is engaged', () => {
     const id = 'osc-notification-attention';
 
-    manager.attend(id);
+    engage(id);
     manager.notifyFromProtocol(id, { source: 'OSC 777', title: 'done', body: 'Build finished' });
 
     expect(manager.getState(id)).toMatchObject({
@@ -628,13 +652,13 @@ describe('AlertManager in isolation', () => {
     });
   });
 
-  it('attended direct notifications do not clear active protocol progress', () => {
+  it('engaged direct notifications do not clear active protocol progress', () => {
     const id = 'osc-progress-with-attended-notification';
 
     manager.updateProtocolProgress(id, { state: 'normal', percent: 25 });
     expect(manager.getState(id).status).toBe('OSC_NOTIF_BUSY');
 
-    manager.attend(id);
+    engage(id);
     manager.notifyFromProtocol(id, { source: 'OSC 777', title: 'done', body: 'Build finished' });
 
     expect(manager.getState(id)).toMatchObject({
@@ -644,10 +668,10 @@ describe('AlertManager in isolation', () => {
     });
   });
 
-  it('terminal bell notifications are suppressed while the user has attention', () => {
+  it('terminal bell notifications are held while the Session is engaged', () => {
     const id = 'terminal-bell-attention';
 
-    manager.attend(id);
+    engage(id);
     applyTerminalProtocolEvents(manager, id, [
       { kind: 'notification', notification: { source: 'BEL', title: 'Terminal bell', body: null } },
     ]);
@@ -659,7 +683,7 @@ describe('AlertManager in isolation', () => {
     });
   });
 
-  it('arms and rings when an attended command loses attention before exiting', () => {
+  it('arms and rings when an engaged command is left before exiting', () => {
     const id = 'command-exit';
 
     armCommandExit(id);
@@ -740,14 +764,14 @@ describe('AlertManager in isolation', () => {
     });
   });
 
-  it('clears an unarmed command-exit watch when the PTY exits before attention loss', () => {
+  it('clears a command-exit watch whose quick PTY exit was engaged', () => {
     const id = 'command-exit-pty-exit-unarmed';
 
-    manager.attend(id);
+    engage(id);
     runCommand(id, 'exec true');
 
     manager.onExit(id, 0);
-    vi.advanceTimersByTime(cfg.alert.userAttention);
+    goIdle(id);
 
     expect(manager.getState(id)).toMatchObject({
       status: 'WATCHING_DISABLED',
@@ -771,14 +795,14 @@ describe('AlertManager in isolation', () => {
     });
   });
 
-  it('disarms command-exit alerts when the user returns before finish', () => {
+  it('disarms command-exit alerts while the user is back, holding the finish', () => {
     const id = 'command-exit-return';
 
     armCommandExit(id, 'pnpm test');
     vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
     expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
 
-    manager.attend(id);
+    engage(id);
     expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
 
     vi.advanceTimersByTime(1_000);
@@ -993,7 +1017,6 @@ describe('AlertManager in isolation', () => {
     const id = 'unwatched-detector';
     manager.setWatchedCommands(['claude']);
     runCommand(id, 'git log');
-    manager.clearAttention(id);
 
     driveToBusy(id);
     // The detector is BUSY underneath, but no rule matches, so nothing shows.
@@ -1014,7 +1037,6 @@ describe('AlertManager in isolation', () => {
   it('shows the live detector state when a rule is enabled mid-command', () => {
     const id = 'enable-rule-mid-busy';
     runCommand(id, 'claude');
-    manager.clearAttention(id);
 
     driveToBusy(id);
     expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
@@ -1028,17 +1050,16 @@ describe('AlertManager in isolation', () => {
     });
   });
 
-  it('suppresses a WATCHING ring when the user is attending at the settle', () => {
+  it('holds a WATCHING ring when the Session is engaged at the settle', () => {
     const id = 'settle-while-attended';
     runWatchedCommand(id);
-    manager.attend(id);
+    engage(id);
 
     driveToBusy(id);
     expect(manager.getState(id).status).toBe('BUSY');
 
     settle();
-    // Total elapsed is under the 15s attention window, so the user is still
-    // looking: no ring, and the detector simply starts over.
+    // The user is looking: no ring yet, and the detector simply starts over.
     expect(manager.getState(id)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
       watchingEnabled: true,
@@ -1073,84 +1094,14 @@ describe('AlertManager in isolation', () => {
   it('keeps the command-exit arm hidden while WATCHING owns the display', () => {
     const id = 'arm-under-watching';
     runWatchedCommand(id);
-    manager.attend(id);
-    manager.clearAttention(id);
+    engage(id);
+    disengage();
 
     // Armed underneath, but the monitor's own state is what is published.
     expect(manager.getState(id).status).toBe('NOTHING_TO_SHOW');
 
     manager.setWatchedCommands([]);
     expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
-  });
-
-  // --- Configurable inactivity timeout (`docs/specs/alert.md` -> Alarm settings) ---
-
-  describe('setInactivityTimeoutMs', () => {
-    it('expires attention on the configured window instead of the default 15s', () => {
-      const id = 'short-window';
-      manager.setInactivityTimeoutMs(3_000);
-
-      manager.attend(id);
-      runCommand(id);
-
-      vi.advanceTimersByTime(2_999);
-      expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
-
-      vi.advanceTimersByTime(1);
-      expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
-    });
-
-    it('leaves the command-exit minimum runtime where it was', () => {
-      const id = 'short-runtime-gate';
-      manager.setInactivityTimeoutMs(3_000);
-
-      armCommandExit(id, 'git status');
-      vi.advanceTimersByTime(4_000);
-      finishCommand(id);
-      expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
-
-      armCommandExit(id, 'git status');
-      vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
-      finishCommand(id);
-      expect(manager.getState(id)).toMatchObject({
-        status: 'ALERT_RINGING',
-        notification: { source: 'COMMAND_EXIT', body: 'git status exited 0' },
-      });
-    });
-
-    it('re-arms a live attention timer so a shortened window applies immediately', () => {
-      const id = 're-arm';
-
-      manager.attend(id);
-      runCommand(id);
-
-      vi.advanceTimersByTime(10_000);
-      expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
-
-      // Shortening mid-window restarts the countdown from now rather than
-      // firing instantly or waiting out the original 15s.
-      manager.setInactivityTimeoutMs(3_000);
-      vi.advanceTimersByTime(2_999);
-      expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
-
-      vi.advanceTimersByTime(1);
-      expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
-    });
-
-    it('ignores a nonsensical value rather than installing a broken timer', () => {
-      const id = 'bad-value';
-      manager.setInactivityTimeoutMs(Number.NaN);
-      manager.setInactivityTimeoutMs(0);
-      manager.setInactivityTimeoutMs(-1);
-
-      manager.attend(id);
-      runCommand(id);
-
-      vi.advanceTimersByTime(cfg.alert.userAttention - 1);
-      expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
-      vi.advanceTimersByTime(1);
-      expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
-    });
   });
 
   it('defers a protocol alert with no settings call, because deferral ships on', () => {
@@ -1299,12 +1250,12 @@ describe('AlertManager in isolation', () => {
       });
     });
 
-    it('cancels deferred delivery when the user attends, even after attention expires', () => {
+    it('cancels deferred delivery when the user acknowledges', () => {
       const id = 'defer-attended';
       driveToBusy(id);
       manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Done' });
 
-      manager.attend(id);
+      manager.acknowledge(id, { input: false });
       vi.advanceTimersByTime(60_000);
       expect(manager.getState(id)).toMatchObject({
         status: 'WATCHING_DISABLED',
@@ -1441,7 +1392,6 @@ describe('AlertManager in isolation', () => {
       const seen = recordingClaimant(id, true);
 
       runWatchedCommand(id);
-      manager.clearAttention(id);
       driveToBusy(id);
       settle();
 
@@ -1460,7 +1410,6 @@ describe('AlertManager in isolation', () => {
       const seen = recordingClaimant(id, false);
 
       runWatchedCommand(id);
-      manager.clearAttention(id);
       driveToBusy(id);
       settle();
 
@@ -1468,11 +1417,11 @@ describe('AlertManager in isolation', () => {
       expect(manager.getState(id).status).toBe('ALERT_RINGING');
     });
 
-    it('reports a short attended command finish that could never ring', () => {
+    it('reports a short engaged command finish that could never ring', () => {
       const id = 'observe-quick-command';
       const seen = recordingClaimant(id, false);
 
-      manager.attend(id);
+      engage(id);
       runCommand(id, 'npm test');
       vi.advanceTimersByTime(1_000);
       finishCommand(id);
@@ -1483,7 +1432,7 @@ describe('AlertManager in isolation', () => {
         watchKey: 'npm test',
         exitCode: 0,
         ranMs: 1_000,
-        armed: false,
+        seen: true,
       }]);
       expect(manager.getState(id)).toMatchObject({
         status: 'WATCHING_DISABLED',
@@ -1492,7 +1441,7 @@ describe('AlertManager in isolation', () => {
       });
     });
 
-    it('claiming an armed command finish suppresses the COMMAND_EXIT ring', () => {
+    it('claiming a seen command finish suppresses the COMMAND_EXIT ring', () => {
       const id = 'claim-command-exit';
       const seen = recordingClaimant(id, true);
 
@@ -1508,7 +1457,7 @@ describe('AlertManager in isolation', () => {
         watchKey: 'pnpm build',
         exitCode: 0,
         ranMs: cfg.alert.commandExitMinRuntime,
-        armed: true,
+        seen: true,
       }]);
       expect(manager.getState(id)).toMatchObject({
         status: 'WATCHING_DISABLED',
@@ -1622,7 +1571,7 @@ describe('AlertManager in isolation', () => {
           watchKey: 'pnpm build',
           exitCode: 1,
           ranMs: cfg.alert.commandExitMinRuntime,
-          armed: true,
+          seen: true,
         },
         ringing: false,
         todo: false,
@@ -1826,14 +1775,14 @@ describe('AlertManager in isolation', () => {
       expect(manager.getState(id)).toMatchObject({ status: 'ALERT_RINGING', todo: true, awaited: true });
     });
 
-    it('never sets attention, so the next completion still rings the human', async () => {
+    it('never acknowledges, so the next completion still rings the human', async () => {
       const id = 'await-does-not-attend';
       driveToRinging(id);
 
       const handle = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
       expect(await handle.promise).toMatchObject({ kind: 'resolved', cause: 'quiet' });
 
-      // Attention would suppress this second ring for the whole 15s window.
+      // An acknowledgement would record the settle as answered.
       driveToBusy(id);
       settle();
       expect(manager.getState(id).status).toBe('ALERT_RINGING');
@@ -1844,7 +1793,6 @@ describe('AlertManager in isolation', () => {
     it('resolves quiet on a settle, claiming it before any ring rule runs', async () => {
       const id = 'await-quiet-settle';
       runWatchedCommand(id);
-      manager.clearAttention(id);
 
       const handle = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
       driveToBusy(id);
@@ -1863,17 +1811,17 @@ describe('AlertManager in isolation', () => {
     it.each([
       ['BUSY', 0, 5_000],
       ['MIGHT_NEED_ATTENTION', 2_000, 3_000],
-    ] as const)('keeps a parked quiet await armed when attention arrives during %s', async (_status, beforeAttendMs, afterAttendMs) => {
+    ] as const)('keeps a parked quiet await armed when the user engages and acknowledges during %s', async (_status, beforeAttendMs, afterAttendMs) => {
       const id = `await-quiet-attended-${_status}`;
       runWatchedCommand(id);
-      manager.clearAttention(id);
 
       const handle = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
       driveToBusy(id);
       vi.advanceTimersByTime(beforeAttendMs);
       expect(manager.getState(id).status).toBe(_status);
 
-      manager.attend(id);
+      engage(id);
+      manager.acknowledge(id, { input: false });
       vi.advanceTimersByTime(afterAttendMs);
 
       expect(await handle.promise).toEqual({
@@ -1925,7 +1873,6 @@ describe('AlertManager in isolation', () => {
     it('ignores a bell and a settle under --until exit, then resolves on the finish', async () => {
       const id = 'await-exit-strict';
       runWatchedCommand(id);
-      manager.clearAttention(id);
 
       const handle = manager.awaitCompletion(id, { until: 'exit', timeoutMs: NEVER });
       const outcome = watch(handle);
@@ -2143,7 +2090,6 @@ describe('AlertManager in isolation', () => {
     it('delivers one completion to every await parked on the Session', async () => {
       const id = 'await-two-waiters';
       runWatchedCommand(id);
-      manager.clearAttention(id);
 
       const first = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
       vi.advanceTimersByTime(1_000);

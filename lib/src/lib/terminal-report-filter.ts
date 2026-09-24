@@ -1,10 +1,6 @@
 import { ESC, RESET } from './ansi';
 import type { TerminalEntry } from './terminal-store';
 
-export function inputContainsEnter(data: string): boolean {
-  return data.includes('\r');
-}
-
 const REPORT_CSI = /\x1b\[[0-?]*[ -/]*[@-~]/;
 const REPORT_SS3 = /\x1bO[@-~]/;
 const REPORT_OSC = /\x1b\][\s\S]*?(?:\x07|\x1b\\)/;

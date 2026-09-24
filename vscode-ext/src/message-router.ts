@@ -179,6 +179,8 @@ let nextFlushRequestId = 0;
 /** Tags each router's contribution to the volatile notepad mirror. Per
  *  extension-host lifetime, like the mirror itself (`notepad-volatile.ts`). */
 let nextNotepadRouterId = 0;
+/** Tags each router's engagement viewer in the shared alert manager. */
+let nextViewerId = 0;
 const ALLOWED_WORKBENCH_COMMANDS = new Set<string>(VSCODE_WORKBENCH_COMMANDS);
 
 // Shared alert manager — survives router disposal so alert state persists
@@ -377,6 +379,9 @@ export function attachRouter(
   const reconnect = options?.reconnect ?? false;
   const killOnDispose = options?.killOnDispose ?? false;
   const notepadRouterId = `notepad-router-${++nextNotepadRouterId}`;
+  // This webview is one engagement viewer of the shared manager, so one
+  // webview's blur never touches another's (docs/specs/alert.md → Engagement).
+  const viewerId = `viewer-${++nextViewerId}`;
 
   // The router's only send path — it stamps this webview's message token, which
   // the webview requires (docs/specs/vscode.md → "Webview message
@@ -845,6 +850,10 @@ export function attachRouter(
         // Tear down previous subscriptions first (webview was destroyed and recreated).
         disconnectWebview?.();
         disconnectWebview = connectWebview();
+        // Recreated content is a new realm: the old one's engagement and the
+        // awaits it parked went with it.
+        alertManager.removeViewer(viewerId);
+        cancelAllPendingAwaits();
 
         // Re-publish the currently-selected shell so split-spawns in the
         // freshly-mounted webview know what to use.
@@ -972,14 +981,15 @@ export function attachRouter(
       case 'alert:dismiss':
         alertManager.dismissAlert(msg.id);
         break;
-      case 'alert:attend':
-        alertManager.attend(msg.id);
+      case 'alert:engagement':
+        // `setViewer` revalidates the shape: only a literal `idle` escalates.
+        alertManager.setViewer(viewerId, { present: msg.present, focusId: msg.focusId }, msg.lapse);
+        break;
+      case 'alert:acknowledge':
+        alertManager.acknowledge(msg.id, { input: msg.input === true });
         break;
       case 'alert:resize':
         alertManager.onResize(msg.id);
-        break;
-      case 'alert:clearAttention':
-        alertManager.clearAttention(msg.id);
         break;
       case 'alert:toggleTodo':
         alertManager.toggleTodo(msg.id);
@@ -1039,6 +1049,7 @@ export function attachRouter(
         if (request.pending.size === 0) request.settle();
       }
       cancelAllPendingAwaits();
+      alertManager.removeViewer(viewerId);
       removeWatchedCommandListener();
       removeAlertSettingsListener();
       resolveAllFlushRequests();
