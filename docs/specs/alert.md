@@ -14,7 +14,7 @@ Dormouse can owe the user attention in three ways. Each is a **source** of the S
 |---|---|---|
 | `watching` (WATCHING Track) | a watched command's output went busy, then quiet | `WATCHING`: `<watch key> went quiet` |
 | `report` (Terminal reports) | the PTY emitted `BEL`, `OSC 9`, `OSC 99`, or `OSC 777`, or ended an `OSC 9;4` cycle | the sanitized report |
-| `exit` (Command-exit Track) | a seen command exited after at least `cfg.alert.commandExitMinRuntime` | `COMMAND_EXIT` |
+| `exit` (Command-exit Track) | a seen command exited | `COMMAND_EXIT` |
 
 Only `watching` requires WATCHING. **Every source obeys one engagement rule — a completion on an engaged Session is held, never rung** (Engagement), applied at the single seam every completion passes through (Completion events). The output/silence detector (`QuiesceDetector`) is not a source: it is an always-on observer WATCHING reads.
 
@@ -79,7 +79,7 @@ Source of truth: `setViewer` / `acknowledge` in `lib/src/lib/alert-manager.ts`; 
 
 Every completion — a detector settle, a command finish, a direct notification, and the end of a protocol progress cycle (completion or error) — is **dispatched as a `CompletionEvent` before any suppression runs** (rationale).
 
-Claimants get first refusal per Session in registration order; the first to return `true` claims the event and the rest are not offered it. **A claimed event never rings, never sets TODO, and never stores an `ActivityNotification`** — it stops before the ring rules, where the echo window, holding, and the command-exit seen and minimum-runtime checks live.
+Claimants get first refusal per Session in registration order; the first to return `true` claims the event and the rest are not offered it. **A claimed event never rings, never sets TODO, and never stores an `ActivityNotification`** — it stops before the ring rules, where the echo window, holding, and the command-exit seen check live.
 
 **Must hold a completion that would ring an engaged Session**: the sources it would raise and the richest detail (Clearing And TODO), repeated holds merging, never public. A deferred report that comes due while engaged is held too, and **never deferred again on escalation** (rationale). **Presence lapsing `idle` with focus unchanged rings what was held**, each source by its unengaged path; any other end drops it — a user verb (Clearing And TODO), focus moving away, the viewer leaving, seeding, removal, or teardown (rationale). **Dropping on an explicit disengage may be a mistake** (rationale). Resumed watched work and rule removal withdraw a held `watching` source as they withdraw a ringing one (WATCHING Track).
 
@@ -96,7 +96,7 @@ With `deferAlertsUntilQuiet` enabled:
 Two ordering rules:
 
 - **Clear the progress cycle *before* dispatch**, so a completion or error ends the cycle whether or not the event is claimed and `OSC_NOTIF_BUSY` falls back either way.
-- **Dispatch a command finish for every watch that existed**, including the short, unseen, and engaged ones the ring rule then discards or holds.
+- **Dispatch a command finish for every watch that existed**, including the unseen and engaged ones the ring rule then discards or holds.
 
 Source of truth: `registerCompletionClaimant` / `dispatchCompletion` / `holdOrDeliver` / `deferOrDeliverNotification` / `scheduleDeferredNotification` / `flushDeferredNotification` / `escalateHeld` in `lib/src/lib/alert-manager.ts`; `quietAt` in `lib/src/lib/quiesce-detector.ts`. Pinned by `held completions` in `lib/src/lib/alert-engagement.test.ts`.
 
@@ -244,13 +244,13 @@ Rules:
 
 - A command start creates `commandExitWatch` for the current foreground command. **Mark it seen** when the Session is engaged at its start, becomes engaged, or is acknowledged while it runs.
 - **Armed is derived, never stored**: a seen command running while the Session is not engaged — public `COMMAND_EXIT_ARMED`, published on every engagement edge.
-- When the same command finishes, or the PTY exits before a finish event, **ring only when** it was seen, ran at least `cfg.alert.commandExitMinRuntime` (15 s), and the Session is not engaged; engaged, the exit is held (Completion events). **Never tie that minimum to the inactivity timeout** (rationale).
+- When the same command finishes, or the PTY exits before a finish event, **ring only when** it was seen and the Session is not engaged; engaged, the exit is held (Completion events). **Never gate the ring on how long the command ran** (rationale).
 - The `exit` source carries the `COMMAND_EXIT` notification (title "Command finished", body = summarized command + exit code).
-- A quick finish, a different command start, or Session destruction clears the watch without ringing.
+- A different command start or Session destruction clears the watch without ringing.
 
 Command starts and finishes also drive the WATCHING rule above, so both sources share one `commandExitWatch` record and one `resolveCommandStart` helper with the terminal-state reducer.
 
-Source of truth: `dispatchCompletion` / `setViewer` / `formatCommandExitBody` in `lib/src/lib/alert-manager.ts`; `resolveCommandStart` in `lib/src/lib/terminal-state.ts`.
+Source of truth: `dispatchCompletion` / `setViewer` / `formatCommandExitBody` in `lib/src/lib/alert-manager.ts`; `resolveCommandStart` in `lib/src/lib/terminal-state.ts`. Pinned by `a short seen command` in `lib/src/lib/alert-manager.test.ts`.
 
 ## Clearing And TODO
 

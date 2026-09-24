@@ -110,7 +110,7 @@
 
 ## Command-exit Track
 
-**Why the minimum runtime is not the inactivity timeout.** The two answer different questions — how long "looking at this pane" lasts, and how short a run the user probably watched. Shared, a user who shortened the timeout to three seconds was rung for every four-second `git status` they turned away from, and one who lengthened it lost exit alerts for every build shorter than the new window (2026-09-23).
+**Why there is no minimum runtime.** The exit ring required 15 s of runtime, a stand-in for "the user probably watched anything quicker" from before engagement existed. Engagement answers that directly: a finish while engaged is held, and a finish after the user moved away was not watched. The stand-in only lost alarms — `sleep 15` and then selecting another pane rang, `sleep 10` and the same did not (product decision, 2026-09-24). The seen gate stays, so a command an agent or `dor send` runs in a pane the user never looked at stays silent.
 
 ## Clearing And TODO
 
