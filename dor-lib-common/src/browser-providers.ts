@@ -203,6 +203,37 @@ export function renderModeFor(provider: BrowserAutomationProvider, presentation:
   return BROWSER_PROVIDERS[provider].modes[presentation];
 }
 
+/** Env var that moves agent-browser's socket directory, where its daemon's
+ * `<session>.pid` and `<session>.stream` live; the host reads its own, and
+ * `dor ab` reads the stream port itself under one the host may not share. */
+export const AGENT_BROWSER_SOCKET_DIR_ENV = 'AGENT_BROWSER_SOCKET_DIR';
+
+/** agent-browser's argv for `stream status --json`, whose output
+ * {@link parseStreamPort} reads. */
+export function streamStatusArgs(session: string): string[] {
+  return [...BROWSER_PROVIDERS['agent-browser'].sessionArgs(session), 'stream', 'status', '--json'];
+}
+
+/**
+ * The stream WebSocket port `stream status --json` printed. The CLI wraps
+ * payloads as either `{ port }` or `{ data: { port } }`; tolerate both, and
+ * return undefined for anything malformed or not a TCP port.
+ */
+export function parseStreamPort(stdout: string): number | undefined {
+  try {
+    const parsed = JSON.parse(stdout) as { port?: unknown; data?: { port?: unknown } };
+    const port = parsed.data?.port ?? parsed.port;
+    return isTcpPort(port) ? port : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether `value` is a TCP port number. */
+export function isTcpPort(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 && value <= 65535;
+}
+
 /** Whether `value` names a provider. */
 export function isBrowserProvider(value: unknown): value is BrowserAutomationProvider {
   return typeof value === 'string' && Object.prototype.hasOwnProperty.call(BROWSER_PROVIDERS, value);

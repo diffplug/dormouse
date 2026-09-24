@@ -461,8 +461,8 @@ export class TauriAdapter implements PlatformAdapter {
     }
   }
 
-  // --- browser automation (docs/specs/dor-browser.md → "Agent-Browser Host
-  // Capabilities"). One Rust command forwards every request to the sidecar's
+  // --- browser automation (docs/specs/dor-browser.md → "Browser Host").
+  // One Rust command forwards every request to the sidecar's
   // shared host; a screenshot takes `browser_screenshot`, which answers raw
   // bytes (tauri::ipc::Response) rather than JSON. ---
 

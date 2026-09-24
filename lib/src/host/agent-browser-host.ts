@@ -1,7 +1,7 @@
 /**
  * The agent-browser provider beneath the shared browser host
- * (`browser-host.ts`; docs/specs/dor-browser.md → "Agent-Browser Host
- * Capabilities"): imported by the VS Code extension host, bundled for the
+ * (`browser-host.ts`; docs/specs/dor-browser.md → "Browser Host"):
+ * imported by the VS Code extension host, bundled for the
  * standalone sidecar. What is genuinely agent-browser's lives here — its
  * per-session daemon and the state files it leaves beside its socket, the pid
  * kill a headed/headless relaunch needs, and each operation's one fixed argv.
@@ -24,8 +24,11 @@ import { promises as fs } from 'fs';
 import {
   BROWSER_PROVIDERS,
   isDirectory,
+  parseStreamPort,
   spawnAndCapture,
+  streamStatusArgs,
   AGENT_BROWSER_BIN_ENV,
+  AGENT_BROWSER_SOCKET_DIR_ENV,
   DEFAULT_AGENT_BROWSER_BIN,
 } from 'dor-lib-common';
 import { isAllowedAgentBrowserBinary } from '../lib/agent-browser-binary';
@@ -66,26 +69,6 @@ function parseCdpUrl(stdout: string): string | null {
     // Plain text is the common CLI output.
   }
   return trimmed.match(/ws:\/\/\S+/)?.[0] ?? null;
-}
-
-/** argv for `stream status --json`, whose output `parseStreamPort` reads. */
-function streamStatusArgs(session: string): string[] {
-  return [...SESSION_ARGS(session), 'stream', 'status', '--json'];
-}
-
-/**
- * The stream WebSocket port `stream status --json` printed. The CLI wraps
- * payloads as either `{ port }` or `{ data: { port } }`; tolerate both, and
- * return undefined for anything malformed or non-finite.
- */
-export function parseStreamPort(stdout: string): number | undefined {
-  try {
-    const parsed = JSON.parse(stdout) as { port?: unknown; data?: { port?: unknown } };
-    const port = parsed.data?.port ?? parsed.port;
-    return typeof port === 'number' && Number.isFinite(port) ? port : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 /** One CLI run's outcome. */
@@ -193,7 +176,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
   // fresh daemon in the mode we ask for. Best-effort and cross-platform
   // (process.kill works on win/mac/linux).
   function agentBrowserStateDir(): string {
-    return process.env.AGENT_BROWSER_SOCKET_DIR || path.join(os.homedir(), '.agent-browser');
+    return process.env[AGENT_BROWSER_SOCKET_DIR_ENV] || path.join(os.homedir(), '.agent-browser');
   }
 
   // The daemon's state files beside its socket: `<session>.pid` and

@@ -588,9 +588,11 @@ is each provider's descriptor:
   that may bind. `--session` and an informational command ask nothing. Outside
   Dormouse a key names its unscoped session itself; a `--surface` fails.
 - **After a command that may bind succeeds, `surface.browser { provider, key?,
-  session, cwd, binaryPath }` opens or reuses its Surface**; the host reports the
-  stream port. A failure there adds a stderr warning without changing the
-  command's success.
+  session, cwd, binaryPath, wsPort? }` opens or reuses its Surface**; the host
+  reports the stream port, except one `dor ab` read itself under the caller's
+  own `AGENT_BROWSER_SOCKET_DIR` (`docs/specs/dor-browser.md` → agent-browser).
+  A failure there adds a stderr warning without changing the command's
+  success.
 - **The host must keep `surface.resolveAgentBrowser` and `surface.agentBrowser`
   as agent-browser aliases of the pair for one release**, in their old answer
   shapes, for a terminal still running the `dor` it was staged with before an

@@ -288,8 +288,8 @@ export interface PlatformAdapter {
   // VS Code-only escape hatch for mirrored workbench shortcuts from webviews.
   runWorkbenchCommand?(command: VSCodeWorkbenchCommand): void;
 
-  // Browser automation (docs/specs/dor-browser.md → "Agent-Browser Host
-  // Capabilities"): the providers this host can drive, and the one typed
+  // Browser automation (docs/specs/dor-browser.md → "Browser Host"): the
+  // providers this host can drive, and the one typed
   // request every browser operation of theirs rides. Both present or both
   // absent; a host without them (the web demo) offers no automated renderer.
   browserProviders?: readonly BrowserAutomationProvider[];

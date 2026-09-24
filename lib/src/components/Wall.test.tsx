@@ -555,6 +555,32 @@ describe('Wall on the Lath engine', () => {
     expect(requests('attach')[0]).toEqual({ provider: 'agent-browser', binding: { session: 'dormouse.1.gate' }, op: 'attach' });
   });
 
+  it('streams from a port `dor ab` read itself, asking the host nothing; a Playwright port is the host\'s to report', async () => {
+    // Under a socket directory the host does not share, the host cannot find
+    // the session (docs/specs/dor-browser.md → "agent-browser").
+    const { browser, requests } = hostBrowsers({ attach: async () => ({ ok: false, error: 'not running' }) });
+    await act(async () => { root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />); });
+    await flush();
+    const bind = async (params: Record<string, unknown>) => {
+      let response: { ok: boolean; error?: string; result?: { surfaceId: string } } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: { method: SURFACE_CONTROL_METHODS.browser, params, respond: (r: typeof response) => { response = r; } },
+        }));
+      });
+      await flush();
+      return response;
+    };
+
+    const bound = await bind({ provider: 'agent-browser', session: 'mine', wsPort: 61218 });
+    expect(bound?.ok).toBe(true);
+    expect(requests('attach')).toEqual([]);
+    expect(browser).toHaveBeenCalledWith(expect.objectContaining({ op: 'streamUrl', port: 61218 }));
+
+    expect((await bind({ provider: 'playwright', session: 'dormouse.pw.x', cwd: '/project', wsPort: 61219 }))?.ok).toBe(false);
+    expect(requests('attach')).toEqual([{ provider: 'playwright', binding: { session: 'dormouse.pw.x', cwd: '/project' }, op: 'attach' }]);
+  });
+
   // The control socket is a wire protocol, not the CLI: `dor iframe` validates
   // its argument, but anything holding the control token reaches this method
   // directly — and on a host with no iframe proxy the value becomes a raw

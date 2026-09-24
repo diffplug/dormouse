@@ -4,7 +4,7 @@ import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BrowserOp, BrowserRequestBinding } from '../lib/platform/browser-automation';
-import { createAgentBrowserProvider, parseStreamPort } from './agent-browser-host';
+import { createAgentBrowserProvider } from './agent-browser-host';
 import { createBrowserHost } from './browser-host';
 
 type SpawnResult = { stdout?: string; stderr?: string; code?: number };
@@ -858,12 +858,3 @@ describe('agent-browser host edit ops', () => {
   });
 });
 
-describe('parseStreamPort', () => {
-  it('reads a top-level or nested port, and nothing from malformed or portless output', () => {
-    expect(parseStreamPort(JSON.stringify({ port: 61218 }))).toBe(61218);
-    expect(parseStreamPort(JSON.stringify({ data: { port: 5173 } }))).toBe(5173);
-    for (const stdout of ['not json', JSON.stringify({ data: {} }), JSON.stringify({ port: 'nope' })]) {
-      expect(parseStreamPort(stdout)).toBeUndefined();
-    }
-  });
-});

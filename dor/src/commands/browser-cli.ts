@@ -9,6 +9,7 @@ import {
   BROWSER_PROVIDERS,
   browserBinaryIsMissing,
   isDirectory,
+  parseStreamPort,
   resolveBinaryPath,
   sessionForKey,
   spawnAndCapture,
@@ -18,6 +19,7 @@ import type {
   BrowserBinding,
   BrowserExec,
   BrowserExecResult,
+  CliEnv,
   CliOptions,
   CliResult,
   ControlClient,
@@ -199,6 +201,11 @@ export interface BrowserCliDescriptor {
   missingBinaryMessage(binary: string): string;
   /** A test's stand-in for the spawn. */
   exec(options: CliOptions): BrowserExec | undefined;
+  /** The argv that reads the session's stream port under the caller's own
+   *  environment, when that environment keeps the session where the host
+   *  does not look (agent-browser's socket directory); the port it prints is
+   *  handed over with the bind, since the host could not find it. */
+  callerStreamStatus?(env: CliEnv, session: string): string[] | undefined;
 }
 
 /**
@@ -274,16 +281,16 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
   const stub = d.exec(options);
   if (stub === undefined && browserBinaryIsMissing(binary, env, binaryPath)) return fail(d.missingBinaryMessage(binary));
   const exec = stub ?? execBrowserProcess;
+  // Spawn the resolved path, never the bare name: cross-spawn resolves a bare
+  // name through `which`, which checks `process.cwd()` *before* PATH on
+  // Windows, so an `agent-browser.cmd` sitting in a cloned repository would
+  // win the race against the real install (docs/specs/dor-cli.md ->
+  // "Spawning External Binaries"). `?? binary` is reached only by a stub.
+  const run = (argv: string[]) => (cwd === undefined ? exec(binaryPath ?? binary, argv) : exec(binaryPath ?? binary, argv, cwd));
 
   let result: BrowserExecResult;
   try {
-    // Spawn the resolved path, never the bare name: cross-spawn resolves a bare
-    // name through `which`, which checks `process.cwd()` *before* PATH on
-    // Windows, so an `agent-browser.cmd` sitting in a cloned repository would
-    // win the race against the real install (docs/specs/dor-cli.md ->
-    // "Spawning External Binaries"). `?? binary` is reached only by a stub.
-    const forwarded = [...(binding.session === undefined ? [] : spec.sessionArgs(binding.session)), ...rest];
-    result = await (cwd === undefined ? exec(binaryPath ?? binary, forwarded) : exec(binaryPath ?? binary, forwarded, cwd));
+    result = await run([...(binding.session === undefined ? [] : spec.sessionArgs(binding.session)), ...rest]);
   } catch (error) {
     return isMissingBinaryError(error) ? fail(d.missingBinaryMessage(binary)) : fail(errorMessage(error));
   }
@@ -293,12 +300,15 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
   // passthrough rather than nagging about the missing surface.
   if (result.exitCode === 0 && mayBind && binding.session !== undefined && !(client instanceof Error)) {
     try {
+      const statusArgs = d.callerStreamStatus?.(env, binding.session);
+      const wsPort = statusArgs === undefined ? undefined : parseStreamPort((await run(statusArgs)).stdout);
       await client.browserSurface({
         provider: d.provider,
         key: flags.key,
         session: binding.session,
         cwd: cwd ?? callerCwd,
         ...(binaryPath ? { binaryPath } : {}),
+        ...(wsPort === undefined ? {} : { wsPort }),
         ...workspaceParam(flags.workspace),
       });
     } catch (error) {

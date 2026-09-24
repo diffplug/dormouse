@@ -66,9 +66,10 @@ Invariants on the flat persisted `BrowserPanelParams`:
   `launchFallback`, `binaryPath`, `cwd`, `nativeIdentity`, `syncEngaged`,
   `key`), never nested but for a `launchFallback` restore's params. Pop-out is not a param — it derives from `renderMode`
   once, at controller construction.
-- **Never carry a stream port in params**: the port `dor ab` reads, or the one
-  the Playwright host's `attach` answers for `dor pw`, goes straight to the
-  Surface's controller (rationale).
+- **Never carry a stream port in params**: the port the host's `attach`
+  answers for a `dor` bind, or one `dor ab` read itself
+  ([agent-browser](#agent-browser)), goes straight to the Surface's controller
+  (rationale).
 - **`contextPortKey` is declared and persisted like any other param.** Only a
   Surface the pane context menu opened for a port carries it, and reuse looks
   one up by it ([Pane Context Menu Connect](#pane-context-menu-connect)).
@@ -180,7 +181,7 @@ Source of truth: `lib/src/components/wall/use-dev-server-ports.ts`,
 
 **Must scan once per context opening**, using the shared per-port URL selection in `docs/specs/dor-cli.md` → Browser Open Target Resolution. Zero/one port uses an inline row; multiple ports use a selector. Failed scans are distinct from no listeners.
 
-**Must offer System browser, Iframe, and each automation provider’s screencast and popout for the selected port**, disabling unavailable host capabilities with a reason. Opening a browser from context always preserves the source terminal, including an untouched one.
+**Must offer System browser, Iframe, and each automation provider’s screencast and popout for the selected port**, each target named by its provider's label (`agent-browser`, `agent-browser popout`, `Playwright`, `Playwright popout`) and disabled with a reason when the host does not offer it (`agent-browser unavailable on this host`). Opening a browser from context always preserves the source terminal, including an untouched one.
 
 **Must reuse targets per source, port, and provider**: each provider’s screencast and popout share a browser session and switch display modes. **A reuse is one intent, `setRenderMode(mode, { url })`, reaching the Surface's controller by id** (`requestBrowserRenderMode`), so a mode switch relaunches at the port's page rather than racing a navigation into it, even in an unmounted Door. Reattach minimized targets and recreate closed ones. System browser follows the OS opener's behavior.
 
@@ -488,13 +489,16 @@ list tabs, act, evaluate, screenshot, stream URL):
   newer launch owns the session (rationale).
 - **Once `open` returns, only a still-current launch closes stray
   `about:blank` tabs, last first, and only while a real page is open**, so it
-  never closes the sole tab (rationale).
+  never closes the sole tab (rationale). One policy for every launch of either
+  provider, fresh or relaunched.
 - **A headed launch is tracked for shutdown before it starts**, so a window
   whose page never loads is still closed; a headless relaunch or a close drops
   it. **Shutdown supersedes pending launches and sweeps, then closes every
   tracked headed browser**, so quitting orphans no window.
 
-Pinned by `lib/src/host/browser-host.test.ts`.
+Pinned by `lib/src/host/browser-host.test.ts`, and against the controller by
+`a closed Surface and the next launch into its session` in
+`lib/src/components/wall/agent-browser-surface-controller.test.ts`.
 
 **Host-side validation is the security boundary: `parseBrowserRequest` rebuilds
 every request field by field before a provider sees it** — a known provider and
@@ -541,15 +545,25 @@ relaunch changes the mode.
   every other call runs in the host's.
 - **Every spawn passes the `binaryPath` gate in `runWithBinaryFallback`**, the
   host's `DORMOUSE_AGENT_BROWSER_BIN` being the exact-match override.
+- **Under a caller's own `AGENT_BROWSER_SOCKET_DIR`, `dor ab` must read the
+  stream port itself** (`stream status --json`) and hand it over with the
+  bind, which streams from it without asking the host: the host reads state
+  files in its own socket directory. **Never carry a socket directory to the
+  host** — it kills the pid it reads there. **Host-side operations for a
+  session in a socket directory the host does not share are unsupported**:
+  navigation, tabs, screenshots and closes run the CLI under the host's
+  environment.
 - **VS Code must reach the stream through a loopback relay** — the agent-browser
   stream server rejects `vscode-webview://` origins. The relay grants one
   single-use, short-TTL token bound to one stream port and strips the Origin
   header; standalone connects directly.
 
 Source of truth: `createAgentBrowserProvider` and `runWithBinaryFallback` in
-`lib/src/host/agent-browser-host.ts`, `isAllowedAgentBrowserBinary` in
-`dor-lib-common/src/browser-providers.ts`, `vscode-ext/src/agent-browser-host.ts`.
-Pinned by `lib/src/host/agent-browser-host.test.ts`.
+`lib/src/host/agent-browser-host.ts`, `isAllowedAgentBrowserBinary` and
+`streamStatusArgs` in `dor-lib-common/src/browser-providers.ts`,
+`callerStreamStatus` in `dor/src/commands/agent-browser.ts`,
+`vscode-ext/src/agent-browser-host.ts`. Pinned by
+`lib/src/host/agent-browser-host.test.ts`.
 
 ### Playwright
 

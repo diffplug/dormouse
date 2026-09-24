@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BROWSER_PROVIDER_IDS, BROWSER_PROVIDERS, parseRenderMode, renderModeFor, sessionForKey } from '../dist/browser-providers.js';
+import { BROWSER_PROVIDER_IDS, BROWSER_PROVIDERS, parseRenderMode, parseStreamPort, renderModeFor, sessionForKey } from '../dist/browser-providers.js';
 
 test('sessionForKey namespaces a key under the workspace', () => {
   assert.equal(sessionForKey('default'), 'dormouse.1.default');
@@ -47,4 +47,12 @@ test('each provider refuses a session name its CLI would read as an option or a 
   // agent-browser takes a user's raw name; Playwright only the names Dormouse mints.
   assert.equal(BROWSER_PROVIDERS['agent-browser'].isSessionName('my session'), true);
   assert.equal(BROWSER_PROVIDERS.playwright.isSessionName('my session'), false);
+});
+
+test('parseStreamPort reads a top-level or nested port, and nothing from malformed, portless or out-of-range output', () => {
+  assert.equal(parseStreamPort(JSON.stringify({ port: 61218 })), 61218);
+  assert.equal(parseStreamPort(JSON.stringify({ data: { port: 5173 } })), 5173);
+  for (const stdout of ['not json', JSON.stringify({ data: {} }), JSON.stringify({ port: 'nope' }), JSON.stringify({ port: 0 }), JSON.stringify({ port: 70000 }), JSON.stringify({ port: 80.5 })]) {
+    assert.equal(parseStreamPort(stdout), undefined, stdout);
+  }
 });

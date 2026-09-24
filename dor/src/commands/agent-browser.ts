@@ -3,7 +3,14 @@
  * stricli so forwarded arguments are never parsed as dor flags. */
 
 import { buildCommand } from '@stricli/core';
-import { AGENT_BROWSER_BIN_ENV, BROWSER_PROVIDERS, DEFAULT_AGENT_BROWSER_BIN, type BrowserAutomationProvider } from 'dor-lib-common';
+import {
+  AGENT_BROWSER_BIN_ENV,
+  AGENT_BROWSER_SOCKET_DIR_ENV,
+  BROWSER_PROVIDERS,
+  DEFAULT_AGENT_BROWSER_BIN,
+  streamStatusArgs,
+  type BrowserAutomationProvider,
+} from 'dor-lib-common';
 import { runBrowserCli, type BrowserCliDescriptor } from './browser-cli.js';
 import type { CliOptions, CliResult, Command, DorCommandContext } from './types.js';
 import { stringParser, workspaceFlag } from './shared.js';
@@ -124,6 +131,10 @@ const AGENT_BROWSER: BrowserCliDescriptor = {
   projectScoped: false,
   missingBinaryMessage,
   exec: (options) => options.execAgentBrowser,
+  // The host reads a session's stream port from its own socket directory, so
+  // a caller that moved its own reads the port itself (docs/specs/dor-browser.md
+  // → "agent-browser").
+  callerStreamStatus: (env, session) => (env[AGENT_BROWSER_SOCKET_DIR_ENV] ? streamStatusArgs(session) : undefined),
 };
 
 export function runAgentBrowserCli(args: string[], options: CliOptions): Promise<CliResult> {

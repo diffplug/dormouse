@@ -115,8 +115,8 @@ export function offeredRenderModes(isTool: boolean, current: BrowserAutomationPr
 
 /**
  * One provider's browser, as the webview drives it: typed operations on the
- * host's one `browser` request (docs/specs/dor-browser.md → "Agent-Browser Host
- * Capabilities"). A request that cannot reach the host answers `{ ok: false }`
+ * host's one `browser` request (docs/specs/dor-browser.md → "Browser Host").
+ * A request that cannot reach the host answers `{ ok: false }`
  * rather than rejecting.
  */
 export interface BrowserHandle {

@@ -44,7 +44,8 @@ import {
 } from './tool-takeover';
 import { attachSurfacePorts } from './surface-ports';
 import { browserSurfaceUrl, hostPathDisplay, iframeRefusal } from './browser-url';
-import { isBrowserProvider, parseRenderMode, renderModeFor } from 'dor-lib-common/browser-providers';
+import { isBrowserProvider, isTcpPort, parseRenderMode, renderModeFor } from 'dor-lib-common/browser-providers';
+import type { BrowserResult } from '../../lib/platform/browser-automation';
 import { BROWSER_PROVIDER_GUI, browserHandle, headedRenderMode, providerUnavailable, rememberLaunchBinaryPath } from './browser-automation';
 import { BrowserBindingReservations } from './browser-binding-reservations';
 import {
@@ -1639,8 +1640,6 @@ export function useDorControl({
       return;
     }
 
-    // `surface.agentBrowser` carries a stream port the older `dor ab` read
-    // itself; the host's own answer is the one used.
     if (detail.method === SURFACE_CONTROL_METHODS.browser || detail.method === SURFACE_CONTROL_METHODS.agentBrowser) {
       const provider = requestedProvider(detail.method === SURFACE_CONTROL_METHODS.agentBrowser);
       if (!provider) return;
@@ -1676,8 +1675,13 @@ export function useDorControl({
       }
       // The host reports where the session the command just drove streams,
       // its headedness when it can tell, and its native identity. No page
-      // named: a session the command left closed is not relaunched.
-      const status = await browser.attach();
+      // named: a session the command left closed is not relaunched. A port
+      // `dor ab` read itself — under a socket directory the host may not
+      // share, and always from an older `dor ab` on the legacy method — is
+      // streamed from as it is, since the host could not find the session
+      // there (docs/specs/dor-browser.md → "agent-browser").
+      const callerPort = provider === 'agent-browser' && isTcpPort(params.wsPort) ? params.wsPort : undefined;
+      const status: BrowserResult = callerPort === undefined ? await browser.attach() : { ok: true, wsPort: callerPort };
       if (!status.ok) {
         detail.respond({ ok: false, error: status.error ?? `${BROWSER_PROVIDER_GUI[provider].label} connection failed` });
         return;

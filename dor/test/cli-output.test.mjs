@@ -1108,6 +1108,26 @@ test('agent-browser resolves --key to a namespaced session and opens a surface',
   ]);
 });
 
+test('agent-browser under a socket directory of its own reads the stream port itself and hands it over', async () => {
+  const ab = fakeAgentBrowser();
+  ab.exec = async (binary, args) => {
+    ab.calls.push([binary, ...args]);
+    return { exitCode: 0, stdout: args.includes('stream') ? JSON.stringify({ data: { port: 61218 } }) : '✓ ok\n', stderr: '' };
+  };
+  const client = fixtureClient();
+  const env = { AGENT_BROWSER_SOCKET_DIR: '/tmp/elsewhere' };
+  await runCli(['ab', '--session', 'mine', 'open', 'http://localhost:6006'], { client, env, execAgentBrowser: ab.exec });
+  // The host looks for the session in its own socket directory, so it could
+  // not find this one to report a port.
+  assert.deepEqual(ab.calls, [
+    ['agent-browser', '--session', 'mine', 'open', 'http://localhost:6006'],
+    ['agent-browser', '--session', 'mine', 'stream', 'status', '--json'],
+  ]);
+  assert.deepEqual(client.requests, [
+    { method: 'browserSurface', request: { provider: 'agent-browser', key: undefined, session: 'mine', cwd: process.cwd(), wsPort: 61218 } },
+  ]);
+});
+
 test('agent-browser --key in another Workspace drives that Workspace own session', async () => {
   const ab = fakeAgentBrowser();
   const client = fixtureClient();
