@@ -60,7 +60,21 @@ The label is the `DerivedHeader` from `deriveHeader(...)`; `docs/specs/terminal-
 
 **Must open the terminal context from terminal header, body, and command-mode `a` and `>` entry points.** Browser-only Surfaces and Doors have no context. Tool context displays its primary terminal; `docs/specs/terminal-context.md` → Tool context owns that composition. Application mouse ownership follows `docs/specs/mouse-and-clipboard.md` → Terminal context input.
 
-**Must float the context inside its source Pane with a one-rem inset on every side**, overlapping the header, with a theme-derived edge and raised shadow. Render it in the Lath leaf's overlay slot, outside the body's clipping box, so it follows the leaf's layout without remounting the helper. Keep one context per Wall. Outside pointer press and explicit close dismiss it. No separate context heading or clipboard toolbar is shown.
+**Must render one context per Wall in a stable Wall-level overlay**, with a theme-derived edge and raised shadow. Anchor it to the invoking source and follow its painted bounds without resizing panes or remounting the helper. Outside pointer press and explicit close dismiss it.
+
+**Must choose placement on opening and retain its side while usable.** Never reposition in response to terminal output. Minimized panes do not count; zoom uses single-pane placement.
+
+| Layout | Placement |
+|---|---|
+| Multiple visible panes | Beside the source with 16px overlap; match its size where possible. Above helpers overlap 4px and extend 32px farther upward over peer headers. Choose the largest usable candidate, ties right / left / bottom / top. Align the other axis with the source, shifting only to stay inside the Wall. |
+| No usable adjacent candidate; single or zoomed pane | Source's top or bottom half, inset 16px on every side, opposite its visible terminal cursor sampled on opening; unknown, offscreen, or midpoint cursor defaults to top. |
+| Small source or Wall | Expand the half-pane fallback to the minimum usable size, clamped inside the Wall's 16px inset; shrink below the minimum when necessary to preserve the inset. |
+
+Popups share the zoomed pane’s app-background halo.
+
+**Must group available side buttons beside Close at the context header’s right edge**, with destination tooltips, accessible labels, and selected state. Remember manual choices per source for the mounted Wall's lifetime; clear on source removal. Preserve terminal focus on pointer repositioning. An unavailable choice falls back automatically; no preference is persisted to disk.
+
+**Must always show source title, directory actions, ports, alerts, and helper actions**, with title explanation available through Explain. Wrap header and detail actions within the panel; scroll bounded details and warnings while reserving 64px for terminal content.
 
 **Must reveal the context from the opening pointer position, clamped to its bounds, over 320ms.** Command-mode `a` and `>` use the header's bottom-left; openings without a position use the context's top-left. Keep final layout dimensions throughout the reveal. Start helper creation, settings reads, and port scanning immediately on mount; fade mounted content, including detail dialogs, in over 140ms after 160ms. Reduced motion or disabled layout animation skips both animations and the delay.
 
@@ -86,7 +100,7 @@ The label is the `DerivedHeader` from `deriveHeader(...)`; `docs/specs/terminal-
 
 **Must promote by adopting the helper Session into a new split beside the source**, preserving identity and focusing it. Helper lifetime and source closure are owned by `docs/specs/terminal-context.md`.
 
-Source of truth: `TerminalContext` in `lib/src/components/wall/TerminalContext.tsx`; `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`; `TerminalLeafOverlay` in `lib/src/components/wall/LathHost.tsx`; `TerminalPanel` in `lib/src/components/wall/TerminalPanel.tsx`; `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHeader.tsx`; `useWallKeyboard` in `lib/src/components/wall/use-wall-keyboard.ts`; `.terminal-context-enter` / `.terminal-context-content` in `lib/src/theme.css`. Tests: `lib/src/components/wall/TerminalContext.test.tsx`, `lib/src/components/Wall.test.tsx`.
+Source of truth: `TerminalContext` in `lib/src/components/wall/TerminalContext.tsx`; `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`; `TerminalContextOverlay` in `lib/src/components/wall/TerminalContextOverlay.tsx`; `placeTerminalContext` in `lib/src/components/wall/terminal-context-placement.ts`; `TerminalPanel` in `lib/src/components/wall/TerminalPanel.tsx`; `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHeader.tsx`; `useWallKeyboard` in `lib/src/components/wall/use-wall-keyboard.ts`; `.terminal-context-enter` / `.terminal-context-content` in `lib/src/theme.css`. Tests: `lib/src/components/wall/TerminalContext.test.tsx`, `lib/src/components/wall/TerminalContextOverlay.test.tsx`, `lib/src/components/wall/terminal-context-placement.test.ts`, `lib/src/components/Wall.test.tsx`.
 
 ### Pane body
 
@@ -326,6 +340,8 @@ Source of truth: `requestKill` (every kill gesture: Door reattach, untouched fas
 
 ## Selection overlay
 
+**Must outline the union of the invoking source Pane and its open helper**, following their outer contour without an internal seam or enclosing unused neighboring space. Track helper repositioning and resize without replacing its terminal; restore the source-only ring on close. The context container has no native focus outline; its controls retain their keyboard focus indicators.
+
 A fixed-positioned element on top of the Lath host, covering the active element's area inflated by `SELECTION_RING_INFLATE_PX` (4px) for panes; doors are not inflated. **The inflate is derived in `lib/src/components/design.tsx` so both ring strokes center on the gutter's midline** (rationale).
 
 - **Exactly one pane or door is active at a time**, drawn by one SVG renderer (`SelectionRing`, `variant: 'ants' | 'solid'`).
@@ -337,6 +353,8 @@ A fixed-positioned element on top of the Lath host, covering the active element'
 - `z-index: SELECTION_RING_Z_INDEX` (50), `pointer-events: none`. Under `WorkspaceWindow` it renders into `document.body`, outside the Workspace's transform and stacking context.
 - **Every modal must render into `document.body` too, at a `MODAL_LAYERS` value above the ring's** (`ModalOverlay`), or the ring crosses it — by value, never insertion order. Pinned by `lib/src/components/ModalOverlay.test.tsx`.
 
+Source of truth: `rectUnionOutline` in `lib/src/lib/rect-union-outline.ts` and `WorkspaceSelectionOverlay` in `lib/src/components/wall/WorkspaceSelectionOverlay.tsx`.
+
 ### Ring travel
 
 The ring's rect (and its `{tl,tr,br,bl,inset}` shape) is driven **per-frame by a JS tween, never a CSS transition**; DESIGN.md's ban on animating layout properties does not reach it (rationale). Motion is `FOCUS_MOTION_MS` (220ms — half `LATH_MOTION_MS`) on the house curve `cubic-bezier(0.22, 1, 0.36, 1)`.
@@ -344,6 +362,7 @@ The ring's rect (and its `{tl,tr,br,bl,inset}` shape) is driven **per-frame by a
 Per-frame writes are **imperative**: `SelectionRing` gives the overlay refs to its stable shell; the rAF loop writes rect, path `d`, marching dash, and smear geometry, then **re-applies after structural renders, pre-paint**, so fresh nodes do not flash. **Never reintroduce per-frame React state** — reconciling this subtree competes with travel for the frame budget (rationale).
 
 - **Identity change → tween.** A measurement whose identity (`${selectedType}:${selectedId}`) differs from the one on screen glides from the current interpolated position to the new target, **clock restarted**, so arrow-key spam stays responsive.
+- **Helper side is identity.** An open helper appends its side, so opening, closing and switching sides tween the union’s two rectangles from the painted frame, including interrupted motion; same-side motion follows the same-identity rules below.
 - **Same identity → snap 1:1.** A same-identity re-measure with no tween in flight (sash drag, window resize, a settled leaf's store commit) writes the new rect directly, tracking the geometry exactly instead of easing behind it.
 - **In-flight retarget.** A same-identity re-measure *during* a tween retargets the destination **without resetting the clock**, so the ring converges on a moving target (select-a-neighbor-during-kill) and still lands on the original completion instant.
 - **Snap gate.** `motionIsInstant()` — `!cfg.layout.animate` (visual snapshots) or `prefersReducedMotion()` — settles the ring instantly; it is the same predicate the Lath animator's duration uses, so ring and leaves agree. **A ring appearing with nothing on screen also snaps**: there is no `from` to glide from.

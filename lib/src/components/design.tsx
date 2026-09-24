@@ -14,6 +14,9 @@ import { OVERLAY_VIEWPORT_MARGIN_PX } from '../lib/ui-geometry';
  * elevated zoom inset) must use this constant so the chrome stays proportional. */
 export const PANE_HEADER_HEIGHT_PX = 30;
 
+/** Soft app-ground halo separates zoomed panes and context popups from content below. */
+export const ELEVATED_PANE_SHADOW = '0 0 5px 5px var(--color-app-bg)';
+
 // Pane headers/doors own the top corners; terminal bodies own the bottom.
 // All terminal-radius constants derive from this single source so the CSS
 // class, the SVG-friendly px value, and the inline-style rem string can't
