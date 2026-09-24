@@ -212,9 +212,9 @@ Resolution controls apply to both screencast providers. **Fixed** issues
   media query `change`.
 - **Each choice of Resize with pane is a new engagement**, named in every size
   sent, which reclaims the viewport even at the size last written.
-- **The host writes one size at a time per browser**, through the provider's
+- **The host serializes all viewport and device writes per browser**, through the provider's
   viewport primitive, never while a launch or close settles it; a write in
-  flight keeps only the latest size, so a drag coalesces.
+  flight keeps only the latest pane size, so a drag coalesces.
 - **The host judges a write only by a viewport taken after it landed**, as the
   provider vouches for it: agent-browser's changed frames, Playwright's poll
   measurement tagged with when it began; never `status`, Playwright's

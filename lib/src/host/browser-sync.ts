@@ -184,13 +184,12 @@ export function createViewportSync<B extends { id: string }>(deps: ViewportSyncD
       };
     },
 
-    /** A Fixed viewport or device for browser `id`: it ends the sync, and
-     *  runs once the write in flight has landed. */
-    fixed(id: string): Promise<void> | undefined {
+    /** A Fixed viewport or device ends this engagement. The host queues its
+     *  write alongside sync writes. */
+    fixed(id: string): void {
       const s = syncs.get(id);
-      if (!s) return undefined;
+      if (!s) return;
       release(s);
-      return s.writing;
     },
 
     /** A launch or close replaces or ends browser `id`. */

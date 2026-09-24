@@ -357,10 +357,26 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     }
   }
 
-  // Sync-to-pane: each browser's pane size, written one write at a time, never
-  // while a launch or close settles it.
+  // Fixed and sync writes share a queue: choosing sync while a Fixed write is
+  // running must leave the newer pane size last. Recheck lifecycle at execution,
+  // since a queued write belongs to the browser that existed at arrival.
+  const viewportWrites = new Map<string, Promise<BrowserResult>>();
+  function writeViewport({ p, b, id }: Bound, act: Extract<BrowserAct, { op: 'viewport' | 'device' }>): Promise<BrowserResult> {
+    const generation = generations.get(id);
+    const writing = (viewportWrites.get(id) ?? Promise.resolve()).catch(() => {}).then(() => {
+      if (closed) throw new Error('the browser host is shutting down');
+      if (settling.has(id) || generations.get(id) !== generation) throw new Error('the browser is being relaunched or closed');
+      return p.act(b, act);
+    });
+    viewportWrites.set(id, writing);
+    const forget = () => { if (viewportWrites.get(id) === writing) viewportWrites.delete(id); };
+    void writing.then(forget, forget);
+    return writing;
+  }
+
+  // Sync-to-pane coalesces pane sizes before they enter the viewport queue.
   const sync = createViewportSync<Bound>({
-    write: ({ p, b }, size) => p.act(b, { op: 'viewport', ...size }),
+    write: (bound, size) => writeViewport(bound, { op: 'viewport', ...size }),
     report: (id, message) => { for (const view of views.get(id) ?? []) view.state(message); },
     blocked: (id) => closed || settling.has(id),
     log,
@@ -626,13 +642,8 @@ export function createBrowserHost(deps: BrowserHostDeps) {
           return await edit(bound, r.edit);
         case 'viewport':
         case 'device': {
-          // A Fixed resolution ends sync-to-pane and lands after its write,
-          // never on a browser a launch or close began to replace meanwhile.
-          const generation = generations.get(bound.id);
-          await sync.fixed(bound.id);
-          if (closed) throw new Error('the browser host is shutting down');
-          if (settling.has(bound.id) || generations.get(bound.id) !== generation) return settlingAnswer;
-          return await p.act(b, r);
+          sync.fixed(bound.id);
+          return await writeViewport(bound, r);
         }
         default:
           return await p.act(b, r);
@@ -664,4 +675,3 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     },
   };
 }
-

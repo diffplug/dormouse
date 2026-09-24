@@ -470,6 +470,22 @@ describe('sync-to-pane', () => {
     expect(pane.writes()).toHaveLength(2);
   });
 
+  it('finishes a Fixed write before a newer sync engagement writes the pane size', async () => {
+    const pane = await paneOn();
+    pane.fake.gate('viewport s1 1024x768@1');
+    const fixed = pane.host.request({ ...s1, op: 'viewport', width: 1024, height: 768, dpr: 1 });
+    await vi.waitFor(() => expect(pane.writes()).toEqual(['viewport s1 1024x768@1']));
+    await pane.size(800, 600);
+    expect(pane.writes()).toEqual(['viewport s1 1024x768@1']);
+    pane.fake.release('viewport s1 1024x768@1');
+    expect((await fixed).ok).toBe(true);
+    await vi.waitFor(() => expect(pane.writes()).toEqual(['viewport s1 1024x768@1', 'viewport s1 800x600@2']));
+    await flush();
+    pane.seen(800, 600);
+    await settled();
+    expect(pane.state()).toBe('synced');
+  });
+
   it('drops a Fixed resolution that waited on a write once a launch replaces the browser', async () => {
     const pane = await paneOn();
     pane.fake.gate('viewport s1 800x600@2');
@@ -518,4 +534,3 @@ describe('sync-to-pane', () => {
     expect(pane.state()).toBeUndefined();
   });
 });
-
