@@ -20,7 +20,7 @@ import { createWorkspaceStripDrag, type StripDragHost } from './workspace-strip-
 import { acquireChromeKeyboardLease } from './wall/chrome-keyboard-lease';
 import { getWallHandle } from './wall/wall-handles';
 import { useDialogKeyboardOwner } from './wall/wall-context';
-import { closeWorkspaceWithSurfaces, requestWorkspaceClose, requestWorkspaceRename } from './wall/workspace-lifecycle';
+import { closeWorkspaceWithSurfaces, enterWorkspace, requestWorkspaceClose, requestWorkspaceRename } from './wall/workspace-lifecycle';
 import { getActivitySnapshot, subscribeToActivity } from '../lib/terminal-registry';
 import { getWorkspaceSurfacesSnapshot, subscribeToWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { computeWorkspaceUnion, type WorkspaceUnion } from '../lib/workspace-union';
@@ -226,7 +226,7 @@ export function WorkspaceStrip({
         className={chromeButton({ kind: 'icon', class: 'mb-0.5 shrink-0' })}
         aria-label="New workspace"
         title="New workspace"
-        onClick={() => { createWorkspace(); }}
+        onClick={() => { void enterWorkspace(createWorkspace().id); }}
       >
         <PlusIcon size={12} weight="bold" aria-hidden="true" />
       </button>

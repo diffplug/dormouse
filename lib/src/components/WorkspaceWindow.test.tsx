@@ -108,6 +108,22 @@ async function render(node = <WorkspaceWindow initialPaneIds={['pane-a']} />): P
 }
 
 describe('WorkspaceWindow', () => {
+  it('clicking + enters the new terminal in passthrough and moves keyboard focus off the button', async () => {
+    const first = getActiveWorkspaceId();
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
+    const focus = vi.spyOn(terminalRegistry, 'focusSession');
+    const button = container.querySelector<HTMLButtonElement>('[data-workspace-new]')!;
+    button.focus();
+    await act(async () => { button.click(); });
+    await flush();
+    await flushFrame();
+    const created = getActiveWorkspaceId();
+    expect(created).not.toBe(first);
+    const [pane] = leafIdsIn(created);
+    expect(wallFor(created).querySelector(`[data-session-id="${pane}"][data-focused="true"]`)).not.toBeNull();
+    expect(focus).toHaveBeenCalledWith(pane, true);
+  });
+
   it('keeps the outgoing Wall inert and visible beneath the incoming Wall until its fade ends', async () => {
     const first = getActiveWorkspaceId();
     createWorkspace({ id: 'ws-2', activate: false });

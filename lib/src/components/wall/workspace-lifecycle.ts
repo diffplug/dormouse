@@ -22,7 +22,7 @@ export function workspaceNeedsCloseConfirmation(id: WorkspaceId): boolean {
   return !!handle && (handle.hasTouchedSurfaces() || handle.runningCount() > 0);
 }
 
-/** Keyboard Enter on `+` waits for the fresh Wall just like close does. */
+/** A click on `+` waits for the fresh Wall before focusing its terminal. */
 export async function enterWorkspace(id: WorkspaceId): Promise<void> {
   setActiveWorkspace(id);
   const handle = await awaitWallHandle(id);
