@@ -26,7 +26,7 @@ on:
       - 'remote-lib-common/**'
       - 'dor-lib-common/**'
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened]
     paths:
       - 'lib/**'
       - 'docs/stories/**'
@@ -47,17 +47,13 @@ concurrency:
 jobs:
   argos:
     name: Argos Visual Tests
-    # A draft PR does not spend snapshots: marking it ready is the deliberate
-    # trigger. A skipped job reports success, but GitHub refuses to merge a draft at
-    # all, so for that clause the draft state is itself the gate.
     # Fork PRs are skipped because secrets are withheld from them, leaving the upload
     # without `ARGOS_TOKEN`. That clause has no such backstop — if this check is ever
     # made required, a fork PR touching `lib/**` merges with it green rather than
     # blocking as it does today.
     if: >-
       github.event_name != 'pull_request'
-      || (github.event.pull_request.draft == false
-      && github.event.pull_request.head.repo.full_name == github.repository)
+      || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     # This job does the rendering, and `--with-deps` runs an unbounded apt-get;
     # without a cap a stalled mirror holds the runner 6h.

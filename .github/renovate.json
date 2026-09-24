@@ -2,7 +2,6 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "enabledManagers": ["github-actions", "npm", "cargo"],
   "dependencyDashboard": true,
-  "draftPR": true,
   "timezone": "America/Los_Angeles",
   "schedule": ["* * * * 1"],
   "vulnerabilityAlerts": {
@@ -10,13 +9,11 @@
       "Security fixes must not wait for the Monday window. Everything else here is batched to one day a week, which is right for routine bumps and wrong for a known-vulnerable dependency, so this overrides the schedule only.",
       "`minimumReleaseAge` is set here EXPLICITLY, and must stay that way. Renovate\u0027s own default for this block is `minimumReleaseAge: null`, force-applied before lookup — so omitting it does not inherit the cooldown from packageRules, it DROPS the cooldown entirely. Stating it is the only way to keep it.",
       "Keeping it is the deliberate choice: the cooldown guards the opposite threat — a compromised release that gets yanked within a day — and a reviewer reading a Renovate diff cannot detect a supply-chain compromise the way the ecosystem\u0027s own yank process can. Nothing here auto-merges, and the Dependabot alert already makes the vulnerability visible the moment it is published, so what the cooldown costs is a day before the remediation PR appears, not a day before anyone knows.",
-      "`draftPR` is set here EXPLICITLY for the same reason: the root sets it true so routine dependency PRs do not spend Argos snapshots until someone marks them ready, and this block inherits PR-stage options from the root — `labels` below is one. A draft security PR would put a manual state flip in front of the remediation, and tend-review cannot approve a draft, so it would arrive with no approval signal. Snapshot cost of exempting it is nil; security PRs are rare.",
       "See docs/specs/security-supply-chain.md, Cooldown and alerts."
     ],
     "enabled": true,
     "schedule": [],
     "minimumReleaseAge": "1 day",
-    "draftPR": false,
     "labels": ["security", "dependencies"]
   },
   "packageRules": [

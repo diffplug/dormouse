@@ -15,9 +15,9 @@
 
 ## Bundling And PATH
 
-**`dor` must work without `npm i -g`.** Both hosts stage the workspace `dor`
-package (`scripts/stage-dor-cli.mjs`) before build and prepend the staged `bin`
-directory to every spawned PTY's `PATH`. Staged: `bin/dor` + `bin/dor.cmd`,
+**`dor` must work without `npm i -g`.** Both hosts stage `dor`
+(`scripts/stage-dor-cli.mjs`) before build and prepend its `bin`
+directory to every PTY's `PATH`. Staged: `bin/dor` + `bin/dor.cmd`,
 `dist/dor.js` (the esbuild bundle), and a generated `package.json` declaring
 `"type": "module"` so Node runs the staged ESM without parent package metadata.
 
@@ -27,9 +27,8 @@ does nothing and **exits 0** (rationale). **Dormouse-launched terminals must
 rely on injected env, never on a globally installed Node**; each launcher's
 `PATH`-`node` fallback is for developer/manual use.
 
-**Both launchers must exit with the CLI's own status**, which `dor await` and every
-script branching on `dor` depend on. `dor/test/launcher.test.mjs` pins it, running
-`dor.cmd` on the Windows leg of CI's `standalone-platform-check`.
+**Both launchers must return the CLI's exit status.**
+`dor/test/launcher.test.mjs` pins both, including `dor.cmd` on Windows.
 
 Public PTY env:
 
