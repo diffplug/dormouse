@@ -408,9 +408,15 @@ labels reserve numbers without opening windows (`saved_windows` and
 `standalone/src-tauri/src/lib.rs`). `standalone/scripts/tauri-conf.test.mjs` pins the
 label.
 
-**Every new window is cloned from `app.windows[0]`** (`WebviewWindowBuilder::from_config`),
-so `titleBarStyle`, `hiddenTitle`, `dragDropEnabled` and the CSP carry across
-with no second copy of any of them.
+**Every new window is cloned from `app.windows[0]`** (`window_config`, then
+`WebviewWindowBuilder::from_config`), so `titleBarStyle`, `hiddenTitle`,
+`dragDropEnabled`, `backgroundThrottling` and the CSP carry across with no
+second copy of any of them.
+
+**Never let a window's webview throttle or suspend in the background**:
+`app.windows[0]` sets `"backgroundThrottling": "disabled"` (macOS 14+; a no-op
+on Windows and Linux; rationale). Pinned by `every_window_disables_background_throttling` in
+`standalone/src-tauri/src/lib.rs` and `standalone/scripts/tauri-conf.test.mjs`.
 
 **Capabilities are split**: `default.json` covers `main` and the `ws-*` glob,
 and `main-only.json` scopes `updater:default` and `core:app:allow-version` to `main`,
