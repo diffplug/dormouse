@@ -35,6 +35,7 @@ import {
   type BrowserResult,
 } from '../lib/platform/browser-automation';
 import { createBrowserCaptures } from './browser-capture';
+import { createViewportSync } from './browser-sync';
 import type { WebSocket } from 'ws';
 import { BrowserView, closeSocket, createViewerServer, type Upstream, type ViewerSink } from './browser-viewer';
 
@@ -358,6 +359,15 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     }
   }
 
+  // Sync-to-pane: each browser's pane size, written one write at a time, never
+  // while a launch or close settles it.
+  const sync = createViewportSync<Bound>({
+    write: ({ p, b }, size) => p.act(b, { op: 'viewport', ...size }),
+    report: (id, message) => { for (const view of views.get(id) ?? []) view.state(message); },
+    blocked: (id) => closed || settling.has(id),
+    log,
+  });
+
   // Bumped by every launch and close: work begun for an earlier browser (a
   // post-launch sweep, a capture to join) must not reach the one that
   // replaced it.
@@ -366,6 +376,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     const generation = (generations.get(id) ?? 0) + 1;
     generations.set(id, generation);
     captures.forget(id);
+    sync.forget(id);
     // Their browser is going: whoever still views it asks again.
     for (const view of views.get(id) ?? []) view.close(1001, 'the browser was relaunched or closed');
     await p.release?.(b);
@@ -527,6 +538,14 @@ export function createBrowserHost(deps: BrowserHostDeps) {
         open?.delete(view);
         if (open?.size === 0) views.delete(bound.id);
       },
+      // A popped-out window is never sized with a pane.
+      ...(isHeaded ? {} : {
+        sync: {
+          intent: (intent) => sync.intent(bound, bound.id, stream, intent),
+          viewport: (size, takenAt) => sync.viewport(bound.id, stream, size, takenAt),
+          pageShown: (tabId) => sync.pageShown(bound.id, stream, tabId),
+        },
+      }),
       ...(debug && deps.log ? { log: deps.log } : {}),
     });
     let open = views.get(bound.id);
@@ -614,6 +633,11 @@ export function createBrowserHost(deps: BrowserHostDeps) {
         }
         case 'edit':
           return await edit(bound, r.edit);
+        case 'viewport':
+        case 'device':
+          // A Fixed resolution ends sync-to-pane, and lands after its write.
+          await sync.fixed(bound.id);
+          return await p.act(b, r);
         default:
           return await p.act(b, r);
       }
@@ -631,6 +655,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     close: async () => {
       // Every launch and sweep still pending now finds itself superseded.
       closed = true;
+      sync.close();
       const windows = [...headed.values()];
       headed.clear();
       await Promise.all([

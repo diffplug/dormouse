@@ -5,6 +5,7 @@ import { WebSocket } from 'ws';
 import { createBrowserCaptures } from './browser-capture';
 import { createBrowserHost, type BrowserProvider } from './browser-host';
 import { openViewer } from './browser-host-test-utils';
+import { SYNC_SETTLE_MS } from './browser-sync';
 import { WINDOW_GONE_GRACE_MS } from './browser-viewer';
 import { createPlaywrightProvider } from './playwright-host';
 import { BROWSER_REQUEST_TIMEOUT_MS, VIEWER_TEXT_INPUT_MAX, viewerTextInputs, type BrowserOp, type BrowserRequestBinding } from '../lib/platform/browser-automation';
@@ -566,3 +567,71 @@ describe('a GUI launch that gives up', () => {
     expect(second.done.at).toBeLessThanOrEqual(30_000);
   });
 });
+
+describe('sync-to-pane', () => {
+  // The page's viewport as Chrome settles it: Playwright's own emulated size,
+  // unless a metrics override from the host's CDP session holds — which
+  // Playwright's re-apply of its own emulation (the CLI's `screenshot`)
+  // replaces (docs/specs/dor-browser.rationale.md → "Playwright").
+  let emulated: { width: number; height: number };
+  let override: { width: number; height: number } | undefined;
+  /** Held, a `setViewportSize` lands only once released. */
+  let landing: PromiseWithResolvers<void> | undefined;
+  /** Held, a measurement answers what it saw only once released. */
+  let answering: PromiseWithResolvers<void> | undefined;
+  beforeEach(() => {
+    emulated = { width: 640, height: 480 };
+    override = undefined;
+    landing = answering = undefined;
+    page.setViewportSize = vi.fn(async (size: { width: number; height: number }) => {
+      await landing?.promise;
+      emulated = size;
+    });
+    page.evaluate = vi.fn(async () => {
+      const seen = override ?? emulated;
+      await answering?.promise;
+      return { ...seen, dpr: 1 };
+    });
+    cdp.send.mockImplementation(async (method: string, params: { width: number; height: number }) => {
+      if (method === 'Emulation.setDeviceMetricsOverride') override = { width: params.width, height: params.height };
+      return { data: 'aGVsbG8=' };
+    });
+  });
+  /** What the host reports of its sync, in order. */
+  const reports = (viewer: Awaited<ReturnType<typeof viewSession>>) => viewer.states.filter((state) => state.type === 'sync').map((state) => state.state);
+  /** The poll's next measurement, as a `dor pw` command's attach runs it. */
+  const poll = () => pw({ op: 'attach' });
+
+  test('a poll begun before a sync write landed never stops the sync', async () => {
+    const viewer = await viewSession();
+    try {
+      viewer.send({ type: 'sync', width: 800, height: 600, dpr: 2, engagement: 'e1' });
+      await vi.waitFor(() => expect(emulated).toEqual({ width: 800, height: 600 }));
+      await poll();
+      await vi.waitFor(() => expect(reports(viewer).at(-1)).toBe('synced'));
+
+      // The drag's next size is being written when the poll starts measuring;
+      // the poll answers the size before it only once the write has landed.
+      landing = Promise.withResolvers();
+      viewer.send({ type: 'sync', width: 900, height: 600, dpr: 2, engagement: 'e1' });
+      await vi.waitFor(() => expect(page.setViewportSize).toHaveBeenLastCalledWith({ width: 900, height: 600 }));
+      answering = Promise.withResolvers();
+      const measured = vi.mocked(page.evaluate).mock.calls.length;
+      const stale = poll();
+      await vi.waitFor(() => expect(vi.mocked(page.evaluate).mock.calls.length).toBeGreaterThan(measured));
+      landing.resolve();
+      await vi.waitFor(() => expect(emulated).toEqual({ width: 900, height: 600 }));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      answering.resolve();
+      answering = undefined;
+      await stale;
+      await new Promise((resolve) => setTimeout(resolve, SYNC_SETTLE_MS + 100));
+      expect(reports(viewer)).not.toContain('off');
+      await poll();
+      await vi.waitFor(() => expect(reports(viewer).at(-1)).toBe('synced'));
+    } finally {
+      viewer.socket.terminate();
+    }
+  });
+});
+

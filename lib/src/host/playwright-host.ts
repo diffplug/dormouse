@@ -10,7 +10,7 @@ import { realpathSync } from 'node:fs';
 import type { Browser, Page, CDPSession } from 'playwright-core';
 import { BROWSER_PROVIDERS, spawnAndCapture } from 'dor-lib-common';
 import { messageOf } from '../lib/errors';
-import { CAPTURE_JPEG_QUALITY, type BrowserResult, type ViewerInput, type ViewerState } from '../lib/platform/browser-automation';
+import { CAPTURE_JPEG_QUALITY, type BrowserResult, type ViewerBrowserInput, type ViewerState } from '../lib/platform/browser-automation';
 import type { BrowserProvider, LiveBrowser } from './browser-host';
 import { measuredViewport, type ViewerSink } from './browser-viewer';
 import { resolvePlaywrightInstall, playwrightWorkspace, type PlaywrightInstall } from './playwright-install';
@@ -162,7 +162,13 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
       if (page) publish(v, { type: 'url', url: page.url() });
       publish(v, { type: 'tabs', tabs });
       if (page) {
+        // Taken as the measurement begins: sync-to-pane counts it only when
+        // no write of its landed after (docs/specs/dor-browser.md → "Display
+        // Modal And Render Swaps"). The screencast's own metadata is no
+        // measure of the viewport (rationale).
+        const takenAt = performance.now();
         const measured = await page.evaluate(() => ({ width: innerWidth, height: innerHeight, dpr: devicePixelRatio })).then(measuredViewport, () => undefined);
+        if (measured) for (const { sink } of v.subscribers) sink.viewport({ width: measured.viewportWidth, height: measured.viewportHeight }, takenAt);
         const size = measured ? undefined : page.viewportSize();
         publish(v, { type: 'status', connected: true, screencasting: !v.headed, viewportWidth: size?.width, viewportHeight: size?.height, ...measured });
       }
@@ -229,7 +235,7 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
     return pending;
   }
   /** One input message, validated by the host (`parseViewerInput`). */
-  async function input(v: Viewer, data: Exclude<ViewerInput, { type: 'repaint' }>) {
+  async function input(v: Viewer, data: ViewerBrowserInput) {
     if (v.disposed || !v.page) return;
     const cdp = await control(v, v.page);
     if (data.type === 'input_mouse') {

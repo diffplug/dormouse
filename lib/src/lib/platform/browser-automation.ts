@@ -95,10 +95,21 @@ export type ViewerState =
   /** The active tab committed a navigation (before its load completes). */
   | { type: 'url'; url: string }
   /** A popped-out window's page as its browser reports it: URL and title. */
-  | { type: 'page'; url: string; title: string | null };
+  | { type: 'page'; url: string; title: string | null }
+  /** Where the host's sync-to-pane stands for `engagement`: writing the
+   *  pane's size, the browser confirmed at it, or stopped because another
+   *  writer set the viewport. */
+  | { type: 'sync'; state: ViewerSyncState; engagement: string };
 
-/** Webview → host, as JSON text: native input, and a request to resend the
- *  last frame to a canvas that mounted blank. */
+export type ViewerSyncState = 'applying' | 'synced' | 'off';
+
+/** The pane's size while Resize with pane is engaged, for the host to size
+ *  the browser to. `engagement` names the choice of Resize with pane it
+ *  belongs to: a new one reclaims the viewport. */
+export type ViewerSyncIntent = { type: 'sync'; width: number; height: number; dpr: number; engagement: string };
+
+/** Webview → host, as JSON text: native input, the pane's size to sync to,
+ *  and a request to resend the last frame to a canvas that mounted blank. */
 export type ViewerInput =
   | {
       type: 'input_mouse';
@@ -115,7 +126,11 @@ export type ViewerInput =
   | { type: 'input_keyboard'; eventType: 'keyDown' | 'keyUp'; key: string; code: string; text: string; windowsVirtualKeyCode: number; modifiers: number }
   /** A paste, inserted whole. */
   | { type: 'input_text'; text: string }
+  | ViewerSyncIntent
   | { type: 'repaint' };
+
+/** The input a provider forwards to its browser. */
+export type ViewerBrowserInput = Exclude<ViewerInput, { type: 'repaint' | 'sync' }>;
 
 /** A frame: a CSS-resolution stream frame painted at once, or the
  *  device-resolution capture that replaces it. */

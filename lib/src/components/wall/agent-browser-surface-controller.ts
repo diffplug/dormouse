@@ -12,6 +12,7 @@ import {
   type BrowserAutomationProvider,
   type BrowserResult,
   type ViewerFrame,
+  type ViewerSyncState,
 } from '../../lib/platform/browser-automation';
 import { isAllowedBinaryFor } from '../../lib/agent-browser-binary';
 import { readTextFromClipboard } from '../../lib/clipboard';
@@ -75,20 +76,12 @@ function abDebugLog(message: string): void {
   if (abDebugLogsOn()) console.log(message);
 }
 
-// SYNCED is "browser viewport CSS size == pane CSS size". The screencast is
-// always delivered at CSS-pixel resolution — the frame never encodes the
-// browser's DPR (verified 0.27.0: `set viewport 800 600 2` yields the same
-// 800×600 JPEG as @1) — so DPR is unrecoverable from frames and plays no part
-// in the match; we still *issue* displayDpr so the page renders at the right
-// density. Dims can be a pixel off after rounding, so compare with a tolerance.
+// The pane's size, compared only to republish the screen snapshot: dims can
+// be a pixel off after rounding.
 const DIM_TOLERANCE = 1;
 
 function dimsMatch(a: { w: number; h: number }, b: { w: number; h: number }): boolean {
   return Math.abs(a.w - b.w) <= DIM_TOLERANCE && Math.abs(a.h - b.h) <= DIM_TOLERANCE;
-}
-
-function dprMatch(a: number, b: number): boolean {
-  return Math.abs(a - b) <= 0.001;
 }
 
 /** A viewport the screencast is fixed at: CSS size and device pixel ratio. */
@@ -289,34 +282,34 @@ export class AgentBrowserSurfaceController {
    *  close cancels them, however late the transport delivers them (`close`). */
   private bringingUp = new Set<string>();
 
-  // --- sync-to-pane ---
+  // --- sync-to-pane (the host owns it; docs/specs/dor-browser.md → "Display
+  // Modal And Render Swaps") ---
   private syncEngaged: boolean;
+  // This pane's current choice of Resize with pane, as the host knows it: a
+  // new one reclaims the viewport, and the host's word on an older one is
+  // stale.
+  private syncEngagement: string = crypto.randomUUID();
+  // What the host last reported for that engagement.
+  private hostSync: ViewerSyncState | undefined;
+  // The viewport as the stream reports it: the Display modal's dims, and the
+  // scale pointer input maps through.
   private device = { width: 1280, height: 720 };
-  // The pane size we last issued `set viewport` for; null while not driving the
-  // viewport (device/custom, or never issued). Used both to skip redundant
-  // re-issues and to detect an external `set …` taking over.
-  private lastIssued: { w: number; h: number; dpr: number } | null = null;
-  // True once a frame has confirmed `lastIssued` actually landed. Until then,
-  // frames still at the browser's pre-resize size are our own `set` not having
-  // taken effect yet — not an external override.
-  private syncConfirmed = false;
   // The DPR of the fixed viewport last issued to this browser, which frames
   // cannot tell; undefined once anything else may have set it.
   private fixedDpr: number | undefined;
   private lastPublishedScreen: ScreenSnapshot | null = null;
-  // Debounce for pushing a pane resize back to the browser as a `set viewport`
-  // (armed by the pane-size observer below, only while sync is engaged).
+  // Debounce for sending the host a settled pane size (armed by the pane-size
+  // observer below, only while sync is engaged).
   private resizeTimer: ReturnType<typeof setTimeout> | undefined;
 
   // --- cached pane size (avoid per-frame forced layout) ---
-  // computeScreenSnapshot() and maybeDisengageSync() run on EVERY non-duplicate
-  // stream frame (~20Hz); a getBoundingClientRect() there forces layout each
-  // time. A ResizeObserver active for the whole attach duration keeps the pane's
-  // content-box size cached (the viewport div has no border/padding, so
-  // contentRect matches the gBCR those hot paths used to read). null ⇒ no attached
-  // view — treat as 0×0 / skip, matching the old no-element behavior. The
-  // correctness-critical read in issueSyncToPane stays live gBCR.
-  // The same observer also drives viewport-sync (debounced), so there is one
+  // computeScreenSnapshot() runs on EVERY non-duplicate stream frame (~20Hz);
+  // a getBoundingClientRect() there forces layout each time. A ResizeObserver
+  // active for the whole attach duration keeps the pane's content-box size
+  // cached (the viewport div has no border/padding, so contentRect matches the
+  // gBCR the hot path used to read). null ⇒ no attached view — treat as 0×0.
+  // The size syncToPane sends stays a live gBCR read.
+  // The same observer also drives sync-to-pane (debounced), so there is one
   // observer on the pane, not two.
   private paneSize: { w: number; h: number } | null = null;
   private paneSizeObserver: ResizeObserver | null = null;
@@ -387,16 +380,16 @@ export class AgentBrowserSurfaceController {
     // screen controller never goes stale.
     this.screenActions = {
       engageSync: () => {
-        // Clear lastIssued so the issue below isn't skipped, and issue now rather
-        // than relying on a syncEngaged effect — re-selecting Sync while already
-        // engaged must still reclaim the viewport (e.g. from an external `set`).
-        this.lastIssued = null;
+        // A new engagement, even while engaged: the host reclaims the
+        // viewport at the size it last wrote too (an agent's `set` may have
+        // taken it), and re-engages a sync it stopped.
+        this.syncEngagement = crypto.randomUUID();
+        this.hostSync = undefined;
         this.forgetFixedViewport();
         this.setSyncEngaged(true);
-        this.issueSyncToPane();
+        this.syncToPane();
       },
       applyDevice: (name) => {
-        this.lastIssued = null;
         this.forgetFixedViewport();
         this.setSyncEngaged(false);
         this.drive(`set device ${name}`, (browser) => browser.device(name));
@@ -519,7 +512,7 @@ export class AgentBrowserSurfaceController {
 
   private onDprChange = (): void => {
     this.watchDpr();
-    if (this.syncEngaged) this.issueSyncToPane();
+    this.syncToPane();
     this.publishScreen();
   };
 
@@ -543,15 +536,13 @@ export class AgentBrowserSurfaceController {
       const cr = entries[entries.length - 1]?.contentRect;
       if (cr) this.paneSize = { w: Math.round(cr.width), h: Math.round(cr.height) };
       this.publishScreen();
-      // While syncing, push the new pane size to the browser (debounced). The
-      // inner re-check drops a resize whose sync was disengaged mid-debounce.
+      // While syncing, send the host the settled pane size. A sync disengaged
+      // mid-debounce sends nothing (`syncToPane`).
       if (!this.syncEngaged) return;
       if (this.resizeTimer) clearTimeout(this.resizeTimer);
       this.resizeTimer = setTimeout(() => {
         this.resizeTimer = undefined;
-        if (!this.syncEngaged) return;
-        this.issueSyncToPane();
-        this.publishScreen();
+        this.syncToPane();
       }, 200);
     });
     observer.observe(el);
@@ -587,10 +578,9 @@ export class AgentBrowserSurfaceController {
       sink.launchFailed(this.pendingLaunchFailure);
       this.pendingLaunchFailure = null;
     }
-    // The pane-size observer fires on observe and (when syncing) debounces a
-    // `set viewport`; issue once explicitly too so re-engaging at an unchanged
-    // size still reclaims the viewport. issueSyncToPane no-ops when not capable.
-    if (this.syncEngaged) this.issueSyncToPane();
+    // The pane-size observer fires on observe and debounces its size; send it
+    // at once too, for a view remounted over a socket already open.
+    this.syncToPane();
     this.updateParkState();
     this.publishScreen();
     // A view remounted within the park debounce mounts a blank canvas over a
@@ -709,16 +699,10 @@ export class AgentBrowserSurfaceController {
   /** Enter `next`, with the viewer socket following it. */
   private setPhase(next: Phase): void {
     this.phase = next;
-    if (next.k === 'live' || next.k === 'parked') {
-      // A new or restarted browser comes up at its native viewport; if sync is
-      // engaged, reclaim the pane size. Clearing lastIssued is essential — it
-      // otherwise still holds the previous browser's pane size and
-      // issueSyncToPane would no-op, leaving the fresh browser unsynced.
-      if (next.stream !== this.boundStream) {
-        this.boundStream = next.stream;
-        this.lastIssued = null;
-        this.fixedDpr = undefined;
-      }
+    // A ratio this Surface fixed describes only the browser it was set on.
+    if ((next.k === 'live' || next.k === 'parked') && next.stream !== this.boundStream) {
+      this.boundStream = next.stream;
+      this.fixedDpr = undefined;
     }
     this.reconcileConnection();
     this.emitView();
@@ -726,16 +710,13 @@ export class AgentBrowserSurfaceController {
     if (next.k === 'live' && !next.resumed) this.drivable();
   }
 
-  /** The daemon can be driven again: catch up on what waited for it. */
+  /** The daemon can be driven again: catch up on what waited for it. The
+   *  pane's size goes to the host once the socket opens. */
   private drivable(): void {
     const { url, headed, viewport } = this.pendingIntent;
     this.pendingIntent = {};
     // A popped-out window is never sized.
     if (viewport && !this.headed) this.issueFixedViewport(viewport);
-    // issueSyncToPane no-ops until now, so a resize made meanwhile — behind a
-    // hidden tab, or across a relaunch — is pushed now (lastIssued makes this a
-    // no-op when the pane size did not change).
-    else if (this.syncEngaged) this.issueSyncToPane();
     if (headed !== undefined && headed !== this.headed) this.relaunch(headed, url);
     else if (url) this.drive(`open ${url}`, (browser) => browser.navigate(url));
   }
@@ -975,6 +956,11 @@ export class AgentBrowserSurfaceController {
           phase.resumed = false;
           this.drivable();
         }
+        // A size the pane took while no socket was open — behind a hidden
+        // tab, across a relaunch — or the same one, which the host holds.
+        this.syncToPane();
+      } else if (event.type === 'sync') {
+        this.applyHostSync(event.state, event.engagement);
       } else if (event.type === 'connection-close') {
         // An unpark's daemon may have moved while nothing viewed it.
         if (phase.resumed) this.attach(false);
@@ -1006,9 +992,10 @@ export class AgentBrowserSurfaceController {
         this.paintFrame(event);
       }
     });
-    // The new stream reports its own status; the last one came from whatever
-    // this Surface streamed before.
+    // The new stream reports its own status, and its host its own sync; the
+    // last came from whatever this Surface streamed before.
     this.status = null;
+    this.hostSync = undefined;
     // Unparking reconnects to the same session/stream; the last good frame is
     // still valid, so only blank to the placeholder when the identity changed.
     const identity = `${session}:${stream}`;
@@ -1018,11 +1005,10 @@ export class AgentBrowserSurfaceController {
     }
   }
 
-  /** The browser's viewport, as its stream reports it: the screen indicator
-   *  and sync-to-pane follow it. */
+  /** The browser's viewport, as its stream reports it: never a judgment on
+   *  sync-to-pane, which only the host makes. */
   private setDeviceSize(width: number, height: number): void {
     this.device = { width, height };
-    this.maybeDisengageSync();
     this.publishScreen();
   }
 
@@ -1113,8 +1099,18 @@ export class AgentBrowserSurfaceController {
     // Reflect the flip in the indicator immediately.
     this.publishScreen();
     // The always-on pane-size observer reads syncEngaged at fire time, so there
-    // is nothing to (re)wire here. Engaging issues a sync via engageSync; a
-    // pending debounce that outlives a disengage is dropped by its own re-check.
+    // is nothing to (re)wire here. Engaging sends the pane's size via
+    // engageSync; a debounce that outlives a disengage sends nothing.
+  }
+
+  /** The host's word on this pane's sync. Only the host decides another
+   *  writer took the viewport (`off`), which disengages Resize with pane; a
+   *  report on an engagement this pane has since replaced is stale. */
+  private applyHostSync(state: ViewerSyncState, engagement: string): void {
+    if (engagement !== this.syncEngagement) return;
+    this.hostSync = state;
+    if (state === 'off') this.setSyncEngaged(false);
+    this.publishScreen();
   }
 
   // --- canonical URL tracking ---
@@ -1226,7 +1222,8 @@ export class AgentBrowserSurfaceController {
     // DPR can't be read back from frames, so report the density this Surface
     // fixed, else the one it would sync to.
     const viewport = { w: device.width, h: device.height, dpr: this.fixedDpr ?? displayDpr };
-    const state: ScreenState = dimsMatch(viewport, paneCss) ? 'SYNCED' : 'SCALED';
+    // SYNCED only on the host's word that the browser is at this pane's size.
+    const state: ScreenState = this.syncEngaged && this.hostSync === 'synced' ? 'SYNCED' : 'SCALED';
     const renderMode = this.renderMode();
     return { state, viewport, paneCss, displayDpr, syncEngaged: this.syncEngaged, renderMode };
   }
@@ -1252,38 +1249,28 @@ export class AgentBrowserSurfaceController {
     }
   }
 
-  // Push the current pane size to the browser as a native `set viewport`.
-  private issueSyncToPane(): void {
-    // Only a live browser is driven: a parked (hidden) pane's rect can be
-    // degenerate, and nothing reaches a daemon mid-launch or mid-relaunch. The
-    // next `live` reconciles any resize made meanwhile.
-    if (!this.driver()) return;
-    // A popped-out surface is a real headed OS window the user drives directly;
-    // never force its viewport to the (now-stub) pane size. Sync resumes when it
-    // pops back in — the new stream's reclaim re-issues against the fresh session.
-    if (this.headed) return;
-    // A host that cannot drive the provider (e.g. the web demo) can't size
-    // the viewport; stay silent rather than warn on every resize — the surface
-    // just reads SCALED.
-    if (!this.hosted) return;
+  /**
+   * While Resize with pane is engaged, send the host the pane's size over the
+   * viewer socket: the host sizes the browser to it and alone judges whether
+   * it holds. Only over a live socket — the socket's open sends what it
+   * missed — and never from a popped-out window, which is its own size.
+   */
+  private syncToPane(): void {
+    // A host that cannot drive the provider (the web demo) sizes nothing; the
+    // surface just reads SCALED.
+    if (!this.syncEngaged || this.headed || !this.hosted || this.phase.k !== 'live') return;
     const el = this.sink?.viewport;
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    const w = Math.round(rect.width);
-    const h = Math.round(rect.height);
-    if (!w || !h) return;
-    const dpr = window.devicePixelRatio || 1;
-    const prev = this.lastIssued;
-    if (prev && prev.w === w && prev.h === h && dprMatch(prev.dpr, dpr)) return;
-    this.lastIssued = { w, h, dpr };
-    this.syncConfirmed = false;
-    this.drive(`set viewport ${w} ${h} ${dpr}`, (browser) => browser.viewport(w, h, dpr));
+    const width = Math.round(rect.width);
+    const height = Math.round(rect.height);
+    if (!width || !height) return;
+    this.connection?.send({ type: 'sync', width, height, dpr: window.devicePixelRatio || 1, engagement: this.syncEngagement });
   }
 
   /** Fix the screencast at `viewport`, disengaging sync: at once while live,
    *  else once the browser is (the pending intent). */
   private fixViewport(viewport: FixedViewport): void {
-    this.lastIssued = null;
     this.setSyncEngaged(false);
     if (this.driver()) this.issueFixedViewport(viewport);
     else this.pendingIntent.viewport = viewport;
@@ -1301,30 +1288,6 @@ export class AgentBrowserSurfaceController {
     delete this.pendingIntent.viewport;
     this.fixedDpr = undefined;
     this.publishScreen();
-  }
-
-  // Last-writer-wins: drop sync when an external `dor ab set …` takes the
-  // viewport away from what we issued. The trap is that right after we issue a
-  // new size, the browser keeps streaming the OLD size for a few frames — those
-  // must NOT count as external. So we only disengage once a frame has first
-  // *confirmed* our issued size landed, and a later frame then deviates.
-  private maybeDisengageSync(): void {
-    if (!this.syncEngaged) return;
-    const issued = this.lastIssued;
-    // Cached pane size (this runs per frame — no forced layout). null ⇒ detached,
-    // same skip as the old no-element guard.
-    const pane = this.paneSize;
-    if (!issued || !pane) return;
-    // Mid-resize: we haven't issued for the pane's current size yet.
-    if (!dimsMatch(issued, pane)) return;
-    const device = { w: this.device.width, h: this.device.height };
-    if (dimsMatch(device, issued)) {
-      this.syncConfirmed = true; // our `set` landed
-      return;
-    }
-    // Frame differs from what we issued: a pre-landing stale frame until
-    // confirmed; an external override once confirmed.
-    if (this.syncConfirmed) this.setSyncEngaged(false);
   }
 
   // --- relaunch: pop-out / pop-in + auto-revert ---

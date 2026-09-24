@@ -18,9 +18,11 @@ import {
   VIEWPORT_MAX_DPR,
   VIEWPORT_MAX_SIDE,
   encodeViewerFrame,
+  type ViewerBrowserInput,
   type ViewerFrameKind,
   type ViewerInput,
   type ViewerState,
+  type ViewerSyncIntent,
 } from '../lib/platform/browser-automation';
 import { BrowserStreamGrants } from './browser-stream-guard';
 import { isLoopbackHost } from './loopback-guard';
@@ -39,7 +41,14 @@ export interface ViewerSink {
    *  view's window with none for `WINDOW_GONE_GRACE_MS` has closed, and the
    *  view ends as `gone`. */
   pages(count: number): void;
+  /** The shown page's viewport as the provider can vouch for it, and when it
+   *  was taken (`performance.now()`, at the measurement's start): what
+   *  sync-to-pane judges its writes by. */
+  viewport(size: ViewportSize, takenAt: number): void;
 }
+
+/** A viewport's CSS size. */
+export type ViewportSize = { width: number; height: number };
 
 /** A page's viewport as it reports it: CSS size and device pixel ratio. */
 export type MeasuredViewport = { viewportWidth: number; viewportHeight: number; devicePixelRatio: number };
@@ -62,7 +71,7 @@ export interface Upstream {
   readonly capturable: boolean;
   /** Forward one validated input message; false when the provider's input
    *  backlog is full. */
-  input(message: Exclude<ViewerInput, { type: 'repaint' }>): boolean;
+  input(message: ViewerBrowserInput): boolean;
   close(): void;
 }
 
@@ -184,6 +193,14 @@ export interface BrowserViewDeps {
   capture(): Promise<Uint8Array | undefined>;
   /** Called once the socket has closed, however it closed. */
   onClose(): void;
+  /** Sync-to-pane's side of a pane's socket — never a headed one's: the
+   *  pane's size to write, the browser's viewport as its provider vouches for
+   *  it, and each change of the page shown (its active tab). */
+  sync?: {
+    intent(intent: ViewerSyncIntent): void;
+    viewport(size: ViewportSize, takenAt: number): void;
+    pageShown(tabId: string): void;
+  };
   /** Set to log this socket's rates every few seconds. */
   log?(message: string): void;
 }
@@ -281,7 +298,14 @@ export class BrowserView implements ViewerSink {
     // otherwise quiet on a static page: capture the tab now shown.
     const active = message.tabs.find((tab) => tab.active)?.tabId;
     if (active !== undefined && this.activeTab !== undefined && active !== this.activeTab && this.last) this.pulse();
-    if (active !== undefined) this.activeTab = active;
+    if (active !== undefined) {
+      this.activeTab = active;
+      this.deps.sync?.pageShown(active);
+    }
+  }
+
+  viewport(size: ViewportSize, takenAt: number): void {
+    if (!this.closed) this.deps.sync?.viewport(size, takenAt);
   }
 
   gone(): void {
@@ -310,6 +334,10 @@ export class BrowserView implements ViewerSink {
     if (message.type === 'repaint') {
       // A canvas that mounted blank: what it would have shown.
       if (this.last) this.transmit(this.last.message);
+      return;
+    }
+    if (message.type === 'sync') {
+      this.deps.sync?.intent(message);
       return;
     }
     this.openProvisionalWindow();
@@ -434,6 +462,8 @@ function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
 
 const MOUSE_EVENTS = new Set(['mouseMoved', 'mousePressed', 'mouseReleased', 'mouseWheel']);
 const MOUSE_BUTTONS = new Set(['left', 'right', 'middle', 'none']);
+// The webview mints one per choice of Resize with pane (`crypto.randomUUID()`).
+const ENGAGEMENT = /^[A-Za-z0-9-]{1,64}$/;
 const finiteCoordinate = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && Math.abs(n) <= 1e6;
 const integer = (n: unknown): number => (Number.isInteger(n) ? n as number : 0);
 
@@ -481,6 +511,12 @@ export function parseViewerInput(raw: string): ViewerInput | null {
       };
     case 'input_text':
       return typeof data.text === 'string' && data.text.length <= VIEWER_TEXT_INPUT_MAX ? { type: 'input_text', text: data.text } : null;
+    case 'sync': {
+      const size = measuredViewport({ width: data.width, height: data.height, dpr: data.dpr });
+      return size && typeof data.engagement === 'string' && ENGAGEMENT.test(data.engagement)
+        ? { type: 'sync', width: size.viewportWidth, height: size.viewportHeight, dpr: size.devicePixelRatio, engagement: data.engagement }
+        : null;
+    }
     case 'repaint':
       return { type: 'repaint' };
     default:

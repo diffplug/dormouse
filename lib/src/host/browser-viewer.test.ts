@@ -335,7 +335,11 @@ describe('parseViewerInput', () => {
       .toEqual({ type: 'input_mouse', eventType: 'mouseWheel', x: 1, y: 2, button: 'none', buttons: 31, clickCount: 3, modifiers: 15, deltaX: 0, deltaY: 5 });
     expect(parseViewerInput(JSON.stringify({ type: 'input_keyboard', eventType: 'keyDown', key: 'a', code: 'c'.repeat(200), text: 't'.repeat(2000), windowsVirtualKeyCode: 65.5, modifiers: 16 })))
       .toEqual({ type: 'input_keyboard', eventType: 'keyDown', key: 'a', code: 'c'.repeat(100), text: 't'.repeat(1000), windowsVirtualKeyCode: 0, modifiers: 0 });
+    const sync = { type: 'sync', width: 800, height: 600, dpr: 2, engagement: '0f5c-e1' };
+    expect(parseViewerInput(JSON.stringify({ ...sync, extra: 'x' }))).toEqual(sync);
     for (const refused of [
+      ...[{ width: 0 }, { width: 800.5 }, { height: 16385 }, { dpr: 0 }, { dpr: 11 }, { engagement: 'has space' }, { engagement: 'e'.repeat(65) }, { engagement: 7 }]
+        .map((field) => ({ ...sync, ...field })),
       { type: 'input_mouse', eventType: 'click', x: 1, y: 1 },
       { type: 'input_mouse', eventType: 'mouseMoved', x: 1e7, y: 1 },
       { type: 'input_keyboard', eventType: 'keyPress', key: 'a' },

@@ -592,7 +592,11 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
       if (message.type === 'frame' && typeof message.data === 'string') {
         if (headed || lastFrame?.equals(data)) return;
         lastFrame = data;
-        sink.frame(Buffer.from(message.data, 'base64'), frameSize(message.metadata));
+        const size = frameSize(message.metadata);
+        sink.frame(Buffer.from(message.data, 'base64'), size);
+        // The daemon's frames follow its `set viewport` exactly, ordered with
+        // rendering: the viewport sync-to-pane judges by (rationale).
+        if (size) sink.viewport(size, performance.now());
         return;
       }
       if (message.type === 'url') {
