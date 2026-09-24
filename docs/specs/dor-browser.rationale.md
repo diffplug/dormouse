@@ -42,7 +42,9 @@ The persisted `wsPort` mirror can lag the controller's already-live port after a
 
 **What parking is worth.** Lath leaves stay mounted, so a background window would otherwise retain every pane's ~20Hz decode and screenshot round trips. The ~1s debounce rides through transient visibility flips and StrictMode remounts without rebuilding the connection.
 
-**What the two-stage split buys.** Three things at once: pointer feedback that does not wait on a screenshot child-process round trip, a resting image sharp on HiDPI, and an idle animated page that does not pay to decode the stream continuously. Either path alone gives up one of the three.
+**What the two-stage split buys.** Three things at once: input feedback that does not wait on a screenshot child-process round trip, a resting image sharp on HiDPI, and an idle animated page that does not pay to decode the stream continuously. Either path alone gives up one of the three.
+
+**Why keys open the window too.** A keystroke's echo is the most latency-sensitive paint there is; outside the window it waited a whole crisp capture — ~120ms, plus up to ~180ms of loop pacing in a burst — while a hover repainted from the stream in ~50ms. On HiDPI the typed text is CSS-resolution until 250ms after the last key, then sharpens, as hover already did.
 
 **Why no crisp capture starts inside the provisional window.** A host screenshot round trip is ~120ms against a ~20Hz stream, so *every* capture started while provisional frames are still landing is superseded before it resolves; the shots skipped would never have drawn anything.
 

@@ -51,8 +51,9 @@ import {
 // immediately, so quick visibility flips — or a StrictMode unmount→remount —
 // don't tear down and rebuild the stream connection.
 export const HIDDEN_PARK_DELAY_MS = 1000;
-/** Keep low-latency stream painting active briefly after pointer input. Continuous
- *  movement extends the window; idle animated pages stay on the cheaper crisp path. */
+/** Keep low-latency stream painting active briefly after input — pointer, keys,
+ *  pasted text, editing chords. Continuous input extends the window; idle
+ *  animated pages stay on the cheaper crisp path. */
 export const PROVISIONAL_INPUT_WINDOW_MS = 250;
 
 // The high-rate `[ab-panel]` stream/screenshot diagnostics fire per frame
@@ -1478,10 +1479,14 @@ export class AgentBrowserSurfaceController {
   }
 
   send(payload: Record<string, unknown>): void {
-    if (payload.type === 'input_mouse') {
-      this.provisionalUntil = performance.now() + PROVISIONAL_INPUT_WINDOW_MS;
-    }
+    // Typing is the most latency-sensitive input there is: its echo must not
+    // wait a crisp capture round trip any more than a hover does.
+    if (typeof payload.type === 'string' && payload.type.startsWith('input_')) this.openProvisionalWindow();
     this.connection?.send(payload);
+  }
+
+  private openProvisionalWindow(): void {
+    this.provisionalUntil = performance.now() + PROVISIONAL_INPUT_WINDOW_MS;
   }
 
   selectTab(tab: StreamTab): void {
@@ -1556,6 +1561,7 @@ export class AgentBrowserSurfaceController {
       const platform = this.platform;
       const session = this.session;
       if (op && platform.agentBrowserEdit && session) {
+        this.openProvisionalWindow();
         platform.agentBrowserEdit(session, op, this.binaryPath).then((r) => {
           if (!r.ok && r.error) console.warn(`[${this.provider}] ${op} failed:`, r.error);
         }).catch((err) => console.warn(`[${this.provider}] ${op} failed:`, err));

@@ -200,6 +200,55 @@ describe('provisional stream paint', () => {
     expect(createImageBitmap).toHaveBeenCalledTimes(1);
   });
 
+  it('paints the stream frame after keys, pasted text and editing chords, not only after pointer input', async () => {
+    let now = 1000;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserScreenshot' | 'agentBrowserEdit' | 'readClipboardText'>;
+    platform.agentBrowserScreenshot = vi.fn(() => new Promise<never>(() => {}));
+    platform.agentBrowserEdit = vi.fn(async () => ({ ok: true }));
+    platform.readClipboardText = vi.fn(async () => 'pasted');
+    setPlatform(platform);
+    vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 40, height: 30, close: vi.fn() })));
+    const sink = makeSink();
+    sink.canvas.getContext = vi.fn(() => ({ drawImage: vi.fn() })) as unknown as typeof sink.canvas.getContext;
+
+    const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', wsPort: 4321 });
+    controller.attachView(sink);
+    await flushMicrotasks();
+    const frame = async (label: string) => {
+      streamSocket(4321)?.emitMessage(JSON.stringify({ type: 'frame', data: btoa(label) }));
+      await flushMicrotasks();
+    };
+    await frame('first');
+    expect(controller.snapshot().hasFrame).toBe(true);
+    expect(createImageBitmap).toHaveBeenCalledTimes(1);
+
+    // At rest, a changed frame only pulses the crisp loop.
+    now += PROVISIONAL_INPUT_WINDOW_MS + 1;
+    await frame('idle');
+    expect(createImageBitmap).toHaveBeenCalledTimes(1);
+
+    // A keystroke's echo paints straight from the stream.
+    controller.handleKeyDownLike({ key: 'a', code: 'KeyA', ctrlKey: false, metaKey: false, altKey: false, shiftKey: false });
+    await frame('typed');
+    expect(createImageBitmap).toHaveBeenCalledTimes(2);
+
+    // So does a paste, replayed as key input once the clipboard read resolves.
+    now += PROVISIONAL_INPUT_WINDOW_MS + 1;
+    controller.handleKeyDownLike({ key: 'v', code: 'KeyV', ctrlKey: true, metaKey: false, altKey: false, shiftKey: false });
+    await flushMicrotasks();
+    expect(platform.readClipboardText).toHaveBeenCalled();
+    await frame('pasted');
+    expect(createImageBitmap).toHaveBeenCalledTimes(3);
+
+    // And a select-all, which runs through the host rather than the stream.
+    now += PROVISIONAL_INPUT_WINDOW_MS + 1;
+    controller.handleKeyDownLike({ key: 'a', code: 'KeyA', ctrlKey: true, metaKey: false, altKey: false, shiftKey: false });
+    expect(platform.agentBrowserEdit).toHaveBeenCalledWith('sess', 'selectAll', undefined);
+    await frame('selected');
+    expect(createImageBitmap).toHaveBeenCalledTimes(4);
+  });
+
   it('repaints a byte-identical crisp capture over a provisional paint', async () => {
     // A provisional paint puts blurry pixels on the canvas without going through
     // the screenshot loop, so the loop's byte-dedup no longer describes what is on

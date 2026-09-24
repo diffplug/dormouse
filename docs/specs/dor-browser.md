@@ -308,8 +308,8 @@ refreshes only when the driving command completes**
 until `tabs` refreshes, even at the same URL.
 
 **Two-stage paint.** A changed stream JPEG paints at once as a CSS-resolution
-**provisional frame** — the first image, and 250ms after pointer input
-(continuous movement extends the window) — then a crisp device-resolution
+**provisional frame** — the first image, and 250ms after any input: pointer,
+keys, pasted text, editing chords (continuous input extends the window) — then a crisp device-resolution
 `agentBrowserScreenshot` replaces it (rationale):
 
 - **Both paths are latest-only.**

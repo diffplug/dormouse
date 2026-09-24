@@ -24,7 +24,7 @@ export interface ScreenshotLoopDeps {
    *  predates a newer provisional paint is stale and must not overwrite it. */
   getProvisionalGeneration?: () => number;
   /** `performance.now()` timestamp through which provisional stream paints are
-   *  still expected (continued pointer input pushes it out). While it is in the
+   *  still expected (continued input pushes it out). While it is in the
    *  future, a capture is certain to be superseded mid-flight and dropped, so the
    *  loop waits it out and takes one settled shot at the end instead of burning a
    *  host round trip per pulse. Absent ⇒ no window; capture on the pacing rule
@@ -135,7 +135,7 @@ export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
       // A provisional stream frame painted during this capture is visibly newer.
       // Do not let the stale crisp result overwrite it. Mere `dirty` pulses do not
       // suppress drawing — an idle animated page still needs periodic crisp frames
-      // even without pointer input.
+      // even without input.
       const stale = (deps.getProvisionalGeneration?.() ?? 0) !== provisionalAtStart;
       if (res.ok && res.bytes) {
         if (stale) {
@@ -186,7 +186,7 @@ export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
       if (timer === undefined) {
         timer = setTimeout(() => {
           timer = undefined;
-          // Re-enter `schedule`, not `take`: continued pointer input pushes the
+          // Re-enter `schedule`, not `take`: continued input pushes the
           // provisional window past this timer, and re-checking re-arms for the new
           // end instead of spending a shot that window would supersede.
           if (dirty && !inFlight) schedule();
