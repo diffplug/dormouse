@@ -34,6 +34,7 @@ import {
   broadcastUiEvent,
   ensurePeerNet,
   forwardCommand,
+  forwardPush,
   isPeerLinkSettled,
   isRemotePtyHandle,
   onPeerLinkSettled,
@@ -421,14 +422,32 @@ export function deliverUiEvent(payload: unknown): void {
 }
 
 /**
+ * One due alarm push from this window's alert host (`docs/specs/alert.md` ->
+ * Push notifications): sent by this window's service, or handed to the
+ * broker's over the link. Fire and forget, with no answer route: nothing
+ * waits on it. Dropped when there is neither, never queued for a role that
+ * may yet settle, because stale alarms are never retried.
+ */
+export function pushAlert(sessionId: string, title: string): void {
+  if (service) void service.push(sessionId, title);
+  else forwardPush(sessionId, title);
+}
+
+/** Broker side: a push another window's alert host forwarded. Never
+ *  forwarded again. */
+export function handleForwardedPush(sessionId: string, title: string): void {
+  void service?.push(sessionId, title);
+}
+
+/**
  * A window just joined this broker. Hand it the Burrow state its webviews gate
  * themselves on.
  *
  * Without this a window that opened after the enrollment is told nothing:
  * `status` events are emitted on change, and nothing about the Burrow changes
  * because a window connected. Its webviews would sit disarmed — announcing no
- * directory changes, watching for no rings — until the user reloaded the whole
- * window (`lib/src/remote/burrow/enrolled-gate.ts`).
+ * directory changes, seeding no pairing queue — until the user reloaded the
+ * whole window (`lib/src/remote/burrow/enrolled-gate.ts`).
  */
 export function greetPeerWindow(client: PeerLinkClient): void {
   if (!service) return;

@@ -16,6 +16,8 @@ Native path payloads are not URLs: decoding `%20` or trimming edge spaces change
 
 **Why the tokenizer is dialect-free rather than shell-aware.** Matching `shellEscapePosix` exactly keeps POSIX escapes meaning what they meant while leaving a native Windows path with the separators the basename step splits on. The two halves disagreed once, about `~`: a path Dormouse itself had escaped rendered with a stray backslash in the pane header, hence `terminal-state.test.ts` → "command tokenizer dialects" pinning both directions character by character.
 
+**Why a redirection's `&` and a comment are lexed.** bash now reports its whole history line rather than `$BASH_COMMAND`, which strips comments, and WATCHING keys a list's last command, so a redirection's bare `&` and a comment's words decided the key: `make 2>&1 | tee build.log` keyed on `1`, and `claude # fix auth; then deploy` on `deploy` (review, 2026-09-24).
+
 **Why an unquoted Windows path with spaces stays split.** Which token ends the program name is undecidable without asking the filesystem, and the tokenizer has no filesystem.
 
 **What the launcher-suffix rule prevents.** PATHEXT gives one program several spellings (`npm`, `npm.cmd`, `npm.exe`); keying the header, WATCHING rule row, and terminal context on the suffixed name would split one program into two rules and let the three disagree about which is running.

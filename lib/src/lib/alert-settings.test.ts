@@ -47,7 +47,7 @@ describe('normalizeAlertSettings', () => {
   });
 
   it('seeds the inactivity timeout from cfg so cfg.ts stays the shipped default', () => {
-    expect(DEFAULT_ALERT_SETTINGS.inactivityTimeoutMs).toBe(cfg.alert.userAttention);
+    expect(DEFAULT_ALERT_SETTINGS.inactivityTimeoutMs).toBe(cfg.alert.inactivityTimeout);
   });
 
   it('ships animation deferral on', () => {

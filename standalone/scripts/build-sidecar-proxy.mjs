@@ -6,9 +6,8 @@
 //   - lib/src/host/playwright-host.ts     → sidecar/playwright-host.cjs
 //   - lib/src/host/tool-host.ts           → sidecar/tool-host.cjs
 //   - lib/src/host/git-info.ts            → sidecar/git-info.cjs
-//   - lib/src/host/remote/sidecar-entry.ts → sidecar/burrow.cjs
+//   - lib/src/host/remote/sidecar-entry.ts → sidecar/burrow.cjs (the alerts too)
 //   - lib/src/host/recovery.ts             → sidecar/recovery.cjs
-//   - lib/src/host/alert-store-host.ts     → sidecar/alert-store.cjs
 // See docs/specs/dor-browser.md, docs/specs/remote-api.md,
 // docs/specs/standalone.md -> "Agent recovery", and docs/specs/alert.md.
 import { build } from 'esbuild';
@@ -66,7 +65,6 @@ const bundles = [
   { entry: 'tool-host.ts', out: 'tool-host.cjs' },
   { entry: 'git-info.ts', out: 'git-info.cjs' },
   { entry: 'recovery.ts', out: 'recovery.cjs' },
-  { entry: 'alert-store-host.ts', out: 'alert-store.cjs' },
   {
     entry: 'remote/sidecar-entry.ts',
     out: 'burrow.cjs',
@@ -113,8 +111,11 @@ function assertNothingInlined(metafile, outfile, names) {
 
 // `tauri.conf.json`'s `bundle.resources` globs this whole directory, so a
 // pre-rename `remote-host.cjs` left in an older checkout would ship inside the
-// app — a dead Burrow with its own baked connect-src allowlist.
-await rm(path.resolve(sidecar, 'remote-host.cjs'), { force: true });
+// app — a dead Burrow with its own baked connect-src allowlist — and so would
+// an `alert-store.cjs` from before the alerts joined `burrow.cjs`.
+for (const retired of ['remote-host.cjs', 'alert-store.cjs']) {
+  await rm(path.resolve(sidecar, retired), { force: true });
+}
 
 for (const { entry, out, define, assertBaked, external } of bundles) {
   const outfile = path.resolve(sidecar, out);

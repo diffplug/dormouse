@@ -21,6 +21,7 @@ export function stubWallActions(overrides: Partial<WallActions> = {}): WallActio
     onSplitV: vi.fn(),
     onZoom: vi.fn(),
     onClickPanel: vi.fn(),
+    onEnterPanel: vi.fn(),
     onFocusPane: vi.fn(),
     onStartRename: vi.fn(),
     onFinishRename: vi.fn(() => ({ accepted: true })),
@@ -38,6 +39,32 @@ export function ensureResizeObserver(): void {
     unobserve() {}
     disconnect() {}
   } as unknown as typeof ResizeObserver;
+}
+
+/** A dispatchable `PointerEvent`: jsdom has none, so its fields are defined on
+ *  a plain event — a primary touch with one button down unless overridden. */
+export function pointerEvent(type: string, overrides: Partial<PointerEvent> = {}): PointerEvent {
+  const event = new Event(type, { bubbles: true, cancelable: true }) as PointerEvent;
+  const values: Partial<PointerEvent> = {
+    pointerId: 7,
+    pointerType: 'touch',
+    isPrimary: true,
+    button: 0,
+    buttons: type === 'pointerup' || type === 'pointercancel' ? 0 : 1,
+    clientX: 10,
+    clientY: 12,
+    screenX: 110,
+    screenY: 112,
+    ctrlKey: false,
+    shiftKey: false,
+    altKey: false,
+    metaKey: false,
+    ...overrides,
+  };
+  for (const [key, value] of Object.entries(values)) {
+    Object.defineProperty(event, key, { configurable: true, get: () => value });
+  }
+  return event;
 }
 
 /** jsdom lacks the native modal `<dialog>` API that `NativeModalDialog` calls. */

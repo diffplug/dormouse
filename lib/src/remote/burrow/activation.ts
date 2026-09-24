@@ -6,9 +6,10 @@
  * The Burrow itself is a service in the process that owns the PTYs
  * (`lib/src/host/remote/service.ts`) — the Tauri sidecar, the VS Code extension
  * host. This module is its client: it forwards console commands, mirrors the
- * pairing queue, and reports rings. It starts no Burrow, holds no relay socket,
- * and reads no ACL. A host with no service behind it (the website) gets nothing
- * at all, which is why every entry point here tolerates a missing link.
+ * pairing queue, and refreshes the push device list. It starts no Burrow, holds
+ * no relay socket, and reads no ACL. A host with no service behind it (the
+ * website) gets nothing at all, which is why every entry point here tolerates a
+ * missing link.
  *
  * Enroll from the devtools console:
  *
@@ -27,8 +28,7 @@ import type {
 } from '../../host/remote/service-protocol';
 import { getPlatform } from '../../lib/platform';
 import type { BurrowLink } from '../../lib/platform/types';
-import { clearPushDevices, setPushDevicesRefresher } from '../../lib/push-devices';
-import { commitPushDevices, invalidatePushDeviceRefreshes, watchPushRings } from './alert-push';
+import { clearPushDevices, commitPushDevices, setPushDevicesRefresher } from '../../lib/push-devices';
 import { armWhileEnrolled } from './enrolled-gate';
 import {
   enqueuePairingApproval,
@@ -79,11 +79,6 @@ function installBridgeMode(link: BurrowLink): void {
   setPushDevicesRefresher(refresh);
 
   armWhileEnrolled(link, () => {
-    // Rings are detected here — the activity store and the pane labels are
-    // webview state — and delivered there, where the ACL is.
-    const stopRings = watchPushRings((sessionId, title) => {
-      void link.command('push', { sessionId, title }).catch(() => {});
-    });
     refresh();
     // Seeded on every transition to enrolled, not once at install: the service
     // pushes the queue only when it changes, so a webview that joins — or a
@@ -94,13 +89,11 @@ function installBridgeMode(link: BurrowLink): void {
       .then((queue) => mirrorPairingQueue(link, (queue ?? []) as PairingQueueItem[]))
       .catch(() => {});
     return () => {
-      stopRings();
       // The Burrow is gone, so the dialog must stop naming devices nothing can
       // reach — including any list still on the wire, which would otherwise put
       // them back the moment it lands. The refresher stays installed: the dialog
       // may still open on an un-enrolled machine, where asking is one command
       // that answers `no-burrow`.
-      invalidatePushDeviceRefreshes();
       clearPushDevices();
     };
   });

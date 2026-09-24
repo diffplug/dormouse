@@ -34,17 +34,17 @@ Dormouse can owe you attention in three independent ways. Two of them need no se
 
 **A command finishes while you are away.** If a foreground command was running while you were watching, you left, and it exited after you had been gone a while, that pane is ringing when you come back. Also no configuration.
 
-**A watched command goes quiet.** This one is opt-in, and it is the one for coding agents. Right-click the header of a pane running `claude` — or press `a` in command mode — and turn on **Watch all claude commands**; Dormouse then watches *that command name*. Every pane running `claude` is then watched, the ones open now and the ones you open later. When a watched command's output goes busy and then falls quiet while you are not looking, it rings.
+**A watched command goes quiet.** This one is opt-in, and it is the one for coding agents. Right-click the header of a pane running `claude` — or press `a` in command mode — and turn on **Watch all claude commands**; Dormouse then watches *that command name*. Every pane running `claude` is then watched, the ones open now and the ones you open later. For a script runner the rule names the script: **Watch all pnpm dev commands** leaves `pnpm test` alone. When a watched command's output goes busy and then falls quiet while you are not looking, it rings.
 
 Dormouse never guesses which commands deserve an alert. Watching is a rule you create on a command name, and turning it off anywhere removes it everywhere.
 
-A ringing pane is outlined and washed in the alarm color until you attend it, so one glance across a full wall finds it. Attending the pane — or pressing `a` — puts the alarm out.
+A ringing pane is outlined and washed in the alarm color until you answer it, so one glance across a full wall finds it. Clicking or typing into the pane — or pressing `a` — puts the alarm out. Nothing rings while you are working in that pane; if you walk away from it instead, it rings then.
 
-Whichever way a pane rings, the ring becomes a **TODO** — a marker beside the pane's title that outlives the alert, so a ring you dismissed does not disappear without a trace. Clear it by clicking it or pressing `t` in command mode.
+An alarm you look at without typing — a click, `a` — becomes a **TODO**, a marker beside the pane's title, so a ring you dismissed does not disappear without a trace. Typing into the pane deals with it, clearing both. Clear a TODO by typing into the pane, clicking the marker, or pressing `t` in command mode. An alarm nobody looked at comes back after a restart as a TODO.
 
 Spoken alarms use your browser or system voice today. An optional [managed ElevenLabs voice](https://dormouse.sh/hosted/#voice) is coming for people who want something more natural without managing a separate voice account.
 
-Watching a command's output requires shell integration (`OSC 633` / `OSC 133`) so Dormouse can tell where one command ends and the next begins. Shells that do not report command boundaries — `cmd.exe`, `fish`, or any shell where the integration did not take — never engage watching. The protocol and command-exit alerts above work regardless.
+Watching a command's output requires shell integration (`OSC 633` / `OSC 133`) so Dormouse can tell where one command ends and the next begins. Shells that do not report their commands — `cmd.exe`, fish before 4, or any shell where the integration did not take — never engage watching. The protocol and command-exit alerts above work regardless.
 
 ## Browsers for you and your agents
 

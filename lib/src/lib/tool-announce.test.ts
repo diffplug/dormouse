@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { parseToolAnnounce } from './tool-announce';
-import { collectTerminalProtocolAlerts, collectTerminalProtocolResponses, TerminalProtocolParser } from './terminal-protocol';
+import { collectTerminalToolEvents, collectTerminalProtocolResponses, TerminalProtocolParser } from './terminal-protocol';
 import { getToolAnnounce, resetToolAnnounces } from './tool-announce-store';
 import { recordToolEvents } from './tool-events';
-import { applyTerminalProtocolEvents } from './terminal-protocol';
 
 const serve = (payload: unknown) => `serve;${JSON.stringify(payload)}`;
 
@@ -92,13 +91,11 @@ describe('parseToolAnnounce', () => {
 });
 
 describe('OSC 367 at the PTY boundary', () => {
-  const sink = { notifyFromProtocol: () => {}, updateProtocolProgress: () => {} };
-
-  it.each(['live', 'replay', 'forwarded'] as const)('isolates successive commands without losing same-chunk serves (%s)', mode => {
+  // A live or replayed parse records the whole batch; the sidecar forwards its Tool events.
+  it.each(['parsed', 'forwarded'] as const)('isolates successive commands without losing same-chunk serves (%s)', mode => {
     const record = (data: string) => {
       const events = new TerminalProtocolParser().process(data).events;
-      if (mode === 'replay') recordToolEvents('epoch', events);
-      else applyTerminalProtocolEvents(sink, 'epoch', mode === 'forwarded' ? collectTerminalProtocolAlerts(events) : events);
+      recordToolEvents('epoch', mode === 'forwarded' ? collectTerminalToolEvents(events) : events);
     };
     const oldServe = '\x1b]367;serve;{"port":6006,"key":["old"]}\x07';
     const start = '\x1b]633;C\x07';
@@ -115,7 +112,7 @@ describe('OSC 367 at the PTY boundary', () => {
   function feed(id: string, data: string) {
     const parser = new TerminalProtocolParser();
     const result = parser.process(data);
-    applyTerminalProtocolEvents(sink, id, result.events);
+    recordToolEvents(id, result.events);
     return result;
   }
 
@@ -159,7 +156,7 @@ it('consumes chunked OSC 367 and forwards the announcement without a terminal re
   expect(parser.process('before\x1b]367;serve;{"port":').visibleData).toBe('before');
   const parsed = parser.process('6006}\x1b\\after');
   expect(parsed.visibleData).toBe('after');
-  expect(collectTerminalProtocolAlerts(parsed.events)).toEqual([
+  expect(collectTerminalToolEvents(parsed.events)).toEqual([
     { kind: 'toolAnnounce', announce: { port: 6006, name: null, key: null, dehydrate: false, persist: null } },
   ]);
   expect(collectTerminalProtocolResponses(parsed.events)).toEqual([]);

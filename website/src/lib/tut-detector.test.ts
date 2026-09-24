@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_MOUSE_SELECTION_STATE, type MouseSelectionState } from "dormouse-lib/lib/mouse-selection";
 import type { ActivityState } from "dormouse-lib/lib/terminal-registry";
+import { watchRuleFor } from "dormouse-lib/lib/terminal-state";
 import { DESKTOP_SECTIONS } from "./tut-items";
 import { TutDetector } from "./tut-detector";
 import { TutorialState } from "./tutorial-state";
@@ -10,7 +11,7 @@ function activity(
   todo = false,
   watchingEnabled = status !== "WATCHING_DISABLED",
 ): ActivityState {
-  return { status, watchingEnabled, todo, notification: null, awaited: false };
+  return { episode: null, status, watchingEnabled, todo, notification: null, awaited: false };
 }
 
 function makeDetectorHarness(initialActivitySnapshot = new Map<string, ActivityState>()) {
@@ -35,7 +36,7 @@ function makeDetectorHarness(initialActivitySnapshot = new Map<string, ActivityS
         };
       },
       getWatchedCommands: () => watchedCommands,
-      getRunningCommandArgv0: (id) => runningCommands.get(id) ?? null,
+      getRunningCommandWatchRule: (id) => watchRuleFor(new Set(watchedCommands), runningCommands.get(id) ?? null),
       subscribeToWatchedCommands: (listener) => {
         watchedListener = listener;
         return () => {
@@ -180,6 +181,20 @@ describe("TutDetector", () => {
     expect(state.isComplete("al-ring")).toBe(true);
   });
 
+  it("credits al-todo-auto when a dismissed ring leaves a TODO behind", () => {
+    const { state, setActivitySnapshot } = makeDetectorHarness();
+    const watching = { source: "WATCHING", title: "longtask went quiet", body: null } as const;
+
+    setActivitySnapshot(new Map([["pane-a", activity("BUSY")]]));
+    setActivitySnapshot(new Map([["pane-a", { ...activity("ALERT_RINGING"), notification: watching }]]));
+    expect(state.isComplete("al-todo-auto")).toBe(false);
+
+    // The look turns the ring into a TODO carrying its detail: not a hand-added one.
+    setActivitySnapshot(new Map([["pane-a", { ...activity("NOTHING_TO_SHOW", true), notification: watching }]]));
+    expect(state.isComplete("al-todo-auto")).toBe(true);
+    expect(state.isComplete("al-todo-manual")).toBe(false);
+  });
+
   it("credits al-watch-cmd once a rule exists", () => {
     const { state, setWatchedCommands } = makeDetectorHarness();
 
@@ -189,7 +204,8 @@ describe("TutDetector", () => {
   });
 
   it("credits al-spreads only when a second pane lights up from the same rule", async () => {
-    const { state, setActivitySnapshot, setRunningCommand } = makeDetectorHarness();
+    const { state, setActivitySnapshot, setRunningCommand, setWatchedCommands } = makeDetectorHarness();
+    setWatchedCommands(["longtask"]);
     setRunningCommand("pane-a", "longtask");
     setRunningCommand("pane-b", "longtask");
 
@@ -213,8 +229,26 @@ describe("TutDetector", () => {
   });
 
 
+  it("credits al-spreads for two scripts one bare runner rule covers", async () => {
+    const { state, setActivitySnapshot, setRunningCommand, setWatchedCommands } = makeDetectorHarness();
+    setWatchedCommands(["pnpm"]);
+    setRunningCommand("pane-a", "pnpm dev");
+    setRunningCommand("pane-b", "pnpm test");
+    setActivitySnapshot(new Map([
+      ["pane-a", activity("NOTHING_TO_SHOW")],
+      ["pane-b", activity("WATCHING_DISABLED")],
+    ]));
+    setActivitySnapshot(new Map([
+      ["pane-a", activity("NOTHING_TO_SHOW")],
+      ["pane-b", activity("NOTHING_TO_SHOW")],
+    ]));
+    await Promise.resolve();
+    expect(state.isComplete("al-spreads")).toBe(true);
+  });
+
   it("does not credit different watched commands, including a command updated after Activity", async () => {
-    const { state, setActivitySnapshot, setRunningCommand } = makeDetectorHarness();
+    const { state, setActivitySnapshot, setRunningCommand, setWatchedCommands } = makeDetectorHarness();
+    setWatchedCommands(["longtask", "other-task"]);
     setRunningCommand("pane-a", "longtask");
     setRunningCommand("pane-b", "longtask");
     setActivitySnapshot(new Map([
@@ -232,7 +266,8 @@ describe("TutDetector", () => {
   });
 
   it("does not credit a queued spread after disposal", async () => {
-    const { state, detector, setActivitySnapshot, setRunningCommand } = makeDetectorHarness();
+    const { state, detector, setActivitySnapshot, setRunningCommand, setWatchedCommands } = makeDetectorHarness();
+    setWatchedCommands(["longtask"]);
     setRunningCommand("pane-a", "longtask");
     setRunningCommand("pane-b", "longtask");
     setActivitySnapshot(new Map([
@@ -254,18 +289,16 @@ describe("TutDetector", () => {
     setActivitySnapshot(new Map([["pane-a", activity("WATCHING_DISABLED", false, false)]]));
     setActivitySnapshot(new Map([
       ["pane-a", {
-        ...activity("ALERT_RINGING", true, false),
+        ...activity("ALERT_RINGING", false, false),
         notification: { source: "OSC 777", title: "Build finished", body: "3 packages" },
       }],
     ]));
     expect(state.isComplete("al-notif")).toBe(true);
     expect(state.isComplete("al-cmd-exit")).toBe(false);
-    // The ring set TODO itself, so this is not a hand-added one.
-    expect(state.isComplete("al-todo-manual")).toBe(false);
 
     setActivitySnapshot(new Map([
       ["pane-a", {
-        ...activity("ALERT_RINGING", true, false),
+        ...activity("ALERT_RINGING", false, false),
         notification: { source: "COMMAND_EXIT", title: "Command finished", body: "slowbuild exited 0" },
       }],
     ]));

@@ -100,9 +100,14 @@ function requestSidecar(event, data, responseEvent, pick, timeoutMs = 10000) {
   });
 }
 
+/** The one window this harness simulates: its alert viewer id and registry label. */
+const HARNESS_WINDOW = 'main';
+
 const fireAndForget = {
   pty_spawn: ({ id, options }) => writeSidecar('pty:spawn', { id, options }),
-  pty_write: ({ id, data, paced }) => writeSidecar('pty:input', { id, data, paced }),
+  // `userInput` rides the write, as `pty_write` in src-tauri/src/lib.rs carries it.
+  pty_write: ({ id, data, paced, userInput }) =>
+    writeSidecar('pty:input', { id, data, paced, ...(userInput === true ? { userInput: true } : {}) }),
   pty_resize: ({ id, cols, rows }) => writeSidecar('pty:resize', { id, cols, rows }),
   pty_theme_colors: ({ colors }) => writeSidecar('pty:themeColors', colors),
   pty_kill: ({ id }) => writeSidecar('pty:kill', { id }),
@@ -111,10 +116,11 @@ const fireAndForget = {
   // The Burrow's whole bridge rides one passthrough, exactly as it does
   // through Rust (`burrow_command` in src-tauri/src/lib.rs).
   burrow_command: ({ payload }) => writeSidecar('burrow:command', payload),
-  // The app-global alert stores live in the sidecar; their broadcasts come back
-  // over the event stream like every other sidecar line (`alert_command` in
-  // src-tauri/src/lib.rs).
-  alert_command: ({ payload }) => writeSidecar('alert:command', payload),
+  // The app's one AlertManager lives in the sidecar; its answers come back over
+  // the event stream like every other sidecar line. Stamped with the one window
+  // label this harness simulates, as Rust stamps the invoking window's
+  // (`alert_command` in src-tauri/src/lib.rs).
+  alert_command: ({ payload }) => writeSidecar('alert:command', { ...payload, window: HARNESS_WINDOW }),
   kill_sidecar_now: () => shutdown(),
 };
 
@@ -207,7 +213,7 @@ function registrySnapshot() {
     name: entry.name,
     active: Boolean(entry.active),
   }));
-  return { revision: registryRevision, windows: [{ label: 'main', workspaces }] };
+  return { revision: registryRevision, windows: [{ label: HARNESS_WINDOW, workspaces }] };
 }
 
 async function readJson(req) {

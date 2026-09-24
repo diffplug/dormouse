@@ -1,8 +1,4 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-
-vi.mock('../../lib/platform', () => ({
-  getPlatform: () => ({ alertPublishSettings: vi.fn() }),
-}));
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   MAX_PUSH_QUERY_DELIVERY_IDS,
@@ -16,15 +12,15 @@ import {
   type NoiseKeyPair,
   type PushSendRequest,
 } from 'remote-lib-common';
-import { commitPushDevices, invalidatePushDeviceRefreshes, watchPushRings } from './alert-push';
-// Delivery — the Relay calls, the recipient rule, the title bounds — runs in
-// the Burrow's process, so it lives beside neither webview nor sidecar.
 import { loadPushDevices, sendPush, toPushText, type AlertPushDeps } from './push-delivery';
-import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS } from '../../lib/alert-settings';
-import { getPushDevices, resetPushDevices } from '../../lib/push-devices';
-import { clearTerminalActivity, setTerminalActivity } from '../../lib/session-activity-store';
+import { clearPushDevices, commitPushDevices, getPushDevices, resetPushDevices } from '../../lib/push-devices';
 
-const PUSH_DELAY_MS = 20_000;
+/**
+ * The Burrow's Relay calls (`docs/specs/alert.md` -> Push notifications): the
+ * recipient rule, the title bounds, the seal, and the device list the Settings
+ * dialog names. When a push is due is the host's delivery scheduler's, and
+ * swallowing a failed one is `BurrowService.push`'s (`service.test.ts`).
+ */
 
 const ENROLLMENT = { relayUrl: 'https://relay.example', burrowToken: 'burrow-token' };
 
@@ -76,8 +72,8 @@ function aclRecord(deliveryId: string, label: string): BurrowAclRecord {
 
 /**
  * A stand-in for the Burrow's seal: shape-correct, distinct per recipient, and
- * free of WebCrypto, so the ring-delay cases below stay deterministic under
- * fake timers. The real construction is driven with real keys in `sealed push`.
+ * free of WebCrypto, so the cases below mint no keys. The real construction is
+ * driven with real keys in `sealed push`.
  */
 function fakeSeal(): AlertPushDeps['seal'] {
   let n = 0;
@@ -95,11 +91,10 @@ const realSeal: AlertPushDeps['seal'] = (clientStaticPublicKey, plaintext) =>
     plaintext,
   });
 
-/** Requests the sink made, in order. */
+/** Requests made of the Relay, in order. */
 let requests: Array<{ url: string; init?: RequestInit }>;
 let subscribed: string[];
 let records: BurrowAclRecord[];
-let stop: (() => void) | null = null;
 
 function fakeFetch(): typeof globalThis.fetch {
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -130,29 +125,9 @@ function deps(overrides: Partial<AlertPushDeps> = {}): AlertPushDeps {
   };
 }
 
-/**
- * The two shipped halves joined: the webview watches for rings and names the
- * Session (`watchPushRings`, in `activation.ts`), and the Burrow delivers with
- * its own ACL and swallows failures so a dead push never breaks the alert path
- * (`BurrowService.#push`). Wired here because they only meet across a
- * process boundary.
- */
-function startPush(pushDeps: AlertPushDeps): () => void {
-  return watchPushRings((id, title) => {
-    void sendPush(pushDeps, id, title).catch((error: unknown) => {
-      console.warn('burrow: push notification failed', error);
-    });
-  });
-}
-
 /** As the settings dialog asks for it, over the bridge (`activation.ts`). */
 function refreshPushDevices(pushDeps: AlertPushDeps): Promise<void> {
   return commitPushDevices(() => loadPushDevices(pushDeps));
-}
-
-function ring(id: string): void {
-  setTerminalActivity(id, { status: 'NOTHING_TO_SHOW' });
-  setTerminalActivity(id, { status: 'ALERT_RINGING' });
 }
 
 /** The body of the last `push/send` request, parsed. */
@@ -167,26 +142,14 @@ function lastRecipients(): string[] {
 }
 
 beforeEach(() => {
-  vi.useFakeTimers();
   requests = [];
   subscribed = [PHONE];
   records = [aclRecord(PHONE, 'iPhone Safari')];
-  clearTerminalActivity();
   resetPushDevices();
-  applyAlertSettingsFromHost({
-    ...DEFAULT_ALERT_SETTINGS,
-    pushEnabled: true,
-    pushDelayMs: PUSH_DELAY_MS,
-  });
 });
 
 afterEach(() => {
-  stop?.();
-  stop = null;
-  clearTerminalActivity();
   resetPushDevices();
-  applyAlertSettingsFromHost(DEFAULT_ALERT_SETTINGS);
-  vi.useRealTimers();
 });
 
 /**
@@ -237,15 +200,9 @@ describe('toPushText', () => {
   });
 });
 
-describe('alarm push', () => {
-  it('sends the pane label after the delay, tagged per Session', async () => {
-    stop = startPush(deps());
-    ring('pty-1');
-
-    await vi.advanceTimersByTimeAsync(PUSH_DELAY_MS - 1);
-    expect(lastSend()).toBeNull();
-
-    await vi.advanceTimersByTimeAsync(1);
+describe('sendPush', () => {
+  it('sends the label sealed, tagged per Session', async () => {
+    await sendPush(deps(), 'pty-1', 'terminal');
     expect(lastRecipients()).toEqual([PHONE]);
     // The label and the collapse tag are sealed, so nothing readable rides on
     // the request the Relay sees.
@@ -254,38 +211,13 @@ describe('alarm push', () => {
     expect(body).not.toContain('pty-1');
   });
 
-  it('sends nothing while pushEnabled is off', async () => {
-    applyAlertSettingsFromHost({ ...DEFAULT_ALERT_SETTINGS, pushEnabled: false });
-    stop = startPush(deps());
-    ring('pty-1');
-
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(lastSend()).toBeNull();
-  });
-
-  it('uses pushDelayMs as the delay', async () => {
-    applyAlertSettingsFromHost({
-      ...DEFAULT_ALERT_SETTINGS,
-      pushEnabled: true,
-      pushDelayMs: 5_000,
-    });
-    stop = startPush(deps());
-    ring('pty-1');
-
-    await vi.advanceTimersByTimeAsync(5_000);
-    expect(lastSend()).not.toBeNull();
-  });
-
-  it('names only devices still active in the ACL', async () => {
+  it('names only devices still active in the ACL when it sends', async () => {
     // The Relay still holds a subscription for a revoked client — nothing
     // propagates a revocation — so the Burrow must not address it. It stays out
-    // of the request because the ACL, not the Relay's list, chooses targets.
+    // of the request because the ACL, read at the send, chooses targets.
     subscribed = [PHONE, REVOKED];
     records = [aclRecord(PHONE, 'iPhone Safari')];
-    stop = startPush(deps());
-    ring('pty-1');
-
-    await vi.advanceTimersByTimeAsync(PUSH_DELAY_MS);
+    await sendPush(deps(), 'pty-1', 'terminal');
     expect(lastRecipients()).toEqual([PHONE]);
   });
 
@@ -293,10 +225,7 @@ describe('alarm push', () => {
     // The ACL is local, and the Relay intersects the names it is given with
     // its own subscriptions anyway — so asking it first would only add a round
     // trip to the one path whose whole value is timeliness.
-    stop = startPush(deps());
-    ring('pty-1');
-
-    await vi.advanceTimersByTimeAsync(PUSH_DELAY_MS);
+    await sendPush(deps(), 'pty-1', 'terminal');
     expect(requests).toHaveLength(1);
     expect(requests[0]!.url).toContain('/api/push/send');
   });
@@ -314,69 +243,36 @@ describe('alarm push', () => {
     // The send route answers 200 with counts even when every delivery failed —
     // a rotated VAPID key or a wedged push service must not be silent.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    stop = startPush(
-      deps({
-        fetch: (async () => ({
-          ok: true,
-          json: async () => ({ delivered: 0, expired: 0, unknown: 0, failed: 1 }),
-        })) as unknown as typeof globalThis.fetch,
-      }),
-    );
-    ring('pty-1');
-
-    await vi.advanceTimersByTimeAsync(PUSH_DELAY_MS);
+    const summary = await sendPush(deps({
+      fetch: (async () => ({
+        ok: true,
+        json: async () => ({ delivered: 0, expired: 0, unknown: 0, failed: 1 }),
+      })) as unknown as typeof globalThis.fetch,
+    }), 'pty-1', 'terminal');
+    expect(summary).toEqual({ targeted: 1, delivered: 0, failed: 1 });
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });
 
-  it('warns rather than failing silently when the Relay rejects the send', async () => {
-    // A 401 from a revoked burrow token would otherwise resolve normally and
-    // leave push permanently broken with nothing in the console.
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    stop = startPush(
-      deps({
-        fetch: (async () => ({ ok: false, status: 401 })) as unknown as typeof globalThis.fetch,
-      }),
-    );
-    ring('pty-1');
+  it('rejects when the Relay refuses the send', async () => {
+    // A 401 from a revoked burrow token must not resolve as if it were sent.
+    await expect(sendPush(deps({
+      fetch: (async () => ({ ok: false, status: 401 })) as unknown as typeof globalThis.fetch,
+    }), 'pty-1', 'terminal')).rejects.toThrow();
+  });
 
-    await vi.advanceTimersByTimeAsync(PUSH_DELAY_MS);
-    expect(warn).toHaveBeenCalled();
-    warn.mockRestore();
+  it('rejects when the Relay cannot be reached', async () => {
+    await expect(sendPush(deps({
+      fetch: (async () => {
+        throw new Error('network down');
+      }) as unknown as typeof globalThis.fetch,
+    }), 'pty-1', 'terminal')).rejects.toThrow('network down');
   });
 
   it('sends nothing when no subscribed device is still authorized', async () => {
     records = [];
-    stop = startPush(deps());
-    ring('pty-1');
-
-    await vi.advanceTimersByTimeAsync(PUSH_DELAY_MS);
+    expect(await sendPush(deps(), 'pty-1', 'terminal')).toEqual({ targeted: 0, delivered: 0, failed: 0 });
     expect(lastSend()).toBeNull();
-  });
-
-  it('re-reads the target list at send time, not at schedule time', async () => {
-    stop = startPush(deps());
-    ring('pty-1');
-    // Revoked during the delay.
-    records = [];
-
-    await vi.advanceTimersByTimeAsync(PUSH_DELAY_MS);
-    expect(lastSend()).toBeNull();
-  });
-
-  it('survives a Relay that cannot be reached', async () => {
-    const failing = deps({
-      fetch: (async () => {
-        throw new Error('network down');
-      }) as unknown as typeof globalThis.fetch,
-    });
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    stop = startPush(failing);
-    ring('pty-1');
-
-    await expect(vi.advanceTimersByTimeAsync(60_000)).resolves.not.toThrow();
-    expect(warn).toHaveBeenCalled();
-    warn.mockRestore();
   });
 });
 
@@ -522,9 +418,9 @@ describe('push device list', () => {
   });
 
   it('discards a refresh that lands after the Burrow went away', async () => {
-    // The enrolled gate disarms on `clearEnrollment` and resets the store to
-    // `no-burrow`. A request already on the wire resolves afterwards and would
-    // otherwise repopulate the dialog with phones there is nothing to push to.
+    // The enrolled gate disarms on `clearEnrollment` with one clear. A request
+    // already on the wire resolves afterwards and would otherwise repopulate
+    // the dialog with phones there is nothing to push to.
     let land: (response: Response) => void = () => {};
     const inFlight = refreshPushDevices(
       deps({
@@ -535,8 +431,7 @@ describe('push device list', () => {
       }),
     );
 
-    invalidatePushDeviceRefreshes();
-    resetPushDevices();
+    clearPushDevices();
 
     land({
       ok: true,

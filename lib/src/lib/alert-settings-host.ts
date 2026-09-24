@@ -13,8 +13,8 @@ export type AlertSettingsTarget = Pick<AlertManager, 'applySettings'>;
  * The first renderer seeds persisted settings after a fresh host start; later
  * renderers receive that canonical state instead of replacing it.
  *
- * `AlertManager.applySettings` takes the host-owned fields. Renderer-only sink
- * fields are held so every webview reads back the same values
+ * `AlertManager.applySettings` takes the detection fields; the sink fields are
+ * the delivery scheduler's defaults, handed over by `createAlertHost`
  * (`docs/specs/alert.md` -> Alarm settings).
  */
 export class AlertSettingsHost {
@@ -54,7 +54,11 @@ export class AlertSettingsHost {
     this.target.applySettings(this.settings);
   }
 
-  private publish(): void {
-    for (const listener of this.listeners) listener(this.settings);
+  /** The canonical blob to every subscriber, or to `to` alone, once there is
+   *  one: a snapshot sent before any renderer seeded would replace their
+   *  persisted settings. */
+  publish(to?: (settings: AlertSettings) => void): void {
+    if (!this.initialized) return;
+    for (const listener of to ? [to] : this.listeners) listener(this.settings);
   }
 }

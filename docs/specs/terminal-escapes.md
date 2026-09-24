@@ -18,35 +18,35 @@
 
 ## Parsing location
 
-State-driving and security-sensitive OSCs — plus the `CSI > q` query — are parsed by the process that owns the PTY: **one parser per PTY generation, fed from spawn, never one per consumer**, because **a second over the same bytes answers every query twice and writes the duplicate into the PTY's input**. One site per host — the VS Code extension host (`ptyManager.addCallbacks`), the standalone sidecar (`main.js`'s `pty-core` tap) — each ahead of `pty:data`; the fake adapter is the same rule with the owner in the browser.
+State-driving and security-sensitive OSCs — plus the `CSI > q` query — are parsed by the process that owns the PTY: **one parser per PTY generation, fed from spawn, never one per consumer**, because **a second over the same bytes answers every query twice and writes the duplicate into the PTY's input**. One site per host, the same `createOwnerPtyStream` in both — the VS Code extension host and the standalone sidecar — each ahead of `pty:data`; the fake adapter is the same rule with the owner in the browser.
 
 **Must buffer an unterminated consumed OSC up to `OSC_INCOMPLETE_LIMIT` (16,384 UTF-16 code units), then discard through its terminator or cancellation**, retaining only a split `ESC`, never promoting payload to text or its terminating BEL to an alert (rationale). A complete sequence in a single read is parsed whole. Pinned by `discards an oversized consumed OSC through its %j terminator` in `lib/src/lib/terminal-protocol.test.ts`. **An unterminated OSC the parser will forward streams to xterm.js instead**, preserving a split `ESC \` terminator (rationale). **Route by the OSC id, and decide nothing while more digits could follow** — `133` becomes `1337` — for `1337` by the subcommand ([Inline graphics](#inline-graphics)).
 
-**Every semantic value `TerminalProtocolParser` *retains* is bounded and stripped of control characters before storage**, whatever the emitter: `TITLE_LIMIT` / `BODY_LIMIT` for titles and notification bodies, whose whitespace controls collapse to spaces before the trim; `COMMAND_LINE_LIMIT` for the OSC 633 `E` command line, bounded *before* the `\xNN` unescape and sanitized *after* it (rationale); `MAX_CWD_LENGTH` for every CWD source, interior whitespace preserved. **Every limit counts code points**, so a cut never splits a surrogate pair. **A value that reduces to nothing is dropped, never stored empty.**
+**Every semantic value `TerminalProtocolParser` *retains* is bounded and stripped of control characters before storage**, whatever the emitter: `TITLE_LIMIT` / `BODY_LIMIT` for titles and notification bodies, whose whitespace controls collapse to spaces before the trim; `COMMAND_LINE_LIMIT` for the command line (`OSC 633 ; E`, `OSC 133 ; C`), bounded *before* its decoding and sanitized *after* it (rationale), **line breaks kept as `\n`**; `MAX_CWD_LENGTH` for every CWD source, interior whitespace preserved. **Every limit counts code points**, so a cut never splits a surrogate pair. **A value that reduces to nothing is dropped, never stored empty.**
 
-**The owner alone acts on the events** its parse produced — writing the responses, recording the semantic state — and hands every consumer the same chunk ([remote-api.md](remote-api.md#terminal-surfaces)).
+**The owner alone acts on the events** its parse produced — writing the responses, feeding its `AlertManager`, forwarding the semantic and Tool events to the owning renderer — and hands every consumer the same chunk ([remote-api.md](remote-api.md#terminal-surfaces)).
 
 **A sink that subscribes inside a forwarded string control starts at the next ground byte**, a cancel releasing it as surely as a terminator (rationale); only a late attachment is ever held, the owner's renderer being there from spawn.
 
 **The owner splits a PTY read above `MAX_PARSER_INPUT_CHARS` (64 Ki UTF-16 code units) before parsing it, and never through a surrogate pair**, so **both** projections — one message, not two — fit the 1 MiB application-message cap after base64url and JSON framing (rationale; [remote-api.md](remote-api.md)).
 
-Source of truth: `oscDispositionAt` in `lib/src/lib/terminal-protocol.ts`, `boundedCwdValue` in `lib/src/lib/terminal-state.ts`, `createProcessedPtyStream` in `lib/src/lib/processed-pty-stream.ts`, `lib/src/host/remote/sidecar-entry.ts`.
+Source of truth: `oscDispositionAt` in `lib/src/lib/terminal-protocol.ts`, `boundedCwdValue` in `lib/src/lib/terminal-state.ts`, `createProcessedPtyStream` in `lib/src/lib/processed-pty-stream.ts`, `createOwnerPtyStream` in `lib/src/host/owner-pty.ts`.
 
 ### `pty:data` strip semantics
 
 **Supported semantic sequences are consumed and never re-emitted** — empty or unparseable payloads, unrecognized `OSC 1337` subcommands and `OSC 50` / `OSC 52` included. **`OSC 8` and the recognized ImageAddon `OSC 1337` forms are the exceptions**: they stay in `pty:data` so xterm.js owns hyperlink regions and inline graphics. Dormouse supplies only the hyperlink activation-confirmation handler. Every other OSC family passes through unchanged, so xterm.js handles standard behavior Dormouse does not model.
 
-**`textData` is the same chunk with every string-control payload removed**, for consumers reading output as text; every other control is left for `stripTerminalControls`. The webview receives them apart: `pty:data` (the stripped output; feeds xterm.js) and `terminal:semanticEvents` (normalized CWD / prompt-command / title events; feeds `TerminalPaneState`, command boundaries also feeding the command-exit alert track in [alert.md](alert.md#command-exit-track)). **Notification-derived state never travels as `pty:data`**: it reaches whichever process holds the `AlertManager` — direct calls in VS Code, `terminal:protocolEvents` in standalone.
+**`textData` is the same chunk with every string-control payload removed**, for consumers reading output as text; every other control is left for `stripTerminalControls`. The webview receives them apart: `pty:data` (the stripped output; feeds xterm.js), `terminal:semanticEvents` (normalized CWD / prompt-command / title events; feeds `TerminalPaneState`), and `terminal:toolEvents` (OSC 367, [dor-tool.md](dor-tool.md#osc-367)). **Notification-derived state never travels as `pty:data`**: the parse site feeds its own process's `AlertManager`.
 
 Each chunk is also classified for the quiesce detector: **the activity monitor's `onData()` fires only when `visibleData` is non-empty**, so a chunk of nothing but notification/progress OSCs is not meaningful output, while one carrying visible output alongside them is.
 
-Replay (`pty:replay`) is the raw stream requiring re-parse: **the webview runs a one-shot parser over the buffered bytes**, so semantic state repopulates and OSCs are stripped before xterm sees them. **Historical replay must not re-fire** alerts, quiesce events, protocol notifications, or query responses — it applies the semantic events and drops the rest (rationale). Live since-mark alert replay follows `docs/specs/alert.md` → Live Workspace transfer. **Every parser in a realm holding the theme takes `themeColorProvider`**, one-shot replay parsers included: a *declined* query stays in `visibleData` for the receiving renderer to answer, and answering is the owner's alone (rationale).
+Replay (`pty:replay`) is the raw stream requiring re-parse: **the webview runs a one-shot parser over the buffered bytes** (`parseReplay` in `lib/src/lib/platform/replay-parse.ts`), so semantic state repopulates and OSCs are stripped before xterm sees them. **Historical replay must not re-fire** alerts, quiesce events, protocol notifications, or query responses — it applies the semantic and Tool events and drops the rest (rationale). **Every parser in a realm holding the theme takes `themeColorProvider`**, one-shot replay parsers included: a *declined* query stays in `visibleData` for the receiving renderer to answer, and answering is the owner's alone (rationale).
 
 ## Supported OSCs
 
 | Sequence | Purpose | Spec |
 |---|---|---|
-| `BEL` (standalone, outside an OSC) | Generic terminal-bell notification | [alert.md](alert.md#terminal-reports) |
+| `BEL` (standalone, outside an OSC) | Generic terminal-bell notification, collapsed per batch | [alert.md](alert.md#terminal-reports) |
 | `OSC 0 ; <title> ST` | Window/icon title | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 2 ; <title> ST` | Window title | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 7 ; file://host/path ST` | CWD (xterm-style URI) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
@@ -55,8 +55,9 @@ Replay (`pty:replay`) is the raw stream requiring re-parse: **the webview runs a
 | `OSC 9 ; <message> ST` | iTerm2 legacy notification | [alert.md](alert.md#terminal-reports) |
 | `OSC 9 ; 4 ; <state> [; <progress>] ST` | iTerm2 progress | [alert.md](alert.md#terminal-reports) |
 | `OSC 9 ; 9 ; <cwd> ST` | CWD (Windows Terminal / ConEmu) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
+| `OSC 9 ; <n> [; ...] ST` | Any other ConEmu subcommand — sleep, tab title, GuiMacro, the `9;12` prompt mark, a bare `9;9`; consumed and ignored | [alert.md](alert.md#terminal-reports) |
 | `OSC 99 ; <metadata> ; <payload> ST` | kitty desktop notification. Dormouse also **answers** the `p=?` capability query with `OSC 99 ; [i=<id>:]p=? ; o=always:p=title,body ST`. | [alert.md](alert.md#terminal-reports) |
-| `OSC 133 ; A/B/C/D [...] ST` | Prompt/command boundaries; command-exit alert input | [terminal-state.md](terminal-state.md#supported-osc-inputs), [alert.md](alert.md#command-exit-track) |
+| `OSC 133 ; A/B/C/D [...] ST` | Prompt/command boundaries, `C` optionally carrying the command line (`cmdline_url=` / `cmdline=`); command-exit alert input | [terminal-state.md](terminal-state.md#supported-osc-inputs), [alert.md](alert.md#command-exit-track) |
 | `OSC 633 ; A/B/C/D ST` | VS Code prompt/command boundaries; command-exit alert input | [terminal-state.md](terminal-state.md#supported-osc-inputs), [alert.md](alert.md#command-exit-track) |
 | `OSC 633 ; E ; <commandline> [; <nonce>] ST` | VS Code command line | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 633 ; P ; Cwd=<cwd> ST` | CWD (VS Code) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
@@ -101,8 +102,9 @@ Source of truth: `normalizeExternalUri` in `lib/src/lib/external-links.ts` (pinn
 |---|---|---|---|
 | `CSI > q` | iTerm2 extended device-attributes query | Answered `DCS > \| iTerm2 <version> ST` at the PTY boundary and stripped, never forwarded to xterm.js. Both `ESC [ > q` and the C1 `U+009B > q` are recognized, **in ground text only** (rationale). | [iTerm2 identity](#iterm2-identity) |
 | `CSI ? ... h` (DECSET) / `CSI ? ... l` (DECRST) | Private-mode set/reset, including mouse tracking and bracketed paste | Observed via xterm.js parser hooks returning false, so xterm still handles the sequence; the mouse-selection store reads `terminal.modes` in a microtask. | [mouse-and-clipboard.md](mouse-and-clipboard.md), `lib/src/lib/mouse-mode-observer.ts` |
-| Kitty keyboard protocol | Disambiguated key-event reporting (CSI u with modifiers, e.g. Shift+Enter distinguishable from Enter) | Enabled by `vtExtensions: { kittyKeyboard: true }` on the xterm.js `Terminal` constructor; xterm.js handles the push/pop (`CSI > u` / `CSI < u`) and the modified key reports. | `lib/src/lib/terminal-lifecycle.ts` |
+| Kitty keyboard protocol | Disambiguated key-event reporting (CSI u with modifiers, e.g. Shift+Enter distinguishable from Enter) | Enabled by `vtExtensions: { kittyKeyboard: true }` on the xterm.js `Terminal` constructor; xterm.js handles the push/pop (`CSI > u` / `CSI < u`) and the modified key reports. | `xtermVtExtensions` in `lib/src/lib/xterm-options.ts` |
 | `CSI ? 9001 h/l` (win32-input-mode) | Faithful Win32 `INPUT_RECORD` key reporting for ConPTY apps reading via the Console API — Codex on Windows, which cannot negotiate the kitty protocol there (rationale) | Advertised **only on Windows** (`vtExtensions: { win32InputMode: IS_WINDOWS }`); xterm.js then emits `CSI Vk;Sc;Uc;Kd;Cs;Rc _` key records. **Mutually exclusive with the kitty protocol**, so a per-pane arbiter watches `CSI > … u` / `CSI < … u` — counting nested pushes, honoring the pop count — and toggles the option off while any kitty consumer is on the stack (rationale). | `lib/src/lib/keyboard-protocol-arbiter.ts` |
+| `CSI ? 996 n` / `CSI ? 2031 h/l` | Color-scheme query; change reports on/off | Answered by the owner's xterm.js (`colorSchemeQuery`): `CSI ? 997 ; 1 n` dark, `; 2 n` light, unsolicited on a theme change while 2031 is set — a [terminal reply](#report-filtering-on-the-input-side). Pinned by `lib/src/lib/terminal-color-scheme.test.ts`, the reply's filtering by `color-scheme report` in `lib/src/lib/terminal-registry.alert.test.ts`. | `xtermVtExtensions` in `lib/src/lib/xterm-options.ts` |
 | `CSI c` | Primary device-attributes query | The owner's ImageAddon answers `CSI ? 62 ; 4 ; 9 ; 22 c`, advertising SIXEL. | [Inline graphics](#inline-graphics) |
 | `CSI 14 t` / `CSI 16 t` / `CSI 18 t` | Window-pixel, cell-pixel, and window-character size queries | Enabled and answered by the owner's xterm.js for image preparation. | [Inline graphics](#inline-graphics) |
 | `CSI ? 80 h/l` | SIXEL scrolling off/on | Observed by ImageAddon; xterm.js continues handling the private mode. | [Inline graphics](#inline-graphics) |
@@ -126,9 +128,9 @@ Source of truth: `getWebviewHtml` in `vscode-ext/src/webview-html.ts`, `app.secu
 
 `onData` includes xterm.js *replies*. **Both classifiers require every chunk token to match**, so a report glued onto real keystrokes is never mistaken for one.
 
-- **`inputIsReplayTerminalReport`** — dropped outright while `isReplaying` (rationale). Shapes: cursor-position / device-status (`CSI [?]<params> R` / `n`), device attributes (`CSI [?>=]<params> c`), window-manipulation reports (`CSI <params> t` / `x`), DECRQSS and XTSMGRAPHICS reports (`CSI [?]<params> $y` and `CSI ? <params> S`), focus in/out (`CSI I` / `CSI O`), kitty keyboard-query replies (`CSI ? <flags> u`), and OSC, DCS, or APC replies of any shape. Also gates recording, attention ([alert.md](alert.md)), and untouched state ([layout.md](layout.md)).
+- **`inputIsReplayTerminalReport`** — dropped outright while `isReplaying` (rationale). Shapes: cursor-position / device-status (`CSI [?]<params> R` / `n`), device attributes (`CSI [?>=]<params> c`), window-manipulation reports (`CSI <params> t` / `x`), DECRQSS and XTSMGRAPHICS reports (`CSI [?]<params> $y` and `CSI ? <params> S`), focus in/out (`CSI I` / `CSI O`), kitty keyboard-query replies (`CSI ? <flags> u`), and OSC, DCS, or APC replies of any shape. Also gates recording, acknowledgement ([alert.md](alert.md)), and untouched state ([layout.md](layout.md)).
 - **`inputIsSyntheticTerminalReport`** — the broader prompt-recording guard (any chunk built only of CSI, SS3 `ESC O <final>`, OSC, or APC tokens). **Never dropped, and must suppress input recording alone** — these sequences can encode real keys.
-- **`stripMouseReportsFromInput`** — removes X10 (`CSI M <3 bytes>`), SGR (`CSI < b;x;y M/m`) and urxvt (`CSI b;x;y M`) mouse reports during mouse-mode override, so reports bypassing DOM interception never reach the PTY ([mouse-and-clipboard.md](mouse-and-clipboard.md)). Keyboard-attention gating: `docs/specs/alert.md` → Attention.
+- **`stripMouseReportsFromInput`** — removes X10 (`CSI M <3 bytes>`), SGR (`CSI < b;x;y M/m`) and urxvt (`CSI b;x;y M`) mouse reports during mouse-mode override, so reports bypassing DOM interception never reach the PTY ([mouse-and-clipboard.md](mouse-and-clipboard.md)). Acknowledgement gating: `docs/specs/alert.md` → Engagement.
 
 **No filter may swallow user keyboard escape sequences** — arrows, function keys, bracketed paste, kitty modified-key reports, win32-input-mode key records (`CSI …_`). Source of truth: `lib/src/lib/terminal-report-filter.ts`.
 
@@ -146,7 +148,7 @@ Unknown CSI sequences pass through to xterm.js, like unknown OSC families, and *
 
 ## iTerm2 identity
 
-Dormouse reports an iTerm2-compatible identity to unlock the iTerm2-style escape codes this spec set supports (rationale). **One compatibility version spans env and device responses**: `ITERM2_COMPAT_VERSION`, currently `3.5.0`, defined twice — in `standalone/sidecar/pty-core.js` and `lib/src/lib/terminal-protocol.ts` — pinned together by `lib/src/lib/mirrored-constants.test.ts`.
+Dormouse reports an iTerm2-compatible identity to unlock the iTerm2-style escape codes this spec set supports (rationale). **One compatibility version spans env and device responses**: `ITERM2_COMPAT_VERSION`, currently `3.6.6`, defined twice — in `standalone/sidecar/pty-core.js` and `lib/src/lib/terminal-protocol.ts` — pinned together by `lib/src/lib/mirrored-constants.test.ts`.
 
 Environment for spawned PTYs:
 
@@ -158,7 +160,9 @@ Environment for spawned PTYs:
 | `LC_TERMINAL_VERSION` | the same compatibility version |
 | `COLORTERM` | `truecolor` — a color-*depth* signal, **independent** of the light/dark *background* detection the OSC color queries above drive, and not iTerm2-specific (rationale) |
 
-**Never advertise** feature-specific support before the behavior exists; the device answer's shape is in [Supported CSI](#supported-csi).
+**Must advertise the lowest iTerm2 version that unlocks every version-gated behavior Dormouse supports** — today Claude Code's `OSC 9;4` progress, gated at 3.6.6 — **and never a version adding sequences that programs would then send and Dormouse mishandles** (rationale). **Never advertise** feature-specific support before the behavior exists; the device answer's shape is in [Supported CSI](#supported-csi).
+
+**Must strip another terminal's identity from the inherited environment before setting Dormouse's** — its session, version, and multiplexer variables — so a tool never drives a terminal that is not there (rationale). Source of truth: `FOREIGN_TERMINAL_ENV` in `standalone/sidecar/pty-core.js`, pinned by `standalone/sidecar/pty-core.test.js`.
 
 The identity provokes more iTerm2 escape codes than Dormouse implements, so **unsupported escape codes must fail inertly** — consumed or ignored, with no visible terminal garbage, privilege escalation, clipboard access, file access, or focus stealing; OSC and CSI alike ([Pass-through and fail-inertly](#pass-through-and-fail-inertly)).
 
@@ -171,7 +175,7 @@ The identity provokes more iTerm2 escape codes than Dormouse implements, so **un
 | Shell | Mechanism | Channel | Notes |
 |---|---|---|---|
 | zsh | `ZDOTDIR` → our dotfiles chain to the user's, then install `precmd`/`preexec` hooks | env (as reliable as the `PATH` prepend) | **Nothing may be written into our directory when shipped** — signed macOS app bundle (rationale). **A `HISTFILE` set inside it is redirected to `USER_ZDOTDIR`**; a user-set one is never touched. |
-| bash | `--init-file` → our script installs a `DEBUG`-trap / `PROMPT_COMMAND` hook | shellArgs | **Injected only when the launch args are *purely* interactive/login flags** (`-i`/`-l`/`--login`), so Git Bash's `--login -i` is covered and a specific `-c <cmd>` is not (rationale). **The whole argv is replaced with `--init-file <script>`** — `-l` and `-i` go with it, and the script replicates login startup itself. **`E` is a pipeline's first simple command**; boundaries and exit codes stay exact. |
+| bash | `--init-file` → our script installs a `DEBUG`-trap / `PROMPT_COMMAND` hook | shellArgs | **Injected only when the launch args are *purely* interactive/login flags** (`-i`/`-l`/`--login`), so Git Bash's `--login -i` is covered and a specific `-c <cmd>` is not (rationale). **The whole argv is replaced with `--init-file <script>`** — `-l` and `-i` go with it, and the script replicates login startup itself. **`E` is the submitted line, read back from history only when the last entry provably is it**, else its first simple command, `$BASH_COMMAND` (rationale). **From bash 4.0 a `bind -x` key is no command**; on 3.2 it still is (rationale). Boundaries and exit codes stay exact. |
 | PowerShell | dot-source a script that wraps the user's `prompt` and PSReadLine's `PSConsoleHostReadLine`; covers `pwsh` and `powershell.exe` | shellArgs | Injected for any **interactive** launch — a bare REPL gets `-NoExit -Command ". '<script>'"`, one already carrying a startup command gets our dot-source *appended* (rationale); non-interactive one-offs (`-Command`/`-File`/`-EncodedCommand` without `-NoExit`) are left untouched. **`-NoProfile` is never passed.** **Without PSReadLine the whole triple falls back to the next prompt**, boundaries and exit codes still exact (rationale). |
 | WSL | `wsl.exe -d <distro> -- sh -c <detector>` → the detector execs the distro's bash with our `--init-file`, referenced via its `/mnt/...` path | shellArgs (Windows-side injection cannot reach inside the distro) | **Injected only for the exact two-argument `-d <distro>` launch** the shell picker emits. The detector reads `/etc/passwd` and prefers bash, stepping aside only for an explicitly configured zsh or fish login shell (rationale). **bash is the only integrated WSL shell**; assumes the default `/mnt` automount root. |
 | cmd.exe | no per-command hook exists | — | Never gets real OSC 633; always uses the keystroke fallback below. |
@@ -183,7 +187,7 @@ Wired in `applyShellIntegration`, called from `resolveSpawnConfig` (`standalone/
 - **`E` (command line)** is escaped by `__dormouse_633_escape`: BEL, ESC and the C1 ST alongside `\`, `;`, LF and CR. The parser decodes `\xNN` back, so it still reports verbatim.
 - **`Cwd=`** is read verbatim, no `\xNN` decoding, so a Windows path's backslashes arrive intact — `__dormouse_633_safe_cwd` therefore *removes* control characters instead of escaping them, preserving backslashes and semicolons. **Under `LC_ALL=C` the scripts strip the C1 ST explicitly first**, `[[:cntrl:]]` not matching its two ordinary bytes.
 
-Source of truth: `__dormouse_633_escape` and `__dormouse_633_safe_cwd` in each of `standalone/sidecar/shell-integration/bash/shellIntegration.bash`, `standalone/sidecar/shell-integration/zsh/.zshrc`, `standalone/sidecar/shell-integration/pwsh/shellIntegration.ps1`; pinned by `standalone/sidecar/shell-integration.test.js`, which spawns real bash and zsh rather than mocking them, hard-fails if bash is absent, and names any uncovered shell out loud.
+Source of truth: `__dormouse_633_escape` and `__dormouse_633_safe_cwd` in each of `standalone/sidecar/shell-integration/bash/shellIntegration.bash`, `standalone/sidecar/shell-integration/zsh/.zshrc`, `standalone/sidecar/shell-integration/pwsh/shellIntegration.ps1`, and bash's `E` in `__dormouse_633_command_line`; pinned by `standalone/sidecar/shell-integration.test.js`, which spawns real bash and zsh rather than mocking them, hard-fails if bash is absent, and names any uncovered shell out loud.
 
 ### Keystroke fallback
 
@@ -206,4 +210,4 @@ Two escape-aware consumers are **not** parse sites: `lib/src/lib/terminal-contro
 
 ## Future
 
-- **fish shell integration** — inject via `XDG_DATA_DIRS`: fish auto-sources `*/fish/vendor_conf.d/*.fish`, so the integration ships as a vendor conf file (env channel, as reliable as the `PATH` prepend). Until it lands, fish panes use the keystroke fallback above.
+- **fish shell integration** — inject via `XDG_DATA_DIRS`: fish auto-sources `*/fish/vendor_conf.d/*.fish`, so the integration ships as a vendor conf file (env channel, as reliable as the `PATH` prepend). Until it lands, fish ≥ 4 reports `OSC 133` itself, command line included, and older fish uses the keystroke fallback above.

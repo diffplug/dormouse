@@ -1,95 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@xterm/addon-fit', () => {
-  class FitAddon {
-    fit(): void {}
-
-    proposeDimensions(): { cols: number; rows: number } {
-      return { cols: 80, rows: 24 };
-    }
-  }
-
-  return { FitAddon };
-});
-
-vi.mock('@xterm/addon-image', () => {
-  class ImageAddon {
-    constructor(readonly options: Record<string, unknown>) {}
-  }
-
-  return { ImageAddon };
-});
-
-vi.mock('@xterm/addon-unicode-graphemes', () => {
-  class UnicodeGraphemesAddon {}
-
-  return { UnicodeGraphemesAddon };
-});
-
-vi.mock('@xterm/xterm', () => {
-  class MockTerminal {
-    writes: string[] = [];
-    addons: unknown[] = [];
-    private dataListeners = new Set<(data: string) => void>();
-    private resizeListeners = new Set<(size: { cols: number; rows: number }) => void>();
-
-    parser = {
-      registerCsiHandler: () => ({ dispose: () => {} }),
-    };
-    modes = {
-      mouseTrackingMode: 'none' as const,
-      bracketedPasteMode: false,
-    };
-
-    loadAddon(addon: unknown): void {
-      this.addons.push(addon);
-    }
-
-    open(): void {}
-
-    write(data: string, _callback?: () => void): void {
-      this.writes.push(data);
-    }
-
-    onData(listener: (data: string) => void): { dispose: () => void } {
-      this.dataListeners.add(listener);
-      return {
-        dispose: () => {
-          this.dataListeners.delete(listener);
-        },
-      };
-    }
-
-    onResize(listener: (size: { cols: number; rows: number }) => void): { dispose: () => void } {
-      this.resizeListeners.add(listener);
-      return {
-        dispose: () => {
-          this.resizeListeners.delete(listener);
-        },
-      };
-    }
-
-    onRender(): { dispose: () => void } {
-      return { dispose: () => {} };
-    }
-
-    focus(): void {}
-
-    blur(): void {}
-
-    dispose(): void {}
-
-    emitInput(data: string): void {
-      this.dataListeners.forEach((listener) => listener(data));
-    }
-
-    emitResize(cols: number, rows: number): void {
-      this.resizeListeners.forEach((listener) => listener({ cols, rows }));
-    }
-  }
-
-  return { Terminal: MockTerminal };
-});
+vi.mock('@xterm/xterm', () => import('./xterm-test-mock'));
+vi.mock('@xterm/addon-fit', () => import('./xterm-test-mock'));
+vi.mock('@xterm/addon-image', () => import('./xterm-test-mock'));
+vi.mock('@xterm/addon-unicode-graphemes', () => import('./xterm-test-mock'));
 
 vi.mock('./platform', async () => {
   const actual = await vi.importActual<typeof import('./platform')>('./platform');
@@ -110,9 +24,9 @@ import {
   isPaneOscDriven,
   mountElement,
   refitSession,
+  acknowledgeSession,
   clearLocalSurfaceActivity,
   clearTerminalActivity,
-  clearSessionAttention,
   restoreBrowserSurfaceTodo,
   disposeAllSessions,
   disposeSession,
@@ -130,8 +44,6 @@ import {
   initAlertStateReceiver,
   setCommandWatched,
   isUntouched,
-  markSessionAttention,
-  markSessionTodo,
   setTerminalActivity,
   resumeTerminal,
   restoreTerminal,
@@ -139,9 +51,10 @@ import {
   subscribeToActivity,
   toggleSessionTodo,
 } from './terminal-registry';
-import { pasteFilePaths } from './clipboard';
+import { createAlertEpisode } from './alert-episode';
+import { doPaste, pasteFilePaths } from './clipboard';
 import { registry } from './terminal-store';
-import { commandArgv0 } from './terminal-state';
+import { commandWatchKey } from './terminal-state';
 import { REPLAY_MODE_RESET } from './terminal-report-filter';
 import { cfg } from '../cfg';
 import { TerminalWebglRenderer } from './terminal-webgl';
@@ -224,22 +137,29 @@ function emitOutput(id: string, data = 'output'): void {
   fakePlatform.writePty(id, data);
 }
 
-function attendSession(id: string): void {
-  markSessionAttention(id);
+/** The user is present with `id` focused, as the Wall's reporter says it. */
+function engageSession(id: string): void {
+  fakePlatform.alertEngagement({ present: true, focusId: id });
 }
 
-function expireAttention(id?: string): void {
-  clearSessionAttention(id);
+/** Focus moved off, or the window left. */
+function leaveSession(): void {
+  fakePlatform.alertEngagement({ present: false, focusId: null }, 'leave');
+}
+
+/** A click on the pane, or a Door reattach into passthrough. */
+function clickSession(id: string): void {
+  acknowledgeSession(id);
 }
 
 function minimizeSession(id: string): void {
   unmountElement(id);
-  clearSessionAttention(id);
+  leaveSession();
 }
 
 function reattachDoorViaEnter(id: string): void {
   mountElement(id, createContainer() as unknown as HTMLElement);
-  markSessionAttention(id);
+  clickSession(id);
 }
 
 function reattachDoorViaD(id: string): void {
@@ -259,7 +179,7 @@ function runCommand(id: string, commandLine = 'longtask'): void {
 /** Run `commandLine` and turn its WATCHING rule on, as the terminal context would. */
 function enableAlert(id: string, commandLine = 'longtask'): void {
   runCommand(id, commandLine);
-  setCommandWatched(commandArgv0(commandLine), true);
+  setCommandWatched(commandWatchKey(commandLine)!, true);
   expect(getActivity(id).watchingEnabled).toBe(true);
 }
 
@@ -281,7 +201,7 @@ function driveToBusy(id: string): void {
 
 function driveToRingingNeedsAttention(id: string): void {
   driveToBusy(id);
-  expireAttention(id);
+  leaveSession();
   advance(2_000);
   expect(getActivity(id).status).toBe('MIGHT_NEED_ATTENTION');
   advance(3_000);
@@ -359,12 +279,13 @@ describe('terminal-registry alert behavior', () => {
 
   it('preserves pre-registration activity through terminal creation and orphaning', () => {
     const id = 'early-host-state';
-    setTerminalActivity(id, { status: 'ALERT_RINGING', todo: true, awaited: true });
+    setTerminalActivity(id, { status: 'ALERT_RINGING', episode: createAlertEpisode(), awaited: true });
     const activity = getActivity(id);
     expect(getLivePersistedAlertState(id)).toBeNull();
 
     createSession(id);
     expect(getActivity(id)).toEqual(activity);
+    // A ring no one has looked at persists as the TODO a look would leave.
     expect(getLivePersistedAlertState(id)).toMatchObject({ status: 'ALERT_RINGING', todo: true });
 
     unmountElement(id);
@@ -394,12 +315,12 @@ describe('terminal-registry alert behavior', () => {
     expect(getActivitySnapshot().has(id)).toBe(false);
   });
 
-  it('keeps the TODO an early attention dismissal left behind', () => {
-    const id = 'early-attention-dismissal';
+  it('keeps the TODO an early acknowledgement left behind', () => {
+    const id = 'early-acknowledgement';
     fakePlatform.spawnPty(id);
     fakePlatform.sendOutput(id, '\x07');
     expect(getActivity(id).status).toBe('ALERT_RINGING');
-    fakePlatform.alertAttend(id);
+    fakePlatform.alertAcknowledge(id);
     expect(getActivity(id)).toMatchObject({ status: 'WATCHING_DISABLED', todo: true });
 
     resumeTerminal(id, null, { alive: true });
@@ -435,7 +356,7 @@ describe('terminal-registry alert behavior', () => {
     initAlertStateReceiver();
     initAlertStateReceiver();
     const unsubscribe = subscribeToActivity(listener);
-    platformModule.getPlatform().alertMarkTodo(id);
+    platformModule.getPlatform().alertToggleTodo(id);
 
     expect(listener).toHaveBeenCalledTimes(1);
     expect(getActivity(id).todo).toBe(true);
@@ -561,6 +482,14 @@ describe('terminal-registry alert behavior', () => {
     expect(entry.terminal.writes.join('')).toContain('codex resume 01JCX8ZK');
   });
 
+  // The host seeds it at the spawn, having started the id over: the reminder
+  // comes back, never the ring (docs/specs/alert.md -> "Persist only").
+  it('restores a pane\'s persisted TODO through its spawn', () => {
+    const notification = { source: 'OSC 9' as const, title: null, body: 'needs input' };
+    restoreTerminal('restore-todo', { alert: { status: 'ALERT_RINGING', todo: true, notification } });
+    expect(getActivity('restore-todo')).toMatchObject({ status: 'WATCHING_DISABLED', todo: true, notification });
+  });
+
   it('seeds untouched state on resume and restore while defaulting missing state to touched', () => {
     resumeTerminal('resume-untouched', null, { alive: true, untouched: true });
     resumeTerminal('resume-legacy', null, { alive: true });
@@ -592,7 +521,7 @@ describe('terminal-registry alert behavior', () => {
       }),
     );
     enableAlert(id);
-    attendSession(id);
+    engageSession(id);
 
     advance(12_000);
 
@@ -613,12 +542,12 @@ describe('terminal-registry alert behavior', () => {
       ], { name: 'long-running' }),
     );
     enableAlert(id);
-    attendSession(id);
+    engageSession(id);
 
     advance(1_800);
     expect(getActivity(id)).toMatchObject({ status: 'BUSY' });
 
-    expireAttention(id);
+    leaveSession();
     advance(2_000);
     expect(getActivity(id).status).toBe('MIGHT_NEED_ATTENTION');
 
@@ -643,11 +572,11 @@ describe('terminal-registry alert behavior', () => {
     expect(getActivity(id)).toMatchObject({ status: 'BUSY' });
   });
 
-  it('Story 4: completion while still attended does not ring', () => {
+  it('Story 4: completion while still engaged does not ring', () => {
     const id = 'story-4';
     createSession(id);
     enableAlert(id);
-    attendSession(id);
+    engageSession(id);
 
     driveToBusy(id);
     advance(2_000);
@@ -659,13 +588,13 @@ describe('terminal-registry alert behavior', () => {
     });
   });
 
-  it('Story 5: user attends to a ringing pane — turns TODO on', () => {
+  it('Story 5: user clicks a ringing pane — its TODO stays', () => {
     const id = 'story-5';
     createSession(id);
     enableAlert(id);
 
     driveToRingingNeedsAttention(id);
-    attendSession(id);
+    clickSession(id);
 
     expect(getActivity(id)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
@@ -673,7 +602,7 @@ describe('terminal-registry alert behavior', () => {
     });
   });
 
-  it('Story 6: dismiss resets to NOTHING_TO_SHOW and turns TODO on; can ring again later', () => {
+  it('Story 6: dismiss resets to NOTHING_TO_SHOW and leaves a TODO; can ring again over it', () => {
     const id = 'story-6';
     createSession(id);
     enableAlert(id);
@@ -687,7 +616,7 @@ describe('terminal-registry alert behavior', () => {
     });
 
     driveToBusy(id);
-    expireAttention(id);
+    leaveSession();
     advance(2_000);
     advance(3_000);
 
@@ -697,16 +626,17 @@ describe('terminal-registry alert behavior', () => {
     });
   });
 
-  it('Story 7: marking TODO clears ring and resets status, leaves alerts enabled', () => {
+  it('Story 7: toggling TODO on a ringing pane turns the ring into a TODO, leaves alerts enabled', () => {
     const id = 'story-7';
     createSession(id);
     enableAlert(id);
 
     driveToRingingNeedsAttention(id);
-    markSessionTodo(id);
+    toggleSessionTodo(id);
 
     expect(getActivity(id)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
+      watchingEnabled: true,
       todo: true,
     });
   });
@@ -782,7 +712,7 @@ describe('terminal-registry alert behavior', () => {
     });
   });
 
-  it('Story 9: new output while ringing latches until user attends', () => {
+  it('Story 9: new output while ringing latches until the user acknowledges', () => {
     const id = 'story-9';
     createSession(id);
     enableAlert(id);
@@ -791,7 +721,7 @@ describe('terminal-registry alert behavior', () => {
     emitOutput(id, 'shell prompt');
     expect(getActivity(id).status).toBe('ALERT_RINGING');
 
-    attendSession(id);
+    clickSession(id);
     expect(getActivity(id).status).toBe('NOTHING_TO_SHOW');
 
     emitOutput(id, 'next task');
@@ -805,7 +735,7 @@ describe('terminal-registry alert behavior', () => {
     const id = 'story-10';
     createSession(id);
     enableAlert(id);
-    attendSession(id);
+    engageSession(id);
 
     minimizeSession(id);
     driveToRingingNeedsAttention(id);
@@ -824,7 +754,7 @@ describe('terminal-registry alert behavior', () => {
     const id = 'story-11';
     createSession(id);
     enableAlert(id);
-    attendSession(id);
+    engageSession(id);
 
     minimizeSession(id);
     driveToRingingNeedsAttention(id);
@@ -865,7 +795,7 @@ describe('terminal-registry alert behavior', () => {
     driveToRingingNeedsAttention(beta);
 
     dismissSessionAlert(alpha);
-    attendSession(beta);
+    clickSession(beta);
 
     expect(getActivity(alpha)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
@@ -877,17 +807,13 @@ describe('terminal-registry alert behavior', () => {
     });
   });
 
-  it('Story 14: destroying a session clears alert, TODO, and attention state', () => {
+  it('Story 14: destroying a session clears alert and TODO state', () => {
     const id = 'story-14';
     createSession(id);
     enableAlert(id);
-    driveToRingingNeedsAttention(id);
     toggleSessionTodo(id);
-
-    expect(getActivity(id)).toMatchObject({
-      status: 'NOTHING_TO_SHOW',
-      todo: true,
-    });
+    driveToRingingNeedsAttention(id);
+    expect(getActivity(id)).toMatchObject({ status: 'ALERT_RINGING', todo: true });
 
     disposeSession(id);
     expect(getActivity(id)).toEqual(DEFAULT_ACTIVITY_STATE);
@@ -897,7 +823,7 @@ describe('terminal-registry alert behavior', () => {
     runCommand(id);
     expect(getActivity(id).watchingEnabled).toBe(true);
     driveToBusy(id);
-    expireAttention(id);
+    leaveSession();
     advance(2_000);
     advance(3_000);
 
@@ -907,18 +833,15 @@ describe('terminal-registry alert behavior', () => {
     });
   });
 
-  it('marks attention from terminal input and clears ringing immediately', () => {
-    const id = 'input-attention';
+  it('acknowledges terminal input, clearing the ring and its TODO at once', () => {
+    const id = 'input-acknowledges';
     const entry = createSession(id);
     enableAlert(id);
 
     driveToRingingNeedsAttention(id);
     entry.terminal.emitInput('x');
 
-    // Typing while ringing: attend clears ring, turns TODO on.
-    // Plain 'x' is not Enter, so TODO stays on.
-    expect(getActivity(id).status).toBe('NOTHING_TO_SHOW');
-    expect(getActivity(id).todo).toBe(true);
+    expect(getActivity(id)).toMatchObject({ status: 'NOTHING_TO_SHOW', todo: false });
   });
 
   it.each([
@@ -928,16 +851,16 @@ describe('terminal-registry alert behavior', () => {
     ['arrow key', '\x1b[A'],
     ['SS3 key', '\x1bOA'],
     ['mouse report with a real key', '\x1b[<35;10;20Mx'],
-  ])('counts a %s as attention and forwards it unchanged', (_name, input) => {
-    const id = 'encoded-input-attention';
+  ])('counts a %s as a keystroke and forwards it unchanged', (_name, input) => {
+    const id = 'encoded-input-acknowledges';
     const entry = createSession(id);
     enableAlert(id);
     driveToRingingNeedsAttention(id);
     const write = vi.spyOn(fakePlatform, 'writePty');
     try {
       entry.terminal.emitInput(input);
-      expect(write).toHaveBeenCalledWith(id, input);
-      expect(getActivity(id)).toMatchObject({ status: 'NOTHING_TO_SHOW', todo: true });
+      expect(write.mock.calls).toEqual([[id, input, { userInput: true }]]);
+      expect(getActivity(id)).toMatchObject({ status: 'NOTHING_TO_SHOW', todo: false });
     } finally {
       write.mockRestore();
     }
@@ -949,6 +872,7 @@ describe('terminal-registry alert behavior', () => {
     ['kitty keyboard query reply', '\x1b[?0u'],
     ['kitty keyboard flags reply', '\x1b[?31u'],
     ['kitty support probe replies', '\x1b[?0u\x1b[?1;2c'],
+    ['color-scheme report', '\x1b[?997;1n'],
     ['focus report', '\x1b[I'],
     ['combined replies', '\x1bP1$r0m\x1b\\\x1b[?1;2c'],
     ['SGR hover report', '\x1b[<35;10;20M'],
@@ -957,38 +881,20 @@ describe('terminal-registry alert behavior', () => {
     ['urxvt mouse report', '\x1b[64;10;20M'],
     ['X10 mouse report', '\x1b[M@!!'],
     ['combined mouse reports', '\x1b[<35;10;20M\x1b[64;10;20M\x1b[M@!!'],
-  ])('forwards a live %s without taking attention from another pane', (_name, input) => {
-    const id = 'reply-attention';
+  ])('forwards a live %s without acknowledging it', (_name, input) => {
+    const id = 'reply-acknowledges-nothing';
     const entry = createSession(id);
     enableAlert(id);
     driveToRingingNeedsAttention(id);
-    createSession('attended-pane');
-    attendSession('attended-pane');
-    const attend = vi.spyOn(fakePlatform, 'alertAttend');
     const write = vi.spyOn(fakePlatform, 'writePty');
     try {
       entry.terminal.emitInput(input);
-      expect(write).toHaveBeenCalledWith(id, input);
-      expect(attend).not.toHaveBeenCalled();
-      expect(getActivity(id)).toMatchObject({ status: 'ALERT_RINGING', todo: false });
+      // Written as it came, and not as user input.
+      expect(write.mock.calls).toEqual([[id, input]]);
+      expect(getActivity(id)).toMatchObject({ status: 'ALERT_RINGING' });
     } finally {
-      attend.mockRestore();
       write.mockRestore();
     }
-  });
-
-  it('Enter that dismisses a ringing alert leaves the auto-created TODO visible', () => {
-    const id = 'enter-dismisses-ringing';
-    const entry = createSession(id);
-    enableAlert(id);
-
-    driveToRingingNeedsAttention(id);
-    entry.terminal.emitInput('\r');
-
-    expect(getActivity(id)).toMatchObject({
-      status: 'NOTHING_TO_SHOW',
-      todo: true,
-    });
   });
 
   it('no monitor is created until alert is enabled', () => {
@@ -1025,30 +931,49 @@ describe('terminal-registry alert behavior', () => {
     expect(getActivity(id).status).toBe('BUSY');
   });
 
-  it('Enter (\\r) in passthrough clears an on-TODO', () => {
-    const id = 'enter-clears-todo';
+  it.each([
+    ['Enter', '\r'],
+    ['kitty Enter', '\x1b[13u'],
+    ['win32-input-mode Enter', '\x1b[13;28;13;1;0;1_'],
+    ['one-key answer', 'y'],
+  ])('clears a TODO on any keystroke: %s', (_name, input) => {
+    const id = 'keystroke-clears-todo';
     const entry = createSession(id);
     enableAlert(id);
 
     driveToRingingNeedsAttention(id);
-    attendSession(id);
+    clickSession(id);
     expect(getActivity(id).todo).toBe(true);
 
-    entry.terminal.emitInput('\r');
-    expect(getActivity(id).todo).toBe(false);
+    entry.terminal.emitInput(input);
+    expect(getActivity(id)).toMatchObject({ todo: false, notification: null });
   });
 
-  it('printable input without Enter does not clear a TODO', () => {
-    const id = 'printable-keeps-todo';
-    const entry = createSession(id);
-    enableAlert(id);
+  it.each([
+    ['a file drop', async (id: string) => pasteFilePaths(id, ['/tmp/a.txt'])],
+    ['a text paste', async (id: string) => {
+      fakePlatform.readClipboardText = async () => 'please review';
+      try { await doPaste(id); } finally { delete fakePlatform.readClipboardText; }
+    }],
+  ])('acknowledges %s like typed input', async (_name, paste) => {
+    const id = 'paste-acknowledges';
+    createSession(id);
+    fakePlatform.sendOutput(id, '\x07');
+    expect(getActivity(id)).toMatchObject({ status: 'ALERT_RINGING', todo: false });
+    await paste(id);
+    expect(getActivity(id)).toMatchObject({ status: 'WATCHING_DISABLED', todo: false });
+  });
 
-    driveToRingingNeedsAttention(id);
-    attendSession(id);
-    expect(getActivity(id).todo).toBe(true);
-
-    entry.terminal.emitInput('hello');
-    expect(getActivity(id).todo).toBe(true);
+  it('acknowledges nothing for a click on a browser Surface, keeping its TODO', () => {
+    const browserId = 'pane-browser-click';
+    try {
+      toggleSessionTodo(browserId);
+      acknowledgeSession(browserId);
+      // The host has no Activity for it, so it creates none.
+      expect(getActivity(browserId)).toEqual({ ...DEFAULT_ACTIVITY_STATE, todo: true });
+    } finally {
+      clearLocalSurfaceActivity(browserId);
+    }
   });
 
   it('focus-report control sequences do not clear a TODO', () => {
@@ -1057,7 +982,7 @@ describe('terminal-registry alert behavior', () => {
     enableAlert(id);
 
     driveToRingingNeedsAttention(id);
-    attendSession(id);
+    clickSession(id);
     expect(getActivity(id).todo).toBe(true);
 
     entry.terminal.emitInput('\x1b[I');
@@ -1137,31 +1062,18 @@ describe('terminal-registry alert behavior', () => {
     expect(getActivity(id).todo).toBe(false);
   });
 
-  it('new output while ringing without attention does not turn TODO on', () => {
-    const id = 'ringing-output-no-todo';
+  it('removing the rule while ringing keeps a TODO the pane already had', () => {
+    const id = 'disable-keeps-todo';
     createSession(id);
     enableAlert(id);
-
-    driveToRingingNeedsAttention(id);
-    emitOutput(id, 'next task');
-
-    expect(getActivity(id)).toMatchObject({
-      status: 'ALERT_RINGING',
-      todo: false,
-    });
-  });
-
-  it('removing the rule while ringing does not turn TODO on', () => {
-    const id = 'disable-no-todo';
-    createSession(id);
-    enableAlert(id);
+    toggleSessionTodo(id);
 
     driveToRingingNeedsAttention(id);
     setCommandWatched('longtask', false);
 
     expect(getActivity(id)).toMatchObject({
       status: 'WATCHING_DISABLED',
-      todo: false,
+      todo: true,
     });
   });
 
@@ -1207,7 +1119,7 @@ describe('terminal-registry alert behavior', () => {
     expect(getWatchedCommands()).toEqual([]);
   });
 
-  it('the alert action dismisses ringing alerts and turns TODO on', () => {
+  it('the alert action dismisses ringing alerts and keeps their TODO', () => {
     const id = 'alert-action-dismiss';
     createSession(id);
     enableAlert(id);
@@ -1221,13 +1133,13 @@ describe('terminal-registry alert behavior', () => {
     });
   });
 
-  it('the alert action leaves a Session attention already quieted alone', () => {
+  it('the alert action leaves a Session an acknowledgement already quieted alone', () => {
     const id = 'displayed-ringing-dismiss';
     createSession(id);
     enableAlert(id);
 
     driveToRingingNeedsAttention(id);
-    markSessionAttention(id);
+    clickSession(id);
 
     expect(getActivity(id)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
@@ -1263,8 +1175,8 @@ describe('terminal-registry alert behavior', () => {
     } finally { unregister(); }
   });
 
-  it('programmatic terminal focus does not count as attention', () => {
-    const id = 'focus-without-attention';
+  it('programmatic terminal focus acknowledges nothing', () => {
+    const id = 'focus-acknowledges-nothing';
     createSession(id);
     enableAlert(id);
 
@@ -1281,7 +1193,7 @@ describe('terminal-registry alert behavior', () => {
     const id = 'resize-debounce';
     const session = createSession(id);
     enableAlert(id);
-    markSessionAttention(id);
+    engageSession(id);
 
     session.terminal.emitResize(120, 30);
     emitOutput(id, 'prompt redraw');

@@ -1,8 +1,8 @@
 import { parseToolState, type ToolState } from './tool-state';
 import type { ActivityNotification, ProtocolProgressUpdate } from './alert-manager';
 import { parseColor } from './css-color';
-import { sanitizeText, truncateText } from './osc-sanitize';
-import { isProtocolCommandStart, recordToolEvents } from './tool-events';
+import { sanitizeCommandLine, sanitizeText, truncateText } from './osc-sanitize';
+import { isProtocolCommandStart } from './tool-events';
 import { parseToolAnnounce, type ToolAnnounce } from './tool-announce';
 import {
   STRING_CONTROL_INTRODUCER,
@@ -48,6 +48,11 @@ export interface TerminalProtocolAlertSink {
   updateProtocolProgress(id: string, progress: ProtocolProgressUpdate): void;
 }
 
+/** A sink that also takes a parse batch's semantic events, ordered among its reports. */
+export interface TerminalEventSink extends TerminalProtocolAlertSink {
+  applyTerminalSemanticEvents(id: string, events: TerminalSemanticEvent[]): void;
+}
+
 export interface TerminalProtocolParseResult {
   visibleData: string;
   events: TerminalProtocolEvent[];
@@ -84,11 +89,12 @@ const OSC99_PENDING_TTL_MS = 60_000;
 const OSC99_MAX_PENDING_IDS = 64;
 const TITLE_LIMIT = 256;
 const BODY_LIMIT = 4096;
-// The OSC 633 `E` command line. Bounded and sanitized like every other value
-// that comes off the wire and is then *retained*: it is re-tokenized on every
-// header derivation and is the key `dor ensure --restart` matches on, and
-// `decodeOsc633Value` actively re-introduces control characters that the
-// emit-side escaping had removed (`docs/specs/terminal-escapes.md`).
+// The shell-reported command line (`OSC 633 ; E`, `OSC 133 ; C`). Bounded and
+// sanitized like every other value that comes off the wire and is then
+// *retained*: it is re-tokenized on every header derivation and is the key
+// `dor ensure --restart` matches on, and its decoding actively re-introduces
+// control characters that the emit-side escaping had removed
+// (`docs/specs/terminal-escapes.md`). See `commandLineEvents`.
 const COMMAND_LINE_LIMIT = 2048;
 const OSC99_PENDING_TITLE_LIMIT = 2048;
 const OSC99_PENDING_BODY_LIMIT = 16_384;
@@ -103,7 +109,7 @@ const TERMINAL_BELL_NOTIFICATION: ActivityNotification = { source: 'BEL', title:
 // Mirrors ITERM2_COMPAT_VERSION in standalone/sidecar/pty-core.js — pinned by
 // mirrored-constants.test.ts (terminal-escapes.md: one compatibility version
 // across env and device responses).
-export const ITERM2_COMPAT_VERSION = '3.5.0';
+export const ITERM2_COMPAT_VERSION = '3.6.6';
 export const ITERM2_DEVICE_ATTRIBUTES_RESPONSE = `\x1bP>|iTerm2 ${ITERM2_COMPAT_VERSION}\x1b\\`;
 
 export class TerminalProtocolParser {
@@ -322,22 +328,28 @@ export class TerminalProtocolParser {
   }
 
   private parseOsc9(content: string): TerminalProtocolEvent[] {
-    if (!content.startsWith('9;')) return [];
-
-    if (content.startsWith('9;9;')) {
-      const cwd = cwdFromOsc9_9(content.slice('9;9;'.length));
-      return cwd ? [{ kind: 'semantic', event: { type: 'cwd', cwd } }] : [];
+    // A number alone or before `;` is a ConEmu subcommand, never a message.
+    const subcommand = /^9;(\d+)(?:;|$)/.exec(content);
+    if (!subcommand) {
+      const body = sanitizeText(content.slice('9;'.length), BODY_LIMIT);
+      return body
+        ? [{ kind: 'notification', notification: { source: 'OSC 9', title: null, body } }]
+        : [];
     }
-
-    if (content === '9;4' || content.startsWith('9;4;')) {
-      const progress = parseOsc94(content);
-      return progress ? [{ kind: 'progress', progress }] : [];
+    switch (subcommand[1]) {
+      case '4': {
+        const progress = parseOsc94(content);
+        return progress ? [{ kind: 'progress', progress }] : [];
+      }
+      case '9': {
+        // `9;9;<cwd>`; a bare `9;9` carries none.
+        const cwd = cwdFromOsc9_9(content.slice(subcommand[0].length));
+        return cwd ? [{ kind: 'semantic', event: { type: 'cwd', cwd } }] : [];
+      }
+      default:
+        // Sleep, tab title, GuiMacro, the `9;12` prompt mark, ...
+        return [];
     }
-
-    const body = sanitizeText(content.slice(2), BODY_LIMIT);
-    return body
-      ? [{ kind: 'notification', notification: { source: 'OSC 9', title: null, body } }]
-      : [];
   }
 
   /**
@@ -467,32 +479,52 @@ export function textProjectionOf(
   return parsed.textData === parsed.visibleData ? undefined : parsed.textData;
 }
 
-export function applyTerminalProtocolEvents(
-  sink: TerminalProtocolAlertSink,
+/**
+ * Apply one parse batch in stream order, so a report written after a command
+ * boundary is judged after it (`docs/specs/alert.md` -> Terminal reports).
+ * Semantic events are timestamped once, handed to the sink in the runs between
+ * reports, and returned for the terminal-state store.
+ */
+export function applyTerminalEvents(
+  sink: TerminalEventSink,
   id: string,
-  events: TerminalProtocolEvent[],
-): void {
-  recordToolEvents(id, events);
+  events: readonly TerminalProtocolEvent[],
+): TerminalSemanticEvent[] {
+  if (events.length === 0) return [];
+  const semanticEvents: TerminalSemanticEvent[] = [];
+  let applied = 0;
+  const applySemantic = (): void => {
+    if (applied === semanticEvents.length) return;
+    sink.applyTerminalSemanticEvents(id, semanticEvents.slice(applied));
+    applied = semanticEvents.length;
+  };
   for (const event of events) {
-    if (event.kind === 'notification') {
-      sink.notifyFromProtocol(id, event.notification);
-    } else if (event.kind === 'progress') {
-      sink.updateProtocolProgress(id, event.progress);
+    const semantic = semanticEventOf(event, nextSemanticTimestamp);
+    if (semantic) semanticEvents.push(semantic);
+    if (event.kind === 'notification' || event.kind === 'progress') {
+      applySemantic();
+      applyTerminalReport(sink, id, event);
     }
   }
+  applySemantic();
+  return semanticEvents;
+}
+
+function applyTerminalReport(sink: TerminalProtocolAlertSink, id: string, event: TerminalProtocolEvent): void {
+  if (event.kind === 'notification') sink.notifyFromProtocol(id, event.notification);
+  else if (event.kind === 'progress') sink.updateProtocolProgress(id, event.progress);
 }
 
 /**
- * The notification, progress, Tool announcement and command-start events {@link applyTerminalProtocolEvents} acts
- * on. An owner whose `AlertManager` lives in another process — standalone's
- * sidecar, whose webview holds it — forwards exactly these; every other kind is
- * the owner's own to settle, a response above all.
+ * The Tool announcement, Tool state and command-start events `recordToolEvents`
+ * acts on, in stream order: what a parse site forwards to the renderer that
+ * holds the Tool stores. Reports stay with the owner's `AlertManager`, and a
+ * response is the owner's alone to write.
  */
-export function collectTerminalProtocolAlerts(
-  events: TerminalProtocolEvent[],
+export function collectTerminalToolEvents(
+  events: readonly TerminalProtocolEvent[],
 ): TerminalProtocolEvent[] {
-  return events.filter((event) => event.kind === 'notification' || event.kind === 'progress' || event.kind === 'toolAnnounce' || event.kind === 'toolState'
-    || isProtocolCommandStart(event));
+  return events.filter((event) => event.kind === 'toolAnnounce' || event.kind === 'toolState' || isProtocolCommandStart(event));
 }
 
 export function collectTerminalProtocolResponses(events: TerminalProtocolEvent[]): string[] {
@@ -510,19 +542,22 @@ export function collectTerminalSemanticEvents(
   const semanticEvents: TerminalSemanticEvent[] = [];
   const nextTimestamp = options.now ? createOrderedEventTimestamp(options.now) : nextSemanticTimestamp;
   for (const event of events) {
-    if (event.kind === 'semantic') {
-      semanticEvents.push(timestampSemanticEvent(event.event, nextTimestamp));
-      continue;
-    }
-    if (event.kind !== 'notification') continue;
-    const title = terminalTitleFromNotification(event.notification, nextTimestamp());
-    if (!title) continue;
-    semanticEvents.push({
-      type: 'title',
-      title,
-    });
+    const semantic = semanticEventOf(event, nextTimestamp);
+    if (semantic) semanticEvents.push(semantic);
   }
   return semanticEvents;
+}
+
+/** The timestamped semantic event a protocol event carries: its own, or a
+ *  notification's title candidate. */
+function semanticEventOf(
+  event: TerminalProtocolEvent,
+  nextTimestamp: () => number,
+): TerminalSemanticEvent | null {
+  if (event.kind === 'semantic') return timestampSemanticEvent(event.event, nextTimestamp);
+  if (event.kind !== 'notification') return null;
+  const title = terminalTitleFromNotification(event.notification, nextTimestamp());
+  return title ? { type: 'title', title } : null;
 }
 
 function createOrderedEventTimestamp(now: () => number): () => number {
@@ -560,16 +595,17 @@ function stripStandaloneBells(segment: string, events: TerminalProtocolEvent[]):
   return segment.replace(/\x07/g, '');
 }
 
+/** Only text-bearing notification detail suppresses the batch's bells: a
+ *  progress event may carry no summons at all (`docs/specs/alert.md` ->
+ *  Terminal reports). Several bells still collapse to one. */
 function filterTerminalBellEvents(events: TerminalProtocolEvent[]): TerminalProtocolEvent[] {
   if (events.length === 0) return events;
   let bellCount = 0;
   let hasRicher = false;
   for (const event of events) {
-    if (event.kind === 'progress') hasRicher = true;
-    else if (event.kind === 'notification') {
-      if (event.notification.source === 'BEL') bellCount += 1;
-      else hasRicher = true;
-    }
+    if (event.kind !== 'notification') continue;
+    if (event.notification.source === 'BEL') bellCount += 1;
+    else hasRicher = true;
   }
   if (bellCount === 0) return events;
   if (!hasRicher && bellCount === 1) return events;
@@ -643,7 +679,129 @@ function parseOsc7(content: string): TerminalProtocolEvent[] {
 function parseOsc133(content: string): TerminalProtocolEvent[] {
   const fields = content.split(';');
   if (fields[0] !== '133') return [];
-  return parsePromptBoundary(fields, 'osc133_boundaries');
+  const boundary = parsePromptBoundary(fields, 'osc133_boundaries');
+  if (fields[1] !== 'C') return boundary;
+  // Staged ahead of the start it names, exactly as `633;E` precedes `633;C`.
+  return [...parseOsc133CommandLine(content.slice('133;C'.length)), ...boundary];
+}
+
+/**
+ * The command line fish ≥ 4 and kitty's shell integration put on `133;C`
+ * itself: `cmdline_url=` (percent-encoded UTF-8) or `cmdline=` (one word quoted
+ * by `printf %q`). `params` is everything after the `C`. `cmdline_url` wins when
+ * both are present, being unambiguous; unknown keys are ignored.
+ *
+ * `%q` can leave a raw `;` inside `$'…'`, so `cmdline=` runs to the end of the
+ * sequence, which is where both emitters put it.
+ */
+function parseOsc133CommandLine(params: string): TerminalProtocolEvent[] {
+  const quoted = params.indexOf(';cmdline=');
+  const url = (quoted === -1 ? params : params.slice(0, quoted))
+    .split(';')
+    .find((field) => field.startsWith('cmdline_url='));
+  // One code point is at most four UTF-8 bytes of three characters each.
+  if (url !== undefined) return commandLineEvents(url.slice('cmdline_url='.length), 12, decodePercentEncoded);
+  if (quoted !== -1) return commandLineEvents(params.slice(quoted + ';cmdline='.length), 4, decodeShellQuotedWord);
+  return [];
+}
+
+/**
+ * The `commandLine` event for a shell-reported command line, from `OSC 633 ; E`
+ * or `OSC 133 ; C` alike (`docs/specs/terminal-escapes.md`): bounded *before*
+ * `decode` to `COMMAND_LINE_LIMIT` code points of at most `encodedWidth`
+ * characters each, so a megabyte of escapes is never decoded to be thrown away,
+ * and sanitized *after* it, because decoding is what puts control characters
+ * back. One that reduces to nothing is dropped rather than stored empty.
+ */
+function commandLineEvents(
+  encoded: string,
+  encodedWidth: number,
+  decode: (value: string) => string,
+): TerminalProtocolEvent[] {
+  const commandLine = sanitizeCommandLine(
+    decode(truncateText(encoded, COMMAND_LINE_LIMIT * encodedWidth)),
+    COMMAND_LINE_LIMIT,
+  );
+  return commandLine === null ? [] : [{ kind: 'semantic', event: { type: 'commandLine', commandLine } }];
+}
+
+/** Shared by every UTF-8 decode here; `decode` without `stream` keeps no state. */
+const UTF8_DECODER = new TextDecoder();
+
+/** `%XX` runs decoded as UTF-8; a malformed escape stays literal and an invalid
+ *  byte sequence becomes U+FFFD, so a truncated tail never throws. */
+function decodePercentEncoded(value: string): string {
+  return value.replace(/(?:%[0-9a-fA-F]{2})+/g, (run) => {
+    const bytes = new Uint8Array(run.length / 3);
+    for (let i = 0; i < bytes.length; i += 1) bytes[i] = Number.parseInt(run.slice(i * 3 + 1, i * 3 + 3), 16);
+    return UTF8_DECODER.decode(bytes);
+  });
+}
+
+const ANSI_C_ESCAPES: Record<string, string> = {
+  a: '\x07', b: '\b', e: '\x1b', E: '\x1b', f: '\f', n: '\n', r: '\r', t: '\t', v: '\v',
+};
+const ANSI_C_NUMERIC_ESCAPE = /^(?:x([0-9a-fA-F]{1,2})|u([0-9a-fA-F]{1,4})|U([0-9a-fA-F]{1,8})|([0-7]{1,3}))/;
+
+/**
+ * Undo one `printf %q` word: `\x` escapes, `'…'`, and `$'…'` ANSI-C quoting
+ * (bash and zsh use it for control characters). An unterminated quote runs to
+ * the end. Double quotes are literal: `%q` never emits them unescaped.
+ */
+function decodeShellQuotedWord(value: string): string {
+  let out = '';
+  let i = 0;
+  while (i < value.length) {
+    const char = value[i]!;
+    if (char === '\\') {
+      out += value[i + 1] ?? '';
+      i += 2;
+    } else if (char === "'") {
+      const close = value.indexOf("'", i + 1);
+      const end = close === -1 ? value.length : close;
+      out += value.slice(i + 1, end);
+      i = end + 1;
+    } else if (char === '$' && value[i + 1] === "'") {
+      const quoted = decodeAnsiCQuote(value, i + 2);
+      out += quoted.text;
+      i = quoted.end;
+    } else {
+      out += char;
+      i += 1;
+    }
+  }
+  return out;
+}
+
+/** The body of a `$'…'` word starting at `from` (past its `$'`), escapes
+ *  decoded, and where reading resumes past its closing quote. */
+function decodeAnsiCQuote(value: string, from: number): { text: string; end: number } {
+  let text = '';
+  let i = from;
+  while (i < value.length && value[i] !== "'") {
+    if (value[i] === '\\') {
+      const escape = decodeAnsiCEscape(value.slice(i + 1, i + 10));
+      text += escape.text;
+      i += 1 + escape.width;
+    } else {
+      text += value[i];
+      i += 1;
+    }
+  }
+  return { text, end: i + 1 };
+}
+
+/** One ANSI-C escape, `rest` being what follows its backslash: the text it
+ *  stands for and how many characters of `rest` it spans. */
+function decodeAnsiCEscape(rest: string): { text: string; width: number } {
+  const numeric = ANSI_C_NUMERIC_ESCAPE.exec(rest);
+  if (numeric) {
+    const [whole, hex, u4, u8, octal] = numeric;
+    const code = Number.parseInt(hex ?? u4 ?? u8 ?? octal!, octal ? 8 : 16);
+    return { text: code <= 0x10ffff ? String.fromCodePoint(code) : '', width: whole.length };
+  }
+  if (rest[0] === 'c' && rest.length > 1) return { text: String.fromCharCode(rest.charCodeAt(1) & 0x1f), width: 2 };
+  return { text: ANSI_C_ESCAPES[rest[0] ?? ''] ?? rest[0] ?? '', width: 1 };
 }
 
 function parseOsc633(content: string): TerminalProtocolEvent[] {
@@ -658,16 +816,7 @@ function parseOsc633(content: string): TerminalProtocolEvent[] {
     // that send raw, unescaped semicolons will see their command truncated; this
     // matches VS Code's contract rather than guessing a delimiter.
     const rawCommand = content.slice(prefix.length).split(';', 1)[0] ?? '';
-    // Bounded *before* the unescape, so a megabyte of `\xNN` is not decoded to
-    // be thrown away, and sanitized after it, because the unescape is what puts
-    // control characters back. An all-control command line reduces to nothing
-    // and is dropped rather than stored empty.
-    const commandLine = sanitizeText(
-      decodeOsc633Value(truncateText(rawCommand, COMMAND_LINE_LIMIT * 4)),
-      COMMAND_LINE_LIMIT,
-    );
-    if (commandLine === null) return [];
-    return [{ kind: 'semantic', event: { type: 'commandLine', commandLine } }];
+    return commandLineEvents(rawCommand, 4, decodeOsc633Value);
   }
   if (fields[1] === 'P') {
     return parseOsc633Property(content.slice('633;P;'.length));
@@ -863,7 +1012,7 @@ function decodeBase64(input: string): string | null {
     const binary = atob(normalized);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-    return new TextDecoder().decode(bytes);
+    return UTF8_DECODER.decode(bytes);
   } catch {
     return null;
   }

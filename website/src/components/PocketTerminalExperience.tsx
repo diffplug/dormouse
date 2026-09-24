@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { MobileTerminalUi, paneMouseOverride, type MobileTerminalKeyboardMode, type MobileTerminalTouchMode } from "dormouse-lib/components/MobileTerminalUi";
 import { MobileWall, useMobileWallSessionItems, type MobileWallSession } from "dormouse-lib/components/MobileWall";
+import { writeUserInput } from "dormouse-lib/lib/terminal-registry";
 import {
   getMouseSelectionSnapshot,
   setOverride as setMouseOverride,
@@ -255,7 +256,7 @@ export function PocketTerminalExperience({
       cursorTouchAvailable={cursorTouchAvailable}
       sessions={sessionItems}
       onSessionSelect={setActivePaneId}
-      onSendInput={(data) => adapterRef.current?.writePty(activePaneId, data)}
+      onSendInput={(data) => { if (adapterRef.current) writeUserInput(activePaneId, data); }}
       onGestureInput={handleGestureInput}
       onPaste={async () => {
         const { doPaste } = await import("dormouse-lib/lib/clipboard");

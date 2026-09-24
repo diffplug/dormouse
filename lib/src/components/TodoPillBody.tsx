@@ -3,15 +3,22 @@ import type { TodoState } from '../lib/terminal-registry';
 
 const FLOURISH_MS = 500;
 
+/** The TODO pill's body, for a pill shell (`todo-pill-shell`). A grid-stacked
+ *  <letters, check>, so the pill width stays stable across steady/flourishing
+ *  states — the CSS drives the animation. */
+export const TODO_PILL_BODY: ReactNode = (
+  <span className="todo-pill-stack">
+    <span className="todo-pill-stack__letters">TODO</span>
+    <span className="todo-pill-stack__check" aria-hidden>✓</span>
+  </span>
+);
+
 /**
  * Shared render body + flourish state for the TODO pill.
  *
  * Returns `visible: false` when the pill should not render at all.
  * Returns `flourishing: true` briefly after a TODO clears so the
  * caller can set `data-flourishing="true"` on its pill shell.
- *
- * The body is a grid-stacked <letters, check> so the pill width stays
- * stable across steady/flourishing states — the CSS drives the animation.
  */
 export function useTodoPillContent(todo: TodoState): {
   visible: boolean;
@@ -44,12 +51,5 @@ export function useTodoPillContent(todo: TodoState): {
 
   const visible = todo || flourishing;
 
-  const body: ReactNode = visible ? (
-    <span className="todo-pill-stack">
-      <span className="todo-pill-stack__letters">TODO</span>
-      <span className="todo-pill-stack__check" aria-hidden>✓</span>
-    </span>
-  ) : null;
-
-  return { visible, flourishing, body };
+  return { visible, flourishing, body: visible ? TODO_PILL_BODY : null };
 }

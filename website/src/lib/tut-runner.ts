@@ -21,13 +21,18 @@ import {
 import type { TutorialState } from "./tutorial-state";
 
 /** Snapshot each launch: both the countdown and the fake command use this
- *  duration. The floor keeps a shortened attention setting from ending output
+ *  duration. The floor keeps a shortened inactivity setting from ending output
  *  before the WATCHING detector can confirm BUSY. */
 function getDemoDurationMs(inactivityTimeoutMs: number): number {
   return Math.max(
     inactivityTimeoutMs,
     cfg.alert.busyCandidateGap + cfg.alert.busyConfirmGap,
   ) + 250;
+}
+
+/** A command-exit ring also needs the command to outlast the minimum runtime. */
+function getCommandExitDemoDurationMs(inactivityTimeoutMs: number): number {
+  return Math.max(getDemoDurationMs(inactivityTimeoutMs), cfg.alert.commandExitMinRuntime + 250);
 }
 
 /** Must stay below `busyCandidateGap` to form one activity burst. */
@@ -180,7 +185,7 @@ export class TutRunner implements InteractiveProgram {
     this.state = options.state;
     this.profile = options.profile ?? DESKTOP_TUTORIAL_PROFILE;
     this.onExit = options.onExit;
-    this.getInactivityTimeoutMs = options.getInactivityTimeoutMs ?? (() => cfg.alert.userAttention);
+    this.getInactivityTimeoutMs = options.getInactivityTimeoutMs ?? (() => cfg.alert.inactivityTimeout);
     this.onTriggerBusyDemo = options.onTriggerBusyDemo;
     this.onTriggerNotifyDemo = options.onTriggerNotifyDemo;
     this.onTriggerCommandExitDemo = options.onTriggerCommandExitDemo;
@@ -610,7 +615,7 @@ export class TutRunner implements InteractiveProgram {
 
   private startCommandExitDemo(): void {
     this.commandExitDemoStart = Date.now();
-    this.commandExitDemoDurationMs = getDemoDurationMs(this.getInactivityTimeoutMs());
+    this.commandExitDemoDurationMs = getCommandExitDemoDurationMs(this.getInactivityTimeoutMs());
     this.onTriggerCommandExitDemo?.(this.commandExitDemoDurationMs);
     this.startSpinnerTicks();
     this.render();

@@ -53,7 +53,7 @@ function animationClockStyle(startedAt: number): CSSProperties {
 
 interface AlertRingBurstProps {
   /** A fresh episode is a fresh summons, so remounting on it replays the burst;
-   *  a second track latching inside one keeps the key and only enriches. */
+   *  a second source joining the ring inside one keeps the key and only enriches. */
   key: string;
   className: string;
   style?: CSSProperties;

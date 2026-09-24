@@ -88,19 +88,56 @@ __dormouse_633_prompt() {
   __dormouse_633_armed=1
 }
 
+# The submitted line, into __dormouse_633_out: the last history entry (one fork;
+# HISTTIMEFORMAT emptied inside it) when that provably is this line, else
+# $BASH_COMMAND, only the simple command about to run. Provably: history is on;
+# `fc -l -1` stops one short of `history 1` (bash's own flag that this line
+# added an entry), or it added none and neither ignorespace nor HISTIGNORE
+# could be why; and the entry contains $BASH_COMMAND, whitespace aside. Why
+# each check: docs/specs/terminal-escapes.rationale.md -> Shell-integration injection.
+__dormouse_633_command_line() {
+  __dormouse_633_out=$BASH_COMMAND
+  [[ -o history ]] || return 0
+  local listing entry number
+  listing=$( { HISTTIMEFORMAT= && builtin history 1 && builtin fc -l -1; } 2>/dev/null )
+  entry=${listing%%$'\n'*}                      # history 1: "%5d%c %s"
+  entry=${entry#"${entry%%[! ]*}"}
+  number=${entry%%[!0-9]*}
+  [ -n "$number" ] || return 0
+  case ${listing#*$'\n'} in                     # fc -l: "%d\t%c%s"
+    "$((number - 1))"$'\t'*) ;;
+    "$number"$'\t'*)
+      [ -z "${HISTIGNORE:-}" ] || return 0
+      case :${HISTCONTROL:-}: in *:ignorespace:* | *:ignoreboth:*) return 0 ;; esac ;;
+    *) return 0 ;;
+  esac
+  entry=${entry:${#number}+2}                   # drop the number, flag and space
+  case ${entry//[[:space:]]/} in
+    *"${BASH_COMMAND//[[:space:]]/}"*) __dormouse_633_out=$entry ;;
+  esac
+  return 0
+}
+
 # preexec: the DEBUG trap fires before every command; emit E/C once per line.
+# The trap passes "$_" as its last word because bash leaves $_ set to the trap
+# command's last word; bash itself restores $?.
 __dormouse_633_preexec() {
   [ "$BASH_COMMAND" = "__dormouse_633_prompt" ] && return   # the PROMPT_COMMAND invocation itself
   [ -z "$__dormouse_633_armed" ] && return                 # inside PROMPT_COMMAND, or already fired this line
   [ -n "${COMP_LINE:-}" ] && return                        # tab-completion, not a submitted command
+  # A `bind -x` key (fzf's Ctrl-R) runs with READLINE_LINE bound from bash 4.0;
+  # staying armed reports the line it leaves instead. 3.2 binds nothing (see
+  # docs/specs/terminal-escapes.rationale.md -> Shell-integration injection).
+  [ -n "${READLINE_LINE+x}" ] && [ "${BASH_VERSINFO[0]}" -ge 4 ] && return
   __dormouse_633_armed=
   __dormouse_633_ran=1
-  __dormouse_633_escape "$BASH_COMMAND"
+  __dormouse_633_command_line
+  __dormouse_633_escape "$__dormouse_633_out"
   printf '\033]633;E;%s\007' "$__dormouse_633_out"
   printf '\033]633;C\007'
 }
 
-trap '__dormouse_633_preexec' DEBUG
+trap '__dormouse_633_preexec "$_"' DEBUG
 PROMPT_COMMAND='__dormouse_633_prompt'
 # Prompt-end / input-start (B) at the tail of PS1, wrapped in \[ \] so bash counts
 # it as zero width. Best-effort: a prompt rebuilt every render loses B, but

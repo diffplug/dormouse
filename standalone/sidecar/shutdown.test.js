@@ -16,8 +16,7 @@ function fixture({ playwrightLoaded = true } = {}) {
     playwright: playwrightLoaded ? { close: () => new Promise(resolve => { closePlaywright = resolve; }) } : undefined,
     setTimeout: callback => { deadline = callback; return { unref() {} }; },
     dorControl: { close: () => calls.push('control') },
-    alertStore: { dispose: () => calls.push('alerts') },
-    burrow: { dispose: () => calls.push('burrow') },
+    host: { dispose: () => calls.push('host') },
     mgr: { killAll: () => calls.push('ptys') },
     process: { exit: () => calls.push('exit') },
   });
@@ -32,7 +31,7 @@ test('shutdown waits for both browser providers before tearing down the sidecar'
   assert.deepEqual(f.calls, []);
   f.closePlaywright();
   await done;
-  assert.deepEqual(f.calls, ['control', 'alerts', 'burrow', 'ptys', 'exit']);
+  assert.deepEqual(f.calls, ['control', 'host', 'ptys', 'exit']);
   await f.shutdown();
   assert.equal(f.calls.filter(call => call === 'exit').length, 1);
 });
@@ -43,7 +42,7 @@ test('the shared deadline still permits shutdown when a browser provider hangs',
   f.closePlaywright();
   f.deadline();
   await done;
-  assert.deepEqual(f.calls, ['control', 'alerts', 'burrow', 'ptys', 'exit']);
+  assert.deepEqual(f.calls, ['control', 'host', 'ptys', 'exit']);
 });
 
 test('shutdown still waits for agent-browser when the Playwright host was never loaded', async () => {
@@ -53,5 +52,5 @@ test('shutdown still waits for agent-browser when the Playwright host was never 
   assert.deepEqual(f.calls, []);
   f.closeAgent();
   await done;
-  assert.deepEqual(f.calls, ['control', 'alerts', 'burrow', 'ptys', 'exit']);
+  assert.deepEqual(f.calls, ['control', 'host', 'ptys', 'exit']);
 });

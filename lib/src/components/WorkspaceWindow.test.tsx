@@ -22,6 +22,7 @@ import { FakePtyAdapter } from '../lib/platform/fake-adapter';
 import { clearAllNotepads, addPlainNote } from '../lib/notepad/notepad-store';
 import { __resetArchiveServiceForTests } from '../lib/notepad/archive-service';
 import { getActivitySnapshot, setTerminalActivity } from '../lib/terminal-registry';
+import { createAlertEpisode } from '../lib/alert-episode';
 import { getWallHandle, listWallHandles, resetWallHandles } from './wall/wall-handles';
 import { resetWorkspaceBootPlans, setWorkspaceBootPlan } from './wall/workspace-boot-plans';
 import { mountWallHarness, type WallHarness } from './wall/wall-test-utils';
@@ -372,7 +373,7 @@ describe('WorkspaceWindow', () => {
   it('costs a Session nothing to switch: the leaf is never remounted and no ring replays', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await render();
-    setTerminalActivity('pane-a', { status: 'ALERT_RINGING' });
+    setTerminalActivity('pane-a', { status: 'ALERT_RINGING', episode: createAlertEpisode() });
     const episodeBefore = getActivitySnapshot().get('pane-a')!.episode;
     expect(episodeBefore?.id).toBeTruthy();
     const leafBefore = wallFor(first).querySelector('[data-lath-leaf="pane-a"]');

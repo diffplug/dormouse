@@ -343,16 +343,14 @@ export class RemotePtyAdapter implements PlatformAdapter {
 
   // Alerts are Burrow-authoritative (surfaced via the directory snapshot), so the
   // phone-side alert controls are inert.
-  alertRemove(): void {}
   alertSetWatchedCommands(): void {}
   alertSetCommandWatched(): void {}
   alertPublishSettings(): void {}
   alertDismiss(): void {}
-  alertAttend(): void {}
-  alertResize(): void {}
-  alertClearAttention(): void {}
+  alertEngagement(): void {}
+  alertPublishSessions(): void {}
+  alertAcknowledge(): void {}
   alertToggleTodo(): void {}
-  alertMarkTodo(): void {}
   alertClearTodo(): void {}
   /**
    * There is no `dor` on the phone and protocol-v1 carries no await, so a
@@ -365,6 +363,9 @@ export class RemotePtyAdapter implements PlatformAdapter {
   onAlertState(): void {}
   onWatchedCommands(): void {}
   onAlertSettings(): void {}
+  onAlertSpeak(): () => void {
+    return () => {};
+  }
 
   saveState(state: unknown): void {
     this.#savedState = state;

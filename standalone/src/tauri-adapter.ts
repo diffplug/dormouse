@@ -1,7 +1,6 @@
 import type { PlaywrightRequest, PlaywrightResult } from '../../lib/src/lib/platform/browser-automation';
 import { recordToolEvents } from '../../lib/src/lib/tool-events';
-import type { AlertRuntimeSnapshot } from 'dormouse-lib/lib/alert-manager';
-import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
+import type { TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-shell";
 import { coalesceCwds } from "./coalesce-cwds";
@@ -13,7 +12,6 @@ import type {
   AgentBrowserPopResult,
   AgentBrowserScreenshotResult,
   AgentBrowserStreamStatusResult,
-  AlertStateDetail,
   IframeProxyResult,
   OpenPort,
   PlatformAdapter,
@@ -27,6 +25,7 @@ import type {
   ToolControlResult,
   ToolHostRequest,
   SessionFlushRequest,
+  SpawnPtyOptions,
   WritePtyOptions,
 } from "dormouse-lib/lib/platform/types";
 import type {
@@ -48,22 +47,18 @@ import {
   type BurrowResult,
 } from "dormouse-lib/host/remote/service-protocol";
 import { embedderOrigins } from "dormouse-lib/lib/embedder-origins";
-import { AlertManager } from "dormouse-lib/lib/alert-manager";
-import type { AwaitHandle, AwaitOptions } from "dormouse-lib/lib/alert-manager";
-import type { AlertSettings } from "dormouse-lib/lib/alert-settings";
+import { createAlertClient, type AlertClientMethods } from "dormouse-lib/host/alert-client";
+import { ALERT_EVENTS, type AlertCommand } from "dormouse-lib/host/alert-protocol";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
-import type { PersistedAlertState, PersistedWindow } from "dormouse-lib/lib/session-types";
+import type { PersistedWindow } from "dormouse-lib/lib/session-types";
 import { TauriSessionStore } from "./tauri-session-store";
 import { claimRecoveryCommands, windowStateSlot } from "./window-recovery";
 import { listenToWindow } from "./window-label";
 import { installWorkspaceRegistry, type WorkspaceRegistrySnapshot } from "./workspace-registry";
 import { withTimeout } from "./with-timeout";
-import {
-  applyTerminalProtocolEvents,
-  TerminalProtocolParser,
-  type TerminalProtocolEvent,
-} from "dormouse-lib/lib/terminal-protocol";
-import { getTerminalTheme, onTerminalThemeChange, themeColorProvider } from "dormouse-lib/lib/terminal-theme";
+import type { TerminalProtocolEvent } from "dormouse-lib/lib/terminal-protocol";
+import { getTerminalTheme, onTerminalThemeChange } from "dormouse-lib/lib/terminal-theme";
+import { parseReplay } from "dormouse-lib/lib/platform/replay-parse";
 import type { TerminalSemanticEvent } from "dormouse-lib/lib/terminal-state";
 import {
   applyTerminalSemanticEvents,
@@ -82,6 +77,9 @@ function invoke(cmd: string, args?: Record<string, unknown>): void {
 
 const errMessage = (err: unknown): string =>
   err instanceof Error ? err.message : String(err);
+
+/** The `alert*` platform methods, taken from the shared client in the constructor. */
+export interface TauriAdapter extends AlertClientMethods {}
 
 /**
  * Platform adapter for the Tauri standalone app.
@@ -102,13 +100,7 @@ export class TauriAdapter implements PlatformAdapter {
   private replayHandlers = new Set<(detail: PtyReplayDetail) => void>();
   private markedHandlers = new Set<(detail: PtyMarkedDetail) => void>();
   private filesDroppedHandlers = new Set<(paths: string[]) => void>();
-  private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
-  // The two app-global stores are the sidecar's, so this window applies what
-  // comes back rather than what it sent (docs/specs/alert.md → "Alarm settings").
-  private watchedCommandHandlers = new Set<(names: string[]) => void>();
-  private alertSettingsHandlers = new Set<(settings: AlertSettings) => void>();
   private unlistenFns: Array<() => void> = [];
-  private alertManager = new AlertManager();
   private static STATE_KEY = 'dormouse.session';
   private sessionStore = new TauriSessionStore();
   private windowSlot = windowStateSlot(this.sessionStore, TauriAdapter.STATE_KEY, 'tauri-adapter');
@@ -135,13 +127,17 @@ export class TauriAdapter implements PlatformAdapter {
 
   readonly burrow: BurrowLink = this.burrowClient.link;
 
-  constructor() {
-    this.alertManager.onStateChange((id, state) => {
-      for (const handler of this.alertStateHandlers) {
-        handler({ id, ...state });
-      }
-    });
+  // --- Alerts (docs/specs/standalone.md → "Alerts") ---
+  //
+  // The app's one AlertManager is the sidecar's; this window is one of its
+  // viewers. Every `alert*` method is one `alert_command`, which Rust stamps
+  // with this window's label, and the answers come back as sidecar events.
+  private readonly alerts = createAlertClient((payload: AlertCommand) => {
+    invoke("alert_command", { payload });
+  });
 
+  constructor() {
+    Object.assign(this, this.alerts.methods);
     // The sidecar parses, and it has no DOM to read the theme from, so push the
     // resolved colors up whenever they change (the initial push is in
     // requestInit) — mirroring VSCodeAdapter.pushThemeColors.
@@ -160,25 +156,22 @@ export class TauriAdapter implements PlatformAdapter {
       // (docs/specs/terminal-escapes.md → "Parsing location").
       listenToWindow<PtyDataDetail>("pty:data", (event) => {
         const { id, data, textData } = event.payload;
-        // Feed visible data to alert manager for visual activity monitoring.
-        this.alertManager.onData(id);
         for (const handler of this.dataHandlers) {
           handler({ id, data, textData });
         }
       }),
 
-      listenToWindow<{ id: string; events: TerminalProtocolEvent[] }>("terminal:protocolEvents", (event) => {
-        applyTerminalProtocolEvents(this.alertManager, event.payload.id, event.payload.events);
+      // The Tool half of the sidecar's parse; its reports stayed with the
+      // sidecar's AlertManager.
+      listenToWindow<{ id: string; events: TerminalProtocolEvent[] }>("terminal:toolEvents", (event) => {
+        recordToolEvents(event.payload.id, event.payload.events);
       }),
 
       listenToWindow<{ id: string; events: TerminalSemanticEvent[] }>("terminal:semanticEvents", (event) => {
-        const { id, events } = event.payload;
-        this.alertManager.applyTerminalSemanticEvents(id, events);
-        applyTerminalSemanticEvents(id, events);
+        applyTerminalSemanticEvents(event.payload.id, event.payload.events);
       }),
 
       listenToWindow<{ id: string; exitCode: number }>("pty:exit", (event) => {
-        this.alertManager.onExit(event.payload.id, event.payload.exitCode);
         for (const handler of this.exitHandlers) {
           handler(event.payload);
         }
@@ -190,39 +183,28 @@ export class TauriAdapter implements PlatformAdapter {
           if (!pty.alive) replayExits.set(key, pty.exitCode ?? -1);
           else replayExits.delete(key);
         }
-        for (const pty of event.payload.ptys) if (pty.helper) this.alertManager.setHelper(pty.id, true);
         for (const handler of this.listHandlers) {
           handler(event.payload);
         }
       }),
 
       listenToWindow<{ id: string; data: string; requestId?: string }>("pty:replay", (event) => {
-        // Replay arrives as raw buffered output, the one stream the sidecar does
-        // not parse. A one-shot parser here repopulates semantic state and
-        // strips OSCs before xterm sees them; its responses are dropped, since
-        // the asker is long gone (docs/specs/terminal-escapes.md). It still
-        // needs the theme: a *declined* colour query is not consumed, so it
-        // reaches xterm.js instead, and answering is the owner's alone.
-        // Both consumers of the live `terminal:semanticEvents` path, because a
-        // replay is the whole of what a transferred pane's new window has: Rust
-        // drops the gap's semantic events rather than holding them
-        // (docs/specs/standalone.md → "Routing").
+        // A replay is the whole of what a transferred pane's new window has:
+        // Rust drops the gap's semantic and Tool events rather than holding
+        // them (docs/specs/standalone.md → "Routing").
         const { id, data, requestId } = event.payload;
-        const parsed = new TerminalProtocolParser(themeColorProvider).process(data);
-        recordToolEvents(id, parsed.events);
-        applyTerminalSemanticEvents(id, this.alertManager.applyReplay(id, requestId, parsed));
+        const visibleData = parseReplay(id, data);
         // A listed exited buffer can contain a command-start with no finish.
-        // Apply its exit after rebuilding the replay's watch, for either target
-        // adoption or source hand-back.
+        // Apply its exit after rebuilding the replay's command state, for
+        // either target adoption or source hand-back.
         const key = replayKey(id, requestId);
         const exitCode = replayExits.get(key);
         if (exitCode !== undefined) {
           replayExits.delete(key);
-          this.alertManager.onExit(id, exitCode);
           applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode }]);
         }
         for (const handler of this.replayHandlers) {
-          handler({ id, data: parsed.visibleData, requestId });
+          handler({ id, data: visibleData, requestId });
         }
       }),
 
@@ -272,21 +254,14 @@ export class TauriAdapter implements PlatformAdapter {
         cancelDorControlRequest(event.payload.requestId);
       }),
 
-      // The sidecar's canonical snapshots, broadcast to every window. This
-      // window's own `AlertManager` is one more consumer of them.
-      listenToWindow<{ names?: string[] }>("alert:watchedCommands", (event) => {
-        const names = event.payload?.names ?? [];
-        this.alertManager.setWatchedCommands(names);
-        for (const handler of this.watchedCommandHandlers) handler(names);
-      }),
-
-      listenToWindow<{ settings?: AlertSettings }>("alert:settings", (event) => {
-        const settings = event.payload?.settings;
-        if (!settings) return;
-        this.alertManager.applySettings(settings);
-        for (const handler of this.alertSettingsHandlers) handler(settings);
-      }),
+      // The sidecar's alerts: this window's Sessions' state, routed here by
+      // ownership, its awaits' results, and the two stores' snapshots.
+      ...ALERT_EVENTS.map((name) =>
+        listenToWindow<unknown>(name, (event) => void this.alerts.onEvent(name, event.payload))),
     ])));
+    // This realm is new, whether the window just opened or reloaded: the
+    // engagement and awaits of the one before it are gone (same label).
+    this.alerts.hello();
 
     await this.hydrateSessionStore();
     // Before restore too: a fresh Window mints its first Workspace id from
@@ -322,7 +297,7 @@ export class TauriAdapter implements PlatformAdapter {
   }
 
   shutdown(): void {
-    this.alertManager.dispose();
+    this.alerts.dispose();
     for (const unlisten of this.unlistenFns) {
       unlisten();
     }
@@ -341,17 +316,17 @@ export class TauriAdapter implements PlatformAdapter {
   async terminalContext(request: TerminalContextRequest): Promise<TerminalContextInfo> {
     const result = await rawInvoke<TerminalContextInfo>('pty_context', { request });
     if (result.error) throw new Error(result.error);
-    if (request.op === 'promote') this.alertManager.setHelper(request.id, !!request.restore);
     return result;
   }
 
-  spawnPty(id: string, options?: { cols?: number; rows?: number; cwd?: string; shell?: string; args?: string[]; helper?: HelperIdentity }): void {
-    if (options?.helper) this.alertManager.setHelper(id, true);
+  spawnPty(id: string, options?: SpawnPtyOptions): void {
     invoke("pty_spawn", { id, options });
   }
 
+  /** `userInput` rides the write itself: the sidecar acknowledges it and opens
+   *  the echo window before writing (docs/specs/alert.md → Engagement). */
   writePty(id: string, data: string, options?: WritePtyOptions): void {
-    invoke("pty_write", { id, data, paced: options?.paced });
+    invoke("pty_write", { id, data, paced: options?.paced, userInput: options?.userInput });
   }
 
   resizePty(id: string, cols: number, rows: number): void {
@@ -369,12 +344,6 @@ export class TauriAdapter implements PlatformAdapter {
 
   getRecoveryCommands(): Record<string, string> {
     return this.recoveryCommands;
-  }
-
-  /** Seed a cold-restored Surface's persisted TODO/alert; the manager lives here,
-   *  so the restore path is the only thing that can. */
-  alertSeed(id: string, state: PersistedAlertState): void {
-    this.alertManager.seed(id, state);
   }
 
   /**
@@ -720,79 +689,6 @@ export class TauriAdapter implements PlatformAdapter {
     rawInvoke("burrow_command", { payload: command }).catch((err) =>
       console.error("[tauri-adapter] burrow_command failed:", err),
     );
-  }
-
-  // --- Alert management (local AlertManager) ---
-
-  alertPauseForTransfer(id: string): AlertRuntimeSnapshot | null { return this.alertManager.pauseForTransfer(id); }
-  alertResumeFromTransfer(id: string, snapshot: AlertRuntimeSnapshot, replayRequestId?: string): void {
-    this.alertManager.resumeFromTransfer(id, snapshot, replayRequestId);
-  }
-
-  alertRemove(id: string): void {
-    this.alertManager.remove(id);
-  }
-
-  /** Offer this window's persisted rule set as the host's startup seed; only
-   *  the first window's offer is taken. */
-  alertSetWatchedCommands(names: string[]): void {
-    invoke("alert_command", { payload: { op: "initializeWatchedCommands", names } });
-  }
-
-  /** A delta, never a replacement, so a window that has not heard about a rule
-   *  cannot drop it. */
-  alertSetCommandWatched(name: string, watched: boolean): void {
-    invoke("alert_command", { payload: { op: "setCommandWatched", name, watched } });
-  }
-
-  alertPublishSettings(settings: AlertSettings, opts: { seed: boolean }): void {
-    invoke("alert_command", {
-      payload: { op: opts.seed ? "initializeSettings" : "updateSettings", settings },
-    });
-  }
-
-  alertDismiss(id: string): void {
-    this.alertManager.dismissAlert(id);
-  }
-
-  alertAttend(id: string): void {
-    this.alertManager.attend(id);
-  }
-
-  alertResize(id: string): void {
-    this.alertManager.onResize(id);
-  }
-
-  alertClearAttention(id?: string): void {
-    this.alertManager.clearAttention(id);
-  }
-
-  alertToggleTodo(id: string): void {
-    this.alertManager.toggleTodo(id);
-  }
-
-  alertMarkTodo(id: string): void {
-    this.alertManager.markTodo(id);
-  }
-
-  alertClearTodo(id: string): void {
-    this.alertManager.clearTodo(id);
-  }
-
-  alertAwait(id: string, options: AwaitOptions): AwaitHandle {
-    return this.alertManager.awaitCompletion(id, options);
-  }
-
-  onAlertState(handler: (detail: AlertStateDetail) => void): void {
-    this.alertStateHandlers.add(handler);
-  }
-
-  onWatchedCommands(handler: (names: string[]) => void): void {
-    this.watchedCommandHandlers.add(handler);
-  }
-
-  onAlertSettings(handler: (settings: AlertSettings) => void): void {
-    this.alertSettingsHandlers.add(handler);
   }
 
   // --- State persistence ---

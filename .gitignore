@@ -37,10 +37,11 @@ standalone/sidecar/recovery.cjs
 standalone/sidecar/agent-browser-host.cjs
 standalone/sidecar/playwright-host.cjs
 standalone/sidecar/burrow.cjs
-standalone/sidecar/alert-store.cjs
-# Kept beside it: a checkout that built before the Burrow rename still holds
-# the old bundle, and `bundle.resources` would ship it.
+# Kept beside it: a checkout that built before the Burrow rename, or before the
+# alerts joined its bundle, still holds the old bundle, and `bundle.resources`
+# would ship it.
 standalone/sidecar/remote-host.cjs
+standalone/sidecar/alert-store.cjs
 standalone/sidecar/tool-host.cjs
 standalone/sidecar/git-info.cjs
 standalone/sidecar/node_modules/

@@ -6,6 +6,12 @@
 
 **What a sync blocking command cost.** A cold `agent-browser open` froze the webview for ~3 s — long enough to look like a pane that never appeared — and a hung one would have held it for the full 30 s `AGENT_BROWSER_TIMEOUT`; `(async)` moves the same blocking body onto a runtime worker. The incident is recorded at the `request_from_sidecar_timeout` invariant comment in `standalone/src-tauri/src/lib.rs`.
 
+## Alerts
+
+**Why one manager per host process, beside the PTYs.** Each window used to run its own `AlertManager` in its webview, fed from events the sidecar had already parsed. Three failures followed from where it lived (audit, 2026-09-23): WKWebView throttles a background window's timers, so the detector, deferral and await timers of a window the user was not looking at ran late — exactly the window a completion should summon them back to; a reload started the webview with an empty manager and a live resume seeds nothing, so every ring and TODO in the window vanished; and a Workspace transfer had to snapshot the ring, its episode, the detector deadlines and the deferred notification into the transfer content, resume them in the target, and bind a replay token so the since-mark replay's reports fired once. VS Code never had these, because its manager lives in the extension host beside the PTYs and the parse. Moving standalone's there made the two hosts one shape, now one module (`createAlertHost`): the parse feeds one manager in stream order, the Burrow's remote writes reach it in the same process, and a window is only a viewer whose state is routed to it.
+
+**Why an await's answer names its window.** Routed by the Session's `id` it would reach the Session's owner, not the window that parked it, and a `requestId` is what Rust's invoke matcher swallows. It was broadcast at first, each adapter matching its own random `awaitId`; `forWindow` routes it the way `pty:list` is routed, so no other window sees it (2026-09).
+
 ## Windows node subsystem
 
 **The two Windows Node variants.** `CREATE_NO_WINDOW`, `DETACHED_PROCESS`, and `STARTUPINFO` hiding all failed to suppress Windows 11's DefTerm handoff from a GUI parent (verified 2026-08): Windows launches Windows Terminal to host the console-subsystem child, flashing a stray WT window behind Dormouse. Should a current spawn-time option suppress it, both variants collapse back to the stock console-subsystem Node under `DORMOUSE_NODE`. `dor`'s opposite requirement comes from running inside a shell's ConPTY, where its stdout/stderr are console handles rather than pipes.
@@ -47,15 +53,9 @@ minted in `pty_spawn`, so an unowned id is one whose window went away, and the
 broadcast reached every sibling's AlertManager — which rang, and offered a TODO,
 for a pane none of them showed.
 
-The first hold queued both derived streams, on the premise that neither is in
-any replay. Semantic events are: the replay is the raw bytes, OSCs included, and
-the target's replay listener re-parses them. The flushed queue then re-applied
-`commandStart` on top of state the replay had just rebuilt, and `commandStart`
-is not idempotent — it mints a fresh id and consumes the pending command line —
-so a transfer that split a command's `commandLine` from its `commandStart` left
-the arriving window with a derived title for a command whose real line the
-replay had already recovered. What the replay path genuinely did not rebuild was
-the AlertManager's copy, and that is a listener fix, not a routing one.
+**Why an exited PTY stays owned.** Ownership used to end at the exit, since nothing more was emitted for a dead PTY. The sidecar's manager publishes `alert:state` for it whenever the user acts on the exited pane — a dismiss, a TODO cleared — and a line for an unowned id is dropped, so the pane would ring until it was closed. An exit before a transfer's mark used to end the marking phase and go to the target, so the `pty:marked` behind it went there too, and the source — which serializes the pane at that line — never saw its mark (2026-09).
+
+**Why the derived streams are dropped, never held.** The first hold queued both, on the premise that neither is in any replay. They are: the replay is the raw bytes, OSCs included, and the receiving window re-parses them. The flushed queue re-applied `commandStart` on top of state the replay had just rebuilt, and `commandStart` is not idempotent — it mints a fresh id and consumes the pending command line — so a transfer that split a command's `commandLine` from its `commandStart` left the arriving window with a derived title for a command whose real line the replay had already recovered. A hold kept for the Tool events alone served only the fail-open sweep, which fires only for suppressions no arrival claims (§Arrival queue), and it went (2026-09).
 
 ## What a window's `Destroyed` settles
 

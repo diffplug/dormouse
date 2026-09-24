@@ -129,8 +129,9 @@ describe("TutRunner snapshots", () => {
       onTriggerCommandExitDemo: (duration) => {
         durationMs = duration;
         adapter.sendOutput(demoId, "\x1b]633;E;slowbuild\x07\x1b]633;C\x07");
-        adapter.alertAttend(demoId);
-        adapter.alertClearAttention(demoId);
+        // The user clicks into the demo pane, then back to the tutorial.
+        adapter.alertEngagement({ present: true, focusId: demoId });
+        adapter.alertEngagement({ present: true, focusId: "test-pane" });
         finishTimer = setTimeout(() => adapter.sendOutput(demoId, "\x1b]633;D;0\x07"), duration);
       },
     });
@@ -138,7 +139,7 @@ describe("TutRunner snapshots", () => {
       adapter.setScenario(demoId, { name: "none", chunks: [] });
       adapter.spawnPty(demoId);
       currentTimeoutMs = inactivityTimeoutMs;
-      adapter.alertPublishSettings(settings);
+      adapter.alertPublishSettings(settings, { seed: false });
       adapter.onAlertState((event) => { if (event.id === demoId) events.push(event); });
       sendKeys(sectionRow("alert") + ENTER + "x");
       expect(durationMs).toBeGreaterThan(inactivityTimeoutMs);

@@ -8,8 +8,8 @@ import { TerminalContextView, type ContextScan, type TerminalContextViewProps } 
 import { TerminalContextContext, WallActionsContext, type TerminalContextState } from './wall-context';
 import { disposeHelper, getHelper, helperRevision, openHelper, setHelperVisible, subscribeHelpers } from '../../lib/helper-terminal';
 import { getPlatform, IS_MAC, IS_WINDOWS } from '../../lib/platform';
-import { buildAppTitleResolver, commandArgv0, createTerminalPaneState, cwdDisplay, deriveSurfaceLabel, explainTerminalTitle, type CwdState } from '../../lib/terminal-state';
-import { focusSession, getTerminalInstance, getActivitySnapshot, getTerminalPaneStateSnapshot, isCommandWatched, setCommandWatched, subscribeToActivity, subscribeToTerminalPaneState, subscribeToWatchedCommands, getWatchedCommandsSnapshot, toggleSessionTodo } from '../../lib/terminal-registry';
+import { buildAppTitleResolver, createTerminalPaneState, cwdDisplay, deriveSurfaceLabel, explainTerminalTitle, type CwdState } from '../../lib/terminal-state';
+import { focusSession, getRunningCommandWatchKey, getRunningCommandWatchRule, getTerminalInstance, getActivitySnapshot, getTerminalPaneStateSnapshot, setCommandWatched, subscribeToActivity, subscribeToTerminalPaneState, subscribeToWatchedCommands, getWatchedCommandsSnapshot, toggleSessionTodo } from '../../lib/terminal-registry';
 import { writeTextToClipboard } from '../../lib/clipboard';
 import { listenerUrlsByPort } from './port-url';
 import { DEFAULT_HELPER_COMMAND } from '../../lib/terminal-context-types';
@@ -31,7 +31,9 @@ export function TerminalContext({ id, title, closing, origin, warning: openWarni
   const cwd = state.cwd?.path ? state.cwd : undefined;
   const helperState = helper ? states.get(helper.id) : undefined;
   const helperCwd = helperState?.cwd?.path ? helperState.cwd : undefined;
-  const argv0 = state.currentCommand?.rawCommandLine ? commandArgv0(state.currentCommand.rawCommandLine) : null;
+  // A bare runner rule already covering the running script is the one the row offers.
+  const watchRule = getRunningCommandWatchRule(id);
+  const offeredRule = watchRule ?? getRunningCommandWatchKey(id);
   const appTitleForPane = useMemo(() => buildAppTitleResolver(states, activities), [states, activities]);
   const titleSources = useMemo(() => explainTerminalTitle(state, { appTitleForPane }), [state, appTitleForPane]);
   const display = (location: CwdState) => cwdDisplay(location, { style: 'full', homePath: home });
@@ -54,13 +56,13 @@ export function TerminalContext({ id, title, closing, origin, warning: openWarni
   const warning = openWarning ?? (helperError || (helper && helper.status !== 'waiting' && (!cwd || !helperCwd) ? 'Directory comparison unavailable: a terminal has not reported its directory.' : undefined));
   return <TerminalContextView placement={placement} terminalRole={tool ? 'tool' : 'helper'} closing={closing} origin={origin} title={deriveSurfaceLabel(state, appTitleForPane, title ?? id)} surfaceRef={actions.resolveSurfaceRef(id)}
     titleSources={titleSources} cwd={cwd ? display(cwd) : 'Directory unknown'} helperCwd={helperCwd && display(helperCwd)} mismatch={mismatch}
-    scan={scan} argv0={argv0} watching={!!argv0 && isCommandWatched(argv0)} todo={activities.get(id)?.todo === true} notification={activities.get(id)?.notification}
+    scan={scan} watchRule={offeredRule} watching={watchRule !== null} todo={activities.get(id)?.todo === true} notification={activities.get(id)?.notification}
     status={tool ? (state.currentCommand ? 'running' : 'completed') : helper?.status ?? 'waiting'} command={tool ? state.currentCommand?.rawCommandLine ?? state.lastCommand?.rawCommandLine ?? '' : helper?.command ?? defaultCommand} defaultCommand={defaultCommand} warning={warning}
     explorerLabel={IS_MAC ? 'Open in Finder' : IS_WINDOWS ? 'Open in Explorer' : 'Open folder'} canExplore={!!platform.terminalContext && !!cwd && !cwd.isRemote}
     canPlaywright={!!platform.playwright} canAgent={!!platform.agentBrowserOpen} canIframe={!!platform.createIframeProxyUrl}
     onClose={onClose} onCopyRef={() => copy(actions.resolveSurfaceRef(id))} onCopyPath={() => copy(cwd?.path ?? '')}
     onExplore={async () => { if (platform.terminalContext && cwd) await platform.terminalContext({ op: 'openDirectory', id, path: cwd.path }); }}
-    onWatch={() => { if (argv0) setCommandWatched(argv0, !isCommandWatched(argv0)); }} onTodo={() => toggleSessionTodo(id)}
+    onWatch={() => { if (offeredRule) setCommandWatched(offeredRule, watchRule === null); }} onTodo={() => toggleSessionTodo(id)}
     onPort={(entry, mode) => context.openPort(id, entry, mode)}
     onModify={async command => { await platform.terminalContext?.({ op: 'settings', command }); setDefaultCommand(command); }}
     notepadAction={<NotepadHeaderButton surfaceId={id} />}

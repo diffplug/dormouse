@@ -27,11 +27,12 @@ The webview is the shared `lib/` frontend, unmodified for this host (`docs/specs
 ### Invariants (VS Code-specific)
 
 - **Capture, then save, then kill.** `deactivate()` runs the agent-recovery capture *first* and both kills *last*, the state flush and live-PTY refresh in between. Source of truth: `deactivate()` in `vscode-ext/src/extension.ts`.
-- **Alert state is global.** One module-level `AlertManager` in `message-router.ts` is shared across all routers, survives router disposal, and is fed by PTY data regardless of webview visibility.
-- **WATCHING rules are host-authoritative.** The first webview after extension-host startup seeds the shared host rule set and **no later webview may replace it**.
+- **Alert state is global.** One module-level alert host (`createAlertHost`) in `message-router.ts` is shared across all routers, survives router disposal, and is fed by PTY data regardless of webview visibility.
+- **Each router is one realm of it**, under its `routerId` (`docs/specs/alert.md` → Engagement). **Must end the realm on router disposal and on a `dormouse:init` re-init** (`endRealm`): recreated content is a new realm. Pinned by `engagement viewers` and `await requests` in `vscode-ext/test/message-router.test.ts`.
 - **Never let a resuming router steal another webview's PTYs.** Each router tracks its PTYs in `ownedPtyIds`; a module-level `globalOwnedPtyIds` set enforces it.
 - **Every save path must merge current alert states through the shared persistence projection.** The frontend periodic save (`onSaveState`) and the backend deactivate refresh (`refreshSavedSessionStateFromPtys`) both narrow alerts with `toPersistedAlertState`; missing the merge reverts alert state on restore, while passing live state through persists transient fields.
-- **Must reserve a closing router's PTYs until its deferred kills finish**, so another router cannot claim them during archive/CWD work; pinned by `vscode-ext/test/message-router.test.ts`.
+- **A Session's alert state follows its PTY**: `pty:spawn` claims the id before starting its alert state over from `options.alert`, so the seeded state reaches the claiming webview, and **every kill removes the entry**. **Must reserve a closing router's PTYs until its deferred kills finish**, so another router cannot claim them during archive/CWD work. Pinned by `vscode-ext/test/message-router.test.ts`.
+- **Every webview and Client write and resize goes through `alertedPty`**, a remote Client's from either Burrow tier included (`writeClientInput`), so input is acknowledged and a resize's grace opened first (`docs/specs/alert.md` → Engagement).
 - **retainContextWhenHidden.** Set on both `WebviewPanel` and `WebviewView` so xterm.js DOM, scrollback, and PTY subscriptions survive panel hide/show without a resume.
 - **Two save sources must produce consistent state**: the frontend's periodic `dormouse:saveState` and the backend's deactivate flush-then-refresh.
 - **Every host → webview send carries the message token**, and **never add a `message` listener that skips `isHostMessage`**.
@@ -82,15 +83,23 @@ Each hosting primitive uses the chrome it has, following the in-app `<title> [TO
 Reflection updates on every owned-PTY `AlertManager.onStateChange` and on `claim` / `release`. Source of truth: `computeWorkspaceUnion` in `lib/src/lib/workspace-union.ts`, `notifyUnion` in `vscode-ext/src/message-router.ts`, `workspaceTitle` / `workspaceBadge` in `vscode-ext/src/workspace-chrome.ts`, `setupPanel` in `vscode-ext/src/extension.ts`, `DormouseViewProvider` in `vscode-ext/src/webview-view-provider.ts`.
 
 WATCHING rules and the alarm settings (`docs/specs/alert.md` → Alarm settings)
-are app-global rather than per-Workspace, so both ride the host-authoritative
-seed / mutate / broadcast channel `docs/specs/transport.md` → Message protocol
-specifies. One thing is this host's: **the seeding offer is the first one
-after extension-host startup**. The settings a shared `AlertManager` consumes
-are `AlertManager.applySettings`'s own list, not this host's choice.
+are app-global rather than per-Workspace, riding the seed / mutate / broadcast
+channel of `docs/specs/transport.md` → Message protocol; the settings the
+shared manager consumes are `AlertManager.applySettings`'s own list.
+
+**`alert:speak` goes only to a connected router whose `ownedPtyIds` hold its
+Session**; a due push goes to `pushAlert`: this window's service, else the
+broker's as an unanswered `push` peer frame, else dropped, never held. **This
+window is one more alert viewer, with no focus, present while `WindowState`
+reports it `focused` and `active`**; one that never reports `active` adds none
+(rationale).
 
 Source of truth: `WatchedCommandHost` in `lib/src/lib/watched-command-host.ts`,
-`AlertSettingsHost` in `lib/src/lib/alert-settings-host.ts`, the alert cases in
-`vscode-ext/src/message-router.ts`.
+`AlertSettingsHost` in `lib/src/lib/alert-settings-host.ts`, the `alert:command`
+case, `connectWebview`, and `reportWindowPresence` in
+`vscode-ext/src/message-router.ts`; `pushAlert` in `vscode-ext/src/burrow.ts`.
+Pinned by `alarm delivery` in `vscode-ext/test/message-router.test.ts` and
+`vscode-ext/test/burrow.test.ts`.
 
 ### Shell selection
 
@@ -144,8 +153,8 @@ commands — **a `WebviewView` re-resolve only, never a deserialized panel and n
 a cold restore** (`docs/specs/notepad.md` → "Live resume").
 
 **On activate**, saved state loads through `readPersistedSession()`
-(`docs/specs/transport.md` → "Persisted session types") and is passed to routers
-for cold-start restore. The WebviewView and each deserialized WebviewPanel then
+(`docs/specs/transport.md` → "Persisted session types") and is injected into
+the webview for cold-start restore. The WebviewView and each deserialized WebviewPanel then
 claim their own pane ids' recovery commands out of the single record, under
 `docs/specs/transport.md` → "Consuming it". **A panel's pane ids come from the
 `vscode.setState()` blob returned at `deserializeWebviewPanel`**, so recovery

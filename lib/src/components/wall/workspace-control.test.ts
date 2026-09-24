@@ -14,6 +14,7 @@ import {
   resetWorkspaceIdPool,
 } from '../../lib/workspace-store';
 import { clearTerminalActivity, setTerminalActivity } from '../../lib/session-activity-store';
+import { createAlertEpisode } from '../../lib/alert-episode';
 import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../../lib/workspace-surfaces';
 import { resetWindowSessionAggregator } from '../../lib/window-session-aggregator';
 import { setPlatform } from '../../lib/platform';
@@ -61,7 +62,7 @@ describe('workspace.list', () => {
     const second = createWorkspace({ id: 'ws-2', name: 'build', activate: false }).id;
     setWorkspaceSurfaces(first, ['a']);
     setWorkspaceSurfaces(second, ['b', 'c']);
-    setTerminalActivity('b', { status: 'ALERT_RINGING' });
+    setTerminalActivity('b', { status: 'ALERT_RINGING', episode: createAlertEpisode() });
     setTerminalActivity('c', { todo: true });
 
     const detail = request('workspace.list');

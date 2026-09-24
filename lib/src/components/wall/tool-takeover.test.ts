@@ -16,7 +16,7 @@ describe('isNakedToolInvocation', () => {
     expect(isNakedToolInvocation('dor tool --fresh storybook')).toBe(true);
     expect(isNakedToolInvocation('/usr/local/bin/dor tool storybook')).toBe(true);
     expect(isNakedToolInvocation('dor.cmd tool storybook')).toBe(true);
-    // The shared tokenizer skips a leading assignment, as `commandArgv0` does.
+    // The shared tokenizer skips a leading assignment, as `commandWatchKey` does.
     expect(isNakedToolInvocation('DEBUG=1 dor tool storybook')).toBe(true);
   });
 

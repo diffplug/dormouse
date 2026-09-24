@@ -383,7 +383,7 @@ export function subscribeToInvitation(
  * break an alarm (`docs/specs/relay.md` -> Web Push). A test button is the one
  * caller that needs the failure.
  *
- * Lives here rather than beside the ring watcher in `alert-push.ts`: that
+ * Lives here rather than beside the device refresh in `activation.ts`: that
  * module is deliberately inside the lazily-imported `RemotePairingModalHost`
  * chunk, and importing it from the Settings dialog would pull the whole
  * Burrow stack into the main bundle on every host.

@@ -1,24 +1,21 @@
 /**
- * Tauri-sidecar binding of {@link BurrowService}; see
- * `docs/specs/standalone.md` → "Burrow service". Stdout is reserved for
- * the JSON-lines bridge, so all logging goes to stderr.
+ * What the Tauri sidecar runs beside its PTYs from this bundle: the binding of
+ * {@link BurrowService} (`docs/specs/standalone.md` → "Burrow service") and the
+ * app's alerts (§Alerts). Stdout is reserved for the JSON-lines bridge, so all
+ * logging goes to stderr.
  *
  * The sidecar owns the PTYs, so it is also standalone's terminal-protocol parse
- * site: one parser per PTY generation feeds the webview's `pty:data` and every
- * attached Client alike (`docs/specs/terminal-escapes.md` → "Parsing location").
+ * site: one parser per PTY generation feeds the webview's `pty:data`, every
+ * attached Client, and the app's one `AlertManager` alike
+ * (`docs/specs/terminal-escapes.md` → "Parsing location").
  */
 
-import {
-  createProcessedPtyStream,
-  type ProcessedPtyStream,
-} from '../../lib/processed-pty-stream';
-import {
-  collectTerminalProtocolAlerts,
-  collectTerminalProtocolResponses,
-  collectTerminalSemanticEvents,
-  type TerminalColorProvider,
-  type TerminalColors,
-} from '../../lib/terminal-protocol';
+import type { ProcessedPtyStream } from '../../lib/processed-pty-stream';
+import type { AlertManager, AlertState } from '../../lib/alert-manager';
+import type { TerminalColorProvider, TerminalColors } from '../../lib/terminal-protocol';
+import { createAlertHost, type AlertRealm } from '../alert-host';
+import type { AlertEvents } from '../alert-protocol';
+import { alertedPty, createOwnerPtyStream } from '../owner-pty';
 import type {
   BurrowSurfaceProvider,
   PtySink,
@@ -41,7 +38,7 @@ import {
 
 /** The slice of `pty-core`'s manager the Burrow drives. */
 export interface SidecarPtyManager {
-  write(id: string, data: string): void;
+  write(id: string, data: string, options?: { paced?: boolean }): void;
   resize(id: string, cols: number, rows: number, repaint?: boolean): void;
   /** Whether the current PTY generation still has a live process. */
   hasPty(id: string): boolean;
@@ -51,6 +48,8 @@ export interface SidecarSurfaceBridgeOptions {
   /** Writes one JSON line to the Rust bridge, which emits it to the webview. */
   send: (event: string, data: unknown) => void;
   mgr: SidecarPtyManager;
+  /** The app's one manager (`createSidecarHost`), fed from the parse below. */
+  alerts: AlertManager;
 }
 
 export interface SidecarSurfaceBridge {
@@ -85,7 +84,7 @@ export interface SidecarSurfaceBridge {
 
 /**
  * The provider half: PTYs answered locally, everything about the *view* of them
- * asked of the webview. Separate from {@link createSidecarBurrow} so it can
+ * asked of the webview. Separate from {@link createSidecarHost} so it can
  * be driven directly by tests, and so the next Burrow to move into its own process
  * can reuse the ask machinery without the sidecar's file store.
  */
@@ -160,49 +159,40 @@ export function createSidecarSurfaceBridge(
   /** Natural exits outlive their process so a late subscription can replay one. */
   const exits = new Map<string, number>();
 
-  /**
-   * The parse site for one PTY, feeding the webview and every Client from the
-   * same pass. Order matches the webview's own former order: alerts, then
-   * semantic state, then the responses this process writes, then the output.
-   */
+  /** The parse site for one PTY (`createOwnerPtyStream`), its renderer's share
+   *  sent to the webview. */
   function ownerStream(id: string): Stream {
     let stream = streams.get(id);
     if (stream) return stream;
-    const parsed = createProcessedPtyStream({
+    const parsed = createOwnerPtyStream(id, {
+      alerts: options.alerts,
       colorProvider: themeColorProvider,
-      onEvents(events) {
-        const alerts = collectTerminalProtocolAlerts(events);
-        if (alerts.length > 0) options.send('terminal:protocolEvents', { id, events: alerts });
-        const semanticEvents = collectTerminalSemanticEvents(events);
-        if (semanticEvents.length > 0) {
-          options.send('terminal:semanticEvents', { id, events: semanticEvents });
-        }
-        // Written from here, never from a viewer: the owner is the sole reply
-        // authority (`docs/specs/remote-api.md` → Terminal surfaces). Guarded
-        // because a PTY that died between the read and this write throws —
-        // `pty-core`'s own `interrupt` wraps the same call — and this runs ahead
-        // of the `pty:data` below. Losing the reply is survivable; losing the
-        // chunk the webview is about to render is not.
-        for (const response of collectTerminalProtocolResponses(events)) {
-          try {
-            options.mgr.write(id, response);
-          } catch (error) {
-            console.error(`[burrow] response write failed for ${id}: ${String(error)}`);
-          }
+      onToolEvents: (events) => options.send('terminal:toolEvents', { id, events }),
+      onSemanticEvents: (events) => options.send('terminal:semanticEvents', { id, events }),
+      // Guarded because a PTY that died between the read and this write throws
+      // — `pty-core`'s own `interrupt` wraps the same call — and this runs ahead
+      // of the `pty:data` below. Losing the reply is survivable; losing the
+      // chunk the webview is about to render is not.
+      writeResponse(response) {
+        try {
+          options.mgr.write(id, response);
+        } catch (error) {
+          console.error(`[burrow] response write failed for ${id}: ${String(error)}`);
         }
       },
-      onChunk(chunk) {
-        options.send('pty:data', { id, ...chunk });
-      },
+      onChunk: (chunk) => options.send('pty:data', { id, ...chunk }),
     });
     stream = { parsed, sinks: new Map() };
     streams.set(id, stream);
     return stream;
   }
 
+  // A Client's keystrokes and resizes reach the PTY as a local renderer's do.
+  const pty = alertedPty(options.alerts, options.mgr);
+
   const { provider, notifyDirectoryChanged } = createAskSurfaceProvider(ask, {
-    writePty: (ptyId, data) => options.mgr.write(ptyId, data),
-    resizePty: (ptyId, cols, rows, repaint) => options.mgr.resize(ptyId, cols, rows, repaint),
+    writePty: pty.writeClientInput,
+    resizePty: pty.resize,
 
     streamPty(ptyId, sink) {
       const subscribed = ownerStream(ptyId);
@@ -343,6 +333,7 @@ export function createSidecarSurfaceBridge(
       if (event !== 'exit') return;
       const reported = (detail as { exitCode?: unknown }).exitCode;
       const exitCode = typeof reported === 'number' ? reported : 0;
+      options.alerts.onExit(id, exitCode);
       // Durable: a surface resolution may already be in flight without a sink.
       exits.set(id, exitCode);
       const stream = streams.get(id);
@@ -389,7 +380,19 @@ export function createSidecarSurfaceBridge(
   };
 }
 
-export interface SidecarBurrowOptions extends SidecarSurfaceBridgeOptions {
+/** The slice of `pty-core`'s manager the host's own commands drive. */
+export interface SidecarHostPtyManager extends SidecarPtyManager {
+  spawn(id: string, options?: unknown): void;
+  kill(id: string): void;
+  gracefulKill(ids: string[], timeout?: unknown): void;
+  list(ids: unknown, forWindow: unknown, requestId: unknown, marks: unknown): void;
+}
+
+export interface SidecarHostOptions {
+  /** Writes one JSON line to the Rust bridge, which routes it
+   *  (`docs/specs/standalone.md` → "Routing"). */
+  send: (event: string, data: unknown) => void;
+  mgr: SidecarHostPtyManager;
   /**
    * Where the enrollment + ACL file lives. The browser dev harness passes a
    * per-run temp dir; standalone passes an empty value only when Rust could not
@@ -398,18 +401,72 @@ export interface SidecarBurrowOptions extends SidecarSurfaceBridgeOptions {
   stateDir?: string;
 }
 
-export interface SidecarBurrow {
-  /** One `burrow:command` line from the webview. */
-  handleCommand(data: unknown): void;
+export interface SidecarHost {
+  /** The app's one `AlertManager` (`docs/specs/standalone.md` → "Alerts").
+   *  `pty-core` reports each helper decision to it. */
+  readonly alerts: AlertManager;
+  /**
+   * One stdin command, if it is this module's — the PTY commands the alerts
+   * must see, and every alert and Burrow command. Returns whether it was.
+   */
+  handleCommand(event: string, data: unknown): boolean;
+  /**
+   * A `pty-core` event. A `data` event is parsed here and reaches the webview
+   * as the events this emits, so `main.js` must not forward it itself.
+   */
   onPtyEvent(event: string, data: unknown): void;
-  onPtySpawn(id: unknown): void;
-  setWindows(labels: unknown): void;
-  setAskDelivery(detail: unknown): void;
-  setThemeColors(colors: unknown): void;
   dispose(): void;
 }
 
-export function createSidecarBurrow(options: SidecarBurrowOptions): SidecarBurrow {
+const isString = (value: unknown): value is string => typeof value === 'string';
+
+/**
+ * Everything the sidecar runs beside its PTYs in this bundle: the parse site,
+ * the Burrow, and the app's alerts in the host role VS Code's extension host
+ * runs too (`lib/src/host/alert-host.ts`), with every window one of its
+ * viewers under its label.
+ */
+export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
+  const { send, mgr } = options;
+  const sendAlert = <E extends keyof AlertEvents>(event: E, data: AlertEvents[E]) => send(event, data);
+  const alertHost = createAlertHost({
+    // Late-bound: the service below is built on this manager's bridge, and a
+    // push comes due only on a timer, once both exist.
+    push: (sessionId, title) => void service.push(sessionId, title),
+  });
+  const alerts = alertHost.manager;
+
+  const publishState = (id: string, state: AlertState) => sendAlert('alert:state', { id, ...state });
+  const stops = [
+    // It names its Session, so Rust routes it to the window showing it.
+    alertHost.onSpeak((speak) => sendAlert('alert:speak', speak)),
+    alertHost.watched.subscribe((names) => sendAlert('alert:watchedCommands', { names })),
+    alertHost.settings.subscribe((settings) => sendAlert('alert:settings', { settings })),
+    alerts.onStateChange(publishState),
+  ];
+
+  /** Re-send the listed Sessions' state, every Session's when none are listed;
+   *  Rust routes each to its owner. */
+  function publish(ids: unknown): void {
+    if (!Array.isArray(ids)) {
+      for (const [id, state] of alerts.getAllStates()) publishState(id, state);
+      return;
+    }
+    for (const id of ids) {
+      if (isString(id) && alerts.has(id)) publishState(id, alerts.getState(id));
+    }
+  }
+
+  /** An await's outcome and a `sync`'s store snapshots go to the window that
+   *  asked; a `sync` re-sends only the Sessions that window names, each routed
+   *  to its owner. */
+  const realmOf = (window: string): AlertRealm => ({
+    answer: (result) => sendAlert('alert:awaitResult', { ...result, forWindow: window }),
+    resendStates: (ids) => publish(ids),
+    resendWatchedCommands: (names) => sendAlert('alert:watchedCommands', { names, forWindow: window }),
+    resendSettings: (settings) => sendAlert('alert:settings', { settings, forWindow: window }),
+  });
+
   const store = options.stateDir
     ? new FileBurrowStateStore(options.stateDir)
     : createEphemeralBurrowStateStore((message) => console.error(message));
@@ -417,13 +474,14 @@ export function createSidecarBurrow(options: SidecarBurrowOptions): SidecarBurro
   // deletes (`burrow-state-store.ts`).
   if (options.stateDir) void forgetRetiredState(options.stateDir);
 
-  const bridge = createSidecarSurfaceBridge(options);
+  const bridge = createSidecarSurfaceBridge({ send, mgr, alerts });
+  const pty = alertedPty(alerts, mgr);
 
   const service = new BurrowService({
     store,
     provider: bridge.provider,
     kind: 'standalone',
-    sendToUi: options.send,
+    sendToUi: send,
     connectSrc: bakedConnectSrc(),
     // The one host that answers a `direct-offer` today. Building the factory
     // loads nothing: the addon is opened inside the first offer, if one ever
@@ -434,24 +492,104 @@ export function createSidecarBurrow(options: SidecarBurrowOptions): SidecarBurro
     console.error(`[burrow] failed to start: ${String(error)}`);
   });
 
+  function handleBurrowCommand(data: unknown): void {
+    if (!isBurrowCommand(data)) return;
+    const command = data;
+    // Both of these feed something already waiting on this side, so they
+    // answer nothing and never reach the service's dispatch.
+    if (command.cmd === 'answer') {
+      return bridge.onAnswer(command.params as AnswerParams, command.window);
+    }
+    if (command.cmd === 'notify') return bridge.onNotify();
+    void service.handleCommand(command);
+  }
+
   return {
-    handleCommand(data) {
-      if (!isBurrowCommand(data)) return;
-      const command = data;
-      // Both of these feed something already waiting on this side, so they
-      // answer nothing and never reach the service's dispatch.
-      if (command.cmd === 'answer') {
-        return bridge.onAnswer(command.params as AnswerParams, command.window);
+    alerts,
+
+    handleCommand(event, data) {
+      const detail = (data && typeof data === 'object' ? data : {}) as Record<string, unknown>;
+      const { id } = detail;
+      switch (event) {
+        case 'pty:spawn': {
+          if (!isString(id)) return true;
+          const { alert, ...spawnOptions } = (detail.options ?? {}) as Record<string, unknown>;
+          // Before the spawn: the id may be a live PTY's, and nothing the new
+          // generation emits may land on the old one's parser or alert state.
+          // A cold restore's persisted TODO rides the spawn.
+          bridge.onPtySpawn(id);
+          alertHost.respawn(id, alert);
+          mgr.spawn(id, spawnOptions);
+          return true;
+        }
+        case 'pty:input':
+          pty.write(id as string, detail.data as string, {
+            paced: detail.paced === true,
+            userInput: detail.userInput === true,
+          });
+          return true;
+        case 'pty:resize':
+          pty.resize(id as string, detail.cols as number, detail.rows as number);
+          return true;
+        // Reached only after Rust dropped the id's owner, so the removal's
+        // state reaches no window.
+        case 'pty:kill':
+          if (isString(id)) alerts.remove(id);
+          mgr.kill(id as string);
+          return true;
+        // A closed window's leftover PTYs: gone like a kill, but gracefully.
+        // Never `pty:gracefulKill`, which the quit flush sends while windows
+        // still own their PTYs.
+        case 'pty:reap': {
+          const ids = Array.isArray(detail.ids) ? detail.ids.filter(isString) : [];
+          for (const reaped of ids) alerts.remove(reaped);
+          mgr.gracefulKill(ids, detail.timeout);
+          return true;
+        }
+        // One window's own PTYs, and the answer names it so the host can route
+        // the list and every replay behind it back (docs/specs/standalone.md).
+        // Their alert state follows, routed to each owner: a reloaded or
+        // arriving window has no other way to learn it.
+        case 'pty:requestInit':
+          mgr.list(detail.ids, detail.forWindow, detail.requestId, detail.marks);
+          publish(detail.ids);
+          return true;
+        case 'alert:command': {
+          // Unstamped: there is no window to be a viewer of, or to answer.
+          if (!isString(detail.window)) return true;
+          const { window, ...command } = detail;
+          alertHost.handle(window, command, realmOf(window));
+          return true;
+        }
+        // Which webviews will answer a Burrow ask, and which are still alert
+        // viewers (docs/specs/standalone.md -> "Burrow service").
+        case 'burrow:windows':
+          bridge.setWindows(detail.labels);
+          if (Array.isArray(detail.labels)) alertHost.retainRealms(detail.labels.filter(isString));
+          return true;
+        // Which windows an ask actually reached. Only the host knows: one naming
+        // a Surface goes to its owner alone.
+        case 'burrow:askDelivered':
+          bridge.setAskDelivery(data);
+          return true;
+        case 'burrow:command':
+          handleBurrowCommand(data);
+          return true;
+        // The webview's resolved terminal theme, so the parser here can answer
+        // OSC 10/11/12 (docs/specs/terminal-escapes.md → Supported OSCs).
+        case 'pty:themeColors':
+          bridge.setThemeColors(data);
+          return true;
+        default:
+          return false;
       }
-      if (command.cmd === 'notify') return bridge.onNotify();
-      void service.handleCommand(command);
     },
+
     onPtyEvent: bridge.onPtyEvent,
-    onPtySpawn: bridge.onPtySpawn,
-    setWindows: bridge.setWindows,
-    setAskDelivery: bridge.setAskDelivery,
-    setThemeColors: bridge.setThemeColors,
+
     dispose() {
+      for (const stop of stops) stop();
+      alertHost.dispose();
       service.dispose();
       bridge.dispose();
       // After the service, so no session is still holding a channel: the addon's

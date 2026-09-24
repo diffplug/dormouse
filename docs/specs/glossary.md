@@ -119,7 +119,7 @@ A Wall is always in exactly one input mode; `docs/specs/layout.md` owns the swit
 | **Registry** | xterm.js Terminal + persistent DOM element | `lib/src/lib/terminal-registry.ts` facade over `terminal-store.ts`, `terminal-lifecycle.ts` |
 | **View** | Where and how a Surface renders | `lib/src/components/Wall.tsx` plus `lib/src/components/wall/` |
 | **Link** | Webview ↔ host relationship | `lib/src/lib/reconnect.ts` |
-| **Activity** | Alert / attention state machine + renderer cache | `lib/src/lib/alert-manager.ts`, `lib/src/lib/session-activity-store.ts` |
+| **Activity** | Alert / engagement state machine + renderer cache | `lib/src/lib/alert-manager.ts`, `lib/src/lib/session-activity-store.ts` |
 | **Snapshot** | Persisted-to-disk projection: cwd, title, `untouched`, alert — never scrollback (`docs/specs/transport.md`) | `lib/src/lib/session-save.ts` / `session-restore.ts` |
 
 A **Session** is the tuple of its `SessionId` plus one state per layer (I1).

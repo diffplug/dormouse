@@ -2,6 +2,10 @@
 
 > Informative companion to [vscode.md](vscode.md): the evidence, measurements, and dead-approach history behind its rules, keyed by that spec's headings (AGENTS.md → "What, not why"). Nothing here is normative.
 
+## Workspaces
+
+**Why this window counts as a viewer, and only when `active`.** Only Dormouse webviews were viewers, so a push reached the phone while the user worked in VS Code outside the webview — the editor, VS Code's own terminal (2026-09-23). Focus alone never lapses: a user who walked away from a focused VS Code would never be pushed. `WindowState.active`, which lapses after a short time without input, was finalized in VS Code 1.89 (April 2024); the supported range starts at 1.85, where only the webviews' own presence counts.
+
 ## Surfacing union status on native chrome
 
 **Why `view.title` cannot carry the status.** The view's own title never surfaces on a single-view bottom-panel container, which leaves the badge as the only runtime indicator this hosting primitive exposes — hence presence-only where the editor tab can spell out `🔔` and `[TODO]`.

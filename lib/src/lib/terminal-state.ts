@@ -369,38 +369,58 @@ export function summarizeCommandLine(raw: string): string {
   if (commandTokens.length === 0) return DEFAULT_COMMAND_TITLE;
 
   const hasPipeline = tokens.includes('|');
-  const hasCompound = tokens.some((token) => token === '&&' || token === '||' || token === ';');
+  // A lone `&` backgrounds the line, or leading it is PowerShell's call
+  // operator; neither makes a second command worth the ` ...`.
+  const hasCompound = tokens.some((token) => token !== '&' && LIST_SEPARATORS.has(token));
   const visibleTokens = commandTitleTokens(commandTokens);
   const suffix = hasPipeline ? ' | ...' : hasCompound ? ' ...' : '';
-  return truncateCommandTitle(`${visibleTokens.join(' ')}${suffix}`);
+  // One line, though a quoted argument or a substitution may span several.
+  return truncateCommandTitle(`${visibleTokens.join(' ')}${suffix}`.replace(/\s*\n\s*/g, ' '));
 }
 
 /**
- * The first word of a command line, reduced to a bare program name: anything
- * after the first pipeline/compound boundary is dropped, leading `VAR=value`
- * assignments and a leading `env` are skipped, and argv[0] is taken as a
- * basename. `claude`, `/usr/bin/claude --print`, and `FOO=1 env BAR=2 claude`
- * all yield `claude`; `foo | claude` yields `foo`. Returns null when the line
- * holds no runnable word.
- *
- * A Windows launcher suffix is not part of the name: `C:\tools\claude.exe`,
- * `npm.cmd` and `build.ps1` yield `claude`, `npm` and `build`. `.exe` / `.cmd`
- * is how one program spells itself when PATHEXT resolves it, so keeping the
- * suffix would leave `npm` and `npm.cmd` as two rules for one program — the
- * miss this whole path exists to close. Accepted: `foo.bat` and `foo.exe` in
- * one directory cannot be watched separately.
- *
- * This is the key WATCHING rules are stored under — see `docs/specs/alert.md`.
+ * The key WATCHING rules are stored under: the program a command line waits on,
+ * as a bare name or `<runner> <script>`, or null when the line holds no
+ * runnable word. Every key it returns passes {@link isWatchKey}. The rules that
+ * derive it are `docs/specs/alert.md` -> WATCHING Track.
  */
-export function commandArgv0(raw: string): string | null {
-  return commandProgramName(primaryCommandTokens(raw)[0] ?? '') || null;
+export function commandWatchKey(raw: string): string | null {
+  const commands = listCommands(tokenizeCommand(raw.trim()));
+  const words = commands[commands.length - 1] ?? [];
+  const pipe = words.indexOf('|');
+  return watchKeyOfCommand(pipe === -1 ? words : words.slice(0, pipe));
+}
+
+/**
+ * Whether `name` is a WATCHING key some command line can produce: a bare
+ * program name, or exactly `<runner> <script>`. Neither part holds a path
+ * separator, and the program never starts with a Windows drive prefix or ends
+ * in a launcher suffix — `commandProgramName` strips those. A script may look
+ * like a drive prefix (`npm run b:dev`).
+ */
+export function isWatchKey(name: string): boolean {
+  const parts = name.split(' ');
+  if (parts.length > 2 || parts.some((part) => !part || /[\\/\s]/.test(part))) return false;
+  return !/^[A-Za-z]:/.test(parts[0]!) && !WINDOWS_EXECUTABLE_SUFFIX.test(parts[0]!);
+}
+
+/**
+ * The rule in `rules` that covers `key`, or null: the key itself, else — for a
+ * `<runner> <script>` key — a bare rule on its runner, which keeps matching
+ * every script of that runner.
+ */
+export function watchRuleFor(rules: ReadonlySet<string>, key: string | null): string | null {
+  if (key === null) return null;
+  if (rules.has(key)) return key;
+  const space = key.indexOf(' ');
+  const runner = space === -1 ? null : key.slice(0, space);
+  return runner !== null && rules.has(runner) ? runner : null;
 }
 
 /**
  * The tokens of the first command on a line: quote- and escape-aware, truncated
  * at the first pipeline/compound boundary, with leading `VAR=value` assignments
- * and a leading `env` skipped. `commandArgv0` is `commandProgramName` of the
- * first of these.
+ * and a leading `env` skipped.
  */
 export function primaryCommandTokens(raw: string): string[] {
   return takePrimaryCommandTokens(tokenizeCommand(raw.trim()));
@@ -416,7 +436,7 @@ export interface ResolvedCommandStart {
 /**
  * Turn a `commandStart` event plus the command line staged by the preceding
  * `commandLine` event into the fields a command run needs. Shared by the
- * terminal-state reducer and the alert manager's command-exit track so the
+ * terminal-state reducer and the alert manager's command-exit alerting so the
  * source resolution and display summarization exist in one place.
  *
  * `fallbackTitle` supplies the display label when the shell reported no command
@@ -882,8 +902,19 @@ function withRequiredHostPrefixes(
 
 /**
  * Split a command line into words, honoring quotes, POSIX backslash escapes,
- * and the pipeline/compound separators `| || && ; &`, which are emitted as
- * their own tokens.
+ * and the pipeline/compound separators `| || && ; &` (and a case item's
+ * `;; ;& ;;&`), which are emitted as their own tokens; `|&`, and fish's `&|`,
+ * pipe both streams and are emitted as `|`. A redirection's `&` or `|` stays
+ * in its word — `2>&1`, `<&3`, `>|`, and `&>` / `&>>`, which start a word of
+ * their own — so none of them reads as a separator. An unquoted `#` starting a
+ * word comments out the rest of its line. An unquoted newline
+ * separates commands like `;`, and a backslash-newline continues the line. A
+ * here-document's body — the lines after an unquoted `<<` / `<<-`'s own line,
+ * through the one equal to its delimiter word with quotes removed — is
+ * skipped, never read as commands. An unquoted `(` or `)` is a token of its
+ * own too, except that a `$(…)` / `<(…)` / `>(…)` substitution or a `name=(…)`
+ * array stays inside its word, whitespace and separators included; `{` and `}`
+ * are grouping only as whole words, which the split already makes them.
  *
  * A `\` escapes exactly the `POSIX_ESCAPABLE` set (`foo\ bar` is one token,
  * `\*.ts` passes a literal glob, and a path Dormouse escaped for paste reads
@@ -902,6 +933,14 @@ function tokenizeCommand(input: string): string[] {
   let current = '';
   let quote: '"' | "'" | null = null;
   let escaping = false;
+  // Open parentheses of the substitution or array being read.
+  let wordParens = 0;
+  // The last character when it was an unquoted, unescaped `$`, `<` or `>`: a
+  // `(` right after it opens a substitution, and an `&` right after a `<` or
+  // `>` (or a `|` after a `>`) belongs to that redirection.
+  let operatorPrefix: string | null = null;
+  // Here-documents opened on the current line, whose bodies follow it in order.
+  const hereDocuments: HereDocument[] = [];
 
   const push = () => {
     if (!current) return;
@@ -911,6 +950,8 @@ function tokenizeCommand(input: string): string[] {
 
   for (let i = 0; i < input.length; i += 1) {
     const char = input[i];
+    const prefix = operatorPrefix;
+    operatorPrefix = null;
 
     if (escaping) {
       current += char;
@@ -919,6 +960,10 @@ function tokenizeCommand(input: string): string[] {
     }
     if (char === '\\' && quote !== "'") {
       const next = input[i + 1];
+      if (next === '\n') {
+        i += 1;
+        continue;
+      }
       if (next !== undefined && POSIX_ESCAPABLE.test(next)) {
         escaping = true;
         continue;
@@ -935,8 +980,44 @@ function tokenizeCommand(input: string): string[] {
       quote = char;
       continue;
     }
+    // A substitution or array is one word, through the `)` closing its first `(`.
+    if (wordParens > 0 || (char === '(' && (prefix !== null || ARRAY_ASSIGNMENT_PREFIX.test(current)))) {
+      if (char === '(') wordParens += 1;
+      else if (char === ')') wordParens -= 1;
+      current += char;
+      continue;
+    }
+    if (char === '\n') {
+      push();
+      tokens.push(';');
+      // The lines after it are the bodies of the here-documents it opened.
+      if (hereDocuments.length > 0) i = skipHereDocumentBodies(input, i + 1, hereDocuments.splice(0)) - 1;
+      continue;
+    }
     if (/\s/.test(char)) {
       push();
+      continue;
+    }
+    if (char === '(' || char === ')') {
+      push();
+      tokens.push(char);
+      continue;
+    }
+    // `2>&1`, `<&3`, `>&-`, `>|`: the redirection it continues.
+    if ((char === '&' && (prefix === '<' || prefix === '>')) || (char === '|' && prefix === '>')) {
+      current += char;
+      continue;
+    }
+    // `&>` / `&>>` redirect both streams, a word of their own.
+    if (char === '&' && input[i + 1] === '>') {
+      push();
+      current = char;
+      continue;
+    }
+    if ((char === '|' && input[i + 1] === '&') || (char === '&' && input[i + 1] === '|')) {
+      push();
+      tokens.push('|');
+      i += 1;
       continue;
     }
     if (char === '&' && input[i + 1] === '&') {
@@ -951,17 +1032,91 @@ function tokenizeCommand(input: string): string[] {
       i += 1;
       continue;
     }
+    // A case item's end: `;;`, `;&`, `;;&`.
+    if (char === ';' && (input[i + 1] === ';' || input[i + 1] === '&')) {
+      push();
+      const end = input.startsWith(';;&', i) ? ';;&' : input.slice(i, i + 2);
+      tokens.push(end);
+      i += end.length - 1;
+      continue;
+    }
     if (char === '|' || char === ';' || char === '&') {
       push();
       tokens.push(char);
       continue;
     }
+    // A `#` starting a word comments out the rest of its line.
+    if (char === '#' && current === '' && (i === 0 || /[\s;&|()]/.test(input[i - 1]!))) {
+      const newline = input.indexOf('\n', i);
+      if (newline === -1) break;
+      i = newline - 1;
+      continue;
+    }
+    // `<<` or `<<-`, never the here-string `<<<`.
+    if (char === '<' && input[i + 1] === '<' && input[i + 2] !== '<' && input[i - 1] !== '<') {
+      const hereDocument = readHereDocumentDelimiter(input, i + 2);
+      if (hereDocument) hereDocuments.push(hereDocument);
+    }
     current += char;
+    if (char === '$' || char === '<' || char === '>') operatorPrefix = char;
   }
 
   push();
   return tokens;
 }
+
+interface HereDocument {
+  /** The delimiter word, quotes removed: its body ends at a line equal to it. */
+  delimiter: string;
+  /** `<<-`: leading tabs are stripped from each body line, the delimiter's included. */
+  stripTabs: boolean;
+}
+
+/** The here-document a `<<` whose word starts at `from` opens, or null when no word follows it. */
+function readHereDocumentDelimiter(input: string, from: number): HereDocument | null {
+  let i = from;
+  const stripTabs = input[i] === '-';
+  if (stripTabs) i += 1;
+  while (input[i] === ' ' || input[i] === '\t') i += 1;
+  let delimiter = '';
+  let quote: '"' | "'" | null = null;
+  for (; i < input.length; i += 1) {
+    const char = input[i]!;
+    if (quote) {
+      if (char === quote) quote = null;
+      else delimiter += char;
+    } else if (char === '"' || char === "'") {
+      quote = char;
+    } else if (char === '\\' && i + 1 < input.length) {
+      i += 1;
+      delimiter += input[i];
+    } else if (/\s/.test(char) || ';&|()<>'.includes(char)) {
+      break;
+    } else {
+      delimiter += char;
+    }
+  }
+  return delimiter ? { delimiter, stripTabs } : null;
+}
+
+/** Where the bodies of `hereDocuments`, one after another from `from`, end:
+ *  past each one's delimiter line, or at the end of input. */
+function skipHereDocumentBodies(input: string, from: number, hereDocuments: readonly HereDocument[]): number {
+  let at = from;
+  for (const { delimiter, stripTabs } of hereDocuments) {
+    while (at < input.length) {
+      const newline = input.indexOf('\n', at);
+      const lineEnd = newline === -1 ? input.length : newline;
+      const line = input.slice(at, lineEnd);
+      at = lineEnd + 1;
+      if ((stripTabs ? line.replace(/^\t+/, '') : line) === delimiter) break;
+    }
+  }
+  return Math.min(at, input.length);
+}
+
+/** A word that opens a `name=(…)` / `name+=(…)` array assignment at its `(`. */
+const ARRAY_ASSIGNMENT_PREFIX = /^[A-Za-z_][A-Za-z0-9_]*\+?=$/;
 
 function takePrimaryCommandTokens(tokens: string[]): string[] {
   // PowerShell's call operator. `& "C:\Program Files\nodejs\npm.cmd" run dev`
@@ -969,8 +1124,9 @@ function takePrimaryCommandTokens(tokens: string[]): string[] {
   // never a POSIX background suffix, so drop it rather than read it as a
   // boundary that leaves no command at all.
   const words = tokens[0] === '&' ? tokens.slice(1) : tokens;
-  const firstBoundary = words.findIndex((token) => token === '|' || token === '&&' || token === '||' || token === ';' || token === '&');
-  const command = (firstBoundary === -1 ? words : words.slice(0, firstBoundary)).filter(Boolean);
+  const firstBoundary = words.findIndex((token) => token === '|' || LIST_SEPARATORS.has(token));
+  const command = (firstBoundary === -1 ? words : words.slice(0, firstBoundary))
+    .filter((token) => !GROUPING_TOKENS.has(token));
   let index = 0;
   while (isEnvAssignment(command[index])) index += 1;
   if (command[index] === 'env') {
@@ -984,19 +1140,296 @@ function isEnvAssignment(token: string | undefined): boolean {
   return !!token && /^[A-Za-z_][A-Za-z0-9_]*=/.test(token);
 }
 
+/** The operators that end a case item. */
+const CASE_ITEM_ENDS = new Set([';;', ';&', ';;&']);
+const LIST_SEPARATORS = new Set(['&&', '||', ';', '&', ...CASE_ITEM_ENDS]);
+/** The subshell and group operators `tokenizeCommand` emits; lexical only, so a
+ *  group's inner list is split like any other. */
+const GROUPING_TOKENS = new Set(['(', ')', '{', '}']);
+/** Words that close a compound command, fish's `end` among them. A segment one
+ *  leads holds only that command's redirections or pipeline (`done < list`,
+ *  `fi | tee log`). */
+const CLOSING_WORDS = new Set(['done', 'fi', 'esac', 'end', '}', ')']);
+/** Words that open a compound command or one of its clauses, negate, or — fish's
+ *  `and` / `or` — chain: the rest of their segment is the command they run. */
+const OPENING_WORDS = new Set(['if', 'elif', 'then', 'else', 'while', 'until', 'do', '!', '(', '{', 'begin', 'and', 'or', 'not']);
+/** Loop headers: a name and a word list, never a command. */
+const LOOP_HEADERS = new Set(['for', 'select']);
+
+/**
+ * The simple commands of a list, in order, with the shell's grammar around them
+ * taken out: separators, grouping, a compound command's reserved words (POSIX
+ * and fish), a loop header, and a case item's pattern; a pipeline stays in one
+ * piece. Lexical, like the tokenizer, and a reserved word counts only where a
+ * command starts, so `for f in *; do make; done`, `if x; then make; fi` and
+ * fish's `while x; make; end` run `make`.
+ */
+function listCommands(tokens: readonly string[]): string[][] {
+  const commands: string[][] = [];
+  /** The next command starts with a case item's `pattern)`, or — after a line
+   *  `case WORD` — maybe with the `in` POSIX lets it put there. */
+  let caseNext: 'pattern' | 'in' | null = null;
+  let segment: string[] = [];
+
+  const end = (): void => {
+    let words = segment;
+    segment = [];
+    if (words.length === 0) return;
+    if (CLOSING_WORDS.has(words[0]!)) {
+      if (words[0] === 'esac') caseNext = null;
+      return;
+    }
+    for (;;) {
+      if (words.length === 0) return;
+      const first = words[0]!;
+      if (caseNext === 'in') {
+        // Without it, the line was fish's `case PATTERN…`: patterns alone.
+        caseNext = first === 'in' ? 'pattern' : null;
+        if (caseNext !== null) words = words.slice(1);
+      } else if (OPENING_WORDS.has(first)) {
+        words = words.slice(1);
+      } else if (caseNext === 'pattern') {
+        caseNext = null;
+        const close = words.indexOf(')');
+        if (close === -1) break;
+        words = words.slice(close + 1);
+      } else if (first === 'case') {
+        // `case WORD in`, then the first item's pattern.
+        const inAt = words.indexOf('in', 2);
+        caseNext = inAt === -1 ? 'in' : 'pattern';
+        words = inAt === -1 ? [] : words.slice(inAt + 1);
+      } else if (LOOP_HEADERS.has(first)) {
+        return;
+      } else {
+        break;
+      }
+    }
+    commands.push(words.filter((token) => !GROUPING_TOKENS.has(token)));
+  };
+
+  for (const token of tokens) {
+    if (!LIST_SEPARATORS.has(token)) {
+      segment.push(token);
+      continue;
+    }
+    end();
+    if (CASE_ITEM_ENDS.has(token)) caseNext = 'pattern';
+  }
+  end();
+  return commands.filter((words) => words.length > 0);
+}
+
+interface FlagSpec {
+  /** Flags that take the next word as their value. */
+  value?: readonly string[];
+  /** `VAR=value` words it accepts among its flags (`sudo FOO=1 make`). */
+  assignments?: boolean;
+}
+
+interface WrapperSpec extends FlagSpec {
+  /** Flags that stand alone; single letters may cluster (`-di`). A `value` flag
+   *  may also carry its value attached (`-uroot`, `--user=root`). */
+  bool?: readonly string[];
+  /** A stand-alone flag shape not worth listing (nice's `-5`). */
+  boolPattern?: RegExp;
+  /** Positional words before the command it runs (`timeout 5m make`). */
+  operands?: number;
+  /** The command is a package spec, whose `@version` is not part of the name. */
+  packageSpec?: boolean;
+}
+
+const PNPM_DLX: WrapperSpec = { value: ['--package'], bool: ['-s', '--silent'], packageSpec: true };
+const BUN_X: WrapperSpec = { value: ['-p', '--package'], bool: ['--bun', '-y'], packageSpec: true };
+
+/**
+ * Programs that run the command named after their own flags, keyed as one word
+ * or as a launcher's two (`pnpm dlx`). Only the flags listed are understood: an
+ * unknown one stops the skip and the wrapper keys as itself, rather than
+ * guessing whether that flag swallowed the next word. `env -S` and
+ * `command -v` are unknown on purpose — neither runs its next word.
+ */
+const TRANSPARENT_WRAPPERS: ReadonlyMap<string, WrapperSpec> = new Map(Object.entries({
+  env: { value: ['-u', '--unset', '-C', '--chdir'], bool: ['-', '-i', '--ignore-environment', '-0', '--null', '-v', '--debug'], assignments: true },
+  sudo: {
+    value: ['-u', '--user', '-g', '--group', '-p', '--prompt', '-C', '--close-from', '-D', '--chdir', '-r', '--role', '-t', '--type', '-T', '--command-timeout', '-U', '--other-user'],
+    bool: ['-E', '--preserve-env', '-H', '--set-home', '-n', '--non-interactive', '-S', '--stdin', '-b', '--background', '-k', '--reset-timestamp', '-P', '--preserve-groups', '-A', '--askpass', '-B', '--bell', '-i', '--login', '-s', '--shell'],
+    assignments: true,
+  },
+  doas: { value: ['-u'], bool: ['-n'] },
+  time: { value: ['-o', '--output', '-f', '--format'], bool: ['-p', '--portability', '-v', '--verbose', '-a', '--append', '-l'] },
+  nice: { value: ['-n', '--adjustment'], boolPattern: /^-\d+$/ },
+  nohup: {},
+  caffeinate: { value: ['-t', '-w'], bool: ['-d', '-i', '-m', '-s', '-u'] },
+  command: { bool: ['-p'] },
+  builtin: {},
+  exec: { value: ['-a'], bool: ['-c', '-l'] },
+  stdbuf: { value: ['-i', '--input', '-o', '--output', '-e', '--error'] },
+  timeout: { value: ['-k', '--kill-after', '-s', '--signal'], bool: ['-v', '--verbose', '--foreground', '--preserve-status'], operands: 1 },
+  npx: { value: ['-p', '--package'], bool: ['-y', '--yes', '--no', '-q', '--quiet'], packageSpec: true },
+  pnpx: PNPM_DLX,
+  bunx: BUN_X,
+  uvx: { value: ['--from', '--with', '-p', '--python'], bool: ['-q', '--quiet', '-v', '--verbose', '--isolated', '--offline'], packageSpec: true },
+  'pnpm dlx': PNPM_DLX,
+  'yarn dlx': { value: ['-p', '--package'], bool: ['-q', '--quiet'], packageSpec: true },
+  'npm exec': { value: ['-p', '--package', '-w', '--workspace'], bool: ['-y', '--yes', '--no', '-q', '--quiet', '-ws', '--workspaces'], packageSpec: true },
+  'bun x': BUN_X,
+} satisfies Record<string, WrapperSpec>));
+
+interface RunnerSpec extends FlagSpec {
+  /** Value flags whose value is optional and numeric (make's `-j` / `-j 8`). */
+  numeric?: readonly string[];
+  /** A verb both spellings of a script share, dropped (`npm run test` is `npm test`). */
+  drop?: readonly string[];
+  /** A leading `+toolchain` word (`cargo +nightly build`). */
+  toolchain?: boolean;
+}
+
+/**
+ * Runners whose script is part of the key, so `pnpm dev` and `pnpm test` are
+ * two rules. `value` lists the flags before the script that take a word; any
+ * other flag is skipped as standing alone.
+ */
+const SCRIPT_RUNNERS: ReadonlyMap<string, RunnerSpec> = new Map(Object.entries({
+  npm: { value: ['-C', '--prefix', '-w', '--workspace'], drop: ['run', 'run-script'] },
+  pnpm: { value: ['-C', '--dir', '-F', '--filter'], drop: ['run'] },
+  yarn: { value: ['--cwd'], drop: ['run'] },
+  bun: { value: ['--cwd', '-F', '--filter', '-c', '--config'], drop: ['run'] },
+  cargo: { value: ['-C', '--color', '--config', '-Z'], toolchain: true },
+  make: {
+    value: ['-C', '--directory', '-f', '--file', '--makefile', '-I', '--include-dir', '-o', '--old-file', '-W', '--what-if'],
+    numeric: ['-j', '--jobs', '-l', '--load-average'],
+    assignments: true,
+  },
+  just: { value: ['-f', '--justfile', '-d', '--working-directory', '--shell', '--dotenv-path', '--dotenv-filename', '--color'], assignments: true },
+} satisfies Record<string, RunnerSpec>));
+
+/** How many words a wrapper flag occupies under `spec`: 0 when it is not one it knows. */
+function flagWidth(words: readonly string[], index: number, spec: WrapperSpec): number {
+  const word = words[index]!;
+  if (spec.bool?.includes(word) || spec.boolPattern?.test(word)) return 1;
+  if (spec.value?.includes(word)) return 2;
+  const equals = word.indexOf('=');
+  if (word.startsWith('--')) {
+    const name = equals > 0 ? word.slice(0, equals) : null;
+    return name !== null && [spec.value, spec.bool].some((list) => list?.includes(name)) ? 1 : 0;
+  }
+  if (word.length > 2) {
+    if (spec.value?.includes(word.slice(0, 2))) return 1;
+    if ([...word.slice(1)].every((letter) => spec.bool?.includes(`-${letter}`))) return 1;
+  }
+  return 0;
+}
+
+/**
+ * Where the command a wrapper at `index` runs starts, and whether that command
+ * is a package spec; null when `words` holds no wrapper there, or one whose
+ * flags are not understood.
+ */
+function wrappedCommandIndex(words: readonly string[], index: number): { index: number; packageSpec: boolean } | null {
+  const program = commandProgramName(words[index] ?? '');
+  const launcher = TRANSPARENT_WRAPPERS.get(`${program} ${words[index + 1] ?? ''}`);
+  const spec = launcher ?? TRANSPARENT_WRAPPERS.get(program);
+  if (!spec) return null;
+  let i = index + (launcher ? 2 : 1);
+  while (i < words.length) {
+    const word = words[i]!;
+    if (word === '--') {
+      i += 1;
+      break;
+    }
+    if (spec.assignments && isEnvAssignment(word)) {
+      i += 1;
+      continue;
+    }
+    if (!word.startsWith('-')) break;
+    const width = flagWidth(words, i, spec);
+    if (width === 0) return null;
+    i += width;
+  }
+  i += spec.operands ?? 0;
+  return i < words.length ? { index: i, packageSpec: spec.packageSpec === true } : null;
+}
+
+/** A redirection word: its operator after an optional fd (`2>&1`, `>log`), or
+ *  the operator alone, its target the next word. A `<(…)` / `>(…)`
+ *  substitution is a word, not one. */
+const REDIRECTION = /^\d*(?:&>>?|[<>]&|>\||<>|>>?|<<<|<<-?|<)(?!\()/;
+
+/** `words` without their redirections, each with its target. */
+function withoutRedirections(words: readonly string[]): string[] {
+  const kept: string[] = [];
+  for (let i = 0; i < words.length; i += 1) {
+    const word = words[i]!;
+    const operator = REDIRECTION.exec(word)?.[0];
+    if (operator === undefined) kept.push(word);
+    else if (operator === word) i += 1;
+  }
+  return kept;
+}
+
+/** One simple command's watch key: redirections, wrappers and assignments skipped, runners keyed by script. */
+function watchKeyOfCommand(command: readonly string[]): string | null {
+  const words = withoutRedirections(command);
+  let index = 0;
+  let packageSpec = false;
+  for (;;) {
+    while (isEnvAssignment(words[index])) index += 1;
+    const wrapped = wrappedCommandIndex(words, index);
+    if (!wrapped) break;
+    ({ index, packageSpec } = wrapped);
+  }
+  let program = commandProgramName(words[index] ?? '');
+  // `claude@latest`, but not a scope's leading `@`.
+  if (packageSpec) program = program.replace(/^(.+?)@[^@]*$/, '$1');
+  // A name with a space in it would read back as `<runner> <script>`.
+  if (program.includes(' ') || !isWatchKey(program)) return null;
+  const runner = SCRIPT_RUNNERS.get(program);
+  if (!runner) return program;
+  const script = runnerScript(words, index + 1, runner);
+  return script !== null && isWatchKey(`${program} ${script}`) ? `${program} ${script}` : program;
+}
+
+/** The first word after a runner's own flags (and its shared verb): its script or target. */
+function runnerScript(words: readonly string[], from: number, spec: RunnerSpec): string | null {
+  let i = from;
+  if (spec.toolchain && words[i]?.startsWith('+')) i += 1;
+  let dropped = false;
+  while (i < words.length) {
+    const word = words[i]!;
+    if (word.startsWith('-') && word !== '-') {
+      // Any flag it does not list as taking a word stands alone.
+      const takesWord = spec.value?.includes(word) || (spec.numeric?.includes(word) && /^\d+(?:\.\d+)?$/.test(words[i + 1] ?? ''));
+      i += takesWord ? 2 : 1;
+    } else if (spec.assignments && isEnvAssignment(word)) {
+      i += 1;
+    } else if (!dropped && spec.drop?.includes(word)) {
+      dropped = true;
+      i += 1;
+    } else {
+      return word;
+    }
+  }
+  return null;
+}
+
 /** A path reduced to its last segment, in either dialect. */
 function commandBasename(command: string): string {
   return command.replace(/^.*[\\/]/, '');
 }
 
-/** PATHEXT's spellings of one program. Exported for `watched-commands.ts`,
- *  which drops a stored key ending in one: `commandArgv0` cannot produce one. */
-export const WINDOWS_EXECUTABLE_SUFFIX = /\.(?:exe|cmd|bat|com|ps1)$/i;
+/** PATHEXT's spellings of one program. */
+const WINDOWS_EXECUTABLE_SUFFIX = /\.(?:exe|cmd|bat|com|ps1)$/i;
 
 /**
  * argv[0] reduced to the one name a program answers to: no path, no launcher
  * suffix. The single answer to "which program is this", so the header, the
  * WATCHING rule row and the terminal context cannot disagree about it.
+ *
+ * `C:\tools\claude.exe`, `npm.cmd` and `build.ps1` are `claude`, `npm` and
+ * `build`: `.exe` / `.cmd` is how one program spells itself when PATHEXT
+ * resolves it, so keeping the suffix would leave `npm` and `npm.cmd` as two
+ * WATCHING rules for one program. Accepted: `foo.bat` and `foo.exe` in one
+ * directory cannot be watched separately.
  */
 export function commandProgramName(command: string): string {
   return commandBasename(command).replace(WINDOWS_EXECUTABLE_SUFFIX, '');
