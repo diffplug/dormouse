@@ -271,6 +271,37 @@ describe('WorkspaceWindow', () => {
     expect(wallFor(created).querySelector('[data-focused="true"]')).not.toBeNull();
   });
 
+  it('activates a Workspace from its tab TODO pill onto its TODO pane', async () => {
+    const first = getActiveWorkspaceId();
+    createWorkspace({ id: 'ws-2', activate: false });
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPlans={{
+      [first]: { initialPaneIds: ['pane-a'] },
+      'ws-2': { initialPaneIds: ['pane-x', 'pane-y'] },
+    }} /></>);
+    await act(async () => { setTerminalActivity('pane-y', { todo: true }); });
+    const verbs = [
+      vi.spyOn(fake, 'alertAcknowledge'), vi.spyOn(fake, 'alertDismiss'),
+      vi.spyOn(fake, 'alertClearTodo'), vi.spyOn(fake, 'alertToggleTodo'),
+    ];
+    try {
+      await act(async () => {
+        container.querySelector<HTMLButtonElement>('[data-workspace-tab="ws-2"] [data-workspace-tab-todo]')!.click();
+      });
+      await flush();
+      expect(getActiveWorkspaceId()).toBe('ws-2');
+      expect(wallFor('ws-2').querySelector('[data-focused="true"]')).toBeNull();
+      for (const verb of verbs) expect(verb).not.toHaveBeenCalled();
+      expect(getActivitySnapshot().get('pane-y')?.todo).toBe(true);
+
+      // The pill left the selection on the TODO pane, which Enter goes into.
+      await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); });
+      await flush();
+      expect(wallFor('ws-2').querySelector('[data-session-id="pane-y"][data-focused="true"]')).not.toBeNull();
+    } finally {
+      terminalRegistry.clearTerminalActivity();
+    }
+  });
+
   it('answers a key from one Wall even when that key activates another', async () => {
     // A browser runs a microtask checkpoint between listeners, which is where
     // React commits the newly active Wall. Synchronous dispatch skips it, so each

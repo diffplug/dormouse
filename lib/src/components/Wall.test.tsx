@@ -4185,6 +4185,85 @@ describe('Wall on the Lath engine', () => {
     expect(getWallHandle(DEFAULT_WORKSPACE_ID)).toBeNull();
   });
 
+  /** docs/specs/layout.md -> "Workspace tabs": what a tab's TODO pill does. */
+  it('cycles through TODO members in command mode, Doors included, with no alert verb', async () => {
+    const onEvent = vi.fn();
+    await act(async () => root.render(<Wall
+      restoredLathLayout={{
+        version: 1,
+        tree: { root: { kind: 'split', dir: 'row', children: [
+          { node: { kind: 'leaf', id: 'pane-a' }, weight: 0.25 },
+          { node: { kind: 'leaf', id: 'pane-b' }, weight: 0.25 },
+          { node: { kind: 'leaf', id: 'browser-a' }, weight: 0.5 },
+        ] } },
+        leafMeta: {
+          'pane-a': { component: 'terminal', tabComponent: 'terminal', title: 'shell' },
+          'pane-b': { component: 'terminal', tabComponent: 'terminal', title: 'shell' },
+          'browser-a': {
+            component: 'browser',
+            tabComponent: 'surface',
+            title: 'example.com',
+            params: { surfaceType: 'browser', renderMode: 'iframe', url: 'https://example.com' },
+          },
+        },
+      }}
+      initialDoors={[{ id: 'door-a', title: 'A' }]}
+      initialMode="passthrough"
+      onEvent={onEvent}
+    />));
+    await flush();
+    const handle = getWallHandle(DEFAULT_WORKSPACE_ID)!;
+    expect(handle.surfaceIds()).toEqual(['pane-a', 'pane-b', 'browser-a', 'door-a']);
+    setTerminalActivity('pane-b', { todo: true });
+    setTerminalActivity('door-a', { todo: true });
+    // A browser Surface's TODO is the renderer's own.
+    terminalRegistry.toggleSessionTodo('browser-a');
+    try {
+      const verbs = [
+        vi.spyOn(fake, 'alertAcknowledge'), vi.spyOn(fake, 'alertDismiss'),
+        vi.spyOn(fake, 'alertClearTodo'), vi.spyOn(fake, 'alertToggleTodo'),
+        vi.spyOn(terminalRegistry, 'acknowledgeSession'), vi.spyOn(terminalRegistry, 'dismissSessionAlert'),
+        vi.spyOn(terminalRegistry, 'clearSessionTodo'), vi.spyOn(terminalRegistry, 'toggleSessionTodo'),
+      ];
+      const last = (type: string) => onEvent.mock.calls.filter(([event]) => event.type === type).at(-1)?.[0];
+      const selection = () => last('selectionChange');
+      const next = async () => {
+        let found = false;
+        await act(async () => { found = handle.selectNextTodo(); });
+        await flush();
+        return found;
+      };
+
+      expect(await next()).toBe(true);
+      expect(selection()).toEqual({ type: 'selectionChange', id: 'pane-b', kind: 'pane' });
+      expect(last('modeChange')).toEqual({ type: 'modeChange', mode: 'command' });
+      expect(container.querySelector('[data-focused="true"]')).toBeNull();
+      expect(await next()).toBe(true);
+      expect(selection()).toEqual({ type: 'selectionChange', id: 'browser-a', kind: 'pane' });
+      // A Door is selected where it stands, never reattached.
+      expect(await next()).toBe(true);
+      expect(selection()).toEqual({ type: 'selectionChange', id: 'door-a', kind: 'door' });
+      expect(container.querySelector('[data-lath-leaf="door-a"]')).toBeNull();
+      expect(handle.surfaceIds()).toEqual(['pane-a', 'pane-b', 'browser-a', 'door-a']);
+      expect(await next()).toBe(true);
+      expect(selection()).toEqual({ type: 'selectionChange', id: 'pane-b', kind: 'pane' });
+
+      for (const verb of verbs) expect(verb).not.toHaveBeenCalled();
+      const activity = terminalRegistry.getActivitySnapshot();
+      expect(['pane-b', 'browser-a', 'door-a'].map((id) => activity.get(id)?.todo)).toEqual([true, true, true]);
+
+      // With no TODO left it answers false and leaves the selection alone.
+      setTerminalActivity('pane-b', {});
+      setTerminalActivity('door-a', {});
+      terminalRegistry.clearLocalSurfaceActivity('browser-a');
+      const before = onEvent.mock.calls.length;
+      expect(await next()).toBe(false);
+      expect(onEvent.mock.calls.slice(before)).toEqual([]);
+    } finally {
+      terminalRegistry.clearLocalSurfaceActivity('browser-a');
+    }
+  });
+
   it('names the command that drives a browser run by the other provider', async () => {
     hostBrowsers({ attach: async (request) => request.provider === 'playwright' ? { ok: true, stream: 4555 } : { ok: true } });
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);

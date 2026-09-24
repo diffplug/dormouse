@@ -36,6 +36,11 @@ export interface WallHandle {
   enterSelectedPane(): void;
   enterCommandMode(): void;
   selectWorkspaceTab(): void;
+  /** Command mode on `nextTodoMember` after the current selection — a pane
+   *  selected, a Door selected and never reattached. False, changing nothing,
+   *  when no member has a TODO. Selection only: never an alert verb
+   *  (`docs/specs/layout.md` → "Workspace tabs"). */
+  selectNextTodo(): boolean;
   /** Persist now. `probeCwd: false` skips the cwd re-read (`SessionFlushRequest`). */
   flushPersistence(options?: SaveOptions): Promise<void>;
   /** Build what another Window needs to take this Workspace, without touching
@@ -103,6 +108,7 @@ export function stubWallHandle(workspaceId: WorkspaceId, overrides: Partial<Wall
     enterSelectedPane: () => {},
     enterCommandMode: () => {},
     selectWorkspaceTab: () => {},
+    selectNextTodo: () => false,
     flushPersistence: async () => {},
     prepareWorkspaceTransfer: async () => ({
       payload: {

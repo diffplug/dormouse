@@ -70,6 +70,7 @@ import type {
 import { hasBrowser, hasTerminal } from 'dor/commands/types';
 import { DEFAULT_WORKSPACE_ID, type PersistedSurfaceRefs, type WorkspaceId } from '../lib/session-types';
 import { clearWorkspaceSurfaces, setWorkspaceSurfaces } from '../lib/workspace-surfaces';
+import { nextTodoMember } from '../lib/workspace-union';
 import { getWorkspace, getWorkspacesSnapshot, subscribeToWorkspaces, workspaceRefFor } from '../lib/workspace-store';
 import { awaitWallEmpty } from './wall/close-all';
 import { registerWallHandle, type WallHandle } from './wall/wall-handles';
@@ -1797,6 +1798,16 @@ export function Wall({
     },
     enterCommandMode: exitTerminalMode,
     selectWorkspaceTab: () => { exitTerminalMode(); selectWorkspace(effectiveWorkspaceId); },
+    selectNextTodo: () => {
+      // A selected Workspace tab is no member, so the search starts from the top.
+      const next = nextTodoMember(memberSurfaceIds(), selectedIdRef.current, getActivitySnapshot());
+      if (next === null) return false;
+      // Command mode first, so the pane leaving passthrough is the one blurred.
+      exitTerminalMode();
+      if (nav.hasPane(next)) selectPane(next);
+      else selectDoor(next);
+      return true;
+    },
     flushPersistence: (options) => persistence.flush(options),
     prepareWorkspaceTransfer: () => prepareWorkspaceTransfer({
       workspaceId: effectiveWorkspaceId,

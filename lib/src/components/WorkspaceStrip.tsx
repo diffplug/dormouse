@@ -86,6 +86,15 @@ export function WorkspaceStrip({
     setActiveWorkspace(id);
   }, []);
 
+  // The TODO pill's click: activation in command mode, landing on the next
+  // member owing a TODO — or plain activation when none does any more, never a
+  // rename (`docs/specs/layout.md` → "Workspace tabs").
+  const selectNextTodo = useCallback((id: WorkspaceId) => {
+    const handle = getWallHandle(id);
+    if (!handle?.selectNextTodo()) handle?.enterCommandMode();
+    setActiveWorkspace(id);
+  }, []);
+
   // Activation changes the close button and therefore the intrinsic tab width.
   // Reveal it after layout, including activation through a shortcut or create.
   useLayoutEffect(() => {
@@ -195,6 +204,7 @@ export function WorkspaceStrip({
             dragging={draggingId === workspace.id}
             registerElement={registerElement}
             onActivate={activate}
+            onSelectNextTodo={selectNextTodo}
             onStartRename={requestWorkspaceRename}
             onFinishRename={finishRename}
             onCancelRename={cancelRename}
@@ -270,6 +280,7 @@ const WorkspaceTab = memo(function WorkspaceTab({
   dragging,
   registerElement,
   onActivate,
+  onSelectNextTodo,
   onStartRename,
   onFinishRename,
   onCancelRename,
@@ -286,6 +297,7 @@ const WorkspaceTab = memo(function WorkspaceTab({
   dragging: boolean;
   registerElement: (element: HTMLElement | null) => (() => void) | undefined;
   onActivate: (id: WorkspaceId) => void;
+  onSelectNextTodo: (id: WorkspaceId) => void;
   onStartRename: (id: WorkspaceId) => void;
   onFinishRename: (id: WorkspaceId, value: string) => void;
   onCancelRename: () => void;
@@ -343,31 +355,47 @@ const WorkspaceTab = memo(function WorkspaceTab({
           onCancel={onCancelRename}
         />
       ) : (
-        <button
-          type="button"
-          className={clsx(
-            'flex h-full min-w-0 flex-1 items-center gap-2 overflow-hidden pl-2.5 text-left',
-            active ? 'pr-1' : 'pr-2.5',
-          )}
-          aria-label={label}
-          title={label}
-          aria-current={active ? 'true' : undefined}
-          onClick={() => {
-            if (wasDragged()) return;
-            if (active) onStartRename(id);
-            else onActivate(id);
-          }}
-        >
-          <span className={clsx('min-w-0 flex-1 truncate', nameIsAuto && AUTO_NAME_CLASS)}>{name}</span>
+        <>
+          <button
+            type="button"
+            className={clsx(
+              'flex h-full min-w-0 flex-1 items-center overflow-hidden pl-2.5 text-left',
+              showTodoPill || active ? 'pr-1' : 'pr-2.5',
+            )}
+            aria-label={label}
+            title={label}
+            aria-current={active ? 'true' : undefined}
+            onClick={() => {
+              if (wasDragged()) return;
+              if (active) onStartRename(id);
+              else onActivate(id);
+            }}
+          >
+            <span className={clsx('min-w-0 flex-1 truncate', nameIsAuto && AUTO_NAME_CLASS)}>{name}</span>
+          </button>
+          {/* A sibling of the tab's button, never inside it: its own click
+              target, reached by the keyboard as one. */}
           {showTodoPill && (
-            <span
-              className={`todo-pill-shell shrink-0 text-xs font-semibold ${TODO_PILL_TRACKING_CLASS}`}
+            <button
+              type="button"
+              data-workspace-tab-todo={id}
+              className={clsx(
+                'todo-pill-shell flex h-full shrink-0 items-center pl-1 text-xs font-semibold',
+                TODO_PILL_TRACKING_CLASS,
+                active ? 'pr-1' : 'pr-2.5',
+              )}
               data-flourishing={todoPill.flourishing ? 'true' : 'false'}
+              aria-label={`Next TODO in ${name}`}
+              title={`Next TODO in ${name}`}
+              onClick={() => {
+                if (wasDragged()) return;
+                onSelectNextTodo(id);
+              }}
             >
               {todoPill.body}
-            </span>
+            </button>
           )}
-        </button>
+        </>
       )}
       {active && !renaming && (
         <button

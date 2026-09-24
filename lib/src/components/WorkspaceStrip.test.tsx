@@ -56,6 +56,10 @@ function activateButton(id: string): HTMLButtonElement {
   return tabFor(id).querySelector<HTMLButtonElement>('button')!;
 }
 
+function todoPill(id: string): HTMLButtonElement | null {
+  return tabFor(id).querySelector<HTMLButtonElement>('[data-workspace-tab-todo]');
+}
+
 async function render(node = <WorkspaceStrip />): Promise<void> {
   await act(async () => root.render(node));
 }
@@ -242,6 +246,72 @@ describe('WorkspaceStrip', () => {
     await act(async () => { activateButton('ws-2').click(); });
     const inset = tabFor(first).querySelector<HTMLElement>('[data-alert-ring-inset]')!;
     expect(inset.style.animationDelay).toBe('-100ms');
+  });
+
+  /** docs/specs/layout.md -> "Workspace tabs": the pill is its own click
+   *  target, beside the tab's button rather than inside it. */
+  it('selects the next TODO from its own pill, activating the Workspace and never renaming it', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    setWorkspaceSurfaces(first, ['pane-a']);
+    setTerminalActivity('pane-a', { todo: true });
+    const handle = stubHandle(first, { selectNextTodo: vi.fn(() => true), enterCommandMode: vi.fn() });
+    await render();
+
+    const pill = todoPill(first)!;
+    expect(pill.tagName).toBe('BUTTON');
+    expect(activateButton(first).contains(pill)).toBe(false);
+    expect(pill.getAttribute('aria-label')).toBe('Next TODO in Workspace 1');
+    expect(activateButton(first).getAttribute('aria-label')).toBe('Workspace 1, 1 needing attention');
+
+    await act(async () => { pill.click(); });
+    expect(getActiveWorkspaceId()).toBe(first);
+    expect(handle.selectNextTodo).toHaveBeenCalledTimes(1);
+    expect(handle.enterCommandMode).not.toHaveBeenCalled();
+    // On the visible tab it moves on to the next TODO, where the tab renames.
+    await act(async () => { todoPill(first)!.click(); });
+    expect(handle.selectNextTodo).toHaveBeenCalledTimes(2);
+    expect(getWorkspaceUiSnapshot().renamingId).toBeNull();
+  });
+
+  /** A TODO cleared between render and click leaves nothing to select. */
+  it('activates in command mode from a pill with no TODO behind it, and never renames', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    setWorkspaceSurfaces(first, ['pane-a']);
+    setTerminalActivity('pane-a', { todo: true });
+    const handle = stubHandle(first, { selectNextTodo: () => false, enterCommandMode: vi.fn() });
+    await render();
+
+    await act(async () => { todoPill(first)!.click(); });
+    expect(getActiveWorkspaceId()).toBe(first);
+    expect(handle.enterCommandMode).toHaveBeenCalledTimes(1);
+    await act(async () => { todoPill(first)!.click(); });
+    expect(handle.enterCommandMode).toHaveBeenCalledTimes(2);
+    expect(getWorkspaceUiSnapshot().renamingId).toBeNull();
+  });
+
+  it('ignores the click a drag from the pill ends with', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    setWorkspaceSurfaces(first, ['pane-a']);
+    setTerminalActivity('pane-a', { todo: true });
+    const handle = stubHandle(first, { selectNextTodo: vi.fn(() => true) });
+    await render();
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
+      { left: 0, right: 100, width: 100, top: 0, bottom: 24, height: 24, x: 0, y: 0, toJSON: () => ({}) } as DOMRect,
+    );
+    Object.defineProperty(tabFor(first), 'setPointerCapture', { configurable: true, value: () => {} });
+    Object.defineProperty(tabFor(first), 'releasePointerCapture', { configurable: true, value: () => {} });
+
+    await act(async () => { todoPill(first)!.dispatchEvent(pointer('pointerdown', { button: 0, clientX: 50, clientY: 12 })); });
+    await act(async () => { window.dispatchEvent(pointer('pointermove', { clientX: 90, clientY: 12 })); });
+    await act(async () => { window.dispatchEvent(pointer('pointerup', { clientX: 90, clientY: 12 })); });
+    await act(async () => { todoPill(first)!.click(); });
+    expect(handle.selectNextTodo).not.toHaveBeenCalled();
+    expect(getActiveWorkspaceId()).toBe('ws-2');
+    await act(async () => { todoPill(first)!.click(); });
+    expect(handle.selectNextTodo).toHaveBeenCalledTimes(1);
   });
 
   it('renames the active tab on click, holding the chrome keyboard lease while the editor is open', async () => {
