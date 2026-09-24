@@ -1020,10 +1020,14 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
-  it('refuses a render swap away from an iframe surface holding a non-http(s) URL', async () => {
+  it.each([
+    ['ab-screencast', 'agent-browser'],
+    ['pw-screencast', 'Playwright'],
+  ] as const)('refuses a render swap to %s away from an iframe surface holding a non-http(s) URL', async (mode, provider) => {
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(true);
     const open = vi.fn(async () => ({ ok: true, session: 'dormouse.1.gui-a1b2c3', wsPort: 4321 }));
-    (fake as PlatformAdapter).agentBrowserOpen = open;
+    const playwright = vi.fn(async () => ({ ok: true, session: 'gui-pw', wsPort: 4322 }));
+    Object.assign(fake, { agentBrowserOpen: open, playwright });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     try {
@@ -1044,16 +1048,17 @@ describe('Wall on the Lath engine', () => {
       await flush();
 
       await act(async () => {
-        getAgentBrowserScreenController(iframeId)?.actions.setRenderMode?.('ab-screencast');
+        getAgentBrowserScreenController(iframeId)?.actions.setRenderMode?.(mode);
       });
       await flush();
 
       expect(open).not.toHaveBeenCalled();
+      expect(playwright).not.toHaveBeenCalled();
       expect(getAgentBrowserScreenController(iframeId)?.snapshot().renderMode).toBe('iframe');
       // The Display modal closes itself on Apply, so the console is the only
       // channel this refusal has of its own.
       expect(warn).toHaveBeenCalledWith(
-        `[dormouse] cannot swap surface '${iframeId}' to agent-browser: `
+        `[dormouse] cannot swap surface '${iframeId}' to ${provider}: `
         + "'data:text/html,<script>alert(1)</script>' is not an http(s) URL",
       );
     } finally {

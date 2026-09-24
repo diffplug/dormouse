@@ -712,6 +712,20 @@ describe('Playwright provider', () => {
     expect(sent.map((message) => message.text).join('')).toBe(pasted.replace('\r\n', '\n'));
   });
 
+  it('names Playwright in a failed host command warning', async () => {
+    const platform: PlatformAdapter = new FakePtyAdapter();
+    platform.playwright = vi.fn(async request => request.op === 'command'
+      ? { ok: false, error: 'boom', exitCode: 1, stdout: '', stderr: 'boom' }
+      : { ok: true });
+    setPlatform(platform);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const controller = acquireAgentBrowserSurfaceController('pw', { renderMode: 'pw-screencast', session: 's' });
+    controller.attachView(makeSink());
+    getAgentBrowserScreenController('pw')!.chromeActions.reload();
+    await flushMicrotasks();
+    expect(warn).toHaveBeenCalledWith('[playwright] reload failed:', 'boom');
+  });
+
   it('uses the shared controller with provider-scoped host calls and cwd', async () => {
     const platform: PlatformAdapter = new FakePtyAdapter();
     platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));

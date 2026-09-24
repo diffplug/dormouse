@@ -478,6 +478,37 @@ describe('AgentBrowserPanel Playwright params', () => {
     expect(getAgentBrowserScreenController('pw-panel')?.snapshot().renderMode).toBe('pw-screencast');
     expect(commands('/second')).toContain('set viewport 800 600 1');
   });
+
+  it('keeps its own mode write over params that predate it', async () => {
+    const playwright = vi.fn<NonNullable<PlatformAdapter['playwright']>>(async (request) => request.op === 'streamUrl'
+      ? { ok: true, url: `ws://127.0.0.1:${request.port}` }
+      : { ok: true, wsPort: 4330 });
+    const platform: PlatformAdapter = new FakePtyAdapter();
+    platform.playwright = playwright;
+    setPlatform(platform);
+    const updateParameters = vi.fn();
+    const popped = { surfaceType: 'browser', renderMode: 'pw-popout', session: 'app', cwd: '/p', wsPort: 4321 };
+    await renderPanel(paneProps('pw-panel', popped), updateParameters);
+    const stream = WebSocketMock.instances.findLast((ws) => ws.url === 'ws://127.0.0.1:4321')!;
+    await act(async () => { stream.emitMessage(JSON.stringify({ type: 'status', connected: true, screencasting: false })); });
+
+    // Minimized, the user closes the headed window: auto-revert pops the pane
+    // back in and buffers its `renderMode` write until the next attach.
+    await act(async () => { root.render(<div />); });
+    await act(async () => { stream.emitMessage(JSON.stringify({ type: 'status', connected: false, screencasting: false })); });
+    expect(playwright).toHaveBeenCalledWith(expect.objectContaining({ op: 'popIn', session: 'app' }));
+    expect(updateParameters).not.toHaveBeenCalledWith(expect.objectContaining({ renderMode: 'pw-screencast' }));
+
+    // Reattached with the params the store still held: they predate the write.
+    await renderPanel(paneProps('pw-panel', popped), updateParameters);
+    expect(updateParameters).toHaveBeenCalledWith(expect.objectContaining({ renderMode: 'pw-screencast' }));
+    expect(getAgentBrowserScreenController('pw-panel')?.snapshot().renderMode).toBe('pw-screencast');
+
+    // Once params show it, a later host report is followed again.
+    await renderPanel(paneProps('pw-panel', { ...popped, renderMode: 'pw-screencast', wsPort: 4330 }), updateParameters);
+    await renderPanel(paneProps('pw-panel', { ...popped, wsPort: 4331 }), updateParameters);
+    expect(getAgentBrowserScreenController('pw-panel')?.snapshot().renderMode).toBe('pw-popout');
+  });
 });
 
 describe('AgentBrowserPanel visibility parking', () => {

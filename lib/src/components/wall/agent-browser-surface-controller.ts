@@ -327,6 +327,9 @@ export class AgentBrowserSurfaceController {
   // observe URL changes); flushed on the next attach.
   private pendingParams = new Map<string, unknown>();
   private pendingTitle: string | null = null;
+  // The renderMode this controller last wrote, until params show it back
+  // (`followParamsHeadedness`).
+  private unechoedRenderMode: RenderMode | null = null;
 
   private started = false;
   private disposed = false;
@@ -650,16 +653,21 @@ export class AgentBrowserSurfaceController {
    * and the Wall records the host-reported mode in params
    * (`ensureAgentBrowserSurface`). Everything else that arrives here is this
    * controller's own popOut/popIn write coming back, so agent-browser ignores
-   * it, and so does a relaunch in flight or a write still buffered while
-   * detached (the store is behind it until the next attach flushes it).
+   * it, and so does a relaunch in flight. Params that have not yet shown this
+   * controller's last mode write predate it — buffered while detached, or a
+   * render (StrictMode's second effect pass) that ran before the store caught
+   * up — and would flip the mode back.
    */
   private followParamsHeadedness(renderMode: RenderMode): void {
-    if (this.provider !== 'playwright' || this.relaunching || this.pendingParams.has('renderMode')) return;
+    if (this.unechoedRenderMode !== null) {
+      if (renderMode === this.unechoedRenderMode) this.unechoedRenderMode = null;
+      return;
+    }
+    if (this.provider !== 'playwright' || this.relaunching) return;
     const headed = isPopout(renderMode);
     if (headed === this.poppedOut) return;
     // The last status came from the old browser; auto-revert waits for the
     // new stream's own before it treats a disconnect as the window closing.
-    this.headedConnected = false;
     this.setStatus(null);
     this.setPoppedOut(headed);
   }
@@ -673,6 +681,7 @@ export class AgentBrowserSurfaceController {
   // Buffer a param write while detached so a minimized (view-less) controller
   // can still record URL changes; flush on the next attach.
   private writeParams(params: Record<string, unknown>): void {
+    if (typeof params.renderMode === 'string') this.unechoedRenderMode = params.renderMode as RenderMode;
     if (this.sink) this.sink.updateParameters(params);
     else for (const [k, v] of Object.entries(params)) this.pendingParams.set(k, v);
   }
