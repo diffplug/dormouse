@@ -2154,13 +2154,14 @@ export function Wall({
       const reference = buildDorSurfaces().find((s) => s.id === id);
       if (!reference) return;
       const agentBrowser = renderMode === 'ab-screencast';
+      const open = getPlatform().agentBrowserOpen;
+      if (agentBrowser && !open) return;
       const created = createContentSurface({
         minimized: false,
         params: { surfaceType: 'browser', renderMode, url, ...(agentBrowser ? { syncEngaged: true } : {}) },
         reference,
         title: hostPathDisplay(url, true),
       });
-      const open = getPlatform().agentBrowserOpen;
       if (!agentBrowser || !created.ok || !open) return;
       const eagerId = created.value.id;
       open(url, {}, launchBinaryPath.get('agent-browser')).then((res) => {
