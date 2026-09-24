@@ -627,6 +627,19 @@ describe('launch', () => {
     expect(WebSocketMock.instances).toHaveLength(0);
   });
 
+  it('ignores params that predate the session its launch bound', async () => {
+    const platform = launchPlatform(async () => ({ ok: true, session: 'dormouse.1.gui-abc', wsPort: 4321 }));
+    const controller = acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-screencast', url: 'https://page.example/' });
+    controller.attachView(makeSink());
+    await flushMicrotasks();
+
+    // A remounted view feeds the params it rendered with, before the write shows.
+    controller.updateParams({ renderMode: 'ab-screencast', url: 'https://page.example/' });
+    await flushMicrotasks();
+    expect(platform.agentBrowserOpen).toHaveBeenCalledOnce();
+    expect(streamSocket(4321)?.readyState).toBe(1);
+  });
+
   it('never closes the session a launch opened when the Surface has since bound it', async () => {
     let answer!: (res: { ok: boolean; session?: string; wsPort?: number }) => void;
     const platform = launchPlatform(() => new Promise((resolve) => { answer = resolve; }));

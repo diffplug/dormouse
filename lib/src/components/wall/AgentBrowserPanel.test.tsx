@@ -566,7 +566,8 @@ describe('AgentBrowserPanel across a provider change', () => {
     withBothProviders();
     await renderPanel(paneProps('swap-panel', pw));
     const failed = getAgentBrowserSurfaceController('swap-panel')!;
-    await renderPanel(paneProps('swap-panel', ab));
+    // No port handover, which would acquire the controller itself.
+    await renderPanel(paneProps('swap-panel', { ...ab, wsPort: undefined }));
     await act(async () => { await Promise.resolve(); });
     expect(getAgentBrowserSurfaceController('swap-panel')).not.toBe(failed);
     expect(getAgentBrowserScreenController('swap-panel')?.snapshot().renderMode).toBe('ab-screencast');

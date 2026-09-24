@@ -816,7 +816,7 @@ export class AgentBrowserSurfaceController {
           // otherwise is whoever holds that session next (a Workspace
           // transfer's destination opens the same one), or this Surface's own.
           const closed = this.phase.k === 'disposed' && this.phase.closed;
-          if (res.session && (closed || (!session && res.session !== this.session))) {
+          if (res.session && (closed || !session)) {
             void closeSessionOn(this.provider, res.cwd ?? this.cwd, res.session, res.binaryPath);
           }
           return;
