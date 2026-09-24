@@ -316,7 +316,7 @@ describe('iframe failures offer a way out', () => {
       await act(async () => { vi.advanceTimersByTime(2000); });
       await act(async () => { iframe.dispatchEvent(new Event('load')); });
       await act(async () => { vi.advanceTimersByTime(1100); });
-      expect(banner()?.textContent).toContain('isn’t running through Dormouse');
+      expect(banner()?.textContent).toContain('Dormouse can’t follow this page');
 
       await act(async () => { button('Open in agent-browser')!.click(); });
       expect(onSwapRenderMode).toHaveBeenCalledWith('iframe-uninstrumented', 'ab-screencast');
@@ -327,10 +327,27 @@ describe('iframe failures offer a way out', () => {
       expect(banner()).toBeNull();
 
       // Flagged again, then a later report from the shim clears it.
+      await report();
+      await act(async () => { vi.advanceTimersByTime(2000); });
       await act(async () => { iframe.dispatchEvent(new Event('load')); });
       await act(async () => { vi.advanceTimersByTime(1100); });
       expect(banner()).not.toBeNull();
       await report('/back-on-the-proxy');
+      expect(banner()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // The proxy instruments HTML only: an image, PDF or JSON document framed from
+  // the start carries no shim and is working, not lost.
+  it('judges nothing until the frame\'s shim has reported once', async () => {
+    vi.useFakeTimers();
+    try {
+      proxyPlatform();
+      const iframe = await renderPanel(stubActions(), paneProps('iframe-non-html'));
+      await act(async () => { iframe.dispatchEvent(new Event('load')); });
+      await act(async () => { vi.advanceTimersByTime(1100); });
       expect(banner()).toBeNull();
     } finally {
       vi.useRealTimers();
@@ -342,6 +359,8 @@ describe('iframe failures offer a way out', () => {
     try {
       proxyPlatform();
       const iframe = await renderPanel(stubActions(), paneProps('iframe-offproxy-link'));
+      await report();
+      await act(async () => { vi.advanceTimersByTime(2000); });
       // The shim posts a clicked link's href just before the frame navigates.
       await act(async () => {
         window.dispatchEvent(new MessageEvent('message', { origin: PROXY, data: { __dormouse: 'location', url: 'https://elsewhere.example/' } }));

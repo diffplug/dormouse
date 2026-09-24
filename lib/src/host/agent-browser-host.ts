@@ -63,13 +63,13 @@ import type {
   AgentBrowserScreenshotResult,
   AgentBrowserStreamStatusResult,
 } from '../lib/platform/types';
+import { isBrowsableUrl } from '../lib/platform/browser-automation';
 import { privateCaptureDir } from './private-capture-dir';
 import {
   captureFormat,
   editScript,
   generateGuiSession,
   isAgentBrowserSession,
-  isBrowsableUrl,
   jpegQuality,
   parseWebviewCommand,
   type WebviewCommand,
@@ -90,6 +90,9 @@ function webviewArgv(command: WebviewCommand): string[] {
   }
 }
 
+// A caller past this joins no pending capture: every adapter has stopped
+// waiting for it (vscode-adapter.ts, the standalone host's 30s forward).
+const CAPTURE_JOIN_MAX_MS = 30_000;
 const STREAM_PORT_READ_ATTEMPTS = 4;
 const STREAM_PORT_READ_DELAY_MS = 150;
 // How often a launch re-reads the daemon's state files while `open` is still
@@ -143,6 +146,8 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   function beginRelaunch(session: string): number {
     const generation = ++nextRelaunchGeneration;
     relaunchGenerations.set(session, generation);
+    // The relaunched daemon's captures must not join its predecessor's.
+    forgetCaptures(session);
     return generation;
   }
 
@@ -405,14 +410,32 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   // One capture per session and format at a time, whoever asks — surfaces can
   // share a session, and a caller re-asks after its adapter's timeout. A second
   // spawn would only queue behind the first in the daemon, then race it for
-  // the session's one capture file, so a caller asking mid-capture joins it.
-  const capturesInFlight = new Map<string, Promise<unknown>>();
-  function oneCapture<T>(key: string, capture: () => Promise<T>): Promise<T> {
-    const pending = capturesInFlight.get(key) as Promise<T> | undefined;
-    if (pending) return pending;
-    const started = capture().finally(() => capturesInFlight.delete(key));
-    capturesInFlight.set(key, started);
-    return started;
+  // the session's one capture file, so a caller asking mid-capture joins it —
+  // but never one older than an adapter's reply timeout, which is wedged, nor
+  // one from before the session's close or relaunch.
+  type PendingCapture = { session: string; started: number; promise: Promise<unknown> };
+  const capturesInFlight = new Map<string, PendingCapture>();
+  function oneCapture<T>(session: string, kind: string, capture: () => Promise<T>): Promise<T> {
+    const key = `${kind}\0${session}`;
+    const pending = capturesInFlight.get(key);
+    if (pending && Date.now() - pending.started < CAPTURE_JOIN_MAX_MS) return pending.promise as Promise<T>;
+    if (pending) forgetCaptures(session);
+    const entry: PendingCapture = { session, started: Date.now(), promise: Promise.resolve() };
+    const promise = capture().finally(() => {
+      if (capturesInFlight.get(key) === entry) capturesInFlight.delete(key);
+    });
+    entry.promise = promise;
+    capturesInFlight.set(key, entry);
+    return promise;
+  }
+
+  /** Join none of `session`'s pending captures, and give its next one a fresh
+   *  file, so a capture that is still running can never overwrite it. */
+  function forgetCaptures(session: string): void {
+    for (const [key, entry] of capturesInFlight) {
+      if (entry.session === session) capturesInFlight.delete(key);
+    }
+    screenshotNames.delete(session);
   }
 
   async function command(session: string, args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult> {
@@ -431,6 +454,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     if (parsed.kind === 'close') {
       poppedOutSessions.delete(session);
       relaunchGenerations.delete(session);
+      forgetCaptures(session);
     }
     return runWithBinaryFallback(['--session', session, ...webviewArgv(parsed)], binaryPath);
   }
@@ -495,7 +519,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
       return { ok: false, error: 'a valid session name is required' };
     }
     const format = captureFormat(opts.format);
-    return oneCapture(`file:${format}:${session}`, async (): Promise<AgentBrowserScreenshotFileResult> => {
+    return oneCapture(session, `file:${format}`, async (): Promise<AgentBrowserScreenshotFileResult> => {
       const ext = format === 'png' ? 'png' : 'jpg';
       let out: string;
       try {
@@ -529,7 +553,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     // Joined whole, read and unlink included: a caller joining only the capture
     // would read a file the first caller has already removed.
     const format = captureFormat(opts.format);
-    return oneCapture(`bytes:${format}:${session}`, async (): Promise<AgentBrowserScreenshotResult> => {
+    return oneCapture(session, `bytes:${format}`, async (): Promise<AgentBrowserScreenshotResult> => {
       const shot = await screenshotToFile(session, opts, binaryPath);
       if (!shot.ok) return { ok: false, error: shot.error };
       try {

@@ -267,6 +267,19 @@ describe('iframe proxy — serving', () => {
     expect((await ask()).body).toBe('(none)');
   });
 
+  it('keys caches on Sec-Fetch-Dest, since the encoding asked for depends on it', async () => {
+    const port = await upstream((q, s) => {
+      if (q.url === '/star') { s.writeHead(200, { 'content-type': 'text/plain', vary: '*' }); s.end('x'); return; }
+      s.writeHead(200, { 'content-type': q.url === '/page' ? 'text/html' : 'application/javascript', vary: 'Accept-Language' });
+      s.end(q.url === '/page' ? '<html><head></head><body>x</body></html>' : 'x');
+    });
+    const origin = new URL(await frame(`http://127.0.0.1:${port}/`)).origin;
+
+    expect((await get(`${origin}/page`)).headers.vary).toBe('Accept-Language, Sec-Fetch-Dest');
+    expect((await get(`${origin}/app.js`)).headers.vary).toBe('Accept-Language, Sec-Fetch-Dest');
+    expect((await get(`${origin}/star`)).headers.vary).toBe('*');
+  });
+
   it('streams the instrumented head as soon as a marker split across chunks completes', async () => {
     let finish: () => void = () => {};
     const port = await upstream(async (_q, s) => {

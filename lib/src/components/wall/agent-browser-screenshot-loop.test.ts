@@ -285,4 +285,26 @@ describe('screenshot loop behind a blocking command', () => {
 
     loop.dispose();
   });
+
+  it('still owes a shot for the wait when the overdue capture fails', async () => {
+    const releases: Array<(res: AgentBrowserScreenshotResult) => void> = [];
+    const screenshot = vi.fn(() => new Promise<AgentBrowserScreenshotResult>((resolve) => { releases.push(resolve); }));
+    setScreenshot(screenshot as unknown as PlatformAdapter['agentBrowserScreenshot']);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const loop = createScreenshotLoop({ getSession: () => 'sess', getBinaryPath: () => undefined, isCapable: () => true, draw: vi.fn() });
+
+    loop.pulse();
+    await vi.advanceTimersByTimeAsync(300);
+    for (let i = 0; i < 5; i++) {
+      loop.pulse();
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    // An adapter gives up on the reply (VS Code answers its timeout `{ ok: false }`):
+    // nothing was drawn, so the pane is still on the stream's frames.
+    releases[0]({ ok: false, error: 'agent-browser screenshot timed out' });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(screenshot).toHaveBeenCalledTimes(2);
+
+    loop.dispose();
+  });
 });

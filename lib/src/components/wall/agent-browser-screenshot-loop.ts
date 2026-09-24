@@ -135,8 +135,9 @@ export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
       const now = performance.now();
       const elapsedMs = now - lastStart;
       deps.log?.(`[agent-browser] screenshot done ${JSON.stringify({ session, seq: mySeq, ok: res.ok, bytes: res.bytes?.byteLength ?? 0, elapsedMs: Math.round(elapsedMs), stalled: stalled(), dirty })}`);
-      // Overdue (see above): only a pulse after its release is owed a shot.
-      if (elapsedMs > overdueAfterMs() && lastPulseAt <= now - avgMs) dirty = false;
+      // Overdue (see above): once it is drawn, only a pulse after its release
+      // is owed a shot.
+      const pulsesInImage = elapsedMs > overdueAfterMs() && lastPulseAt <= now - avgMs;
       avgMs = avgMs * 0.6 + Math.min(elapsedMs, overdueAfterMs()) * 0.4;
       inFlight = false;
       // A provisional stream frame painted during this capture is visibly newer.
@@ -152,6 +153,7 @@ export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
           // work pending so the resting frame still sharpens.
           dirty = true;
         } else {
+          if (pulsesInImage) dirty = false;
           display(res.bytes, res.mime || 'image/jpeg', mySeq, provisionalAtStart);
         }
       } else {

@@ -566,6 +566,37 @@ describe('SurfacePaneHeader — browser chrome', () => {
     registration.dispose();
   });
 
+  it('refuses a non-http(s) address visibly instead of navigating to it', () => {
+    const navigate = vi.fn();
+    const registration = registerAgentBrowserScreen('pane-url-refuse', {
+      snapshot: SCREEN,
+      actions: { engageSync: vi.fn(), applyDevice: vi.fn(), applyViewport: vi.fn(), openModal: vi.fn() },
+      chrome: CHROME,
+      chromeActions: { navigate, back: vi.fn(), forward: vi.fn(), reload: vi.fn() },
+      hostCapable: true,
+    });
+    renderHeader(headerProps('pane-url-refuse', 'x'), stubActions());
+
+    for (const typed of ['file:///tmp/report.html', 'about:blank']) {
+      act(() => {
+        (container.querySelector('span[title="Vite + React"]') as HTMLElement)
+          .dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      const input = container.querySelector<HTMLInputElement>('[data-url-input-for="pane-url-refuse"]')!;
+      act(() => {
+        setNativeFieldValue(input, typed);
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      });
+      const warning = document.querySelector('[data-url-refusal-for="pane-url-refuse"]');
+      expect(warning?.textContent).toContain(typed);
+      expect(warning?.textContent).toContain('http:// and https:// pages only');
+      act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); });
+    }
+    expect(navigate).not.toHaveBeenCalled();
+
+    registration.dispose();
+  });
+
   it('cancels URL editing on Escape without navigating', () => {
     const navigate = vi.fn();
     const registration = registerAgentBrowserScreen('pane-url-esc', {

@@ -2017,6 +2017,18 @@ export function Wall({
       const params = nav.paneParams(id);
       const currentRenderMode = surfaceRenderModeFromParams(params);
 
+      // No pane, tool or not, swaps onto an iframe that would refuse its page;
+      // the Display modal never offers it (docs/specs/dor-browser.md → "Iframe
+      // Renderer").
+      if (mode === 'iframe') {
+        const url = browserUrlFromParams(params) || getAgentBrowserScreenController(id)?.chrome().url;
+        const refused = url ? iframeRefusal(url) : null;
+        if (refused) {
+          console.warn(`[dormouse] cannot swap surface '${id}' to iframe: ${refused}`);
+          return;
+        }
+      }
+
       // Tools keep their Session and current URL through renderer swaps, and
       // take only their declarable renders: anything else would be written
       // as `toolRender` and launch nothing (docs/specs/dor-tool.md).
@@ -2024,7 +2036,7 @@ export function Wall({
         if (mode === currentRenderMode || !isToolRender(mode)) return;
         const url = browserUrlFromParams(params);
         const platform = getPlatform();
-        if (!url || (mode === 'ab-screencast' && !platform.agentBrowserOpen) || (mode === 'iframe' && iframeRefusal(url))) return;
+        if (!url || (mode === 'ab-screencast' && !platform.agentBrowserOpen)) return;
         closeAgentBrowserSession(params);
         disposeAgentBrowserSurfaceController(id);
         lath.store.updateParams(id, {
@@ -2056,9 +2068,8 @@ export function Wall({
         // Canonical params.url (mirrored from the chrome snapshot) first; fall
         // back to the live snapshot for a surface that hasn't reported a tab yet.
         const url = browserUrlFromParams(params) || getAgentBrowserScreenController(id)?.chrome().url;
-        const refused = url ? iframeRefusal(url) : 'no URL observed yet';
-        if (!url || refused) {
-          console.warn(`[dormouse] cannot swap surface '${id}' to iframe: ${refused}`);
+        if (!url) {
+          console.warn(`[dormouse] cannot swap surface '${id}' to iframe: no URL observed yet`);
           return;
         }
         replaceSurface(id, {

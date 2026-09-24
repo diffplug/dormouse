@@ -403,7 +403,18 @@ function sanitizeResponseHeaders(grant: Grant, headers: http.IncomingHttpHeaders
   if (typeof loc === 'string') {
     out.location = rewriteOrigin(loc, grant.upstream.origin, grant.proxyOrigin);
   }
+  // The upstream was asked for identity or not by `Sec-Fetch-Dest`
+  // (DOCUMENT_DESTINATIONS), so a cache must key on it too: a compressed,
+  // uninstrumented fetch of a page must never answer the frame's navigation.
+  out.vary = varyAlso(out.vary, 'Sec-Fetch-Dest');
   return out;
+}
+
+function varyAlso(vary: http.OutgoingHttpHeader | undefined, field: string): string {
+  const fields = (Array.isArray(vary) ? vary.join(',') : String(vary ?? ''))
+    .split(',').map((part) => part.trim()).filter(Boolean);
+  if (fields.includes('*') || fields.some((part) => part.toLowerCase() === field.toLowerCase())) return fields.join(', ');
+  return [...fields, field].join(', ');
 }
 
 // Compare parsed origins, never string prefixes or embedded query values.

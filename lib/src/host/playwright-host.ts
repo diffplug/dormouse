@@ -9,6 +9,7 @@ import type { Browser, Page, CDPSession } from 'playwright-core';
 import { spawnAndCapture } from 'dor-lib-common';
 import { messageOf } from '../lib/errors';
 import {
+  isBrowsableUrl,
   PLAYWRIGHT_REQUEST_TIMEOUT_MS,
   PLAYWRIGHT_TEXT_INPUT_MAX,
   type PlaywrightRequest,
@@ -18,7 +19,6 @@ import {
   captureFormat,
   editScript,
   generateGuiSession,
-  isBrowsableUrl,
   isPlaywrightSession,
   jpegQuality,
   parseWebviewCommand,

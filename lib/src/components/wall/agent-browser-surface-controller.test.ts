@@ -750,6 +750,23 @@ describe('relaunch (pop-out / pop-in)', () => {
     expect(platform.agentBrowserPopOut).toHaveBeenCalledWith('sess', expect.objectContaining({ url: 'https://slow.example/' }), undefined);
   });
 
+  it('relaunches at the last page the host can reopen, not a file: or data: tab', async () => {
+    const platform = relaunchPlatform();
+    const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', wsPort: 1111, url: 'https://before.example/' });
+    const sink = makeSink();
+    controller.attachView(sink);
+    await flushMicrotasks();
+    const socket = streamSocket(1111);
+    socket?.emitMessage(JSON.stringify({ type: 'url', url: 'https://app.example/report' }));
+    socket?.emitMessage(JSON.stringify({ type: 'url', url: 'file:///tmp/report.html' }));
+    // The header shows the page; the restorable URL stays the last http(s) one.
+    expect(getAgentBrowserScreenController('id')?.chrome().url).toBe('file:///tmp/report.html');
+    expect(sink.updateParameters).not.toHaveBeenCalledWith({ url: 'file:///tmp/report.html' });
+
+    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout');
+    expect(platform.agentBrowserPopOut).toHaveBeenCalledWith('sess', expect.objectContaining({ url: 'https://app.example/report' }), undefined);
+  });
+
   it('clears a stale title when navigation commits at the same URL', async () => {
     const controller = acquireAgentBrowserSurfaceController('id', {
       session: 'sess', wsPort: 1111, url: 'https://same.example/',

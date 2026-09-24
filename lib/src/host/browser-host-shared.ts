@@ -5,6 +5,7 @@
 import { randomBytes } from 'crypto';
 import { sessionForKey } from 'dor-lib-common';
 import type { AgentBrowserEditOp } from '../lib/platform/types';
+import { isBrowsableUrl } from '../lib/platform/browser-automation';
 
 // The host owns the exact JS for each editing op — the webview only selects a
 // name, so this never becomes an arbitrary-eval channel. copy/cut return the
@@ -46,17 +47,6 @@ export function captureFormat(format: unknown): 'png' | 'jpeg' {
 export function jpegQuality(quality: unknown): number {
   if (typeof quality !== 'number' || !Number.isFinite(quality)) return 85;
   return Math.min(100, Math.max(1, Math.round(quality)));
-}
-
-/** A URL a provider may launch or navigate to: http(s) only, untrimmed. */
-export function isBrowsableUrl(value: unknown): value is string {
-  if (typeof value !== 'string' || value !== value.trim()) return false;
-  try {
-    const { protocol } = new URL(value);
-    return protocol === 'http:' || protocol === 'https:';
-  } catch {
-    return false;
-  }
 }
 
 /** An agent-browser session name. `dor ab --session` passes a user's raw name

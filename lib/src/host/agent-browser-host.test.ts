@@ -484,6 +484,47 @@ describe('agent-browser host screenshot transport', () => {
     await host.closePoppedOut();
   });
 
+  it('joins no capture from before a close or relaunch, nor one past the reply timeout', async () => {
+    // Every screenshot hangs; closes and relaunch steps answer at once.
+    const shots: string[] = [];
+    spawnMock.mockImplementation(async (_binary: string, args: string[]) => {
+      if (args.includes('screenshot')) {
+        shots.push(args[3]);
+        return new Promise(() => {});
+      }
+      return spawnResult({ code: args.includes('open') ? 1 : 0 });
+    });
+    const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });
+    const capture = async () => {
+      void host.screenshotToFile('wedged', { format: 'jpeg' });
+      await vi.waitFor(() => expect(shots.length).toBeGreaterThan(0));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    };
+
+    await capture();
+    await capture();
+    expect(shots).toHaveLength(1);
+
+    // A close ends the session those captures were for.
+    await host.command('wedged', ['close']);
+    await capture();
+    expect(shots).toHaveLength(2);
+
+    // So does a relaunch, which reuses the session name.
+    await host.popIn('wedged', { url: 'https://example.com/' });
+    await capture();
+    expect(shots).toHaveLength(3);
+
+    // Past the reply timeout a pending capture is wedged: the next asks afresh,
+    // into a file the wedged one cannot overwrite.
+    const now = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(now + 31_000);
+    await capture();
+    expect(shots).toHaveLength(4);
+    expect(new Set(shots).size).toBe(4);
+    await host.closePoppedOut();
+  });
+
   it('answers a capture-directory failure as a result, and retries the next time', async () => {
     // `??=` on the mkdtemp promise would memoize a rejection, so one transient
     // EACCES/ENOSPC on tmpdir would disable screenshots for the whole process.

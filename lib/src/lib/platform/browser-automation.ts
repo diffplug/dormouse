@@ -58,3 +58,16 @@ export function playwrightTextInputs(text: string): { type: 'input_text'; text: 
   }
   return messages;
 }
+
+/** A URL a browser provider may launch, relaunch or navigate to: http(s) only,
+ *  untrimmed. The hosts refuse anything else (`parseWebviewCommand`), so the
+ *  webview must never offer one — a relaunch would land on about:blank. */
+export function isBrowsableUrl(value: unknown): value is string {
+  if (typeof value !== 'string' || value !== value.trim()) return false;
+  try {
+    const { protocol } = new URL(value);
+    return protocol === 'http:' || protocol === 'https:';
+  } catch {
+    return false;
+  }
+}

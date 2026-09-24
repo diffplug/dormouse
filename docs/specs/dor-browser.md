@@ -39,8 +39,9 @@ Invariants on the flat persisted `BrowserPanelParams`:
   live agent-browser. **Only params may omit it** — a live `ScreenSnapshot`
   always carries one, so nothing defaults it a second time.
 - **`url` is the canonical target** across render swaps and relaunches.
-  Agent-browser mirrors the newest non-blank active tab URL into it; iframe
-  persists only navigations initiated by Dormouse chrome.
+  Agent-browser mirrors the newest http(s) active tab URL into it — the host
+  relaunches at nothing else; iframe persists only navigations initiated by
+  Dormouse chrome.
 - **Must keep automation state flat** (`session`, `wsPort`, `binaryPath`,
   `syncEngaged`, `key`, plus Playwright `cwd`/`nativeIdentity`), never nested. Pop-out is not a param — it derives from
   `renderMode` once, at controller construction.
@@ -116,7 +117,8 @@ Header contract:
   persisted title keeps the query.
 - **Must open a pre-selected `InlineEditInput` from the URL.** Blur discards;
   `normalizeNavUrl` follows CLI scheme selection plus bare loopback → `http://`
-  and bare remote → `https://` (rationale).
+  and bare remote → `https://` (rationale). **Must refuse any other scheme with
+  a warning under the field**, since no renderer opens one.
 - **Must keep back/forward/reload enabled.** Agent-browser uses native commands;
   iframe uses parent history and re-resolves its proxy.
 - **Must show non-default managed `--key` as a badge, never a title prefix.**
@@ -176,8 +178,8 @@ The iframe option lists that the embed keeps no logins or cookies (for
 Resolution controls apply to both screencast providers, as GUI wrappers around native
 commands: **Resize with pane** is Dormouse-owned sync issuing
 `set viewport <paneW> <paneH> <displayDpr>` once a pane resize settles (200ms);
-**only a DPR change re-syncs at once**, off the window `resize` event, which
-fires every frame of a drag. **Fixed** issues
+**only a DPR change re-syncs at once**, off a `(resolution: <dpr>dppx)` media
+query `change` event. **Fixed** issues
 `set viewport <w> <h> <dpr>` or `set device <name>` from the modal's registry.
 
 **Only `syncEngaged` persists** — device/custom viewport state lives in
@@ -359,8 +361,8 @@ shared by the stream and `tab list --json`).
 `ab-popout` relaunches the same session headed, because Chrome fixes
 headed/headless at daemon launch. The pane becomes a stub with Pop back in;
 while the window is still opening (a relaunch in flight, or an eager pane
-without its session) the stub offers nothing. **State carried in v1 is only the active
-non-blank URL**: other tabs, DOM state, scroll, form inputs, session storage,
+without its session) the stub offers nothing. **State carried in v1 is only the last
+http(s) active URL**: other tabs, DOM state, scroll, form inputs, session storage,
 cookies/logins do not survive.
 
 Host sequence: run `close`, **then terminate the daemon by its pid file and wait
@@ -395,7 +397,7 @@ sidecar/Rust adapter.
 | Method | Contract |
 | --- | --- |
 | `agentBrowserCommand` | Navigation, tab, viewport/device, `get cdp-url` and `close` commands, one shape per verb. |
-| `agentBrowserScreenshot` | One device-resolution JPEG/PNG frame. VS Code structured-clones the bytes; standalone passes Rust the capture's temp-file **path** over the sidecar stdio, for Rust to read (rationale). **One capture per session in flight**: a request made meanwhile joins it. |
+| `agentBrowserScreenshot` | One device-resolution JPEG/PNG frame. VS Code structured-clones the bytes; standalone passes Rust the capture's temp-file **path** over the sidecar stdio, for Rust to read (rationale). **One capture per session in flight**: a request made meanwhile joins it — never one out past 30s, nor one from before the session's close or relaunch. |
 | `agentBrowserStreamStatus` | Current stream port, for stale-`wsPort` recovery. |
 | `agentBrowserEdit` | select-all/copy/cut via fixed host-owned JS plus an OS clipboard write. |
 | `getAgentBrowserStreamUrl` | Direct stream URL, or the VS Code relay URL. |
@@ -482,15 +484,18 @@ The proxy instruments any `http://` upstream, loopback and remote alike:
   pinned by `lib/src/host/iframe-proxy-rewrite.test.ts`.
 
 **Must refuse `https://` at every entry to the iframe renderer on a host with
-the proxy, in the one `IFRAME_HTTP_ONLY` wording, naming `dor ab open <url>`**
-(a host without it frames https raw):
+the proxy, in the one `IFRAME_HTTP_ONLY` wording** (a host without it frames
+https raw):
 
 | Entry | Outcome |
 | --- | --- |
-| `surface.iframe` (`dor iframe`) | refused before any pane opens |
-| Display modal / render swap to `iframe` | option disabled with the reason; the Wall's swap refuses too |
+| `surface.iframe` (`dor iframe`) | refused before any pane opens, naming `dor ab open <url>` |
+| Display modal | iframe option disabled, showing the wording |
+| Render swap to `iframe`, tool or not | refused with a console warning; the modal never offers it |
 | New-tab request from a framed page | an `ab-screencast` pane, bound to its launch like a render swap, closed if the launch fails |
-| A pane already holding one | synchronous `scheme` panel error |
+| A pane already holding one | `scheme` panel error with Open in agent-browser and `dor ab open <url>` |
+
+The terminal context's port rows are always `http://` (`listenerUrlsByPort`).
 
 Header rewriting:
 
@@ -506,6 +511,7 @@ Header rewriting:
 | response | `X-Dormouse-Preserve-CSP: 1` | consumed; preserves upstream CSP headers and meta policies |
 | response | hop-by-hop (RFC 7230 §6.1) | dropped |
 | response | `Location` | upstream origin rewritten back to the proxy origin, so a redirect stays inside the proxy |
+| response | `Vary` | `Sec-Fetch-Dest` appended, since the `Accept-Encoding` sent upstream depends on it |
 | response body | `<meta http-equiv="content-security-policy">` | removed unless the response opts into CSP preservation |
 
 **Must update this table whenever header rewriting changes.**
@@ -556,10 +562,12 @@ for chrome/history without reloading the frame.
 New-tab requests show an overlay: accept opens an adjacent browser pane (for
 `https://`, see [Iframe Renderer](#iframe-renderer)); cancel drops it.
 
-**A proxied frame `load` with no `location` report within 1s marks the document
-uninstrumented** (off the proxy, refused, or its grant gone), and a banner
-offers Reload and Open in agent-browser. Only a report naming the proxy origin
-counts, including one up to 250ms before the load.
+**Once a proxied frame's shim has reported, a `load` with no `location` report
+within 1s marks the document uninstrumented** (not HTML, off the proxy, refused,
+or its grant gone), and a banner offers Reload and Open in agent-browser. Only a
+report naming the proxy origin counts, including one up to 250ms before the
+load; a new frame source waits for its first report again, since a non-HTML
+document served from the start carries no shim (rationale).
 
 Source of truth: `lib/src/host/iframe-proxy-rewrite.ts` (`iframeShim`),
 `lib/src/components/wall/browser-url.ts` (`browserSurfaceUrl`),

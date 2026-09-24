@@ -40,7 +40,9 @@ const IFRAME_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups
 const IFRAME_ALLOW = 'autoplay; clipboard-write; fullscreen';
 // Uninstrumented documents (docs/specs/dor-browser.md → "Iframe Shim"). The
 // lead admits the shim's pageshow report, which races the frame's load event
-// to the parent.
+// to the parent. The proxy instruments HTML only, so a frame is judged only
+// once its shim has reported: a proxied image, PDF or JSON document served
+// from the start is working, not lost.
 const SHIM_REPORT_TIMEOUT_MS = 1000;
 const SHIM_REPORT_LEAD_MS = 250;
 
@@ -296,13 +298,14 @@ export function IframePanel({ id, title, params }: PaneProps) {
     return registerProxyOrigin(proxyOrigin);
   }, [proxyOrigin]);
 
-  // A new frame source starts over: no verdict until its document loads.
+  // A new frame source starts over: no verdict until its shim reports.
   useEffect(() => {
     setUninstrumented(false);
+    lastShimReportRef.current = Number.NEGATIVE_INFINITY;
     return () => clearTimeout(shimCheckRef.current);
   }, [resolution]);
   const onFrameLoad = useCallback(() => {
-    if (!proxyOrigin) return;
+    if (!proxyOrigin || lastShimReportRef.current === Number.NEGATIVE_INFINITY) return;
     const loadedAt = performance.now();
     clearTimeout(shimCheckRef.current);
     shimCheckRef.current = setTimeout(() => {
@@ -428,7 +431,7 @@ export function IframePanel({ id, title, params }: PaneProps) {
           onMouseDown={(e) => e.stopPropagation()}
         >
           <span className="min-w-0 flex-1 px-1.5 py-0.5 text-muted">
-            This page isn’t running through Dormouse — it left the proxy, was blocked, or the proxy expired.
+            Dormouse can’t follow this page — it isn’t an HTML page on the proxy, so the URL bar and leader chord stop at it.
           </span>
           <button type="button" className={popupButton()} onClick={() => chromeActions.reload()}>Reload</button>
           {openInAgentBrowser && (

@@ -5,7 +5,7 @@
  * only; Wall owns daemon teardown.
  */
 import type { PlatformAdapter } from '../../lib/platform/types';
-import { playwrightTextInputs, type BrowserAutomationProvider } from '../../lib/platform/browser-automation';
+import { isBrowsableUrl, playwrightTextInputs, type BrowserAutomationProvider } from '../../lib/platform/browser-automation';
 import { isAllowedBinaryFor } from '../../lib/agent-browser-binary';
 import { readTextFromClipboard } from '../../lib/clipboard';
 import { isAbDebugLogsEnabled } from '../../lib/feature-flags';
@@ -83,11 +83,10 @@ function dprMatch(a: number, b: number): boolean {
   return Math.abs(a - b) <= 0.001;
 }
 
-// A pop-out/pop-in relaunch restores a single URL. A transient about:blank — a
-// stray tab the close+reopen can momentarily surface, or a freshly-relaunched
-// blank page — must never be treated as the page to restore, or the real URL is
-// lost on the way back in. Mirrors the host's usableRelaunchUrl.
-function isRestorableUrl(url: string | null | undefined): url is string {
+
+// A stray about:blank the close+reopen of a relaunch can surface is never the
+// page the pane shows.
+function isShownUrl(url: string | null | undefined): url is string {
   if (typeof url !== 'string') return false;
   const trimmed = url.trim();
   return trimmed !== '' && trimmed !== 'about:blank';
@@ -291,7 +290,9 @@ export class AgentBrowserSurfaceController {
   private dprQuery: MediaQueryList | null = null;
 
   // --- canonical URL tracking ---
-  // The newest non-blank active-tab URL observed from the live stream. Kept
+  // The newest active-tab URL observed from the live stream that a relaunch
+  // can restore — http(s) only, as the host relaunches nowhere else, so a
+  // transient about:blank or a `file:`/`data:` page leaves the last one. Kept
   // separate from paramsUrl: engine param writes can lag a tab message, but
   // pop-in/auto-revert must carry the page the user just navigated to.
   private latestRestorableUrl: string | undefined;
@@ -362,7 +363,7 @@ export class AgentBrowserSurfaceController {
     this.paramsUrl = params.url;
     this.paramsKey = params.key ?? null;
     this.paramsSyncEngaged = params.syncEngaged;
-    this.latestRestorableUrl = isRestorableUrl(params.url) ? params.url : undefined;
+    this.latestRestorableUrl = isBrowsableUrl(params.url) ? params.url : undefined;
     // poppedOut is derived from the canonical renderMode; an unset mode (a direct
     // mount in tests) is not popped out.
     this.poppedOut = isPopout(params.renderMode);
@@ -656,7 +657,7 @@ export class AgentBrowserSurfaceController {
     }
     if (params.url !== this.paramsUrl) {
       this.paramsUrl = params.url;
-      if (isRestorableUrl(params.url)) this.latestRestorableUrl = params.url;
+      if (isBrowsableUrl(params.url)) this.latestRestorableUrl = params.url;
     }
     if ((params.key ?? null) !== this.paramsKey) {
       this.paramsKey = params.key ?? null;
@@ -1182,12 +1183,12 @@ export class AgentBrowserSurfaceController {
   // --- canonical URL tracking ---
 
   private rememberRestorableUrl(url: string | null | undefined): boolean {
-    if (!isRestorableUrl(url)) return false;
+    if (!isBrowsableUrl(url)) return false;
     this.latestRestorableUrl = url;
     // Track the active tab faithfully so params.url is always the page the user
     // is on. Two guards: freeze while a relaunch is in flight (the active tab is
     // momentarily a blank/booting page that must not overwrite the real target),
-    // and never record a transient about:blank (isRestorableUrl above).
+    // and never record a URL a relaunch cannot restore (latestRestorableUrl).
     if (!this.relaunching && url !== this.paramsUrl) {
       this.paramsUrl = url;
       this.writeParams({ url });
@@ -1201,7 +1202,7 @@ export class AgentBrowserSurfaceController {
   }
 
   private applyObservedNavigation(url: string | null | undefined, title?: string | null): void {
-    if (!isRestorableUrl(url)) return;
+    if (!isShownUrl(url)) return;
     this.rememberRestorableUrl(url);
     const prev = this.tabs;
     if (prev.length === 0) {
@@ -1220,7 +1221,7 @@ export class AgentBrowserSurfaceController {
   // the previous page's title no longer describes it, so the tab falls back to
   // its URL until the load completes and `tabs` brings the real title.
   private applyStreamUrl(url: string): void {
-    if (!isRestorableUrl(url)) return;
+    if (!isShownUrl(url)) return;
     this.rememberRestorableUrl(url);
     const active = this.activeTab();
     if (!active) {
@@ -1239,7 +1240,7 @@ export class AgentBrowserSurfaceController {
       this.latestRestorableUrl,
       this.chrome.url,
       this.paramsUrl,
-    ].find(isRestorableUrl);
+    ].find((url) => isBrowsableUrl(url));
   }
 
   // --- header: title + browser-chrome ---
