@@ -10,6 +10,7 @@ import type { PaneProps } from './pane-props';
 import { AgentBrowserPanel, HIDDEN_PARK_DELAY_MS } from './AgentBrowserPanel';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
 import {
+  closeBrowserSurface,
   disposeAgentBrowserSurfaceController,
   disposeAllAgentBrowserSurfaceControllers,
   getAgentBrowserSurfaceController,
@@ -595,6 +596,31 @@ describe('AgentBrowserPanel across a provider change', () => {
     expect(getAgentBrowserScreenController('swap-panel')?.snapshot().renderMode).toBe('ab-screencast');
     // The replaced one is released, its stream with it.
     expect(WebSocketMock.instances.filter((ws) => ws.url.includes('4400')).every((ws) => ws.readyState === 3)).toBe(true);
+  });
+});
+
+describe('AgentBrowserPanel after its controller is released', () => {
+  it('takes a fresh controller for the params that follow, and none for the release alone', async () => {
+    const attach = vi.fn<PlatformAdapter['agentBrowserAttach']>(async () => ({ ok: true, wsPort: 4402 }));
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserAttach'>;
+    platform.agentBrowserAttach = attach;
+    platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
+    setPlatform(platform);
+    const first = { surfaceType: 'browser', renderMode: 'ab-screencast', session: 'first-run', wsPort: 4400 };
+    await renderPanel(paneProps('released-panel', first));
+    const released = getAgentBrowserSurfaceController('released-panel');
+
+    // A kill releases it as the pane starts to fade: nothing comes back.
+    await act(async () => { await closeBrowserSurface('released-panel', first); });
+    expect(getAgentBrowserSurfaceController('released-panel')).toBeNull();
+
+    // A Tool's next run names a new session on the same Surface.
+    await renderPanel(paneProps('released-panel', { surfaceType: 'browser', renderMode: 'ab-screencast', session: 'next-run' }));
+    await act(async () => { await Promise.resolve(); });
+    const next = getAgentBrowserSurfaceController('released-panel');
+    expect(next).not.toBeNull();
+    expect(next).not.toBe(released);
+    expect(attach).toHaveBeenCalledWith('next-run', expect.anything(), undefined);
   });
 });
 

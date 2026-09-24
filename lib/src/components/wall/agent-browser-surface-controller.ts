@@ -1670,6 +1670,12 @@ export class AgentBrowserSurfaceController {
     return { session, done: session ? this.closeSession(session) : Promise.resolve() };
   }
 
+  /** Closed or disposed: nothing here runs again, and a view still mounted
+   *  acquires a new controller for the Surface's next params. */
+  get released(): boolean {
+    return this.phase.k === 'disposed';
+  }
+
   /** Release every client-side resource, leaving the session to whoever holds it
    *  next (a Workspace transfer's destination). */
   dispose(): void {

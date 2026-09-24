@@ -60,16 +60,18 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   // The surface-scoped controller: get-or-create, keyed by surface id. Survives
   // this component's unmount (minimize, layout churn, StrictMode). Keyed by
   // provider too: a minimized pane keeps this view mounted while its Wall
-  // restores a failed cross-provider swap in place, disposing the controller
-  // it held, and the restored provider needs its own. A same-provider disposal
-  // only ever precedes the pane going away (a kill's fade), where re-acquiring
-  // would leave a live controller behind for a dead Surface.
+  // restores a failed cross-provider swap in place, and the restored provider
+  // needs its own. One released under this view is replaced when params next
+  // change (`generation`), never on the release itself: a kill releases it as
+  // the pane starts to fade, where re-acquiring would leave a live controller
+  // behind for a dead Surface.
+  const [generation, setGeneration] = useState(0);
   const controller = useMemo(
     () => acquireAgentBrowserSurfaceController(id, { ...params, renderMode: seededMode }),
     // Later param changes flow through updateParams below (acquire is
     // get-or-create and ignores params when the controller already exists).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [id, provider],
+    [id, provider, generation],
   );
 
   const snapshot = useSyncExternalStore(controller.subscribe, controller.snapshot);
@@ -99,7 +101,8 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   // one only for Playwright, whose native `open` can change headedness outside
   // Dormouse (`followParamsHeadedness`).
   useEffect(() => {
-    controller.updateParams({ session, launchSession, binaryPath, url, syncEngaged, key, cwd, renderMode: seededMode });
+    if (controller.released) setGeneration((current) => current + 1);
+    else controller.updateParams({ session, launchSession, binaryPath, url, syncEngaged, key, cwd, renderMode: seededMode });
   }, [controller, session, launchSession, binaryPath, url, syncEngaged, key, cwd, seededMode]);
 
   // Lend the controller this view's live DOM bindings. Last attach wins; the
