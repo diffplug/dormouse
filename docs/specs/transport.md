@@ -117,8 +117,9 @@ running (`docs/specs/standalone.md` → Transfer). It is a resume, not a restore
 with these transfer rules:
 
 - **Release, never dispose, and only once the target has adopted the Workspace.**
-  The source detaches its half of each Session — the alert, the pins, the
-  listeners, the element, the xterm instance — and **does not kill the PTY**
+  The source detaches its half of each Session — the pins, the listeners, the
+  element, the xterm instance — and **neither kills the PTY nor removes its
+  host alert entry**
   (`releaseSession` in `lib/src/lib/terminal-lifecycle.ts`). **Never reachable
   from a webview unmount**: a Wall unmounts on a reload and on a StrictMode
   double-mount, and releasing there would strand every PTY the window still owns.
@@ -156,7 +157,7 @@ with these transfer rules:
   in `lib/src/lib/terminal-transfer.test.ts` and `drains replay before adopting even when no note has a pin`
   in `standalone/src/workspace-move.test.ts`.
 - Tool browser bindings and announcements follow `docs/specs/dor-tool.md` → Persistence and hosts.
-- Live Activity and delivery handoff follows `docs/specs/alert.md` → Live Workspace transfer.
+- Alert state and delivery handoff follow `docs/specs/alert.md` → Live Workspace transfer.
 - Semantic-state transfer follows `docs/specs/terminal-state.md` → Core Model.
 - Source-pin limitations belong to `docs/specs/notepad.md` → Source links.
 
@@ -201,12 +202,12 @@ Transport constraints:
 | Host → webview | `pty:openPorts` | `ports: OpenPort[]` (`{ protocol, family, address, port, pid, processName }`), de-duplicated by `(family, address, port)`, sorted by port then address. Empty when the PTY is gone or enumeration fails. |
 | Host → webview | `pty:data` | PTY output after state-driving supported OSCs are parsed/stripped; `OSC 8` and ImageAddon's inline-image `OSC 1337` forms are preserved for xterm.js, routed only to the owning router. **Carries an optional `textData`** (string-control payloads removed, for the prompt heuristic), **omitted when it would equal `data`**. |
 | Host → webview | `terminal:semanticEvents` | Normalized CWD / prompt-command / title events the owner's parser derived, in stream order. |
-| Host → webview | `terminal:protocolEvents` | Standalone notification/progress delivery and ordered Tool announcements/state/resets (`docs/specs/dor-tool.md` → OSC 367). VS Code keeps its `AlertManager` in the extension host. |
+| Host → webview | `terminal:protocolEvents` | Standalone's ordered Tool announcements/state/resets (`docs/specs/dor-tool.md` → OSC 367). |
 | Webview → host | `dormouse:themeColors` (VS Code) / `pty_theme_colors` (standalone) | Resolved foreground / background / cursor, so the owner's parser can answer OSC 10/11/12. |
 | Host → webview | `pty:replay` | Buffered raw output since spawn; the webview runs a one-shot parser over it, the only re-parse there is. |
 | Host → webview | `dormouse:newTerminal` | May carry `shell`, `args`, display `name`, `replaceUntouched`, `announce`. The webview replaces the selected untouched terminal in place only when `replaceUntouched` is true, otherwise spawns a new pane. |
 
-**Two app-global stores relay on one pattern**: WATCHING rules (`alert:initializeWatchedCommands`, `alert:setCommandWatched` → host; `alert:watchedCommands` → webview) and alarm settings (`alert:initializeSettings`, `alert:updateSettings` → host; `alert:settings` → webview; `docs/specs/alert.md` → Alarm settings). An `initialize*` offers the renderer's persisted copy as a startup seed, and **a multi-webview host accepts only the first seed of its lifetime**. A mutation replaces the host's copy — `setCommandWatched` adds or removes one bare command key without touching unrelated rules, `updateSettings` sends the whole blob, renderer-only fields included, so every webview agrees. Either way the host broadcasts a canonical snapshot, and **every renderer replaces and persists its local mirror from it**. **In standalone both directions ride one opaque passthrough**, the `alert_command` invoke to a `alert:command` sidecar line, where the stores live so N windows share one answer; the snapshot comes back as a broadcast `alert:settings` / `alert:watchedCommands` (`docs/specs/standalone.md` → "Windows").
+**Two app-global stores relay on one pattern**: WATCHING rules (`alert:initializeWatchedCommands`, `alert:setCommandWatched` → host; `alert:watchedCommands` → webview) and alarm settings (`alert:initializeSettings`, `alert:updateSettings` → host; `alert:settings` → webview; `docs/specs/alert.md` → Alarm settings). An `initialize*` offers the renderer's persisted copy as a startup seed, and **a multi-webview host accepts only the first seed of its lifetime**. A mutation replaces the host's copy — `setCommandWatched` adds or removes one bare command key without touching unrelated rules, `updateSettings` sends the whole blob, renderer-only fields included, so every webview agrees. Either way the host broadcasts a canonical snapshot, and **every renderer replaces and persists its local mirror from it**. **In standalone both directions ride one opaque passthrough**, the `alert_command` invoke to an `alert:command` sidecar line, where the stores live beside the one `AlertManager`; the snapshot comes back as a broadcast. The passthrough carries every other `alert*` verb too (`docs/specs/standalone.md` → "Alerts").
 
 **The host must revalidate renderer-supplied settings, never trust them** — they become host timers. `AlertSettingsHost` runs every inbound blob through `normalizeAlertSettings`, which drops unknown keys, defaults missing ones, and clamps each delay into range. Both directions share one adapter method, `alertPublishSettings(settings, { seed })`: seed vs replace picks a message type, not a payload.
 

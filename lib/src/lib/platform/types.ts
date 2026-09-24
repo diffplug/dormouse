@@ -1,4 +1,3 @@
-import type { AlertRuntimeSnapshot } from '../alert-manager';
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
 import type { AlertState, AwaitHandle, AwaitOptions, Engagement, EngagementLapse } from '../alert-manager';
 import type { AlertSettings } from '../alert-settings';
@@ -304,20 +303,15 @@ export interface PlatformAdapter {
    */
   requestAppRestart?(requester?: string): Promise<boolean>;
 
-  /** Explicit live Workspace handoff, never a persistence reader. */
-  alertPauseForTransfer?(id: string): AlertRuntimeSnapshot | null;
-  /** `replayRequestId` names the one since-mark `pty:replay` whose notification
-   *  events and visible output count as live; every other replay stays silent. */
-  alertResumeFromTransfer?(id: string, snapshot: AlertRuntimeSnapshot, replayRequestId?: string): void;
   /**
    * Seed a cold-restored Surface's persisted TODO/alert into the host's
    * `AlertManager`, so the freshly spawned PTY inherits the state its saved pane
-   * carried (`docs/specs/alert.md` -> "Persist only").
+   * carried (`docs/specs/alert.md` -> "Persist only"). Called after the spawn.
    *
-   * Present only where the adapter owns the manager: standalone runs it in the
-   * webview, so the restore path is the only thing that can seed it. VS Code
-   * omits it — its extension host seeds its own manager while answering the
-   * webview's boot (`vscode-ext/src/message-router.ts`).
+   * Present only on standalone, whose sidecar holds no persisted session, so
+   * the restore path is the only thing that can seed it. VS Code omits it — its
+   * extension host seeds its own manager while answering the webview's boot
+   * (`vscode-ext/src/message-router.ts`).
    */
   alertSeed?(id: string, state: PersistedAlertState): void;
 

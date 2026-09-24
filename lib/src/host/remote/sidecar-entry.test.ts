@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProcessedPtyChunk, PtySink } from '../../remote/burrow/burrow-surface-provider';
 import { createSidecarSurfaceBridge, type SidecarSurfaceBridge } from './sidecar-entry';
 import { ASK_BUDGET_MS, type BurrowAsk } from './service-protocol';
+import { AlertManager } from '../../lib/alert-manager';
 
 let sent: Array<{ event: string; data: unknown }>;
 let written: Array<{ id: string; data: string }>;
@@ -15,6 +16,10 @@ let livePtys: Set<string>;
 /** A PTY that died between the read and a reply write. */
 let writeThrows: boolean;
 let bridge: SidecarSurfaceBridge;
+/** The app's one manager, which the parse feeds. */
+let alerts: AlertManager;
+/** Called as each PTY write lands, to observe what preceded it. */
+let onWrite: ((id: string) => void) | null;
 
 /** The ask the bridge is waiting on, most recent last. */
 function asks(): BurrowAsk[] {
@@ -53,11 +58,15 @@ beforeEach(() => {
   resized = [];
   livePtys = new Set(['pty-1', 'pty-2']);
   writeThrows = false;
+  alerts = new AlertManager();
+  onWrite = null;
   bridge = createSidecarSurfaceBridge({
+    alerts,
     send: (event, data) => sent.push({ event, data }),
     mgr: {
       write: (id, data) => {
         if (writeThrows) throw new Error('write EIO');
+        onWrite?.(id);
         written.push({ id, data });
       },
       resize: (id, cols, rows, repaint) => void resized.push({
@@ -70,6 +79,7 @@ beforeEach(() => {
 
 afterEach(() => {
   bridge.dispose();
+  alerts.dispose();
   vi.useRealTimers();
 });
 
@@ -306,6 +316,30 @@ describe('resolveSurface', () => {
 });
 
 describe('PTYs', () => {
+  // A Client's keystrokes are a human's input like a local one's, and the host
+  // acknowledges them before the write, echo window included
+  // (docs/specs/alert.md → Engagement).
+  it('acknowledges a Client\'s input before writing it', () => {
+    alerts.notifyFromProtocol('pty-1', { source: 'OSC 9', title: null, body: 'needs input' });
+    const atWrite: unknown[] = [];
+    onWrite = (id) => {
+      const { status, todo } = alerts.getState(id);
+      atWrite.push({ status, todo });
+    };
+    bridge.provider.writePty('pty-1', 'y');
+    expect(atWrite).toEqual([{ status: 'WATCHING_DISABLED', todo: false }]);
+    // A bell answering the key rings no one.
+    alerts.notifyFromProtocol('pty-1', { source: 'OSC 9', title: null, body: 'needs input' });
+    expect(alerts.getState('pty-1').status).not.toBe('ALERT_RINGING');
+  });
+
+  it('gives a Client\'s repaint bounce the resize grace', () => {
+    const onResize = vi.spyOn(alerts, 'onResize');
+    bridge.provider.resizePty('pty-1', 80, 24, true);
+    expect(onResize).toHaveBeenCalledWith('pty-1');
+    expect(resized).toEqual([{ id: 'pty-1', cols: 80, rows: 24, repaint: true }]);
+  });
+
   it('writes and resizes straight through to the manager', () => {
     bridge.provider.writePty('pty-1', 'ls\r');
     bridge.provider.resizePty('pty-1', 80, 24);
@@ -470,21 +504,48 @@ describe('the webview’s half of the parse', () => {
     expect(emitted<{ id: string; events: unknown[] }>('terminal:semanticEvents')).toHaveLength(1);
   });
 
-  it('forwards the alert half of a parse, and the semantic half, in that order', () => {
+  it('keeps a report for the manager, forwarding only the semantic state it carries', () => {
     bridge.onPtyEvent('data', { id: 'pty-1', data: `\x1b]9;Build finished\x07` });
 
-    expect(sent.map((message) => message.event)).toEqual([
-      'terminal:protocolEvents',
-      'terminal:semanticEvents',
-    ]);
-    expect(emitted('terminal:protocolEvents')).toEqual([
-      {
-        id: 'pty-1',
-        events: [
-          { kind: 'notification', notification: { source: 'OSC 9', title: null, body: 'Build finished' } },
-        ],
-      },
-    ]);
+    // The notification's title candidate is pane state; the report itself
+    // rang the sidecar's manager and reaches no webview as an event.
+    expect(sent.map((message) => message.event)).toEqual(['terminal:semanticEvents']);
+    expect(alerts.getState('pty-1')).toMatchObject({
+      status: 'ALERT_RINGING',
+      notification: { source: 'OSC 9', title: null, body: 'Build finished' },
+    });
+  });
+
+  it('feeds reports to the manager in stream order with the boundaries around them', async () => {
+    // A precmd hook reports after the shell's finish, in the same read: judged
+    // after the finish, the await resolves on the exit rather than the bell.
+    bridge.onPtyEvent('data', { id: 'pty-1', data: '\x1b]633;E;./build.sh\x07\x1b]633;C\x07' });
+    const parked = alerts.awaitCompletion('pty-1', { until: 'quiet', timeoutMs: 600_000 });
+    bridge.onPtyEvent('data', { id: 'pty-1', data: '\x1b]633;D;0\x07\x1b]777;notify;Command completed;./build.sh\x1b\\' });
+    await expect(parked.promise).resolves.toMatchObject({ kind: 'resolved', cause: 'exit' });
+  });
+
+  it('counts visible output as the Session working, and protocol alone as nothing', () => {
+    const onData = vi.spyOn(alerts, 'onData');
+    bridge.onPtyEvent('data', { id: 'pty-1', data: '\x1b]7;file:///tmp\x07' });
+    expect(onData).not.toHaveBeenCalled();
+    bridge.onPtyEvent('data', { id: 'pty-1', data: 'compiling…' });
+    expect(onData).toHaveBeenCalledWith('pty-1');
+  });
+
+  it('tells the manager a PTY exited, stream or none', () => {
+    const onExit = vi.spyOn(alerts, 'onExit');
+    bridge.onPtyEvent('exit', { id: 'pty-9', exitCode: 3 });
+    expect(onExit).toHaveBeenCalledWith('pty-9', 3);
+  });
+
+  it('starts a respawned Session\'s alert state over', () => {
+    alerts.notifyFromProtocol('pty-1', { source: 'OSC 9', title: null, body: 'old run' });
+    bridge.onPtySpawn('pty-1');
+    expect(alerts.getState('pty-1')).toMatchObject({ status: 'WATCHING_DISABLED', todo: false });
+    // No tombstone: the new generation's output is its own Session's.
+    bridge.onPtyEvent('data', { id: 'pty-1', data: 'fresh' });
+    expect(alerts.getAllStates().has('pty-1')).toBe(true);
   });
 
   it('forwards dirty state and command resets separately from serve metadata', () => {

@@ -2,7 +2,6 @@ import { getToolDirty } from '../../lib/tool-dirty-store';
 import type { TransferredTools } from './tool-transfer';
 import { getToolAnnounce } from '../../lib/tool-announce-store';
 import type { ToolAnnounce } from '../../lib/tool-announce';
-import type { AlertRuntimeSnapshot } from '../../lib/alert-manager';
 import type { AlertDeliveryHandoff } from '../../lib/alert-delivery-state';
 import { snapshotTerminalState, type TransferredTerminalState } from '../../lib/terminal-state-store';
 import { dismissWorkspaceUi } from '../../lib/workspace-ui-store';
@@ -136,7 +135,8 @@ export async function prepareWorkspaceTransfer(
 /** One terminal's half of a transfer's content: what the target writes before
  *  it attaches, and where the host's replay picks up. */
 export interface TransferredTerminal {
-  alertRuntime?: AlertRuntimeSnapshot;
+  /** The speech and push receipts; the Session's alert state itself never
+   *  moves, since the host's one manager holds it. */
   alertDelivery?: AlertDeliveryHandoff;
   /** The buffer as the escape stream that rebuilds it; `''` for a Session this
    *  Window no longer held. */

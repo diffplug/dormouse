@@ -4,18 +4,20 @@
  * the JSON-lines bridge, so all logging goes to stderr.
  *
  * The sidecar owns the PTYs, so it is also standalone's terminal-protocol parse
- * site: one parser per PTY generation feeds the webview's `pty:data` and every
- * attached Client alike (`docs/specs/terminal-escapes.md` → "Parsing location").
+ * site: one parser per PTY generation feeds the webview's `pty:data`, every
+ * attached Client, and the app's one `AlertManager` alike
+ * (`docs/specs/terminal-escapes.md` → "Parsing location").
  */
 
 import {
   createProcessedPtyStream,
   type ProcessedPtyStream,
 } from '../../lib/processed-pty-stream';
+import type { AlertManager } from '../../lib/alert-manager';
 import {
-  collectTerminalProtocolAlerts,
+  applyTerminalEvents,
   collectTerminalProtocolResponses,
-  collectTerminalSemanticEvents,
+  collectTerminalToolEvents,
   type TerminalColorProvider,
   type TerminalColors,
 } from '../../lib/terminal-protocol';
@@ -39,6 +41,10 @@ import {
   type AnswerParams,
 } from './service-protocol';
 
+// The sidecar's alerts ride this bundle, so the parse site and the manager it
+// feeds are one module graph (`standalone/scripts/build-sidecar-proxy.mjs`).
+export { createSidecarAlerts, type SidecarAlerts } from '../alert-host';
+
 /** The slice of `pty-core`'s manager the Burrow drives. */
 export interface SidecarPtyManager {
   write(id: string, data: string): void;
@@ -51,6 +57,8 @@ export interface SidecarSurfaceBridgeOptions {
   /** Writes one JSON line to the Rust bridge, which emits it to the webview. */
   send: (event: string, data: unknown) => void;
   mgr: SidecarPtyManager;
+  /** The app's one manager (`createSidecarAlerts`), fed from the parse below. */
+  alerts: AlertManager;
 }
 
 export interface SidecarSurfaceBridge {
@@ -73,7 +81,8 @@ export interface SidecarSurfaceBridge {
    * as the events this emits, so `main.js` must not forward it itself.
    */
   onPtyEvent(event: string, data: unknown): void;
-  /** A `pty:spawn` command: the id now names a new PTY generation. */
+  /** A `pty:spawn` command: the id now names a new PTY generation, whose
+   *  Session starts its alert state over. */
   onPtySpawn(id: unknown): void;
   /**
    * A `pty:themeColors` push. The sidecar has no DOM, so the webview reports its
@@ -161,9 +170,10 @@ export function createSidecarSurfaceBridge(
   const exits = new Map<string, number>();
 
   /**
-   * The parse site for one PTY, feeding the webview and every Client from the
-   * same pass. Order matches the webview's own former order: alerts, then
-   * semantic state, then the responses this process writes, then the output.
+   * The parse site for one PTY, feeding the alerts, the webview and every
+   * Client from the same pass: reports and command boundaries to the manager
+   * in stream order, then Tool events and semantic state to the webview, then
+   * the responses this process writes, then the output.
    */
   function ownerStream(id: string): Stream {
     let stream = streams.get(id);
@@ -171,9 +181,11 @@ export function createSidecarSurfaceBridge(
     const parsed = createProcessedPtyStream({
       colorProvider: themeColorProvider,
       onEvents(events) {
-        const alerts = collectTerminalProtocolAlerts(events);
-        if (alerts.length > 0) options.send('terminal:protocolEvents', { id, events: alerts });
-        const semanticEvents = collectTerminalSemanticEvents(events);
+        // `recordTools` stays off: the Tool stores are the renderer's, so their
+        // events travel to it instead.
+        const semanticEvents = applyTerminalEvents(options.alerts, id, events);
+        const toolEvents = collectTerminalToolEvents(events);
+        if (toolEvents.length > 0) options.send('terminal:protocolEvents', { id, events: toolEvents });
         if (semanticEvents.length > 0) {
           options.send('terminal:semanticEvents', { id, events: semanticEvents });
         }
@@ -192,6 +204,7 @@ export function createSidecarSurfaceBridge(
         }
       },
       onChunk(chunk) {
+        options.alerts.onData(id);
         options.send('pty:data', { id, ...chunk });
       },
     });
@@ -201,8 +214,17 @@ export function createSidecarSurfaceBridge(
   }
 
   const { provider, notifyDirectoryChanged } = createAskSurfaceProvider(ask, {
-    writePty: (ptyId, data) => options.mgr.write(ptyId, data),
-    resizePty: (ptyId, cols, rows, repaint) => options.mgr.resize(ptyId, cols, rows, repaint),
+    // A Client's keystrokes are human input like a local one's: acknowledged,
+    // echo window opened, before the write (`docs/specs/alert.md` → Engagement).
+    writePty: (ptyId, data) => {
+      options.alerts.acknowledge(ptyId, { input: true });
+      options.mgr.write(ptyId, data);
+    },
+    // The repaint bounce's output is a resize's, never the program working.
+    resizePty: (ptyId, cols, rows, repaint) => {
+      options.alerts.onResize(ptyId);
+      options.mgr.resize(ptyId, cols, rows, repaint);
+    },
 
     streamPty(ptyId, sink) {
       const subscribed = ownerStream(ptyId);
@@ -343,6 +365,7 @@ export function createSidecarSurfaceBridge(
       if (event !== 'exit') return;
       const reported = (detail as { exitCode?: unknown }).exitCode;
       const exitCode = typeof reported === 'number' ? reported : 0;
+      options.alerts.onExit(id, exitCode);
       // Durable: a surface resolution may already be in flight without a sink.
       exits.set(id, exitCode);
       const stream = streams.get(id);
@@ -359,6 +382,9 @@ export function createSidecarSurfaceBridge(
       // one's half-read sequence into its first bytes, and the new PTY has not
       // exited whatever the old one did.
       if (typeof id !== 'string') return;
+      // At the spawn command: a cold restore seeds after it, so the seed lands
+      // on the new Session rather than being wiped by it.
+      options.alerts.restart(id);
       const stream = streams.get(id);
       const exitCode = exits.get(id) ?? 0;
       exits.delete(id);

@@ -1,10 +1,5 @@
 import { createAlertEpisode, type AlertEpisode } from './alert-episode';
-import { QuiesceDetector, type QuiesceStatus, type QuiesceSnapshot } from './quiesce-detector';
-import {
-  applyTerminalEvents,
-  collectTerminalSemanticEvents,
-  type TerminalProtocolParseResult,
-} from './terminal-protocol';
+import { QuiesceDetector, type QuiesceStatus } from './quiesce-detector';
 import { DEFAULT_ALERT_SETTINGS, type AlertSettings } from './alert-settings-model';
 import { cfg } from '../cfg';
 import {
@@ -103,7 +98,6 @@ interface WatchingSource {
 
 /** The sources a ring holds, or held completions would raise. */
 interface SourceSet {
-  /** An array, not a Set: the live-transfer snapshot crosses IPC as JSON. */
   sources: ListedRingSource[];
   /** Removing the rule that covers its key withdraws it. */
   watching: WatchingSource | null;
@@ -165,7 +159,7 @@ export type EngagementLapse = 'idle' | 'leave';
 const NOT_ENGAGED: Engagement = { present: false, focusId: null };
 
 /** The one viewer of a manager that serves a single renderer realm: the fake
- *  adapter's, a standalone window's, the browser-sidecar page's. */
+ *  adapter's. */
 export const LOCAL_VIEWER = 'local';
 
 export function normalizeActivityNotification(value: unknown): ActivityNotification | null {
@@ -312,18 +306,10 @@ interface AlertEntry {
   echoUntil: number;
 }
 
-/** Explicit live handoff only: timers are deadlines, and no caller closures travel. */
-export interface AlertRuntimeSnapshot extends Omit<AlertEntry, 'detector' | 'deferredTimer'> {
-  detector: QuiesceSnapshot;
-}
-
 /** Portable Session Activity manager. `dispatchCompletion` is the single
  * observe→claim→ring seam, so await can claim completions before suppression. */
 export class AlertManager {
   private entries = new Map<string, AlertEntry>();
-  private suspendedForTransfer = new Set<string>();
-  /** Session → request token of the one replay that counts as live (`applyReplay`). */
-  private liveReplay = new Map<string, string>();
   /** Blocks late output/resize from recreating a removed entry. Only a semantic
    * or protocol event proves a reused id belongs to a live replacement. */
   private removed = new Set<string>();
@@ -365,9 +351,7 @@ export class AlertManager {
 
     // Turning the gate off releases news it was holding; dropping it would turn
     // a timing preference into alert loss.
-    for (const [id, entry] of this.entries) {
-      if (!this.suspendedForTransfer.has(id)) this.flushDeferredNotification(id, entry);
-    }
+    for (const [id, entry] of this.entries) this.flushDeferredNotification(id, entry);
   }
 
   /** Mark (or, on promotion, unmark) a helper Session. */
@@ -403,7 +387,6 @@ export class AlertManager {
   }
 
   onExit(id: string, exitCode?: number): void {
-    if (this.suspendedForTransfer.has(id)) return;
     const entry = this.entries.get(id);
     if (entry && this.finishCommandExitWatch(id, entry, exitCode)) this.notify(id);
     // The command-exit dispatch above already resolved anything waiting on the
@@ -430,9 +413,6 @@ export class AlertManager {
     if (next.size === this.watchedCommands.size && [...next].every((name) => this.watchedCommands.has(name))) return;
     this.watchedCommands = next;
     for (const [id, entry] of this.entries) {
-      // A suspended Session is frozen at its snapshot; `resumeFromTransfer`
-      // re-applies this rule wherever the snapshot lands.
-      if (this.suspendedForTransfer.has(id)) continue;
       this.withdrawUncoveredWatchingRing(entry);
       // WATCHING is derived from the rule set, so every entry may have changed.
       this.notify(id);
@@ -871,7 +851,7 @@ export class AlertManager {
   // --- Command-exit ---
 
   applyTerminalSemanticEvents(id: string, events: TerminalSemanticEvent[]): void {
-    if (events.length === 0 || this.suspendedForTransfer.has(id)) return;
+    if (events.length === 0) return;
     const entry = this.reportedEntry(id);
     let changed = false;
 
@@ -1178,7 +1158,7 @@ export class AlertManager {
    */
   acknowledge(id: string, { input }: { input: boolean }): void {
     const entry = this.entries.get(id);
-    if (!entry || this.suspendedForTransfer.has(id)) return;
+    if (!entry) return;
     if (input) entry.echoUntil = Date.now() + cfg.alert.echoWindow;
     if (this.helpers.has(id)) return;
     this.markSeen(entry);
@@ -1221,7 +1201,6 @@ export class AlertManager {
   // --- Alert controls ---
 
   dismissAlert(id: string): void {
-    if (this.suspendedForTransfer.has(id)) return;
     const entry = this.entries.get(id);
     if (!entry) return;
 
@@ -1280,8 +1259,6 @@ export class AlertManager {
 
   /** Completely remove alert state for a PTY (used when PTY is destroyed) */
   remove(id: string): void {
-    this.suspendedForTransfer.delete(id);
-    this.liveReplay.delete(id);
     this.removed.add(id);
     // Nobody parked here has anything left to wait for.
     this.settleWaiters(id, 'died');
@@ -1298,6 +1275,17 @@ export class AlertManager {
     // Last, so `notify` still knows a helper that never published has nothing
     // for subscribers to forget.
     this.helpers.delete(id);
+  }
+
+  /**
+   * A new PTY generation under `id`: what the old one left goes as on
+   * `remove`, but no tombstone, since the output about to arrive is the new
+   * Session's own. A host whose restore seeds after the spawn calls this at
+   * the spawn; one that seeds before it must not.
+   */
+  restart(id: string): void {
+    this.remove(id);
+    this.removed.delete(id);
   }
 
   /**
@@ -1323,72 +1311,10 @@ export class AlertManager {
     this.notify(id);
   }
 
-  /** Whether `id` drops reports, controls and awaits: a helper, or a Session
-   *  suspended for a live handoff. The output and command-state feeds, which a
-   *  helper keeps, check the suspension alone. */
+  /** Whether `id` drops reports, controls and awaits: a helper. The output and
+   *  command-state feeds, which a helper keeps, never check it. */
   private inert(id: string): boolean {
-    return this.helpers.has(id) || this.suspendedForTransfer.has(id);
-  }
-
-  /** Suspend at the output mark. Parked await callers receive an explicit cancellation. */
-  pauseForTransfer(id: string): AlertRuntimeSnapshot | null {
-    const entry = this.entries.get(id);
-    if (!entry) return null;
-    this.settleWaiters(id, 'cancelled');
-    // Leaving this window is an explicit disengage, and a seen command stays
-    // seen: unengaged at the destination, it is armed there.
-    entry.held = null;
-    this.suspendedForTransfer.add(id);
-    const { detector, deferredTimer: _timer, ...state } = entry;
-    const snapshot = structuredClone({ ...state, detector: detector.snapshot() });
-    detector.dispose();
-    if (entry.deferredTimer !== null) clearTimeout(entry.deferredTimer);
-    entry.deferredTimer = null;
-    return snapshot;
-  }
-
-  /** Resume live state before replay; unlike seed, this preserves the ring and
-   *  its episode identity. `replayRequestId` names the one since-mark replay that
-   *  `applyReplay` treats as live output. */
-  resumeFromTransfer(id: string, snapshot: AlertRuntimeSnapshot, replayRequestId?: string): void {
-    if (this.helpers.has(id)) return;
-    this.suspendedForTransfer.delete(id);
-    this.removed.delete(id);
-    if (replayRequestId === undefined) this.liveReplay.delete(id);
-    else this.liveReplay.set(id, replayRequestId);
-    const entry = this.getOrCreateEntry(id);
-    entry.detector.dispose();
-    if (entry.deferredTimer !== null) clearTimeout(entry.deferredTimer);
-    const { detector, ...state } = structuredClone(snapshot);
-    Object.assign(entry, state);
-    entry.deferredTimer = null;
-    entry.detector = this.createDetector(id);
-    entry.detector.restore(detector);
-    this.withdrawUncoveredWatchingRing(entry);
-    if (entry.deferred) {
-      if (this.deferAlertsUntilQuiet) this.scheduleDeferredNotification(id, entry);
-      else this.flushDeferredNotification(id, entry);
-    }
-    this.notify(id);
-  }
-
-  /**
-   * Feed a `pty:replay` chunk. Historical replay applies semantic events alone;
-   * only the live since-mark replay of a Workspace handoff, matched by its
-   * request token, counts as output and fires notification events
-   * (`docs/specs/alert.md` → Live Workspace transfer). Returns the semantic
-   * events for the terminal-state store.
-   */
-  applyReplay(id: string, requestId: string | undefined, parsed: TerminalProtocolParseResult): TerminalSemanticEvent[] {
-    if (requestId !== undefined && this.liveReplay.get(id) === requestId) {
-      this.liveReplay.delete(id);
-      if (parsed.visibleData.length) this.onData(id);
-      // The caller records the replay's Tool reports for either kind.
-      return applyTerminalEvents(this, id, parsed.events);
-    }
-    const events = collectTerminalSemanticEvents(parsed.events);
-    this.applyTerminalSemanticEvents(id, events);
-    return events;
+    return this.helpers.has(id);
   }
 
   dispose(): void {
@@ -1400,8 +1326,6 @@ export class AlertManager {
       entry.detector.dispose();
     }
     this.entries.clear();
-    this.suspendedForTransfer.clear();
-    this.liveReplay.clear();
     this.removed.clear();
     this.helpers.clear();
     this.awaits.clear();
@@ -1421,7 +1345,7 @@ export class AlertManager {
    * was killed (see `removed`).
    */
   private streamEntry(id: string): AlertEntry | null {
-    if (this.removed.has(id) || this.suspendedForTransfer.has(id)) return null;
+    if (this.removed.has(id)) return null;
     return this.getOrCreateEntry(id);
   }
 

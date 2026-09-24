@@ -480,20 +480,6 @@ export function textProjectionOf(
 }
 
 /**
- * Apply a batch's reports and Tool reports alone — standalone's protocol
- * channel, whose semantic events arrive on a channel of their own. Everything
- * else takes {@link applyTerminalEvents}.
- */
-export function applyTerminalProtocolEvents(
-  sink: TerminalProtocolAlertSink,
-  id: string,
-  events: TerminalProtocolEvent[],
-): void {
-  recordToolEvents(id, events);
-  for (const event of events) applyTerminalReport(sink, id, event);
-}
-
-/**
  * Apply one parse batch in stream order, so a report written after a command
  * boundary is judged after it (`docs/specs/alert.md` -> Terminal reports).
  * Semantic events are timestamped once, handed to the sink in the runs between
@@ -534,16 +520,15 @@ function applyTerminalReport(sink: TerminalProtocolAlertSink, id: string, event:
 }
 
 /**
- * The notification, progress, Tool announcement and command-start events {@link applyTerminalProtocolEvents} acts
- * on. An owner whose `AlertManager` lives in another process — standalone's
- * sidecar, whose webview holds it — forwards exactly these; every other kind is
- * the owner's own to settle, a response above all.
+ * The Tool announcement, Tool state and command-start events `recordToolEvents`
+ * acts on, in stream order: what a parse site forwards to the renderer that
+ * holds the Tool stores. Reports stay with the owner's `AlertManager`, and a
+ * response is the owner's alone to write.
  */
-export function collectTerminalProtocolAlerts(
-  events: TerminalProtocolEvent[],
+export function collectTerminalToolEvents(
+  events: readonly TerminalProtocolEvent[],
 ): TerminalProtocolEvent[] {
-  return events.filter((event) => event.kind === 'notification' || event.kind === 'progress' || event.kind === 'toolAnnounce' || event.kind === 'toolState'
-    || isProtocolCommandStart(event));
+  return events.filter((event) => event.kind === 'toolAnnounce' || event.kind === 'toolState' || isProtocolCommandStart(event));
 }
 
 export function collectTerminalProtocolResponses(events: TerminalProtocolEvent[]): string[] {

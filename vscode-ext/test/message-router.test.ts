@@ -15,11 +15,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ExtensionMessage, WebviewMessage } from '../src/message-types';
 import type { PeerLinkDeps } from '../src/peer-link';
+import type { BurrowDeps } from '../src/burrow';
 import type { WebviewChannel } from '../src/webview-messaging';
 
 /** What `message-router.ts` hands the two modules it configures at load. */
 const wiring = vi.hoisted(() => ({
   peer: null as PeerLinkDeps | null,
+  burrow: null as BurrowDeps | null,
   /** Every `notifyDirectoryChanged()` the router made. */
   invalidations: 0,
 }));
@@ -66,7 +68,9 @@ vi.mock('../src/pty-manager', async (importOriginal) => ({
 }));
 
 vi.mock('../src/burrow', () => ({
-  configureBurrow: () => {},
+  configureBurrow: (deps: BurrowDeps) => {
+    wiring.burrow = deps;
+  },
   deliverCommandResult: () => {},
   deliverUiEvent: () => {},
   dropForwardedCommands: () => {},
@@ -114,6 +118,7 @@ let mirror: MirrorModule;
 beforeEach(async () => {
   vi.resetModules();
   wiring.peer = null;
+  wiring.burrow = null;
   wiring.invalidations = 0;
   ptys.cwd = null;
   ptys.cwdAsked = [];
@@ -681,6 +686,22 @@ describe('engagement viewers', () => {
     }
   });
 
+  // A remote Client's keystrokes reach the PTY through this window's own
+  // Burrow or over the peer link from the broker's, never through a webview:
+  // the host acknowledges them itself (docs/specs/alert.md → Engagement).
+  it.each(['burrow', 'peer'] as const)('acknowledges a Client\'s input before writing it (%s)', (path) => {
+    const deps = path === 'burrow' ? wiring.burrow! : wiring.peer!;
+    ptys.callbacks!.onData('pty-remote', REPORT);
+    const atWrite: Array<string | undefined> = [];
+    ptys.onWrite = (id) => void atWrite.push(status(id));
+    deps.writePty('pty-remote', 'y');
+    expect(atWrite).toEqual(['WATCHING_DISABLED']);
+    expect(router.getAlertStates().get('pty-remote')?.todo).toBe(false);
+    // A bell answering the key rings no one.
+    ptys.callbacks!.onData('pty-remote', REPORT);
+    expect(status('pty-remote')).not.toBe('ALERT_RINGING');
+  });
+
   it('stops engaging anything once its webview is disposed', () => {
     const webview = fakeWebview();
     const disposable = router.attachRouter(webview.channel);
@@ -712,4 +733,18 @@ describe('engagement viewers', () => {
       disposable.dispose();
     }
   });
+});
+
+// An editor panel's disposal kills its PTYs, and the webview that would have
+// sent `alert:remove` for them is already gone: the host removes their entries.
+it('removes the alert state of the PTYs a closing panel kills', async () => {
+  const webview = fakeWebview();
+  const disposable = router.attachRouter(webview.channel, { killOnDispose: true });
+  webview.send({ type: 'pty:spawn', id: 'panel-pty', options: { cwd: '/repo' } });
+  ptys.callbacks!.onData('panel-pty', '\x1b]9;needs input\x07');
+  expect(router.getAlertStates().has('panel-pty')).toBe(true);
+
+  disposable.dispose();
+  await vi.waitFor(() => expect(ptys.order).toContain('kill panel-pty'));
+  expect(router.getAlertStates().has('panel-pty')).toBe(false);
 });

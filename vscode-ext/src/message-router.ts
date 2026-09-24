@@ -97,8 +97,8 @@ configurePeerLink({
   brokerRequest,
   invalidateDirectory: notifyDirectoryChanged,
   streamPty: processedPtyStreams.streamPty,
-  writePty: (ptyId, data) => ptyManager.write(ptyId, data),
-  resizePty: (ptyId, cols, rows, repaint) => ptyManager.resize(ptyId, cols, rows, repaint),
+  writePty: writeClientInput,
+  resizePty: resizeForClient,
   // Peer PTYs use generated provider-local route handles. Keep those handles
   // outside this window's real PTY namespace so local ids always fall through
   // to the manager that owns them.
@@ -116,9 +116,27 @@ configureBurrow({
   brokerRequest,
   broadcastToWebviews,
   streamPty: processedPtyStreams.streamPty,
-  writePty: (ptyId, data) => ptyManager.write(ptyId, data),
-  resizePty: (ptyId, cols, rows, repaint) => ptyManager.resize(ptyId, cols, rows, repaint),
+  writePty: writeClientInput,
+  resizePty: resizeForClient,
 });
+
+/**
+ * A remote Client's keystrokes, reaching this window's PTY from its own Burrow
+ * or over the peer link from the broker's: a human's input like a webview's,
+ * so acknowledged before the write, echo window included (`docs/specs/alert.md`
+ * → Engagement). The Burrow has already dropped a mirror's terminal replies.
+ */
+function writeClientInput(ptyId: string, data: string): void {
+  alertManager.acknowledge(ptyId, { input: true });
+  ptyManager.write(ptyId, data);
+}
+
+/** A Client's resize — the repaint bounce included — whose output is the
+ *  resize's, never the program working. */
+function resizeForClient(ptyId: string, cols: number, rows: number, repaint?: boolean): void {
+  alertManager.onResize(ptyId);
+  ptyManager.resize(ptyId, cols, rows, repaint);
+}
 
 /**
  * Put one question to every webview in this window and settle with everything
@@ -1106,7 +1124,11 @@ export function attachRouter(
         .finally(() => {
           for (const id of toKill) {
             try { ptyManager.kill(id); }
-            finally { globalOwnedPtyIds.delete(id); }
+            finally {
+              globalOwnedPtyIds.delete(id);
+              // Its webview, which would have sent `alert:remove`, is gone.
+              alertManager.remove(id);
+            }
           }
         });
     },

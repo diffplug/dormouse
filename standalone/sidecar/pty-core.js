@@ -1504,6 +1504,12 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
     return ptys.has(id);
   }
 
+  /** Whether `id` is a helper, as validated at its spawn or promotion: the
+   *  host's alerts mirror this after each (docs/specs/alert.md -> Pane Header). */
+  function isHelper(id) {
+    return helpers.has(id);
+  }
+
   function kill(id) {
     helpers.delete(id);
     sessions.delete(id);
@@ -1759,7 +1765,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
     send('shells', { shells: detectAvailableShells(), requestId });
   }
 
-  return { spawn, write, resize, hasPty, kill, killAll, list, context,
+  return { spawn, write, resize, hasPty, isHelper, kill, killAll, list, context,
     getCwd, getCwds, getOpenPorts, getOpenPortsMany, interrupt, gracefulKill, getShells,
     liveIds, receivedChars, outputSince, mark };
 };

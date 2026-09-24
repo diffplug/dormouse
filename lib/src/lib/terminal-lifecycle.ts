@@ -617,17 +617,20 @@ export function disposeAllSessions(): void {
 }
 
 /**
- * Tear this webview's half of a Session down: the alert, the notepad pins, the
- * listeners, the element and the xterm instance, plus the registry, pane,
- * selection and activity state keyed to it.
+ * Tear this webview's half of a Session down: the notepad pins, the listeners,
+ * the element and the xterm instance, plus the registry, pane, selection and
+ * activity state keyed to it.
  *
  * `kill` is the only difference between the two verbs below, and it is the
- * whole difference between ending a Session and letting another Window take it.
+ * whole difference between ending a Session and letting another Window take it:
+ * a kill also removes the host's alert entry, which a release leaves to the
+ * Window that takes the Session over (`docs/specs/alert.md` → Live Workspace
+ * transfer).
  */
 function teardownSession(id: string, { kill }: { kill: boolean }): void {
   const entry = registry.get(id);
   if (!entry) return;
-  getPlatform().alertRemove(id);
+  if (kill) getPlatform().alertRemove(id);
   // Before the xterm instance goes: its markers are what notepad pins hold, and
   // a disposed marker cannot be dropped cleanly afterwards. The notes stay.
   dropSourcesForTerminal(id);

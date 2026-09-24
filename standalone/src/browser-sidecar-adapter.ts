@@ -1,5 +1,4 @@
 import { recordToolEvents } from '../../lib/src/lib/tool-events';
-import type { AlertRuntimeSnapshot } from 'dormouse-lib/lib/alert-manager';
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
 import { installWorkspaceRegistry, type WorkspaceRegistrySnapshot } from "./workspace-registry";
 import type {
@@ -10,7 +9,6 @@ import type {
   AgentBrowserPopResult,
   AgentBrowserScreenshotResult,
   AgentBrowserStreamStatusResult,
-  AlertStateDetail,
   IframeProxyResult,
   OpenPort,
   PlatformAdapter,
@@ -38,16 +36,15 @@ import {
   type BurrowResult,
 } from "dormouse-lib/host/remote/service-protocol";
 import { embedderOrigins } from "dormouse-lib/lib/embedder-origins";
-import { AlertManager, LOCAL_VIEWER } from "dormouse-lib/lib/alert-manager";
-import type { AwaitHandle, AwaitOptions, Engagement, EngagementLapse } from "dormouse-lib/lib/alert-manager";
-import type { AlertSettings } from "dormouse-lib/lib/alert-settings";
+import { createSidecarAlertClient } from "dormouse-lib/host/alert-client";
+import type { AlertCommand } from "dormouse-lib/host/alert-protocol";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
 import { createMemoryNotepadArchivePort } from "dormouse-lib/lib/notepad/memory-archive-port";
-import type { PersistedAlertState, PersistedWindow } from "dormouse-lib/lib/session-types";
+import type { PersistedWindow } from "dormouse-lib/lib/session-types";
 import { claimRecoveryCommands, windowStateSlot } from "./window-recovery";
 import { coalesceCwds } from "./coalesce-cwds";
 import {
-  applyTerminalProtocolEvents,
+  collectTerminalSemanticEvents,
   TerminalProtocolParser,
   type TerminalProtocolEvent,
 } from "dormouse-lib/lib/terminal-protocol";
@@ -76,19 +73,9 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   private listHandlers = new Set<(detail: PtyListDetail) => void>();
   private replayHandlers = new Set<(detail: PtyReplayDetail) => void>();
   private markedHandlers = new Set<(detail: PtyMarkedDetail) => void>();
-  private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
-  private watchedCommandHandlers = new Set<(names: string[]) => void>();
-  private alertSettingsHandlers = new Set<(settings: AlertSettings) => void>();
-  private alertManager = new AlertManager();
   private unlistenHost: (() => void) | null = null;
   private unlistenReconnect: (() => void) | null = null;
   private unlistenRegistry: (() => void) | null = null;
-  // The seeds this renderer last offered, keyed by op. The SSE stream is the
-  // only way a store's snapshot reaches this adapter, and a dropped stream
-  // takes the bridge's fan-out entry with it; re-offering the seeds after a
-  // reconnect makes the sidecar republish both stores (a repeat seed is
-  // ignored as a seed but still answered with the canonical snapshot).
-  private readonly alertSeeds = new Map<string, Record<string, unknown>>();
   private onRegistrySnapshot: ((snapshot: WorkspaceRegistrySnapshot) => void) | null = null;
   private static STATE_KEY = 'dormouse.browser-sidecar.session';
   private windowSlot = windowStateSlot(localStorage, BrowserSidecarAdapter.STATE_KEY, 'browser-sidecar');
@@ -102,11 +89,28 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
 
   readonly burrow: BurrowLink = this.burrowClient.link;
 
-  constructor(private readonly host: BrowserSidecarHost) {
-    this.alertManager.onStateChange((id, state) => {
-      for (const handler of this.alertStateHandlers) handler({ id, ...state });
-    });
+  // The sidecar's alerts, through the same client TauriAdapter uses; the dev
+  // host stamps this page's one fixed window label on each command.
+  private readonly alerts = createSidecarAlertClient((payload: AlertCommand) => {
+    this.host.send("alert_command", { payload });
+  });
+  readonly alertRemove = this.alerts.alertRemove;
+  readonly alertSeed = this.alerts.alertSeed;
+  readonly alertSetWatchedCommands = this.alerts.alertSetWatchedCommands;
+  readonly alertSetCommandWatched = this.alerts.alertSetCommandWatched;
+  readonly alertPublishSettings = this.alerts.alertPublishSettings;
+  readonly alertDismiss = this.alerts.alertDismiss;
+  readonly alertEngagement = this.alerts.alertEngagement;
+  readonly alertAcknowledge = this.alerts.alertAcknowledge;
+  readonly alertResize = this.alerts.alertResize;
+  readonly alertToggleTodo = this.alerts.alertToggleTodo;
+  readonly alertClearTodo = this.alerts.alertClearTodo;
+  readonly alertAwait = this.alerts.alertAwait;
+  readonly onAlertState = this.alerts.onAlertState;
+  readonly onWatchedCommands = this.alerts.onWatchedCommands;
+  readonly onAlertSettings = this.alerts.onAlertSettings;
 
+  constructor(private readonly host: BrowserSidecarHost) {
     // See TauriAdapter: the sidecar parses and has no DOM, so it is told the
     // resolved terminal colors whenever they change.
     onTerminalThemeChange(() => this.pushThemeColors());
@@ -129,9 +133,13 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   async init(): Promise<void> {
     await this.host.init();
     this.unlistenHost = this.host.onEvent(({ event, data }) => this.handleHostEvent(event, data));
-    this.unlistenReconnect = this.host.onReconnect(() => {
-      for (const payload of this.alertSeeds.values()) this.host.send("alert_command", { payload });
-    });
+    // The SSE stream is the only way a store's snapshot reaches this adapter,
+    // and a dropped stream takes the bridge's fan-out entry with it; re-offering
+    // the seeds makes the sidecar republish both stores (a repeat seed is
+    // ignored as a seed but still answered with the canonical snapshot).
+    this.unlistenReconnect = this.host.onReconnect(() => this.alerts.reofferSeeds());
+    // A reload is a new realm under the same label; see TauriAdapter.
+    this.alerts.hello();
     this.installConsoleForwarder();
     this.unlistenRegistry = await installWorkspaceRegistry({
       invoke: (cmd, args) => this.host.invoke(cmd, args),
@@ -150,7 +158,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   }
 
   shutdown(): void {
-    this.alertManager.dispose();
+    this.alerts.dispose();
     this.unlistenHost?.();
     this.unlistenHost = null;
     this.unlistenReconnect?.();
@@ -177,17 +185,15 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   async terminalContext(request: TerminalContextRequest): Promise<TerminalContextInfo> {
     const result = await this.host.invoke<TerminalContextInfo>('pty_context', { request });
     if (result.error) throw new Error(result.error);
-    if (request.op === 'promote') this.alertManager.setHelper(request.id, !!request.restore);
     return result;
   }
   spawnPty(id: string, options?: { cols?: number; rows?: number; cwd?: string; shell?: string; args?: string[]; helper?: HelperIdentity }): void {
-    if (options?.helper) this.alertManager.setHelper(id, true);
     this.host.send("pty_spawn", { id, options });
   }
 
+  /** See TauriAdapter: `userInput` rides the write itself. */
   writePty(id: string, data: string, options?: WritePtyOptions): void {
-    if (options?.userInput) this.alertManager.acknowledge(id, { input: true });
-    this.host.send("pty_write", { id, data, paced: options?.paced });
+    this.host.send("pty_write", { id, data, paced: options?.paced, userInput: options?.userInput });
   }
 
   resizePty(id: string, cols: number, rows: number): void {
@@ -226,10 +232,6 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   // sending `^C` to every agent would interrupt work that is still running. What
   // a reload does exercise is the claim above, against whatever the app's own
   // quit last wrote (docs/specs/standalone.md -> "Agent recovery").
-
-  alertSeed(id: string, state: PersistedAlertState): void {
-    this.alertManager.seed(id, state);
-  }
 
   async getOpenPorts(id: string): Promise<OpenPort[]> {
     try { return await this.host.invoke("pty_get_open_ports", { id }); } catch { return []; }
@@ -355,40 +357,6 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   offRequestSessionFlush(_handler: (detail: { requestId: string }) => void): void {}
   notifySessionFlushComplete(_requestId: string): void {}
 
-  alertPauseForTransfer(id: string): AlertRuntimeSnapshot | null { return this.alertManager.pauseForTransfer(id); }
-  alertResumeFromTransfer(id: string, snapshot: AlertRuntimeSnapshot, replayRequestId?: string): void {
-    this.alertManager.resumeFromTransfer(id, snapshot, replayRequestId);
-  }
-
-  alertRemove(id: string): void { this.alertManager.remove(id); }
-  // Through the sidecar's app-global stores and back as their broadcasts, the
-  // path the shipped app takes (see TauriAdapter), so the harness exercises
-  // the seed-once and delta rules rather than a private copy of the state.
-  alertSetWatchedCommands(names: string[]): void {
-    this.sendAlertSeed({ op: "initializeWatchedCommands", names });
-  }
-  alertSetCommandWatched(name: string, watched: boolean): void {
-    this.host.send("alert_command", { payload: { op: "setCommandWatched", name, watched } });
-  }
-  alertPublishSettings(settings: AlertSettings, opts: { seed: boolean }): void {
-    if (opts.seed) this.sendAlertSeed({ op: "initializeSettings", settings });
-    else this.host.send("alert_command", { payload: { op: "updateSettings", settings } });
-  }
-  private sendAlertSeed(payload: { op: string } & Record<string, unknown>): void {
-    this.alertSeeds.set(payload.op, payload);
-    this.host.send("alert_command", { payload });
-  }
-  alertDismiss(id: string): void { this.alertManager.dismissAlert(id); }
-  alertEngagement(state: Engagement, lapse?: EngagementLapse): void { this.alertManager.setViewer(LOCAL_VIEWER, state, lapse); }
-  alertAcknowledge(id: string): void { this.alertManager.acknowledge(id, { input: false }); }
-  alertResize(id: string): void { this.alertManager.onResize(id); }
-  alertToggleTodo(id: string): void { this.alertManager.toggleTodo(id); }
-  alertClearTodo(id: string): void { this.alertManager.clearTodo(id); }
-  alertAwait(id: string, options: AwaitOptions): AwaitHandle { return this.alertManager.awaitCompletion(id, options); }
-  onAlertState(handler: (detail: AlertStateDetail) => void): void { this.alertStateHandlers.add(handler); }
-  onWatchedCommands(handler: (names: string[]) => void): void { this.watchedCommandHandlers.add(handler); }
-  onAlertSettings(handler: (settings: AlertSettings) => void): void { this.alertSettingsHandlers.add(handler); }
-
   // See TauriAdapter: no bare-Session slot on this host. The harness mirrors the
   // shipped persistence answer, so a reload here exercises what the app does
   // (docs/specs/transport.md -> "The governing rule").
@@ -421,38 +389,22 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
       this.onRegistrySnapshot?.(data as WorkspaceRegistrySnapshot);
       return;
     }
-    if (event === "alert:watchedCommands") {
-      const names = (data as { names?: string[] } | undefined)?.names ?? [];
-      this.alertManager.setWatchedCommands(names);
-      for (const handler of this.watchedCommandHandlers) handler(names);
-      return;
-    }
-    if (event === "alert:settings") {
-      const settings = (data as { settings?: AlertSettings } | undefined)?.settings;
-      if (!settings) return;
-      this.alertManager.applySettings(settings);
-      for (const handler of this.alertSettingsHandlers) handler(settings);
-      return;
-    }
+    if (this.alerts.onEvent(event, data)) return;
     if (event === "pty:data") {
       // Already parsed by the sidecar, which owns the PTY; its events arrive as
       // the two messages below (docs/specs/terminal-escapes.md).
       const payload = data as PtyDataDetail;
-      this.alertManager.onData(payload.id);
       for (const handler of this.dataHandlers) handler(payload);
     } else if (event === "terminal:protocolEvents") {
       const payload = data as { id: string; events: TerminalProtocolEvent[] };
-      applyTerminalProtocolEvents(this.alertManager, payload.id, payload.events);
+      recordToolEvents(payload.id, payload.events);
     } else if (event === "terminal:semanticEvents") {
       const { id, events } = data as { id: string; events: TerminalSemanticEvent[] };
-      this.alertManager.applyTerminalSemanticEvents(id, events);
       applyTerminalSemanticEvents(id, events);
     } else if (event === "pty:exit") {
       const payload = data as { id: string; exitCode: number };
-      this.alertManager.onExit(payload.id, payload.exitCode);
       for (const handler of this.exitHandlers) handler(payload);
     } else if (event === "pty:list") {
-      for (const pty of (data as PtyListDetail).ptys) if (pty.helper) this.alertManager.setHelper(pty.id, true);
       for (const handler of this.listHandlers) handler(data as PtyListDetail);
     } else if (event === "pty:marked") {
       for (const handler of this.markedHandlers) handler(data as PtyMarkedDetail);
@@ -462,7 +414,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
       const { id, data: text, requestId } = data as PtyReplayDetail;
       const parsed = new TerminalProtocolParser(themeColorProvider).process(text);
       recordToolEvents(id, parsed.events);
-      applyTerminalSemanticEvents(id, this.alertManager.applyReplay(id, requestId, parsed));
+      applyTerminalSemanticEvents(id, collectTerminalSemanticEvents(parsed.events));
       for (const handler of this.replayHandlers) handler({ id, data: parsed.visibleData, requestId });
     } else if (event === BURROW_RESULT_EVENT) {
       this.burrowClient.onResult(data as BurrowResult);

@@ -109,10 +109,11 @@ export function restoreSession(platform: PlatformAdapter, sources: RestoreSource
         ? { command: pane.command ?? null, requireIntegration: true, resumeCommand: null }
         : { resumeCommand: recoveryCommands[pane.id] ?? null }),
     });
-    // The fresh PTY inherits the pane's persisted TODO/alert, on the hosts whose
-    // AlertManager lives in the webview. Seeded after `restoreTerminal` so the
-    // state change lands on a registered pane. Restore-only: a live resume still
-    // has the manager's own state (docs/specs/alert.md -> "Persist only").
+    // The fresh PTY inherits the pane's persisted TODO/alert, on the host that
+    // cannot seed itself (standalone: its sidecar holds no persisted session).
+    // After `restoreTerminal`, whose spawn starts the Session's alert state over
+    // host-side, so the seed lands on the new Session. Restore-only: a live
+    // resume still has the manager's own state (docs/specs/alert.md -> "Persist only").
     if (pane.alert) platform.alertSeed?.(pane.id, pane.alert);
   }
 

@@ -79,7 +79,8 @@ fn guard<T>(lock: &Mutex<T>) -> MutexGuard<'_, T> {
 #[derive(Default)]
 struct RoutingState {
     /// ptyId -> window label. Minted only in `pty_spawn`, dropped by
-    /// `pty_kill`, an exit, or a window going away; reassigned by a transfer.
+    /// `pty_kill` or a window going away — never by an exit; reassigned by a
+    /// transfer.
     owners: HashMap<String, String>,
     /// Ids whose output is suppressed until the replay their new owner is about
     /// to be sent has been emitted, each with the instant it began.
@@ -87,8 +88,8 @@ struct RoutingState {
     /// dor requestId -> the window handling it, so a cancel reaches the window
     /// holding the subscription, watch or completion claim it releases.
     dor_targets: HashMap<String, String>,
-    /// Protocol events that arrived while their id was suppressed, delivered
-    /// to the new owner behind its replay (`routing::Route::Hold`). Only ever
+    /// Tool events that arrived while their id was suppressed, delivered to
+    /// the new owner behind its replay (`routing::Route::Hold`). Only ever
     /// emptied together with `awaiting_replay` (`lift_suppression`).
     held: HashMap<String, Vec<routing::HeldEvent>>,
     /// Ids between a transfer's invoke and the sidecar's `marked` line, each
@@ -222,16 +223,28 @@ impl WindowState {
         JsonValue::Object(marks)
     }
 
-    fn forget_pty(&self, id: &str) { self.remove_pty(id, false); }
-    fn exited_pty(&self, id: &str) { self.remove_pty(id, true); }
-
-    fn remove_pty(&self, id: &str, keep_cut: bool) {
+    /// The Session is gone (`pty_kill`, or its window went away): ownership and
+    /// every transfer record with it, the cut included, since a kill discards
+    /// the buffer it indexes.
+    fn forget_pty(&self, id: &str) {
         let mut routing = guard(&self.routing);
         routing.owners.remove(id);
+        routing.transfer_marks.remove(id);
+        self.end_transfer_routing(&mut routing, id);
+    }
+
+    /// The PTY exited on its own. **Ownership stays until the Session is
+    /// killed**: the pane still shows it, and the sidecar's `alert:state` for it
+    /// — a dismiss, a TODO cleared — must still reach that window (§Alerts). The
+    /// cut stays too: the sidecar retains the buffer a replay reads.
+    fn exited_pty(&self, id: &str) {
+        let mut routing = guard(&self.routing);
+        self.end_transfer_routing(&mut routing, id);
+    }
+
+    fn end_transfer_routing(&self, routing: &mut RoutingState, id: &str) {
         routing.lift_suppression(id);
         routing.marking.remove(id);
-        // Natural exit retains the sidecar buffer; explicit kill discards it.
-        if !keep_cut { routing.transfer_marks.remove(id); }
         self.suppressed.store(routing.awaiting_replay.len(), Ordering::Relaxed);
     }
 
@@ -1092,13 +1105,37 @@ fn pty_spawn(
 }
 
 #[tauri::command]
-fn pty_write(state: tauri::State<'_, SidecarState>, id: String, data: String, paced: Option<bool>) {
+fn pty_write(
+    state: tauri::State<'_, SidecarState>,
+    id: String,
+    data: String,
+    paced: Option<bool>,
+    user_input: Option<bool>,
+) {
+    send_to_sidecar(&state, pty_input_message(id, data, paced, user_input).to_string());
+}
+
+/// One `pty:input` line. **Human input carries `userInput` on the write itself**,
+/// never a separate alert command racing it: the sidecar acknowledges it and
+/// opens the echo window before the bytes reach the PTY (docs/specs/alert.md
+/// → Engagement).
+fn pty_input_message(id: String, data: String, paced: Option<bool>, user_input: Option<bool>) -> JsonValue {
     let mut input = serde_json::json!({ "id": id, "data": data });
     if paced == Some(true) {
         input["paced"] = true.into();
     }
-    let msg = serde_json::json!({ "event": "pty:input", "data": input });
-    send_to_sidecar(&state, msg.to_string());
+    if user_input == Some(true) {
+        input["userInput"] = true.into();
+    }
+    serde_json::json!({ "event": "pty:input", "data": input })
+}
+
+/// Stamp the invoking window's label onto a webview's opaque command: the one
+/// field Rust adds, because a webview cannot name itself to the sidecar.
+fn stamp_window(payload: &mut JsonValue, label: &str) {
+    if let Some(command) = payload.as_object_mut() {
+        command.insert("window".to_string(), JsonValue::String(label.to_string()));
+    }
 }
 
 #[tauri::command]
@@ -1177,15 +1214,9 @@ fn burrow_command(
     state: tauri::State<'_, SidecarState>,
     mut payload: JsonValue,
 ) {
-    // The one field Rust adds: which webview this came from. An ask fans out to
-    // every window and settles on having heard from each, and a webview cannot
-    // name itself to the Burrow (§Burrow service).
-    if let Some(command) = payload.as_object_mut() {
-        command.insert(
-            "window".to_string(),
-            JsonValue::String(window.label().to_string()),
-        );
-    }
+    // Which webview this came from: an ask fans out to every window and settles
+    // on having heard from each (§Burrow service).
+    stamp_window(&mut payload, window.label());
     let msg = serde_json::json!({
         "event": "burrow:command",
         "data": payload,
@@ -1193,13 +1224,18 @@ fn burrow_command(
     send_to_sidecar(&state, msg.to_string());
 }
 
-// The two app-global alert stores live in the sidecar so N windows share one
-// answer (docs/specs/alert.md -> "Alarm settings"). One opaque passthrough, like
-// `burrow_command`: the payload names its own op, and the shape belongs to
-// `lib/src/host/alert-store-host.ts` at the other end. The canonical snapshot
-// comes back as a broadcast `alert:settings` / `alert:watchedCommands`.
+// The app's one AlertManager lives in the sidecar, and every window is one of
+// its viewers (§Alerts). One opaque passthrough, like `burrow_command`: the
+// payload names its own op, and the shape belongs to
+// `lib/src/host/alert-protocol.ts`. The window label is stamped, because it is
+// the viewer id engagement is kept under and the owner of the awaits it parks.
 #[tauri::command]
-fn alert_command(state: tauri::State<'_, SidecarState>, payload: JsonValue) {
+fn alert_command(
+    window: tauri::Window,
+    state: tauri::State<'_, SidecarState>,
+    mut payload: JsonValue,
+) {
+    stamp_window(&mut payload, window.label());
     let msg = serde_json::json!({ "event": "alert:command", "data": payload });
     send_to_sidecar(&state, msg.to_string());
 }
@@ -3086,7 +3122,7 @@ fn spawn_arrival_watchdog(app: AppHandle, arrival: &routing::Arrival) {
 /// From its mark to now every byte went to the target, or nowhere, and the
 /// source's xterm stands at the mark; so the sidecar is asked for
 /// `outputSince(mark)` scoped to the source, and that replay lifts the
-/// suppression on its way out (`dispatch_sidecar_event`), the held protocol
+/// suppression on its way out (`dispatch_sidecar_event`), the held Tool
 /// events behind it. Marks come from the routing state at `pty:marked`, never
 /// from the later serialized content. Only an id the sidecar never stamped
 /// goes straight back.
@@ -4752,8 +4788,63 @@ mod tests {
         assert_eq!(windows.hand_back(&["t1".to_string()], "main")["t1"], 42);
         let routing = guard(&windows.routing);
         assert!(!routing.transfer_marks.contains_key("t1"));
-        assert!(!routing.owners.contains_key("t1"));
-        assert!(!routing.awaiting_replay.contains_key("t1"));
+        // The source shows the exited pane again, behind the replay of its cut.
+        assert_eq!(routing.owners.get("t1").map(String::as_str), Some("main"));
+        assert!(routing.awaiting_replay.contains_key("t1"));
+    }
+
+    /// An exited Session is still on screen, and a dismiss or a TODO cleared on
+    /// it comes back as `alert:state`: dropped as unowned, the pane would ring
+    /// forever. Only a kill forgets the owner.
+    #[test]
+    fn an_exited_pty_stays_owned_until_it_is_killed() {
+        let windows = super::WindowState::default();
+        windows.mint("t1", "main");
+        windows.exited_pty("t1");
+        {
+            let state = guard(&windows.routing);
+            let registry = super::workspaces::Registry::default();
+            let view = super::RouteView {
+                owners: &state.owners, awaiting_replay: &state.awaiting_replay,
+                dor_targets: &state.dor_targets, registry: &registry, marking: &state.marking,
+            };
+            assert_eq!(
+                super::routing::route("alert:state", &serde_json::json!({"id": "t1"}), &view),
+                super::routing::Route::EmitTo("main")
+            );
+        }
+        windows.forget_pty("t1");
+        assert!(!guard(&windows.routing).owners.contains_key("t1"));
+    }
+
+    /// The window label is the alert viewer id and the owner of the awaits a
+    /// window parks, and a webview cannot name itself: Rust stamps it on both
+    /// opaque passthroughs, over anything the payload claimed.
+    #[test]
+    fn both_webview_passthroughs_stamp_the_invoking_window() {
+        let mut forged = serde_json::json!({ "op": "hello", "window": "main" });
+        super::stamp_window(&mut forged, "ws-2");
+        assert_eq!(forged, serde_json::json!({ "op": "hello", "window": "ws-2" }));
+
+        let src = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        for command in ["fn alert_command(", "fn burrow_command("] {
+            let body = src.split(command).nth(1).unwrap().split("\n}\n").next().unwrap();
+            assert!(body.contains("stamp_window(&mut payload, window.label());"), "{command} must stamp");
+        }
+    }
+
+    /// Human input is acknowledged by the sidecar before it writes, so the flag
+    /// rides the write itself rather than a second message that could lose the race.
+    #[test]
+    fn user_input_rides_the_write_it_describes() {
+        assert_eq!(
+            super::pty_input_message("t1".into(), "y".into(), None, Some(true)),
+            serde_json::json!({ "event": "pty:input", "data": { "id": "t1", "data": "y", "userInput": true } })
+        );
+        assert_eq!(
+            super::pty_input_message("t1".into(), "\x1b[I".into(), Some(true), None),
+            serde_json::json!({ "event": "pty:input", "data": { "id": "t1", "data": "\x1b[I", "paced": true } })
+        );
     }
 
     #[test]

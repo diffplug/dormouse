@@ -43,11 +43,12 @@ pub enum Route<'a> {
     /// Nothing is delivered: the id is mid-transfer and what this carries is
     /// already in the replay the new owner is about to receive (its bytes, or
     /// the semantic events the owner re-derives from them), or no window owns it
-    /// at all and every window would otherwise ring for a pane none of them shows.
+    /// at all and every window would otherwise take state for a pane none of
+    /// them shows.
     Drop,
-    /// Kept for the id's next owner: the id is mid-transfer and this event is
-    /// in no replay and re-derived from none. The caller queues it and delivers
-    /// the queue, in order, right after the replay that lifts the suppression.
+    /// Kept for the id's next owner: the id is mid-transfer. The caller queues
+    /// it and delivers the queue, in order, right after the replay that lifts
+    /// the suppression — or when a fail-open sweep lifts it with no replay.
     Hold,
     /// A `dor` request naming no Surface belongs to whichever window the user
     /// is looking at. Resolved by the caller, which alone holds the focus order.
@@ -90,10 +91,10 @@ fn lookup<'a>(map: &'a HashMap<String, String>, key: &str) -> Route<'a> {
 }
 
 /// Route by PTY ownership. **An id no window owns is dropped, never broadcast**:
-/// ownership is minted for every PTY this app spawns, so an unowned id is one
-/// whose window went away — and a broadcast would ring every other window's
-/// AlertManager for a pane none of them shows. The caller reaps the process
-/// (`Destroyed` in `standalone/src-tauri/src/lib.rs`).
+/// ownership is minted for every PTY this app spawns and held until it is
+/// killed, so an unowned id is one whose window went away — and a broadcast
+/// would hand every other window state for a pane none of them shows. The
+/// caller reaps the process (`Destroyed` in `standalone/src-tauri/src/lib.rs`).
 fn owner<'a>(map: &'a HashMap<String, String>, id: &str) -> Route<'a> {
     match map.get(id) {
         Some(label) => Route::EmitTo(label.as_str()),
@@ -136,8 +137,11 @@ pub fn route<'a>(event: &str, data: &'a JsonValue, view: &RouteView<'a>) -> Rout
             }
             owner(view.owners, id)
         }
-        // A protocol event (a notification, a progress bar) is carried by no
-        // replay, so it outlives its chunk's drop: held for the id's next owner.
+        // The Tool half of a parse (announcements, state, command-start resets;
+        // reports stay with the sidecar's AlertManager): held for the id's next
+        // owner and delivered behind its replay. The replay re-derives the same
+        // events, and applying that ordered run again leaves the state it left;
+        // the hold is what a fail-open sweep, which sends no replay, delivers.
         "terminal:protocolEvents" => {
             let Some(id) = str_field(data, "id") else {
                 return Route::Broadcast;
@@ -230,10 +234,15 @@ pub fn route<'a>(event: &str, data: &'a JsonValue, view: &RouteView<'a>) -> Rout
             Some(surface_id) => lookup(view.owners, surface_id),
             None => Route::Broadcast,
         },
-        // `alert:*` carrying an id is about one Session; the two app-global
-        // stores (settings, watched commands) carry none and reach everyone.
+        // `alert:*` carrying an id is about one Session, and goes where its
+        // output does until the mark: the source still shows it. After the mark
+        // the new owner's collection re-sends it (§Alerts). What carries none —
+        // the two app-global stores, an await's result — reaches everyone.
         _ if event.starts_with("alert:") => match str_field(data, "id") {
-            Some(id) => owner(view.owners, id),
+            Some(id) => match view.marking.get(id) {
+                Some(source) => Route::EmitTo(source.as_str()),
+                None => owner(view.owners, id),
+            },
             None => Route::Broadcast,
         },
         _ => Route::Broadcast,
@@ -712,6 +721,13 @@ mod tests {
             ("pty:list", json!({"ptys":[]}), Route::Broadcast),
             ("alert:state", json!({"id":"a"}), Route::EmitTo("main")),
             ("alert:settings", json!({"speech":true}), Route::Broadcast),
+            // An await's result names the window that asked, never a Session:
+            // every adapter hears it and matches its own `awaitId`.
+            (
+                "alert:awaitResult",
+                json!({"awaitId":"await-1","window":"ws-2","outcome":{"kind":"cancelled","waitedMs":0}}),
+                Route::Broadcast,
+            ),
             (
                 "dor:controlRequest",
                 json!({"requestId":"dor-1","surfaceId":"b"}),
@@ -853,14 +869,15 @@ mod tests {
             Route::EmitTo("main")
         );
         assert_eq!(route("pty:marked", &json!({"id":"a"}), &marking_view), Route::EmitTo("main"));
+        // Its alert state goes with its output: the source is still showing it.
+        assert_eq!(route("alert:state", &json!({"id":"a"}), &marking_view), Route::EmitTo("main"));
         // A chunk's semantic events are re-derived from the replay by whoever
-        // receives it: dropped with the chunk. Its protocol events are in no
-        // replay: held, not dropped.
+        // receives it: dropped with the chunk. Its Tool events are held, which
+        // is all a fail-open sweep has to deliver.
         assert_eq!(
             route("terminal:semanticEvents", &json!({"id":"a"}), &suppressed),
             Route::Drop
         );
-        // Protocol events are rebuilt by no replay path: held, not dropped.
         assert_eq!(
             route("terminal:protocolEvents", &json!({"id":"a"}), &suppressed),
             Route::Hold

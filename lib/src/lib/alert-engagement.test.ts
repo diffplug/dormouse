@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AlertManager, type ActivityNotification, type AwaitOutcome } from './alert-manager';
-import { applyTerminalProtocolEvents, TerminalProtocolParser } from './terminal-protocol';
+import { applyTerminalEvents, TerminalProtocolParser } from './terminal-protocol';
 import { cfg } from '../cfg';
 import { engage, finishCommand, goIdle, leave, runCommand, VIEWER } from './alert-manager-test-utils';
 
@@ -298,7 +298,7 @@ describe('walking away from a permission prompt', () => {
     timeline.push({ at: ENTER_AT, step: () => manager.acknowledge(PANE, { input: true }) });
     // Working, then the permission prompt drawn.
     for (let at = 9_390; at < 11_960; at += 110) timeline.push({ at, step: () => manager.onData(PANE) });
-    timeline.push({ at: 17_960, step: () => applyTerminalProtocolEvents(manager, PANE, parser.process(OSC99).events) });
+    timeline.push({ at: 17_960, step: () => applyTerminalEvents(manager, PANE, parser.process(OSC99).events) });
     // The idle prompt's cursor redraw.
     for (let at = 12_415; at < untilMs; at += 605) timeline.push({ at, step: () => manager.onData(PANE) });
     // The renderer's presence lapses 15s after the last input.

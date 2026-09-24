@@ -59,17 +59,17 @@ Three separate signals, never one lease (rationale):
 **A Session is engaged while some present viewer focuses it**, and engagement alone decides holding over ringing.
 
 - **Must compute presence in the renderer and report transitions only**: an input event only stamps a time, and the host keeps no presence timer. **An end of presence names its lapse** — `idle` when the timeout ran out, `leave` on a window blur or hide. **A blur is a leave only when `document.hasFocus()` is false** (`docs/specs/layout.md` → Corner cases #2). Focus or visibility returning counts as input.
-- **Must keep engagement per viewer**, deduped at the renderer, so one viewer's leave never disengages a Session another viewer engages. **An absent viewer reports no focus change.** VS Code gives each webview its own viewer (`docs/specs/vscode.md`); any other manager has one, `LOCAL_VIEWER`.
+- **Must keep engagement per viewer**, deduped at the renderer, so one viewer's leave never disengages a Session another viewer engages. **An absent viewer reports no focus change.** VS Code gives each webview its own viewer (`docs/specs/vscode.md`), standalone each window, by its label (`docs/specs/standalone.md` → Alerts); the fake adapter has one, `LOCAL_VIEWER`.
 
 | Gesture | Acknowledges |
 |---|---|
-| typing into the pane (CSI/SS3 key encodings included), a paste, a file drop, the mobile input bar or a gesture key | with input |
+| typing into the pane (CSI/SS3 key encodings included), a paste, a file drop, the mobile input bar or a gesture key, a remote Client's write | with input |
 | a Pane body or header click, zoom, the dev-server chip, entering passthrough by keyboard, a Door click or `Enter`, a mobile tap | without input |
 | a terminal reply, a mouse-only report chunk, `d` reattach, a spawn, split, or promotion, a `dor` reveal, an embed focusing itself, DOM focus alone | nothing |
 
 - **Must acknowledge at each gesture's handler, never in the passthrough entry the silent paths share.**
 - **Never treat terminal replies or mouse-only report chunks as keyboard input** (rationale).
-- **Must write all human-originated PTY input through `writeUserInput`**, the mobile input bar's included: it carries `userInput`, and the host acknowledges it with input before writing it, in the one message.
+- **Must write all human-originated PTY input through `writeUserInput`**, the mobile input bar's included: it carries `userInput`, and the host acknowledges it with input before writing it, in the one message. **A remote Client's write acknowledges with input at the host's Burrow provider**, the Burrow having dropped a mirror's terminal replies.
 - **Never create an Activity entry to acknowledge**, the host's one check, so a browser Surface keeps its own TODO.
 - **User input opens the echo window** (`cfg.alert.echoWindow`) even when acknowledging clears nothing, a helper's included. Output inside it is ignored entirely — detector, `outputSince`, the acknowledged state, awaits — and a completion inside it neither rings nor is held (rationale).
 
@@ -81,7 +81,7 @@ Every completion — a detector settle, a command finish, a direct notification,
 
 Claimants get first refusal per Session in registration order; the first to return `true` claims the event and the rest are not offered it. **A claimed event never rings, never sets TODO, and never stores an `ActivityNotification`** — it stops before the ring rules, where the echo window, holding, and the command-exit seen and minimum-runtime checks live.
 
-**Must hold a completion that would ring an engaged Session**: the sources it would raise and the richest detail (Clearing And TODO), repeated holds merging, never public. A deferred report that comes due while engaged is held too. **Presence lapsing `idle` with focus unchanged rings what was held**, each source by its unengaged path; any other end drops it — a user verb (Clearing And TODO), focus moving away, the viewer leaving, live-transfer suspension, seeding, removal, or teardown (rationale). **Dropping on an explicit disengage may be a mistake** (rationale). Resumed watched work and rule removal withdraw a held `watching` source as they withdraw a ringing one (WATCHING Track).
+**Must hold a completion that would ring an engaged Session**: the sources it would raise and the richest detail (Clearing And TODO), repeated holds merging, never public. A deferred report that comes due while engaged is held too. **Presence lapsing `idle` with focus unchanged rings what was held**, each source by its unengaged path; any other end drops it — a user verb (Clearing And TODO), focus moving away, the viewer leaving, seeding, removal, or teardown (rationale). **Dropping on an explicit disengage may be a mistake** (rationale). Resumed watched work and rule removal withdraw a held `watching` source as they withdraw a ringing one (WATCHING Track).
 
 With `deferAlertsUntilQuiet` enabled:
 
@@ -91,7 +91,7 @@ With `deferAlertsUntilQuiet` enabled:
 - **Must defer after claimants and ring eligibility, never redispatch the historical `CompletionEvent`** (rationale).
 - **Keep pending intent live-only and bounded** to one protocol notification, chosen by richness (Clearing And TODO). Meaningful output moves its quiet deadline; command-boundary detector resets do not drop it.
 - **Cancel pending delivery on an acknowledgement, a dismissal that clears a ring, TODO changes, removal, seeding, or teardown.** A dismiss on a quiet Session keeps it: a cancelled deferral was never visible to dismiss. Disabling the setting releases it immediately; otherwise confirmed quiet raises one fresh ring, after which speech/push begin their own delays.
-- **Must ring a deferral by `cfg.alert.deferCeiling` (30 s) after the first notification deferred**, quiet or not; a replacement keeps that start, and a live transfer carries it (rationale).
+- **Must ring a deferral by `cfg.alert.deferCeiling` (30 s) after the first notification deferred**, quiet or not; a replacement keeps that start (rationale).
 
 Two ordering rules:
 
@@ -153,16 +153,17 @@ An **await** parks on one Session until it finishes what it is doing, then repor
 
 **Several awaits may park on one Session**, sharing one claimant: a completion goes to every await whose condition it satisfies, each resolving on the first qualifying signal after it registered.
 
-**In VS Code an await crosses the webview -> extension-host boundary**, and the wait itself never leaves the host:
+**In VS Code and standalone an await crosses from the renderer to the host process that holds the manager**, and the wait itself never leaves the host:
 
-- The webview posts `alert:await` and, if it gives up, `alert:awaitCancel`; **the host answers exactly one `alert:awaitResult` per request**, a cancel included.
-- **A disposing webview must cancel everything it had parked, and must answer those requests itself *synchronously*** (rationale).
-- `cancelled` has no wire outcome of its own: the webview reports it to `dor` as an error, which is also what forgets the in-flight control request.
-- Other hosts call `awaitCompletion` in-process. The Pocket phone adapter has no `dor` and protocol-v1 carries no await, so it settles every request `cancelled` at once.
+- The renderer asks to park and, if it gives up, to cancel; **the host answers exactly one result per await**, a cancel included — VS Code over `alert:await` / `alert:awaitCancel` / `alert:awaitResult` by `requestId`, standalone per `docs/specs/standalone.md` → Alerts.
+- **A realm that ends — a disposed or recreated webview, a reloaded or closed window — has everything it parked cancelled and answered by the host, *synchronously*** (rationale); a disposing standalone adapter settles its own.
+- `cancelled` has no wire outcome of its own: the renderer reports it to `dor` as an error, which is also what forgets the in-flight control request.
+- The fake adapter calls `awaitCompletion` in-process. The Pocket phone adapter has no `dor` and protocol-v1 carries no await, so it settles every request `cancelled` at once.
+- **An await survives a Workspace transfer**: the manager never moves (Live Workspace transfer).
 
-**A PTY exit or Session removal resolves every waiter still parked as `died`**, after command-finish dispatch gets first chance to resolve normally. Manager disposal and live transfer suspension resolve every waiter as `cancelled`.
+**A PTY exit or Session removal resolves every waiter still parked as `died`**, after command-finish dispatch gets first chance to resolve normally. Manager disposal resolves every waiter as `cancelled`.
 
-Source of truth: `awaitCompletion` in `lib/src/lib/alert-manager.ts`; `alertAwait` in `lib/src/lib/platform/types.ts` and `lib/src/lib/platform/vscode-adapter.ts`; `vscode-ext/src/message-router.ts`.
+Source of truth: `awaitCompletion` in `lib/src/lib/alert-manager.ts`; `alertAwait` in `lib/src/lib/platform/types.ts`, `lib/src/lib/platform/vscode-adapter.ts` and `lib/src/host/alert-client.ts`; `vscode-ext/src/message-router.ts`; `createSidecarAlerts` in `lib/src/host/alert-host.ts`.
 
 ## WATCHING Track
 
@@ -210,7 +211,7 @@ Source of truth: `commandWatchKey` / `watchRuleFor` in `lib/src/lib/terminal-sta
 
 **Terminal notifications are independent of WATCHING** and follow the deferral policy in Completion events. **An engaged Session holds a report** (Completion events); holding leaves a progress cycle alone. A report raises the ring's `report` source (Clearing And TODO).
 
-**Must apply a parse batch's reports and command boundaries in stream order, timestamping its semantic events once** for both the `AlertManager` and the terminal-state store; standalone, receiving them as two events, still applies reports first. Pinned by `judges a notification written after a command finish against the reset detector` in `lib/src/lib/alert-manager.test.ts`.
+**Must apply a parse batch's reports and command boundaries in stream order, timestamping its semantic events once** for both the `AlertManager` and the terminal-state store, at the host's parse site in both hosts. Pinned by `judges a notification written after a command finish against the reset detector` in `lib/src/lib/alert-manager.test.ts`.
 
 Sequence syntax lives in `docs/specs/terminal-escapes.md`; what each means here:
 
@@ -278,18 +279,20 @@ Source of truth: `raiseRing` / `withdrawRingSource` / `clearRingForUser` in `lib
 
 ## Live Workspace transfer
 
-- **Must transfer live alert state separately from persisted reminders:** the ring and its episode, the progress cycle, the acknowledgement, command watch, deferred notification with its start, and detector history/deadlines travel in the marked transfer content. **Never read this content on cold restore.**
-- **Must suspend source delivery before handing ownership to the host**, freezing its detector, rule walk, and controls at content capture, and **must await host hand-back when source content capture fails**, holding that suspension until routing returns. The destination restores receipts after persisted seeding and before the runtime publishes, and enables delivery only after `adopt_done` succeeds; refusal restores the source runtime and its pending deadlines. Transaction order is `docs/specs/standalone.md` → "Arrival queue".
-- **Must discard imported runtime, Activity, and pane state before releasing the delivery guards on any target failure**, mount or no mount, so a watcher never re-arms on a Workspace this window never owned. A receipt forgotten on an episode already observed is consumed, never fresh.
-- **Must carry per-sink receipts with the episode:** pending/queued work retains its original deadline; engine-admitted speech and dispatched push are consumed and never replayed. Suspending cuts current speech; a partially heard utterance is not restarted after a move or refusal.
-- **Must cancel parked await callers at suspension**, carrying no claimant closures and nothing held. A seen command stays seen, so it arrives armed; the destination's viewers establish their own engagement.
-- **Must process notification events and visible output from the one since-mark replay that carries the arrival's request token, once.** Any other replay, whatever its token, stays historical and silent; query responses are never replayed. The parser boundary limitation follows `docs/specs/transport.md` → Transferring a Workspace.
+**A Session's alert state never moves**: the host's one manager holds it (`docs/specs/standalone.md` → Alerts), and a transfer moves only where its `alert:state` is routed — the source until the mark, then the target, whose collection is answered with every listed Session's state (rationale).
 
-Source of truth: `pauseForTransfer` / `resumeFromTransfer` / `applyReplay` in `lib/src/lib/alert-manager.ts`; `snapshot` / `restore` in `lib/src/lib/quiesce-detector.ts`; `snapshotAlertDelivery` / `restoreAlertDelivery` in `lib/src/lib/alert-delivery-state.ts`; `planArrival` / `discardArrival` in `standalone/src/workspace-move.ts`. Pinned by `lib/src/lib/alert-runtime-transfer.test.ts`, `lib/src/lib/alert-delivery-policy.test.ts`, and `standalone/src/workspace-move.test.ts`.
+- **Never remove or seed an entry on a departure, a refused arrival, or a hand-back**: releasing a Session is not ending it. Only a kill removes one.
+- **A replay never feeds the manager**, whose host parse already did.
+- **Awaits survive a transfer**; a seen command stays seen, so it arrives armed; the destination's viewers establish their own engagement.
+- **Must suspend the source's alarm delivery before handing ownership to the host**, and **must await host hand-back when source content capture fails**, holding that suspension until routing returns. The destination restores receipts before its collection, and enables delivery only after `adopt_done` succeeds; refusal resumes the source's. Transaction order is `docs/specs/standalone.md` → "Arrival queue".
+- **Must discard this window's Activity and pane state before releasing the delivery guards on any target failure**, mount or no mount, so a watcher never re-arms on a Workspace this window never owned. A receipt forgotten on an episode already observed is consumed, never fresh.
+- **Must carry per-sink receipts with the episode:** pending/queued work retains its original deadline; engine-admitted speech and dispatched push are consumed and never replayed. Suspending cuts current speech; a partially heard utterance is not restarted after a move or refusal.
+
+Source of truth: `teardownSession` in `lib/src/lib/terminal-lifecycle.ts`; `snapshotAlertDelivery` / `restoreAlertDelivery` in `lib/src/lib/alert-delivery-state.ts`; `planArrival` / `discardArrival` in `standalone/src/workspace-move.ts`. Pinned by `lib/src/lib/terminal-lifecycle.release.test.ts`, `lib/src/lib/alert-delivery-policy.test.ts`, and `standalone/src/workspace-move.test.ts`.
 
 ## Alarm settings
 
-Application alarm defaults live beside the WATCHING rule set, edited in **Settings** (below). **Every other store reached from Settings stays its own — never fold one into `AlertSettings`**, which is relayed wholesale to the host. **A host revalidates the blob before installing it** (`normalizeAlertSettings`): a webview must never be able to hand it a NaN or an absurd timer. Both stores run the same two classes in either host (`lib/src/lib/watched-command-host.ts`, `lib/src/lib/alert-settings-host.ts`), bound for standalone by `lib/src/host/alert-store-host.ts`; the shape, its defaults and its validation are the platform-free `lib/src/lib/alert-settings-model.ts`.
+Application alarm defaults live beside the WATCHING rule set, edited in **Settings** (below). **Every other store reached from Settings stays its own — never fold one into `AlertSettings`**, which is relayed wholesale to the host. **A host revalidates the blob before installing it** (`normalizeAlertSettings`): a webview must never be able to hand it a NaN or an absurd timer. Both stores run the same two classes in either host (`lib/src/lib/watched-command-host.ts`, `lib/src/lib/alert-settings-host.ts`), bound to standalone's sidecar manager by `lib/src/host/alert-host.ts`; the shape, its defaults and its validation are the platform-free `lib/src/lib/alert-settings-model.ts`.
 
 | Field | Meaning |
 |---|---|
@@ -305,7 +308,7 @@ Rules:
 
 - **Validate and clamp every field on read *and* on write** (`normalizeAlertSettings`), so a hand-edited `localStorage` blob or a hostile message can never install a `NaN` or absurd timer. Unknown keys are dropped and missing keys defaulted, so the blob evolves additively with no version field. `cfg.alert` owns the inactivity default; `DEFAULT_ALERT_SETTINGS` owns the sink and boolean defaults.
 - **Distribution follows the WATCHING rule set's seed/broadcast shape** (rationale), except that an edit **relays the whole blob** rather than a per-command delta, so every webview resolves workspace overrides against the same defaults. Wire contract and host revalidation: `docs/specs/transport.md`.
-- **Must keep detection settings application-wide.** Standalone and browser-sidecar renderers apply detector settings to their local manager; VS Code applies them in the extension host.
+- **Must keep detection settings application-wide**, applied to each host's one manager: the standalone sidecar's and the VS Code extension host's.
 
 **Must resolve delivery policy from application defaults, then sparse Workspace overrides.** Speech/push enable and delay can override independently; `speakVoice` selects a local engine voice URI, missing inherits the system-voice default, and explicit null selects the system voice. Missing or unavailable voices fall back to the engine default without erasing the saved choice. Unknown/invalid overrides are dropped; finite delays share the application clamp.
 
@@ -409,11 +412,11 @@ The header shows a fixed-text `TODO` pill when `todo === true`, a hover/focus no
 - **`a` on the selected Pane in command mode dismisses a ringing Session and opens the terminal context, whatever the status; it never edits a WATCHING rule.**
 - **A WATCHING rule is created only in the terminal context** ("Watch all `<key>` commands"), which offers the row whenever a foreground command has a watch key — naming the bare runner rule instead when one already covers the running script — and removed there or in Settings. Removing it anywhere drops it for every Session running that command.
 - Right-click always opens the context. Pressing `t` toggles TODO.
-- **The mobile composition dismisses by acknowledgement alone** — a tap, or a keystroke that also clears TODO — and wears its ring as the alarm inset, never an icon (`docs/specs/mobile-terminal-ui.md`). A Client cannot dismiss yet (`docs/specs/remote-api.md` → Future).
+- **The mobile composition dismisses by acknowledgement alone** — a tap, or a keystroke that also clears TODO — and wears its ring as the alarm inset, never an icon (`docs/specs/mobile-terminal-ui.md`). In Pocket only the keystroke reaches the host, as a Client's write (Engagement); a Client cannot dismiss yet (`docs/specs/remote-api.md` → Future).
 
 **Must keep context alert controls scoped to the source**, with TODO, running-command WATCHING, and notification detail. Settings owns the global watched-command list. **Must suppress helper alerting until promotion, including after exit**: no completion dispatch (await, ring, TODO, speech, push), protocol report, acknowledgement, or TODO control, and only the default state published. **A helper still tracks its command and feeds its detector**, so one promoted mid-command is WATCHING what it runs; promotion publishes that state and never replays a suppressed event (rationale). Pinned by `helper Sessions` in `lib/src/lib/alert-manager.test.ts`.
 
-Source of truth: `TerminalContext` in `lib/src/components/wall/TerminalContext.tsx`; `setHelper` in `lib/src/lib/alert-manager.ts`, which every host calls at helper spawn, listing, and promotion.
+Source of truth: `TerminalContext` in `lib/src/components/wall/TerminalContext.tsx`; `setHelper` in `lib/src/lib/alert-manager.ts`, which every host calls at helper spawn and promotion.
 
 The TODO pill always displays `TODO`; remote notification text belongs in preview/detail surfaces, not inside the pill. Clicking the pill clears TODO, and on clear the pill briefly shows the success flourish before unmounting.
 

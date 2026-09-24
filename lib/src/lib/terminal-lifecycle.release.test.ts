@@ -37,6 +37,7 @@ import {
 const platform = (platformModule as unknown as { __fakePlatform: FakePtyAdapter }).__fakePlatform;
 
 let killed: string[];
+let removedAlerts: string[];
 
 /** A pin, without a real xterm buffer behind it: what the notepad holds is two
  *  markers it must be able to dispose. */
@@ -51,6 +52,8 @@ function fakeSource(terminalId: string) {
 beforeEach(() => {
   killed = [];
   vi.spyOn(platform, 'killPty').mockImplementation((id: string) => void killed.push(id));
+  removedAlerts = [];
+  vi.spyOn(platform, 'alertRemove').mockImplementation((id: string) => void removedAlerts.push(id));
   for (const id of ['pane-1', 'pane-2']) removeSurface(id);
 });
 
@@ -63,6 +66,19 @@ describe('releaseSession', () => {
     getOrCreateTerminal('pane-2');
     disposeSession('pane-2');
     expect(killed).toEqual(['pane-2']);
+  });
+
+  // The host's alert entry is the Session's, not this Window's: a departure or
+  // a refused arrival that removed it would wipe a ring or TODO the other
+  // Window is showing (docs/specs/alert.md → Live Workspace transfer).
+  it('leaves the host alert entry, which only a kill removes', () => {
+    getOrCreateTerminal('pane-1');
+    releaseSession('pane-1');
+    expect(removedAlerts).toEqual([]);
+
+    getOrCreateTerminal('pane-2');
+    disposeSession('pane-2');
+    expect(removedAlerts).toEqual(['pane-2']);
   });
 
   it("drops this webview's half of the Session", () => {

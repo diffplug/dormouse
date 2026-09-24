@@ -22,17 +22,14 @@ const { gitInfo } = require('./git-info.cjs');
 const { createAgentBrowserHost } = require('./agent-browser-host.cjs');
 // Same pattern again: lib/src/host/remote/sidecar-entry.ts is the Burrow —
 // the relay socket, the enrollment, the ACL, and remote-api v1 — running next to
-// the PTYs it serves. See docs/specs/remote-api.md.
-const { createSidecarBurrow } = require('./burrow.cjs');
+// the PTYs it serves. See docs/specs/remote-api.md. The same bundle carries the
+// app's one AlertManager (lib/src/host/alert-host.ts), which its parse feeds,
+// and the two app-global alert stores bound to it. See docs/specs/alert.md.
+const { createSidecarBurrow, createSidecarAlerts } = require('./burrow.cjs');
 // Same pattern again: lib/src/host/recovery.ts is the agent-recovery capture
 // machine (shared with the VS Code extension host) plus the single-use record
 // store. See docs/specs/standalone.md -> "Agent recovery".
 const { captureAgentRecovery, createRecoveryStore, sliceSince } = require('./recovery.cjs');
-// Same pattern again: lib/src/host/alert-store-host.ts holds the two
-// app-global alert stores — one WATCHING rule set and one alarm-settings blob
-// for every window — running the same classes the VS Code extension host runs.
-// See docs/specs/alert.md.
-const { createAlertStoreHost } = require('./alert-store.cjs');
 
 const agentBrowser = createAgentBrowserHost({
   writeClipboardText: (text) => clipboard.writeClipboardText(text),
@@ -68,10 +65,16 @@ const mgr = create((event, data) => {
   // buffers through one implementation.
 }, nodePty, { replay: true, sliceSince });
 
+// One per app, like VS Code's extension host: every window is a viewer of it,
+// and its `alert:state` is routed to each Session's owner (docs/specs/standalone.md
+// -> "Alerts").
+const alerts = createSidecarAlerts({ send });
+
 const burrow = createSidecarBurrow({
   send,
   stateDir: process.env.DORMOUSE_STATE_DIR,
   mgr,
+  alerts: alerts.manager,
 });
 
 // Dor Tools. Shares the app's state directory, so an approved repo stays
@@ -87,10 +90,6 @@ const toolHost = createToolHost({ stateDir: process.env.DORMOUSE_STATE_DIR });
 const dorControlToken = process.env.DORMOUSE_CONTROL_TOKEN;
 delete process.env.DORMOUSE_CONTROL_TOKEN;
 delete process.env.DORMOUSE_CONTROL_SOCKET;
-
-// Broadcast, never addressed: both stores are one per machine, so every window
-// gets the same canonical snapshot (docs/specs/standalone.md -> "Windows").
-const alertStore = createAlertStoreHost({ send });
 
 const dorControl = createDorControlServer({
   token: dorControlToken,
@@ -149,15 +148,34 @@ function handleLine(line) {
     switch (event) {
       // Told before the spawn: the id may be a live PTY's, and the parser for
       // that generation must not carry a half-read sequence into the new one.
-      case 'pty:spawn':   burrow.onPtySpawn(data.id); mgr.spawn(data.id, data.options); break;
-      case 'pty:input':   mgr.write(data.id, data.data, { paced: data.paced === true }); break;
+      // pty-core validates a helper, so the alerts mirror its answer.
+      case 'pty:spawn':
+        burrow.onPtySpawn(data.id);
+        mgr.spawn(data.id, data.options);
+        alerts.setHelper(data.id, mgr.isHelper(data.id));
+        break;
+      // Human input is acknowledged in the same message as its write, so the
+      // echo window is open before any echo can arrive (docs/specs/alert.md ->
+      // Engagement).
+      case 'pty:input':
+        if (data.userInput === true) alerts.acknowledgeInput(data.id);
+        mgr.write(data.id, data.data, { paced: data.paced === true });
+        break;
       case 'pty:resize':  mgr.resize(data.id, data.cols, data.rows); break;
       case 'pty:kill':    mgr.kill(data.id); break;
       // One window's own PTYs, and the answer names it so the host can route
       // the list and every replay behind it back (docs/specs/standalone.md).
-      case 'pty:requestInit': mgr.list(data?.ids, data?.forWindow, data?.requestId, data?.marks); break;
+      // Their alert state follows, routed to each owner: a reloaded or arriving
+      // window has no other way to learn it.
+      case 'pty:requestInit':
+        mgr.list(data?.ids, data?.forWindow, data?.requestId, data?.marks);
+        alerts.publish(data?.ids);
+        break;
       case 'pty:mark': mgr.mark(data?.ids, data?.requestId); break;
-      case 'pty:context': mgr.context(data, data.requestId); break;
+      case 'pty:context':
+        mgr.context(data, data.requestId);
+        if (data.op === 'promote') alerts.setHelper(data.id, mgr.isHelper(data.id));
+        break;
       case 'pty:getCwd':  mgr.getCwd(data.id, data.requestId); break;
       case 'pty:getCwds': mgr.getCwds(data.ids, data.requestId); break;
       case 'pty:getOpenPorts': mgr.getOpenPorts(data.id, data.requestId); break;
@@ -196,13 +214,16 @@ function handleLine(line) {
       // The webview's resolved terminal theme, so the parser here can answer
       // OSC 10/11/12 (docs/specs/terminal-escapes.md → Supported OSCs).
       // Which webviews will answer a Burrow ask (docs/specs/standalone.md
-      // -> "Burrow service").
-      case 'burrow:windows': burrow.setWindows(data?.labels); break;
+      // -> "Burrow service"), and which are still alert viewers.
+      case 'burrow:windows':
+        burrow.setWindows(data?.labels);
+        alerts.setWindows(data?.labels);
+        break;
       // Which windows an ask actually reached. Only the host knows: one naming
       // a Surface goes to its owner alone (docs/specs/standalone.md ->
       // "Burrow service").
       case 'burrow:askDelivered': burrow.setAskDelivery(data); break;
-      case 'alert:command': alertStore.handle(data); break;
+      case 'alert:command': alerts.handle(data); break;
       case 'pty:themeColors': burrow.setThemeColors(data); break;
       case 'sidecar:shutdown': shutdown(); break;
       case 'dor:controlResponse': dorControl?.respond(data); break;
@@ -308,7 +329,7 @@ async function shutdown() {
     ]);
   } catch {}
   dorControl?.close();
-  alertStore.dispose();
+  alerts.dispose();
   burrow.dispose();
   mgr.killAll();
   process.exit(0);

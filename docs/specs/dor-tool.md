@@ -211,7 +211,7 @@ Source of truth: `toolTakesOverCaller` / `toolRerunsInCaller` / `callerStillPlac
 - Reserved: **Must retain `name`, `dehydrate`, and `persist` as inert parsed fields**, serving the announced-name and D1/D2 items under [Future](#future). Neither `persist: never` nor a `dehydrate` verb changes current persistence.
 - Reserved: **Never assign an OSC 367 verb beyond `serve`, `state`, and `dehydrate`**; `dehydrate` belongs to D2 under [Future](#future), while existing title/progress protocols keep those roles.
 
-Source of truth: `TerminalProtocolParser` / `collectTerminalProtocolAlerts` in `lib/src/lib/terminal-protocol.ts`; `parseToolAnnounce` in `lib/src/lib/tool-announce.ts`; `recordToolAnnounce` in `lib/src/lib/tool-announce-store.ts`; `recordToolEvents` in `lib/src/lib/tool-events.ts`; `createOwnerPtyStream` in `vscode-ext/src/message-router.ts`; `ownerStream` in `lib/src/host/remote/sidecar-entry.ts`. Tests: `lib/src/lib/tool-announce.test.ts`, `standalone/scripts/dev-agent-browser-announce.test.mjs`.
+Source of truth: `TerminalProtocolParser` / `collectTerminalToolEvents` in `lib/src/lib/terminal-protocol.ts`; `parseToolAnnounce` in `lib/src/lib/tool-announce.ts`; `recordToolAnnounce` in `lib/src/lib/tool-announce-store.ts`; `recordToolEvents` in `lib/src/lib/tool-events.ts`; `createOwnerPtyStream` in `vscode-ext/src/message-router.ts`; `ownerStream` in `lib/src/host/remote/sidecar-entry.ts`. Tests: `lib/src/lib/tool-announce.test.ts`, `standalone/scripts/dev-agent-browser-announce.test.mjs`.
 
 ## Unsaved changes
 

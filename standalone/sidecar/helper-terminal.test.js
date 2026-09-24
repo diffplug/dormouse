@@ -67,11 +67,15 @@ test('helper ownership survives a live listing and promotion preserves the PTY a
   }, { replay: true });
   manager.spawn('parent');
   manager.spawn('helper', { helper: { parentId: 'parent', command: 'git status' } });
+  // What the host's alerts mirror after each spawn and promotion.
+  assert.equal(manager.isHelper('parent'), false);
+  assert.equal(manager.isHelper('helper'), true);
   spawned[1].output('unsaved editor text');
   manager.list();
   assert.deepEqual(events.findLast(e => e.event === 'list').data.ptys[1].helper, { parentId: 'parent', command: 'git status' });
   assert.equal(events.findLast(e => e.event === 'replay').data.data, 'unsaved editor text');
   manager.context({ op: 'promote', id: 'helper' }, 'promote-1');
+  assert.equal(manager.isHelper('helper'), false);
   manager.list();
   assert.equal(events.findLast(e => e.event === 'list').data.ptys[1].helper, undefined);
   assert.equal(spawned.length, 2);

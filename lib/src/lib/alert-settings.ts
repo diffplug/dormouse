@@ -10,7 +10,7 @@ import {
  * The renderer's copy of the app-global alarm settings: what the dialog edits
  * and what `localStorage` holds. The shape, its defaults and its validation are
  * the platform-free `alert-settings-model.ts`, so a host can run them beside
- * the PTYs (`lib/src/host/alert-store-host.ts`) without dragging a renderer in.
+ * the PTYs (`lib/src/host/alert-host.ts`) without dragging a renderer in.
  *
  * Re-exported here so every existing importer keeps one name to reach for.
  */

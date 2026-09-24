@@ -14,7 +14,6 @@ vi.mock("@tauri-apps/plugin-shell", () => ({ open: vi.fn(async () => {}) }));
 import { BrowserSidecarAdapter } from "./browser-sidecar-adapter";
 import { BrowserSidecarHost } from "./browser-sidecar-host";
 import { TauriAdapter } from "./tauri-adapter";
-import type { AlertManager } from "dormouse-lib/lib/alert-manager";
 import type { AlertSettings } from "dormouse-lib/lib/alert-settings";
 import { DEFAULT_ALERT_SETTINGS } from "dormouse-lib/lib/alert-settings-model";
 
@@ -117,14 +116,13 @@ describe("BrowserSidecarAdapter terminal stream", () => {
 
     const adapter = new BrowserSidecarAdapter(host);
     await adapter.init();
+    // The page's realm is new on every load: the sidecar hears it at init.
+    expect(send).toHaveBeenCalledWith("alert_command", { payload: { op: "hello" } });
     send.mockClear();
-    // The manager is where a broadcast has to land for the rule to bite; the
-    // handler fan-out alone would pass with a private copy of the store.
-    const manager = (adapter as unknown as { alertManager: AlertManager }).alertManager;
     const alertCommands = () =>
       send.mock.calls.filter(([cmd]) => cmd === "alert_command").map(([, args]) => args);
     return {
-      adapter, send, manager, alertCommands,
+      adapter, send, alertCommands,
       reconnect: () => reconnect(),
       deliver: (event: string, data: unknown) => emit({ event, data }),
     };
@@ -161,52 +159,56 @@ describe("BrowserSidecarAdapter terminal stream", () => {
     expect(send.mock.calls.filter(([cmd]) => cmd === "pty_write")).toEqual([]);
   });
 
-  it("acknowledges user input before writing it", async () => {
-    const { adapter, send, manager } = await listening();
-    manager.notifyFromProtocol("typed", { source: "OSC 9", title: null, body: "needs input" });
-    let atWrite: string | undefined;
-    send.mockImplementation(() => { atWrite = manager.getState("typed").status; });
-
+  it("writes user input with its acknowledgement in one message", async () => {
+    const { adapter, send, alertCommands } = await listening();
     adapter.writePty("typed", "\x1b[I");
-    expect(atWrite).toBe("ALERT_RINGING");
     adapter.writePty("typed", "y", { userInput: true });
-    expect(send).toHaveBeenLastCalledWith("pty_write", { id: "typed", data: "y", paced: undefined });
-    expect(atWrite).toBe("WATCHING_DISABLED");
-    expect(manager.getState("typed").todo).toBe(false);
+    expect(send.mock.calls).toEqual([
+      ["pty_write", { id: "typed", data: "\x1b[I", paced: undefined, userInput: undefined }],
+      ["pty_write", { id: "typed", data: "y", paced: undefined, userInput: true }],
+    ]);
+    expect(alertCommands()).toEqual([]);
   });
 
-  it("routes the alert stores through the sidecar and applies their broadcasts", async () => {
-    const { adapter, manager, alertCommands, deliver } = await listening();
+  it("routes every alert verb through the sidecar and renders what comes back", async () => {
+    const { adapter, alertCommands, deliver } = await listening();
     const quiet: AlertSettings = { ...DEFAULT_ALERT_SETTINGS, speakEnabled: false };
     adapter.alertSetCommandWatched("cargo", true);
     adapter.alertPublishSettings(quiet, { seed: true });
+    adapter.alertDismiss("b1");
     expect(alertCommands()).toEqual([
       { payload: { op: "setCommandWatched", name: "cargo", watched: true } },
       { payload: { op: "initializeSettings", settings: quiet } },
+      { payload: { op: "dismiss", id: "b1" } },
     ]);
 
-    const setWatched = vi.spyOn(manager, "setWatchedCommands");
-    const applySettings = vi.spyOn(manager, "applySettings");
     const names: string[][] = [];
     const settings: AlertSettings[] = [];
+    const states: AlertStateDetail[] = [];
     adapter.onWatchedCommands((next) => void names.push(next));
     adapter.onAlertSettings((next) => void settings.push(next));
+    adapter.onAlertState((next) => void states.push(next));
 
     deliver("alert:watchedCommands", { names: ["cargo", "make"] });
-    expect(setWatched).toHaveBeenCalledWith(["cargo", "make"]);
     expect(names).toEqual([["cargo", "make"]]);
-
-    // Not the default blob, so the assertion still distinguishes "forwarded what
-    // it was handed" from "emitted DEFAULT_ALERT_SETTINGS".
     const canonical: AlertSettings = { ...DEFAULT_ALERT_SETTINGS, deferAlertsUntilQuiet: false };
     deliver("alert:settings", { settings: canonical });
-    expect(applySettings).toHaveBeenCalledWith(canonical);
     expect(settings).toEqual([canonical]);
+    const ringing = { id: "b1", status: "ALERT_RINGING", watchingEnabled: false, todo: true, notification: null, awaited: false };
+    deliver("alert:state", ringing);
+    expect(states).toEqual([ringing]);
+  });
 
-    // A broadcast with no blob is dropped, not applied as "no settings".
-    deliver("alert:settings", {});
-    expect(applySettings).toHaveBeenCalledTimes(1);
-    expect(settings).toEqual([canonical]);
+  it("resolves an await from the broadcast result, and settles it when shut down", async () => {
+    const { adapter, alertCommands, deliver } = await listening();
+    const answered = adapter.alertAwait("b1", { until: "quiet", timeoutMs: 600_000 });
+    const { awaitId } = (alertCommands()[0] as { payload: { awaitId: string } }).payload;
+    deliver("alert:awaitResult", { awaitId, window: "main", outcome: { kind: "resolved", cause: "quiet", waitedMs: 9 } });
+    await expect(answered.promise).resolves.toEqual({ kind: "resolved", cause: "quiet", waitedMs: 9 });
+
+    const parked = adapter.alertAwait("b1", { until: "exit", timeoutMs: 600_000 });
+    adapter.shutdown();
+    await expect(parked.promise).resolves.toMatchObject({ kind: "cancelled" });
   });
 
   // The stream is the only path a store's snapshot takes back, and a dropped
@@ -230,21 +232,18 @@ describe("BrowserSidecarAdapter terminal stream", () => {
     ]);
   });
 
-  // Same contract as TauriAdapter: the replay is all a transferred pane's new
-  // window sees, so it rebuilds the AlertManager's half too.
-  it("rebuilds alert state from a replay, not only pane state", async () => {
-    const { adapter, deliver } = await listening();
+  // Same contract as TauriAdapter: the sidecar's parse already fed its manager,
+  // so a replay rebuilds pane state and nothing of the alerts.
+  it("rebuilds pane state from a replay, and asks nothing of the alerts", async () => {
+    const { adapter, deliver, alertCommands } = await listening();
     const alerts: AlertStateDetail[] = [];
     adapter.onAlertState((detail) => void alerts.push(detail));
-    // The rule set lives in the sidecar here: the seed goes out, its snapshot
-    // comes back, and only then does this manager watch anything.
-    adapter.alertSetWatchedCommands(["sleep"]);
-    deliver("alert:watchedCommands", { names: ["sleep"] });
 
-    deliver("pty:replay", { id: "replay-b", data: "\x1b]633;E;sleep 5\x07\x1b]633;C\x07" });
+    deliver("pty:replay", { id: "replay-b", data: "\x1b]633;E;sleep 5\x07\x1b]633;C\x07\x1b]9;Historical\x07" });
 
     expect(getTerminalPaneState("replay-b").currentCommand?.rawCommandLine).toBe("sleep 5");
-    expect(alerts.some((detail) => detail.id === "replay-b" && detail.watchingEnabled)).toBe(true);
+    expect(alerts).toEqual([]);
+    expect(alertCommands()).toEqual([]);
   });
 
   it("pushes the resolved theme so the sidecar can answer a colour query", async () => {

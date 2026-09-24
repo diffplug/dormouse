@@ -3,7 +3,6 @@ import { AlertManager, AWAIT_GRACE_MS, DEFAULT_ALERT_STATE, MAX_AWAIT_TIMEOUT_MS
 import type { ActivityNotification, AwaitHandle, AwaitOutcome, CompletionEvent } from './alert-manager';
 import {
   applyTerminalEvents,
-  applyTerminalProtocolEvents,
   collectTerminalSemanticEvents,
   TerminalProtocolParser,
 } from './terminal-protocol';
@@ -54,8 +53,8 @@ describe('AlertManager in isolation', () => {
       runWatchedCommand(HELPER);
       driveToBusy(manager, HELPER);
       settle();
-      applyTerminalProtocolEvents(manager, HELPER, [{ kind: 'notification', notification: { source: 'OSC 9', title: null, body: 'done' } }]);
-      applyTerminalProtocolEvents(manager, HELPER, [{ kind: 'progress', progress: { state: 'normal', percent: 40 } }]);
+      applyTerminalEvents(manager, HELPER, [{ kind: 'notification', notification: { source: 'OSC 9', title: null, body: 'done' } }]);
+      applyTerminalEvents(manager, HELPER, [{ kind: 'progress', progress: { state: 'normal', percent: 40 } }]);
       engage(manager, HELPER);
       manager.acknowledge(HELPER, { input: true });
       leave(manager);
@@ -122,7 +121,7 @@ describe('AlertManager in isolation', () => {
       runCommand(manager, HELPER, 'claude');
       driveToBusy(manager, HELPER);
       settle();
-      applyTerminalProtocolEvents(manager, HELPER, [{ kind: 'notification', notification: { source: 'OSC 9', title: null, body: 'done' } }]);
+      applyTerminalEvents(manager, HELPER, [{ kind: 'notification', notification: { source: 'OSC 9', title: null, body: 'done' } }]);
 
       manager.setHelper(HELPER, false);
       vi.advanceTimersByTime(10_000);
@@ -449,7 +448,7 @@ describe('AlertManager in isolation', () => {
   it('terminal bell notifications ring and create TODO detail even when WATCHING is disabled', () => {
     const id = 'terminal-bell';
 
-    applyTerminalProtocolEvents(manager, id, [
+    applyTerminalEvents(manager, id, [
       { kind: 'notification', notification: { source: 'BEL', title: 'Terminal bell', body: null } },
     ]);
 
@@ -636,7 +635,7 @@ describe('AlertManager in isolation', () => {
     const id = 'terminal-bell-held';
 
     engage(manager, id);
-    applyTerminalProtocolEvents(manager, id, [
+    applyTerminalEvents(manager, id, [
       { kind: 'notification', notification: { source: 'BEL', title: 'Terminal bell', body: null } },
     ]);
 
@@ -673,7 +672,7 @@ describe('AlertManager in isolation', () => {
     armCommandExit(manager, id);
     vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
 
-    applyTerminalProtocolEvents(manager, id, [
+    applyTerminalEvents(manager, id, [
       { kind: 'notification', notification: { source: 'BEL', title: 'Terminal bell', body: null } },
     ]);
     const rung = manager.getState(id);
@@ -693,13 +692,13 @@ describe('AlertManager in isolation', () => {
     const id = 'episode-restart';
     const bell = { source: 'BEL', title: 'Terminal bell', body: null } as const;
 
-    applyTerminalProtocolEvents(manager, id, [{ kind: 'notification', notification: bell }]);
+    applyTerminalEvents(manager, id, [{ kind: 'notification', notification: bell }]);
     const first = manager.getState(id).episode;
     expect(first?.id).toBeTruthy();
 
     // Bell spam on a ring that is already active enriches the standing
     // summons; it cannot raise a new episode, so nothing keyed on one replays.
-    applyTerminalProtocolEvents(manager, id, [{ kind: 'notification', notification: bell }]);
+    applyTerminalEvents(manager, id, [{ kind: 'notification', notification: bell }]);
     expect(manager.getState(id).episode?.id).toBe(first!.id);
 
     manager.clearTodo(id);
@@ -707,7 +706,7 @@ describe('AlertManager in isolation', () => {
 
     // Output since the clear: the next bell is news, not the acknowledged state.
     manager.onData(id);
-    applyTerminalProtocolEvents(manager, id, [{ kind: 'notification', notification: bell }]);
+    applyTerminalEvents(manager, id, [{ kind: 'notification', notification: bell }]);
     const second = manager.getState(id).episode;
     expect(second?.id).toBeTruthy();
     expect(second?.id).not.toBe(first!.id);

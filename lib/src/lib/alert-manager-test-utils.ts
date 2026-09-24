@@ -1,9 +1,8 @@
 /**
  * Drivers the suites that feed an `AlertManager` directly share
  * (`alert-manager.test.ts`, `alert-engagement.test.ts`,
- * `alert-resumed-output.test.ts`, `alert-runtime-transfer.test.ts`). Each takes
- * the manager it drives, since a transfer test drives two, and runs under fake
- * timers.
+ * `alert-resumed-output.test.ts`). Each takes the manager it drives and runs
+ * under fake timers.
  *
  * Timing from cfg.alert: busyCandidateGap=1500, busyConfirmGap=500,
  * mightNeedAttention=2000, needsAttentionConfirm=3000.

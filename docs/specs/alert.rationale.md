@@ -68,7 +68,7 @@
 
 **Why the timeout ceiling exists at all.** `timeoutMs` is a safety rail on a blocking call inside an agent loop, not an alert-tuning knob. Like the inactivity timeout it originates a process away and ends up in `setTimeout`, whose delay is a signed 32-bit millisecond count. Anything past ~24.9 days overflows and fires immediately, turning a long park into an instant `timeout`.
 
-**Why a disposing VS Code webview answers its own parked requests synchronously.** A caller that can no longer be answered would otherwise go on absorbing completions the human would have been shown. Synchronously, because the cancelled outcome would arrive a microtask after the router stopped posting and be dropped, leaving `dor` blocked on a reply that never comes.
+**Why an ended realm's awaits are cancelled, and answered synchronously.** A caller that can no longer be answered would otherwise go on absorbing completions the human would have been shown. Synchronously, because in VS Code the cancelled outcome would arrive a microtask after the router stopped posting and be dropped, leaving `dor` blocked on a reply that never comes. Standalone's sidecar answers the same way for one rule across both hosts; a standalone reload keeps its window label, so the window says `hello` rather than the host inferring a new realm from a label list that never changed.
 
 ## WATCHING Track
 
@@ -170,7 +170,7 @@ Guarding only completion leaves a stale `start` free to replace the active utter
 
 ## Live Workspace transfer
 
-A persisted reminder intentionally forgets rings and detector history. Reusing it for a live move erased alert episodes and pending delivery; recreating them from public status could instead speak twice. The live snapshot and per-sink receipt distinguish this handoff from cold restore. Receipt consumption occurs at sink admission because there is no transactional acknowledgement tying audible sound or phone display to Workspace ownership (2026-09).
+The manager used to live in each standalone window, so a move had to snapshot its runtime — the ring and its episode, detector deadlines, the deferred notification — into the transfer content, resume it in the target, and bind a replay token so the since-mark replay's reports fired once; a reused persisted reminder had erased episodes and pending delivery instead, and a release removed the entry the other window still showed. With one manager in the host process nothing moves, and all of that went (2026-09). Per-sink receipts still travel because ring delivery is still scheduled in the renderer. Receipt consumption occurs at sink admission because there is no transactional acknowledgement tying audible sound or phone display to Workspace ownership (2026-09).
 
 ## Workspace union
 

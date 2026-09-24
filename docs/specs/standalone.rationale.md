@@ -6,6 +6,16 @@
 
 **What a sync blocking command cost.** A cold `agent-browser open` froze the webview for ~3 s — long enough to look like a pane that never appeared — and a hung one would have held it for the full 30 s `AGENT_BROWSER_TIMEOUT`; `(async)` moves the same blocking body onto a runtime worker. The incident is recorded at the `request_from_sidecar_timeout` invariant comment in `standalone/src-tauri/src/lib.rs`.
 
+## Alerts
+
+**Why one manager per host process, beside the PTYs.** Each window used to run its own `AlertManager` in its webview, fed from events the sidecar had already parsed. Three failures followed from where it lived (audit, 2026-09-23): WKWebView throttles a background window's timers, so the detector, deferral and await timers of a window the user was not looking at ran late — exactly the window a completion should summon them back to; a reload started the webview with an empty manager and a live resume seeds nothing, so every ring and TODO in the window vanished; and a Workspace transfer had to freeze one window's manager and thaw it in another (alert.md → Live Workspace transfer). VS Code never had these, because its manager lives in the extension host beside the PTYs and the parse. Moving standalone's there makes the two hosts one shape: the parse feeds one manager in stream order, the Burrow's remote writes reach it in the same process, and a window is only a viewer whose state is routed to it.
+
+**Why `userInput` rides the write.** The echo of a keystroke comes back from the PTY within milliseconds, so the acknowledgement that opens the echo window has to be in effect before the bytes are written. As a second command it would race the write through Rust and the sidecar's stdin, and an echo that won would count as the program working.
+
+**Why an exited PTY stays owned.** Ownership used to end at the exit, since nothing more was emitted for a dead PTY. The sidecar's manager now publishes `alert:state` for it whenever the user acts on the exited pane — a dismiss, a TODO cleared — and a line for an unowned id is dropped, so the pane would ring until it was closed.
+
+**Why an await's result is broadcast.** Routed by the Session's `id` it would reach the Session's owner, not the window that parked it, and a `requestId` is what Rust's invoke matcher swallows. Each adapter mints a random `awaitId`, so a broadcast reaches the one that asked and no other can mistake it — the argument `burrowRequestId` makes for the Burrow's results.
+
 ## Windows node subsystem
 
 **The two Windows Node variants.** `CREATE_NO_WINDOW`, `DETACHED_PROCESS`, and `STARTUPINFO` hiding all failed to suppress Windows 11's DefTerm handoff from a GUI parent (verified 2026-08): Windows launches Windows Terminal to host the console-subsystem child, flashing a stray WT window behind Dormouse. Should a current spawn-time option suppress it, both variants collapse back to the stock console-subsystem Node under `DORMOUSE_NODE`. `dor`'s opposite requirement comes from running inside a shell's ConPTY, where its stdout/stderr are console handles rather than pipes.
@@ -55,7 +65,8 @@ is not idempotent — it mints a fresh id and consumes the pending command line 
 so a transfer that split a command's `commandLine` from its `commandStart` left
 the arriving window with a derived title for a command whose real line the
 replay had already recovered. What the replay path genuinely did not rebuild was
-the AlertManager's copy, and that is a listener fix, not a routing one.
+the AlertManager's copy, and that was a listener fix, not a routing one — until
+the manager moved into the sidecar, whose own parse feeds it (§Alerts, 2026-09).
 
 ## What a window's `Destroyed` settles
 
