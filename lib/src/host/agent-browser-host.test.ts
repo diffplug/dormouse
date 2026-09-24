@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, promises as fsp, statSync, utimesSync, writeFi
 import { createServer, type Server } from 'net';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
-import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { BrowserOp, BrowserRequestBinding } from '../lib/platform/browser-automation';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { createAgentBrowserProvider } from './agent-browser-host';
@@ -86,10 +86,20 @@ function writeState(session: string, ext: 'pid' | 'stream', value: number): void
   writeFileSync(join(process.env.AGENT_BROWSER_SOCKET_DIR!, `${session}.${ext}`), `${value}\n`);
 }
 
-/** Give each session a running daemon, as its pid file says: the host drives
- *  no other. This test process stands in for it. */
+// A port something accepts on, standing in for a daemon's stream server.
+let acceptingPort = 0;
+let acceptingServer: Server | undefined;
+beforeAll(async () => { ({ port: acceptingPort, server: acceptingServer } = await listen()); });
+afterAll(async () => { if (acceptingServer) await closeServer(acceptingServer); });
+
+/** Give each session a daemon its state files prove live: a pid file naming
+ *  this test process, beside a stream port that accepts (the host drives no
+ *  other). A test that dials the stream writes its own port afterwards. */
 function running(...sessions: string[]): void {
-  for (const session of sessions) writeState(session, 'pid', process.pid);
+  for (const session of sessions) {
+    writeState(session, 'pid', process.pid);
+    writeState(session, 'stream', acceptingPort);
+  }
 }
 
 // The host spawns through dor-lib-common's spawnAndCapture; mock just that
@@ -521,7 +531,8 @@ describe('agent-browser host attach', () => {
   // Any verb starts a daemon to answer when none runs, at about:blank: an
   // operation on a daemon gone while its pane was hidden, or on one in a
   // socket directory the host does not share, must start nothing.
-  it('runs no operation on a session whose daemon is not running', async () => {
+  // The proof is the one a stop needs before it signals a pid.
+  it('runs no operation on a session whose state files do not prove its daemon live', async () => {
     const host = makeHost();
     const ops: BrowserOp[] = [
       { op: 'navigate', url: 'https://example.com/' },
@@ -532,15 +543,31 @@ describe('agent-browser host attach', () => {
       { op: 'edit', edit: 'copy' },
     ];
     const provider = createAgentBrowserProvider();
-    for (const pid of [undefined, DEAD_PID]) {
-      if (pid !== undefined) writeState(session, 'pid', pid);
+    const cases: [string, () => Promise<void>][] = [
+      ['no state files', async () => {}],
+      ['a dead pid', async () => writeState(session, 'pid', DEAD_PID)],
+      ['a live pid with no stream that accepts', async () => {
+        writeState(session, 'pid', process.pid);
+        writeState(session, 'stream', await closedPort());
+      }],
+      ['a live pid and stream from before this boot', async () => {
+        running(session);
+        for (const ext of ['pid', 'stream']) utimesSync(join(process.env.AGENT_BROWSER_SOCKET_DIR!, `${session}.${ext}`), 0, 0);
+      }],
+    ];
+    for (const [name, arrange] of cases) {
+      await arrange();
       for (const op of ops) {
-        expect(await ab(host, op, { session }), JSON.stringify(op)).toEqual({ ok: false, error: `agent-browser session '${session}' is not running` });
+        expect(await ab(host, op, { session }), `${name}: ${JSON.stringify(op)}`).toEqual({ ok: false, error: `agent-browser session '${session}' is not running` });
       }
       // Nor a capture for a viewer socket.
-      await expect(provider.screenshot({ session }, async () => '/nonexistent/shot.jpg')).rejects.toThrow('is not running');
+      await expect(provider.screenshot({ session }, async () => '/nonexistent/shot.jpg'), name).rejects.toThrow('is not running');
     }
     expect(spawnMock).not.toHaveBeenCalled();
+    // Proven live, the same operation runs.
+    running(session);
+    enqueueSpawnResults([{}]);
+    expect(await ab(host, ops[1], { session })).toEqual({ ok: true });
   });
 
   it('relaunches a gone daemon at the page named, headed for a pop-out, and tracks that window for shutdown', async () => {
@@ -758,9 +785,14 @@ describe('agent-browser host viewer', () => {
     expect(await offRange.closed).toBe(1011);
   });
 
-  // `dor ab` under the caller's own AGENT_BROWSER_SOCKET_DIR hands over a port
-  // the host's socket directory knows nothing of.
-  it('watches a daemon in a socket directory it does not share: every changed frame, and no capture', async () => {
+  // `dor ab` hands over the port it read under its own environment; under
+  // the caller's own AGENT_BROWSER_SOCKET_DIR the host's state files know
+  // nothing of it, or name another daemon of the same session.
+  it.each([
+    ['in a socket directory it does not share', false],
+    ['beside a daemon of the same session name in its own', true],
+  ])('watches a daemon it cannot prove live %s: every changed frame, and no capture', async (_name, sameName) => {
+    if (sameName) running(session);
     const daemon = await fakeServer();
     const viewer = await view(daemon.port);
     await daemon.connected();
@@ -794,8 +826,24 @@ describe('agent-browser host viewer', () => {
       { type: 'page', url: 'https://two.example/', title: 'Two' },
     ]);
     expect(viewer.frames).toEqual([]);
-    expect(spawnMock.mock.calls.map((call) => (call[1] as string[]).slice(2))).toEqual([['get', 'cdp-url']]);
+    // Bounded like every call a viewer makes.
+    expect(spawnMock.mock.calls.map((call) => [(call[1] as string[]).slice(2), call[2]])).toEqual([[['get', 'cdp-url'], { timeoutMs: 10_000 }]]);
   });
+
+  it('ends a viewer whose stream accepts but never answers the upgrade, closing its connection', async () => {
+    const { port, server } = await listen();
+    const hung: Promise<void>[] = [];
+    // Read, so the host's end of the connection reaches this end.
+    server.on('connection', (tcp) => { tcp.resume(); hung.push(new Promise((resolve) => tcp.once('close', () => resolve()))); });
+    try {
+      const viewer = await view(port);
+      expect(await viewer.closed).toBe(1011);
+      await vi.waitFor(() => expect(hung).toHaveLength(1));
+      await hung[0];
+    } finally {
+      await closeServer(server);
+    }
+  }, 10_000);
 
   it('dials no CDP endpoint off loopback', async () => {
     running(session);
@@ -837,7 +885,7 @@ describe('agent-browser host captures', () => {
   // external process under the ambient umask. A derivable path straight in
   // os.tmpdir() let any other local account read every frame, or pre-create the
   // name as a symlink and have agent-browser clobber the target.
-  it('captures into a private, unguessable file, reads it back and removes it, bounded', async () => {
+  it('captures into a fresh private, unguessable file per capture, read back and deleted, bounded', async () => {
     writesFrames();
     const captures = createBrowserCaptures();
     expect([...await take(captures)]).toEqual([0xff, 0xd8, 1]);
@@ -852,12 +900,27 @@ describe('agent-browser host captures', () => {
     const dir = dirname(file);
     expect(dir).not.toBe(tmpdir());
     expect(statSync(dir).mode & 0o777).toBe(0o700);
-    // Reused per browser, so frames do not accumulate.
+    // Never a name another capture wrote, and nothing left behind.
     expect([...await take(captures)]).toEqual([0xff, 0xd8, 2]);
-    expect((spawnMock.mock.calls[1][1] as string[])[3]).toBe(file);
+    expect((spawnMock.mock.calls[1][1] as string[])[3]).not.toBe(file);
+    expect(await fsp.readdir(dir)).toEqual([]);
     // No frame of the user's browser outlives the host that took it.
     await captures.remove();
     expect(existsSync(dir)).toBe(false);
+  });
+
+  it('deletes the frame of a capture that failed or was killed after writing it', async () => {
+    let file = '';
+    spawnMock.mockImplementation(async (_binary: string, args: string[]) => {
+      file = args[3];
+      writeFileSync(file, Uint8Array.from([0xff, 0xd8]));
+      return { ok: false, error: { code: 'ETIMEDOUT', message: 'screenshot timed out' } };
+    });
+    const captures = createBrowserCaptures();
+    await expect(take(captures)).rejects.toThrow('timed out');
+    expect(file).not.toBe('');
+    expect(existsSync(file)).toBe(false);
+    await captures.remove();
   });
 
   it('joins a capture of the browser already running, and none it was told to forget', async () => {

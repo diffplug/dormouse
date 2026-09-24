@@ -104,6 +104,9 @@ export function createViewerServer(): ViewerServer {
       closed = true;
       for (const socket of wss.clients) socket.terminate();
       const bound = await listening?.catch(() => null);
+      // Every connection too, so a client holding one open cannot hold
+      // shutdown.
+      bound?.server.closeAllConnections();
       await new Promise<void>((resolve) => (bound ? bound.server.close(() => resolve()) : resolve()));
     },
   };

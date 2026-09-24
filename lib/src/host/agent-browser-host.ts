@@ -83,7 +83,10 @@ const CAPTURE_TIMEOUT_MS = 30_000;
 const STREAM_PORT_READ_ATTEMPTS = 4;
 const STREAM_PORT_READ_DELAY_MS = 150;
 const PORT_PROBE_TIMEOUT_MS = 500;
+// A viewer's upstream dials — the daemon's stream, a headed window's CDP —
+// and the `get cdp-url` before one, each end here at the latest.
 const STREAM_CONNECT_TIMEOUT_MS = 5000;
+const CDP_URL_TIMEOUT_MS = 10_000;
 // A stream message above this size is a frame (a base64 JPEG); status, tabs
 // and url are small — unless a long tab list or URL crosses it too.
 const FRAME_THRESHOLD_BYTES = 16384;
@@ -247,23 +250,36 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
     }
   }
 
-  /**
-   * One CLI call on a live browser. Any verb starts a daemon to answer when
-   * none runs, so it is refused unless the session's daemon runs as its pid
-   * file says: only a launch's own steps may start one (docs/specs/dor-browser.md
-   * → "Browser Host"). A session in a socket directory the host does not
-   * share has no pid file here, so it is refused too.
-   */
-  async function drive(b: ProviderBinding, args: string[], options?: { timeoutMs?: number }): Promise<CliResult> {
-    const pid = await readStateNumber(b.session, 'pid');
-    if (pid === undefined || !processAlive(pid)) throw new Error(`agent-browser session '${b.session}' is not running`);
-    return run(b, args, options);
-  }
-
   /** The port `<session>.stream` names, when something accepts on it. */
   async function acceptingStreamPort(session: string): Promise<number | undefined> {
     const port = await readStateNumber(session, 'stream');
     return port !== undefined && await portAccepts(port) ? port : undefined;
+  }
+
+  /**
+   * The session's daemon as its state files prove it: a pid file from this
+   * boot naming a live process, beside a stream port that accepts. The one
+   * proof the host acts on — to signal a pid, to run a verb, to capture — since
+   * a pid file alone may name any process, and any verb run with no daemon up
+   * starts one to answer.
+   */
+  async function liveDaemon(session: string): Promise<{ pid: number; stream: number } | undefined> {
+    const pid = await readStateNumber(session, 'pid');
+    if (pid === undefined || !processAlive(pid)) return undefined;
+    const stream = await acceptingStreamPort(session);
+    return stream === undefined ? undefined : { pid, stream };
+  }
+
+  /**
+   * One CLI call on a live browser, refused unless `liveDaemon` proves the
+   * session's daemon up: only a launch's own steps may start one
+   * (docs/specs/dor-browser.md → "agent-browser"). A session in a socket
+   * directory the host does not share has no state files here, so it is
+   * refused too.
+   */
+  async function drive(b: ProviderBinding, args: string[], options?: { timeoutMs?: number }): Promise<CliResult> {
+    if (!await liveDaemon(b.session)) throw new Error(`agent-browser session '${b.session}' is not running`);
+    return run(b, args, options);
   }
 
   /** Terminate `session`'s daemon `pid`, proven live by the caller, and wait
@@ -302,12 +318,10 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
     // to answer. One up but not streaming is left alone: relaunching would
     // compete with it.
     async find(b) {
+      const live = await liveDaemon(b.session);
+      if (live) return { stream: live.stream };
       const pid = await readStateNumber(b.session, 'pid');
-      if (pid !== undefined && processAlive(pid)) {
-        const port = await acceptingStreamPort(b.session);
-        if (port !== undefined) return { stream: port };
-        throw new Error(`agent-browser session '${b.session}' is not streaming`);
-      }
+      if (pid !== undefined && processAlive(pid)) throw new Error(`agent-browser session '${b.session}' is not streaming`);
       return { gone: `agent-browser session '${b.session}' is not running`, named: pid !== undefined };
     },
 
@@ -320,9 +334,9 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
     // files the old daemon left.
     async stop(b, timeoutMs) {
       const pid = await readStateNumber(b.session, 'pid');
-      const proven = pid !== undefined && processAlive(pid) && await acceptingStreamPort(b.session) !== undefined;
+      const proven = await liveDaemon(b.session);
       await run(b, ['close'], { timeoutMs });
-      if (proven) await killDaemon(b.session, pid);
+      if (proven) await killDaemon(b.session, proven.pid);
       return pid;
     },
 
@@ -426,13 +440,16 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
    * CDP (`observePage`), which the stream does not report for navigations
    * made in the window itself.
    *
-   * `port` may be one `dor ab` read under a socket directory the host does
-   * not share: it is only ever dialed on loopback, only the stream's own
-   * messages come back from it, and only validated input goes to it.
+   * `port` is the one `dor ab` read after its command, or a launch or attach
+   * answered: it is only ever dialed on loopback, only the stream's own
+   * messages come back from it, and only validated input goes to it. The
+   * host captures the browser only when its own state files prove that port
+   * the session's live daemon (`liveDaemon`); a daemon in a socket directory
+   * it does not share is watched, never captured, and that directory never
+   * read.
    */
   async function viewStream(b: ProviderBinding, port: number, headed: boolean, sink: ViewerSink): Promise<Upstream> {
-    // Only a daemon in the host's own socket directory is one it can capture.
-    const capturable = (await readStateNumber(b.session, 'stream')) === port;
+    const capturable = (await liveDaemon(b.session))?.stream === port;
     const socket = new WebSocket(`ws://127.0.0.1:${port}`, { handshakeTimeout: STREAM_CONNECT_TIMEOUT_MS, perMessageDeflate: false });
     let opened = false;
     let closing = false;
@@ -521,7 +538,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
     const page = (url: unknown, title: unknown) => {
       if (typeof url === 'string') sink.state({ type: 'page', url, title: typeof title === 'string' ? title : null });
     };
-    void drive(b, ['get', 'cdp-url']).then((result) => {
+    void drive(b, ['get', 'cdp-url'], { timeoutMs: CDP_URL_TIMEOUT_MS }).then((result) => {
       const url = result.exitCode === 0 ? parseCdpUrl(result.stdout) : null;
       if (closed || !url) {
         if (!url) log(`[agent-browser] no CDP endpoint for ${b.session}: ${cliError(result)}`);
@@ -532,7 +549,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
         log(`[agent-browser] refused a CDP endpoint off loopback: ${url}`);
         return;
       }
-      const socket = cdp = new WebSocket(url, { perMessageDeflate: false });
+      const socket = cdp = new WebSocket(url, { handshakeTimeout: STREAM_CONNECT_TIMEOUT_MS, perMessageDeflate: false });
       let nextId = 1;
       const send = (method: string, params?: Record<string, unknown>) => socket.send(JSON.stringify({ id: nextId++, method, ...(params ? { params } : {}) }));
       socket.on('open', () => {

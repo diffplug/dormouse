@@ -455,18 +455,19 @@ replaces it (rationale):
   again** (rationale).
 - **A byte-identical capture is resent only after a provisional frame or a
   `repaint`.**
-- **An active-tab change owes a capture**; a browser the host cannot capture (a
-  daemon in a socket directory it does not share) has every changed frame sent
-  as provisional.
+- **An active-tab change owes a capture**; a browser the host cannot prove
+  live at the stream viewed ([agent-browser](#agent-browser)) has every changed
+  frame sent as provisional.
 
 Pinned by `lib/src/host/browser-viewer.test.ts`.
 
 **Upstreams.** agent-browser: the daemon's stream, dialed on `127.0.0.1` only;
 **the host must drop its ~20 Hz re-broadcast by raw comparison against the last
 frame and tab list**, decoding a changed frame once (rationale); **a tab list or
-URL is state at any size**, never taken for a frame; a paste goes as key pairs. **A headed window's page is followed over its browser's
-CDP, held host-side and dialed on loopback only** (rationale). Playwright: its
-CDP screencast ([Playwright](#playwright)).
+URL is state at any size**, never taken for a frame; a paste goes as key pairs.
+**A headed window's page is followed over its browser's CDP, held host-side and
+dialed on loopback only** (rationale). **Every upstream dial ends by 5 s**, and
+`get cdp-url` by 10 s. Playwright: its CDP screencast ([Playwright](#playwright)).
 
 Source of truth: `createViewerServer`, `BrowserView` and `parseViewerInput` in
 `lib/src/host/browser-viewer.ts`; `BrowserStreamGrants` in
@@ -591,14 +592,13 @@ match. **A refused path is dropped, never fatal**, so the host's own candidates
 run. The webview applies the same predicate before sending one
 (`browserHandle`) or storing one.
 
-**A crisp capture a CLI writes lands in a private per-process directory, is
-read back and removed at once, and the directory is removed at shutdown**
-(rationale).
+**A crisp capture a CLI writes lands in a fresh, randomly named file in a
+private per-process directory, is read into memory and deleted — read or not,
+failed or killed — and the directory is removed at shutdown** (rationale).
 **One capture per browser is in flight**: a viewer socket asking meanwhile joins
 it — never one from before the browser's close or relaunch — and an
 agent-browser capture's spawn is killed past 30s. **A tmpdir that cannot be
-created fails that capture and is retried on the next, never memoized.** The
-file name is reused per browser, with a fresh one after its close or relaunch.
+created fails that capture and is retried on the next, never memoized.**
 
 Source of truth: `lib/src/host/browser-host.ts` (`parseBrowserRequest`,
 `createBrowserHost`, `BrowserProvider`), `BROWSER_PROVIDERS` (`isSessionName`,
@@ -623,16 +623,17 @@ relaunch changes the mode.
   daemon up but not streaming is left alone; its native identity is its session.
   **A state file written before this boot reads as absent.**
 - **Never signal a pid its state files do not prove to be the session's live
-  daemon**: named by a pid file from this boot, alive, beside a stream port that
-  accepts, checked before `close` (rationale).
+  daemon** (`liveDaemon`): named by a pid file from this boot, alive, beside a
+  stream port that accepts, checked before `close` (rationale).
 - **A launch runs `open` in the binding's project directory while it exists**,
   so a relaunch reads the same `./agent-browser.json` the `dor ab` there did;
   every other call runs in the host's.
 - **Every spawn passes the `binaryPath` gate in `runWithBinaryFallback`**, the
   host's `DORMOUSE_AGENT_BROWSER_BIN` being the exact-match override.
 - **Only a launch's own steps may run a CLI verb with no daemon up**: an
-  operation runs only while `<session>.pid` names a live process, since any
-  verb starts a daemon at `about:blank` to answer.
+  operation, a capture or `get cdp-url` runs only on that same proof, since
+  any verb starts a daemon at `about:blank` to answer; **a stream is captured
+  only when the proof names its port**.
 - **`dor ab` must read the stream port itself after a command that may bind**
   (`stream status --json`, safe once the command made the daemon) and hand it
   over; the host views it on loopback without reading the caller's socket
