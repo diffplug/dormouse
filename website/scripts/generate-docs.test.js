@@ -11,7 +11,8 @@ import {
   resolveRepoLinks,
   securityAudiences,
 } from './generate-docs.js';
-import { createSlugger, parseMarkdown, visit } from './docs-parser.js';
+import { createSlugger, inlineToText, parseMarkdown, visit } from './docs-parser.js';
+import { CODING_AGENTS } from '../../lib/src/lib/coding-agents.ts';
 
 const data = await generateDocs();
 
@@ -29,9 +30,27 @@ function generatedHrefs() {
   collect(data.selfhost.blocks);
   collect(data.security.blocks);
   collect(data.skill.blocks);
+  collect(data.agents.blocks);
   for (const section of data.cli.intro) collect(section.blocks);
   return hrefs;
 }
+
+describe('compatible agents', () => {
+  it('publishes the complete authored guide with only its title removed', () => {
+    expect(data.agents.delta.map((rule) => rule.id)).toEqual(['drop-document-title']);
+    expect(data.agents.source).toBe('docs/compatible-agents.md');
+  });
+
+  it('keeps the supported-agent table aligned with executable and resume definitions', () => {
+    const table = data.agents.blocks.find((block) => block.type === 'table');
+    expect(table.header.map(inlineToText)).toEqual(['Agent', 'Command', 'Resume command', 'Watch by default']);
+    expect(table.rows.map((row) => row.map(inlineToText))).toEqual(
+      CODING_AGENTS.flatMap((agent) => agent.commands.map((command) => [
+        agent.name, command, `${command} ${agent.resume} <id>`, agent.watchByDefault ? 'Yes' : 'No',
+      ])),
+    );
+  });
+});
 
 describe('product guide', () => {
   it('drops exactly the document title and records the delta', () => {

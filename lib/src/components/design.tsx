@@ -5,6 +5,7 @@ import { forwardRef, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom';
 import type { ButtonHTMLAttributes, ComponentProps, CSSProperties, HTMLAttributes, InputHTMLAttributes, ReactNode, RefObject } from 'react';
 import { stepFocus } from './focus-step';
+import { isComposingKey } from '../lib/dom';
 import { OVERLAY_VIEWPORT_MARGIN_PX } from '../lib/ui-geometry';
 
 // App-wide type scale, color strategy, and chrome conventions: see
@@ -721,7 +722,7 @@ function useModalFocusTrap<TModal extends HTMLElement, TInitial extends HTMLElem
       const modal = modalRef.current;
       if (!modal) return;
 
-      if (event.key !== 'Escape' && event.key !== 'Tab') return;
+      if ((event.key !== 'Escape' && event.key !== 'Tab') || isComposingKey(event)) return;
 
       // A native modal <dialog> (ThemeStoreDialog, ThemeDebuggerDialog) sits in
       // the browser's top layer and owns the keyboard with its own Tab/Escape

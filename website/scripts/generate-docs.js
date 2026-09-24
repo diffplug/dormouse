@@ -94,6 +94,7 @@ export const REPO_BLOB_BASE = 'https://github.com/diffplug/dormouse/blob/main';
 /** Trailing slash: the form the host serves, as everywhere else in-site (see
  *  `sitePath` in website/src/lib/site-meta.ts). */
 export const SITE_ROUTES = {
+  'docs/compatible-agents.md': '/docs/compatible-agents/',
   'SELF_HOST.md': '/docs/self-host/',
   'docs/specs/security.md': '/docs/security/',
 };
@@ -832,7 +833,13 @@ export async function generateDocs() {
   const guide = await buildGuide();
   const selfhost = await buildSelfHost();
   const security = await buildSecurity();
-  assertRouteFragments([guide, selfhost, security]);
+  const agents = await buildDocument({
+    file: 'docs/compatible-agents.md',
+    delta: [DROP_DOCUMENT_TITLE],
+    label: '/docs/compatible-agents',
+    fallbackTitle: 'Compatible agents',
+  });
+  assertRouteFragments([guide, selfhost, security, agents]);
   const skill = await buildSkill();
   const cli = await buildCli(skill);
   const references = linkSkillHeadings(skill, cli);
@@ -841,6 +848,7 @@ export async function generateDocs() {
     guide,
     selfhost,
     security,
+    agents,
     cli,
     skill: {
       source: skill.source,
@@ -861,7 +869,7 @@ export async function generateDocs() {
 const BUILD_ONLY_FIELDS = ['delta', 'withheldLinks', 'repoLinks', 'localizedLinks'];
 
 /** The pages with a component; the guide has none (`Scope: guide-page-return`). */
-const PUBLISHED_PAGES = ['selfhost', 'security', 'cli', 'skill'];
+const PUBLISHED_PAGES = ['selfhost', 'security', 'cli', 'skill', 'agents'];
 
 function publishable(value) {
   const out = { ...value };
@@ -880,14 +888,15 @@ async function main() {
     ),
     syncGuideMedia(data.guide.media.available),
   ]);
-  const { guide, selfhost, security, cli, skill } = data;
-  const markdownPages = [guide, selfhost, security];
+  const { guide, selfhost, security, cli, skill, agents } = data;
+  const markdownPages = [guide, selfhost, security, agents];
   console.log(
     `Wrote docs data: guide ${guide.headings.length} headings (parsed, not written), ` +
       `self-host ${selfhost.headings.length} headings (${selfhost.delta.length} delta rules), ` +
       `security ${security.headings.length} headings (${security.delta.length} delta rules), ` +
       `cli ${cli.commands.length} commands + ${cli.intro.length} intro sections, ` +
       `skill ${Object.keys(skill.references).length} reference links, ` +
+      `agents ${agents.headings.length} headings, ` +
       `${guide.media.available.length} media file(s), ` +
       `${markdownPages.reduce((n, page) => n + page.repoLinks.length, 0)} link(s) sent to the repository, ` +
       `${markdownPages.reduce((n, page) => n + page.localizedLinks.length, 0)} link(s) localized`,

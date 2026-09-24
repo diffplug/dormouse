@@ -87,7 +87,7 @@ export function WorkspaceTeardownModal({
     const count = hasRunning ? `${runningCount} running command${runningCount === 1 ? '' : 's'} will be stopped.` : 'No commands are still running.';
     const update = intent.discardsUpdate ? ' The downloaded update will be discarded.' : '';
     // A quit captures agent resumes; a window close ends its Sessions for good.
-    const resume = intent.kind === 'quit' ? ' Claude and Codex sessions resume when Dormouse reopens.' : '';
+    const resume = intent.kind === 'quit' ? ' Supported agent sessions resume when Dormouse reopens.' : '';
     return <WorkspaceKillConfirm char={char} detail={`${scope}${count}${update}${resume}`} onConfirm={confirmQuit} onCancel={cancelQuit}
       layer="critical" />;
   }

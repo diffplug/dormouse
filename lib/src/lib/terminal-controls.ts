@@ -179,11 +179,12 @@ function stripPresentationControls(stringsRemoved: string, boundaries: boolean):
     : () => '';
   return (
     stringsRemoved
+      // An unfinished CSI or ESC sequence has not moved the cursor yet. Drop
+      // its tail without a synthetic boundary: it may become SGR or a charset
+      // designator whose following text continues the same word on the next read.
+      .replace(/\x1b(?:\[[0-?]*[ -/]*|[ -/]*)$/, '')
       // CSI.
       .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, csi)
-      // An incomplete trailing CSI swallows its parameters rather than
-      // promoting them to visible text.
-      .replace(/\x1b\[[0-?]*[ -/]*$/, boundary)
       // Charset designators (G0–G3): no cursor movement, no erase, so like SGR
       // they leave the text either side genuinely contiguous.
       .replace(/\x1b[()*+][A-Za-z0-9]/g, '')

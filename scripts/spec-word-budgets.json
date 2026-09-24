@@ -6,11 +6,11 @@
   "docs/specs/auto-update.md": 1150,
   "docs/specs/deploy.md": 1900,
   "docs/specs/dor-browser.md": 8400,
-  "docs/specs/dor-cli.md": 6300,
+  "docs/specs/dor-cli.md": 6350,
   "docs/specs/dor-tool.md": 4150,
   "docs/specs/glossary.md": 2950,
   "docs/specs/hosted.md": 1100,
-  "docs/specs/layout.md": 10700,
+  "docs/specs/layout.md": 10750,
   "docs/specs/mobile-terminal-ui.md": 2050,
   "docs/specs/mouse-and-clipboard.md": 3750,
   "docs/specs/notepad.md": 3850,
@@ -32,9 +32,9 @@
   "docs/specs/terminal-state.md": 2550,
   "docs/specs/theme.md": 2200,
   "docs/specs/tiling-engine.md": 4650,
-  "docs/specs/transport.md": 5500,
-  "docs/specs/tutorial.md": 1900,
+  "docs/specs/transport.md": 5600,
+  "docs/specs/tutorial.md": 1950,
   "docs/specs/vscode.md": 7400,
   "docs/specs/webgl-text.md": 1200,
-  "docs/specs/website-docs.md": 4800
+  "docs/specs/website-docs.md": 4850
 }

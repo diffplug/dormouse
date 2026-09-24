@@ -12,6 +12,12 @@ export function isEditableTarget(target: EventTarget | null): boolean {
   return target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable === true;
 }
 
+/** True while an IME composition owns the key. WebKit sends the key that ends a
+ *  composition with `isComposing` false but `keyCode` 229, so both count. */
+export function isComposingKey(e: KeyboardEvent): boolean {
+  return e.isComposing || e.keyCode === 229;
+}
+
 /** True for the `<textarea>` xterm keeps offscreen as the terminal's input
  *  proxy — the one editable element that is not a text field of ours. Callers
  *  that treat the terminal as *non*-editable pair this with
