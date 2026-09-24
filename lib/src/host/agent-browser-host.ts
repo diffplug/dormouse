@@ -93,7 +93,7 @@ function webviewArgv(command: WebviewCommand): string[] {
 
 // A capture can queue behind a page-loading `open` for the CLI's whole 25s
 // action timeout; past this it is wedged, and killed so it cannot pin
-// `oneCapture`. Every adapter has stopped waiting by then anyway.
+// `joinInFlight`. Every adapter has stopped waiting by then anyway.
 const CAPTURE_TIMEOUT_MS = 30_000;
 const STREAM_PORT_READ_ATTEMPTS = 4;
 const STREAM_PORT_READ_DELAY_MS = 150;
@@ -148,8 +148,8 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   function beginRelaunch(session: string): number {
     const generation = ++nextRelaunchGeneration;
     relaunchGenerations.set(session, generation);
-    // The relaunched daemon's captures must not join its predecessor's.
-    forgetCaptures(session);
+    // The relaunched daemon's work must not join its predecessor's.
+    forgetInFlight(session);
     return generation;
   }
 
@@ -289,14 +289,19 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     }
   }
 
+  /** The port `<session>.stream` names, when something accepts on it. */
+  async function acceptingStreamPort(session: string): Promise<number | undefined> {
+    const port = await readStateNumber(session, 'stream');
+    return port !== undefined && await portAccepts(port) ? port : undefined;
+  }
+
   /** The session's daemon as its state files describe it — a CLI verb would
    *  start one to answer (docs/specs/dor-browser.md → "Pop-Out"): the pid file's
    *  pid, whether that process is alive, and its stream port if it accepts. */
   async function daemonState(session: string): Promise<{ pid: number | undefined; alive: boolean; wsPort?: number }> {
     const pid = await readStateNumber(session, 'pid');
     if (pid === undefined || !processAlive(pid)) return { pid, alive: false };
-    const port = await readStateNumber(session, 'stream');
-    return port !== undefined && await portAccepts(port) ? { pid, alive: true, wsPort: port } : { pid, alive: true };
+    return { pid, alive: true, wsPort: await acceptingStreamPort(session) };
   }
 
   /** Terminate the session's daemon and wait for it to exit. Returns the pid
@@ -313,9 +318,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     // Wait for the process to actually exit (signal 0 throws once it's gone), so
     // the relaunch doesn't race a daemon that's still shutting down.
     for (let i = 0; i < 40; i++) {
-      try {
-        process.kill(pid, 0);
-      } catch {
+      if (!processAlive(pid)) {
         log(`[ab-relaunch] daemon ${pid} for ${session} exited after ${i * 50}ms`);
         return pid;
       }
@@ -358,8 +361,8 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
         return { wsPort: await readStreamPort(session, binaryPath), opened };
       }
       if (daemonUp) {
-        const port = await readStateNumber(session, 'stream');
-        if (port !== undefined && await portAccepts(port)) return { wsPort: port, opened };
+        const port = await acceptingStreamPort(session);
+        if (port !== undefined) return { wsPort: port, opened };
       }
       await delay(LAUNCH_POLL_MS);
     }
@@ -414,7 +417,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     await screenshotDir.remove();
   }
 
-  // Reused per session so we don't litter with one file per frame; `oneCapture`
+  // Reused per session so we don't litter with one file per frame; `joinInFlight`
   // keeps one capture in flight per session, so overwriting is safe. The
   // random component is per session, so the name stays stable for reuse while
   // being unguessable from the session key alone.
@@ -428,32 +431,33 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     return path.join(await screenshotDir.get(), `shot-${name}.${ext}`);
   }
 
-  // One capture per session and format at a time, whoever asks — surfaces can
-  // share a session, and a caller re-asks after its adapter's timeout. A second
-  // spawn would only queue behind the first in the daemon, then race it for
-  // the session's one capture file, so a caller asking mid-capture joins it —
-  // never one from before the session's close or relaunch. The spawn's
-  // `CAPTURE_TIMEOUT_MS` bounds how long any capture stays joinable.
-  type PendingCapture = { session: string; promise: Promise<unknown> };
-  const capturesInFlight = new Map<string, PendingCapture>();
-  function oneCapture<T>(session: string, kind: string, capture: () => Promise<T>): Promise<T> {
+  // Work a caller asking meanwhile joins rather than repeats, one per session
+  // and kind: a capture (surfaces can share a session, and a caller re-asks
+  // after its adapter's timeout; a second spawn would only queue behind the
+  // first in the daemon, then race it for the session's one capture file), or
+  // an attach (two panes restoring one session relaunch it once). Never work
+  // from before the session's close or relaunch (`forgetInFlight`); the
+  // capture spawn's `CAPTURE_TIMEOUT_MS` bounds how long one stays joinable.
+  type InFlight = { session: string; kind: string; promise: Promise<unknown> };
+  const inFlight = new Map<string, InFlight>();
+  function joinInFlight<T>(session: string, kind: string, work: () => Promise<T>): Promise<T> {
     const key = `${kind}\0${session}`;
-    const pending = capturesInFlight.get(key);
+    const pending = inFlight.get(key);
     if (pending) return pending.promise as Promise<T>;
-    const entry: PendingCapture = { session, promise: Promise.resolve() };
-    const promise = capture().finally(() => {
-      if (capturesInFlight.get(key) === entry) capturesInFlight.delete(key);
+    const entry: InFlight = { session, kind, promise: Promise.resolve() };
+    const promise = work().finally(() => {
+      if (inFlight.get(key) === entry) inFlight.delete(key);
     });
     entry.promise = promise;
-    capturesInFlight.set(key, entry);
+    inFlight.set(key, entry);
     return promise;
   }
 
-  /** Join none of `session`'s pending captures, and give its next one a fresh
-   *  file, so one still running cannot overwrite it. */
-  function forgetCaptures(session: string): void {
-    for (const [key, entry] of capturesInFlight) {
-      if (entry.session === session) capturesInFlight.delete(key);
+  /** Join none of `session`'s pending work but the `keep` kind, and give its
+   *  next capture a fresh file, so one still running cannot overwrite it. */
+  function forgetInFlight(session: string, keep?: string): void {
+    for (const [key, entry] of inFlight) {
+      if (entry.session === session && entry.kind !== keep) inFlight.delete(key);
     }
     screenshotNames.delete(session);
   }
@@ -474,7 +478,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     if (parsed.kind === 'close') {
       poppedOutSessions.delete(session);
       relaunchGenerations.delete(session);
-      forgetCaptures(session);
+      forgetInFlight(session);
     }
     return runWithBinaryFallback(['--session', session, ...webviewArgv(parsed)], binaryPath);
   }
@@ -539,7 +543,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
       return { ok: false, error: 'a valid session name is required' };
     }
     const format = captureFormat(opts.format);
-    return oneCapture(session, `file:${format}`, async (): Promise<AgentBrowserScreenshotFileResult> => {
+    return joinInFlight(session, `file:${format}`, async (): Promise<AgentBrowserScreenshotFileResult> => {
       const ext = format === 'png' ? 'png' : 'jpg';
       let out: string;
       try {
@@ -573,7 +577,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     // Joined whole, read and unlink included: a caller joining only the capture
     // would read a file the first caller has already removed.
     const format = captureFormat(opts.format);
-    return oneCapture(session, `bytes:${format}`, async (): Promise<AgentBrowserScreenshotResult> => {
+    return joinInFlight(session, `bytes:${format}`, async (): Promise<AgentBrowserScreenshotResult> => {
       const shot = await screenshotToFile(session, opts, binaryPath);
       if (!shot.ok) return { ok: false, error: shot.error };
       try {
@@ -593,9 +597,33 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     });
   }
 
-  // Concurrent attaches of one session join, so two panes restoring it relaunch
-  // it once.
-  const attachesInFlight = new Map<string, Promise<AgentBrowserAttachResult>>();
+  /** The `open` argv for `session`, tracking a headed one for shutdown before
+   *  its launch — a window whose page never loads is still closed — and
+   *  dropping a headless one. */
+  function openArgs(session: string, url: string, headed: boolean, binaryPath: string | undefined): string[] {
+    if (headed) poppedOutSessions.set(session, binaryPath);
+    else poppedOutSessions.delete(session);
+    return ['--session', session, ...(headed ? ['--headed'] : []), 'open', url];
+  }
+
+  // A launch into a daemon it did not just kill — a GUI open, or an attach
+  // relaunching a gone one — sweeps no blank tabs: only a relaunch's
+  // close+reopen leaves a stray one. Nothing coming up is the one failure,
+  // and closes whatever did (a no-op without a daemon: `close` starts none).
+  async function coldLaunch(
+    label: string,
+    session: string,
+    args: string[],
+    binaryPath: string | undefined,
+    replacedPid?: number,
+  ): Promise<{ wsPort: number } | { error: string }> {
+    const { wsPort, opened } = await launch(session, args, binaryPath, replacedPid);
+    logOpened(`${label} session=${session}`, opened);
+    if (wsPort !== undefined) return { wsPort };
+    poppedOutSessions.delete(session);
+    await runWithBinaryFallback(['--session', session, 'close'], binaryPath);
+    return { error: launchFailure(label, await opened) };
+  }
 
   // The session's live stream port, without starting anything. A daemon that is
   // up but not streaming is left alone — relaunching would compete with it. Only
@@ -607,23 +635,19 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     binaryPath?: string,
   ): Promise<AgentBrowserAttachResult> {
     if (!isAgentBrowserSession(session)) return { ok: false, error: 'a valid session name is required' };
-    const pending = attachesInFlight.get(session);
-    if (pending) return pending;
-    const attaching = (async (): Promise<AgentBrowserAttachResult> => {
+    return joinInFlight(session, 'attach', async (): Promise<AgentBrowserAttachResult> => {
       const daemon = await daemonState(session);
       if (daemon.wsPort !== undefined) return { ok: true, wsPort: daemon.wsPort };
       if (daemon.alive) return { ok: false, error: `agent-browser session '${session}' is not streaming` };
       const url = opts?.url;
       if (!isBrowsableUrl(url)) return { ok: false, error: `agent-browser session '${session}' is not running` };
-      const generation = beginRelaunch(session);
       log(`[ab-relaunch] attach session=${session} is gone -> open ${url}`);
-      if (opts.headed) poppedOutSessions.set(session, binaryPath);
-      else poppedOutSessions.delete(session);
-      const args = ['--session', session, ...(opts.headed ? ['--headed'] : []), 'open', url];
-      return relaunch('attach', session, args, binaryPath, daemon.pid, generation);
-    })().finally(() => attachesInFlight.delete(session));
-    attachesInFlight.set(session, attaching);
-    return attaching;
+      // An earlier relaunch's sweep must not reach this daemon, nor its captures.
+      relaunchGenerations.delete(session);
+      forgetInFlight(session, 'attach');
+      const launched = await coldLaunch('attach open', session, openArgs(session, url, !!opts.headed, binaryPath), binaryPath, daemon.pid);
+      return 'wsPort' in launched ? { ok: true, wsPort: launched.wsPort } : { ok: false, error: launched.error };
+    });
   }
 
   // Open <url> in a new managed session, or in the caller's `session` (a Tool's
@@ -637,22 +661,9 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
       return { ok: false, error: 'a valid session name is required' };
     }
     const session = opts?.session ?? generateGuiSession();
-    const args = ['--session', session, ...(opts?.headed ? ['--headed'] : []), 'open', url];
-    // A headed spawn is a real OS window — track it before the launch so a
-    // window whose page never finishes loading is still closed on shutdown.
-    if (opts?.headed) poppedOutSessions.set(session, binaryPath);
-    const { wsPort, opened } = await launch(session, args, binaryPath);
-    logOpened(`open session=${session}`, opened);
-    if (wsPort === undefined) {
-      poppedOutSessions.delete(session);
-      // Nothing came up to bind a surface to. Close whatever did, so a
-      // half-launched browser does not outlive the swap it was spawned for
-      // (a no-op when there is no daemon — `close` starts none).
-      await runWithBinaryFallback(['--session', session, 'close'], binaryPath);
-      const failed = await opened;
-      return { ok: false, error: launchFailure('open', failed) };
-    }
-    return { ok: true, session, wsPort, ...(binaryPath ? { binaryPath } : {}) };
+    const launched = await coldLaunch('open', session, openArgs(session, url, !!opts?.headed, binaryPath), binaryPath);
+    if ('error' in launched) return { ok: false, error: launched.error };
+    return { ok: true, session, wsPort: launched.wsPort, ...(binaryPath ? { binaryPath } : {}) };
   }
 
   // Pop-out is a relaunch, not a live toggle: Chrome's headed/headless choice is
@@ -674,10 +685,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     // ignored as "daemon already running" (which would leave it headless).
     await runWithBinaryFallback(['--session', session, 'close'], binaryPath);
     const replacedPid = await killDaemon(session);
-    // A real headed OS window from here on — track it before the launch so
-    // shutdown closes it even if its page never finishes loading.
-    poppedOutSessions.set(session, binaryPath);
-    return relaunch('popOut', session, ['--session', session, '--headed', 'open', url], binaryPath, replacedPid, generation);
+    return relaunch('popOut', session, openArgs(session, url, true, binaryPath), binaryPath, replacedPid, generation);
   }
 
   // Shared tail of pop-out/pop-in: launch, and once `open` itself returns —
@@ -726,9 +734,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     // to it and stay headed. Stop the daemon so the relaunch comes up headless.
     await runWithBinaryFallback(['--session', session, 'close'], binaryPath);
     const replacedPid = await killDaemon(session);
-    // The headed window is gone after the close above; back to headless.
-    poppedOutSessions.delete(session);
-    return relaunch('popIn', session, ['--session', session, 'open', url], binaryPath, replacedPid, generation);
+    return relaunch('popIn', session, openArgs(session, url, false, binaryPath), binaryPath, replacedPid, generation);
   }
 
   // Close every still-popped-out session's headed window. Called from each

@@ -481,6 +481,17 @@ describe('VSCodeAdapter agent-browser replies', () => {
       expect(JSON.stringify(settled)).toMatch(/timed out/);
     }
   });
+
+  it('keeps everything an attach answers with', async () => {
+    const adapter = new VSCodeAdapter();
+    const attached = adapter.agentBrowserAttach('sess', { url: 'https://example.com/' });
+    const request = postMessage.mock.calls.map(([message]) => message).find((message) => message.type === 'agentBrowser:attach');
+    expect(request).toMatchObject({ session: 'sess', url: 'https://example.com/' });
+    windowTarget.dispatchEvent(hostMessage({
+      type: 'agentBrowser:attachResult', requestId: request.requestId, ok: true, wsPort: 4321, headed: true, nativeIdentity: 'id',
+    }));
+    expect(await attached).toEqual({ ok: true, wsPort: 4321, headed: true, nativeIdentity: 'id', error: undefined });
+  });
 });
 
 describe('VSCodeAdapter notepad archive', () => {

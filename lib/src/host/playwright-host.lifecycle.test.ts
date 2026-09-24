@@ -91,6 +91,8 @@ test('captures reuse recent tab state but refresh it when it expires', async () 
   const now = vi.spyOn(Date, 'now').mockReturnValue(10000);
   browser.contexts = () => [{ pages: () => [page, Object.assign(new EventEmitter(), page)] }];
   expect((await host.request({ ...binding, op: 'attach' })).ok).toBe(true);
+  // No viewer yet, so attach left the tab state to the first capture.
+  expect((await host.request({ ...binding, op: 'screenshot' })).ok).toBe(true);
   mocks.cli.mockClear();
   for (let i = 0; i < 10; i++) expect((await host.request({ ...binding, op: 'screenshot' })).ok).toBe(true);
   expect(mocks.cli).not.toHaveBeenCalled();
@@ -223,6 +225,19 @@ describe('attach', () => {
     const attached = await host.request({ ...binding, op: 'attach', url: 'http://localhost/', headed: true });
     expect(attached).toMatchObject({ ok: true, wsPort: expect.any(Number) });
     expect(mocks.cli.mock.calls.map(([, args]) => args)).toContainEqual(['--session=test', 'open', 'http://localhost/', '--browser=chromium', '--headed']);
+  });
+
+  test('refreshes tab state only for viewers already connected', async () => {
+    running = true;
+    // Two tabs, so a refresh would ask the CLI which is selected.
+    browser.contexts = () => [{ pages: () => [page, Object.assign(new EventEmitter(), page)] }];
+    expect((await host.request({ ...binding, op: 'attach' })).ok).toBe(true);
+    expect(verbs()).toEqual(['list']);
+  });
+
+  test('relaunches a session no registry entry names without closing it first', async () => {
+    expect((await host.request({ ...binding, op: 'attach', url: 'http://localhost/' })).ok).toBe(true);
+    expect(verbs()).not.toContain('close');
   });
 
   test('a session it cannot view is never relaunched', async () => {

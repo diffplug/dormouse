@@ -51,11 +51,29 @@ async function listen(): Promise<{ port: number; server: Server }> {
   return { port: address.port, server };
 }
 
+function closeServer(server: Server): Promise<void> {
+  return new Promise<void>((resolve) => server.close(() => resolve()));
+}
+
 /** A port nothing listens on: bind, read it, release it. */
 async function closedPort(): Promise<number> {
   const { port, server } = await listen();
-  await new Promise<void>((resolve) => server.close(() => resolve()));
+  await closeServer(server);
   return port;
+}
+
+/** Point the host at a fresh state directory for each test of the suite, and
+ *  reset the spawn mock. */
+function useTempSocketDir(prefix: string): void {
+  const originalSocketDir = process.env.AGENT_BROWSER_SOCKET_DIR;
+  beforeEach(() => {
+    spawnMock.mockReset();
+    process.env.AGENT_BROWSER_SOCKET_DIR = mkdtempSync(join(tmpdir(), prefix));
+  });
+  afterEach(() => {
+    if (originalSocketDir === undefined) delete process.env.AGENT_BROWSER_SOCKET_DIR;
+    else process.env.AGENT_BROWSER_SOCKET_DIR = originalSocketDir;
+  });
 }
 
 function writeState(session: string, ext: 'pid' | 'stream', value: number): void {
@@ -86,17 +104,7 @@ function enqueueSpawnResults(results: SpawnResult[]) {
 }
 
 describe('agent-browser host relaunch', () => {
-  const originalSocketDir = process.env.AGENT_BROWSER_SOCKET_DIR;
-
-  beforeEach(() => {
-    spawnMock.mockReset();
-    process.env.AGENT_BROWSER_SOCKET_DIR = mkdtempSync(join(tmpdir(), 'dormouse-ab-host-test-'));
-  });
-
-  afterEach(() => {
-    if (originalSocketDir === undefined) delete process.env.AGENT_BROWSER_SOCKET_DIR;
-    else process.env.AGENT_BROWSER_SOCKET_DIR = originalSocketDir;
-  });
+  useTempSocketDir('dormouse-ab-host-test-');
 
   it('closes a stray about:blank tab when tab list reports CLI-style id fields', async () => {
     // No pid file here (an older CLI): the port comes from `stream status` once
@@ -165,7 +173,7 @@ describe('agent-browser host relaunch', () => {
         expect(calls).toContainEqual(['--session', session, 'tab', 'close', 'blank']);
       });
     } finally {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await closeServer(server);
     }
   });
 
@@ -210,7 +218,7 @@ describe('agent-browser host relaunch', () => {
 
       expect(calls.some((args) => args.includes('tab'))).toBe(false);
     } finally {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await closeServer(server);
     }
   });
 
@@ -252,7 +260,7 @@ describe('agent-browser host relaunch', () => {
 
       expect(calls.some((args) => args.includes('tab'))).toBe(false);
     } finally {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await closeServer(server);
     }
   });
 
@@ -296,7 +304,7 @@ describe('agent-browser host relaunch', () => {
       expect(closeCount).toBe(2);
       expect(calls.some((args) => args.includes('tab'))).toBe(false);
     } finally {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await closeServer(server);
     }
   });
 
@@ -350,18 +358,8 @@ describe('agent-browser host relaunch', () => {
 });
 
 describe('agent-browser host attach', () => {
-  const originalSocketDir = process.env.AGENT_BROWSER_SOCKET_DIR;
   const session = 'dormouse.1.default';
-
-  beforeEach(() => {
-    spawnMock.mockReset();
-    process.env.AGENT_BROWSER_SOCKET_DIR = mkdtempSync(join(tmpdir(), 'dormouse-ab-attach-test-'));
-  });
-
-  afterEach(() => {
-    if (originalSocketDir === undefined) delete process.env.AGENT_BROWSER_SOCKET_DIR;
-    else process.env.AGENT_BROWSER_SOCKET_DIR = originalSocketDir;
-  });
+  useTempSocketDir('dormouse-ab-attach-test-');
 
   it('reads a live daemon\'s port from its state files and spawns nothing', async () => {
     const { port, server } = await listen();
@@ -373,7 +371,7 @@ describe('agent-browser host attach', () => {
       expect(await host.attach(session, { url: 'https://example.com/' })).toEqual({ ok: true, wsPort: port });
       expect(spawnMock).not.toHaveBeenCalled();
     } finally {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await closeServer(server);
     }
   });
 
@@ -411,12 +409,15 @@ describe('agent-browser host attach', () => {
       expect(first).toEqual({ ok: true, wsPort: port });
       expect(second).toEqual(first);
       expect(calls).toEqual([['--session', session, '--headed', 'open', 'https://example.com/']]);
+      // A cold start leaves no stray blank tab to sweep once `open` returns.
+      opened.resolve({});
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(calls).toHaveLength(1);
 
       await host.closePoppedOut();
       expect(calls).toContainEqual(['--session', session, 'close']);
-      opened.resolve({});
     } finally {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await closeServer(server);
     }
   });
 
@@ -438,7 +439,7 @@ describe('agent-browser host attach', () => {
       expect(await host.open('http://localhost:5173/', { session: '../evil' })).toEqual({ ok: false, error: 'a valid session name is required' });
       expect(calls).toHaveLength(spawned);
     } finally {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await closeServer(server);
     }
   });
 });
@@ -665,17 +666,7 @@ describe('agent-browser host screenshot transport', () => {
 
 // `parseWebviewCommand` in browser-host-shared.ts says why every token is checked.
 describe('agent-browser host webview argv', () => {
-  const originalSocketDir = process.env.AGENT_BROWSER_SOCKET_DIR;
-
-  beforeEach(() => {
-    spawnMock.mockReset();
-    process.env.AGENT_BROWSER_SOCKET_DIR = mkdtempSync(join(tmpdir(), 'dormouse-ab-argv-test-'));
-  });
-
-  afterEach(() => {
-    if (originalSocketDir === undefined) delete process.env.AGENT_BROWSER_SOCKET_DIR;
-    else process.env.AGENT_BROWSER_SOCKET_DIR = originalSocketDir;
-  });
+  useTempSocketDir('dormouse-ab-argv-test-');
 
   it('runs exactly the argv shapes the webview sends', async () => {
     const shapes = [

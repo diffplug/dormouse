@@ -56,8 +56,14 @@ function realpathOrUndefined(file: string): string | undefined {
   }
 }
 
-/** The CLI registry lists no browser for the session: it is gone, not merely unviewable. */
-class SessionNotOpenError extends Error {}
+/** The CLI registry lists no browser for the session: it is gone, not merely
+ *  unviewable. `named`: some entry carried the session's name, in another
+ *  project scope or installation, so a relaunch still closes it first. */
+class SessionNotOpenError extends Error {
+  constructor(message: string, readonly named: boolean) {
+    super(message);
+  }
+}
 
 /** `key` is the native identity: installation, CLI workspace and session. */
 type Binding = { session: string; cwd: string; install: PlaywrightInstall; workspace: string | undefined; key: string };
@@ -291,7 +297,9 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
         && typeof s.playwrightLib === 'string'
         && realpathOrUndefined(s.playwrightLib) === b.install.libraryPath);
       if (matches.length > 1) throw new Error('Ambiguous Playwright session');
-      if (matches.length === 0) throw new SessionNotOpenError('Playwright session is not open or has no viewable endpoint');
+      if (matches.length === 0) {
+        throw new SessionNotOpenError('Playwright session is not open or has no viewable endpoint', servers.some(s => s.title === b.session));
+      }
       const descriptor = matches[0];
       if (descriptor.browser?.browserName !== 'chromium') throw new Error('Dormouse currently views Chromium Playwright sessions only. The native CLI command still ran.');
       const endpoint = descriptor.endpoint ?? descriptor.pipeName;
@@ -423,6 +431,8 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
     const session = request.op === 'open' ? request.session ?? generateGuiSession() : request.session;
     if (!isPlaywrightSession(session)) throw new Error('Invalid Playwright session name');
     const b = bind(session, cwd, install);
+    const bound = (v: Viewer, extra?: Partial<PlaywrightResult>): PlaywrightResult => (
+      { ok: true, session, cwd, binaryPath: install.binary, wsPort: v.port, nativeIdentity: b.key, ...extra });
     if (request.op === 'open' || request.op === 'popOut' || request.op === 'popIn') {
       // A GUI open navigates where it was asked, so that URL must pass the
       // http(s) check. A relaunch only carries the page along: one Dormouse may
@@ -433,8 +443,7 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
       const isHeaded = request.op === 'open' ? !!request.headed : request.op === 'popOut';
       const fresh = request.op === 'open' && request.session === undefined;
       const deadline = Date.now() + REQUEST_BUDGET_MS;
-      const v = await serialize(b, () => launch(b, url, isHeaded, fresh, deadline));
-      return { ok: true, session, cwd, binaryPath: install.binary, wsPort: v.port, nativeIdentity: b.key };
+      return bound(await serialize(b, () => launch(b, url, isHeaded, fresh, deadline)));
     }
     // The viewer for a live session; one whose browser is gone is relaunched at
     // `url` when the caller names it, and fails otherwise.
@@ -446,11 +455,13 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
           return await connect(b);
         } catch (error) {
           if (!(error instanceof SessionNotOpenError) || !isBrowsableUrl(url)) throw error;
-          return launch(b, url, !!request.headed, false, deadline);
+          // A session no entry names has nothing to close first.
+          return launch(b, url, !!request.headed, !error.named, deadline);
         }
       });
-      await refresh(v);
-      return { ok: true, session, cwd, binaryPath: install.binary, wsPort: v.port, headed: v.headed, nativeIdentity: b.key };
+      // A connecting viewer is sent the current state; only live ones need it now.
+      if (v.sockets.size) await refresh(v);
+      return bound(v, { headed: v.headed });
     }
     // Parsed before anything connects, so a refused command costs nothing.
     const command = request.op === 'command' ? parseWebviewCommand(request.args) : undefined;
