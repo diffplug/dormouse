@@ -10,7 +10,6 @@ import type {
   AgentBrowserOpenResult,
   AgentBrowserPopResult,
   AgentBrowserScreenshotResult,
-  AgentBrowserAttachResult,
   IframeProxyResult,
   OpenPort,
   PlatformAdapter,
