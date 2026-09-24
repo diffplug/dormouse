@@ -1,7 +1,7 @@
 import { PLAYWRIGHT_REQUEST_TIMEOUT_MS, type PlaywrightRequest, type PlaywrightResult } from './browser-automation';
 import { recordToolEvents } from '../tool-events';
 import type { TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
-import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, IframeProxyResult, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink, SpawnPtyOptions, ToolControlResult, ToolHostRequest, WritePtyOptions } from './types';
+import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserAttachResult, IframeProxyResult, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink, SpawnPtyOptions, ToolControlResult, ToolHostRequest, WritePtyOptions } from './types';
 import { openPortRequestTimeoutMs } from './types';
 import { createBurrowLinkClient } from '../../host/remote/link-client';
 import { createAlertClient, type AlertClientMethods } from '../../host/alert-client';
@@ -130,7 +130,7 @@ export class VSCodeAdapter implements PlatformAdapter {
     this.agentBrowserCommand = this.agentBrowserCommand.bind(this);
     this.agentBrowserEdit = this.agentBrowserEdit.bind(this);
     this.agentBrowserScreenshot = this.agentBrowserScreenshot.bind(this);
-    this.agentBrowserStreamStatus = this.agentBrowserStreamStatus.bind(this);
+    this.agentBrowserAttach = this.agentBrowserAttach.bind(this);
     this.getAgentBrowserStreamUrl = this.getAgentBrowserStreamUrl.bind(this);
     this.agentBrowserOpen = this.agentBrowserOpen.bind(this);
     this.agentBrowserPopOut = this.agentBrowserPopOut.bind(this);
@@ -414,14 +414,15 @@ export class VSCodeAdapter implements PlatformAdapter {
     return result ?? { ok: false, error: 'agent-browser screenshot timed out' };
   }
 
-  async agentBrowserStreamStatus(session: string, binaryPath?: string): Promise<AgentBrowserStreamStatusResult> {
-    const result = await this.requestResponse<AgentBrowserStreamStatusResult>(
-      'agentBrowser:streamStatus', 'agentBrowser:streamStatusResult',
-      { session, binaryPath },
+  async agentBrowserAttach(session: string, opts: { url?: string; headed?: boolean }, binaryPath?: string): Promise<AgentBrowserAttachResult> {
+    // A gone session relaunches, so this waits as long as an open does.
+    const result = await this.requestResponse<AgentBrowserAttachResult>(
+      'agentBrowser:attach', 'agentBrowser:attachResult',
+      { session, url: opts.url, headed: opts.headed, binaryPath },
       (msg) => ({ ok: msg.ok, wsPort: msg.wsPort, error: msg.error }),
-      5000,
+      15000,
     );
-    return result ?? { ok: false, error: 'agent-browser stream status timed out' };
+    return result ?? { ok: false, error: 'agent-browser attach timed out' };
   }
 
   getAgentBrowserStreamUrl(port: number): Promise<string | null> {
@@ -434,9 +435,9 @@ export class VSCodeAdapter implements PlatformAdapter {
     );
   }
 
-  async agentBrowserOpen(url: string, opts: { headed?: boolean }, binaryPath?: string): Promise<AgentBrowserOpenResult> {
+  async agentBrowserOpen(url: string, opts: { headed?: boolean; session?: string }, binaryPath?: string): Promise<AgentBrowserOpenResult> {
     const result = await this.requestResponse<AgentBrowserOpenResult>(
-      'agentBrowser:open', 'agentBrowser:openResult', { url, headed: opts.headed, binaryPath },
+      'agentBrowser:open', 'agentBrowser:openResult', { url, headed: opts.headed, session: opts.session, binaryPath },
       (msg) => ({ ok: msg.ok, session: msg.session, wsPort: msg.wsPort, binaryPath: msg.binaryPath, error: msg.error }),
       15000,
     );

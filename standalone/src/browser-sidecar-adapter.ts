@@ -3,13 +3,14 @@ import { recordToolEvents } from '../../lib/src/lib/tool-events';
 import type { TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
 import { installWorkspaceRegistry, type WorkspaceRegistrySnapshot } from "./workspace-registry";
 import type {
+  AgentBrowserAttachResult,
   AgentBrowserCommandResult,
   AgentBrowserEditOp,
   AgentBrowserEditResult,
   AgentBrowserOpenResult,
   AgentBrowserPopResult,
   AgentBrowserScreenshotResult,
-  AgentBrowserStreamStatusResult,
+  AgentBrowserAttachResult,
   IframeProxyResult,
   OpenPort,
   PlatformAdapter,
@@ -112,7 +113,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     this.agentBrowserCommand = this.agentBrowserCommand.bind(this);
     this.agentBrowserEdit = this.agentBrowserEdit.bind(this);
     this.agentBrowserScreenshot = this.agentBrowserScreenshot.bind(this);
-    this.agentBrowserStreamStatus = this.agentBrowserStreamStatus.bind(this);
+    this.agentBrowserAttach = this.agentBrowserAttach.bind(this);
     this.agentBrowserOpen = this.agentBrowserOpen.bind(this);
     this.agentBrowserPopOut = this.agentBrowserPopOut.bind(this);
     this.agentBrowserPopIn = this.agentBrowserPopIn.bind(this);
@@ -303,13 +304,13 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     }
   }
 
-  async agentBrowserStreamStatus(session: string, binaryPath?: string): Promise<AgentBrowserStreamStatusResult> {
-    try { return await this.host.invoke("agent_browser_stream_status", { session, binaryPath }); }
+  async agentBrowserAttach(session: string, opts: { url?: string; headed?: boolean }, binaryPath?: string): Promise<AgentBrowserAttachResult> {
+    try { return await this.host.invoke("agent_browser_attach", { session, url: opts.url, headed: opts.headed, binaryPath }); }
     catch (err) { return { ok: false, error: errMessage(err) }; }
   }
 
-  async agentBrowserOpen(url: string, opts: { headed?: boolean }, binaryPath?: string): Promise<AgentBrowserOpenResult> {
-    try { return await this.host.invoke("agent_browser_open", { url, headed: opts.headed, binaryPath }); }
+  async agentBrowserOpen(url: string, opts: { headed?: boolean; session?: string }, binaryPath?: string): Promise<AgentBrowserOpenResult> {
+    try { return await this.host.invoke("agent_browser_open", { url, headed: opts.headed, session: opts.session, binaryPath }); }
     catch (err) { return { ok: false, error: errMessage(err) }; }
   }
 

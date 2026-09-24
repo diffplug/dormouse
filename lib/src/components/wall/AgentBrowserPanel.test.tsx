@@ -5,7 +5,7 @@ import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
-import type { AgentBrowserPopResult, AgentBrowserStreamStatusResult, PlatformAdapter } from '../../lib/platform/types';
+import type { AgentBrowserPopResult, AgentBrowserAttachResult, PlatformAdapter } from '../../lib/platform/types';
 import type { PaneProps } from './pane-props';
 import { AgentBrowserPanel, HIDDEN_PARK_DELAY_MS } from './AgentBrowserPanel';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
@@ -149,14 +149,14 @@ describe('AgentBrowserPanel render mode controller', () => {
       ok: true,
       wsPort: 3456,
     }));
-    const streamStatus = vi.fn<PlatformAdapter['agentBrowserStreamStatus']>(async (): Promise<AgentBrowserStreamStatusResult> => ({
+    const streamStatus = vi.fn<PlatformAdapter['agentBrowserAttach']>(async (): Promise<AgentBrowserAttachResult> => ({
       ok: true,
       wsPort: 1234,
     }));
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserPopOut' | 'agentBrowserStreamStatus'>;
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserPopOut' | 'agentBrowserAttach'>;
     platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
     platform.agentBrowserPopOut = popOut;
-    platform.agentBrowserStreamStatus = streamStatus;
+    platform.agentBrowserAttach = streamStatus;
     setPlatform(platform);
 
     await renderPanel(paneProps('ab-panel'), updateParameters);
@@ -178,10 +178,10 @@ describe('AgentBrowserPanel render mode controller', () => {
       ok: true,
       wsPort: 4567,
     }));
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserPopIn' | 'agentBrowserStreamStatus'>;
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserPopIn' | 'agentBrowserAttach'>;
     platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
     platform.agentBrowserPopIn = popIn;
-    platform.agentBrowserStreamStatus = vi.fn(async () => ({ ok: true, wsPort: 1234 }));
+    platform.agentBrowserAttach = vi.fn(async () => ({ ok: true, wsPort: 1234 }));
     setPlatform(platform);
 
     await renderPanel(
@@ -206,10 +206,10 @@ describe('AgentBrowserPanel render mode controller', () => {
       ok: true,
       wsPort: 4567,
     }));
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserPopIn' | 'agentBrowserStreamStatus'>;
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserPopIn' | 'agentBrowserAttach'>;
     platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
     platform.agentBrowserPopIn = popIn;
-    platform.agentBrowserStreamStatus = vi.fn(async () => ({ ok: true, wsPort: 1234 }));
+    platform.agentBrowserAttach = vi.fn(async () => ({ ok: true, wsPort: 1234 }));
     setPlatform(platform);
 
     await renderPanel(
@@ -241,9 +241,9 @@ describe('AgentBrowserPanel render mode controller', () => {
 
   it('mirrors popped-out stream tab URL updates when the stream reports id instead of tabId', async () => {
     const updateParameters = vi.fn();
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserStreamStatus'>;
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserAttach'>;
     platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
-    platform.agentBrowserStreamStatus = vi.fn(async () => ({ ok: true, wsPort: 1234 }));
+    platform.agentBrowserAttach = vi.fn(async () => ({ ok: true, wsPort: 1234 }));
     setPlatform(platform);
 
     await renderPanel(
@@ -269,12 +269,12 @@ describe('AgentBrowserPanel render mode controller', () => {
 
   it('mirrors popped-out manual navigation from CDP target events', async () => {
     const updateParameters = vi.fn();
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserStreamStatus'>;
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserAttach'>;
     platform.agentBrowserCommand = vi.fn(async (_session, args) => {
       if (args.join(' ') === 'get cdp-url') return { exitCode: 0, stdout: 'ws://127.0.0.1:9222/devtools/browser/test', stderr: '' };
       return { exitCode: 0, stdout: '', stderr: '' };
     });
-    platform.agentBrowserStreamStatus = vi.fn(async () => ({ ok: true, wsPort: 1234 }));
+    platform.agentBrowserAttach = vi.fn(async () => ({ ok: true, wsPort: 1234 }));
     setPlatform(platform);
 
     await renderPanel(
@@ -422,12 +422,12 @@ describe('AgentBrowserPanel render mode controller', () => {
   });
 
   it('does not recover a stale port through stream status after that port opened live', async () => {
-    const streamStatus = vi.fn<PlatformAdapter['agentBrowserStreamStatus']>(async (): Promise<AgentBrowserStreamStatusResult> => ({
+    const streamStatus = vi.fn<PlatformAdapter['agentBrowserAttach']>(async (): Promise<AgentBrowserAttachResult> => ({
       ok: true,
       wsPort: 2222,
     }));
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserStreamStatus'>;
-    platform.agentBrowserStreamStatus = streamStatus;
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserAttach'>;
+    platform.agentBrowserAttach = streamStatus;
     setPlatform(platform);
 
     await renderPanel(paneProps('ab-panel', { surfaceType: 'browser', session: 'browser-session', wsPort: 1111 }));
@@ -699,9 +699,9 @@ describe('AgentBrowserPanel visibility parking', () => {
   });
 
   it('never queries stream status while parked', async () => {
-    const streamStatus = vi.fn<PlatformAdapter['agentBrowserStreamStatus']>(async () => ({ ok: false }));
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserStreamStatus'>;
-    platform.agentBrowserStreamStatus = streamStatus;
+    const streamStatus = vi.fn<PlatformAdapter['agentBrowserAttach']>(async () => ({ ok: false }));
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserAttach'>;
+    platform.agentBrowserAttach = streamStatus;
     setPlatform(platform);
 
     // No wsPort ⇒ the stale-port recovery effect is the code path that would

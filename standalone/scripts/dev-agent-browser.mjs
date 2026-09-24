@@ -160,12 +160,12 @@ const invokeMap = {
   agent_browser_screenshot: async ({ session, format, quality, binaryPath }) => readCapture(
     await requestSidecar('agentBrowser:screenshot', { session, format, quality, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
   ),
-  agent_browser_stream_status: ({ session, binaryPath }) => requestSidecar('agentBrowser:streamStatus', { session, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
+  agent_browser_attach: ({ session, url, headed, binaryPath }) => requestSidecar('agentBrowser:attach', { session, url, headed, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
   tool_control: ({ request }) =>
     requestSidecar('tool:control', { request }, 'tool:result', (data) => data.result),
   git_info: ({ paths }) =>
     requestSidecar('git:info', { paths }, 'git:infoResult', (data) => data.result),
-  agent_browser_open: ({ url, headed, binaryPath }) => requestSidecar('agentBrowser:open', { url, headed, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
+  agent_browser_open: ({ url, headed, session, binaryPath }) => requestSidecar('agentBrowser:open', { url, headed, session, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
   agent_browser_pop_out: ({ session, url, rect, binaryPath }) => requestSidecar('agentBrowser:popOut', { session, url, rect, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
   agent_browser_pop_in: ({ session, url, binaryPath }) => requestSidecar('agentBrowser:popIn', { session, url, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
   // Agent recovery (docs/specs/standalone.md -> "Agent recovery"). The harness

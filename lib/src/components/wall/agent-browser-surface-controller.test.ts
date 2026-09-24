@@ -511,9 +511,9 @@ describe('updateParams', () => {
 
 describe('stale-port recovery gating', () => {
   it('stays fully inert for a session-less pane until params deliver the session', async () => {
-    const streamStatus = vi.fn<PlatformAdapter['agentBrowserStreamStatus']>(async () => ({ ok: true, wsPort: 2222 }));
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserStreamStatus'>;
-    platform.agentBrowserStreamStatus = streamStatus;
+    const streamStatus = vi.fn<PlatformAdapter['agentBrowserAttach']>(async () => ({ ok: true, wsPort: 2222 }));
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserAttach'>;
+    platform.agentBrowserAttach = streamStatus;
     setPlatform(platform);
 
     // The pane context menu's instant connect mounts its surface WITHOUT a
@@ -537,9 +537,9 @@ describe('stale-port recovery gating', () => {
   it('never queries stream status while parked', async () => {
     vi.useFakeTimers();
     try {
-      const streamStatus = vi.fn<PlatformAdapter['agentBrowserStreamStatus']>(async () => ({ ok: false }));
-      const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserStreamStatus'>;
-      platform.agentBrowserStreamStatus = streamStatus;
+      const streamStatus = vi.fn<PlatformAdapter['agentBrowserAttach']>(async () => ({ ok: false }));
+      const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserAttach'>;
+      platform.agentBrowserAttach = streamStatus;
       setPlatform(platform);
 
       // No wsPort ⇒ the recovery path is what would query the daemon.
@@ -559,9 +559,9 @@ describe('stale-port recovery gating', () => {
   });
 
   it('does not recover a stale port through stream status after that port opened live', async () => {
-    const streamStatus = vi.fn<PlatformAdapter['agentBrowserStreamStatus']>(async () => ({ ok: true, wsPort: 2222 }));
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserStreamStatus'>;
-    platform.agentBrowserStreamStatus = streamStatus;
+    const streamStatus = vi.fn<PlatformAdapter['agentBrowserAttach']>(async () => ({ ok: true, wsPort: 2222 }));
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserAttach'>;
+    platform.agentBrowserAttach = streamStatus;
     setPlatform(platform);
 
     const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', wsPort: 1111 });
@@ -579,9 +579,9 @@ describe('stale-port recovery gating', () => {
   it('clears live-port memory while parked so unpark can recover a changed stream port', async () => {
     vi.useFakeTimers();
     try {
-      const streamStatus = vi.fn<PlatformAdapter['agentBrowserStreamStatus']>(async () => ({ ok: true, wsPort: 2222 }));
-      const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserStreamStatus'>;
-      platform.agentBrowserStreamStatus = streamStatus;
+      const streamStatus = vi.fn<PlatformAdapter['agentBrowserAttach']>(async () => ({ ok: true, wsPort: 2222 }));
+      const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserAttach'>;
+      platform.agentBrowserAttach = streamStatus;
       setPlatform(platform);
 
       const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', wsPort: 1111 });
@@ -603,7 +603,7 @@ describe('stale-port recovery gating', () => {
       await vi.advanceTimersByTimeAsync(4000);
       await vi.advanceTimersByTimeAsync(0);
 
-      expect(streamStatus).toHaveBeenCalledWith('sess', undefined);
+      expect(streamStatus).toHaveBeenCalledWith('sess', {}, undefined);
       expect(sink.updateParameters).toHaveBeenCalledWith({ wsPort: 2222 });
     } finally {
       vi.useRealTimers();
@@ -611,9 +611,9 @@ describe('stale-port recovery gating', () => {
   });
 
   it('does not query the daemon while a relaunch is in flight', async () => {
-    const streamStatus = vi.fn<PlatformAdapter['agentBrowserStreamStatus']>(async () => ({ ok: true, wsPort: 9999 }));
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserStreamStatus' | 'agentBrowserCommand' | 'agentBrowserPopOut'>;
-    platform.agentBrowserStreamStatus = streamStatus;
+    const streamStatus = vi.fn<PlatformAdapter['agentBrowserAttach']>(async () => ({ ok: true, wsPort: 9999 }));
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserAttach' | 'agentBrowserCommand' | 'agentBrowserPopOut'>;
+    platform.agentBrowserAttach = streamStatus;
     platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
     // A pop-out whose promise never settles pins `relaunching` true.
     platform.agentBrowserPopOut = vi.fn(() => new Promise(() => {}));
@@ -654,12 +654,12 @@ describe('dispose', () => {
 });
 
 describe('relaunch (pop-out / pop-in)', () => {
-  type RelaunchPlatform = FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserPopOut' | 'agentBrowserPopIn' | 'agentBrowserStreamStatus'>;
+  type RelaunchPlatform = FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserPopOut' | 'agentBrowserPopIn' | 'agentBrowserAttach'>;
   function relaunchPlatform(): RelaunchPlatform & { resolvePopOut: (res: { ok: boolean; wsPort?: number }) => void } {
     const platform = new FakePtyAdapter() as RelaunchPlatform;
     let resolvePopOut!: (res: { ok: boolean; wsPort?: number }) => void;
     platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
-    platform.agentBrowserStreamStatus = vi.fn(async () => ({ ok: true, wsPort: 9999 }));
+    platform.agentBrowserAttach = vi.fn(async () => ({ ok: true, wsPort: 9999 }));
     platform.agentBrowserPopOut = vi.fn(() => new Promise<{ ok: boolean; wsPort?: number }>((r) => { resolvePopOut = r; }));
     platform.agentBrowserPopIn = vi.fn(async () => ({ ok: true, wsPort: 5555 }));
     setPlatform(platform);
@@ -692,7 +692,7 @@ describe('relaunch (pop-out / pop-in)', () => {
     expect(streamSockets(3456).length).toBe(1);
     expect(streamSockets(1111).length).toBe(1);
     expect(platform.agentBrowserCommand).toHaveBeenCalledWith('sess', ['get', 'cdp-url'], undefined);
-    expect(platform.agentBrowserStreamStatus).not.toHaveBeenCalled();
+    expect(platform.agentBrowserAttach).not.toHaveBeenCalled();
   });
 
   it('ignores a second pop-out or pop-in while one is in flight', async () => {
@@ -805,7 +805,7 @@ describe('relaunch (pop-out / pop-in)', () => {
     controller.updateParams({ session: 'sess', wsPort: 4321, url: 'https://x.example/' });
     await flushMicrotasks();
     expect(streamSockets(4321).length).toBe(1);
-    expect(platform.agentBrowserStreamStatus).not.toHaveBeenCalled();
+    expect(platform.agentBrowserAttach).not.toHaveBeenCalled();
   });
 });
 

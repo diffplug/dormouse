@@ -1,12 +1,12 @@
 /** Host-owned operations for the Playwright provider. No arbitrary code or CDP crosses this boundary. */
 export type { BrowserAutomationProvider } from 'dor/commands/types';
 export type PlaywrightRequest = { binaryPath?: string; cwd?: string } & (
-  | { op: 'open'; url: string; headed?: boolean }
+  | { op: 'open'; url: string; headed?: boolean; session?: string }
   | { op: 'streamUrl'; port: number }
   | { op: 'command'; session: string; args: string[] }
   | { op: 'edit'; session: string; edit: 'selectAll' | 'copy' | 'cut' }
   | { op: 'screenshot'; session: string; format?: 'jpeg' | 'png'; quality?: number }
-  | { op: 'streamStatus'; session: string }
+  | { op: 'attach'; session: string; url?: string; headed?: boolean }
   | { op: 'popOut' | 'popIn'; session: string; url?: string }
 );
 export interface PlaywrightResult {

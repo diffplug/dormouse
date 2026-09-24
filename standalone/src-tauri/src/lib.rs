@@ -1562,15 +1562,17 @@ fn agent_browser_edit(
 }
 
 #[tauri::command(async)]
-fn agent_browser_stream_status(
+fn agent_browser_attach(
     state: tauri::State<'_, SidecarState>,
     session: String,
+    url: Option<String>,
+    headed: Option<bool>,
     binary_path: Option<String>,
 ) -> Result<JsonValue, String> {
     agent_browser_forward(
         &state,
-        "agentBrowser:streamStatus",
-        serde_json::json!({ "session": session, "binaryPath": binary_path }),
+        "agentBrowser:attach",
+        serde_json::json!({ "session": session, "url": url, "headed": headed, "binaryPath": binary_path }),
     )
 }
 
@@ -1579,12 +1581,13 @@ fn agent_browser_open(
     state: tauri::State<'_, SidecarState>,
     url: String,
     headed: Option<bool>,
+    session: Option<String>,
     binary_path: Option<String>,
 ) -> Result<JsonValue, String> {
     agent_browser_forward(
         &state,
         "agentBrowser:open",
-        serde_json::json!({ "url": url, "headed": headed, "binaryPath": binary_path }),
+        serde_json::json!({ "url": url, "headed": headed, "session": session, "binaryPath": binary_path }),
     )
 }
 
@@ -4568,7 +4571,7 @@ pub fn run() {
             playwright_screenshot,
             agent_browser_edit,
             agent_browser_screenshot,
-            agent_browser_stream_status,
+            agent_browser_attach,
             agent_browser_open,
             agent_browser_pop_out,
             agent_browser_pop_in,

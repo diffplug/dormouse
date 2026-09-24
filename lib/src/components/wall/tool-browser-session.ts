@@ -1,7 +1,7 @@
 import type { PlatformAdapter } from '../../lib/platform/types';
 /** The host capabilities this module needs — the same two the CLI path leans
  *  on, narrowed so tests can stub them without a full adapter. */
-type ConnectPlatform = Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserStreamStatus'>;
+type ConnectPlatform = Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserAttach'>;
 
 /**
  * Open `url` in `session` and hand `surfaceId` the resulting `{session, wsPort}`
@@ -35,8 +35,8 @@ export async function attachAgentBrowserSession({
   // Best-effort stream port so the panel connects straight to the live screencast;
   // if it's absent or stale the panel recovers it later, so a miss is non-fatal.
   let wsPort: number | undefined;
-  if (platform.agentBrowserStreamStatus) {
-    const status = await platform.agentBrowserStreamStatus(session, binaryPath);
+  if (platform.agentBrowserAttach) {
+    const status = await platform.agentBrowserAttach(session, {}, binaryPath);
     if (status.ok) wsPort = status.wsPort;
   }
   // Setting `session` connects the controller (the daemon is up now, so its

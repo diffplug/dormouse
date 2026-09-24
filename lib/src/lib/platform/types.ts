@@ -121,11 +121,11 @@ export interface AgentBrowserEditResult {
 
 export type { IframeProxyResult };
 
-/** Result of asking the host for the current stream status of an existing
- *  session. Used to recover persisted panels whose saved wsPort went stale
- *  across VS Code/webview reloads without exposing a generic `stream` exec
- *  channel to the webview. */
-export interface AgentBrowserStreamStatusResult {
+/** Result of attaching to a session's live stream (docs/specs/dor-browser.md →
+ *  "Agent-Browser Connection"): the port its stream serves now, found without
+ *  starting a daemon — or, when the caller named a page and the session is gone,
+ *  the port of the browser relaunched there. */
+export interface AgentBrowserAttachResult {
   headed?: boolean;
   nativeIdentity?: string;
   ok: boolean;
@@ -377,10 +377,10 @@ export interface PlatformAdapter {
   // Absent on hosts that can't run the binary — the panel then keeps every
   // changed stream frame as its final, lower-resolution image.
   agentBrowserScreenshot?(session: string, opts: { format?: 'jpeg' | 'png'; quality?: number }, binaryPath?: string): Promise<AgentBrowserScreenshotResult>;
-  // Reads the current stream port for an already-running session. This is a
-  // purpose-built status channel, not an agentBrowserCommand,
-  // so restored panels can recover from a stale persisted wsPort after reload.
-  agentBrowserStreamStatus?(session: string, binaryPath?: string): Promise<AgentBrowserStreamStatusResult>;
+  // The session's live stream port, read without spawning anything — a CLI
+  // verb would start a daemon to answer. With `url`, a session whose daemon is
+  // gone is relaunched there (headed with `headed`); without, it fails.
+  agentBrowserAttach?(session: string, opts: { url?: string; headed?: boolean }, binaryPath?: string): Promise<AgentBrowserAttachResult>;
   // The WebSocket URL for a session's stream port. Hosts whose webview origin
   // the agent-browser stream server rejects (VS Code) return a tokenized relay
   // URL; absent or null falls back to ws://127.0.0.1:<port>.
@@ -410,13 +410,14 @@ export interface PlatformAdapter {
   // docs/specs/dor-browser.md → "Pop-Out"). All optional
   // so hosts degrade: the modal hides whatever isn't backed by a capability.
   //
-  // Spawn a managed agent-browser session and open <url> — backs swapping an
-  // iframe embed up to a live screencast (`headed: false`) or straight to a
-  // popped-out window (`headed: true`, so embed→popout is one spawn, not a
-  // headless launch immediately torn down). `binaryPath` is the last one a
+  // Open <url> in a new managed session, or in `session` when the caller names
+  // one — the launch behind every GUI-created browser Surface, headless or
+  // straight into a popped-out window (`headed: true`, so embed→popout is one
+  // spawn, not a headless launch immediately torn down). Resolves once the
+  // browser is up, never waiting for the page. `binaryPath` is the last one a
   // `dor ab` surface resolved (a GUI-launched host's own PATH may miss the
   // binary); the host falls back to PATH / DORMOUSE_AGENT_BROWSER_BIN.
-  agentBrowserOpen?(url: string, opts: { headed?: boolean }, binaryPath?: string): Promise<AgentBrowserOpenResult>;
+  agentBrowserOpen?(url: string, opts: { headed?: boolean; session?: string }, binaryPath?: string): Promise<AgentBrowserOpenResult>;
   // Relaunch a session's browser headed as a native OS window, reopening `url`
   // (headed/headless is fixed at launch, so this is a close+relaunch — v1
   // preserves the active tab URL). Best-effort positioned over `rect` (CSS px

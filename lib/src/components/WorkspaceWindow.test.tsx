@@ -579,7 +579,7 @@ describe('WorkspaceWindow', () => {
       });
     });
     await flush();
-    expect(playwright).toHaveBeenCalledWith(expect.objectContaining({ op: 'streamStatus', session: 'late' }));
+    expect(playwright).toHaveBeenCalledWith(expect.objectContaining({ op: 'attach', session: 'late' }));
     await act(async () => { expect(await handle.closeAll('silent')).toBeNull(); });
     await act(async () => status.resolve({ ok: true, wsPort: 4321, headed: false }));
     await flush();

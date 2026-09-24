@@ -1046,8 +1046,8 @@ export class AgentBrowserSurfaceController {
     }
     if (this.streamPort && !this.connectionLost && this.status?.connected !== false) return;
     const platform = this.platform;
-    if (!platform.agentBrowserStreamStatus) return;
-    platform.agentBrowserStreamStatus(session, this.binaryPath).then((res) => {
+    if (!platform.agentBrowserAttach) return;
+    platform.agentBrowserAttach(session, {}, this.binaryPath).then((res) => {
       if (gen !== this.recoveryGen || this.disposed) return;
       if (!res.ok || !res.wsPort) return;
       this.setConnectionLost(false);
@@ -1081,12 +1081,12 @@ export class AgentBrowserSurfaceController {
 
     const currentSession = this.session;
     const platform = this.platform;
-    if (!currentSession || !platform.agentBrowserStreamStatus) {
+    if (!currentSession || !platform.agentBrowserAttach) {
       this.bumpRecovery();
       return Promise.resolve(false);
     }
 
-    return platform.agentBrowserStreamStatus(currentSession, this.binaryPath).then((res) => {
+    return platform.agentBrowserAttach(currentSession, {}, this.binaryPath).then((res) => {
       if (this.closeIfSessionMarkedClosed(currentSession)) return false;
       if (!res.ok || !res.wsPort) return false;
       if (res.wsPort !== this.streamPort) {

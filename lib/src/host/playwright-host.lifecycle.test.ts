@@ -58,7 +58,7 @@ test('concurrent captures share one CDP attachment and detach it once on close',
 test('closing during a CDP attachment releases it without capturing', async () => {
   let complete!: (value: typeof cdp) => void;
   attach.mockImplementation(() => new Promise(resolve => { complete = resolve; }));
-  const { wsPort } = await host.request({ ...binding, op: 'streamStatus' });
+  const { wsPort } = await host.request({ ...binding, op: 'attach' });
   const capture = host.request({ ...binding, op: 'screenshot' });
   await vi.waitFor(() => expect(attach).toHaveBeenCalledTimes(1));
   const closing = host.request({ ...binding, op: 'command', args: ['close'] });
@@ -82,7 +82,7 @@ test('a viewer listener failure releases its browser connection', async () => {
     queueMicrotask(() => this.emit('error', new Error('Listener unavailable')));
     return this;
   });
-  const result = await host.request({ ...binding, op: 'streamStatus' });
+  const result = await host.request({ ...binding, op: 'attach' });
   expect(result.error).toBe('Listener unavailable');
   expect(browser.close).toHaveBeenCalledTimes(1);
 });
@@ -90,7 +90,7 @@ test('a viewer listener failure releases its browser connection', async () => {
 test('captures reuse recent tab state but refresh it when it expires', async () => {
   const now = vi.spyOn(Date, 'now').mockReturnValue(10000);
   browser.contexts = () => [{ pages: () => [page, Object.assign(new EventEmitter(), page)] }];
-  expect((await host.request({ ...binding, op: 'streamStatus' })).ok).toBe(true);
+  expect((await host.request({ ...binding, op: 'attach' })).ok).toBe(true);
   mocks.cli.mockClear();
   for (let i = 0; i < 10; i++) expect((await host.request({ ...binding, op: 'screenshot' })).ok).toBe(true);
   expect(mocks.cli).not.toHaveBeenCalled();
@@ -128,17 +128,17 @@ test('a native reopen in headless mode clears headed shutdown ownership', async 
     }
     return result;
   });
-  expect((await host.request({ ...binding, op: 'streamStatus' })).headed).toBe(true);
+  expect((await host.request({ ...binding, op: 'attach' })).headed).toBe(true);
   browser.emit('disconnected');
   headless = true;
-  expect((await host.request({ ...binding, op: 'streamStatus' })).headed).toBe(false);
+  expect((await host.request({ ...binding, op: 'attach' })).headed).toBe(false);
   mocks.cli.mockClear();
   await host.close();
   expect(mocks.cli).not.toHaveBeenCalled();
 });
 
 test('a single-page browser refreshes without asking the CLI for its selection', async () => {
-  expect((await host.request({ ...binding, op: 'streamStatus' })).ok).toBe(true);
+  expect((await host.request({ ...binding, op: 'attach' })).ok).toBe(true);
   expect(mocks.cli.mock.calls.map(([, args]) => args[1])).toEqual(['list']);
 });
 
@@ -170,7 +170,7 @@ test('a relaunch without an http(s) page reopens blank; a GUI open still needs o
 });
 
 test.each(['attach', 'startScreencast'] as const)('a screencast whose %s fails mid-navigation is retried on the next poll', async (failing) => {
-  const { wsPort } = await host.request({ ...binding, op: 'streamStatus' });
+  const { wsPort } = await host.request({ ...binding, op: 'attach' });
   const starts = () => cdp.send.mock.calls.filter(([method]) => method === 'Page.startScreencast').length;
   if (failing === 'attach') attach.mockRejectedValueOnce(new Error('Target navigated'));
   else {
@@ -191,6 +191,48 @@ test.each(['attach', 'startScreencast'] as const)('a screencast whose %s fails m
   }
 });
 
+describe('attach', () => {
+  // The registry lists the session only once `open` has run for it.
+  let running: boolean;
+  let browserName: string;
+  beforeEach(() => {
+    running = false;
+    browserName = 'chromium';
+    mocks.cli.mockImplementation(async (_binary, args) => {
+      if (args[1] === 'open') running = true;
+      const servers = running ? [{
+        title: 'test', workspaceDir: process.cwd(), playwrightLib: process.cwd(),
+        endpoint: '/tmp/test-playwright.pipe', browser: { browserName },
+      }] : [];
+      return { ok: true, exitCode: 0, stderr: '', stdout: JSON.stringify(args[1] === 'list' ? { servers } : { result: '- 0: (current) Test' }) };
+    });
+  });
+  const verbs = () => mocks.cli.mock.calls.map(([, args]) => args[1]);
+
+  test('a live session answers its viewer port without launching', async () => {
+    running = true;
+    const attached = await host.request({ ...binding, op: 'attach', url: 'http://localhost/' });
+    expect(attached).toMatchObject({ ok: true, headed: false, wsPort: expect.any(Number) });
+    expect(verbs()).not.toContain('open');
+  });
+
+  test('a gone session relaunches at the page named, and fails without one', async () => {
+    expect((await host.request({ ...binding, op: 'attach' })).ok).toBe(false);
+    expect(verbs()).not.toContain('open');
+
+    const attached = await host.request({ ...binding, op: 'attach', url: 'http://localhost/', headed: true });
+    expect(attached).toMatchObject({ ok: true, wsPort: expect.any(Number) });
+    expect(mocks.cli.mock.calls.map(([, args]) => args)).toContainEqual(['--session=test', 'open', 'http://localhost/', '--browser=chromium', '--headed']);
+  });
+
+  test('a session it cannot view is never relaunched', async () => {
+    running = true;
+    browserName = 'firefox';
+    expect((await host.request({ ...binding, op: 'attach', url: 'http://localhost/' })).ok).toBe(false);
+    expect(verbs()).not.toContain('open');
+  });
+});
+
 test('copy runs the shared edit script and never overwrites the clipboard with an empty selection', async () => {
   page.evaluate = vi.fn(async (script: unknown) => typeof script === 'string' ? '' : { width: 640, height: 480 });
   expect(await host.request({ ...binding, op: 'edit', edit: 'copy' })).toMatchObject({ ok: true, text: '' });
@@ -202,7 +244,7 @@ test('copy runs the shared edit script and never overwrites the clipboard with a
 });
 
 test('viewers get tabs, url and status only when they change, and the current state when they connect', async () => {
-  const { wsPort } = await host.request({ ...binding, op: 'streamStatus' });
+  const { wsPort } = await host.request({ ...binding, op: 'attach' });
   const sockets: WebSocket[] = [];
   const connectViewer = async () => {
     const { url } = await host.request({ op: 'streamUrl', port: wsPort! });
@@ -217,10 +259,10 @@ test('viewers get tabs, url and status only when they change, and the current st
   try {
     const first = await connectViewer();
     await vi.waitFor(() => expect(first).toEqual(['url', 'tabs', 'status']));
-    await host.request({ ...binding, op: 'streamStatus' });
-    await host.request({ ...binding, op: 'streamStatus' });
+    await host.request({ ...binding, op: 'attach' });
+    await host.request({ ...binding, op: 'attach' });
     page.url = () => 'http://localhost/next';
-    await host.request({ ...binding, op: 'streamStatus' });
+    await host.request({ ...binding, op: 'attach' });
     // A repeated state message would have arrived ahead of the navigation.
     await vi.waitFor(() => expect(first).toEqual(['url', 'tabs', 'status', 'url', 'tabs']));
     const second = await connectViewer();
@@ -232,7 +274,7 @@ test('viewers get tabs, url and status only when they change, and the current st
 });
 
 test('a long paste reaches the page whole without tripping the input backlog', async () => {
-  const { wsPort } = await host.request({ ...binding, op: 'streamStatus' });
+  const { wsPort } = await host.request({ ...binding, op: 'attach' });
   const { url } = await host.request({ op: 'streamUrl', port: wsPort! });
   const ws = new WebSocket(url!);
   ws.on('error', () => {});

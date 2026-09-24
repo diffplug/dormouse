@@ -77,7 +77,7 @@ export function offeredRenderModes(isTool: boolean, current: BrowserAutomationPr
 
 export type BrowserPlatform = Pick<PlatformAdapter,
   | 'agentBrowserCommand' | 'agentBrowserEdit' | 'agentBrowserScreenshot'
-  | 'agentBrowserStreamStatus' | 'getAgentBrowserStreamUrl' | 'agentBrowserOpen'
+  | 'agentBrowserAttach' | 'getAgentBrowserStreamUrl' | 'agentBrowserOpen'
   | 'agentBrowserPopOut' | 'agentBrowserPopIn'
 >;
 
@@ -99,13 +99,13 @@ export function browserPlatform(provider: BrowserAutomationProvider, cwd?: strin
       if (r.bytes && !(r.bytes instanceof Uint8Array)) r.bytes = new Uint8Array(r.bytes);
       return r;
     },
-    agentBrowserStreamStatus: (session: string, binaryPath?: string) => call({ op: 'streamStatus', session, binaryPath }),
+    agentBrowserAttach: (session: string, opts: { url?: string; headed?: boolean }, binaryPath?: string) => call({ op: 'attach', session, ...opts, binaryPath }),
     getAgentBrowserStreamUrl: async (port: number) => {
       const r = await call({ op: 'streamUrl', port });
       if (!r.ok || !r.url) throw new Error(r.error ?? 'Playwright stream unavailable');
       return r.url;
     },
-    agentBrowserOpen: (url: string, opts: { headed?: boolean }, binaryPath?: string) => call({ op: 'open', url, ...opts, binaryPath }),
+    agentBrowserOpen: (url: string, opts: { headed?: boolean; session?: string }, binaryPath?: string) => call({ op: 'open', url, ...opts, binaryPath }),
     agentBrowserPopOut: (session: string, opts: { url?: string }, binaryPath?: string) => call({ op: 'popOut', session, ...opts, binaryPath }),
     agentBrowserPopIn: (session: string, opts: { url?: string }, binaryPath?: string) => call({ op: 'popIn', session, ...opts, binaryPath }),
   };

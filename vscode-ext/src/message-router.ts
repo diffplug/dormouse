@@ -16,7 +16,7 @@ import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
 import type { WebviewMessage, ExtensionMessage } from './message-types';
 import type { DorControlRequest } from './pty-manager';
 import { dorWorkspaceRefusal } from './dor-workspace-guard';
-import { createStreamRelayUrl, runAgentBrowserCommand, runAgentBrowserEdit, runAgentBrowserOpen, runAgentBrowserPopIn, runAgentBrowserPopOut, runAgentBrowserScreenshot, runAgentBrowserStreamStatus, runPlaywrightRequest } from './agent-browser-host';
+import { createStreamRelayUrl, runAgentBrowserAttach, runAgentBrowserCommand, runAgentBrowserEdit, runAgentBrowserOpen, runAgentBrowserPopIn, runAgentBrowserPopOut, runAgentBrowserScreenshot, runPlaywrightRequest } from './agent-browser-host';
 import { createIframeProxyUrl } from './iframe-proxy-host';
 import { toolControl } from './tool-host';
 import type { ToolHostRequest } from '../../lib/src/lib/platform/types';
@@ -703,13 +703,17 @@ export function attachRouter(
           } satisfies ExtensionMessage);
         });
         break;
-      case 'agentBrowser:streamStatus':
-        runAgentBrowserStreamStatus(
+      case 'agentBrowser:attach':
+        runAgentBrowserAttach(
           msg.session,
+          {
+            url: typeof msg.url === 'string' ? msg.url : undefined,
+            headed: msg.headed === true,
+          },
           typeof msg.binaryPath === 'string' ? msg.binaryPath : undefined,
         ).then((result) => {
           post({
-            type: 'agentBrowser:streamStatusResult', requestId: msg.requestId, ...result,
+            type: 'agentBrowser:attachResult', requestId: msg.requestId, ...result,
           } satisfies ExtensionMessage);
         });
         break;
@@ -731,7 +735,7 @@ export function attachRouter(
       case 'agentBrowser:open':
         runAgentBrowserOpen(
           typeof msg.url === 'string' ? msg.url : '',
-          { headed: msg.headed === true },
+          { headed: msg.headed === true, session: typeof msg.session === 'string' ? msg.session : undefined },
           typeof msg.binaryPath === 'string' ? msg.binaryPath : undefined,
         ).then((result) => {
           post({ type: 'agentBrowser:openResult', requestId: msg.requestId, ...result } satisfies ExtensionMessage);

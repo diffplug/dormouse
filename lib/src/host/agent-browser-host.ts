@@ -21,10 +21,11 @@
  *    (select-all/copy/cut) the stream input path can't dispatch; copy/cut land
  *    on the OS clipboard.
  * 3. `screenshot` — captures one device-resolution frame and returns the bytes.
- * 4. `streamStatus` — reads the current stream port so restored panels recover
- *    from a stale persisted `wsPort`.
- * 5. `open` — spawns a managed namespaced session and opens a url, backing a
- *    render swap (docs/specs/dor-browser.md → "Display Modal And Render Swaps").
+ * 4. `attach` — reports a session's live stream port from its state files,
+ *    never spawning a daemon; relaunches a gone one at the page the pane had.
+ * 5. `open` — opens a url in a new managed session (or a caller-named one),
+ *    backing every GUI launch (docs/specs/dor-browser.md → "Agent-Browser
+ *    Connection").
  * 6. `popOut` / `popIn` — relaunch a session headed/headless at its live active
  *    url (Chrome's mode is fixed at launch, so this is a close + relaunch).
  * 7. `closePoppedOut` — close every still-headed window **and drop the capture
@@ -55,13 +56,13 @@ import { randomBytes } from 'crypto';
 import { isAllowedAgentBrowserBinary } from '../lib/agent-browser-binary';
 import { type AgentBrowserTab, parseAgentBrowserTabs } from '../lib/agent-browser-tab';
 import type {
+  AgentBrowserAttachResult,
   AgentBrowserCommandResult,
   AgentBrowserEditOp,
   AgentBrowserEditResult,
   AgentBrowserOpenResult,
   AgentBrowserPopResult,
   AgentBrowserScreenshotResult,
-  AgentBrowserStreamStatusResult,
 } from '../lib/platform/types';
 import { isBrowsableUrl } from '../lib/platform/browser-automation';
 import { privateCaptureDir } from './private-capture-dir';
@@ -121,8 +122,8 @@ export interface AgentBrowserHost {
   edit(session: string, op: AgentBrowserEditOp, binaryPath?: string): Promise<AgentBrowserEditResult>;
   screenshot(session: string, opts: { format?: 'jpeg' | 'png'; quality?: number }, binaryPath?: string): Promise<AgentBrowserScreenshotResult>;
   screenshotToFile(session: string, opts: { format?: 'jpeg' | 'png'; quality?: number }, binaryPath?: string): Promise<AgentBrowserScreenshotFileResult>;
-  streamStatus(session: string, binaryPath?: string): Promise<AgentBrowserStreamStatusResult>;
-  open(url: string, opts: { headed?: boolean }, binaryPath?: string): Promise<AgentBrowserOpenResult>;
+  attach(session: string, opts: { url?: string; headed?: boolean }, binaryPath?: string): Promise<AgentBrowserAttachResult>;
+  open(url: string, opts: { headed?: boolean; session?: string }, binaryPath?: string): Promise<AgentBrowserOpenResult>;
   popOut(session: string, opts: { rect?: { x: number; y: number; width: number; height: number }; url?: string }, binaryPath?: string): Promise<AgentBrowserPopResult>;
   popIn(session: string, opts: { url?: string }, binaryPath?: string): Promise<AgentBrowserPopResult>;
   closePoppedOut(): Promise<void>;
@@ -136,7 +137,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   // close it on shutdown or it orphans (spec → "Pop-Out" lifecycle:
   // "Dormouse/editor quits → headed windows are cleaned up; no orphans").
   // Headless sessions are deliberately NOT tracked — they're left alive to
-  // reattach across webview reloads (the wsPort/stream-recovery design).
+  // reattach across webview reloads (`attach`).
   const poppedOutSessions = new Map<string, string | undefined>();
   // A relaunch returns once the daemon is streamable, while its `open` command
   // may remain pending until page load. Key the post-open blank-tab sweep so a
@@ -161,7 +162,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   // arbitrary local execution in the extension host or the Tauri sidecar — the
   // exact escape the nonce CSP exists to prevent, and reachable without any user
   // interaction on the next launch. The argv check in `command()` does not
-  // cover it: `streamStatus`, `open` and `popOut` supply their own args and
+  // cover it: `attach`, `open` and `popOut` supply their own args and
   // take a `binaryPath` of their own. A refused path is dropped, not fatal: the
   // host's own candidates still run, so a stale or hostile value degrades to
   // "resolve it yourself" rather than to a broken surface.
@@ -277,6 +278,25 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
       socket.once('error', () => settle(false));
       socket.setTimeout(PORT_PROBE_TIMEOUT_MS, () => settle(false));
     });
+  }
+
+  function processAlive(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false; // ESRCH (gone), or EPERM: not a daemon this user started
+    }
+  }
+
+  /** The session's daemon as its state files describe it — a CLI verb would
+   *  start one to answer (docs/specs/dor-browser.md → "Pop-Out"): the pid file's
+   *  pid, whether that process is alive, and its stream port if it accepts. */
+  async function daemonState(session: string): Promise<{ pid: number | undefined; alive: boolean; wsPort?: number }> {
+    const pid = await readStateNumber(session, 'pid');
+    if (pid === undefined || !processAlive(pid)) return { pid, alive: false };
+    const port = await readStateNumber(session, 'stream');
+    return port !== undefined && await portAccepts(port) ? { pid, alive: true, wsPort: port } : { pid, alive: true };
   }
 
   /** Terminate the session's daemon and wait for it to exit. Returns the pid
@@ -573,20 +593,50 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     });
   }
 
-  async function streamStatus(session: string, binaryPath?: string): Promise<AgentBrowserStreamStatusResult> {
+  // Concurrent attaches of one session join, so two panes restoring it relaunch
+  // it once.
+  const attachesInFlight = new Map<string, Promise<AgentBrowserAttachResult>>();
+
+  // The session's live stream port, without starting anything. A daemon that is
+  // up but not streaming is left alone — relaunching would compete with it. Only
+  // a daemon that is gone, for a caller naming the page it had, is relaunched
+  // there: headed when the pane is a pop-out.
+  async function attach(
+    session: string,
+    opts: { url?: string; headed?: boolean },
+    binaryPath?: string,
+  ): Promise<AgentBrowserAttachResult> {
     if (!isAgentBrowserSession(session)) return { ok: false, error: 'a valid session name is required' };
-    const wsPort = await readStreamPort(session, binaryPath);
-    if (!wsPort) return { ok: false, error: 'stream port unavailable' };
-    return { ok: true, wsPort };
+    const pending = attachesInFlight.get(session);
+    if (pending) return pending;
+    const attaching = (async (): Promise<AgentBrowserAttachResult> => {
+      const daemon = await daemonState(session);
+      if (daemon.wsPort !== undefined) return { ok: true, wsPort: daemon.wsPort };
+      if (daemon.alive) return { ok: false, error: `agent-browser session '${session}' is not streaming` };
+      const url = opts?.url;
+      if (!isBrowsableUrl(url)) return { ok: false, error: `agent-browser session '${session}' is not running` };
+      const generation = beginRelaunch(session);
+      log(`[ab-relaunch] attach session=${session} is gone -> open ${url}`);
+      if (opts.headed) poppedOutSessions.set(session, binaryPath);
+      else poppedOutSessions.delete(session);
+      const args = ['--session', session, ...(opts.headed ? ['--headed'] : []), 'open', url];
+      return relaunch('attach', session, args, binaryPath, daemon.pid, generation);
+    })().finally(() => attachesInFlight.delete(session));
+    attachesInFlight.set(session, attaching);
+    return attaching;
   }
 
-  // Spawn a managed session and open <url> — backs swapping an iframe embed up
-  // to a live screencast (docs/specs/dor-browser.md → "Display Modal And Render Swaps"). With `headed`,
-  // the process launches headed in one shot so embed→popout doesn't open a
-  // headless browser only to tear it down.
-  async function open(url: string, opts: { headed?: boolean }, binaryPath?: string): Promise<AgentBrowserOpenResult> {
+  // Open <url> in a new managed session, or in the caller's `session` (a Tool's
+  // own, or the one a failed swap restores) — every GUI launch
+  // (docs/specs/dor-browser.md → "Agent-Browser Connection"). A live daemon for
+  // that session just navigates. With `headed`, the process launches headed in
+  // one shot so embed→popout doesn't open a headless browser only to tear it down.
+  async function open(url: string, opts: { headed?: boolean; session?: string }, binaryPath?: string): Promise<AgentBrowserOpenResult> {
     if (!isBrowsableUrl(url)) return { ok: false, error: 'an http(s) url is required' };
-    const session = generateGuiSession();
+    if (opts?.session !== undefined && !isAgentBrowserSession(opts.session)) {
+      return { ok: false, error: 'a valid session name is required' };
+    }
+    const session = opts?.session ?? generateGuiSession();
     const args = ['--session', session, ...(opts?.headed ? ['--headed'] : []), 'open', url];
     // A headed spawn is a real OS window — track it before the launch so a
     // window whose page never finishes loading is still closed on shutdown.
@@ -704,5 +754,5 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     ]);
   }
 
-  return { command, edit, screenshot, screenshotToFile, streamStatus, open, popOut, popIn, closePoppedOut };
+  return { command, edit, screenshot, screenshotToFile, attach, open, popOut, popIn, closePoppedOut };
 }

@@ -5,13 +5,14 @@ import { invoke as rawInvoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-shell";
 import { coalesceCwds } from "./coalesce-cwds";
 import type {
+  AgentBrowserAttachResult,
   AgentBrowserCommandResult,
   AgentBrowserEditOp,
   AgentBrowserEditResult,
   AgentBrowserOpenResult,
   AgentBrowserPopResult,
   AgentBrowserScreenshotResult,
-  AgentBrowserStreamStatusResult,
+  AgentBrowserAttachResult,
   IframeProxyResult,
   OpenPort,
   PlatformAdapter,
@@ -521,17 +522,17 @@ export class TauriAdapter implements PlatformAdapter {
     }
   }
 
-  async agentBrowserStreamStatus(session: string, binaryPath?: string): Promise<AgentBrowserStreamStatusResult> {
+  async agentBrowserAttach(session: string, opts: { url?: string; headed?: boolean }, binaryPath?: string): Promise<AgentBrowserAttachResult> {
     try {
-      return await rawInvoke<AgentBrowserStreamStatusResult>("agent_browser_stream_status", { session, binaryPath });
+      return await rawInvoke<AgentBrowserAttachResult>("agent_browser_attach", { session, url: opts.url, headed: opts.headed, binaryPath });
     } catch (err) {
       return { ok: false, error: errMessage(err) };
     }
   }
 
-  async agentBrowserOpen(url: string, opts: { headed?: boolean }, binaryPath?: string): Promise<AgentBrowserOpenResult> {
+  async agentBrowserOpen(url: string, opts: { headed?: boolean; session?: string }, binaryPath?: string): Promise<AgentBrowserOpenResult> {
     try {
-      return await rawInvoke<AgentBrowserOpenResult>("agent_browser_open", { url, headed: opts.headed, binaryPath });
+      return await rawInvoke<AgentBrowserOpenResult>("agent_browser_open", { url, headed: opts.headed, session: opts.session, binaryPath });
     } catch (err) {
       return { ok: false, error: errMessage(err) };
     }

@@ -829,7 +829,7 @@ describe('Wall on the Lath engine', () => {
     });
     (fake as PlatformAdapter).agentBrowserCommand = agentBrowserCommand;
     (fake as PlatformAdapter).agentBrowserOpen = vi.fn(() => openResult);
-    (fake as PlatformAdapter).agentBrowserStreamStatus = vi.fn(async () => ({ ok: true, wsPort: 4321 }));
+    (fake as PlatformAdapter).agentBrowserAttach = vi.fn(async () => ({ ok: true, wsPort: 4321 }));
 
     try {
       await act(async () => {
@@ -3840,7 +3840,7 @@ describe('Wall on the Lath engine', () => {
 
   it('names the command that drives a browser run by the other provider', async () => {
     (fake as PlatformAdapter).playwright = vi.fn(async (request: { op: string }) => (
-      request.op === 'streamStatus' ? { ok: true, wsPort: 4555 } : { ok: true }
+      request.op === 'attach' ? { ok: true, wsPort: 4555 } : { ok: true }
     ));
     (fake as PlatformAdapter).agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);

@@ -5,7 +5,7 @@ import type { TerminalColors, TerminalProtocolEvent } from '../../lib/src/lib/te
 import type { AlertCommand, AlertEvents } from '../../lib/src/host/alert-protocol';
 import type { PersistedAlertState } from '../../lib/src/lib/session-types';
 import type { DorControlCancelPayload, DorControlRequestPayload, DorControlResponsePayload } from '../../dor/src/protocol';
-import type { AgentBrowserStreamStatusResult, IframeProxyResult, OpenPort, ToolControlResult, ToolHostRequest } from '../../lib/src/lib/platform/types';
+import type { AgentBrowserAttachResult, IframeProxyResult, OpenPort, ToolControlResult, ToolHostRequest } from '../../lib/src/lib/platform/types';
 import type { VSCodeWorkbenchCommand } from '../../lib/src/lib/vscode-keybindings';
 import type { BurrowCommand, BurrowResult } from '../../lib/src/host/remote/service-protocol';
 import type { VolatileNotepadSnapshot } from '../../lib/src/lib/notepad/types';
@@ -28,9 +28,9 @@ export type WebviewMessage =
   | { type: 'agentBrowser:command'; session: string; args: string[]; binaryPath?: string; requestId: string }
   | { type: 'agentBrowser:edit'; session: string; op: 'selectAll' | 'copy' | 'cut'; binaryPath?: string; requestId: string }
   | { type: 'agentBrowser:screenshot'; session: string; format?: 'jpeg' | 'png'; quality?: number; binaryPath?: string; requestId: string }
-  | { type: 'agentBrowser:streamStatus'; session: string; binaryPath?: string; requestId: string }
+  | { type: 'agentBrowser:attach'; session: string; url?: string; headed?: boolean; binaryPath?: string; requestId: string }
   | { type: 'agentBrowser:getStreamUrl'; port: number; requestId: string }
-  | { type: 'agentBrowser:open'; url: string; headed?: boolean; binaryPath?: string; requestId: string }
+  | { type: 'agentBrowser:open'; url: string; headed?: boolean; session?: string; binaryPath?: string; requestId: string }
   | { type: 'agentBrowser:popOut'; session: string; url?: string; rect?: { x: number; y: number; width: number; height: number }; binaryPath?: string; requestId: string }
   | { type: 'agentBrowser:popIn'; session: string; url?: string; binaryPath?: string; requestId: string }
   | { type: 'iframe:createProxyUrl'; url: string; embedderOrigins: string[]; requestId: string }
@@ -91,7 +91,7 @@ export type ExtensionMessage =
   | { type: 'agentBrowser:commandResult'; requestId: string; exitCode: number; stdout: string; stderr: string }
   | { type: 'agentBrowser:editResult'; requestId: string; ok: boolean; text?: string; error?: string }
   | { type: 'agentBrowser:screenshotResult'; requestId: string; ok: boolean; bytes?: Uint8Array; mime?: string; error?: string }
-  | ({ type: 'agentBrowser:streamStatusResult'; requestId: string } & AgentBrowserStreamStatusResult)
+  | ({ type: 'agentBrowser:attachResult'; requestId: string } & AgentBrowserAttachResult)
   | { type: 'agentBrowser:streamUrl'; requestId: string; url: string | null }
   | { type: 'agentBrowser:openResult'; requestId: string; ok: boolean; session?: string; wsPort?: number; binaryPath?: string; error?: string }
   | { type: 'agentBrowser:popResult'; requestId: string; ok: boolean; wsPort?: number; error?: string }

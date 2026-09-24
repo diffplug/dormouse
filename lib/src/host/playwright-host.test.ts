@@ -33,7 +33,7 @@ test.skipIf(!binaryPath)('real CLI: GUI launch, stream grants, native tabs, inpu
     expect(opened.ok).toBe(true);
     session = opened.session!;
     const req = { cwd, binaryPath, session };
-    const nested = await host.request({ ...req, cwd: path.join(cwd, 'nested'), op: 'streamStatus' });
+    const nested = await host.request({ ...req, cwd: path.join(cwd, 'nested'), op: 'attach' });
     expect(nested.wsPort).toBe(opened.wsPort);
     expect(nested.nativeIdentity).toBe(opened.nativeIdentity);
     const stream = await host.request({ op: 'streamUrl', port: opened.wsPort! });
@@ -45,7 +45,7 @@ test.skipIf(!binaryPath)('real CLI: GUI launch, stream grants, native tabs, inpu
     // Parking drops the viewer socket, then reconnects to the same CLI browser.
     socket.close();
     await new Promise<void>(resolve => socket!.once('close', () => resolve()));
-    expect((await host.request({ ...req, op: 'streamStatus' })).wsPort).toBe(opened.wsPort);
+    expect((await host.request({ ...req, op: 'attach' })).wsPort).toBe(opened.wsPort);
     messages.length = 0;
     const resumedStream = await host.request({ op: 'streamUrl', port: opened.wsPort! });
     socket = new WebSocket(resumedStream.url!);
@@ -74,7 +74,7 @@ test.skipIf(!binaryPath)('real CLI: GUI launch, stream grants, native tabs, inpu
     expect((await host.request({ ...req, op: 'command', args: ['eval', 'process.exit()'] })).ok).toBe(false);
     const popped = await host.request({ ...req, op: 'popOut', url });
     expect(popped.ok, popped.error).toBe(true);
-    expect((await host.request({ ...req, op: 'streamStatus' })).headed).toBe(true);
+    expect((await host.request({ ...req, op: 'attach' })).headed).toBe(true);
     await new Promise(r => setTimeout(r, 1000));
     const popTabs = await host.request({ ...req, op: 'command', args: ['tab', 'list'] });
     expect(JSON.parse(popTabs.stdout!).tabs).toHaveLength(1);
@@ -83,7 +83,7 @@ test.skipIf(!binaryPath)('real CLI: GUI launch, stream grants, native tabs, inpu
     expect(relaunched.wsPort).not.toBe(opened.wsPort);
     expect((await host.request({ op: 'streamUrl', port: opened.wsPort! })).ok).toBe(false);
     expect((await host.request({ ...req, op: 'command', args: ['close'] })).ok).toBe(true);
-    expect((await host.request({ ...req, op: 'streamStatus' })).ok).toBe(false);
+    expect((await host.request({ ...req, op: 'attach' })).ok).toBe(false);
   } finally {
     socket?.terminate();
     if (session) await host.request({ cwd, binaryPath, session, op: 'command', args: ['close'] });

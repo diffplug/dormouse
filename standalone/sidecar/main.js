@@ -247,14 +247,14 @@ function handleLine(line) {
           return { result: { ok: true, mime: shot.mime, path: shot.path } };
         });
         break;
-      case 'agentBrowser:streamStatus':
+      case 'agentBrowser:attach':
         respondAsync('agentBrowser:result', data.requestId, async () => ({
-          result: await agentBrowser.streamStatus(data.session, data.binaryPath),
+          result: await agentBrowser.attach(data.session, { url: data.url, headed: data.headed }, data.binaryPath),
         }));
         break;
       case 'agentBrowser:open':
         respondAsync('agentBrowser:result', data.requestId, async () => ({
-          result: await agentBrowser.open(data.url, { headed: data.headed }, data.binaryPath),
+          result: await agentBrowser.open(data.url, { headed: data.headed, session: data.session }, data.binaryPath),
         }));
         break;
       case 'agentBrowser:popOut':

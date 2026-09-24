@@ -1673,11 +1673,12 @@ export function useDorControl({
         if (key) browserReservations.current.confirm(key);
         const cwd = stringParam(params.cwd);
         const platform = browserPlatform(provider, cwd);
-        if (!platform.agentBrowserStreamStatus) {
+        if (!platform.agentBrowserAttach) {
           detail.respond({ ok: false, error: 'Playwright is unavailable on this host' });
           return;
         }
-        const status = await platform.agentBrowserStreamStatus(session, binaryPath);
+        // No page named: a session the command left closed is not relaunched.
+        const status = await platform.agentBrowserAttach(session, {}, binaryPath);
         if (!status.ok) {
           detail.respond({ ok: false, error: status.error ?? 'Playwright connection failed' });
           return;

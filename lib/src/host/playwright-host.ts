@@ -56,6 +56,9 @@ function realpathOrUndefined(file: string): string | undefined {
   }
 }
 
+/** The CLI registry lists no browser for the session: it is gone, not merely unviewable. */
+class SessionNotOpenError extends Error {}
+
 /** `key` is the native identity: installation, CLI workspace and session. */
 type Binding = { session: string; cwd: string; install: PlaywrightInstall; workspace: string | undefined; key: string };
 function bind(session: string, cwd: string, install: PlaywrightInstall): Binding {
@@ -287,7 +290,8 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
         && (s.workspaceDir || undefined) === b.workspace
         && typeof s.playwrightLib === 'string'
         && realpathOrUndefined(s.playwrightLib) === b.install.libraryPath);
-      if (matches.length !== 1) throw new Error(matches.length ? 'Ambiguous Playwright session' : 'Playwright session is not open or has no viewable endpoint');
+      if (matches.length > 1) throw new Error('Ambiguous Playwright session');
+      if (matches.length === 0) throw new SessionNotOpenError('Playwright session is not open or has no viewable endpoint');
       const descriptor = matches[0];
       if (descriptor.browser?.browserName !== 'chromium') throw new Error('Dormouse currently views Chromium Playwright sessions only. The native CLI command still ran.');
       const endpoint = descriptor.endpoint ?? descriptor.pipeName;
@@ -415,7 +419,8 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
     }
     const install = resolvePlaywrightInstall(request.binaryPath);
     const cwd = typeof request.cwd === 'string' && path.isAbsolute(request.cwd) ? request.cwd : process.cwd();
-    const session = request.op === 'open' ? generateGuiSession() : request.session;
+    // `open` mints a session unless the caller names one to open the page in.
+    const session = request.op === 'open' ? request.session ?? generateGuiSession() : request.session;
     if (!isPlaywrightSession(session)) throw new Error('Invalid Playwright session name');
     const b = bind(session, cwd, install);
     if (request.op === 'open' || request.op === 'popOut' || request.op === 'popIn') {
@@ -426,10 +431,26 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
       if (request.op === 'open' && !isBrowsableUrl(request.url)) throw new Error('Browser navigation requires an http(s) URL');
       const url = isBrowsableUrl(request.url) ? request.url : undefined;
       const isHeaded = request.op === 'open' ? !!request.headed : request.op === 'popOut';
-      const fresh = request.op === 'open';
+      const fresh = request.op === 'open' && request.session === undefined;
       const deadline = Date.now() + REQUEST_BUDGET_MS;
       const v = await serialize(b, () => launch(b, url, isHeaded, fresh, deadline));
       return { ok: true, session, cwd, binaryPath: install.binary, wsPort: v.port, nativeIdentity: b.key };
+    }
+    // The viewer for a live session; one whose browser is gone is relaunched at
+    // `url` when the caller names it, and fails otherwise.
+    if (request.op === 'attach') {
+      const url = request.url;
+      const deadline = Date.now() + REQUEST_BUDGET_MS;
+      const v = await serialize(b, async () => {
+        try {
+          return await connect(b);
+        } catch (error) {
+          if (!(error instanceof SessionNotOpenError) || !isBrowsableUrl(url)) throw error;
+          return launch(b, url, !!request.headed, false, deadline);
+        }
+      });
+      await refresh(v);
+      return { ok: true, session, cwd, binaryPath: install.binary, wsPort: v.port, headed: v.headed, nativeIdentity: b.key };
     }
     // Parsed before anything connects, so a refused command costs nothing.
     const command = request.op === 'command' ? parseWebviewCommand(request.args) : undefined;
@@ -443,10 +464,6 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
       });
     }
     const v = await connect(b);
-    if (request.op === 'streamStatus') {
-      await refresh(v);
-      return { ok: true, wsPort: v.port, headed: v.headed, nativeIdentity: b.key };
-    }
     await refresh(v, request.op !== 'screenshot');
     const page = v.page;
     if (!page) throw new Error('No Playwright page is open');
