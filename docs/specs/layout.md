@@ -320,9 +320,9 @@ That order is load-bearing twice: a rename input suppresses the pane shortcuts b
 
 **Chrome outside every Wall takes the chrome keyboard lease instead**: the Workspace strip's rename editor and close confirmation live in the app bar, where `stopPropagation` cannot reach a capture-phase window listener. **The Workspace branch is inert on a Wall with no Workspace id**, which is what leaves those keys unbound on a bare Wall. Source of truth: `acquireChromeKeyboardLease` in `lib/src/components/wall/chrome-keyboard-lease.ts`; `handleWorkspaceShortcuts` in `lib/src/components/wall/keyboard/handle-workspace-shortcuts.ts`.
 
-**Must leave Escape and Tab to IME composition in popover focus traps and terminal-context dialogs**, including WebKit's composition-ending key (`isComposing` false, `keyCode` 229).
+**Must leave Escape and Tab to IME composition in modal/popover focus traps and terminal-context dialogs, and Enter/Escape in shared inline editors**, including WebKit's composition-ending key (`isComposing` false, `keyCode` 229).
 
-Source of truth: `isComposingKey` in `lib/src/lib/dom.ts`; `usePopoverFocusTrap` in `lib/src/components/use-popover-focus-trap.ts`; `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`. Tests: `lib/src/components/use-popover-focus-trap.test.tsx`; `lib/src/components/wall/TerminalContext.test.tsx`.
+Source of truth: `isComposingKey` in `lib/src/lib/dom.ts`; `usePopoverFocusTrap` in `lib/src/components/use-popover-focus-trap.ts`; `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`; `useModalFocusTrap` in `lib/src/components/design.tsx`; `InlineEditInput` in `lib/src/components/wall/InlineEditInput.tsx`. Tests: `lib/src/components/use-popover-focus-trap.test.tsx`; `lib/src/components/wall/TerminalContext.test.tsx`; `lib/src/components/ModalOverlay.test.tsx`; `lib/src/components/wall/InlineEditInput.test.tsx`.
 
 ### Split cwd inheritance
 
