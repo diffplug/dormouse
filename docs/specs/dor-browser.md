@@ -591,8 +591,9 @@ match. **A refused path is dropped, never fatal**, so the host's own candidates
 run. The webview applies the same predicate before sending one
 (`browserHandle`) or storing one.
 
-**Crisp captures are written into a private per-process directory, read back
-and removed at once, and the directory is removed at shutdown** (rationale).
+**A crisp capture a CLI writes lands in a private per-process directory, is
+read back and removed at once, and the directory is removed at shutdown**
+(rationale).
 **One capture per browser is in flight**: a viewer socket asking meanwhile joins
 it — never one from before the browser's close or relaunch — and an
 agent-browser capture's spawn is killed past 30s. **A tmpdir that cannot be

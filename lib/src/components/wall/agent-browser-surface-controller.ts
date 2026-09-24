@@ -974,9 +974,7 @@ export class AgentBrowserSurfaceController {
         const lost = !event.status.connected && phase.seen;
         if (event.status.connected) phase.seen = true;
         if (typeof event.status.viewportWidth === 'number' && typeof event.status.viewportHeight === 'number') {
-          this.device = { width: event.status.viewportWidth, height: event.status.viewportHeight };
-          this.maybeDisengageSync();
-          this.publishScreen();
+          this.setDeviceSize(event.status.viewportWidth, event.status.viewportHeight);
         }
         if (lost) this.streamLost();
       } else if (event.type === 'url') {
@@ -990,11 +988,7 @@ export class AgentBrowserSurfaceController {
       } else if (event.type === 'tabs') {
         this.setTabs(event.tabs);
       } else if (event.type === 'frame') {
-        if (event.size) {
-          this.device = { width: event.size.width, height: event.size.height };
-          this.maybeDisengageSync();
-          this.publishScreen();
-        }
+        if (event.size) this.setDeviceSize(event.size.width, event.size.height);
         this.paintFrame(event);
       }
     });
@@ -1008,6 +1002,14 @@ export class AgentBrowserSurfaceController {
       this.lastConnectedIdentity = identity;
       this.setHasFrame(false);
     }
+  }
+
+  /** The browser's viewport, as its stream reports it: the screen indicator
+   *  and sync-to-pane follow it. */
+  private setDeviceSize(width: number, height: number): void {
+    this.device = { width, height };
+    this.maybeDisengageSync();
+    this.publishScreen();
   }
 
   // --- painting ---

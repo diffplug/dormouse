@@ -98,7 +98,7 @@ export interface AgentBrowserProviderDeps {
  * A paste for the daemon's stream, which takes only key and mouse events: a
  * key down and up per character, a newline as Enter.
  */
-export function keyPairTextInputs(text: string): Extract<ViewerInput, { type: 'input_keyboard' }>[] {
+function keyPairTextInputs(text: string): Extract<ViewerInput, { type: 'input_keyboard' }>[] {
   const messages: Extract<ViewerInput, { type: 'input_keyboard' }>[] = [];
   for (const ch of text) {
     if (ch === '\r') continue;
@@ -453,11 +453,9 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
     });
     socket.on('message', (data: Buffer, isBinary) => {
       if (isBinary) return;
+      // A re-broadcast frame is dropped before it is parsed.
       const large = data.length > FRAME_THRESHOLD_BYTES && !CONTROL_MARKERS.some((marker) => data.includes(marker));
-      if (large) {
-        if (headed || lastFrame?.equals(data)) return;
-        lastFrame = data;
-      }
+      if (large && (headed || lastFrame?.equals(data))) return;
       const text = data.toString();
       let message: { type?: unknown; data?: unknown; metadata?: { deviceWidth?: unknown; deviceHeight?: unknown }; connected?: unknown; screencasting?: unknown; viewportWidth?: unknown; viewportHeight?: unknown; tabs?: unknown; url?: unknown };
       try {
@@ -466,11 +464,8 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
         return;
       }
       if (message.type === 'frame' && typeof message.data === 'string') {
-        if (headed) return;
-        if (!large) {
-          if (lastFrame?.equals(data)) return;
-          lastFrame = data;
-        }
+        if (headed || lastFrame?.equals(data)) return;
+        lastFrame = data;
         sink.frame(Buffer.from(message.data, 'base64'), frameSize(message.metadata));
         return;
       }

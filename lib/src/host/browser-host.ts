@@ -263,6 +263,10 @@ type Bound = { p: BrowserProvider<unknown>; b: unknown; id: string };
 export function createBrowserHost(deps: BrowserHostDeps) {
   const log = (error: unknown) => deps.log?.(`[browser-host] ${messageOf(error)}`);
   const providers = new Map<BrowserAutomationProvider, BrowserProvider<unknown>>();
+  const viewers = createViewerServer();
+  // The viewer sockets open on each browser: a launch or close ends them.
+  const views = new Map<string, Set<BrowserView>>();
+  const captures = createBrowserCaptures();
   let closed = false;
 
   function providerFor(id: BrowserAutomationProvider): BrowserProvider<unknown> {
@@ -506,10 +510,6 @@ export function createBrowserHost(deps: BrowserHostDeps) {
 
   // --- viewer sockets and their captures ---
 
-  const viewers = createViewerServer();
-  // The viewer sockets open on each browser: a launch or close ends them.
-  const views = new Map<string, Set<BrowserView>>();
-
   /** Open one viewer socket on the browser at `stream`, unless a launch or
    *  close of it began since its URL was granted (`generation`). */
   function openView(socket: WebSocket, bound: Bound, stream: number, isHeaded: boolean, debug: boolean, generation: number): void {
@@ -535,8 +535,6 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       (error: unknown) => view.close(1011, messageOf(error)),
     );
   }
-
-  const captures = createBrowserCaptures();
 
   /** One device-resolution JPEG of `bound`'s browser, for its viewer sockets'
    *  crisp paint; undefined when none can be taken. A launch or close ends
