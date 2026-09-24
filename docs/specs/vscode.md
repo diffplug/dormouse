@@ -87,9 +87,14 @@ are app-global rather than per-Workspace, riding the seed / mutate / broadcast
 channel of `docs/specs/transport.md` → Message protocol; the settings the
 shared manager consumes are `AlertManager.applySettings`'s own list.
 
+**A due alarm goes to the router whose `ownedPtyIds` hold its Session**; the
+owner-less push goes through `handleBurrowCommand` (`docs/specs/alert.md` →
+Alarm settings).
+
 Source of truth: `WatchedCommandHost` in `lib/src/lib/watched-command-host.ts`,
 `AlertSettingsHost` in `lib/src/lib/alert-settings-host.ts`, the `alert:command`
-case in `vscode-ext/src/message-router.ts`.
+case and `deliverAlert` in `vscode-ext/src/message-router.ts`. Pinned by
+`alarm delivery` in `vscode-ext/test/message-router.test.ts`.
 
 ### Shell selection
 

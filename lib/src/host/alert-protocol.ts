@@ -1,4 +1,6 @@
 import type { AwaitOutcome, AwaitUntil, Engagement, EngagementLapse } from '../lib/alert-manager';
+import type { AlertDeliveryOverrides } from '../lib/alert-delivery-model';
+import type { AlertDelivery } from '../lib/alert-delivery-scheduler';
 import type { AlertSettings } from '../lib/alert-settings-model';
 import type { AlertStateDetail } from '../lib/platform/types';
 
@@ -18,6 +20,9 @@ export type AlertCommand =
   | { op: 'setCommandWatched'; name: string; watched: boolean }
   | { op: 'initializeSettings' | 'updateSettings'; settings: AlertSettings }
   | { op: 'engagement'; state: Engagement; lapse?: EngagementLapse }
+  /** Every Session this realm shows, each with its Workspace's sparse
+   *  overrides: what the host's delivery scheduler cannot know itself. */
+  | { op: 'deliveryPolicy'; overrides: Record<string, AlertDeliveryOverrides> }
   | { op: 'acknowledge' | 'dismiss' | 'toggleTodo' | 'clearTodo'; id: string }
   | { op: 'await'; awaitId: string; id: string; until: AwaitUntil; timeoutMs: number }
   | { op: 'awaitCancel'; awaitId: string };
@@ -38,6 +43,8 @@ export interface AlertEvents {
   /** The app-global stores' canonical snapshots, to every realm. */
   'alert:watchedCommands': { names: string[] };
   'alert:settings': { settings: AlertSettings };
+  /** A spoken alarm or push now due, to the realm that shows its Session. */
+  'alert:deliver': AlertDelivery;
 }
 
 export const ALERT_EVENTS = [
@@ -45,6 +52,7 @@ export const ALERT_EVENTS = [
   'alert:awaitResult',
   'alert:watchedCommands',
   'alert:settings',
+  'alert:deliver',
 ] as const satisfies ReadonlyArray<keyof AlertEvents>;
 
 export type AlertEventName = (typeof ALERT_EVENTS)[number];

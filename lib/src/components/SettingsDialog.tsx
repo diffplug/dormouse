@@ -1,6 +1,6 @@
 import { SecondsField, SwitchRow } from './AlarmSettingsControls';
 import { WorkspaceAlarmSettings } from './WorkspaceAlarmSettings';
-import type { AlertSink } from '../lib/alert-delivery-state';
+import type { AlertSink } from '../lib/alert-delivery-model';
 import { useWorkspaceAlertPolicy } from './wall/use-workspace-alert-policy';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
@@ -255,7 +255,7 @@ export function AlarmSettingsSection({ sink, preview = false }: { sink: AlarmSin
   return sink === 'speech' ? (
     <AlarmSinkSection
       className={preview ? '' : SECTION}
-      switchLabel="Speak out loud if not attended"
+      switchLabel="Speak out loud when you're not looking at that pane"
       delayLabel="Delay before speaking:"
       enabled={settings.speakEnabled}
       delayMs={settings.speakDelayMs}
@@ -271,7 +271,7 @@ export function AlarmSettingsSection({ sink, preview = false }: { sink: AlarmSin
   ) : (
     <AlarmSinkSection
       className={preview ? '' : SECTION}
-      switchLabel="Send push notification if not attended"
+      switchLabel="Send push notification when you're away from Dormouse"
       delayLabel="Delay before push:"
       enabled={settings.pushEnabled}
       delayMs={settings.pushDelayMs}

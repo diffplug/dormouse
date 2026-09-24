@@ -1,6 +1,8 @@
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
 import type { AlertState, AwaitHandle, AwaitOptions, Engagement, EngagementLapse } from '../alert-manager';
 import type { AlertSettings } from '../alert-settings';
+import type { AlertDeliveryOverrides } from '../alert-delivery-model';
+import type { AlertDelivery } from '../alert-delivery-scheduler';
 import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
 import type { ShellEntry } from '../shell-defaults';
 // Defined in its own dependency-free file so the Node proxy in lib/src/host can
@@ -477,6 +479,12 @@ export interface PlatformAdapter {
    * Engagement), sent only when it changes; `lapse` says why presence ended.
    */
   alertEngagement(state: Engagement, lapse?: EngagementLapse): void;
+  /**
+   * Every Session this realm shows, each with its Workspace's sparse delivery
+   * overrides, for the host's delivery scheduler (`docs/specs/alert.md` ->
+   * Alarm settings). Replaces what this realm published before.
+   */
+  alertPublishDeliveryPolicy(overrides: Record<string, AlertDeliveryOverrides>): void;
   /** A human gesture reached the Session without input; input rides `writePty`'s `userInput`. */
   alertAcknowledge(id: string): void;
   alertToggleTodo(id: string): void;
@@ -499,6 +507,8 @@ export interface PlatformAdapter {
   onWatchedCommands(handler: (names: string[]) => void): void;
   /** Receive the host's canonical alarm settings. */
   onAlertSettings(handler: (settings: AlertSettings) => void): void;
+  /** Receive a spoken alarm or push the host scheduled, to perform. */
+  onAlertDeliver(handler: (delivery: AlertDelivery) => void): void;
 
   // State persistence
   saveState(state: unknown): void;

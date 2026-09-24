@@ -252,6 +252,8 @@ that feeds it: one `AlertManager`, every window a realm under its label
 - **An await's answer carries `forWindow`**, the label that parked it, which
   Rust routes it to — **never a Session `id`**, which would route it to that
   Session's owner, **nor a `requestId`**, which Rust swallows (rationale).
+- **`alert:deliver` carries its Session's `id`**, so Rust routes a due alarm
+  to the window showing it (`docs/specs/alert.md` → Alarm settings).
 - **Must re-send each listed Session's `alert:state` behind the answer to
   `pty:requestInit`**: a reloaded window and an arriving Workspace learn their
   rings and TODOs nowhere else. A `sync` re-sends every Session's, and Rust
@@ -748,7 +750,10 @@ below reads that record rather than inferring itself from the suppression map.
 - **Must reject a repeated move while that Workspace is in flight**, preserving
   the first attempt’s content and recovery state. Async continuations act only
   on their own attempt (`keeps the first move recoverable when the same tab is
-  dropped twice` in `standalone/src/workspace-move.test.ts`).
+  dropped twice` in `standalone/src/workspace-move.test.ts`). **Must await the
+  host's hand-back when source content capture fails**, keeping the Workspace
+  in flight until routing returns (`recovers serialization failure through host
+  hand-back before another move`).
 - **A hand-back replays what the marked ids missed.** From an id's mark to the
   hand-back every byte went to the target, or nowhere, so `hand_back_arrival`
   returns each id the content marked to the source *suppressed* and asks the

@@ -113,7 +113,7 @@ export class FakePtyAdapter implements PlatformAdapter {
   }
 
   private startAlertHost(): void {
-    const host = createAlertHost();
+    const host = createAlertHost({ deliver: (delivery) => void this.alerts.onEvent('alert:deliver', delivery) });
     const stops = [
       host.manager.onStateChange((id, state) => void this.alerts.onEvent('alert:state', { id, ...state })),
       host.watched.subscribe((names) => void this.alerts.onEvent('alert:watchedCommands', { names })),

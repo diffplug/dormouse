@@ -1,14 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-vi.mock('./platform', () => ({
-  getPlatform: () => ({ alertPublishSettings: vi.fn() }),
-}));
-
 import { AlertManager } from './alert-manager';
-import { watchUnattendedRings } from './alert-ring-watch';
-import { startAlertSpeech } from './alert-speech';
-import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS } from './alert-settings';
-import { clearTerminalActivity, setTerminalActivity } from './session-activity-store';
+import { createAlertDeliveryScheduler, type AlertDeliveryScheduler } from './alert-delivery-scheduler';
+import { DEFAULT_ALERT_SETTINGS } from './alert-settings-model';
 import { cfg } from '../cfg';
 import { armCommandExit, driveToBusy, finishCommand, runCommand, settle } from './alert-manager-test-utils';
 
@@ -16,38 +9,30 @@ const ID = 'resumed-watched-work';
 const WATCHED = 'longtask';
 const DELAY = 10_000;
 let manager: AlertManager;
-let stopSpeech: () => void;
-let stopPush: () => void;
+let scheduler: AlertDeliveryScheduler;
+/** The host's deliveries, one call per sink. */
 let spoken: ReturnType<typeof vi.fn>;
 let pushed: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   vi.useFakeTimers();
-  clearTerminalActivity();
   spoken = vi.fn();
   pushed = vi.fn();
-  vi.stubGlobal('speechSynthesis', { speak: spoken, cancel: vi.fn() });
-  vi.stubGlobal('SpeechSynthesisUtterance', class {
-    constructor(readonly text: string) {}
-  });
-  applyAlertSettingsFromHost({ ...DEFAULT_ALERT_SETTINGS, speakEnabled: true, speakDelayMs: DELAY });
   manager = new AlertManager();
   manager.setDeferAlertsUntilQuiet(true);
-  manager.onStateChange(setTerminalActivity);
   manager.setWatchedCommands([WATCHED]);
   runCommand(manager, ID, WATCHED);
-  stopSpeech = startAlertSpeech();
-  // Push shares the ring watcher; exercise its delivery decision without a Relay.
-  stopPush = watchUnattendedRings({ sink: 'push', subscribe: () => () => {}, enabled: () => true, delayMs: () => DELAY, fire: pushed });
+  const settings = { ...DEFAULT_ALERT_SETTINGS, speakEnabled: true, speakDelayMs: DELAY, pushEnabled: true, pushDelayMs: DELAY };
+  scheduler = createAlertDeliveryScheduler({
+    manager,
+    defaults: () => settings,
+    deliver: ({ sink, id, episodeId }) => (sink === 'speech' ? spoken : pushed)(id, episodeId),
+  });
 });
 
 afterEach(() => {
-  stopPush();
-  stopSpeech();
+  scheduler.dispose();
   manager.dispose();
-  clearTerminalActivity();
-  applyAlertSettingsFromHost(DEFAULT_ALERT_SETTINGS);
-  vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
@@ -80,7 +65,7 @@ describe('WATCHING output resuming before alarm delivery', () => {
     expect(pushed).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
     expect(spoken).toHaveBeenCalledOnce();
-    expect(pushed).toHaveBeenCalledExactlyOnceWith(ID, manager.getState(ID).episode);
+    expect(pushed).toHaveBeenCalledExactlyOnceWith(ID, manager.getState(ID).episode!.id);
   });
 
   it('keeps an inferred ring through a short redraw that never confirms BUSY', () => {

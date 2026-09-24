@@ -4,11 +4,11 @@
  * is reached. The transport those calls run under is `burrow-fetch.ts`, shared
  * with the setup-token mint.
  *
- * Split from `alert-push.ts` because the two halves run in different processes
- * once the Burrow is Node-resident: ring *detection* is webview state (the
- * activity store, the alarm settings, the pane's label), while *delivery* needs
- * the enrollment and the ACL, which only the Burrow holds. Nothing here touches
- * the DOM or a store, so it runs unchanged in a webview or in the sidecar.
+ * Only the send lives here: *when* is the host's delivery scheduler
+ * (`lib/src/lib/alert-delivery-scheduler.ts`), and *what the Session is
+ * called* the renderer's pane label, while the send needs the enrollment and
+ * the ACL, which only the Burrow holds. Nothing here touches the DOM or a
+ * store, so it runs unchanged in a webview or in the sidecar.
  *
  * Delivery is an HTTP POST to the Relay rather than a relay frame: the relay
  * routes between two live sockets, and the whole point of a push is reaching a

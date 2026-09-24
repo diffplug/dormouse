@@ -15,13 +15,13 @@ export interface AlertSettings {
   inactivityTimeoutMs: number;
   /** Delay terminal-notification rings behind confirmed animation. */
   deferAlertsUntilQuiet: boolean;
-  /** Speak an unattended alarm out loud after `speakDelayMs`. */
+  /** Speak a ring out loud after `speakDelayMs`, unless its pane is the one being looked at. */
   speakEnabled: boolean;
-  /** ms after a ring before speaking, if the ring is still unattended. */
+  /** ms after a ring starts before speaking, if it is still ringing. */
   speakDelayMs: number;
-  /** Push an unattended alarm to paired phones after `pushDelayMs`. */
+  /** Push a ring to paired phones after `pushDelayMs`, if the user is away from Dormouse. */
   pushEnabled: boolean;
-  /** ms after a ring before pushing, if the ring is still unattended. */
+  /** ms after a ring starts before pushing, if it is still ringing. */
   pushDelayMs: number;
 }
 

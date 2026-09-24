@@ -287,6 +287,9 @@ interface AlertEntry {
   progress: ActiveProtocolProgress | null;
   commandExitWatch: CommandExitWatch | null;
   pendingCommandLine: string | null;
+  /** The running or last command's display text: all a host with no renderer
+   *  can call the Session (`docs/specs/alert.md` -> Alarm settings). */
+  lastCommand: string | null;
   todo: TodoState;
   notification: ActivityNotification | null;
   /**
@@ -583,7 +586,7 @@ export class AlertManager {
     detail: ActivityNotification,
     deferrable = true,
   ): void {
-    if (this.engaged(id)) {
+    if (this.isEngaged(id)) {
       this.hold(entry, source, detail);
     } else if (source === 'report' && deferrable) {
       this.deliverReport(id, entry, detail);
@@ -890,12 +893,13 @@ export class AlertManager {
     // Every command boundary silently ends a progress cycle the program never
     // closed, so a later stray clear finds nothing to complete.
     entry.progress = null;
+    entry.lastCommand = resolved.displayCommand;
     entry.commandExitWatch = {
       displayCommand: resolved.displayCommand,
       watchKey: resolved.rawCommandLine === null ? null : commandWatchKey(resolved.rawCommandLine),
       source: resolved.source,
       startedAt: resolved.startedAt,
-      seen: this.engaged(id),
+      seen: this.isEngaged(id),
     };
     // Every command boundary starts the detector over, so one command's output
     // history can never leak into the next one's busy/quiet reading.
@@ -1096,8 +1100,9 @@ export class AlertManager {
 
   // --- Engagement (`docs/specs/alert.md` -> Engagement) ---
 
-  /** Some present viewer points at `id`. The only thing the ring rules read. */
-  private engaged(id: string): boolean {
+  /** Some present viewer points at `id`: all the ring rules read, and what
+   *  keeps a spoken alarm from the pane the user is looking at. */
+  isEngaged(id: string): boolean {
     for (const focusId of this.viewers.values()) {
       if (focusId === id) return true;
     }
@@ -1119,13 +1124,13 @@ export class AlertManager {
     // Only this viewer moved, so only the Sessions it pointed at can change.
     const touched = [...new Set([before, after])]
       .filter((id): id is string => typeof id === 'string')
-      .map((id) => ({ id, was: this.engaged(id) }));
+      .map((id) => ({ id, was: this.isEngaged(id) }));
     if (after === undefined) this.viewers.delete(viewerId);
     else this.viewers.set(viewerId, after);
 
     for (const { id, was } of touched) {
       const entry = this.entries.get(id);
-      if (!entry || this.inert(id) || this.engaged(id) === was) continue;
+      if (!entry || this.inert(id) || this.isEngaged(id) === was) continue;
       if (!was) {
         this.markSeen(entry);
       } else if (lapse === 'idle' && focusId === id) {
@@ -1248,6 +1253,11 @@ export class AlertManager {
       awaited: (this.awaits.get(id)?.waiters.size ?? 0) > 0,
       episode: entry.ring?.episode ?? null,
     };
+  }
+
+  /** The running or last command's display text, else null. */
+  lastCommand(id: string): string | null {
+    return this.entries.get(id)?.lastCommand ?? null;
   }
 
   /** Whether `id` has state to publish: an entry that is not a helper's.
@@ -1374,7 +1384,7 @@ export class AlertManager {
     // from real output, so it is the more informative of the two.
     if (this.isWatching(entry)) return entry.detector.getStatus();
     // Armed: a seen command running while nobody engages it.
-    if (entry.commandExitWatch?.seen && !this.engaged(id)) return 'COMMAND_EXIT_ARMED';
+    if (entry.commandExitWatch?.seen && !this.isEngaged(id)) return 'COMMAND_EXIT_ARMED';
     return 'WATCHING_DISABLED';
   }
 
@@ -1388,6 +1398,7 @@ export class AlertManager {
         progress: null,
         commandExitWatch: null,
         pendingCommandLine: null,
+        lastCommand: null,
         todo: false,
         notification: null,
         deferred: null,

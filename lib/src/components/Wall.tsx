@@ -104,7 +104,7 @@ import type { WallNav } from './wall/keyboard/types';
 import { useWallKeyboard } from './wall/use-wall-keyboard';
 import { useSessionPersistence } from './wall/use-session-persistence';
 import { useDevServerPortCorrelation } from './wall/use-dev-server-ports';
-import { useAlertSpeech } from './wall/use-alert-speech';
+import { useAlertDelivery } from './wall/use-alert-delivery';
 import { queueToolSpawn, restartSurfaceInPlace, toolRunCommand, useDorControl, waitForNewToolCommand } from './wall/use-dor-control';
 import { errorText } from './wall/dor-control-shared';
 import { useWindowFocused } from './wall/use-window-focused';
@@ -1172,8 +1172,8 @@ export function Wall({
   // --- Dev-server port → pane correlation (browser header connection chip) ---
   useDevServerPortCorrelation({ lath, doorsRef });
 
-  // --- Spoken alarms (`docs/specs/alert.md` -> Alarm settings) ---
-  useAlertSpeech();
+  // --- Spoken alarms and pushes (`docs/specs/alert.md` -> Alarm settings) ---
+  useAlertDelivery();
 
   // --- Reattach ---
 

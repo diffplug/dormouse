@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as ptyManager from './pty-manager';
 import { createAlertHost, type AlertRealm } from '../../lib/src/host/alert-host';
+import type { AlertDelivery } from '../../lib/src/lib/alert-delivery-scheduler';
 import { alertedPty, createOwnerPtyStream } from '../../lib/src/host/owner-pty';
 import type {
   TerminalColorProvider,
@@ -189,8 +190,29 @@ const ALLOWED_WORKBENCH_COMMANDS = new Set<string>(VSCODE_WORKBENCH_COMMANDS);
 // This window's alerts, in the host role standalone's sidecar runs too
 // (`lib/src/host/alert-host.ts`). They survive router disposal, so alert state
 // persists across webview collapse/expand cycles; each router is one realm.
-const alertHost = createAlertHost();
+const alertHost = createAlertHost({ deliver: deliverAlert });
 const alertManager = alertHost.manager;
+let nextFallbackPushId = 0;
+
+/**
+ * One due spoken alarm or push, to the webview that owns its Session. With
+ * none — a disposed view whose PTYs live on — a push goes from here, titled by
+ * the command, and speech is skipped: it needs a renderer
+ * (`docs/specs/alert.md` -> Alarm settings).
+ */
+function deliverAlert(delivery: AlertDelivery): void {
+  const owner = [...activeRouters].find((router) => router.ownsPty(delivery.id));
+  if (owner) {
+    owner.send({ type: 'alert:deliver', ...delivery });
+    return;
+  }
+  if (delivery.sink !== 'push') return;
+  handleBurrowCommand({
+    burrowRequestId: `alert-push-${++nextFallbackPushId}`,
+    cmd: 'push',
+    params: { sessionId: delivery.id, title: alertManager.lastCommand(delivery.id) ?? '' },
+  });
+}
 /** Every PTY write and resize, as the alerts must see it. */
 const alertedPtys = alertedPty(alertManager, ptyManager);
 /**

@@ -2,8 +2,6 @@ import { clearToolDirty, recordToolDirty } from 'dormouse-lib/lib/tool-dirty-sto
 import { dismissWorkspaceUi } from 'dormouse-lib/lib/workspace-ui-store';
 import { restoreToolParams } from 'dormouse-lib/components/wall/tool-transfer';
 import { recordToolAnnounce } from 'dormouse-lib/lib/tool-announce-store';
-import { pauseAlertDelivery, resumeAlertDelivery, snapshotAlertDelivery, restoreAlertDelivery, forgetAlertDelivery } from 'dormouse-lib/lib/alert-delivery-state';
-import { setIncomingAlertPolicy } from 'dormouse-lib/lib/alert-delivery-policy';
 import { invoke } from "@tauri-apps/api/core";
 import { clearTerminalActivity, flushTerminal, releaseSession } from "dormouse-lib/lib/terminal-registry";
 import { forgetHelper } from "dormouse-lib/lib/helper-terminal";
@@ -160,7 +158,6 @@ async function handOff(
   args: Record<string, unknown>,
 ): Promise<MoveOutcome> {
   const { workspaceId, terminalIds } = prepared.payload;
-  pauseAlertDelivery(terminalIds);
   // Armed before the invoke: Rust asks the sidecar to stamp the marks inside
   // `begin_arrival`, so a `marked` line can arrive ahead of the invoke's reply.
   const pendingMarks = marksFor(terminalIds, `mark-${workspaceId}`);
@@ -176,7 +173,6 @@ async function handOff(
   } catch (err) {
     if (inFlight.get(workspaceId)?.prepared === prepared) {
       inFlight.delete(workspaceId);
-      resumeAlertDelivery(terminalIds);
       setWorkspaceTransferPending(workspaceId, false); // else `settle` already did
     }
     console.warn(`[workspace-move] ${command} refused; the Workspace stays here`, err);
@@ -194,12 +190,6 @@ async function handOff(
       const content = await captureTransferContent(terminalIds, marks);
       if (prepared.tools) content.tools = prepared.tools;
       if (inFlight.get(workspaceId)?.prepared === prepared) { // else handed back while serializing
-        // The alert state stays in the sidecar's one manager, routed to
-        // whichever window owns the Session; only the delivery receipts move.
-        for (const id of terminalIds) {
-          const delivery = snapshotAlertDelivery(id);
-          if (Object.keys(delivery).length) content.terminals[id].alertDelivery = delivery;
-        }
         try {
           await invoke("transfer_workspace_content", { workspaceId, content });
         } catch (err) {
@@ -211,9 +201,9 @@ async function handOff(
     }
   } catch (err) {
     // Rust already owns the transaction. Its ARRIVAL_MAX watchdog hands back
-    // an arrival with no content; keep the guard and delivery pause until that
-    // event restores routing, replay, and receipts together. Clearing
-    // them locally would permit another move while this one still owns PTYs.
+    // an arrival with no content; keep the guard until that event restores
+    // routing and replay together. Clearing it locally would permit another
+    // move while this one still owns PTYs.
     console.warn("[workspace-move] content capture failed; awaiting host hand-back", err);
   }
   return outcome;
@@ -295,7 +285,6 @@ async function handleDeparted(workspaceId: WorkspaceId): Promise<void> {
   inFlight.delete(workspaceId);
   await collapseWorkspace(workspaceId);
   move.prepared.commit();
-  forgetAlertDelivery(move.prepared.payload.terminalIds);
   move.settle({ moved: true });
   // Moving a Window's last Workspace away closes it — without confirming,
   // archiving or killing, because nothing ended: the Surfaces are alive
@@ -326,7 +315,6 @@ function handleArrivalFailed(workspaceId: WorkspaceId, reason: string, replayIds
   if (!move) return;
   inFlight.delete(workspaceId);
   clearWorkspaceTransferring(workspaceId);
-  resumeAlertDelivery(move.prepared.payload.terminalIds);
   console.warn(`[workspace-move] ${workspaceId} was not adopted (${reason}); it stays here`);
   if (replayIds.length) acceptHandBackReplay(workspaceId, replayIds);
   move.settle({ moved: false, reason });
@@ -408,14 +396,11 @@ async function planArrival(
   platform: PlatformAdapter,
   payload: MovePayload,
 ): Promise<WallBootPlans[string]> {
-  pauseAlertDelivery(payload.terminalIds);
-  setIncomingAlertPolicy(payload.terminalIds, payload.workspace.session.alertDelivery ?? {});
   // No alert seeding: the Sessions' alert state never left the sidecar, and
   // its answer to the `pty:requestInit` below re-sends it to this window.
   const ptyIds = new Set(payload.terminalIds);
   const transferred = Object.entries(payload.terminals ?? {}).filter(([id]) => ptyIds.has(id));
   for (const [id, terminal] of transferred) {
-    if (terminal.alertDelivery) restoreAlertDelivery(id, terminal.alertDelivery);
     if (terminal.semanticState) restoreTransferredTerminalState(id, terminal.semanticState);
     if (terminal.toolAnnounce) recordToolAnnounce(id, terminal.toolAnnounce);
     recordToolDirty(id, terminal.toolDirty ?? null);
@@ -466,9 +451,6 @@ async function planArrival(
  * mounted: Sessions released, **never killed** (the shells are the source's
  * again), notes and helpers dropped, the record and parked plan forgotten.
  * **Never removes the host's alert entry**, which the source goes on showing.
- * **This window's Activity copy goes before the delivery guards**: forgetting
- * the pause first would let a watcher re-arm on the still ringing Activity of a
- * Workspace this window never owned.
  */
 function discardArrival(payload: MovePayload): void {
   dismissWorkspaceUi(payload.workspaceId);
@@ -482,14 +464,6 @@ function discardArrival(payload: MovePayload): void {
   closeWorkspace(payload.workspaceId);
   forgetWorkspaceSession(payload.workspaceId);
   forgetWorkspaceBootPlan(payload.workspaceId);
-  forgetAlertDelivery(payload.terminalIds);
-  setIncomingAlertPolicy(payload.terminalIds);
-}
-
-/** The arrival is this window's: delivery resumes under the mounted Workspace's own policy. */
-function acceptArrival(payload: MovePayload): void {
-  resumeAlertDelivery(payload.terminalIds);
-  setIncomingAlertPolicy(payload.terminalIds);
 }
 
 /** Settle one arrival with Rust, whichever way it went. */
@@ -523,7 +497,6 @@ async function adoptWorkspace(platform: PlatformAdapter, payload: MovePayload): 
     // retired underneath this window.
     try {
       await invoke("adopt_done", { workspaceId: id });
-      acceptArrival(payload);
     } catch (err) {
       // The `ARRIVAL_MAX` watchdog had already expired the record and handed
       // the shells back, and the source kept the Workspace. Left mounted here
@@ -625,7 +598,6 @@ export async function bootFromTearOut(platform: PlatformAdapter): Promise<WallBo
   // plan, so a refused arrival leaves no half-installed Window behind.
   installWindowPersistence(platform, { version: 1, workspaces: [{ id, name, nameIsAuto, session }], activeWorkspaceId: id });
   publishWorkspaceSession(id, session);
-  acceptArrival(first);
   adopting.delete(id);
   // A second Workspace dropped on this window between the tear-out and this
   // drain rides in the same queue.
@@ -635,10 +607,7 @@ export async function bootFromTearOut(platform: PlatformAdapter): Promise<WallBo
 
 /** @internal Forget what this window is moving (tests). */
 export function _resetWorkspaceMovesForTesting(): void {
-  for (const [id, move] of inFlight) {
-    forgetAlertDelivery(move.prepared.payload.terminalIds);
-    setWorkspaceTransferPending(id, false);
-  }
+  for (const id of inFlight.keys()) setWorkspaceTransferPending(id, false);
   inFlight.clear();
   adopting.clear();
 }

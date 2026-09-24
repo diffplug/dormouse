@@ -25,6 +25,8 @@ const wiring = vi.hoisted(() => ({
   burrow: null as BurrowDeps | null,
   /** Every `notifyDirectoryChanged()` the router made. */
   invalidations: 0,
+  /** Every Burrow command the router sent on its own account. */
+  burrowCommands: [] as unknown[],
 }));
 
 vi.mock('../src/peer-link', () => ({
@@ -78,7 +80,7 @@ vi.mock('../src/burrow', () => ({
   dropForwardedCommands: () => {},
   greetPeerWindow: () => {},
   handleForwardedCommand: () => {},
-  handleBurrowCommand: () => {},
+  handleBurrowCommand: (payload: unknown) => void wiring.burrowCommands.push(payload),
   notifyDirectoryChanged: () => {
     wiring.invalidations += 1;
   },
@@ -127,6 +129,7 @@ beforeEach(async () => {
   wiring.peer = null;
   wiring.burrow = null;
   wiring.invalidations = 0;
+  wiring.burrowCommands = [];
   ptys.cwd = null;
   ptys.cwdAsked = [];
   ptys.cwdWait = null;
@@ -700,6 +703,60 @@ describe('engagement viewers', () => {
     } finally {
       disposable.dispose();
     }
+  });
+});
+
+/**
+ * A due spoken alarm or push goes to the webview that owns its Session; with
+ * none, a push goes from the host (docs/specs/alert.md → Alarm settings).
+ */
+describe('alarm delivery', () => {
+  const REPORT = '\x1b]9;needs input\x07';
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('hands a due delivery to the webview that owns the Session, and no other', () => {
+    const other = fakeWebview();
+    const owner = fakeWebview();
+    const first = router.attachRouter(other.channel);
+    const second = router.attachRouter(owner.channel);
+    try {
+      alert(owner, { op: 'initializeSettings', settings: { speakEnabled: true, speakDelayMs: 1_000 } as never });
+      owner.send({ type: 'pty:spawn', id: 'pty-owned', options: { cwd: '/repo' } });
+      ptys.callbacks!.onData('pty-owned', REPORT);
+      vi.advanceTimersByTime(1_000);
+      const episodeId = router.getAlertStates().get('pty-owned')!.episode!.id;
+      expect(owner.posted.filter((message) => message.type === 'alert:deliver'))
+        .toEqual([{ type: 'alert:deliver', sink: 'speech', id: 'pty-owned', episodeId }]);
+      expect(other.posted.filter((message) => message.type === 'alert:deliver')).toEqual([]);
+    } finally {
+      first.dispose();
+      second.dispose();
+    }
+  });
+
+  it('pushes from the host, titled by the command, when no webview owns the Session', () => {
+    const webview = fakeWebview();
+    const disposable = router.attachRouter(webview.channel);
+    alert(webview, { op: 'initializeSettings', settings: { speakEnabled: true, pushEnabled: true, pushDelayMs: 1_000 } as never });
+    webview.send({ type: 'pty:spawn', id: 'pty-orphan', options: { cwd: '/repo' } });
+    ptys.callbacks!.onData('pty-orphan', '\x1b]633;E;pnpm build\x07\x1b]633;C\x07');
+    // The view goes away; its PTYs live on.
+    disposable.dispose();
+    ptys.callbacks!.onData('pty-orphan', REPORT);
+    vi.advanceTimersByTime(60_000);
+    expect(webview.posted.filter((message) => message.type === 'alert:deliver')).toEqual([]);
+    expect(wiring.burrowCommands).toEqual([{
+      burrowRequestId: expect.any(String),
+      cmd: 'push',
+      params: { sessionId: 'pty-orphan', title: 'pnpm build' },
+    }]);
   });
 });
 

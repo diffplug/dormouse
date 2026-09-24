@@ -144,8 +144,8 @@ describe('Baseboard settings controls', () => {
   });
 
   it.each([
-    ['speech', 'speakEnabled', 'Speak out loud if not attended', 'Delay before speaking:'],
-    ['push', 'pushEnabled', 'Send push notification if not attended', 'Delay before push:'],
+    ['speech', 'speakEnabled', "Speak out loud when you're not looking at that pane", 'Delay before speaking:'],
+    ['push', 'pushEnabled', "Send push notification when you're away from Dormouse", 'Delay before push:'],
   ] as const)('toggles only %s and previews its stored setting without taking the keyboard', (sink, field, label, delay) => {
     vi.useFakeTimers();
     const setDialogKeyboardActive = vi.fn();

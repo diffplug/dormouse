@@ -1,4 +1,6 @@
 import type { AwaitHandle, AwaitOptions, AwaitOutcome, Engagement, EngagementLapse } from '../lib/alert-manager';
+import { ALERT_SINKS } from '../lib/alert-delivery-model';
+import type { AlertDelivery } from '../lib/alert-delivery-scheduler';
 import type { AlertSettings } from '../lib/alert-settings-model';
 import type { AlertStateDetail, PlatformAdapter } from '../lib/platform/types';
 import { isAlertEvent, type AlertAwaitResult, type AlertCommand, type AlertEvents } from './alert-protocol';
@@ -17,6 +19,7 @@ export type AlertClientMethods = Required<Pick<
   | 'alertPublishSettings'
   | 'alertDismiss'
   | 'alertEngagement'
+  | 'alertPublishDeliveryPolicy'
   | 'alertAcknowledge'
   | 'alertToggleTodo'
   | 'alertClearTodo'
@@ -24,6 +27,7 @@ export type AlertClientMethods = Required<Pick<
   | 'onAlertState'
   | 'onWatchedCommands'
   | 'onAlertSettings'
+  | 'onAlertDeliver'
 >>;
 
 export interface AlertClient {
@@ -57,6 +61,7 @@ export function createAlertClient(send: (command: AlertCommand) => void): AlertC
   const stateHandlers = new Set<(detail: AlertStateDetail) => void>();
   const watchedHandlers = new Set<(names: string[]) => void>();
   const settingsHandlers = new Set<(settings: AlertSettings) => void>();
+  const deliverHandlers = new Set<(delivery: AlertDelivery) => void>();
   const awaits = new Map<string, { resolve: (outcome: AwaitOutcome) => void; startedAt: number }>();
   const tag = randomTag();
   let awaitSeq = 0;
@@ -71,6 +76,7 @@ export function createAlertClient(send: (command: AlertCommand) => void): AlertC
     alertDismiss: (id) => send({ op: 'dismiss', id }),
     alertEngagement: (state: Engagement, lapse?: EngagementLapse) =>
       send({ op: 'engagement', state, ...(lapse ? { lapse } : {}) }),
+    alertPublishDeliveryPolicy: (overrides) => send({ op: 'deliveryPolicy', overrides }),
     alertAcknowledge: (id) => send({ op: 'acknowledge', id }),
     alertToggleTodo: (id) => send({ op: 'toggleTodo', id }),
     alertClearTodo: (id) => send({ op: 'clearTodo', id }),
@@ -98,6 +104,7 @@ export function createAlertClient(send: (command: AlertCommand) => void): AlertC
     onAlertState: (handler) => void stateHandlers.add(handler),
     onWatchedCommands: (handler) => void watchedHandlers.add(handler),
     onAlertSettings: (handler) => void settingsHandlers.add(handler),
+    onAlertDeliver: (handler) => void deliverHandlers.add(handler),
   };
 
   return {
@@ -130,6 +137,14 @@ export function createAlertClient(send: (command: AlertCommand) => void): AlertC
           const settings = (data as Partial<AlertEvents['alert:settings']> | null)?.settings;
           // A snapshot with no blob is dropped, not applied as "no settings".
           if (settings) for (const handler of settingsHandlers) handler(settings);
+          break;
+        }
+        case 'alert:deliver': {
+          const delivery = data as Partial<AlertDelivery> | null;
+          if (!delivery || !ALERT_SINKS.includes(delivery.sink as AlertDelivery['sink'])) break;
+          if (typeof delivery.id !== 'string' || typeof delivery.episodeId !== 'string') break;
+          const { sink, id, episodeId } = delivery as AlertDelivery;
+          for (const handler of deliverHandlers) handler({ sink, id, episodeId });
           break;
         }
         default:

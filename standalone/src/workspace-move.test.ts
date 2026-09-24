@@ -89,8 +89,6 @@ import { setPlatform } from "dormouse-lib/lib/platform";
 import { disposeAllSessions, getOrCreateTerminal } from "dormouse-lib/lib/terminal-registry";
 import { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 import { createAlertEpisode } from "dormouse-lib/lib/alert-episode";
-import { getAlertDeliveryReceipts, isAlertDeliveryPaused } from "dormouse-lib/lib/alert-delivery-state";
-import { watchUnattendedRings } from "dormouse-lib/lib/alert-ring-watch";
 import { clearTerminalActivity, getActivitySnapshot, setTerminalActivity } from "dormouse-lib/lib/session-activity-store";
 
 const WORKSPACE_ID = "ws-moving";
@@ -508,7 +506,7 @@ describe("the source half", () => {
     expect(getWorkspacesSnapshot().workspaces.map((w) => w.id)).toContain("ws-b");
   });
 
-  it("recovers serialization failure through host hand-back before resuming delivery or another move", async () => {
+  it("recovers serialization failure through host hand-back before another move", async () => {
     initWorkspaceMoves(fakePlatform());
     getOrCreateTerminal("pane-a");
     createWorkspace({ id: WORKSPACE_ID });
@@ -524,7 +522,6 @@ describe("the source half", () => {
     await vi.waitFor(() => expect(mocks.serialize).toHaveBeenCalled());
     await settle();
     expect(finished).toBe(false);
-    expect(isAlertDeliveryPaused("pane-a")).toBe(true);
     expect(isWorkspaceTransferPending(WORKSPACE_ID)).toBe(true);
     expect(getWindowSnapshot().workspaces.map(w => w.id)).not.toContain(WORKSPACE_ID);
     expect(mocks.invoke).not.toHaveBeenCalledWith("transfer_workspace_content", expect.anything());
@@ -537,7 +534,6 @@ describe("the source half", () => {
     });
     deliverReplay({ id: "pane-a", data: "missed output", requestId: `handback-${WORKSPACE_ID}` });
     await expect(moving).resolves.toEqual({ moved: false, reason: "arrival timed out" });
-    expect(isAlertDeliveryPaused("pane-a")).toBe(false);
     expect(isWorkspaceTransferPending(WORKSPACE_ID)).toBe(false);
     expect(getWindowSnapshot().workspaces.map(w => w.id)).toContain(WORKSPACE_ID);
     expect(mocks.writes).toContain("missed output");
@@ -795,7 +791,7 @@ describe("the target half", () => {
 
   it("discards this window's copy of the alert state when adopt_done is refused before the Wall mounts", async () => {
     // The source's live ring, as the sidecar's snapshot delivers it to the
-    // collecting window, and its still-pending speech receipt riding along.
+    // collecting window.
     const episode = createAlertEpisode();
     const platform = fakePlatform([], {
       beforeReplay: () => setTerminalActivity("pane-a", {
@@ -808,27 +804,15 @@ describe("the target half", () => {
       if (cmd === "adopt_done") arrivals = [];
       return host(cmd, args);
     });
-    const fire = vi.fn();
-    const stopWatch = watchUnattendedRings({ sink: "speech", subscribe: () => () => {}, enabled: () => true, delayMs: () => 0, fire });
-    arrivals = [payload({
-      terminals: { "pane-a": { serialized: "", alertDelivery: { speech: { episodeId: episode.id, dueAt: 0, phase: "pending" } } } },
-    } as Partial<WorkspaceTransferPayload>)];
-    try {
-      // No Wall handle: React never mounted the arrival before the refusal.
-      initWorkspaceMoves(platform);
-      await settle();
-      await settle();
-      expect(mocks.invoke).toHaveBeenCalledWith("adopt_done", { workspaceId: WORKSPACE_ID });
-      expect(getActivitySnapshot().has("pane-a")).toBe(false);
-      expect(isAlertDeliveryPaused("pane-a")).toBe(false);
-      expect(getAlertDeliveryReceipts("speech").has("pane-a")).toBe(false);
-      // The ring is the source's again, still live in the sidecar.
-      expect(kill).not.toHaveBeenCalled();
-      await settle();
-      expect(fire).not.toHaveBeenCalled();
-    } finally {
-      stopWatch();
-    }
+    arrivals = [payload({ terminals: { "pane-a": { serialized: "" } } } as Partial<WorkspaceTransferPayload>)];
+    // No Wall handle: React never mounted the arrival before the refusal.
+    initWorkspaceMoves(platform);
+    await settle();
+    await settle();
+    expect(mocks.invoke).toHaveBeenCalledWith("adopt_done", { workspaceId: WORKSPACE_ID });
+    expect(getActivitySnapshot().has("pane-a")).toBe(false);
+    // The ring is the source's again, still live in the sidecar.
+    expect(kill).not.toHaveBeenCalled();
   });
 
   it("closes the window when its last Workspace leaves, instead of emptying it", async () => {

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAlertHost, type AlertHost, type AlertRealm } from './alert-host';
 import type { AlertAwaitResult } from './alert-protocol';
+import type { AlertDelivery } from '../lib/alert-delivery-scheduler';
 import { DEFAULT_ALERT_SETTINGS } from '../lib/alert-settings-model';
 import { REPORT } from '../lib/alert-manager-test-utils';
 
@@ -18,6 +19,7 @@ let answers: Array<{ realm: string } & AlertAwaitResult>;
 let resent: string[];
 let watched: string[][];
 let settings: Array<Record<string, unknown>>;
+let delivered: AlertDelivery[];
 
 function realmFor(name: string): AlertRealm {
   return {
@@ -30,7 +32,8 @@ function realmFor(name: string): AlertRealm {
 const from = (name: string, command: unknown) => host.handle(name, command, realmFor(name));
 
 beforeEach(() => {
-  host = createAlertHost();
+  delivered = [];
+  host = createAlertHost({ deliver: (delivery) => void delivered.push(delivery) });
   answers = [];
   resent = [];
   watched = [];
@@ -210,6 +213,56 @@ describe('realms', () => {
     expect(host.manager.viewerIds()).toEqual(['main']);
     host.manager.notifyFromProtocol('pty-b', REPORT);
     expect(host.manager.getState('pty-b').status).toBe('ALERT_RINGING');
+  });
+});
+
+/**
+ * The scheduler runs in the host so that no realm's end can lose or repeat a
+ * delivery (`docs/specs/alert.md` -> Alarm settings).
+ */
+describe('delivery', () => {
+  const SPEECH_OFF = { ...DEFAULT_ALERT_SETTINGS, speakEnabled: false, speakDelayMs: 5_000 };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    from('main', { op: 'initializeSettings', settings: SPEECH_OFF });
+  });
+
+  it('takes each realm\'s published overrides over the settings the host holds', () => {
+    from('main', { op: 'deliveryPolicy', overrides: { 'pty-1': { speakEnabled: true } } });
+    host.manager.notifyFromProtocol('pty-1', REPORT);
+    host.manager.notifyFromProtocol('pty-2', REPORT);
+    vi.advanceTimersByTime(5_000);
+    expect(delivered).toEqual([{ sink: 'speech', id: 'pty-1', episodeId: host.manager.getState('pty-1').episode!.id }]);
+  });
+
+  it('delivers once across its realm\'s reload, whose overrides outlive the gap', () => {
+    from('main', { op: 'deliveryPolicy', overrides: { 'pty-1': { speakEnabled: true } } });
+    host.manager.notifyFromProtocol('pty-1', REPORT);
+    vi.advanceTimersByTime(4_000);
+    // The reload: the old realm ends, and the new one publishes after the deadline.
+    from('main', { op: 'hello' });
+    vi.advanceTimersByTime(2_000);
+    from('main', { op: 'deliveryPolicy', overrides: { 'pty-1': { speakEnabled: true } } });
+    vi.advanceTimersByTime(60_000);
+    expect(delivered.map((delivery) => delivery.sink)).toEqual(['speech']);
+  });
+
+  it('rechecks pending work when the settings change', () => {
+    from('main', { op: 'updateSettings', settings: { ...SPEECH_OFF, speakEnabled: true } });
+    host.manager.notifyFromProtocol('pty-1', REPORT);
+    from('main', { op: 'updateSettings', settings: SPEECH_OFF });
+    from('main', { op: 'updateSettings', settings: { ...SPEECH_OFF, speakEnabled: true } });
+    vi.advanceTimersByTime(60_000);
+    expect(delivered).toEqual([]);
+  });
+
+  it('leaves nothing pending once disposed', () => {
+    from('main', { op: 'updateSettings', settings: { ...SPEECH_OFF, speakEnabled: true } });
+    host.manager.notifyFromProtocol('pty-1', REPORT);
+    host.dispose();
+    expect(vi.getTimerCount()).toBe(0);
+    host = createAlertHost({ deliver: () => {} });
   });
 });
 

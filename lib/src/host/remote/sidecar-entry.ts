@@ -430,10 +430,11 @@ const isString = (value: unknown): value is string => typeof value === 'string';
  */
 export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
   const { send, mgr } = options;
-  const alertHost = createAlertHost();
+  const sendAlert = <E extends keyof AlertEvents>(event: E, data: AlertEvents[E]) => send(event, data);
+  // A delivery names its Session, so Rust routes it to the window showing it.
+  const alertHost = createAlertHost({ deliver: (delivery) => sendAlert('alert:deliver', delivery) });
   const alerts = alertHost.manager;
 
-  const sendAlert = <E extends keyof AlertEvents>(event: E, data: AlertEvents[E]) => send(event, data);
   const publishState = (id: string, state: AlertState) => sendAlert('alert:state', { id, ...state });
   const stops = [
     alertHost.watched.subscribe((names) => sendAlert('alert:watchedCommands', { names })),

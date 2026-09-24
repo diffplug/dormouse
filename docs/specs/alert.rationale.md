@@ -120,9 +120,9 @@
 
 **Why the settings ride the WATCHING rule set's seed/broadcast shape.** Each VS Code webview has its own origin and therefore its own `localStorage`, while the `AlertManager` is shared; without a host-authoritative copy, two webviews would each believe their own blob. The one difference is the whole-blob relay: an alarm setting is not a set of independent keys the way a rule list is.
 
-**Why both sinks share one ring machine.** "Fresh unattended ring, re-checked after the delay, once per ring, never on first observation" is a small pile of rules subtle enough to drift if speech and push each carried a copy.
+**Why the host schedules delivery.** Each renderer used to run its own watcher over its activity mirror, and every realm boundary cost an alarm (audit, 2026-09-23). A recreated VS Code webview saw a latched ring go quiet-then-ringing and fired it at once, while one still inside its delay was first-observed in the new realm, seeded consumed, and never delivered; a disposed view whose PTYs lived on delivered nothing; standalone's WKWebView throttles or suspends timers when hidden; and a Workspace transfer had to carry, pause and resume receipts. The host sees every episode from its start and outlives every renderer, so first-observation seeding and receipt transfer went away. Only speaking and naming the Pane need a renderer.
 
-**Why a first-observation ring never fires.** A restore or a reconnect replays a latched ring, and a persisted session blob can carry one from days ago. Treating that as fresh would buzz the paired phone at every launch.
+**Why presence gates delivery.** The watcher rechecked only the episode and the setting, so a push went out while the user typed in the next pane, and speech named the pane they were reading (audit, 2026-09-23). Speech is heard in the room, so it only has to spare the pane being looked at; a push reaches a phone, so it waits until the user has left every viewer.
 
 ## Spoken alarms
 
@@ -144,7 +144,7 @@ Guarding only completion leaves a stale `start` free to replace the active utter
 
 ## Push notifications
 
-**Why both halves live under `remote/burrow/`.** The sink rides the lazily-imported `RemotePairingModalHost` chunk; the shared ring machine and the device store stay in the common bundle instead, since speech and the settings dialog need them everywhere.
+**Why the device list lives under `remote/burrow/`.** It rides the lazily-imported `RemotePairingModalHost` chunk. Performing a push is one Burrow command beside speech in the common bundle, and the device store stays common too, since the settings dialog needs it everywhere.
 
 **Why `toPushText` is not `toSpokenText`.** The angle-bracket rule exists only because WebKit's synthesizer wedges on them (Spoken alarms); an OS notification has no such failure, and instead has bidi and zero-width formatting that can visually reorder or hide text.
 
@@ -172,7 +172,7 @@ Guarding only completion leaves a stale `start` free to replace the active utter
 
 ## Live Workspace transfer
 
-Nothing moves because the manager left the standalone windows for the host process (`docs/specs/standalone.rationale.md` → Alerts). Per-sink receipts still travel because ring delivery is still scheduled in the renderer. Receipt consumption occurs at sink admission because there is no transactional acknowledgement tying audible sound or phone display to Workspace ownership (2026-09).
+Nothing moves because the manager and the delivery scheduler left the standalone windows for the host process (`docs/specs/standalone.rationale.md` → Alerts; Alarm settings). Until the scheduler moved, per-sink receipts travelled in the transfer payload, paused on the source and resumed on the target's `adopt_done`, and a refused arrival had to drop its Activity copy before releasing that pause or its watcher re-armed on a Workspace the window never owned (2026-09).
 
 ## Workspace union
 

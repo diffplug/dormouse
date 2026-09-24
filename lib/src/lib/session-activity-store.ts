@@ -67,7 +67,7 @@ export function getLivePersistedAlertState(id: string): PersistedAlertState | nu
 export function setTerminalActivity(id: string, state: Partial<AlertState>): void {
   const previous = terminalActivity.get(id);
   // Older hosts and local fixtures have no episode field. Hydrate their status
-  // edges here; consumers still seed first-observed rings without delivery.
+  // edges here, so the ring burst still keys on one.
   const episode = state.status === 'ALERT_RINGING'
     ? state.episode ?? (previous?.status === 'ALERT_RINGING' ? previous.episode : null) ?? createAlertEpisode()
     : null;

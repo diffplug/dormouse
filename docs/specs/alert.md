@@ -279,16 +279,14 @@ Source of truth: `raiseRing` / `withdrawRingSource` / `clearRingForUser` in `lib
 
 ## Live Workspace transfer
 
-**A Session's alert state never moves**: the host's one manager holds it (`docs/specs/standalone.md` → Alerts), and a transfer moves only where its `alert:state` is routed — the source until the mark, then the target, whose collection is answered with every listed Session's state (rationale).
+**A Session's alert state never moves**: the host's one manager and its delivery scheduler hold it (`docs/specs/standalone.md` → Alerts), and a transfer moves only where its `alert:state` and `alert:deliver` are routed — the source until the mark, then the target, whose collection is answered with every listed Session's state (rationale).
 
 - **Never spawn or kill over a departure, a refused arrival, or a hand-back**: a spawn starts the host's entry over and a kill or reap removes it, and releasing a Session is neither. Pinned by `never spawns or kills over an arrival's live Sessions` in `standalone/src/workspace-move.test.ts`.
 - **A replay never feeds the manager**, whose host parse already did.
-- **Awaits survive a transfer**; a seen command stays seen, so it arrives armed; the destination's viewers establish their own engagement.
-- **Must suspend the source's alarm delivery before handing ownership to the host**, and **must await host hand-back when source content capture fails**, holding that suspension until routing returns. The destination restores receipts before its collection, and enables delivery only after `adopt_done` succeeds; refusal resumes the source's. Transaction order is `docs/specs/standalone.md` → "Arrival queue".
-- **Must discard this window's Activity and pane state before releasing the delivery guards on any target failure**, mount or no mount, so a watcher never re-arms on a Workspace this window never owned. A receipt forgotten on an episode already observed is consumed, never fresh.
-- **Must carry per-sink receipts with the episode:** pending/queued work retains its original deadline; engine-admitted speech and dispatched push are consumed and never replayed. Suspending cuts current speech; a partially heard utterance is not restarted after a move or refusal.
+- **Awaits and pending deliveries survive a transfer**; a seen command stays seen, so it arrives armed; the destination's viewers establish their own engagement, and its Wall publishes the Workspace's overrides (Alarm settings).
+- **Must discard this window's Activity copy on any target failure**, mount or no mount: the source goes on showing the Session. Pinned by `discards this window's copy of the alert state when adopt_done is refused before the Wall mounts` in `standalone/src/workspace-move.test.ts`.
 
-Source of truth: `teardownSession` in `lib/src/lib/terminal-lifecycle.ts`; `snapshotAlertDelivery` / `restoreAlertDelivery` in `lib/src/lib/alert-delivery-state.ts`; `planArrival` / `discardArrival` in `standalone/src/workspace-move.ts`. Pinned by `lib/src/lib/terminal-lifecycle.release.test.ts`, `lib/src/lib/alert-delivery-policy.test.ts`, and `standalone/src/workspace-move.test.ts`.
+Source of truth: `teardownSession` in `lib/src/lib/terminal-lifecycle.ts`; `planArrival` / `discardArrival` in `standalone/src/workspace-move.ts`. Pinned by `lib/src/lib/terminal-lifecycle.release.test.ts` and `standalone/src/workspace-move.test.ts`.
 
 ## Alarm settings
 
@@ -314,25 +312,27 @@ Rules:
 
 **Must persist overrides in the Workspace's `PersistedSession.alertDelivery` in both hosts**, preserving them through rename, reorder, save, and live move. Reset removes overrides, restoring inheritance. A pane resolves its current parent Workspace; a pane without membership uses application defaults.
 
-Both sinks use `watchUnattendedRings`:
+**The host decides when to deliver, in `createAlertHost` beside the manager; the realm showing the Session performs it** (rationale):
 
-- **Must deliver at most once per sink per episode**, independently per Session, with a deadline fixed when the fresh episode is observed.
-- **Must recheck episode identity and effective policy before delivery.** Disabling consumes pending work immediately, suspended for a move included; enabling never replays the same episode. Delay edits do not move existing deadlines; speech reads the current voice at engine admission.
-- **Must seed first-observed ringing snapshots silently**, except explicitly transferred pending receipts (Live Workspace transfer). Receipts outlive a watcher; a restarting watcher prunes those of Sessions that left unpaused.
+- **Must deliver at most once per sink per episode**, independently per Session, due at the episode's start plus the Session's delay; a source joining the episode delivers nothing, and the ring clearing consumes what it had pending.
+- **Must recheck at the deadline, and consume a deadline that fails, never retrying it**: the sink still on; **speech only while the Session is not engaged** (Engagement); **push only while no viewer is present** (rationale).
+- **Disabling consumes pending work immediately; enabling never replays an episode**, one that began disabled included. Delay edits do not move existing deadlines; speech reads the current voice at engine admission.
+- **Each realm publishes every Session it shows with its Workspace's overrides** (`deliveryPolicy`) on each membership or override change. The host revalidates them, resolves them over its settings, and keeps each Session's last publisher's; an unpublished Session uses the defaults. **A realm's end keeps a live Session's overrides**, so a reload or a disposed VS Code view loses none.
+- **Must hand a due delivery to the realm showing its Session** as `alert:deliver { sink, id, episodeId }`, which speaks or pushes the Pane label (below). **With no such realm — a disposed VS Code view whose PTYs live on — the host pushes, titled by the Session's running or last command, and skips speech** (`docs/specs/vscode.md` → Workspaces); standalone reaps a PTY no window owns.
 
-Source of truth: `normalizeAlertDeliveryOverrides` / `resolveAlertDeliveryPolicy` in `lib/src/lib/alert-delivery-model.ts`; `getSessionAlertPolicy` in `lib/src/lib/alert-delivery-policy.ts`; `setWorkspaceAlertDelivery` in `lib/src/lib/workspace-store.ts`. Pinned by `lib/src/lib/alert-delivery-policy.test.ts`.
+Source of truth: `normalizeAlertDeliveryOverrides` / `resolveAlertDeliveryPolicy` in `lib/src/lib/alert-delivery-model.ts`; `createAlertDeliveryScheduler` in `lib/src/lib/alert-delivery-scheduler.ts`; `startAlertDelivery` in `lib/src/lib/alert-delivery.ts`; `getSessionAlertPolicy` / `collectDeliveryOverrides` in `lib/src/lib/alert-delivery-policy.ts`; `setWorkspaceAlertDelivery` in `lib/src/lib/workspace-store.ts`. Pinned by `lib/src/lib/alert-delivery-scheduler.test.ts`, `lib/src/lib/alert-delivery.test.ts`, and `delivery` in `lib/src/host/alert-host.test.ts`.
 
 | Contract | Speech | Push |
 |---|---|---|
-| Gate | Desktop shell, after `speakDelayMs`; a missing backend is a silent no-op. | Desktop shell with an enrolled Burrow, after `pushDelayMs`. |
+| Gate | After `speakDelayMs`, the Session not engaged; a missing backend is a silent no-op. | After `pushDelayMs`, no viewer present; sent only by an enrolled Burrow. |
 | Payload | Pane label via `toSpokenText`; fallback `terminal`. | Same label via `toPushText`, plus a fixed body; fallback `terminal`. |
 | Never payload | The ringing `ActivityNotification`. | The ringing `ActivityNotification`. |
-| Delivery identity | Episode receipt plus native attempt identity; renderer-local `speaking` / `spoken`. | HTTP push tagged by Session id, so a newer ring replaces the prior notification. |
+| Delivery identity | The host's episode receipt plus native attempt identity; renderer-local `speaking` / `spoken`. | HTTP push tagged by Session id, so a newer ring replaces the prior notification. |
 | After delivery | Clearing the ring cuts off speech. | **Never recall** — another push would only replace one stale notice with another. |
 | Failure | A refused or unavailable engine produces no marker. | Warn on non-2xx, partial, or zero delivery; **never retry** stale alarms. |
 | Authority | The renderer invokes `window.speechSynthesis`. | The webview names Session/title; the Burrow selects active ACL devices, the Relay intersects subscriptions. |
 
-Source of truth: `AlertSettings` in `lib/src/lib/alert-settings.ts` (renderer mirror, persisted at `dormouse:alert-settings`); `lib/src/lib/alert-settings-host.ts`; `watchUnattendedRings` in `lib/src/lib/alert-ring-watch.ts`.
+Source of truth: `AlertSettings` in `lib/src/lib/alert-settings.ts` (renderer mirror, persisted at `dormouse:alert-settings`); `lib/src/lib/alert-settings-host.ts`.
 
 ### Spoken alarms
 
@@ -341,22 +341,22 @@ Source of truth: `AlertSettings` in `lib/src/lib/alert-settings.ts` (renderer mi
 - **Delivery state follows actual engine callbacks, not queue admission.** `AlertSpeechState` is a renderer-local `speaking | spoken` map keyed by Session: `start` publishes `speaking`; `end`, or `error` after a real start, publishes `spoken`; an utterance that never starts publishes neither. **Must check delivery identity before accepting `start` or completion**, including after cancellation, timeout, or teardown. Pinned by `ignores an older ring starting after a newer ring has begun speaking` and `recovers from a callback-less engine without accepting its later callbacks` in `lib/src/lib/alert-speech.test.ts`.
 - **Nothing in the settle path may assume the callback arrives after `speak()` returns** — an engine may dispatch `start` then `end`/`error` *synchronously* inside `speechSynthesis.speak()` (rationale). Handlers therefore close over the utterance itself and registration happens before dispatch. A dispatch the engine refuses outright settles too.
 - **Clearing the ring mid-sentence cuts the utterance off** — silence the engine, not merely un-render the overlay. "Mid-sentence" is the sink's own record that an utterance started — its generation token — never the rendered `speaking` state.
-- **Must admit only one utterance at a time to Web Speech per renderer**, Settings tests included, and **must remove resolved, disabled, or suspended pending jobs before engine admission** without cutting another pane's current utterance. Pinned by `never admits a resolved queued alarm to the speech engine` in `lib/src/lib/alert-speech.test.ts`.
+- **Must admit only one utterance at a time to Web Speech per renderer**, Settings tests included, and **must remove resolved or disabled pending jobs before engine admission**, a delivery that crossed either included, without cutting another pane's current utterance. Pinned by `never admits a resolved queued alarm to the speech engine` in `lib/src/lib/alert-speech.test.ts`.
 - **Must bound pending jobs and cancel a stalled engine attempt**, advancing the queue and revoking callback identity before every cancel, and **never retry a failed, expired, or overflowed delivery**. Teardown cancels the current engine utterance and drops pending jobs. The bound, the timeout, and the revocation mechanism live at `SpeechQueue`.
 - `speaking` / `spoken` remains only while the originating Session is still `ALERT_RINGING`: any action that resolves the ring (Clearing And TODO) clears it, killing the Session included, while visibility, hover, and command-mode selection do not. **Never persist it or send it to the host**, so restore/reconnect cannot recreate it.
 
-Source of truth: `toSpokenText` in `lib/src/lib/alert-speech.ts`, armed by `lib/src/components/wall/use-alert-speech.ts`; `SpeechQueue` in `lib/src/lib/speech-queue.ts`; `redactHighEntropyTokens` in `lib/src/lib/redact-high-entropy.ts`; label derivation in `lib/src/lib/session-label.ts`; `AlertSpeechState` in `lib/src/lib/alert-speech-state.ts`.
+Source of truth: `toSpokenText` / `startAlertSpeech` in `lib/src/lib/alert-speech.ts`, armed by `lib/src/components/wall/use-alert-delivery.ts`; `SpeechQueue` in `lib/src/lib/speech-queue.ts`; `redactHighEntropyTokens` in `lib/src/lib/redact-high-entropy.ts`; label derivation in `lib/src/lib/session-label.ts`; `AlertSpeechState` in `lib/src/lib/alert-speech-state.ts`.
 
 ### Push notifications
 
-**The two halves run in different processes.** Ring *detection* is webview state, so `watchPushRings` stays in the webview and fires one `push { sessionId, title }` command at the Burrow service. *Delivery* needs the enrollment and the ACL, which only the Burrow holds, so `sendPush` runs in the service's process and touches no DOM or store. **A webview cannot choose recipients:** it names the Session and what to call it; the service reads its own active ACL at send time. **Arm watching only while the service reports an enrollment** (`enrolled-gate.ts`), so an un-enrolled machine pays no activity-store subscription; a `push` arriving with no Burrow running is not sent. **Keep both halves under `remote/burrow/`**, inside the lazily-imported `RemotePairingModalHost` chunk, so a host without `enableBurrow` never fetches it (rationale).
+**A due push is one `push { sessionId, title }` command from the realm showing the Session to the Burrow service**, titled by the Pane label; *sending* needs the enrollment and the ACL, which only the Burrow holds, so `sendPush` runs in the service's process and touches no DOM or store. **A webview cannot choose recipients:** it names the Session and what to call it; the service reads its own active ACL at send time. A `push` arriving with no Burrow running is not sent. **Keep the device list under `remote/burrow/`**, inside the lazily-imported `RemotePairingModalHost` chunk, so a host without `enableBurrow` never fetches it (rationale).
 
 - **The label is sanitized by `toPushText` at send time, in the delivery half, and not by `toSpokenText`'s rule** (rationale). It keeps angle brackets and instead strips control characters and the Unicode bidi and zero-width format characters (including the Arabic letter mark); the cap counts code points, so a cut never ships half a surrogate pair. `toPushText` is only this sink's limit and fallback over `boundedPushText` in `remote-lib-common/src/security/push.ts`.
 - **The Burrow bounds, then seals; the worker re-bounds at the render sink.** Title, body, and tag are sealed to each recipient's own Client static and the Relay forwards ciphertext, so the second pass runs in `lib/src/remote/pocket-app/sw.ts`, which imports the *same* `boundedPushText` rather than mirroring it (`docs/specs/remote-security-model.md` -> Push sealing).
 - **The Burrow names its targets; the Relay rejects a send that does not.** Targets are the Burrow's *active* ACL records, read at send time so a revocation during the delay takes effect, and the Relay intersects them with its own subscriptions (rationale). **One sealed envelope per recipient** — a Client static is not a group key — so a send names each `deliveryId` beside the ciphertext only that phone can open, **clamped to `MAX_PUSH_QUERY_DELIVERY_IDS`** because the route refuses the whole POST past it. The Burrow does **not** ask which devices are subscribed first (rationale).
 - **The settings dialog re-reads the device list when it opens; the transient preview never refreshes.** The list is the Burrow's join of the Relay's subscriptions against its own ACL labels. **A disarmed enrolled gate invalidates every in-flight refresh and clears the list**, so nothing already on the wire can repopulate the dialog with phones there is no longer anything to push to.
 
-Source of truth: `watchPushRings` / `invalidatePushDeviceRefreshes` in `lib/src/remote/burrow/alert-push.ts`; `sendPush` / `toPushText` in `lib/src/remote/burrow/push-delivery.ts`; `refreshPushDevicesNow` / `clearPushDevices` / `resetPushDevices` in `lib/src/lib/push-devices.ts`.
+Source of truth: `commitPushDevices` / `invalidatePushDeviceRefreshes` in `lib/src/remote/burrow/alert-push.ts`; `sendPush` / `toPushText` in `lib/src/remote/burrow/push-delivery.ts`; `refreshPushDevicesNow` / `clearPushDevices` / `resetPushDevices` in `lib/src/lib/push-devices.ts`.
 
 ### Settings dialog
 
@@ -365,6 +365,7 @@ Reached from the baseboard sliders; `docs/specs/layout.md` owns placement. The a
 - **Must toggle only the clicked baseboard alarm setting**, as an override for that Workspace, showing the effective value. Components without a Workspace scope edit application defaults. **Must show its shared settings section for 2 seconds, then fade for 250ms**, anchored to the button and bounded by the viewport. The preview is inert, announces the resulting state, preserves keyboard focus and command dispatch, and omits test actions. Each click replaces the preview and restarts its lifetime; opening Settings or unmounting clears it. Reduced motion skips the fade. Pinned by `Baseboard.test.tsx`.
 - Lists every watched command with a remove control, and **cannot add one** — WATCHING is keyed on a running command's watch key, so creating a rule stays the terminal context of a Pane running it, and the empty state says so. **It is the only place a rule set on a since-closed Pane can be removed**, the terminal context reaching only the command its own Pane is running.
 - The watcher group carries the **Defer alerts until animation stops** switch and explains that a fully armed watcher delays terminal notifications and withdraws a ring once watched work resumes.
+- Each sink's switch names its gate: not looking at that pane, or away from Dormouse.
 - **Delays are committed on blur or `Enter`, never per keystroke** — typing `3` on the way to `30` must not briefly install a 3-second timer. They are shown in seconds; an out-of-range or empty entry snaps back to whatever the store clamped it to.
 - **The push group's device line names every device a push would reach**, and otherwise says why there is none — no Burrow enrolled, nothing subscribed yet, or the server could not be asked (rationale).
 - **Must separate application defaults from this Workspace’s overrides** and offer per-field inheritance plus reset-all. The local voice picker follows engine voice availability. Pinned by `lib/src/components/WorkspaceAlarmSettings.test.tsx`.

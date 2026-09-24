@@ -10,24 +10,25 @@ function sessionWorkspaceId(sessionId: string): string | null {
   return null;
 }
 
-const incoming = new Map<string, AlertDeliveryOverrides>();
-/** Policy during the interval before the arriving Workspace mounts. */
-export function setIncomingAlertPolicy(ids: readonly string[], overrides?: AlertDeliveryOverrides): void {
-  for (const id of ids) {
-    if (overrides) incoming.set(id, overrides);
-    else incoming.delete(id);
-  }
-}
-
-/** Application defaults under the sparse overrides of the Session's Workspace
- *  (staged, else current); a Session with neither uses the defaults. */
+/** Application defaults under the sparse overrides of the Session's
+ *  Workspace; a Session with none uses the defaults. */
 export function getSessionAlertPolicy(sessionId: string): AlertDeliveryPolicy {
   const workspaceId = sessionWorkspaceId(sessionId);
-  const overrides = incoming.get(sessionId) ?? (workspaceId === null ? undefined : getWorkspace(workspaceId)?.alertDelivery);
-  return resolveAlertDeliveryPolicy(getAlertSettings(), overrides);
+  return resolveAlertDeliveryPolicy(getAlertSettings(), workspaceId === null ? undefined : getWorkspace(workspaceId)?.alertDelivery);
 }
 
 export function subscribeToAlertDeliveryPolicy(listener: () => void): () => void {
   const stops = [subscribeToAlertSettings(listener), subscribeToWorkspaces(listener), subscribeToWorkspaceSurfaces(listener)];
   return () => stops.forEach((stop) => stop());
+}
+
+/** Every member Surface of this realm's Workspaces, with its Workspace's
+ *  sparse overrides: what the host's delivery scheduler is told. */
+export function collectDeliveryOverrides(): Record<string, AlertDeliveryOverrides> {
+  const overrides: Record<string, AlertDeliveryOverrides> = {};
+  for (const [workspaceId, ids] of getWorkspaceSurfacesSnapshot()) {
+    const workspace = getWorkspace(workspaceId)?.alertDelivery ?? {};
+    for (const id of ids) overrides[id] = workspace;
+  }
+  return overrides;
 }

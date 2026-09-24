@@ -639,7 +639,7 @@ export class BurrowService {
   /**
    * Tell the webviews whether there is a Burrow at all. Everything they do *for*
    * one — announcing that the directory may have changed on every pane-state,
-   * activity, and focus change, watching for unattended rings — costs a
+   * activity, and focus change — costs a
    * crossing per event on a machine that may never enroll, so they arm on this
    * and idle without it (`lib/src/remote/burrow/enrolled-gate.ts`).
    *

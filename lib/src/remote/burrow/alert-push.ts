@@ -1,24 +1,16 @@
-import { markAlertConsumed } from '../../lib/alert-delivery-state';
 /**
- * Push notifications for unattended alarms (`docs/specs/alert.md` -> Push
- * notifications). When a Session rings and stays unattended for `pushDelayMs`,
- * send that Pane's name to the paired phones.
+ * The push device list the Settings dialog names (`docs/specs/alert.md` ->
+ * Settings dialog): each refresh fenced so a stale answer never overwrites a
+ * newer one, or a Burrow that went away. When a ring is pushed is the host's
+ * delivery scheduler's (`lib/src/lib/alert-delivery-scheduler.ts`); the Relay
+ * calls are `push-delivery.ts`, which a Node-resident Burrow runs.
  *
- * The ring detection, delay, and cancellation rules are shared with spoken
- * alarms (`lib/src/lib/alert-ring-watch.ts`); this module is the webview half of
- * the push sink — the watch, the pane label, and the settings dialog's device
- * list. The Relay calls themselves are in `push-delivery.ts`, which a
- * Node-resident Burrow runs without any of this.
- *
- * It lives under `remote/burrow/` rather than `lib/` because it is only meaningful
- * with a Burrow behind it, and because that keeps it inside the lazily-imported
- * `RemotePairingModalHost` chunk — so a host that never sets `enableBurrow`
- * never fetches it.
+ * It lives under `remote/burrow/` rather than `lib/` because it is only
+ * meaningful with a Burrow behind it, and because that keeps it inside the
+ * lazily-imported `RemotePairingModalHost` chunk — so a host that never sets
+ * `enableBurrow` never fetches it.
  */
 
-import { getSessionAlertPolicy, subscribeToAlertDeliveryPolicy } from '../../lib/alert-delivery-policy';
-import { watchUnattendedRings } from '../../lib/alert-ring-watch';
-import { deriveSessionLabel } from '../../lib/session-label';
 import { setPushDevices, type PushDevice, type PushDevicesState } from '../../lib/push-devices';
 
 let pushDevicesRefreshSequence = 0;
@@ -65,23 +57,4 @@ export async function commitPushDevices(
  */
 export function invalidatePushDeviceRefreshes(): void {
   pushDevicesRefreshSequence += 1;
-}
-
-/**
- * Watch the activity store for fresh rings and hand the unattended ones to
- * `fire`, with the Session's display label already derived. Returns a disposer
- * that cancels everything pending.
- *
- * The label is derived here, in the webview, because that is where the pane
- * stores are — a Burrow in another process is told what the Session is called
- * rather than guessing (`push-delivery.ts`).
- */
-export function watchPushRings(fire: (sessionId: string, title: string) => void): () => void {
-  return watchUnattendedRings({
-    sink: 'push',
-    enabled: (id) => getSessionAlertPolicy(id).pushEnabled,
-    delayMs: (id) => getSessionAlertPolicy(id).pushDelayMs,
-    subscribe: subscribeToAlertDeliveryPolicy,
-    fire: (id, episode) => { markAlertConsumed('push', id, episode.id); fire(id, deriveSessionLabel(id)); },
-  });
 }

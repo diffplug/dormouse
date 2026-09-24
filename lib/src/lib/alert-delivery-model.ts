@@ -1,5 +1,9 @@
 import { clampAlertDelayMs, type AlertSettings } from './alert-settings-model';
 
+/** The two alarm sinks (`docs/specs/alert.md` -> Alarm settings). */
+export type AlertSink = 'speech' | 'push';
+export const ALERT_SINKS: readonly AlertSink[] = ['speech', 'push'];
+
 /** Missing fields inherit the application default; null voice selects the system voice. */
 export type AlertDeliveryOverrides = Partial<Pick<AlertSettings, 'speakEnabled' | 'speakDelayMs' | 'pushEnabled' | 'pushDelayMs'>> & {
   /** A local engine voice URI; the engine default when missing or unavailable. */
@@ -29,4 +33,14 @@ export function resolveAlertDeliveryPolicy(defaults: AlertSettings, overrides: A
     speakVoice: null, pushEnabled: defaults.pushEnabled, pushDelayMs: defaults.pushDelayMs,
     ...overrides,
   };
+}
+
+/** Whether `policy` turns `sink` on. */
+export function sinkEnabled(policy: AlertDeliveryPolicy, sink: AlertSink): boolean {
+  return sink === 'speech' ? policy.speakEnabled : policy.pushEnabled;
+}
+
+/** How long after an episode starts `policy` delivers to `sink`. */
+export function sinkDelayMs(policy: AlertDeliveryPolicy, sink: AlertSink): number {
+  return sink === 'speech' ? policy.speakDelayMs : policy.pushDelayMs;
 }
