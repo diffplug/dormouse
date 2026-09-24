@@ -45,6 +45,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   usePaneChrome(id, elRef);
 
   const session = params?.session;
+  const launchSession = params?.launchSession;
   const wsPort = params?.wsPort;
   const binaryPath = params?.binaryPath;
   const url = params?.url;
@@ -99,8 +100,8 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   // one only for Playwright, whose native `open` can change headedness outside
   // Dormouse (`followParamsHeadedness`).
   useEffect(() => {
-    controller.updateParams({ session, wsPort, binaryPath, url, syncEngaged, key, cwd, renderMode: seededMode });
-  }, [controller, session, wsPort, binaryPath, url, syncEngaged, key, cwd, seededMode]);
+    controller.updateParams({ session, launchSession, wsPort, binaryPath, url, syncEngaged, key, cwd, renderMode: seededMode });
+  }, [controller, session, launchSession, wsPort, binaryPath, url, syncEngaged, key, cwd, seededMode]);
 
   // Lend the controller this view's live DOM bindings. Last attach wins; the
   // detach is identity-guarded inside the controller so a stale StrictMode
@@ -323,20 +324,24 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
 
   // The browser is on its way — a launch, an attach, or a relaunch whose new
   // stream is not yet known — not a session that ended.
-  const opening = phase === 'unbound' || phase === 'attaching' || phase === 'relaunching';
+  const opening = phase === 'idle' || phase === 'launching' || phase === 'attaching' || phase === 'relaunching';
   const placeholder = (() => {
-    // Session-less: the pane context menu's eager connect pane, on screen before
-    // the daemon boots (docs/specs/dor-browser.md → Pane Context Menu Connect).
-    // It is mid-boot, not idle — telling the user to run `dor ab open` here would
-    // ask them to redo the click they just made.
-    if (phase === 'unbound') return 'Connecting to browser session…';
+    // Mid-launch: the pane is on screen before its browser is up. It is
+    // mid-boot, not idle — telling the user to run `dor ab open` here would ask
+    // them to redo the click they just made.
+    if (phase === 'launching') return 'Opening the browser…';
     // Mid pop-in: the headed browser is closed by design and the headless one
     // is booting — not a session that ended.
     if (phase === 'relaunching') return 'Relaunching browser…';
     // Addressed to this pane: a bare `dor ab open` drives the caller's default
     // key, which for a keyed or GUI-launched pane is some other browser.
     const command = `${cli} --surface ${actions.resolveSurfaceRef(id)} open <url>`;
-    if (phase === 'ended' && error) return `The browser could not be opened (${error}) — run ${command} to retry, or close this surface.`;
+    // A pane whose launch never named a session has no browser to drive yet.
+    if (phase === 'ended' && error) {
+      return session
+        ? `The browser could not be opened (${error}) — run ${command} to retry, or close this surface.`
+        : `The browser could not be opened (${error}).`;
+    }
     if (phase === 'ended' || connectionLost || status?.connected === false) {
       return `The browser session ended — run ${command} to restart it, or close this surface.`;
     }
@@ -405,9 +410,9 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
         />
         {poppedOut && phase !== 'ended' ? (
           // Popped out to a headed OS window — the pane is a clean stub. While
-          // the window is still being opened (a relaunch in flight, or an eager
-          // swap whose daemon has not yet named its session) there is nothing to
-          // pop back in, so the affordance waits with it.
+          // the window is still being opened (a launch, attach or relaunch in
+          // flight) there is nothing to pop back in, so the affordance waits
+          // with it.
           <div className="flex flex-col items-center gap-3 px-4 text-center text-sm text-muted">
             <div>{opening ? 'Opening the browser window…' : 'This browser is running in a separate window.'}</div>
             {!opening && <div className="flex gap-2 text-xs">

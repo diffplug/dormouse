@@ -7,6 +7,7 @@ import {
   leafMetaFromPersistedDoor,
   persistableLeafMeta,
   shouldParkOnMinimize,
+  toolLeafMeta,
 } from './lath-wall-engine';
 import type { PersistedDoor } from '../../lib/session-types';
 import { leaves } from '../../lib/lath/model';
@@ -71,6 +72,13 @@ describe('browser stream ports', () => {
     expect(engine.getMeta('b1')?.params?.wsPort).toBe(4321);
     expect(engine.serializeLayout()?.leafMeta.b1.params).toEqual(expected);
     expect(persistableLeafMeta({ component: 'browser', tabComponent: 'surface', title: 'Browser', params: browserParams }).params).toEqual(expected);
+  });
+
+  it('are dropped with the rest of a Tool\'s derived browser binding', () => {
+    expect(persistableLeafMeta(toolLeafMeta('Tool', {
+      surfaceType: 'tool', command: 'pnpm dev', url: 'http://localhost:6006/', renderMode: 'ab-screencast',
+      session: 'dormouse.1.tool.t', launchSession: 'dormouse.1.tool.t', wsPort: 4321,
+    })).params).toEqual({ surfaceType: 'tool', command: 'pnpm dev' });
   });
 
   it('are dropped from a blob saved before that rule, pane or Door', () => {

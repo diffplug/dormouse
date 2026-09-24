@@ -105,27 +105,33 @@ describe('port: announced', () => {
     expect(state.params.url).toBe('http://localhost:6006/second/view');
   });
 
-  it('defers Workspace transfer until reopening an existing browser has settled', async () => {
+  it('reopens an existing browser in its own session, deferring Workspace transfer until it binds', async () => {
     const { lath, state } = toolEngine({
       ...announced, toolRender: 'ab-screencast', renderMode: 'ab-screencast',
       session: 'existing-browser', wsPort: 9222, url: 'http://localhost:6006/', toolAnnouncedPort: 6006,
       binaryPath: '/opt/custom-agent-browser',
     });
-    const opened = Promise.withResolvers<{ exitCode: number; stdout: string; stderr: string }>();
-    const platform = Object.assign(new FakePtyAdapter(), {
-      getOpenPorts: vi.fn(async () => [tcp(6007)]),
-      agentBrowserCommand: vi.fn(() => opened.promise),
-    });
-    setPlatform(platform);
+    setPlatform(Object.assign(new FakePtyAdapter(), { getOpenPorts: vi.fn(async () => [tcp(6007)]) }));
     recordToolAnnounce('tool-1', { port: 6007, name: null, key: null, dehydrate: false, persist: null });
     const doorsRef = { current: [] };
     function Probe() { useToolServing({ lath, doorsRef }); return null; }
     await act(async () => root.render(<Probe />));
-    expect(state.params.url).toBe('http://localhost:6007/');
+
+    // The pane's controller opens the new destination in the session and binary
+    // it had, and binds the session once the browser is up.
+    expect(state.params).toMatchObject({ url: 'http://localhost:6007/', launchSession: 'existing-browser', binaryPath: '/opt/custom-agent-browser' });
+    expect(state.params.session).toBeUndefined();
+    expect(state.params.wsPort).toBeUndefined();
     expect(() => captureToolParams(lath, ['tool-1'])).toThrow('Wait for the Tool browser to connect');
-    await act(async () => opened.resolve({ exitCode: 0, stdout: '', stderr: '' }));
+    state.set({ session: 'existing-browser' });
     expect(captureToolParams(lath, ['tool-1'])['tool-1'].session).toBe('existing-browser');
-    expect(platform.agentBrowserCommand).toHaveBeenCalledExactlyOnceWith('existing-browser', ['open', 'http://localhost:6007/'], '/opt/custom-agent-browser');
+  });
+
+  it('launches a first browser in the Tool\'s own session', async () => {
+    recordToolAnnounce('tool-1', { port: 6006, name: null, key: null, dehydrate: false, persist: null });
+    const { state } = await run({ ...announced, toolRender: 'ab-screencast' }, [[tcp(6006)]]);
+    expect(state.params).toMatchObject({ url: 'http://localhost:6006/', renderMode: 'ab-screencast', launchSession: 'dormouse.1.tool.tool-1' });
+    expect(state.params.session).toBeUndefined();
   });
 
   it('frames nothing without an announcement, however many ports bind', async () => {

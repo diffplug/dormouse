@@ -16,7 +16,6 @@ import {
   toolKeysEqual,
   toolPortConflictFromParams,
 } from './browser-surface';
-import { attachAgentBrowserSession } from './tool-browser-session';
 import { listenerUrlsByPort } from './port-url';
 import { getToolAnnounce } from '../../lib/tool-announce-store';
 import { validToolServePath } from '../../lib/tool-announce';
@@ -135,6 +134,7 @@ export function useToolServing({
             toolAnnouncedPath: undefined,
             toolPortConflict: undefined,
             session: undefined,
+            launchSession: undefined,
             wsPort: undefined,
             renderMode: undefined,
             syncEngaged: undefined,
@@ -212,59 +212,35 @@ export function useToolServing({
           entry = entries[0];
         }
 
-        // Frame it, under whichever renderer the tool declared. Show the
-        // destination immediately even for `ab-screencast`: the panel's
-        // session-less branch renders `Connecting to browser session…` while
-        // the daemon boots, and cannot race it (see docs/specs/dor-browser.md
-        // -> Instant create). `toolFace` tests the conflict before the url, so
-        // a stale verdict would keep the conflict forward over the browser.
+        // Frame it, under whichever renderer the tool declared. `toolFace`
+        // tests the conflict before the url, so a stale verdict would keep the
+        // conflict forward over the browser.
+        //
+        // An agent-drivable tool needs a real browser behind it, bound to the
+        // tool's *own* Surface rather than a second one: a tool's browser is a
+        // param of its own leaf, which is what keeps its id stable while its
+        // capabilities come and go. Its controller launches it — reusing the
+        // session it had, which a changed destination just navigates — and
+        // binds the session once it is up; until then the pane shows the
+        // destination and Workspace transfer waits (docs/specs/dor-browser.md
+        // -> "Agent-Browser Connection").
         const agentDrivable = leaf.params.toolRender === 'ab-screencast';
         const url = new URL(announcedPath, entry.url).href;
         const session = typeof leaf.params.session === 'string' ? leaf.params.session : sessionForKey(`tool.${leaf.id}`);
-        const binaryPath = typeof leaf.params.binaryPath === 'string' ? leaf.params.binaryPath : undefined;
         lath.store.updateParams(leaf.id, {
           url,
           renderMode: agentDrivable ? 'ab-screencast' : 'iframe',
           toolPortConflict: undefined,
           toolAnnouncedPort: announcedPort ?? undefined,
           toolAnnouncedPath: announcedPort === null ? undefined : announcedPath,
-          // Reopening an existing browser is also an in-flight connection:
-          // withhold its binding until open settles so a Workspace move cannot
-          // capture the old stream while this webview still owns the launch.
-          ...(agentDrivable ? { session: undefined, wsPort: undefined } : {}),
+          ...(agentDrivable ? { session: undefined, wsPort: undefined, launchSession: session } : {}),
         });
-        if (!agentDrivable) continue;
-
-        // An agent-drivable tool needs a real browser behind it. Bind the
-        // session to the tool's *own* Surface rather than creating a second
-        // one: a tool's browser is a param of its own leaf, which is what keeps
-        // its id stable while its capabilities come and go.
-        await attachAgentBrowserSession({
-          url,
-          platform,
-          session,
-          surfaceId: leaf.id,
-          binaryPath,
-          refreshSurface: (id, patch) => {
-            if (!cancelled && getTerminalPaneState(id).currentCommand?.id === run.id) lath.store.updateParams(id, patch);
-          },
-        });
-        // The Surface can be killed while the daemon boots. Param writes no-op
-        // on a dead leaf, but the daemon would keep running with nothing bound
-        // to it and no teardown path — `closeAgentBrowserSession` reads a
-        // `session` param this leaf no longer has. Close it here instead
-        // (docs/specs/dor-tool.md -> Lifecycle: kill reaps the browser's
-        // resources).
-        if (cancelled || !lath.getMeta(leaf.id) || getTerminalPaneState(leaf.id).currentCommand?.id !== run.id) {
-          void platform.agentBrowserCommand?.(session, ['close'], binaryPath).catch(() => {});
-        }
       }
     };
 
-    // `getOpenPorts` shells out (lsof / PowerShell) and an agent-browser launch
-    // is seconds, either of which can outrun the interval. Without this guard a
-    // second tick re-enters a leaf whose `url` is not written yet and issues a
-    // duplicate `agent-browser open`.
+    // `getOpenPorts` shells out (lsof / PowerShell) and can outrun the
+    // interval. Without this guard a second tick re-enters a leaf whose `url`
+    // is not written yet and frames it twice.
     let ticking = false;
     const runTick = async () => {
       if (ticking) return;

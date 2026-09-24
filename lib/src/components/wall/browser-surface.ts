@@ -201,9 +201,8 @@ export function surfaceKindFromParams(params: unknown): SurfaceKind {
 
 /** The automation session a browser surface is bound to — the join key
  *  of the session↔surface registry — or null when the surface is not
- *  automated, or is one the context-menu connect created eagerly and the
- *  daemon has not yet named (`docs/specs/dor-browser.md` → Pane Context Menu
- *  Connect). */
+ *  automated, or its launch has not yet named one (`docs/specs/dor-browser.md`
+ *  → "Agent-Browser Connection"). */
 export function agentBrowserSessionFromParams(params: unknown): string | null {
   if (!isAgentBrowserParams(params)) return null;
   const session = asParams(params).session;

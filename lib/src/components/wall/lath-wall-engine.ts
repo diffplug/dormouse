@@ -133,6 +133,7 @@ export function persistableLeafMeta(meta: LeafMeta): LeafMeta {
   const {
     url: _url,
     session: _session,
+    launchSession: _launchSession,
     wsPort: _wsPort,
     renderMode: _renderMode,
     toolPortConflict: _toolPortConflict,

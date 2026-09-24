@@ -12,6 +12,7 @@ import {
   acquireAgentBrowserSurfaceController,
   closeBrowserSurface,
   disposeAgentBrowserSurfaceController,
+  whenBrowserLaunched,
   disposeAllAgentBrowserSurfaceControllers,
   getAgentBrowserSurfaceController,
   type AgentBrowserViewSink,
@@ -554,6 +555,114 @@ describe('updateParams', () => {
   });
 });
 
+describe('launch', () => {
+  type Open = PlatformAdapter['agentBrowserOpen'];
+  function launchPlatform(open: NonNullable<Open>) {
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserOpen' | 'agentBrowserCommand' | 'agentBrowserAttach'>;
+    platform.agentBrowserOpen = vi.fn(open);
+    platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
+    platform.agentBrowserAttach = vi.fn(async () => ({ ok: true, wsPort: 9999 }));
+    setPlatform(platform);
+    return platform;
+  }
+
+  it('a session-less pane opens its page, binds the session the host answers with, and streams', async () => {
+    const platform = launchPlatform(async () => ({ ok: true, session: 'dormouse.1.gui-abc', wsPort: 4321, binaryPath: '/usr/bin/agent-browser' }));
+    const launched = whenBrowserLaunched('id');
+    // A restored pane whose launch never landed is the same pane.
+    const controller = acquireAgentBrowserSurfaceController('id', {
+      renderMode: 'ab-screencast', url: 'https://page.example/', binaryPath: '/usr/bin/agent-browser',
+    });
+    const sink = makeSink();
+    controller.attachView(sink);
+    expect(controller.snapshot().phase).toBe('launching');
+    await flushMicrotasks();
+
+    expect(platform.agentBrowserOpen).toHaveBeenCalledExactlyOnceWith('https://page.example/', { headed: false }, '/usr/bin/agent-browser');
+    expect(sink.updateParameters).toHaveBeenCalledWith({ session: 'dormouse.1.gui-abc', binaryPath: '/usr/bin/agent-browser' });
+    expect(streamSocket(4321)?.readyState).toBe(1);
+    expect(platform.agentBrowserAttach).not.toHaveBeenCalled();
+    expect(await launched).toBeNull();
+    // Driven as the session it bound.
+    getAgentBrowserScreenController('id')!.chromeActions.reload();
+    expect(platform.agentBrowserCommand).toHaveBeenLastCalledWith('dormouse.1.gui-abc', ['reload'], '/usr/bin/agent-browser');
+
+    // Params that predate that write — a remounted view feeding them before its
+    // flush — do not take the session away and launch again.
+    controller.updateParams({ renderMode: 'ab-screencast', url: 'https://page.example/' });
+    controller.updateParams({ renderMode: 'ab-screencast', url: 'https://page.example/', session: 'dormouse.1.gui-abc' });
+    await flushMicrotasks();
+    expect(platform.agentBrowserOpen).toHaveBeenCalledTimes(1);
+    expect(streamSockets(4321)).toHaveLength(1);
+  });
+
+  it('opens in the session params name, headed for a pop-out, and binds it', async () => {
+    const platform = launchPlatform(async () => ({ ok: true, session: 'dormouse.1.tool.t', wsPort: 4321 }));
+    const controller = acquireAgentBrowserSurfaceController('id', {
+      renderMode: 'ab-popout', url: 'http://localhost:6006/', launchSession: 'dormouse.1.tool.t',
+    });
+    const sink = makeSink();
+    controller.attachView(sink);
+    await flushMicrotasks();
+    expect(platform.agentBrowserOpen).toHaveBeenCalledWith('http://localhost:6006/', { headed: true, session: 'dormouse.1.tool.t' }, undefined);
+    expect(sink.updateParameters).toHaveBeenCalledWith({ session: 'dormouse.1.tool.t', launchSession: undefined });
+  });
+
+  it('a failed launch says why, in the pane and to whoever awaited it', async () => {
+    const platform: PlatformAdapter = new FakePtyAdapter();
+    platform.playwright = vi.fn(async () => ({ ok: false }));
+    setPlatform(platform);
+    const launched = whenBrowserLaunched('pw');
+    const controller = acquireAgentBrowserSurfaceController('pw', { renderMode: 'pw-screencast', url: 'https://page.example/' });
+    controller.attachView(makeSink());
+    await flushMicrotasks();
+    expect(await launched).toBe('Could not open Playwright');
+    expect(controller.snapshot()).toMatchObject({ phase: 'ended', error: 'Could not open Playwright' });
+    expect(WebSocketMock.instances).toHaveLength(0);
+  });
+
+  it('a Surface closed mid-launch closes the browser that comes up, and its waiter hears it is gone', async () => {
+    let answer!: (res: { ok: boolean; session?: string; wsPort?: number }) => void;
+    const platform = launchPlatform(() => new Promise((resolve) => { answer = resolve; }));
+    const launched = whenBrowserLaunched('id');
+    const controller = acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-screencast', url: 'https://page.example/' });
+    controller.attachView(makeSink());
+    await flushMicrotasks();
+
+    closeBrowserSurface('id', { surfaceType: 'browser', renderMode: 'ab-screencast', url: 'https://page.example/' });
+    expect(await launched).toBeNull();
+    expect(platform.agentBrowserCommand).not.toHaveBeenCalled();
+
+    answer({ ok: true, session: 'dormouse.1.gui-late', wsPort: 4321 });
+    await flushMicrotasks();
+    expect(platform.agentBrowserCommand).toHaveBeenCalledExactlyOnceWith('dormouse.1.gui-late', ['close'], undefined);
+    expect(WebSocketMock.instances).toHaveLength(0);
+  });
+
+  it('never closes the session a launch opened when the Surface has since bound it', async () => {
+    let answer!: (res: { ok: boolean; session?: string; wsPort?: number }) => void;
+    const platform = launchPlatform(() => new Promise((resolve) => { answer = resolve; }));
+    const controller = acquireAgentBrowserSurfaceController('id', {
+      renderMode: 'ab-screencast', url: 'http://localhost:6006/', launchSession: 'dormouse.1.tool.t',
+    });
+    controller.attachView(makeSink());
+    await flushMicrotasks();
+
+    controller.updateParams({ renderMode: 'ab-screencast', url: 'http://localhost:6006/', session: 'dormouse.1.tool.t', wsPort: 4321 });
+    answer({ ok: true, session: 'dormouse.1.tool.t', wsPort: 4321 });
+    await flushMicrotasks();
+    expect(platform.agentBrowserCommand).not.toHaveBeenCalledWith('dormouse.1.tool.t', ['close'], undefined);
+    expect(streamSocket(4321)?.readyState).toBe(1);
+  });
+
+  it('a Surface killed before its view ever mounted still settles its waiter', async () => {
+    launchPlatform(async () => ({ ok: true }));
+    const launched = whenBrowserLaunched('never-mounted');
+    closeBrowserSurface('never-mounted', { surfaceType: 'browser', renderMode: 'ab-screencast', url: 'https://page.example/' });
+    expect(await launched).toBeNull();
+  });
+});
+
 describe('attach', () => {
   function attachPlatform(attach: PlatformAdapter['agentBrowserAttach']) {
     const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserAttach' | 'agentBrowserCommand'>;
@@ -562,28 +671,6 @@ describe('attach', () => {
     setPlatform(platform);
     return platform;
   }
-
-  it('stays fully inert for a session-less pane until params deliver the session', async () => {
-    const platform = attachPlatform(async () => ({ ok: true, wsPort: 2222 }));
-
-    // The pane context menu's instant connect mounts its surface WITHOUT a
-    // session precisely so nothing here can race the daemon boot — no attach,
-    // no socket (docs/specs/dor-browser.md → Pane Context Menu Connect).
-    // Deriving the session from `key` would silently reintroduce the race.
-    const controller = acquireAgentBrowserSurfaceController('id', { key: 'default', url: 'http://localhost:5173/' });
-    const sink = makeSink();
-    controller.attachView(sink);
-    await flushMicrotasks();
-    expect(platform.agentBrowserAttach).not.toHaveBeenCalled();
-    expect(WebSocketMock.instances).toHaveLength(0);
-
-    // The background boot hands over {session, wsPort} in one params write,
-    // which is what brings the stream up.
-    controller.updateParams({ key: 'default', url: 'http://localhost:5173/', session: 'sess', wsPort: 1111 });
-    await flushMicrotasks();
-    expect(streamSocket(1111)?.readyState).toBe(1);
-    expect(platform.agentBrowserAttach).not.toHaveBeenCalled();
-  });
 
   it('a restored pane attaches at the page and presentation it had, and never writes the port back', async () => {
     const platform = attachPlatform(async () => ({ ok: true, wsPort: 2222 }));
@@ -820,16 +907,17 @@ describe('relaunch (pop-out / pop-in)', () => {
     expect(platform.agentBrowserPopIn).toHaveBeenCalledTimes(1);
   });
 
-  it('pop-in on a session-less popped-out pane is a no-op', async () => {
+  it('pop-in while the first launch is in flight is a no-op', async () => {
     const platform = relaunchPlatform();
-    const controller = acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-popout' });
+    Object.assign(platform, { agentBrowserOpen: vi.fn(() => new Promise<never>(() => {})) });
+    const controller = acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-popout', url: 'https://page.example/' });
     const sink = makeSink();
     controller.attachView(sink);
     await flushMicrotasks();
 
     controller.popIn();
     expect(platform.agentBrowserPopIn).not.toHaveBeenCalled();
-    expect(controller.snapshot().poppedOut).toBe(true);
+    expect(controller.snapshot()).toMatchObject({ poppedOut: true, phase: 'launching' });
     expect(sink.updateParameters).not.toHaveBeenCalledWith({ renderMode: 'ab-screencast' });
   });
 
@@ -1011,16 +1099,17 @@ describe('relaunch (pop-out / pop-in)', () => {
     expect(streamSocket(9999)?.readyState).toBe(1);
   });
 
-  it('a single {session, wsPort} handover connects once and asks the daemon nothing', async () => {
+  it('a `dor ab` re-run handing over a new port reconnects there and asks the daemon nothing', async () => {
     const platform = relaunchPlatform();
-    const controller = acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-screencast', url: 'https://x.example/' });
+    const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', wsPort: 1111, url: 'https://x.example/' });
     controller.attachView(makeSink());
     await flushMicrotasks();
-    expect(WebSocketMock.instances.length).toBe(0);
+    expect(streamSocket(1111)?.readyState).toBe(1);
 
     controller.updateParams({ session: 'sess', wsPort: 4321, url: 'https://x.example/' });
     await flushMicrotasks();
-    expect(streamSockets(4321).length).toBe(1);
+    expect(streamSocket(1111)?.readyState).toBe(3);
+    expect(streamSockets(4321)).toHaveLength(1);
     expect(platform.agentBrowserAttach).not.toHaveBeenCalled();
   });
 });

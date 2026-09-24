@@ -4,7 +4,7 @@
  * released by Wall on kill/render swap: `closeBrowserSurface` closes the
  * session too, `disposeAgentBrowserSurfaceController` only the client side.
  */
-import type { AgentBrowserCommandResult } from '../../lib/platform/types';
+import type { AgentBrowserCommandResult, AgentBrowserOpenResult } from '../../lib/platform/types';
 import { isBrowsableUrl, playwrightTextInputs, type BrowserAutomationProvider } from '../../lib/platform/browser-automation';
 import { isAllowedBinaryFor } from '../../lib/agent-browser-binary';
 import { readTextFromClipboard } from '../../lib/clipboard';
@@ -137,6 +137,9 @@ export interface AgentBrowserSurfaceParams {
   renderMode?: RenderMode;
   cwd?: string;
   session?: string;
+  /** With no `session`, the one the launch opens `url` in; absent, the host
+   *  mints one. */
+  launchSession?: string;
   key?: string;
   wsPort?: number;
   binaryPath?: string;
@@ -165,8 +168,8 @@ function allowedBinaryPath(candidate: unknown, provider: BrowserAutomationProvid
 type Phase =
   /** Constructed; no view has started it yet. */
   | { k: 'idle' }
-  /** No session to show: inert until params deliver one. */
-  | { k: 'unbound' }
+  /** No session yet: opening `url` in a browser whose session binds on success. */
+  | { k: 'launching' }
   /** The session's stream port is being asked of the host (`attach`). */
   | { k: 'attaching' }
   /** Streaming from `port`. `windowSeen`: a headed browser's stream has
@@ -248,6 +251,7 @@ export class AgentBrowserSurfaceController {
 
   // --- params (mirrors of the persisted blob) ---
   private session: string | undefined;
+  private launchSession: string | undefined;
   private binaryPath: string | undefined;
   /** The last `wsPort` params carried: a change is a handover of a live port. */
   private paramsWsPort: number | undefined;
@@ -361,6 +365,10 @@ export class AgentBrowserSurfaceController {
   // The renderMode this controller last wrote, until params show it back
   // (`followParamsHeadedness`).
   private unechoedRenderMode: RenderMode | null = null;
+  // The session a launch bound, until params show it back: params that predate
+  // the write — buffered while detached, then fed by a remounted view before
+  // the flush — would read as the session being taken away and launch again.
+  private unechoedSession: string | null = null;
 
   private readonly viewListeners = new Set<() => void>();
   private viewSnapshot: AgentBrowserViewSnapshot;
@@ -374,6 +382,7 @@ export class AgentBrowserSurfaceController {
     // and go, its identity does not), so this is safe to seed once.
     this.isTool = isToolParams(params);
     this.session = params.session;
+    this.launchSession = params.launchSession;
     this.binaryPath = allowedBinaryPath(params.binaryPath, this.provider);
     this.paramsWsPort = params.wsPort;
     this.paramsUrl = params.url;
@@ -633,8 +642,14 @@ export class AgentBrowserSurfaceController {
     // Before the port below, so the new stream never inherits a `set viewport`
     // meant for the old mode.
     if (params.renderMode) this.followParamsHeadedness(params.renderMode);
-    const sessionChanged = params.session !== this.session;
-    this.session = params.session;
+    let sessionChanged = false;
+    if (this.unechoedSession !== null) {
+      if (params.session === this.unechoedSession) this.unechoedSession = null;
+    } else if (params.session !== this.session) {
+      this.session = params.session;
+      sessionChanged = true;
+    }
+    this.launchSession = params.launchSession;
     this.binaryPath = allowedBinaryPath(params.binaryPath, this.provider);
     let handover: number | undefined;
     if (params.wsPort !== this.paramsWsPort) {
@@ -691,6 +706,7 @@ export class AgentBrowserSurfaceController {
   // can still record URL changes; flush on the next attach.
   private writeParams(params: Record<string, unknown>): void {
     if (typeof params.renderMode === 'string') this.unechoedRenderMode = params.renderMode as RenderMode;
+    if (typeof params.session === 'string') this.unechoedSession = params.session;
     if (this.sink) this.sink.updateParameters(params);
     else for (const [k, v] of Object.entries(params)) this.pendingParams.set(k, v);
   }
@@ -723,19 +739,21 @@ export class AgentBrowserSurfaceController {
     if (url) this.runCommand(['open', url]);
   }
 
-  /** (Re)bind the current params: a session without a port learns it from the
-   *  host, one whose port was just handed over streams from it at once. */
+  /** (Re)bind the current params: no session launches one, a session without a
+   *  port learns it from the host, one whose port was just handed over streams
+   *  from it at once. */
   private bind(handover?: number): void {
-    if (!this.session) this.setPhase({ k: 'unbound' });
+    if (!this.session) this.launch();
     else if (handover) this.goLive(handover);
     else this.attach(true);
   }
 
-  /** A port handed over for the bound session: stream from it. A relaunch in
-   *  flight ignores it — the host's answer is the authoritative port. */
+  /** A port handed over for the bound session: stream from it. A launch or
+   *  relaunch in flight ignores it — the host's answer is the authoritative
+   *  port. */
   private adopt(port: number): void {
     const phase = this.phase;
-    if (phase.k === 'relaunching' || phase.k === 'unbound') return;
+    if (phase.k === 'relaunching' || phase.k === 'launching') return;
     if (phase.k === 'live' && phase.port === port) return;
     if (phase.k === 'parked') this.setPhase({ k: 'parked', port });
     else this.goLive(port);
@@ -748,6 +766,67 @@ export class AgentBrowserSurfaceController {
   }
 
   /**
+   * Open this Surface's page in a new browser — in `launchSession` when params
+   * name one — and bind the session the host answers with. Every GUI-created
+   * browser Surface starts here, and so does one restored before its launch
+   * landed. Resolves once the browser is up, never waiting for the page; the
+   * Wall's `whenBrowserLaunched` hears the outcome.
+   */
+  private launch(): void {
+    const platform = this.platform;
+    const url = this.currentRelaunchUrl();
+    const phase: Phase = { k: 'launching' };
+    this.setPhase(phase);
+    const headed = this.headed;
+    const opts = { headed, ...(this.launchSession ? { session: this.launchSession } : {}) };
+    // Call through the adapter instance — detaching the method drops `this`.
+    // A launch that cannot start settles as late as one that fails, so whoever
+    // created this Surface is always listening by then.
+    const opened: Promise<AgentBrowserOpenResult> = !platform.agentBrowserOpen
+      ? Promise.resolve({ ok: false, error: `${PROVIDER_LABEL[this.provider]} is unavailable on this host` })
+      : !url
+        ? Promise.resolve({ ok: false, error: 'no page to open' })
+        : platform.agentBrowserOpen(url, opts, this.binaryPath);
+    opened
+      .catch((err: unknown): AgentBrowserOpenResult => ({ ok: false, error: messageOf(err) }))
+      .then((res) => {
+        if (this.phase !== phase) {
+          // Nothing else knows this browser — unless this Surface has since
+          // bound that very session — so close what came up.
+          if (res.session && res.session !== this.session) {
+            closeBrowserSessionFromParams({
+              renderMode: automationMode(this.provider, headed), session: res.session, cwd: res.cwd ?? this.cwd, binaryPath: res.binaryPath,
+            });
+          }
+          return;
+        }
+        if (!res.ok || !res.session) {
+          const error = res.error ?? `Could not open ${PROVIDER_LABEL[this.provider]}`;
+          this.setPhase({ k: 'ended', error });
+          settleLaunch(this.id, error);
+          return;
+        }
+        this.session = res.session;
+        if (res.cwd !== undefined && res.cwd !== this.cwd) {
+          this.cwd = res.cwd;
+          this.platformCache = null;
+        }
+        this.binaryPath = allowedBinaryPath(res.binaryPath, this.provider) ?? this.binaryPath;
+        this.writeParams({
+          session: res.session,
+          ...(res.cwd !== undefined ? { cwd: res.cwd } : {}),
+          ...(res.nativeIdentity !== undefined ? { nativeIdentity: res.nativeIdentity } : {}),
+          ...(this.binaryPath !== undefined ? { binaryPath: this.binaryPath } : {}),
+          ...(this.launchSession !== undefined ? { launchSession: undefined } : {}),
+        });
+        this.launchSession = undefined;
+        if (res.wsPort) this.goLive(res.wsPort);
+        else this.attach(false);
+        settleLaunch(this.id, null);
+      });
+  }
+
+  /**
    * Ask the host where the session's stream is (`attach`, which never starts a
    * daemon to answer). With `relaunch`, a session whose daemon is gone is
    * reopened at the page this Surface had, so a restore after a reboot comes
@@ -756,7 +835,7 @@ export class AgentBrowserSurfaceController {
    */
   private attach(relaunch: boolean, fallbackPort?: number): void {
     const session = this.session;
-    if (!session) { this.setPhase({ k: 'unbound' }); return; }
+    if (!session) { this.launch(); return; }
     const platform = this.platform;
     if (!platform.agentBrowserAttach) {
       if (fallbackPort) this.goLive(fallbackPort);
@@ -788,9 +867,9 @@ export class AgentBrowserSurfaceController {
     if (this.phase.k === 'disposed' && this.phase.closed) this.closeSession(session);
   }
 
-  private closeSession(session: string): void {
+  private closeSession(session: string): Promise<void> {
     // A close starts no daemon, so it needs no gate.
-    this.platform.agentBrowserCommand?.(session, ['close'], this.binaryPath).catch(() => {});
+    return this.platform.agentBrowserCommand?.(session, ['close'], this.binaryPath).then(() => {}, () => {}) ?? Promise.resolve();
   }
 
   // --- parking ---
@@ -1432,7 +1511,8 @@ export class AgentBrowserSurfaceController {
 
   /** Navigate the active tab. Asked while nothing can be driven, it is kept as
    *  the one latest intent and run on the next `live`; an ended browser is
-   *  attached again, relaunching at that page if its daemon is gone. */
+   *  opened again there — attached, relaunching if its daemon is gone, or
+   *  launched when it never had a session. */
   private navigate(url: string): void {
     if (!url) return;
     if (this.canDrive()) {
@@ -1441,9 +1521,9 @@ export class AgentBrowserSurfaceController {
     }
     if (this.phase.k === 'disposed') return;
     this.pendingNavigation = url;
-    if (this.phase.k !== 'ended' || !this.session) return;
+    if (this.phase.k !== 'ended') return;
     if (isBrowsableUrl(url)) this.latestRestorableUrl = url;
-    this.attach(true);
+    this.bind();
   }
 
   // --- input bridging ---
@@ -1547,13 +1627,12 @@ export class AgentBrowserSurfaceController {
 
   /** Close this Surface's browser session and release the controller. Work in
    *  flight that could bring the session back up closes it again when it lands.
-   *  Returns the session closed, if any. */
-  close(): string | undefined {
-    if (this.phase.k === 'disposed') return undefined;
+   *  Returns the session closed, if any, and when the host answered. */
+  close(): { session?: string; done: Promise<void> } {
+    if (this.phase.k === 'disposed') return { done: Promise.resolve() };
     const session = this.session;
     this.release(true);
-    if (session) this.closeSession(session);
-    return session;
+    return { session, done: session ? this.closeSession(session) : Promise.resolve() };
   }
 
   /** Release every client-side resource, leaving the session to whoever holds it
@@ -1564,6 +1643,9 @@ export class AgentBrowserSurfaceController {
   }
 
   private release(closed: boolean): void {
+    // A launch in flight lands on a released controller, which closes what it
+    // brings up; whoever awaited it hears that the Surface is gone.
+    if (this.phase.k === 'launching') settleLaunch(this.id, null);
     if (this.parkTimer) { clearTimeout(this.parkTimer); this.parkTimer = undefined; }
     this.teardownPaneSizeObserver();
     this.paneSize = null;
@@ -1618,41 +1700,64 @@ export function getAgentBrowserSurfaceController(id: string): AgentBrowserSurfac
  *  (iframe/terminal). */
 export function disposeAgentBrowserSurfaceController(id: string): void {
   const controller = registry.get(id);
-  if (!controller) return;
   registry.delete(id);
-  controller.dispose();
+  if (controller) controller.dispose();
+  else settleLaunch(id, null);
 }
 
-/** Close `params`'s automation session, for a Surface no controller holds.
- *  No-op for other surface types. */
-export function closeBrowserSessionFromParams(params: unknown): void {
+/** Close `params`'s automation session, for a Surface no controller holds;
+ *  resolves once the host answered. No-op for other surface types. */
+function closeBrowserSessionFromParams(params: unknown): Promise<void> {
   const session = agentBrowserSessionFromParams(params);
-  if (!session) return;
+  if (!session) return Promise.resolve();
   const { renderMode, cwd, binaryPath } = params as { renderMode?: unknown; cwd?: string; binaryPath?: unknown };
   const provider = automationProvider(renderMode);
-  if (!provider) return;
-  browserPlatform(provider, cwd).agentBrowserCommand?.(
+  if (!provider) return Promise.resolve();
+  return browserPlatform(provider, cwd).agentBrowserCommand?.(
     session,
     ['close'],
     // Checked, not merely typed: these params come off the persisted session
     // blob, and `binaryPath` names a program the host will spawn
     // (`lib/src/lib/agent-browser-binary.ts`).
     allowedBinaryPath(binaryPath, provider),
-  ).catch(() => {});
+  ).then(() => {}, () => {}) ?? Promise.resolve();
 }
 
 /**
  * A kill or a swap away from an automated renderer: surface lifetime and browser
  * lifetime are bound (docs/specs/dor-browser.md → "Placement And Lifetime"), so
  * close its session and release its controller. The controller closes what it
- * holds, and closes again after any relaunch still in flight; `params` covers a
- * session no controller has bound yet. No-op for other surface types.
+ * holds, and closes again after a launch or relaunch still in flight lands;
+ * `params` covers a session no controller holds. Resolves once the host
+ * answered every close. No-op for other surface types.
  */
-export function closeBrowserSurface(id: string, params: unknown): void {
+export function closeBrowserSurface(id: string, params: unknown): Promise<void> {
   const controller = registry.get(id);
   registry.delete(id);
+  if (!controller) settleLaunch(id, null);
   const closed = controller?.close();
-  if (agentBrowserSessionFromParams(params) !== (closed ?? null)) closeBrowserSessionFromParams(params);
+  const closing = [closed?.done ?? Promise.resolve()];
+  if (agentBrowserSessionFromParams(params) !== (closed?.session ?? null)) closing.push(closeBrowserSessionFromParams(params));
+  return Promise.all(closing).then(() => {});
+}
+
+// --- first-launch outcomes (the Wall's side of a controller-owned launch) ---
+
+const launchWaiters = new Map<string, (error: string | null) => void>();
+
+/**
+ * The outcome of the first launch of the session-less Surface `id` the caller
+ * just created: `null` once it streams — or once the Surface is gone — else why
+ * it failed. Register before the Surface can mount, and at most once per id.
+ */
+export function whenBrowserLaunched(id: string): Promise<string | null> {
+  return new Promise((resolve) => launchWaiters.set(id, resolve));
+}
+
+function settleLaunch(id: string, error: string | null): void {
+  const settle = launchWaiters.get(id);
+  launchWaiters.delete(id);
+  settle?.(error);
 }
 
 /** For tests: controllers now outlive panel unmount, so a suite reusing a

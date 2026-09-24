@@ -25,8 +25,14 @@ export type BrowserPanelParams = {
   url?: string;
   cwd?: string;
   nativeIdentity?: string;
+  /** Bound once the browser is up; absent while the Surface's controller
+   *  launches it (docs/specs/dor-browser.md → "Agent-Browser Connection"). */
   session?: string;
+  /** With no `session`, the one the launch opens `url` in: a Tool's own, or
+   *  the previous provider's when a failed swap restores it. */
+  launchSession?: string;
   key?: string;
+  /** The one-shot handover of a launch's live stream port; never persisted. */
   wsPort?: number;
   binaryPath?: string;
   syncEngaged?: boolean;

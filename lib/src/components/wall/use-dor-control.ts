@@ -126,21 +126,15 @@ type EnsureAgentBrowserSurfaceResult =
   | { ok: true; status: 'created' | 'existing' | 'replaced'; surfaceId: string; surfaceRef: string; minimized: boolean }
   | { ok: false; message: string };
 
-/** Reuse-or-create an agent-browser browser surface — the surface half of
- *  `dor ab` (the control plane), and, with `session` omitted, the pane context
- *  menu's eager session-less create (docs/specs/dor-browser.md → Pane Context
- *  Menu Connect). At least one of `key` / `session` is required (it names the
- *  surface). */
+/** Reuse-or-create an automated browser surface for the session a `dor ab` /
+ *  `dor pw` command just drove — the surface half of the control plane. */
 type EnsureAgentBrowserSurface = (args: {
   provider?: BrowserAutomationProvider;
   headed?: boolean;
   nativeIdentity?: string;
   cwd?: string;
   key?: string;
-  /** Omitted for the eager connect pane, which is created session-less on
-   *  purpose so the controller stays inert until the daemon is up; the reuse
-   *  arm is skipped (there is no session to match). */
-  session?: string;
+  session: string;
   url?: string;
   wsPort?: number;
   binaryPath?: string;
@@ -613,8 +607,8 @@ export function useDorControl({
    *  null. Shared with the context's port launches in Wall.tsx. */
   findSurfaceByParams: (isMatch: (params: unknown) => boolean) => { id: string; minimized: boolean } | null;
   /** Fold a params patch onto a surface (visible pane or minimized door) — the
-   *  one write path a background daemon boot uses to hand a session-less pane
-   *  its `{session, wsPort, binaryPath}`. */
+   *  one write path `dor` uses to hand an existing pane its refreshed
+   *  `{wsPort, binaryPath}`. */
   updateSurfaceParams: (id: string, patch: Record<string, unknown>) => void;
   /** Run one `dor` request against this Wall. `dor-control-router.ts` owns the
    *  window listener that chooses which Wall's handler runs. */
@@ -711,8 +705,8 @@ export function useDorControl({
     // live metadata for panes and parked doors alike.
     const session = agentBrowserSessionFromParams(lath.getMeta(target.id)?.params);
     if (!session) {
-      // An eagerly-created connect pane whose daemon boot has not yet named
-      // it (docs/specs/dor-browser.md → Pane Context Menu Connect).
+      // A pane whose launch has not yet named its session
+      // (docs/specs/dor-browser.md → "Agent-Browser Connection").
       detail.respond({ ok: false, error: `surface '${target.ref}' has no ${provider} session yet` });
       return null;
     }
@@ -800,12 +794,9 @@ export function useDorControl({
       ...(binaryPath !== undefined ? { binaryPath } : {}),
     };
 
-    let existing: { id: string; minimized: boolean } | null = null;
-    if (session !== undefined) {
-      existing = provider === 'agent-browser'
-        ? findAgentBrowserSurface(session)
-        : findPlaywrightSurface({ key, session, nativeIdentity, cwd });
-    }
+    const existing = provider === 'agent-browser'
+      ? findAgentBrowserSurface(session)
+      : findPlaywrightSurface({ key, session, nativeIdentity, cwd });
     if (existing) {
       // Reuse: refresh the stream port (OS-assigned, churns across session
       // restarts) so the panel reconnects to the live stream, and the
@@ -821,7 +812,6 @@ export function useDorControl({
     }
 
     const title = key ?? session;
-    if (title === undefined) return { ok: false, message: 'a browser surface needs a key or a session' };
     const target = reference();
     if (!target.ok) return { ok: false, message: target.message };
     const result = createContentSurface({
@@ -830,7 +820,7 @@ export function useDorControl({
         surfaceType: 'browser',
         renderMode: automationMode(provider, false),
         ...(cwd ? { cwd } : {}),
-        ...(session !== undefined ? { session } : {}),
+        session,
         ...(key !== undefined ? { key } : {}),
         ...(url !== undefined ? { url } : {}),
         ...refreshedParams,

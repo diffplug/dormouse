@@ -865,6 +865,8 @@ describe('Wall on the Lath engine', () => {
 
       expect(playwright).toHaveBeenCalledWith(expect.objectContaining({ op: 'open', url: 'http://localhost:5173/' }));
       expect(document.querySelector('[data-terminal-context] [role="alert"]')?.textContent).toBe('Could not open Playwright');
+      // The pane made for it goes with the failure.
+      expect(leafCount()).toBe(1);
     } finally {
       helperSpy.mockRestore();
       untouchedSpy.mockRestore();
@@ -991,10 +993,11 @@ describe('Wall on the Lath engine', () => {
       await act(async () => { eagerLeaf.querySelector<HTMLButtonElement>('[aria-label="Minimize"]')!.click(); });
       await flush();
 
-      // Playwright is not installed: the Door comes back as agent-browser.
+      // Playwright is not installed: the Door comes back as agent-browser, in
+      // the session it had.
       await act(async () => { pwOpen.resolve({ ok: false, error: 'playwright-cli is not installed' }); });
       await flush();
-      expect(relaunch).toHaveBeenCalledWith('http://localhost:5173/', { headed: false }, undefined);
+      expect(relaunch).toHaveBeenCalledWith('http://localhost:5173/', { headed: false, session: 'ab-live' }, undefined);
       expect(getAgentBrowserSurfaceController(eagerId)?.provider).toBe('agent-browser');
       expect(getAgentBrowserScreenController(eagerId)?.snapshot().renderMode).toBe('ab-screencast');
     } finally {
@@ -1095,6 +1098,89 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('restores a failed provider swap minimized meanwhile in place, reopening the previous browser under its own key', async () => {
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    const defaultSession = sessionForKey('default');
+    const events: string[] = [];
+    let failPlaywright!: (result: { ok: boolean; error?: string }) => void;
+    let landClose!: () => void;
+    Object.assign(fake, {
+      agentBrowserAttach: vi.fn(async () => ({ ok: true, wsPort: 4321 })),
+      agentBrowserCommand: vi.fn(async (session: string, args: string[]) => {
+        events.push(`${args.join(' ')} ${session}`);
+        if (args[0] === 'close') {
+          await new Promise<void>((resolve) => { landClose = resolve; });
+          events.push('close landed');
+        }
+        return { exitCode: 0, stdout: '', stderr: '' };
+      }),
+      agentBrowserOpen: vi.fn(async (url: string, opts: { session?: string }) => {
+        events.push(`open ${opts.session} ${url}`);
+        return { ok: true, session: opts.session, wsPort: 5555 };
+      }),
+      playwright: vi.fn((request: { op: string }) => (request.op === 'open'
+        ? new Promise((resolve) => { failPlaywright = resolve; })
+        : Promise.resolve({ ok: true }))),
+    });
+    try {
+      await act(async () => {
+        root.render(<Wall initialMode="command" restoredLathLayout={{
+          version: 1,
+          tree: { root: { kind: 'split', dir: 'row', children: [
+            { node: { kind: 'leaf', id: 'pane-a' }, weight: 0.5 },
+            { node: { kind: 'leaf', id: 'keyed-ab' }, weight: 0.5 },
+          ] } },
+          leafMeta: {
+            'pane-a': { component: 'terminal', tabComponent: 'terminal', title: 'shell' },
+            'keyed-ab': { component: 'browser', tabComponent: 'surface', title: 'default', params: {
+              surfaceType: 'browser', renderMode: 'ab-screencast', session: defaultSession, key: 'default', url: 'http://localhost:5173/',
+            } },
+          },
+        }} />);
+      });
+      await flush();
+
+      await act(async () => { getAgentBrowserScreenController('keyed-ab')?.actions.setRenderMode?.('pw-screencast'); });
+      await flush();
+      const eagerId = Array.from(container.querySelectorAll<HTMLElement>('[data-lath-leaf]'))
+        .map((leaf) => leaf.dataset.lathLeaf!).find((leafId) => leafId !== 'pane-a')!;
+      expect(eagerId).not.toBe('keyed-ab');
+      await act(async () => {
+        container.querySelector<HTMLElement>(`[data-lath-leaf="${eagerId}"]`)!.querySelector<HTMLButtonElement>('[aria-label="Minimize"]')!.click();
+      });
+      await flush();
+
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      await act(async () => { failPlaywright({ ok: false, error: 'playwright-cli was not found' }); });
+      await flush();
+      warn.mockRestore();
+      expect(events).toEqual([`close ${defaultSession}`]);
+      await act(async () => { landClose(); });
+      await flush();
+
+      // Back to agent-browser in the Door it was minimized to, reopened in the
+      // session its key names once that session's close has landed…
+      expect(container.querySelector(`[data-door-id="${eagerId}"]`)).not.toBeNull();
+      expect(events).toEqual([`close ${defaultSession}`, 'close landed', `open ${defaultSession} http://localhost:5173/`]);
+      expect(await dispatchResolveAgentBrowser(eagerId)).toMatchObject({ ok: true, result: { session: defaultSession } });
+      // …so `dor ab --key default` drives it rather than opening a second pane.
+      let reused: { ok: boolean; result?: { status: string; surfaceId: string } } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.agentBrowser,
+            params: { key: 'default', session: defaultSession, wsPort: 5555, surface: 'surface:1' },
+            respond: (r: typeof reused) => { reused = r; },
+          },
+        }));
+      });
+      await flush();
+      expect(reused).toMatchObject({ ok: true, result: { status: 'existing', surfaceId: eagerId } });
+    } finally {
+      untouchedSpy.mockRestore();
+    }
+  });
+
   it('restores an eager render swap to iframe when launch rejects', async () => {
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(true);
     (fake as PlatformAdapter).agentBrowserOpen = vi.fn(async () => {
@@ -1181,9 +1267,44 @@ describe('Wall on the Lath engine', () => {
 
       await act(async () => { controller()?.actions.setRenderMode?.('ab-screencast'); });
       await flush();
-      expect(open).toHaveBeenCalledWith('http://localhost:6006/', {}, undefined);
+      expect(open).toHaveBeenCalledWith('http://localhost:6006/', { headed: false }, undefined);
     } finally {
       offered.mockRestore();
+      act(() => terminalRegistry.removeTerminalPaneState('tool-a'));
+    }
+  });
+
+  it('gives a Tool its embed back when its swap to agent-browser cannot launch', async () => {
+    Object.assign(fake, { agentBrowserOpen: vi.fn(async () => ({ ok: false, error: 'agent-browser binary not found' })) });
+    terminalRegistry.applyTerminalSemanticEvents('tool-a', [
+      { type: 'commandLine', commandLine: 'pnpm storybook' },
+      { type: 'commandStart' },
+    ]);
+    try {
+      await act(async () => {
+        root.render(<Wall
+          restoredLathLayout={{
+            version: 1,
+            tree: { root: { kind: 'leaf', id: 'tool-a' } },
+            leafMeta: {
+              'tool-a': {
+                component: 'tool', tabComponent: 'tool', title: 'storybook',
+                params: {
+                  surfaceType: 'tool', command: 'pnpm storybook', cwd: '/repo', toolName: 'storybook',
+                  toolRender: 'iframe', toolPort: 'announced', renderMode: 'iframe', url: 'http://localhost:6006/',
+                },
+              },
+            },
+          }}
+          initialMode="command"
+        />);
+      });
+      await flush();
+      await act(async () => { getAgentBrowserScreenController('tool-a')?.actions.setRenderMode?.('ab-screencast'); });
+      await flush();
+      expect(fake.agentBrowserOpen).toHaveBeenCalledWith('http://localhost:6006/', { headed: false }, undefined);
+      expect(getAgentBrowserScreenController('tool-a')?.snapshot().renderMode).toBe('iframe');
+    } finally {
       act(() => terminalRegistry.removeTerminalPaneState('tool-a'));
     }
   });
