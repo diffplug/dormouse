@@ -22,10 +22,10 @@ export type BrowserOp =
   /** Open `url` — blank when it is not http(s) — in a new session, or
    *  relaunch the named one there, headed or headless. Answers once the
    *  browser is up, never waiting for the page. */
-  | { op: 'launch'; url?: string; headed: boolean }
+  | { op: 'launch'; url?: string; headed: boolean; requestId?: string }
   /** Where the session streams now, found without starting a browser; one
    *  that is gone relaunches at `url` when the caller names one. */
-  | { op: 'attach'; url?: string; headed?: boolean }
+  | { op: 'attach'; url?: string; headed?: boolean; requestId?: string }
   /** The URL the webview connects to for a stream port. */
   | { op: 'streamUrl'; port: number }
   /** One device-resolution frame. */
@@ -39,7 +39,11 @@ export type BrowserOp =
   /** agent-browser only: the browser's CDP endpoint, for the popped-out URL
    *  observer. */
   | { op: 'cdpUrl' }
-  | { op: 'close' };
+  /** Close the session — after the launch or attach of it running now — and
+   *  cancel `cancels`: requests the closing Surface sent that can bring the
+   *  browser up, by their `requestId`, however late the transport delivers
+   *  them. */
+  | { op: 'close'; cancels?: string[] };
 
 export type BrowserRequest = { provider: BrowserAutomationProvider; binding: BrowserRequestBinding } & BrowserOp;
 
@@ -76,6 +80,9 @@ export interface BrowserResult {
  *  waits exactly this long (VS Code's `requestResponse`, the Tauri
  *  `browser_request` command, the browser-dev harness). */
 export const BROWSER_REQUEST_TIMEOUT_MS = 40_000;
+
+/** The most requests one `close` may cancel; the host refuses a longer list. */
+export const BROWSER_CLOSE_MAX_CANCELS = 32;
 
 /** The most characters one Playwright viewer `input_text` message carries. A
  *  paste takes as many messages as it needs, each under the viewer socket's

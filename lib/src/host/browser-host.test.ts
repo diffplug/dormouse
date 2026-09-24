@@ -49,6 +49,44 @@ describe('createBrowserHost', () => {
     ]);
   });
 
+  it('opens nothing for a request a close cancelled before it arrived, for as long and as many as it keeps', async () => {
+    const fake = fakeProvider();
+    const host = createBrowserHost({ writeClipboardText: vi.fn(), providers: { 'agent-browser': () => fake.provider } });
+    const s1 = { provider: 'agent-browser', binding: { session: 's1' } } as const;
+    const launch = (requestId: string) => host.request({ ...s1, op: 'launch', url: 'http://localhost:5173/', headed: false, requestId });
+    // The Surface's launch was sent first; the transport delivered its close first.
+    expect(await host.request({ ...s1, op: 'close', cancels: ['launch-1'] })).toEqual({ ok: true });
+    expect(await launch('launch-1')).toEqual({ ok: false, error: 'the browser was closed' });
+    expect(await host.request({ ...s1, op: 'attach', url: 'http://localhost:5173/', requestId: 'launch-1' })).toMatchObject({ ok: true });
+    expect(fake.calls).toEqual(['close s1', 'open s1 http://localhost:5173/']);
+
+    // Forgotten after five minutes, and past the newest 256.
+    const now = Date.now();
+    await host.request({ ...s1, op: 'close', cancels: ['stale'] });
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 5 * 60_000 + 1);
+    try {
+      expect(await launch('stale')).toMatchObject({ ok: true });
+    } finally {
+      clock.mockRestore();
+    }
+    for (let batch = 0; batch < 9; batch++) {
+      await host.request({ ...s1, op: 'close', cancels: Array.from({ length: 32 }, (_, i) => `r${batch * 32 + i}`) });
+    }
+    expect(await launch('r0')).toMatchObject({ ok: true });
+    expect(await launch('r287')).toEqual({ ok: false, error: 'the browser was closed' });
+  });
+
+  it('refuses a request id or cancel list it cannot bound', async () => {
+    const host = createBrowserHost({ writeClipboardText: vi.fn(), providers: { 'agent-browser': () => fakeProvider().provider } });
+    const s1 = { provider: 'agent-browser', binding: { session: 's1' } } as const;
+    for (const requestId of ['has space', 'x'.repeat(65), 7, '']) {
+      expect(await host.request({ ...s1, op: 'launch', url: 'http://localhost:5173/', headed: false, requestId })).toEqual({ ok: false, error: 'invalid request id' });
+    }
+    for (const cancels of ['r1', [7], ['has space'], Array.from({ length: 33 }, (_, i) => `r${i}`)]) {
+      expect(await host.request({ ...s1, op: 'close', cancels })).toEqual({ ok: false, error: 'invalid cancelled request ids' });
+    }
+  });
+
   it('sweeps the blank tabs a launch leaves once its open returns, last first, and only beside a real page', async () => {
     const fake = fakeProvider();
     const host = createBrowserHost({ writeClipboardText: vi.fn(), providers: { 'agent-browser': () => fake.provider } });

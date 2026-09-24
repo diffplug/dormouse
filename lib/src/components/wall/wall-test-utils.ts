@@ -211,8 +211,15 @@ export type BrowserAnswers = {
  * Install a platform whose host drives `providers`, answering each typed
  * browser request from `answers` by operation — `{ ok: true }` where none is
  * given. `answers` stays live, so a test may swap one mid-flight; `requests`
- * reads back every request of one kind, in order.
+ * reads back every request of one kind, in order, without the ids a Surface
+ * mints for its launches and attaches and a close's `cancels` of them — fresh
+ * UUIDs no test can predict (`browser`'s calls keep them).
  */
+function withoutIds(request: BrowserRequest): BrowserRequest {
+  const { requestId: _id, cancels: _cancels, ...rest } = request as BrowserRequest & { requestId?: string; cancels?: string[] };
+  return rest as BrowserRequest;
+}
+
 export function installBrowserHost(
   answers: BrowserAnswers = {},
   providers: readonly BrowserAutomationProvider[] = BROWSER_PROVIDER_IDS,
@@ -224,6 +231,6 @@ export function installBrowserHost(
   const platform = Object.assign(new FakePtyAdapter(), { browserProviders: providers, browser });
   setPlatform(platform);
   const requests = <K extends BrowserOp['op']>(op: K): Extract<BrowserRequest, { op: K }>[] =>
-    browser.mock.calls.map(([request]) => request).filter((request): request is Extract<BrowserRequest, { op: K }> => request.op === op);
+    browser.mock.calls.map(([request]) => withoutIds(request)).filter((request): request is Extract<BrowserRequest, { op: K }> => request.op === op);
   return { platform, browser, answers, requests };
 }

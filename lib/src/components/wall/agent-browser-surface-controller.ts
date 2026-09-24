@@ -4,7 +4,7 @@
  * released by Wall on kill/render swap: `closeBrowserSurface` closes the
  * session too, `disposeAgentBrowserSurfaceController` only the client side.
  */
-import { isBlankUrl, isBrowsableUrl, type BrowserAutomationProvider, type BrowserResult } from '../../lib/platform/browser-automation';
+import { BROWSER_CLOSE_MAX_CANCELS, isBlankUrl, isBrowsableUrl, type BrowserAutomationProvider, type BrowserResult } from '../../lib/platform/browser-automation';
 import { isAllowedBinaryFor } from '../../lib/agent-browser-binary';
 import { readTextFromClipboard } from '../../lib/clipboard';
 import { isAbDebugLogsEnabled } from '../../lib/feature-flags';
@@ -271,6 +271,11 @@ export class AgentBrowserSurfaceController {
    *  must not lose them. A launch or relaunch opens the page itself
    *  (`launchUrl`), and a host that opened it settles it (`openedByHost`). */
   private pendingIntent: { url?: string; headed?: boolean } = {};
+
+  /** Requests this Surface sent that can bring its browser up — a launch, a
+   *  relaunch, an attach naming a page — which the host has not answered: a
+   *  close cancels them, however late the transport delivers them (`close`). */
+  private bringingUp = new Set<string>();
 
   // --- sync-to-pane ---
   private syncEngaged: boolean;
@@ -798,8 +803,8 @@ export class AgentBrowserSurfaceController {
       : !url
         ? Promise.resolve({ ok: false, error: 'no page to open' })
         : !closing
-          ? browser.launch(url, headed)
-          : closing.then(() => this.phase === phase ? browser.launch(url, headed) : { ok: false });
+          ? this.bringUp((requestId) => browser.launch(url, headed, requestId))
+          : closing.then(() => this.phase === phase ? this.bringUp((requestId) => browser.launch(url, headed, requestId)) : { ok: false });
     opened
       .then((res) => {
         if (this.phase !== phase) {
@@ -879,8 +884,8 @@ export class AgentBrowserSurfaceController {
     this.setPhase(phase);
     const url = relaunch ? this.launchUrl() : undefined;
     // A browser this relaunches for a Surface closed meanwhile is closed by
-    // the host: it runs the close after this attach (`close`).
-    browser.attach({ url, headed: this.headed })
+    // the host: it runs the close after this attach, or cancels it (`close`).
+    (url ? this.bringUp((requestId) => browser.attach({ url, headed: this.headed, requestId })) : browser.attach({ headed: this.headed }))
       .then((res) => {
         if (this.phase !== phase) return;
         // Only a gone daemon is relaunched at the page; a live one was only
@@ -891,8 +896,16 @@ export class AgentBrowserSurfaceController {
       });
   }
 
-  private closeSession(session: string): Promise<void> {
-    return closeSessionOn(this.provider, this.cwd, session, this.binaryPath);
+  /** Send a request that can bring the browser up under a fresh id, held in
+   *  `bringingUp` until the host answers it. */
+  private bringUp(send: (requestId: string) => Promise<BrowserResult>): Promise<BrowserResult> {
+    const requestId = crypto.randomUUID();
+    this.bringingUp.add(requestId);
+    // A handle answers failures rather than rejecting.
+    return send(requestId).then((result) => {
+      this.bringingUp.delete(requestId);
+      return result;
+    });
   }
 
   // --- parking ---
@@ -1465,7 +1478,7 @@ export class AgentBrowserSurfaceController {
     this.setHeaded(headed);
     this.writeParams({ renderMode: this.renderMode() });
     abDebugLog(`[ab-panel] ${headed ? 'popOut' : 'popIn'} -> ${JSON.stringify({ session, url: target })}`);
-    this.handle()!.launch(target, headed).then((res) => {
+    this.bringUp((requestId) => this.handle()!.launch(target, headed, requestId)).then((res) => {
       abDebugLog(`[ab-panel] relaunch result ${JSON.stringify(res)}`);
       // Closed meanwhile, the host closes what this brought up after it.
       if (this.phase !== phase) return;
@@ -1635,17 +1648,21 @@ export class AgentBrowserSurfaceController {
 
   /** Close this Surface's browser session — the one it is bound to, or the
    *  one its launch names — and release the controller. Sent at once: the host
-   *  runs it after the session's launch, relaunch or attach still in flight,
-   *  closing what that brings up (docs/specs/dor-browser.md → "Browser Host"),
-   *  and a launch naming the session waits for its answer (`closeInFlight`).
+   *  runs it after the Surface's launch, relaunch or attach still running,
+   *  closing what that brings up, and cancels one it has not received yet
+   *  (docs/specs/dor-browser.md → "Browser Host"); a launch naming the session
+   *  waits for its answer (`closeInFlight`).
    *  Returns the session closed, if any, and when the host answered. */
   close(): { session?: string; done: Promise<void> } {
     const phase = this.phase;
     if (phase.k === 'disposed') return { done: Promise.resolve() };
     const session = this.session;
+    // Its own requests still unanswered may reach the host after this close;
+    // a Surface has one or two at a time, so the newest fit any bound.
+    const cancels = [...this.bringingUp].slice(-BROWSER_CLOSE_MAX_CANCELS);
     this.release();
-    const done = session ? this.closeSession(session)
-      : phase.k === 'launching' && phase.named ? trackClose(this.provider, phase.named.session, phase.named.browser.close())
+    const done = session ? closeSessionOn(this.provider, this.cwd, session, this.binaryPath, cancels)
+      : phase.k === 'launching' && phase.named ? trackClose(this.provider, phase.named.session, phase.named.browser.close(cancels))
       : Promise.resolve();
     return { session, done };
   }
@@ -1734,9 +1751,9 @@ export function disposeAgentBrowserSurfaceController(id: string): void {
  * off the persisted session blob, and names a program the host will spawn
  * (`lib/src/lib/agent-browser-binary.ts`).
  */
-function closeSessionOn(provider: BrowserAutomationProvider, cwd: string | undefined, session: string, binaryPath: unknown): Promise<void> {
+function closeSessionOn(provider: BrowserAutomationProvider, cwd: string | undefined, session: string, binaryPath: unknown, cancels?: readonly string[]): Promise<void> {
   const handle = browserHandle(provider, { session, cwd, binaryPath });
-  return handle ? trackClose(provider, session, handle.close()) : Promise.resolve();
+  return handle ? trackClose(provider, session, handle.close(cancels)) : Promise.resolve();
 }
 
 // Closes of each session this webview has sent and the host has not answered,

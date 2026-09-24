@@ -105,7 +105,8 @@ Surface lifetime owns backing resources:
 - **Killing an automated pane — or swapping away from that renderer — must go
   through `closeBrowserSurface`**: it closes the session through the controller
   (or from params when none holds it) and releases every client resource.
-  **Work that lands after the close closes what it brought up.**
+  **The Surface's work still in flight never outlives the close**
+  ([Browser Host](#browser-host)).
 - **A Workspace transfer releases its browser controllers without closing their
   sessions**; the destination attaches to them, or opens the same named session
   a launch was opening. **An abandoned launch closes only a session the host
@@ -480,7 +481,11 @@ list tabs, act, evaluate, screenshot, stream URL):
   native identity**, in arrival order, so two panes restoring one session
   relaunch it once. **A close runs after the launch or attach already running,
   closing what it brings up, and supersedes one sent before it that has not
-  begun**, which answers that the browser was closed (rationale).
+  begun**, which answers that the browser was closed (rationale). **A close
+  also cancels, by webview-minted `requestId`, the closing Surface's own
+  launches, relaunches and page-naming attaches still unanswered
+  (`cancels`); one arriving after it answers the same and opens nothing.**
+  The host keeps a cancelled id five minutes, at most 256.
 - **Must answer a launch inside `BROWSER_REQUEST_TIMEOUT_MS`**: startup,
   queueing included, gets 30 s from the request's arrival. A launch stops what
   runs a named session first, then resolves once the provider reports the
@@ -504,8 +509,9 @@ Pinned by `lib/src/host/browser-host.test.ts`, and against the controller by
 **Host-side validation is the security boundary: `parseBrowserRequest` rebuilds
 every request field by field before a provider sees it** — a known provider and
 operation, an http(s) navigation or new-session URL, bounded dimensions, a tab
-id and device name that cannot read as an option, and a session name neither
-CLI reads as an option or a path (rationale). Pinned by
+id and device name that cannot read as an option, a session name neither
+CLI reads as an option or a path, and request ids of at most 64 `[A-Za-z0-9-]`,
+32 per close (rationale). Pinned by
 `lib/src/host/agent-browser-host.test.ts`.
 
 **`binaryPath` crosses from the webview realm, so it is checked at the spawn**

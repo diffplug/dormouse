@@ -823,6 +823,38 @@ describe('a closed Surface and the next launch into its session', () => {
     ]);
   });
 
+  it.each([
+    ['launch naming it', 'launch'],
+    ['pop-out', 'launch'],
+    ['attach relaunching it', 'attach'],
+  ] as const)('a Surface closed while its own %s is on its way opens nothing, though the close reaches the host first', async (name, op) => {
+    // Tauri runs each command on a worker pool, so a request sent an instant
+    // before the close can reach the host after it.
+    let deliver!: () => void;
+    const held = new Promise<void>((resolve) => { deliver = resolve; });
+    const host = realHost((request, send) => (request.op === op ? held.then(send) : send()));
+    if (name === 'launch naming it') {
+      acquireAgentBrowserSurfaceController('first', { renderMode: 'ab-screencast', url: page, launchSession: session }).attachView(makeSink());
+    } else if (name === 'pop-out') {
+      const first = withPort('first', { session, url: page }, 1111);
+      first.attachView(makeSink());
+      await flushMicrotasks();
+      first.setRenderMode('ab-popout');
+    } else {
+      acquireAgentBrowserSurfaceController('first', { session, url: page }).attachView(makeSink());
+    }
+    await flushMicrotasks();
+    const sent = host.browser.mock.calls.map(([request]) => request).find((request) => request.op === op) as { requestId?: string };
+    expect(sent.requestId).toEqual(expect.any(String));
+
+    await closeBrowserSurface('first', {});
+    expect(host.browser.mock.calls.map(([request]) => request).find((request) => request.op === 'close')).toMatchObject({ cancels: [sent.requestId] });
+    deliver();
+    // Every request answered, the late one included.
+    await Promise.all(host.browser.mock.results.map(({ value }) => value));
+    expect(host.lifecycle()).toEqual([`close ${session}`]);
+  });
+
   it('closes a launch that was opening it before the next launch', async () => {
     const host = realHost();
     host.fake.gate(`stop ${session}`);
@@ -1142,6 +1174,26 @@ describe('closeBrowserSurface', () => {
     launch.resolve({ ok: true, session: 'dormouse.1.tool.t', wsPort: 4321 });
     await flushMicrotasks();
     expect(host.requests('close')).toHaveLength(1);
+  });
+
+  it('cancels only its own requests the host has not answered', async () => {
+    const popIn = pending();
+    const answers = [Promise.resolve<BrowserResult>({ ok: true, wsPort: 3456 }), popIn.promise];
+    const host = installBrowserHost({ launch: () => answers.shift()! });
+    const controller = withPort('id', { session: 'sess' }, 1111);
+    controller.attachView(makeSink());
+    await flushMicrotasks();
+    // A pop-out the host answered, then a pop-in still on its way.
+    controller.setRenderMode('ab-popout');
+    await flushMicrotasks();
+    controller.setRenderMode('ab-screencast');
+    await flushMicrotasks();
+
+    void closeBrowserSurface('id', {});
+    const sent = host.browser.mock.calls.map(([request]) => request as BrowserRequest & { requestId?: string; cancels?: string[] });
+    const [popOut, pendingPopIn] = sent.filter((request) => request.op === 'launch');
+    expect(popOut.requestId).not.toBe(pendingPopIn.requestId);
+    expect(sent.find((request) => request.op === 'close')?.cancels).toEqual([pendingPopIn.requestId]);
   });
 
   it('a release that closes nothing leaves a relaunch in flight to whoever holds the session next', async () => {

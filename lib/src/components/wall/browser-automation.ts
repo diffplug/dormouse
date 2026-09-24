@@ -121,8 +121,8 @@ export function offeredRenderModes(isTool: boolean, current: BrowserAutomationPr
  */
 export interface BrowserHandle {
   readonly provider: BrowserAutomationProvider;
-  launch(url: string | undefined, headed: boolean): Promise<BrowserResult>;
-  attach(opts?: { url?: string; headed?: boolean }): Promise<BrowserResult>;
+  launch(url: string | undefined, headed: boolean, requestId?: string): Promise<BrowserResult>;
+  attach(opts?: { url?: string; headed?: boolean; requestId?: string }): Promise<BrowserResult>;
   streamUrl(port: number): Promise<BrowserResult>;
   screenshot(opts: { format?: 'jpeg' | 'png'; quality?: number }): Promise<BrowserResult>;
   edit(edit: BrowserEditOp): Promise<BrowserResult>;
@@ -132,7 +132,8 @@ export interface BrowserHandle {
   viewport(width: number, height: number, dpr: number): Promise<BrowserResult>;
   device(name: string): Promise<BrowserResult>;
   cdpUrl(): Promise<BrowserResult>;
-  close(): Promise<BrowserResult>;
+  /** `cancels`: the closing Surface's own requests still unanswered. */
+  close(cancels?: readonly string[]): Promise<BrowserResult>;
 }
 
 /**
@@ -164,7 +165,7 @@ export function browserHandle(provider: BrowserAutomationProvider, binding: Omit
   };
   return {
     provider,
-    launch: (url, headed) => send({ op: 'launch', ...(url !== undefined ? { url } : {}), headed }),
+    launch: (url, headed, requestId) => send({ op: 'launch', ...(url !== undefined ? { url } : {}), headed, ...(requestId !== undefined ? { requestId } : {}) }),
     attach: (opts = {}) => send({ op: 'attach', ...opts }),
     streamUrl: (port) => send({ op: 'streamUrl', port }),
     screenshot: async (opts) => {
@@ -180,7 +181,7 @@ export function browserHandle(provider: BrowserAutomationProvider, binding: Omit
     viewport: (width, height, dpr) => send({ op: 'viewport', width, height, dpr }),
     device: (name) => send({ op: 'device', name }),
     cdpUrl: () => send({ op: 'cdpUrl' }),
-    close: () => send({ op: 'close' }),
+    close: (cancels = []) => send({ op: 'close', ...(cancels.length ? { cancels: [...cancels] } : {}) }),
   };
 }
 

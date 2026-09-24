@@ -23,6 +23,7 @@ import {
 import { messageOf } from '../lib/errors';
 import { settleAllWithin } from '../lib/settle-within';
 import {
+  BROWSER_CLOSE_MAX_CANCELS,
   BROWSER_REQUEST_TIMEOUT_MS,
   isBlankUrl,
   isBrowsableUrl,
@@ -144,6 +145,14 @@ function generateGuiSession(): string {
 
 const TAB_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const DEVICE_NAME = /^[A-Za-z0-9][A-Za-z0-9 ()._-]{0,63}$/;
+/** A webview-minted id of a request that can bring a browser up. */
+const REQUEST_ID = /^[A-Za-z0-9-]{1,64}$/;
+
+/** `value` as an optional request id: absent, valid, or `null` when invalid. */
+function optionalRequestId(value: unknown): { requestId?: string } | null {
+  if (value === undefined) return {};
+  return typeof value === 'string' && REQUEST_ID.test(value) ? { requestId: value } : null;
+}
 
 function dimension(value: unknown, max: number): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= max ? value : null;
@@ -193,9 +202,14 @@ function parseBrowserRequest(raw: unknown): BrowserRequest | string {
 function parseOp(r: Record<string, unknown>): BrowserOp | string {
   switch (r.op) {
     case 'launch':
-      return { op: 'launch', ...(isBrowsableUrl(r.url) ? { url: r.url } : {}), headed: r.headed === true };
-    case 'attach':
-      return { op: 'attach', ...(isBrowsableUrl(r.url) ? { url: r.url } : {}), ...(r.headed === true ? { headed: true } : {}) };
+    case 'attach': {
+      const id = optionalRequestId(r.requestId);
+      if (!id) return 'invalid request id';
+      const url = isBrowsableUrl(r.url) ? { url: r.url } : {};
+      return r.op === 'launch'
+        ? { op: 'launch', ...url, headed: r.headed === true, ...id }
+        : { op: 'attach', ...url, ...(r.headed === true ? { headed: true } : {}), ...id };
+    }
     case 'streamUrl': {
       const port = r.port;
       return typeof port === 'number' && Number.isInteger(port) && port > 0 && port <= 65535 ? { op: 'streamUrl', port } : 'a stream port is required';
@@ -221,8 +235,14 @@ function parseOp(r: Record<string, unknown>): BrowserOp | string {
     case 'device':
       return typeof r.name === 'string' && DEVICE_NAME.test(r.name) ? { op: 'device', name: r.name } : 'invalid device name';
     case 'cdpUrl':
-    case 'close':
-      return { op: r.op };
+      return { op: 'cdpUrl' };
+    case 'close': {
+      const cancels = r.cancels;
+      if (cancels === undefined) return { op: 'close' };
+      const valid = Array.isArray(cancels) && cancels.length <= BROWSER_CLOSE_MAX_CANCELS
+        && cancels.every((id) => typeof id === 'string' && REQUEST_ID.test(id));
+      return valid ? { op: 'close', cancels: [...cancels] as string[] } : 'invalid cancelled request ids';
+    }
     default:
       return `unsupported browser operation '${String(r.op)}'`;
   }
@@ -288,6 +308,39 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       if ((closesArrived.get(id) ?? 0) !== closes) throw new Error('the browser was closed');
       return action();
     });
+  }
+
+  // Requests a close cancelled — sent before it by the Surface it closed —
+  // that have not arrived yet: a transport may deliver them after the close,
+  // and one run then would bring the browser up for a closed Surface. Kept
+  // well past any request's wait (`BROWSER_REQUEST_TIMEOUT_MS`) and bounded,
+  // oldest first; one already arrived is superseded above if still queued, or
+  // closed after by the close if running, so its entry just expires.
+  const cancelled = new Map<string, number>();
+  const CANCEL_TTL_MS = 5 * 60_000;
+  const MAX_CANCELLED = 256;
+  function cancelRequests(ids: readonly string[] = []): void {
+    const now = Date.now();
+    // Insertion order is expiry order: the TTL is fixed.
+    for (const [id, expires] of cancelled) {
+      if (expires > now) break;
+      cancelled.delete(id);
+    }
+    for (const id of ids) {
+      cancelled.delete(id);
+      cancelled.set(id, now + CANCEL_TTL_MS);
+    }
+    for (const id of cancelled.keys()) {
+      if (cancelled.size <= MAX_CANCELLED) break;
+      cancelled.delete(id);
+    }
+  }
+  /** Whether a close already cancelled request `id`, forgetting it. */
+  function wasCancelled(id: string | undefined): boolean {
+    if (id === undefined) return false;
+    const expires = cancelled.get(id);
+    cancelled.delete(id);
+    return expires !== undefined && expires > Date.now();
   }
 
   // Bumped by every launch and close: work begun for an earlier browser (a
@@ -510,6 +563,9 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     if (typeof r === 'string') return { ok: false, error: r };
     try {
       if (closed) throw new Error('the browser host is shutting down');
+      // Sent before a close that cancelled it, delivered after: it opens
+      // nothing for the Surface that close was for.
+      if ((r.op === 'launch' || r.op === 'attach') && wasCancelled(r.requestId)) throw new Error('the browser was closed');
       const p = providerFor(r.provider);
       if (r.op === 'streamUrl') return { ok: true, url: await p.streamUrl(r.port) };
       const b = p.bind({ ...r.binding, session: r.binding.session ?? generateGuiSession() });
@@ -530,6 +586,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
           return { ...answer(live), ...(relaunched ? { relaunched } : {}) };
         }
         case 'close':
+          cancelRequests(r.cancels);
           await closeSession(bound);
           return { ok: true };
         case 'screenshot':
