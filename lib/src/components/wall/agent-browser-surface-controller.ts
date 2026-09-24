@@ -172,9 +172,11 @@ type Phase =
   | { k: 'launching' }
   /** The session's stream port is being asked of the host (`attach`). */
   | { k: 'attaching' }
-  /** Streaming from `port`. `windowSeen`: a headed browser's stream has
-   *  connected, so a later drop means its window closed. */
-  | { k: 'live'; port: number; windowSeen: boolean }
+  /** Streaming from `port`. `seen`: the stream has reported its browser
+   *  connected, so a later drop means it went away — a headed window closed.
+   *  `resumed`: an unpark reconnecting to the port it parked at, not yet
+   *  proven there. */
+  | { k: 'live'; port: number; seen: boolean; resumed: boolean }
   /** Hidden long enough to shed the stream; the daemon stays up at `port`. */
   | { k: 'parked'; port: number }
   /** A headed↔headless relaunch is in flight: the host closes the browser and
@@ -209,13 +211,13 @@ export interface AgentBrowserViewSink {
 }
 
 /** The single view-facing snapshot, consumed via `useSyncExternalStore`. Only
- *  fields the view actually renders live here — parked state is read by tests via
- *  `isParked()`, and session comes straight from params, so neither belongs in
- *  the snapshot (keeping `parked` out also avoids a wasted re-render per park). */
+ *  what the view renders lives here — session comes straight from params — and
+ *  `phase` is the view's projection: a headless pane that parks or re-attaches
+ *  still shows its last frame, so it reads `live` then, rather than re-rendering
+ *  on every hide and show (`isParked()` answers tests). */
 export interface AgentBrowserViewSnapshot {
   tabs: StreamTab[];
   status: StreamStatus | null;
-  connectionLost: boolean;
   hasFrame: boolean;
   /** Headed: the browser is (or is being opened as) a separate OS window. */
   poppedOut: boolean;
@@ -273,7 +275,6 @@ export class AgentBrowserSurfaceController {
   // --- view state (the snapshot) ---
   private status: StreamStatus | null = null;
   private hasFrame = false;
-  private connectionLost = false;
   private tabs: StreamTab[] = EMPTY_TABS;
 
   // --- visibility / parking ---
@@ -451,13 +452,13 @@ export class AgentBrowserSurfaceController {
 
   private buildViewSnapshot(): AgentBrowserViewSnapshot {
     const phase = this.phase;
+    const shown = !this.headed && (phase.k === 'parked' || phase.k === 'attaching') ? 'live' : phase.k;
     return {
       tabs: this.tabs,
       status: this.status,
-      connectionLost: this.connectionLost,
       hasFrame: this.hasFrame,
       poppedOut: this.headed,
-      phase: phase.k,
+      phase: shown,
       error: phase.k === 'ended' ? phase.error : undefined,
     };
   }
@@ -470,7 +471,6 @@ export class AgentBrowserSurfaceController {
     if (
       prev.tabs === next.tabs &&
       prev.status === next.status &&
-      prev.connectionLost === next.connectionLost &&
       prev.hasFrame === next.hasFrame &&
       prev.poppedOut === next.poppedOut &&
       prev.phase === next.phase &&
@@ -688,7 +688,7 @@ export class AgentBrowserSurfaceController {
     // The last status came from the old browser; auto-revert waits for the
     // new stream's own before it treats a disconnect as the window closing.
     this.setStatus(null);
-    if (this.phase.k === 'live') this.phase.windowSeen = false;
+    if (this.phase.k === 'live') this.phase.seen = false;
     this.setHeaded(headed);
   }
 
@@ -756,10 +756,10 @@ export class AgentBrowserSurfaceController {
     else this.goLive(port);
   }
 
-  private goLive(port: number): void {
+  private goLive(port: number, resumed = false): void {
     this.setPhase(this.parkRequested && !this.headed
       ? { k: 'parked', port }
-      : { k: 'live', port, windowSeen: false });
+      : { k: 'live', port, seen: false, resumed });
   }
 
   /**
@@ -891,11 +891,11 @@ export class AgentBrowserSurfaceController {
     this.parkRequested = parkRequested;
     const phase = this.phase;
     // A parked pane holds no stream/screenshot loop; the daemon/session stays
-    // alive and re-broadcasts on reconnect. An unpark asks the host where the
-    // stream is now — the daemon may have moved while no client was alive —
-    // falling back to the port it parked at.
+    // alive and re-broadcasts on reconnect. An unpark streams from the port it
+    // parked at at once, and asks the host only if that fails: the daemon may
+    // have moved while no client was alive.
     if (parkRequested && phase.k === 'live') this.setPhase({ k: 'parked', port: phase.port });
-    else if (!parkRequested && phase.k === 'parked') this.attach(false, phase.port);
+    else if (!parkRequested && phase.k === 'parked') this.goLive(phase.port, true);
   }
 
   // --- stream connection (keyed; exists exactly while live) ---
@@ -951,18 +951,25 @@ export class AgentBrowserSurfaceController {
     this.connection = connection;
     this.screenshotLoop = screenshotLoop;
     this.connectionUnsub = connection.subscribe((event) => {
+      const phase = this.phase;
+      if (phase.k !== 'live') return;
       if (event.type === 'connection-open') {
-        this.setConnectionLost(false);
+        phase.resumed = false;
       } else if (event.type === 'connection-close') {
-        if (event.failures >= 3) this.setConnectionLost(true);
+        // An unpark's daemon may have moved while nothing streamed.
+        if (phase.resumed) this.attach(false);
+        else if (event.failures >= 3) this.streamLost();
       } else if (event.type === 'status') {
         this.setStatus(event.status);
-        this.setConnectionLost(event.status.connected === false);
+        // A browser not yet reported connected is still coming up.
+        const lost = !event.status.connected && phase.seen;
+        if (event.status.connected) phase.seen = true;
         if (typeof event.status.viewportWidth === 'number' && typeof event.status.viewportHeight === 'number') {
           this.device = { width: event.status.viewportWidth, height: event.status.viewportHeight };
           this.maybeDisengageSync();
           this.publishScreen();
         }
+        if (lost) this.streamLost();
       } else if (event.type === 'url') {
         // A navigation committed. `tabs` catches up only when the driving
         // command completes — for a slow page, the whole load — so record it now:
@@ -998,7 +1005,6 @@ export class AgentBrowserSurfaceController {
     // The new stream reports its own status; the last one came from whatever
     // this Surface streamed before.
     this.status = null;
-    this.connectionLost = false;
     // Unparking reconnects to the same session/port; the last good frame is still
     // valid, so only blank to the placeholder when the identity actually changed.
     const identity = `${session}:${streamPort}`;
@@ -1161,17 +1167,8 @@ export class AgentBrowserSurfaceController {
   // --- view-snapshot field setters (notify on real change) ---
 
   private setStatus(status: StreamStatus | null): void {
-    const prevConnected = this.status?.connected;
     this.status = status;
     this.emitView();
-    if (status?.connected !== prevConnected) this.maybeAutoRevert();
-  }
-
-  private setConnectionLost(connectionLost: boolean): void {
-    if (this.connectionLost === connectionLost) return;
-    this.connectionLost = connectionLost;
-    this.emitView();
-    this.maybeAutoRevert();
   }
 
   private setHasFrame(hasFrame: boolean): void {
@@ -1457,15 +1454,20 @@ export class AgentBrowserSurfaceController {
     });
   }
 
-  // Auto-revert: once the headed stream has connected, a later disconnect means
-  // the window closed → relaunch headless and resume streaming. A Dormouse
-  // teardown (pane kill, a render-swap away) releases the controller before it
-  // closes the session, so no stream is left to see that close.
-  private maybeAutoRevert(): void {
+  /**
+   * The stream says its browser is gone, or the stream itself is. A headless
+   * one has `ended`: the gate shuts, so nothing reaches a daemon whose port this
+   * controller would never learn. A headed one seen connected auto-reverts —
+   * its window closed, so relaunch headless in the pane; one not yet seen is
+   * still opening. A Dormouse teardown (pane kill, a render-swap away) releases
+   * the controller before it closes the session, so no stream is left to see
+   * that close.
+   */
+  private streamLost(): void {
     const phase = this.phase;
-    if (phase.k !== 'live' || !this.headed) return;
-    if (this.status?.connected === true) phase.windowSeen = true;
-    else if (phase.windowSeen && (this.status?.connected === false || this.connectionLost)) this.popIn();
+    if (phase.k !== 'live') return;
+    if (!this.headed) this.setPhase({ k: 'ended' });
+    else if (phase.seen) this.popIn();
   }
 
   // --- the daemon gate ---

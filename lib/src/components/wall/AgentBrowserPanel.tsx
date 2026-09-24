@@ -73,7 +73,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   );
 
   const snapshot = useSyncExternalStore(controller.subscribe, controller.snapshot);
-  const { tabs, status, connectionLost, hasFrame, poppedOut, phase, error } = snapshot;
+  const { tabs, status, hasFrame, poppedOut, phase, error } = snapshot;
 
   // Gated on the same Workspace-aware visibility the streaming body reads, so a
   // Workspace left in passthrough on a browser pane stops forwarding (and
@@ -341,7 +341,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
         ? `The browser could not be opened (${error}) — run ${command} to retry, or close this surface.`
         : `The browser could not be opened (${error}).`;
     }
-    if (phase === 'ended' || connectionLost || status?.connected === false) {
+    if (phase === 'ended') {
       return `The browser session ended — run ${command} to restart it, or close this surface.`;
     }
     if (!hasFrame) {

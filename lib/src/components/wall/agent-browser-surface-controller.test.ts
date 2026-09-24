@@ -692,26 +692,45 @@ describe('attach', () => {
     expect(WebSocketMock.instances).toHaveLength(0);
   });
 
-  it('never attaches while parked, and an unpark adopts a port that changed while hidden', async () => {
+  /** A live pane on 1111, parked. */
+  async function parkedAt1111(attach: PlatformAdapter['agentBrowserAttach']) {
+    const platform = attachPlatform(attach);
+    const controller = withPort('id', { session: 'sess', url: 'https://page.example/' }, 1111);
+    controller.attachView(makeSink());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(streamSocket(1111)?.readyState).toBe(1);
+    controller.setVisible(false);
+    await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50);
+    expect(controller.isParked()).toBe(true);
+    expect(streamSocket(1111)?.readyState).toBe(3);
+    return { platform, controller };
+  }
+
+  it('never attaches while parked, and an unpark whose port still answers asks the host nothing', async () => {
     vi.useFakeTimers();
     try {
-      const platform = attachPlatform(async () => ({ ok: true, wsPort: 2222 }));
-      const controller = withPort('id', { session: 'sess', url: 'https://page.example/' }, 1111);
-      const sink = makeSink();
-      controller.attachView(sink);
-      await vi.advanceTimersByTimeAsync(0);
-      expect(streamSocket(1111)?.readyState).toBe(1);
-
-      controller.setVisible(false);
-      await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50);
-      expect(controller.isParked()).toBe(true);
-      expect(streamSocket(1111)?.readyState).toBe(3);
-      expect(platform.agentBrowserAttach).not.toHaveBeenCalled();
-
-      // An unpark asks without a page: a daemon gone while hidden has ended,
-      // it is not relaunched behind the user's back.
+      const { platform, controller } = await parkedAt1111(async () => ({ ok: true, wsPort: 2222 }));
+      // Hidden and shown again, a headless pane never left `live` for its view.
+      expect(controller.snapshot().phase).toBe('live');
       controller.setVisible(true);
       await vi.advanceTimersByTimeAsync(0);
+      expect(streamSockets(1111)).toHaveLength(2);
+      expect(streamSocket(1111)?.readyState).toBe(1);
+      expect(platform.agentBrowserAttach).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('an unpark whose port fails asks the host, without a page, where the stream moved', async () => {
+    vi.useFakeTimers();
+    try {
+      const { platform, controller } = await parkedAt1111(async () => ({ ok: true, wsPort: 2222 }));
+      WebSocketMock.failPorts.add(1111);
+      controller.setVisible(true);
+      await vi.advanceTimersByTimeAsync(0);
+      // Without a page: a daemon gone while hidden has ended, it is not
+      // relaunched behind the user's back.
       expect(platform.agentBrowserAttach).toHaveBeenCalledExactlyOnceWith('sess', { url: undefined, headed: false }, undefined);
       expect(streamSocket(2222)?.readyState).toBe(1);
     } finally {
@@ -719,36 +738,50 @@ describe('attach', () => {
     }
   });
 
-  it('an unpark the host cannot answer streams on from the port it parked at', async () => {
+  it('an unpark the host cannot place ends', async () => {
     vi.useFakeTimers();
     try {
-      attachPlatform(async () => ({ ok: false, error: 'not running' }));
-      const controller = withPort('id', { session: 'sess' }, 1111);
-      controller.attachView(makeSink());
-      await vi.advanceTimersByTimeAsync(0);
-      controller.setVisible(false);
-      await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50);
-
+      const { controller } = await parkedAt1111(async () => ({ ok: false, error: 'not running' }));
+      WebSocketMock.failPorts.add(1111);
       controller.setVisible(true);
       await vi.advanceTimersByTimeAsync(0);
-      expect(streamSockets(1111)).toHaveLength(2);
-      expect(controller.snapshot().phase).toBe('live');
+      expect(controller.snapshot()).toMatchObject({ phase: 'ended', error: undefined });
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('does not attach again after a live port drops', async () => {
-    const platform = attachPlatform(async () => ({ ok: true, wsPort: 2222 }));
-    const controller = withPort('id', { session: 'sess' }, 1111);
-    const sink = makeSink();
-    controller.attachView(sink);
+  it('a headless browser that drops ends, reached again only through attach or a handed-over port', async () => {
+    const platform = attachPlatform(async () => ({ ok: true, wsPort: 3333 }));
+    const controller = withPort('id', { session: 'sess', url: 'https://page.example/' }, 1111);
+    controller.attachView(makeSink());
     await flushMicrotasks();
-
-    // The live port dropping is a stream failure, not a stale port.
-    streamSocket(1111)?.emitMessage(JSON.stringify({ type: 'status', connected: false, screencasting: false }));
-    await flushMicrotasks();
+    const socket = streamSocket(1111)!;
+    // Not yet reported connected: still coming up, not gone.
+    socket.emitMessage(JSON.stringify({ type: 'status', connected: false, screencasting: false }));
+    expect(controller.snapshot().phase).toBe('live');
+    socket.emitMessage(JSON.stringify({ type: 'status', connected: true, screencasting: true }));
+    socket.emitMessage(JSON.stringify({ type: 'status', connected: false, screencasting: false }));
+    expect(controller.snapshot().phase).toBe('ended');
+    expect(socket.readyState).toBe(3);
     expect(platform.agentBrowserAttach).not.toHaveBeenCalled();
+
+    // `dor ab open` brings it back on the port it had.
+    handOverBrowserPort('id', { session: 'sess', url: 'https://page.example/' }, 1111);
+    await flushMicrotasks();
+    expect(controller.snapshot().phase).toBe('live');
+    expect(streamSockets(1111)).toHaveLength(2);
+
+    // Ended again, a URL-bar navigation attaches — never a daemon command, which
+    // would start a daemon on a port nobody learns — and opens the page once live.
+    streamSocket(1111)!.emitMessage(JSON.stringify({ type: 'status', connected: true, screencasting: true }));
+    streamSocket(1111)!.emitMessage(JSON.stringify({ type: 'status', connected: false, screencasting: false }));
+    getAgentBrowserScreenController('id')!.chromeActions.navigate('https://next.example/');
+    expect(platform.agentBrowserCommand).not.toHaveBeenCalledWith('sess', ['open', 'https://next.example/'], undefined);
+    expect(platform.agentBrowserAttach).toHaveBeenCalledExactlyOnceWith('sess', { url: 'https://next.example/', headed: false }, undefined);
+    await flushMicrotasks();
+    expect(streamSocket(3333)?.readyState).toBe(1);
+    expect(platform.agentBrowserCommand).toHaveBeenCalledWith('sess', ['open', 'https://next.example/'], undefined);
   });
 
   it('does not query the daemon while a relaunch is in flight', async () => {
