@@ -582,8 +582,9 @@ terminal verbs use (`dor read surface:3`).
 `--surface` is the third of the mutually exclusive identity flags
 (`docs/specs/dor-browser.md` → Managed identity); any two of the three fail
 (`--key and --surface are mutually exclusive`). It changes *addressing* only:
-every other argument is still forwarded verbatim, and the host-side subcommand
-allowlist is untouched.
+every other argument is still forwarded verbatim, and the host's webview argv
+shapes are untouched (`docs/specs/dor-browser.md` → Agent-Browser Host
+Capabilities).
 
 **Resolution is host-side**, mirroring `surface.resolveOpen`: the CLI sends the
 handle to `surface.resolveAgentBrowser` and forwards the session it gets back.
