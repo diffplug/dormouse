@@ -130,8 +130,8 @@ export type KeyLike = {
 };
 
 /** Canonical params for a browser surface, as the view reads them. Pop-out is
- *  deliberately absent: it is derived from `renderMode`, never stored, and
- *  `wsPort` is only a one-shot handover of a port a launch just learned
+ *  deliberately absent: it is derived from `renderMode`, never stored; nor is
+ *  the stream port, which `dor` hands straight to the controller
  *  (docs/specs/dor-browser.md → "Canonical Params"). */
 export interface AgentBrowserSurfaceParams {
   surfaceType?: string;
@@ -142,7 +142,6 @@ export interface AgentBrowserSurfaceParams {
    *  mints one. */
   launchSession?: string;
   key?: string;
-  wsPort?: number;
   binaryPath?: string;
   url?: string;
   syncEngaged?: boolean;
@@ -252,8 +251,8 @@ export class AgentBrowserSurfaceController {
   private session: string | undefined;
   private launchSession: string | undefined;
   private binaryPath: string | undefined;
-  /** The last `wsPort` params carried: a change is a handover of a live port. */
-  private paramsWsPort: number | undefined;
+  /** A port handed over before the first start, which then streams from it. */
+  private initialPort: number | undefined;
   private paramsUrl: string | undefined;
   private paramsKey: string | null;
   private paramsSyncEngaged: boolean | undefined;
@@ -382,7 +381,6 @@ export class AgentBrowserSurfaceController {
     this.session = params.session;
     this.launchSession = params.launchSession;
     this.binaryPath = allowedBinaryPath(params.binaryPath, this.provider);
-    this.paramsWsPort = params.wsPort;
     this.paramsUrl = params.url;
     this.paramsKey = params.key ?? null;
     this.paramsSyncEngaged = params.syncEngaged;
@@ -506,7 +504,8 @@ export class AgentBrowserSurfaceController {
     });
     this.lastPublishedScreen = null;
     this.publishScreen();
-    this.bind(this.paramsWsPort);
+    this.bind(this.initialPort);
+    this.initialPort = undefined;
   }
 
   // A display-scale (DPR) change resizes nothing, so the pane's ResizeObserver
@@ -643,11 +642,6 @@ export class AgentBrowserSurfaceController {
     if (sessionChanged) this.session = params.session;
     this.launchSession = params.launchSession;
     this.binaryPath = allowedBinaryPath(params.binaryPath, this.provider);
-    let handover: number | undefined;
-    if (params.wsPort !== this.paramsWsPort) {
-      this.paramsWsPort = params.wsPort;
-      handover = params.wsPort;
-    }
     if (params.url !== this.paramsUrl) {
       this.paramsUrl = params.url;
       if (isBrowsableUrl(params.url)) this.latestRestorableUrl = params.url;
@@ -658,9 +652,18 @@ export class AgentBrowserSurfaceController {
     }
     if (params.syncEngaged !== undefined) this.paramsSyncEngaged = params.syncEngaged;
     // Before the first attach, `ensureStarted` binds whatever has arrived.
-    if (this.phase.k === 'idle') return;
-    if (sessionChanged) this.bind(handover);
-    else if (handover) this.adopt(handover);
+    if (this.phase.k !== 'idle' && sessionChanged) this.bind();
+  }
+
+  /**
+   * A port a `dor ab` / `dor pw` command just learned for this Surface's
+   * session — the same one again included — to stream from, leaving `ended`
+   * too.
+   */
+  handOver(port: number): void {
+    if (this.phase.k === 'disposed') return;
+    if (this.phase.k === 'idle') this.initialPort = port;
+    else this.adopt(port);
   }
 
   /** Whether params may set `field` to `value`: not while they have yet to
@@ -1703,6 +1706,17 @@ export function disposeAgentBrowserSurfaceController(id: string): void {
 function closeSessionOn(provider: BrowserAutomationProvider, cwd: string | undefined, session: string, binaryPath: unknown): Promise<void> {
   return browserPlatform(provider, cwd).agentBrowserCommand?.(session, ['close'], allowedBinaryPath(binaryPath, provider))
     .then(() => {}, () => {}) ?? Promise.resolve();
+}
+
+/** Hand `id`'s controller a port a `dor` command just learned, with the
+ *  params that command just refreshed — acquired from them if no view has
+ *  mounted it yet, so its first start streams at once. The params go first, so
+ *  a host-reported presentation or cwd applies before the new stream: sync
+ *  never sizes a headed window. */
+export function handOverBrowserPort(id: string, params: AgentBrowserSurfaceParams, port: number): void {
+  const controller = acquireAgentBrowserSurfaceController(id, params);
+  controller.updateParams(params);
+  controller.handOver(port);
 }
 
 /** Close `params`'s automation session, for a Surface no controller holds.

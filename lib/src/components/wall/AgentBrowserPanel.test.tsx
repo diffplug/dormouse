@@ -13,7 +13,9 @@ import {
   disposeAgentBrowserSurfaceController,
   disposeAllAgentBrowserSurfaceControllers,
   getAgentBrowserSurfaceController,
+  handOverBrowserPort,
 } from './agent-browser-surface-controller';
+import type { RenderMode } from './agent-browser-screen';
 import { ModeContext, PaneWriteContext, SelectedIdContext, WallActionsContext, WorkspaceActiveContext, type PaneWriteActions } from './wall-context';
 import { stubWallActions as stubActions } from './wall-test-utils';
 
@@ -39,7 +41,9 @@ class ResizeObserverMock {
 
 
 function paneProps(id: string, params: TestPanelParams = DEFAULT_PARAMS): PaneProps {
-  return { id, title: 'Browser', params };
+  const props = { id, title: 'Browser', params };
+  handOverFixturePort(props);
+  return props;
 }
 
 // The panel's title/param writes route through PaneWriteContext now; forward
@@ -96,10 +100,22 @@ afterEach(() => {
   // 'ab-panel', so release them or the next test would reuse a stale controller
   // bound to old platform mocks.
   disposeAllAgentBrowserSurfaceControllers();
+  handedOver.clear();
   container.remove();
   vi.restoreAllMocks();
   setPlatform(new FakePtyAdapter());
 });
+
+// `dor` hands a stream port straight to the Surface's controller, never
+// through params. These fixtures carry it in their params, so hand each new one
+// over the way the Wall does, with the params the command refreshed.
+const handedOver = new Map<string, number>();
+function handOverFixturePort({ id, params }: PaneProps): void {
+  const fixture = params as TestPanelParams | undefined;
+  if (fixture?.wsPort === undefined || handedOver.get(id) === fixture.wsPort) return;
+  handedOver.set(id, fixture.wsPort);
+  handOverBrowserPort(id, { ...fixture, renderMode: fixture.renderMode as RenderMode | undefined }, fixture.wsPort);
+}
 
 async function renderPanel(
   props: PaneProps = paneProps('ab-panel'),

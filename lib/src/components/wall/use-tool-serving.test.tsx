@@ -108,7 +108,7 @@ describe('port: announced', () => {
   it('reopens an existing browser in its own session, deferring Workspace transfer until it binds', async () => {
     const { lath, state } = toolEngine({
       ...announced, toolRender: 'ab-screencast', renderMode: 'ab-screencast',
-      session: 'existing-browser', wsPort: 9222, url: 'http://localhost:6006/', toolAnnouncedPort: 6006,
+      session: 'existing-browser', url: 'http://localhost:6006/', toolAnnouncedPort: 6006,
       binaryPath: '/opt/custom-agent-browser',
     });
     setPlatform(Object.assign(new FakePtyAdapter(), { getOpenPorts: vi.fn(async () => [tcp(6007)]) }));
@@ -121,7 +121,6 @@ describe('port: announced', () => {
     // it had, and binds the session once the browser is up.
     expect(state.params).toMatchObject({ url: 'http://localhost:6007/', launchSession: 'existing-browser', binaryPath: '/opt/custom-agent-browser' });
     expect(state.params.session).toBeUndefined();
-    expect(state.params.wsPort).toBeUndefined();
     expect(() => captureToolParams(lath, ['tool-1'])).toThrow('Wait for the Tool browser to connect');
     state.set({ session: 'existing-browser' });
     expect(captureToolParams(lath, ['tool-1'])['tool-1'].session).toBe('existing-browser');
@@ -298,7 +297,6 @@ describe('agent-browser retirement on command exit', () => {
       url: 'http://localhost:6006/',
       renderMode: 'ab-screencast',
       session: 'dormouse.1.tool-1',
-      wsPort: 43123,
       syncEngaged: true,
       binaryPath: '/opt/agent-browser',
     };
@@ -317,7 +315,6 @@ describe('agent-browser retirement on command exit', () => {
     }));
     expect(state.params.url).toBeUndefined();
     expect(state.params.session).toBeUndefined();
-    expect(state.params.wsPort).toBeUndefined();
     expect(state.params.renderMode).toBeUndefined();
     expect(state.params.syncEngaged).toBeUndefined();
   });

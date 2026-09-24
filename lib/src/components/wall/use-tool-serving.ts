@@ -135,7 +135,6 @@ export function useToolServing({
             toolPortConflict: undefined,
             session: undefined,
             launchSession: undefined,
-            wsPort: undefined,
             renderMode: undefined,
             syncEngaged: undefined,
           });
@@ -233,7 +232,7 @@ export function useToolServing({
           toolPortConflict: undefined,
           toolAnnouncedPort: announcedPort ?? undefined,
           toolAnnouncedPath: announcedPort === null ? undefined : announcedPath,
-          ...(agentDrivable ? { session: undefined, wsPort: undefined, launchSession: session } : {}),
+          ...(agentDrivable ? { session: undefined, launchSession: session } : {}),
         });
       }
     };

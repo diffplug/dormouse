@@ -46,7 +46,6 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
 
   const session = params?.session;
   const launchSession = params?.launchSession;
-  const wsPort = params?.wsPort;
   const binaryPath = params?.binaryPath;
   const url = params?.url;
   const key = params?.key;
@@ -100,8 +99,8 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   // one only for Playwright, whose native `open` can change headedness outside
   // Dormouse (`followParamsHeadedness`).
   useEffect(() => {
-    controller.updateParams({ session, launchSession, wsPort, binaryPath, url, syncEngaged, key, cwd, renderMode: seededMode });
-  }, [controller, session, launchSession, wsPort, binaryPath, url, syncEngaged, key, cwd, seededMode]);
+    controller.updateParams({ session, launchSession, binaryPath, url, syncEngaged, key, cwd, renderMode: seededMode });
+  }, [controller, session, launchSession, binaryPath, url, syncEngaged, key, cwd, seededMode]);
 
   // Lend the controller this view's live DOM bindings. Last attach wins; the
   // detach is identity-guarded inside the controller so a stale StrictMode

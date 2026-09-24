@@ -5,9 +5,7 @@ import {
   dorDirectionForEdge,
   directionForArrow,
   leafMetaFromPersistedDoor,
-  persistableLeafMeta,
   shouldParkOnMinimize,
-  toolLeafMeta,
 } from './lath-wall-engine';
 import type { PersistedDoor } from '../../lib/session-types';
 import { leaves } from '../../lib/lath/model';
@@ -57,39 +55,6 @@ describe('lath-wall-engine seed', () => {
     const { paneIds, fresh } = engine.seed(emptyLath, ['p1'], () => 'gen');
     expect(fresh).toBe(true);
     expect(paneIds).toEqual(['p1']);
-  });
-});
-
-describe('browser stream ports', () => {
-  const browserParams = { surfaceType: 'browser', renderMode: 'ab-screencast', session: 'sess', url: 'https://example.com/', wsPort: 4321 };
-  const expected = { surfaceType: 'browser', renderMode: 'ab-screencast', session: 'sess', url: 'https://example.com/' };
-
-  it('are never saved: a restored browser attaches to find the live port', () => {
-    const engine = createLathWallEngine();
-    engine.seed(null, ['p1'], () => 'gen');
-    engine.store.addLeaf('b1', { component: 'browser', tabComponent: 'surface', title: 'Browser', params: browserParams }, null);
-    // Live metadata keeps the handover for the controller that consumes it.
-    expect(engine.getMeta('b1')?.params?.wsPort).toBe(4321);
-    expect(engine.serializeLayout()?.leafMeta.b1.params).toEqual(expected);
-    expect(persistableLeafMeta({ component: 'browser', tabComponent: 'surface', title: 'Browser', params: browserParams }).params).toEqual(expected);
-  });
-
-  it('are dropped with the rest of a Tool\'s derived browser binding', () => {
-    expect(persistableLeafMeta(toolLeafMeta('Tool', {
-      surfaceType: 'tool', command: 'pnpm dev', url: 'http://localhost:6006/', renderMode: 'ab-screencast',
-      session: 'dormouse.1.tool.t', launchSession: 'dormouse.1.tool.t', wsPort: 4321,
-    })).params).toEqual({ surfaceType: 'tool', command: 'pnpm dev' });
-  });
-
-  it('are dropped from a blob saved before that rule, pane or Door', () => {
-    const engine = createLathWallEngine();
-    engine.seed({
-      version: 1,
-      tree: { root: { kind: 'leaf', id: 'b1' } },
-      leafMeta: { b1: { component: 'browser', tabComponent: 'surface', title: 'Browser', params: browserParams } },
-    }, [], () => 'gen', [{ id: 'd1', title: 'Door', component: 'browser', tabComponent: 'surface', params: browserParams } as PersistedDoor]);
-    expect(engine.getMeta('b1')?.params).toEqual(expected);
-    expect(engine.getMeta('d1')?.params).toEqual(expected);
   });
 });
 

@@ -35,6 +35,7 @@ import { isSurfaceClosing } from '../../lib/notepad/notepad-store';
 import { clearToolAnnounce } from '../../lib/tool-announce-store';
 import { isWorkspaceTransferPending } from '../../lib/window-session-aggregator';
 import { stringParam } from './dor-control-shared';
+import { handOverBrowserPort } from './agent-browser-surface-controller';
 import {
   callerStillPlaceable,
   callerStillRunnable,
@@ -608,7 +609,7 @@ export function useDorControl({
   findSurfaceByParams: (isMatch: (params: unknown) => boolean) => { id: string; minimized: boolean } | null;
   /** Fold a params patch onto a surface (visible pane or minimized door) — the
    *  one write path `dor` uses to hand an existing pane its refreshed
-   *  `{wsPort, binaryPath}`. */
+   *  `binaryPath`. */
   updateSurfaceParams: (id: string, patch: Record<string, unknown>) => void;
   /** Run one `dor` request against this Wall. `dor-control-router.ts` owns the
    *  window listener that chooses which Wall's handler runs. */
@@ -790,18 +791,23 @@ export function useDorControl({
     const refreshedParams = {
       ...(nativeIdentity ? { nativeIdentity } : {}),
       ...(provider === 'playwright' && headed !== undefined ? { renderMode: automationMode(provider, headed) } : {}),
-      ...(wsPort !== undefined ? { wsPort } : {}),
       ...(binaryPath !== undefined ? { binaryPath } : {}),
+    };
+    // The stream port is no param: the command just learned it, so the
+    // Surface's controller streams from it at once, even when it is unchanged.
+    const handOver = (id: string) => {
+      if (wsPort !== undefined) handOverBrowserPort(id, lath.getMeta(id)?.params ?? {}, wsPort);
     };
 
     const existing = provider === 'agent-browser'
       ? findAgentBrowserSurface(session)
       : findPlaywrightSurface({ key, session, nativeIdentity, cwd });
     if (existing) {
-      // Reuse: refresh the stream port (OS-assigned, churns across session
-      // restarts) so the panel reconnects to the live stream, and the
-      // resolved binary path alongside it.
+      // Reuse: hand over the stream port (OS-assigned, churns across session
+      // restarts) so the pane reconnects to the live stream, and refresh the
+      // resolved binary path.
       updateSurfaceParams(existing.id, refreshedParams);
+      handOver(existing.id);
       return {
         ok: true,
         status: 'existing',
@@ -831,6 +837,7 @@ export function useDorControl({
       focusNeutral: true,
     });
     if (!result.ok) return { ok: false, message: result.message };
+    handOver(result.value.id);
     return {
       ok: true,
       status: result.value.status,
@@ -838,7 +845,7 @@ export function useDorControl({
       surfaceRef: result.value.ref,
       minimized,
     };
-  }, [createContentSurface, findAgentBrowserSurface, findPlaywrightSurface, updateSurfaceParams, surfaceRefForId]);
+  }, [createContentSurface, findAgentBrowserSurface, findPlaywrightSurface, updateSurfaceParams, surfaceRefForId, lath]);
 
 
   // The request handler itself. The window listener that picks WHICH Wall runs it

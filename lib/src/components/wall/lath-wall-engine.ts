@@ -100,19 +100,6 @@ export function toolLeafMeta(title: string, params: Record<string, unknown>): Le
 }
 
 /**
- * A browser's stream port is the one-shot handover of the launch that learned
- * it, never state: after a restart it names nothing — or another process's
- * listener — and the Surface attaches to find the live one
- * (docs/specs/dor-browser.md → "Canonical Params"). Dropped both ways, so a
- * blob saved before this rule restores without it too.
- */
-function withoutStreamPort(meta: LeafMeta): LeafMeta {
-  if (meta.params?.wsPort === undefined) return meta;
-  const { wsPort: _wsPort, ...params } = meta.params;
-  return { ...meta, params };
-}
-
-/**
  * A tool's browser is derived, never restored: its port is whatever the command
  * bound *this* run, so a persisted `url` would frame a dead address — and a
  * persisted agent-browser `session` would name a daemon that is gone
@@ -121,7 +108,7 @@ function withoutStreamPort(meta: LeafMeta): LeafMeta {
  * cold spawn passes through. Everything else about the leaf persists.
  */
 export function persistableLeafMeta(meta: LeafMeta): LeafMeta {
-  if (meta.component !== 'tool' || !meta.params) return withoutStreamPort(meta);
+  if (meta.component !== 'tool' || !meta.params) return meta;
   // A tool still awaiting approval persists as a plain empty terminal. Keeping
   // it a tool would restore a pane that spawns a shell in a repo nobody
   // approved, with no gesture at all — and the prompt cannot be restored either,
@@ -134,7 +121,6 @@ export function persistableLeafMeta(meta: LeafMeta): LeafMeta {
     url: _url,
     session: _session,
     launchSession: _launchSession,
-    wsPort: _wsPort,
     renderMode: _renderMode,
     toolPortConflict: _toolPortConflict,
     toolAnnouncedPort: _toolAnnouncedPort,
@@ -146,12 +132,12 @@ export function persistableLeafMeta(meta: LeafMeta): LeafMeta {
 
 /** Hydration-only Door-row projection; runtime metadata stays in the store. */
 export function leafMetaFromPersistedDoor(item: PersistedDoor): LeafMeta {
-  return withoutStreamPort({
+  return {
     component: item.component ?? 'terminal',
     tabComponent: item.tabComponent ?? 'terminal',
     title: item.title,
     params: item.params,
-  });
+  };
 }
 
 /** Whether minimizing this leaf should park it rather than remove it: true when the
@@ -311,8 +297,7 @@ export function createLathWallEngine(
       if (isLathPersistedLayout(lathBlob)) {
         const tree = lathBlob.tree as LathTree;
         if (leaves(tree).length > 0) {
-          const leafMeta = Object.entries(lathBlob.leafMeta).map(([id, meta]) => [id, withoutStreamPort(meta)] as const);
-          store.seed(tree, [...leafMeta, ...doorMeta]);
+          store.seed(tree, [...Object.entries(lathBlob.leafMeta), ...doorMeta]);
           return { paneIds: store.leafIds(), fresh: false };
         }
       }

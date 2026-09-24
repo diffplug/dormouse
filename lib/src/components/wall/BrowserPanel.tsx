@@ -32,8 +32,6 @@ export type BrowserPanelParams = {
    *  the previous provider's when a failed swap restores it. */
   launchSession?: string;
   key?: string;
-  /** The one-shot handover of a launch's live stream port; never persisted. */
-  wsPort?: number;
   binaryPath?: string;
   syncEngaged?: boolean;
   /** Set only on a Surface the pane context menu opened for a port, as
