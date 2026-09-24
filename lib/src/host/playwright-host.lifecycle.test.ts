@@ -217,7 +217,7 @@ describe('attach', () => {
   });
 
   test('a gone session relaunches at the page named, and fails without one', async () => {
-    expect((await host.request({ ...binding, op: 'attach' })).ok).toBe(false);
+    expect((await host.request({ ...binding, op: 'attach' })).error).toBe('Playwright session is not open or has no viewable endpoint');
     expect(verbs()).not.toContain('open');
 
     const attached = await host.request({ ...binding, op: 'attach', url: 'http://localhost/', headed: true });

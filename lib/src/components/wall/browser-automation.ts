@@ -111,13 +111,6 @@ export function browserPlatform(provider: BrowserAutomationProvider, cwd?: strin
   };
 }
 
-/** The key of a session's closed mark (`agent-browser-sessions.ts`). Playwright
- *  session names are unique only within a CLI project scope, so they are keyed
- *  with their cwd. */
-export function browserSessionKey(session: string, provider: BrowserAutomationProvider, cwd?: string): string {
-  return provider === 'playwright' ? JSON.stringify(['playwright', cwd ?? '', session]) : session;
-}
-
 /**
  * The binary path a `dor ab` surface last resolved on a terminal's PATH,
  * re-used to spawn an agent-browser for a GUI launch (an embed swapped up to a

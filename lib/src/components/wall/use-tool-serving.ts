@@ -21,8 +21,7 @@ import { listenerUrlsByPort } from './port-url';
 import { getToolAnnounce } from '../../lib/tool-announce-store';
 import { validToolServePath } from '../../lib/tool-announce';
 import { sessionForKey } from 'dor-lib-common/agent-browser';
-import { markAgentBrowserSessionClosed } from './agent-browser-sessions';
-import { disposeAgentBrowserSurfaceController } from './agent-browser-surface-controller';
+import { closeBrowserSurface } from './agent-browser-surface-controller';
 import type { LathWallEngine } from './lath-wall-engine';
 import type { DooredItem } from './wall-types';
 import type { CommandRun } from '../../lib/terminal-state';
@@ -126,18 +125,10 @@ export function useToolServing({
         if (!running || runChanged) seenPorts.current.delete(leaf.id);
 
         if ((hasUrl || hasConflict) && (!running || runChanged)) {
-          const session = typeof leaf.params.session === 'string' ? leaf.params.session : null;
-          if (session) {
-            const binaryPath = typeof leaf.params.binaryPath === 'string' ? leaf.params.binaryPath : undefined;
-            // Mark before close so a popped-out/stream-loss callback cannot
-            // auto-relaunch a browser the command exit is retiring.
-            markAgentBrowserSessionClosed(session);
-            void platform.agentBrowserCommand?.(session, ['close'], binaryPath).catch(() => {});
-          }
           // The browser panel remains mounted behind the terminal half, so its
-          // controller must be disposed explicitly rather than waiting for an
-          // unmount that will not happen.
-          disposeAgentBrowserSurfaceController(leaf.id);
+          // controller must be released explicitly rather than waiting for an
+          // unmount that will not happen — closing its session with it.
+          closeBrowserSurface(leaf.id, leaf.params);
           lath.store.updateParams(leaf.id, {
             url: undefined,
             toolAnnouncedPort: undefined,

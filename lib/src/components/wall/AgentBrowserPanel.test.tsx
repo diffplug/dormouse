@@ -149,14 +149,14 @@ describe('AgentBrowserPanel render mode controller', () => {
       ok: true,
       wsPort: 3456,
     }));
-    const streamStatus = vi.fn<PlatformAdapter['agentBrowserAttach']>(async (): Promise<AgentBrowserAttachResult> => ({
+    const attach = vi.fn<PlatformAdapter['agentBrowserAttach']>(async (): Promise<AgentBrowserAttachResult> => ({
       ok: true,
       wsPort: 1234,
     }));
     const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserPopOut' | 'agentBrowserAttach'>;
     platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
     platform.agentBrowserPopOut = popOut;
-    platform.agentBrowserAttach = streamStatus;
+    platform.agentBrowserAttach = attach;
     setPlatform(platform);
 
     await renderPanel(paneProps('ab-panel'), updateParameters);
@@ -421,13 +421,13 @@ describe('AgentBrowserPanel render mode controller', () => {
     expect(getAgentBrowserScreenController('ab-panel')?.chrome().url).toBe('https://github.com/diffplug/dormouse');
   });
 
-  it('does not recover a stale port through stream status after that port opened live', async () => {
-    const streamStatus = vi.fn<PlatformAdapter['agentBrowserAttach']>(async (): Promise<AgentBrowserAttachResult> => ({
+  it('does not attach again after the port it streams from drops', async () => {
+    const attach = vi.fn<PlatformAdapter['agentBrowserAttach']>(async (): Promise<AgentBrowserAttachResult> => ({
       ok: true,
       wsPort: 2222,
     }));
     const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserAttach'>;
-    platform.agentBrowserAttach = streamStatus;
+    platform.agentBrowserAttach = attach;
     setPlatform(platform);
 
     await renderPanel(paneProps('ab-panel', { surfaceType: 'browser', session: 'browser-session', wsPort: 1111 }));
@@ -435,14 +435,14 @@ describe('AgentBrowserPanel render mode controller', () => {
     await act(async () => {
       await Promise.resolve();
     });
-    streamStatus.mockClear();
+    attach.mockClear();
 
     await act(async () => {
       WebSocketMock.instances.at(-1)?.emitMessage(JSON.stringify({ type: 'status', connected: false, screencasting: false }));
       await Promise.resolve();
     });
 
-    expect(streamStatus).not.toHaveBeenCalled();
+    expect(attach).not.toHaveBeenCalled();
   });
 
   it('swaps straight to iframe with no extra tabs (no confirm gate)', async () => {
@@ -698,10 +698,10 @@ describe('AgentBrowserPanel visibility parking', () => {
     expect(liveStreamSocket(4321)?.readyState).toBe(1);
   });
 
-  it('never queries stream status while parked', async () => {
-    const streamStatus = vi.fn<PlatformAdapter['agentBrowserAttach']>(async () => ({ ok: false }));
+  it('never attaches while parked', async () => {
+    const attach = vi.fn<PlatformAdapter['agentBrowserAttach']>(async () => ({ ok: false }));
     const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserAttach'>;
-    platform.agentBrowserAttach = streamStatus;
+    platform.agentBrowserAttach = attach;
     setPlatform(platform);
 
     // No wsPort ⇒ the stale-port recovery effect is the code path that would
@@ -710,12 +710,12 @@ describe('AgentBrowserPanel visibility parking', () => {
       surfaceType: 'browser', session: 'browser-session',
     });
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-    streamStatus.mockClear();
+    attach.mockClear();
 
     await act(async () => { setVisible(false); });
     await act(async () => { await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50); });
 
-    expect(streamStatus).not.toHaveBeenCalled();
+    expect(attach).not.toHaveBeenCalled();
   });
 
   it('reconnects and repaints from the stream when it becomes visible again', async () => {

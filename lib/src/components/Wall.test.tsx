@@ -783,6 +783,60 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('pops out a reused context-port browser at the port, never navigating into the relaunch', async () => {
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    const helperSpy = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'context-helper', parentId: 'pane-a', command: '', status: 'preserved' });
+    const command = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
+    const popOut = vi.fn(() => new Promise<never>(() => {}));
+    Object.assign(fake, {
+      agentBrowserOpen: vi.fn(async () => ({ ok: true, session: 'second', wsPort: 1 })),
+      agentBrowserAttach: vi.fn(async () => ({ ok: true, wsPort: 4321 })),
+      agentBrowserCommand: command,
+      agentBrowserPopOut: popOut,
+    });
+    try {
+      // The port's browser, navigated away from the port's page since.
+      await act(async () => {
+        root.render(<Wall initialMode="command" restoredLathLayout={{
+          version: 1,
+          tree: { root: { kind: 'split', dir: 'row', children: [
+            { node: { kind: 'leaf', id: 'pane-a' }, weight: 0.5 },
+            { node: { kind: 'leaf', id: 'port-ab' }, weight: 0.5 },
+          ] } },
+          leafMeta: {
+            'pane-a': { component: 'terminal', tabComponent: 'terminal', title: 'shell' },
+            'port-ab': { component: 'browser', tabComponent: 'surface', title: 'localhost:5173', params: {
+              surfaceType: 'browser', renderMode: 'ab-screencast', session: 'restored', url: 'http://localhost:5173/elsewhere', contextPortKey: 'pane-a:5173:agent',
+            } },
+          },
+        }} />);
+      });
+      await flush();
+      if (!fake.hasPty('pane-a')) fake.spawnPty('pane-a');
+      fake.setOpenPorts('pane-a', [{ protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port: 5173, pid: 100, processName: 'vite' }]);
+      await act(async () => {
+        container.querySelector<HTMLElement>('[data-pane-header-for="pane-a"]')!.dispatchEvent(new MouseEvent('contextmenu', {
+          bubbles: true, cancelable: true, clientX: 10, clientY: 10,
+        }));
+      });
+      await flush();
+      command.mockClear();
+      await act(async () => {
+        document.querySelector<HTMLButtonElement>('[data-terminal-context] button[aria-label="Open in agent-browser popout"]')!.click();
+      });
+      await flush();
+
+      // One relaunch, at the port — not at the page it was on, with the port's
+      // `open` queued behind it.
+      expect(leafCount()).toBe(2);
+      expect(popOut).toHaveBeenCalledExactlyOnceWith('restored', expect.objectContaining({ url: 'http://localhost:5173/' }), undefined);
+      expect(command).not.toHaveBeenCalledWith('restored', ['open', 'http://localhost:5173/'], undefined);
+    } finally {
+      helperSpy.mockRestore();
+      untouchedSpy.mockRestore();
+    }
+  });
+
   it('names Playwright when a context-menu Playwright launch fails', async () => {
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
     // The mocked TerminalPane registers no terminal, so the helper would report

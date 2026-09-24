@@ -17,7 +17,7 @@ import { createLathWallEngine, toolLeafMeta } from './lath-wall-engine';
 import type { OpenPort } from '../../lib/platform/types';
 
 const controllerMocks = vi.hoisted(() => ({
-  disposeAgentBrowserSurfaceController: vi.fn(),
+  closeBrowserSurface: vi.fn(),
 }));
 
 vi.mock('./agent-browser-surface-controller', () => controllerMocks);
@@ -296,17 +296,19 @@ describe('agent-browser retirement on command exit', () => {
       syncEngaged: true,
       binaryPath: '/opt/agent-browser',
     };
-    const { state, platform } = await run(params, [[]]);
-    const close = vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 }));
-    platform.agentBrowserCommand = close;
+    const { state } = await run(params, [[]]);
+    controllerMocks.closeBrowserSurface.mockClear();
 
-    // The first tick ran during mount before the close stub was installed; put
-    // the browser state back, then let the next poll exercise retirement.
+    // The first tick retired the browser during mount; put the browser state
+    // back, then let the next poll exercise retirement.
     state.set(params);
     await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
 
-    expect(close).toHaveBeenCalledWith('dormouse.1.tool-1', ['close'], '/opt/agent-browser');
-    expect(controllerMocks.disposeAgentBrowserSurfaceController).toHaveBeenCalledWith('tool-1');
+    // Its session is closed with its controller, from the params it had.
+    expect(controllerMocks.closeBrowserSurface).toHaveBeenCalledExactlyOnceWith('tool-1', expect.objectContaining({
+      session: 'dormouse.1.tool-1',
+      binaryPath: '/opt/agent-browser',
+    }));
     expect(state.params.url).toBeUndefined();
     expect(state.params.session).toBeUndefined();
     expect(state.params.wsPort).toBeUndefined();

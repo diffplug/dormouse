@@ -10,6 +10,7 @@ import {
   HIDDEN_PARK_DELAY_MS,
   PROVISIONAL_INPUT_WINDOW_MS,
   acquireAgentBrowserSurfaceController,
+  closeBrowserSurface,
   disposeAgentBrowserSurfaceController,
   disposeAllAgentBrowserSurfaceControllers,
   getAgentBrowserSurfaceController,
@@ -356,6 +357,50 @@ describe('sync-to-pane', () => {
   });
 });
 
+describe('sync-to-pane while parked', () => {
+  it('pushes a resize made behind a hidden pane once it is live again', async () => {
+    vi.useFakeTimers();
+    try {
+      const command = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
+      const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserAttach'>;
+      platform.agentBrowserCommand = command;
+      platform.agentBrowserAttach = vi.fn(async () => ({ ok: true, wsPort: 4321 }));
+      setPlatform(platform);
+      const observers: ResizeObserverCallback[] = [];
+      vi.stubGlobal('ResizeObserver', class {
+        constructor(callback: ResizeObserverCallback) { observers.push(callback); }
+        observe() {}
+        disconnect() {}
+      });
+      const sink = makeSink();
+      let size = { width: 800, height: 600 };
+      sink.viewport.getBoundingClientRect = () => ({ ...size }) as DOMRect;
+      const viewports = () => command.mock.calls
+        .map((call) => (call as unknown as [string, string[]])[1])
+        .filter((args) => args[1] === 'viewport');
+
+      const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', wsPort: 4321 });
+      controller.attachView(sink);
+      await vi.advanceTimersByTimeAsync(0);
+      controller.setVisible(false);
+      await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50);
+      expect(controller.isParked()).toBe(true);
+
+      size = { width: 1000, height: 700 };
+      observers.at(-1)?.([{ contentRect: { width: 1000, height: 700 } } as ResizeObserverEntry], {} as ResizeObserver);
+      await vi.advanceTimersByTimeAsync(250);
+      expect(viewports().at(-1)).toEqual(['set', 'viewport', '800', '600', '1']);
+
+      // Unparked at the same port: the size it missed still goes out.
+      controller.setVisible(true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(viewports().at(-1)).toEqual(['set', 'viewport', '1000', '700', '1']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('parking', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
@@ -509,22 +554,27 @@ describe('updateParams', () => {
   });
 });
 
-describe('stale-port recovery gating', () => {
-  it('stays fully inert for a session-less pane until params deliver the session', async () => {
-    const streamStatus = vi.fn<PlatformAdapter['agentBrowserAttach']>(async () => ({ ok: true, wsPort: 2222 }));
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserAttach'>;
-    platform.agentBrowserAttach = streamStatus;
+describe('attach', () => {
+  function attachPlatform(attach: PlatformAdapter['agentBrowserAttach']) {
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserAttach' | 'agentBrowserCommand'>;
+    platform.agentBrowserAttach = vi.fn(attach);
+    platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
     setPlatform(platform);
+    return platform;
+  }
+
+  it('stays fully inert for a session-less pane until params deliver the session', async () => {
+    const platform = attachPlatform(async () => ({ ok: true, wsPort: 2222 }));
 
     // The pane context menu's instant connect mounts its surface WITHOUT a
-    // session precisely so nothing here can race the daemon boot — no recovery
-    // query, no socket (docs/specs/dor-browser.md → Pane Context Menu Connect).
+    // session precisely so nothing here can race the daemon boot — no attach,
+    // no socket (docs/specs/dor-browser.md → Pane Context Menu Connect).
     // Deriving the session from `key` would silently reintroduce the race.
     const controller = acquireAgentBrowserSurfaceController('id', { key: 'default', url: 'http://localhost:5173/' });
     const sink = makeSink();
     controller.attachView(sink);
     await flushMicrotasks();
-    expect(streamStatus).not.toHaveBeenCalled();
+    expect(platform.agentBrowserAttach).not.toHaveBeenCalled();
     expect(WebSocketMock.instances).toHaveLength(0);
 
     // The background boot hands over {session, wsPort} in one params write,
@@ -532,92 +582,96 @@ describe('stale-port recovery gating', () => {
     controller.updateParams({ key: 'default', url: 'http://localhost:5173/', session: 'sess', wsPort: 1111 });
     await flushMicrotasks();
     expect(streamSocket(1111)?.readyState).toBe(1);
+    expect(platform.agentBrowserAttach).not.toHaveBeenCalled();
   });
 
-  it('never queries stream status while parked', async () => {
-    vi.useFakeTimers();
-    try {
-      const streamStatus = vi.fn<PlatformAdapter['agentBrowserAttach']>(async () => ({ ok: false }));
-      const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserAttach'>;
-      platform.agentBrowserAttach = streamStatus;
-      setPlatform(platform);
-
-      // No wsPort ⇒ the recovery path is what would query the daemon.
-      const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess' });
-      const sink = makeSink();
-      controller.attachView(sink);
-      await vi.advanceTimersByTimeAsync(0);
-      streamStatus.mockClear();
-
-      controller.setVisible(false);
-      await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50);
-      expect(controller.isParked()).toBe(true);
-      expect(streamStatus).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('does not recover a stale port through stream status after that port opened live', async () => {
-    const streamStatus = vi.fn<PlatformAdapter['agentBrowserAttach']>(async () => ({ ok: true, wsPort: 2222 }));
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserAttach'>;
-    platform.agentBrowserAttach = streamStatus;
-    setPlatform(platform);
-
-    const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', wsPort: 1111 });
+  it('a restored pane attaches at the page and presentation it had, and never writes the port back', async () => {
+    const platform = attachPlatform(async () => ({ ok: true, wsPort: 2222 }));
+    const controller = acquireAgentBrowserSurfaceController('id', {
+      session: 'sess', renderMode: 'ab-popout', url: 'https://restored.example/',
+    });
     const sink = makeSink();
     controller.attachView(sink);
     await flushMicrotasks();
-    streamStatus.mockClear();
 
-    // The live port dropping is a stream failure, not a stale persisted port.
-    streamSocket(1111)?.emitMessage(JSON.stringify({ type: 'status', connected: false, screencasting: false }));
-    await flushMicrotasks();
-    expect(streamStatus).not.toHaveBeenCalled();
+    expect(platform.agentBrowserAttach).toHaveBeenCalledExactlyOnceWith('sess', { url: 'https://restored.example/', headed: true }, undefined);
+    expect(streamSocket(2222)?.readyState).toBe(1);
+    expect(sink.updateParameters).not.toHaveBeenCalledWith(expect.objectContaining({ wsPort: expect.anything() }));
   });
 
-  it('clears live-port memory while parked so unpark can recover a changed stream port', async () => {
+  it('a browser that cannot be reopened says why', async () => {
+    attachPlatform(async () => ({ ok: false, error: 'agent-browser binary not found' }));
+    const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', url: 'https://restored.example/' });
+    controller.attachView(makeSink());
+    await flushMicrotasks();
+    expect(controller.snapshot()).toMatchObject({ phase: 'ended', error: 'agent-browser binary not found' });
+    expect(WebSocketMock.instances).toHaveLength(0);
+  });
+
+  it('never attaches while parked, and an unpark adopts a port that changed while hidden', async () => {
     vi.useFakeTimers();
     try {
-      const streamStatus = vi.fn<PlatformAdapter['agentBrowserAttach']>(async () => ({ ok: true, wsPort: 2222 }));
-      const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserAttach'>;
-      platform.agentBrowserAttach = streamStatus;
-      setPlatform(platform);
-
-      const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', wsPort: 1111 });
+      const platform = attachPlatform(async () => ({ ok: true, wsPort: 2222 }));
+      const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', wsPort: 1111, url: 'https://page.example/' });
       const sink = makeSink();
       controller.attachView(sink);
       await vi.advanceTimersByTimeAsync(0);
       expect(streamSocket(1111)?.readyState).toBe(1);
-      streamStatus.mockClear();
 
       controller.setVisible(false);
       await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50);
       expect(controller.isParked()).toBe(true);
+      expect(streamSocket(1111)?.readyState).toBe(3);
+      expect(platform.agentBrowserAttach).not.toHaveBeenCalled();
 
-      WebSocketMock.failPorts.add(1111);
+      // An unpark asks without a page: a daemon gone while hidden has ended,
+      // it is not relaunched behind the user's back.
       controller.setVisible(true);
       await vi.advanceTimersByTimeAsync(0);
-
-      await vi.advanceTimersByTimeAsync(2000);
-      await vi.advanceTimersByTimeAsync(4000);
-      await vi.advanceTimersByTimeAsync(0);
-
-      expect(streamStatus).toHaveBeenCalledWith('sess', {}, undefined);
-      expect(sink.updateParameters).toHaveBeenCalledWith({ wsPort: 2222 });
+      expect(platform.agentBrowserAttach).toHaveBeenCalledExactlyOnceWith('sess', { url: undefined, headed: false }, undefined);
+      expect(streamSocket(2222)?.readyState).toBe(1);
+      expect(sink.updateParameters).not.toHaveBeenCalledWith({ wsPort: 2222 });
     } finally {
       vi.useRealTimers();
     }
   });
 
+  it('an unpark the host cannot answer streams on from the port it parked at', async () => {
+    vi.useFakeTimers();
+    try {
+      attachPlatform(async () => ({ ok: false, error: 'not running' }));
+      const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', wsPort: 1111 });
+      controller.attachView(makeSink());
+      await vi.advanceTimersByTimeAsync(0);
+      controller.setVisible(false);
+      await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50);
+
+      controller.setVisible(true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(streamSockets(1111)).toHaveLength(2);
+      expect(controller.snapshot().phase).toBe('live');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not attach again after a live port drops', async () => {
+    const platform = attachPlatform(async () => ({ ok: true, wsPort: 2222 }));
+    const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', wsPort: 1111 });
+    const sink = makeSink();
+    controller.attachView(sink);
+    await flushMicrotasks();
+
+    // The live port dropping is a stream failure, not a stale port.
+    streamSocket(1111)?.emitMessage(JSON.stringify({ type: 'status', connected: false, screencasting: false }));
+    await flushMicrotasks();
+    expect(platform.agentBrowserAttach).not.toHaveBeenCalled();
+  });
+
   it('does not query the daemon while a relaunch is in flight', async () => {
-    const streamStatus = vi.fn<PlatformAdapter['agentBrowserAttach']>(async () => ({ ok: true, wsPort: 9999 }));
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserAttach' | 'agentBrowserCommand' | 'agentBrowserPopOut'>;
-    platform.agentBrowserAttach = streamStatus;
-    platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
-    // A pop-out whose promise never settles pins `relaunching` true.
-    platform.agentBrowserPopOut = vi.fn(() => new Promise(() => {}));
-    setPlatform(platform);
+    const platform = attachPlatform(async () => ({ ok: true, wsPort: 9999 }));
+    const popOut = vi.fn(() => new Promise<never>(() => {}));
+    Object.assign(platform, { agentBrowserPopOut: popOut });
 
     const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', wsPort: 1111 });
     const sink = makeSink();
@@ -625,12 +679,13 @@ describe('stale-port recovery gating', () => {
     await flushMicrotasks();
 
     getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout');
-    streamStatus.mockClear();
+    vi.mocked(platform.agentBrowserCommand!).mockClear();
 
-    // A stream drop mid-relaunch must not spawn a competing daemon via recovery.
+    // A stream drop mid-relaunch must not spawn a competing daemon.
     streamSocket(1111)?.emitMessage(JSON.stringify({ type: 'status', connected: false, screencasting: false }));
     await flushMicrotasks();
-    expect(streamStatus).not.toHaveBeenCalled();
+    expect(platform.agentBrowserAttach).not.toHaveBeenCalled();
+    expect(platform.agentBrowserCommand).not.toHaveBeenCalled();
   });
 });
 
@@ -650,6 +705,55 @@ describe('dispose', () => {
     expect(socket?.readyState).toBe(3);
     expect(getAgentBrowserScreenController('id')).toBeNull();
     expect(getAgentBrowserSurfaceController('id')).toBeNull();
+  });
+});
+
+describe('closeBrowserSurface', () => {
+  function closePlatform() {
+    let resolvePopOut!: (res: { ok: boolean; wsPort?: number }) => void;
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserPopOut'>;
+    platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
+    platform.agentBrowserPopOut = vi.fn(() => new Promise((r) => { resolvePopOut = r; }));
+    setPlatform(platform);
+    const closes = () => vi.mocked(platform.agentBrowserCommand!).mock.calls.filter(([, args]) => args[0] === 'close');
+    return { platform, closes, resolvePopOut: (res: { ok: boolean; wsPort?: number }) => resolvePopOut(res) };
+  }
+
+  it('closes the session again when a relaunch in flight brings its daemon back', async () => {
+    const { closes, resolvePopOut } = closePlatform();
+    const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', wsPort: 1111 });
+    controller.attachView(makeSink());
+    await flushMicrotasks();
+    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout');
+
+    closeBrowserSurface('id', { renderMode: 'ab-popout', session: 'sess' });
+    expect(closes()).toHaveLength(1);
+    expect(getAgentBrowserSurfaceController('id')).toBeNull();
+
+    resolvePopOut({ ok: true, wsPort: 3456 });
+    await flushMicrotasks();
+    expect(closes()).toHaveLength(2);
+    expect(streamSockets(3456)).toHaveLength(0);
+  });
+
+  it('a release that closes nothing leaves a relaunch in flight to whoever holds the session next', async () => {
+    const { closes, resolvePopOut } = closePlatform();
+    const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', wsPort: 1111 });
+    controller.attachView(makeSink());
+    await flushMicrotasks();
+    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout');
+
+    disposeAgentBrowserSurfaceController('id');
+    resolvePopOut({ ok: true, wsPort: 3456 });
+    await flushMicrotasks();
+    expect(closes()).toHaveLength(0);
+  });
+
+  it('closes a session no controller holds from its params, with only a checked binary', async () => {
+    const { platform } = closePlatform();
+    closeBrowserSurface('never-mounted', { surfaceType: 'browser', renderMode: 'ab-screencast', session: 'sess', binaryPath: '/usr/bin/curl' });
+    closeBrowserSurface('iframe', { surfaceType: 'browser', renderMode: 'iframe', url: 'http://localhost:5173/' });
+    expect(platform.agentBrowserCommand).toHaveBeenCalledExactlyOnceWith('sess', ['close'], undefined);
   });
 });
 
@@ -795,6 +899,118 @@ describe('relaunch (pop-out / pop-in)', () => {
     expect(sink.setTitle).toHaveBeenCalledTimes(titleWrites);
   });
 
+  it('reaches no daemon from the header, Display modal, tabs, sync or edit chords mid-relaunch, and carries a navigation to the new browser', async () => {
+    const platform = relaunchPlatform();
+    const edit = vi.fn(async () => ({ ok: true }));
+    Object.assign(platform, { agentBrowserEdit: edit });
+    const observers: ResizeObserverCallback[] = [];
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: ResizeObserverCallback) { observers.push(callback); }
+      observe() {}
+      disconnect() {}
+    });
+    vi.useFakeTimers();
+    try {
+      const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', wsPort: 1111 });
+      const sink = makeSink();
+      let size = { width: 800, height: 600 };
+      sink.viewport.getBoundingClientRect = () => ({ ...size }) as DOMRect;
+      controller.attachView(sink);
+      await vi.advanceTimersByTimeAsync(0);
+      streamSocket(1111)?.emitMessage(JSON.stringify({
+        type: 'tabs',
+        tabs: [
+          { tabId: 't1', title: 'One', url: 'https://one.example/', active: true },
+          { tabId: 't2', title: 'Two', url: 'https://two.example/', active: false },
+        ],
+      }));
+      const screen = getAgentBrowserScreenController('id')!;
+      screen.actions.setRenderMode?.('ab-popout');
+      vi.mocked(platform.agentBrowserCommand!).mockClear();
+
+      screen.chromeActions.back();
+      screen.chromeActions.forward();
+      screen.chromeActions.reload();
+      screen.chromeActions.navigate('https://first.example/');
+      screen.chromeActions.navigate('https://latest.example/');
+      screen.actions.applyDevice('iPhone 16 Pro');
+      screen.actions.applyViewport(1024, 768, 2);
+      screen.actions.engageSync();
+      const [first, second] = controller.snapshot().tabs;
+      controller.selectTab(second);
+      controller.closeTab(first);
+      size = { width: 900, height: 700 };
+      observers.at(-1)?.([{ contentRect: { width: 900, height: 700 } } as ResizeObserverEntry], {} as ResizeObserver);
+      await vi.advanceTimersByTimeAsync(250);
+      controller.handleKeyDownLike({ key: 'a', code: 'KeyA', metaKey: true, ctrlKey: false, altKey: false, shiftKey: false });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(platform.agentBrowserCommand).not.toHaveBeenCalled();
+      expect(edit).not.toHaveBeenCalled();
+
+      // The relaunch lands: only the latest navigation runs, once.
+      platform.resolvePopOut({ ok: true, wsPort: 3456 });
+      await vi.advanceTimersByTimeAsync(0);
+      const opens = vi.mocked(platform.agentBrowserCommand!).mock.calls.filter(([, args]) => args[0] === 'open');
+      expect(opens).toEqual([['sess', ['open', 'https://latest.example/'], undefined]]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps sync-to-pane out of a pop-in gap, and re-syncs once the headless browser streams', async () => {
+    const platform = relaunchPlatform();
+    let resolvePopIn!: (res: { ok: boolean; wsPort?: number }) => void;
+    platform.agentBrowserPopIn = vi.fn(() => new Promise((r) => { resolvePopIn = r; }));
+    const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', wsPort: 1111, renderMode: 'ab-popout' });
+    const sink = makeSink();
+    sink.viewport.getBoundingClientRect = () => ({ width: 800, height: 600 }) as DOMRect;
+    controller.attachView(sink);
+    await flushMicrotasks();
+
+    controller.popIn();
+    // Headless already, as far as the view is concerned — but not yet live.
+    expect(controller.snapshot().poppedOut).toBe(false);
+    window.dispatchEvent(new Event('resize'));
+    getAgentBrowserScreenController('id')!.actions.engageSync();
+    const viewports = () => vi.mocked(platform.agentBrowserCommand!).mock.calls.filter(([, args]) => args[1] === 'viewport');
+    expect(viewports()).toEqual([]);
+
+    resolvePopIn({ ok: true, wsPort: 5555 });
+    await flushMicrotasks();
+    expect(viewports()).toEqual([['sess', ['set', 'viewport', '800', '600', '1'], undefined]]);
+  });
+
+  it('a pop-out asked for with a page relaunches there instead of navigating into the gap', async () => {
+    const platform = relaunchPlatform();
+    const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', wsPort: 1111, url: 'https://before.example/' });
+    controller.attachView(makeSink());
+    await flushMicrotasks();
+    vi.mocked(platform.agentBrowserCommand!).mockClear();
+
+    // The pane context menu's reuse of an existing port target.
+    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout', { url: 'http://localhost:5173/' });
+    expect(platform.agentBrowserPopOut).toHaveBeenCalledWith('sess', expect.objectContaining({ url: 'http://localhost:5173/' }), undefined);
+    platform.resolvePopOut({ ok: true, wsPort: 3456 });
+    await flushMicrotasks();
+    expect(platform.agentBrowserCommand).not.toHaveBeenCalledWith('sess', ['open', 'http://localhost:5173/'], undefined);
+  });
+
+  it('a failed pop-out comes back in the pane, relaunching headless at its page if no daemon came up', async () => {
+    const platform = relaunchPlatform();
+    const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', wsPort: 1111, url: 'https://page.example/' });
+    const sink = makeSink();
+    controller.attachView(sink);
+    await flushMicrotasks();
+
+    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout');
+    platform.resolvePopOut({ ok: false });
+    await flushMicrotasks();
+    expect(platform.agentBrowserAttach).toHaveBeenCalledExactlyOnceWith('sess', { url: 'https://page.example/', headed: false }, undefined);
+    expect(sink.updateParameters).toHaveBeenLastCalledWith({ renderMode: 'ab-screencast' });
+    expect(controller.snapshot()).toMatchObject({ poppedOut: false, phase: 'live' });
+    expect(streamSocket(9999)?.readyState).toBe(1);
+  });
+
   it('a single {session, wsPort} handover connects once and asks the daemon nothing', async () => {
     const platform = relaunchPlatform();
     const controller = acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-screencast', url: 'https://x.example/' });
@@ -839,7 +1055,7 @@ describe('Playwright provider', () => {
       : { ok: true });
     setPlatform(platform);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const controller = acquireAgentBrowserSurfaceController('pw', { renderMode: 'pw-screencast', session: 's' });
+    const controller = acquireAgentBrowserSurfaceController('pw', { renderMode: 'pw-screencast', session: 's', wsPort: 4321 });
     controller.attachView(makeSink());
     getAgentBrowserScreenController('pw')!.chromeActions.reload();
     await flushMicrotasks();

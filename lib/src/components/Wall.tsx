@@ -24,11 +24,9 @@ const RemotePairingModalHost = lazy(() =>
   })),
 );
 import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
-import { markAgentBrowserSessionClosed } from './wall/agent-browser-sessions';
-import { automationProvider, browserPlatform, browserSessionKey, isPopout, LaunchBinaryPath, PROVIDER_LABEL, type AutomationRenderMode } from './wall/browser-automation';
-import { isAllowedBinaryFor } from '../lib/agent-browser-binary';
+import { automationProvider, browserPlatform, isPopout, LaunchBinaryPath, PROVIDER_LABEL, type AutomationRenderMode } from './wall/browser-automation';
 import { isToolRender } from '../lib/platform/tool-types';
-import { disposeAgentBrowserSurfaceController } from './wall/agent-browser-surface-controller';
+import { closeBrowserSessionFromParams, closeBrowserSurface, disposeAgentBrowserSurfaceController } from './wall/agent-browser-surface-controller';
 import { KILL_CONFIRM_MS, KILL_SHAKE_MS, KillConfirmOverlay, randomKillChar, type ConfirmKill } from './KillConfirm';
 import { NotepadArchiveFailureModal, type NotepadArchiveFailure } from './NotepadArchiveFailure';
 import { messageOf } from '../lib/errors';
@@ -82,7 +80,6 @@ import type { Edge } from '../lib/lath/model';
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
 import {
   resolveRenderMode,
-  agentBrowserSessionFromParams,
   browserDisplayModeFromParams,
   browserUrlFromParams,
   isBrowserParams,
@@ -215,28 +212,6 @@ function stageDefaultShell(id: string, cwd: string | undefined): void {
 function compareBySurfaceRef(a: DorSurface, b: DorSurface): number {
   return (surfaceRefNumber(a.ref) ?? Number.MAX_SAFE_INTEGER)
     - (surfaceRefNumber(b.ref) ?? Number.MAX_SAFE_INTEGER);
-}
-
-/** Killing or swapping away from an agent-browser surface closes its session —
- *  surface lifetime and browser lifetime are bound (spec → Lifecycle). No-op
- *  for other surface types. */
-function closeAgentBrowserSession(params: unknown): void {
-  const session = agentBrowserSessionFromParams(params);
-  if (!session) return;
-  const { renderMode, cwd, binaryPath } = params as { renderMode?: unknown; cwd?: string; binaryPath?: unknown };
-  const provider = automationProvider(renderMode);
-  if (!provider) return;
-  // Mark before issuing the close so a popped-out surface's auto-revert sees
-  // the impending teardown and doesn't relaunch the session we're killing.
-  markAgentBrowserSessionClosed(browserSessionKey(session, provider, cwd));
-  browserPlatform(provider, cwd).agentBrowserCommand?.(
-    session,
-    ['close'],
-    // Checked, not merely typed: these params come off the persisted session
-    // blob, and `binaryPath` names a program the host will spawn
-    // (`lib/src/lib/agent-browser-binary.ts`).
-    isAllowedBinaryFor(provider, binaryPath) ? binaryPath : undefined,
-  ).catch(() => {});
 }
 
 /** The params binding a browser Surface to the `session` a GUI launch returned. */
@@ -706,8 +681,7 @@ export function Wall({
       // teardown lands here: the throwaway was created straight into a door.
       const door = doorsRef.current.find(d => d.id === id);
       if (!door) return;
-      closeAgentBrowserSession(lath.getMeta(id)?.params);
-      disposeAgentBrowserSurfaceController(id);
+      closeBrowserSurface(id, lath.getMeta(id)?.params);
       // Destroy the Door: drop the meta the store kept for it and, if it was parked,
       // unmount the DOM (and any iframe document still running inside it) with it.
       lath.store.forgetLeaf(id);
@@ -730,11 +704,10 @@ export function Wall({
       fireEvent({ type: 'kill', id });
       return;
     }
-    const params = nav.paneParams(id);
-    closeAgentBrowserSession(params);
-    // Release the surface's client-side controller (connection, loops, timers,
-    // screen registration). A safe no-op for iframe/terminal surfaces.
-    disposeAgentBrowserSurfaceController(id);
+    // Close its browser session and release the client-side controller
+    // (connection, loops, timers, screen registration). A safe no-op for
+    // iframe/terminal surfaces.
+    closeBrowserSurface(id, nav.paneParams(id));
     // Two-phase kill (docs/specs/tiling-engine.md → "Animation"): fade the pane in
     // place (a last-pane kill also shrinks it toward the bottom-right), then commit
     // `remove` once the fade completes — survivors tween into the reclaimed space.
@@ -1561,10 +1534,9 @@ export function Wall({
     const oldParams = nav.paneParams(oldId);
     const oldVisible = nav.hasPane(oldId);
     if (!oldVisible) return null;
-    closeAgentBrowserSession(oldParams);
-    // The old renderer's controller is going away with this swap; release its
-    // client-side resources (no-op for a non-agent-browser surface).
-    disposeAgentBrowserSurfaceController(oldId);
+    // The old renderer goes away with this swap: its session and its
+    // controller's client-side resources (no-op for a non-automated surface).
+    closeBrowserSurface(oldId, oldParams);
     // A browser Surface has no helper; the terminal's goes with the old id.
     closeHelperParent(oldId);
     const newId = generatePaneId();
@@ -1925,7 +1897,7 @@ export function Wall({
     if (!result.ok || !result.session) return result.error ?? `Could not open ${PROVIDER_LABEL[provider]}`;
     launchBinaryPath.remember(provider, result.binaryPath);
     const binding = boundBrowserParams(result.session, result, cwd);
-    if (!lath.getMeta(eagerId) || lath.isDying(eagerId)) closeAgentBrowserSession({ renderMode: mode, ...binding });
+    if (!lath.getMeta(eagerId) || lath.isDying(eagerId)) closeBrowserSessionFromParams({ renderMode: mode, ...binding });
     else updateSurfaceParams(eagerId, binding);
     return null;
   }, [launchBinaryPath, lath, updateSurfaceParams]);
@@ -2039,8 +2011,7 @@ export function Wall({
         const url = browserUrlFromParams(params);
         const platform = getPlatform();
         if (!url || (mode === 'ab-screencast' && !platform.agentBrowserOpen)) return;
-        closeAgentBrowserSession(params);
-        disposeAgentBrowserSurfaceController(id);
+        closeBrowserSurface(id, params);
         lath.store.updateParams(id, {
           toolRender: mode, renderMode: mode, url,
           session: undefined, wsPort: undefined, syncEngaged: mode === 'ab-screencast',
@@ -2050,7 +2021,7 @@ export function Wall({
           void platform.agentBrowserOpen!(url, {}, launchBinaryPath.get('agent-browser')).then(result => {
             const current = lath.getMeta(id)?.params;
             if (!current || lath.isDying(id) || current.renderMode !== mode || current.url !== url || getTerminalPaneState(id).currentCommand?.id !== runId) {
-              if (result.session) closeAgentBrowserSession({ renderMode: mode, session: result.session, binaryPath: result.binaryPath });
+              if (result.session) closeBrowserSessionFromParams({ renderMode: mode, session: result.session, binaryPath: result.binaryPath });
               return;
             }
             if (result.ok && result.session) {
@@ -2147,7 +2118,7 @@ export function Wall({
               if (!r.session) return;
               const bound = boundBrowserParams(r.session, r, cwd);
               if (r.ok && lath.getMeta(restoredId) && !lath.isDying(restoredId)) updateSurfaceParams(restoredId, bound);
-              else closeAgentBrowserSession({ renderMode: currentRenderMode, ...bound });
+              else closeBrowserSessionFromParams({ renderMode: currentRenderMode, ...bound });
             })
             .catch((error) => console.warn('[dormouse] could not restore browser provider:', error));
         };
@@ -2165,7 +2136,7 @@ export function Wall({
           // tree. Close only when the eager Surface was genuinely destroyed (or
           // its visible pane is mid-fade); otherwise hand the session to its meta.
           if (!eagerSurfaceExists() || lath.isDying(eagerId)) {
-            closeAgentBrowserSession({ renderMode: mode, ...bound });
+            closeBrowserSessionFromParams({ renderMode: mode, ...bound });
             return;
           }
           updateSurfaceParams(eagerId, bound);
@@ -2221,11 +2192,10 @@ export function Wall({
       const existing = findSurfaceByParams(params => (params as { contextPortKey?: unknown } | undefined)?.contextPortKey === key);
       if (existing) {
         revealSurface(existing.id);
-        if (mode !== 'iframe') {
-          const controller = getAgentBrowserScreenController(existing.id);
-          controller?.actions.setRenderMode?.(mode);
-          controller?.chromeActions.navigate(entry.url);
-        } else updateSurfaceParams(existing.id, { url: entry.url });
+        // One intent: a pop-out/pop-in relaunch opens the URL rather than
+        // racing a navigation into its close/reopen gap.
+        if (mode !== 'iframe') getAgentBrowserScreenController(existing.id)?.actions.setRenderMode?.(mode, { url: entry.url });
+        else updateSurfaceParams(existing.id, { url: entry.url });
         return;
       }
       if (provider && !platform?.agentBrowserOpen) throw new Error(`${PROVIDER_LABEL[provider]} is unavailable on this host`);

@@ -50,9 +50,11 @@ export interface ScreenActions {
   /** Swap this surface's render backend in place, preserving the target
    *  (docs/specs/dor-browser.md → "Display Modal And Render Swaps"). This is
    *  the single entry point for every mode, including `popout` (relaunch headed
-   *  — docs/specs/dor-browser.md → "Pop-Out"). Absent until the
-   *  swap is wired; the modal hides its Render section without it. */
-  setRenderMode?(mode: RenderMode): void;
+   *  — docs/specs/dor-browser.md → "Pop-Out"). With `url`, the Surface also
+   *  goes there — a relaunch opens it, so no navigation races the relaunch.
+   *  Absent until the swap is wired; the modal hides its Render section
+   *  without it. */
+  setRenderMode?(mode: RenderMode, opts?: { url?: string }): void;
 }
 
 /** What the browser-chrome header reads about the active tab
