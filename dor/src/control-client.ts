@@ -43,6 +43,7 @@ import {
   type DorControlMethod,
 } from './protocol.js';
 import type { DorControlResult } from './protocol.js';
+import { BROWSER_REQUEST_TIMEOUT_MS } from 'dor-lib-common';
 
 export interface SocketControlClientOptions {
   socketPath: string;
@@ -148,8 +149,16 @@ export class SocketControlClient implements ControlClient {
     return this.request<IframeSurfaceResponse>(SURFACE_CONTROL_METHODS.iframe, request);
   }
 
+  // The host asks the browser where it streams (`attach`) before answering,
+  // which can wait behind a launch or close of that browser for as long as
+  // the host's own request timeout; the socket deadline sits above it, so a
+  // bind that succeeds late is never reported as a failure.
   browserSurface(request: BrowserSurfaceRequest): Promise<BrowserSurfaceResponse> {
-    return this.request<BrowserSurfaceResponse>(SURFACE_CONTROL_METHODS.browser, request);
+    return this.request<BrowserSurfaceResponse>(
+      SURFACE_CONTROL_METHODS.browser,
+      request,
+      { timeoutMs: BROWSER_REQUEST_TIMEOUT_MS + 5_000 },
+    );
   }
 
   resolveBrowser(request: ResolveBrowserRequest): Promise<ResolveBrowserResponse> {

@@ -31,7 +31,7 @@ import { __resetArchiveServiceForTests } from '../lib/notepad/archive-service';
 import { addPlainNote, beginClosing, clearAllNotepads, getNotes, setOpenNotepadId } from '../lib/notepad/notepad-store';
 import type { NotepadArchiveV1 } from '../lib/notepad/types';
 import { createTerminalPaneState, type TerminalPaneState } from '../lib/terminal-state';
-import { getWallHandle, listWallHandles } from './wall/wall-handles';
+import { getWallHandle, listWallHandles, registerWallHandle, stubWallHandle } from './wall/wall-handles';
 import { installBrowserHost, mountWallHarness, type WallHarness } from './wall/wall-test-utils';
 import { DEFAULT_WORKSPACE_ID } from '../lib/session-types';
 import { clearTerminalActivity, setTerminalActivity } from '../lib/session-activity-store';
@@ -556,8 +556,9 @@ describe('Wall on the Lath engine', () => {
   });
 
   it('streams from a port `dor ab` read itself, asking the host nothing; a Playwright port is the host\'s to report', async () => {
-    // Under a socket directory the host does not share, the host cannot find
-    // the session (docs/specs/dor-browser.md → "agent-browser").
+    // An agent-browser that writes no state files, or keeps them in a socket
+    // directory of its own, is one the host cannot find
+    // (docs/specs/dor-browser.md → "agent-browser").
     const { browser, requests } = hostBrowsers({ attach: async () => ({ ok: false, error: 'not running' }) });
     await act(async () => { root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />); });
     await flush();
@@ -750,6 +751,44 @@ describe('Wall on the Lath engine', () => {
       expect((await dispatchKill(surfaceId))?.ok).toBe(true);
       expect(container.querySelector(`[data-lath-leaf="${surfaceId}"]`)).toBeNull();
     } finally {
+      untouchedSpy.mockRestore();
+    }
+  });
+
+  it.each(['playwright', 'agent-browser'] as const)('never binds a %s key to a session a Surface in another Workspace still holds', async (provider) => {
+    const { requests } = hostBrowsers({ attach: async () => ({ ok: true, wsPort: 4555 }) });
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    const disposers: Array<() => void> = [];
+    try {
+      await act(async () => { root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />); });
+      await flush();
+      const control = async (method: string, params: Record<string, unknown>) => {
+        let response: { ok: boolean; result?: { binding?: { session: string }; surfaceId?: string } } | undefined;
+        await act(async () => {
+          window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+            detail: { method, params, surfaceId: 'pane-a', respond: (r: typeof response) => { response = r; } },
+          }));
+        });
+        await flush();
+        return response;
+      };
+      // `dor --key foo open` binds a pane here…
+      const first = (await control(SURFACE_CONTROL_METHODS.resolveBrowser, { provider, key: 'foo', proposed: { cwd: '/project' } }))?.result?.binding;
+      const bound = await control(SURFACE_CONTROL_METHODS.browser, { provider, key: 'foo', session: first!.session, cwd: '/project' });
+      expect(bound?.ok).toBe(true);
+      // …which moves to another Workspace, still bound to that session.
+      expect((await dispatchKill(bound!.result!.surfaceId!))?.ok).toBe(true);
+      disposers.push(registerWallHandle(stubWallHandle('ws-elsewhere', {
+        browserSessions: (asked) => (asked === provider ? [first!.session] : []),
+      })));
+
+      // The same command here opens a browser of its own, so neither pane's
+      // close ends the other's.
+      const again = (await control(SURFACE_CONTROL_METHODS.resolveBrowser, { provider, key: 'foo', proposed: { cwd: '/project' } }))?.result?.binding;
+      expect(again?.session).toBe(`${first!.session}.2`);
+      expect(requests('attach')).toHaveLength(1);
+    } finally {
+      disposers.forEach((dispose) => dispose());
       untouchedSpy.mockRestore();
     }
   });

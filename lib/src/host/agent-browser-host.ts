@@ -154,9 +154,9 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
   // Right after it, the daemon may not have published the port yet; a single
   // read would then return undefined and leave the panel pinned to a stale
   // port. Retry briefly to close that window.
-  async function readStreamPort(b: ProviderBinding): Promise<number | undefined> {
+  async function readStreamPort(b: ProviderBinding, deadline: number): Promise<number | undefined> {
     for (let attempt = 0; attempt < STREAM_PORT_READ_ATTEMPTS; attempt++) {
-      const result = await runWithBinaryFallback(streamStatusArgs(b.session), b.binaryPath);
+      const result = await runWithBinaryFallback(streamStatusArgs(b.session), b.binaryPath, { timeoutMs: Math.max(0, deadline - Date.now()) });
       if (result.exitCode === 0) {
         const port = parseStreamPort(result.stdout);
         if (port !== undefined) return port;
@@ -183,9 +183,15 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
   // `<session>.stream` (the stream server's port, written as the daemon comes
   // up — ~100ms into a launch, long before the page loads). Neither is cleaned
   // up when the daemon is killed, so a reader must know which daemon wrote it.
+  // One written before this boot describes no process now running: its pid
+  // is whatever process has that number since, so it reads as absent.
   async function readStateNumber(session: string, ext: 'pid' | 'stream'): Promise<number | undefined> {
     try {
-      const value = Number.parseInt((await fs.readFile(path.join(agentBrowserStateDir(), `${session}.${ext}`), 'utf8')).trim(), 10);
+      const file = path.join(agentBrowserStateDir(), `${session}.${ext}`);
+      const [stat, text] = await Promise.all([fs.stat(file), fs.readFile(file, 'utf8')]);
+      // `os.uptime` is whole seconds on some platforms: a second's slack.
+      if (stat.mtimeMs < Date.now() - os.uptime() * 1000 - 1000) return undefined;
+      const value = Number.parseInt(text.trim(), 10);
       return Number.isInteger(value) && value > 0 ? value : undefined;
     } catch {
       return undefined; // absent (no daemon yet, custom dir, or an older CLI)
@@ -217,29 +223,25 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
     return port !== undefined && await portAccepts(port) ? port : undefined;
   }
 
-  /** Terminate the session's daemon and wait for it to exit. Returns the pid
-   *  the pid file named (dead or not), so a relaunch can tell the daemon that
-   *  replaces it from the stale state files it leaves behind. */
-  async function killDaemon(session: string): Promise<number | undefined> {
-    const pid = await readStateNumber(session, 'pid');
-    if (pid === undefined) return undefined; // no pid file — nothing to kill (already gone, or custom dir)
+  /** Terminate `session`'s daemon `pid`, proven live by the caller, and wait
+   *  for it to exit. */
+  async function killDaemon(session: string, pid: number): Promise<void> {
     try {
       process.kill(pid, 'SIGTERM');
     } catch {
-      return pid; // ESRCH: already dead
+      return; // ESRCH: already dead
     }
     // Wait for the process to actually exit (signal 0 throws once it's gone), so
     // the relaunch doesn't race a daemon that's still shutting down.
     for (let i = 0; i < 40; i++) {
       if (!processAlive(pid)) {
         log(`[ab-relaunch] daemon ${pid} for ${session} exited after ${i * 50}ms`);
-        return pid;
+        return;
       }
       await delay(50);
     }
     log(`[ab-relaunch] daemon ${pid} for ${session} still alive after 2s; SIGKILL`);
     try { process.kill(pid, 'SIGKILL'); } catch { /* ignore */ }
-    return pid;
   }
 
 
@@ -268,10 +270,17 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
 
     // Close the browser, then fully stop the daemon so a relaunch isn't ignored
     // as "daemon already running" (a no-op without a daemon: `close` starts
-    // none).
+    // none). Only a pid proven to be the daemon is signalled — named by a pid
+    // file from this boot, alive, beside a stream port that accepts, checked
+    // before `close` — since a pid file alone may name any process. Answers
+    // that pid, live or not, so `probe` tells the replacement from the state
+    // files the old daemon left.
     async stop(b, timeoutMs) {
+      const pid = await readStateNumber(b.session, 'pid');
+      const proven = pid !== undefined && processAlive(pid) && await acceptingStreamPort(b.session) !== undefined;
       await run(b, ['close'], { timeoutMs });
-      return killDaemon(b.session);
+      if (proven) await killDaemon(b.session, pid);
+      return pid;
     },
 
     // `open` returns when the page's `load` event fires — up to the CLI's
@@ -293,12 +302,12 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
     // `open` has returned, a non-zero exit with the daemon up is a page still
     // loading, not a failed launch — without a pid file (an older CLI) the exit
     // code is all there is.
-    async probe(b, { replaced, opened }): Promise<LiveBrowser | { failed: string } | undefined> {
+    async probe(b, { replaced, opened, deadline }): Promise<LiveBrowser | { failed: string } | undefined> {
       const pid = await readStateNumber(b.session, 'pid');
       const daemonUp = pid !== undefined && pid !== replaced;
       if (opened) {
         if (opened.exitCode !== 0 && !daemonUp) return { failed: opened.stderr.trim() || `agent-browser open exited ${opened.exitCode}` };
-        const port = await readStreamPort(b);
+        const port = await readStreamPort(b, deadline);
         return port !== undefined ? { wsPort: port } : { failed: 'agent-browser published no stream port' };
       }
       if (!daemonUp) return undefined;

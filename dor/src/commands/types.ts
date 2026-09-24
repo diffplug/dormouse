@@ -446,9 +446,8 @@ export interface BrowserSurfaceRequest extends WorkspaceScopedRequest {
   /** Absolute path of the provider's binary, resolved with the invoking
    * terminal's PATH so the host (which may lack it) can drive the browser. */
   binaryPath?: string;
-  /** agent-browser only: the stream port the caller read under a socket
-   * directory the host may not share; the Surface streams from it instead of
-   * asking the host. */
+  /** agent-browser only: the stream port `dor ab` read itself after the
+   * command; the Surface streams from it instead of asking the host. */
   wsPort?: number;
   minimized?: boolean;
 }

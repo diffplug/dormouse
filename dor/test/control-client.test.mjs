@@ -51,6 +51,27 @@ test('a dor client and the host control server complete a request', skipOnWindow
   });
 });
 
+test('a browser bind waits past the host\'s browser request timeout, not the client default', skipOnWindows, async () => {
+  await withTempSocket(async (socketPath) => {
+    // The host answers late: its `attach` queued behind a launch of the browser.
+    const server = createDorControlServer({
+      socketPath,
+      token: 'shared-secret',
+      send(event, data) {
+        if (event === 'dor:controlRequest') setTimeout(() => server.respond({ requestId: data.requestId, ok: true, result: { status: 'created' } }), 200);
+      },
+    });
+    await server.ready;
+    try {
+      const client = new SocketControlClient({ socketPath, token: 'shared-secret', timeoutMs: 50 });
+      assert.deepEqual(await client.browserSurface({ provider: 'playwright', session: 's' }), { status: 'created' });
+      await assert.rejects(client.listSurfaces({}), /timed out waiting for surface.list/);
+    } finally {
+      server.close();
+    }
+  });
+});
+
 test('a dor client refuses a host whose token does not match', skipOnWindows, async () => {
   await withTempSocket(async (socketPath) => {
     const server = createDorControlServer({ socketPath, token: 'shared-secret', send() {} });

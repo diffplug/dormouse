@@ -388,6 +388,9 @@ function fakeAgentBrowser({ exitCode = 0, stdout = '✓ ok\n', stderr = '' } = {
     calls,
     exec: async (binary, args) => {
       calls.push([binary, ...args]);
+      if (args.includes('stream')) {
+        return { exitCode: 0, stdout: '{"success":true,"data":{"port":61141}}\n', stderr: '' };
+      }
       return { exitCode, stdout, stderr };
     },
   };
@@ -1096,35 +1099,17 @@ test('agent-browser resolves --key to a namespaced session and opens a surface',
   const ab = fakeAgentBrowser();
   const client = fixtureClient();
   await runCli(['ab', '--key', 'storybook', 'open', 'http://localhost:6006'], { client, execAgentBrowser: ab.exec });
-  // The host reports where the session streams; `dor ab` asks the CLI nothing more.
+  // The command made the daemon, so `dor ab` asks it for its stream port — under
+  // its own socket directory and CLI — and hands that over.
   assert.deepEqual(ab.calls, [
     ['agent-browser', '--session', 'dormouse.1.storybook', 'open', 'http://localhost:6006'],
+    ['agent-browser', '--session', 'dormouse.1.storybook', 'stream', 'status', '--json'],
   ]);
   assert.deepEqual(client.requests, [
     // The host names the session, because only the Workspace that will hold the
     // browser can namespace a key.
     { method: 'resolveBrowser', request: { provider: 'agent-browser', key: 'storybook', proposed: proposedHere } },
-    { method: 'browserSurface', request: { provider: 'agent-browser', key: 'storybook', session: 'dormouse.1.storybook', cwd: process.cwd() } },
-  ]);
-});
-
-test('agent-browser under a socket directory of its own reads the stream port itself and hands it over', async () => {
-  const ab = fakeAgentBrowser();
-  ab.exec = async (binary, args) => {
-    ab.calls.push([binary, ...args]);
-    return { exitCode: 0, stdout: args.includes('stream') ? JSON.stringify({ data: { port: 61218 } }) : '✓ ok\n', stderr: '' };
-  };
-  const client = fixtureClient();
-  const env = { AGENT_BROWSER_SOCKET_DIR: '/tmp/elsewhere' };
-  await runCli(['ab', '--session', 'mine', 'open', 'http://localhost:6006'], { client, env, execAgentBrowser: ab.exec });
-  // The host looks for the session in its own socket directory, so it could
-  // not find this one to report a port.
-  assert.deepEqual(ab.calls, [
-    ['agent-browser', '--session', 'mine', 'open', 'http://localhost:6006'],
-    ['agent-browser', '--session', 'mine', 'stream', 'status', '--json'],
-  ]);
-  assert.deepEqual(client.requests, [
-    { method: 'browserSurface', request: { provider: 'agent-browser', key: undefined, session: 'mine', cwd: process.cwd(), wsPort: 61218 } },
+    { method: 'browserSurface', request: { provider: 'agent-browser', key: 'storybook', session: 'dormouse.1.storybook', cwd: process.cwd(), wsPort: 61141 } },
   ]);
 });
 
@@ -1137,12 +1122,13 @@ test('agent-browser --key in another Workspace drives that Workspace own session
   // first Workspace's `dormouse.1.default`.
   assert.deepEqual(ab.calls, [
     ['agent-browser', '--session', 'dormouse.workspace-2b1c.default', 'open', 'http://localhost:6006'],
+    ['agent-browser', '--session', 'dormouse.workspace-2b1c.default', 'stream', 'status', '--json'],
   ]);
   assert.deepEqual(client.requests, [
     { method: 'resolveBrowser', request: { provider: 'agent-browser', key: 'default', proposed: proposedHere, workspace: 'build' } },
     {
       method: 'browserSurface',
-      request: { provider: 'agent-browser', key: 'default', session: 'dormouse.workspace-2b1c.default', cwd: process.cwd(), workspace: 'build' },
+      request: { provider: 'agent-browser', key: 'default', session: 'dormouse.workspace-2b1c.default', cwd: process.cwd(), wsPort: 61141, workspace: 'build' },
     },
   ]);
 });
@@ -1152,7 +1138,7 @@ test('agent-browser defaults to --key default', async () => {
   const client = fixtureClient();
   await runCli(['agent-browser', 'open', 'http://localhost:5173'], { client, execAgentBrowser: ab.exec });
   assert.equal(ab.calls[0][2], 'dormouse.1.default');
-  assert.deepEqual(client.requests[1].request, { provider: 'agent-browser', key: 'default', session: 'dormouse.1.default', cwd: process.cwd() });
+  assert.deepEqual(client.requests[1].request, { provider: 'agent-browser', key: 'default', session: 'dormouse.1.default', cwd: process.cwd(), wsPort: 61141 });
 });
 
 test('agent-browser raw --session skips key namespacing', async () => {
@@ -1163,7 +1149,7 @@ test('agent-browser raw --session skips key namespacing', async () => {
   // A raw session is already the session: nothing is asked of the host but the
   // surface it binds to.
   assert.deepEqual(client.requests, [
-    { method: 'browserSurface', request: { provider: 'agent-browser', key: undefined, session: 'mine', cwd: process.cwd() } },
+    { method: 'browserSurface', request: { provider: 'agent-browser', key: undefined, session: 'mine', cwd: process.cwd(), wsPort: 61141 } },
   ]);
 });
 
@@ -1175,6 +1161,7 @@ test('agent-browser --workspace names the Workspace and never reaches the binary
   // handle resolves there, and agent-browser sees neither the flag nor its value.
   assert.deepEqual(ab.calls, [
     ['agent-browser', '--session', 'dormouse.workspace-2b1c.default', 'open', 'http://localhost:5173/'],
+    ['agent-browser', '--session', 'dormouse.workspace-2b1c.default', 'stream', 'status', '--json'],
   ]);
   // Every host round trip the run makes names it: the session namespace, the
   // handle resolution, and the surface the browser lands in.
@@ -1192,6 +1179,7 @@ test('agent-browser open resolves a surface handle to a URL before forwarding', 
   // The surface handle is resolved via the host, then the URL is forwarded.
   assert.deepEqual(ab.calls, [
     ['agent-browser', '--session', 'dormouse.1.default', 'open', 'http://localhost:5173/'],
+    ['agent-browser', '--session', 'dormouse.1.default', 'stream', 'status', '--json'],
   ]);
   assert.deepEqual(client.requests[1], { method: 'resolveOpenTarget', request: { surface: 'surface:1' } });
 });
@@ -1291,11 +1279,12 @@ test('agent-browser --surface drives the session the host says the surface is bo
   });
   assert.deepEqual(ab.calls, [
     ['agent-browser', '--session', 'dormouse.1.gui-a1b2c3', 'click', '@e3'],
+    ['agent-browser', '--session', 'dormouse.1.gui-a1b2c3', 'stream', 'status', '--json'],
   ]);
   // No `key`: a surface-addressed session is not necessarily a managed one.
   assert.deepEqual(client.requests[1], {
     method: 'browserSurface',
-    request: { provider: 'agent-browser', key: undefined, session: 'dormouse.1.gui-a1b2c3', cwd: process.cwd() },
+    request: { provider: 'agent-browser', key: undefined, session: 'dormouse.1.gui-a1b2c3', cwd: process.cwd(), wsPort: 61141 },
   });
 });
 
@@ -1431,7 +1420,7 @@ test('agent-browser spawns the PATH-resolved absolute path, never the bare name'
     // hand the inherited cwd a code-execution primitive on Windows, where
     // cross-spawn's `which` searches it before PATH — docs/specs/dor-cli.md ->
     // "Spawning External Binaries".
-    assert.equal(ab.calls.length, 1);
+    assert.equal(ab.calls.length, 2);
     for (const [target] of ab.calls) assertSamePath(target, binPath);
     assertSamePath(surfaceRequest(client).binaryPath, binPath);
   });

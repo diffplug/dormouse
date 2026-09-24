@@ -42,7 +42,9 @@ views without weakening that first signal.
 
 **Why a bare Wall mints its own key scope.** Every VS Code webview is a bare Wall, and each named `--key default` `dormouse.1.default`: two webviews' default browsers were one browser behind two Surfaces, and killing either closed it under the other. Playwright had avoided it with random session names and a reservation; one deterministic scheme with a scope unique per bare Wall covers both, and needs no migration because a key finds its Surface's stored session first (review of the browser stack, 2026-09).
 
-**Why the host, not `dor ab`, reports the stream port.** `dor ab` ran `agent-browser stream status` after every command — one more Node process per invocation — to learn a port the host reads from the daemon's state files; Playwright's host already answered it. Reading them host-side needs the host and the terminal to share the socket directory, which a host-issued relaunch needs anyway.
+## Managed identity
+
+**Why a key numbers past sessions held elsewhere.** A key's session is `dormouse.<scope>.<name>`, and the key lookup searches only the answering Wall. A pane bound to that session which left for another Workspace keeps it, so the same command here bound a second pane to the same browser, and closing either closed the other's (review of #777, 2026-09). Playwright keys had minted a fresh UUID each, so this was new there; agent-browser keys always worked this way.
 
 ## Browser Connection
 
@@ -109,6 +111,18 @@ A post-open blank-tab sweep can become such a query when a later relaunch, expli
 **Why one lifecycle for both providers.** The two hosts carried the same policies twice — headed tracking, relaunch generations, the blank-tab sweep, capture joins, the editing scripts — and the copies drifted: an empty copy clobbered the clipboard in one, the capture directory lacked its `chmod` in the other, and only Playwright serialized its closes with its relaunches, so the webview kept its own record of closes in flight for agent-browser (review of the browser stack, 2026-09).
 
 **Why the screenshot path is private.** The frame is a picture of the user's authenticated browser, written by an external process under the ambient umask, so a derivable name in the shared temp directory is readable by anything else on the machine for as long as it exists. Precedent: `standalone/sidecar/clipboard-ops.js` applies the same discipline, cleanup included, to clipboard images.
+
+**Why a named launch into a live browser navigates.** A Tool re-announcing — its dev server moved — sends a named launch into the session it already has. Relaunching it stopped the daemon (`close`, then SIGTERM and SIGKILL), so an agent driving that Tool lost its tabs, page state and CDP clients on every move, and a `dor ab` command in flight failed or started a daemon mid-relaunch (review of #777, 2026-09). Only a change of mode needs a new browser.
+
+**Why every capture writes fresh files.** A capture file reused per browser was answered before its reader read it, so a second capture of that browser in the gap — a second pane, or the Display modal beside the loop — rewrote it under the read: a torn or empty frame. A name rotated on close without deleting its file left the user's last page on disk until shutdown (review of #777, 2026-09). A joined capture's callers each get a copy because each reader deletes what it read.
+
+**Why every call in a browser's queue is bounded.** A close ran inside the browser's lifecycle queue with no time limit, and agent-browser's `close` queues behind an `open` stalled on a slow page: a hung daemon held the close forever, every later attach, relaunch and pop of that session waited behind it, each webview request gave up at 40 s, and shutdown never settled (review of #777, 2026-09). A launch already bounded its stop by its deadline.
+
+## agent-browser
+
+**Why a pid needs proof before a signal.** A relaunch reads the daemon's pid from `<session>.pid`, which nothing removes: after a reboot, or once that daemon died, the number can belong to any process, and SIGTERM then SIGKILL would reach it (review of #777, 2026-09). A file older than the boot is stale for certain; a live pid beside a stream port that accepts is the daemon as far as its state files can tell.
+
+**Why `dor ab` reads the stream port itself.** The host's `attach` reads only the state files, which an older agent-browser does not write and a caller's own `AGENT_BROWSER_SOCKET_DIR` keeps where the host does not look; with either, `dor ab open` opened no pane (review of #777, 2026-09). The command has just made the daemon, so asking it starts none.
 
 ## Playwright
 

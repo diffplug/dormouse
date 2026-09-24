@@ -1491,7 +1491,7 @@ fn tool_control(
 // iframe_create_proxy_url; the logic lives in lib, not here, so the two hosts
 // can't drift. ────────────────────────────────────────────────────────────────
 
-// BROWSER_REQUEST_TIMEOUT_MS in lib/src/lib/platform/browser-automation.ts: the
+// BROWSER_REQUEST_TIMEOUT_MS in dor-lib-common/src/browser-providers.ts: the
 // host bounds a launch (slow on a first Chrome run, and pop-out is a close +
 // relaunch) to answer inside it.
 const BROWSER_REQUEST_TIMEOUT: Duration = Duration::from_secs(40);
@@ -1513,8 +1513,9 @@ fn browser_request(
 // The sidecar answers a screenshot with its temp-file PATH (the bytes never ride
 // the JSON-lines stdio shared with PTY traffic). Read the file here and return a
 // raw tauri::ipc::Response, so the webview gets an ArrayBuffer (what the panel
-// decodes with createImageBitmap). The file is left for the host: it reuses one
-// per session, which the next capture overwrites and shutdown removes.
+// decodes with createImageBitmap). Each capture is a fresh file handed to this
+// reader alone, so it is deleted once read: a frame of the user's page must not
+// wait on disk for the host's shutdown.
 #[tauri::command(async)]
 fn browser_screenshot(
     state: tauri::State<'_, SidecarState>,
@@ -1535,9 +1536,10 @@ fn browser_screenshot(
         .get("path")
         .and_then(JsonValue::as_str)
         .ok_or("screenshot returned no path")?;
-    std::fs::read(path)
-        .map(tauri::ipc::Response::new)
-        .map_err(|err| format!("could not read screenshot file '{path}': {err}"))
+    let bytes = std::fs::read(path)
+        .map_err(|err| format!("could not read screenshot file '{path}': {err}"));
+    let _ = std::fs::remove_file(path);
+    bytes.map(tauri::ipc::Response::new)
 }
 
 // Clipboard reads run natively on Windows (see clipboard_win) to avoid the

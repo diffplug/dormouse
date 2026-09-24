@@ -1,4 +1,5 @@
-import { existsSync, mkdtempSync, promises as fsp, statSync, writeFileSync } from 'fs';
+import { spawn } from 'child_process';
+import { existsSync, mkdtempSync, promises as fsp, statSync, utimesSync, writeFileSync } from 'fs';
 import { createServer, type Server } from 'net';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
@@ -379,6 +380,91 @@ describe('agent-browser host relaunch', () => {
   });
 });
 
+describe('agent-browser host daemon stop', () => {
+  useTempSocketDir('dormouse-ab-host-stop-');
+  const session = 'dormouse.1.tool.t';
+  const page = 'http://localhost:6006/';
+
+  it('navigates a live headless daemon a named launch reopens, stopping nothing', async () => {
+    const { port, server } = await listen();
+    writeState(session, 'pid', process.pid);
+    writeState(session, 'stream', port);
+    const calls = mockSpawnByCommand({ open: () => ({}) });
+    const realKill = process.kill.bind(process);
+    const kill = vi.spyOn(process, 'kill').mockImplementation((pid, signal) => (signal === 0 ? realKill(pid, 0) : true));
+    try {
+      // A Tool re-announced: the same session, headless, another page.
+      expect(await ab(makeHost(), { op: 'launch', url: page, headed: false }, { session })).toMatchObject({ ok: true, wsPort: port, headed: false });
+      await vi.waitFor(() => expect(calls).toEqual([['--session', session, 'open', page]]));
+      expect(kill.mock.calls.filter(([, signal]) => signal !== 0)).toEqual([]);
+    } finally {
+      kill.mockRestore();
+      await closeServer(server);
+    }
+  });
+
+  it.each([
+    ['names a live process from before this boot', true, true],
+    ['names a live process with no stream that accepts', false, false],
+  ])('never signals a pid file that %s', async (_name, streaming, preBoot) => {
+    const { port, server } = await listen();
+    writeState(session, 'pid', process.pid);
+    writeState(session, 'stream', streaming ? port : await closedPort());
+    if (preBoot) {
+      for (const ext of ['pid', 'stream']) utimesSync(join(process.env.AGENT_BROWSER_SOCKET_DIR!, `${session}.${ext}`), 0, 0);
+    }
+    const calls = mockSpawnByCommand({ close: () => ({}), '--headed open': () => ({}), stream: () => ({ stdout: JSON.stringify({ port }) }), tab: () => ({ stdout: JSON.stringify({ tabs: [] }) }) });
+    // The pid named is this test's own: record a signal rather than send it.
+    const realKill = process.kill.bind(process);
+    const kill = vi.spyOn(process, 'kill').mockImplementation((pid, signal) => (signal === 0 ? realKill(pid, 0) : true));
+    try {
+      // A pop-out: the other mode, so a relaunch that stops what runs first.
+      const host = makeHost();
+      await ab(host, { op: 'launch', url: page, headed: true }, { session });
+      // `close` starts no daemon; only the signal needs proof.
+      expect(calls.filter((args) => args.includes('close'))).toEqual([['--session', session, 'close']]);
+      expect(kill.mock.calls.filter(([, signal]) => signal !== 0)).toEqual([]);
+      await host.close();
+    } finally {
+      kill.mockRestore();
+      await closeServer(server);
+    }
+  });
+
+  it('bounds the CLI a close runs, which a hung daemon would otherwise hold forever', async () => {
+    enqueueSpawnResults([{}]);
+    await ab(makeHost(), { op: 'close' }, { session });
+    expect(spawnMock).toHaveBeenCalledExactlyOnceWith('agent-browser', ['--session', session, 'close'], { timeoutMs: 10_000 });
+  });
+
+  it('terminates a daemon its state files prove live before relaunching it in the other mode', async () => {
+    const { port, server } = await listen();
+    const daemon = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+    await new Promise((resolve) => daemon.once('spawn', resolve));
+    const exited = new Promise((resolve) => daemon.once('exit', resolve));
+    writeState(session, 'pid', daemon.pid!);
+    writeState(session, 'stream', port);
+    mockSpawnByCommand({ close: () => ({}), '--headed open': () => ({}), stream: () => ({ stdout: JSON.stringify({ port }) }), tab: () => ({ stdout: JSON.stringify({ tabs: [] }) }) });
+    const kill = vi.spyOn(process, 'kill');
+    try {
+      const host = makeHost();
+      await ab(host, { op: 'launch', url: page, headed: true }, { session });
+      expect(kill).toHaveBeenCalledWith(daemon.pid, 'SIGTERM');
+      await exited;
+      // The port read that ends the launch is bounded by the launch's deadline.
+      const status = spawnMock.mock.calls.find(([, args]) => (args as string[]).includes('stream'))!;
+      expect(status[2]).toEqual({ timeoutMs: expect.any(Number) });
+      expect(status[2].timeoutMs).toBeGreaterThan(0);
+      expect(status[2].timeoutMs).toBeLessThanOrEqual(40_000);
+      await host.close();
+    } finally {
+      kill.mockRestore();
+      daemon.kill('SIGKILL');
+      await closeServer(server);
+    }
+  });
+});
+
 describe('agent-browser host launch directory', () => {
   useTempSocketDir('dormouse-ab-cwd-test-');
 
@@ -506,24 +592,36 @@ describe('agent-browser host screenshot transport', () => {
   // makes vitest register it as a teardown hook and call it — a phantom spawn.
   beforeEach(() => { spawnMock.mockReset(); });
 
-  it('screenshotToFile returns the path + mime without reading the bytes', async () => {
-    // Only the CLI spawn happens — no file is written by the mock.
-    enqueueSpawnResults([{}]); // screenshot exits 0
+  /** agent-browser's `screenshot <path>`, writing `frames` in turn. */
+  function captureFrames(...frames: number[][]): string[][] {
+    const queue = [...frames];
+    const calls: string[][] = [];
+    spawnMock.mockImplementation(async (_binary: string, args: string[]) => {
+      calls.push(args);
+      if (args.includes('screenshot')) writeFileSync(args[args.indexOf('screenshot') + 1], Uint8Array.from(queue.shift() ?? [0]));
+      return spawnResult({});
+    });
+    return calls;
+  }
+  const read = async (file: string) => Array.from(await fsp.readFile(file));
+  const filesIn = async (dir: string) => (await fsp.readdir(dir).catch(() => [] as string[])).sort();
 
+  it('hands the file transport a fresh file per capture, which a later capture never rewrites', async () => {
+    const calls = captureFrames([1, 1], [2, 2]);
     const host = makeHost();
-    const result = await abFile(host, { op: 'screenshot', format: 'jpeg', quality: 85 }, { session: 'shotfile', binaryPath: '/usr/local/bin/agent-browser' });
+    const binding = { session: 'shotfile', binaryPath: '/usr/local/bin/agent-browser' };
+    const first = await abFile(host, { op: 'screenshot', format: 'jpeg', quality: 85 }, binding);
+    expect(first).toEqual({ ok: true, path: expect.any(String), mime: 'image/jpeg' });
+    expect(calls[0]).toEqual(['--session', 'shotfile', 'screenshot', expect.any(String), '--screenshot-format', 'jpeg', '--screenshot-quality', '85']);
 
-    expect(result.ok).toBe(true);
-    const shotPath = result.ok ? result.path : '';
-    expect(result).toEqual({ ok: true, path: shotPath, mime: 'image/jpeg' });
-    // The capture never touched the filesystem: the path points at a file that
-    // does not exist (the mock spawned nothing that would create it).
-    expect(existsSync(shotPath)).toBe(false);
-    expect(spawnMock).toHaveBeenCalledTimes(1);
-    expect(spawnMock).toHaveBeenCalledWith('/usr/local/bin/agent-browser', [
-      '--session', 'shotfile', 'screenshot', shotPath,
-      '--screenshot-format', 'jpeg', '--screenshot-quality', '85',
-    ], { timeoutMs: 30_000 });
+    // The next frame is taken while the reader has yet to read the first.
+    const second = await abFile(host, { op: 'screenshot', format: 'jpeg' }, binding);
+    expect(second.path).not.toBe(first.path);
+    expect(await read(first.path!)).toEqual([1, 1]);
+    expect(await read(second.path!)).toEqual([2, 2]);
+    // Only the files handed out remain: each capture's own file went once read.
+    expect(await filesIn(dirname(first.path!))).toEqual([first.path!, second.path!].map((file) => file.slice(dirname(file).length + 1)).sort());
+    await host.close();
   });
 
   // The frame is a picture of the user's authenticated browser, written by an
@@ -531,49 +629,57 @@ describe('agent-browser host screenshot transport', () => {
   // os.tmpdir() let any other local account read every frame, or pre-create the
   // name as a symlink and have agent-browser clobber the target.
   it('captures into a private, unguessable directory rather than a derivable tmp path', async () => {
-    enqueueSpawnResults([{}, {}]);
+    const calls = captureFrames([1]);
     const host = makeHost();
-
-    const first = await abFile(host, { op: 'screenshot', format: 'jpeg' }, { session: 'dormouse.1.default', binaryPath: '/usr/local/bin/agent-browser' });
-    const second = await abFile(host, { op: 'screenshot', format: 'jpeg' }, { session: 'dormouse.1.default', binaryPath: '/usr/local/bin/agent-browser' });
-    if (!first.ok || !second.ok) throw new Error('expected both captures to resolve a path');
-
-    // Nothing about the path is derivable from the session name.
-    expect(first.path).not.toContain('dormouse.1.default');
-    expect(first.path).not.toBe(join(tmpdir(), 'dormouse-ab-shot-dormouse.1.default.jpg'));
-    // Still reused per session, so one file per frame does not accumulate.
-    expect(second.path).toBe(first.path);
-
-    const dir = dirname(first.path);
-    expect(dir).not.toBe(tmpdir());
-    expect(statSync(dir).mode & 0o777).toBe(0o700);
+    const shot = await abFile(host, { op: 'screenshot', format: 'jpeg' }, { session: 'dormouse.1.default', binaryPath: '/usr/local/bin/agent-browser' });
+    if (!shot.ok) throw new Error('expected a path');
+    for (const file of [shot.path!, calls[0][3]]) {
+      // Nothing about the path is derivable from the session name.
+      expect(file).not.toContain('dormouse.1.default');
+      expect(dirname(file)).not.toBe(tmpdir());
+      expect(statSync(dirname(file)).mode & 0o777).toBe(0o700);
+    }
+    await host.close();
   });
 
-  it('screenshot() still reads the file and returns the raw bytes', async () => {
-    const payload = Uint8Array.from([0xff, 0xd8, 0xff, 0x01, 0x02, 0x03]);
-    // Stand in for agent-browser writing the frame: the host chooses the path,
-    // so learn it from a capture first, then write there.
-    enqueueSpawnResults([{}, {}]);
+  it('answers the bytes transport with the frame, leaving no file', async () => {
+    captureFrames([0xff, 0xd8, 0xff, 0x01]);
     const host = makeHost();
-    const located = await abFile(host, { op: 'screenshot', format: 'jpeg', quality: 85 }, { session: 'shotbytes', binaryPath: '/usr/local/bin/agent-browser' });
-    if (!located.ok) throw new Error('expected a path');
-    writeFileSync(located.path, payload);
-
     const result = await ab(host, { op: 'screenshot', format: 'jpeg', quality: 85 }, { session: 'shotbytes', binaryPath: '/usr/local/bin/agent-browser' });
-
-    expect(result.ok).toBe(true);
     expect(result.mime).toBe('image/jpeg');
-    expect(Array.from(result.bytes ?? [])).toEqual(Array.from(payload));
-    await host.close(); // drops the capture directory
+    expect(Array.from(result.bytes ?? [])).toEqual([0xff, 0xd8, 0xff, 0x01]);
+    const probe = await abFile(host, { op: 'screenshot', format: 'jpeg' }, { session: 'shotbytes' });
+    expect(await filesIn(dirname(probe.path!))).toEqual([probe.path!.slice(dirname(probe.path!).length + 1)]);
+    await host.close();
+  });
+
+  it('deletes frames never read when their browser closes or relaunches, and any older than every reader\'s wait', async () => {
+    captureFrames([1], [2], [3], [4]);
+    const host = makeHost();
+    const unread = await abFile(host, { op: 'screenshot', format: 'jpeg' }, { session: 'left' });
+    await ab(host, { op: 'close' }, { session: 'left' });
+    await vi.waitFor(() => expect(existsSync(unread.path!)).toBe(false));
+
+    // A reader that gave up never comes for its frame.
+    const stale = await abFile(host, { op: 'screenshot', format: 'jpeg' }, { session: 'kept' });
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 40_001);
+    try {
+      const next = await abFile(host, { op: 'screenshot', format: 'jpeg' }, { session: 'kept' });
+      await vi.waitFor(() => expect(existsSync(stale.path!)).toBe(false));
+      expect(existsSync(next.path!)).toBe(true);
+    } finally {
+      clock.mockRestore();
+    }
+    await host.close();
   });
 
   it('drops the capture directory on shutdown', async () => {
-    enqueueSpawnResults([{}]);
+    captureFrames([1, 2, 3]);
     const host = makeHost();
     const shot = await abFile(host, { op: 'screenshot', format: 'jpeg' }, { session: 'shutdown-sess', binaryPath: '/usr/local/bin/agent-browser' });
     if (!shot.ok) throw new Error('expected a path');
-    writeFileSync(shot.path, Uint8Array.from([1, 2, 3])); // stand in for the capture
-    const dir = dirname(shot.path);
+    const dir = dirname(shot.path!);
 
     await host.close();
 
@@ -582,28 +688,11 @@ describe('agent-browser host screenshot transport', () => {
     expect(existsSync(dir)).toBe(false);
   });
 
-  it('removes the frame once its bytes have been read', async () => {
-    enqueueSpawnResults([{}, {}]);
-    const host = makeHost();
-    const located = await abFile(host, { op: 'screenshot', format: 'jpeg' }, { session: 'read-sess', binaryPath: '/usr/local/bin/agent-browser' });
-    if (!located.ok) throw new Error('expected a path');
-    writeFileSync(located.path, Uint8Array.from([0xff, 0xd8]));
-
-    await ab(host, { op: 'screenshot', format: 'jpeg' }, { session: 'read-sess', binaryPath: '/usr/local/bin/agent-browser' });
-
-    // `screenshot()` owns the file's whole life — the bytes went to the webview.
-    expect(existsSync(located.path)).toBe(false);
-    await host.close();
-  });
-
-  // `oneCapture` in agent-browser-host.ts says why.
   it('joins a capture already in flight for the session instead of spawning another', async () => {
     const release = deferred<SpawnResult>();
-    let file = '';
     spawnMock.mockImplementation(async (_binary: string, args: string[]) => {
-      file = args[3];
       const result = await release.promise;
-      writeFileSync(file, Uint8Array.from([0xff, 0xd8, 0x01]));
+      writeFileSync(args[3], Uint8Array.from([0xff, 0xd8, 0x01]));
       return spawnResult(result);
     });
     const host = makeHost();
@@ -621,16 +710,17 @@ describe('agent-browser host screenshot transport', () => {
     expect(spawnMock).toHaveBeenCalledTimes(2);
 
     release.resolve({});
+    // Each file caller gets its own copy, which its reader deletes.
     const [first, second] = await Promise.all(paths);
-    expect(second).toEqual(first);
-    // Both callers get the frame from the one read, which removed the file.
+    expect(second.path).not.toBe(first.path);
+    for (const result of [first, second]) expect(await read(result.path!)).toEqual([0xff, 0xd8, 0x01]);
     for (const result of await Promise.all(bytes)) {
       expect(Array.from(result.bytes ?? [])).toEqual([0xff, 0xd8, 0x01]);
     }
 
     // Once it has answered, the next request captures afresh.
     spawnMock.mockReset();
-    enqueueSpawnResults([{}]);
+    captureFrames([1]);
     await abFile(host, { op: 'screenshot', format: 'jpeg' }, { session: 'queued' });
     expect(spawnMock).toHaveBeenCalledTimes(1);
     await host.close();
@@ -689,7 +779,7 @@ describe('agent-browser host screenshot transport', () => {
     expect(spawnMock).not.toHaveBeenCalled(); // never spawned without a path
 
     mkdtemp.mockRestore();
-    enqueueSpawnResults([{}]);
+    captureFrames([1]);
     const recovered = await abFile(host, { op: 'screenshot', format: 'jpeg' }, { session: 'retry-sess', binaryPath: '/usr/local/bin/agent-browser' });
     expect(recovered.ok).toBe(true);
     await host.close();

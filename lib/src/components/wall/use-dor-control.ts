@@ -48,6 +48,7 @@ import { isBrowserProvider, isTcpPort, parseRenderMode, renderModeFor } from 'do
 import type { BrowserResult } from '../../lib/platform/browser-automation';
 import { BROWSER_PROVIDER_GUI, browserHandle, headedRenderMode, providerUnavailable, rememberLaunchBinaryPath } from './browser-automation';
 import { BrowserBindingReservations } from './browser-binding-reservations';
+import { listWallHandles } from './wall-handles';
 import {
   agentBrowserSessionFromParams,
   browserBindingFromParams,
@@ -1635,7 +1636,10 @@ export function useDorControl({
       // and executable (docs/specs/dor-browser.md → Managed identity).
       const found = findBrowserSurface(provider, { key });
       const binding = (found ? browserBindingFromParams(lath.getMeta(found.id)?.params) : null)
-        ?? browserReservations.current.resolve(provider, key, browserKeyScope(), params.proposed);
+        ?? browserReservations.current.resolve(provider, key, browserKeyScope(), params.proposed,
+          // Window-wide: a Surface bound to this key's session may have left
+          // for another Workspace, still holding it.
+          (session) => listWallHandles().some((wall) => wall.browserSessions(provider).includes(session)));
       detail.respond({ ok: true, result: legacy ? { session: binding.session } : { binding } });
       return;
     }
@@ -1675,11 +1679,10 @@ export function useDorControl({
       }
       // The host reports where the session the command just drove streams,
       // its headedness when it can tell, and its native identity. No page
-      // named: a session the command left closed is not relaunched. A port
-      // `dor ab` read itself — under a socket directory the host may not
-      // share, and always from an older `dor ab` on the legacy method — is
-      // streamed from as it is, since the host could not find the session
-      // there (docs/specs/dor-browser.md → "agent-browser").
+      // named: a session the command left closed is not relaunched. The port
+      // `dor ab` read itself, under its own socket directory and CLI, is
+      // streamed from as it is; the host's state files may not describe that
+      // daemon at all (docs/specs/dor-browser.md → "agent-browser").
       const callerPort = provider === 'agent-browser' && isTcpPort(params.wsPort) ? params.wsPort : undefined;
       const status: BrowserResult = callerPort === undefined ? await browser.attach() : { ok: true, wsPort: callerPort };
       if (!status.ok) {

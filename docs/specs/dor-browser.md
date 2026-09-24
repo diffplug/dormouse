@@ -66,10 +66,9 @@ Invariants on the flat persisted `BrowserPanelParams`:
   `launchFallback`, `binaryPath`, `cwd`, `nativeIdentity`, `syncEngaged`,
   `key`), never nested but for a `launchFallback` restore's params. Pop-out is not a param — it derives from `renderMode`
   once, at controller construction.
-- **Never carry a stream port in params**: the port the host's `attach`
-  answers for a `dor` bind, or one `dor ab` read itself
-  ([agent-browser](#agent-browser)), goes straight to the Surface's controller
-  (rationale).
+- **Never carry a stream port in params**: the port `dor ab` reads, or the one
+  the Playwright host's `attach` answers for `dor pw`, goes straight to the
+  Surface's controller (rationale).
 - **`contextPortKey` is declared and persisted like any other param.** Only a
   Surface the pane context menu opened for a port carries it, and reuse looks
   one up by it ([Pane Context Menu Connect](#pane-context-menu-connect)).
@@ -262,7 +261,9 @@ absolute path (`docs/specs/dor-cli.md` → Spawning External Binaries).
   webviews' `--key default` are two browsers. Its first commands that may bind
   reserve the caller's cwd and executable for two minutes, shared by concurrent
   first commands; one that succeeds without a viewer (a non-Chromium Playwright)
-  keeps it until a Surface binds, and binding removes it.
+  keeps it until a Surface binds, and binding removes it. **A key never mints a
+  session a Surface anywhere in the Window holds, or the provider's reservation
+  of another key**: it takes the first free `.2`, `.3`, … suffix (rationale).
 - **Only the answering Workspace can name a key**, so `dor` asks the host
   (`surface.resolveBrowser`) before it forwards anything, and names the key
   itself (`dormouse.1.<name>`) only when there is no control endpoint at all —
@@ -432,8 +433,9 @@ cookies/logins do not survive.
 
 A pop-out or pop-in is a `launch` of the bound session, under the host's
 lifecycle ([Browser Host](#browser-host)).
-agent-browser's relaunch runs `close`, **then terminates the daemon by its pid
-file and waits for it to exit** (rationale), then reopens. **Never wait for the
+agent-browser's relaunch runs `close`, **then terminates the daemon its state
+files prove live ([agent-browser](#agent-browser)) and waits for it to exit**
+(rationale), then reopens. **Never wait for the
 page to load** (rationale): its launch resolves once the *relaunched* daemon is
 up, asking `stream status` only after `open` returns. **A non-zero `open` exit
 with the daemon up is a page still loading, not a failed launch**; only a launch
@@ -461,9 +463,9 @@ plus `browser_screenshot` for raw bytes.
 
 | Operation | Contract |
 | --- | --- |
-| `launch` | Without a session, open an http(s) `url` in a new GUI session; with one, relaunch it headed or headless at `url`, blank when that page is not http(s). Resolves when the browser is up, not when the page loads ([Pop-Out](#pop-out)). |
+| `launch` | Without a session, open an http(s) `url` in a new GUI session; with one, navigate it when it is up in the mode asked for, else relaunch it headed or headless at `url`, blank when that page is not http(s). Resolves when the browser is up, not when the page loads ([Pop-Out](#pop-out)). |
 | `attach` | The live stream port, found without starting a browser ([agent-browser](#agent-browser), [Playwright](#playwright)), with headedness where the provider can tell. Only a gone browser, for a caller naming a page, is relaunched there (headed on request), answering `relaunched`; one it cannot view is left alone. |
-| `screenshot` | One device-resolution JPEG/PNG frame. VS Code structured-clones the bytes; standalone passes Rust the capture's temp-file **path** over the sidecar stdio, for Rust to read (rationale). **One capture per session and format in flight**: a request made meanwhile joins it — never one from before the session's close or relaunch — and the capture's spawn is killed past 30s. |
+| `screenshot` | One device-resolution JPEG/PNG frame. VS Code structured-clones the bytes; standalone passes Rust a temp-file **path** over the sidecar stdio, for Rust to read and delete (rationale). **One capture per session and format in flight**: a request made meanwhile joins it — never one from before the session's close or relaunch — and the capture's spawn is killed past 30s. |
 | `edit` | select-all/copy/cut via fixed host-owned JS plus an OS clipboard write. |
 | `streamUrl` | The URL the webview connects to for a stream port. |
 | `navigate`, `history`, `tab`, `viewport`, `device`, `close` | One fixed argv (agent-browser) or client call (Playwright) each. |
@@ -486,9 +488,13 @@ list tabs, act, evaluate, screenshot, stream URL):
   launches, relaunches and page-naming attaches still unanswered
   (`cancels`); one arriving after it answers the same and opens nothing.**
   The host keeps a cancelled id five minutes, at most 256.
+- **A launch naming a session whose browser is up in the mode it asks for
+  must navigate it, never stop it** (a Tool re-announced); only one gone or in
+  the other mode is relaunched (rationale). agent-browser cannot report its
+  mode: one this host did not launch headed counts as headless.
 - **Must answer a launch inside `BROWSER_REQUEST_TIMEOUT_MS`**: startup,
-  queueing included, gets 30 s from the request's arrival. A launch stops what
-  runs a named session first, then resolves once the provider reports the
+  queueing included, gets 30 s from the request's arrival. A relaunch stops
+  what runs the session first, then resolves once the provider reports the
   browser up, **never waiting for the page**.
 - **A launch that gives up must let its `open` land, for up to 4 s, before
   closing the session**, and close again when a later `open` lands unless a
@@ -497,6 +503,10 @@ list tabs, act, evaluate, screenshot, stream URL):
   `about:blank` tabs, last first, and only while a real page is open**, so it
   never closes the sole tab (rationale). One policy for every launch of either
   provider, fresh or relaunched.
+- **Every provider call a browser's queue waits on must be bounded** — a
+  launch's by its deadline, a close by 10 s — so one hung CLI holds that
+  browser's later requests only that long; **shutdown waits on the queue at
+  most 10 s** (rationale).
 - **A headed launch is tracked for shutdown before it starts**, so a window
   whose page never loads is still closed; a headless relaunch or a close drops
   it. **Shutdown supersedes pending launches and sweeps, then closes every
@@ -523,9 +533,10 @@ run. The webview applies the same predicate before sending one
 
 **Screenshots are captured into a private per-process directory, and it is
 removed** (rationale). **A tmpdir that cannot be created is answered
-`{ ok: false }` and retried on the next capture, never memoized.** A capture
-file is reused per session: its reader leaves it, the next capture overwrites
-it.
+`{ ok: false }` and retried on the next capture, never memoized.** **Every
+capture writes fresh files, one per caller** (rationale); a reader deletes its
+own, and the browser's close or relaunch, or a capture past
+`BROWSER_REQUEST_TIMEOUT_MS`, deletes one never read.
 
 Source of truth: `lib/src/host/browser-host.ts` (`parseBrowserRequest`,
 `createBrowserHost`, `BrowserProvider`), `BROWSER_PROVIDERS` (`isSessionName`,
@@ -547,18 +558,21 @@ relaunch changes the mode.
 - **`attach` reads the live port from `<session>.pid` / `<session>.stream` and a
   port probe, never spawning** — any CLI verb starts a daemon to answer. A
   daemon up but not streaming is left alone; its native identity is its session.
+  **A state file written before this boot reads as absent.**
+- **Never signal a pid its state files do not prove to be the session's live
+  daemon**: named by a pid file from this boot, alive, beside a stream port that
+  accepts, checked before `close` (rationale).
 - **A launch runs `open` in the binding's project directory while it exists**,
   so a relaunch reads the same `./agent-browser.json` the `dor ab` there did;
   every other call runs in the host's.
 - **Every spawn passes the `binaryPath` gate in `runWithBinaryFallback`**, the
   host's `DORMOUSE_AGENT_BROWSER_BIN` being the exact-match override.
-- **Under a caller's own `AGENT_BROWSER_SOCKET_DIR`, `dor ab` must read the
-  stream port itself** (`stream status --json`) and hand it over with the
-  bind, which streams from it without asking the host: the host reads state
-  files in its own socket directory. **Never carry a socket directory to the
-  host** — it kills the pid it reads there. **Host-side operations for a
-  session in a socket directory the host does not share are unsupported**:
-  navigation, tabs, screenshots and closes run the CLI under the host's
+- **`dor ab` must read the stream port itself after a command that may bind**
+  (`stream status --json`, safe once the command made the daemon) and hand it
+  over; the Surface streams from it without asking the host (rationale).
+  **Never carry a socket directory to the host** — it kills the pid it reads
+  there. **Host-side operations for a session in a socket directory the host
+  does not share are unsupported**: they run the CLI under the host's
   environment.
 - **VS Code must reach the stream through a loopback relay** — the agent-browser
   stream server rejects `vscode-webview://` origins. The relay grants one
@@ -568,7 +582,7 @@ relaunch changes the mode.
 Source of truth: `createAgentBrowserProvider` and `runWithBinaryFallback` in
 `lib/src/host/agent-browser-host.ts`, `isAllowedAgentBrowserBinary` and
 `streamStatusArgs` in `dor-lib-common/src/browser-providers.ts`,
-`callerStreamStatus` in `dor/src/commands/agent-browser.ts`,
+`streamStatus` in `dor/src/commands/agent-browser.ts`,
 `vscode-ext/src/agent-browser-host.ts`. Pinned by
 `lib/src/host/agent-browser-host.test.ts`.
 

@@ -84,9 +84,9 @@ export interface BrowserProvider<B = unknown> {
   probe(b: B, launch: { replaced: unknown; opened?: OpenOutcome; deadline: number }): Promise<LiveBrowser | { failed: string } | undefined>;
   /** How often a launch probes, in ms. */
   readonly pollMs: number;
-  /** Close the session; throws when the CLI refused. The host has released
-   *  `b` first. */
-  close(b: B, timeoutMs?: number): Promise<void>;
+  /** Close the session within `timeoutMs`; throws when the CLI refused or
+   *  overran. The host has released `b` first. */
+  close(b: B, timeoutMs: number): Promise<void>;
   /** Drop what the provider holds for `b` besides the session itself. */
   release?(b: B): Promise<void>;
   /** The session's tabs, and closing one, for the post-launch sweep. */
@@ -256,6 +256,9 @@ function parseOp(r: Record<string, unknown>): BrowserOp | string {
 // LAUNCH_CLOSE_RESERVE_MS before it; a launch that gives up then waits up to
 // OPEN_SETTLE_MS for its `open`, and closes the session with whatever remains.
 const REQUEST_BUDGET_MS = BROWSER_REQUEST_TIMEOUT_MS - 2_000;
+// Everything else run in a browser's lifecycle queue is bounded too, so one
+// hung CLI holds that browser's later requests, and shutdown, only this long.
+const CLOSE_TIMEOUT_MS = 10_000;
 const OPEN_SETTLE_MS = 4_000;
 const LAUNCH_CLOSE_RESERVE_MS = OPEN_SETTLE_MS + 4_000;
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -356,9 +359,9 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   }
 
   /** Release what the provider holds for the browser, then close its session. */
-  async function shut({ p, b }: Bound, timeoutMs?: number): Promise<void> {
+  async function shut({ p, b }: Bound, timeoutMs = CLOSE_TIMEOUT_MS): Promise<void> {
     await p.release?.(b);
-    await p.close(b, timeoutMs === undefined ? undefined : Math.max(0, timeoutMs));
+    await p.close(b, Math.max(0, timeoutMs));
   }
 
   // Browsers launched headed are real OS windows, so shutdown closes them.
@@ -444,6 +447,24 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     }).catch(log);
   }
 
+  /** A named launch into a browser already up in the mode it asks for: the
+   *  page opens there — a navigation, not waited on — and nothing is stopped,
+   *  so an agent driving the session keeps its tabs, state and CDP clients.
+   *  Undefined when the browser is gone, cannot be viewed, or runs in the
+   *  other mode, which a relaunch changes. agent-browser cannot report its
+   *  mode, so a browser this host did not launch headed counts as headless. */
+  async function reuse(bound: Bound, url: string | undefined, isHeaded: boolean): Promise<LiveBrowser | undefined> {
+    const { p, b, id } = bound;
+    const found = await p.find(b).catch(() => undefined);
+    if (!found || !('wsPort' in found) || (found.headed ?? headed.has(id)) !== isHeaded) return undefined;
+    if (isBrowsableUrl(url)) {
+      void p.act(b, { op: 'navigate', url }).then((result) => {
+        if (!result.ok) log(`navigating ${id} to ${url} failed: ${result.error ?? 'no reason given'}`);
+      }, log);
+    }
+    return { ...found, headed: isHeaded };
+  }
+
   /** The live browser; one that is gone relaunches at `url` when the caller
    *  names a page — `relaunched`, so the caller has no navigation left to run
    *  there — and fails otherwise. Serialized with launches, so two panes
@@ -467,7 +488,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       // close. Invalidating released it.
       await invalidate(bound);
       headed.delete(bound.id);
-      await bound.p.close(bound.b);
+      await bound.p.close(bound.b, CLOSE_TIMEOUT_MS);
     });
   }
 
@@ -475,68 +496,78 @@ export function createBrowserHost(deps: BrowserHostDeps) {
 
   // Screenshots of the user's authenticated browser land here, written by an
   // external process under the ambient umask — which is why the private
-  // directory, not the file mode, is the control.
+  // directory, not the file mode, is the control. Every file is a fresh
+  // random name — unguessable, and never one a reader may still be reading.
   const captures = privateCaptureDir('dormouse-browser-');
-  // One file per browser, so frames don't litter; one capture of it in flight
-  // (below), so reusing the name is safe. The random name keeps it unguessable
-  // from the session alone.
-  const captureNames = new Map<string, string>();
-  async function capturePath(id: string, format: 'jpeg' | 'png'): Promise<string> {
-    let name = captureNames.get(id);
-    if (name === undefined) captureNames.set(id, name = randomBytes(12).toString('hex'));
-    return path.join(await captures.get(), `shot-${name}.${format === 'png' ? 'png' : 'jpg'}`);
+  async function freshCapturePath(format: 'jpeg' | 'png'): Promise<string> {
+    return path.join(await captures.get(), `shot-${randomBytes(12).toString('hex')}.${format === 'png' ? 'png' : 'jpg'}`);
+  }
+
+  // Files handed to the file transport's reader, which deletes each once read
+  // (the Tauri `browser_screenshot` command). Kept per browser until then: its
+  // close or relaunch removes those still there, and each new one removes any
+  // older than every reader's wait, which no reader will come for.
+  const handedOut = new Map<string, Map<string, number>>();
+  async function handOut(id: string, bytes: Uint8Array, format: 'jpeg' | 'png'): Promise<string> {
+    const file = await freshCapturePath(format);
+    await fs.writeFile(file, bytes, { mode: 0o600 });
+    let files = handedOut.get(id);
+    if (!files) handedOut.set(id, files = new Map());
+    const now = Date.now();
+    for (const [old, at] of files) {
+      if (at > now - BROWSER_REQUEST_TIMEOUT_MS) break;
+      files.delete(old);
+      void fs.unlink(old).catch(() => {});
+    }
+    files.set(file, now);
+    return file;
   }
 
   // A capture a caller asking meanwhile joins rather than repeats, one per
-  // browser, format and transport: surfaces can share a session, and a caller
-  // re-asks after its adapter's timeout. Never one from before the browser's
-  // close or relaunch (`forgetInFlight`).
-  const inFlight = new Map<string, { id: string; promise: Promise<BrowserResult> }>();
-  function joinInFlight(id: string, kind: string, work: () => Promise<BrowserResult>): Promise<BrowserResult> {
-    const key = `${kind}\0${id}`;
+  // browser and format: surfaces can share a session, and a caller re-asks
+  // after its adapter's timeout. Never one from before the browser's close or
+  // relaunch (`forgetInFlight`).
+  const inFlight = new Map<string, { id: string; promise: Promise<Uint8Array> }>();
+  function joinInFlight(id: string, format: string, work: () => Promise<Uint8Array>): Promise<Uint8Array> {
+    const key = `${format}\0${id}`;
     const pending = inFlight.get(key);
     if (pending) return pending.promise;
-    const entry = { id, promise: Promise.resolve<BrowserResult>({ ok: false }) };
-    entry.promise = work().finally(() => { if (inFlight.get(key) === entry) inFlight.delete(key); });
+    const entry = { id, promise: work().finally(() => { if (inFlight.get(key) === entry) inFlight.delete(key); }) };
     inFlight.set(key, entry);
     return entry.promise;
   }
 
-  /** Join none of `id`'s pending captures, and give its next capture a fresh
-   *  file, so one still running cannot overwrite it. */
+  /** Join none of `id`'s pending captures, and delete the frames of its page
+   *  still handed out, rather than leave them on disk until shutdown. */
   function forgetInFlight(id: string): void {
     for (const [key, entry] of inFlight) if (entry.id === id) inFlight.delete(key);
-    captureNames.delete(id);
+    for (const file of handedOut.get(id)?.keys() ?? []) void fs.unlink(file).catch(() => {});
+    handedOut.delete(id);
   }
 
-  function screenshot({ p, b, id }: Bound, asked: { format?: 'jpeg' | 'png'; quality?: number }, transport: Transport): Promise<BrowserResult> {
+  async function screenshot({ p, b, id }: Bound, asked: { format?: 'jpeg' | 'png'; quality?: number }, transport: Transport): Promise<BrowserResult> {
     const opts = { format: asked.format === 'png' ? 'png' as const : 'jpeg' as const, quality: jpegQuality(asked.quality) };
     const mime = opts.format === 'png' ? 'image/png' : 'image/jpeg';
-    // Joined whole, read and unlink included: a caller joining only the capture
-    // would read a file the first caller has already removed.
-    return joinInFlight(id, `${transport}:${opts.format}`, async (): Promise<BrowserResult> => {
-      const target = () => capturePath(id, opts.format);
-      let shot: { path: string } | { bytes: Uint8Array };
-      try {
-        shot = await p.screenshot(b, opts, target);
-      } catch (error) {
-        return { ok: false, error: messageOf(error) };
-      }
-      if (transport === 'file') {
-        if ('path' in shot) return { ok: true, path: shot.path, mime };
-        if (closed) return { ok: false, error: 'the browser host is shutting down' };
-        const written = await target();
-        await fs.writeFile(written, shot.bytes, { mode: 0o600 });
-        return { ok: true, path: written, mime };
-      }
-      if ('bytes' in shot) return { ok: true, bytes: shot.bytes, mime };
-      // The bytes go to the webview now, so the frame does not wait on disk for
-      // shutdown. The file transport cannot do this: its reader (Rust) reads
-      // the file afterwards, so there the next capture overwrites it.
-      const buffer = await fs.readFile(shot.path);
-      await fs.unlink(shot.path).catch(() => {});
-      return { ok: true, bytes: new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength), mime };
-    });
+    let bytes: Uint8Array;
+    try {
+      // The frame is held in memory and its capture file gone before anyone
+      // joined reads it, so each caller gets its own copy.
+      bytes = await joinInFlight(id, opts.format, async () => {
+        const shot = await p.screenshot(b, opts, () => freshCapturePath(opts.format));
+        if ('bytes' in shot) return shot.bytes;
+        try {
+          const buffer = await fs.readFile(shot.path);
+          return new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+        } finally {
+          await fs.unlink(shot.path).catch(() => {});
+        }
+      });
+    } catch (error) {
+      return { ok: false, error: messageOf(error) };
+    }
+    if (transport === 'bytes') return { ok: true, bytes, mime };
+    if (closed) return { ok: false, error: 'the browser host is shutting down' };
+    return { ok: true, path: await handOut(id, bytes, opts.format), mime };
   }
 
   // --- editing ---
@@ -578,7 +609,8 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       switch (r.op) {
         case 'launch': {
           const fresh = r.binding.session === undefined;
-          const live = await bringUp(bound.id, () => launch(bound, r.url, r.headed, fresh, requestDeadline));
+          const live = await bringUp(bound.id, async () => (fresh ? undefined : await reuse(bound, r.url, r.headed))
+            ?? launch(bound, r.url, r.headed, fresh, requestDeadline));
           return answer({ headed: r.headed, ...live });
         }
         case 'attach': {
@@ -616,9 +648,9 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       headed.clear();
       await Promise.all([
         ...windows.map((bound) => shut(bound).catch(log)),
-        captures.remove().then(() => captureNames.clear()),
+        captures.remove().then(() => handedOut.clear()),
       ]);
-      await Promise.allSettled(lifecycle.values());
+      await settleAllWithin([...lifecycle.values()], CLOSE_TIMEOUT_MS, undefined);
       await Promise.all([...providers.values()].map((provider) => provider.dispose?.()));
     },
   };

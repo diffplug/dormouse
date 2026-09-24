@@ -203,9 +203,15 @@ export function renderModeFor(provider: BrowserAutomationProvider, presentation:
   return BROWSER_PROVIDERS[provider].modes[presentation];
 }
 
+/** How long the webview waits for any browser request before its transport
+ * gives up. The host bounds a launch to answer inside it, every transport
+ * waits exactly this long (VS Code's `requestResponse`, the Tauri
+ * `browser_request` command, the browser-dev harness), and `dor`'s bind waits
+ * past it, since the host's answer can wait on one. */
+export const BROWSER_REQUEST_TIMEOUT_MS = 40_000;
+
 /** Env var that moves agent-browser's socket directory, where its daemon's
- * `<session>.pid` and `<session>.stream` live; the host reads its own, and
- * `dor ab` reads the stream port itself under one the host may not share. */
+ * `<session>.pid` and `<session>.stream` live; the host reads its own. */
 export const AGENT_BROWSER_SOCKET_DIR_ENV = 'AGENT_BROWSER_SOCKET_DIR';
 
 /** agent-browser's argv for `stream status --json`, whose output

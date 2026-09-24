@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
+import { readFileSync } from 'node:fs';
 import { Server } from 'node:http';
 import { WebSocket } from 'ws';
 import { createBrowserHost } from './browser-host';
@@ -154,29 +155,51 @@ test('a single-page browser refreshes without asking the CLI for its selection',
   expect(mocks.cli.mock.calls.map(([, args]) => args[1])).toEqual(['list']);
 });
 
-test('a GUI open launches its fresh session without closing it first; a relaunch still does', async () => {
+test('hands the sidecar a fresh frame file per capture, so the next never rewrites one being read', async () => {
+  page.setViewportSize = vi.fn(async () => {});
+  const file = (op: BrowserOp) => host.requestFile({ provider: 'playwright', binding, ...op });
+  const first = await file({ op: 'screenshot' });
+  cdp.send.mockResolvedValue({ data: Buffer.from('next').toString('base64') });
+  const second = await file({ op: 'screenshot' });
+  expect(second.path).not.toBe(first.path);
+  expect(readFileSync(first.path!, 'utf8')).toBe('hello');
+  expect(readFileSync(second.path!, 'utf8')).toBe('next');
+});
+
+test('a GUI open launches its fresh session without closing it first; a named launch navigates it in its mode and relaunches it into the other', async () => {
+  page.goto = vi.fn(async () => null);
   const opened = await pw({ op: 'launch', url: 'http://localhost/', headed: false }, { cwd: process.cwd() });
   expect(opened.error).toBeUndefined();
   expect(mocks.cli.mock.calls.map(([, args]) => args[1])).not.toContain('close');
+  const named = { ...binding, session: opened.session! };
+
+  // Up headless (a Tool re-announced): its page opens there, and nothing an
+  // agent drives is stopped.
   mocks.cli.mockClear();
-  expect((await pw({ op: 'launch', url: 'http://localhost/', headed: false }, { ...binding, session: opened.session! })).ok).toBe(true);
+  expect(await pw({ op: 'launch', url: 'http://localhost/next', headed: false }, named)).toMatchObject({ ok: true, headed: false });
+  expect(mocks.cli.mock.calls.map(([, args]) => args[1])).not.toContain('close');
+  expect(mocks.cli.mock.calls.map(([, args]) => args[1])).not.toContain('open');
+  await vi.waitFor(() => expect(page.goto).toHaveBeenCalledWith('http://localhost/next', { waitUntil: 'commit' }));
+
+  // A pop-out asks for the other mode: a relaunch, closing first.
+  mocks.cli.mockClear();
+  expect((await pw({ op: 'launch', url: 'http://localhost/', headed: true }, named)).ok).toBe(true);
   expect(mocks.cli.mock.calls[0][1]).toEqual([`--session=${opened.session}`, 'close']);
 });
 
 test('a relaunch without an http(s) page reopens blank; a GUI open still needs one', async () => {
   // A bare `dor pw open` pane sits on about:blank; a headed window can be left
-  // on a file, data or error page when the user closes it.
+  // on a file, data or error page when the user closes it. Each is a pop-out
+  // of the headless browser up, so a relaunch.
   for (const url of [undefined, 'about:blank', 'file:///etc/passwd', 'data:text/html,hi', 'chrome-error://chromewebdata/']) {
-    for (const headed of [true, false]) {
-      mocks.cli.mockClear();
-      const result = await pw({ op: 'launch', headed, ...(url === undefined ? {} : { url }) });
-      expect(result.error, `headed=${headed} ${url}`).toBeUndefined();
-      const open = mocks.cli.mock.calls.find(([, args]) => args[1] === 'open')![1];
-      expect(open, `headed=${headed} ${url}`).toEqual(['--session=test', 'open', '--browser=chromium', ...(headed ? ['--headed'] : [])]);
-    }
+    mocks.cli.mockClear();
+    const result = await pw({ op: 'launch', headed: true, ...(url === undefined ? {} : { url }) });
+    expect(result.error, url).toBeUndefined();
+    const open = mocks.cli.mock.calls.find(([, args]) => args[1] === 'open')![1];
+    expect(open, url).toEqual(['--session=test', 'open', '--browser=chromium', '--headed']);
   }
   mocks.cli.mockClear();
-  expect((await pw({ op: 'launch', url: 'http://localhost/next', headed: false })).ok).toBe(true);
+  expect((await pw({ op: 'launch', url: 'http://localhost/next', headed: true })).ok).toBe(true);
   expect(mocks.cli.mock.calls.find(([, args]) => args[1] === 'open')![1]).toContain('http://localhost/next');
   expect((await pw({ op: 'launch', url: 'file:///etc/passwd', headed: false }, { cwd: process.cwd() })).error).toBe('Browser navigation requires an http(s) URL');
 });

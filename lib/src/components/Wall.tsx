@@ -25,7 +25,7 @@ const RemotePairingModalHost = lazy(() =>
 );
 import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
 import { BROWSER_PROVIDER_GUI, hostSupportsBrowser, providerUnavailable } from './wall/browser-automation';
-import { parseRenderMode } from 'dor-lib-common/browser-providers';
+import { parseRenderMode, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
 import { isToolRender } from '../lib/platform/tool-types';
 import { closeBrowserSurface, requestBrowserRenderMode, whenBrowserLaunched } from './wall/agent-browser-surface-controller';
 import { KILL_CONFIRM_MS, KILL_SHAKE_MS, KillConfirmOverlay, randomKillChar, type ConfirmKill } from './KillConfirm';
@@ -999,6 +999,15 @@ export function Wall({
     [lath, memberSurfaceIds, surfaceRefForId],
   );
 
+  const browserSessions = useCallback(
+    (provider: BrowserAutomationProvider): string[] => memberSurfaceIds().flatMap((id) => {
+      const params = lath.getMeta(id)?.params as { renderMode?: unknown; session?: unknown; launchSession?: unknown } | undefined;
+      if (!params || parseRenderMode(params.renderMode).provider !== provider) return [];
+      return [params.session, params.launchSession].filter((session): session is string => typeof session === 'string');
+    }),
+    [lath, memberSurfaceIds],
+  );
+
   /** Whether a member Surface has a PTY behind it, as against a browser view. */
   const surfaceHasTerminal = useCallback(
     (id: string): boolean => hasTerminal(surfaceKindFromParams(lath.getMeta(id)?.params)),
@@ -1773,6 +1782,7 @@ export function Wall({
     surfaceIds: memberSurfaceIds,
     ownsSurface,
     iframeSurfaceRefs,
+    browserSessions,
     hasTouchedSurfaces: () => memberSurfaceIds().some((id) => {
       // A browser Surface has no "untouched" notion and always holds a page, so
       // it counts; so does a Tool, before its terminal exists to be asked. A

@@ -7,6 +7,7 @@
 import type { BrowserAutomationProvider, BrowserBinding } from 'dor-lib-common/browser-providers';
 
 export type { BrowserAutomationProvider };
+export { BROWSER_REQUEST_TIMEOUT_MS } from 'dor-lib-common/browser-providers';
 
 /** What a request names its browser by. Only a `launch` may omit the session,
  *  and the host then mints one. */
@@ -19,9 +20,10 @@ export type BrowserEditOp = 'selectAll' | 'copy' | 'cut';
 
 /** One operation on a provider's browser. */
 export type BrowserOp =
-  /** Open `url` — blank when it is not http(s) — in a new session, or
-   *  relaunch the named one there, headed or headless. Answers once the
-   *  browser is up, never waiting for the page. */
+  /** Open `url` — blank when it is not http(s) — in a new session, or in the
+   *  named one: navigating it when it is up in the mode asked for, else
+   *  relaunching it headed or headless. Answers once the browser is up, never
+   *  waiting for the page. */
   | { op: 'launch'; url?: string; headed: boolean; requestId?: string }
   /** Where the session streams now, found without starting a browser; one
    *  that is gone relaunches at `url` when the caller names one. */
@@ -75,11 +77,6 @@ export interface BrowserResult {
   mime?: string;
 }
 
-/** How long the webview waits for any browser request before its transport
- *  gives up. The host bounds a launch to answer inside it, and every transport
- *  waits exactly this long (VS Code's `requestResponse`, the Tauri
- *  `browser_request` command, the browser-dev harness). */
-export const BROWSER_REQUEST_TIMEOUT_MS = 40_000;
 
 /** The most requests one `close` may cancel; the host refuses a longer list. */
 export const BROWSER_CLOSE_MAX_CANCELS = 32;

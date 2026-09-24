@@ -19,7 +19,6 @@ import type {
   BrowserBinding,
   BrowserExec,
   BrowserExecResult,
-  CliEnv,
   CliOptions,
   CliResult,
   ControlClient,
@@ -201,11 +200,11 @@ export interface BrowserCliDescriptor {
   missingBinaryMessage(binary: string): string;
   /** A test's stand-in for the spawn. */
   exec(options: CliOptions): BrowserExec | undefined;
-  /** The argv that reads the session's stream port under the caller's own
-   *  environment, when that environment keeps the session where the host
-   *  does not look (agent-browser's socket directory); the port it prints is
-   *  handed over with the bind, since the host could not find it. */
-  callerStreamStatus?(env: CliEnv, session: string): string[] | undefined;
+  /** The argv that reads the session's stream port once a command has
+   *  succeeded — the browser exists then, so asking starts none — under the
+   *  caller's own environment; the port it prints is handed over with the
+   *  bind. Absent when the host reports the port. */
+  streamStatus?(session: string): string[];
 }
 
 /**
@@ -300,7 +299,7 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
   // passthrough rather than nagging about the missing surface.
   if (result.exitCode === 0 && mayBind && binding.session !== undefined && !(client instanceof Error)) {
     try {
-      const statusArgs = d.callerStreamStatus?.(env, binding.session);
+      const statusArgs = d.streamStatus?.(binding.session);
       const wsPort = statusArgs === undefined ? undefined : parseStreamPort((await run(statusArgs)).stdout);
       await client.browserSurface({
         provider: d.provider,

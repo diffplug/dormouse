@@ -52,3 +52,18 @@ test('a key whose command succeeded keeps its binding with no Surface to bind', 
     expect(registry.resolve('playwright', 'other', 'ws', { cwd: '/elsewhere' }).cwd).toBe('/elsewhere');
   } finally { vi.useRealTimers(); }
 });
+
+test('a key never mints a session a Surface in the Window, or another key\'s reservation, holds', () => {
+  const registry = new BrowserBindingReservations();
+  const base = sessionForKey('app', 'ws');
+  // The pane first bound to `app` left for another Workspace, still bound.
+  const held = new Set([base]);
+  const binding = registry.resolve('playwright', 'app', 'ws', { cwd: '/project' }, (session) => held.has(session));
+  expect(binding.session).toBe(`${base}.2`);
+  // Deterministic: the key resolves to it again, and its reservation keeps the
+  // name from the next key that would number onto it.
+  expect(registry.resolve('playwright', 'app', 'ws', { cwd: '/project' }, (session) => held.has(session))).toEqual(binding);
+  expect(registry.resolve('playwright', 'app.2', 'ws', { cwd: '/project' }, (session) => held.has(session)).session).toBe(`${base}.2.2`);
+  // Another provider's session of that name is another browser.
+  expect(registry.resolve('agent-browser', 'app', 'ws', { cwd: '/project' }).session).toBe(base);
+});

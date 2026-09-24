@@ -87,6 +87,34 @@ describe('createBrowserHost', () => {
     }
   });
 
+  it('bounds a close, so a hung one holds its browser\'s later requests, and shutdown, only so long', async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = fakeProvider();
+      // A daemon that never answers: its close ends when the bound kills the CLI.
+      fake.provider.close = (_b, timeoutMs) => new Promise((_resolve, reject) => { setTimeout(() => reject(new Error('close timed out')), timeoutMs); });
+      const host = createBrowserHost({ writeClipboardText: vi.fn(), providers: { 'agent-browser': () => fake.provider } });
+      const s1 = { provider: 'agent-browser', binding: { session: 's1' } } as const;
+      const closing = host.request({ ...s1, op: 'close' });
+      const launching = host.request({ ...s1, op: 'launch', url: 'http://localhost:5173/', headed: false });
+      await vi.advanceTimersByTimeAsync(9_999);
+      expect(fake.calls).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await closing).toEqual({ ok: false, error: 'close timed out' });
+      expect(await launching).toMatchObject({ ok: true });
+
+      // One that ignores its bound still leaves shutdown only that long.
+      fake.provider.close = () => new Promise(() => {});
+      void host.request({ ...s1, op: 'close' });
+      let shutDown = false;
+      void host.close().then(() => { shutDown = true; });
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(shutDown).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('sweeps the blank tabs a launch leaves once its open returns, last first, and only beside a real page', async () => {
     const fake = fakeProvider();
     const host = createBrowserHost({ writeClipboardText: vi.fn(), providers: { 'agent-browser': () => fake.provider } });

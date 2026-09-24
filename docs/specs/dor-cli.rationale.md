@@ -105,6 +105,10 @@ releases its request; it does not prove itself before receiving the client proof
 
 **Why `dor await` prints no terminal text.** Mirroring `dor read` would drag its whole output-flag surface (`--lines`, mode selection) onto `await` and spend the one thing `await` has that composes cleanly: a stdout that is nothing but the cause, so `CAUSE=$(dor await …)` needs no parsing. `dor await … && dor read …` gets the screen back for one extra command.
 
+## Browser Surface Addressing
+
+**Why the bind waits past the host's browser request timeout.** `surface.browser` answers only once the host has asked the browser where it streams, and that `attach` queues behind any launch, relaunch or close of the same browser, which can take the host's whole budget. At the client's default 5 s deadline, a command run just after a pop-out printed "could not open the Dormouse browser surface … timed out" and the pane bound anyway; agents read stderr, so the warning misled them (review of #777, 2026-09).
+
 ## Browser Open Target Resolution
 
 **Why the port, and not the hostname, picks `http`.** A public HTTPS site lives on 443 and is written without a port, whereas a bare `host:port` is overwhelmingly a dev or infra server — loopback, a LAN container, a Tailnet peer — and those speak `http`. The hostname carries no usable signal: `box.ts.net` is a private Tailnet peer and looks like any other domain, so the CLI does not try to classify it.

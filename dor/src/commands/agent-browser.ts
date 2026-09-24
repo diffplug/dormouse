@@ -5,7 +5,6 @@
 import { buildCommand } from '@stricli/core';
 import {
   AGENT_BROWSER_BIN_ENV,
-  AGENT_BROWSER_SOCKET_DIR_ENV,
   BROWSER_PROVIDERS,
   DEFAULT_AGENT_BROWSER_BIN,
   streamStatusArgs,
@@ -131,10 +130,9 @@ const AGENT_BROWSER: BrowserCliDescriptor = {
   projectScoped: false,
   missingBinaryMessage,
   exec: (options) => options.execAgentBrowser,
-  // The host reads a session's stream port from its own socket directory, so
-  // a caller that moved its own reads the port itself (docs/specs/dor-browser.md
-  // → "agent-browser").
-  callerStreamStatus: (env, session) => (env[AGENT_BROWSER_SOCKET_DIR_ENV] ? streamStatusArgs(session) : undefined),
+  // Under the caller's own socket directory and CLI, whatever state files
+  // that CLI writes (docs/specs/dor-browser.md → "agent-browser").
+  streamStatus: streamStatusArgs,
 };
 
 export function runAgentBrowserCli(args: string[], options: CliOptions): Promise<CliResult> {
