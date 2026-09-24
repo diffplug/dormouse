@@ -272,7 +272,7 @@ describe('saveSession', () => {
     // rather than the session. This pins the second half — a save must not
     // reintroduce the field, because a carried-forward value would outlive the
     // destructive read of the recovery record and be re-run on a later restore
-    // (docs/specs/agent-recovery.md -> "Cold restore").
+    // (docs/compatible-agents.md -> "Cold restore").
     const platform = createPlatform(null);
 
     await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }]);

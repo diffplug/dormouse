@@ -1697,7 +1697,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
 
   // Send ONE ^C to the given PTYs (all live ones when `ids` is omitted), so an
   // agent prints its resume invocation before the host tears the process down
-  // (docs/specs/agent-recovery.md -> "Capture"). Writes ^C into
+  // (docs/compatible-agents.md -> "Capture"). Writes ^C into
   // the pty rather than signalling a pid: the tty line discipline delivers SIGINT
   // to the foreground process group itself, so this needs neither tcgetpgrp nor
   // the master fd node-pty does not expose, and it is the one mechanism both
@@ -1710,7 +1710,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
   // press landing in that window aborts the print entirely ("Shutting down...^C"
   // and nothing else). Claude needs the second press and prints nothing without
   // it. Only the host can tell them apart, because only the host sees what came
-  // back (docs/specs/agent-recovery.md -> "Capture").
+  // back (docs/compatible-agents.md -> "Capture").
   //
   // "Omitted" therefore means omitted, never "an empty list": a caller that
   // forwards a computed set that happened to come out empty must get a no-op, not

@@ -61,13 +61,13 @@ moving a Workspace and losing it.
 
 ## The governing rule
 
-**Why the rule reversed for standalone.** The old reading — a quit is a deliberate ending, so end everything — was a claim about the *processes*, and users do not experience a window that way. The product call is that window state is the app's contract, as it is in VS Code: the layout comes back, the agents come back, and the transcripts never do. Dropping persisted scrollback is what made that affordable — a resumed agent renders the real conversation, which is more context than the transcript it replaces (`docs/specs/agent-recovery.md` → "Cold restore").
+**Why the rule reversed for standalone.** The old reading — a quit is a deliberate ending, so end everything — was a claim about the *processes*, and users do not experience a window that way. The product call is that window state is the app's contract, as it is in VS Code: the layout comes back, the agents come back, and the transcripts never do. Dropping persisted scrollback is what made that affordable — a resumed agent renders the real conversation, which is more context than the transcript it replaces (`docs/compatible-agents.md` → "Cold restore").
 
 **What made it safe to persist again.** The two objections to the old store were both about content, not about persistence: it wrote transcripts, and it wrote them into a WKWebView `localStorage` WAL that grew without bound (`docs/specs/standalone.md` → "Persistence", rationale). Both were already fixed — no writer accepts a transcript-bearing shape, and the blob rides a Rust file store — before the rule changed.
 
 ## Universal invariants
 
-**VS Code scrollback outlives the process for repeat resumes.** Recovery capture runs before any kill (`docs/specs/agent-recovery.md` → "Capture"), but a webview reopened over an exited pane still needs its transcript. The shared PTY core formerly kept a second buffer: VS Code never read it, and standalone's reader became unreachable when the adapter stopped persisting transcripts. Removing that duplicate leaves buffering with its actual consumer.
+**VS Code scrollback outlives the process for repeat resumes.** Recovery capture runs before any kill (`docs/compatible-agents.md` → "Capture"), but a webview reopened over an exited pane still needs its transcript. The shared PTY core formerly kept a second buffer: VS Code never read it, and standalone's reader became unreachable when the adapter stopped persisting transcripts. Removing that duplicate leaves buffering with its actual consumer.
 
 **Where a flat `scrollbackChars` bites.** The cap is reached first on exactly the long-running agent pane recovery exists for, so a caller treating buffer length as a stream position sees no growth on the pane it most needs to watch.
 

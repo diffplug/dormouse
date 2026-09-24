@@ -68,7 +68,7 @@ export function getWebviewHtml(
    * Surface id -> agent resume invocation, captured by the last teardown. Rides
    * the boot payload rather than `initialState` because it is host-owned and
    * single-use: the webview never writes it back, so no save/restore cycle can
-   * replay it (docs/specs/agent-recovery.md -> "Cold restore").
+   * replay it (docs/compatible-agents.md -> "Cold restore").
    */
   recoveryCommands?: Record<string, string> | null,
   /**

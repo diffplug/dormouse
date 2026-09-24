@@ -5,7 +5,7 @@
  * over `vscode-ext/src/pty-manager.ts`, the Tauri sidecar over `pty-core.js`.
  * Both reach it through the same four primitives — interrupt, a monotonic
  * received count, the output since a mark, and the live id set — because that is
- * all the detection ever needed (docs/specs/agent-recovery.md -> "Capture").
+ * all the detection ever needed (docs/compatible-agents.md -> "Capture").
  *
  * The gesture is always `^C` written *into* the pty, never a signal: the tty
  * line discipline delivers the SIGINT to the foreground process group, so the
@@ -21,7 +21,7 @@ import { stripTerminalControls } from '../lib/terminal-controls';
 // An explicit ask (Claude's `Press Ctrl-C again`, Cursor's `Press Ctrl+C
 // again`) permits an immediate second press. Other panes without a recovery
 // hint must pass both fallback clocks below before retrying. Keying on an
-// English UI string is deliberate: docs/specs/agent-recovery.rationale.md.
+// English UI string is deliberate: docs/compatible-agents.rationale.md.
 const ASKS_FOR_SECOND_PRESS = /Press Ctrl[-+]C again/i;
 
 // When to press a silent pane again without having been asked.

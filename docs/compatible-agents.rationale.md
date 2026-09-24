@@ -1,6 +1,6 @@
-# Agent recovery — Rationale
+# Compatible agents — Rationale
 
-> Informative companion to [agent-recovery.md](agent-recovery.md), keyed by its headings.
+> Informative companion to [compatible-agents.md](compatible-agents.md), keyed by its headings.
 
 ## Capture
 

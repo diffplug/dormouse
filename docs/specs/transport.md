@@ -238,7 +238,7 @@ Source of truth: `getWindowSnapshot` / `seedWindowSession` / `installWindowSessi
 
 **A corrupt save must never block startup.** Every read goes through `readPersistedSession()` / `readPersistedWindow()`, which accept the canonical parsed object *or* a JSON-stringified blob (host state APIs may hand back the inner serialized string) and log-and-discard anything present but unreadable. `readPersistedWindow` additionally drops Workspaces whose inner session is unreadable and repairs a dangling `activeWorkspaceId` to the first Workspace.
 
-**Must keep recovery commands outside `PersistedPane`.** `normalizeSessionV3` strips legacy `resumeCommand` fields. Capture, records, and execution follow `docs/specs/agent-recovery.md`.
+**Must keep recovery commands outside `PersistedPane`.** `normalizeSessionV3` strips legacy `resumeCommand` fields. Capture, records, and execution follow `docs/compatible-agents.md`.
 
 Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `surfaceRefs` in `lib/src/components/Wall.tsx`; `saveSession` in `lib/src/lib/session-save.ts`; `restoreSession` in `lib/src/lib/session-restore.ts`; the resume plan in `lib/src/lib/reconnect.ts`.
 
@@ -281,7 +281,7 @@ Ending something deliberately is also what *keeps* its notes: **a deliberate clo
 **Standalone persists one `PersistedWindow` per window**, every Workspace in it, and
 restores them on the next launch (rationale). Quitting ends the processes, not the
 window: the layout, cwds, titles, doors, and TODO/alert blobs come back, and the
-agents that were running come back with them (`docs/specs/agent-recovery.md` → "Cold restore"). Nothing else does —
+agents that were running come back with them (`docs/compatible-agents.md` → "Cold restore"). Nothing else does —
 scrollback is never persisted, so a cold-restored pane opens empty.
 
 ## Universal invariants

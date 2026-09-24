@@ -1,13 +1,13 @@
 /**
  * Where a Node-resident host keeps the agent resume invocations it captured
  * while tearing down, and how a cold start claims them exactly once
- * (docs/specs/agent-recovery.md -> "Recovery record").
+ * (docs/compatible-agents.md -> "Recovery record").
  *
  * The record is single-use, rebuilt-invocation-only, and never a buffer: only
  * what `detectResumeCommand` recognized is written, so no transcript reaches
  * disk. It is deliberately NOT part of the persisted session — a webview that
  * could save it back would replay a stale invocation on a later restore
- * (docs/specs/agent-recovery.md -> "Cold restore").
+ * (docs/compatible-agents.md -> "Cold restore").
  */
 
 import { randomUUID } from 'node:crypto';

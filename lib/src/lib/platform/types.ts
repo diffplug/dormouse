@@ -229,7 +229,7 @@ export interface PlatformAdapter {
    * Deliberately *not* part of the persisted session: it is host-owned and
    * single-use, and a webview that could save it back would replay a stale
    * invocation on a later restore. Absent on adapters whose host captures
-   * nothing (docs/specs/agent-recovery.md -> "Cold restore").
+   * nothing (docs/compatible-agents.md -> "Cold restore").
    */
   getRecoveryCommands?(): Record<string, string>;
 

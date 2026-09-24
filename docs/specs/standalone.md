@@ -1007,7 +1007,7 @@ disk persistence.
 
 ### Agent recovery
 
-**Must run shared capture and record ownership in the sidecar**, under `docs/specs/agent-recovery.md`. Rust bridges `capture_agent_recovery` and `take_recovery_commands` asynchronously. **Must answer both through `respondAsync`**, returning `{ error }` on throws rather than stranding the invoke.
+**Must run shared capture and record ownership in the sidecar**, under `docs/compatible-agents.md`. Rust bridges `capture_agent_recovery` and `take_recovery_commands` asynchronously. **Must answer both through `respondAsync`**, returning `{ error }` on throws rather than stranding the invoke.
 
 - **Must store the record at `<state root>/recovery.json`.**
 - **Must claim the saved Window's pane ids across all its Workspaces from `TauriAdapter.init()`.** Init starts the claim without awaiting it; boot awaits `recoveryReady` only on the branch that can cold-restore.

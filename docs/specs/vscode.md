@@ -133,7 +133,7 @@ A `WebviewPanelSerializer` registered under the `dormouse` view type restores ed
 5. `refreshSavedSessionStateFromPtys()` — re-read CWD while the processes are alive.
 6. `gracefulKillAll(2000)` (SIGTERM, wait), then `killAll()` (force).
 
-**Must capture before the session flush and PTY kills** (rationale). Shared capture and durability follow `docs/specs/agent-recovery.md`.
+**Must capture before the session flush and PTY kills** (rationale). Shared capture and durability follow `docs/compatible-agents.md`.
 
 **Live notepad notes are never in any of this.** They ride a volatile in-memory
 mirror the extension host keeps per webview, archived by the disposals above and
@@ -145,13 +145,13 @@ a cold restore** (`docs/specs/notepad.md` → "Live resume").
 (`docs/specs/transport.md` → "Persisted session types") and is injected into
 the webview for cold-start restore. The WebviewView and each deserialized WebviewPanel then
 claim their own pane ids' recovery commands out of the single record, under
-`docs/specs/agent-recovery.md` → "Recovery record". **A panel's pane ids come from the
+`docs/compatible-agents.md` → "Recovery record". **A panel's pane ids come from the
 `vscode.setState()` blob returned at `deserializeWebviewPanel`**, so recovery
 needs no host-side per-panel store.
 
 #### Capturing agent recovery
 
-**Must offer every live extension-host PTY to shared capture**, across the view and editor panels. **Must store the record under `storageUri`, falling back to `globalStorageUri`; never `workspaceState`** (rationale). If neither directory exists, skip capture. Shared behavior follows `docs/specs/agent-recovery.md`.
+**Must offer every live extension-host PTY to shared capture**, across the view and editor panels. **Must store the record under `storageUri`, falling back to `globalStorageUri`; never `workspaceState`** (rationale). If neither directory exists, skip capture. Shared behavior follows `docs/compatible-agents.md`.
 
 Source of truth: `captureAgentRecoveryCommands` / `takeRecoveryCommands` in `vscode-ext/src/session-state.ts`; `interrupt` in `vscode-ext/src/pty-manager.ts`.
 

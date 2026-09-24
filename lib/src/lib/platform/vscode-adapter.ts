@@ -484,7 +484,7 @@ export class VSCodeAdapter implements PlatformAdapter {
    * than a field on the persisted session precisely so the webview cannot write it
    * back — a `getState`/`saveState` cycle has nothing to carry forward, so no
    * later restore can replay a stale invocation
-   * (docs/specs/agent-recovery.md -> "Cold restore").
+   * (docs/compatible-agents.md -> "Cold restore").
    */
   getRecoveryCommands(): Record<string, string> {
     return readInjectedRecoveryCommands();

@@ -6,7 +6,7 @@
  * The two differ only in their transport (Tauri `invoke` vs the harness's HTTP
  * bridge) and their store (the Rust-backed `TauriSessionStore` vs
  * `localStorage`), so each supplies those and nothing else
- * (docs/specs/agent-recovery.md -> "Cold restore").
+ * (docs/compatible-agents.md -> "Cold restore").
  */
 
 import {
