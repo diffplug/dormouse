@@ -13,7 +13,13 @@ import { BROWSER_REQUEST_TIMEOUT_MS, VIEWER_TEXT_INPUT_MAX, viewerTextInputs, ty
 const mocks = vi.hoisted(() => ({ cli: vi.fn(), connect: vi.fn(), clipboard: vi.fn() }));
 vi.mock('dor-lib-common', async importOriginal => ({ ...await importOriginal<typeof import('dor-lib-common')>(), spawnAndCapture: mocks.cli }));
 vi.mock('./playwright-install', () => ({
-  resolvePlaywrightInstall: () => ({ binary: '/tools/playwright-cli', libraryPath: process.cwd(), library: { chromium: { connect: mocks.connect } } }),
+  resolvePlaywrightInstall: () => ({
+    binary: '/tools/playwright-cli', libraryPath: process.cwd(),
+    library: {
+      chromium: { connect: mocks.connect },
+      devices: { 'iPhone 15': { viewport: { width: 393, height: 659 }, userAgent: 'iPhone UA', deviceScaleFactor: 3, isMobile: true, hasTouch: true } },
+    },
+  }),
   playwrightWorkspace: () => process.cwd(),
 }));
 
@@ -602,6 +608,23 @@ describe('sync-to-pane', () => {
   /** The poll's next measurement, as a `dor pw` command's attach runs it. */
   const poll = () => pw({ op: 'attach' });
 
+  test('sizes a page only through Playwright\'s own setViewportSize; a device adds only its touch and user agent', async () => {
+    expect((await pw({ op: 'viewport', width: 900, height: 600, dpr: 2 })).ok).toBe(true);
+    expect(page.setViewportSize).toHaveBeenLastCalledWith({ width: 900, height: 600 });
+    expect((await pw({ op: 'device', name: 'iPhone 15' })).ok).toBe(true);
+    expect(page.setViewportSize).toHaveBeenLastCalledWith({ width: 393, height: 659 });
+    expect((await pw({ op: 'viewport', width: 800, height: 600, dpr: 2 })).ok).toBe(true);
+    expect((await pw({ op: 'viewport', width: 820, height: 600, dpr: 2 })).ok).toBe(true);
+    // No metrics override: a second writer Chrome re-applies on navigation.
+    expect(cdp.send.mock.calls.filter(([method]) => method.startsWith('Emulation.'))).toEqual([
+      ['Emulation.setTouchEmulationEnabled', { enabled: true }],
+      ['Emulation.setUserAgentOverride', { userAgent: 'iPhone UA' }],
+      // The next viewport leaves the device; the one after has nothing to leave.
+      ['Emulation.setTouchEmulationEnabled', { enabled: false }],
+      ['Emulation.setUserAgentOverride', { userAgent: '' }],
+    ]);
+  });
+
   test('a poll begun before a sync write landed never stops the sync', async () => {
     const viewer = await viewSession();
     try {
@@ -629,6 +652,28 @@ describe('sync-to-pane', () => {
       expect(reports(viewer)).not.toContain('off');
       await poll();
       await vi.waitFor(() => expect(reports(viewer).at(-1)).toBe('synced'));
+    } finally {
+      viewer.socket.terminate();
+    }
+  });
+
+  test('Playwright re-applying its own emulation, or a navigation, never stops the sync', async () => {
+    const viewer = await viewSession();
+    try {
+      viewer.send({ type: 'sync', width: 800, height: 600, dpr: 2, engagement: 'e1' });
+      await vi.waitFor(() => expect(page.setViewportSize).toHaveBeenCalled());
+      await poll();
+      await vi.waitFor(() => expect(reports(viewer).at(-1)).toBe('synced'));
+      // The CLI's `screenshot` re-applies Playwright's emulation; the page navigates.
+      override = undefined;
+      page.url = () => 'http://localhost/next';
+      await poll();
+      await new Promise((resolve) => setTimeout(resolve, SYNC_SETTLE_MS + 100));
+      expect(reports(viewer)).not.toContain('off');
+      // An agent's `resize` is another writer.
+      emulated = { width: 1024, height: 768 };
+      await poll();
+      await vi.waitFor(() => expect(reports(viewer).at(-1)).toBe('off'));
     } finally {
       viewer.socket.terminate();
     }

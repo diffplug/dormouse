@@ -59,6 +59,8 @@ type Viewer = Binding & {
   instance: number;
   subscribers: Set<Subscriber>;
   controls: Map<Page, Promise<CDPSession>>;
+  /** Pages whose touch and user agent a device set over their control. */
+  devices: WeakSet<Page>;
   page?: Page;
   cdp?: CDPSession;
   timer?: ReturnType<typeof setTimeout>;
@@ -288,6 +290,7 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
         instance: ++instances,
         subscribers: new Set(),
         controls: new Map(),
+        devices: new WeakSet(),
         disposed: false,
         queue: Promise.resolve(),
         queued: 0,
@@ -398,16 +401,23 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
         case 'device': {
           const devices = b.install.library.devices;
           const device = act.op === 'device' && Object.prototype.hasOwnProperty.call(devices, act.name) ? devices[act.name] : undefined;
-          const size = act.op === 'viewport' ? act
-            : device ? { width: device.viewport.width, height: device.viewport.height, dpr: device.deviceScaleFactor } : undefined;
+          const size = act.op === 'viewport' ? act : device?.viewport;
           if (!size) throw new Error('Invalid viewport/device');
-          const { width, height, dpr } = size;
-          await page.setViewportSize({ width, height });
-          const cdp = await control(v, page);
-          await cdp.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: dpr, mobile: device?.isMobile ?? false });
-          await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: device?.hasTouch ?? false });
-          if (device) await cdp.send('Emulation.setUserAgentOverride', { userAgent: device.userAgent });
-          break;
+          // Playwright's own writer, alone, which keeps the browser context's
+          // ratio: a CDP metrics override from this connection would be a
+          // second writer Chrome re-applies on every navigation (rationale).
+          await page.setViewportSize({ width: size.width, height: size.height });
+          // A device's touch and user agent ride this connection's CDP, and
+          // any other viewport leaves them.
+          if (device || v.devices.has(page)) {
+            const cdp = await control(v, page);
+            await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: device?.hasTouch ?? false });
+            await cdp.send('Emulation.setUserAgentOverride', { userAgent: device?.userAgent ?? '' });
+            if (device) v.devices.add(page);
+            else v.devices.delete(page);
+          }
+          // Landed: the next poll measures it, begun after (`refreshNow`).
+          return { ok: true };
         }
         default: throw new Error('Unsupported Playwright host operation');
       }
