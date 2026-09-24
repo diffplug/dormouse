@@ -22,9 +22,8 @@ handle (`docs/specs/dor-cli.md` → Browser Open Target Resolution):
 - `dor ab ...` / `dor agent-browser ...` forwards to the user's own
   `agent-browser` binary and binds that session to a browser pane.
 - `dor pw ...` / `dor playwright ...` binds the user-installed Playwright CLI.
-- `dor iframe <url>` uses the iframe renderer, for `http://` pages: a host with
-  the iframe proxy refuses an `https://` target at `surface.iframe`, naming
-  `dor ab open <url>`.
+- `dor iframe <url>` uses the iframe renderer, for `http://` pages
+  ([Iframe Renderer](#iframe-renderer)).
 
 Source of truth: `lib/src/components/wall/BrowserPanel.tsx`,
 `lib/src/components/wall/browser-surface.ts` (`resolveRenderMode`,
@@ -171,8 +170,8 @@ robot rides each provider’s screencast parent, each nested resolution row carr
 its presentation glyph.
 
 **Must offer only the render modes the Surface's screen controller declares** (`renderModes`), never the host's global capabilities: a provider its host can launch, or the running one, which relaunches; that provider's popout where the host can also pop out; always `iframe`; for a Tool, only its declarable renders (`docs/specs/dor-tool.md` → Declaring tools). **`setRenderMode` refuses any other mode.**
-**Must disable the iframe option, naming why, for an `https://` page on a host
-with the iframe proxy**; it lists that the embed keeps no logins or cookies.
+The iframe option lists that the embed keeps no logins or cookies (for
+`https://`, see [Iframe Renderer](#iframe-renderer)).
 
 Resolution controls apply to both screencast providers, as GUI wrappers around native
 commands: **Resize with pane** is Dormouse-owned sync issuing
@@ -317,10 +316,9 @@ capture is **overdue** — then a crisp device-resolution
 
 - **Both paths are latest-only.**
 - **No capture may start inside the provisional window** (rationale).
-- **A capture is overdue past twice the average round trip, at least 400ms**,
-  and **is never re-issued while its host call is unresolved**: it is queued
-  behind a blocking daemon command such as a page-loading `open`, which would
-  otherwise hold the previous page on screen for the whole load (rationale).
+- **A capture is overdue past twice the average round trip, at least 400ms. It
+  is never re-issued while its host call is unresolved, and a paint made only
+  because it is overdue does not supersede it** (rationale).
 - **Must leave the loop dirty when capture or bitmap decode becomes stale**
   (rationale). Pinned by `agent-browser-screenshot-loop.test.ts`.
 - **Any canvas writer but the crisp loop must bump the draw generation** in its
@@ -397,12 +395,16 @@ sidecar/Rust adapter.
 | Method | Contract |
 | --- | --- |
 | `agentBrowserCommand` | Navigation, tab, viewport/device, `get cdp-url` and `close` commands, one shape per verb. |
-| `agentBrowserScreenshot` | One device-resolution JPEG/PNG frame. VS Code structured-clones the bytes; standalone passes Rust the capture's temp-file **path** over the sidecar stdio, for Rust to read (rationale). **One capture per session in flight**: a request made meanwhile joins it, since the webview re-asks when its adapter times out. |
+| `agentBrowserScreenshot` | One device-resolution JPEG/PNG frame. VS Code structured-clones the bytes; standalone passes Rust the capture's temp-file **path** over the sidecar stdio, for Rust to read (rationale). **One capture per session in flight**: a request made meanwhile joins it. |
 | `agentBrowserStreamStatus` | Current stream port, for stale-`wsPort` recovery. |
 | `agentBrowserEdit` | select-all/copy/cut via fixed host-owned JS plus an OS clipboard write. |
 | `getAgentBrowserStreamUrl` | Direct stream URL, or the VS Code relay URL. |
 | `agentBrowserOpen` | Spawn a GUI-owned session for iframe -> agent-browser; resolves when the daemon is up, not when the page loads ([Pop-Out](#pop-out)). |
 | `agentBrowserPopOut` / `agentBrowserPopIn` | Headed/headless relaunch. |
+
+**Every adapter must wait past agent-browser's 25s action timeout for a
+command, edit or capture reply** (30s on each host), so the webview never
+re-asks while the host still works.
 
 **Host-side validation is the security boundary: both provider hosts run only
 what the shared `parseWebviewCommand` accepts, rebuilt from its parsed value,
@@ -470,15 +472,25 @@ The proxy instruments any `http://` upstream, loopback and remote alike:
 - Unreachable / timed-out upstream: served Dormouse error page, distinct for
   "couldn't connect" and "didn't respond in 30s of socket idle", in the system
   color scheme; **only a loopback upstream is called a dev server**.
-- HTTPS: synchronous `scheme` failure. **Every panel error but a non-http(s)
+- HTTPS: refused, per the table below. **Every panel error but a non-http(s)
   URL offers Open in agent-browser** (a swap to `ab-screencast`) where the host
-  can launch one, with `dor ab open <url>` as the fallback text — agent-browser
-  is the path for real HTTPS or a login.
+  can launch one, with `dor ab open <url>` as the fallback text.
 - **Link-local / cloud-metadata address: refused (`scheme`)** — an SSRF guard
   that stands regardless of the loosened framing policy. **Canonicalize every
   equivalent spelling** (decimal/octal/hex, short forms, IPv4-mapped IPv6) before
   range-checking, so `0xA9FEA9FE` and `::ffff:169.254.169.254` are caught too;
   pinned by `lib/src/host/iframe-proxy-rewrite.test.ts`.
+
+**Must refuse `https://` at every entry to the iframe renderer on a host with
+the proxy, in the one `IFRAME_HTTP_ONLY` wording, naming `dor ab open <url>`**
+(a host without it frames https raw):
+
+| Entry | Outcome |
+| --- | --- |
+| `surface.iframe` (`dor iframe`) | refused before any pane opens |
+| Display modal / render swap to `iframe` | option disabled with the reason; the Wall's swap refuses too |
+| New-tab request from a framed page | an `ab-screencast` pane, bound to its launch like a render swap, closed if the launch fails |
+| A pane already holding one | synchronous `scheme` panel error |
 
 Header rewriting:
 
@@ -520,8 +532,9 @@ keyboard and pointer interaction inside the frame by design.
 Source of truth: `lib/src/components/wall/IframePanel.tsx`,
 `lib/src/host/iframe-proxy.ts`, `lib/src/host/iframe-proxy-rewrite.ts`
 (`FRAMING_RESPONSE_HEADERS`, `HOP_BY_HOP_RESPONSE_HEADERS`, `instrumentHtml`,
-`isBlockedAddress`, `errorPageHtml`), `lib/src/lib/platform/iframe-proxy-types.ts`,
-`surface.iframe` in `lib/src/components/wall/use-dor-control.ts`.
+`isBlockedAddress`, `errorPageHtml`), `lib/src/lib/platform/iframe-proxy-types.ts`
+(`IFRAME_HTTP_ONLY`), `iframeRefusal` in `lib/src/components/wall/browser-url.ts`,
+`isLoopbackHostname` in `lib/src/lib/ip-literal.ts`.
 
 ### Iframe Shim
 
@@ -540,15 +553,13 @@ Leader messages feed the same Wall command-mode exit path as in-document
 dual-tap; `IframePanel` maps proxy-origin `location` URLs back to upstream URLs
 for chrome/history without reloading the frame.
 
-New-tab requests show an overlay: accept opens an adjacent browser pane —
-**an `https://` URL opens as an `ab-screencast` pane** on a proxy host that can
-launch agent-browser, bound to its launch like a render swap and closed if it
-fails; cancel drops it.
+New-tab requests show an overlay: accept opens an adjacent browser pane (for
+`https://`, see [Iframe Renderer](#iframe-renderer)); cancel drops it.
 
 **A proxied frame `load` with no `location` report within 1s marks the document
-uninstrumented** — it left the proxy, was refused, or its grant is gone — and a
-banner offers Reload and Open in agent-browser. Only a report naming the proxy
-origin counts, including one up to 250ms before the load.
+uninstrumented** (off the proxy, refused, or its grant gone), and a banner
+offers Reload and Open in agent-browser. Only a report naming the proxy origin
+counts, including one up to 250ms before the load.
 
 Source of truth: `lib/src/host/iframe-proxy-rewrite.ts` (`iframeShim`),
 `lib/src/components/wall/browser-url.ts` (`browserSurfaceUrl`),

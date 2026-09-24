@@ -3903,7 +3903,7 @@ describe('Wall on the Lath engine', () => {
     (fake as PlatformAdapter).createIframeProxyUrl = vi.fn(async () => ({ ok: true as const, url: 'http://127.0.0.1:61234/' }));
     expect(await respond('https://example.com/')).toEqual({
       ok: false,
-      error: 'iframe panes show http:// pages only; open https://example.com/ with `dor ab open https://example.com/`',
+      error: 'the embedded view frames http:// pages only — open it with dor ab open https://example.com/',
     });
     expect((await respond('http://localhost:5173/'))?.ok).toBe(true);
   });
@@ -3932,18 +3932,25 @@ describe('Wall on the Lath engine', () => {
       await openTab('https://accounts.example/login');
       const [tab] = leafIds().filter((id) => !before.includes(id));
       expect(tab).toBeTruthy();
-      expect(fake.agentBrowserOpen).toHaveBeenCalledWith('https://accounts.example/login', {}, undefined);
+      expect(fake.agentBrowserOpen).toHaveBeenCalledWith('https://accounts.example/login', { headed: false }, undefined);
       // The pane is there at once; `dor ab --surface` has nothing to drive until the launch names it.
       expect(await dispatchResolveAgentBrowser(tab)).toMatchObject({ ok: false });
       await act(async () => { launches[0]({ ok: true, session: 'dormouse.1.gui-abc', wsPort: 4321 }); });
       await flush();
       expect(await dispatchResolveAgentBrowser(tab)).toMatchObject({ ok: true, result: { session: 'dormouse.1.gui-abc' } });
 
+      // Nor can it be swapped back into an iframe that would refuse it.
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      await act(async () => { getAgentBrowserScreenController(tab)?.actions.setRenderMode?.('iframe'); });
+      await flush();
+      expect(leafIds()).toContain(tab);
+      expect(getAgentBrowserScreenController(tab)?.snapshot().renderMode).toBe('ab-screencast');
+      expect(warn).toHaveBeenCalledWith(`[dormouse] cannot swap surface '${tab}' to iframe: the embedded view frames http:// pages only`);
+
       // A launch that fails takes its pane with it.
       const beforeFailure = leafIds();
       await openTab('https://other.example/');
       const [failed] = leafIds().filter((id) => !beforeFailure.includes(id));
-      vi.spyOn(console, 'warn').mockImplementation(() => {});
       await act(async () => { launches[1]({ ok: false, error: 'agent-browser binary not found' }); });
       await flush();
       expect(leafIds()).not.toContain(failed);

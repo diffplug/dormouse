@@ -79,6 +79,10 @@ function dimsMatch(a: { w: number; h: number }, b: { w: number; h: number }): bo
   return Math.abs(a.w - b.w) <= DIM_TOLERANCE && Math.abs(a.h - b.h) <= DIM_TOLERANCE;
 }
 
+function dprMatch(a: number, b: number): boolean {
+  return Math.abs(a - b) <= 0.001;
+}
+
 // A pop-out/pop-in relaunch restores a single URL. A transient about:blank — a
 // stray tab the close+reopen can momentarily surface, or a freshly-relaunched
 // blank page — must never be treated as the page to restore, or the real URL is
@@ -284,6 +288,7 @@ export class AgentBrowserSurfaceController {
   // observer on the pane, not two.
   private paneSize: { w: number; h: number } | null = null;
   private paneSizeObserver: ResizeObserver | null = null;
+  private dprQuery: MediaQueryList | null = null;
 
   // --- canonical URL tracking ---
   // The newest non-blank active-tab URL observed from the live stream. Kept
@@ -323,7 +328,11 @@ export class AgentBrowserSurfaceController {
   // frame (or a provisional frame from a later pointer move).
   private frameDrawSeq = 0;
   private provisionalUntil = 0;
+  // Counts the provisional paints that supersede a crisp capture in flight —
+  // not those made only while one is overdue, which it is newer than
+  // (`createScreenshotLoop`).
   private provisionalPaintGeneration = 0;
+  private paintingForOverdue = false;
   // Param writes buffered while detached (a minimized popped-out pane can still
   // observe URL changes); flushed on the next attach.
   private pendingParams = new Map<string, unknown>();
@@ -463,9 +472,7 @@ export class AgentBrowserSurfaceController {
     // This surface owns its session again — clear any teardown mark a prior
     // surface (re-using the same managed name) left behind, so auto-revert works.
     if (this.session) clearAgentBrowserSessionClosed(this.sessionKey(this.session));
-    // Display-scale (DPR) changes don't resize the pane, so ResizeObserver misses
-    // them; a window resize is the available signal.
-    window.addEventListener('resize', this.onWindowResize);
+    this.watchDpr();
     this.registration = registerAgentBrowserScreen(this.id, {
       snapshot: this.computeScreenSnapshot(),
       actions: this.screenActions,
@@ -480,17 +487,20 @@ export class AgentBrowserSurfaceController {
     this.maybeRecoverStalePort();
   }
 
-  private onWindowResize = (): void => {
-    // A display-scale (DPR) change doesn't resize the pane, so ResizeObserver
-    // misses it; refresh the cache off the window-resize signal too.
-    this.refreshPaneSize();
-    // Only a DPR change is this listener's to sync. A size change also reaches
-    // the pane's debounced ResizeObserver, and a window drag fires `resize`
-    // every frame — one `set viewport` spawn each, per synced pane.
-    const issued = this.lastIssued;
-    if (this.syncEngaged && issued && Math.abs(issued.dpr - (window.devicePixelRatio || 1)) > 0.001) {
-      this.issueSyncToPane();
-    }
+  // A display-scale (DPR) change resizes nothing, so the pane's ResizeObserver
+  // misses it. A `(resolution)` query fires once when the scale leaves its
+  // value, and is re-armed for the new one.
+  private watchDpr(): void {
+    this.dprQuery?.removeEventListener('change', this.onDprChange);
+    this.dprQuery = typeof window.matchMedia === 'function'
+      ? window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`)
+      : null;
+    this.dprQuery?.addEventListener('change', this.onDprChange);
+  }
+
+  private onDprChange = (): void => {
+    this.watchDpr();
+    if (this.syncEngaged) this.issueSyncToPane();
     this.publishScreen();
   };
 
@@ -513,6 +523,7 @@ export class AgentBrowserSurfaceController {
     const observer = new ResizeObserver((entries) => {
       const cr = entries[entries.length - 1]?.contentRect;
       if (cr) this.paneSize = { w: Math.round(cr.width), h: Math.round(cr.height) };
+      this.publishScreen();
       // While syncing, push the new pane size to the browser (debounced). The
       // inner re-check drops a resize whose sync was disengaged mid-debounce.
       if (!this.syncEngaged) return;
@@ -826,7 +837,7 @@ export class AgentBrowserSurfaceController {
         // The body rides along only when we asked for it (via `wantFrameData`), so
         // its presence is the request — re-testing `wantsProvisionalFrame` here would
         // only race its own `provisionalUntil` deadline and drop a frame we wanted.
-        if (event.data) this.drawProvisionalFrame(event.data);
+        if (event.data) this.drawProvisionalFrame(event.data, this.paintingForOverdue);
         this.maybeDisengageSync();
         this.publishScreen();
         if (!this.poppedOut && !this.relaunching) screenshotLoop.pulse();
@@ -862,7 +873,7 @@ export class AgentBrowserSurfaceController {
     this.paintBitmap(bitmap);
   };
 
-  private drawProvisionalFrame(data: string): void {
+  private drawProvisionalFrame(data: string, forOverdueCapture: boolean): void {
     const sink = this.sink;
     if (!sink || typeof createImageBitmap !== 'function') return;
     let bytes: Uint8Array<ArrayBuffer>;
@@ -882,7 +893,7 @@ export class AgentBrowserSurfaceController {
         bitmap.close();
         return;
       }
-      this.provisionalPaintGeneration += 1;
+      if (!forOverdueCapture) this.provisionalPaintGeneration += 1;
       // This paint puts CSS-resolution pixels on the canvas behind the crisp
       // loop's back, so its byte-dedup (`lastDrawnKey`) no longer describes what
       // is on screen: a resting page whose crisp bytes match the last crisp draw
@@ -899,10 +910,9 @@ export class AgentBrowserSurfaceController {
   }
 
   private wantsProvisionalFrame(): boolean {
-    return !this.hasFrame || !this.platform.agentBrowserScreenshot || performance.now() <= this.provisionalUntil
-      // A crisp capture queued behind a blocking `open` would otherwise leave
-      // the previous page on screen for the whole load.
-      || !!this.screenshotLoop?.captureOverdue();
+    const forInput = !this.hasFrame || !this.platform.agentBrowserScreenshot || performance.now() <= this.provisionalUntil;
+    this.paintingForOverdue = !forInput;
+    return forInput || !!this.screenshotLoop?.captureOverdue();
   }
 
   // agent-browser's stream publishes the initial headed tab list but not every
@@ -1269,7 +1279,7 @@ export class AgentBrowserSurfaceController {
   // --- screen indicator (SYNCED/SCALED) + sync-to-pane ---
 
   private computeScreenSnapshot(): ScreenSnapshot {
-    // Read the cached pane size (updated by the ResizeObserver / window resize)
+    // Read the cached pane size (updated by the ResizeObserver)
     // rather than forcing layout on every frame. null ⇒ no attached view ⇒ 0×0.
     const pane = this.paneSize;
     const displayDpr = window.devicePixelRatio || 1;
@@ -1325,7 +1335,7 @@ export class AgentBrowserSurfaceController {
     if (!w || !h) return;
     const dpr = window.devicePixelRatio || 1;
     const prev = this.lastIssued;
-    if (prev && prev.w === w && prev.h === h && Math.abs(prev.dpr - dpr) <= 0.001) return;
+    if (prev && prev.w === w && prev.h === h && dprMatch(prev.dpr, dpr)) return;
     this.lastIssued = { w, h, dpr };
     this.syncConfirmed = false;
     this.runAgentBrowser(['set', 'viewport', String(w), String(h), String(dpr)]);
@@ -1593,7 +1603,8 @@ export class AgentBrowserSurfaceController {
     this.cdpTeardown?.();
     this.cdpTeardown = null;
     this.cdpKey = null;
-    if (this.started) window.removeEventListener('resize', this.onWindowResize);
+    this.dprQuery?.removeEventListener('change', this.onDprChange);
+    this.dprQuery = null;
     this.registration?.dispose();
     this.registration = null;
     this.sink = null;

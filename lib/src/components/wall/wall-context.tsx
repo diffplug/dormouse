@@ -69,7 +69,7 @@ export interface WallActions {
    *  renderer is single-frame, so a page's new-tab request (target=_blank /
    *  window.open, surfaced by the proxy shim) becomes a new pane
    *  (docs/specs/dor-browser.md → "Iframe Shim"). */
-  onOpenBrowserPane?: (id: string, url: string, renderMode?: 'iframe' | 'ab-screencast') => void;
+  onOpenBrowserPane?: (id: string, url: string) => void;
   /** The stable `surface:N` ref for a pane/door id (minted lazily, exactly as
    *  `dor list` assigns refs). Used by the pane context menu to show the handle. */
   resolveSurfaceRef: (id: string) => string;

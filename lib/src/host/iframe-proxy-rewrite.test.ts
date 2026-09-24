@@ -243,7 +243,7 @@ describe('errorPageHtml', () => {
   });
 
   it('asks about a dev server only when the upstream is this machine', () => {
-    for (const local of ['http://localhost:5173/', 'http://127.0.0.2:8000/', 'http://app.localhost:3000/', 'http://[::1]:8080/']) {
+    for (const local of ['http://localhost:5173/', 'http://127.0.0.2:8000/', 'http://app.localhost:3000/', 'http://[::1]:8080/', 'http://[::ffff:127.0.0.1]:8080/']) {
       expect(unreachablePage(new URL(local), 'ECONNREFUSED').message, local).toContain('dev server');
       expect(timedOutPage(new URL(local)).message, local).toContain('dev server');
     }

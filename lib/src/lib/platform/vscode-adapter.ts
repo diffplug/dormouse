@@ -35,6 +35,11 @@ const DETACHED = Symbol('detached');
 
 /** The `alert*` platform methods, taken from the shared client in the constructor. */
 export interface VSCodeAdapter extends AlertClientMethods {}
+// An agent-browser command, edit or capture can queue behind a page-loading
+// `open` for the CLI's whole 25s action timeout. The reply waits past that, as
+// the standalone host's does, so the webview never re-asks while the extension
+// host is still working on the first request.
+const AGENT_BROWSER_REPLY_TIMEOUT_MS = 30_000;
 
 export class VSCodeAdapter implements PlatformAdapter {
   // VS Code owns the theme here: it provides --vscode-* itself and has its own
@@ -385,7 +390,7 @@ export class VSCodeAdapter implements PlatformAdapter {
     const result = await this.requestResponse<AgentBrowserCommandResult>(
       'agentBrowser:command', 'agentBrowser:commandResult', { session, args, binaryPath },
       (msg) => ({ exitCode: msg.exitCode, stdout: msg.stdout, stderr: msg.stderr }),
-      10000,
+      AGENT_BROWSER_REPLY_TIMEOUT_MS,
     );
     return result ?? { exitCode: 1, stdout: '', stderr: 'agent-browser command timed out' };
   }
@@ -394,7 +399,7 @@ export class VSCodeAdapter implements PlatformAdapter {
     const result = await this.requestResponse<AgentBrowserEditResult>(
       'agentBrowser:edit', 'agentBrowser:editResult', { session, op, binaryPath },
       (msg) => ({ ok: msg.ok, text: msg.text, error: msg.error }),
-      10000,
+      AGENT_BROWSER_REPLY_TIMEOUT_MS,
     );
     return result ?? { ok: false, error: 'agent-browser edit timed out' };
   }
@@ -404,7 +409,7 @@ export class VSCodeAdapter implements PlatformAdapter {
       'agentBrowser:screenshot', 'agentBrowser:screenshotResult',
       { session, format: opts.format, quality: opts.quality, binaryPath },
       (msg) => ({ ok: msg.ok, bytes: msg.bytes, mime: msg.mime, error: msg.error }),
-      10000,
+      AGENT_BROWSER_REPLY_TIMEOUT_MS,
     );
     return result ?? { ok: false, error: 'agent-browser screenshot timed out' };
   }

@@ -38,15 +38,13 @@ export interface ScreenshotLoopDeps {
 export interface ScreenshotLoop {
   /** A "page changed" signal — schedule a fresh shot (coalesced + throttled). */
   pulse(): void;
-  /** Whether the capture in flight has been outstanding past twice the usual
-   *  round trip (and at least 400ms): queued behind a blocking daemon command,
-   *  such as an `open` waiting on a page load. Until it answers, only the
-   *  stream shows what the page is doing. */
+  /** Whether the capture in flight is overdue (see `createScreenshotLoop`). */
   captureOverdue(): boolean;
   dispose(): void;
 }
 
 const OVERDUE_FLOOR_MS = 400;
+// A capture this slow is flagged `stalled` in its done/error log.
 const STALL_WARNING_MS = 8000;
 
 /**
@@ -68,10 +66,13 @@ const STALL_WARNING_MS = 8000;
  * deferred shot or one superseded mid-flight — it stays `dirty`, because the canvas
  * is left on a CSS-resolution frame and only a later crisp shot can sharpen it.
  *
- * A shot that stays in flight is never re-issued: it is queued behind a blocking
- * daemon command, and a second one would only queue behind it too. The panel
- * paints the stream meanwhile (`captureOverdue`), and every host adapter bounds
- * the wait with its own timeout.
+ * A shot out past twice the usual round trip (at least 400ms) is overdue: queued
+ * behind a blocking daemon command, such as an `open` waiting on its page load,
+ * while the panel paints the stream instead. It is never re-issued — a second
+ * one would only queue behind it, and every host adapter bounds the wait. It is
+ * taken when the command lets it go, so the pulses of its wait leave nothing
+ * owed, and its round trip, which timed the command, is clamped before it
+ * enters the pacing average.
  */
 export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
   let inFlight = false;
@@ -80,7 +81,7 @@ export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
   let lastStart = 0;
   let avgMs = 120;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let stallWarning: ReturnType<typeof setTimeout> | undefined;
+  let lastPulseAt = 0;
   let disposed = false;
   // The `bytes:generation` of the frame currently on the canvas. Skips decoding a
   // capture we've already displayed onto this same draw target.
@@ -129,24 +130,15 @@ export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
     const provisionalAtStart = deps.getProvisionalGeneration?.() ?? 0;
     lastStart = performance.now();
     deps.log?.(`[agent-browser] screenshot start ${JSON.stringify({ session, seq: mySeq })}`);
-    // Diagnostic only: the slot stays held until the host answers (see above).
-    stallWarning = setTimeout(() => {
-      stallWarning = undefined;
-      console.warn(`[agent-browser] screenshot capture stalled (>${STALL_WARNING_MS / 1000}s) ${JSON.stringify({ session, seq: mySeq, dirty })}`);
-    }, STALL_WARNING_MS);
-    const settle = () => {
-      clearTimeout(stallWarning);
-      stallWarning = undefined;
-      inFlight = false;
-    };
+    const stalled = () => performance.now() - lastStart > STALL_WARNING_MS;
     platform.agentBrowserScreenshot(session, { format: 'jpeg', quality: 85 }, deps.getBinaryPath()).then((res) => {
-      const elapsedMs = performance.now() - lastStart;
-      deps.log?.(`[agent-browser] screenshot done ${JSON.stringify({ session, seq: mySeq, ok: res.ok, bytes: res.bytes?.byteLength ?? 0, elapsedMs: Math.round(elapsedMs), dirty })}`);
-      // A capture held behind a blocking command timed that command, not a
-      // capture: clamp the sample so one slow page load stretches neither the
-      // pacing nor the overdue threshold of the shots after it.
+      const now = performance.now();
+      const elapsedMs = now - lastStart;
+      deps.log?.(`[agent-browser] screenshot done ${JSON.stringify({ session, seq: mySeq, ok: res.ok, bytes: res.bytes?.byteLength ?? 0, elapsedMs: Math.round(elapsedMs), stalled: stalled(), dirty })}`);
+      // Overdue (see above): only a pulse after its release is owed a shot.
+      if (elapsedMs > overdueAfterMs() && lastPulseAt <= now - avgMs) dirty = false;
       avgMs = avgMs * 0.6 + Math.min(elapsedMs, overdueAfterMs()) * 0.4;
-      settle();
+      inFlight = false;
       // A provisional stream frame painted during this capture is visibly newer.
       // Do not let the stale crisp result overwrite it. Mere `dirty` pulses do not
       // suppress drawing — an idle animated page still needs periodic crisp frames
@@ -167,8 +159,8 @@ export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
       }
       if (dirty) schedule();
     }).catch((err) => {
-      console.warn(`[agent-browser] screenshot error ${JSON.stringify({ session, seq: mySeq })}:`, err);
-      settle();
+      console.warn(`[agent-browser] screenshot error ${JSON.stringify({ session, seq: mySeq, stalled: stalled() })}:`, err);
+      inFlight = false;
       if (dirty) schedule();
     });
   };
@@ -212,6 +204,7 @@ export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
   return {
     pulse: () => {
       if (disposed || !deps.isCapable()) return;
+      lastPulseAt = performance.now();
       dirty = true;
       schedule();
     },
@@ -219,7 +212,6 @@ export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
     dispose: () => {
       disposed = true;
       if (timer !== undefined) clearTimeout(timer);
-      clearTimeout(stallWarning);
     },
   };
 }

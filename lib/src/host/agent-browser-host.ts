@@ -402,11 +402,10 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     return path.join(await screenshotDir.get(), `shot-${name}.${ext}`);
   }
 
-  // One capture per session and format at a time, whoever asks. A `screenshot`
-  // queued behind a page-loading `open` blocks for up to 25s, and each webview
-  // adapter gives up on its reply sooner (VS Code at 10s) and asks again; a
-  // second spawn would only queue behind the first, then race it for the
-  // session's one capture file. A caller that asks mid-capture joins it.
+  // One capture per session and format at a time, whoever asks — surfaces can
+  // share a session, and a caller re-asks after its adapter's timeout. A second
+  // spawn would only queue behind the first in the daemon, then race it for
+  // the session's one capture file, so a caller asking mid-capture joins it.
   const capturesInFlight = new Map<string, Promise<unknown>>();
   function oneCapture<T>(key: string, capture: () => Promise<T>): Promise<T> {
     const pending = capturesInFlight.get(key) as Promise<T> | undefined;

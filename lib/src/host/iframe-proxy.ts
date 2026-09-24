@@ -53,7 +53,7 @@
  */
 import * as http from 'http';
 import * as net from 'net';
-import type { IframeProxyResult } from '../lib/platform/iframe-proxy-types';
+import { IFRAME_HTTP_ONLY, type IframeProxyResult } from '../lib/platform/iframe-proxy-types';
 import { isForeignOrigin, isLoopbackHost, isOwnOrigin } from './loopback-guard';
 import {
   FRAMING_RESPONSE_HEADERS,
@@ -145,7 +145,7 @@ export async function createIframeProxyUrl(
   // plain http, and rewriting authenticated https pages is the agent-browser's
   // job (spec → Target policy).
   if (upstream.protocol !== 'http:') {
-    return { ok: false, reason: 'scheme', detail: 'the embedded view frames http:// pages only' };
+    return { ok: false, reason: 'scheme', detail: IFRAME_HTTP_ONLY };
   }
   // SSRF guard: the proxy fetches a user-supplied URL, so refuse the link-local
   // / cloud-metadata ranges (169.254.169.254 and friends). Other private ranges

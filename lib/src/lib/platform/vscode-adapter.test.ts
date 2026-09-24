@@ -455,6 +455,34 @@ describe('VSCodeAdapter PTY exit handling', () => {
 // (docs/specs/notepad.md). What is covered here is what this transport adds: the
 // compare-and-swap shape on the wire, failures that reject rather than resolve,
 // and the boot mirror being consumable exactly once.
+describe('VSCodeAdapter agent-browser replies', () => {
+  beforeEach(stubWebviewEnv);
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  // A capture queued behind a page-loading `open` answers only after the
+  // CLI's 25s action timeout; giving up sooner makes the webview ask again.
+  it('waits out a daemon command held behind a page load', async () => {
+    vi.useFakeTimers();
+    const adapter = new VSCodeAdapter();
+    for (const request of [
+      () => adapter.agentBrowserScreenshot('sess', { format: 'jpeg' }),
+      () => adapter.agentBrowserCommand('sess', ['reload']),
+      () => adapter.agentBrowserEdit('sess', 'copy'),
+    ]) {
+      let settled: unknown;
+      void request().then((result) => { settled = result; });
+      await vi.advanceTimersByTimeAsync(26_000);
+      expect(settled).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(JSON.stringify(settled)).toMatch(/timed out/);
+    }
+  });
+});
+
 describe('VSCodeAdapter notepad archive', () => {
   beforeEach(stubWebviewEnv);
 

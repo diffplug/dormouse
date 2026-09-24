@@ -54,8 +54,8 @@ three ways:
    (`--command`, `--cwd`, `--port`) into a handle.
 
 Text output is designed for you to read: it is terse and carries the same
-refs. Reach for `--json` (every command except `dor ab` and `dor pw` supports it)
-only when a shell script or pipeline using `jq` consumes the output.
+refs. Reach for `--json` (every command except `dor ab` and `dor pw` supports
+it) only when a shell script or pipeline using `jq` consumes the output.
 
 ## Surface handles
 
@@ -194,9 +194,9 @@ A Window holds several Workspaces, each with its own surfaces and its own
 you were started in, and creating one is a change the user sees. When you do,
 name one as `workspace:<n>` (positional) or `workspace:<name>`, and pass
 `--workspace <ref>` to any command — `split`, `ensure`, `read`, `send`,
-`await`, `kill`, `iframe`, `ab`, `pw` — to act in another one. A surface's stable id
-finds it in any Workspace without that flag; `surface:N` does not, since every
-Workspace has one. `close` refuses a Workspace holding your running work
+`await`, `kill`, `iframe`, `ab`, `pw` — to act in another one. A surface's
+stable id finds it in any Workspace without that flag; `surface:N` does not,
+since every Workspace has one. `close` refuses a Workspace holding your running work
 unless you pass `--force`.
 
 ### `dor ab` / `dor agent-browser` — agent-drivable browser pane
@@ -222,17 +222,15 @@ independent browsers at once.
 `dor list` works here exactly as it does for `read` / `send` / `await` / `kill`.
 Prefer it whenever you hold a ref rather than a key — it is the only way to
 reach a browser the *user* opened from the GUI, which has no key. It fails on a
-terminal (no browser), on a Playwright browser (drive it with `dor pw
---surface`), and on an `iframe`-rendered surface (nothing to drive — open it
-with `dor ab` instead). The three identity flags are mutually exclusive.
+terminal (no browser), and on an `iframe`-rendered surface (nothing to drive —
+open it with `dor ab` instead). The three identity flags are mutually exclusive.
 
 `dor ab` has no `--json` of its own; any JSON flags belong to `agent-browser`.
 
 ### `dor pw` / `dor playwright` — Playwright browser pane
 
-For a user or project that uses Playwright, or a `pw-*` browser. Forwards to
-your installed `@playwright/cli` (`npm i -g @playwright/cli`; override its path
-with `DORMOUSE_PLAYWRIGHT_BIN`).
+Forwards to your installed `@playwright/cli` (`npm i -g @playwright/cli`;
+override its path with `DORMOUSE_PLAYWRIGHT_BIN`).
 
 **Launch once with `open`, then navigate with `goto`.** Playwright's `open`
 restarts the browser, dropping every tab and cookie, where `dor ab open` only

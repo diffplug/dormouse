@@ -117,7 +117,7 @@ describe('AgentBrowserScreenModal', () => {
     act(() => root.render(<AgentBrowserScreenModal controller={getAgentBrowserScreenController('secure')!} label="surface:5" onClose={() => {}} />));
     expect(document.body.textContent).toContain('no logins/cookies');
     expect(iframeRow().querySelector('input')!.disabled).toBe(true);
-    expect(iframeRow().textContent).toContain('https:// pages can’t be embedded');
+    expect(iframeRow().textContent).toContain('the embedded view frames http:// pages only');
     secure.dispose();
 
     const local = registerStubScreen('local', {

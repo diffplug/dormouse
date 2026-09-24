@@ -444,9 +444,7 @@ describe('agent-browser host screenshot transport', () => {
     await host.closePoppedOut();
   });
 
-  // A capture queued behind a page-loading `open` outlives the webview's reply
-  // timeout, and the webview asks again. A second spawn would only queue behind
-  // the first, then race it for the session's one capture file.
+  // `oneCapture` in agent-browser-host.ts says why.
   it('joins a capture already in flight for the session instead of spawning another', async () => {
     const release = deferred<SpawnResult>();
     let file = '';

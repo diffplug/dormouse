@@ -239,13 +239,10 @@ describe('screenshot loop backpressure', () => {
 });
 
 describe('screenshot loop behind a blocking command', () => {
-  // `open` holds the daemon's queue until the page loads (up to 25s), so a
-  // capture issued meanwhile waits behind it. That is not a wedged host.
-  it('reports the capture overdue and never issues a second one while it waits', async () => {
+  it('reports the capture overdue, never re-issues it, and owes a shot only for pulses after its release', async () => {
     const releases: Array<(res: AgentBrowserScreenshotResult) => void> = [];
     const screenshot = vi.fn(() => new Promise<AgentBrowserScreenshotResult>((resolve) => { releases.push(resolve); }));
     setScreenshot(screenshot as unknown as PlatformAdapter['agentBrowserScreenshot']);
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
     const draw = vi.fn();
     const loop = createScreenshotLoop({
       getSession: () => 'sess',
@@ -258,33 +255,33 @@ describe('screenshot loop behind a blocking command', () => {
     await vi.advanceTimersByTimeAsync(300);
     expect(screenshot).toHaveBeenCalledTimes(1);
     expect(loop.captureOverdue()).toBe(false);
-
-    // Past twice the usual round trip (floored at 400ms): the stream is all the
-    // pane has to show the page loading.
     await vi.advanceTimersByTimeAsync(500);
     expect(loop.captureOverdue()).toBe(true);
 
-    // The page keeps changing for the rest of the load; a second capture would
-    // only queue behind the first.
+    // The page keeps changing through the rest of the load.
     for (let i = 0; i < 20; i++) {
       loop.pulse();
       await vi.advanceTimersByTimeAsync(1000);
     }
     expect(screenshot).toHaveBeenCalledTimes(1);
 
-    // `open` returns: the capture lands, and the owed follow-up starts at once.
+    // Those changes are in the capture `open` releases: drawn, nothing owed.
     releases[0]({ ok: true, bytes: new Uint8Array([1]), mime: 'image/jpeg' });
-    await vi.advanceTimersByTimeAsync(0);
-    expect(screenshot).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(10);
     expect(loop.captureOverdue()).toBe(false);
+    expect(draw).toHaveBeenCalledTimes(1);
+    expect(screenshot).toHaveBeenCalledTimes(1);
 
-    // The 20s wait timed the page load, not a capture, so a second slow load is
-    // overdue just as soon.
+    // The wait timed the page load, not a capture, so the next slow load is
+    // overdue just as soon — and a change just before its reply is owed a shot.
+    loop.pulse();
     await vi.advanceTimersByTimeAsync(500);
+    expect(screenshot).toHaveBeenCalledTimes(2);
     expect(loop.captureOverdue()).toBe(true);
+    loop.pulse();
     releases[1]({ ok: true, bytes: new Uint8Array([2]), mime: 'image/jpeg' });
     await vi.advanceTimersByTimeAsync(10);
-    expect(draw).toHaveBeenCalledTimes(1);
+    expect(screenshot).toHaveBeenCalledTimes(3);
 
     loop.dispose();
   });

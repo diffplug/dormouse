@@ -9,6 +9,8 @@
  * runtime-agnostic.
  */
 
+import { ipv4Value, isLoopbackHostname } from '../lib/ip-literal';
+
 /** Header bag shape both `http.IncomingHttpHeaders` and a plain map satisfy. */
 export type ProxyHeaders = Record<string, string | string[] | undefined>;
 
@@ -193,14 +195,21 @@ export function iframeShim(embedderOrigin: string): string {
 // `embedderOrigin` is the document that frames us, and it is required: without
 // one there is nobody to address the shim's messages to, so the caller must not
 // instrument at all rather than fall back to `'*'`.
+const HEAD_CLOSE = /<\/head>/i;
+const BODY_OPEN = /<body[^>]*>/i;
+
+/** The end of the document prefix `instrumentHtml` places the shim before
+ *  (`</head>`) or after (`<body…>`). The proxy buffers until it sees one. */
+export const HEAD_MARKER = new RegExp(`${HEAD_CLOSE.source}|${BODY_OPEN.source}`, 'i');
+
 export function instrumentHtml(body: string, embedderOrigin: string, preserveCsp = false): string {
   const html = preserveCsp ? body : body.replace(
     /<meta[^>]+http-equiv=["']?content-security-policy["']?[^>]*>/gi,
     '',
   );
   const shimTag = `<script>${iframeShim(embedderOrigin)}</script>`;
-  if (/<\/head>/i.test(html)) return html.replace(/<\/head>/i, `${shimTag}</head>`);
-  if (/<body[^>]*>/i.test(html)) return html.replace(/(<body[^>]*>)/i, `$1${shimTag}`);
+  if (HEAD_CLOSE.test(html)) return html.replace(HEAD_CLOSE, (tag) => shimTag + tag);
+  if (BODY_OPEN.test(html)) return html.replace(BODY_OPEN, (tag) => tag + shimTag);
   // Both tags are optional in valid HTML. Never ahead of the doctype, which
   // would switch the page to quirks mode, nor of a `<meta charset>`, which
   // counts only within the first 1024 bytes — the same window searched here.
@@ -213,69 +222,14 @@ export function instrumentHtml(body: string, embedderOrigin: string, preserveCsp
   return html.slice(0, at) + shimTag + html.slice(at);
 }
 
-/** The end of the document prefix `instrumentHtml` places the shim before
- *  (`</head>`) or after (`<body…>`). The proxy buffers until it sees one. */
-export const HEAD_MARKER = /<\/head>|<body[^>]*>/i;
-
 // 169.254.0.0/16 — IPv4 link-local, incl. the 169.254.169.254 cloud-metadata
 // endpoint — as a numeric range so every equivalent encoding is caught.
 const LINK_LOCAL_V4_START = 0xa9fe0000; // 169.254.0.0
 const LINK_LOCAL_V4_END = 0xa9feffff; // 169.254.255.255
 
-// Parse one dotted-quad component with inet_aton semantics: hex (0x…), octal
-// (leading 0), or decimal. Returns null for anything else.
-function parseIPv4Part(part: string): number | null {
-  if (/^0x[0-9a-f]+$/.test(part)) return parseInt(part.slice(2), 16);
-  if (/^0[0-7]+$/.test(part)) return parseInt(part, 8);
-  if (/^(0|[1-9][0-9]*)$/.test(part)) return parseInt(part, 10);
-  return null;
-}
-
-// Parse a hostname as an IPv4 literal the way the OS resolver (getaddrinfo /
-// inet_aton) would — including short forms and non-decimal encodings — so that
-// 2852039166, 0xA9FEA9FE, 0251.0376.0251.0376 and 169.254.169.254 all collapse
-// to the same 32-bit value. Returns null when the string isn't a numeric IPv4.
-function parseIPv4(host: string): number | null {
-  const parts = host.split('.');
-  if (parts.length === 0 || parts.length > 4) return null;
-  const nums: number[] = [];
-  for (const part of parts) {
-    const n = parseIPv4Part(part);
-    if (n === null) return null;
-    nums.push(n);
-  }
-  // Every part but the last is a single byte; the last fills the remainder.
-  for (let i = 0; i < nums.length - 1; i++) {
-    if (nums[i] > 0xff) return null;
-  }
-  const last = nums[nums.length - 1];
-  if (last > Math.pow(256, 5 - nums.length) - 1) return null;
-  let value = last;
-  for (let i = 0; i < nums.length - 1; i++) {
-    value += nums[i] * Math.pow(256, 3 - i);
-  }
-  return value >>> 0 === value ? value : null;
-}
-
-// Extract the 32-bit IPv4 address embedded in an IPv4-mapped or IPv4-compatible
-// IPv6 literal (::ffff:169.254.169.254, ::ffff:a9fe:a9fe, ::169.254.169.254),
-// or null if this isn't such an address.
-function embeddedIPv4(h: string): number | null {
-  const m = h.match(/^::(?:ffff:)?(.+)$/);
-  if (!m) return null;
-  const tail = m[1];
-  if (tail.includes('.')) return parseIPv4(tail.slice(tail.lastIndexOf(':') + 1));
-  const groups = tail.split(':');
-  if (groups.length === 2 && groups.every((g) => /^[0-9a-f]{1,4}$/.test(g))) {
-    return ((parseInt(groups[0], 16) << 16) >>> 0) + parseInt(groups[1], 16);
-  }
-  return null;
-}
-
 export function isBlockedAddress(hostname: string): boolean {
-  const h = hostname.replace(/^\[|\]$/g, '').toLowerCase();
   // IPv6 link-local (fe80::/10).
-  if (/^fe[89ab][0-9a-f]:/.test(h)) return true;
+  if (/^\[?fe[89ab][0-9a-f]:/i.test(hostname)) return true;
   // Resolve the host to its 32-bit IPv4 value across every equivalent encoding
   // (decimal/octal/hex, short forms, IPv4-mapped IPv6) and range-check the
   // link-local / cloud-metadata block. The genuine end-to-end hole a literal
@@ -284,7 +238,7 @@ export function isBlockedAddress(hostname: string): boolean {
   // can't see; the numeric-IPv4 spellings are collapsed by that same parser
   // before the guard runs, so canonicalizing them here is defense-in-depth
   // against callers that don't pre-normalize rather than a live bypass fix.
-  const v4 = h.includes(':') ? embeddedIPv4(h) : parseIPv4(h);
+  const v4 = ipv4Value(hostname);
   return v4 !== null && v4 >= LINK_LOCAL_V4_START && v4 <= LINK_LOCAL_V4_END;
 }
 
@@ -295,19 +249,10 @@ export interface ErrorPage {
   message: string;
 }
 
-/** Whether the upstream is this machine — the one case where "the dev server"
- *  is a fair guess at what the user pointed the pane at. */
-function isLoopbackUpstream(upstream: URL): boolean {
-  const host = upstream.hostname.toLowerCase();
-  if (host === 'localhost' || host.endsWith('.localhost') || host === '[::1]') return true;
-  const v4 = parseIPv4(host);
-  return v4 !== null && v4 >>> 24 === 127;
-}
-
 export function unreachablePage(upstream: URL, detail: string): ErrorPage {
   return {
     title: `Nothing responding at ${upstream.host}`,
-    message: `Dormouse couldn’t reach ${upstream.href} (${detail}). ${isLoopbackUpstream(upstream)
+    message: `Dormouse couldn’t reach ${upstream.href} (${detail}). ${isLoopbackHostname(upstream.hostname)
       ? 'Is the dev server running?'
       : 'Check that the server is up and reachable from this machine.'}`,
   };
@@ -316,7 +261,7 @@ export function unreachablePage(upstream: URL, detail: string): ErrorPage {
 export function timedOutPage(upstream: URL): ErrorPage {
   return {
     title: `${upstream.host} isn’t responding`,
-    message: `Dormouse connected to ${upstream.host} but it didn’t respond in time — ${isLoopbackUpstream(upstream)
+    message: `Dormouse connected to ${upstream.host} but it didn’t respond in time — ${isLoopbackHostname(upstream.hostname)
       ? 'the dev server may be busy (e.g. optimizing dependencies)'
       : 'the server may be busy or slow'}. Try reloading.`,
   };

@@ -156,33 +156,39 @@ describe('view attachment', () => {
 });
 
 describe('provisional stream paint', () => {
-  it('draws the native stream frame before the crisp screenshot resolves', async () => {
-    let now = 1000;
-    vi.spyOn(performance, 'now').mockImplementation(() => now);
-    const screenshot = vi.fn(() => new Promise<never>(() => {}));
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserScreenshot'>;
-    platform.agentBrowserScreenshot = screenshot;
+  type Shot = { ok: true; bytes: Uint8Array; mime: string };
+  /** An attached pane on `sess:4321` with the clock, the host capture and the
+   *  canvas under the test's control. Captures never answer unless `screenshot` says. */
+  async function paintFixture(
+    screenshot: () => Promise<Shot> = () => new Promise<never>(() => {}),
+    extra: Partial<Pick<PlatformAdapter, 'agentBrowserEdit' | 'readClipboardText'>> = {},
+  ) {
+    const clock = { now: 1000 };
+    vi.spyOn(performance, 'now').mockImplementation(() => clock.now);
+    const platform = Object.assign(new FakePtyAdapter(), { agentBrowserScreenshot: vi.fn(screenshot), ...extra });
     setPlatform(platform);
-
     const bitmap = { width: 40, height: 30, close: vi.fn() } as unknown as ImageBitmap;
     vi.stubGlobal('createImageBitmap', vi.fn(async () => bitmap));
     const sink = makeSink();
     const drawImage = vi.fn();
     sink.canvas.getContext = vi.fn(() => ({ drawImage })) as unknown as typeof sink.canvas.getContext;
-
     const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', wsPort: 4321 });
     controller.attachView(sink);
     await flushMicrotasks();
+    const frame = async (label: string) => {
+      streamSocket(4321)?.emitMessage(JSON.stringify({ type: 'frame', data: btoa(label), metadata: { deviceWidth: 40, deviceHeight: 30 } }));
+      await flushMicrotasks();
+    };
+    const decodes = () => vi.mocked(createImageBitmap).mock.calls.length;
+    return { clock, platform, sink, bitmap, drawImage, controller, frame, decodes };
+  }
+
+  it('draws the native stream frame before the crisp screenshot resolves', async () => {
+    const { clock, platform, sink, bitmap, drawImage, controller, frame, decodes } = await paintFixture();
 
     controller.send({ type: 'input_mouse', eventType: 'mouseMoved', x: 1, y: 1 });
-    streamSocket(4321)?.emitMessage(JSON.stringify({
-      type: 'frame',
-      data: btoa('low-latency-frame'),
-      metadata: { deviceWidth: 40, deviceHeight: 30 },
-    }));
-    await flushMicrotasks();
-
-    expect(screenshot).toHaveBeenCalled();
+    await frame('low-latency-frame');
+    expect(platform.agentBrowserScreenshot).toHaveBeenCalled();
     expect(drawImage).toHaveBeenCalledWith(bitmap, 0, 0);
     expect(sink.canvas.width).toBe(40);
     expect(sink.canvas.height).toBe(30);
@@ -190,158 +196,106 @@ describe('provisional stream paint', () => {
 
     // Once pointer activity is old, an animated page must not keep decoding its
     // CSS-resolution stream at frame rate; the throttled crisp path remains.
-    now += PROVISIONAL_INPUT_WINDOW_MS + 1;
-    streamSocket(4321)?.emitMessage(JSON.stringify({
-      type: 'frame',
-      data: btoa('idle-animation-frame'),
-      metadata: { deviceWidth: 40, deviceHeight: 30 },
-    }));
-    await flushMicrotasks();
-    expect(createImageBitmap).toHaveBeenCalledTimes(1);
+    clock.now += PROVISIONAL_INPUT_WINDOW_MS + 1;
+    await frame('idle-animation-frame');
+    expect(decodes()).toBe(1);
   });
 
   it('paints the stream frame after keys, pasted text and editing chords, not only after pointer input', async () => {
-    let now = 1000;
-    vi.spyOn(performance, 'now').mockImplementation(() => now);
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserScreenshot' | 'agentBrowserEdit' | 'readClipboardText'>;
-    platform.agentBrowserScreenshot = vi.fn(() => new Promise<never>(() => {}));
-    platform.agentBrowserEdit = vi.fn(async () => ({ ok: true }));
-    platform.readClipboardText = vi.fn(async () => 'pasted');
-    setPlatform(platform);
-    vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 40, height: 30, close: vi.fn() })));
-    const sink = makeSink();
-    sink.canvas.getContext = vi.fn(() => ({ drawImage: vi.fn() })) as unknown as typeof sink.canvas.getContext;
-
-    const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', wsPort: 4321 });
-    controller.attachView(sink);
-    await flushMicrotasks();
-    const frame = async (label: string) => {
-      streamSocket(4321)?.emitMessage(JSON.stringify({ type: 'frame', data: btoa(label) }));
-      await flushMicrotasks();
-    };
+    const { clock, platform, controller, frame, decodes } = await paintFixture(undefined, {
+      agentBrowserEdit: vi.fn(async () => ({ ok: true })),
+      readClipboardText: vi.fn(async () => 'pasted'),
+    });
     await frame('first');
-    expect(controller.snapshot().hasFrame).toBe(true);
-    expect(createImageBitmap).toHaveBeenCalledTimes(1);
+    expect(decodes()).toBe(1);
 
     // At rest, a changed frame only pulses the crisp loop.
-    now += PROVISIONAL_INPUT_WINDOW_MS + 1;
+    clock.now += PROVISIONAL_INPUT_WINDOW_MS + 1;
     await frame('idle');
-    expect(createImageBitmap).toHaveBeenCalledTimes(1);
+    expect(decodes()).toBe(1);
 
-    // A keystroke's echo paints straight from the stream.
     controller.handleKeyDownLike({ key: 'a', code: 'KeyA', ctrlKey: false, metaKey: false, altKey: false, shiftKey: false });
     await frame('typed');
-    expect(createImageBitmap).toHaveBeenCalledTimes(2);
+    expect(decodes()).toBe(2);
 
-    // So does a paste, replayed as key input once the clipboard read resolves.
-    now += PROVISIONAL_INPUT_WINDOW_MS + 1;
+    // A paste is replayed as key input once the clipboard read resolves.
+    clock.now += PROVISIONAL_INPUT_WINDOW_MS + 1;
     controller.handleKeyDownLike({ key: 'v', code: 'KeyV', ctrlKey: true, metaKey: false, altKey: false, shiftKey: false });
     await flushMicrotasks();
     expect(platform.readClipboardText).toHaveBeenCalled();
     await frame('pasted');
-    expect(createImageBitmap).toHaveBeenCalledTimes(3);
+    expect(decodes()).toBe(3);
 
-    // And a select-all, which runs through the host rather than the stream.
-    now += PROVISIONAL_INPUT_WINDOW_MS + 1;
+    // A select-all runs through the host rather than the stream.
+    clock.now += PROVISIONAL_INPUT_WINDOW_MS + 1;
     controller.handleKeyDownLike({ key: 'a', code: 'KeyA', ctrlKey: true, metaKey: false, altKey: false, shiftKey: false });
     expect(platform.agentBrowserEdit).toHaveBeenCalledWith('sess', 'selectAll', undefined);
     await frame('selected');
-    expect(createImageBitmap).toHaveBeenCalledTimes(4);
+    expect(decodes()).toBe(4);
   });
 
-  it('paints the stream while a crisp capture waits behind a blocking command', async () => {
-    let now = 1000;
-    vi.spyOn(performance, 'now').mockImplementation(() => now);
-    // Every capture queues behind a page-loading `open` and never answers here.
-    const screenshot = vi.fn(() => new Promise<never>(() => {}));
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserScreenshot'>;
-    platform.agentBrowserScreenshot = screenshot;
-    setPlatform(platform);
-    vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 40, height: 30, close: vi.fn() })));
-    const sink = makeSink();
-    sink.canvas.getContext = vi.fn(() => ({ drawImage: vi.fn() })) as unknown as typeof sink.canvas.getContext;
-
-    const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', wsPort: 4321 });
-    controller.attachView(sink);
-    await flushMicrotasks();
-    const frame = async (label: string) => {
-      streamSocket(4321)?.emitMessage(JSON.stringify({ type: 'frame', data: btoa(label) }));
-      await flushMicrotasks();
-    };
+  it('paints the stream while a crisp capture waits behind a blocking command, then draws that capture', async () => {
+    const releases: Array<(shot: Shot) => void> = [];
+    const { clock, platform, drawImage, frame, decodes } = await paintFixture(() => new Promise((resolve) => { releases.push(resolve); }));
+    // The first image paints from the stream, superseding the capture it pulsed;
+    // its replacement is the one a page-loading `open` then holds.
     await frame('previous page');
-    expect(screenshot).toHaveBeenCalledTimes(1);
-    expect(createImageBitmap).toHaveBeenCalledTimes(1);
+    clock.now += 300;
+    releases[0]({ ok: true, bytes: new Uint8Array([1]), mime: 'image/jpeg' });
+    await flushMicrotasks();
+    expect(platform.agentBrowserScreenshot).toHaveBeenCalledTimes(2);
+    const decoded = decodes();
 
-    // Soon after the capture started, a changed frame only pulses the loop.
-    now += PROVISIONAL_INPUT_WINDOW_MS + 1;
+    clock.now += PROVISIONAL_INPUT_WINDOW_MS + 1;
     await frame('loading');
-    expect(createImageBitmap).toHaveBeenCalledTimes(1);
-
-    // Once the capture is overdue, the loading page paints from the stream.
-    now += 400;
+    expect(decodes()).toBe(decoded);
+    // Overdue now: the loading page paints from the stream.
+    clock.now += 400;
     await frame('still loading');
-    expect(createImageBitmap).toHaveBeenCalledTimes(2);
-    expect(screenshot).toHaveBeenCalledTimes(1);
+    expect(decodes()).toBe(decoded + 1);
+
+    // `open` returns: the held capture is the newer image — drawn, not re-taken.
+    const drawn = drawImage.mock.calls.length;
+    clock.now += 1000;
+    releases[1]({ ok: true, bytes: new Uint8Array([2]), mime: 'image/jpeg' });
+    await flushMicrotasks();
+    await flushMicrotasks();
+    expect(platform.agentBrowserScreenshot).toHaveBeenCalledTimes(2);
+    expect(drawImage.mock.calls.length).toBe(drawn + 1);
   });
 
   it('repaints a byte-identical crisp capture over a provisional paint', async () => {
-    // A provisional paint puts blurry pixels on the canvas without going through
-    // the screenshot loop, so the loop's byte-dedup no longer describes what is on
-    // screen. On a resting page the next crisp capture is byte-identical to the
-    // last crisp draw — it must still repaint, or the pane stays blurry until the
-    // page happens to change.
-    let now = 1000;
-    vi.spyOn(performance, 'now').mockImplementation(() => now);
-    // A static page: every capture returns the same pixels.
-    const screenshot = vi.fn(async () => ({ ok: true as const, bytes: new Uint8Array([9, 9, 9]), mime: 'image/jpeg' }));
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserScreenshot'>;
-    platform.agentBrowserScreenshot = screenshot;
-    setPlatform(platform);
-
-    vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 40, height: 30, close: vi.fn() })));
-    const sink = makeSink();
-    const drawImage = vi.fn();
-    sink.canvas.getContext = vi.fn(() => ({ drawImage })) as unknown as typeof sink.canvas.getContext;
-
-    const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', wsPort: 4321 });
-    controller.attachView(sink);
-    await flushMicrotasks();
-
-    // The first stream frame paints provisionally (nothing on the canvas yet), so
-    // hasFrame flips and the provisional window can be closed from here on.
-    streamSocket(4321)?.emitMessage(JSON.stringify({ type: 'frame', data: btoa('first') }));
-    await flushMicrotasks();
+    // A provisional paint changes the canvas behind the loop's byte-dedup, so a
+    // resting page's byte-identical capture must still repaint over the blur.
+    const { clock, platform, drawImage, controller, frame } = await paintFixture(
+      async () => ({ ok: true, bytes: new Uint8Array([9, 9, 9]), mime: 'image/jpeg' }),
+    );
+    await frame('first');
     expect(controller.snapshot().hasFrame).toBe(true);
 
-    // Past the input window a frame is a bare pulse — no provisional paint — so
-    // this capture lands as the crisp resting frame the loop records.
-    now += PROVISIONAL_INPUT_WINDOW_MS + 1;
-    streamSocket(4321)?.emitMessage(JSON.stringify({ type: 'frame', data: btoa('rest') }));
-    await flushMicrotasks();
+    // Past the input window a frame is a bare pulse, so this capture lands as
+    // the crisp resting frame the loop records.
+    clock.now += PROVISIONAL_INPUT_WINDOW_MS + 1;
+    await frame('rest');
     const afterCrisp = drawImage.mock.calls.length;
-    expect(screenshot).toHaveBeenCalled();
+    expect(platform.agentBrowserScreenshot).toHaveBeenCalled();
 
-    // Pointer input reopens the window; this frame paints blurry over the crisp one.
     controller.send({ type: 'input_mouse', eventType: 'mouseMoved', x: 1, y: 1 });
-    streamSocket(4321)?.emitMessage(JSON.stringify({ type: 'frame', data: btoa('hover') }));
-    await flushMicrotasks();
+    await frame('hover');
     const afterProvisional = drawImage.mock.calls.length;
     expect(afterProvisional).toBeGreaterThan(afterCrisp);
 
-    // Back at rest: the capture's bytes match the earlier crisp draw exactly, and
-    // it must still repaint over the blur.
-    now += PROVISIONAL_INPUT_WINDOW_MS + 1;
-    streamSocket(4321)?.emitMessage(JSON.stringify({ type: 'frame', data: btoa('settled') }));
-    await flushMicrotasks();
+    clock.now += PROVISIONAL_INPUT_WINDOW_MS + 1;
+    await frame('settled');
     expect(drawImage.mock.calls.length).toBeGreaterThan(afterProvisional);
   });
 });
 
-describe('sync-to-pane on window resize', () => {
+describe('sync-to-pane', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  it('leaves a size change to the debounced pane observer and re-syncs a DPR change at once', async () => {
+  it('issues one viewport once a pane resize settles, and re-syncs a display-scale change at once', async () => {
     const command = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
     const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand'>;
     platform.agentBrowserCommand = command;
@@ -353,6 +307,16 @@ describe('sync-to-pane on window resize', () => {
       observe() {}
       disconnect() {}
     });
+    // A display-scale change fires the `(resolution)` query armed for the old scale.
+    const queries: Array<{ media: string; onChange?: () => void }> = [];
+    vi.stubGlobal('matchMedia', (media: string) => {
+      const query: { media: string; onChange?: () => void } = { media };
+      queries.push(query);
+      return {
+        addEventListener: (_type: string, listener: () => void) => { query.onChange = listener; },
+        removeEventListener: () => { query.onChange = undefined; },
+      };
+    });
     let dpr = 1;
     vi.spyOn(window, 'devicePixelRatio', 'get').mockImplementation(() => dpr);
     const sink = makeSink();
@@ -361,7 +325,6 @@ describe('sync-to-pane on window resize', () => {
     const resizePane = (width: number, height: number) => {
       size = { width, height };
       observers.at(-1)?.([{ contentRect: { width, height } } as ResizeObserverEntry], {} as ResizeObserver);
-      window.dispatchEvent(new Event('resize'));
     };
     const viewports = () => command.mock.calls
       .map((call) => (call as unknown as [string, string[]])[1])
@@ -374,7 +337,7 @@ describe('sync-to-pane on window resize', () => {
     expect(viewports().at(-1)).toEqual(['set', 'viewport', '800', '600', '1']);
     const issued = viewports().length;
 
-    // A window drag: `resize` every frame, one settled viewport after the debounce.
+    // A window drag resizes the pane every frame; one viewport lands after it settles.
     for (let w = 801; w <= 860; w++) {
       resizePane(w, 600);
       await vi.advanceTimersByTimeAsync(16);
@@ -383,10 +346,12 @@ describe('sync-to-pane on window resize', () => {
     await vi.advanceTimersByTimeAsync(200);
     expect(viewports().slice(issued)).toEqual([['set', 'viewport', '860', '600', '1']]);
 
-    // A display-scale change resizes nothing, so only the window signal sees it.
     dpr = 2;
-    window.dispatchEvent(new Event('resize'));
+    queries.at(-1)!.onChange!();
     expect(viewports().at(-1)).toEqual(['set', 'viewport', '860', '600', '2']);
+    // Re-armed for the new scale.
+    expect(queries.at(-1)!.media).toBe('(resolution: 2dppx)');
+    expect(queries.at(-1)!.onChange).toBeDefined();
   });
 });
 

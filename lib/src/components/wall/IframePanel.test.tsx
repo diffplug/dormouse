@@ -401,11 +401,11 @@ describe('iframe failures offer a way out', () => {
     await openWindow('https://accounts.example/login');
     expect(button('Open in new pane')).toBeUndefined();
     await act(async () => { button('Open in agent-browser')!.click(); });
-    expect(onOpenBrowserPane).toHaveBeenLastCalledWith('iframe-newtab', 'https://accounts.example/login', 'ab-screencast');
+    expect(onOpenBrowserPane).toHaveBeenLastCalledWith('iframe-newtab', 'https://accounts.example/login');
 
     await openWindow(`${PROXY}/docs`);
     await act(async () => { button('Open in new pane')!.click(); });
-    expect(onOpenBrowserPane).toHaveBeenLastCalledWith('iframe-newtab', 'http://example.test/docs', 'iframe');
+    expect(onOpenBrowserPane).toHaveBeenLastCalledWith('iframe-newtab', 'http://example.test/docs');
   });
 });
 

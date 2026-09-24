@@ -30,8 +30,7 @@ import {
 import type { RenderMode, ScreenController, ScreenSnapshot } from './agent-browser-screen';
 import { browserDisplayMode, useAgentBrowserChromeSnapshot, useAgentBrowserScreenSnapshot } from './agent-browser-screen';
 import { AUTOMATION_PROVIDERS, automationMode, automationProvider, isScreencast, PROVIDER_LABEL } from './browser-automation';
-import { getPlatformOrNull } from '../../lib/platform';
-import { isHttpsUrl } from './browser-url';
+import { iframeRefusal } from './browser-url';
 import {
   AgentRobotIcon,
   BROWSER_DISPLAY_LABEL,
@@ -95,11 +94,7 @@ export function AgentBrowserScreenModal({
   // The controller declares what this Surface can take (a tool never pops out
   // or changes provider); the current mode always shows so it stays selected.
   const offered = (mode: RenderMode) => mode === currentMode || controller.renderModes.includes(mode);
-  // A host with the iframe proxy frames http:// only, so swapping an https://
-  // page to the embed would land on its refusal.
-  const iframeRefusal = currentMode !== 'iframe' && isHttpsUrl(chrome?.url ?? '') && !!getPlatformOrNull()?.createIframeProxyUrl
-    ? 'https:// pages can’t be embedded'
-    : undefined;
+  const embedRefusal = currentMode === 'iframe' ? null : iframeRefusal(chrome?.url ?? '');
   // Only the screencast backend has a Dormouse-settable viewport; pop-out is a
   // native OS window and embed renders at the pane size, so both grey it out.
   const viewportDisabled = !isScreencast(renderMode);
@@ -271,7 +266,7 @@ export function AgentBrowserScreenModal({
               icon={<BrowserDisplayIcon mode="iframe" size={14} className="text-muted" />}
               label={BROWSER_DISPLAY_LABEL.iframe}
               features={[[false, 'agents cannot read/write'], [false, 'http only'], [false, 'no logins/cookies'], [true, 'native human experience']]}
-              disabledReason={iframeRefusal}
+              disabledReason={embedRefusal ?? undefined}
             />
           )}
         </div>

@@ -43,7 +43,7 @@ import {
   type ToolTakeoverGate,
 } from './tool-takeover';
 import { attachSurfacePorts } from './surface-ports';
-import { browserSurfaceUrl, hostPathDisplay, isHttpsUrl } from './browser-url';
+import { browserSurfaceUrl, hostPathDisplay, iframeRefusal } from './browser-url';
 import { automationCli, automationMode, automationProvider, browserPlatform, type LaunchBinaryPath } from './browser-automation';
 import { BrowserBindingReservations } from './browser-binding-reservations';
 import {
@@ -697,10 +697,9 @@ export function useDorControl({
     const rendering = automationProvider(target.renderMode);
     if (rendering !== provider) {
       // Name the command that does work on it, so the caller's next try lands.
-      const url = rendering ? undefined : browserUrlFromParams(lath.getMeta(target.id)?.params);
       const remedy = rendering
         ? `drive it with ${automationCli(rendering)} --surface ${target.ref}`
-        : `an iframe cannot be driven; open its page with ${automationCli(provider)} open ${url ?? '<url>'}`;
+        : `an iframe cannot be driven; open its page with dor ab open ${browserUrlFromParams(lath.getMeta(target.id)?.params) ?? '<url>'}`;
       detail.respond({
         ok: false,
         error: `surface '${target.ref}' is not ${provider} rendered (render_mode: ${target.renderMode}) — ${remedy}`,
@@ -1580,11 +1579,10 @@ export function useDorControl({
         detail.respond({ ok: false, error: 'url must be an http:// or https:// URL' });
         return;
       }
-      // A host with the iframe proxy frames http:// only, so an https:// pane
-      // would open straight onto its refusal (docs/specs/dor-browser.md →
-      // "Iframe Renderer"). Say so here, where the caller can act on it.
-      if (getPlatform().createIframeProxyUrl && isHttpsUrl(url)) {
-        detail.respond({ ok: false, error: `iframe panes show http:// pages only; open ${url} with \`dor ab open ${url}\`` });
+      // Refused here, where the caller can act on it, not in the pane.
+      const refusal = iframeRefusal(url);
+      if (refusal) {
+        detail.respond({ ok: false, error: `${refusal} — open it with dor ab open ${url}` });
         return;
       }
       const target = resolveVisibleSurface(stringParam(params.surface), detail.surfaceId);
