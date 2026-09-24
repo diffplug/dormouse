@@ -76,6 +76,11 @@ export interface BrowserResult {
 /** The most requests one `close` may cancel; the host refuses a longer list. */
 export const BROWSER_CLOSE_MAX_CANCELS = 32;
 
+/** The largest viewport side and device pixel ratio a `viewport` request may
+ *  set. */
+export const VIEWPORT_MAX_SIDE = 16384;
+export const VIEWPORT_MAX_DPR = 10;
+
 /** The JPEG quality of a crisp capture, for either provider. */
 export const CAPTURE_JPEG_QUALITY = 85;
 
@@ -83,8 +88,9 @@ export const CAPTURE_JPEG_QUALITY = 85;
 
 /** Host → webview, as JSON text: the browser's state, sent only on change. */
 export type ViewerState =
-  /** Whether the browser is up, and its viewport's CSS size when known. */
-  | { type: 'status'; connected: boolean; screencasting: boolean; viewportWidth?: number; viewportHeight?: number }
+  /** Whether the browser is up, and its viewport's CSS size and device pixel
+   *  ratio when known — a popped-out window's own, as its page reports them. */
+  | { type: 'status'; connected: boolean; screencasting: boolean; viewportWidth?: number; viewportHeight?: number; devicePixelRatio?: number }
   | { type: 'tabs'; tabs: AgentBrowserTab[] }
   /** The active tab committed a navigation (before its load completes). */
   | { type: 'url'; url: string }

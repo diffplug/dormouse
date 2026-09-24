@@ -5,11 +5,12 @@ import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { BrowserOp, BrowserRequestBinding } from '../lib/platform/browser-automation';
-import { WebSocketServer, type WebSocket } from 'ws';
+import { WebSocket, WebSocketServer } from 'ws';
 import { createAgentBrowserProvider } from './agent-browser-host';
 import { createBrowserCaptures, type BrowserCaptures } from './browser-capture';
 import { createBrowserHost } from './browser-host';
 import { openViewer } from './browser-host-test-utils';
+import { WINDOW_GONE_GRACE_MS } from './browser-viewer';
 
 type SpawnResult = { stdout?: string; stderr?: string; code?: number };
 
@@ -807,31 +808,127 @@ describe('agent-browser host viewer', () => {
     expect(spawnMock).not.toHaveBeenCalled();
   });
 
-  it('follows a headed window\'s page over its browser\'s CDP, and sends it no frames', async () => {
-    running(session);
-    const cdp = await fakeServer((message, client) => {
+  /** How one page of a fake browser answers the host's measure. */
+  type FakePage = { visibilityState: 'visible' | 'hidden'; innerWidth: number; innerHeight: number; devicePixelRatio: number };
+  const shownPage = (innerWidth = 1200): FakePage => ({ visibilityState: 'visible', innerWidth, innerHeight: 736, devicePixelRatio: 2 });
+
+  /** A browser's CDP endpoint whose window shows `pages` (target ids), each
+   *  running the host's measure against `pageState(id)` — hidden unless
+   *  given; a DevTools window and a service worker beside them, which are
+   *  not the window's. */
+  async function fakeBrowser(pages: string[], pageState: (id: string) => FakePage | undefined = () => undefined) {
+    return fakeServer((message, client) => {
+      const params = message.params as { targetId?: string; expression?: string } | undefined;
+      const answer = (result: unknown) => client.send(JSON.stringify({ id: message.id, result }));
       if (message.method === 'Target.getTargets') {
-        client.send(JSON.stringify({ id: message.id, result: { targetInfos: [{ type: 'page', url: 'https://one.example/', title: 'One' }, { type: 'service_worker', url: 'https://one.example/sw.js' }] } }));
-      }
+        answer({ targetInfos: [
+          ...pages.map((id) => ({ targetId: id, type: 'page', url: `https://${id}.example/`, title: id })),
+          { targetId: 'tools', type: 'page', url: 'devtools://devtools/bundled/devtools_app.html', title: 'DevTools' },
+          { targetId: 'sw', type: 'service_worker', url: 'https://one.example/sw.js' },
+        ] });
+      } else if (message.method === 'Target.attachToTarget') answer({ sessionId: `session-${params?.targetId}` });
+      else if (message.method === 'Runtime.evaluate') {
+        // The host's own expression, as the page would run it.
+        const { visibilityState, ...globals } = pageState((message.sessionId as string).replace('session-', '')) ?? { ...shownPage(), visibilityState: 'hidden' };
+        const run = new Function('document', ...Object.keys(globals), `return (${params!.expression});`);
+        answer({ result: { value: run({ visibilityState }, ...Object.values(globals)) } });
+      } else answer({});
     });
+  }
+
+  /** A headed viewer on a daemon whose browser's CDP is `cdp`. */
+  async function headedView(cdp: Awaited<ReturnType<typeof fakeServer>>) {
+    running(session);
     const daemon = await fakeServer();
     writeState(session, 'stream', daemon.port);
     enqueueSpawnResults([{ stdout: `ws://127.0.0.1:${cdp.port}/devtools/browser/abc\n` }]);
     const viewer = await view(daemon.port, true);
     await daemon.connected();
     await cdp.connected();
-    await vi.waitFor(() => expect(cdp.received.map((m) => m.method)).toEqual(['Target.setDiscoverTargets', 'Target.getTargets', 'Page.enable']));
-    cdp.send({ method: 'Target.targetInfoChanged', params: { targetInfo: { type: 'page', url: 'https://two.example/', title: 'Two' } } });
+    return { viewer, daemon };
+  }
+
+  const cdpVerbs = () => spawnMock.mock.calls.map((call) => [(call[1] as string[]).slice(2), call[2]]);
+
+  it('follows a headed window\'s page over its browser\'s CDP, and sends it no frames', async () => {
+    const cdp = await fakeBrowser(['one']);
+    const { viewer, daemon } = await headedView(cdp);
+    await vi.waitFor(() => expect(cdp.received.map((m) => m.method).slice(0, 3)).toEqual(['Target.setDiscoverTargets', 'Target.getTargets', 'Page.enable']));
+    cdp.send({ method: 'Target.targetInfoChanged', params: { targetInfo: { targetId: 'one', type: 'page', url: 'https://two.example/', title: 'Two' } } });
     cdp.send({ method: 'Page.frameNavigated', params: { frame: { parentId: 'p', url: 'https://ad.example/' } } });
     daemon.send(frame(1));
     await vi.waitFor(() => expect(viewer.states).toHaveLength(2));
     expect(viewer.states).toEqual([
-      { type: 'page', url: 'https://one.example/', title: 'One' },
+      { type: 'page', url: 'https://one.example/', title: 'one' },
       { type: 'page', url: 'https://two.example/', title: 'Two' },
     ]);
     expect(viewer.frames).toEqual([]);
     // Bounded like every call a viewer makes.
-    expect(spawnMock.mock.calls.map((call) => [(call[1] as string[]).slice(2), call[2]])).toEqual([[['get', 'cdp-url'], { timeoutMs: 10_000 }]]);
+    expect(cdpVerbs()).toEqual([[['get', 'cdp-url'], { timeoutMs: 10_000 }]]);
+  });
+
+  it('reports a headed window gone once its browser has no page but DevTools, asking the browser nothing', async () => {
+    const cdp = await fakeBrowser(['one', 'two']);
+    const { viewer, daemon } = await headedView(cdp);
+    daemon.send({ type: 'status', connected: true, screencasting: false });
+    await vi.waitFor(() => expect(viewer.states.map((state) => state.type)).toContain('status'));
+    // The user closes the window: its browser runs on, and its stream says nothing.
+    cdp.send({ method: 'Target.targetDestroyed', params: { targetId: 'one' } });
+    cdp.send({ method: 'Target.targetDestroyed', params: { targetId: 'two' } });
+    expect(await viewer.closed).toBe(1000);
+    expect(viewer.states.at(-1)).toEqual({ type: 'status', connected: false, screencasting: false });
+    // Any CLI verb would open a blank window in it.
+    expect(cdpVerbs()).toEqual([[['get', 'cdp-url'], { timeoutMs: 10_000 }]]);
+  });
+
+  it('never reads a tab closed and replaced as the window closing', async () => {
+    const cdp = await fakeBrowser(['one']);
+    const { viewer } = await headedView(cdp);
+    await vi.waitFor(() => expect(viewer.states).toHaveLength(1));
+    cdp.send({ method: 'Target.targetDestroyed', params: { targetId: 'one' } });
+    cdp.send({ method: 'Target.targetCreated', params: { targetInfo: { targetId: 'two', type: 'page', url: 'chrome://newtab/', title: 'New Tab' } } });
+    await new Promise((resolve) => setTimeout(resolve, 2 * WINDOW_GONE_GRACE_MS));
+    expect(viewer.socket.readyState).toBe(WebSocket.OPEN);
+  });
+
+  it('reports gone a window that closed before its observer came', async () => {
+    const { viewer } = await headedView(await fakeBrowser([]));
+    expect(await viewer.closed).toBe(1000);
+  });
+
+  it('carries a headed window\'s own viewport and ratio in its status, measured on the page it shows', async () => {
+    let shown = shownPage(1200);
+    const cdp = await fakeBrowser(['background', 'shown', 'popup'], (id) => (id === 'shown' ? shown : id === 'popup' ? shownPage(400) : undefined));
+    const { viewer, daemon } = await headedView(cdp);
+    // The daemon's configured viewport, which the window does not follow.
+    daemon.send({ type: 'status', connected: true, screencasting: false, viewportWidth: 1280, viewportHeight: 720 });
+    await vi.waitFor(() => expect(viewer.states.filter((state) => state.type === 'status')).toContainEqual(
+      { type: 'status', connected: true, screencasting: false, viewportWidth: 1200, viewportHeight: 736, devicePixelRatio: 2 },
+    ));
+    // The user resizes the window.
+    shown = shownPage(900);
+    await vi.waitFor(() => expect(viewer.states.at(-1)).toEqual(
+      { type: 'status', connected: true, screencasting: false, viewportWidth: 900, viewportHeight: 736, devicePixelRatio: 2 },
+    ), { timeout: 3000 });
+    // Measured on the first page shown, and none past it.
+    expect(cdp.received.filter((m) => m.method === 'Runtime.evaluate').map((m) => m.sessionId)).not.toContain('session-popup');
+  });
+
+  it('asks a daemon for its browser\'s CDP endpoint once, however often its window is viewed', async () => {
+    const cdp = await fakeBrowser(['one']);
+    running(session);
+    const daemon = await fakeServer();
+    writeState(session, 'stream', daemon.port);
+    enqueueSpawnResults([{ stdout: `ws://127.0.0.1:${cdp.port}/devtools/browser/abc\n` }]);
+    const host = makeHost();
+    hosts.push(host);
+    for (let i = 0; i < 2; i++) {
+      const { url } = await ab(host, { op: 'view', stream: daemon.port, headed: true }, { session });
+      const viewer = await openViewer(url!);
+      await vi.waitFor(() => expect(viewer.states).toContainEqual({ type: 'page', url: 'https://one.example/', title: 'one' }));
+      viewer.socket.close();
+    }
+    expect(cdpVerbs()).toEqual([[['get', 'cdp-url'], { timeoutMs: 10_000 }]]);
   });
 
   it('ends a viewer whose stream accepts but never answers the upgrade, closing its connection', async () => {

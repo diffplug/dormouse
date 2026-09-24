@@ -1370,6 +1370,105 @@ describe('relaunch (pop-out / pop-in)', () => {
     expect(host.requests('viewport')).toEqual([onSess({ op: 'viewport', width: 800, height: 600, dpr: 1 })]);
   });
 
+  /** A popped-out pane live at 1111 whose window reported `statuses`, the
+   *  pane itself 800×600; its pop-in waits for `resolvePopIn`. */
+  async function poppedOut(...statuses: object[]) {
+    const host = relaunchHost();
+    const popIn = pending();
+    host.answers.launch = (request) => request.headed ? Promise.resolve({ ok: true, stream: 3456 }) : popIn.promise;
+    const controller = withPort('id', { session: 'sess', renderMode: 'ab-popout', url: 'https://page.example/' }, 1111);
+    const sink = makeSink();
+    sink.viewport.getBoundingClientRect = () => ({ width: 800, height: 600 }) as DOMRect;
+    controller.attachView(sink);
+    await flushMicrotasks();
+    for (const status of statuses) streamSocket(1111)!.emitMessage(JSON.stringify({ type: 'status', screencasting: false, ...status }));
+    return { host, controller, sink, resolvePopIn: popIn.resolve };
+  }
+
+  it.each([
+    ['its window closes', () => streamSocket(1111)!.emitMessage(JSON.stringify({ type: 'status', connected: false, screencasting: false }))],
+    ['Pop back in is pressed', () => getAgentBrowserSurfaceController('id')!.popIn()],
+  ])('a pop-in when %s fixes the screencast at the window\'s last resolution, once the headless browser is live', async (_name, popIn) => {
+    const { host, sink, resolvePopIn } = await poppedOut(
+      // The daemon's configured viewport, which the window does not follow.
+      { connected: true, viewportWidth: 1280, viewportHeight: 720 },
+      { connected: true, viewportWidth: 1100, viewportHeight: 657, devicePixelRatio: 2 },
+      // Resized, then moved to another display.
+      { connected: true, viewportWidth: 1200, viewportHeight: 736, devicePixelRatio: 1.5 },
+    );
+    popIn();
+    expect(host.relaunches(false)).toEqual([onSess({ op: 'launch', url: 'https://page.example/', headed: false })]);
+    expect(sink.updateParameters).toHaveBeenCalledWith({ syncEngaged: false });
+    // Nothing reaches the browser the relaunch is replacing.
+    expect(host.requests('viewport')).toEqual([]);
+
+    resolvePopIn({ ok: true, stream: 5555 });
+    await flushMicrotasks();
+    expect(host.requests('viewport')).toEqual([onSess({ op: 'viewport', width: 1200, height: 736, dpr: 1.5 })]);
+    // The Display modal shows Fixed, at those numbers.
+    expect(getAgentBrowserScreenController('id')!.snapshot()).toMatchObject({
+      renderMode: 'ab-screencast', syncEngaged: false, viewport: { w: 1200, h: 736, dpr: 1.5 },
+    });
+  });
+
+  it('a resolution picked during the pop-in wins, and a fixed ratio describes only the browser it was set on', async () => {
+    const { host, controller, resolvePopIn } = await poppedOut({ connected: true, viewportWidth: 1200, viewportHeight: 736, devicePixelRatio: 1.5 });
+    const screen = getAgentBrowserScreenController('id')!;
+    controller.popIn();
+    screen.actions.engageSync();
+    resolvePopIn({ ok: true, stream: 5555 });
+    await flushMicrotasks();
+    expect(host.requests('viewport')).toEqual([onSess({ op: 'viewport', width: 800, height: 600, dpr: 1 })]);
+
+    // The modal reports the ratio it fixed, until another resolution is picked.
+    for (const pick of [() => screen.actions.engageSync(), () => screen.actions.applyDevice('iPhone 16')]) {
+      screen.actions.applyViewport(1024, 768, 3);
+      expect(screen.snapshot()).toMatchObject({ syncEngaged: false, viewport: { dpr: 3 } });
+      pick();
+      expect(screen.snapshot()?.viewport.dpr).toBe(1);
+    }
+    // Or until another browser streams.
+    screen.actions.applyViewport(1024, 768, 3);
+    controller.handOver(4321);
+    await flushMicrotasks();
+    emitFrame(streamSocket(4321), 'provisional', 1, { width: 1024, height: 768 });
+    expect(screen.snapshot()?.viewport.dpr).toBe(1);
+  });
+
+  it('a fixed resolution picked while a pop-out opens never sizes the window', async () => {
+    const host = relaunchHost();
+    const controller = withPort('id', { session: 'sess' }, 1111);
+    controller.attachView(makeSink());
+    await flushMicrotasks();
+    const screen = getAgentBrowserScreenController('id')!;
+    screen.actions.setRenderMode?.('ab-popout');
+    screen.actions.applyViewport(1024, 768, 2);
+    host.resolvePopOut({ ok: true, stream: 3456 });
+    await flushMicrotasks();
+    expect(controller.snapshot()).toMatchObject({ poppedOut: true, phase: 'live' });
+    expect(host.requests('viewport')).toEqual([]);
+  });
+
+  it('a pop-in with no resolution from this window keeps resizing with the pane', async () => {
+    const { host, controller, resolvePopIn } = await poppedOut({ connected: true, viewportWidth: 1100, viewportHeight: 657, devicePixelRatio: 2 });
+    controller.popIn();
+    resolvePopIn({ ok: true, stream: 5555 });
+    await flushMicrotasks();
+    const screen = getAgentBrowserScreenController('id')!;
+    screen.actions.engageSync();
+    host.browser.mockClear();
+
+    // Out again: this window reports only the daemon's viewport.
+    screen.actions.setRenderMode?.('ab-popout');
+    await flushMicrotasks();
+    streamSocket(3456)!.emitMessage(JSON.stringify({ type: 'status', connected: true, screencasting: false, viewportWidth: 1280, viewportHeight: 720 }));
+    host.answers.launch = (request) => Promise.resolve({ ok: true, stream: request.headed ? 3456 : 5556 });
+    controller.popIn();
+    await flushMicrotasks();
+    expect(host.requests('viewport')).toEqual([onSess({ op: 'viewport', width: 800, height: 600, dpr: 1 })]);
+    expect(screen.snapshot()).toMatchObject({ syncEngaged: true, viewport: { dpr: 1 } });
+  });
+
   it('a pop-out asked for with a page relaunches there instead of navigating into the gap', async () => {
     const host = relaunchHost();
     const controller = withPort('id', { session: 'sess', url: 'https://before.example/' }, 1111);

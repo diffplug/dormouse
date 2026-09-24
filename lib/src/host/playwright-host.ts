@@ -12,7 +12,7 @@ import { BROWSER_PROVIDERS, spawnAndCapture } from 'dor-lib-common';
 import { messageOf } from '../lib/errors';
 import { CAPTURE_JPEG_QUALITY, type BrowserResult, type ViewerInput, type ViewerState } from '../lib/platform/browser-automation';
 import type { BrowserProvider, LiveBrowser } from './browser-host';
-import type { ViewerSink } from './browser-viewer';
+import { measuredViewport, type ViewerSink } from './browser-viewer';
 import { resolvePlaywrightInstall, playwrightWorkspace, type PlaywrightInstall } from './playwright-install';
 
 const TAB_REFRESH_INTERVAL_MS = 750;
@@ -146,6 +146,8 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
       const index = pagesOf(v).length > 1 ? await activeIndex(v) : 0;
       const pages = pagesOf(v);
       if (v.disposed) return;
+      // A headed window that closed can leave its browser running with none.
+      for (const { sink } of v.subscribers) sink.pages(pages.length);
       const page = pages[index] ?? pages[0];
       if (page !== v.page) {
         await v.cdp?.detach().catch(() => {});
@@ -160,8 +162,9 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
       if (page) publish(v, { type: 'url', url: page.url() });
       publish(v, { type: 'tabs', tabs });
       if (page) {
-        const size = await page.evaluate(() => ({ width: innerWidth, height: innerHeight })).catch(() => page.viewportSize());
-        publish(v, { type: 'status', connected: true, screencasting: !v.headed, viewportWidth: size?.width, viewportHeight: size?.height });
+        const measured = await page.evaluate(() => ({ width: innerWidth, height: innerHeight, dpr: devicePixelRatio })).then(measuredViewport, () => undefined);
+        const size = measured ? undefined : page.viewportSize();
+        publish(v, { type: 'status', connected: true, screencasting: !v.headed, viewportWidth: size?.width, viewportHeight: size?.height, ...measured });
       }
       v.refreshedAt = Date.now();
     } catch (e) { log(e); }

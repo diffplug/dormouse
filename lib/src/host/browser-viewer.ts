@@ -15,6 +15,8 @@ import { monitorEventLoopDelay, type IntervalHistogram } from 'node:perf_hooks';
 import { WebSocketServer, WebSocket } from 'ws';
 import {
   VIEWER_TEXT_INPUT_MAX,
+  VIEWPORT_MAX_DPR,
+  VIEWPORT_MAX_SIDE,
   encodeViewerFrame,
   type ViewerFrameKind,
   type ViewerInput,
@@ -33,6 +35,24 @@ export interface ViewerSink {
   /** The browser went away on its own — its window closed, its daemon or
    *  connection died — never because the host closed it. */
   gone(): void;
+  /** How many pages the browser has, reported on each change: a headed
+   *  view's window with none for `WINDOW_GONE_GRACE_MS` has closed, and the
+   *  view ends as `gone`. */
+  pages(count: number): void;
+}
+
+/** A page's viewport as it reports it: CSS size and device pixel ratio. */
+export type MeasuredViewport = { viewportWidth: number; viewportHeight: number; devicePixelRatio: number };
+
+/** What a page answered for `{ width: innerWidth, height: innerHeight, dpr:
+ *  devicePixelRatio }`, as a viewport the host would set; undefined for
+ *  anything else — the page may answer anything. */
+export function measuredViewport(value: unknown): MeasuredViewport | undefined {
+  const { width, height, dpr } = (value ?? {}) as { width?: unknown; height?: unknown; dpr?: unknown };
+  const side = (n: unknown): n is number => Number.isInteger(n) && (n as number) > 0 && (n as number) <= VIEWPORT_MAX_SIDE;
+  return side(width) && side(height) && typeof dpr === 'number' && dpr > 0 && dpr <= VIEWPORT_MAX_DPR
+    ? { viewportWidth: width, viewportHeight: height, devicePixelRatio: dpr }
+    : undefined;
 }
 
 /** A provider's subscription behind one viewer socket. */
@@ -152,6 +172,9 @@ const STALL_WARNING_MS = 8000;
 // this skips it.
 const FRAME_BACKLOG_BYTES = 2_000_000;
 const STATS_INTERVAL_MS = 5000;
+/** A headed window with no page this long has closed: long enough that a tab
+ *  closed and replaced never reads as the window going. */
+export const WINDOW_GONE_GRACE_MS = 1000;
 
 export interface BrowserViewDeps {
   /** The Surface shows its browser as its own window: no frame is sent. */
@@ -195,6 +218,8 @@ export class BrowserView implements ViewerSink {
   private timer: ReturnType<typeof setTimeout> | undefined;
   private readonly stats = { framesIn: 0, provisional: 0, crisp: 0, captures: 0, captureMs: 0, bytesOut: 0 };
   private statsTimer: ReturnType<typeof setInterval> | undefined;
+  /** Running while a headed view's browser has no page. */
+  private windowGone: ReturnType<typeof setTimeout> | undefined;
 
   constructor(private readonly socket: WebSocket, private readonly deps: BrowserViewDeps) {
     socket.on('message', (raw, isBinary) => this.receive(raw, isBinary));
@@ -262,6 +287,18 @@ export class BrowserView implements ViewerSink {
   gone(): void {
     this.state({ type: 'status', connected: false, screencasting: false });
     this.close(1000, 'the browser went away');
+  }
+
+  pages(count: number): void {
+    if (this.closed || !this.deps.headed) return;
+    if (count > 0) {
+      clearTimeout(this.windowGone);
+      this.windowGone = undefined;
+    } else {
+      // A browser whose window closed can run on with none (macOS), telling
+      // its provider nothing else.
+      this.windowGone ??= setTimeout(() => this.gone(), WINDOW_GONE_GRACE_MS);
+    }
   }
 
   // --- the webview's socket ---
@@ -377,6 +414,7 @@ export class BrowserView implements ViewerSink {
     this.closed = true;
     if (this.timer) clearTimeout(this.timer);
     if (this.statsTimer) clearInterval(this.statsTimer);
+    clearTimeout(this.windowGone);
     this.upstream?.close();
     this.deps.onClose();
   }

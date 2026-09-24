@@ -14,6 +14,8 @@ export interface AgentBrowserStreamStatus {
   screencasting: boolean;
   viewportWidth?: number;
   viewportHeight?: number;
+  /** A popped-out window's, as its page reports it. */
+  devicePixelRatio?: number;
 }
 
 export interface AgentBrowserSnapshot {
@@ -214,6 +216,7 @@ export class AgentBrowserConnection {
         screencasting: msg.screencasting === true,
         ...(typeof msg.viewportWidth === 'number' ? { viewportWidth: msg.viewportWidth } : {}),
         ...(typeof msg.viewportHeight === 'number' ? { viewportHeight: msg.viewportHeight } : {}),
+        ...(typeof msg.devicePixelRatio === 'number' ? { devicePixelRatio: msg.devicePixelRatio } : {}),
       };
       this.patch({ status });
       this.emit({ type: 'status', status });

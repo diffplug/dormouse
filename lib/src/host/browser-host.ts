@@ -24,6 +24,8 @@ import { settleAllWithin } from '../lib/settle-within';
 import {
   BROWSER_CLOSE_MAX_CANCELS,
   BROWSER_REQUEST_TIMEOUT_MS,
+  VIEWPORT_MAX_DPR,
+  VIEWPORT_MAX_SIDE,
   isBlankUrl,
   isBrowsableUrl,
   type BrowserEditOp,
@@ -224,7 +226,7 @@ function parseOp(r: Record<string, unknown>): BrowserOp | string {
       return { op: 'tab', action, tabId };
     }
     case 'viewport': {
-      const [width, height, dpr] = [dimension(r.width, 16384), dimension(r.height, 16384), dimension(r.dpr, 10)];
+      const [width, height, dpr] = [dimension(r.width, VIEWPORT_MAX_SIDE), dimension(r.height, VIEWPORT_MAX_SIDE), dimension(r.dpr, VIEWPORT_MAX_DPR)];
       return width && height && dpr ? { op: 'viewport', width, height, dpr } : 'invalid viewport';
     }
     case 'device':

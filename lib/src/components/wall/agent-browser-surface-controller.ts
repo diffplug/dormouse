@@ -91,6 +91,9 @@ function dprMatch(a: number, b: number): boolean {
   return Math.abs(a - b) <= 0.001;
 }
 
+/** A viewport the screencast is fixed at: CSS size and device pixel ratio. */
+type FixedViewport = { width: number; height: number; dpr: number };
+
 
 // A stray about:blank the close+reopen of a relaunch can surface is never the
 // page the pane shows.
@@ -271,11 +274,15 @@ export class AgentBrowserSurfaceController {
   private parkRequested = false;
   private parkTimer: ReturnType<typeof setTimeout> | undefined;
 
-  /** The latest presentation and page asked for while nothing could be
-   *  driven, applied once the Surface is live: a launch, attach or relaunch
-   *  must not lose them. A launch or relaunch opens the page itself
+  /** The latest presentation, page and fixed viewport asked for while nothing
+   *  could be driven, applied once the Surface is live: a launch, attach or
+   *  relaunch must not lose them. A launch or relaunch opens the page itself
    *  (`launchUrl`), and a host that opened it settles it (`openedByHost`). */
-  private pendingIntent: { url?: string; headed?: boolean } = {};
+  private pendingIntent: { url?: string; headed?: boolean; viewport?: FixedViewport } = {};
+
+  /** The popped-out window's viewport as its page last reported it, which a
+   *  pop-in fixes the screencast at. */
+  private windowViewport: FixedViewport | undefined;
 
   /** Requests this Surface sent that can bring its browser up — a launch, a
    *  relaunch, an attach naming a page — which the host has not answered: a
@@ -293,6 +300,9 @@ export class AgentBrowserSurfaceController {
   // frames still at the browser's pre-resize size are our own `set` not having
   // taken effect yet — not an external override.
   private syncConfirmed = false;
+  // The DPR of the fixed viewport last issued to this browser, which frames
+  // cannot tell; undefined once anything else may have set it.
+  private fixedDpr: number | undefined;
   private lastPublishedScreen: ScreenSnapshot | null = null;
   // Debounce for pushing a pane resize back to the browser as a `set viewport`
   // (armed by the pane-size observer below, only while sync is engaged).
@@ -381,19 +391,17 @@ export class AgentBrowserSurfaceController {
         // than relying on a syncEngaged effect — re-selecting Sync while already
         // engaged must still reclaim the viewport (e.g. from an external `set`).
         this.lastIssued = null;
+        this.forgetFixedViewport();
         this.setSyncEngaged(true);
         this.issueSyncToPane();
       },
       applyDevice: (name) => {
         this.lastIssued = null;
+        this.forgetFixedViewport();
         this.setSyncEngaged(false);
         this.drive(`set device ${name}`, (browser) => browser.device(name));
       },
-      applyViewport: (w, h, dpr) => {
-        this.lastIssued = null;
-        this.setSyncEngaged(false);
-        this.drive(`set viewport ${w} ${h} ${dpr}`, (browser) => browser.viewport(w, h, dpr));
-      },
+      applyViewport: (width, height, dpr) => this.fixViewport({ width, height, dpr }),
       openModal: () => openAgentBrowserScreenModal(this.id),
       setRenderMode: (mode, opts) => this.setRenderMode(mode, opts),
     };
@@ -709,6 +717,7 @@ export class AgentBrowserSurfaceController {
       if (next.stream !== this.boundStream) {
         this.boundStream = next.stream;
         this.lastIssued = null;
+        this.fixedDpr = undefined;
       }
     }
     this.reconcileConnection();
@@ -719,12 +728,14 @@ export class AgentBrowserSurfaceController {
 
   /** The daemon can be driven again: catch up on what waited for it. */
   private drivable(): void {
+    const { url, headed, viewport } = this.pendingIntent;
+    this.pendingIntent = {};
+    // A popped-out window is never sized.
+    if (viewport && !this.headed) this.issueFixedViewport(viewport);
     // issueSyncToPane no-ops until now, so a resize made meanwhile — behind a
     // hidden tab, or across a relaunch — is pushed now (lastIssued makes this a
     // no-op when the pane size did not change).
-    if (this.syncEngaged) this.issueSyncToPane();
-    const { url, headed } = this.pendingIntent;
-    this.pendingIntent = {};
+    else if (this.syncEngaged) this.issueSyncToPane();
     if (headed !== undefined && headed !== this.headed) this.relaunch(headed, url);
     else if (url) this.drive(`open ${url}`, (browser) => browser.navigate(url));
   }
@@ -973,8 +984,11 @@ export class AgentBrowserSurfaceController {
         // A browser not yet reported connected is still coming up.
         const lost = !event.status.connected && phase.seen;
         if (event.status.connected) phase.seen = true;
-        if (typeof event.status.viewportWidth === 'number' && typeof event.status.viewportHeight === 'number') {
-          this.setDeviceSize(event.status.viewportWidth, event.status.viewportHeight);
+        const { viewportWidth: width, viewportHeight: height, devicePixelRatio: dpr } = event.status;
+        if (typeof width === 'number' && typeof height === 'number') this.setDeviceSize(width, height);
+        // A status without a ratio sizes the daemon's viewport, not the window.
+        if (this.headed && typeof width === 'number' && typeof height === 'number' && typeof dpr === 'number') {
+          this.windowViewport = { width, height, dpr };
         }
         if (lost) this.streamLost();
       } else if (event.type === 'url') {
@@ -1209,8 +1223,9 @@ export class AgentBrowserSurfaceController {
     const displayDpr = window.devicePixelRatio || 1;
     const device = this.device;
     const paneCss = { w: pane?.w ?? 0, h: pane?.h ?? 0 };
-    // DPR can't be read back from frames, so report the density we'd sync to.
-    const viewport = { w: device.width, h: device.height, dpr: displayDpr };
+    // DPR can't be read back from frames, so report the density this Surface
+    // fixed, else the one it would sync to.
+    const viewport = { w: device.width, h: device.height, dpr: this.fixedDpr ?? displayDpr };
     const state: ScreenState = dimsMatch(viewport, paneCss) ? 'SYNCED' : 'SCALED';
     const renderMode = this.renderMode();
     return { state, viewport, paneCss, displayDpr, syncEngaged: this.syncEngaged, renderMode };
@@ -1263,6 +1278,29 @@ export class AgentBrowserSurfaceController {
     this.lastIssued = { w, h, dpr };
     this.syncConfirmed = false;
     this.drive(`set viewport ${w} ${h} ${dpr}`, (browser) => browser.viewport(w, h, dpr));
+  }
+
+  /** Fix the screencast at `viewport`, disengaging sync: at once while live,
+   *  else once the browser is (the pending intent). */
+  private fixViewport(viewport: FixedViewport): void {
+    this.lastIssued = null;
+    this.setSyncEngaged(false);
+    if (this.driver()) this.issueFixedViewport(viewport);
+    else this.pendingIntent.viewport = viewport;
+  }
+
+  private issueFixedViewport({ width, height, dpr }: FixedViewport): void {
+    this.fixedDpr = dpr;
+    this.publishScreen();
+    this.drive(`set viewport ${width} ${height} ${dpr}`, (browser) => browser.viewport(width, height, dpr));
+  }
+
+  /** Another resolution was asked for: a fixed viewport still waiting is
+   *  dropped, and the one issued no longer describes the browser. */
+  private forgetFixedViewport(): void {
+    delete this.pendingIntent.viewport;
+    this.fixedDpr = undefined;
+    this.publishScreen();
   }
 
   // Last-writer-wins: drop sync when an external `dor ab set …` takes the
@@ -1326,6 +1364,11 @@ export class AgentBrowserSurfaceController {
     // viewer socket on the browser the relaunch is closing.
     const phase: Phase = { k: 'relaunching' };
     this.setPhase(phase);
+    // A pop-in keeps the window's resolution: the screencast is fixed at it
+    // once the headless browser is live.
+    const windowViewport = this.windowViewport;
+    this.windowViewport = undefined;
+    if (!headed && this.headed && windowViewport) this.fixViewport(windowViewport);
     this.setHeaded(headed);
     this.writeParams({ renderMode: this.renderMode() });
     abDebugLog(`[ab-panel] ${headed ? 'popOut' : 'popIn'} -> ${JSON.stringify({ session, url: target })}`);

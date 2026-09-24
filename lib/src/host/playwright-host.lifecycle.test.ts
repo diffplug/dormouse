@@ -1,9 +1,11 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
+import { WebSocket } from 'ws';
 import { createBrowserCaptures } from './browser-capture';
 import { createBrowserHost, type BrowserProvider } from './browser-host';
 import { openViewer } from './browser-host-test-utils';
+import { WINDOW_GONE_GRACE_MS } from './browser-viewer';
 import { createPlaywrightProvider } from './playwright-host';
 import { BROWSER_REQUEST_TIMEOUT_MS, VIEWER_TEXT_INPUT_MAX, viewerTextInputs, type BrowserOp, type BrowserRequestBinding } from '../lib/platform/browser-automation';
 
@@ -43,7 +45,7 @@ beforeEach(() => {
   page = Object.assign(new EventEmitter(), {
     context: () => ({ newCDPSession: attach }), isClosed: () => false,
     title: async () => 'Test', url: () => 'http://localhost/',
-    evaluate: async () => ({ width: 640, height: 480 }),
+    evaluate: async () => ({ width: 640, height: 480, dpr: 1 }), viewportSize: () => ({ width: 640, height: 480 }),
   });
   browser = Object.assign(new EventEmitter(), {
     contexts: () => [{ pages: () => [page] }], isConnected: () => true,
@@ -274,10 +276,10 @@ describe('attach', () => {
 });
 
 test('copy runs the shared edit script and never overwrites the clipboard with an empty selection', async () => {
-  page.evaluate = vi.fn(async (script: unknown) => typeof script === 'string' ? '' : { width: 640, height: 480 });
+  page.evaluate = vi.fn(async (script: unknown) => typeof script === 'string' ? '' : { width: 640, height: 480, dpr: 1 });
   expect(await pw({ op: 'edit', edit: 'copy' })).toMatchObject({ ok: true, text: '' });
   expect(mocks.clipboard).not.toHaveBeenCalled();
-  page.evaluate = vi.fn(async (script: unknown) => typeof script === 'string' ? 'hello' : { width: 640, height: 480 });
+  page.evaluate = vi.fn(async (script: unknown) => typeof script === 'string' ? 'hello' : { width: 640, height: 480, dpr: 1 });
   expect(await pw({ op: 'edit', edit: 'copy' })).toMatchObject({ ok: true, text: 'hello' });
   expect(mocks.clipboard).toHaveBeenCalledExactlyOnceWith('hello');
   expect((await pw({ op: 'edit', edit: 'constructor' as never })).error).toBe("unknown edit op 'constructor'");
@@ -370,6 +372,70 @@ test('a browser that disconnects on its own tells its viewers it is gone', async
   browser.emit('disconnected');
   expect(await viewer.closed).toBe(1000);
   expect(viewer.states.at(-1)).toEqual({ type: 'status', connected: false, screencasting: false });
+});
+
+describe('a headed window', () => {
+  let pages: unknown[];
+  beforeEach(() => {
+    pages = [page];
+    browser.contexts = () => [{ pages: () => pages }];
+    // The host's own measure, run as the page would.
+    vi.stubGlobal('innerWidth', 1200);
+    vi.stubGlobal('innerHeight', 736);
+    vi.stubGlobal('devicePixelRatio', 2);
+    page.evaluate = async (measure: () => unknown) => measure();
+    // The CLI launched it headed.
+    const originalCli = mocks.cli.getMockImplementation()!;
+    mocks.cli.mockImplementation(async (binary, args, options) => {
+      const result = await originalCli(binary, args, options);
+      if (!args.includes('list')) return result;
+      const registry = JSON.parse(result.stdout);
+      registry.servers[0].browser.launchOptions = { headless: false };
+      return { ...result, stdout: JSON.stringify(registry) };
+    });
+  });
+  afterEach(() => { vi.unstubAllGlobals(); });
+  /** A popped-out pane's viewer socket onto the session's browser. */
+  const viewWindow = async () => {
+    const { stream } = await pw({ op: 'attach' });
+    return openViewer((await pw({ op: 'view', stream: stream!, headed: true })).url!);
+  };
+
+  test('reports its viewport and ratio, as its page measures them', async () => {
+    const viewer = await viewWindow();
+    try {
+      await vi.waitFor(() => expect(viewer.states).toContainEqual(
+        { type: 'status', connected: true, screencasting: false, viewportWidth: 1200, viewportHeight: 736, devicePixelRatio: 2 },
+      ));
+    } finally {
+      viewer.socket.terminate();
+    }
+  });
+
+  test('is gone once every page of its browser has closed, though the browser runs on', async () => {
+    const viewer = await viewWindow();
+    await vi.waitFor(() => expect(viewer.states.map((state) => state.type)).toContain('status'));
+    pages = [];
+    // A refresh reports the pages it sees, as the poll does.
+    await pw({ op: 'attach' });
+    expect(await viewer.closed).toBe(1000);
+    expect(viewer.states.at(-1)).toEqual({ type: 'status', connected: false, screencasting: false });
+  });
+
+  test('is not gone when a tab closed is replaced', async () => {
+    const viewer = await viewWindow();
+    try {
+      await vi.waitFor(() => expect(viewer.states.map((state) => state.type)).toContain('status'));
+      pages = [];
+      await pw({ op: 'attach' });
+      pages = [Object.assign(new EventEmitter(), page)];
+      await pw({ op: 'attach' });
+      await new Promise((resolve) => setTimeout(resolve, 2 * WINDOW_GONE_GRACE_MS));
+      expect(viewer.socket.readyState).toBe(WebSocket.OPEN);
+    } finally {
+      viewer.socket.terminate();
+    }
+  });
 });
 
 describe('a GUI launch that gives up', () => {
