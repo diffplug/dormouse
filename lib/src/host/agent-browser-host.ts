@@ -127,6 +127,49 @@ function frameSize(metadata: { deviceWidth?: unknown; deviceHeight?: unknown } |
 // control message large enough to pass for a frame.
 const CONTROL_MARKERS = ['"type":"tabs"', '"type":"status"', '"type":"url"'];
 
+/** A browser target that is one of its window's pages — never a DevTools
+ *  window, a worker or a frame. */
+function windowPage(info: unknown): { targetId: string; url: string; title?: unknown } | undefined {
+  const t = info as { targetId?: unknown; type?: unknown; url?: unknown; title?: unknown } | null;
+  if (!t || typeof t !== 'object' || typeof t.targetId !== 'string' || t.type !== 'page' || typeof t.url !== 'string') return undefined;
+  return t.url.startsWith('devtools://') ? undefined : { targetId: t.targetId, url: t.url, title: t.title };
+}
+
+/** Calls over a CDP `socket`: each answers its result, or undefined for an
+ *  error or a closed socket; every event goes to `event`. */
+function cdpCalls(socket: WebSocket, event: (method: string, params: Record<string, unknown> | undefined) => void = () => {}) {
+  let nextId = 1;
+  const replies = new Map<number, (result: unknown) => void>();
+  socket.on('message', (data: Buffer) => {
+    let message: { id?: unknown; method?: unknown; params?: Record<string, unknown>; result?: unknown };
+    try {
+      message = JSON.parse(data.toString());
+    } catch {
+      return;
+    }
+    if (typeof message.id === 'number') {
+      replies.get(message.id)?.(message.result);
+      replies.delete(message.id);
+    } else if (typeof message.method === 'string') {
+      event(message.method, message.params);
+    }
+  });
+  socket.on('close', () => {
+    for (const reply of replies.values()) reply(undefined);
+    replies.clear();
+  });
+  /** One call to the browser, or to the page `sessionId` is attached to. */
+  return (method: string, params?: Record<string, unknown>, sessionId?: string) => new Promise<unknown>((resolve) => {
+    if (socket.readyState !== WebSocket.OPEN) {
+      resolve(undefined);
+      return;
+    }
+    const id = nextId++;
+    replies.set(id, resolve);
+    socket.send(JSON.stringify({ id, method, ...(params ? { params } : {}), ...(sessionId ? { sessionId } : {}) }));
+  });
+}
+
 // Run in each of a headed window's pages until one answers: the shown page's
 // viewport (`measuredViewport`), measured this often.
 const MEASURE_SCRIPT = "document.visibilityState === 'visible' ? { width: innerWidth, height: innerHeight, dpr: devicePixelRatio } : null";
@@ -287,18 +330,10 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
     return run(b, args, options);
   }
 
-  // Each session's browser CDP endpoint, beside the stream port of the daemon
-  // that named it: once a headed window has closed, any CLI verb run for its
-  // browser opens a blank one (rationale), so a later observer of the same
-  // daemon asks it nothing.
-  const cdpEndpoints = new Map<string, { stream: number; url: string }>();
-
-  /** The CDP endpoint of the browser the daemon streaming on `stream` runs,
-   *  only ever on loopback; asked of that daemon once. */
-  async function cdpEndpoint(b: ProviderBinding, stream: number): Promise<string | undefined> {
-    const known = cdpEndpoints.get(b.session);
-    if (known?.stream === stream) return known.url;
-    const result = await drive(b, ['get', 'cdp-url'], { timeoutMs: CDP_URL_TIMEOUT_MS });
+  /** The browser's CDP endpoint, as `get cdp-url` run `via` names it — only
+   *  ever on loopback. */
+  async function askCdpEndpoint(b: ProviderBinding, via: typeof run): Promise<string | undefined> {
+    const result = await via(b, ['get', 'cdp-url'], { timeoutMs: CDP_URL_TIMEOUT_MS });
     const url = result.exitCode === 0 ? parseCdpUrl(result.stdout) : null;
     if (!url) {
       log(`[agent-browser] no CDP endpoint for ${b.session}: ${cliError(result)}`);
@@ -309,8 +344,41 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
       log(`[agent-browser] refused a CDP endpoint off loopback: ${url}`);
       return undefined;
     }
-    cdpEndpoints.set(b.session, { stream, url });
     return url;
+  }
+
+  // Each session's browser CDP endpoint, beside the stream port of the daemon
+  // that named it: once a headed window has closed, any CLI verb run for its
+  // browser opens a blank one (rationale), so a later observer of the same
+  // daemon asks it nothing.
+  const cdpEndpoints = new Map<string, { stream: number; url: string }>();
+
+  /** The CDP endpoint of the browser the daemon streaming on `stream` runs,
+   *  asked of that daemon once. */
+  async function cdpEndpoint(b: ProviderBinding, stream: number): Promise<string | undefined> {
+    const known = cdpEndpoints.get(b.session);
+    if (known?.stream === stream) return known.url;
+    const url = await askCdpEndpoint(b, drive);
+    if (url) cdpEndpoints.set(b.session, { stream, url });
+    return url;
+  }
+
+  /** One call to the session's browser over a connection of its own, for a
+   *  launch's own steps once `open` has brought the daemon up. */
+  async function browserCall(b: ProviderBinding, method: string, params?: Record<string, unknown>): Promise<unknown> {
+    const url = await askCdpEndpoint(b, run);
+    if (!url) throw new Error(`agent-browser session '${b.session}' has no CDP endpoint`);
+    const socket = new WebSocket(url, { handshakeTimeout: STREAM_CONNECT_TIMEOUT_MS, perMessageDeflate: false });
+    try {
+      await new Promise((resolve, reject) => {
+        socket.once('open', resolve);
+        // Kept for the socket's life: a later error must not go unhandled.
+        socket.on('error', reject);
+      });
+      return await cdpCalls(socket)(method, params);
+    } finally {
+      socket.close();
+    }
   }
 
   /** Terminate `session`'s daemon `pid`, proven live by the caller, and wait
@@ -408,21 +476,17 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
       if (result.exitCode !== 0) throw new Error(cliError(result));
     },
 
-    // Envelope: { tabs } or { data: { tabs } }; the record parse is shared with
-    // the live stream (parseAgentBrowserTabs). Empty on any failure.
+    // The browser's own pages, over its CDP: `tab list` leaves out the
+    // `chrome://newtab/` page every launch opens beside its own (rationale).
+    // A page closed this way leaves `tab list` too.
     async listTabs(b) {
-      const result = await run(b, ['tab', 'list', '--json']);
-      if (result.exitCode !== 0) return [];
-      try {
-        const parsed = JSON.parse(result.stdout) as { tabs?: unknown; data?: { tabs?: unknown } };
-        return parseAgentBrowserTabs(parsed.data?.tabs ?? parsed.tabs);
-      } catch {
-        return [];
-      }
+      const listed = await browserCall(b, 'Target.getTargets') as { targetInfos?: unknown } | undefined;
+      const infos: unknown[] = Array.isArray(listed?.targetInfos) ? listed.targetInfos : [];
+      return infos.map(windowPage).filter((page) => page !== undefined).map(({ targetId, url }) => ({ tabId: targetId, url }));
     },
 
     async closeTab(b, tabId) {
-      await run(b, ['tab', 'close', tabId]);
+      await browserCall(b, 'Target.closeTarget', { targetId: tabId });
     },
 
     async act(b, act): Promise<BrowserResult> {
@@ -595,19 +659,6 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
     void cdpEndpoint(b, stream).then((url) => {
       if (closed || !url) return;
       const socket = cdp = new WebSocket(url, { handshakeTimeout: STREAM_CONNECT_TIMEOUT_MS, perMessageDeflate: false });
-      let nextId = 1;
-      const replies = new Map<number, (result: unknown) => void>();
-      /** One call to the browser, or to the page `sessionId` is attached
-       *  to: its result, or undefined for an error or a closed socket. */
-      const call = (method: string, params?: Record<string, unknown>, sessionId?: string) => new Promise<unknown>((resolve) => {
-        if (socket.readyState !== WebSocket.OPEN) {
-          resolve(undefined);
-          return;
-        }
-        const id = nextId++;
-        replies.set(id, resolve);
-        socket.send(JSON.stringify({ id, method, ...(params ? { params } : {}), ...(sessionId ? { sessionId } : {}) }));
-      });
 
       // The window's pages by target id, each with the session it is
       // measured on once attached. Counted only once listed whole.
@@ -615,15 +666,29 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
       let listed = false;
       const count = () => { if (listed) sink.pages(pages.size); };
       const track = (info: unknown) => {
-        const t = info as { targetId?: unknown; type?: unknown; url?: unknown; title?: unknown } | null;
-        if (!t || typeof t !== 'object' || typeof t.targetId !== 'string') return;
-        if (t.type !== 'page' || (typeof t.url === 'string' && t.url.startsWith('devtools://'))) {
-          pages.delete(t.targetId);
-          return;
-        }
-        if (!pages.has(t.targetId)) pages.set(t.targetId, undefined);
-        page(t.url, t.title);
+        const target = windowPage(info);
+        if (!target) return;
+        if (!pages.has(target.targetId)) pages.set(target.targetId, undefined);
+        page(target.url, target.title);
       };
+      const call = cdpCalls(socket, (method, params) => {
+        switch (method) {
+          case 'Target.targetCreated':
+          case 'Target.targetInfoChanged':
+            track(params?.targetInfo);
+            count();
+            break;
+          case 'Target.targetDestroyed':
+            if (typeof params?.targetId === 'string') pages.delete(params.targetId);
+            count();
+            break;
+          case 'Page.frameNavigated': {
+            const frame = params?.frame as { parentId?: unknown; url?: unknown; name?: unknown } | undefined;
+            if (!frame?.parentId) page(frame?.url, frame?.name);
+            break;
+          }
+        }
+      });
 
       // The first page shown — a background tab may keep its old size.
       const measure = async () => {
@@ -662,37 +727,6 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
         log(`[agent-browser] CDP observer error: ${error.message}`);
         // The next observer asks the daemon again.
         if (cdpEndpoints.get(b.session)?.url === url) cdpEndpoints.delete(b.session);
-      });
-      socket.on('close', () => {
-        for (const reply of replies.values()) reply(undefined);
-        replies.clear();
-      });
-      socket.on('message', (data: Buffer) => {
-        let message: { id?: unknown; method?: string; params?: { targetInfo?: unknown; targetId?: unknown; frame?: { parentId?: unknown; url?: unknown; name?: unknown } }; result?: unknown };
-        try {
-          message = JSON.parse(data.toString());
-        } catch {
-          return;
-        }
-        if (typeof message.id === 'number') {
-          replies.get(message.id)?.(message.result);
-          replies.delete(message.id);
-          return;
-        }
-        switch (message.method) {
-          case 'Target.targetCreated':
-          case 'Target.targetInfoChanged':
-            track(message.params?.targetInfo);
-            count();
-            break;
-          case 'Target.targetDestroyed':
-            if (typeof message.params?.targetId === 'string') pages.delete(message.params.targetId);
-            count();
-            break;
-          case 'Page.frameNavigated':
-            if (!message.params?.frame?.parentId) page(message.params?.frame?.url, message.params?.frame?.name);
-            break;
-        }
       });
     }).catch((error: unknown) => log(`[agent-browser] CDP observer: ${error instanceof Error ? error.message : String(error)}`));
     return {

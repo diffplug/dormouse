@@ -87,6 +87,34 @@ function writeState(session: string, ext: 'pid' | 'stream', value: number): void
   writeFileSync(join(process.env.AGENT_BROWSER_SOCKET_DIR!, `${session}.${ext}`), `${value}\n`);
 }
 
+/** A browser's CDP endpoint on loopback whose pages are `pages` (URL by
+ *  target id), beside a service worker, which is none: the targets it was
+ *  asked to close, and what `get cdp-url` prints for it. */
+async function fakeCdp(pages: Record<string, string>) {
+  const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+  onTestFinished(() => {
+    for (const client of server.clients) client.terminate();
+    server.close();
+  });
+  await new Promise((resolve) => server.once('listening', resolve));
+  const closed: string[] = [];
+  server.on('connection', (ws) => ws.on('message', (data) => {
+    const message = JSON.parse(data.toString()) as { id: number; method: string; params?: { targetId?: string } };
+    const answer = (result: unknown) => ws.send(JSON.stringify({ id: message.id, result }));
+    if (message.method === 'Target.getTargets') {
+      answer({ targetInfos: [
+        ...Object.entries(pages).map(([targetId, url]) => ({ targetId, type: 'page', url })),
+        { targetId: 'sw', type: 'service_worker', url: 'https://example.com/sw.js' },
+      ] });
+    } else if (message.method === 'Target.closeTarget') {
+      closed.push(message.params!.targetId!);
+      answer({ success: true });
+    } else answer({});
+  }));
+  const url = `ws://127.0.0.1:${(server.address() as { port: number }).port}/devtools/browser/fake`;
+  return { closed, printed: { stdout: `${url}\n` } };
+}
+
 // A port something accepts on, standing in for a daemon's stream server.
 let acceptingPort = 0;
 let acceptingServer: Server | undefined;
@@ -140,22 +168,18 @@ function enqueueSpawnResults(results: SpawnResult[]) {
 describe('agent-browser host relaunch', () => {
   useTempSocketDir('dormouse-ab-host-test-');
 
-  it('closes a stray about:blank tab when tab list reports CLI-style id fields', async () => {
-    // No pid file here (an older CLI): the port comes from `stream status` once
-    // `open` has returned, and the sweep runs after that.
+  it('closes the blank and new-tab pages a launch leaves beside its page, over the browser\'s CDP', async () => {
+    // `tab list` names neither the `chrome://newtab/` page nor any page but
+    // agent-browser's own. No pid file here (an older CLI): the port comes
+    // from `stream status` once `open` has returned, and the sweep runs after.
+    const cdp = await fakeCdp({ blank: 'about:blank', newtab: 'chrome://newtab/', real: 'https://example.com/' });
     enqueueSpawnResults([
       {}, // close
       {}, // --headed open
       { stdout: JSON.stringify({ port: 61218 }) },
-      {
-        stdout: JSON.stringify({
-          tabs: [
-            { id: 'blank-tab', url: 'about:blank', active: false },
-            { id: 'real-tab', url: 'https://example.com/', active: true },
-          ],
-        }),
-      },
-      {}, // tab close blank-tab
+      cdp.printed, // get cdp-url, to list the pages
+      cdp.printed, // … to close one
+      cdp.printed, // … and the other
     ]);
 
     const host = makeHost();
@@ -164,12 +188,8 @@ describe('agent-browser host relaunch', () => {
     expect(result).toEqual({
       ok: true, stream: 61218, headed: true, session: 'dormouse.1.default', nativeIdentity: 'dormouse.1.default', binaryPath: '/usr/local/bin/agent-browser',
     });
-    await vi.waitFor(() => {
-      expect(spawnMock).toHaveBeenCalledWith(
-        '/usr/local/bin/agent-browser',
-        ['--session', 'dormouse.1.default', 'tab', 'close', 'blank-tab'],
-      );
-    });
+    // Last first.
+    await vi.waitFor(() => expect(cdp.closed).toEqual(['newtab', 'blank']));
   });
 
   it('pop-out returns the relaunched daemon\'s port while `open` is still waiting on the page', async () => {
@@ -180,19 +200,18 @@ describe('agent-browser host relaunch', () => {
     writeState(session, 'pid', DEAD_PID);
     writeState(session, 'stream', stale);
     const opened = deferred<SpawnResult>();
+    const cdp = await fakeCdp({ blank: 'about:blank', real: 'https://example.com/' });
     const calls = mockSpawnByCommand({
       close: () => ({}),
       '--headed open': () => opened.promise,
-      tab: (args) => (args.includes('list')
-        ? { stdout: JSON.stringify({ tabs: [{ tabId: 'blank', url: 'about:blank', active: false }, { tabId: 'real', url: 'https://example.com/', active: true }] }) }
-        : {}),
+      get: () => cdp.printed,
     });
     const host = makeHost();
     const popOut = ab(host, { op: 'launch', url: 'https://example.com/', headed: true }, { session: session });
 
     // While the stale files are all there is, the launch waits.
     await new Promise((resolve) => setTimeout(resolve, 350));
-    expect(calls.some((args) => args.includes('tab'))).toBe(false);
+    expect(calls.some((args) => args.includes('cdp-url'))).toBe(false);
     // The new daemon comes up: a fresh pid and a port that accepts connections.
     const { port, server } = await listen();
     try {
@@ -201,13 +220,11 @@ describe('agent-browser host relaunch', () => {
       expect(await popOut).toEqual({ ok: true, stream: port, headed: true, session, nativeIdentity: session });
       // `open` has not returned, so no daemon command (the blank-tab sweep) has
       // been queued behind it.
-      expect(calls.some((args) => args.includes('tab'))).toBe(false);
+      expect(calls.some((args) => args.includes('cdp-url'))).toBe(false);
       expect(calls.some((args) => args.includes('stream'))).toBe(false);
 
       opened.resolve({ code: 1, stderr: 'Operation timed out. The page may still be loading' });
-      await vi.waitFor(() => {
-        expect(calls).toContainEqual(['--session', session, 'tab', 'close', 'blank']);
-      });
+      await vi.waitFor(() => expect(cdp.closed).toEqual(['blank']));
     } finally {
       await closeServer(server);
     }
@@ -221,14 +238,6 @@ describe('agent-browser host relaunch', () => {
     const calls = mockSpawnByCommand({
       close: () => (++closeCount === 1 ? {} : secondClose.promise),
       '--headed open': () => firstOpened.promise,
-      tab: () => ({
-        stdout: JSON.stringify({
-          tabs: [
-            { tabId: 'blank', url: 'about:blank', active: false },
-            { tabId: 'real', url: 'https://example.com/', active: true },
-          ],
-        }),
-      }),
     });
     // Seed the daemon state that pop-out replaces. Wait until headed open has
     // started before publishing the successor, so a slow CI runner cannot make
@@ -252,7 +261,7 @@ describe('agent-browser host relaunch', () => {
       firstOpened.resolve({ code: 1, stderr: 'Operation timed out' });
       await new Promise((resolve) => setTimeout(resolve, 0));
 
-      expect(calls.some((args) => args.includes('tab'))).toBe(false);
+      expect(calls.some((args) => args.includes('cdp-url'))).toBe(false);
     } finally {
       await closeServer(server);
     }
@@ -266,14 +275,6 @@ describe('agent-browser host relaunch', () => {
     const calls = mockSpawnByCommand({
       close: () => (++closeCount === 1 ? {} : explicitClose.promise),
       '--headed open': () => opened.promise,
-      tab: () => ({
-        stdout: JSON.stringify({
-          tabs: [
-            { tabId: 'blank', url: 'about:blank', active: false },
-            { tabId: 'real', url: 'https://example.com/', active: true },
-          ],
-        }),
-      }),
     });
     const stale = await closedPort();
     writeState(session, 'pid', DEAD_PID);
@@ -294,7 +295,7 @@ describe('agent-browser host relaunch', () => {
       opened.resolve({ code: 1, stderr: 'Operation timed out' });
       await new Promise((resolve) => setTimeout(resolve, 0));
 
-      expect(calls.some((args) => args.includes('tab'))).toBe(false);
+      expect(calls.some((args) => args.includes('cdp-url'))).toBe(false);
     } finally {
       await closeServer(server);
     }
@@ -313,14 +314,6 @@ describe('agent-browser host relaunch', () => {
         return {};
       },
       '--headed open': () => opened.promise,
-      tab: () => ({
-        stdout: JSON.stringify({
-          tabs: [
-            { tabId: 'blank', url: 'about:blank', active: false },
-            { tabId: 'real', url: 'https://example.com/', active: true },
-          ],
-        }),
-      }),
     });
     const stale = await closedPort();
     writeState(session, 'pid', DEAD_PID);
@@ -338,7 +331,7 @@ describe('agent-browser host relaunch', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
 
       expect(closeCount).toBe(2);
-      expect(calls.some((args) => args.includes('tab'))).toBe(false);
+      expect(calls.some((args) => args.includes('cdp-url'))).toBe(false);
     } finally {
       await closeServer(server);
     }
@@ -576,6 +569,7 @@ describe('agent-browser host attach', () => {
     writeState(session, 'stream', await closedPort());
     const { port, server } = await listen();
     const opened = deferred<SpawnResult>();
+    const cdp = await fakeCdp({ real: 'https://example.com/' });
     const calls = mockSpawnByCommand({
       '--headed open': () => {
         // This test process stands in for the relaunched daemon.
@@ -583,7 +577,7 @@ describe('agent-browser host attach', () => {
         writeState(session, 'stream', port);
         return opened.promise;
       },
-      tab: () => ({ stdout: JSON.stringify({ tabs: [{ tabId: 'real', url: 'https://example.com/', active: true }] }) }),
+      get: () => cdp.printed,
       close: () => ({}),
     });
     try {
@@ -604,7 +598,9 @@ describe('agent-browser host attach', () => {
       ]);
       // Once `open` returns, the sweep finds no stray blank tab to close.
       opened.resolve({});
-      await vi.waitFor(() => expect(calls).toContainEqual(['--session', session, 'tab', 'list', '--json']));
+      await vi.waitFor(() => expect(calls).toContainEqual(['--session', session, 'get', 'cdp-url']));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(cdp.closed).toEqual([]);
       expect(calls.filter((args) => args.includes('close'))).toEqual([['--session', session, 'close']]);
 
       await host.close();

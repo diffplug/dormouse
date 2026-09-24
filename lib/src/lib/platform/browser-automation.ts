@@ -188,10 +188,14 @@ export function viewerTextInputs(text: string): { type: 'input_text'; text: stri
   return messages;
 }
 
-/** Whether a tab shows nothing: empty, or the blank page a launch can leave. */
+// The browsers' own new-tab pages, which a launch leaves beside its page.
+const NEW_TAB_URLS = new Set(['about:newtab', 'chrome://newtab', 'chrome://new-tab-page', 'edge://newtab']);
+
+/** Whether a tab shows nothing: empty, or the blank or new-tab page a launch
+ *  can leave. */
 export function isBlankUrl(url: string): boolean {
   const trimmed = url.trim();
-  return trimmed === '' || trimmed === 'about:blank';
+  return trimmed === '' || trimmed === 'about:blank' || NEW_TAB_URLS.has(trimmed.replace(/\/$/, ''));
 }
 
 /** A URL a browser provider may launch, relaunch or navigate to: http(s) only,

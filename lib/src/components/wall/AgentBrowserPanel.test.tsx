@@ -298,6 +298,12 @@ describe('AgentBrowserPanel render mode controller', () => {
     });
 
     expect(updateParameters).toHaveBeenCalledWith({ url: 'https://example.com/' });
+
+    // The new-tab page the launch opened beside it is not the page it shows.
+    await act(async () => {
+      WebSocketMock.instances[0].emitMessage(JSON.stringify({ type: 'page', url: 'chrome://newtab/', title: 'New Tab' }));
+    });
+    expect(getAgentBrowserScreenController('ab-panel')?.chrome().url).toBe('https://example.com/');
   });
 
   it('actively selects a newly opened tab when the stream does not mark it active', async () => {
