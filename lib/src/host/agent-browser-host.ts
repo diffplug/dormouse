@@ -423,8 +423,8 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     await screenshotDir.remove();
   }
 
-  // Reused per session so we don't litter with one file per frame; the panel
-  // guarantees one screenshot in flight per surface, so overwriting is safe. The
+  // Reused per session so we don't litter with one file per frame; `oneCapture`
+  // keeps one capture in flight per session, so overwriting is safe. The
   // random component is per session, so the name stays stable for reuse while
   // being unguessable from the session key alone.
   const screenshotNames = new Map<string, string>();
@@ -435,6 +435,20 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
       screenshotNames.set(session, name);
     }
     return path.join(await screenshotDir.get(), `shot-${name}.${ext}`);
+  }
+
+  // One capture per session and format at a time, whoever asks. A `screenshot`
+  // queued behind a page-loading `open` blocks for up to 25s, and each webview
+  // adapter gives up on its reply sooner (VS Code at 10s) and asks again; a
+  // second spawn would only queue behind the first, then race it for the
+  // session's one capture file. A caller that asks mid-capture joins it.
+  const capturesInFlight = new Map<string, Promise<unknown>>();
+  function oneCapture<T>(key: string, capture: () => Promise<T>): Promise<T> {
+    const pending = capturesInFlight.get(key) as Promise<T> | undefined;
+    if (pending) return pending;
+    const started = capture().finally(() => capturesInFlight.delete(key));
+    capturesInFlight.set(key, started);
+    return started;
   }
 
   async function command(session: string, args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult> {
@@ -516,25 +530,27 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
       return { ok: false, error: 'a valid session name is required' };
     }
     const format = opts.format === 'png' ? 'png' : 'jpeg';
-    const ext = format === 'png' ? 'png' : 'jpg';
-    let out: string;
-    try {
-      // Every other failure in here answers `{ ok: false, error }`; a tmpdir
-      // that cannot be created must not escape as a rejection instead.
-      out = await screenshotPath(session, ext);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      log(`[agent-browser] could not create the capture directory: ${message}`);
-      return { ok: false, error: `could not create a private screenshot directory: ${message}` };
-    }
-    const args = ['--session', session, 'screenshot', out, '--screenshot-format', format];
-    if (format === 'jpeg') args.push('--screenshot-quality', String(jpegQuality(opts.quality)));
-    const result = await runWithBinaryFallback(args, binaryPath);
-    if (result.exitCode !== 0) {
-      log(`[agent-browser] screenshot failed (exit ${result.exitCode}): ${result.stderr.trim() || result.stdout.trim()}`);
-      return { ok: false, error: result.stderr.trim() || `screenshot exited ${result.exitCode}` };
-    }
-    return { ok: true, path: out, mime: format === 'png' ? 'image/png' : 'image/jpeg' };
+    return oneCapture(`file:${format}:${session}`, async (): Promise<AgentBrowserScreenshotFileResult> => {
+      const ext = format === 'png' ? 'png' : 'jpg';
+      let out: string;
+      try {
+        // Every other failure in here answers `{ ok: false, error }`; a tmpdir
+        // that cannot be created must not escape as a rejection instead.
+        out = await screenshotPath(session, ext);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        log(`[agent-browser] could not create the capture directory: ${message}`);
+        return { ok: false, error: `could not create a private screenshot directory: ${message}` };
+      }
+      const args = ['--session', session, 'screenshot', out, '--screenshot-format', format];
+      if (format === 'jpeg') args.push('--screenshot-quality', String(jpegQuality(opts.quality)));
+      const result = await runWithBinaryFallback(args, binaryPath);
+      if (result.exitCode !== 0) {
+        log(`[agent-browser] screenshot failed (exit ${result.exitCode}): ${result.stderr.trim() || result.stdout.trim()}`);
+        return { ok: false, error: result.stderr.trim() || `screenshot exited ${result.exitCode}` };
+      }
+      return { ok: true, path: out, mime: format === 'png' ? 'image/png' : 'image/jpeg' };
+    });
   }
 
   // Byte-returning wrapper over screenshotToFile for the VS Code host (structured
@@ -545,22 +561,27 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     opts: { format?: 'jpeg' | 'png'; quality?: number },
     binaryPath?: string,
   ): Promise<AgentBrowserScreenshotResult> {
-    const shot = await screenshotToFile(session, opts, binaryPath);
-    if (!shot.ok) return { ok: false, error: shot.error };
-    try {
-      const buffer = await fs.readFile(shot.path);
-      // A Uint8Array view over exactly this file's bytes.
-      const bytes = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
-      // The bytes are in memory now and this path owns the file's whole life,
-      // so the frame does not sit on disk until shutdown. The path-returning
-      // sibling cannot do this — its caller (Rust) reads the file afterwards —
-      // so there the next capture overwrites it and shutdown removes the dir.
-      await fs.unlink(shot.path).catch(() => {});
-      return { ok: true, bytes, mime: shot.mime };
-    } catch (err) {
-      log(`[agent-browser] screenshot read failed: ${err instanceof Error ? err.message : String(err)}`);
-      return { ok: false, error: `could not read screenshot file: ${err instanceof Error ? err.message : String(err)}` };
-    }
+    // Joined whole, read and unlink included: a caller joining only the capture
+    // would read a file the first caller has already removed.
+    const format = opts.format === 'png' ? 'png' : 'jpeg';
+    return oneCapture(`bytes:${format}:${session}`, async (): Promise<AgentBrowserScreenshotResult> => {
+      const shot = await screenshotToFile(session, opts, binaryPath);
+      if (!shot.ok) return { ok: false, error: shot.error };
+      try {
+        const buffer = await fs.readFile(shot.path);
+        // A Uint8Array view over exactly this file's bytes.
+        const bytes = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+        // The bytes are in memory now and this path owns the file's whole life,
+        // so the frame does not sit on disk until shutdown. The path-returning
+        // sibling cannot do this — its caller (Rust) reads the file afterwards —
+        // so there the next capture overwrites it and shutdown removes the dir.
+        await fs.unlink(shot.path).catch(() => {});
+        return { ok: true, bytes, mime: shot.mime };
+      } catch (err) {
+        log(`[agent-browser] screenshot read failed: ${err instanceof Error ? err.message : String(err)}`);
+        return { ok: false, error: `could not read screenshot file: ${err instanceof Error ? err.message : String(err)}` };
+      }
+    });
   }
 
   async function streamStatus(session: string, binaryPath?: string): Promise<AgentBrowserStreamStatusResult> {

@@ -249,6 +249,41 @@ describe('provisional stream paint', () => {
     expect(createImageBitmap).toHaveBeenCalledTimes(4);
   });
 
+  it('paints the stream while a crisp capture waits behind a blocking command', async () => {
+    let now = 1000;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    // Every capture queues behind a page-loading `open` and never answers here.
+    const screenshot = vi.fn(() => new Promise<never>(() => {}));
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserScreenshot'>;
+    platform.agentBrowserScreenshot = screenshot;
+    setPlatform(platform);
+    vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 40, height: 30, close: vi.fn() })));
+    const sink = makeSink();
+    sink.canvas.getContext = vi.fn(() => ({ drawImage: vi.fn() })) as unknown as typeof sink.canvas.getContext;
+
+    const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', wsPort: 4321 });
+    controller.attachView(sink);
+    await flushMicrotasks();
+    const frame = async (label: string) => {
+      streamSocket(4321)?.emitMessage(JSON.stringify({ type: 'frame', data: btoa(label) }));
+      await flushMicrotasks();
+    };
+    await frame('previous page');
+    expect(screenshot).toHaveBeenCalledTimes(1);
+    expect(createImageBitmap).toHaveBeenCalledTimes(1);
+
+    // Soon after the capture started, a changed frame only pulses the loop.
+    now += PROVISIONAL_INPUT_WINDOW_MS + 1;
+    await frame('loading');
+    expect(createImageBitmap).toHaveBeenCalledTimes(1);
+
+    // Once the capture is overdue, the loading page paints from the stream.
+    now += 400;
+    await frame('still loading');
+    expect(createImageBitmap).toHaveBeenCalledTimes(2);
+    expect(screenshot).toHaveBeenCalledTimes(1);
+  });
+
   it('repaints a byte-identical crisp capture over a provisional paint', async () => {
     // A provisional paint puts blurry pixels on the canvas without going through
     // the screenshot loop, so the loop's byte-dedup no longer describes what is on

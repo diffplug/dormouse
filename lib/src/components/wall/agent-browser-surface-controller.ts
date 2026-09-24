@@ -900,7 +900,10 @@ export class AgentBrowserSurfaceController {
   }
 
   private wantsProvisionalFrame(): boolean {
-    return !this.hasFrame || !this.platform.agentBrowserScreenshot || performance.now() <= this.provisionalUntil;
+    return !this.hasFrame || !this.platform.agentBrowserScreenshot || performance.now() <= this.provisionalUntil
+      // A crisp capture queued behind a blocking `open` would otherwise leave
+      // the previous page on screen for the whole load.
+      || !!this.screenshotLoop?.captureOverdue();
   }
 
   // agent-browser's stream publishes the initial headed tab list but not every

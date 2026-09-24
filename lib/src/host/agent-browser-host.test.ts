@@ -444,6 +444,48 @@ describe('agent-browser host screenshot transport', () => {
     await host.closePoppedOut();
   });
 
+  // A capture queued behind a page-loading `open` outlives the webview's reply
+  // timeout, and the webview asks again. A second spawn would only queue behind
+  // the first, then race it for the session's one capture file.
+  it('joins a capture already in flight for the session instead of spawning another', async () => {
+    const release = deferred<SpawnResult>();
+    let file = '';
+    spawnMock.mockImplementation(async (_binary: string, args: string[]) => {
+      file = args[3];
+      const result = await release.promise;
+      writeFileSync(file, Uint8Array.from([0xff, 0xd8, 0x01]));
+      return spawnResult(result);
+    });
+    const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });
+
+    const paths = [
+      host.screenshotToFile('queued', { format: 'jpeg' }),
+      host.screenshotToFile('queued', { format: 'jpeg' }),
+    ];
+    const bytes = [
+      host.screenshot('queued-bytes', { format: 'jpeg' }),
+      host.screenshot('queued-bytes', { format: 'jpeg' }),
+    ];
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(2)); // one per session
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+
+    release.resolve({});
+    const [first, second] = await Promise.all(paths);
+    expect(second).toEqual(first);
+    // Both callers get the frame from the one read, which removed the file.
+    for (const result of await Promise.all(bytes)) {
+      expect(Array.from(result.bytes ?? [])).toEqual([0xff, 0xd8, 0x01]);
+    }
+
+    // Once it has answered, the next request captures afresh.
+    spawnMock.mockReset();
+    enqueueSpawnResults([{}]);
+    await host.screenshotToFile('queued', { format: 'jpeg' });
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    await host.closePoppedOut();
+  });
+
   it('answers a capture-directory failure as a result, and retries the next time', async () => {
     // `??=` on the mkdtemp promise would memoize a rejection, so one transient
     // EACCES/ENOSPC on tmpdir would disable screenshots for the whole process.

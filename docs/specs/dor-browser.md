@@ -308,12 +308,17 @@ refreshes only when the driving command completes**
 until `tabs` refreshes, even at the same URL.
 
 **Two-stage paint.** A changed stream JPEG paints at once as a CSS-resolution
-**provisional frame** — the first image, and 250ms after any input: pointer,
-keys, pasted text, editing chords (continuous input extends the window) — then a crisp device-resolution
+**provisional frame** — the first image, 250ms after any input (pointer, keys,
+pasted text, editing chords; continuous input extends the window), and while a
+capture is **overdue** — then a crisp device-resolution
 `agentBrowserScreenshot` replaces it (rationale):
 
 - **Both paths are latest-only.**
 - **No capture may start inside the provisional window** (rationale).
+- **A capture is overdue past twice the average round trip, at least 400ms**,
+  and **is never re-issued while its host call is unresolved**: it is queued
+  behind a blocking daemon command such as a page-loading `open`, which would
+  otherwise hold the previous page on screen for the whole load (rationale).
 - **Must leave the loop dirty when capture or bitmap decode becomes stale**
   (rationale). Pinned by `agent-browser-screenshot-loop.test.ts`.
 - **Any canvas writer but the crisp loop must bump the draw generation** in its
@@ -390,7 +395,7 @@ sidecar/Rust adapter.
 | Method | Contract |
 | --- | --- |
 | `agentBrowserCommand` | One fixed argv shape per verb: `open <absolute url>`, `back`/`forward`/`reload`, bare `close`, `get cdp-url`, `tab <ref>`, `tab close <ref>`, `set viewport <w> <h> <dpr>`, `set device <name>`. |
-| `agentBrowserScreenshot` | One device-resolution JPEG/PNG frame. VS Code structured-clones the bytes; standalone passes Rust the capture's temp-file **path** over the sidecar stdio, for Rust to read (rationale). |
+| `agentBrowserScreenshot` | One device-resolution JPEG/PNG frame. VS Code structured-clones the bytes; standalone passes Rust the capture's temp-file **path** over the sidecar stdio, for Rust to read (rationale). **One capture per session in flight**: a request made meanwhile joins it, since the webview re-asks when its adapter times out. |
 | `agentBrowserStreamStatus` | Current stream port, for stale-`wsPort` recovery. |
 | `agentBrowserEdit` | select-all/copy/cut via fixed host-owned JS plus an OS clipboard write. |
 | `getAgentBrowserStreamUrl` | Direct stream URL, or the VS Code relay URL. |
