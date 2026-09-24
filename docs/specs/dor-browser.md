@@ -491,7 +491,7 @@ https raw):
 | --- | --- |
 | `surface.iframe` (`dor iframe`) | refused before any pane opens, naming `dor ab open <url>` |
 | Display modal | iframe option disabled, showing the wording |
-| Render swap to `iframe`, tool or not | refused with a console warning; the modal never offers it |
+| Render swap to `iframe`, tool or not | refused with a console warning; the modal never offers it, since both judge the page on screen (chrome URL, then `params.url`) |
 | New-tab request from a framed page | an `ab-screencast` pane, bound to its launch like a render swap, closed if the launch fails |
 | A pane already holding one | `scheme` panel error with Open in agent-browser and `dor ab open <url>` |
 
