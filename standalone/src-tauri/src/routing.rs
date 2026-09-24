@@ -208,10 +208,11 @@ pub fn route<'a>(event: &str, data: &'a JsonValue, view: &RouteView<'a>) -> Rout
             Some(surface_id) => lookup(view.owners, surface_id),
             None => Route::Broadcast,
         },
-        // `alert:*` naming a window (an await's result) goes to it. One
-        // carrying an id is about one Session, and goes to the window showing
-        // it: after the mark the new owner's collection re-sends it (§Alerts).
-        // What carries neither — the two app-global stores — reaches everyone.
+        // `alert:*` naming a window (an await's result, a `sync`'s store
+        // snapshots) goes to it. One carrying an id is about one Session, and
+        // goes to the window showing it: after the mark the new owner's
+        // collection re-sends it (§Alerts). What carries neither — the two
+        // app-global stores' broadcasts — reaches everyone.
         _ if event.starts_with("alert:") => {
             if let Some(label) = str_field(data, "forWindow") {
                 return Route::EmitTo(label);
@@ -645,6 +646,12 @@ mod tests {
             ("pty:list", json!({"ptys":[]}), Route::Broadcast),
             ("alert:state", json!({"id":"a"}), Route::EmitTo("main")),
             ("alert:settings", json!({"speech":true}), Route::Broadcast),
+            // A `sync`'s snapshot answers only the window that asked.
+            (
+                "alert:settings",
+                json!({"settings":{},"forWindow":"ws-2"}),
+                Route::EmitTo("ws-2"),
+            ),
             // An await's result goes to the window that parked it, never to a
             // Session's owner.
             (

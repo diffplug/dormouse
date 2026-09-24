@@ -155,13 +155,39 @@ describe('published Sessions', () => {
     ring();
     vi.advanceTimersByTime(SPEAK_MS);
     expect(sinks()).toEqual(['speech']);
+  });
 
-    // A realm dropping a Session it last published returns it to the defaults.
+  it('keeps a Session a partial publication omits, and the alarm its override armed', () => {
+    scheduler.setDefaults({ ...SETTINGS, speakEnabled: false, pushEnabled: false });
+    scheduler.publish('main', { [PANE]: session({ speakEnabled: true }), [OTHER]: session({}) });
+    ring();
+    // A reload publishes its first Wall before the one showing the ring.
+    scheduler.publish('main', { [OTHER]: session({}) });
+    scheduler.publish('main', { [PANE]: session({ speakEnabled: true }), [OTHER]: session({}) });
+    vi.advanceTimersByTime(SPEAK_MS);
+    expect(delivered).toEqual([{ sink: 'speech', id: PANE, episodeId: episodeId() }]);
+  });
+
+  it('gives a Session that moved its new owner\'s overrides', () => {
+    scheduler.setDefaults({ ...SETTINGS, pushEnabled: false });
+    scheduler.publish('source', { [PANE]: session({}) });
+    ring();
     scheduler.publish('target', { [PANE]: session({ speakEnabled: false }) });
-    scheduler.publish('target', {});
+    scheduler.publish('source', {});
+    vi.advanceTimersByTime(SPEAK_MS);
+    expect(delivered).toEqual([]);
+  });
+
+  it('forgets an omitted Session only while it has no alert state', () => {
+    scheduler.setDefaults({ ...SETTINGS, pushEnabled: false });
+    scheduler.publish('main', { [PANE]: session({ speakEnabled: false }), [OTHER]: session({ speakEnabled: false }) });
+    ring();
+    scheduler.publish('main', {});
+    // OTHER had none, so nothing was pending on it: it is back on the defaults.
+    ring(OTHER);
     ringAgain();
     vi.advanceTimersByTime(SPEAK_MS);
-    expect(sinks()).toEqual(['speech', 'speech']);
+    expect(delivered).toEqual([{ sink: 'speech', id: OTHER, episodeId: episodeId(OTHER) }]);
   });
 
   it.each([

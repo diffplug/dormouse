@@ -15,7 +15,8 @@ import { REPORT } from '../lib/alert-manager-test-utils';
 let host: AlertHost;
 /** Every await outcome, by the realm it was answered to. */
 let answers: Array<{ realm: string } & AlertAwaitResult>;
-let resent: string[];
+/** Each realm's `sync` answer: the Session ids re-sent, and the store snapshots. */
+let resent: Array<{ realm: string; ids?: readonly string[]; names?: string[]; settings?: unknown }>;
 let watched: string[][];
 let settings: Array<Record<string, unknown>>;
 let spoken: AlertSpeak[];
@@ -24,7 +25,9 @@ let pushed: Array<[string, string]>;
 function realmFor(name: string): AlertRealm {
   return {
     answer: (result) => void answers.push({ realm: name, ...result }),
-    resendStates: () => void resent.push(name),
+    resendStates: (ids) => void resent.push({ realm: name, ids }),
+    resendWatchedCommands: (names) => void resent.push({ realm: name, names }),
+    resendSettings: (value) => void resent.push({ realm: name, settings: value }),
   };
 }
 
@@ -133,25 +136,33 @@ it('starts a respawned Session over, from the persisted state it was spawned wit
   expect(host.manager.has('pty-2')).toBe(true);
 });
 
-it('re-sends the asking realm its state and both stores on sync, ending nothing', () => {
+it('re-sends the asking realm its own Sessions and both stores on sync, to it alone, ending nothing', () => {
   from('main', { op: 'initializeWatchedCommands', names: ['npm test'] });
   from('main', { op: 'initializeSettings', settings: DEFAULT_ALERT_SETTINGS });
   from('main', { op: 'engagement', state: { present: true, focusId: 'pty-a' } });
   watched = [];
   settings = [];
 
-  from('main', { op: 'sync' });
-  expect(resent).toEqual(['main']);
-  expect(watched).toEqual([['npm test']]);
-  expect(settings).toHaveLength(1);
+  from('main', { op: 'sync', ids: ['pty-a', 42, ''] });
+  expect(resent).toEqual([
+    { realm: 'main', ids: ['pty-a'] },
+    { realm: 'main', names: ['npm test'] },
+    { realm: 'main', settings: DEFAULT_ALERT_SETTINGS },
+  ]);
+  // No broadcast: every other realm's copies are intact.
+  expect(watched).toEqual([]);
+  expect(settings).toEqual([]);
   expect(host.manager.viewerIds()).toEqual(['main']);
+
+  resent = [];
+  from('main', { op: 'sync' });
+  expect(resent[0]).toEqual({ realm: 'main', ids: [] });
 });
 
 it('never snapshots a store no realm has seeded', () => {
   // It would replace the renderers' persisted copies with the defaults.
-  from('main', { op: 'sync' });
-  expect(watched).toEqual([]);
-  expect(settings).toEqual([]);
+  from('main', { op: 'sync', ids: [] });
+  expect(resent).toEqual([{ realm: 'main', ids: [] }]);
 });
 
 describe('realms', () => {
@@ -197,6 +208,8 @@ describe('realms', () => {
     host.handle('main', { op: 'await', awaitId: 'await-1', id: 'pty-1', until: 'exit', timeoutMs: 600_000 }, {
       answer: () => { throw new Error('webview disposed'); },
       resendStates: () => {},
+      resendWatchedCommands: () => {},
+      resendSettings: () => {},
     });
     from('main', { op: 'await', awaitId: 'await-2', id: 'pty-2', until: 'exit', timeoutMs: 600_000 });
     host.endRealm('main');

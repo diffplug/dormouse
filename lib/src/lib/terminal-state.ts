@@ -385,9 +385,8 @@ export function summarizeCommandLine(raw: string): string {
  * derive it are `docs/specs/alert.md` -> WATCHING Track.
  */
 export function commandWatchKey(raw: string): string | null {
-  const segments = splitCommandList(tokenizeCommand(raw.trim()))
-    .map((segment) => segment.filter((token) => !GROUPING_TOKENS.has(token)));
-  const words = segments.reverse().find((segment) => segment.length > 0) ?? [];
+  const commands = listCommands(tokenizeCommand(raw.trim()));
+  const words = commands[commands.length - 1] ?? [];
   const pipe = words.indexOf('|');
   return watchKeyOfCommand(pipe === -1 ? words : words.slice(0, pipe));
 }
@@ -902,9 +901,12 @@ function withRequiredHostPrefixes(
 
 /**
  * Split a command line into words, honoring quotes, POSIX backslash escapes,
- * and the pipeline/compound separators `| || && ; &`, which are emitted as
- * their own tokens. An unquoted newline separates commands like `;`, and a
- * backslash-newline continues the line. An unquoted `(` or `)` is a token of its
+ * and the pipeline/compound separators `| || && ; &` (and a case item's
+ * `;; ;& ;;&`), which are emitted as their own tokens. An unquoted newline
+ * separates commands like `;`, and a backslash-newline continues the line. A
+ * here-document's body — the lines after an unquoted `<<` / `<<-`'s own line,
+ * through the one equal to its delimiter word with quotes removed — is
+ * skipped, never read as commands. An unquoted `(` or `)` is a token of its
  * own too, except that a `$(…)` / `<(…)` / `>(…)` substitution or a `name=(…)`
  * array stays inside its word, whitespace and separators included; `{` and `}`
  * are grouping only as whole words, which the split already makes them.
@@ -931,6 +933,8 @@ function tokenizeCommand(input: string): string[] {
   // Whether the last character was an unquoted, unescaped `$`, `<` or `>`,
   // which makes a `(` right after it open a substitution.
   let substitutionPrefix = false;
+  // Here-documents opened on the current line, whose bodies follow it in order.
+  const hereDocuments: HereDocument[] = [];
 
   const push = () => {
     if (!current) return;
@@ -980,6 +984,8 @@ function tokenizeCommand(input: string): string[] {
     if (char === '\n') {
       push();
       tokens.push(';');
+      // The lines after it are the bodies of the here-documents it opened.
+      if (hereDocuments.length > 0) i = skipHereDocumentBodies(input, i + 1, hereDocuments.splice(0)) - 1;
       continue;
     }
     if (/\s/.test(char)) {
@@ -1003,10 +1009,23 @@ function tokenizeCommand(input: string): string[] {
       i += 1;
       continue;
     }
+    // A case item's end: `;;`, `;&`, `;;&`.
+    if (char === ';' && (input[i + 1] === ';' || input[i + 1] === '&')) {
+      push();
+      const end = input.startsWith(';;&', i) ? ';;&' : input.slice(i, i + 2);
+      tokens.push(end);
+      i += end.length - 1;
+      continue;
+    }
     if (char === '|' || char === ';' || char === '&') {
       push();
       tokens.push(char);
       continue;
+    }
+    // `<<` or `<<-`, never the here-string `<<<`.
+    if (char === '<' && input[i + 1] === '<' && input[i + 2] !== '<' && input[i - 1] !== '<') {
+      const hereDocument = readHereDocumentDelimiter(input, i + 2);
+      if (hereDocument) hereDocuments.push(hereDocument);
     }
     current += char;
     substitutionPrefix = char === '$' || char === '<' || char === '>';
@@ -1014,6 +1033,56 @@ function tokenizeCommand(input: string): string[] {
 
   push();
   return tokens;
+}
+
+interface HereDocument {
+  /** The delimiter word, quotes removed: its body ends at a line equal to it. */
+  delimiter: string;
+  /** `<<-`: leading tabs are stripped from each body line, the delimiter's included. */
+  stripTabs: boolean;
+}
+
+/** The here-document a `<<` whose word starts at `from` opens, or null when no word follows it. */
+function readHereDocumentDelimiter(input: string, from: number): HereDocument | null {
+  let i = from;
+  const stripTabs = input[i] === '-';
+  if (stripTabs) i += 1;
+  while (input[i] === ' ' || input[i] === '\t') i += 1;
+  let delimiter = '';
+  let quote: '"' | "'" | null = null;
+  for (; i < input.length; i += 1) {
+    const char = input[i]!;
+    if (quote) {
+      if (char === quote) quote = null;
+      else delimiter += char;
+    } else if (char === '"' || char === "'") {
+      quote = char;
+    } else if (char === '\\' && i + 1 < input.length) {
+      i += 1;
+      delimiter += input[i];
+    } else if (/\s/.test(char) || ';&|()<>'.includes(char)) {
+      break;
+    } else {
+      delimiter += char;
+    }
+  }
+  return delimiter ? { delimiter, stripTabs } : null;
+}
+
+/** Where the bodies of `hereDocuments`, one after another from `from`, end:
+ *  past each one's delimiter line, or at the end of input. */
+function skipHereDocumentBodies(input: string, from: number, hereDocuments: readonly HereDocument[]): number {
+  let at = from;
+  for (const { delimiter, stripTabs } of hereDocuments) {
+    while (at < input.length) {
+      const newline = input.indexOf('\n', at);
+      const lineEnd = newline === -1 ? input.length : newline;
+      const line = input.slice(at, lineEnd);
+      at = lineEnd + 1;
+      if ((stripTabs ? line.replace(/^\t+/, '') : line) === delimiter) break;
+    }
+  }
+  return Math.min(at, input.length);
 }
 
 /** A word that opens a `name=(…)` / `name+=(…)` array assignment at its `(`. */
@@ -1041,19 +1110,76 @@ function isEnvAssignment(token: string | undefined): boolean {
   return !!token && /^[A-Za-z_][A-Za-z0-9_]*=/.test(token);
 }
 
-const LIST_SEPARATORS = new Set(['&&', '||', ';', '&']);
+/** The operators that end a case item. */
+const CASE_ITEM_ENDS = new Set([';;', ';&', ';;&']);
+const LIST_SEPARATORS = new Set(['&&', '||', ';', '&', ...CASE_ITEM_ENDS]);
 /** The subshell and group operators `tokenizeCommand` emits; lexical only, so a
  *  group's inner list is split like any other. */
 const GROUPING_TOKENS = new Set(['(', ')', '{', '}']);
+/** Words that close a compound command. A segment one leads holds only that
+ *  command's redirections or pipeline (`done < list`, `fi | tee log`). */
+const CLOSING_WORDS = new Set(['done', 'fi', 'esac', '}', ')']);
+/** Words that open a compound command or one of its clauses, or negate: the
+ *  rest of their segment is the command they run. */
+const OPENING_WORDS = new Set(['if', 'elif', 'then', 'else', 'while', 'until', 'do', '!', '(', '{']);
+/** Loop headers: a name and a word list, never a command. */
+const LOOP_HEADERS = new Set(['for', 'select']);
 
-/** Tokens split into the commands of a list; a pipeline stays in one piece. */
-function splitCommandList(tokens: string[]): string[][] {
-  const segments: string[][] = [[]];
+/**
+ * The simple commands of a list, in order, with the shell's grammar around them
+ * taken out: separators, grouping, a compound command's reserved words, a loop
+ * header, and a case item's pattern; a pipeline stays in one piece. Lexical,
+ * like the tokenizer, and a reserved word counts only where a command starts,
+ * so `for f in *; do make; done` and `if x; then make; fi` run `make`.
+ */
+function listCommands(tokens: readonly string[]): string[][] {
+  const commands: string[][] = [];
+  /** The next command starts with a case item's `pattern)`. */
+  let casePattern = false;
+  let segment: string[] = [];
+
+  const end = (): void => {
+    let words = segment;
+    segment = [];
+    if (words.length === 0) return;
+    if (CLOSING_WORDS.has(words[0]!)) {
+      if (words[0] === 'esac') casePattern = false;
+      return;
+    }
+    for (;;) {
+      if (words.length === 0) return;
+      const first = words[0]!;
+      if (OPENING_WORDS.has(first)) {
+        words = words.slice(1);
+      } else if (casePattern) {
+        casePattern = false;
+        const close = words.indexOf(')');
+        if (close === -1) break;
+        words = words.slice(close + 1);
+      } else if (first === 'case') {
+        // `case WORD in`, then the first item's pattern.
+        casePattern = true;
+        const inAt = words.indexOf('in', 2);
+        words = inAt === -1 ? [] : words.slice(inAt + 1);
+      } else if (LOOP_HEADERS.has(first)) {
+        return;
+      } else {
+        break;
+      }
+    }
+    commands.push(words.filter((token) => !GROUPING_TOKENS.has(token)));
+  };
+
   for (const token of tokens) {
-    if (LIST_SEPARATORS.has(token)) segments.push([]);
-    else segments[segments.length - 1]!.push(token);
+    if (!LIST_SEPARATORS.has(token)) {
+      segment.push(token);
+      continue;
+    }
+    end();
+    if (CASE_ITEM_ENDS.has(token)) casePattern = true;
   }
-  return segments;
+  end();
+  return commands.filter((words) => words.length > 0);
 }
 
 interface FlagSpec {

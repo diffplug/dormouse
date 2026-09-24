@@ -13,14 +13,16 @@ import type { AlertStateDetail } from '../lib/platform/types';
 export type AlertCommand =
   /** A realm (re)initialized: whatever its previous realm engaged or parked is gone. */
   | { op: 'hello' }
-  /** Re-send this realm its Sessions' state and both stores, ending nothing. */
-  | { op: 'sync' }
+  /** Re-send this realm the state of the Sessions it shows, `ids`, and both
+   *  stores' snapshots, to it alone, ending nothing. */
+  | { op: 'sync'; ids: string[] }
   | { op: 'initializeWatchedCommands'; names: string[] }
   | { op: 'setCommandWatched'; name: string; watched: boolean }
   | { op: 'initializeSettings' | 'updateSettings'; settings: AlertSettings }
   | { op: 'engagement'; state: Engagement; lapse?: EngagementLapse }
   /** Every Session this realm shows, by id: what the host's delivery
-   *  scheduler cannot know itself. Replaces what the realm published before. */
+   *  scheduler cannot know itself. Overwrites each one's last publication
+   *  (`createAlertDeliveryScheduler`). */
   | { op: 'sessions'; sessions: Record<string, AlertSessionInfo> }
   | { op: 'acknowledge' | 'dismiss' | 'toggleTodo' | 'clearTodo'; id: string }
   | { op: 'await'; awaitId: string; id: string; until: AwaitUntil; timeoutMs: number }
@@ -55,9 +57,10 @@ export interface AlertEvents {
   /** `forWindow`: standalone names the window that parked the await, which
    *  Rust routes it to (`docs/specs/standalone.md` → "Routing"). */
   'alert:awaitResult': AlertAwaitResult & { forWindow?: string };
-  /** The app-global stores' canonical snapshots, to every realm. */
-  'alert:watchedCommands': { names: string[] };
-  'alert:settings': { settings: AlertSettings };
+  /** The app-global stores' canonical snapshots, to every realm, or to the
+   *  one that asked to `sync`, which standalone names in `forWindow`. */
+  'alert:watchedCommands': { names: string[]; forWindow?: string };
+  'alert:settings': { settings: AlertSettings; forWindow?: string };
   /** A spoken alarm now due, to the realm that shows its Session. */
   'alert:speak': AlertSpeak;
 }

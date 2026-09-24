@@ -676,6 +676,32 @@ describe('engagement viewers', () => {
     expect(router.getAlertStates().get('pty-remote')?.todo).toBe(false);
   });
 
+  it('answers a sync with its own Sessions named and both stores, to that webview alone', () => {
+    const asking = fakeWebview();
+    const other = fakeWebview();
+    const first = router.attachRouter(asking.channel);
+    const second = router.attachRouter(other.channel);
+    try {
+      alert(asking, { op: 'initializeWatchedCommands', names: ['make'] });
+      alert(asking, { op: 'initializeSettings', settings: {} as never });
+      asking.send({ type: 'pty:spawn', id: 'pty-mine', options: { cwd: '/repo' } });
+      other.send({ type: 'pty:spawn', id: 'pty-theirs', options: { cwd: '/repo' } });
+      asking.posted.length = 0;
+      other.posted.length = 0;
+
+      alert(asking, { op: 'sync', ids: ['pty-mine', 'pty-theirs'] });
+      expect(asking.posted.map((message) => [message.type, (message as { id?: string }).id])).toEqual([
+        ['alert:state', 'pty-mine'],
+        ['alert:watchedCommands', undefined],
+        ['alert:settings', undefined],
+      ]);
+      expect(other.posted).toEqual([]);
+    } finally {
+      first.dispose();
+      second.dispose();
+    }
+  });
+
   it('stops engaging anything once its webview is disposed', () => {
     const webview = fakeWebview();
     const disposable = router.attachRouter(webview.channel);

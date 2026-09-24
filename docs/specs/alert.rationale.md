@@ -18,6 +18,8 @@
 
 **Why a command-mode selection is not focus.** Command mode is navigation: the selection passes over panes while the user looks for one, and none of them receives the keyboard. Treating it as focus would hold completions on whatever pane the cursor was left on.
 
+**Why a focused iframe holds presence.** Input typed into an iframe browser Surface goes to the frame's own document, so a user typing in a browser pane lapsed `idle` after the inactivity timeout and was pushed while at the keyboard (review, 2026-09-23). The accepted cost: walking away with a browser pane focused keeps the viewer present, so a push waits until the window blurs or hides. Speech is unaffected, since a browser Surface is never focus. An application switch with the frame focused blurs only the frame, which is why the next deadline checks the window itself.
+
 **Why the renderer computes presence.** It is the only side that sees input events, and a presence timer in the host would need an IPC message per event to refresh it; one message per transition carries the same information.
 
 **Why each VS Code webview is its own viewer.** The webviews share one manager. With one attention slot, a webview's window blur sent an id-less clear that wiped the attention another webview had just set, arming its running build (audit, 2026-09-23).
@@ -82,6 +84,8 @@
 
 **Why the key is the last command of a list, past its wrappers.** The old key, argv[0] of the first simple command, named the set-up rather than the work: `cd web && pnpm dev` keyed on `cd`, `clear; claude` on `clear`, and `sudo make`, `time make`, `caffeinate -i claude` and `npx claude` on the wrapper, so a rule offered from those panes matched every other use of `cd` or `sudo` (audit, 2026-09-23). The last command of a list is the one still running when the line settles; a pipeline's first stage is the producer whose output the pane shows. An unknown wrapper flag keys the wrapper because guessing whether it swallowed the next word would key an argument as a program.
 
+**Why reserved words and here-documents are grammar.** Command lines keep their newlines and bash reports a whole history entry, so a compound entry's last word was its closer: `for f in *; do make; done` keyed on `done`, `if x; then make; fi` on `fi`, and `python3 - <<'EOF' … EOF` on its delimiter, splitting the script's own `&&` and `;` on the way (review, 2026-09-23). A rule offered from those panes matched nothing anyone runs. The body a loop or conditional runs is what the entry waits on, as a list's last command is; a closer's trailing `< list` or `| tee log` belongs to the whole compound command, whose producer is that body.
+
 **Why runners key by script.** `pnpm dev` never finishes and `pnpm test` does; one `pnpm` rule rang for both, so watching a dev server's pane also rang every test run. `run` is dropped because `npm run test` and `npm test` are one script under two spellings.
 
 **Why a bare runner rule still covers every script.** Rules stored before script keys are bare runner names, and a user who watched `pnpm` asked for all of it; a new rule never loses ground an old one had.
@@ -125,6 +129,8 @@
 **Why the host schedules delivery.** Each renderer used to run its own watcher over its activity mirror, and every realm boundary cost an alarm (audit, 2026-09-23). A recreated VS Code webview saw a latched ring go quiet-then-ringing and fired it at once, while one still inside its delay was first-observed in the new realm, seeded consumed, and never delivered; a disposed view whose PTYs lived on delivered nothing; standalone's WKWebView throttles or suspends timers when hidden; and a Workspace transfer had to carry, pause and resume receipts, and drop a refused arrival's Activity copy before releasing that pause. The host sees every episode from its start and outlives every renderer, so first-observation seeding and receipt transfer went away.
 
 **Why a push goes from the host, and only speech from a realm.** A push is the walked-away channel, yet performing it in the renderer made it depend on the realm the user had walked away from — suspended when hidden, or disposed, when a VS Code view fell back to titling the push by its command line (2026-09-23). Only `window.speechSynthesis` needs a renderer; a push needs only the Pane label, which the realm publishes ahead of time.
+
+**Why a publication never drops a Session with state.** Dropping an entry rechecked it against the defaults, consuming a sink only its override enabled, and enabling never replays an episode, so the realm's next, whole publication could not re-arm it. A reload, or a window mounting its Walls one at a time, publishes a partial set first (review, 2026-09-23). A Session with no state has no episode to consume; forgetting it keeps the host's copy bounded by what realms show, browser Surfaces included, which the manager never removes.
 
 **Why labels wait on a throttle and overrides do not.** Claude Code animates its terminal title about ten times a second (2026-09), and each frame changes the label: publishing every one would cross into the host ten times a second per Session for a value read only when a push comes due. An override change goes at once because disabling a sink must consume its pending push before it fires.
 

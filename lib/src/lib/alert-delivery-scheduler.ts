@@ -18,7 +18,7 @@ import { DEFAULT_ALERT_SETTINGS, type AlertSettings } from './alert-settings-mod
  */
 
 export interface AlertDeliverySchedulerOptions {
-  manager: Pick<AlertManager, 'onStateChange' | 'onRemove' | 'isEngaged' | 'viewerIds'>;
+  manager: Pick<AlertManager, 'onStateChange' | 'onRemove' | 'isEngaged' | 'viewerIds' | 'has'>;
   /** A spoken alarm is due, for the realm showing the Session to speak. */
   speak(id: string, episodeId: string): void;
   /** A push is due, titled by the Session's published Pane label. */
@@ -27,9 +27,11 @@ export interface AlertDeliverySchedulerOptions {
 
 export interface AlertDeliveryScheduler {
   /**
-   * One realm's Sessions, `{ label, overrides }` by id, revalidated. Replaces
-   * what that realm published before, except a Session another realm has
-   * published since.
+   * The Sessions one realm shows, `{ label, overrides }` by id, revalidated.
+   * Each overwrites its Session's record, whichever realm made it. One the
+   * realm published before and omits now is forgotten only while it has no
+   * alert state, which nothing can be pending on: a partial publication must
+   * never consume what an override armed.
    */
   publish(realmId: string, sessions: unknown): void;
   /** The application defaults, from the host's settings store. */
@@ -131,27 +133,24 @@ export function createAlertDeliveryScheduler(options: AlertDeliverySchedulerOpti
   return {
     publish(realmId, raw) {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return;
-      const next = new Map<string, Omit<Published, 'realmId'>>();
+      const named = new Set<string>();
       for (const [id, value] of Object.entries(raw)) {
         if (!id || !value || typeof value !== 'object') continue;
-        const { label, overrides } = value as Record<string, unknown>;
-        next.set(id, {
-          label: typeof label === 'string' ? label.slice(0, LABEL_LIMIT) : '',
-          overrides: normalizeAlertDeliveryOverrides(overrides),
-        });
-      }
-      const changed: string[] = [];
-      for (const [id, entry] of published) {
-        if (entry.realmId !== realmId || next.has(id)) continue;
-        published.delete(id);
-        if (Object.keys(entry.overrides).length > 0) changed.push(id);
-      }
-      for (const [id, entry] of next) {
+        named.add(id);
+        const { label, overrides: rawOverrides } = value as Record<string, unknown>;
+        const overrides = normalizeAlertDeliveryOverrides(rawOverrides);
         const prior = published.get(id)?.overrides ?? {};
-        published.set(id, { realmId, ...entry });
-        if (!sameAlertDeliveryOverrides(prior, entry.overrides)) changed.push(id);
+        published.set(id, { realmId, label: typeof label === 'string' ? label.slice(0, LABEL_LIMIT) : '', overrides });
+        if (!sameAlertDeliveryOverrides(prior, overrides)) recheck(id);
       }
-      for (const id of changed) recheck(id);
+      // Never a record a ring could be pending on: dropping it would consume
+      // that ring's sinks, and the realm's next, whole publication could never
+      // re-arm them. One with no alert state (a browser Surface, a terminal
+      // that has printed nothing) goes, so the host holds no more than realms
+      // show.
+      for (const [id, entry] of published) {
+        if (entry.realmId === realmId && !named.has(id) && !manager.has(id)) published.delete(id);
+      }
     },
 
     setDefaults(settings) {

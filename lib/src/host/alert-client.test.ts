@@ -47,7 +47,8 @@ it('sends each alert verb as one command naming its op', () => {
     { op: 'initializeSettings', settings: DEFAULT_ALERT_SETTINGS },
     { op: 'updateSettings', settings: DEFAULT_ALERT_SETTINGS },
     { op: 'hello' },
-    { op: 'sync' },
+    // The Sessions the realm last published are the ones it shows.
+    { op: 'sync', ids: ['p'] },
   ]);
 });
 
@@ -137,6 +138,8 @@ describe('awaits', () => {
     const realm = createAlertClient((command) => host.handle('main', command, {
       answer: (result) => void realm.onEvent('alert:awaitResult', result),
       resendStates: () => {},
+      resendWatchedCommands: () => {},
+      resendSettings: () => {},
     }));
     try {
       const handle = realm.methods.alertAwait('p', { until: 'quiet', timeoutMs: 600_000 });

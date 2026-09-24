@@ -73,9 +73,13 @@ export class FakePtyAdapter implements PlatformAdapter {
   private readonly alerts = createAlertClient((command) => this.alertHost.handle(LOCAL_VIEWER, command, this.alertRealm));
   private readonly alertRealm: AlertRealm = {
     answer: (result) => void this.alerts.onEvent('alert:awaitResult', result),
-    resendStates: () => {
-      for (const [id, state] of this.alertManager.getAllStates()) this.alerts.onEvent('alert:state', { id, ...state });
+    resendStates: (ids) => {
+      for (const id of ids) {
+        if (this.alertManager.has(id)) this.alerts.onEvent('alert:state', { id, ...this.alertManager.getState(id) });
+      }
     },
+    resendWatchedCommands: (names) => void this.alerts.onEvent('alert:watchedCommands', { names }),
+    resendSettings: (settings) => void this.alerts.onEvent('alert:settings', { settings }),
   };
 
   /** The PTY side feeds the manager directly, as a host's own PTYs do. */

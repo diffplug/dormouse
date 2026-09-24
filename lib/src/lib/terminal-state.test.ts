@@ -381,6 +381,26 @@ describe('WATCHING key', () => {
     ['arr=(1 2) claude', 'claude'],
     ['npm run "build(prod)"', 'npm build(prod)'],
     ['(cd web && pnpm dev) | tee log', 'pnpm dev'],
+    // A here-document's body is text, never commands.
+    ["python3 - <<'EOF'\nimport os\nprint(os.getcwd())\nEOF", 'python3'],
+    ['cat <<EOF\nmake && deploy; rm -rf x\nEOF', 'cat'],
+    ['cat << "END" | claude\nhi\nEND', 'cat'],
+    ['cat <<-EOF\n\tone; two\n\tEOF\nclaude', 'claude'],
+    ['cat <<A <<\\B\na; x\nA\nb; y\nB\nclaude', 'claude'],
+    ['cat <<<x\nclaude', 'claude'],
+    // Reserved words are grammar: the key is the command a clause runs.
+    ['for f in *; do make; done', 'make'],
+    ['for f in *\ndo\n  claude "$f"\ndone', 'claude'],
+    ['if test -f x; then make; fi', 'make'],
+    ['if x; then a; else make; fi', 'make'],
+    ['while true; do claude; done', 'claude'],
+    ['while read -r f; do claude; done < list', 'claude'],
+    ['for f in *; do make; done | tee log', 'make'],
+    ['{ make; } > log', 'make'],
+    ['! make', 'make'],
+    ['echo done', 'echo'],
+    ['case $x in a|b) make;; esac', 'make'],
+    ['case $x in\n  a)\n    make\n    ;;\n  (*) claude ;;\nesac', 'claude'],
     // Transparent wrappers, with the flags they take.
     ['sudo make', 'make'],
     ['sudo -u root FOO=1 make install', 'make install'],
@@ -444,7 +464,7 @@ describe('WATCHING key', () => {
     expect(isWatchKey(expected)).toBe(true);
   });
 
-  it.each(['', '   ', '|', 'FOO=1', ';', '"my tool" --flag'])('has no key for %j', (raw) => {
+  it.each(['', '   ', '|', 'FOO=1', ';', '"my tool" --flag', 'done', 'fi', 'for f in *', 'case $x in'])('has no key for %j', (raw) => {
     expect(commandWatchKey(raw)).toBeNull();
   });
 

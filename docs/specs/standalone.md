@@ -255,8 +255,9 @@ that feeds it: one `AlertManager`, every window a realm under its label
 - **`alert:speak` carries its Session's `id`**, which Rust routes it by.
 - **Must re-send each listed Session's `alert:state` behind the answer to
   `pty:requestInit`**: a reloaded window and an arriving Workspace learn their
-  rings and TODOs nowhere else. A `sync` re-sends every Session's, and Rust
-  routes each to its owner.
+  rings and TODOs nowhere else. **A `sync` re-sends only the Sessions its
+  window names**, each to its owner, and both stores' snapshots **with
+  `forWindow`**.
 - **Rust passes a spawn's `options.alert` through opaque**
   (`a_spawn_carries_its_persisted_alert_to_the_sidecar`); the sidecar seeds from
   it (`docs/specs/alert.md` → Public State) and strips it before `pty-core`.

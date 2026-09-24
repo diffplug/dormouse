@@ -808,13 +808,18 @@ describe('the sidecar host', () => {
     expect(host.alerts.viewerIds()).toEqual(['main']);
   });
 
-  it('re-sends every Session\'s state and both stores to a window that asks to sync', () => {
+  it('re-sends a window that asks to sync its own Sessions\' state, and both stores to it alone', () => {
     command('main', { op: 'initializeWatchedCommands', names: ['npm test'] });
     command('main', { op: 'initializeSettings', settings: {} });
     host.alerts.notifyFromProtocol('pty-1', REPORT);
+    host.alerts.notifyFromProtocol('pty-2', REPORT);
     out = [];
-    command('main', { op: 'sync' });
-    expect(out.map((line) => line.event).sort()).toEqual(['alert:settings', 'alert:state', 'alert:watchedCommands']);
+    command('main', { op: 'sync', ids: ['pty-1'] });
+    expect(out.map((line) => [line.event, (line.data as { id?: string; forWindow?: string }).id ?? (line.data as { forWindow?: string }).forWindow])).toEqual([
+      ['alert:state', 'pty-1'],
+      ['alert:watchedCommands', 'main'],
+      ['alert:settings', 'main'],
+    ]);
   });
 
   /**

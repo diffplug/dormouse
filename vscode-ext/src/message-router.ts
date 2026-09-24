@@ -400,9 +400,13 @@ export function attachRouter(
    *  disposed: a realm's end answers what it parked synchronously. */
   const realm: AlertRealm = {
     answer: (result) => void post({ type: 'alert:awaitResult', ...result } satisfies ExtensionMessage),
-    resendStates: () => {
-      for (const id of ownedPtyIds) post({ type: 'alert:state', id, ...alertManager.getState(id) } satisfies ExtensionMessage);
+    resendStates: (ids) => {
+      for (const id of ids) {
+        if (ownedPtyIds.has(id)) post({ type: 'alert:state', id, ...alertManager.getState(id) } satisfies ExtensionMessage);
+      }
     },
+    resendWatchedCommands: (names) => void post({ type: 'alert:watchedCommands', names } satisfies ExtensionMessage),
+    resendSettings: (settings) => void post({ type: 'alert:settings', settings } satisfies ExtensionMessage),
   };
 
   function claim(id: string): void {

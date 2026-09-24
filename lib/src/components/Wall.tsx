@@ -1926,20 +1926,19 @@ export function Wall({
       // over rather than merely unzoom the owner. Acquiring zoom first enters
       // passthrough on this pane (unless it already owns focus); selectPane's
       // `releaseZoomExcept` drops the previous owner on the way through.
-      const currentZoom = lath.store.getSnapshot().zoomedId;
-      if (currentZoom === id) {
-        lath.store.setZoomed(null);
-        return;
-      }
+      const unzoom = lath.store.getSnapshot().zoomedId === id;
       if (
-        modeRef.current !== 'passthrough' ||
-        selectedTypeRef.current !== 'pane' ||
-        selectedIdRef.current !== id
+        !unzoom && (
+          modeRef.current !== 'passthrough' ||
+          selectedTypeRef.current !== 'pane' ||
+          selectedIdRef.current !== id
+        )
       ) {
         enterTerminalMode(id);
-        acknowledgeSession(id);
       }
-      lath.store.setZoomed(id);
+      // A gesture on this Session whichever way it goes, in passthrough or not.
+      acknowledgeSession(id);
+      lath.store.setZoomed(unzoom ? null : id);
     },
     onClickPanel: (id: string) => {
       setConfirmKill(null);

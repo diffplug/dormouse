@@ -92,6 +92,30 @@ describe('presence', () => {
     expect(transitions).toHaveLength(2);
   });
 
+  it('never lapses idle while an iframe Surface holds focus, whose input never reaches this window', () => {
+    const frame = document.createElement('iframe');
+    const activeElement = vi.spyOn(document, 'activeElement', 'get').mockReturnValue(frame);
+    input('keydown');
+    input('blur');
+    vi.advanceTimersByTime(TIMEOUT * 2);
+    expect(transitions).toEqual([[true, undefined]]);
+
+    // Focus back in the document: the idle clock runs from the frame's last check.
+    activeElement.mockReturnValue(document.body);
+    vi.advanceTimersByTime(TIMEOUT);
+    expect(transitions).toEqual([[true, undefined], [false, 'idle']]);
+  });
+
+  it('leaves at the next deadline when the window loses focus while an iframe holds it', () => {
+    const frame = document.createElement('iframe');
+    vi.spyOn(document, 'activeElement', 'get').mockReturnValue(frame);
+    input('keydown');
+    // No blur reaches this window: it already blurred into the frame.
+    focused = false;
+    vi.advanceTimersByTime(TIMEOUT);
+    expect(transitions).toEqual([[true, undefined], [false, 'leave']]);
+  });
+
   it('leaves when hidden and comes back when shown', () => {
     input('keydown');
     visibility = 'hidden';

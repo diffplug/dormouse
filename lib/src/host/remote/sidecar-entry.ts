@@ -459,11 +459,14 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
     }
   }
 
-  /** An await's outcome goes to the window that parked it; a `sync` re-sends
-   *  every Session's state, which reaches only the windows that own them. */
+  /** An await's outcome and a `sync`'s store snapshots go to the window that
+   *  asked; a `sync` re-sends only the Sessions that window names, each routed
+   *  to its owner. */
   const realmOf = (window: string): AlertRealm => ({
     answer: (result) => sendAlert('alert:awaitResult', { ...result, forWindow: window }),
-    resendStates: () => publish(undefined),
+    resendStates: (ids) => publish(ids),
+    resendWatchedCommands: (names) => sendAlert('alert:watchedCommands', { names, forWindow: window }),
+    resendSettings: (settings) => sendAlert('alert:settings', { settings, forWindow: window }),
   });
 
   const store = options.stateDir

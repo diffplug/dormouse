@@ -10,8 +10,9 @@ const LISTENER_OPTIONS: AddEventListenerOptions = { capture: true, passive: true
 
 /**
  * Whether a human is at this renderer realm: its window focused and visible,
- * with typing, pointer, or wheel input inside the inactivity timeout. Emits
- * transitions only, each end of presence with why it ended.
+ * with typing, pointer, or wheel input inside the inactivity timeout, or an
+ * iframe Surface holding focus. Emits transitions only, each end of presence
+ * with why it ended.
  */
 export interface PresenceTracker {
   readonly present: boolean;
@@ -33,6 +34,10 @@ export function createPresenceTracker({ timeoutMs, onChange }: PresenceTrackerOp
   let timer: ReturnType<typeof setTimeout> | null = null;
 
   const windowActive = (): boolean => document.hasFocus() && document.visibilityState === 'visible';
+  // A focused iframe Surface keeps the input typed into it from these
+  // listeners, so its focus stands in for input (`docs/specs/alert.md` ->
+  // Engagement).
+  const iframeHoldsFocus = (): boolean => document.activeElement?.tagName === 'IFRAME';
 
   const set = (next: boolean, lapse?: EngagementLapse): void => {
     if (next === present) return;
@@ -56,6 +61,12 @@ export function createPresenceTracker({ timeoutMs, onChange }: PresenceTrackerOp
   function expire(): void {
     timer = null;
     if (!present) return;
+    // Left while an iframe held focus, so no blur reached this window.
+    if (!windowActive()) {
+      set(false, 'leave');
+      return;
+    }
+    if (iframeHoldsFocus()) lastInputAt = Date.now();
     if (Date.now() - lastInputAt >= timeoutMs()) set(false, 'idle');
     else arm();
   }

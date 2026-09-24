@@ -111,6 +111,6 @@ describe("BrowserSidecarAdapter event stream", () => {
     send.mockClear();
 
     reconnect();
-    expect(send.mock.calls).toEqual([["alert_command", { payload: { op: "sync" } }]]);
+    expect(send.mock.calls).toEqual([["alert_command", { payload: { op: "sync", ids: [] } }]]);
   });
 });

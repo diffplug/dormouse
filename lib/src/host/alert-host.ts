@@ -3,6 +3,7 @@ import { createAlertDeliveryScheduler } from '../lib/alert-delivery-scheduler';
 import { AlertSettingsHost } from '../lib/alert-settings-host';
 import { WatchedCommandHost } from '../lib/watched-command-host';
 import type { PersistedAlertState } from '../lib/session-types';
+import type { AlertSettings } from '../lib/alert-settings-model';
 import type { AlertAwaitResult, AlertSpeak } from './alert-protocol';
 
 /**
@@ -19,8 +20,13 @@ import type { AlertAwaitResult, AlertSpeak } from './alert-protocol';
 export interface AlertRealm {
   /** One await's outcome. May throw from a realm being torn down. */
   answer(result: AlertAwaitResult): void;
-  /** `sync`: re-send this realm the state of the Sessions it shows. */
-  resendStates(): void;
+  /** `sync`: re-send this realm the state of these Sessions, the ones it
+   *  shows, each the host has state for. */
+  resendStates(ids: readonly string[]): void;
+  /** `sync`: the WATCHING rule set's snapshot, to this realm alone. */
+  resendWatchedCommands(names: string[]): void;
+  /** `sync`: the alarm settings' snapshot, to this realm alone. */
+  resendSettings(settings: AlertSettings): void;
 }
 
 export interface AlertHostOptions {
@@ -135,10 +141,12 @@ export function createAlertHost(options: AlertHostOptions): AlertHost {
         case 'hello':
           endRealm(realmId);
           return;
+        // Answered to the asking realm alone, never a broadcast: every other
+        // realm's copies are intact.
         case 'sync':
-          realm.resendStates();
-          watched.publish();
-          settings.publish();
+          realm.resendStates(Array.isArray(message.ids) ? message.ids.filter(isId) : []);
+          watched.publish((names) => realm.resendWatchedCommands(names));
+          settings.publish((value) => realm.resendSettings(value));
           return;
         case 'initializeWatchedCommands':
           // Only the first realm's offer is taken; every later one is answered

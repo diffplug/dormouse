@@ -38,7 +38,8 @@ export interface AlertClient {
    *  the same name engaged or parked is gone. */
   hello(): void;
   /** Ask the host to re-send this realm's Sessions' state and both stores,
-   *  for a transport that may have dropped them. */
+   *  for a transport that may have dropped them: the Sessions its last
+   *  `alertPublishSessions` named. */
   sync(): void;
   /** Settle every await this realm parked `cancelled`, synchronously: nothing
    *  will deliver their outcomes once the adapter is gone. */
@@ -63,6 +64,8 @@ export function createAlertClient(send: (command: AlertCommand) => void): AlertC
   const awaits = new Map<string, { resolve: (outcome: AwaitOutcome) => void; startedAt: number }>();
   const tag = randomTag();
   let awaitSeq = 0;
+  /** The Sessions this realm shows, as it last published them. */
+  let shown: string[] = [];
 
   const methods: AlertClientMethods = {
     alertSetWatchedCommands: (names) => send({ op: 'initializeWatchedCommands', names }),
@@ -74,7 +77,10 @@ export function createAlertClient(send: (command: AlertCommand) => void): AlertC
     alertDismiss: (id) => send({ op: 'dismiss', id }),
     alertEngagement: (state: Engagement, lapse?: EngagementLapse) =>
       send({ op: 'engagement', state, ...(lapse ? { lapse } : {}) }),
-    alertPublishSessions: (sessions) => send({ op: 'sessions', sessions }),
+    alertPublishSessions: (sessions) => {
+      shown = Object.keys(sessions);
+      send({ op: 'sessions', sessions });
+    },
     alertAcknowledge: (id) => send({ op: 'acknowledge', id }),
     alertToggleTodo: (id) => send({ op: 'toggleTodo', id }),
     alertClearTodo: (id) => send({ op: 'clearTodo', id }),
@@ -156,7 +162,7 @@ export function createAlertClient(send: (command: AlertCommand) => void): AlertC
     },
 
     hello: () => send({ op: 'hello' }),
-    sync: () => send({ op: 'sync' }),
+    sync: () => send({ op: 'sync', ids: shown }),
 
     dispose() {
       for (const [awaitId, parked] of [...awaits]) {

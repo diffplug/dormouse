@@ -3952,6 +3952,22 @@ describe('engagement', () => {
     expect(acknowledge.mock.calls).toEqual([['pane-a']]);
   });
 
+  it('acknowledges a zoom and an unzoom from the pane already in passthrough', async () => {
+    const acknowledge = vi.spyOn(terminalRegistry, 'acknowledgeSession');
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="passthrough" />));
+    await flush();
+
+    await act(async () => { container.querySelector<HTMLElement>('[data-lath-leaf="pane-a"] button[aria-label="Zoom"]')!.click(); });
+    await flush();
+    expect(container.querySelector('[data-lath-leaf="pane-a"] button[aria-label="Unzoom"]')).not.toBeNull();
+    expect(acknowledge.mock.calls).toEqual([['pane-a']]);
+
+    await act(async () => { container.querySelector<HTMLElement>('[data-lath-leaf="pane-a"] button[aria-label="Unzoom"]')!.click(); });
+    await flush();
+    expect(container.querySelector('[data-lath-leaf="pane-a"] button[aria-label="Zoom"]')).not.toBeNull();
+    expect(acknowledge.mock.calls).toEqual([['pane-a'], ['pane-a']]);
+  });
+
   it('acknowledges the dev-server chip jumping to the terminal it names', async () => {
     const acknowledge = vi.spyOn(terminalRegistry, 'acknowledgeSession');
     await act(async () => root.render(<Wall

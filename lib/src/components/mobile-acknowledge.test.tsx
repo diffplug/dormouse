@@ -14,6 +14,7 @@ import { MobileWall, useMobileWallSessionItems } from './MobileWall';
 import { FakePtyAdapter, setPlatform } from '../lib/platform';
 import { clearTerminalActivity, disposeAllSessions, getActivity, initAlertStateReceiver, writeUserInput } from '../lib/terminal-registry';
 import { ensureResizeObserver, pointerEvent } from './wall/wall-test-utils';
+import { RADIUS_FADE_START, RADIUS_SELECT } from '../lib/mobile-gesture-menu';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -84,16 +85,49 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+type Point = { clientX: number; clientY: number };
+
+/** One press on the terminal: down, a move to each of `moves`, then up at `up`. */
+function press(down: Point, moves: Point[], up: Point): void {
+  const screen = container.querySelector('.xterm');
+  expect(screen).not.toBeNull();
+  act(() => {
+    screen!.dispatchEvent(pointerEvent('pointerdown', down));
+    for (const point of moves) screen!.dispatchEvent(pointerEvent('pointermove', point));
+    screen!.dispatchEvent(pointerEvent('pointerup', up));
+  });
+}
+
+const ORIGIN = { clientX: 10, clientY: 12 };
+/** Past a tap's slop, short of any radial selection, so no gesture key fires. */
+const AWAY = { clientX: 10, clientY: 12 + (RADIUS_FADE_START + RADIUS_SELECT) / 2 };
+
 describe('mobile acknowledge', () => {
   it.each<MobileTerminalTouchMode>(['gestures', 'selection', 'cursor'])(
     'a tap on the terminal puts out a ring and keeps its TODO in %s mode',
     (mode) => {
       render(mode);
       ring();
-      const screen = container.querySelector('.xterm');
-      expect(screen).not.toBeNull();
-      act(() => { screen!.dispatchEvent(pointerEvent('pointerdown')); });
+      const screen = container.querySelector('.xterm')!;
+      act(() => { screen.dispatchEvent(pointerEvent('pointerdown', ORIGIN)); });
+      // Judged on release: the press may yet become a drag.
+      expect(getActivity(PANE)).toMatchObject({ status: 'ALERT_RINGING' });
+      // A little jitter is still a tap.
+      act(() => { screen.dispatchEvent(pointerEvent('pointerup', { clientX: 11, clientY: 12 })); });
       expect(getActivity(PANE)).toMatchObject({ status: 'WATCHING_DISABLED', todo: true });
+    },
+  );
+
+  it.each<MobileTerminalTouchMode>(['gestures', 'selection', 'cursor'])(
+    'a drag across the terminal leaves the ring in %s mode, even one that comes back',
+    (mode) => {
+      render(mode);
+      ring();
+      press(ORIGIN, [AWAY], AWAY);
+      press(ORIGIN, [AWAY, ORIGIN], ORIGIN);
+      // Lifted away with no move reported between.
+      press(ORIGIN, [], AWAY);
+      expect(getActivity(PANE)).toMatchObject({ status: 'ALERT_RINGING', todo: true });
     },
   );
 
