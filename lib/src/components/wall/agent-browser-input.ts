@@ -72,20 +72,3 @@ export const MOUSE_BUTTON_MASKS: Record<number, number> = { 0: 1, 1: 4, 2: 2 };
 export function modifiers(e: { altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }): number {
   return (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0);
 }
-
-/** A paste as agent-browser stream messages: its stream takes only key and
- *  mouse events, so a key down and up per character, a newline as Enter. */
-export function keyPairTextInputs(text: string): Record<string, unknown>[] {
-  const messages: Record<string, unknown>[] = [];
-  for (const ch of text) {
-    if (ch === '\r') continue;
-    if (ch === '\n') {
-      messages.push({ type: 'input_keyboard', eventType: 'keyDown', key: 'Enter', code: 'Enter', text: '\r', windowsVirtualKeyCode: 13, modifiers: 0 });
-      messages.push({ type: 'input_keyboard', eventType: 'keyUp', key: 'Enter', code: 'Enter', text: '', windowsVirtualKeyCode: 13, modifiers: 0 });
-    } else {
-      messages.push({ type: 'input_keyboard', eventType: 'keyDown', key: ch, code: '', text: ch, windowsVirtualKeyCode: 0, modifiers: 0 });
-      messages.push({ type: 'input_keyboard', eventType: 'keyUp', key: ch, code: '', text: '', windowsVirtualKeyCode: 0, modifiers: 0 });
-    }
-  }
-  return messages;
-}

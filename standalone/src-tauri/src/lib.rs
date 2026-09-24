@@ -1510,38 +1510,6 @@ fn browser_request(
     Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
 }
 
-// The sidecar answers a screenshot with its temp-file PATH (the bytes never ride
-// the JSON-lines stdio shared with PTY traffic). Read the file here and return a
-// raw tauri::ipc::Response, so the webview gets an ArrayBuffer (what the panel
-// decodes with createImageBitmap). Each capture is a fresh file handed to this
-// reader alone, so it is deleted once read: a frame of the user's page must not
-// wait on disk for the host's shutdown.
-#[tauri::command(async)]
-fn browser_screenshot(
-    state: tauri::State<'_, SidecarState>,
-    request: JsonValue,
-) -> Result<tauri::ipc::Response, String> {
-    if request.get("op").and_then(JsonValue::as_str) != Some("screenshot") {
-        return Err("Expected screenshot operation".to_string());
-    }
-    let result = browser_request(state, request)?;
-    if result.get("ok").and_then(JsonValue::as_bool) != Some(true) {
-        return Err(result
-            .get("error")
-            .and_then(JsonValue::as_str)
-            .unwrap_or("screenshot failed")
-            .to_string());
-    }
-    let path = result
-        .get("path")
-        .and_then(JsonValue::as_str)
-        .ok_or("screenshot returned no path")?;
-    let bytes = std::fs::read(path)
-        .map_err(|err| format!("could not read screenshot file '{path}': {err}"));
-    let _ = std::fs::remove_file(path);
-    bytes.map(tauri::ipc::Response::new)
-}
-
 // Clipboard reads run natively on Windows (see clipboard_win) to avoid the
 // console-window flicker of shelling out to PowerShell; other platforms keep the
 // sidecar path (pbpaste/xclip never pop a console window).
@@ -4430,7 +4398,6 @@ pub fn run() {
             save_notepad_archive,
             reset_notepad_archive,
             browser_request,
-            browser_screenshot,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Dormouse")
@@ -6164,12 +6131,10 @@ mod tests {
                 }
             }
 
-            // Match direct callers of the blocking helper *and*
-            // `browser_screenshot`, which reaches it transitively through
-            // `browser_request` (its body never names `request_from_sidecar`
-            // directly). That pair carries the longest timeout
-            // (BROWSER_REQUEST_TIMEOUT = 40s), so it's the worst case to let
-            // slip plain-sync.
+            // Match direct callers of the blocking helper *and* anything that
+            // reaches it transitively through `browser_request`, which carries
+            // the longest timeout (BROWSER_REQUEST_TIMEOUT = 40s), so it's the
+            // worst case to let slip plain-sync.
             let reaches_blocking = [
                 "request_from_sidecar", "browser_request", "ARRIVAL_DISK_LOCK",
                 "record_arrival_on_disk", "mark_arrival_adopted_on_disk", "return_arrival_on_disk",

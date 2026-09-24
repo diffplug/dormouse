@@ -210,7 +210,9 @@ export type BrowserAnswers = {
 /**
  * Install a platform whose host drives `providers`, answering each typed
  * browser request from `answers` by operation — `{ ok: true }` where none is
- * given. `answers` stays live, so a test may swap one mid-flight; `requests`
+ * given, and for `view` a viewer socket URL naming the stream as its port, so
+ * a test finds a Surface's socket by the stream it views. `answers` stays
+ * live, so a test may swap one mid-flight; `requests`
  * reads back every request of one kind, in order, without the ids a Surface
  * mints for its launches and attaches and a close's `cancels` of them — fresh
  * UUIDs no test can predict (`browser`'s calls keep them).
@@ -226,6 +228,7 @@ export function installBrowserHost(
 ) {
   const browser = vi.fn(async (request: BrowserRequest): Promise<BrowserResult> => {
     const answer = answers[request.op] as ((r: BrowserRequest) => BrowserResult | Promise<BrowserResult>) | undefined;
+    if (!answer && request.op === 'view') return { ok: true, url: `ws://127.0.0.1:${request.stream}` };
     return (await answer?.(request)) ?? { ok: true };
   });
   const platform = Object.assign(new FakePtyAdapter(), { browserProviders: providers, browser });

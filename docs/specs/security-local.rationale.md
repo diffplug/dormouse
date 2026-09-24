@@ -120,9 +120,15 @@ chain and fails the policy, and a different grant has a different origin.
 someone adds a listener — the same failure mode that once left `.vscode/` owned by
 nobody.
 
-**Why the stream relay needs no `Host` check.** Rebinding exists to make
-same-origin-looking requests to loopback, which buys nothing against a listener
-demanding an unguessable one-shot secret.
+**Why the webview gets one guarded viewer socket, never an upstream.** The
+webview once held a browser-level CDP socket from `get cdp-url` for a popped-out
+window's URL — `Runtime.evaluate` in any target, `file://` navigation — and in
+VS Code dialed a relay that piped raw bytes to any loopback port it named, with
+`Origin` dropped (review of the browser stack, 2026-09). The host now speaks
+each upstream's protocol itself and relays only parsed state, frames and
+rebuilt input, so a webview naming another loopback port gets nothing it could
+not already reach with its own `ws://127.0.0.1:*` `connect-src`. The listener
+checks `Host` as well as the token, like every listener built after the relay.
 
 **Why the browser-dev bridge's content-type gate is a security control.** Without it
 the endpoint is CORS-simple and needs no preflight to survive, and what it dispatches

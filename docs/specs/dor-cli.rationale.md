@@ -58,7 +58,7 @@ file `which` would" licenses the hijack — and that the X_OK probe was unpinned
 because `statSync().isFile()` already rejected the directory the test shadowed
 with. All three rounds were review findings on the fix, before it merged.
 
-**What a missing `windowsHide` looks like.** cross-spawn routes `.cmd` shims through `cmd.exe`, which owns a real console window, and the browser panel's screenshot loop spawns one per stream-frame pulse — a live page flickers focus-stealing windows several times a second.
+**What a missing `windowsHide` looks like.** cross-spawn routes `.cmd` shims through `cmd.exe`, which owns a real console window, and the browser host's crisp-capture loop spawns one per changed stream frame — a live page flickers focus-stealing windows several times a second.
 
 **Why none of the `exit`-vs-`close` trouble surfaced on macOS.** The `agent-browser` daemon double-forks and detaches from the inherited fds, so `close` fires normally; only on Windows, where the daemon holds the parent's stdout/stderr pipes for its whole life, does a `close`-only wait hang forever.
 

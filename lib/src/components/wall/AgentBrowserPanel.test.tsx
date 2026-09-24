@@ -13,11 +13,12 @@ import {
   disposeAgentBrowserSurfaceController,
   disposeAllAgentBrowserSurfaceControllers,
   getAgentBrowserSurfaceController,
-  handOverBrowserPort,
+  handOverBrowserStream,
 } from './agent-browser-surface-controller';
 import type { RenderMode } from './agent-browser-screen';
 import { ModeContext, PaneWriteContext, SelectedIdContext, WallActionsContext, WorkspaceActiveContext, type PaneWriteActions } from './wall-context';
-import { installBrowserHost, stubWallActions as stubActions, type BrowserAnswers } from './wall-test-utils';
+import { installBrowserHost, stubWallActions as stubActions } from './wall-test-utils';
+import { encodeViewerFrame } from '../../lib/platform/browser-automation';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -25,7 +26,7 @@ type TestPanelParams = {
   surfaceType: string;
   renderMode?: string;
   session: string;
-  wsPort?: number;
+  stream?: number;
   url?: string;
   poppedOut?: boolean;
   cwd?: string;
@@ -33,10 +34,8 @@ type TestPanelParams = {
 
 const DEFAULT_PARAMS: TestPanelParams = { surfaceType: 'agent-browser', session: 'browser-session' };
 
-// The Playwright host serves its own viewer, so it names the stream URL.
-const PLAYWRIGHT_STREAM: BrowserAnswers = { streamUrl: async ({ port }) => ({ ok: true, url: `ws://127.0.0.1:${port}` }) };
 /** The operations that drive a live browser, rather than bind or view one. */
-const DRIVES = new Set(['navigate', 'history', 'tab', 'viewport', 'device', 'cdpUrl', 'close']);
+const DRIVES = new Set(['navigate', 'history', 'tab', 'viewport', 'device', 'close']);
 
 class ResizeObserverMock {
   observe() {}
@@ -47,7 +46,7 @@ class ResizeObserverMock {
 
 function paneProps(id: string, params: TestPanelParams = DEFAULT_PARAMS): PaneProps {
   const props = { id, title: 'Browser', params };
-  handOverFixturePort(props);
+  handOverFixtureStream(props);
   return props;
 }
 
@@ -82,7 +81,7 @@ class WebSocketMock {
     this.onclose?.(new CloseEvent('close'));
   }
 
-  emitMessage(data: string) {
+  emitMessage(data: string | ArrayBuffer) {
     this.onmessage?.({ data } as MessageEvent);
   }
 }
@@ -94,6 +93,8 @@ beforeEach(() => {
   vi.stubGlobal('ResizeObserver', ResizeObserverMock);
   vi.stubGlobal('WebSocket', WebSocketMock);
   WebSocketMock.instances = [];
+  // A host granting every viewer socket, at the stream's number as its port.
+  installBrowserHost();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -115,11 +116,11 @@ afterEach(() => {
 // through params. These fixtures carry it in their params, so hand each new one
 // over the way the Wall does, with the params the command refreshed.
 const handedOver = new Map<string, number>();
-function handOverFixturePort({ id, params }: PaneProps): void {
+function handOverFixtureStream({ id, params }: PaneProps): void {
   const fixture = params as TestPanelParams | undefined;
-  if (fixture?.wsPort === undefined || handedOver.get(id) === fixture.wsPort) return;
-  handedOver.set(id, fixture.wsPort);
-  handOverBrowserPort(id, { ...fixture, renderMode: fixture.renderMode as RenderMode | undefined }, fixture.wsPort);
+  if (fixture?.stream === undefined || handedOver.get(id) === fixture.stream) return;
+  handedOver.set(id, fixture.stream);
+  handOverBrowserStream(id, { ...fixture, renderMode: fixture.renderMode as RenderMode | undefined }, fixture.stream);
 }
 
 async function renderPanel(
@@ -167,8 +168,8 @@ describe('AgentBrowserPanel render mode controller', () => {
   it('relaunches screencast sessions as popout and publishes the mode immediately', async () => {
     const updateParameters = vi.fn();
     const host = installBrowserHost({
-      launch: async () => ({ ok: true, wsPort: 3456 }),
-      attach: async () => ({ ok: true, wsPort: 1234 }),
+      launch: async () => ({ ok: true, stream: 3456 }),
+      attach: async () => ({ ok: true, stream: 1234 }),
     });
 
     await renderPanel(paneProps('ab-panel'), updateParameters);
@@ -187,8 +188,8 @@ describe('AgentBrowserPanel render mode controller', () => {
   it('relaunches popped-out sessions back into screencast', async () => {
     const updateParameters = vi.fn();
     const host = installBrowserHost({
-      launch: async () => ({ ok: true, wsPort: 4567 }),
-      attach: async () => ({ ok: true, wsPort: 1234 }),
+      launch: async () => ({ ok: true, stream: 4567 }),
+      attach: async () => ({ ok: true, stream: 1234 }),
     });
 
     await renderPanel(
@@ -210,8 +211,8 @@ describe('AgentBrowserPanel render mode controller', () => {
   it('pop-in uses the latest observed headed-window tab URL over stale params', async () => {
     const updateParameters = vi.fn();
     const host = installBrowserHost({
-      launch: async () => ({ ok: true, wsPort: 4567 }),
-      attach: async () => ({ ok: true, wsPort: 1234 }),
+      launch: async () => ({ ok: true, stream: 4567 }),
+      attach: async () => ({ ok: true, stream: 1234 }),
     });
 
     await renderPanel(
@@ -219,7 +220,7 @@ describe('AgentBrowserPanel render mode controller', () => {
         surfaceType: 'browser',
         renderMode: 'ab-popout',
         session: 'browser-session',
-        wsPort: 1111,
+        stream: 1111,
         url: 'https://google.com/',
       }),
       updateParameters,
@@ -245,14 +246,14 @@ describe('AgentBrowserPanel render mode controller', () => {
 
   it('mirrors popped-out stream tab URL updates when the stream reports id instead of tabId', async () => {
     const updateParameters = vi.fn();
-    installBrowserHost({ attach: async () => ({ ok: true, wsPort: 1234 }) });
+    installBrowserHost({ attach: async () => ({ ok: true, stream: 1234 }) });
 
     await renderPanel(
       paneProps('ab-panel', {
         surfaceType: 'browser',
         renderMode: 'ab-popout',
         session: 'browser-session',
-        wsPort: 1111,
+        stream: 1111,
         url: 'https://google.com/',
       }),
       updateParameters,
@@ -268,19 +269,16 @@ describe('AgentBrowserPanel render mode controller', () => {
     expect(updateParameters).toHaveBeenCalledWith({ url: 'https://example.com/' });
   });
 
-  it('mirrors popped-out manual navigation from CDP target events', async () => {
+  it('mirrors a popped-out window\'s page as the host observes it, holding no CDP itself', async () => {
     const updateParameters = vi.fn();
-    const host = installBrowserHost({
-      cdpUrl: async () => ({ ok: true, url: 'ws://127.0.0.1:9222/devtools/browser/test' }),
-      attach: async () => ({ ok: true, wsPort: 1234 }),
-    });
+    const host = installBrowserHost({ attach: async () => ({ ok: true, stream: 1234 }) });
 
     await renderPanel(
       paneProps('ab-panel', {
         surfaceType: 'browser',
         renderMode: 'ab-popout',
         session: 'browser-session',
-        wsPort: 1111,
+        stream: 1111,
         url: 'https://google.com/',
       }),
       updateParameters,
@@ -291,24 +289,21 @@ describe('AgentBrowserPanel render mode controller', () => {
       await Promise.resolve();
     });
 
-    const cdpWs = WebSocketMock.instances.find((ws) => ws.url.includes('/devtools/browser/'));
-    expect(cdpWs).toBeTruthy();
+    // Its one socket is the host's viewer, told it shows a headed window.
+    expect(host.requests('view')).toEqual([{ provider: 'agent-browser', binding: { session: 'browser-session' }, op: 'view', stream: 1111, headed: true }]);
+    expect(WebSocketMock.instances.map((ws) => ws.url)).toEqual(['ws://127.0.0.1:1111']);
 
     await act(async () => {
-      cdpWs?.emitMessage(JSON.stringify({
-        method: 'Target.targetInfoChanged',
-        params: { targetInfo: { type: 'page', url: 'https://example.com/', title: 'Example Domain' } },
-      }));
+      WebSocketMock.instances[0].emitMessage(JSON.stringify({ type: 'page', url: 'https://example.com/', title: 'Example Domain' }));
     });
 
-    expect(host.requests('cdpUrl')).toEqual([{ provider: 'agent-browser', binding: { session: 'browser-session' }, op: 'cdpUrl' }]);
     expect(updateParameters).toHaveBeenCalledWith({ url: 'https://example.com/' });
   });
 
   it('actively selects a newly opened tab when the stream does not mark it active', async () => {
     const host = installBrowserHost();
 
-    await renderPanel(paneProps('ab-panel', { surfaceType: 'browser', session: 'browser-session', wsPort: 1111 }));
+    await renderPanel(paneProps('ab-panel', { surfaceType: 'browser', session: 'browser-session', stream: 1111 }));
 
     await act(async () => {
       WebSocketMock.instances.at(-1)?.emitMessage(JSON.stringify({
@@ -333,7 +328,7 @@ describe('AgentBrowserPanel render mode controller', () => {
   it('does not force-select a provisional new tab that already reports active', async () => {
     const host = installBrowserHost();
 
-    await renderPanel(paneProps('ab-panel', { surfaceType: 'browser', session: 'browser-session', wsPort: 1111 }));
+    await renderPanel(paneProps('ab-panel', { surfaceType: 'browser', session: 'browser-session', stream: 1111 }));
 
     await act(async () => {
       WebSocketMock.instances.at(-1)?.emitMessage(JSON.stringify({
@@ -358,7 +353,7 @@ describe('AgentBrowserPanel render mode controller', () => {
   it('selects a provisional new tab after it reaches its destination if it is not active', async () => {
     const host = installBrowserHost();
 
-    await renderPanel(paneProps('ab-panel', { surfaceType: 'browser', session: 'browser-session', wsPort: 1111 }));
+    await renderPanel(paneProps('ab-panel', { surfaceType: 'browser', session: 'browser-session', stream: 1111 }));
 
     await act(async () => {
       WebSocketMock.instances.at(-1)?.emitMessage(JSON.stringify({
@@ -393,7 +388,7 @@ describe('AgentBrowserPanel render mode controller', () => {
   it('keeps the last known active tab when the stream emits a transient empty tab list', async () => {
     const updateParameters = vi.fn();
     await renderPanel(
-      paneProps('ab-panel', { surfaceType: 'browser', session: 'browser-session', wsPort: 1111 }),
+      paneProps('ab-panel', { surfaceType: 'browser', session: 'browser-session', stream: 1111 }),
       updateParameters,
     );
 
@@ -443,13 +438,13 @@ describe('AgentBrowserPanel Playwright params', () => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
       { width: 800, height: 600, left: 0, top: 0, right: 800, bottom: 600, x: 0, y: 0, toJSON() {} } as DOMRect,
     );
-    const host = installBrowserHost(PLAYWRIGHT_STREAM);
+    const host = installBrowserHost();
     // Every operation that drives the browser, in the directory it ran for.
     const commands = (cwd?: string) => host.browser.mock.calls
       .map(([request]) => request)
       .filter((request) => DRIVES.has(request.op) && (cwd === undefined || request.binding.cwd === cwd))
       .map((request) => request.op === 'viewport' ? `set viewport ${request.width} ${request.height} ${request.dpr}` : request.op);
-    const params = { surfaceType: 'browser', renderMode: 'pw-screencast', session: 'app', cwd: '/first', wsPort: 4321 };
+    const params = { surfaceType: 'browser', renderMode: 'pw-screencast', session: 'app', cwd: '/first', stream: 4321 };
 
     await renderPanel(paneProps('pw-panel', params));
     expect(commands()).toContain('set viewport 800 600 1');
@@ -457,7 +452,7 @@ describe('AgentBrowserPanel Playwright params', () => {
     await act(async () => { stream(4321).emitMessage(JSON.stringify({ type: 'status', connected: true, screencasting: true })); });
     host.browser.mockClear();
 
-    await renderPanel(paneProps('pw-panel', { ...params, renderMode: 'pw-popout', wsPort: 4322 }));
+    await renderPanel(paneProps('pw-panel', { ...params, renderMode: 'pw-popout', stream: 4322 }));
     expect(getAgentBrowserScreenController('pw-panel')?.snapshot().renderMode).toBe('pw-popout');
     expect(container.textContent).toContain('This browser is running in a separate window.');
     expect(commands()).toEqual([]);
@@ -466,15 +461,15 @@ describe('AgentBrowserPanel Playwright params', () => {
     await act(async () => { stream(4322).emitMessage(JSON.stringify({ type: 'status', connected: false, screencasting: false })); });
     expect(host.requests('launch')).toEqual([]);
 
-    await renderPanel(paneProps('pw-panel', { ...params, cwd: '/second', wsPort: 4323 }));
+    await renderPanel(paneProps('pw-panel', { ...params, cwd: '/second', stream: 4323 }));
     expect(getAgentBrowserScreenController('pw-panel')?.snapshot().renderMode).toBe('pw-screencast');
     expect(commands('/second')).toContain('set viewport 800 600 1');
   });
 
   it('keeps its own mode write over params that predate it', async () => {
-    const host = installBrowserHost({ ...PLAYWRIGHT_STREAM, launch: async () => ({ ok: true, wsPort: 4330 }) });
+    const host = installBrowserHost({ launch: async () => ({ ok: true, stream: 4330 }) });
     const updateParameters = vi.fn();
-    const popped = { surfaceType: 'browser', renderMode: 'pw-popout', session: 'app', cwd: '/p', wsPort: 4321 };
+    const popped = { surfaceType: 'browser', renderMode: 'pw-popout', session: 'app', cwd: '/p', stream: 4321 };
     await renderPanel(paneProps('pw-panel', popped), updateParameters);
     const stream = WebSocketMock.instances.findLast((ws) => ws.url === 'ws://127.0.0.1:4321')!;
     await act(async () => { stream.emitMessage(JSON.stringify({ type: 'status', connected: true, screencasting: false })); });
@@ -494,8 +489,8 @@ describe('AgentBrowserPanel Playwright params', () => {
     expect(getAgentBrowserScreenController('pw-panel')?.snapshot().renderMode).toBe('pw-screencast');
 
     // Once params show it, a later host report is followed again.
-    await renderPanel(paneProps('pw-panel', { ...popped, renderMode: 'pw-screencast', wsPort: 4330 }), updateParameters);
-    await renderPanel(paneProps('pw-panel', { ...popped, wsPort: 4331 }), updateParameters);
+    await renderPanel(paneProps('pw-panel', { ...popped, renderMode: 'pw-screencast', stream: 4330 }), updateParameters);
+    await renderPanel(paneProps('pw-panel', { ...popped, stream: 4331 }), updateParameters);
     expect(getAgentBrowserScreenController('pw-panel')?.snapshot().renderMode).toBe('pw-popout');
   });
 });
@@ -504,10 +499,10 @@ describe('AgentBrowserPanel across a provider change', () => {
   // A minimized pane keeps this view mounted while its Wall restores a failed
   // cross-provider swap in place: same id, the other provider's params.
   function withBothProviders() {
-    installBrowserHost(PLAYWRIGHT_STREAM);
+    installBrowserHost();
   }
-  const pw = { surfaceType: 'browser', renderMode: 'pw-screencast', session: 'failed-swap', wsPort: 4400 };
-  const ab = { surfaceType: 'browser', renderMode: 'ab-screencast', session: 'relaunched', wsPort: 4401 };
+  const pw = { surfaceType: 'browser', renderMode: 'pw-screencast', session: 'failed-swap', stream: 4400 };
+  const ab = { surfaceType: 'browser', renderMode: 'ab-screencast', session: 'relaunched', stream: 4401 };
 
   it('takes a fresh controller when the Wall disposes the old one and restores the other provider', async () => {
     withBothProviders();
@@ -530,7 +525,7 @@ describe('AgentBrowserPanel across a provider change', () => {
     await renderPanel(paneProps('swap-panel', pw));
     const failed = getAgentBrowserSurfaceController('swap-panel')!;
     // No port handover, which would acquire the controller itself.
-    await renderPanel(paneProps('swap-panel', { ...ab, wsPort: undefined }));
+    await renderPanel(paneProps('swap-panel', { ...ab, stream: undefined }));
     await act(async () => { await Promise.resolve(); });
     expect(getAgentBrowserSurfaceController('swap-panel')).not.toBe(failed);
     expect(getAgentBrowserScreenController('swap-panel')?.snapshot().renderMode).toBe('ab-screencast');
@@ -541,8 +536,8 @@ describe('AgentBrowserPanel across a provider change', () => {
 
 describe('AgentBrowserPanel after its controller is released', () => {
   it('takes a fresh controller for the params that follow, and none for the release alone', async () => {
-    const host = installBrowserHost({ attach: async () => ({ ok: true, wsPort: 4402 }) });
-    const first = { surfaceType: 'browser', renderMode: 'ab-screencast', session: 'first-run', wsPort: 4400 };
+    const host = installBrowserHost({ attach: async () => ({ ok: true, stream: 4402 }) });
+    const first = { surfaceType: 'browser', renderMode: 'ab-screencast', session: 'first-run', stream: 4400 };
     await renderPanel(paneProps('released-panel', first));
     const released = getAgentBrowserSurfaceController('released-panel');
 
@@ -617,7 +612,7 @@ describe('AgentBrowserPanel visibility parking', () => {
 
   it('parks a hidden panel: closes the stream and opens no replacement', async () => {
     const { setVisible } = await renderVisibilityPanel({
-      surfaceType: 'browser', session: 'browser-session', wsPort: 4321,
+      surfaceType: 'browser', session: 'browser-session', stream: 4321,
     });
 
     const socket = liveStreamSocket(4321);
@@ -634,7 +629,7 @@ describe('AgentBrowserPanel visibility parking', () => {
 
   it('parks a minimized (parked) panel even while the window stays in the foreground', async () => {
     const { setParked } = await renderVisibilityPanel({
-      surfaceType: 'browser', session: 'browser-session', wsPort: 4321,
+      surfaceType: 'browser', session: 'browser-session', stream: 4321,
     });
 
     const socket = liveStreamSocket(4321);
@@ -657,7 +652,7 @@ describe('AgentBrowserPanel visibility parking', () => {
 
   it('idles a screencast whose Workspace is hidden, and resumes it on return', async () => {
     const { setWorkspaceActive } = await renderVisibilityPanel({
-      surfaceType: 'browser', session: 'browser-session', wsPort: 4321,
+      surfaceType: 'browser', session: 'browser-session', stream: 4321,
     });
 
     const socket = liveStreamSocket(4321);
@@ -677,11 +672,10 @@ describe('AgentBrowserPanel visibility parking', () => {
   });
 
   it('reconnects and repaints from the stream when it becomes visible again', async () => {
-    const screenshot = vi.fn(async () => ({ ok: false as const, error: 'test' }));
-    installBrowserHost({ screenshot });
+    vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 4, height: 4, close: vi.fn() })));
 
     const { setVisible } = await renderVisibilityPanel({
-      surfaceType: 'browser', session: 'browser-session', wsPort: 4321,
+      surfaceType: 'browser', session: 'browser-session', stream: 4321,
     });
 
     await act(async () => { setVisible(false); });
@@ -696,18 +690,17 @@ describe('AgentBrowserPanel visibility parking', () => {
     const reconnected = liveStreamSocket(4321);
     expect(reconnected?.readyState).toBe(1);
 
-    // A frame pulse over the reconnected stream drives a device screenshot.
-    screenshot.mockClear();
+    // The host's first frame over the reconnected socket paints.
     await act(async () => {
-      reconnected?.emitMessage(JSON.stringify({ type: 'frame', data: 'x'.repeat(32) }));
-      await vi.advanceTimersByTimeAsync(300);
+      reconnected?.emitMessage(encodeViewerFrame({ kind: 'provisional', jpeg: new Uint8Array([0xff, 0xd8, 1]) }).buffer);
+      await vi.advanceTimersByTimeAsync(0);
     });
-    expect(screenshot).toHaveBeenCalled();
+    expect(createImageBitmap).toHaveBeenCalledOnce();
   });
 
   it('does not park a popped-out panel while it is hidden', async () => {
     const { setVisible } = await renderVisibilityPanel({
-      surfaceType: 'browser', renderMode: 'ab-popout', session: 'browser-session', wsPort: 1111,
+      surfaceType: 'browser', renderMode: 'ab-popout', session: 'browser-session', stream: 1111,
     });
 
     const socket = liveStreamSocket(1111);
@@ -723,7 +716,7 @@ describe('AgentBrowserPanel visibility parking', () => {
 
   it('parks when the document is hidden (raw visibilitychange event)', async () => {
     await renderVisibilityPanel({
-      surfaceType: 'browser', session: 'browser-session', wsPort: 4321,
+      surfaceType: 'browser', session: 'browser-session', stream: 4321,
     });
 
     const socket = liveStreamSocket(4321);
@@ -737,7 +730,7 @@ describe('AgentBrowserPanel visibility parking', () => {
 
   it('does not park when a hide is reversed within the delay', async () => {
     const { setVisible } = await renderVisibilityPanel({
-      surfaceType: 'browser', session: 'browser-session', wsPort: 4321,
+      surfaceType: 'browser', session: 'browser-session', stream: 4321,
     });
 
     const socket = liveStreamSocket(4321);
@@ -762,7 +755,7 @@ describe('AgentBrowserPanel canvas input forwarding', () => {
     selectedId: string | null,
     workspaceActive = true,
   ): Promise<HTMLCanvasElement> {
-    const props = paneProps('ab-panel', { surfaceType: 'agent-browser', session: 'browser-session', wsPort: 4321 });
+    const props = paneProps('ab-panel', { surfaceType: 'agent-browser', session: 'browser-session', stream: 4321 });
     await act(async () => {
       root.render(
         <StrictMode>
@@ -851,7 +844,7 @@ describe('AgentBrowserPanel tab strip actions', () => {
   // just exercises the onClick → selectTab/closeTab wiring.
   async function renderWithTwoTabs(): Promise<ReturnType<typeof installBrowserHost>> {
     const host = installBrowserHost();
-    const props = paneProps('ab-panel', { surfaceType: 'agent-browser', session: 'browser-session', wsPort: 4321 });
+    const props = paneProps('ab-panel', { surfaceType: 'agent-browser', session: 'browser-session', stream: 4321 });
     await renderPanel(props);
     const ws = WebSocketMock.instances[WebSocketMock.instances.length - 1];
     await act(async () => {
@@ -885,39 +878,6 @@ describe('AgentBrowserPanel tab strip actions', () => {
     expect(host.requests('tab')).toContainEqual({ provider: 'agent-browser', binding: { session: 'browser-session' }, op: 'tab', action: 'close', tabId: 't2' });
   });
 
-  it('captures a fresh frame when the active tab changes, but not on other tab edits', async () => {
-    // The daemon emits no screencast frame on a tab switch and the dedup'd stream
-    // is otherwise silent, so the panel forces one device screenshot so the canvas
-    // follows the newly-active tab.
-    const screenshot = vi.fn(async () => ({ ok: false as const, error: 'test' }));
-    installBrowserHost({ screenshot });
-    const props = paneProps('ab-panel', { surfaceType: 'agent-browser', session: 'browser-session', wsPort: 4321 });
-    await renderPanel(props);
-    const ws = WebSocketMock.instances[WebSocketMock.instances.length - 1];
-    const tabs = (a: 't1' | 't2', extra = false) => JSON.stringify({ type: 'tabs', tabs: [
-      { tabId: 't1', title: 'Dormouse', url: 'https://dormouse.sh/', active: a === 't1' },
-      { tabId: 't2', title: 'GitHub', url: 'https://github.com/diffplug/dormouse', active: a === 't2' },
-      ...(extra ? [{ tabId: 't3', title: 'GitHub', url: 'https://github.com/diffplug/dormouse', active: false }] : []),
-    ] });
-
-    await act(async () => { ws.emitMessage(tabs('t1')); });
-    // Let the loop go fully idle before measuring tab-driven captures. Besides the
-    // priming capture, StrictMode remounts the panel, and the re-attach repaint
-    // pulse (a live connection survives the detach) schedules a throttled
-    // follow-up capture ~one shot-interval later — drain it before mockClear.
-    await new Promise((r) => setTimeout(r, 250));
-    screenshot.mockClear();
-
-    // Adding a tab without changing which is active must NOT force a capture.
-    await act(async () => { ws.emitMessage(tabs('t1', true)); });
-    await new Promise((r) => setTimeout(r, 120));
-    expect(screenshot).not.toHaveBeenCalled();
-
-    // Switching the active tab does.
-    await act(async () => { ws.emitMessage(tabs('t2', true)); });
-    await new Promise((r) => setTimeout(r, 120));
-    expect(screenshot).toHaveBeenCalled();
-  });
 });
 
 describe('the render modes a tool is offered (regression: PR #493 review)', () => {
@@ -927,7 +887,7 @@ describe('the render modes a tool is offered (regression: PR #493 review)', () =
   // `agent-browser-surface-controller.ts`. The host can do everything, so a
   // refusal is the tool rule and not a missing capability.
   function withCapableHost() {
-    return installBrowserHost({ launch: async () => ({ ok: true, wsPort: 1 }) });
+    return installBrowserHost({ launch: async () => ({ ok: true, stream: 1 }) });
   }
 
   it('offers every mode on a plain browser surface', async () => {

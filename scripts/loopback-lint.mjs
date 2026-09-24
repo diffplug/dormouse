@@ -88,12 +88,6 @@ const ALLOWED = {
     + 'and unbundled — it ships in nothing. Both controls are checked by '
     + 'standalone/scripts/dev-agent-browser.test.mjs; see '
     + 'standalone/scripts/dev-host-guard.mjs for the bridge beside it.',
-  'vscode-ext/src/agent-browser-host.ts':
-    'The stream relay authenticates with a single-use 64-hex token (60s TTL, '
-    + 'pinned to one target port) and drops Origin rather than rewriting it, so '
-    + 'it vouches for no one. It skips the Host check on purpose: rebinding '
-    + 'exists to make same-origin-looking requests, which buys nothing against '
-    + 'an unguessable one-shot secret. See lib/src/host/loopback-guard.ts.',
 };
 
 const GUARD_REFERENCES = ['loopback-guard', 'dev-host-guard'];

@@ -237,7 +237,7 @@ frame-src   http://127.0.0.1:* http://localhost:*
 
 **`frame-src` is loopback-only** — `dor iframe` frames its target through the transparent proxy the extension host stands up, so the only origin ever embedded is loopback on an OS-assigned port; without the override `default-src 'none'` blocks the frame and leaves a blank white pane (`docs/specs/dor-browser.md`).
 
-**The webview CSP carries no relay sources.** Its `connect-src` loopback `ws:` entries are for the agent-browser stream relay and guarded Playwright viewer — the Burrow holds its `/ws/burrow` socket from the *extension host*, which no CSP fences, so the origin allowlist is enforced there instead (see "Burrow: a service in the extension host").
+**The webview CSP carries no relay sources.** Its `connect-src` loopback `ws:` entries are for the host's guarded browser viewer sockets (`docs/specs/dor-browser.md` → Viewer Socket) — the Burrow holds its `/ws/burrow` socket from the *extension host*, which no CSP fences, so the origin allowlist is enforced there instead (see "Burrow: a service in the extension host").
 
 **That allowlist is a build-time constant, never a runtime value**: `vscode-ext/scripts/esbuild.mjs` substitutes `__DORMOUSE_REMOTE_CONNECT_SRC__` into `dist/extension.js`. The default, the replace-not-add override rule, and the two build-time guards are `docs/specs/relay.md` → "Where a Burrow may reach a Relay".
 

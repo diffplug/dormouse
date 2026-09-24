@@ -2,7 +2,6 @@
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { readFile, rm } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { sessionForKey } from 'dor-lib-common/browser-providers';
 // cross-spawn, not node:child_process: this script spawns `dor` and
@@ -124,25 +123,9 @@ const fireAndForget = {
   kill_sidecar_now: () => shutdown(),
 };
 
-// The sidecar answers a screenshot with a temp-file PATH (bytes stay off the
-// stdio pipe). Production reads that file in Rust; this dev bridge has no Rust,
-// so read it in Node and re-encode to the base64 the browser-sidecar adapter
-// expects — the base64 travels in the HTTP invoke response, outside the event
-// stream. Like Rust, it deletes the file once read: each capture is its own.
-async function readCapture(result) {
-  if (!result?.ok || typeof result.path !== 'string') return result;
-  try {
-    return { ok: true, mime: result.mime, bytesBase64: (await readFile(result.path)).toString('base64') };
-  } finally {
-    await rm(result.path, { force: true });
-  }
-}
-
 const invokeMap = {
   // BROWSER_REQUEST_TIMEOUT_MS in dor-lib-common/src/browser-providers.ts.
-  browser_request: async ({ request }) => readCapture(
-    await requestSidecar('browser:request', { request }, 'browser:result', (data) => data.result, 40000),
-  ),
+  browser_request: ({ request }) => requestSidecar('browser:request', { request }, 'browser:result', (data) => data.result, 40000),
   get_available_shells: (_args) => requestSidecar('pty:getShells', {}, 'pty:shells', (data) => data.shells ?? []),
   pty_get_cwd: ({ id }) => requestSidecar('pty:getCwd', { id }, 'pty:cwd', (data) => data.cwd ?? null),
   pty_get_cwds: ({ ids }) => requestSidecar('pty:getCwds', { ids }, 'pty:cwds', (data) => data.cwds ?? {}),

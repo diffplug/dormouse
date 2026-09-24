@@ -2,23 +2,26 @@
  * The Playwright provider beneath the shared browser host (`browser-host.ts`;
  * docs/specs/dor-browser.md → "Playwright"). The installed Playwright
  * CLI owns browsers; this provider owns what is genuinely Playwright's — the
- * install and registry discovery, and the Dormouse viewer each browser is
- * streamed through over CDP. The host owns everything the providers share.
+ * install and registry discovery, and the CDP connection each browser's
+ * frames, state and input travel over to the host's viewer sockets. The host
+ * owns everything the providers share.
  */
-import { createServer, type Server } from 'node:http';
 import { realpathSync } from 'node:fs';
-import { WebSocketServer, WebSocket } from 'ws';
 import type { Browser, Page, CDPSession } from 'playwright-core';
 import { BROWSER_PROVIDERS, spawnAndCapture } from 'dor-lib-common';
 import { messageOf } from '../lib/errors';
-import { PLAYWRIGHT_TEXT_INPUT_MAX, type BrowserResult } from '../lib/platform/browser-automation';
+import { CAPTURE_JPEG_QUALITY, type BrowserResult, type ViewerInput, type ViewerState } from '../lib/platform/browser-automation';
 import type { BrowserProvider, LiveBrowser } from './browser-host';
+import type { ViewerSink } from './browser-viewer';
 import { resolvePlaywrightInstall, playwrightWorkspace, type PlaywrightInstall } from './playwright-install';
-import { isLoopbackHost } from './loopback-guard';
-import { BrowserStreamGrants } from './browser-stream-guard';
 
 const TAB_REFRESH_INTERVAL_MS = 750;
 const CONNECT_TIMEOUT_MS = 8_000;
+// Chrome sends the next screencast frame only once the last is acknowledged,
+// so pacing the acks caps the stream at ~20 frames a second.
+const FRAME_INTERVAL_MS = 50;
+// Input waiting on CDP past this closes the viewer socket.
+const INPUT_BACKLOG = 256;
 // Every CLI call but `open` ends here at the latest, so a wedged playwright-cli
 // cannot hold a viewer refresh or a host operation forever. `open` alone runs
 // unbounded: it lasts as long as the page load, nothing waits on it past a
@@ -48,15 +51,13 @@ function bind(session: string, cwd: string, install: PlaywrightInstall): Binding
   const workspace = playwrightWorkspace(cwd);
   return { session, cwd, install, workspace, key: JSON.stringify([install.libraryPath, workspace ?? '', session]) };
 }
-type StateMessage =
-  | { type: 'url'; url: string }
-  | { type: 'tabs'; tabs: { tabId: string; url: string; title: string; active: boolean }[] }
-  | { type: 'status'; connected: true; screencasting: boolean; viewportWidth?: number; viewportHeight?: number };
+/** One viewer socket's hold on a browser: headed ones get no frames. */
+type Subscriber = { sink: ViewerSink; headed: boolean };
 type Viewer = Binding & {
   browser: Browser;
-  server: Server;
-  sockets: Set<WebSocket>;
-  port: number;
+  /** This connection's number, which the host hands back as its stream. */
+  instance: number;
+  subscribers: Set<Subscriber>;
   controls: Map<Page, Promise<CDPSession>>;
   page?: Page;
   cdp?: CDPSession;
@@ -67,20 +68,21 @@ type Viewer = Binding & {
   queue: Promise<void>;
   queued: number;
   headed: boolean;
-  /** The last payload published per state message type, replayed to each viewer that connects. */
-  sent: Map<StateMessage['type'], string>;
+  /** The last state published per message type, replayed to each viewer that connects. */
+  sent: Map<ViewerState['type'], { json: string; message: ViewerState }>;
 };
 const pagesOf = (v: Viewer) => v.browser.contexts().flatMap(context => context.pages());
 const tabsOf = (v: Viewer) => Promise.all(pagesOf(v).map(async (page, index) => ({
   tabId: String(index), url: page.url(), title: await page.title().catch(() => ''), active: page === v.page,
 })));
+const watching = (v: Viewer) => [...v.subscribers].some(s => !s.headed);
 export function createPlaywrightProvider(deps: { log?(text: string): void } = {}): BrowserProvider<Binding> {
   const viewers = new Map<string, Viewer>();
   const connecting = new Map<string, Promise<Viewer>>();
   // Bumped whenever the host releases a binding's viewer: a connect begun
   // before must not publish the viewer it brings back.
   const generations = new Map<string, number>();
-  const grants = new BrowserStreamGrants();
+  let instances = 0;
   let closed = false;
   const log = (e: unknown) => deps.log?.(`[playwright] ${messageOf(e)}`);
   /** One CLI call, ended after `timeoutMs` (none for `null`); throws when it could not run or finish. */
@@ -92,27 +94,20 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
     if (!r.ok) throw new Error(r.error.message);
     return { exitCode: r.exitCode, stdout: r.stdout, stderr: r.stderr };
   }
-  // A frame is superseded by the next one, so a socket backed up past 2 MB
-  // skips it. State is published only on change, so it is never skipped.
-  function broadcast(v: Viewer, payload: string, frame: boolean) {
-    for (const ws of v.sockets) {
-      if (ws.readyState === WebSocket.OPEN && (!frame || ws.bufferedAmount < 2_000_000)) ws.send(payload);
-    }
-  }
   // Every state message re-renders the pane, so the poll publishes only
   // changes; a connecting viewer is sent the latest state instead.
-  function publish(v: Viewer, data: StateMessage) {
-    const payload = JSON.stringify(data);
-    if (v.sent.get(data.type) === payload) return;
-    v.sent.set(data.type, payload);
-    broadcast(v, payload, false);
+  function publish(v: Viewer, message: ViewerState) {
+    const json = JSON.stringify(message);
+    if (v.sent.get(message.type)?.json === json) return;
+    v.sent.set(message.type, { json, message });
+    for (const { sink } of v.subscribers) sink.state(message);
   }
+  /** Release the connection; its viewers are the host's to end. */
   async function dispose(v: Viewer) {
     if (v.disposed) return;
     v.disposed = true;
     if (v.timer) clearTimeout(v.timer);
-    for (const ws of v.sockets) ws.terminate();
-    v.server.close();
+    v.subscribers.clear();
     await v.cdp?.detach().catch(() => {});
     await Promise.allSettled([...v.controls.values()].map(async pending => { await (await pending).detach(); }));
     v.controls.clear();
@@ -156,7 +151,7 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
         await v.cdp?.detach().catch(() => {});
         v.cdp = undefined;
         v.page = page;
-        if (page && !v.headed && v.sockets.size) await startFrames(v);
+        if (page) await startFrames(v);
       }
       const tabs = await tabsOf(v);
       if (v.disposed) return;
@@ -172,16 +167,26 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
     } catch (e) { log(e); }
   }
   async function startFrames(v: Viewer) {
-    if (!v.page || v.cdp || v.disposed || v.headed) return;
+    if (!v.page || v.cdp || v.disposed || v.headed || !watching(v)) return;
     const page = v.page;
     try {
       const cdp = await page.context().newCDPSession(page);
       // Another refresh, tab change, or parking may finish while CDP attaches.
-      if (v.disposed || !v.sockets.size || v.page !== page || v.cdp) { await cdp.detach().catch(() => {}); return; }
+      if (v.disposed || !watching(v) || v.page !== page || v.cdp) { await cdp.detach().catch(() => {}); return; }
       v.cdp = cdp;
+      let acked = 0;
       cdp.on('Page.screencastFrame', event => {
-        void cdp.send('Page.screencastFrameAck', { sessionId: event.sessionId }).catch(() => {});
-        if (!v.disposed && v.cdp === cdp) broadcast(v, JSON.stringify({ type: 'frame', data: event.data, metadata: event.metadata }), true);
+        if (v.disposed || v.cdp !== cdp) return;
+        // Decoded once, here; the viewer sockets carry it as binary.
+        const jpeg = Buffer.from(event.data, 'base64');
+        const { deviceWidth: width, deviceHeight: height } = event.metadata;
+        const size = width > 0 && height > 0 ? { width, height } : undefined;
+        for (const { sink, headed } of v.subscribers) if (!headed) sink.frame(jpeg, size);
+        const ack = () => {
+          acked = Date.now();
+          void cdp.send('Page.screencastFrameAck', { sessionId: event.sessionId }).catch(() => {});
+        };
+        setTimeout(ack, Math.max(0, acked + FRAME_INTERVAL_MS - Date.now())).unref();
       });
       await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 70 });
     } catch (e) {
@@ -194,7 +199,7 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
     }
   }
   function schedule(v: Viewer) {
-    if (v.disposed || !v.sockets.size || v.timer) return;
+    if (v.disposed || !v.subscribers.size || v.timer) return;
     v.timer = setTimeout(() => {
       v.timer = undefined;
       void refresh(v).finally(() => schedule(v));
@@ -220,28 +225,18 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
     void pending.catch(() => { if (v.controls.get(page) === pending) v.controls.delete(page); });
     return pending;
   }
-  async function input(v: Viewer, raw: string) {
-    if (v.disposed || raw.length > 65536 || !v.page) return;
-    const data = JSON.parse(raw);
-    const page = v.page;
-    if (data.type === 'input_mouse' && ['mouseMoved', 'mousePressed', 'mouseReleased', 'mouseWheel'].includes(data.eventType)) {
-      if (![data.x, data.y].every(n => typeof n === 'number' && Number.isFinite(n) && Math.abs(n) <= 1e6)) return;
-      const cdp = await control(v, page);
-      await cdp.send('Input.dispatchMouseEvent', { type: data.eventType, x: data.x, y: data.y,
-        button: ['left', 'right', 'middle', 'none'].includes(data.button) ? data.button : 'none',
-        buttons: Number.isInteger(data.buttons) ? data.buttons & 31 : 0,
-        modifiers: Number.isInteger(data.modifiers) ? data.modifiers & 15 : 0,
-        clickCount: Math.min(3, Math.max(0, Number(data.clickCount) || 0)),
-        ...(data.eventType === 'mouseWheel' ? { deltaX: Number(data.deltaX) || 0, deltaY: Number(data.deltaY) || 0 } : {}) });
-    } else if (data.type === 'input_keyboard' && ['keyDown', 'keyUp'].includes(data.eventType) && typeof data.key === 'string' && data.key.length <= 100) {
-      const cdp = await control(v, page);
-      await cdp.send('Input.dispatchKeyEvent', { type: data.eventType, key: data.key, code: typeof data.code === 'string' ? data.code.slice(0, 100) : '',
-        text: typeof data.text === 'string' ? data.text.slice(0, 1000) : '',
-        windowsVirtualKeyCode: Number.isInteger(data.windowsVirtualKeyCode) ? data.windowsVirtualKeyCode : 0,
-        modifiers: Number.isInteger(data.modifiers) ? data.modifiers & 15 : 0 });
-    } else if (data.type === 'input_text' && typeof data.text === 'string' && data.text.length <= PLAYWRIGHT_TEXT_INPUT_MAX) {
-      // A paste arrives as text, not a key pair per character (`playwrightTextInputs`).
-      const cdp = await control(v, page);
+  /** One input message, validated by the host (`parseViewerInput`). */
+  async function input(v: Viewer, data: Exclude<ViewerInput, { type: 'repaint' }>) {
+    if (v.disposed || !v.page) return;
+    const cdp = await control(v, v.page);
+    if (data.type === 'input_mouse') {
+      const { eventType: type, x, y, button, buttons, modifiers, clickCount, deltaX, deltaY } = data;
+      await cdp.send('Input.dispatchMouseEvent', { type, x, y, button, buttons, modifiers, clickCount, ...(type === 'mouseWheel' ? { deltaX, deltaY } : {}) });
+    } else if (data.type === 'input_keyboard') {
+      const { eventType: type, key, code, text, windowsVirtualKeyCode, modifiers } = data;
+      await cdp.send('Input.dispatchKeyEvent', { type, key, code, text, windowsVirtualKeyCode, modifiers });
+    } else {
+      // A paste arrives as text, not a key pair per character (`viewerTextInputs`).
       await cdp.send('Input.insertText', { text: data.text });
     }
   }
@@ -278,14 +273,11 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
       if (remaining <= 0) throw new Error('Playwright browser connection timed out');
       const browser = await b.install.library.chromium.connect(endpoint, { timeout: Math.min(CONNECT_TIMEOUT_MS, remaining) });
       if (closed || gen !== (generations.get(key) ?? 0)) { await browser.close(); throw new Error('Browser launch superseded'); }
-      const server = createServer((_req, res) => { res.writeHead(403); res.end(); });
-      const wss = new WebSocketServer({ noServer: true, maxPayload: 65536 });
       const v: Viewer = {
         ...b,
         browser,
-        server,
-        sockets: new Set(),
-        port: 0,
+        instance: ++instances,
+        subscribers: new Set(),
         controls: new Map(),
         disposed: false,
         queue: Promise.resolve(),
@@ -293,42 +285,12 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
         headed: descriptor.browser.launchOptions?.headless === false,
         sent: new Map(),
       };
-      server.on('upgrade', (req, socket, head) => {
-        const token = /^\/stream\/([a-f0-9]{64})$/.exec(req.url ?? '')?.[1];
-        if (!isLoopbackHost(req.headers.host, v.port) || !token || !grants.consume(token, v.port)) { socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return; }
-        wss.handleUpgrade(req, socket, head, ws => {
-          v.sockets.add(ws);
-          // Earlier viewers already hold this state; the refresh below sends only what changed.
-          for (const payload of v.sent.values()) ws.send(payload);
-          ws.on('error', log);
-          ws.on('message', raw => {
-            if (v.queued >= 256) { ws.close(1008, 'Input backlog exceeded'); return; }
-            v.queued++;
-            v.queue = v.queue.then(() => input(v, raw.toString())).catch(log).finally(() => { v.queued--; });
-          });
-          ws.on('close', () => {
-            v.sockets.delete(ws);
-            if (!v.sockets.size) {
-              if (v.timer) clearTimeout(v.timer);
-              v.timer = undefined;
-              void v.cdp?.detach().catch(() => {});
-              v.cdp = undefined;
-            }
-          });
-          void refresh(v).then(() => startFrames(v)).catch(log);
-          if (v.sockets.size === 1) schedule(v);
-        });
+      browser.on('disconnected', () => {
+        // Gone on its own: the CLI closed it, or its window closed.
+        if (!v.disposed) for (const { sink } of v.subscribers) sink.gone();
+        if (viewers.get(key) === v) viewers.delete(key);
+        void dispose(v);
       });
-      try {
-        await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
-      } catch (error) {
-        await dispose(v);
-        throw error;
-      }
-      server.unref();
-      v.port = (server.address() as { port: number }).port;
-      browser.on('disconnected', () => { if (viewers.get(key) === v) viewers.delete(key); void dispose(v); });
-      if (closed || gen !== (generations.get(key) ?? 0)) { await dispose(v); throw new Error('Browser launch superseded'); }
       viewers.set(key, v);
       return v;
     })();
@@ -344,7 +306,7 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
     return { v, page: v.page };
   }
   const exited = (r: { exitCode: number; stderr: string }) => r.stderr.trim() || `playwright-cli exited ${r.exitCode}`;
-  const live = (v: Viewer): LiveBrowser => ({ wsPort: v.port, headed: v.headed });
+  const live = (v: Viewer): LiveBrowser => ({ stream: v.instance, headed: v.headed });
 
   return {
     pollMs: 200,
@@ -361,7 +323,7 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
       try {
         const v = await connect(b);
         // A connecting viewer is sent the current state; only live ones need it now.
-        if (v.sockets.size) await refresh(v);
+        if (v.subscribers.size) await refresh(v);
         return live(v);
       } catch (error) {
         if (!(error instanceof SessionNotOpenError)) throw error;
@@ -450,18 +412,40 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
     },
 
     // CDP capture in-process. Captures share the viewer's polling cadence.
-    async screenshot(b, { format, quality }) {
+    async screenshot(b) {
       const { v, page } = await livePage(b, false);
       const cdp = await control(v, page);
-      const { data } = await cdp.send('Page.captureScreenshot', { format, ...(format === 'jpeg' ? { quality } : {}), captureBeyondViewport: false });
-      // Keep the cross-host contract a plain typed array, including VS Code's message transport.
-      return { bytes: new Uint8Array(Buffer.from(data, 'base64')) };
+      const { data } = await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: CAPTURE_JPEG_QUALITY, captureBeyondViewport: false });
+      return { bytes: Buffer.from(data, 'base64') };
     },
 
-    async streamUrl(port) {
-      const v = [...viewers.values()].find(v => v.port === port && !v.disposed);
-      if (!v) throw new Error('Playwright stream is no longer live');
-      return `ws://127.0.0.1:${v.port}/stream/${grants.issue(v.port)}`;
+    async view(b, stream, { headed }, sink) {
+      const v = await connect(b);
+      if (v.instance !== stream || v.disposed) throw new Error('Playwright stream is no longer live');
+      const subscriber: Subscriber = { sink, headed };
+      v.subscribers.add(subscriber);
+      // Earlier viewers already hold this state; the refresh below sends only what changed.
+      for (const { message } of v.sent.values()) sink.state(message);
+      void refresh(v).then(() => startFrames(v)).catch(log);
+      if (v.subscribers.size === 1) schedule(v);
+      return {
+        capturable: true,
+        input(message) {
+          if (v.queued >= INPUT_BACKLOG) return false;
+          v.queued++;
+          v.queue = v.queue.then(() => input(v, message)).catch(log).finally(() => { v.queued--; });
+          return true;
+        },
+        close() {
+          if (!v.subscribers.delete(subscriber) || watching(v)) return;
+          // Nobody sees its frames now; with no viewer left, nobody its tabs.
+          void v.cdp?.detach().catch(() => {});
+          v.cdp = undefined;
+          if (v.subscribers.size) return;
+          if (v.timer) clearTimeout(v.timer);
+          v.timer = undefined;
+        },
+      };
     },
 
     async dispose() {

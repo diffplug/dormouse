@@ -88,20 +88,18 @@ describe("BrowserSidecarAdapter session persistence", () => {
   });
 });
 
-// The harness has no Rust to read a capture file, so its bridge answers a
-// screenshot with base64 (`readCapture` in standalone/scripts/dev-agent-browser.mjs).
 describe("BrowserSidecarAdapter browser requests", () => {
-  it("forwards every request through one browser_request, decoding a screenshot's base64", async () => {
+  it("forwards every request through one browser_request, and answers a failure as a result", async () => {
     const host = new BrowserSidecarHost("http://localhost:1234");
-    const invoke = vi.spyOn(host, "invoke").mockResolvedValueOnce({ ok: true, mime: "image/jpeg", bytesBase64: "/9gB" });
+    const invoke = vi.spyOn(host, "invoke").mockResolvedValueOnce({ ok: true, url: "ws://127.0.0.1:9/view/abc" });
     const adapter = new BrowserSidecarAdapter(host);
-    const request = { provider: "agent-browser" as const, binding: { session: "sess" }, op: "screenshot" as const };
+    const request = { provider: "agent-browser" as const, binding: { session: "sess" }, op: "view" as const, stream: 4321 };
 
-    expect(await adapter.browser(request)).toEqual({ ok: true, mime: "image/jpeg", bytes: Uint8Array.from([0xff, 0xd8, 0x01]) });
+    expect(await adapter.browser(request)).toEqual({ ok: true, url: "ws://127.0.0.1:9/view/abc" });
     expect(invoke).toHaveBeenCalledWith("browser_request", { request });
 
     invoke.mockRejectedValueOnce(new Error("bridge down"));
-    expect(await adapter.browser({ ...request, op: "close" })).toEqual({ ok: false, error: "bridge down" });
+    expect(await adapter.browser({ provider: "agent-browser", binding: { session: "sess" }, op: "close" })).toEqual({ ok: false, error: "bridge down" });
   });
 });
 

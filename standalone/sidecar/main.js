@@ -215,13 +215,11 @@ function handleLine(line) {
         }));
         break;
       case 'browser:request':
-        // A screenshot answers with its temp-file PATH, not the bytes: a
-        // ~100-700KB base64 line would otherwise ride the JSON-lines stdio pipe
-        // shared with all PTY traffic (head-of-line blocking terminal output on
-        // every frame). Rust reads the file itself and returns a raw
-        // tauri::ipc::Response for the webview.
+        // Frames never ride this JSON-lines stdio, which PTY traffic shares:
+        // the webview takes them over the host's viewer socket
+        // (docs/specs/dor-browser.md → "Viewer Socket").
         respondAsync('browser:result', data.requestId, async () => ({
-          result: await browserHost.requestFile(data.request),
+          result: await browserHost.request(data.request),
         }));
         break;
       case 'clipboard:readFiles':

@@ -468,7 +468,7 @@ describe('VSCodeAdapter browser requests', () => {
     expect(new VSCodeAdapter().browserProviders).toEqual(['agent-browser', 'playwright']);
   });
 
-  // A capture queued behind a page-loading `open` answers only after the
+  // A command queued behind a page-loading `open` answers only after the
   // CLI's 25s action timeout, and a launch the host bounds to answer inside
   // the same wait; giving up sooner makes the webview ask again.
   it('waits out a daemon command held behind a page load', async () => {
@@ -476,7 +476,7 @@ describe('VSCodeAdapter browser requests', () => {
     const adapter = new VSCodeAdapter();
     const binding = { session: 'sess' };
     for (const request of [
-      () => adapter.browser({ provider: 'agent-browser', binding, op: 'screenshot', format: 'jpeg' }),
+      () => adapter.browser({ provider: 'agent-browser', binding, op: 'launch', url: 'https://example.com/', headed: true }),
       () => adapter.browser({ provider: 'agent-browser', binding, op: 'history', dir: 'reload' }),
       () => adapter.browser({ provider: 'agent-browser', binding, op: 'edit', edit: 'copy' }),
     ]) {
@@ -495,9 +495,9 @@ describe('VSCodeAdapter browser requests', () => {
     const request = postMessage.mock.calls.map(([message]) => message).find((message) => message.type === 'browser:request');
     expect(request.request).toEqual({ provider: 'agent-browser', binding: { session: 'sess' }, op: 'attach', url: 'https://example.com/' });
     windowTarget.dispatchEvent(hostMessage({
-      type: 'browser:result', requestId: request.requestId, result: { ok: true, wsPort: 4321, relaunched: true, headed: true, nativeIdentity: 'id' },
+      type: 'browser:result', requestId: request.requestId, result: { ok: true, stream: 4321, relaunched: true, headed: true, nativeIdentity: 'id' },
     }));
-    expect(await attached).toEqual({ ok: true, wsPort: 4321, relaunched: true, headed: true, nativeIdentity: 'id' });
+    expect(await attached).toEqual({ ok: true, stream: 4321, relaunched: true, headed: true, nativeIdentity: 'id' });
   });
 });
 

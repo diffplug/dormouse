@@ -34,7 +34,7 @@ import { isSurfaceClosing } from '../../lib/notepad/notepad-store';
 import { clearToolAnnounce } from '../../lib/tool-announce-store';
 import { isWorkspaceTransferPending } from '../../lib/window-session-aggregator';
 import { stringParam } from './dor-control-shared';
-import { handOverBrowserPort } from './agent-browser-surface-controller';
+import { handOverBrowserStream } from './agent-browser-surface-controller';
 import {
   callerStillPlaceable,
   callerStillRunnable,
@@ -138,7 +138,8 @@ type EnsureBrowserSurface = (args: {
   cwd?: string;
   key?: string;
   session: string;
-  wsPort?: number;
+  /** The browser's stream, for the Surface's controller to view at once. */
+  stream?: number;
   binaryPath?: string;
   /** Resolved lazily, only when a fresh surface must be created: the reuse path
    *  must succeed without a visible reference (e.g. `dor ab` from a minimized
@@ -777,7 +778,7 @@ export function useDorControl({
     nativeIdentity,
     cwd,
     session,
-    wsPort,
+    stream,
     binaryPath,
     reference,
     minimized = false,
@@ -791,10 +792,10 @@ export function useDorControl({
       ...(headed !== undefined ? { renderMode: headedRenderMode(provider, headed) } : {}),
       ...(binaryPath !== undefined ? { binaryPath } : {}),
     };
-    // The stream port is no param: the command just learned it, so the
-    // Surface's controller streams from it at once, even when it is unchanged.
+    // The stream is no param: the command just learned it, so the Surface's
+    // controller views it at once, even when it is unchanged.
     const handOver = (id: string) => {
-      if (wsPort !== undefined) handOverBrowserPort(id, lath.getMeta(id)?.params ?? {}, wsPort);
+      if (stream !== undefined) handOverBrowserStream(id, lath.getMeta(id)?.params ?? {}, stream);
     };
 
     const existing = findBrowserSurface(provider, key !== undefined ? { key } : { nativeIdentity });
@@ -1684,7 +1685,7 @@ export function useDorControl({
       // streamed from as it is; the host's state files may not describe that
       // daemon at all (docs/specs/dor-browser.md → "agent-browser").
       const callerPort = provider === 'agent-browser' && isTcpPort(params.wsPort) ? params.wsPort : undefined;
-      const status: BrowserResult = callerPort === undefined ? await browser.attach() : { ok: true, wsPort: callerPort };
+      const status: BrowserResult = callerPort === undefined ? await browser.attach() : { ok: true, stream: callerPort };
       if (!status.ok) {
         detail.respond({ ok: false, error: status.error ?? `${BROWSER_PROVIDER_GUI[provider].label} connection failed` });
         return;
@@ -1700,7 +1701,7 @@ export function useDorControl({
         session,
         cwd,
         binaryPath,
-        wsPort: status.wsPort,
+        stream: status.stream,
         headed: status.headed,
         // agent-browser's is its session; every host answer names one.
         nativeIdentity: status.nativeIdentity ?? session,

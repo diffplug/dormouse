@@ -1,7 +1,6 @@
 /**
- * The private per-process directory a browser host writes screenshot frames
- * into (docs/specs/dor-browser.md → "Browser Host"), shared
- * by the agent-browser and Playwright hosts.
+ * The private per-process directory the browser host's captures are written
+ * into (docs/specs/dor-browser.md → "Viewer Socket"; `./browser-capture.ts`).
  *
  * A frame is a picture of the user's authenticated browser, so the *directory*
  * is the control: one `mkdtemp` per host, which is `0700` and unguessable. A

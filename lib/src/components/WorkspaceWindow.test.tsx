@@ -559,7 +559,7 @@ describe('WorkspaceWindow', () => {
   it('refuses a Playwright surface.browser whose host answer lands after the close began', async () => {
     // The Playwright arm asks the host for the viewer before it creates
     // anything, so the guard above is not the last word.
-    const status = Promise.withResolvers<{ ok: boolean; wsPort: number; headed: boolean }>();
+    const status = Promise.withResolvers<{ ok: boolean; stream: number; headed: boolean }>();
     const browser = vi.fn(() => status.promise);
     Object.assign(fake, { browserProviders: ['agent-browser', 'playwright'], browser });
     await render();
@@ -581,7 +581,7 @@ describe('WorkspaceWindow', () => {
     await flush();
     expect(browser).toHaveBeenCalledWith(expect.objectContaining({ provider: 'playwright', op: 'attach', binding: expect.objectContaining({ session: 'late' }) }));
     await act(async () => { expect(await handle.closeAll('silent')).toBeNull(); });
-    await act(async () => status.resolve({ ok: true, wsPort: 4321, headed: false }));
+    await act(async () => status.resolve({ ok: true, stream: 4321, headed: false }));
     await flush();
 
     expect(respond).toHaveBeenCalledWith({ ok: false, error: 'this workspace is closing' });

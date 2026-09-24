@@ -82,14 +82,13 @@ stdout. **stdout is the protocol** — sidecar diagnostics go to stderr, which R
 appends to the log file.
 
 Webview → Rust is Tauri invokes; the `#[tauri::command]` set and `TauriAdapter`
-own the exact command list, most of them thin sidecar forwarders. Three carve-outs
+own the exact command list, most of them thin sidecar forwarders. Two carve-outs
 are *not* forwarded:
 
 | Not forwarded | Handled | Why |
 |---|---|---|
 | `load_session` / `save_session` | Rust | the per-window session file is Rust's store (§Persistence) |
 | the `clipboard` readers (Windows only) | Rust (`clipboard_win.rs`) | native Win32 reads (`docs/specs/mouse-and-clipboard.md` §8.6) |
-| `browser_screenshot` | Rust reads, then deletes, a sidecar-supplied temp-file *path* | images must never ride the JSON-lines pipe shared with PTY traffic (`docs/specs/dor-browser.md`) |
 
 Request/response commands block on the sidecar's reply under a timeout.
 `OPEN_PORT_TIMEOUT_MS` and `OPEN_PORT_TIMEOUT_PER_ID_MS` in `lib.rs` mirror the

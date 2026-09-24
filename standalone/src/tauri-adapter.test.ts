@@ -109,23 +109,16 @@ describe("TauriAdapter cwd probing", () => {
 });
 
 describe("TauriAdapter browser requests", () => {
-  it("sends a screenshot for raw bytes, every other request as JSON, and answers a failure as a result", async () => {
-    // Image bytes must never ride the JSON-lines pipe: only `browser_screenshot`
-    // reads the capture file in Rust and answers an ArrayBuffer.
+  it("sends every request through one browser_request, and answers a failure as a result", async () => {
+    // Frames never cross this IPC: the webview takes them over the host's
+    // viewer socket.
     const adapter = new TauriAdapter();
-    vi.mocked(rawInvoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "browser_screenshot") return Uint8Array.from([0xff, 0xd8]).buffer;
-      if (cmd === "browser_request") return { ok: true, wsPort: 4321 };
-      return undefined;
-    });
+    vi.mocked(rawInvoke).mockImplementation(async (cmd: string) => (cmd === "browser_request" ? { ok: true, stream: 4321 } : undefined));
     const binding = { session: "sess" };
 
-    const shot = await adapter.browser({ provider: "agent-browser", binding, op: "screenshot", format: "png" });
-    expect(shot).toEqual({ ok: true, bytes: Uint8Array.from([0xff, 0xd8]), mime: "image/png" });
     const attached = await adapter.browser({ provider: "playwright", binding, op: "attach" });
-    expect(attached).toEqual({ ok: true, wsPort: 4321 });
+    expect(attached).toEqual({ ok: true, stream: 4321 });
     expect(vi.mocked(rawInvoke).mock.calls.filter(([cmd]) => cmd.startsWith("browser_"))).toEqual([
-      ["browser_screenshot", { request: { provider: "agent-browser", binding, op: "screenshot", format: "png" } }],
       ["browser_request", { request: { provider: "playwright", binding, op: "attach" } }],
     ]);
 

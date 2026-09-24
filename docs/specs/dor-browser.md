@@ -66,9 +66,9 @@ Invariants on the flat persisted `BrowserPanelParams`:
   `launchFallback`, `binaryPath`, `cwd`, `nativeIdentity`, `syncEngaged`,
   `key`), never nested but for a `launchFallback` restore's params. Pop-out is not a param — it derives from `renderMode`
   once, at controller construction.
-- **Never carry a stream port in params**: the port `dor ab` reads, or the one
-  the Playwright host's `attach` answers for `dor pw`, goes straight to the
-  Surface's controller (rationale).
+- **Never carry a stream in params**: the port `dor ab` reads, or the stream
+  the host's `attach` answers for `dor pw`, goes straight to the Surface's
+  controller (rationale).
 - **`contextPortKey` is declared and persisted like any other param.** Only a
   Surface the pane context menu opened for a port carries it, and reuse looks
   one up by it ([Pane Context Menu Connect](#pane-context-menu-connect)).
@@ -82,7 +82,7 @@ Invariants on the flat persisted `BrowserPanelParams`:
 
 Source of truth: `lib/src/components/wall/BrowserPanel.tsx` (`BrowserPanelParams`), `lib/src/components/wall/browser-surface.ts`,
 `lib/src/components/Wall.tsx` (`replaceSurface`), `lib/src/components/wall/agent-browser-surface-controller.ts`
-(`rememberRestorableUrl`, `handOverBrowserPort`), `lib/src/components/wall/IframePanel.tsx` (`applyFrameUrl`).
+(`rememberRestorableUrl`, `handOverBrowserStream`), `lib/src/components/wall/IframePanel.tsx` (`applyFrameUrl`).
 
 ## Placement And Lifetime
 
@@ -284,7 +284,7 @@ absolute path (`docs/specs/dor-cli.md` → Spawning External Binaries).
   native identity (agent-browser: the session; Playwright: installation,
   project scope and session, which a raw `--session` shares across one
   project's subdirectories). A command for a browser that has a Surface hands
-  its port over, refreshes `binaryPath` and reuses the pane — not an invariant,
+  its stream over, refreshes `binaryPath` and reuses the pane — not an invariant,
   though: a surface killed or render-swapped mid-command leaves the trailing
   request to mint a fresh pane (rationale).
 
@@ -299,7 +299,7 @@ handle to its agent-browser session, and gates the rest` in
 ### Browser Connection
 
 A surface-id-keyed controller registry (mirroring `terminal-lifecycle.ts`) owns
-one `AgentBrowserConnection` plus its screenshot loop. **The controller is
+one `AgentBrowserConnection`, its end of a [Viewer Socket](#viewer-socket). **The controller is
 Surface-scoped, not panel-scoped** — it survives panel unmount. **Must keep the
 daemon/session alive while parked.** **A view must key its controller by
 provider as well as Surface id, and the registry must replace one driving the
@@ -308,36 +308,37 @@ swap is restored in place, and a controller's provider is fixed for its life.
 **A view whose controller was released takes a new one on its next params
 change, never on the release itself** (a kill's, as its fade starts).
 
-**Phase.** The controller holds one `Phase`; the stream connection and CDP
-observer exist exactly in `live`. A hidden headless pane enters `parked` in
-place of `live`; a `dor` handover moves any phase but `launching` and
-`relaunching` to its port; a new `session` in params rebinds.
+**Phase.** The controller holds one `Phase`; the viewer socket exists exactly
+in `live`. A hidden headless pane enters `parked` in place of `live`; a `dor`
+handover moves any phase but `launching` and `relaunching` to its stream; a new
+`session` in params rebinds. A **stream** is what a launch or `attach` answers
+for a live browser — agent-browser's daemon stream port, the host's number for
+a Playwright connection — and what `view` takes back.
 
 | Phase | State | Next |
 | --- | --- | --- |
-| `idle` | No view has started it | `launching` without a session; `live` at a handed-over port; else `attaching` with its page |
-| `launching` | Opening `url`, in `launchSession` when set, then binding the session answered | `live` at the answered port, else `attaching`; `ended` |
+| `idle` | No view has started it | `launching` without a session; `live` at a handed-over stream; else `attaching` with its page |
+| `launching` | Opening `url`, in `launchSession` when set, then binding the session answered | `live` at the answered stream, else `attaching`; `ended` |
 | `attaching` | Asking the host (`attach`) where the session streams | `live`; `ended` |
-| `live` | Streaming from its port | `parked` (hidden ≥1s, headless); `relaunching`; `ended` when a headless stream drops (rationale); `attaching` with no page when an unpark's port fails |
-| `parked` | Stream released; daemon up at its port | `live` at that port on unpark (rationale); `relaunching` |
-| `relaunching` | Headed↔headless relaunch | `live` at the host's port; else `attaching` with its page, headless |
+| `live` | Viewing its stream | `parked` (hidden ≥1s, headless); `relaunching`; `ended` when a headless browser goes (rationale); `attaching` with no page when an unpark's stream fails |
+| `parked` | Socket released; browser up at its stream | `live` at that stream on unpark (rationale); `relaunching` |
+| `relaunching` | Headed↔headless relaunch | `live` at the host's stream; else `attaching` with its page, headless |
 | `ended` | No browser; `error` says why | `relaunching`; a navigation rebinds, with its page |
 | `disposed` | Released | — |
 
 - **Every browser operation must pass one gate (`driver`), open only in
-  `live`** — chrome and Display modal actions, tabs, sync-to-pane, `get
-  cdp-url`, edit chords, screenshots (rationale). **An unpark catches up —
-  sync, a pending intent — only once its stream opens.** The gate orders the
-  Surface's own intents; the host is what keeps an operation off a browser
-  mid-relaunch ([Browser Host](#browser-host)).
+  `live`** — chrome and Display modal actions, tabs, sync-to-pane, edit chords
+  (rationale). **An unpark catches up — sync, a pending intent — only once its
+  socket opens.** The gate orders the Surface's own intents; the host is what
+  keeps an operation off a browser mid-relaunch ([Browser Host](#browser-host)).
 - **A navigation asked for outside `live` is kept as the one latest intent**,
   run on the next `live`; **so is a pop-out or pop-in asked before the browser
   is bound** (`idle`, `launching`, `attaching`), run as a relaunch, and so is
   a new `url` in params while `launching` (rationale). **A launch or relaunch
   opens the pending page itself; one the host opened never loads again**
   (rationale).
-- **The controller never asks a daemon-spawning CLI verb for a port**: ports
-  come from a launch or relaunch answer, a `dor` handover, or `attach`.
+- **The controller never asks a daemon-spawning CLI verb for a stream**:
+  streams come from a launch or relaunch answer, a `dor` handover, or `attach`.
 - **A failed first launch is reported once to the Wall, which applies the
   Surface's `launchFallback`**: `close` the pane, `embed` (a Tool's iframe), or
   `{ restore }` the params a swap replaced. A param cleared on success, it
@@ -352,48 +353,30 @@ place of `live`; a `dor` handover moves any phase but `launching` and
   `ended`). **A relaunch leaves `live` before headedness changes** (rationale).
 
 **Parking.** A Lath leaf is always mounted, so nothing else stops a hidden pane's
-~20Hz stream and per-pulse screenshot loop (rationale). A pane that goes
-off-screen — or whose view unmounts — parks after a ~1s debounce: connection and
-screenshot loop disposed, daemon/session alive, daemon-side streaming stopping on
-its own because clients trigger it.
+~20Hz stream and its crisp captures (rationale). A pane that goes off-screen —
+or whose view unmounts — parks after a ~1s debounce: its viewer socket closed,
+which ends the host's subscription, daemon/session alive, daemon-side streaming
+stopping on its own because clients trigger it.
 
-- **An unpark keeps the last good frame on screen**, re-priming from the stream's
-  re-broadcast frame/tabs; a fresh reattach mounts a blank canvas and shows the
-  placeholder until the first screenshot.
+- **An unpark keeps the last good frame on screen**, re-priming from the
+  stream's re-broadcast frame/tabs; a fresh reattach mounts a blank canvas and
+  asks the host to `repaint`, showing the placeholder until a frame lands.
 - **A resize made while not `live` is pushed on the next `live`.**
-- **Never park a popped-out pane**: its stream/CDP observer must keep running for
-  window-close auto-revert, even while minimized.
+- **Never park a popped-out pane**: its viewer socket brings the window's page
+  and its close, which auto-reverts, even while minimized.
 - **Never set `AGENT_BROWSER_IDLE_TIMEOUT_MS`** for Dormouse-managed sessions —
   daemon self-exit when idle would defeat "alive while parked".
 
-The stream carries frames, status, tab snapshots, `url`, and native
-`input_mouse` / `input_keyboard` input. **Control envelopes dispatch at any
-size.** **`url` names the active tab at navigation commit; `tabs`
-refreshes only when the driving command completes**
-(for a slow page, after the load; rationale), so every commit clears the title
-until `tabs` refreshes, even at the same URL.
+**The webview paints what the socket sends, latest-only**: one frame decodes at
+a time, and a newer arrival replaces the one waiting behind it. **A provisional
+frame of the canvas's shape draws scaled into it**; only a crisp frame, or one
+of another shape, sizes the canvas, so switching between the two reallocates
+nothing (rationale).
 
-**Two-stage paint.** A changed stream JPEG paints at once as a CSS-resolution
-**provisional frame** — the first image, 250ms after any input (pointer, keys,
-pasted text, editing chords; continuous input extends the window), and while a
-capture is **overdue** — then a crisp device-resolution
-host `screenshot` replaces it (rationale):
-
-- **Both paths are latest-only.**
-- **No capture may start inside the provisional window** (rationale).
-- **A capture is overdue past twice the average round trip, at least 400ms. It
-  is never re-issued while its host call is unresolved, and a paint made only
-  because it is overdue does not supersede it** (rationale).
-- **Must leave the loop dirty when capture or bitmap decode becomes stale**
-  (rationale). Pinned by `agent-browser-screenshot-loop.test.ts`.
-- **Any canvas writer but the crisp loop must bump the draw generation** in its
-  key, or the byte-identical-frame dedup drops its paint (rationale).
-- **A host that cannot drive the provider paints every changed provisional
-  frame as its final image** rather than showing only the placeholder.
-
-High-rate `[ab-panel]`/`[agent-browser]` console diagnostics sit behind the
+High-rate `[ab-panel]` console diagnostics sit behind the
 `dormouse.flags.abDebugLogs` localStorage flag, read lazily and memoized on the
-first log (reload to apply); `debugSnapshot()`'s ring is always on.
+first log (reload to apply), which also has the host log each viewer socket's
+rates and its event-loop delay every 5 s; `debugSnapshot()`'s ring is always on.
 
 Input rules:
 
@@ -404,8 +387,9 @@ Input rules:
 - **`windowsVirtualKeyCode` comes from a real key map, never
   `key.charCodeAt(0)`** (`.` is char 46 = VK_DELETE, so periods would otherwise
   become Delete presses).
-- Local paste is replayed as per-character key input — as `input_text` on
-  [Playwright](#playwright).
+- **Must send a local paste as `input_text` messages of at most 8192
+  characters** (`viewerTextInputs`), never a key pair per character from the
+  webview; the host inserts each whole (rationale).
 - **Select-all/copy/cut go through the host `edit` operation on every
   platform**, since those chords do not survive CDP input. Undo/redo is not
   emulated.
@@ -418,11 +402,78 @@ mid-relaunch` in `lib/src/components/wall/agent-browser-surface-controller.test.
 
 Source of truth: `lib/src/components/wall/AgentBrowserPanel.tsx` (`toDevice`, the
 tab strip, placeholders), `lib/src/components/wall/agent-browser-surface-controller.ts`
-(`Phase`, `driver`, `launch`, `attach`, `whenBrowserLaunched`), `onBrowserLaunchFailed` in `lib/src/components/Wall.tsx`,
-`lib/src/components/wall/agent-browser-connection.ts`,
-`lib/src/components/wall/agent-browser-screenshot-loop.ts`, `lib/src/components/wall/agent-browser-input.ts`,
+(`Phase`, `driver`, `launch`, `attach`, `paintFrame`, `paintBitmap`, `whenBrowserLaunched`), `onBrowserLaunchFailed` in `lib/src/components/Wall.tsx`,
+`lib/src/components/wall/agent-browser-connection.ts`, `lib/src/components/wall/agent-browser-input.ts`,
+`viewerTextInputs` in `lib/src/lib/platform/browser-automation.ts`,
 `lib/src/components/wall/use-surface-visibility.ts`, `lib/src/lib/agent-browser-tab.ts` (the tab record
 shared by the stream and `tab list --json`).
+
+### Viewer Socket
+
+**The webview reaches a browser only through its host's viewer socket** —
+never a daemon's stream, never CDP. One loopback listener in the host serves a
+socket per Surface, onto the browser at the stream `view` names:
+
+| Message | Direction | Carries |
+| --- | --- | --- |
+| frame | host → webview, binary | A 12-byte header — kind (`provisional` / `crisp`), the viewport's CSS size — then the JPEG |
+| `status`, `tabs` | host → webview | Whether the browser is up, and its viewport size; the tab list |
+| `url` | host → webview | A navigation the active tab committed |
+| `page` | host → webview | A popped-out window's page URL and title |
+| `input_mouse`, `input_keyboard`, `input_text` | webview → host | Native input; a paste as text |
+| `repaint` | webview → host | Resend the last frame to a canvas that mounted blank |
+
+- **Must authorize every upgrade with the listener's own loopback `Host` and a
+  single-use, 60-second grant for that one view**, capped at 1024; a plain
+  request is refused (`docs/specs/security-local.md` → Loopback Listeners).
+- **Must rebuild every webview message field by field before a provider sees
+  it** (`parseViewerInput`); inbound messages are capped at 64 KiB.
+- **Must send state only on change, and the current state to a socket that
+  connects — except `url`, a commit edge**: `tabs` refreshes only when the
+  driving command completes (rationale), so every commit clears the title
+  until `tabs` refreshes, even at the same URL.
+- **A browser that goes on its own is reported `status { connected: false }`
+  before its socket closes**, ending a headless pane and auto-reverting a
+  headed one seen connected. **A launch or close of the browser ends every
+  socket on it**; a URL granted before one opens nothing.
+- **A headed socket carries no frames**; a socket with more than 2 MB queued
+  skips a provisional one.
+
+**Two-stage paint, in the host.** A changed stream frame is sent at once as a
+CSS-resolution **provisional frame** when it is the first, within 250 ms of
+input (over the socket, or a host editing op), or while a capture is
+**overdue**; otherwise it pulses the crisp loop, whose device-resolution capture
+replaces it (rationale):
+
+- **One capture in flight**, the next no sooner than 1.5× the average capture
+  after the last began.
+- **No capture may start inside the provisional window** (rationale).
+- **A capture is overdue past twice the average round trip, at least 400ms; it
+  is never re-issued, and a paint made only because it is overdue does not
+  supersede it** (rationale).
+- **A capture a provisional paint superseded while it ran is dropped and owed
+  again** (rationale).
+- **A byte-identical capture is resent only after a provisional frame or a
+  `repaint`.**
+- **An active-tab change owes a capture**; a browser the host cannot capture (a
+  daemon in a socket directory it does not share) has every changed frame sent
+  as provisional.
+
+Pinned by `lib/src/host/browser-viewer.test.ts`.
+
+**Upstreams.** agent-browser: the daemon's stream, dialed on `127.0.0.1` only;
+**the host must drop its ~20 Hz re-broadcast by raw comparison against the last
+frame and tab list**, decoding a changed frame once (rationale); **a tab list or
+URL is state at any size**, never taken for a frame; a paste goes as key pairs. **A headed window's page is followed over its browser's
+CDP, held host-side and dialed on loopback only** (rationale). Playwright: its
+CDP screencast ([Playwright](#playwright)).
+
+Source of truth: `createViewerServer`, `BrowserView` and `parseViewerInput` in
+`lib/src/host/browser-viewer.ts`; `BrowserStreamGrants` in
+`lib/src/host/browser-stream-guard.ts`; `encodeViewerFrame` and `ViewerState` in
+`lib/src/lib/platform/browser-automation.ts`; `viewStream` and `observePage` in
+`lib/src/host/agent-browser-host.ts`. Pinned also by
+`lib/src/host/agent-browser-host.test.ts` and `lib/src/host/browser-host.test.ts`.
 
 ### Pop-Out
 
@@ -446,11 +497,14 @@ daemon during the close/reopen gap** (rationale) — the host refuses every
 operation on a browser mid-launch ([Browser Host](#browser-host)) — so
 **Dormouse supplies the active-tab URL and the host trusts it**.
 
-While popped out, Dormouse keeps a stream/CDP observer for same-tab URL/header
-updates and headed-window close auto-revert.
+While popped out, the pane's viewer socket carries no frames: **the host
+follows the window's page and reports the window going away** — agent-browser's
+daemon stream and its browser's CDP, Playwright's connection
+([Viewer Socket](#viewer-socket)) — and a window seen connected that goes
+auto-reverts to the pane.
 
-Source of truth: `lib/src/components/wall/agent-browser-surface-controller.ts` (pop-out state, CDP
-observer, auto-revert), `lib/src/host/agent-browser-host.ts` (`killDaemon`),
+Source of truth: `lib/src/components/wall/agent-browser-surface-controller.ts` (pop-out state,
+auto-revert), `lib/src/host/agent-browser-host.ts` (`killDaemon`, `observePage`),
 VS Code/standalone shutdown wiring.
 
 ### Browser Host
@@ -460,18 +514,17 @@ provider-tagged `BrowserRequest` — `{ provider, binding: { session?, cwd?,
 binaryPath? } }` plus one operation — answered by a `BrowserResult`. A host lists
 the providers it drives in `browserProviders`; one without them (the web demo)
 offers no automated renderer. VS Code runs the shared host in the extension
-host; standalone runs the bundled copy in the sidecar behind one Rust command,
-plus `browser_screenshot` for raw bytes.
+host; standalone runs the bundled copy in the sidecar behind one Rust command.
+**No frame rides a request's transport**: frames reach the webview over the
+[Viewer Socket](#viewer-socket), never the sidecar stdio PTY traffic shares.
 
 | Operation | Contract |
 | --- | --- |
 | `launch` | Without a session, open an http(s) `url` in a new GUI session; with one, navigate it when it is up in the mode asked for, else relaunch it headed or headless at `url`, blank when that page is not http(s). Resolves when the browser is up, not when the page loads ([Pop-Out](#pop-out)). |
-| `attach` | The live stream port, found without starting a browser ([agent-browser](#agent-browser), [Playwright](#playwright)), with headedness where the provider can tell. Only a gone browser, for a caller naming a page, is relaunched there (headed on request), answering `relaunched`; one it cannot view is left alone. |
-| `screenshot` | One device-resolution JPEG/PNG frame. VS Code structured-clones the bytes; standalone passes Rust a temp-file **path** over the sidecar stdio, for Rust to read and delete (rationale). **One capture per session and format in flight**: a request made meanwhile joins it — never one from before the session's close or relaunch — and the capture's spawn is killed past 30s. |
+| `attach` | The live browser's stream, found without starting a browser ([agent-browser](#agent-browser), [Playwright](#playwright)), with headedness where the provider can tell. Only a gone browser, for a caller naming a page, is relaunched there (headed on request), answering `relaunched`; one it cannot view is left alone. |
+| `view` | A single-use viewer socket URL for the browser at a `stream`, `headed` for a popped-out pane ([Viewer Socket](#viewer-socket)). |
 | `edit` | select-all/copy/cut via fixed host-owned JS plus an OS clipboard write. |
-| `streamUrl` | The URL the webview connects to for a stream port. |
 | `navigate`, `history`, `tab`, `viewport`, `device`, `close` | One fixed argv (agent-browser) or client call (Playwright) each. |
-| `cdpUrl` | agent-browser only: the browser's CDP endpoint, for the popped-out URL observer. |
 
 **Every transport waits `BROWSER_REQUEST_TIMEOUT_MS` (40s) for any reply**, past
 agent-browser's 25s action timeout, so the webview never re-asks while the host
@@ -479,7 +532,7 @@ still works.
 
 **The host runs one lifecycle for both providers**; a provider implements only
 the primitives that differ (`BrowserProvider`: find, stop, open, probe, close,
-list tabs, act, evaluate, screenshot, stream URL):
+list tabs, act, evaluate, screenshot, view):
 
 - **Must serialize a browser's launches, relaunching attaches and closes per
   native identity**, in arrival order, so two panes restoring one session
@@ -495,9 +548,10 @@ list tabs, act, evaluate, screenshot, stream URL):
   the other mode is relaunched (rationale). agent-browser cannot report its
   mode: one this host did not launch headed counts as headless.
 - **Must refuse every operation but `launch`, `attach` and `close` on a
-  browser a launch is replacing or a close is ending**, until it is done, so
-  nothing reaches a browser in the close/reopen gap ([Pop-Out](#pop-out)),
-  whichever Surface asks.
+  browser a launch is replacing or a close is ending**, `view` included, until
+  it is done, so nothing reaches a browser in the close/reopen gap
+  ([Pop-Out](#pop-out)), whichever Surface asks; the launch or close has ended
+  every viewer socket on it first, so no capture does either.
 - **Must answer a launch inside `BROWSER_REQUEST_TIMEOUT_MS`**: startup,
   queueing included, gets 30 s from the request's arrival. A relaunch stops
   what runs the session first, then resolves once the provider reports the
@@ -537,21 +591,23 @@ match. **A refused path is dropped, never fatal**, so the host's own candidates
 run. The webview applies the same predicate before sending one
 (`browserHandle`) or storing one.
 
-**Screenshots are captured into a private per-process directory, and it is
-removed** (rationale). **A tmpdir that cannot be created is answered
-`{ ok: false }` and retried on the next capture, never memoized.** **Every
-capture writes fresh files, one per caller** (rationale); a reader deletes its
-own, and the browser's close or relaunch, or a capture past
-`BROWSER_REQUEST_TIMEOUT_MS`, deletes one never read.
+**Crisp captures are written into a private per-process directory, read back
+and removed at once, and the directory is removed at shutdown** (rationale).
+**One capture per browser is in flight**: a viewer socket asking meanwhile joins
+it — never one from before the browser's close or relaunch — and an
+agent-browser capture's spawn is killed past 30s. **A tmpdir that cannot be
+created fails that capture and is retried on the next, never memoized.** The
+file name is reused per browser, with a fresh one after its close or relaunch.
 
 Source of truth: `lib/src/host/browser-host.ts` (`parseBrowserRequest`,
 `createBrowserHost`, `BrowserProvider`), `BROWSER_PROVIDERS` (`isSessionName`,
 `isAllowedBinary`) in `dor-lib-common/src/browser-providers.ts`, `BrowserRequest` in
 `lib/src/lib/platform/browser-automation.ts`, `browserHandle` in
 `lib/src/components/wall/browser-automation.ts`,
+`createBrowserCaptures` in `lib/src/host/browser-capture.ts`,
 `lib/src/host/private-capture-dir.ts`, `vscode-ext/src/agent-browser-host.ts`,
 `vscode-ext/src/webview-html.ts`, `standalone/src/tauri-adapter.ts`,
-`standalone/src-tauri/src/lib.rs` (`browser_request`, `browser_screenshot`),
+`standalone/src-tauri/src/lib.rs` (`browser_request`),
 `standalone/sidecar/main.js`.
 
 ### agent-browser
@@ -578,36 +634,32 @@ relaunch changes the mode.
   verb starts a daemon at `about:blank` to answer.
 - **`dor ab` must read the stream port itself after a command that may bind**
   (`stream status --json`, safe once the command made the daemon) and hand it
-  over; the Surface streams from it without asking the host (rationale).
-  **Never carry a socket directory to the host** — it kills the pid it reads
-  there. **Host-side operations for a session in a socket directory the host
-  does not share are refused**, as the host sees no daemon for it; a close runs
-  the CLI under the host's environment.
-- **VS Code must reach the stream through a loopback relay** — the agent-browser
-  stream server rejects `vscode-webview://` origins. The relay grants one
-  single-use, short-TTL token bound to one stream port and strips the Origin
-  header; standalone connects directly.
+  over; the host views it on loopback without reading the caller's socket
+  directory (rationale). **Never carry a socket directory to the host** — it
+  kills the pid it reads there. **Host-side operations and captures for a
+  session in a socket directory the host does not share are refused**, as the
+  host sees no daemon for it; its viewer socket still sends every changed
+  frame, and a close runs the CLI under the host's environment.
 
 Source of truth: `createAgentBrowserProvider` and `runWithBinaryFallback` in
 `lib/src/host/agent-browser-host.ts`, `isAllowedAgentBrowserBinary` and
 `streamStatusArgs` in `dor-lib-common/src/browser-providers.ts`,
-`streamStatus` in `dor/src/commands/agent-browser.ts`,
-`vscode-ext/src/agent-browser-host.ts`. Pinned by
+`streamStatus` in `dor/src/commands/agent-browser.ts`. Pinned by
 `lib/src/host/agent-browser-host.test.ts`.
 
 ### Playwright
 
 **Must use the user's installed `@playwright/cli`, resolved from `DORMOUSE_PLAYWRIGHT_BIN` or `PATH`.** GUI launches use Chromium. Native commands retain Playwright semantics: `open` restarts, `goto` navigates; commands for unsupported engines still run, with a viewer warning. The viewer requires CLI 0.1.19’s local browser-binding endpoint; installation errors name this requirement. A Playwright session lives in its CLI project scope, so a binding's cwd and executable pin every later command, relative paths included; `--session` uses the caller's own scope. GUI Connect inherits the source terminal's cwd; a swap without one uses the host cwd.
 
-**Must discover the native session in its CLI project scope and connect using that installation's matching Playwright client.** Accept only a unique registry entry matching session, workspace and library, with a local pipe endpoint and Chromium engine. Never load modules from the registry's library path. The host derives the client from the validated CLI installation. **`attach` relaunches at the page only when the registry lists no browser for the session**, never one it cannot view; `dor pw`'s binding attaches with no page, and reports the browser's headedness. Native CLI tabs and the pane share the selected tab; the host polls tab selection and metadata every 750ms while viewed, broadcasting only changes, and the current state to each connecting viewer. Screenshots reuse tab state for up to 750ms; explicit host controls refresh immediately. **The controller must apply a host-reported mode before the new viewer port**, so sync never sizes a headed window, except mid-relaunch or as an echo ([Browser Connection](#browser-connection)).
+**Must discover the native session in its CLI project scope and connect using that installation's matching Playwright client.** Accept only a unique registry entry matching session, workspace and library, with a local pipe endpoint and Chromium engine. Never load modules from the registry's library path. The host derives the client from the validated CLI installation. **`attach` relaunches at the page only when the registry lists no browser for the session**, never one it cannot view; `dor pw`'s binding attaches with no page, and reports the browser's headedness. Native CLI tabs and the pane share the selected tab; the host polls tab selection and metadata every 750ms while viewed, broadcasting only changes, and the current state to each connecting viewer. Captures reuse tab state for up to 750ms; explicit host controls refresh immediately. **The controller must apply a host-reported mode before the new stream**, so sync never sizes a headed window, except mid-relaunch or as an echo ([Browser Connection](#browser-connection)).
 
 Arbitrary CLI arguments, JavaScript and CDP methods are unavailable through the webview channel; the trusted `dor pw` process retains native passthrough. Executable hints use the same filename/exact-host-override boundary as agent-browser, with `playwright-cli` as the accepted name; `dor pw` applies it to the executable a binding returns (`docs/specs/dor-cli.md` → Browser Surface Addressing).
 
-A relaunch closes the previous CLI session, and a launch completes when the browser endpoint is ready. **Every CLI call a launch waits on is killed at its deadline; every other one at 10 s, except `open`**, which lasts as long as the page load and whose end could take its browser down; nothing waits on it past a launch's own bounds. Shutdown also disconnects viewers. Viewer disconnect alone leaves the CLI browser alive. Concurrent input/captures share CDP attachments; disposal releases late attachments. **A screencast that fails to start must forget its page**, so the next poll releases the attachment and retries.
+A relaunch closes the previous CLI session, and a launch completes when the browser endpoint is ready; its stream is the host's number for that connection. **Every CLI call a launch waits on is killed at its deadline; every other one at 10 s, except `open`**, which lasts as long as the page load and whose end could take its browser down; nothing waits on it past a launch's own bounds. Shutdown also disconnects viewers. Viewer disconnect alone leaves the CLI browser alive; **a browser that disconnects on its own is reported gone to its viewers**. Concurrent input/captures share CDP attachments; disposal releases late attachments. **A screencast that fails to start must forget its page**, so the next poll releases the attachment and retries.
 
-**Must authorize every stream upgrade with an own-loopback Host and a single-use, 60-second token bound to that viewer port.** Grants are capped at 1024; normal HTTP requests are refused. Input is limited to 64 KiB per message and 256 queued messages; frame backpressure drops frames above 2 MB queued. **Must send a paste as `input_text` messages of at most 8192 characters**, which the host inserts with CDP `Input.insertText`, never as a key pair per character (rationale). The same guarded stream serves all three hosts.
+The viewer socket ([Viewer Socket](#viewer-socket)) takes its frames from the CDP screencast, **decoded once and acknowledged no faster than 20 a second** (rationale), and inserts a paste with CDP `Input.insertText`. **Input waiting on CDP past 256 messages closes the viewer socket.**
 
-Source of truth: `followParamsHeadedness` in `lib/src/components/wall/agent-browser-surface-controller.ts`; `playwrightTextInputs` in `lib/src/lib/platform/browser-automation.ts`; `createPlaywrightProvider` in `lib/src/host/playwright-host.ts`; `resolvePlaywrightInstall` in `lib/src/host/playwright-install.ts`; `BrowserStreamGrants` in `lib/src/host/browser-stream-guard.ts`. Pinned by `lib/src/host/playwright-host.test.ts` (opt-in real CLI via `DORMOUSE_PLAYWRIGHT_TEST_BIN`), `lib/src/host/playwright-host.lifecycle.test.ts`, `lib/src/host/browser-stream-guard.test.ts`, and `AgentBrowserPanel Playwright params` in `lib/src/components/wall/AgentBrowserPanel.test.tsx`.
+Source of truth: `followParamsHeadedness` in `lib/src/components/wall/agent-browser-surface-controller.ts`; `createPlaywrightProvider` in `lib/src/host/playwright-host.ts`; `resolvePlaywrightInstall` in `lib/src/host/playwright-install.ts`. Pinned by `lib/src/host/playwright-host.test.ts` (opt-in real CLI via `DORMOUSE_PLAYWRIGHT_TEST_BIN`), `lib/src/host/playwright-host.lifecycle.test.ts`, and `AgentBrowserPanel Playwright params` in `lib/src/components/wall/AgentBrowserPanel.test.tsx`.
 
 ## Iframe Renderer
 

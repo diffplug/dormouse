@@ -4,15 +4,26 @@ import { createServer } from 'node:http';
 import { mkdtemp, mkdir, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { WebSocket } from 'ws';
 import { spawnAndCapture } from 'dor-lib-common';
-import type { BrowserOp, BrowserRequestBinding } from '../lib/platform/browser-automation';
+import type { BrowserOp, BrowserRequestBinding, ViewerState } from '../lib/platform/browser-automation';
 import { createBrowserHost } from './browser-host';
+import { openViewer, type TestViewer } from './browser-host-test-utils';
 import { createPlaywrightProvider } from './playwright-host';
+
+/** A JPEG's pixel width, from its start-of-frame segment. */
+function jpegWidth(jpeg: Uint8Array): number {
+  for (let i = 2; i + 8 < jpeg.length;) {
+    if (jpeg[i] !== 0xff) return 0;
+    const marker = jpeg[i + 1];
+    if (marker >= 0xc0 && marker <= 0xc3) return (jpeg[i + 7] << 8) | jpeg[i + 8];
+    i += 2 + ((jpeg[i + 2] << 8) | jpeg[i + 3]);
+  }
+  return 0;
+}
 
 // Opt-in: tests the user's real CLI and matching Chromium, with a private session.
 const binaryPath = process.env.DORMOUSE_PLAYWRIGHT_TEST_BIN;
-test.skipIf(!binaryPath)('real CLI: GUI launch, stream grants, native tabs, input, screenshots, relaunch and close', async () => {
+test.skipIf(!binaryPath)('real CLI: GUI launch, viewer sockets, native tabs, input, crisp captures, relaunch and close', async () => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), 'dor-pw-test-'));
   await mkdir(path.join(cwd, '.playwright'));
   await mkdir(path.join(cwd, 'nested'));
@@ -23,8 +34,7 @@ test.skipIf(!binaryPath)('real CLI: GUI launch, stream grants, native tabs, inpu
   const host = createBrowserHost({ writeClipboardText: text => { clipboard = text; }, providers: { playwright: () => createPlaywrightProvider() } });
   const pw = (op: BrowserOp, binding: BrowserRequestBinding) => host.request({ provider: 'playwright', binding, ...op });
   let session = '';
-  let socket: WebSocket | undefined;
-  const messages: any[] = [];
+  let viewer: TestViewer | undefined;
   const waitFor = async (predicate: () => boolean) => {
     const until = Date.now() + 10000;
     while (!predicate() && Date.now() < until) await new Promise(r => setTimeout(r, 50));
@@ -37,43 +47,38 @@ test.skipIf(!binaryPath)('real CLI: GUI launch, stream grants, native tabs, inpu
     session = opened.session!;
     const req = { cwd, binaryPath, session };
     const nested = await pw({ op: 'attach' }, { ...req, cwd: path.join(cwd, 'nested') });
-    expect(nested.wsPort).toBe(opened.wsPort);
+    expect(nested.stream).toBe(opened.stream);
     expect(nested.nativeIdentity).toBe(opened.nativeIdentity);
-    const stream = await pw({ op: 'streamUrl', port: opened.wsPort! }, {});
-    socket = new WebSocket(stream.url!);
-    socket.on('message', raw => messages.push(JSON.parse(String(raw))));
-    await waitFor(() => messages.some(m => m.type === 'frame') && messages.some(m => m.type === 'tabs'));
-    const replay = new WebSocket(stream.url!);
-    await new Promise<void>(resolve => replay.on('unexpected-response', (_req, res) => { expect(res.statusCode).toBe(403); res.resume(); replay.terminate(); resolve(); }).on('error', () => {}));
+    const { url: viewUrl } = await pw({ op: 'view', stream: opened.stream! }, req);
+    viewer = await openViewer(viewUrl!);
+    await waitFor(() => viewer!.frames.length > 0 && viewer!.states.some(m => m.type === 'tabs'));
+    await expect(openViewer(viewUrl!)).rejects.toThrow('403');
     // Parking drops the viewer socket, then reconnects to the same CLI browser.
-    socket.close();
-    await new Promise<void>(resolve => socket!.once('close', () => resolve()));
-    expect((await pw({ op: 'attach' }, req)).wsPort).toBe(opened.wsPort);
-    messages.length = 0;
-    const resumedStream = await pw({ op: 'streamUrl', port: opened.wsPort! }, {});
-    socket = new WebSocket(resumedStream.url!);
-    socket.on('message', raw => messages.push(JSON.parse(String(raw))));
-    await waitFor(() => messages.some(m => m.type === 'frame'));
+    viewer.socket.close();
+    await viewer.closed;
+    expect((await pw({ op: 'attach' }, req)).stream).toBe(opened.stream);
+    viewer = await openViewer((await pw({ op: 'view', stream: opened.stream! }, req)).url!);
+    await waitFor(() => viewer!.frames.length > 0);
     expect((await pw({ op: 'edit', edit: 'selectAll' }, req)).ok).toBe(true);
     expect((await pw({ op: 'edit', edit: 'copy' }, req)).ok).toBe(true);
     expect(clipboard).toBe('hello');
-    socket.send(JSON.stringify({ type: 'input_keyboard', eventType: 'keyDown', key: 'x', code: 'KeyX', text: 'x', windowsVirtualKeyCode: 88 }));
+    viewer.send({ type: 'input_keyboard', eventType: 'keyDown', key: 'x', code: 'KeyX', text: 'x', windowsVirtualKeyCode: 88 });
     await new Promise(r => setTimeout(r, 200));
     await pw({ op: 'edit', edit: 'selectAll' }, req);
     await pw({ op: 'edit', edit: 'copy' }, req);
     expect(clipboard).toBe('x');
-    const shot = await pw({ op: 'screenshot', format: 'png' }, req);
-    expect(Buffer.isBuffer(shot.bytes)).toBe(false);
-    expect(Buffer.from(shot.bytes!).subarray(1, 4).toString()).toBe('PNG');
+    // The typed key changed the page, so the host sharpened its stream frame.
+    await waitFor(() => viewer!.frames.some(f => f.kind === 'crisp'));
     const native = await spawnAndCapture(binaryPath!, [`--session=${session}`, 'tab-new', `${url}/second`], { cwd });
     expect(native.ok && native.exitCode).toBe(0);
-    await waitFor(() => messages.some(m => m.type === 'tabs' && m.tabs.length === 2 && m.tabs[1].active));
+    await waitFor(() => viewer!.states.some(m => m.type === 'tabs' && m.tabs.length === 2 && m.tabs[1].active));
     expect((await pw({ op: 'tab', action: 'select', tabId: '0' }, req)).ok).toBe(true);
-    await waitFor(() => messages.at(-1)?.type === 'status' && [...messages].reverse().find(m => m.type === 'tabs')?.tabs[0].active);
+    const lastTabs = () => [...viewer!.states].reverse().find((m): m is Extract<ViewerState, { type: 'tabs' }> => m.type === 'tabs');
+    await waitFor(() => viewer!.states.at(-1)?.type === 'status' && !!lastTabs()?.tabs[0].active);
     const viewport = await pw({ op: 'viewport', width: 640, height: 480, dpr: 2 }, req);
     expect(viewport.ok).toBe(true);
-    const sized = await pw({ op: 'screenshot', format: 'png' }, req);
-    expect(Buffer.from(sized.bytes!).readUInt32BE(16)).toBe(1280);
+    // Captured at device resolution, unlike the CSS-resolution stream.
+    await waitFor(() => viewer!.frames.some(f => f.kind === 'crisp' && jpegWidth(f.jpeg) === 1280));
     // No operation outside the typed set reaches the CLI.
     expect((await host.request({ provider: 'playwright', binding: req, op: 'eval', script: 'process.exit()' })).ok).toBe(false);
     const popped = await pw({ op: 'launch', url, headed: true }, req);
@@ -85,12 +90,15 @@ test.skipIf(!binaryPath)('real CLI: GUI launch, stream grants, native tabs, inpu
     expect(popTabs.ok && popTabs.stdout.match(/\d+:/g)).toHaveLength(1);
     const relaunched = await pw({ op: 'launch', url, headed: false }, req);
     expect(relaunched.ok, relaunched.error).toBe(true);
-    expect(relaunched.wsPort).not.toBe(opened.wsPort);
-    expect((await pw({ op: 'streamUrl', port: opened.wsPort! }, {})).ok).toBe(false);
+    expect(relaunched.stream).not.toBe(opened.stream);
+    // The relaunch ended the old browser's viewer, and nothing views it again.
+    expect(await viewer.closed).toBe(1001);
+    const stale = await openViewer((await pw({ op: 'view', stream: opened.stream! }, req)).url!);
+    expect(await stale.closed).toBe(1011);
     expect((await pw({ op: 'close' }, req)).ok).toBe(true);
     expect((await pw({ op: 'attach' }, req)).ok).toBe(false);
   } finally {
-    socket?.terminate();
+    viewer?.socket.terminate();
     if (session) await pw({ op: 'close' }, { cwd, binaryPath, session });
     await host.close();
     server.closeAllConnections();

@@ -4,14 +4,11 @@
  * imported by the VS Code extension host, bundled for the
  * standalone sidecar. What is genuinely agent-browser's lives here — its
  * per-session daemon and the state files it leaves beside its socket, the pid
- * kill a headed/headless relaunch needs, and each operation's one fixed argv.
- * The host owns everything the two providers share.
+ * kill a headed/headless relaunch needs, each operation's one fixed argv, and
+ * the daemon's stream the host relays to its viewer socket. The host owns
+ * everything the two providers share.
  *
- * Plain Node (child_process / fs), so the same code runs on both hosts. The
- * VS Code stream relay is NOT here: it works around the `vscode-webview://`
- * origin the agent-browser stream server rejects, which is a VS-Code-only
- * concern (the standalone webview's `tauri://localhost` origin is accepted, so
- * it connects directly). It stays in the VS Code host, injected as `streamUrl`.
+ * Plain Node (child_process / fs / ws), so the same code runs on both hosts.
  */
 import * as net from 'net';
 import * as os from 'os';
@@ -31,10 +28,12 @@ import {
   AGENT_BROWSER_SOCKET_DIR_ENV,
   DEFAULT_AGENT_BROWSER_BIN,
 } from 'dor-lib-common';
+import { WebSocket } from 'ws';
 import { isAllowedAgentBrowserBinary } from '../lib/agent-browser-binary';
 import { parseAgentBrowserTabs } from '../lib/agent-browser-tab';
-import type { BrowserResult } from '../lib/platform/browser-automation';
+import { CAPTURE_JPEG_QUALITY, type BrowserResult, type ViewerInput } from '../lib/platform/browser-automation';
 import type { BrowserAct, BrowserProvider, LiveBrowser, ProviderBinding } from './browser-host';
+import type { Upstream, ViewerSink } from './browser-viewer';
 
 const SESSION_ARGS = BROWSER_PROVIDERS['agent-browser'].sessionArgs;
 
@@ -53,7 +52,6 @@ function actArgv(act: BrowserAct): string[] | null {
       return act.action === 'select' ? ['tab', act.tabId] : ['tab', 'close', act.tabId];
     case 'viewport': return ['set', 'viewport', String(act.width), String(act.height), String(act.dpr)];
     case 'device': return ['set', 'device', act.name];
-    case 'cdpUrl': return ['get', 'cdp-url'];
   }
 }
 
@@ -85,14 +83,46 @@ const CAPTURE_TIMEOUT_MS = 30_000;
 const STREAM_PORT_READ_ATTEMPTS = 4;
 const STREAM_PORT_READ_DELAY_MS = 150;
 const PORT_PROBE_TIMEOUT_MS = 500;
+const STREAM_CONNECT_TIMEOUT_MS = 5000;
+// A stream message above this size is a frame (a base64 JPEG); status, tabs
+// and url are small — unless a long tab list or URL crosses it too.
+const FRAME_THRESHOLD_BYTES = 16384;
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 export interface AgentBrowserProviderDeps {
   /** Optional diagnostic logger. */
   log?: (message: string) => void;
-  /** The stream URL for a port; absent, the webview dials it directly. */
-  streamUrl?: (port: number) => Promise<string>;
 }
+
+/**
+ * A paste for the daemon's stream, which takes only key and mouse events: a
+ * key down and up per character, a newline as Enter.
+ */
+export function keyPairTextInputs(text: string): Extract<ViewerInput, { type: 'input_keyboard' }>[] {
+  const messages: Extract<ViewerInput, { type: 'input_keyboard' }>[] = [];
+  for (const ch of text) {
+    if (ch === '\r') continue;
+    if (ch === '\n') {
+      messages.push({ type: 'input_keyboard', eventType: 'keyDown', key: 'Enter', code: 'Enter', text: '\r', windowsVirtualKeyCode: 13, modifiers: 0 });
+      messages.push({ type: 'input_keyboard', eventType: 'keyUp', key: 'Enter', code: 'Enter', text: '', windowsVirtualKeyCode: 13, modifiers: 0 });
+    } else {
+      messages.push({ type: 'input_keyboard', eventType: 'keyDown', key: ch, code: '', text: ch, windowsVirtualKeyCode: 0, modifiers: 0 });
+      messages.push({ type: 'input_keyboard', eventType: 'keyUp', key: ch, code: '', text: '', windowsVirtualKeyCode: 0, modifiers: 0 });
+    }
+  }
+  return messages;
+}
+
+/** The viewport's CSS size a stream frame's metadata carries, when whole. */
+function frameSize(metadata: { deviceWidth?: unknown; deviceHeight?: unknown } | undefined): { width: number; height: number } | undefined {
+  const width = metadata?.deviceWidth;
+  const height = metadata?.deviceHeight;
+  return typeof width === 'number' && width > 0 && typeof height === 'number' && height > 0 ? { width, height } : undefined;
+}
+
+// A frame's bulk is base64, whose alphabet has no `"` or `:`: these mark a
+// control message large enough to pass for a frame.
+const CONTROL_MARKERS = ['"type":"tabs"', '"type":"status"', '"type":"url"'];
 
 export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}): BrowserProvider<ProviderBinding> {
   const log = deps.log ?? (() => {});
@@ -275,7 +305,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
       const pid = await readStateNumber(b.session, 'pid');
       if (pid !== undefined && processAlive(pid)) {
         const port = await acceptingStreamPort(b.session);
-        if (port !== undefined) return { wsPort: port };
+        if (port !== undefined) return { stream: port };
         throw new Error(`agent-browser session '${b.session}' is not streaming`);
       }
       return { gone: `agent-browser session '${b.session}' is not running`, named: pid !== undefined };
@@ -321,11 +351,11 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
       if (opened) {
         if (opened.exitCode !== 0 && !daemonUp) return { failed: opened.stderr.trim() || `agent-browser open exited ${opened.exitCode}` };
         const port = await readStreamPort(b, deadline);
-        return port !== undefined ? { wsPort: port } : { failed: 'agent-browser published no stream port' };
+        return port !== undefined ? { stream: port } : { failed: 'agent-browser published no stream port' };
       }
       if (!daemonUp) return undefined;
       const port = await acceptingStreamPort(b.session);
-      return port !== undefined ? { wsPort: port } : undefined;
+      return port !== undefined ? { stream: port } : undefined;
     },
 
     async close(b, timeoutMs) {
@@ -354,10 +384,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
       const argv = actArgv(act);
       if (!argv) return { ok: false, error: 'invalid tab operation' };
       const result = await drive(b, argv);
-      if (result.exitCode !== 0) return { ok: false, error: cliError(result) };
-      if (act.op !== 'cdpUrl') return { ok: true };
-      const url = parseCdpUrl(result.stdout);
-      return url ? { ok: true, url } : { ok: false, error: 'agent-browser printed no CDP endpoint' };
+      return result.exitCode === 0 ? { ok: true } : { ok: false, error: cliError(result) };
     },
 
     // eval --json envelope: { success, data: { result }, error }.
@@ -376,10 +403,9 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
 
     // agent-browser's `screenshot` honors the session's viewport/DPR, unlike
     // the CSS-resolution screencast, and writes the frame where it is told.
-    async screenshot(b, { format, quality }, file) {
+    async screenshot(b, file) {
       const out = await file();
-      const args = ['screenshot', out, '--screenshot-format', format];
-      if (format === 'jpeg') args.push('--screenshot-quality', String(quality));
+      const args = ['screenshot', out, '--screenshot-format', 'jpeg', '--screenshot-quality', String(CAPTURE_JPEG_QUALITY)];
       const result = await drive(b, args, { timeoutMs: CAPTURE_TIMEOUT_MS });
       if (result.exitCode !== 0) {
         log(`[agent-browser] screenshot failed (exit ${result.exitCode}): ${cliError(result)}`);
@@ -388,6 +414,162 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
       return { path: out };
     },
 
-    streamUrl: async (port) => (deps.streamUrl ? deps.streamUrl(port) : `ws://127.0.0.1:${port}`),
+    view: (b, port, { headed }, sink) => viewStream(b, port, headed, sink),
   };
+
+  /**
+   * The daemon's stream at `port`, relayed to one viewer socket. The daemon
+   * re-sends its current frame and tab list ~20 times a second whether or not
+   * they changed, so each is compared raw against the last and dropped when
+   * equal: only a changed frame is parsed, decoded once and passed on. A
+   * headed viewer gets no frames, and its page is followed over the browser's
+   * CDP (`observePage`), which the stream does not report for navigations
+   * made in the window itself.
+   *
+   * `port` may be one `dor ab` read under a socket directory the host does
+   * not share: it is only ever dialed on loopback, only the stream's own
+   * messages come back from it, and only validated input goes to it.
+   */
+  async function viewStream(b: ProviderBinding, port: number, headed: boolean, sink: ViewerSink): Promise<Upstream> {
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('an agent-browser stream is a TCP port');
+    // Only a daemon in the host's own socket directory is one it can capture.
+    const capturable = (await readStateNumber(b.session, 'stream')) === port;
+    const socket = new WebSocket(`ws://127.0.0.1:${port}`, { handshakeTimeout: STREAM_CONNECT_TIMEOUT_MS, perMessageDeflate: false });
+    let opened = false;
+    let closing = false;
+    let observer: { close(): void } | null = null;
+    let lastFrame: Buffer | undefined;
+    const lastState = new Map<string, string>();
+    socket.on('error', (error) => log(`[agent-browser] stream error: ${error.message}`));
+    const open = new Promise<void>((resolve, reject) => {
+      socket.once('open', () => {
+        opened = true;
+        resolve();
+      });
+      socket.on('close', () => {
+        observer?.close();
+        if (!opened) reject(new Error(`no agent-browser stream answers on port ${port}`));
+        else if (!closing) sink.gone();
+      });
+    });
+    socket.on('message', (data: Buffer, isBinary) => {
+      if (isBinary) return;
+      const large = data.length > FRAME_THRESHOLD_BYTES && !CONTROL_MARKERS.some((marker) => data.includes(marker));
+      if (large) {
+        if (headed || lastFrame?.equals(data)) return;
+        lastFrame = data;
+      }
+      const text = data.toString();
+      let message: { type?: unknown; data?: unknown; metadata?: { deviceWidth?: unknown; deviceHeight?: unknown }; connected?: unknown; screencasting?: unknown; viewportWidth?: unknown; viewportHeight?: unknown; tabs?: unknown; url?: unknown };
+      try {
+        message = JSON.parse(text);
+      } catch {
+        return;
+      }
+      if (message.type === 'frame' && typeof message.data === 'string') {
+        if (headed) return;
+        if (!large) {
+          if (lastFrame?.equals(data)) return;
+          lastFrame = data;
+        }
+        sink.frame(Buffer.from(message.data, 'base64'), frameSize(message.metadata));
+        return;
+      }
+      if (message.type === 'url') {
+        // A commit edge, never deduplicated: a reload commits the same URL.
+        if (typeof message.url === 'string') sink.state({ type: 'url', url: message.url });
+        return;
+      }
+      if (message.type !== 'status' && message.type !== 'tabs') return;
+      if (lastState.get(message.type) === text) return;
+      lastState.set(message.type, text);
+      if (message.type === 'tabs') {
+        if (Array.isArray(message.tabs)) sink.state({ type: 'tabs', tabs: parseAgentBrowserTabs(message.tabs) });
+        return;
+      }
+      sink.state({
+        type: 'status',
+        connected: message.connected === true,
+        screencasting: message.screencasting === true,
+        ...(typeof message.viewportWidth === 'number' ? { viewportWidth: message.viewportWidth } : {}),
+        ...(typeof message.viewportHeight === 'number' ? { viewportHeight: message.viewportHeight } : {}),
+      });
+    });
+    await open;
+    if (headed) observer = observePage(b, sink);
+    const forward = (message: object) => {
+      if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+    };
+    return {
+      capturable,
+      input(message) {
+        if (message.type === 'input_text') for (const key of keyPairTextInputs(message.text)) forward(key);
+        else forward(message);
+        return true;
+      },
+      close() {
+        closing = true;
+        observer?.close();
+        socket.close();
+      },
+    };
+  }
+
+  /**
+   * Follow a headed window's page over its browser's CDP: the URL and title
+   * of each page target as it is created or changes, and each main-frame
+   * navigation. The endpoint is asked of the daemon, which is up while its
+   * stream is; the CDP socket stays in the host.
+   */
+  function observePage(b: ProviderBinding, sink: ViewerSink): { close(): void } {
+    let closed = false;
+    let cdp: WebSocket | null = null;
+    const page = (url: unknown, title: unknown) => {
+      if (typeof url === 'string') sink.state({ type: 'page', url, title: typeof title === 'string' ? title : null });
+    };
+    void drive(b, ['get', 'cdp-url']).then((result) => {
+      const url = result.exitCode === 0 ? parseCdpUrl(result.stdout) : null;
+      if (closed || !url) {
+        if (!url) log(`[agent-browser] no CDP endpoint for ${b.session}: ${cliError(result)}`);
+        return;
+      }
+      // The browser's own endpoint, and only ever on loopback.
+      if (!/^ws:\/\/(127\.0\.0\.1|localhost):\d+\//.test(url)) {
+        log(`[agent-browser] refused a CDP endpoint off loopback: ${url}`);
+        return;
+      }
+      const socket = cdp = new WebSocket(url, { perMessageDeflate: false });
+      let nextId = 1;
+      const send = (method: string, params?: Record<string, unknown>) => socket.send(JSON.stringify({ id: nextId++, method, ...(params ? { params } : {}) }));
+      socket.on('open', () => {
+        send('Target.setDiscoverTargets', { discover: true });
+        send('Target.getTargets');
+        // Were the endpoint a page's rather than the browser's, its own events
+        // would be the navigation source.
+        send('Page.enable');
+      });
+      socket.on('error', (error) => log(`[agent-browser] CDP observer error: ${error.message}`));
+      socket.on('message', (data: Buffer) => {
+        let message: { method?: string; params?: { targetInfo?: unknown; frame?: { parentId?: unknown; url?: unknown; name?: unknown } }; result?: { targetInfos?: unknown } };
+        try {
+          message = JSON.parse(data.toString());
+        } catch {
+          return;
+        }
+        const target = (info: unknown) => {
+          const t = info as { type?: unknown; url?: unknown; title?: unknown } | null;
+          if (t && typeof t === 'object' && t.type === 'page') page(t.url, t.title);
+        };
+        if (message.method === 'Target.targetCreated' || message.method === 'Target.targetInfoChanged') target(message.params?.targetInfo);
+        else if (message.method === 'Page.frameNavigated' && !message.params?.frame?.parentId) page(message.params?.frame?.url, message.params?.frame?.name);
+        else if (Array.isArray(message.result?.targetInfos)) for (const info of message.result.targetInfos) target(info);
+      });
+    }).catch((error: unknown) => log(`[agent-browser] CDP observer: ${error instanceof Error ? error.message : String(error)}`));
+    return {
+      close() {
+        closed = true;
+        cdp?.close();
+      },
+    };
+  }
 }

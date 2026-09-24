@@ -53,13 +53,6 @@ import { BrowserSidecarHost } from "./browser-sidecar-host";
 
 const errMessage = (err: unknown): string => err instanceof Error ? err.message : String(err);
 
-function decodeBase64Bytes(base64: string): Uint8Array {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-}
-
 /** The `alert*` platform methods, taken from the shared client in the constructor. */
 export interface BrowserSidecarAdapter extends AlertClientMethods {}
 
@@ -261,10 +254,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
 
   async browser(request: BrowserRequest): Promise<BrowserResult> {
     try {
-      // A screenshot's bytes arrive as base64: this bridge has no Rust to read
-      // the capture file (`readCapture` in standalone/scripts/dev-agent-browser.mjs).
-      const { bytesBase64, ...result } = await this.host.invoke<BrowserResult & { bytesBase64?: string }>("browser_request", { request });
-      return bytesBase64 ? { ...result, bytes: decodeBase64Bytes(bytesBase64) } : result;
+      return await this.host.invoke<BrowserResult>("browser_request", { request });
     } catch (err) {
       return { ok: false, error: errMessage(err) };
     }

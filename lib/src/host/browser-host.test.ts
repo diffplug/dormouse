@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
 import { createBrowserHost } from './browser-host';
-import { fakeProvider } from './browser-host-test-utils';
+import { fakeProvider, openViewer } from './browser-host-test-utils';
 
 const flush = async () => { for (let i = 0; i < 10; i++) await new Promise((resolve) => setImmediate(resolve)); };
 
@@ -18,7 +18,7 @@ describe('createBrowserHost', () => {
     expect(fake.calls).toEqual(['close dormouse.1.default']);
     fake.release('close dormouse.1.default');
     expect(await closing).toEqual({ ok: true });
-    expect(await launching).toMatchObject({ ok: true, session: 'dormouse.1.default', wsPort: 4321 });
+    expect(await launching).toMatchObject({ ok: true, session: 'dormouse.1.default', stream: 4321 });
     expect(fake.calls).toEqual(['close dormouse.1.default', 'stop dormouse.1.default', 'open dormouse.1.default http://localhost:5173/']);
   });
 
@@ -38,10 +38,10 @@ describe('createBrowserHost', () => {
     closes.push(host.request({ ...tool, op: 'close' }));
     const third = host.request(launch);
     fake.release('stop dormouse.1.tool.t');
-    expect(await first).toMatchObject({ ok: true, wsPort: 4321 });
+    expect(await first).toMatchObject({ ok: true, stream: 4321 });
     expect(await superseded).toEqual({ ok: false, error: 'the browser was closed' });
     expect(await Promise.all(closes)).toEqual([{ ok: true }, { ok: true }]);
-    expect(await third).toMatchObject({ ok: true, wsPort: 4321 });
+    expect(await third).toMatchObject({ ok: true, stream: 4321 });
     expect(fake.calls).toEqual([
       'stop dormouse.1.tool.t', 'open dormouse.1.tool.t http://localhost:6006/',
       'close dormouse.1.tool.t', 'close dormouse.1.tool.t',
@@ -84,20 +84,103 @@ describe('createBrowserHost', () => {
       host.request({ ...s1, op: 'navigate', url: 'http://localhost:5173/next' }),
       host.request({ ...s1, op: 'viewport', width: 800, height: 600, dpr: 2 }),
       host.request({ ...s1, op: 'edit', edit: 'selectAll' }),
+      host.request({ ...s1, op: 'view', stream: 4321 }),
     ]);
     const refused = { ok: false, error: 'the browser is being relaunched or closed' };
     for (const [step, op] of [['stop s1', { op: 'launch', url: 'http://localhost:5173/', headed: true }], ['close s1', { op: 'close' }]] as const) {
       fake.gate(step);
       const settling = host.request({ ...s1, ...op });
       await flush();
-      expect(await drive()).toEqual([refused, refused, refused]);
+      expect(await drive()).toEqual([refused, refused, refused, refused]);
       fake.release(step);
       expect((await settling).ok).toBe(true);
     }
     // A pop-out's relaunch holds the browser from its stop until it is up.
     expect(fake.calls).not.toContain('navigate s1');
-    expect((await drive()).map((result) => result.ok)).toEqual([true, true, true]);
+    expect((await drive()).map((result) => result.ok)).toEqual([true, true, true, true]);
     expect(fake.calls).toContain('navigate s1');
+    await host.close();
+  });
+
+  it('relays a browser over one viewer socket: its state, a provisional frame, the capture that sharpens it, and input back', async () => {
+    const fake = fakeProvider();
+    const host = createBrowserHost({ writeClipboardText: vi.fn(), providers: { 'agent-browser': () => fake.provider } });
+    const s1 = { provider: 'agent-browser', binding: { session: 's1' } } as const;
+    try {
+      const { url } = await host.request({ ...s1, op: 'view', stream: 4321 });
+      const viewer = await openViewer(url!);
+      await vi.waitFor(() => expect(fake.views).toHaveLength(1));
+      const [view] = fake.views;
+      expect(view).toMatchObject({ session: 's1', stream: 4321, headed: false });
+      view.sink.state({ type: 'url', url: 'http://localhost:5173/' });
+      view.sink.frame(new Uint8Array([0xff, 0xd8, 0xaa]), { width: 800, height: 600 });
+      await vi.waitFor(() => expect(viewer.frames.map((frame) => frame.kind)).toEqual(['provisional', 'crisp']));
+      expect(viewer.states).toEqual([{ type: 'url', url: 'http://localhost:5173/' }]);
+      expect([...viewer.frames[1].jpeg]).toEqual([0xff, 0xd8, 1]);
+      viewer.send({ type: 'input_text', text: 'hi' });
+      await vi.waitFor(() => expect(view.inputs).toEqual([{ type: 'input_text', text: 'hi' }]));
+      // The URL was good for this one socket.
+      await expect(openViewer(url!)).rejects.toThrow('403');
+      viewer.socket.close();
+      await vi.waitFor(() => expect(view.closed).toBe(true));
+    } finally {
+      await host.close();
+    }
+  });
+
+  it('joins one capture for every viewer of a browser, and ends them all when a launch or close replaces it', async () => {
+    const fake = fakeProvider();
+    const host = createBrowserHost({ writeClipboardText: vi.fn(), providers: { 'agent-browser': () => fake.provider } });
+    const s1 = { provider: 'agent-browser', binding: { session: 's1' } } as const;
+    const view = async () => openViewer((await host.request({ ...s1, op: 'view', stream: 4321 })).url!);
+    try {
+      // Two Surfaces on one session: a Workspace transfer's two ends.
+      const viewers = [await view(), await view()];
+      await vi.waitFor(() => expect(fake.views).toHaveLength(2));
+      fake.gate('screenshot s1');
+      for (const { sink } of fake.views) sink.frame(new Uint8Array([0xff, 0xd8, 0xaa]));
+      await vi.waitFor(() => expect(fake.calls).toContain('screenshot s1'));
+      fake.release('screenshot s1');
+      await vi.waitFor(() => {
+        for (const viewer of viewers) expect(viewer.frames.map((frame) => frame.kind)).toEqual(['provisional', 'crisp']);
+      });
+      expect(fake.calls.filter((call) => call === 'screenshot s1')).toHaveLength(1);
+
+      // A URL granted before a relaunch opens nothing on the browser after it.
+      const { url: granted } = await host.request({ ...s1, op: 'view', stream: 4321 });
+      await host.request({ ...s1, op: 'launch', url: 'http://localhost:5173/', headed: true });
+      expect(await Promise.all(viewers.map((viewer) => viewer.closed))).toEqual([1001, 1001]);
+      await vi.waitFor(() => expect(fake.views.map((v) => v.closed)).toEqual([true, true]));
+      const late = await openViewer(granted!);
+      expect(await late.closed).toBe(1001);
+      expect(fake.views).toHaveLength(2);
+    } finally {
+      await host.close();
+    }
+  });
+
+  it('joins no capture of the browser a relaunch replaced', async () => {
+    const fake = fakeProvider();
+    const host = createBrowserHost({ writeClipboardText: vi.fn(), providers: { 'agent-browser': () => fake.provider } });
+    const s1 = { provider: 'agent-browser', binding: { session: 's1' } } as const;
+    const view = async () => openViewer((await host.request({ ...s1, op: 'view', stream: 4321 })).url!);
+    try {
+      await view();
+      await vi.waitFor(() => expect(fake.views).toHaveLength(1));
+      // The old browser's capture is still running when the relaunch lands.
+      fake.gate('screenshot s1');
+      fake.views[0].sink.frame(new Uint8Array([0xff, 0xd8, 0xaa]));
+      await vi.waitFor(() => expect(fake.calls).toContain('screenshot s1'));
+      await host.request({ ...s1, op: 'launch', url: 'http://localhost:5173/', headed: false });
+      const viewer = await view();
+      await vi.waitFor(() => expect(fake.views).toHaveLength(2));
+      fake.views[1].sink.frame(new Uint8Array([0xff, 0xd8, 0xbb]));
+      await vi.waitFor(() => expect(fake.calls.filter((call) => call === 'screenshot s1')).toHaveLength(2));
+      fake.release('screenshot s1');
+      await vi.waitFor(() => expect(viewer.frames.map((frame) => frame.kind)).toEqual(['provisional', 'crisp']));
+    } finally {
+      await host.close();
+    }
   });
 
   it('refuses a request id or cancel list it cannot bound', async () => {
@@ -149,7 +232,7 @@ describe('createBrowserHost', () => {
       flush().then(() => null),
     ]);
     // Up before the page loads: nothing reaches the browser while `open` holds it.
-    expect(launched).toMatchObject({ ok: true, wsPort: 4321 });
+    expect(launched).toMatchObject({ ok: true, stream: 4321 });
     expect(fake.calls.filter((call) => call.startsWith('tab'))).toEqual([]);
     fake.release('open s1 http://localhost:5173/');
     await flush();

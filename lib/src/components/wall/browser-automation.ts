@@ -13,7 +13,6 @@ import {
 } from 'dor-lib-common/browser-providers';
 import { getPlatform } from '../../lib/platform';
 import {
-  playwrightTextInputs,
   type BrowserEditOp,
   type BrowserOp,
   type BrowserRequest,
@@ -23,7 +22,6 @@ import {
 import { isAllowedBinaryFor } from '../../lib/agent-browser-binary';
 import { messageOf } from '../../lib/errors';
 import { isToolRender } from '../../lib/platform/tool-types';
-import { keyPairTextInputs } from './agent-browser-input';
 import type { RenderMode } from './agent-browser-screen';
 
 interface BrowserProviderGui {
@@ -36,13 +34,11 @@ interface BrowserProviderGui {
   devices: readonly string[];
   /** What to run from a terminal to size the viewport on a host that cannot. */
   viewportHint: string;
-  /** A paste as the stream messages the provider's viewer takes. */
-  pasteMessages(text: string): Record<string, unknown>[];
 }
 
-function gui(provider: BrowserAutomationProvider, fields: { devices: readonly string[]; viewportVerb: string; pasteMessages(text: string): Record<string, unknown>[] }): BrowserProviderGui {
+function gui(provider: BrowserAutomationProvider, fields: { devices: readonly string[]; viewportVerb: string }): BrowserProviderGui {
   const cli = `dor ${BROWSER_PROVIDERS[provider].alias}`;
-  return { label: BROWSER_PROVIDERS[provider].label, cli, devices: fields.devices, viewportHint: `${cli} ${fields.viewportVerb} …`, pasteMessages: fields.pasteMessages };
+  return { label: BROWSER_PROVIDERS[provider].label, cli, devices: fields.devices, viewportHint: `${cli} ${fields.viewportVerb} …` };
 }
 
 export const BROWSER_PROVIDER_GUI: Record<BrowserAutomationProvider, BrowserProviderGui> = {
@@ -51,13 +47,10 @@ export const BROWSER_PROVIDER_GUI: Record<BrowserAutomationProvider, BrowserProv
     // against 0.27.0).
     devices: ['iPhone 15', 'iPhone 16', 'iPhone 16 Pro', 'iPhone 17', 'iPad', 'iPad Pro', 'Pixel 9', 'Galaxy S25'],
     viewportVerb: 'set',
-    pasteMessages: keyPairTextInputs,
   }),
   playwright: gui('playwright', {
     devices: ['iPhone 15', 'iPhone 16', 'iPhone 16 Pro', 'iPhone 17', 'iPad (gen 11)', 'iPad Pro 11', 'Pixel 9', 'Galaxy S24'],
     viewportVerb: 'resize',
-    // The host inserts each message whole, never a key pair per character.
-    pasteMessages: playwrightTextInputs,
   }),
 };
 
@@ -123,15 +116,14 @@ export interface BrowserHandle {
   readonly provider: BrowserAutomationProvider;
   launch(url: string | undefined, headed: boolean, requestId?: string): Promise<BrowserResult>;
   attach(opts?: { url?: string; headed?: boolean; requestId?: string }): Promise<BrowserResult>;
-  streamUrl(port: number): Promise<BrowserResult>;
-  screenshot(opts: { format?: 'jpeg' | 'png'; quality?: number }): Promise<BrowserResult>;
+  /** A viewer socket URL on the browser at `stream`. */
+  view(stream: number, opts: { headed: boolean; debug: boolean }): Promise<BrowserResult>;
   edit(edit: BrowserEditOp): Promise<BrowserResult>;
   navigate(url: string): Promise<BrowserResult>;
   history(dir: 'back' | 'forward' | 'reload'): Promise<BrowserResult>;
   tab(action: 'select' | 'close', tabId: string): Promise<BrowserResult>;
   viewport(width: number, height: number, dpr: number): Promise<BrowserResult>;
   device(name: string): Promise<BrowserResult>;
-  cdpUrl(): Promise<BrowserResult>;
   /** `cancels`: the closing Surface's own requests still unanswered. */
   close(cancels?: readonly string[]): Promise<BrowserResult>;
 }
@@ -167,20 +159,13 @@ export function browserHandle(provider: BrowserAutomationProvider, binding: Omit
     provider,
     launch: (url, headed, requestId) => send({ op: 'launch', ...(url !== undefined ? { url } : {}), headed, ...(requestId !== undefined ? { requestId } : {}) }),
     attach: (opts = {}) => send({ op: 'attach', ...opts }),
-    streamUrl: (port) => send({ op: 'streamUrl', port }),
-    screenshot: async (opts) => {
-      const result = await send({ op: 'screenshot', ...opts });
-      // JSON transports materialize a Uint8Array as an ordinary array.
-      if (result.bytes && !(result.bytes instanceof Uint8Array)) result.bytes = new Uint8Array(result.bytes);
-      return result;
-    },
+    view: (stream, { headed, debug }) => send({ op: 'view', stream, ...(headed ? { headed } : {}), ...(debug ? { debug } : {}) }),
     edit: (edit) => send({ op: 'edit', edit }),
     navigate: (url) => send({ op: 'navigate', url }),
     history: (dir) => send({ op: 'history', dir }),
     tab: (action, tabId) => send({ op: 'tab', action, tabId }),
     viewport: (width, height, dpr) => send({ op: 'viewport', width, height, dpr }),
     device: (name) => send({ op: 'device', name }),
-    cdpUrl: () => send({ op: 'cdpUrl' }),
     close: (cancels = []) => send({ op: 'close', ...(cancels.length ? { cancels: [...cancels] } : {}) }),
   };
 }

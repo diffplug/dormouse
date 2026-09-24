@@ -6,7 +6,7 @@ import type { RestoredSession } from '../../lib/session-restore';
 const params = {
   surfaceType: 'tool', command: 'pnpm storybook', toolRender: 'ab-screencast',
   url: 'http://localhost:6006/edited', renderMode: 'ab-screencast',
-  session: 'dormouse.1.tool-one', wsPort: 9222, toolAnnouncedPort: 6006, toolAnnouncedPath: '/token/view',
+  session: 'dormouse.1.tool-one', stream: 9222, toolAnnouncedPort: 6006, toolAnnouncedPath: '/token/view',
 };
 
 function engine(initial = params) {

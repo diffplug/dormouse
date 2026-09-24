@@ -4,16 +4,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import type { PlatformAdapter } from '../../lib/platform/types';
-import { PLAYWRIGHT_TEXT_INPUT_MAX, type BrowserRequest, type BrowserResult } from '../../lib/platform/browser-automation';
+import { VIEWER_TEXT_INPUT_MAX, encodeViewerFrame, type BrowserRequest, type BrowserResult } from '../../lib/platform/browser-automation';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
 import { forgetLaunchBinaryPaths, launchBinaryPath, rememberLaunchBinaryPath } from './browser-automation';
 import {
   HIDDEN_PARK_DELAY_MS,
-  PROVISIONAL_INPUT_WINDOW_MS,
   acquireAgentBrowserSurfaceController,
   closeBrowserSurface,
   disposeAgentBrowserSurfaceController,
-  handOverBrowserPort,
+  handOverBrowserStream,
   whenBrowserLaunched,
   type AgentBrowserSurfaceController,
   type AgentBrowserSurfaceParams,
@@ -50,6 +49,7 @@ class WebSocketMock {
     queueMicrotask(() => this.onopen?.(new Event('open')));
   }
 
+  binaryType = 'blob';
   send(data: string) { this.sent.push(data); }
 
   close() {
@@ -57,7 +57,7 @@ class WebSocketMock {
     this.onclose?.(new CloseEvent('close'));
   }
 
-  emitMessage(data: string) {
+  emitMessage(data: string | ArrayBuffer) {
     this.onmessage?.({ data } as MessageEvent);
   }
 }
@@ -82,6 +82,11 @@ function makeSink(): AgentBrowserViewSink & {
     requestRenderSwap: vi.fn(),
     launchFailed: vi.fn(),
   };
+}
+
+/** A frame the host sends over a viewer socket. */
+function emitFrame(socket: WebSocketMock | undefined, kind: 'provisional' | 'crisp' = 'provisional', n = 1, size?: { width: number; height: number }) {
+  socket?.emitMessage(encodeViewerFrame({ kind, jpeg: new Uint8Array([0xff, 0xd8, n]), ...(size ? { size } : {}) }).buffer);
 }
 
 /** A controller whose first start streams from `port`, as `dor ab` hands
@@ -119,7 +124,8 @@ beforeEach(() => {
   vi.stubGlobal('ResizeObserver', ResizeObserverMock);
   WebSocketMock.instances = [];
   WebSocketMock.failPorts = new Set<number>();
-  setPlatform(new FakePtyAdapter());
+  // A host that grants every viewer socket, at the stream's number as its port.
+  installBrowserHost();
 });
 
 afterEach(() => {
@@ -189,138 +195,91 @@ describe('view attachment', () => {
   });
 });
 
-describe('provisional stream paint', () => {
-  type Shot = { ok: true; bytes: Uint8Array; mime: string };
-  /** An attached pane on `sess:4321` with the clock, the host capture and the
-   *  canvas under the test's control. Captures never answer unless `screenshot` says. */
-  async function paintFixture(
-    screenshot: () => Promise<Shot> = () => new Promise<never>(() => {}),
-    clipboardText?: string,
-  ) {
-    const clock = { now: 1000 };
-    vi.spyOn(performance, 'now').mockImplementation(() => clock.now);
-    const host = installBrowserHost({ screenshot });
+describe('painting', () => {
+  /** An attached pane viewing `sess:4321`, its decodes answered by the test,
+   *  in order, and its canvas recording what is drawn. */
+  async function paintFixture(clipboardText?: string) {
+    const host = installBrowserHost();
     const platform: PlatformAdapter = host.platform;
     if (clipboardText !== undefined) platform.readClipboardText = vi.fn(async () => clipboardText);
-    const bitmap = { width: 40, height: 30, close: vi.fn() } as unknown as ImageBitmap;
-    vi.stubGlobal('createImageBitmap', vi.fn(async () => bitmap));
+    const decodes: { bytes: number; resolve: (bitmap: ImageBitmap) => void }[] = [];
+    vi.stubGlobal('createImageBitmap', vi.fn(async (blob: Blob) => {
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      return new Promise<ImageBitmap>((resolve) => decodes.push({ bytes: bytes[2], resolve }));
+    }));
     const sink = makeSink();
     const drawImage = vi.fn();
     sink.canvas.getContext = vi.fn(() => ({ drawImage })) as unknown as typeof sink.canvas.getContext;
     const controller = withPort('id', { session: 'sess' }, 4321);
     controller.attachView(sink);
     await flushMicrotasks();
-    const frame = async (label: string) => {
-      streamSocket(4321)?.emitMessage(JSON.stringify({ type: 'frame', data: btoa(label), metadata: { deviceWidth: 40, deviceHeight: 30 } }));
+    const bitmap = (width: number, height: number) => ({ width, height, close: vi.fn() }) as unknown as ImageBitmap;
+    /** Decode the next waiting frame as a `width`×`height` image. */
+    const decode = async (width: number, height: number) => {
+      await vi.waitFor(() => expect(decodes.length).toBeGreaterThan(0));
+      decodes.shift()!.resolve(bitmap(width, height));
       await flushMicrotasks();
     };
-    const decodes = () => vi.mocked(createImageBitmap).mock.calls.length;
-    return { clock, host, platform, sink, bitmap, drawImage, controller, frame, decodes };
+    return { host, sink, drawImage, controller, decodes, decode };
   }
 
-  it('draws the native stream frame before the crisp screenshot resolves', async () => {
-    const { clock, host, sink, bitmap, drawImage, controller, frame, decodes } = await paintFixture();
+  it('draws each frame over the whole canvas, sized by the crisp one so a provisional one reallocates nothing', async () => {
+    const { sink, drawImage, controller, decode } = await paintFixture();
+    const sizes: string[] = [];
+    const record = () => sizes.push(`${sink.canvas.width}x${sink.canvas.height}`);
 
-    controller.send({ type: 'input_mouse', eventType: 'mouseMoved', x: 1, y: 1 });
-    await frame('low-latency-frame');
-    expect(host.requests('screenshot').length).toBeGreaterThan(0);
-    expect(drawImage).toHaveBeenCalledWith(bitmap, 0, 0);
-    expect(sink.canvas.width).toBe(40);
-    expect(sink.canvas.height).toBe(30);
+    emitFrame(streamSocket(4321), 'provisional', 1, { width: 40, height: 30 });
+    await decode(40, 30);
+    record();
     expect(controller.snapshot().hasFrame).toBe(true);
+    // The device-resolution capture that replaces it sizes the canvas.
+    emitFrame(streamSocket(4321), 'crisp', 2);
+    await decode(80, 60);
+    record();
+    // Hover: the CSS-resolution stream paints into that same canvas, scaled.
+    emitFrame(streamSocket(4321), 'provisional', 3);
+    await decode(40, 30);
+    record();
+    emitFrame(streamSocket(4321), 'crisp', 4);
+    await decode(80, 60);
+    record();
+    expect(sizes).toEqual(['40x30', '80x60', '80x60', '80x60']);
+    expect(drawImage.mock.calls.map((call) => call.slice(1))).toEqual([[0, 0, 40, 30], [0, 0, 80, 60], [0, 0, 80, 60], [0, 0, 80, 60]]);
+    // The frame's viewport size drives the screen indicator and sync.
+    expect(controller.getDeviceSize()).toEqual({ width: 40, height: 30 });
 
-    // Once pointer activity is old, an animated page must not keep decoding its
-    // CSS-resolution stream at frame rate; the throttled crisp path remains.
-    clock.now += PROVISIONAL_INPUT_WINDOW_MS + 1;
-    await frame('idle-animation-frame');
-    expect(decodes()).toBe(1);
+    // A resized viewport's frame is another shape: the canvas follows it.
+    emitFrame(streamSocket(4321), 'provisional', 5, { width: 50, height: 30 });
+    await decode(50, 30);
+    expect(`${sink.canvas.width}x${sink.canvas.height}`).toBe('50x30');
   });
 
-  it('paints the stream frame after keys, pasted text and editing chords, not only after pointer input', async () => {
-    const { clock, host, platform, controller, frame, decodes } = await paintFixture(undefined, 'pasted');
-    await frame('first');
-    expect(decodes()).toBe(1);
+  it('decodes the newest frame only: one at a time, a later arrival replacing the one waiting', async () => {
+    const { drawImage, decodes, decode } = await paintFixture();
+    for (let n = 1; n <= 4; n++) emitFrame(streamSocket(4321), 'provisional', n);
+    await flushMicrotasks();
+    expect(decodes.map((d) => d.bytes)).toEqual([1]);
+    await decode(40, 30);
+    // Frames 2 and 3 were replaced while 1 decoded; 4 paints next.
+    expect(decodes.map((d) => d.bytes)).toEqual([4]);
+    await decode(40, 30);
+    expect(drawImage).toHaveBeenCalledTimes(2);
+  });
 
-    // At rest, a changed frame only pulses the crisp loop.
-    clock.now += PROVISIONAL_INPUT_WINDOW_MS + 1;
-    await frame('idle');
-    expect(decodes()).toBe(1);
-
+  it('sends input, pasted text and repaint requests over the viewer socket, and editing chords to the host', async () => {
+    const { host, controller } = await paintFixture('pasted\r\ntext');
+    const sent = () => streamSocket(4321)!.sent.map((raw) => JSON.parse(raw));
     controller.handleKeyDownLike({ key: 'a', code: 'KeyA', ctrlKey: false, metaKey: false, altKey: false, shiftKey: false });
-    await frame('typed');
-    expect(decodes()).toBe(2);
-
-    // A paste is replayed as key input once the clipboard read resolves.
-    clock.now += PROVISIONAL_INPUT_WINDOW_MS + 1;
+    expect(sent().at(-1)).toMatchObject({ type: 'input_keyboard', eventType: 'keyDown', key: 'a', text: 'a' });
+    // A paste goes as text, whichever provider: the host inserts it.
     controller.handleKeyDownLike({ key: 'v', code: 'KeyV', ctrlKey: true, metaKey: false, altKey: false, shiftKey: false });
     await flushMicrotasks();
-    expect(platform.readClipboardText).toHaveBeenCalled();
-    await frame('pasted');
-    expect(decodes()).toBe(3);
-
-    // A select-all runs through the host rather than the stream.
-    clock.now += PROVISIONAL_INPUT_WINDOW_MS + 1;
+    expect(sent().at(-1)).toEqual({ type: 'input_text', text: 'pasted\ntext' });
     controller.handleKeyDownLike({ key: 'a', code: 'KeyA', ctrlKey: true, metaKey: false, altKey: false, shiftKey: false });
     expect(host.requests('edit')).toEqual([onSess({ op: 'edit', edit: 'selectAll' })]);
-    await frame('selected');
-    expect(decodes()).toBe(4);
-  });
-
-  it('paints the stream while a crisp capture waits behind a blocking command, then draws that capture', async () => {
-    const releases: Array<(shot: Shot) => void> = [];
-    const { clock, host, drawImage, frame, decodes } = await paintFixture(() => new Promise((resolve) => { releases.push(resolve); }));
-    // The first image paints from the stream, superseding the capture it pulsed;
-    // its replacement is the one a page-loading `open` then holds.
-    await frame('previous page');
-    clock.now += 300;
-    releases[0]({ ok: true, bytes: new Uint8Array([1]), mime: 'image/jpeg' });
-    await flushMicrotasks();
-    expect(host.requests('screenshot')).toHaveLength(2);
-    const decoded = decodes();
-
-    clock.now += PROVISIONAL_INPUT_WINDOW_MS + 1;
-    await frame('loading');
-    expect(decodes()).toBe(decoded);
-    // Overdue now: the loading page paints from the stream.
-    clock.now += 400;
-    await frame('still loading');
-    expect(decodes()).toBe(decoded + 1);
-
-    // `open` returns: the held capture is drawn on arrival rather than dropped
-    // as older than the overdue paints (the follow-up its wait's pulses owe
-    // comes after).
-    const drawn = drawImage.mock.calls.length;
-    clock.now += 1000;
-    releases[1]({ ok: true, bytes: new Uint8Array([2]), mime: 'image/jpeg' });
-    await flushMicrotasks();
-    await flushMicrotasks();
-    expect(drawImage.mock.calls.length).toBe(drawn + 1);
-  });
-
-  it('repaints a byte-identical crisp capture over a provisional paint', async () => {
-    // A provisional paint changes the canvas behind the loop's byte-dedup, so a
-    // resting page's byte-identical capture must still repaint over the blur.
-    const { clock, host, drawImage, controller, frame } = await paintFixture(
-      async () => ({ ok: true, bytes: new Uint8Array([9, 9, 9]), mime: 'image/jpeg' }),
-    );
-    await frame('first');
-    expect(controller.snapshot().hasFrame).toBe(true);
-
-    // Past the input window a frame is a bare pulse, so this capture lands as
-    // the crisp resting frame the loop records.
-    clock.now += PROVISIONAL_INPUT_WINDOW_MS + 1;
-    await frame('rest');
-    const afterCrisp = drawImage.mock.calls.length;
-    expect(host.requests('screenshot').length).toBeGreaterThan(0);
-
-    controller.send({ type: 'input_mouse', eventType: 'mouseMoved', x: 1, y: 1 });
-    await frame('hover');
-    const afterProvisional = drawImage.mock.calls.length;
-    expect(afterProvisional).toBeGreaterThan(afterCrisp);
-
-    clock.now += PROVISIONAL_INPUT_WINDOW_MS + 1;
-    await frame('settled');
-    expect(drawImage.mock.calls.length).toBeGreaterThan(afterProvisional);
+    // A view remounted over the open socket asks the host for the last frame.
+    controller.attachView(makeSink());
+    expect(sent().at(-1)).toEqual({ type: 'repaint' });
   });
 });
 
@@ -387,7 +346,7 @@ describe('sync-to-pane while parked', () => {
   it('pushes a resize made behind a hidden pane once it is live again', async () => {
     vi.useFakeTimers();
     try {
-      const host = installBrowserHost({ attach: async () => ({ ok: true, wsPort: 4321 }) });
+      const host = installBrowserHost({ attach: async () => ({ ok: true, stream: 4321 }) });
       const observers: ResizeObserverCallback[] = [];
       vi.stubGlobal('ResizeObserver', class {
         constructor(callback: ResizeObserverCallback) { observers.push(callback); }
@@ -426,8 +385,6 @@ describe('parking', () => {
   afterEach(() => vi.useRealTimers());
 
   it('detach parks after the debounce and resets hasFrame', async () => {
-    const screenshot = vi.fn(async () => ({ ok: true as const, bytes: new Uint8Array([1, 2, 3]), mime: 'image/jpeg' }));
-    installBrowserHost({ screenshot });
     // Give the draw path a bitmap so hasFrame can flip true without a real canvas.
     vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 4, height: 4, close: vi.fn() })));
 
@@ -438,10 +395,9 @@ describe('parking', () => {
     const socket = streamSocket(4321);
     expect(socket?.readyState).toBe(1);
 
-    // Drive one frame → screenshot → draw → hasFrame true.
-    socket?.emitMessage(JSON.stringify({ type: 'frame', data: 'x'.repeat(32) }));
-    await vi.advanceTimersByTimeAsync(300);
-    expect(screenshot).toHaveBeenCalled();
+    // One frame → draw → hasFrame true.
+    emitFrame(socket, 'crisp');
+    await vi.advanceTimersByTimeAsync(0);
     expect(controller.snapshot().hasFrame).toBe(true);
 
     // Detach immediately drops hasFrame (the canvas DOM died with the unmount).
@@ -454,36 +410,6 @@ describe('parking', () => {
     expect(socket?.readyState).toBe(3);
     expect(streamSockets(4321).length).toBe(1);
     expect(controller.isParked()).toBe(true);
-  });
-});
-
-describe('re-attach repaint', () => {
-  it('schedules a repaint capture when re-attaching to a live connection', async () => {
-    vi.useFakeTimers();
-    try {
-      const screenshot = vi.fn(async () => ({ ok: true as const, bytes: new Uint8Array([1, 2, 3]), mime: 'image/jpeg' }));
-      installBrowserHost({ screenshot });
-      vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 4, height: 4, close: vi.fn() })));
-
-      const controller = withPort('id', { session: 'sess' }, 4321);
-      const first = makeSink();
-      const h1 = controller.attachView(first);
-      await vi.advanceTimersByTimeAsync(0);
-      expect(streamSocket(4321)?.readyState).toBe(1);
-
-      // Detach but stay within the park debounce, so the connection (and its
-      // screenshot loop) survive.
-      h1.detach();
-      screenshot.mockClear();
-
-      // Re-attach to that live, unparked connection → one repaint capture, so a
-      // view remounted within the debounce doesn't sit blank.
-      controller.attachView(makeSink());
-      await vi.advanceTimersByTimeAsync(300);
-      expect(screenshot).toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
   });
 });
 
@@ -555,11 +481,11 @@ describe('updateParams', () => {
 
 describe('launch', () => {
   function launchHost(launch: NonNullable<BrowserAnswers['launch']>) {
-    return installBrowserHost({ launch, attach: async () => ({ ok: true, wsPort: 9999 }) });
+    return installBrowserHost({ launch, attach: async () => ({ ok: true, stream: 9999 }) });
   }
 
   it('a session-less pane opens its page, binds the session the host answers with, and streams', async () => {
-    const host = launchHost(async () => ({ ok: true, session: 'dormouse.1.gui-abc', wsPort: 4321, binaryPath: '/usr/bin/agent-browser' }));
+    const host = launchHost(async () => ({ ok: true, session: 'dormouse.1.gui-abc', stream: 4321, binaryPath: '/usr/bin/agent-browser' }));
     const launched = whenBrowserLaunched('id');
     // A restored pane whose launch never landed is the same pane.
     const controller = acquireAgentBrowserSurfaceController('id', {
@@ -593,7 +519,7 @@ describe('launch', () => {
   });
 
   it('opens in the session params name, headed for a pop-out, and binds it', async () => {
-    const host = launchHost(async () => ({ ok: true, session: 'dormouse.1.tool.t', wsPort: 4321 }));
+    const host = launchHost(async () => ({ ok: true, session: 'dormouse.1.tool.t', stream: 4321 }));
     const controller = acquireAgentBrowserSurfaceController('id', {
       renderMode: 'ab-popout', url: 'http://localhost:6006/', launchSession: 'dormouse.1.tool.t',
     });
@@ -629,14 +555,14 @@ describe('launch', () => {
     expect(await launched).toBeNull();
     expect(host.requests('close')).toEqual([]);
 
-    launch.resolve({ ok: true, session: 'dormouse.1.gui-late', wsPort: 4321 });
+    launch.resolve({ ok: true, session: 'dormouse.1.gui-late', stream: 4321 });
     await flushMicrotasks();
     expect(host.requests('close')).toEqual([{ provider: 'agent-browser', binding: { session: 'dormouse.1.gui-late' }, op: 'close' }]);
     expect(WebSocketMock.instances).toHaveLength(0);
   });
 
   it('a navigation out of a failed launch launches at its page, and loads it once', async () => {
-    const answers: BrowserResult[] = [{ ok: false, error: 'boom' }, { ok: true, session: 'dormouse.1.gui-n', wsPort: 4321 }];
+    const answers: BrowserResult[] = [{ ok: false, error: 'boom' }, { ok: true, session: 'dormouse.1.gui-n', stream: 4321 }];
     const host = launchHost(async () => answers.shift()!);
     acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-screencast', url: 'https://page.example/' }).attachView(makeSink());
     await flushMicrotasks();
@@ -659,14 +585,14 @@ describe('launch', () => {
 
     // A new announcement: the same session, another page.
     controller.updateParams({ renderMode: 'ab-screencast', url: 'http://localhost:6007/docs', launchSession: 'dormouse.1.tool.t' });
-    launch.resolve({ ok: true, session: 'dormouse.1.tool.t', wsPort: 4321 });
+    launch.resolve({ ok: true, session: 'dormouse.1.tool.t', stream: 4321 });
     await flushMicrotasks();
     expect(streamSocket(4321)?.readyState).toBe(1);
     expect(opens(host)).toEqual(['http://localhost:6007/docs']);
   });
 
   it('ignores params that predate the session its launch bound', async () => {
-    const host = launchHost(async () => ({ ok: true, session: 'dormouse.1.gui-abc', wsPort: 4321 }));
+    const host = launchHost(async () => ({ ok: true, session: 'dormouse.1.gui-abc', stream: 4321 }));
     const controller = acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-screencast', url: 'https://page.example/' });
     controller.attachView(makeSink());
     await flushMicrotasks();
@@ -689,14 +615,14 @@ describe('launch', () => {
 
     controller.updateParams({ renderMode: 'ab-screencast', url: 'http://localhost:6006/', session: 'dormouse.1.tool.t' });
     controller.handOver(4321);
-    launch.resolve({ ok: true, session: 'dormouse.1.tool.t', wsPort: 4321 });
+    launch.resolve({ ok: true, session: 'dormouse.1.tool.t', stream: 4321 });
     await flushMicrotasks();
     expect(host.requests('close')).toEqual([]);
     expect(streamSocket(4321)?.readyState).toBe(1);
   });
 
   it('launches with the binary `dor ab` last resolved, and remembers the one it ran', async () => {
-    const host = launchHost(async () => ({ ok: true, session: 'dormouse.1.gui-b', wsPort: 4321, binaryPath: '/opt/ab/agent-browser' }));
+    const host = launchHost(async () => ({ ok: true, session: 'dormouse.1.gui-b', stream: 4321, binaryPath: '/opt/ab/agent-browser' }));
     rememberLaunchBinaryPath('agent-browser', '/usr/local/bin/agent-browser');
     acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-screencast', url: 'https://page.example/' }).attachView(makeSink());
     await flushMicrotasks();
@@ -731,8 +657,8 @@ describe('launch', () => {
     // A Workspace transfer: the destination opens the same named session.
     disposeAgentBrowserSurfaceController('named');
     disposeAgentBrowserSurfaceController('minted');
-    answers[0]({ ok: true, session: 'dormouse.1.tool.t', wsPort: 4321 });
-    answers[1]({ ok: true, session: 'dormouse.1.gui-x', wsPort: 4322 });
+    answers[0]({ ok: true, session: 'dormouse.1.tool.t', stream: 4321 });
+    answers[1]({ ok: true, session: 'dormouse.1.gui-x', stream: 4322 });
     await flushMicrotasks();
     expect(host.requests('close')).toEqual([{ provider: 'agent-browser', binding: { session: 'dormouse.1.gui-x' }, op: 'close' }]);
   });
@@ -910,7 +836,7 @@ describe('attach', () => {
   }
 
   it('a restored pane attaches at the page and presentation it had', async () => {
-    const host = attachHost(async () => ({ ok: true, wsPort: 2222 }));
+    const host = attachHost(async () => ({ ok: true, stream: 2222 }));
     const controller = acquireAgentBrowserSurfaceController('id', {
       session: 'sess', renderMode: 'ab-popout', url: 'https://restored.example/',
     });
@@ -929,7 +855,7 @@ describe('attach', () => {
     await flushMicrotasks();
     expect(controller.snapshot().phase).toBe('ended');
 
-    handOverBrowserPort('id', { session: 'sess', url: 'https://page.example/' }, 4321);
+    handOverBrowserStream('id', { session: 'sess', url: 'https://page.example/' }, 4321);
     await flushMicrotasks();
     expect(controller.snapshot().phase).toBe('live');
     expect(streamSocket(4321)?.readyState).toBe(1);
@@ -961,7 +887,7 @@ describe('attach', () => {
   it('never attaches while parked, and an unpark whose port still answers asks the host nothing', async () => {
     vi.useFakeTimers();
     try {
-      const { host, controller } = await parkedAt1111(async () => ({ ok: true, wsPort: 2222 }));
+      const { host, controller } = await parkedAt1111(async () => ({ ok: true, stream: 2222 }));
       // Hidden and shown again, a headless pane never left `live` for its view.
       expect(controller.snapshot().phase).toBe('live');
       controller.setVisible(true);
@@ -977,7 +903,7 @@ describe('attach', () => {
   it('an unpark whose port fails asks the host, without a page, where the stream moved', async () => {
     vi.useFakeTimers();
     try {
-      const { host, controller } = await parkedAt1111(async () => ({ ok: true, wsPort: 2222 }));
+      const { host, controller } = await parkedAt1111(async () => ({ ok: true, stream: 2222 }));
       WebSocketMock.failPorts.add(1111);
       controller.setVisible(true);
       await vi.advanceTimersByTimeAsync(0);
@@ -999,7 +925,7 @@ describe('attach', () => {
     try {
       const host = attachHost(async () => ({ ok: false, error: 'not running' }));
       // What reaches the browser: a stream URL is only the host's to build.
-      const sent = () => host.browser.mock.calls.map(([request]) => request).filter((request) => request.op !== 'streamUrl');
+      const sent = () => host.browser.mock.calls.map(([request]) => request).filter((request) => request.op !== 'view');
       const sink = makeSink();
       let size = { width: 800, height: 600 };
       sink.viewport.getBoundingClientRect = () => ({ ...size }) as DOMRect;
@@ -1052,7 +978,7 @@ describe('attach', () => {
   });
 
   it('a headless browser that drops ends, reached again only through attach or a handed-over port', async () => {
-    const host = attachHost(async () => ({ ok: true, wsPort: 3333 }));
+    const host = attachHost(async () => ({ ok: true, stream: 3333 }));
     const controller = withPort('id', { session: 'sess', url: 'https://page.example/' }, 1111);
     controller.attachView(makeSink());
     await flushMicrotasks();
@@ -1067,7 +993,7 @@ describe('attach', () => {
     expect(host.requests('attach')).toEqual([]);
 
     // `dor ab open` brings it back on the port it had.
-    handOverBrowserPort('id', { session: 'sess', url: 'https://page.example/' }, 1111);
+    handOverBrowserStream('id', { session: 'sess', url: 'https://page.example/' }, 1111);
     await flushMicrotasks();
     expect(controller.snapshot().phase).toBe('live');
     expect(streamSockets(1111)).toHaveLength(2);
@@ -1089,7 +1015,7 @@ describe('attach', () => {
     const host = attachHost(async () => ({ ok: false, error: 'not running' }));
     acquireAgentBrowserSurfaceController('id', { session: 'sess', url: 'https://page.example/' }).attachView(makeSink());
     await flushMicrotasks();
-    host.answers.attach = async () => ({ ok: true, wsPort: 3333, relaunched: true });
+    host.answers.attach = async () => ({ ok: true, stream: 3333, relaunched: true });
 
     getAgentBrowserScreenController('id')!.chromeActions.navigate('https://next.example/');
     await flushMicrotasks();
@@ -1099,7 +1025,7 @@ describe('attach', () => {
   });
 
   it('does not query the daemon while a relaunch is in flight', async () => {
-    const host = attachHost(async () => ({ ok: true, wsPort: 9999 }));
+    const host = attachHost(async () => ({ ok: true, stream: 9999 }));
     host.answers.launch = () => new Promise<never>(() => {});
 
     const controller = withPort('id', { session: 'sess' }, 1111);
@@ -1158,7 +1084,7 @@ describe('closeBrowserSurface', () => {
 
     // The host runs that close after the relaunch, so closing again when it
     // lands would close whoever launched the session next.
-    resolvePopOut({ ok: true, wsPort: 3456 });
+    resolvePopOut({ ok: true, stream: 3456 });
     await flushMicrotasks();
     expect(closes()).toHaveLength(1);
     expect(streamSockets(3456)).toHaveLength(0);
@@ -1175,14 +1101,14 @@ describe('closeBrowserSurface', () => {
     // Through the binding the launch used, so the host orders the two.
     expect(host.requests('close')).toEqual([{ provider: 'agent-browser', binding: host.requests('launch')[0].binding, op: 'close' }]);
     expect(host.requests('close')[0].binding).toMatchObject({ session: 'dormouse.1.tool.t', binaryPath: '/opt/agent-browser' });
-    launch.resolve({ ok: true, session: 'dormouse.1.tool.t', wsPort: 4321 });
+    launch.resolve({ ok: true, session: 'dormouse.1.tool.t', stream: 4321 });
     await flushMicrotasks();
     expect(host.requests('close')).toHaveLength(1);
   });
 
   it('cancels only its own requests the host has not answered', async () => {
     const popIn = pending();
-    const answers = [Promise.resolve<BrowserResult>({ ok: true, wsPort: 3456 }), popIn.promise];
+    const answers = [Promise.resolve<BrowserResult>({ ok: true, stream: 3456 }), popIn.promise];
     const host = installBrowserHost({ launch: () => answers.shift()! });
     const controller = withPort('id', { session: 'sess' }, 1111);
     controller.attachView(makeSink());
@@ -1208,7 +1134,7 @@ describe('closeBrowserSurface', () => {
     getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout');
 
     disposeAgentBrowserSurfaceController('id');
-    resolvePopOut({ ok: true, wsPort: 3456 });
+    resolvePopOut({ ok: true, stream: 3456 });
     await flushMicrotasks();
     expect(closes()).toHaveLength(0);
   });
@@ -1227,8 +1153,8 @@ describe('relaunch (pop-out / pop-in)', () => {
   function relaunchHost() {
     const popOut = pending();
     const host = installBrowserHost({
-      attach: async () => ({ ok: true, wsPort: 9999 }),
-      launch: (request) => request.headed ? popOut.promise : Promise.resolve({ ok: true, wsPort: 5555 }),
+      attach: async () => ({ ok: true, stream: 9999 }),
+      launch: (request) => request.headed ? popOut.promise : Promise.resolve({ ok: true, stream: 5555 }),
     });
     /** The relaunches of a bound session, headed (pop-outs) or not (pop-ins). */
     const relaunches = (headed: boolean) => host.requests('launch').filter((request) => request.binding.session !== undefined && request.headed === headed);
@@ -1251,16 +1177,16 @@ describe('relaunch (pop-out / pop-in)', () => {
     expect(old?.readyState).toBe(3);
     expect(controller.snapshot().phase).toBe('relaunching');
     expect(controller.snapshot().poppedOut).toBe(true);
-    // No daemon command while the relaunch is in flight: not even the popped-out
-    // CDP observer's `get cdp-url`.
-    expect(host.requests('cdpUrl')).toEqual([]);
+    // No viewer socket while the relaunch is in flight, headed or not.
+    expect(host.requests('view')).toEqual([onSess({ op: 'view', stream: 1111 })]);
 
-    host.resolvePopOut({ ok: true, wsPort: 3456 });
+    host.resolvePopOut({ ok: true, stream: 3456 });
     await flushMicrotasks();
     expect(controller.snapshot().phase).toBe('live');
     expect(streamSockets(3456).length).toBe(1);
     expect(streamSockets(1111).length).toBe(1);
-    expect(host.requests('cdpUrl')).toEqual([onSess({ op: 'cdpUrl' })]);
+    // The popped-out window's viewer: its page and its close, no frames.
+    expect(host.requests('view').at(-1)).toEqual(onSess({ op: 'view', stream: 3456, headed: true }));
     expect(host.requests('attach')).toEqual([]);
   });
 
@@ -1279,7 +1205,7 @@ describe('relaunch (pop-out / pop-in)', () => {
     expect(host.relaunches(false)).toHaveLength(0);
     expect(controller.snapshot().poppedOut).toBe(true);
 
-    host.resolvePopOut({ ok: true, wsPort: 3456 });
+    host.resolvePopOut({ ok: true, stream: 3456 });
     await flushMicrotasks();
     controller.popIn();
     expect(host.relaunches(false)).toHaveLength(1);
@@ -1414,7 +1340,7 @@ describe('relaunch (pop-out / pop-in)', () => {
       expect(host.browser).not.toHaveBeenCalled();
 
       // The relaunch lands: only the latest navigation runs, once.
-      host.resolvePopOut({ ok: true, wsPort: 3456 });
+      host.resolvePopOut({ ok: true, stream: 3456 });
       await vi.advanceTimersByTimeAsync(0);
       expect(host.requests('navigate')).toEqual([onSess({ op: 'navigate', url: 'https://latest.example/' })]);
     } finally {
@@ -1439,7 +1365,7 @@ describe('relaunch (pop-out / pop-in)', () => {
     getAgentBrowserScreenController('id')!.actions.engageSync();
     expect(host.requests('viewport')).toEqual([]);
 
-    popIn.resolve({ ok: true, wsPort: 5555 });
+    popIn.resolve({ ok: true, stream: 5555 });
     await flushMicrotasks();
     expect(host.requests('viewport')).toEqual([onSess({ op: 'viewport', width: 800, height: 600, dpr: 1 })]);
   });
@@ -1453,7 +1379,7 @@ describe('relaunch (pop-out / pop-in)', () => {
     // The pane context menu's reuse of an existing port target.
     getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout', { url: 'http://localhost:5173/' });
     expect(host.relaunches(true)).toEqual([onSess({ op: 'launch', url: 'http://localhost:5173/', headed: true })]);
-    host.resolvePopOut({ ok: true, wsPort: 3456 });
+    host.resolvePopOut({ ok: true, stream: 3456 });
     await flushMicrotasks();
     expect(host.requests('navigate')).toEqual([]);
   });
@@ -1466,7 +1392,7 @@ describe('relaunch (pop-out / pop-in)', () => {
 
     getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout');
     getAgentBrowserScreenController('id')!.chromeActions.navigate('https://page.example/');
-    host.resolvePopOut({ ok: true, wsPort: 3456 });
+    host.resolvePopOut({ ok: true, stream: 3456 });
     await flushMicrotasks();
     expect(host.relaunches(true)).toEqual([expect.objectContaining({ url: 'https://page.example/' })]);
     expect(opens(host)).toEqual([]);
@@ -1489,7 +1415,7 @@ describe('relaunch (pop-out / pop-in)', () => {
       getAgentBrowserScreenController('id')!.chromeActions.navigate('https://next.example/');
       getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout', asked ? { url: asked } : undefined);
       expect(host.relaunches(true)).toEqual([expect.objectContaining({ url: opened })]);
-      host.resolvePopOut({ ok: true, wsPort: 3456 });
+      host.resolvePopOut({ ok: true, stream: 3456 });
       await vi.advanceTimersByTimeAsync(0);
       expect(opens(host)).toEqual([]);
     } finally {
@@ -1509,7 +1435,7 @@ describe('relaunch (pop-out / pop-in)', () => {
     expect(host.requests('attach')).toHaveLength(1);
     expect(host.relaunches(true)).toEqual([]);
 
-    attach.resolve({ ok: true, wsPort: 1111 });
+    attach.resolve({ ok: true, stream: 1111 });
     await flushMicrotasks();
     expect(host.relaunches(true)).toEqual([onSess({ op: 'launch', url: 'http://localhost:5173/', headed: true })]);
   });
@@ -1547,8 +1473,8 @@ describe('relaunch (pop-out / pop-in)', () => {
 
 describe('Playwright provider', () => {
   it('pastes as whole-text messages the host inserts, not a key pair per character', async () => {
-    const host = installBrowserHost({ streamUrl: async (request) => ({ ok: true, url: `ws://127.0.0.1:${request.port}` }) });
-    const pasted = `${'x'.repeat(PLAYWRIGHT_TEXT_INPUT_MAX + 10)}\r\nend`;
+    const host = installBrowserHost();
+    const pasted = `${'x'.repeat(VIEWER_TEXT_INPUT_MAX + 10)}\r\nend`;
     (host.platform as PlatformAdapter).readClipboardText = vi.fn(async () => pasted);
     const controller = withPort('pw', { renderMode: 'pw-screencast', session: 's' }, 4321);
     controller.attachView(makeSink());
@@ -1576,7 +1502,7 @@ describe('Playwright provider', () => {
 
   it('uses the shared controller with provider-scoped host calls and cwd', async () => {
     // The swap back to agent-browser is offered only where the host can launch one.
-    const host = installBrowserHost({ streamUrl: async (request) => ({ ok: true, url: `ws://127.0.0.1:${request.port}` }) });
+    const host = installBrowserHost();
     const controller = withPort('pw', { renderMode: 'pw-screencast', session: 'shared-name', cwd: '/first-project' }, 4321);
     const sink = makeSink();
     controller.attachView(sink);

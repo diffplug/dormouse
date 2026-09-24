@@ -1,12 +1,11 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
-import { readFileSync } from 'node:fs';
-import { Server } from 'node:http';
-import { WebSocket } from 'ws';
-import { createBrowserHost } from './browser-host';
+import { createBrowserCaptures } from './browser-capture';
+import { createBrowserHost, type BrowserProvider } from './browser-host';
+import { openViewer } from './browser-host-test-utils';
 import { createPlaywrightProvider } from './playwright-host';
-import { BROWSER_REQUEST_TIMEOUT_MS, PLAYWRIGHT_TEXT_INPUT_MAX, playwrightTextInputs, type BrowserOp, type BrowserRequestBinding } from '../lib/platform/browser-automation';
+import { BROWSER_REQUEST_TIMEOUT_MS, VIEWER_TEXT_INPUT_MAX, viewerTextInputs, type BrowserOp, type BrowserRequestBinding } from '../lib/platform/browser-automation';
 
 const mocks = vi.hoisted(() => ({ cli: vi.fn(), connect: vi.fn(), clipboard: vi.fn() }));
 vi.mock('dor-lib-common', async importOriginal => ({ ...await importOriginal<typeof import('dor-lib-common')>(), spawnAndCapture: mocks.cli }));
@@ -16,6 +15,7 @@ vi.mock('./playwright-install', () => ({
 }));
 
 let host: ReturnType<typeof createBrowserHost>;
+let provider: BrowserProvider<any>;
 let page: EventEmitter & Record<string, any>;
 let browser: EventEmitter & Record<string, any>;
 let cdp: { send: ReturnType<typeof vi.fn>; detach: ReturnType<typeof vi.fn>; on: ReturnType<typeof vi.fn> };
@@ -23,6 +23,18 @@ let attach: ReturnType<typeof vi.fn>;
 const binding = { cwd: process.cwd(), session: 'test' };
 /** One Playwright request through the shared host, bound to `b`. */
 const pw = (op: BrowserOp, b: BrowserRequestBinding = binding) => host.request({ provider: 'playwright', binding: b, ...op });
+let captures: ReturnType<typeof createBrowserCaptures>;
+/** One crisp capture, as the host takes it for a viewer socket: joined per
+ *  browser. */
+const capture = () => {
+  const b = provider.bind({ ...binding });
+  return captures.take(provider.identity(b), (file) => provider.screenshot(b, file)).then(() => true, () => false);
+};
+/** A viewer socket onto the session's live browser. */
+const viewSession = async () => {
+  const { stream } = await pw({ op: 'attach' });
+  return openViewer((await pw({ op: 'view', stream: stream! })).url!);
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -45,19 +57,20 @@ beforeEach(() => {
       endpoint: '/tmp/test-playwright.pipe', browser: { browserName: 'chromium' },
     }] } : { result: '- 0: (current) Test' }),
   }));
-  host = createBrowserHost({ writeClipboardText: mocks.clipboard, providers: { playwright: () => createPlaywrightProvider() } });
+  provider = createPlaywrightProvider();
+  captures = createBrowserCaptures();
+  host = createBrowserHost({ writeClipboardText: mocks.clipboard, providers: { playwright: () => provider } });
 });
-afterEach(async () => { await host.close(); vi.restoreAllMocks(); });
+afterEach(async () => { await host.close(); await captures.remove(); vi.restoreAllMocks(); });
 
 test('concurrent captures join one, a concurrent control shares its CDP attachment, and close detaches it once', async () => {
   page.setViewportSize = vi.fn(async () => {});
   const [first, second, sized] = await Promise.all([
-    pw({ op: 'screenshot' }),
-    pw({ op: 'screenshot' }),
+    capture(),
+    capture(),
     pw({ op: 'viewport', width: 640, height: 480, dpr: 1 }),
   ]);
-  expect(first.error).toBeUndefined();
-  expect(second).toEqual(first);
+  expect([first, second]).toEqual([true, true]);
   expect(sized.ok).toBe(true);
   expect(attach).toHaveBeenCalledTimes(1);
   expect(cdp.send.mock.calls.filter(([method]) => method === 'Page.captureScreenshot')).toHaveLength(1);
@@ -69,13 +82,14 @@ test('concurrent captures join one, a concurrent control shares its CDP attachme
 test('closing during a CDP attachment releases it without capturing', async () => {
   let complete!: (value: typeof cdp) => void;
   attach.mockImplementation(() => new Promise(resolve => { complete = resolve; }));
-  const { wsPort } = await pw({ op: 'attach' });
-  const capture = pw({ op: 'screenshot' });
+  await pw({ op: 'attach' });
+  const captured = capture();
   await vi.waitFor(() => expect(attach).toHaveBeenCalledTimes(1));
   const closing = pw({ op: 'close' });
-  await vi.waitFor(async () => expect((await pw({ op: 'streamUrl', port: wsPort! }, {})).ok).toBe(false));
+  // The close releases the connection, whose disposal waits on the attachment.
+  await new Promise((resolve) => setTimeout(resolve, 20));
   complete(cdp);
-  expect((await capture).ok).toBe(false);
+  expect(await captured).toBe(false);
   expect((await closing).ok).toBe(true);
   expect(cdp.send).not.toHaveBeenCalled();
   expect(cdp.detach).toHaveBeenCalledTimes(1);
@@ -83,19 +97,9 @@ test('closing during a CDP attachment releases it without capturing', async () =
 
 test('a failed attachment can be retried', async () => {
   attach.mockRejectedValueOnce(new Error('Tab detached'));
-  expect((await pw({ op: 'screenshot' })).ok).toBe(false);
-  expect((await pw({ op: 'screenshot' })).ok).toBe(true);
+  expect(await capture()).toBe(false);
+  expect(await capture()).toBe(true);
   expect(attach).toHaveBeenCalledTimes(2);
-});
-
-test('a viewer listener failure releases its browser connection', async () => {
-  vi.spyOn(Server.prototype, 'listen').mockImplementationOnce(function (this: Server) {
-    queueMicrotask(() => this.emit('error', new Error('Listener unavailable')));
-    return this;
-  });
-  const result = await pw({ op: 'attach' });
-  expect(result.error).toBe('Listener unavailable');
-  expect(browser.close).toHaveBeenCalledTimes(1);
 });
 
 test('captures reuse recent tab state but refresh it when it expires', async () => {
@@ -103,12 +107,12 @@ test('captures reuse recent tab state but refresh it when it expires', async () 
   browser.contexts = () => [{ pages: () => [page, Object.assign(new EventEmitter(), page)] }];
   expect((await pw({ op: 'attach' })).ok).toBe(true);
   // No viewer yet, so attach left the tab state to the first capture.
-  expect((await pw({ op: 'screenshot' })).ok).toBe(true);
+  expect(await capture()).toBe(true);
   mocks.cli.mockClear();
-  for (let i = 0; i < 10; i++) expect((await pw({ op: 'screenshot' })).ok).toBe(true);
+  for (let i = 0; i < 10; i++) expect(await capture()).toBe(true);
   expect(mocks.cli).not.toHaveBeenCalled();
   now.mockReturnValue(10750);
-  expect((await pw({ op: 'screenshot' })).ok).toBe(true);
+  expect(await capture()).toBe(true);
   expect(mocks.cli).toHaveBeenCalledExactlyOnceWith('/tools/playwright-cli', ['--session=test', 'tab-list', '--json'], { cwd: binding.cwd, timeoutMs: 10_000 });
 });
 
@@ -123,9 +127,9 @@ test('GUI tab selection refreshes immediately even with a recent capture', async
     if (args.includes('tab-list')) return { ok: true, exitCode: 0, stdout: JSON.stringify({ result: `- ${active}: (current) Test` }), stderr: '' };
     return originalCli(binary, args, options);
   });
-  expect((await pw({ op: 'screenshot' })).ok).toBe(true);
+  expect(await capture()).toBe(true);
   expect((await pw({ op: 'tab', action: 'select', tabId: '1' })).ok).toBe(true);
-  expect((await pw({ op: 'screenshot' })).ok).toBe(true);
+  expect(await capture()).toBe(true);
   expect(attach).toHaveBeenLastCalledWith(second);
 });
 
@@ -153,17 +157,6 @@ test('a native reopen in headless mode clears headed shutdown ownership', async 
 test('a single-page browser refreshes without asking the CLI for its selection', async () => {
   expect((await pw({ op: 'attach' })).ok).toBe(true);
   expect(mocks.cli.mock.calls.map(([, args]) => args[1])).toEqual(['list']);
-});
-
-test('hands the sidecar a fresh frame file per capture, so the next never rewrites one being read', async () => {
-  page.setViewportSize = vi.fn(async () => {});
-  const file = (op: BrowserOp) => host.requestFile({ provider: 'playwright', binding, ...op });
-  const first = await file({ op: 'screenshot' });
-  cdp.send.mockResolvedValue({ data: Buffer.from('next').toString('base64') });
-  const second = await file({ op: 'screenshot' });
-  expect(second.path).not.toBe(first.path);
-  expect(readFileSync(first.path!, 'utf8')).toBe('hello');
-  expect(readFileSync(second.path!, 'utf8')).toBe('next');
 });
 
 test('a GUI open launches its fresh session without closing it first; a named launch navigates it in its mode and relaunches it into the other', async () => {
@@ -205,7 +198,7 @@ test('a relaunch without an http(s) page reopens blank; a GUI open still needs o
 });
 
 test.each(['attach', 'startScreencast'] as const)('a screencast whose %s fails mid-navigation is retried on the next poll', async (failing) => {
-  const { wsPort } = await pw({ op: 'attach' });
+  const { stream } = await pw({ op: 'attach' });
   const starts = () => cdp.send.mock.calls.filter(([method]) => method === 'Page.startScreencast').length;
   if (failing === 'attach') attach.mockRejectedValueOnce(new Error('Target navigated'));
   else {
@@ -214,15 +207,12 @@ test.each(['attach', 'startScreencast'] as const)('a screencast whose %s fails m
       return { data: 'aGVsbG8=' };
     });
   }
-  const { url } = await pw({ op: 'streamUrl', port: wsPort! }, {});
-  const ws = new WebSocket(url!);
-  ws.on('error', () => {});
+  const viewer = await openViewer((await pw({ op: 'view', stream: stream! })).url!);
   try {
-    await new Promise(resolve => ws.once('open', resolve));
     // The next 750 ms poll attaches again and starts the screencast.
     await vi.waitFor(() => expect(starts()).toBe(failing === 'attach' ? 1 : 2), { timeout: 3000 });
   } finally {
-    ws.terminate();
+    viewer.socket.terminate();
   }
 });
 
@@ -247,7 +237,7 @@ describe('attach', () => {
   test('a live session answers its viewer port without launching', async () => {
     running = true;
     const attached = await pw({ op: 'attach', url: 'http://localhost/' });
-    expect(attached).toMatchObject({ ok: true, headed: false, wsPort: expect.any(Number) });
+    expect(attached).toMatchObject({ ok: true, headed: false, stream: expect.any(Number) });
     expect(attached).not.toHaveProperty('relaunched');
     expect(verbs()).not.toContain('open');
   });
@@ -258,7 +248,7 @@ describe('attach', () => {
 
     const attached = await pw({ op: 'attach', url: 'http://localhost/', headed: true });
     // Opened at the page, so the caller has no navigation left to run.
-    expect(attached).toMatchObject({ ok: true, wsPort: expect.any(Number), relaunched: true });
+    expect(attached).toMatchObject({ ok: true, stream: expect.any(Number), relaunched: true });
     expect(mocks.cli.mock.calls.map(([, args]) => args)).toContainEqual(['--session=test', 'open', 'http://localhost/', '--browser=chromium', '--headed']);
   });
 
@@ -294,48 +284,38 @@ test('copy runs the shared edit script and never overwrites the clipboard with a
 });
 
 test('viewers get tabs, url and status only when they change, and the current state when they connect', async () => {
-  const { wsPort } = await pw({ op: 'attach' });
-  const sockets: WebSocket[] = [];
+  const viewers: Awaited<ReturnType<typeof viewSession>>[] = [];
   const connectViewer = async () => {
-    const { url } = await pw({ op: 'streamUrl', port: wsPort! }, {});
-    const types: string[] = [];
-    const ws = new WebSocket(url!);
-    sockets.push(ws);
-    ws.on('error', () => {});
-    ws.on('message', raw => types.push(JSON.parse(String(raw)).type));
-    await new Promise(resolve => ws.once('open', resolve));
-    return types;
+    const viewer = await viewSession();
+    viewers.push(viewer);
+    return () => viewer.states.map((state) => state.type);
   };
   try {
     const first = await connectViewer();
-    await vi.waitFor(() => expect(first).toEqual(['url', 'tabs', 'status']));
+    await vi.waitFor(() => expect(first()).toEqual(['url', 'tabs', 'status']));
     await pw({ op: 'attach' });
     await pw({ op: 'attach' });
     page.url = () => 'http://localhost/next';
     await pw({ op: 'attach' });
     // A repeated state message would have arrived ahead of the navigation.
-    await vi.waitFor(() => expect(first).toEqual(['url', 'tabs', 'status', 'url', 'tabs']));
+    await vi.waitFor(() => expect(first()).toEqual(['url', 'tabs', 'status', 'url', 'tabs']));
     const second = await connectViewer();
-    await vi.waitFor(() => expect(second).toEqual(['url', 'tabs', 'status']));
-    expect(first).toHaveLength(5);
+    await vi.waitFor(() => expect(second()).toEqual(['url', 'tabs', 'status']));
+    expect(first()).toHaveLength(5);
   } finally {
-    for (const ws of sockets) ws.terminate();
+    for (const viewer of viewers) viewer.socket.terminate();
   }
 });
 
 test('a long paste reaches the page whole without tripping the input backlog', async () => {
-  const { wsPort } = await pw({ op: 'attach' });
-  const { url } = await pw({ op: 'streamUrl', port: wsPort! }, {});
-  const ws = new WebSocket(url!);
-  ws.on('error', () => {});
+  const viewer = await viewSession();
   const closed = vi.fn();
-  ws.on('close', closed);
+  viewer.socket.on('close', closed);
   try {
-    await new Promise(resolve => ws.once('open', resolve));
     // Past 128 characters, a key pair per character overflowed the 256-message
     // queue. The first message would end between an emoji's two halves.
-    const text = `${'x'.repeat(PLAYWRIGHT_TEXT_INPUT_MAX - 1)}🙂${'é🙂\n'.repeat(40_000)}`;
-    for (const message of playwrightTextInputs(text)) ws.send(JSON.stringify(message));
+    const text = `${'x'.repeat(VIEWER_TEXT_INPUT_MAX - 1)}🙂${'é🙂\n'.repeat(40_000)}`;
+    for (const message of viewerTextInputs(text)) viewer.send(message);
     const insertions = () => cdp.send.mock.calls.filter(([method]) => method === 'Input.insertText').map(([, params]) => params.text as string);
     const inserted = () => insertions().join('');
     await vi.waitFor(() => expect(inserted()).toBe(text));
@@ -343,12 +323,45 @@ test('a long paste reaches the page whole without tripping the input backlog', a
     expect(closed).not.toHaveBeenCalled();
     // Text past the per-message bound is refused, like oversized key input.
     cdp.send.mockClear();
-    ws.send(JSON.stringify({ type: 'input_text', text: 'x'.repeat(PLAYWRIGHT_TEXT_INPUT_MAX + 1) }));
-    ws.send(JSON.stringify({ type: 'input_text', text: 'ok' }));
+    viewer.send({ type: 'input_text', text: 'x'.repeat(VIEWER_TEXT_INPUT_MAX + 1) });
+    viewer.send({ type: 'input_text', text: 'ok' });
     await vi.waitFor(() => expect(inserted()).toBe('ok'));
   } finally {
-    ws.terminate();
+    viewer.socket.terminate();
   }
+});
+
+test('frames reach the viewer as binary, decoded once, their acks paced to ~20 a second', async () => {
+  const handlers = new Map<string, (event: unknown) => void>();
+  cdp.on.mockImplementation((event: string, handler: (event: unknown) => void) => { handlers.set(event, handler); });
+  const viewer = await viewSession();
+  try {
+    await vi.waitFor(() => expect(handlers.has('Page.screencastFrame')).toBe(true));
+    const acks = () => cdp.send.mock.calls.filter(([method]) => method === 'Page.screencastFrameAck');
+    const screencastFrame = (n: number) => handlers.get('Page.screencastFrame')!({
+      data: Buffer.from([0xff, 0xd8, n]).toString('base64'), sessionId: n, metadata: { deviceWidth: 640, deviceHeight: 480 },
+    });
+    screencastFrame(1);
+    await vi.waitFor(() => expect(acks()).toHaveLength(1));
+    const start = Date.now();
+    screencastFrame(2);
+    await vi.waitFor(() => expect(acks()).toHaveLength(2));
+    // Chrome sends the next frame only once this one is acknowledged.
+    expect(Date.now() - start).toBeGreaterThanOrEqual(40);
+    await vi.waitFor(() => expect(viewer.frames.length).toBeGreaterThan(0));
+    expect(viewer.frames[0]).toMatchObject({ kind: 'provisional', size: { width: 640, height: 480 } });
+    expect([...viewer.frames[0].jpeg]).toEqual([0xff, 0xd8, 1]);
+  } finally {
+    viewer.socket.terminate();
+  }
+});
+
+test('a browser that disconnects on its own tells its viewers it is gone', async () => {
+  const viewer = await viewSession();
+  await vi.waitFor(() => expect(viewer.states.map((state) => state.type)).toContain('status'));
+  browser.emit('disconnected');
+  expect(await viewer.closed).toBe(1000);
+  expect(viewer.states.at(-1)).toEqual({ type: 'status', connected: false, screencasting: false });
 });
 
 describe('a GUI launch that gives up', () => {

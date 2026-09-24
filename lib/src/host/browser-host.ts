@@ -5,14 +5,13 @@
  * as one provider-tagged `BrowserRequest`, is validated here once — the
  * security boundary for both providers — and runs under one lifecycle: launches
  * and closes serialized per native identity, the post-launch blank-tab sweep,
- * capture joins and their private directory, the editing scripts, headed
+ * the viewer sockets and their crisp captures, the editing scripts, headed
  * tracking and shutdown. A provider implements only the primitives that
- * genuinely differ (`BrowserProvider`): agent-browser its daemon state files
- * and argv, Playwright its install discovery, registry and CDP viewer.
+ * genuinely differ (`BrowserProvider`): agent-browser its daemon state files,
+ * stream and argv, Playwright its install discovery, registry and CDP.
  */
 import { randomBytes } from 'crypto';
 import * as path from 'path';
-import { promises as fs } from 'fs';
 import {
   BROWSER_PROVIDERS,
   isBrowserProvider,
@@ -33,20 +32,22 @@ import {
   type BrowserRequestBinding,
   type BrowserResult,
 } from '../lib/platform/browser-automation';
-import { privateCaptureDir } from './private-capture-dir';
+import { createBrowserCaptures } from './browser-capture';
+import type { WebSocket } from 'ws';
+import { BrowserView, createViewerServer, type Upstream, type ViewerSink } from './browser-viewer';
 
 /** An operation on a live browser that each provider maps to its own call:
  *  a fixed agent-browser argv, or a Playwright client call. */
-export type BrowserAct = Extract<BrowserOp, { op: 'navigate' | 'history' | 'tab' | 'viewport' | 'device' | 'cdpUrl' }>;
+export type BrowserAct = Extract<BrowserOp, { op: 'navigate' | 'history' | 'tab' | 'viewport' | 'device' }>;
 
 /** The binding a provider runs one request with: the session named, or minted
  *  for a new launch. */
 export type ProviderBinding = BrowserBinding;
 
-/** A browser that is up: where it streams, and whether it runs headed when the
- *  provider can tell. */
+/** A browser that is up: its stream — what `view` subscribes to — and
+ *  whether it runs headed when the provider can tell. */
 export interface LiveBrowser {
-  wsPort: number;
+  stream: number;
   headed?: boolean;
 }
 
@@ -95,10 +96,13 @@ export interface BrowserProvider<B = unknown> {
   act(b: B, act: BrowserAct): Promise<BrowserResult>;
   /** Run one of the host's fixed editing scripts in the page. */
   evaluate(b: B, script: string): Promise<unknown>;
-  /** One device-resolution frame: written to `file()` by a CLI, or its bytes. */
-  screenshot(b: B, opts: { format: 'jpeg' | 'png'; quality: number }, file: () => Promise<string>): Promise<{ path: string } | { bytes: Uint8Array }>;
-  /** The URL the webview connects to for a stream port. */
-  streamUrl(port: number): Promise<string>;
+  /** One device-resolution JPEG at `CAPTURE_JPEG_QUALITY`: written to
+   *  `file()` by a CLI, or its bytes. */
+  screenshot(b: B, file: () => Promise<string>): Promise<{ path: string } | { bytes: Uint8Array }>;
+  /** Subscribe `sink` to the browser at `stream` (a `find` or `probe`
+   *  answer): its changed frames — none for a `headed` viewer — and state.
+   *  Rejects when that browser is not live. */
+  view(b: B, stream: number, opts: { headed: boolean }, sink: ViewerSink): Promise<Upstream>;
   /** Shutdown: release every client-side resource. */
   dispose?(): Promise<void>;
 }
@@ -158,12 +162,6 @@ function dimension(value: unknown, max: number): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= max ? value : null;
 }
 
-/** A capture's JPEG quality: an integer in 1..100, defaulting to 85. */
-function jpegQuality(quality: unknown): number {
-  if (typeof quality !== 'number' || !Number.isFinite(quality)) return 85;
-  return Math.min(100, Math.max(1, Math.round(quality)));
-}
-
 /**
  * `raw`, as a request the providers may run, or why it may not. The request
  * arrives from webview IPC unvalidated, so the result is rebuilt field by
@@ -192,10 +190,9 @@ function parseBrowserRequest(raw: unknown): BrowserRequest | string {
     // A new session opens where it was asked; a relaunch only carries its page
     // along, reopening blank on one it may not navigate to.
     if (binding.session === undefined && !isBrowsableUrl(op.url)) return 'Browser navigation requires an http(s) URL';
-  } else if (op.op !== 'streamUrl' && binding.session === undefined) {
+  } else if (binding.session === undefined) {
     return 'a valid session name is required';
   }
-  if (op.op === 'cdpUrl' && provider !== 'agent-browser') return `${provider} has no cdpUrl operation`;
   return { provider, binding, ...op };
 }
 
@@ -210,13 +207,11 @@ function parseOp(r: Record<string, unknown>): BrowserOp | string {
         ? { op: 'launch', ...url, headed: r.headed === true, ...id }
         : { op: 'attach', ...url, ...(r.headed === true ? { headed: true } : {}), ...id };
     }
-    case 'streamUrl': {
-      const port = r.port;
-      return typeof port === 'number' && Number.isInteger(port) && port > 0 && port <= 65535 ? { op: 'streamUrl', port } : 'a stream port is required';
+    case 'view': {
+      const stream = r.stream;
+      if (typeof stream !== 'number' || !Number.isSafeInteger(stream) || stream <= 0) return 'a stream is required';
+      return { op: 'view', stream, ...(r.headed === true ? { headed: true } : {}), ...(r.debug === true ? { debug: true } : {}) };
     }
-    case 'screenshot':
-      // Normalized where it is taken (`screenshot`).
-      return { op: 'screenshot', ...(r.format === 'png' ? { format: 'png' } : {}), ...(typeof r.quality === 'number' ? { quality: r.quality } : {}) };
     case 'edit':
       return editScript(r.edit) !== undefined ? { op: 'edit', edit: r.edit as BrowserEditOp } : `unknown edit op '${String(r.edit)}'`;
     case 'navigate':
@@ -234,8 +229,6 @@ function parseOp(r: Record<string, unknown>): BrowserOp | string {
     }
     case 'device':
       return typeof r.name === 'string' && DEVICE_NAME.test(r.name) ? { op: 'device', name: r.name } : 'invalid device name';
-    case 'cdpUrl':
-      return { op: 'cdpUrl' };
     case 'close': {
       const cancels = r.cancels;
       if (cancels === undefined) return { op: 'close' };
@@ -262,10 +255,6 @@ const CLOSE_TIMEOUT_MS = 10_000;
 const OPEN_SETTLE_MS = 4_000;
 const LAUNCH_CLOSE_RESERVE_MS = OPEN_SETTLE_MS + 4_000;
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
-
-/** Screenshots answer with their bytes, or — to the sidecar, whose Rust
- *  caller reads the file itself — with the private file holding them. */
-type Transport = 'bytes' | 'file';
 
 /** One request, resolved: its provider, the provider's binding, and the
  *  native identity everything per-browser keys on. */
@@ -370,7 +359,9 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   async function invalidate({ p, b, id }: Bound): Promise<number> {
     const generation = (generations.get(id) ?? 0) + 1;
     generations.set(id, generation);
-    forgetInFlight(id);
+    captures.forget(id);
+    // Their browser is going: whoever still views it asks again.
+    for (const view of views.get(id) ?? []) view.close(1001, 'the browser was relaunched or closed');
     await p.release?.(b);
     return generation;
   }
@@ -424,7 +415,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       } catch (error) {
         why = messageOf(error);
       }
-      if (probe && 'wsPort' in probe) {
+      if (probe && 'stream' in probe) {
         sweepAfter(opening, bound, generation);
         return probe;
       }
@@ -477,7 +468,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   async function reuse(bound: Bound, url: string | undefined, isHeaded: boolean): Promise<LiveBrowser | undefined> {
     const { p, b, id } = bound;
     const found = await p.find(b).catch(() => undefined);
-    if (!found || !('wsPort' in found) || (found.headed ?? headed.has(id)) !== isHeaded) return undefined;
+    if (!found || !('stream' in found) || (found.headed ?? headed.has(id)) !== isHeaded) return undefined;
     if (isBrowsableUrl(url)) {
       void p.act(b, { op: 'navigate', url }).then((result) => {
         if (!result.ok) log(`navigating ${id} to ${url} failed: ${result.error ?? 'no reason given'}`);
@@ -493,7 +484,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   function attach(bound: Bound, url: string | undefined, isHeaded: boolean, requestDeadline: number): Promise<LiveBrowser & { relaunched?: true }> {
     return bringUp(bound.id, async () => {
       const found = await bound.p.find(bound.b);
-      if ('wsPort' in found) return found;
+      if ('stream' in found) return found;
       if (!isBrowsableUrl(url)) throw new Error(found.gone);
       return { ...await launch(bound, url, isHeaded, !found.named, requestDeadline), relaunched: true };
     });
@@ -513,87 +504,57 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     }));
   }
 
-  // --- captures ---
+  // --- viewer sockets and their captures ---
 
-  // Screenshots of the user's authenticated browser land here, written by an
-  // external process under the ambient umask — which is why the private
-  // directory, not the file mode, is the control. Every file is a fresh
-  // random name — unguessable, and never one a reader may still be reading.
-  const captures = privateCaptureDir('dormouse-browser-');
-  async function freshCapturePath(format: 'jpeg' | 'png'): Promise<string> {
-    return path.join(await captures.get(), `shot-${randomBytes(12).toString('hex')}.${format === 'png' ? 'png' : 'jpg'}`);
-  }
+  const viewers = createViewerServer();
+  // The viewer sockets open on each browser: a launch or close ends them.
+  const views = new Map<string, Set<BrowserView>>();
 
-  // Files handed to the file transport's reader, which deletes each once read
-  // (the Tauri `browser_screenshot` command). Kept per browser until then: its
-  // close or relaunch removes those still there, and each new one removes any
-  // older than every reader's wait, which no reader will come for.
-  const handedOut = new Map<string, Map<string, number>>();
-  async function handOut(id: string, bytes: Uint8Array, format: 'jpeg' | 'png'): Promise<string> {
-    const file = await freshCapturePath(format);
-    await fs.writeFile(file, bytes, { mode: 0o600 });
-    let files = handedOut.get(id);
-    if (!files) handedOut.set(id, files = new Map());
-    const now = Date.now();
-    for (const [old, at] of files) {
-      if (at > now - BROWSER_REQUEST_TIMEOUT_MS) break;
-      files.delete(old);
-      void fs.unlink(old).catch(() => {});
+  /** Open one viewer socket on the browser at `stream`, unless a launch or
+   *  close of it began since its URL was granted (`generation`). */
+  function openView(socket: WebSocket, bound: Bound, stream: number, isHeaded: boolean, debug: boolean, generation: number): void {
+    if (closed || (generations.get(bound.id) ?? 0) !== generation) {
+      socket.close(1001, 'the browser was relaunched or closed');
+      return;
     }
-    files.set(file, now);
-    return file;
+    const view = new BrowserView(socket, {
+      headed: isHeaded,
+      capture: () => crisp(bound),
+      onClose: () => {
+        const open = views.get(bound.id);
+        open?.delete(view);
+        if (open?.size === 0) views.delete(bound.id);
+      },
+      ...(debug && deps.log ? { log: deps.log } : {}),
+    });
+    let open = views.get(bound.id);
+    if (!open) views.set(bound.id, open = new Set());
+    open.add(view);
+    bound.p.view(bound.b, stream, { headed: isHeaded }, view).then(
+      (upstream) => view.attach(upstream),
+      (error: unknown) => view.close(1011, messageOf(error)),
+    );
   }
 
-  // A capture a caller asking meanwhile joins rather than repeats, one per
-  // browser and format: surfaces can share a session, and a caller re-asks
-  // after its adapter's timeout. Never one from before the browser's close or
-  // relaunch (`forgetInFlight`).
-  const inFlight = new Map<string, { id: string; promise: Promise<Uint8Array> }>();
-  function joinInFlight(id: string, format: string, work: () => Promise<Uint8Array>): Promise<Uint8Array> {
-    const key = `${format}\0${id}`;
-    const pending = inFlight.get(key);
-    if (pending) return pending.promise;
-    const entry = { id, promise: work().finally(() => { if (inFlight.get(key) === entry) inFlight.delete(key); }) };
-    inFlight.set(key, entry);
-    return entry.promise;
-  }
+  const captures = createBrowserCaptures();
 
-  /** Join none of `id`'s pending captures, and delete the frames of its page
-   *  still handed out, rather than leave them on disk until shutdown. */
-  function forgetInFlight(id: string): void {
-    for (const [key, entry] of inFlight) if (entry.id === id) inFlight.delete(key);
-    for (const file of handedOut.get(id)?.keys() ?? []) void fs.unlink(file).catch(() => {});
-    handedOut.delete(id);
-  }
-
-  async function screenshot({ p, b, id }: Bound, asked: { format?: 'jpeg' | 'png'; quality?: number }, transport: Transport): Promise<BrowserResult> {
-    const opts = { format: asked.format === 'png' ? 'png' as const : 'jpeg' as const, quality: jpegQuality(asked.quality) };
-    const mime = opts.format === 'png' ? 'image/png' : 'image/jpeg';
-    let bytes: Uint8Array;
+  /** One device-resolution JPEG of `bound`'s browser, for its viewer sockets'
+   *  crisp paint; undefined when none can be taken. A launch or close ends
+   *  every viewer socket of the browser first, so none asks mid-relaunch. */
+  async function crisp({ p, b, id }: Bound): Promise<Uint8Array | undefined> {
     try {
-      // The frame is held in memory and its capture file gone before anyone
-      // joined reads it, so each caller gets its own copy.
-      bytes = await joinInFlight(id, opts.format, async () => {
-        const shot = await p.screenshot(b, opts, () => freshCapturePath(opts.format));
-        if ('bytes' in shot) return shot.bytes;
-        try {
-          const buffer = await fs.readFile(shot.path);
-          return new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
-        } finally {
-          await fs.unlink(shot.path).catch(() => {});
-        }
-      });
+      return await captures.take(id, (file) => p.screenshot(b, file));
     } catch (error) {
-      return { ok: false, error: messageOf(error) };
+      log(error);
+      return undefined;
     }
-    if (transport === 'bytes') return { ok: true, bytes, mime };
-    if (closed) return { ok: false, error: 'the browser host is shutting down' };
-    return { ok: true, path: await handOut(id, bytes, opts.format), mime };
   }
 
   // --- editing ---
 
-  async function edit({ p, b }: Bound, op: BrowserEditOp): Promise<BrowserResult> {
+  async function edit({ p, b, id }: Bound, op: BrowserEditOp): Promise<BrowserResult> {
+    // The page answers an editing chord the way it answers a keystroke.
+    for (const view of views.get(id) ?? []) view.openProvisionalWindow();
     const result = await p.evaluate(b, EDIT_SCRIPTS[op]);
     if (op === 'selectAll') return { ok: true };
     const text = typeof result === 'string' ? result : '';
@@ -610,7 +571,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
 
   // --- dispatch ---
 
-  async function run(raw: unknown, transport: Transport): Promise<BrowserResult> {
+  async function run(raw: unknown): Promise<BrowserResult> {
     const r = parseBrowserRequest(raw);
     if (typeof r === 'string') return { ok: false, error: r };
     try {
@@ -619,12 +580,11 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       // nothing for the Surface that close was for.
       if ((r.op === 'launch' || r.op === 'attach') && wasCancelled(r.requestId)) throw new Error('the browser was closed');
       const p = providerFor(r.provider);
-      if (r.op === 'streamUrl') return { ok: true, url: await p.streamUrl(r.port) };
       const b = p.bind({ ...r.binding, session: r.binding.session ?? generateGuiSession() });
       const bound: Bound = { p, b, id: p.identity(b) };
       const answer = (live: LiveBrowser): BrowserResult => {
         trackHeaded(bound, live.headed);
-        return { ok: true, ...p.describe(b), nativeIdentity: bound.id, wsPort: live.wsPort, ...(live.headed !== undefined ? { headed: live.headed } : {}) };
+        return { ok: true, ...p.describe(b), nativeIdentity: bound.id, stream: live.stream, ...(live.headed !== undefined ? { headed: live.headed } : {}) };
       };
       const requestDeadline = Date.now() + REQUEST_BUDGET_MS;
       if (r.op !== 'launch' && r.op !== 'attach' && r.op !== 'close' && settling.has(bound.id)) {
@@ -645,8 +605,11 @@ export function createBrowserHost(deps: BrowserHostDeps) {
           cancelRequests(r.cancels);
           await closeSession(bound);
           return { ok: true };
-        case 'screenshot':
-          return await screenshot(bound, r, transport);
+        case 'view': {
+          const { stream, headed: viewHeaded = false, debug = false } = r;
+          const generation = generations.get(bound.id) ?? 0;
+          return { ok: true, url: await viewers.grant((socket) => openView(socket, bound, stream, viewHeaded, debug, generation)) };
+        }
         case 'edit':
           return await edit(bound, r.edit);
         default:
@@ -658,21 +621,20 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   }
 
   return {
-    /** One request from the webview; a screenshot answers with its bytes. */
-    request: (raw: unknown) => run(raw, 'bytes'),
-    /** The same, but a screenshot answers with a private file's path. */
-    requestFile: (raw: unknown) => run(raw, 'file'),
-    /** Shutdown: close every headed window — so quitting orphans none — and
-     *  drop the capture directory, so no frame of the user's browser outlives
-     *  the process that took it. */
+    /** One request from the webview. */
+    request: run,
+    /** Shutdown: end every viewer socket, close every headed window — so
+     *  quitting orphans none — and drop the capture directory, so no frame of
+     *  the user's browser outlives the process that took it. */
     close: async () => {
       // Every launch and sweep still pending now finds itself superseded.
       closed = true;
       const windows = [...headed.values()];
       headed.clear();
       await Promise.all([
+        viewers.close(),
         ...windows.map((bound) => shut(bound).catch(log)),
-        captures.remove().then(() => handedOut.clear()),
+        captures.remove(),
       ]);
       await settleAllWithin([...lifecycle.values()], CLOSE_TIMEOUT_MS, undefined);
       await Promise.all([...providers.values()].map((provider) => provider.dispose?.()));

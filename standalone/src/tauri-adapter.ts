@@ -462,18 +462,13 @@ export class TauriAdapter implements PlatformAdapter {
   }
 
   // --- browser automation (docs/specs/dor-browser.md → "Browser Host").
-  // One Rust command forwards every request to the sidecar's
-  // shared host; a screenshot takes `browser_screenshot`, which answers raw
-  // bytes (tauri::ipc::Response) rather than JSON. ---
+  // One Rust command forwards every request to the sidecar's shared host;
+  // frames reach the webview over the host's viewer socket, never this IPC. ---
 
   readonly browserProviders = BROWSER_PROVIDER_IDS;
 
   async browser(request: BrowserRequest): Promise<BrowserResult> {
     try {
-      if (request.op === "screenshot") {
-        const buffer = await rawInvoke<ArrayBuffer>("browser_screenshot", { request });
-        return { ok: true, bytes: new Uint8Array(buffer), mime: request.format === "png" ? "image/png" : "image/jpeg" };
-      }
       return await rawInvoke<BrowserResult>("browser_request", { request });
     } catch (err) {
       return { ok: false, error: errMessage(err) };

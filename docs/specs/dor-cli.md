@@ -590,7 +590,7 @@ is each provider's descriptor:
 - **After a command that may bind succeeds, `surface.browser { provider, key?,
   session, cwd, binaryPath, wsPort? }` opens or reuses its Surface**: `dor ab`
   first reads the stream port itself (`docs/specs/dor-browser.md` →
-  agent-browser), and the host reports Playwright's. **The call must wait past
+  agent-browser), and the host reports Playwright's stream. **The call must wait past
   `BROWSER_REQUEST_TIMEOUT_MS`**, since the host's answer can queue behind a
   launch or close of the browser (rationale). A failure there adds a stderr
   warning without changing the command's success.
