@@ -711,6 +711,10 @@ describe('agent-browser host viewer', () => {
     daemon.send(frame(1));
     daemon.send(frame(1));
     daemon.send(frame(2, 900));
+    // A frame small enough to pass for a control message is deduplicated too.
+    const small = { type: 'frame', data: Buffer.alloc(100, 3).toString('base64'), metadata: { deviceWidth: 900, deviceHeight: 600 } };
+    daemon.send(small);
+    daemon.send(small);
     // A commit edge is never deduplicated: a reload commits the same URL.
     daemon.send({ type: 'url', url: 'https://example.com/' });
     daemon.send({ type: 'url', url: 'https://example.com/' });
@@ -723,7 +727,7 @@ describe('agent-browser host viewer', () => {
     ]);
     await vi.waitFor(() => expect(viewer.frames.filter((f) => f.kind === 'crisp').length).toBeGreaterThan(0));
     const provisional = viewer.frames.filter((f) => f.kind === 'provisional');
-    expect(provisional.map((f) => [f.jpeg[0], f.jpeg.byteLength, f.size?.width])).toEqual([[1, 13_000, 800], [2, 13_000, 900]]);
+    expect(provisional.map((f) => [f.jpeg[0], f.jpeg.byteLength, f.size?.width])).toEqual([[1, 13_000, 800], [2, 13_000, 900], [3, 100, 900]]);
     expect([...viewer.frames.find((f) => f.kind === 'crisp')!.jpeg]).toEqual([0xff, 0xd8, 0x99]);
   });
 
