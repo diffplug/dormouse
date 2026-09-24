@@ -1,5 +1,5 @@
 import { getActivitySnapshot } from './session-activity-store';
-import { buildAppTitleResolver, deriveSurfaceLabel, DEFAULT_IDLE_TITLE, type TerminalPaneState } from './terminal-state';
+import { buildAppTitleResolver, createTerminalPaneState, deriveSurfaceLabel, DEFAULT_IDLE_TITLE, type TerminalPaneState } from './terminal-state';
 import { getTerminalPaneStateSnapshot } from './terminal-state-store';
 
 /**
@@ -18,6 +18,15 @@ import { getTerminalPaneStateSnapshot } from './terminal-state-store';
 export function deriveSessionLabel(id: string, fallbackTitle: string | null = null): string {
   const states = getTerminalPaneStateSnapshot();
   return labelOf(states.get(id), buildAppTitleResolver(states, getActivitySnapshot()), fallbackTitle);
+}
+
+/** The label a Surface's Door and pane header show for it, `<idle>` included —
+ *  the Door's own derivation (`doorProps` in `Baseboard.tsx`) over the live
+ *  stores — for text that must name what is on screen, such as a Workspace tab
+ *  pill's tooltip. {@link deriveSessionLabel} is the spoken form. */
+export function deriveDisplayedSessionLabel(id: string, fallbackTitle: string): string {
+  const states = getTerminalPaneStateSnapshot();
+  return deriveSurfaceLabel(states.get(id) ?? createTerminalPaneState(), buildAppTitleResolver(states, getActivitySnapshot()), fallbackTitle);
 }
 
 /** {@link deriveSessionLabel} for many ids, reading the stores and building the

@@ -212,3 +212,23 @@ body {
     opacity: 0;
   }
 }
+
+/* TODO landing spotlight (docs/specs/alert.md → Pane Header): a Workspace tab's
+ * pill selected this Surface, so its own pill takes one wash of its own colour —
+ * rising, held while the focus ring lands, then fading. Not the flourish (no
+ * check, no dissolve) and not the alarm (no edge, no alarm colour, no repeat).
+ * Resting opacity is 0, so a finished pulse, or one reduced motion drops,
+ * leaves nothing on screen. TodoSpotlight remounts the overlay per signal. */
+.todo-spotlight {
+  opacity: 0;
+  animation: todo-spotlight 480ms ease-out;
+}
+@keyframes todo-spotlight {
+  0%       { opacity: 0; }
+  30%, 45% { opacity: 1; }
+  100%     { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .todo-spotlight { animation: none; }
+}

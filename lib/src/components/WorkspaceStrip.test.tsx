@@ -12,6 +12,7 @@ import { requestWorkspaceClose, requestWorkspaceRename } from './wall/workspace-
 import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { clearTerminalActivity, setTerminalActivity } from '../lib/terminal-registry';
 import { createAlertEpisode } from '../lib/alert-episode';
+import { getTodoSpotlight, resetTodoSpotlight } from '../lib/todo-spotlight';
 import { resetWindowSessionAggregator, setWorkspaceTransferPending } from '../lib/window-session-aggregator';
 import {
   getWorkspaceUiSnapshot,
@@ -60,6 +61,11 @@ function todoPill(id: string): HTMLButtonElement | null {
   return tabFor(id).querySelector<HTMLButtonElement>('[data-workspace-tab-todo]');
 }
 
+/** What React synthesizes `onMouseEnter` from. */
+function hover(element: Element): void {
+  element.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
+}
+
 async function render(node = <WorkspaceStrip />): Promise<void> {
   await act(async () => root.render(node));
 }
@@ -84,6 +90,7 @@ beforeEach(() => {
   resetWallHandles();
   resetChromeKeyboardLeases();
   clearTerminalActivity();
+  resetTodoSpotlight();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -255,7 +262,7 @@ describe('WorkspaceStrip', () => {
     await act(async () => { createWorkspace({ id: 'ws-2' }); });
     setWorkspaceSurfaces(first, ['pane-a']);
     setTerminalActivity('pane-a', { todo: true });
-    const handle = stubHandle(first, { selectNextTodo: vi.fn(() => true), enterCommandMode: vi.fn() });
+    const handle = stubHandle(first, { selectNextTodo: vi.fn(() => 'pane-a'), enterCommandMode: vi.fn() });
     await render();
 
     const pill = todoPill(first)!;
@@ -280,7 +287,7 @@ describe('WorkspaceStrip', () => {
     await act(async () => { createWorkspace({ id: 'ws-2' }); });
     setWorkspaceSurfaces(first, ['pane-a']);
     setTerminalActivity('pane-a', { todo: true });
-    const handle = stubHandle(first, { selectNextTodo: () => false, enterCommandMode: vi.fn() });
+    const handle = stubHandle(first, { selectNextTodo: () => null, enterCommandMode: vi.fn() });
     await render();
 
     await act(async () => { todoPill(first)!.click(); });
@@ -289,6 +296,78 @@ describe('WorkspaceStrip', () => {
     await act(async () => { todoPill(first)!.click(); });
     expect(handle.enterCommandMode).toHaveBeenCalledTimes(2);
     expect(getWorkspaceUiSnapshot().renamingId).toBeNull();
+    // Nothing selected, so nothing to spotlight.
+    expect(getTodoSpotlight()).toBeNull();
+  });
+
+  /** docs/specs/layout.md -> "Workspace tabs": borderless text on a rounded hit
+   *  area that washes on hover and harder under the press, with a pointer and a
+   *  keyboard focus ring. */
+  it('draws the pill borderless, with hover, press, pointer, and focus-visible states', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    setWorkspaceSurfaces(first, ['pane-a']);
+    setTerminalActivity('pane-a', { todo: true });
+    await render();
+
+    const pill = todoPill(first)!.className.split(/\s+/);
+    for (const token of ['rounded', 'text-xs', 'font-semibold', 'transition-colors', 'hover:bg-current/10',
+      'active:bg-current/20', 'cursor-pointer', 'focus-visible:outline', 'focus-visible:outline-current']) {
+      expect(pill).toContain(token);
+    }
+    expect(pill.filter((token) => /(^|:)border/.test(token))).toEqual([]);
+    // Nothing that changes the pill's size with its state, which would move the tab.
+    expect(pill.filter((token) => /^(hover|active|focus-visible):(p[xytrbl]?|m[xytrbl]?|text|font)-/.test(token))).toEqual([]);
+  });
+
+  /** The tooltip names where the click lands, which moves with the Wall's
+   *  selection, so it is read on arrival and again after each click. */
+  it('names the Surface the click will select in the pill tooltip', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    setWorkspaceSurfaces(first, ['pane-a', 'pane-b']);
+    setWorkspaceSurfaces('ws-2', ['pane-x']);
+    setTerminalActivity('pane-a', { todo: true });
+    setTerminalActivity('pane-b', { todo: true });
+    setTerminalActivity('pane-x', { todo: true });
+    const peekNextTodo = vi.fn()
+      .mockReturnValueOnce({ id: 'pane-a', label: 'pnpm dev' })
+      .mockReturnValueOnce({ id: 'pane-b', label: 'vim notes.md' })
+      .mockReturnValue({ id: 'pane-a', label: 'pnpm dev' });
+    stubHandle(first, { peekNextTodo, selectNextTodo: () => 'pane-a' });
+    await render();
+
+    const pill = todoPill(first)!;
+    expect(pill.title).toBe('Next TODO in Workspace 1');
+    await act(async () => { hover(pill); });
+    expect(pill.title).toBe('Next TODO: pnpm dev');
+    // The accessible name stays the Workspace's; the tooltip describes it.
+    expect(pill.getAttribute('aria-label')).toBe('Next TODO in Workspace 1');
+
+    await act(async () => { pill.click(); });
+    expect(todoPill(first)!.title).toBe('Next TODO: vim notes.md');
+    await act(async () => { todoPill(first)!.focus(); });
+    expect(todoPill(first)!.title).toBe('Next TODO: pnpm dev');
+    expect(peekNextTodo).toHaveBeenCalledTimes(3);
+
+    // No Wall to ask: the tooltip still says what the pill is for.
+    await act(async () => { hover(todoPill('ws-2')!); });
+    expect(todoPill('ws-2')!.title).toBe('Next TODO in Workspace 2');
+  });
+
+  /** docs/specs/alert.md -> Pane Header: the landing spotlight is raised on the
+   *  Surface the click selected, and a repeat is a new signal. */
+  it('spotlights the Surface the pill lands on, again on a repeat click', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    setWorkspaceSurfaces(first, ['pane-a']);
+    setTerminalActivity('pane-a', { todo: true });
+    stubHandle(first, { selectNextTodo: () => 'pane-a' });
+    await render();
+
+    await act(async () => { todoPill(first)!.click(); });
+    expect(getTodoSpotlight()).toMatchObject({ surfaceId: 'pane-a', seq: 1 });
+    await act(async () => { todoPill(first)!.click(); });
+    expect(getTodoSpotlight()).toMatchObject({ surfaceId: 'pane-a', seq: 2 });
   });
 
   it('ignores the click a drag from the pill ends with', async () => {
@@ -296,7 +375,7 @@ describe('WorkspaceStrip', () => {
     await act(async () => { createWorkspace({ id: 'ws-2' }); });
     setWorkspaceSurfaces(first, ['pane-a']);
     setTerminalActivity('pane-a', { todo: true });
-    const handle = stubHandle(first, { selectNextTodo: vi.fn(() => true) });
+    const handle = stubHandle(first, { selectNextTodo: vi.fn(() => 'pane-a') });
     await render();
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
       { left: 0, right: 100, width: 100, top: 0, bottom: 24, height: 24, x: 0, y: 0, toJSON: () => ({}) } as DOMRect,

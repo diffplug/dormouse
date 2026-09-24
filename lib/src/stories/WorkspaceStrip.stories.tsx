@@ -22,18 +22,30 @@ function primed(names: string[], activeIndex: number, membership?: Record<number
 /** The Workspace model comes from `parameters.primedWorkspaces`, which the
  *  preview decorator writes before first render (the strip reads the store on
  *  its first) and clears after. */
-function StripStory({ width = 640, busyIndex }: { width?: number; busyIndex?: number }) {
-  // A stand-in for a mounted Wall, so the close flow has something to ask about
-  // running work. `closeAll` never resolves: the story is the confirmation, not
-  // what follows it.
+function StripStory({ width = 640, busyIndex, todoLabels }: {
+  width?: number;
+  busyIndex?: number;
+  /** By position: what a Workspace's TODO pill says its click selects. */
+  todoLabels?: Record<number, string>;
+}) {
+  // Stand-ins for mounted Walls: the close flow asks one about running work, and
+  // a TODO pill asks where its click lands. `closeAll` never resolves: the story
+  // is the confirmation, not what follows it.
   useEffect(() => {
-    if (busyIndex === undefined) return;
-    return registerWallHandle(stubWallHandle(ws(busyIndex), {
-      hasTouchedSurfaces: () => true,
-      runningCount: () => 1,
-      closeAll: () => new Promise<null>(() => {}),
-    }));
-  }, [busyIndex]);
+    const indices = new Set([...(busyIndex === undefined ? [] : [busyIndex]), ...Object.keys(todoLabels ?? {}).map(Number)]);
+    const releases = [...indices].map((index) => {
+      const label = todoLabels?.[index];
+      return registerWallHandle(stubWallHandle(ws(index), {
+        ...(index === busyIndex ? {
+          hasTouchedSurfaces: () => true,
+          runningCount: () => 1,
+          closeAll: () => new Promise<null>(() => {}),
+        } : {}),
+        ...(label === undefined ? {} : { peekNextTodo: () => ({ id: `${ws(index)}-todo`, label }) }),
+      }));
+    });
+    return () => releases.forEach((release) => release());
+  }, [busyIndex, todoLabels]);
 
   return (
     <div className="bg-app-bg text-app-fg flex h-[30px] items-end" style={{ width }}>
@@ -61,8 +73,10 @@ export const ContentSized: Story = {
 
 /** Every tab shows its Workspace's TODO pill; only a HIDDEN one wears the alarm
  *  inset, the visible one's panes already ringing (`docs/specs/alert.md` → the
- *  Workspace union). */
+ *  Workspace union). The pill is a borderless button: hover it for the wash and
+ *  the Surface its click selects (`docs/specs/layout.md` → Workspace tabs). */
 export const Indicators: Story = {
+  args: { todoLabels: { 0: 'vim notes.md', 1: 'claude', 2: 'pnpm dev' } },
   parameters: {
     primedWorkspaces: primed(['Builds', 'Agents', 'Workspace 3'], 2, {
       0: ['builds-a', 'builds-b'],

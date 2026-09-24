@@ -71,6 +71,7 @@ import { hasBrowser, hasTerminal } from 'dor/commands/types';
 import { DEFAULT_WORKSPACE_ID, type PersistedSurfaceRefs, type WorkspaceId } from '../lib/session-types';
 import { clearWorkspaceSurfaces, setWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { nextTodoMember } from '../lib/workspace-union';
+import { deriveDisplayedSessionLabel } from '../lib/session-label';
 import { getWorkspace, getWorkspacesSnapshot, subscribeToWorkspaces, workspaceRefFor } from '../lib/workspace-store';
 import { awaitWallEmpty } from './wall/close-all';
 import { registerWallHandle, type WallHandle } from './wall/wall-handles';
@@ -170,6 +171,13 @@ export { TerminalPaneHeader } from './wall/TerminalPaneHeader';
 function persistedPanelTitle(title: string | null | undefined): string {
   const trimmed = title?.trim();
   return trimmed || UNNAMED_PANEL_TITLE;
+}
+
+/** The label a member's Door and pane header show, `<idle>` included: a
+ *  terminal's derived label, else the stored title. */
+function displayedSurfaceLabel(surfaceId: string, meta: LeafMeta): string {
+  const title = persistedPanelTitle(meta.title);
+  return hasTerminal(surfaceKindFromParams(meta.params)) ? deriveDisplayedSessionLabel(surfaceId, title) : title;
 }
 
 function surfaceRenderModeFromParams(params: unknown): DorSurfaceRenderMode | null {
@@ -1776,6 +1784,10 @@ export function Wall({
     focusSession(id, focused && modeRef.current === 'passthrough');
   }, [nav]);
 
+  /** What a tab's TODO pill selects next. A selected Workspace tab is no
+   *  member, so the search starts from the top. */
+  const nextTodo = () => nextTodoMember(memberSurfaceIds(), selectedIdRef.current, getActivitySnapshot());
+
   // The methods close over current state, so they are rebuilt each render and
   // assigned INTO one stable object: the registry holds that object, so a
   // re-render never replaces a registered entry.
@@ -1799,14 +1811,18 @@ export function Wall({
     enterCommandMode: exitTerminalMode,
     selectWorkspaceTab: () => { exitTerminalMode(); selectWorkspace(effectiveWorkspaceId); },
     selectNextTodo: () => {
-      // A selected Workspace tab is no member, so the search starts from the top.
-      const next = nextTodoMember(memberSurfaceIds(), selectedIdRef.current, getActivitySnapshot());
-      if (next === null) return false;
+      const next = nextTodo();
+      if (next === null) return null;
       // Command mode first, so the pane leaving passthrough is the one blurred.
       exitTerminalMode();
       if (nav.hasPane(next)) selectPane(next);
       else selectDoor(next);
-      return true;
+      return next;
+    },
+    peekNextTodo: () => {
+      const next = nextTodo();
+      const meta = next === null ? undefined : lath.getMeta(next);
+      return next === null || !meta ? null : { id: next, label: displayedSurfaceLabel(next, meta) };
     },
     flushPersistence: (options) => persistence.flush(options),
     prepareWorkspaceTransfer: () => prepareWorkspaceTransfer({

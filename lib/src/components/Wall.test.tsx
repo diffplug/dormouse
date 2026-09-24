@@ -36,7 +36,7 @@ import { installBrowserHost, mountWallHarness, type WallHarness } from './wall/w
 import { DEFAULT_WORKSPACE_ID } from '../lib/session-types';
 import { clearTerminalActivity, setTerminalActivity } from '../lib/session-activity-store';
 import { createAlertEpisode } from '../lib/alert-episode';
-import { resetTerminalPaneState } from '../lib/terminal-state-store';
+import { resetTerminalPaneState, setTerminalUserTitle } from '../lib/terminal-state-store';
 import { setWindowLabel } from '../lib/workspace-store';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -4185,7 +4185,8 @@ describe('Wall on the Lath engine', () => {
     expect(getWallHandle(DEFAULT_WORKSPACE_ID)).toBeNull();
   });
 
-  /** docs/specs/layout.md -> "Workspace tabs": what a tab's TODO pill does. */
+  /** docs/specs/layout.md -> "Workspace tabs": what a tab's TODO pill does, and
+   *  the destination its tooltip names before each click. */
   it('cycles through TODO members in command mode, Doors included, with no alert verb', async () => {
     const onEvent = vi.fn();
     await act(async () => root.render(<Wall
@@ -4198,7 +4199,7 @@ describe('Wall on the Lath engine', () => {
         ] } },
         leafMeta: {
           'pane-a': { component: 'terminal', tabComponent: 'terminal', title: 'shell' },
-          'pane-b': { component: 'terminal', tabComponent: 'terminal', title: 'shell' },
+          'pane-b': { component: 'terminal', tabComponent: 'terminal', title: 'build' },
           'browser-a': {
             component: 'browser',
             tabComponent: 'surface',
@@ -4213,11 +4214,14 @@ describe('Wall on the Lath engine', () => {
     />));
     await flush();
     const handle = getWallHandle(DEFAULT_WORKSPACE_ID)!;
+    expect(handle.peekNextTodo()).toBeNull();
     expect(handle.surfaceIds()).toEqual(['pane-a', 'pane-b', 'browser-a', 'door-a']);
     setTerminalActivity('pane-b', { todo: true });
     setTerminalActivity('door-a', { todo: true });
     // A browser Surface's TODO is the renderer's own.
     terminalRegistry.toggleSessionTodo('browser-a');
+    // A terminal is named as its header or Door shows it, over the stored title.
+    await act(async () => { setTerminalUserTitle('pane-b', 'deploy watcher'); });
     try {
       const verbs = [
         vi.spyOn(fake, 'alertAcknowledge'), vi.spyOn(fake, 'alertDismiss'),
@@ -4228,39 +4232,48 @@ describe('Wall on the Lath engine', () => {
       const last = (type: string) => onEvent.mock.calls.filter(([event]) => event.type === type).at(-1)?.[0];
       const selection = () => last('selectionChange');
       const next = async () => {
-        let found = false;
+        let found: string | null = null;
         await act(async () => { found = handle.selectNextTodo(); });
         await flush();
         return found;
       };
 
-      expect(await next()).toBe(true);
+      // The peek names what the click then selects, as its header or Door shows it.
+      expect(handle.peekNextTodo()).toEqual({ id: 'pane-b', label: 'deploy watcher' });
+      expect(container.querySelector('[data-pane-title-for="pane-b"]')!.textContent).toContain('deploy watcher');
+      expect(await next()).toBe('pane-b');
       expect(selection()).toEqual({ type: 'selectionChange', id: 'pane-b', kind: 'pane' });
       expect(last('modeChange')).toEqual({ type: 'modeChange', mode: 'command' });
       expect(container.querySelector('[data-focused="true"]')).toBeNull();
-      expect(await next()).toBe(true);
+      expect(handle.peekNextTodo()).toEqual({ id: 'browser-a', label: 'example.com' });
+      expect(await next()).toBe('browser-a');
       expect(selection()).toEqual({ type: 'selectionChange', id: 'browser-a', kind: 'pane' });
       // A Door is selected where it stands, never reattached.
-      expect(await next()).toBe(true);
+      // An idle terminal is `<idle>` on screen, so in the tooltip too.
+      expect(handle.peekNextTodo()).toEqual({ id: 'door-a', label: '<idle>' });
+      expect(container.querySelector('[data-door-id="door-a"]')!.textContent).toContain('<idle>');
+      expect(await next()).toBe('door-a');
       expect(selection()).toEqual({ type: 'selectionChange', id: 'door-a', kind: 'door' });
       expect(container.querySelector('[data-lath-leaf="door-a"]')).toBeNull();
       expect(handle.surfaceIds()).toEqual(['pane-a', 'pane-b', 'browser-a', 'door-a']);
-      expect(await next()).toBe(true);
+      expect(await next()).toBe('pane-b');
       expect(selection()).toEqual({ type: 'selectionChange', id: 'pane-b', kind: 'pane' });
 
       for (const verb of verbs) expect(verb).not.toHaveBeenCalled();
       const activity = terminalRegistry.getActivitySnapshot();
       expect(['pane-b', 'browser-a', 'door-a'].map((id) => activity.get(id)?.todo)).toEqual([true, true, true]);
 
-      // With no TODO left it answers false and leaves the selection alone.
+      // With no TODO left it answers null and leaves the selection alone.
       setTerminalActivity('pane-b', {});
       setTerminalActivity('door-a', {});
       terminalRegistry.clearLocalSurfaceActivity('browser-a');
       const before = onEvent.mock.calls.length;
-      expect(await next()).toBe(false);
+      expect(handle.peekNextTodo()).toBeNull();
+      expect(await next()).toBeNull();
       expect(onEvent.mock.calls.slice(before)).toEqual([]);
     } finally {
       terminalRegistry.clearLocalSurfaceActivity('browser-a');
+      resetTerminalPaneState('pane-b');
     }
   });
 

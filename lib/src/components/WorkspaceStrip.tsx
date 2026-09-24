@@ -24,6 +24,7 @@ import { closeWorkspaceWithSurfaces, requestWorkspaceClose, requestWorkspaceRena
 import { getActivitySnapshot, subscribeToActivity } from '../lib/terminal-registry';
 import { getWorkspaceSurfacesSnapshot, subscribeToWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { computeWorkspaceUnion, type WorkspaceUnion } from '../lib/workspace-union';
+import { spotlightTodo } from '../lib/todo-spotlight';
 import { isWorkspaceTransferPending } from '../lib/window-session-aggregator';
 import {
   getWorkspaceUiSnapshot,
@@ -88,12 +89,16 @@ export function WorkspaceStrip({
 
   // The TODO pill's click: activation in command mode, landing on the next
   // member owing a TODO — or plain activation when none does any more, never a
-  // rename (`docs/specs/layout.md` → "Workspace tabs").
+  // rename — and a spotlight on the pill it landed on (`docs/specs/layout.md` →
+  // "Workspace tabs").
   const selectNextTodo = useCallback((id: WorkspaceId) => {
     const handle = getWallHandle(id);
-    if (!handle?.selectNextTodo()) handle?.enterCommandMode();
+    const target = handle?.selectNextTodo() ?? null;
+    if (target === null) handle?.enterCommandMode();
     setActiveWorkspace(id);
+    if (target !== null) spotlightTodo(target);
   }, []);
+  const peekNextTodo = useCallback((id: WorkspaceId) => getWallHandle(id)?.peekNextTodo()?.label ?? null, []);
 
   // Activation changes the close button and therefore the intrinsic tab width.
   // Reveal it after layout, including activation through a shortcut or create.
@@ -205,6 +210,7 @@ export function WorkspaceStrip({
             registerElement={registerElement}
             onActivate={activate}
             onSelectNextTodo={selectNextTodo}
+            onPeekNextTodo={peekNextTodo}
             onStartRename={requestWorkspaceRename}
             onFinishRename={finishRename}
             onCancelRename={cancelRename}
@@ -281,6 +287,7 @@ const WorkspaceTab = memo(function WorkspaceTab({
   registerElement,
   onActivate,
   onSelectNextTodo,
+  onPeekNextTodo,
   onStartRename,
   onFinishRename,
   onCancelRename,
@@ -298,6 +305,8 @@ const WorkspaceTab = memo(function WorkspaceTab({
   registerElement: (element: HTMLElement | null) => (() => void) | undefined;
   onActivate: (id: WorkspaceId) => void;
   onSelectNextTodo: (id: WorkspaceId) => void;
+  /** The label of the Surface the pill's click would select, or null. */
+  onPeekNextTodo: (id: WorkspaceId) => string | null;
   onStartRename: (id: WorkspaceId) => void;
   onFinishRename: (id: WorkspaceId, value: string) => void;
   onCancelRename: () => void;
@@ -316,6 +325,12 @@ const WorkspaceTab = memo(function WorkspaceTab({
   );
   const label = (showAlarmInset || showTodoPill) && union.count > 0
     ? `${name}, ${union.count} needing attention` : name;
+  // The pill's destination depends on the Wall's selection, which renders
+  // nothing here, so it is read as the pointer or focus arrives and after each
+  // click moves it on.
+  const [todoTarget, setTodoTarget] = useState<string | null>(null);
+  const peekTodoTarget = () => setTodoTarget(onPeekNextTodo(id));
+  const todoTitle = todoTarget === null ? `Next TODO in ${name}` : `Next TODO: ${todoTarget}`;
 
   return (
     <div
@@ -380,16 +395,25 @@ const WorkspaceTab = memo(function WorkspaceTab({
               type="button"
               data-workspace-tab-todo={id}
               className={clsx(
-                'todo-pill-shell flex h-full shrink-0 items-center pl-1 text-xs font-semibold',
+                // Borderless text, as a Door's pill, on a rounded hit area that
+                // takes the washes: 20px tall in the 24px tab, its text where
+                // the tab's padding put it.
+                'todo-pill-shell shrink-0 cursor-pointer rounded px-1 py-0.5 text-xs font-semibold',
                 TODO_PILL_TRACKING_CLASS,
-                active ? 'pr-1' : 'pr-2.5',
+                'transition-colors hover:bg-current/10 active:bg-current/20',
+                // Current-coloured, as a theme's focus ring can match the active tab.
+                'focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-current',
+                !active && 'mr-1.5',
               )}
               data-flourishing={todoPill.flourishing ? 'true' : 'false'}
               aria-label={`Next TODO in ${name}`}
-              title={`Next TODO in ${name}`}
+              title={todoTitle}
+              onMouseEnter={peekTodoTarget}
+              onFocus={peekTodoTarget}
               onClick={() => {
                 if (wasDragged()) return;
                 onSelectNextTodo(id);
+                peekTodoTarget();
               }}
             >
               {todoPill.body}

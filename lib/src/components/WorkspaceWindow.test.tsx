@@ -29,6 +29,7 @@ import { mountWallHarness, type WallHarness } from './wall/wall-test-utils';
 import { getWorkspaceSurfacesSnapshot, resetWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { previousWorkspaceSession, publishWorkspaceSession, resetWindowSessionAggregator, seedWindowSession, setWorkspaceTransferPending } from '../lib/window-session-aggregator';
 import { getWorkspaceUiSnapshot, resetWorkspaceUi } from '../lib/workspace-ui-store';
+import { resetTodoSpotlight } from '../lib/todo-spotlight';
 import {
   closeWorkspace,
   createWorkspace,
@@ -60,6 +61,7 @@ beforeEach(() => {
   resetWorkspaceUi();
   resetWindowSessionAggregator();
   resetWorkspaceBootPlans();
+  resetTodoSpotlight();
   fake = new FakePtyAdapter();
   setPlatform(fake);
   harness = mountWallHarness();
@@ -297,6 +299,58 @@ describe('WorkspaceWindow', () => {
       await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); });
       await flush();
       expect(wallFor('ws-2').querySelector('[data-session-id="pane-y"][data-focused="true"]')).not.toBeNull();
+    } finally {
+      terminalRegistry.clearTerminalActivity();
+    }
+  });
+
+  /** docs/specs/alert.md -> Pane Header: where a tab pill's click lands, that
+   *  Surface's own pill says so — a pane's header pill or a Door's. */
+  it('spotlights the pill a tab TODO pill lands on, header or Door, replaying a repeat, with no alert verb', async () => {
+    const first = getActiveWorkspaceId();
+    createWorkspace({ id: 'ws-2', activate: false });
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPlans={{
+      [first]: { initialPaneIds: ['pane-a'] },
+      'ws-2': { initialPaneIds: ['pane-x', 'pane-y'], initialDoors: [{ id: 'door-z', title: 'Z' }] },
+    }} /></>);
+    await act(async () => { setTerminalActivity('pane-y', { todo: true }); });
+    const verbs = [
+      vi.spyOn(fake, 'alertAcknowledge'), vi.spyOn(fake, 'alertDismiss'),
+      vi.spyOn(fake, 'alertClearTodo'), vi.spyOn(fake, 'alertToggleTodo'),
+      vi.spyOn(terminalRegistry, 'acknowledgeSession'), vi.spyOn(terminalRegistry, 'dismissSessionAlert'),
+      vi.spyOn(terminalRegistry, 'clearSessionTodo'), vi.spyOn(terminalRegistry, 'toggleSessionTodo'),
+    ];
+    const pill = () => container.querySelector<HTMLButtonElement>('[data-workspace-tab="ws-2"] [data-workspace-tab-todo]')!;
+    const spotlightOn = (pillSelector: string) => wallFor('ws-2').querySelector(`${pillSelector} [data-todo-spotlight]`);
+    const paneY = '[data-session-todo-for="pane-y"]';
+    const doorZ = '[data-door-id="door-z"]';
+    const clickPill = async () => {
+      await act(async () => { pill().click(); });
+      await flush();
+    };
+    try {
+      // The hover asks the hidden Workspace's Wall where the click will land.
+      await act(async () => { pill().dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body })); });
+      expect(pill().title).toMatch(/^Next TODO: \S/);
+      expect(spotlightOn(paneY)).toBeNull();
+
+      await clickPill();
+      expect(getActiveWorkspaceId()).toBe('ws-2');
+      const landed = spotlightOn(paneY);
+      expect(landed).not.toBeNull();
+      // Its only TODO again: the same pill, replayed.
+      await clickPill();
+      expect(spotlightOn(paneY)).not.toBeNull();
+      expect(spotlightOn(paneY)).not.toBe(landed);
+
+      // A Door's pill, where it stands; the pane's pulse ends.
+      await act(async () => { setTerminalActivity('door-z', { todo: true }); });
+      await clickPill();
+      expect(spotlightOn(doorZ)).not.toBeNull();
+      expect(spotlightOn(paneY)).toBeNull();
+
+      for (const verb of verbs) expect(verb).not.toHaveBeenCalled();
+      expect(['pane-y', 'door-z'].map((id) => getActivitySnapshot().get(id)?.todo)).toEqual([true, true]);
     } finally {
       terminalRegistry.clearTerminalActivity();
     }
