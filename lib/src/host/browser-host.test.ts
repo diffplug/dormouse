@@ -471,6 +471,22 @@ describe('sync-to-pane', () => {
     expect(pane.writes()).toHaveLength(2);
   });
 
+  it('drops a Fixed resolution that waited on a write once a launch replaces the browser', async () => {
+    const pane = await paneOn();
+    pane.fake.gate('viewport s1 800x600@2');
+    await pane.size(800, 600);
+    const fixed = pane.host.request({ ...s1, op: 'viewport', width: 1024, height: 768, dpr: 1 });
+    await flush();
+    pane.fake.gate('stop s1');
+    const relaunch = pane.host.request({ ...s1, op: 'launch', url: 'http://localhost:5173/', headed: true });
+    await vi.waitFor(() => expect(pane.fake.calls).toContain('stop s1'));
+    pane.fake.release('viewport s1 800x600@2');
+    expect(await fixed).toEqual({ ok: false, error: 'the browser is being relaunched or closed' });
+    pane.fake.release('stop s1');
+    expect((await relaunch).ok).toBe(true);
+    expect(pane.writes()).toEqual(['viewport s1 800x600@2']);
+  });
+
   it('never sizes a popped-out window', async () => {
     const pane = await paneOn({ headed: true });
     pane.viewer.send({ type: 'sync', width: 800, height: 600, dpr: 2, engagement: 'e1' });

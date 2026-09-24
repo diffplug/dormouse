@@ -6,6 +6,7 @@
  * began and landed, so only it can tell a report taken before a write from
  * another writer — an agent's `set viewport` — which ends the sync.
  */
+import { messageOf } from '../lib/errors';
 import type { BrowserResult, ViewerState, ViewerSyncIntent, ViewerSyncState } from '../lib/platform/browser-automation';
 import type { ViewportSize } from './browser-viewer';
 
@@ -106,7 +107,7 @@ export function createViewportSync<B>(deps: ViewportSyncDeps<B>) {
     s.stale = false;
     settle(s);
     setState(s, 'applying');
-    s.writing = deps.write(s.browser, size).catch((error: unknown): BrowserResult => ({ ok: false, error: String(error) })).then((result) => {
+    s.writing = deps.write(s.browser, size).catch((error: unknown): BrowserResult => ({ ok: false, error: messageOf(error) })).then((result) => {
       s.writing = undefined;
       s.settledAt = performance.now();
       s.applied = result.ok ? size : undefined;
@@ -187,7 +188,9 @@ export function createViewportSync<B>(deps: ViewportSyncDeps<B>) {
 
     /** Shutdown. */
     close(): void {
-      for (const id of [...syncs.keys()]) forget(id);
+      for (const s of syncs.values()) settle(s);
+      syncs.clear();
+      shown.clear();
     },
   };
 }

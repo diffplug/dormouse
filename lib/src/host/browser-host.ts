@@ -608,9 +608,8 @@ export function createBrowserHost(deps: BrowserHostDeps) {
         return { ok: true, ...p.describe(b), nativeIdentity: bound.id, stream: live.stream, ...(live.headed !== undefined ? { headed: live.headed } : {}) };
       };
       const requestDeadline = Date.now() + REQUEST_BUDGET_MS;
-      if (r.op !== 'launch' && r.op !== 'attach' && r.op !== 'close' && settling.has(bound.id)) {
-        return { ok: false, error: 'the browser is being relaunched or closed' };
-      }
+      const settlingAnswer = { ok: false, error: 'the browser is being relaunched or closed' };
+      if (r.op !== 'launch' && r.op !== 'attach' && r.op !== 'close' && settling.has(bound.id)) return settlingAnswer;
       switch (r.op) {
         case 'launch': {
           const fresh = r.binding.session === undefined;
@@ -635,9 +634,10 @@ export function createBrowserHost(deps: BrowserHostDeps) {
           return await edit(bound, r.edit);
         case 'viewport':
         case 'device':
-          // A Fixed resolution ends sync-to-pane, and lands after its write.
+          // A Fixed resolution ends sync-to-pane, and lands after its write —
+          // unless a launch or close began meanwhile.
           await sync.fixed(bound.id);
-          return await p.act(b, r);
+          return settling.has(bound.id) ? settlingAnswer : await p.act(b, r);
         default:
           return await p.act(b, r);
       }
