@@ -12,6 +12,7 @@ import {
 import { isAutomationMode } from './browser-automation';
 import type { BrowserBinding, SurfaceKind } from 'dor/commands/types';
 import { isToolKeyScope, type ToolKeyScope } from '../../lib/platform/tool-types';
+import { sessionForKey } from 'dor-lib-common/agent-browser';
 
 type BrowserParamsLike = {
   surfaceType?: unknown;
@@ -219,6 +220,34 @@ export function browserBindingFromParams(params: unknown): BrowserBinding | null
     session,
     ...(typeof cwd === 'string' ? { cwd } : {}),
     ...(typeof binaryPath === 'string' ? { binaryPath } : {}),
+  };
+}
+
+/**
+ * What the Wall does when a Surface's first launch fails
+ * (docs/specs/dor-browser.md → "Agent-Browser Connection"), stored by whoever
+ * created it so a pane restored mid-launch still gets it: close the pane, fall
+ * a Tool back to its embed, or restore the renderer a swap replaced.
+ */
+export type LaunchFallback = 'close' | 'embed' | { restore: Record<string, unknown> };
+
+export function launchFallbackFromParams(params: unknown): LaunchFallback | null {
+  const fallback = (params as { launchFallback?: unknown } | null | undefined)?.launchFallback;
+  if (fallback === 'close' || fallback === 'embed') return fallback;
+  const restore = (fallback as { restore?: unknown } | null | undefined)?.restore;
+  return restore && typeof restore === 'object' ? { restore: restore as Record<string, unknown> } : null;
+}
+
+/** The params that launch a Tool's agent-drivable browser at `url`, in the
+ *  session it had or else its own (`tool.<leafId>`), falling back to the embed
+ *  when it cannot come up (docs/specs/dor-tool.md → Serving). */
+export function toolBrowserLaunchParams(leafId: string, params: Record<string, unknown>, url: string): Record<string, unknown> {
+  return {
+    url,
+    renderMode: 'ab-screencast',
+    session: undefined,
+    launchSession: typeof params.session === 'string' ? params.session : sessionForKey(`tool.${leafId}`),
+    launchFallback: 'embed' satisfies LaunchFallback,
   };
 }
 

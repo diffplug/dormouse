@@ -16,6 +16,7 @@ import * as helpers from '../lib/helper-terminal';
 import * as agentBrowserScreen from './wall/agent-browser-screen';
 import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
 import { disposeAllAgentBrowserSurfaceControllers, getAgentBrowserSurfaceController } from './wall/agent-browser-surface-controller';
+import { forgetLaunchBinaryPaths } from './wall/browser-automation';
 import * as browserAutomation from './wall/browser-automation';
 import { setDevServerResolution } from './wall/agent-browser-ports';
 import { setPlatform } from '../lib/platform';
@@ -78,8 +79,10 @@ afterEach(() => {
   // The activity store is Window-global, so a ring or TODO left on a pane id
   // would wear its alarm overlay in every later test that renders that id.
   clearTerminalActivity();
-  // Browser controllers outlive the Wall that mounted them, like the ring above.
+  // Browser controllers outlive the Wall that mounted them, like the ring
+  // above, and so does the binary path `dor ab` last resolved.
   disposeAllAgentBrowserSurfaceControllers();
+  forgetLaunchBinaryPaths();
 });
 
 const flush = (): Promise<void> => harness.flush();
@@ -1045,6 +1048,43 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('gives a pane restored mid-launch its creator\'s fallback when the launch fails', async () => {
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(true);
+    Object.assign(fake, {
+      agentBrowserOpen: vi.fn(async () => ({ ok: false, error: 'agent-browser binary not found' })),
+      agentBrowserCommand: vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' })),
+    });
+    try {
+      // Persisted before either launch answered: a new-tab pane, and a swap
+      // away from the embed.
+      await act(async () => {
+        root.render(<Wall
+          restoredLathLayout={{ version: 1, tree: { root: { kind: 'split', dir: 'row', children: [
+            { node: { kind: 'leaf', id: 'new-tab' }, weight: 0.5 },
+            { node: { kind: 'leaf', id: 'swapped' }, weight: 0.5 },
+          ] } }, leafMeta: {
+            'new-tab': { component: 'browser', tabComponent: 'surface', title: 'accounts.example', params: {
+              surfaceType: 'browser', renderMode: 'ab-screencast', url: 'https://accounts.example/', launchFallback: 'close',
+            } },
+            'swapped': { component: 'browser', tabComponent: 'surface', title: 'localhost:5173', params: {
+              surfaceType: 'browser', renderMode: 'ab-screencast', url: 'http://localhost:5173/',
+              launchFallback: { restore: { surfaceType: 'browser', renderMode: 'iframe', url: 'http://localhost:5173/' } },
+            } },
+          } }}
+          initialMode="command"
+        />);
+      });
+      await flush();
+      await flush();
+
+      expect(container.querySelector('[data-lath-leaf="new-tab"]')).toBeNull();
+      expect(container.querySelector('[data-lath-leaf="swapped"]')).not.toBeNull();
+      expect(getAgentBrowserScreenController('swapped')?.snapshot().renderMode).toBe('iframe');
+    } finally {
+      untouchedSpy.mockRestore();
+    }
+  });
+
   it('hands an eager render-swap session to a Surface minimized during launch', async () => {
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(true);
     let resolveOpen!: (result: { ok: boolean; session?: string; wsPort?: number; binaryPath?: string }) => void;
@@ -1307,7 +1347,7 @@ describe('Wall on the Lath engine', () => {
 
       await act(async () => { controller()?.actions.setRenderMode?.('ab-screencast'); });
       await flush();
-      expect(open).toHaveBeenCalledWith('http://localhost:6006/', { headed: false }, undefined);
+      expect(open).toHaveBeenCalledWith('http://localhost:6006/', { headed: false, session: 'dormouse.1.tool.tool-a' }, undefined);
     } finally {
       offered.mockRestore();
       act(() => terminalRegistry.removeTerminalPaneState('tool-a'));
@@ -1342,7 +1382,7 @@ describe('Wall on the Lath engine', () => {
       await flush();
       await act(async () => { getAgentBrowserScreenController('tool-a')?.actions.setRenderMode?.('ab-screencast'); });
       await flush();
-      expect(fake.agentBrowserOpen).toHaveBeenCalledWith('http://localhost:6006/', { headed: false }, undefined);
+      expect(fake.agentBrowserOpen).toHaveBeenCalledWith('http://localhost:6006/', { headed: false, session: 'dormouse.1.tool.tool-a' }, undefined);
       expect(getAgentBrowserScreenController('tool-a')?.snapshot().renderMode).toBe('iframe');
     } finally {
       act(() => terminalRegistry.removeTerminalPaneState('tool-a'));

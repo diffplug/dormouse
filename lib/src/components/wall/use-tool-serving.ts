@@ -14,12 +14,12 @@ import {
   isToolParams,
   namespacedToolKey,
   toolKeysEqual,
+  toolBrowserLaunchParams,
   toolPortConflictFromParams,
 } from './browser-surface';
 import { listenerUrlsByPort } from './port-url';
 import { getToolAnnounce } from '../../lib/tool-announce-store';
 import { validToolServePath } from '../../lib/tool-announce';
-import { sessionForKey } from 'dor-lib-common/agent-browser';
 import { closeBrowserSurface } from './agent-browser-surface-controller';
 import type { LathWallEngine } from './lath-wall-engine';
 import type { DooredItem } from './wall-types';
@@ -135,6 +135,7 @@ export function useToolServing({
             toolPortConflict: undefined,
             session: undefined,
             launchSession: undefined,
+            launchFallback: undefined,
             renderMode: undefined,
             syncEngaged: undefined,
           });
@@ -223,16 +224,14 @@ export function useToolServing({
         // binds the session once it is up; until then the pane shows the
         // destination and Workspace transfer waits (docs/specs/dor-browser.md
         // -> "Agent-Browser Connection").
-        const agentDrivable = leaf.params.toolRender === 'ab-screencast';
         const url = new URL(announcedPath, entry.url).href;
-        const session = typeof leaf.params.session === 'string' ? leaf.params.session : sessionForKey(`tool.${leaf.id}`);
         lath.store.updateParams(leaf.id, {
-          url,
-          renderMode: agentDrivable ? 'ab-screencast' : 'iframe',
+          ...(leaf.params.toolRender === 'ab-screencast'
+            ? toolBrowserLaunchParams(leaf.id, leaf.params, url)
+            : { url, renderMode: 'iframe' }),
           toolPortConflict: undefined,
           toolAnnouncedPort: announcedPort ?? undefined,
           toolAnnouncedPath: announcedPort === null ? undefined : announcedPath,
-          ...(agentDrivable ? { session: undefined, launchSession: session } : {}),
         });
       }
     };

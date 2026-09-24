@@ -6,6 +6,7 @@ import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import type { PlatformAdapter } from '../../lib/platform/types';
 import { PLAYWRIGHT_TEXT_INPUT_MAX } from '../../lib/platform/browser-automation';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
+import { forgetLaunchBinaryPaths, launchBinaryPath, rememberLaunchBinaryPath } from './browser-automation';
 import {
   HIDDEN_PARK_DELAY_MS,
   PROVISIONAL_INPUT_WINDOW_MS,
@@ -68,6 +69,7 @@ function makeSink(): AgentBrowserViewSink & {
   updateParameters: ReturnType<typeof vi.fn>;
   setTitle: ReturnType<typeof vi.fn>;
   requestRenderSwap: ReturnType<typeof vi.fn>;
+  launchFailed: ReturnType<typeof vi.fn>;
 } {
   return {
     canvas: document.createElement('canvas'),
@@ -75,6 +77,7 @@ function makeSink(): AgentBrowserViewSink & {
     updateParameters: vi.fn(),
     setTitle: vi.fn(),
     requestRenderSwap: vi.fn(),
+    launchFailed: vi.fn(),
   };
 }
 
@@ -104,6 +107,7 @@ beforeEach(() => {
 
 afterEach(() => {
   disposeAllAgentBrowserSurfaceControllers();
+  forgetLaunchBinaryPaths();
   vi.restoreAllMocks();
   setPlatform(new FakePtyAdapter());
 });
@@ -589,7 +593,7 @@ describe('launch', () => {
     controller.attachView(sink);
     await flushMicrotasks();
     expect(platform.agentBrowserOpen).toHaveBeenCalledWith('http://localhost:6006/', { headed: true, session: 'dormouse.1.tool.t' }, undefined);
-    expect(sink.updateParameters).toHaveBeenCalledWith({ session: 'dormouse.1.tool.t', launchSession: undefined });
+    expect(sink.updateParameters).toHaveBeenCalledWith({ session: 'dormouse.1.tool.t', launchSession: undefined, launchFallback: undefined });
   });
 
   it('a failed launch says why, in the pane and to whoever awaited it', async () => {
@@ -638,6 +642,54 @@ describe('launch', () => {
     await flushMicrotasks();
     expect(platform.agentBrowserCommand).not.toHaveBeenCalledWith('dormouse.1.tool.t', ['close'], undefined);
     expect(streamSocket(4321)?.readyState).toBe(1);
+  });
+
+  it('launches with the binary `dor ab` last resolved, and remembers the one it ran', async () => {
+    const platform = launchPlatform(async () => ({ ok: true, session: 'dormouse.1.gui-b', wsPort: 4321, binaryPath: '/opt/ab/agent-browser' }));
+    rememberLaunchBinaryPath('agent-browser', '/usr/local/bin/agent-browser');
+    acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-screencast', url: 'https://page.example/' }).attachView(makeSink());
+    await flushMicrotasks();
+    expect(platform.agentBrowserOpen).toHaveBeenCalledWith('https://page.example/', { headed: false }, '/usr/local/bin/agent-browser');
+    expect(launchBinaryPath('agent-browser')).toBe('/opt/ab/agent-browser');
+  });
+
+  it('tells the Wall about a failed launch, once a view is attached to hear it', async () => {
+    launchPlatform(async () => ({ ok: false, error: 'boom' }));
+    const controller = acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-screencast', url: 'https://page.example/' });
+    const first = makeSink();
+    const handle = controller.attachView(first);
+    handle.detach();
+    await flushMicrotasks();
+    expect(first.launchFailed).not.toHaveBeenCalled();
+    const second = makeSink();
+    controller.attachView(second);
+    expect(second.launchFailed).toHaveBeenCalledExactlyOnceWith('boom');
+  });
+
+  it('a launch released without a close leaves a session it named, and closes one the host minted', async () => {
+    const answers: Array<(res: { ok: boolean; session?: string; wsPort?: number }) => void> = [];
+    const platform = launchPlatform(() => new Promise((resolve) => { answers.push(resolve); }));
+    const named = acquireAgentBrowserSurfaceController('named', { renderMode: 'ab-screencast', url: 'https://page.example/', launchSession: 'dormouse.1.tool.t' });
+    named.attachView(makeSink());
+    const minted = acquireAgentBrowserSurfaceController('minted', { renderMode: 'ab-screencast', url: 'https://page.example/' });
+    minted.attachView(makeSink());
+    await flushMicrotasks();
+
+    // A Workspace transfer: the destination opens the same named session.
+    disposeAgentBrowserSurfaceController('named');
+    disposeAgentBrowserSurfaceController('minted');
+    answers[0]({ ok: true, session: 'dormouse.1.tool.t', wsPort: 4321 });
+    answers[1]({ ok: true, session: 'dormouse.1.gui-x', wsPort: 4322 });
+    await flushMicrotasks();
+    expect(platform.agentBrowserCommand).toHaveBeenCalledExactlyOnceWith('dormouse.1.gui-x', ['close'], undefined);
+  });
+
+  it('a controller released before it ever started still settles its waiter', async () => {
+    launchPlatform(async () => ({ ok: true }));
+    const launched = whenBrowserLaunched('id');
+    acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-screencast', url: 'https://page.example/' });
+    disposeAgentBrowserSurfaceController('id');
+    expect(await launched).toBeNull();
   });
 
   it('a Surface killed before its view ever mounted still settles its waiter', async () => {

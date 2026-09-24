@@ -117,23 +117,26 @@ export function browserPlatform(provider: BrowserAutomationProvider, cwd?: strin
   };
 }
 
+// The binary path a `dor ab` surface last resolved on a terminal's PATH, one per
+// webview (its Walls share one host).
+let lastAgentBrowserBinaryPath: string | undefined;
+
 /**
- * The binary path a `dor ab` surface last resolved on a terminal's PATH,
- * re-used to spawn an agent-browser for a GUI launch (an embed swapped up to a
- * screencast, a port opened from the terminal context), since the webview/host
- * PATH may not find the binary itself. Agent-browser only: the Playwright host
- * resolves its own installation on every launch.
+ * The binary path a GUI launch of `provider` passes: the one a `dor ab`
+ * surface last resolved on a terminal's PATH, since the webview/host PATH may
+ * not find the binary itself. Agent-browser only: the Playwright host resolves
+ * its own installation on every launch.
  */
-export class LaunchBinaryPath {
-  private last: string | undefined;
+export function launchBinaryPath(provider: BrowserAutomationProvider): string | undefined {
+  return provider === 'agent-browser' ? lastAgentBrowserBinaryPath : undefined;
+}
 
-  /** The binary path a GUI launch of `provider` passes. */
-  get(provider: BrowserAutomationProvider): string | undefined {
-    return provider === 'agent-browser' ? this.last : undefined;
-  }
+/** Record the binary path a `provider` session resolved or launched with. */
+export function rememberLaunchBinaryPath(provider: BrowserAutomationProvider, binaryPath: string | undefined): void {
+  if (binaryPath && provider === 'agent-browser') lastAgentBrowserBinaryPath = binaryPath;
+}
 
-  /** Record the binary path a `provider` session resolved. */
-  remember(provider: BrowserAutomationProvider, binaryPath: string | undefined): void {
-    if (binaryPath && provider === 'agent-browser') this.last = binaryPath;
-  }
+/** For tests: the memo outlives the Wall that filled it. */
+export function forgetLaunchBinaryPaths(): void {
+  lastAgentBrowserBinaryPath = undefined;
 }

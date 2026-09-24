@@ -120,6 +120,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
         if (controller.snapshot().tabs.length >= 2) setPendingRenderSwap(mode);
         else actionsRef.current.onSwapRenderMode(id, mode);
       },
+      launchFailed: (error) => actionsRef.current.onBrowserLaunchFailed?.(id, error),
     });
     return () => handle.detach();
     // The sink closes over `paneWrite` + `id`, both stable for a mounted pane

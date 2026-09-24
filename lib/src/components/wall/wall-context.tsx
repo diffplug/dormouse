@@ -70,6 +70,8 @@ export interface WallActions {
    *  window.open, surfaced by the proxy shim) becomes a new pane
    *  (docs/specs/dor-browser.md → "Iframe Shim"). */
   onOpenBrowserPane?: (id: string, url: string) => void;
+  /** A browser Surface's first launch failed: apply its `launchFallback`. */
+  onBrowserLaunchFailed?: (id: string, error: string) => void;
   /** The stable `surface:N` ref for a pane/door id (minted lazily, exactly as
    *  `dor list` assigns refs). Used by the pane context menu to show the handle. */
   resolveSurfaceRef: (id: string) => string;

@@ -24,8 +24,7 @@ const RemotePairingModalHost = lazy(() =>
   })),
 );
 import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
-import { automationProvider, browserPlatform, LaunchBinaryPath, PROVIDER_LABEL } from './wall/browser-automation';
-import type { BrowserAutomationProvider } from '../lib/platform/browser-automation';
+import { automationProvider, browserPlatform, PROVIDER_LABEL } from './wall/browser-automation';
 import { isToolRender } from '../lib/platform/tool-types';
 import { closeBrowserSurface, requestBrowserRenderMode, whenBrowserLaunched } from './wall/agent-browser-surface-controller';
 import { KILL_CONFIRM_MS, KILL_SHAKE_MS, KillConfirmOverlay, randomKillChar, type ConfirmKill } from './KillConfirm';
@@ -81,6 +80,9 @@ import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
 import {
   resolveRenderMode,
   agentBrowserSessionFromParams,
+  launchFallbackFromParams,
+  toolBrowserLaunchParams,
+  type LaunchFallback,
   browserDisplayModeFromParams,
   browserUrlFromParams,
   isBrowserParams,
@@ -1509,25 +1511,23 @@ export function Wall({
     return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), status: 'created' } };
   }, [generatePaneId, minimizePane, surfaceRefForId, transferSurfaceRef, lath, settleAddSelection, nav]);
 
-  const launchBinaryPath = useRef(new LaunchBinaryPath()).current;
-
   /**
    * Replace a content surface's renderer in place, preserving its slot
    * (docs/specs/dor-browser.md → "Display Modal And Render Swaps"): an atomic
    * identity swap that closes the old surface's session if any and selects the
-   * new. `closed` settles once the host answered that close. The generalized
-   * form of createContentSurface's replace-untouched-terminal branch.
+   * new. The generalized form of createContentSurface's replace-untouched-terminal
+   * branch.
    */
   const replaceSurface = useCallback((oldId: string, next: {
     params: Record<string, unknown>;
     title: string;
-  }): { id: string; closed: Promise<void> } | null => {
+  }): string | null => {
     const oldParams = nav.paneParams(oldId);
     const oldVisible = nav.hasPane(oldId);
     if (!oldVisible) return null;
     // The old renderer goes away with this swap: its session and its
     // controller's client-side resources (no-op for a non-automated surface).
-    const closed = closeBrowserSurface(oldId, oldParams);
+    void closeBrowserSurface(oldId, oldParams);
     // A browser Surface has no helper; the terminal's goes with the old id.
     closeHelperParent(oldId);
     const newId = generatePaneId();
@@ -1538,16 +1538,8 @@ export function Wall({
     lath.store.replaceLeaf(oldId, newId, browserLeafMeta(next.title, next.params));
     clearLocalSurfaceActivity(oldId);
     selectPane(newId);
-    return { id: newId, closed };
+    return newId;
   }, [generatePaneId, transferSurfaceRef, selectPane, lath, nav]);
-
-  /** The binary path a GUI launch of `provider` passes, as a Surface param: the
-   *  one a `dor ab` surface last resolved, since the webview/host PATH may not
-   *  find the binary itself. */
-  const launchBinaryParams = useCallback((provider: BrowserAutomationProvider) => {
-    const binaryPath = launchBinaryPath.get(provider);
-    return binaryPath ? { binaryPath } : {};
-  }, [launchBinaryPath]);
 
   // Listen for external "new terminal" requests (e.g. from the standalone AppBar)
   useEffect(() => {
@@ -1635,7 +1627,6 @@ export function Wall({
     closeSurface,
     revealSurface,
     isClosingWorkspace: useCallback(() => closingWorkspaceRef.current, []),
-    launchBinaryPath,
     workspaceRef: useCallback(() => workspaceRefFor(effectiveWorkspaceId), [effectiveWorkspaceId]),
     // The raw prop, not `effectiveWorkspaceId`: a bare Wall keeps the unscoped
     // agent-browser session names (docs/specs/dor-browser.md → Managed identity).
@@ -1994,22 +1985,10 @@ export function Wall({
         const platform = getPlatform();
         if (!url || (mode === 'ab-screencast' && !platform.agentBrowserOpen)) return;
         closeBrowserSurface(id, params);
-        lath.store.updateParams(id, {
-          toolRender: mode, renderMode: mode, url,
-          session: undefined, syncEngaged: mode === 'ab-screencast',
-          ...(mode === 'ab-screencast' ? launchBinaryParams('agent-browser') : {}),
-        });
-        if (mode === 'ab-screencast') {
-          // The Tool's browser launches itself; one that cannot falls back to
-          // the embed, unless the Tool moved on meanwhile.
-          const runId = getTerminalPaneState(id).currentCommand?.id;
-          void whenBrowserLaunched(id).then((error) => {
-            const current = lath.getMeta(id)?.params;
-            if (!error || current?.renderMode !== mode || current.url !== url || current.session
-              || getTerminalPaneState(id).currentCommand?.id !== runId) return;
-            lath.store.updateParams(id, { toolRender: 'iframe', renderMode: 'iframe', syncEngaged: false });
-          });
-        }
+        // The Tool's browser launches itself, in the Tool's own session.
+        lath.store.updateParams(id, mode === 'ab-screencast'
+          ? { toolRender: mode, syncEngaged: true, ...toolBrowserLaunchParams(id, params ?? {}, url) }
+          : { toolRender: mode, renderMode: mode, url, session: undefined, launchSession: undefined, launchFallback: undefined, syncEngaged: false });
         return;
       }
 
@@ -2057,32 +2036,22 @@ export function Wall({
           return;
         }
         if (!browserPlatform(provider, cwd).agentBrowserOpen) return;
-        const title = hostPathDisplay(url, true);
-        const swapped = replaceSurface(id, {
-          params: { surfaceType: 'browser', renderMode: mode, url, cwd, syncEngaged: true, ...launchBinaryParams(provider) },
-          title,
-        });
-        if (!swapped) return;
-        const eagerId = swapped.id;
         // A browser that cannot come up gives the previous renderer back in
-        // place — visible or minimized meanwhile — at the URL: the embed, or
-        // the previous provider reopened in its own session once that session's
-        // close has landed, so its key and handle still name it.
-        void whenBrowserLaunched(eagerId).then(async (error) => {
-          if (!error) return;
-          console.warn(`[dormouse] failed to swap surface '${id}' to ${PROVIDER_LABEL[provider]}:`, error);
-          await swapped.closed;
-          if (!lath.getMeta(eagerId) || lath.isDying(eagerId) || isSurfaceClosing(eagerId)) return;
-          const previousSession = agentBrowserSessionFromParams(params);
-          closeBrowserSurface(eagerId, lath.getMeta(eagerId)?.params);
-          lath.store.setMeta(eagerId, browserLeafMeta(title, {
-            ...params,
-            surfaceType: 'browser',
-            renderMode: currentRenderMode,
-            url,
-            session: undefined,
-            ...(previousSession ? { launchSession: previousSession } : {}),
-          }));
+        // place, even minimized meanwhile, at the URL: the embed, or the
+        // previous provider reopened in its own session, so its key and handle
+        // still name it.
+        const previousSession = agentBrowserSessionFromParams(params);
+        const restore = {
+          ...params,
+          surfaceType: 'browser',
+          renderMode: currentRenderMode,
+          url,
+          session: undefined,
+          ...(previousSession ? { launchSession: previousSession } : {}),
+        };
+        replaceSurface(id, {
+          params: { surfaceType: 'browser', renderMode: mode, url, cwd, syncEngaged: true, launchFallback: { restore } satisfies LaunchFallback },
+          title: hostPathDisplay(url, true),
         });
       }
     },
@@ -2093,28 +2062,40 @@ export function Wall({
       const reference = buildDorSurfaces().find((s) => s.id === id);
       if (!reference) return;
       const agentBrowser = !!iframeRefusal(url) && !!getPlatform().agentBrowserOpen;
-      const created = createContentSurface({
+      createContentSurface({
         minimized: false,
+        // A launch that fails takes its pane with it.
         params: agentBrowser
-          ? { surfaceType: 'browser', renderMode: 'ab-screencast', url, syncEngaged: true, ...launchBinaryParams('agent-browser') }
+          ? { surfaceType: 'browser', renderMode: 'ab-screencast', url, syncEngaged: true, launchFallback: 'close' satisfies LaunchFallback }
           : { surfaceType: 'browser', renderMode: 'iframe', url },
         reference,
         title: hostPathDisplay(url, true),
       });
-      if (!agentBrowser || !created.ok) return;
-      // A launch that fails takes its pane with it.
-      const eagerId = created.value.id;
-      void whenBrowserLaunched(eagerId).then((failure) => {
-        if (!failure) return;
-        console.warn(`[dormouse] could not open ${url} in agent-browser:`, failure);
-        if (lath.getMeta(eagerId) && !lath.isDying(eagerId)) void closeSurfaceRef.current(eagerId, 'silent');
-      });
+    },
+    onBrowserLaunchFailed: (id, error) => {
+      // The one liveness check every creator's fallback shares.
+      const params = lath.getMeta(id)?.params;
+      const fallback = launchFallbackFromParams(params);
+      if (!fallback || lath.isDying(id) || isSurfaceClosing(id)) return;
+      console.warn(`[dormouse] browser surface '${id}' could not launch:`, error);
+      if (fallback === 'close') {
+        void closeSurfaceRef.current(id, 'silent');
+        return;
+      }
+      // The failed controller goes; the pane stays, as the embed or the
+      // renderer the swap replaced.
+      void closeBrowserSurface(id, params);
+      if (fallback === 'embed') {
+        lath.store.updateParams(id, { toolRender: 'iframe', renderMode: 'iframe', syncEngaged: false, launchSession: undefined, launchFallback: undefined });
+      } else {
+        lath.store.setMeta(id, browserLeafMeta(hostPathDisplay(browserUrlFromParams(fallback.restore) ?? '', true), fallback.restore));
+      }
     },
     resolveSurfaceRef: surfaceRefForId,
     onResolveToolApproval: (id: string, choice: 'upstream' | 'folder' | 'decline' | 'retry') => {
       void resolveToolApproval(id, choice);
     },
-  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, requestKill, replaceSurface, launchBinaryParams, buildDorSurfaces, createContentSurface, surfaceRefForId, resolveToolApproval, lath, nav]);
+  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, requestKill, replaceSurface, buildDorSurfaces, createContentSurface, surfaceRefForId, resolveToolApproval, lath, nav]);
   const contextPortLaunches = useRef(new Map<string, Promise<void>>());
   const openContextPort = useCallback(async (id: string, entry: PortUrlEntry, mode: PortMode): Promise<void> => {
     if (mode === 'system') { getPlatform().openExternal?.(entry.url); return; }
@@ -2142,22 +2123,22 @@ export function Wall({
       }
       if (provider && !platform?.agentBrowserOpen) throw new Error(`${PROVIDER_LABEL[provider]} is unavailable on this host`);
       const created = createContentSurface({ minimized: false, reference, preserveSource: true,
-        params: { surfaceType: 'browser', renderMode: mode, url: entry.url, cwd, syncEngaged: true, contextPortKey: key, ...(provider ? launchBinaryParams(provider) : {}) },
+        params: {
+          surfaceType: 'browser', renderMode: mode, url: entry.url, cwd, syncEngaged: true, contextPortKey: key,
+          // The pane launches its own browser; a failure takes it along.
+          ...(provider ? { launchFallback: 'close' satisfies LaunchFallback } : {}),
+        },
         title: hostPathDisplay(entry.url, true) });
       if (!created.ok) throw new Error(created.message);
       const launched = mode === 'iframe' ? null : whenBrowserLaunched(created.value.id);
       enterTerminalMode(created.value.id);
-      // The pane launches its own browser; a failure is reported in context and
-      // takes the pane with it.
+      // Reported in context.
       const failure = await launched;
-      if (failure) {
-        await closeSurface(created.value.id);
-        throw new Error(failure);
-      }
+      if (failure) throw new Error(failure);
     })();
     contextPortLaunches.current.set(key, operation);
     try { await operation; } finally { contextPortLaunches.current.delete(key); }
-  }, [buildDorSurfaces, findSurfaceByParams, createContentSurface, enterTerminalMode, closeSurface, launchBinaryParams, revealSurface, updateSurfaceParams, lath]);
+  }, [buildDorSurfaces, findSurfaceByParams, createContentSurface, enterTerminalMode, revealSurface, updateSurfaceParams, lath]);
   const contextActions = useMemo(() => ({
     id: contextSourceId,
     mounted: terminalContext,

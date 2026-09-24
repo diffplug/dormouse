@@ -29,6 +29,8 @@ import {
   isPopout,
   offeredRenderModes,
   PROVIDER_LABEL,
+  launchBinaryPath,
+  rememberLaunchBinaryPath,
   surfaceProvider,
   type BrowserPlatform,
 } from './browser-automation';
@@ -208,6 +210,8 @@ export interface AgentBrowserViewSink {
    *  typed-confirm gate and the Wall's `onSwapRenderMode` are view concerns; the
    *  view reads tabs from the snapshot and decides. */
   requestRenderSwap(mode?: RenderMode): void;
+  /** The first launch failed: the Wall applies the Surface's `launchFallback`. */
+  launchFailed(error: string): void;
 }
 
 /** The single view-facing snapshot, consumed via `useSyncExternalStore`. Only
@@ -369,6 +373,7 @@ export class AgentBrowserSurfaceController {
   // observe URL changes); flushed on the next attach.
   private pendingParams = new Map<string, unknown>();
   private pendingTitle: string | null = null;
+  private pendingLaunchFailure: string | null = null;
   // The value this controller last wrote to each field it also takes from
   // params, until params show it back. Params predating the write — buffered
   // while detached, then fed by a remounted view before the flush, or a render
@@ -597,6 +602,10 @@ export class AgentBrowserSurfaceController {
       sink.setTitle(this.pendingTitle);
       this.pendingTitle = null;
     }
+    if (this.pendingLaunchFailure !== null) {
+      sink.launchFailed(this.pendingLaunchFailure);
+      this.pendingLaunchFailure = null;
+    }
     // The pane-size observer fires on observe and (when syncing) debounces a
     // `set viewport`; issue once explicitly too so re-engaging at an unchanged
     // size still reclaims the viewport. issueSyncToPane no-ops when not capable.
@@ -784,7 +793,12 @@ export class AgentBrowserSurfaceController {
     const phase: Phase = { k: 'launching' };
     this.setPhase(phase);
     const headed = this.headed;
-    const opts = { headed, ...(this.launchSession ? { session: this.launchSession } : {}) };
+    const session = this.launchSession;
+    // No creation site has to remember the binary a `dor ab` surface resolved.
+    const binaryPath = this.binaryPath ?? launchBinaryPath(this.provider);
+    // A named session's close still in flight — a failed swap reopening the
+    // previous provider's — would land after this open and shut it.
+    const opening = session ? closeLanded(this.provider, this.cwd, session) : Promise.resolve();
     // Call through the adapter instance — detaching the method drops `this`.
     // A launch that cannot start settles as late as one that fails, so whoever
     // created this Surface is always listening by then.
@@ -792,14 +806,17 @@ export class AgentBrowserSurfaceController {
       ? Promise.resolve({ ok: false, error: `${PROVIDER_LABEL[this.provider]} is unavailable on this host` })
       : !url
         ? Promise.resolve({ ok: false, error: 'no page to open' })
-        : platform.agentBrowserOpen(url, opts, this.binaryPath);
+        : opening.then(() => platform.agentBrowserOpen!(url, { headed, ...(session ? { session } : {}) }, binaryPath));
     opened
       .catch((err: unknown): AgentBrowserOpenResult => ({ ok: false, error: messageOf(err) }))
       .then((res) => {
         if (this.phase !== phase) {
-          // Nothing else knows this browser — unless this Surface has since
-          // bound that very session — so close what came up.
-          if (res.session && res.session !== this.session) {
+          // The browser that came up belongs to nobody: close it — a session
+          // the host minted, or any once the Surface closed. A named one left
+          // otherwise is whoever holds that session next (a Workspace
+          // transfer's destination opens the same one), or this Surface's own.
+          const closed = this.phase.k === 'disposed' && this.phase.closed;
+          if (res.session && (closed || (!session && res.session !== this.session))) {
             void closeSessionOn(this.provider, res.cwd ?? this.cwd, res.session, res.binaryPath);
           }
           return;
@@ -808,26 +825,38 @@ export class AgentBrowserSurfaceController {
           const error = res.error ?? `Could not open ${PROVIDER_LABEL[this.provider]}`;
           this.setPhase({ k: 'ended', error });
           settleLaunch(this.id, error);
+          this.reportLaunchFailure(error);
           return;
         }
+        rememberLaunchBinaryPath(this.provider, res.binaryPath);
         this.session = res.session;
         if (res.cwd !== undefined && res.cwd !== this.cwd) {
           this.cwd = res.cwd;
           this.platformCache = null;
         }
-        this.binaryPath = allowedBinaryPath(res.binaryPath, this.provider) ?? this.binaryPath;
+        this.binaryPath = allowedBinaryPath(res.binaryPath, this.provider) ?? allowedBinaryPath(binaryPath, this.provider);
         this.writeParams({
           session: res.session,
           ...(res.cwd !== undefined ? { cwd: res.cwd } : {}),
           ...(res.nativeIdentity !== undefined ? { nativeIdentity: res.nativeIdentity } : {}),
           ...(this.binaryPath !== undefined ? { binaryPath: this.binaryPath } : {}),
-          ...(this.launchSession !== undefined ? { launchSession: undefined } : {}),
+          // The launch is done: its session and its failure policy with it.
+          launchSession: undefined,
+          launchFallback: undefined,
         });
         this.launchSession = undefined;
         if (res.wsPort) this.goLive(res.wsPort);
         else this.attach(false);
         settleLaunch(this.id, null);
       });
+  }
+
+  /** Tell the Wall this Surface's first launch failed: it applies the
+   *  fallback the Surface's creator stored (`launchFallback`). A view that is
+   *  not attached hears it when it attaches. */
+  private reportLaunchFailure(error: string): void {
+    if (this.sink) this.sink.launchFailed(error);
+    else this.pendingLaunchFailure = error;
   }
 
   /**
@@ -1650,8 +1679,8 @@ export class AgentBrowserSurfaceController {
 
   private release(closed: boolean): void {
     // A launch in flight lands on a released controller, which closes what it
-    // brings up; whoever awaited it hears that the Surface is gone.
-    if (this.phase.k === 'launching') settleLaunch(this.id, null);
+    // brings up; whoever awaited one hears that the Surface is gone.
+    settleLaunch(this.id, null);
     if (this.parkTimer) { clearTimeout(this.parkTimer); this.parkTimer = undefined; }
     this.teardownPaneSizeObserver();
     this.paneSize = null;
@@ -1711,6 +1740,11 @@ export function disposeAgentBrowserSurfaceController(id: string): void {
   else settleLaunch(id, null);
 }
 
+// Closes the host has not answered yet, per session, so a launch into the same
+// named session waits them out (`closeLanded`).
+const closesInFlight = new Map<string, Promise<void>>();
+const closeKey = (provider: BrowserAutomationProvider, cwd: string | undefined, session: string) => JSON.stringify([provider, cwd ?? '', session]);
+
 /**
  * The one way a session is closed; resolves once the host answered. A close
  * starts no daemon, so it needs no drive gate. `binaryPath` is checked, not
@@ -1718,8 +1752,17 @@ export function disposeAgentBrowserSurfaceController(id: string): void {
  * the host will spawn (`lib/src/lib/agent-browser-binary.ts`).
  */
 function closeSessionOn(provider: BrowserAutomationProvider, cwd: string | undefined, session: string, binaryPath: unknown): Promise<void> {
-  return browserPlatform(provider, cwd).agentBrowserCommand?.(session, ['close'], allowedBinaryPath(binaryPath, provider))
-    .then(() => {}, () => {}) ?? Promise.resolve();
+  const key = closeKey(provider, cwd, session);
+  const closing = (browserPlatform(provider, cwd).agentBrowserCommand?.(session, ['close'], allowedBinaryPath(binaryPath, provider))
+    .then(() => {}, () => {}) ?? Promise.resolve())
+    .finally(() => { if (closesInFlight.get(key) === closing) closesInFlight.delete(key); });
+  closesInFlight.set(key, closing);
+  return closing;
+}
+
+/** Once every close of `session` issued so far has been answered. */
+function closeLanded(provider: BrowserAutomationProvider, cwd: string | undefined, session: string): Promise<void> {
+  return closesInFlight.get(closeKey(provider, cwd, session)) ?? Promise.resolve();
 }
 
 /** Hand `id`'s controller a port a `dor` command just learned, with the

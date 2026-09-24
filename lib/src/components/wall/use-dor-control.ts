@@ -45,7 +45,7 @@ import {
 } from './tool-takeover';
 import { attachSurfacePorts } from './surface-ports';
 import { browserSurfaceUrl, hostPathDisplay, iframeRefusal } from './browser-url';
-import { automationCli, automationMode, automationProvider, browserPlatform, type LaunchBinaryPath } from './browser-automation';
+import { automationCli, automationMode, automationProvider, browserPlatform, rememberLaunchBinaryPath } from './browser-automation';
 import { BrowserBindingReservations } from './browser-binding-reservations';
 import {
   agentBrowserSessionFromParams,
@@ -541,7 +541,6 @@ export function useDorControl({
   isClosingWorkspace,
   closeSurface,
   revealSurface,
-  launchBinaryPath,
   workspaceRef,
   workspaceScope,
 }: {
@@ -592,8 +591,6 @@ export function useDorControl({
   /** Reveal a Surface (reattaching a Door first) and report whether it ended up
    *  visible. `Wall.tsx` -> `revealSurface`. */
   revealSurface: (id: string) => boolean;
-  /** The binary path a `dor ab` surface last resolved, for GUI launches. */
-  launchBinaryPath: LaunchBinaryPath;
   /** This Wall's own positional Workspace ref, reported by `dor list` so a caller
    *  learns which Workspace answered (docs/specs/dor-cli.md → "Handle Model").
    *  The Window's own ref rides beside it, so `dor list` says which Window
@@ -787,7 +784,7 @@ export function useDorControl({
     minimized = false,
   }) => {
     // Remember the resolved binary so an embed→screencast swap can spawn one.
-    launchBinaryPath.remember(provider, binaryPath);
+    rememberLaunchBinaryPath(provider, binaryPath);
     const refreshedParams = {
       ...(nativeIdentity ? { nativeIdentity } : {}),
       ...(provider === 'playwright' && headed !== undefined ? { renderMode: automationMode(provider, headed) } : {}),

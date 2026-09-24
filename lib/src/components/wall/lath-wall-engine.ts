@@ -121,6 +121,7 @@ export function persistableLeafMeta(meta: LeafMeta): LeafMeta {
     url: _url,
     session: _session,
     launchSession: _launchSession,
+    launchFallback: _launchFallback,
     renderMode: _renderMode,
     toolPortConflict: _toolPortConflict,
     toolAnnouncedPort: _toolAnnouncedPort,

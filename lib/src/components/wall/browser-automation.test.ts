@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import type { PlatformAdapter } from '../../lib/platform/types';
-import { automationMode, automationProvider, isPopout, isScreencast, LaunchBinaryPath, offeredRenderModes } from './browser-automation';
+import { automationMode, automationProvider, forgetLaunchBinaryPaths, isPopout, isScreencast, launchBinaryPath, offeredRenderModes, rememberLaunchBinaryPath } from './browser-automation';
 import { resolveRenderMode } from './browser-surface';
 
 describe('automation render modes', () => {
@@ -27,14 +27,15 @@ describe('automation render modes', () => {
   });
 });
 
-describe('LaunchBinaryPath', () => {
+describe('launchBinaryPath', () => {
+  afterEach(forgetLaunchBinaryPaths);
+
   it('hands GUI launches only the agent-browser binary path', () => {
-    const paths = new LaunchBinaryPath();
-    paths.remember('playwright', '/opt/bin/playwright-cli');
-    expect(paths.get('agent-browser')).toBeUndefined();
-    paths.remember('agent-browser', '/opt/bin/agent-browser');
-    expect(paths.get('agent-browser')).toBe('/opt/bin/agent-browser');
-    expect(paths.get('playwright')).toBeUndefined();
+    rememberLaunchBinaryPath('playwright', '/opt/bin/playwright-cli');
+    expect(launchBinaryPath('agent-browser')).toBeUndefined();
+    rememberLaunchBinaryPath('agent-browser', '/opt/bin/agent-browser');
+    expect(launchBinaryPath('agent-browser')).toBe('/opt/bin/agent-browser');
+    expect(launchBinaryPath('playwright')).toBeUndefined();
   });
 });
 
