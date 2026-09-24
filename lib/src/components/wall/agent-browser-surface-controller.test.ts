@@ -1661,6 +1661,17 @@ describe('Playwright provider', () => {
     expect(sent.map((message) => message.text).join('')).toBe(pasted.replace('\r\n', '\n'));
   });
 
+  it('shows the ratio its browser measures, which Playwright keeps as its own', async () => {
+    installBrowserHost();
+    const controller = withPort('pw', { renderMode: 'pw-screencast', session: 's' }, 4321);
+    controller.attachView(makeSink());
+    await flushMicrotasks();
+    const screen = getAgentBrowserScreenController('pw')!;
+    screen.actions.applyViewport(1024, 768, 2);
+    streamSocket(4321)!.emitMessage(JSON.stringify({ type: 'status', connected: true, screencasting: true, viewportWidth: 1024, viewportHeight: 768, devicePixelRatio: 1 }));
+    expect(screen.snapshot()?.viewport).toEqual({ w: 1024, h: 768, dpr: 1 });
+  });
+
   it('names Playwright in a failed host command warning', async () => {
     installBrowserHost({ history: async () => ({ ok: false, error: 'boom' }) });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});

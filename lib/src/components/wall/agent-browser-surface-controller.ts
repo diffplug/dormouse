@@ -1224,9 +1224,10 @@ export class AgentBrowserSurfaceController {
     const displayDpr = window.devicePixelRatio || 1;
     const device = this.device;
     const paneCss = { w: pane?.w ?? 0, h: pane?.h ?? 0 };
-    // DPR can't be read back from frames, so report the density this Surface
+    // Frames never show the ratio: report the one the browser measures
+    // (Playwright's poll, which keeps its own ratio), else the one this Surface
     // fixed, else the one it would sync to.
-    const viewport = { w: device.width, h: device.height, dpr: this.fixedDpr ?? displayDpr };
+    const viewport = { w: device.width, h: device.height, dpr: this.status?.devicePixelRatio ?? this.fixedDpr ?? displayDpr };
     // SYNCED only on the host's word that the browser is at this pane's size.
     const state: ScreenState = this.syncEngaged && this.hostSync === 'synced' ? 'SYNCED' : 'SCALED';
     const renderMode = this.renderMode();
