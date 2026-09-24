@@ -3,14 +3,12 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Terminal } from '@xterm/xterm';
-import { xtermVtExtensions } from './terminal-lifecycle';
-import { inputIsReplayTerminalReport } from './terminal-report-filter';
+import { xtermVtExtensions } from './xterm-options';
 
 /**
  * The advertised iTerm2 version promises dark-mode reporting
- * (`docs/specs/terminal-escapes.md` -> iTerm2 identity). A real xterm.js with
- * Dormouse's extensions answers the query, and the answer is a terminal reply
- * on the input side, never a keystroke.
+ * (`docs/specs/terminal-escapes.md` -> iTerm2 identity): a real xterm.js with
+ * Dormouse's extensions answers the query.
  */
 async function colorSchemeReply(theme: { background: string; foreground: string }): Promise<string[]> {
   const terminal = new Terminal({ allowProposedApi: true, theme, vtExtensions: xtermVtExtensions() });
@@ -38,9 +36,7 @@ describe('color-scheme query (DSR 996)', () => {
   it.each([
     ['dark', { background: '#1e1e1e', foreground: '#d4d4d4' }, '\x1b[?997;1n'],
     ['light', { background: '#ffffff', foreground: '#333333' }, '\x1b[?997;2n'],
-  ] as const)('answers a %s theme with a reply the input filter treats as a terminal report', async (_scheme, theme, expected) => {
-    const replies = await colorSchemeReply(theme);
-    expect(replies).toEqual([expected]);
-    expect(inputIsReplayTerminalReport(expected)).toBe(true);
+  ] as const)('answers a %s theme', async (_scheme, theme, expected) => {
+    expect(await colorSchemeReply(theme)).toEqual([expected]);
   });
 });

@@ -10,6 +10,7 @@ import { cfg } from '../cfg';
 import { toPersistedAlertState } from './session-types';
 import {
   armCommandExit,
+  collectEpisodes,
   driveToBusy,
   engage,
   finishCommand,
@@ -383,10 +384,7 @@ describe('AlertManager in isolation', () => {
       // Claude Code: the turn settles and WATCHING rings; the user acknowledges
       // it without typing; a minute later Claude sends its idle notification.
       const id = `acknowledged-${verb}`;
-      const episodes = new Set<string>();
-      manager.onStateChange((changed, state) => {
-        if (changed === id && state.episode) episodes.add(state.episode.id);
-      });
+      const episodes = collectEpisodes(manager, id);
       driveToRinging(id);
       leaveTodoVerbs[verb](id);
       vi.advanceTimersByTime(60_000);
@@ -676,10 +674,7 @@ describe('AlertManager in isolation', () => {
   // `docs/specs/alert.md` -> Public State.
   it('a second source joining mid-episode keeps the episode id', () => {
     const id = 'episode-cross-track';
-    const seen: string[] = [];
-    manager.onStateChange((_id, state) => {
-      if (_id === id && state.episode) seen.push(state.episode.id);
-    });
+    const episodes = collectEpisodes(manager, id);
 
     armCommandExit(manager, id);
     vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
@@ -697,7 +692,7 @@ describe('AlertManager in isolation', () => {
     const again = manager.getState(id);
     expect(again.status).toBe(rung.status);
     expect(again.episode?.id).toBe(rung.episode?.id);
-    expect(new Set(seen)).toEqual(new Set([rung.episode!.id]));
+    expect(episodes).toEqual(new Set([rung.episode!.id]));
   });
 
   it('re-latching after the ring clears starts a new episode', () => {

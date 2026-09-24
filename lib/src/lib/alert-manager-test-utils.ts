@@ -52,6 +52,15 @@ export function finishCommand(
   ]);
 }
 
+/** Every episode id `id` publishes from now on, added as it is published. */
+export function collectEpisodes(manager: AlertManager, id: string): Set<string> {
+  const episodes = new Set<string>();
+  manager.onStateChange((changed, state) => {
+    if (changed === id && state.episode) episodes.add(state.episode.id);
+  });
+  return episodes;
+}
+
 /** Run `commandLine` seen and then left: armed, so its exit rings once it has
  *  outlasted `cfg.alert.commandExitMinRuntime`. */
 export function armCommandExit(manager: AlertManager, id: string, commandLine = 'pnpm build'): void {

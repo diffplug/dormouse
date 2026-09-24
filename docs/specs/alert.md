@@ -234,9 +234,7 @@ Sequence syntax lives in `docs/specs/terminal-escapes.md`; what each means here:
 
   **Titles name the running command** — its watch key, else its display command — and fall back to a generic title with none running; the body is `Progress <percent>%`, or none.
 
-  Claude Code runs one cycle per turn under the advertised iTerm2 version, so **a turn ending on an unengaged Session rings `claude finished`** (rationale). Pinned by `a Claude Code turn` in `lib/src/lib/alert-engagement.test.ts`.
-
-Source of truth: the OSC 777 and OSC 99 grammars, parsing, sanitization limits, OSC 99 chunk state, and `applyTerminalEvents` in `lib/src/lib/terminal-protocol.ts`; `createOwnerPtyStream` in `lib/src/host/owner-pty.ts`; `updateProtocolProgress` / `finishProtocolProgressCycle` / `PROGRESS_TITLES` in `lib/src/lib/alert-manager.ts`. Pinned by `silently ends a progress cycle the program abandoned` and `names the running command in a progress %s title` in `lib/src/lib/alert-manager.test.ts`.
+Source of truth: the OSC 777 and OSC 99 grammars, parsing, sanitization limits, OSC 99 chunk state, and `applyTerminalEvents` in `lib/src/lib/terminal-protocol.ts`; `createOwnerPtyStream` in `lib/src/host/owner-pty.ts`; `updateProtocolProgress` / `finishProtocolProgressCycle` / `PROGRESS_TITLES` in `lib/src/lib/alert-manager.ts`. Pinned by `silently ends a progress cycle the program abandoned` and `names the running command in a progress %s title` in `lib/src/lib/alert-manager.test.ts`; `a Claude Code turn` in `lib/src/lib/alert-engagement.test.ts`.
 
 ## Command-exit Track
 

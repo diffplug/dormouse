@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AlertManager, type ActivityNotification, type AwaitOutcome } from './alert-manager';
 import { applyTerminalEvents, TerminalProtocolParser } from './terminal-protocol';
 import { cfg } from '../cfg';
-import { engage, finishCommand, goIdle, leave, runCommand, VIEWER } from './alert-manager-test-utils';
+import { collectEpisodes, engage, finishCommand, goIdle, leave, runCommand, VIEWER } from './alert-manager-test-utils';
 import { alertedPty, createOwnerPtyStream } from '../host/owner-pty';
 
 /**
@@ -54,6 +54,34 @@ function typeFor(id: string, ms: number): void {
 
 function ringing(id: string): boolean {
   return manager.getState(id).status === 'ALERT_RINGING';
+}
+
+/** One step of a replayed timeline, due `at` ms in. */
+interface Step { at: number; step: () => void }
+
+function at(ms: number, step: () => void): Step {
+  return { at: ms, step };
+}
+
+/**
+ * Runs `steps` in time order, ties in list order, advancing the clock between
+ * them; each `to` resumes where the last one stopped.
+ */
+function player(steps: Step[]): { to(ms: number): void } {
+  const queue = [...steps].sort((a, b) => a.at - b.at);
+  let now = 0;
+  return {
+    to(ms) {
+      while (queue.length > 0 && queue[0].at <= ms) {
+        const next = queue.shift()!;
+        vi.advanceTimersByTime(next.at - now);
+        now = next.at;
+        next.step();
+      }
+      vi.advanceTimersByTime(ms - now);
+      now = ms;
+    },
+  };
 }
 
 /** A watched command, busy and then quiet: the settle a WATCHING ring needs. */
@@ -287,33 +315,22 @@ describe('walking away from a permission prompt', () => {
 
   function replay(untilMs: number): void {
     const parser = new TerminalProtocolParser();
-    const timeline: { at: number; step: () => void }[] = [];
-    timeline.push({ at: 0, step: () => { engage(manager, PANE); runCommand(manager, PANE, 'claude'); } });
+    const steps = [at(0, () => { engage(manager, PANE); runCommand(manager, PANE, 'claude'); })];
     // First paint.
-    for (let at = 230; at < 830; at += 100) timeline.push({ at, step: () => manager.onData(PANE) });
+    for (let t = 230; t < 830; t += 100) steps.push(at(t, () => manager.onData(PANE)));
     // The prompt, typed at 40ms a key, each key echoed.
-    for (let at = 6_000; at <= 9_000; at += 40) {
-      timeline.push({ at, step: () => manager.acknowledge(PANE, { input: true }) });
-      timeline.push({ at: at + 7, step: () => manager.onData(PANE) });
+    for (let t = 6_000; t <= 9_000; t += 40) {
+      steps.push(at(t, () => manager.acknowledge(PANE, { input: true })), at(t + 7, () => manager.onData(PANE)));
     }
-    timeline.push({ at: ENTER_AT, step: () => manager.acknowledge(PANE, { input: true }) });
+    steps.push(at(ENTER_AT, () => manager.acknowledge(PANE, { input: true })));
     // Working, then the permission prompt drawn.
-    for (let at = 9_390; at < 11_960; at += 110) timeline.push({ at, step: () => manager.onData(PANE) });
-    timeline.push({ at: 17_960, step: () => applyTerminalEvents(manager, PANE, parser.process(OSC99).events) });
+    for (let t = 9_390; t < 11_960; t += 110) steps.push(at(t, () => manager.onData(PANE)));
+    steps.push(at(17_960, () => applyTerminalEvents(manager, PANE, parser.process(OSC99).events)));
     // The idle prompt's cursor redraw.
-    for (let at = 12_415; at < untilMs; at += 605) timeline.push({ at, step: () => manager.onData(PANE) });
+    for (let t = 12_415; t < untilMs; t += 605) steps.push(at(t, () => manager.onData(PANE)));
     // The renderer's presence lapses 15s after the last input.
-    timeline.push({ at: ENTER_AT + cfg.alert.inactivityTimeout, step: () => goIdle(manager, PANE) });
-
-    timeline.sort((a, b) => a.at - b.at);
-    let now = 0;
-    for (const { at, step } of timeline) {
-      if (at > untilMs) break;
-      vi.advanceTimersByTime(at - now);
-      now = at;
-      step();
-    }
-    vi.advanceTimersByTime(untilMs - now);
+    steps.push(at(ENTER_AT + cfg.alert.inactivityTimeout, () => goIdle(manager, PANE)));
+    player(steps).to(untilMs);
   }
 
   it('holds the permission request while the user is still there', () => {
@@ -347,10 +364,11 @@ describe('a Claude Code turn', () => {
   const QUIET_MS = cfg.alert.mightNeedAttention + cfg.alert.needsAttentionConfirm;
   const IDLE_NOTICE = '\x1b]99;i=3319:d=0:p=title;Claude Code\x07\x1b]99;i=3319:p=body;Claude is waiting for your input\x07\x1b]99;i=3319:d=1:a=focus;\x07';
   const FINISHED: ActivityNotification = { source: 'OSC 9;4', title: 'claude finished', body: null };
+  /** The user clicks another pane mid-turn. */
+  const MOVED_AWAY = at(ENTER_AT + 600, () => engage(manager, OTHER));
 
-  interface Step { at: number; step: () => void }
-  let emit: (at: number, data: string) => Step;
-  let key: (at: number, data: string) => Step;
+  let emit: (ms: number, data: string) => Step;
+  let key: (ms: number, data: string) => Step;
   let episodes: Set<string>;
 
   beforeEach(() => {
@@ -363,18 +381,16 @@ describe('a Claude Code turn', () => {
       onChunk() {},
     });
     const pty = alertedPty(manager, { write() {}, resize() {} });
-    emit = (at, data) => ({ at, step: () => stream.write(data) });
-    key = (at, data) => ({ at, step: () => pty.write(PANE, data, { userInput: true }) });
-    episodes = new Set();
-    manager.onStateChange((id, state) => { if (id === PANE && state.episode) episodes.add(state.episode.id); });
+    emit = (ms, data) => at(ms, () => stream.write(data));
+    key = (ms, data) => at(ms, () => pty.write(PANE, data, { userInput: true }));
+    episodes = collectEpisodes(manager, PANE);
   });
 
-  const at = (ms: number, step: () => void): Step => ({ at: ms, step });
-
-  /** The turn's bytes and keystrokes: the prompt typed and submitted, then Claude working for `turnMs`. */
+  /** The turn on the pane the user starts at: the prompt typed and submitted, then Claude working for `turnMs`. */
   function turn(turnMs: number): Step[] {
     const endAt = ENTER_AT + turnMs;
     const steps = [
+      at(0, () => engage(manager, PANE)),
       // Shell integration names the command; Claude paints and clears any stale progress.
       emit(0, '\x1b]633;E;claude\x07\x1b]633;C\x07'),
       emit(358, 'Claude Code'),
@@ -392,29 +408,10 @@ describe('a Claude Code turn', () => {
     return steps;
   }
 
-  /** Runs `steps` in time order (ties in list order), advancing the clock between them. */
-  function player(steps: Step[]): { to(ms: number): void } {
-    const queue = [...steps].sort((a, b) => a.at - b.at);
-    let now = 0;
-    return {
-      to(ms) {
-        while (queue.length > 0 && queue[0].at <= ms) {
-          const next = queue.shift()!;
-          vi.advanceTimersByTime(next.at - now);
-          now = next.at;
-          next.step();
-        }
-        vi.advanceTimersByTime(ms - now);
-        now = ms;
-      },
-    };
-  }
-
   it('holds the finish while the user watches, and drops it once they type', () => {
     const endAt = ENTER_AT + RECORDED_TURN_MS;
     const typedAt = endAt + 2_000;
     const run = player([
-      at(0, () => engage(manager, PANE)),
       ...turn(RECORDED_TURN_MS),
       key(typedAt, 'x'),
       at(typedAt + cfg.alert.inactivityTimeout, () => goIdle(manager, PANE)),
@@ -432,11 +429,7 @@ describe('a Claude Code turn', () => {
     ['once a longer turn has gone quiet', LONG_TURN_MS, 3 + QUIET_MS],
   ] as const)('rings "claude finished" once when the user moved away mid-turn: %s', (_when, turnMs, afterEndMs) => {
     const ringAt = ENTER_AT + turnMs + afterEndMs;
-    const run = player([
-      at(0, () => engage(manager, PANE)),
-      at(ENTER_AT + 600, () => engage(manager, OTHER)),
-      ...turn(turnMs),
-    ]);
+    const run = player([...turn(turnMs), MOVED_AWAY]);
 
     run.to(ringAt - 1);
     expect(ringing(PANE)).toBe(false);
@@ -450,9 +443,8 @@ describe('a Claude Code turn', () => {
     const endAt = ENTER_AT + RECORDED_TURN_MS;
     const clickAt = endAt + 5_000;
     const run = player([
-      at(0, () => engage(manager, PANE)),
-      at(ENTER_AT + 600, () => engage(manager, OTHER)),
       ...turn(RECORDED_TURN_MS),
+      MOVED_AWAY,
       at(clickAt, () => { engage(manager, PANE); manager.acknowledge(PANE, { input: false }); }),
       at(clickAt + cfg.alert.inactivityTimeout, () => goIdle(manager, PANE)),
     ]);
@@ -468,11 +460,7 @@ describe('a Claude Code turn', () => {
 
   it('rings once the user, still focused on the pane, has gone idle', () => {
     const idleAt = ENTER_AT + cfg.alert.inactivityTimeout;
-    const run = player([
-      at(0, () => engage(manager, PANE)),
-      ...turn(RECORDED_TURN_MS),
-      at(idleAt, () => goIdle(manager, PANE)),
-    ]);
+    const run = player([...turn(RECORDED_TURN_MS), at(idleAt, () => goIdle(manager, PANE))]);
 
     run.to(idleAt - 1);
     expect(manager.getState(PANE)).toMatchObject({ todo: false, notification: null });
