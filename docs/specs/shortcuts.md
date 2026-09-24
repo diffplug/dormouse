@@ -30,11 +30,10 @@ A focused cross-origin iframe surface swallows the gesture; the proxy shim detec
 
 ## Workspaces (command mode)
 
-Standalone only — a bare Wall (VS Code, the website playground) leaves every key here unbound. Follows the tmux *window* bindings, except rename: tmux's `,` is already pane rename.
+Standalone only — a bare Wall (VS Code, the website playground) leaves every key here unbound. Follows the tmux *window* bindings, except create and rename: **never bind a bare key to creating a Workspace** — a stray keystroke must not spawn one, so creating is the strip's `+` — and tmux's `,` is already pane rename.
 
 | Key | Action | Description |
 |-----|--------|-------------|
-| `c` | Create Workspace | Adds `Workspace N`, activates it, and spawns its one pane. |
 | `n` / `p` | Next / previous | Wraps at both ends. |
 | `1`–`9` | Select by position | The nth Workspace in strip order; out of range is a consumed no-op. |
 | `&` | Close Workspace | Confirms when the Workspace holds work; replaces the last Workspace. |

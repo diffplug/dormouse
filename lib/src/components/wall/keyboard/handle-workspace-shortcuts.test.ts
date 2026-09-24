@@ -14,7 +14,7 @@ import {
 } from '../../../lib/workspace-store';
 import type { WallKeyboardCtx } from './types';
 
-const KEYS = ['c', 'n', 'p', '&', '$', '1', '5', '9'];
+const KEYS = ['n', 'p', '&', '$', '1', '5', '9'];
 
 function ctxWith(workspaceId?: string): WallKeyboardCtx {
   return { activeRef: { current: true }, selectedTypeRef: { current: 'pane' }, workspaceId } as unknown as WallKeyboardCtx;
@@ -48,11 +48,16 @@ describe('handleWorkspaceShortcuts', () => {
     expect(ids()).toHaveLength(1);
   });
 
-  it('creates, cycles, and selects by position through the store', () => {
+  it('never creates a Workspace from a bare `c`', () => {
+    const event = keydown('c');
+    expect(handleWorkspaceShortcuts(event, ctx)).toBe(false);
+    expect(event.defaultPrevented).toBe(false);
+    expect(ids()).toHaveLength(1);
+  });
+
+  it('cycles and selects by position through the store', () => {
     const first = getActiveWorkspaceId();
-    expect(handleWorkspaceShortcuts(keydown('c'), ctx)).toBe(true);
-    expect(ids()).toHaveLength(2);
-    const second = ids()[1];
+    const second = createWorkspace().id;
     expect(getActiveWorkspaceId()).toBe(second);
 
     handleWorkspaceShortcuts(keydown('n'), ctx); // wraps at the end
@@ -75,7 +80,7 @@ describe('handleWorkspaceShortcuts', () => {
       handleWorkspaceShortcuts(keydown('$'), ctx);
       expect(getWorkspaceUiSnapshot().renamingId).toBe('ws-2');
 
-      // No Wall has registered yet — `&` right after `c` — so the close waits
+      // No Wall has registered yet — `&` right after creating — so the close waits
       // for it rather than being refused unseen; nothing in the Wall is
       // touched, so it then goes straight through. Closing the final Workspace
       // replaces it with a fresh identity.
@@ -127,19 +132,21 @@ describe('handleWorkspaceShortcuts', () => {
   });
 
   it('claims the key it handles and leaves every other one alone', () => {
-    const handled = keydown('c');
+    const handled = keydown('n');
     handleWorkspaceShortcuts(handled, ctx);
     expect(handled.defaultPrevented).toBe(true);
 
-    for (const key of ['0', 'x', 'k', ',', 'z', 'Enter', '|']) {
+    for (const key of ['0', 'c', 'x', 'k', ',', 'z', 'Enter', '|']) {
       expect(handleWorkspaceShortcuts(keydown(key), ctx)).toBe(false);
     }
   });
 
-  it('ignores a modified key, so Cmd+C stays a clipboard chord', () => {
+  it('ignores a modified key, so a host or clipboard chord passes through', () => {
+    const before = getActiveWorkspaceId();
+    createWorkspace({ activate: false });
     for (const init of [{ metaKey: true }, { ctrlKey: true }, { altKey: true }]) {
-      expect(handleWorkspaceShortcuts(keydown('c', init), ctx)).toBe(false);
+      expect(handleWorkspaceShortcuts(keydown('n', init), ctx)).toBe(false);
     }
-    expect(ids()).toHaveLength(1);
+    expect(getActiveWorkspaceId()).toBe(before);
   });
 });

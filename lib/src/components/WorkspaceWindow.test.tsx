@@ -777,9 +777,12 @@ describe('WorkspaceWindow', () => {
       await flush();
     };
 
+    // A bare `c` never creates a Workspace; that is the strip's `+`.
     await press('c');
     const ids = () => getWorkspacesSnapshot().workspaces.map((workspace) => workspace.id);
-    expect(ids()).toHaveLength(2);
+    expect(ids()).toHaveLength(1);
+    await act(async () => { createWorkspace(); });
+    await flush();
     const second = ids()[1];
     expect(getActiveWorkspaceId()).toBe(second);
 
@@ -793,9 +796,9 @@ describe('WorkspaceWindow', () => {
     await press('9');
     expect(getActiveWorkspaceId()).toBe(first);
 
-    // Exactly one Wall dispatches, so two mounted Walls create one Workspace.
-    await press('c');
-    expect(ids()).toHaveLength(3);
+    // Exactly one Wall dispatches: two mounted Walls step one Workspace, not two.
+    await press('n');
+    expect(getActiveWorkspaceId()).toBe(second);
   });
 
   it('reports a fresh Workspace as untouched with nothing running', async () => {
