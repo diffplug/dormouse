@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { get } from 'node:http';
 import { setTimeout as delay } from 'node:timers/promises';
-import { sessionForKey } from 'dor-lib-common/agent-browser';
+import { sessionForKey } from 'dor-lib-common/browser-providers';
 import { cleanEnv, devWorkspace, runner, writeShims } from './dev-fixture.mjs';
 
 const scripts = path.dirname(fileURLToPath(import.meta.url));

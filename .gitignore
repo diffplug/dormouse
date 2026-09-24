@@ -34,7 +34,9 @@ standalone/dist/
 standalone/sidecar/dor-cli/
 standalone/sidecar/iframe-proxy.cjs
 standalone/sidecar/recovery.cjs
+standalone/sidecar/browser-host.cjs
 standalone/sidecar/agent-browser-host.cjs
+standalone/sidecar/playwright-host.cjs
 standalone/sidecar/burrow.cjs
 # Kept beside it: a checkout that built before the Burrow rename, or before the
 # alerts joined its bundle, still holds the old bundle, and `bundle.resources`
@@ -101,3 +103,6 @@ audit-status.txt
 # Impeccable per-developer state and generated critiques (design.json is shared).
 .impeccable/config.local.json
 .impeccable/critique/
+
+# Native Playwright CLI snapshots and traces
+.playwright-cli/

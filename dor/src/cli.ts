@@ -7,6 +7,7 @@ import {
   type ApplicationText,
   type StricliProcess,
 } from '@stricli/core';
+import { BROWSER_PROVIDER_IDS, BROWSER_PROVIDERS, isBrowserProvider, type BrowserAutomationProvider } from 'dor-lib-common';
 import { agentBrowserCommand, runAgentBrowserCli } from './commands/agent-browser.js';
 import { appCommand } from './commands/app.js';
 import { awaitCommand } from './commands/await.js';
@@ -20,6 +21,7 @@ import { skillCommand } from './commands/skill.js';
 import { splitCommand } from './commands/split.js';
 import { toolCommand } from './commands/tool.js';
 import { openCommand } from './commands/open.js';
+import { playwrightCommand, runPlaywrightCli } from './commands/playwright.js';
 import { versionCommand } from './commands/version.js';
 import { workspaceCommand } from './commands/workspace.js';
 import { errorLine, errorMessage, fail } from './commands/shared.js';
@@ -35,16 +37,16 @@ import type {
 } from './commands/types.js';
 
 export type {
-  AgentBrowserExec,
-  AgentBrowserExecResult,
-  AgentBrowserSurfaceRequest,
-  AgentBrowserSurfaceResponse,
   AppRestartResponse,
   AwaitCause,
   AwaitSurfaceOutcome,
   AwaitSurfaceRequest,
   AwaitSurfaceResponse,
   AwaitUntil,
+  BrowserExec,
+  BrowserExecResult,
+  BrowserSurfaceRequest,
+  BrowserSurfaceResponse,
   CliEnv,
   CliOptions,
   CliResult,
@@ -104,6 +106,7 @@ const COMMANDS = [
   killCommand,
   iframeCommand,
   agentBrowserCommand,
+  playwrightCommand,
   listCommand,
   workspaceCommand,
   appCommand,
@@ -122,6 +125,7 @@ const ROUTES = {
   kill: killCommand.command,
   iframe: iframeCommand.command,
   'agent-browser': agentBrowserCommand.command,
+  playwright: playwrightCommand.command,
   list: listCommand.command,
   workspace: workspaceCommand.command,
   app: appCommand.command,
@@ -192,13 +196,14 @@ interface CaptureProcess extends StricliProcess {
 }
 
 export async function runCli(rawArgv: string[], options: CliOptions = {}): Promise<CliResult> {
-  const argv = normalizeAgentBrowserAlias(normalizeVersionAlias(rawArgv));
+  const argv = normalizePassthroughAlias(normalizeVersionAlias(rawArgv));
 
-  // `dor ab <args...>` forwards args verbatim to agent-browser, so they must
-  // never reach stricli's flag parser. Only a bare `--help`/`-h` (or
-  // `dor help agent-browser`, normalized above) falls through to stricli.
-  if (argv[0] === 'agent-browser' && !isAgentBrowserHelpInvocation(argv)) {
-    return runAgentBrowserCli(argv.slice(1), options);
+  // `dor ab <args...>` and `dor pw <args...>` forward args verbatim to the
+  // provider's CLI, so they must never reach stricli's flag parser. Only a bare
+  // `--help`/`-h` (or `dor help agent-browser`, normalized above) falls through
+  // to stricli.
+  if (isBrowserProvider(argv[0]) && !isPassthroughHelpInvocation(argv)) {
+    return BROWSER_CLIS[argv[0]](argv.slice(1), options);
   }
   // `dor __view-file <file>` is the built-in viewer's private entry
   // (docs/specs/dor-tool.md -> Opening local files). Its server outlives this
@@ -248,14 +253,25 @@ function normalizeVersionAlias(argv: string[]): string[] {
   return argv;
 }
 
-/** `ab` is the documented short alias for `agent-browser`, in any help form. */
-function normalizeAgentBrowserAlias(argv: string[]): string[] {
-  if (argv[0] === 'ab') return ['agent-browser', ...argv.slice(1)];
-  if (argv[0] === 'help' && argv[1] === 'ab') return ['help', 'agent-browser', ...argv.slice(2)];
+/** Each browser provider's passthrough, run under its id as the command. */
+const BROWSER_CLIS: Record<BrowserAutomationProvider, (args: string[], options: CliOptions) => Promise<CliResult>> = {
+  'agent-browser': runAgentBrowserCli,
+  playwright: runPlaywrightCli,
+};
+
+/** The documented short aliases of the browser passthroughs. */
+const PASSTHROUGH_ALIASES = new Map<string, string>(BROWSER_PROVIDER_IDS.map((provider) => [BROWSER_PROVIDERS[provider].alias, provider]));
+
+/** Expand a passthrough's short alias, in any help form. */
+function normalizePassthroughAlias(argv: string[]): string[] {
+  const command = PASSTHROUGH_ALIASES.get(argv[0] ?? '');
+  if (command) return [command, ...argv.slice(1)];
+  const helpSubject = argv[0] === 'help' ? PASSTHROUGH_ALIASES.get(argv[1] ?? '') : undefined;
+  if (helpSubject) return ['help', helpSubject, ...argv.slice(2)];
   return argv;
 }
 
-function isAgentBrowserHelpInvocation(argv: string[]): boolean {
+function isPassthroughHelpInvocation(argv: string[]): boolean {
   return argv.length === 2 && (argv[1] === '--help' || argv[1] === '-h');
 }
 

@@ -1,10 +1,14 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { vi } from 'vitest';
+import { BROWSER_PROVIDER_IDS, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
+import { FakePtyAdapter, setPlatform } from '../../lib/platform';
+import type { BrowserOp, BrowserRequest, BrowserResult } from '../../lib/platform/browser-automation';
 import type { WallActions } from './wall-context';
 import {
   registerAgentBrowserScreen,
   type ChromeSnapshot,
+  type RenderMode,
   type ScreenRegistration,
   type ScreenSnapshot,
 } from './agent-browser-screen';
@@ -179,7 +183,7 @@ export function registerStubScreen(
     snapshot?: ScreenSnapshot;
     chrome?: ChromeSnapshot;
     hostCapable?: boolean;
-    canPopOut?: boolean;
+    renderModes?: readonly RenderMode[];
   } = {},
 ): ScreenRegistration {
   return registerAgentBrowserScreen(id, {
@@ -194,6 +198,42 @@ export function registerStubScreen(
     chrome: init.chrome ?? STUB_CHROME,
     chromeActions: { navigate: vi.fn(), back: vi.fn(), forward: vi.fn(), reload: vi.fn() },
     hostCapable: init.hostCapable ?? true,
-    canPopOut: init.canPopOut ?? true,
+    renderModes: init.renderModes ?? ['ab-screencast', 'ab-popout', 'pw-screencast', 'pw-popout', 'iframe'],
   });
+}
+
+/** How a fake browser host answers one kind of request. */
+export type BrowserAnswers = {
+  [K in BrowserOp['op']]?: (request: Extract<BrowserRequest, { op: K }>) => BrowserResult | Promise<BrowserResult>;
+};
+
+/**
+ * Install a platform whose host drives `providers`, answering each typed
+ * browser request from `answers` by operation — `{ ok: true }` where none is
+ * given, and for `view` a viewer socket URL naming the stream as its port, so
+ * a test finds a Surface's socket by the stream it views. `answers` stays
+ * live, so a test may swap one mid-flight; `requests`
+ * reads back every request of one kind, in order, without the ids a Surface
+ * mints for its launches and attaches and a close's `cancels` of them — fresh
+ * UUIDs no test can predict (`browser`'s calls keep them).
+ */
+function withoutIds(request: BrowserRequest): BrowserRequest {
+  const { requestId: _id, cancels: _cancels, ...rest } = request as BrowserRequest & { requestId?: string; cancels?: string[] };
+  return rest as BrowserRequest;
+}
+
+export function installBrowserHost(
+  answers: BrowserAnswers = {},
+  providers: readonly BrowserAutomationProvider[] = BROWSER_PROVIDER_IDS,
+) {
+  const browser = vi.fn(async (request: BrowserRequest): Promise<BrowserResult> => {
+    const answer = answers[request.op] as ((r: BrowserRequest) => BrowserResult | Promise<BrowserResult>) | undefined;
+    if (!answer && request.op === 'view') return { ok: true, url: `ws://127.0.0.1:${request.stream}` };
+    return (await answer?.(request)) ?? { ok: true };
+  });
+  const platform = Object.assign(new FakePtyAdapter(), { browserProviders: providers, browser });
+  setPlatform(platform);
+  const requests = <K extends BrowserOp['op']>(op: K): Extract<BrowserRequest, { op: K }>[] =>
+    browser.mock.calls.map(([request]) => withoutIds(request)).filter((request): request is Extract<BrowserRequest, { op: K }> => request.op === op);
+  return { platform, browser, answers, requests };
 }

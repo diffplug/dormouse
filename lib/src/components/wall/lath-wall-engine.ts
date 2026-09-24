@@ -120,7 +120,8 @@ export function persistableLeafMeta(meta: LeafMeta): LeafMeta {
   const {
     url: _url,
     session: _session,
-    wsPort: _wsPort,
+    launchSession: _launchSession,
+    launchFallback: _launchFallback,
     renderMode: _renderMode,
     toolPortConflict: _toolPortConflict,
     toolAnnouncedPort: _toolAnnouncedPort,

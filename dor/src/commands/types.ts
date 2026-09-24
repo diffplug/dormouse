@@ -3,12 +3,14 @@ import type {
   CommandContext,
   StricliProcess,
 } from '@stricli/core';
+import type { BrowserAutomationProvider, BrowserBinding, SurfaceRenderMode } from 'dor-lib-common/browser-providers';
+
+export type { BrowserAutomationProvider, BrowserBinding, SurfaceRenderMode };
 
 export type IdFormat = 'refs' | 'ids' | 'both';
 export type SplitDirection = 'left' | 'right' | 'up' | 'down' | 'auto';
 export type ResolvedSplitDirection = 'left' | 'right' | 'up' | 'down';
 export type SurfaceKind = 'terminal' | 'browser' | 'tool';
-export type SurfaceRenderMode = 'iframe' | 'ab-screencast' | 'ab-popout';
 
 /** What each kind is backed by (`docs/specs/glossary.md` → Panes and Surfaces).
  *  The single source of capability gating; kind switches elsewhere go through
@@ -405,48 +407,52 @@ export interface ResolveOpenTargetResponse {
   port: number;
 }
 
-/** The two ways `dor ab` asks the host to name a session: a Surface handle whose
- *  bound session it wants, or a managed `--key`, whose session name is the
- *  answering Workspace's (`docs/specs/dor-browser.md` → Managed identity). Never
- *  both — a key names no Surface, and a Surface's session was minted long ago. */
-export type ResolveAgentBrowserSessionRequest = WorkspaceScopedRequest & (
+/** The two ways a browser command asks the host for its binding: a Surface
+ *  handle, or a managed `--key`, which only the answering Workspace can
+ *  namespace (`docs/specs/dor-browser.md` → Managed identity). Never both — a
+ *  key names no Surface, and a Surface's session was minted long ago. */
+export type ResolveBrowserRequest = WorkspaceScopedRequest & { provider: BrowserAutomationProvider } & (
   | {
     /** A Surface handle (surface:N, surface:<stable-id>, surface:self,
      *  surface:focused, title:<title>) naming the browser Surface to drive. */
     surface: string;
     key?: undefined;
+    proposed?: undefined;
   }
   | {
-    /** A managed browser key (`dor ab --key`), which only the answering
-     *  Workspace can namespace. */
     key: string;
     surface?: undefined;
+    /** The caller's cwd and executable, offered for a key's first command
+     *  that may bind a Surface; the host mints the session. */
+    proposed?: Omit<BrowserBinding, 'session'>;
   }
 );
 
-export interface ResolveAgentBrowserSessionResponse {
-  /** The Surface the handle named; absent when the request named a `key`, which
-   *  is answered whether or not a Surface holds that session yet. */
-  surfaceId?: string;
-  surfaceRef?: string;
-  /** The agent-browser session — what `dor ab` forwards as `--session`. Includes
-   *  GUI-minted sessions, which no `--key` can name. */
-  session: string;
+export interface ResolveBrowserResponse {
+  /** The key's or Surface's binding; a key no Surface holds yet gets the
+   *  session the host minted for it. */
+  binding: BrowserBinding;
 }
 
-export interface AgentBrowserSurfaceRequest extends WorkspaceScopedRequest {
+/** After a browser command succeeds: open or reuse the Surface bound to its
+ *  session. The binding fields are what the command ran with. */
+export interface BrowserSurfaceRequest extends WorkspaceScopedRequest {
+  provider: BrowserAutomationProvider;
   /** Managed workspace-scoped key; absent when attaching via raw --session. */
   key?: string;
-  /** Resolved agent-browser session name — the join key for the surface. */
   session: string;
-  /** Session stream WebSocket port from `stream status --json`. */
-  wsPort?: number;
-  /** Absolute path of the agent-browser binary, resolved with the invoking
-   * terminal's PATH so the host (which may lack it) can run tab/close. */
+  /** The directory the command ran in. */
+  cwd?: string;
+  /** Absolute path of the provider's binary, resolved with the invoking
+   * terminal's PATH so the host (which may lack it) can drive the browser. */
   binaryPath?: string;
+  /** agent-browser only: the stream port `dor ab` read itself after the
+   * command; the Surface streams from it instead of asking the host. */
+  wsPort?: number;
+  minimized?: boolean;
 }
 
-export interface AgentBrowserSurfaceResponse {
+export interface BrowserSurfaceResponse {
   status: 'created' | 'existing' | 'replaced';
   surfaceId: string;
   surfaceRef: string;
@@ -455,6 +461,8 @@ export interface AgentBrowserSurfaceResponse {
 }
 
 export interface ControlClient {
+  browserSurface(request: BrowserSurfaceRequest): Promise<BrowserSurfaceResponse>;
+  resolveBrowser(request: ResolveBrowserRequest): Promise<ResolveBrowserResponse>;
   listSurfaces(request: ListSurfacesRequest): Promise<ListSurfacesResponse>;
   splitSurface(request: SplitSurfaceRequest): Promise<SplitSurfaceResponse>;
   ensureSurface(request: EnsureSurfaceRequest): Promise<EnsureSurfaceResponse>;
@@ -464,11 +472,7 @@ export interface ControlClient {
   awaitSurface(request: AwaitSurfaceRequest): Promise<AwaitSurfaceResponse>;
   killSurface(request: KillSurfaceRequest): Promise<KillSurfaceResponse>;
   iframeSurface(request: IframeSurfaceRequest): Promise<IframeSurfaceResponse>;
-  agentBrowserSurface(request: AgentBrowserSurfaceRequest): Promise<AgentBrowserSurfaceResponse>;
   resolveOpenTarget(request: ResolveOpenTargetRequest): Promise<ResolveOpenTargetResponse>;
-  resolveAgentBrowserSession(
-    request: ResolveAgentBrowserSessionRequest,
-  ): Promise<ResolveAgentBrowserSessionResponse>;
   listWorkspaces(request: ListWorkspacesRequest): Promise<ListWorkspacesResponse>;
   newWorkspace(request: NewWorkspaceRequest): Promise<WorkspaceMutationResponse>;
   renameWorkspace(request: RenameWorkspaceRequest): Promise<WorkspaceMutationResponse>;
@@ -478,14 +482,15 @@ export interface ControlClient {
   restartApp(): Promise<AppRestartResponse>;
 }
 
-export interface AgentBrowserExecResult {
+export interface BrowserExecResult {
   exitCode: number;
   stdout: string;
   stderr: string;
 }
 
-/** Runs the user's agent-browser binary; injectable so CLI tests stay hermetic. */
-export type AgentBrowserExec = (binary: string, args: string[]) => Promise<AgentBrowserExecResult>;
+/** Runs the user's browser CLI binary, in `cwd` when given; injectable so CLI
+ *  tests stay hermetic. */
+export type BrowserExec = (binary: string, args: string[], cwd?: string) => Promise<BrowserExecResult>;
 
 export interface CliEnv {
   [key: string]: string | undefined;
@@ -496,7 +501,8 @@ export interface CliOptions {
   client?: ControlClient;
   readStdin?: () => Promise<string>;
   versionMetadata?: VersionMetadata;
-  execAgentBrowser?: AgentBrowserExec;
+  execAgentBrowser?: BrowserExec;
+  execPlaywright?: BrowserExec;
 }
 
 export interface CliResult {

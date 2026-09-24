@@ -1,23 +1,43 @@
 /** Per-surface bridge from browser bodies to their separate header and modal;
  * see docs/specs/dor-browser.md → "Browser Chrome". */
 import { useSyncExternalStore } from 'react';
+import { BROWSER_PROVIDERS, parseRenderMode, type BrowserAutomationProvider, type SurfaceRenderMode } from 'dor-lib-common/browser-providers';
 
 export type ScreenState = 'SYNCED' | 'SCALED';
 
-/** Canonical renderer values; defaulting belongs to `resolveRenderMode`. */
-export type RenderMode = 'ab-screencast' | 'ab-popout' | 'iframe';
+/** Canonical renderer values, one per provider presentation plus the embed
+ *  (`dor-lib-common/src/browser-providers.ts`); defaulting belongs to
+ *  `resolveRenderMode`. */
+export type RenderMode = SurfaceRenderMode;
+
+type ProviderAlias = (typeof BROWSER_PROVIDERS)[keyof typeof BROWSER_PROVIDERS]['alias'];
+
+/** How an automated browser's human view is presented: resizing with the
+ *  pane, at a fixed size, or popped out. */
+export type BrowserView = 'resize' | 'fixed' | 'popout';
+export const BROWSER_VIEWS: readonly BrowserView[] = ['resize', 'fixed', 'popout'];
 
 /** Capability-first browser display identity shared by pane chrome, the Display
- *  modal, and minimized Doors. The agent-browser modes always carry the robot;
- *  the second glyph describes where/how the human view is presented. */
-export type BrowserDisplayMode = 'ab-resize' | 'ab-fixed' | 'ab-popout' | 'iframe';
+ *  modal, and minimized Doors: a provider's view, or the embed. The automated
+ *  modes always carry the robot; the second glyph describes the view. */
+export type BrowserDisplayMode = 'iframe' | `${ProviderAlias}-${BrowserView}`;
+
+/** `provider`'s display mode for `view`. */
+export function displayModeFor(provider: BrowserAutomationProvider, view: BrowserView): BrowserDisplayMode {
+  return `${BROWSER_PROVIDERS[provider].alias}-${view}`;
+}
+
+/** The view a display mode presents, or the embed. */
+export function displayView(mode: BrowserDisplayMode): BrowserView | 'iframe' {
+  return mode === 'iframe' ? 'iframe' : mode.slice(mode.lastIndexOf('-') + 1) as BrowserView;
+}
 
 export function browserDisplayMode(
   snapshot: Pick<ScreenSnapshot, 'renderMode' | 'syncEngaged'>,
 ): BrowserDisplayMode {
-  if (snapshot.renderMode === 'iframe') return 'iframe';
-  if (snapshot.renderMode === 'ab-popout') return 'ab-popout';
-  return snapshot.syncEngaged ? 'ab-resize' : 'ab-fixed';
+  const { provider, presentation } = parseRenderMode(snapshot.renderMode);
+  if (provider === null) return 'iframe';
+  return displayModeFor(provider, presentation === 'popout' ? 'popout' : snapshot.syncEngaged ? 'resize' : 'fixed');
 }
 
 export interface ScreenSnapshot {
@@ -48,9 +68,11 @@ export interface ScreenActions {
   /** Swap this surface's render backend in place, preserving the target
    *  (docs/specs/dor-browser.md → "Display Modal And Render Swaps"). This is
    *  the single entry point for every mode, including `popout` (relaunch headed
-   *  — docs/specs/dor-browser.md → "Pop-Out"). Absent until the
-   *  swap is wired; the modal hides its Render section without it. */
-  setRenderMode?(mode: RenderMode): void;
+   *  — docs/specs/dor-browser.md → "Pop-Out"). With `url`, the Surface also
+   *  goes there — a relaunch opens it, so no navigation races the relaunch.
+   *  Absent until the swap is wired; the modal hides its Render section
+   *  without it. */
+  setRenderMode?(mode: RenderMode, opts?: { url?: string }): void;
 }
 
 /** What the browser-chrome header reads about the active tab
@@ -81,6 +103,10 @@ export interface ChromeActions {
   reload(): void;
 }
 
+/** `snapshot()` and `chrome()` feed useSyncExternalStore, so each must return
+ *  the same object until its own channel notifies; a fresh object per call
+ *  loops React's render. `registerAgentBrowserScreen` builds the only
+ *  production implementation. */
 export interface ScreenController {
   readonly id: string;
   subscribe(listener: () => void): () => void;
@@ -91,11 +117,12 @@ export interface ScreenController {
   subscribeChrome(listener: () => void): () => void;
   chrome(): ChromeSnapshot;
   readonly chromeActions: ChromeActions;
-  /** Whether the host can run `agentBrowserCommand` (false ⇒ resizes inert). */
+  /** Whether the host can drive this Surface's browser (false ⇒ resizes inert). */
   readonly hostCapable: boolean;
-  /** Whether this host/platform can pop the surface out to a headed OS window
-   *  (false/absent on web; gates the modal's `popout` render option). */
-  readonly canPopOut?: boolean;
+  /** The render modes this Surface can take — the Display modal offers these
+   *  (and the current mode) and nothing else. `offeredRenderModes` answers for
+   *  a host and Surface kind. */
+  readonly renderModes: readonly RenderMode[];
 }
 
 interface ScreenEntry {
@@ -136,7 +163,8 @@ export function registerAgentBrowserScreen(
     chrome: ChromeSnapshot;
     chromeActions: ChromeActions;
     hostCapable: boolean;
-    canPopOut?: boolean;
+    /** Absent: no render swap to offer. */
+    renderModes?: readonly RenderMode[];
   },
 ): ScreenRegistration {
   const entry: ScreenEntry = {
@@ -159,7 +187,7 @@ export function registerAgentBrowserScreen(
       chrome: () => entry.chrome,
       chromeActions: init.chromeActions,
       hostCapable: init.hostCapable,
-      canPopOut: init.canPopOut,
+      renderModes: init.renderModes ?? [],
     },
   };
   registry.set(id, entry);

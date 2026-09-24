@@ -29,7 +29,8 @@ import {
 import { BROWSER_DISPLAY_LABEL, BrowserDisplayIcon } from './BrowserDisplayIcon';
 import { InlineEditInput } from './InlineEditInput';
 import type { PaneProps } from './pane-props';
-import { loopbackPort, normalizeNavUrl, pathDisplay } from './browser-url';
+import { browserSurfaceUrl, loopbackPort, pathDisplay } from './browser-url';
+import { AnchoredWarning } from './AnchoredWarning';
 import { triggerDevServerRescan, useDevServerMatch } from './agent-browser-ports';
 import {
   ModeContext,
@@ -93,9 +94,14 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
     if (!screen && editingUrl) setEditingUrl(false);
   }, [screen, editingUrl]);
 
-  const submitUrl = (value: string) => {
-    const url = normalizeNavUrl(value);
+  // Every renderer shows http(s) only — the iframe sink and both provider
+  // hosts refuse anything else — so another scheme is refused here, visibly.
+  const [urlRefusal, setUrlRefusal] = useState<{ rect: DOMRect; value: string } | null>(null);
+  const closeUrlRefusal = useCallback(() => setUrlRefusal(null), []);
+  const submitUrl = (value: string, el: HTMLInputElement) => {
+    const url = browserSurfaceUrl(value);
     if (url) screen?.chromeActions.navigate(url);
+    else if (value.trim()) setUrlRefusal({ rect: el.getBoundingClientRect(), value: value.trim() });
     setEditingUrl(false);
   };
   const closeUrlEditor = () => setEditingUrl(false);
@@ -297,6 +303,15 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
         {renderBrowserControls('popover')}
         {!inlineMinimizeKill && <MinimizeKillButtons surfaceId={id} beforeAct={closeMenu} {...minimizeKillFocus} />}
       </BrowserHeaderPopover>}
+      {urlRefusal && (
+        <AnchoredWarning
+          data-url-refusal-for={id}
+          anchorRect={urlRefusal.rect}
+          title="Can’t open this address"
+          message={`Browser panes open http:// and https:// pages only, not “${urlRefusal.value}”.`}
+          onClose={closeUrlRefusal}
+        />
+      )}
     </div>
   );
 }

@@ -8,6 +8,9 @@
  * components so they can be unit-tested directly.
  */
 import type { AgentBrowserTab } from '../../lib/agent-browser-tab';
+import { isLoopbackHostname } from '../../lib/ip-literal';
+import { getPlatformOrNull } from '../../lib/platform';
+import { IFRAME_HTTP_ONLY } from '../../lib/platform/iframe-proxy-types';
 
 /** Host + path of a URL (e.g. `localhost:5173/app`) — the browser header's
  *  primary text, and the iframe surface's title. Pass `includeSearch` to keep
@@ -87,6 +90,17 @@ export function browserSurfaceUrl(raw: string): string | null {
   }
 }
 
+/** Why this host cannot show `url` in an iframe pane, or null when it can (or
+ *  when there is no URL yet): nothing but http(s) is framed, and a host with the
+ *  iframe proxy frames http:// only (docs/specs/dor-browser.md → "Iframe
+ *  Renderer"). The raw fallback of a proxy-less host frames https too. */
+export function iframeRefusal(url: string): string | null {
+  if (!url) return null;
+  const framed = browserSurfaceUrl(url);
+  if (!framed) return IFRAME_HTTP_ONLY;
+  return framed.startsWith('https:') && getPlatformOrNull()?.createIframeProxyUrl ? IFRAME_HTTP_ONLY : null;
+}
+
 /** The host part of a schemeless authority, minus any `:port`. An IPv6 literal
  *  is bracketed and full of colons, so splitting on the first `:` would yield
  *  `[` — take everything through the closing bracket instead, which keeps the
@@ -95,19 +109,6 @@ function authorityHostname(authority: string): string {
   if (!authority.startsWith('[')) return authority.split(':', 1)[0];
   const close = authority.indexOf(']');
   return close === -1 ? authority : authority.slice(0, close + 1);
-}
-
-/** True for hostnames that resolve to the local machine. `*.localhost` is
- *  included because browsers route it to loopback per the RFC. */
-function isLoopbackHostname(hostname: string): boolean {
-  const host = hostname.toLowerCase();
-  return (
-    host === 'localhost' ||
-    host === '127.0.0.1' ||
-    host === '::1' ||
-    host === '[::1]' ||
-    host.endsWith('.localhost')
-  );
 }
 
 /** The TCP port of a loopback URL, or null if the URL is not loopback / has no

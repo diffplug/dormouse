@@ -32,7 +32,7 @@ repository containing `agent-browser.cmd` executed on the next `dor ab` — and
 `dor skill` mandates `dor ab` for every page view. The 2026-09-19 security audit
 ([run 35432996343](https://github.com/diffplug/dormouse/actions/runs/35432996343))
 raised it as its one BLOCKER: the hijack needs a *legitimate* install present,
-because `agentBrowserIsMissing` refuses to spawn when the PATH walk finds
+because `browserBinaryIsMissing` refuses to spawn when the PATH walk finds
 nothing. The same audit named three sidecar sites spawning system binaries by
 bare name (`standalone/sidecar/pty-core.js`, `standalone/sidecar/clipboard-ops.js`)
 whose cwd is the app directory rather than a user's repository;
@@ -58,7 +58,7 @@ file `which` would" licenses the hijack — and that the X_OK probe was unpinned
 because `statSync().isFile()` already rejected the directory the test shadowed
 with. All three rounds were review findings on the fix, before it merged.
 
-**What a missing `windowsHide` looks like.** cross-spawn routes `.cmd` shims through `cmd.exe`, which owns a real console window, and the browser panel's screenshot loop spawns one per stream-frame pulse — a live page flickers focus-stealing windows several times a second.
+**What a missing `windowsHide` looks like.** cross-spawn routes `.cmd` shims through `cmd.exe`, which owns a real console window, and the browser host's crisp-capture loop spawns one per changed stream frame — a live page flickers focus-stealing windows several times a second.
 
 **Why none of the `exit`-vs-`close` trouble surfaced on macOS.** The `agent-browser` daemon double-forks and detaches from the inherited fds, so `close` fires normally; only on Windows, where the daemon holds the parent's stdout/stderr pipes for its whole life, does a `close`-only wait hang forever.
 
@@ -104,6 +104,10 @@ releases its request; it does not prove itself before receiving the client proof
 **What `dor list` replaced.** Two retired cmux-shaped commands, `list-panes` and `list-pane-surfaces`, plus `dor identify`, whose whole output became the top-level identity block of `dor list --json`. Collapsing all three into one listing is why new selection power goes into `dor list`'s filters rather than a second enumeration command.
 
 **Why `dor await` prints no terminal text.** Mirroring `dor read` would drag its whole output-flag surface (`--lines`, mode selection) onto `await` and spend the one thing `await` has that composes cleanly: a stdout that is nothing but the cause, so `CAUSE=$(dor await …)` needs no parsing. `dor await … && dor read …` gets the screen back for one extra command.
+
+## Browser Surface Addressing
+
+**Why the bind waits past the host's browser request timeout.** `surface.browser` answers only once the host has asked the browser where it streams, and that `attach` queues behind any launch, relaunch or close of the same browser, which can take the host's whole budget. At the client's default 5 s deadline, a command run just after a pop-out printed "could not open the Dormouse browser surface … timed out" and the pane bound anyway; agents read stderr, so the warning misled them (review of #777, 2026-09).
 
 ## Browser Open Target Resolution
 

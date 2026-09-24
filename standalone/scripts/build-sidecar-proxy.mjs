@@ -2,7 +2,9 @@
 // into CommonJS files the Node sidecar can require. Keeps each as a single
 // TypeScript source while the sidecar itself stays plain CJS.
 //   - lib/src/host/iframe-proxy.ts        → sidecar/iframe-proxy.cjs
+//   - lib/src/host/browser-host.ts        → sidecar/browser-host.cjs
 //   - lib/src/host/agent-browser-host.ts  → sidecar/agent-browser-host.cjs
+//   - lib/src/host/playwright-host.ts     → sidecar/playwright-host.cjs
 //   - lib/src/host/tool-host.ts           → sidecar/tool-host.cjs
 //   - lib/src/host/git-info.ts            → sidecar/git-info.cjs
 //   - lib/src/host/remote/sidecar-entry.ts → sidecar/burrow.cjs (the alerts too)
@@ -59,7 +61,9 @@ if (!SIDECAR_RUNTIME_DEPS.includes('node-datachannel')) {
 
 const bundles = [
   { entry: 'iframe-proxy.ts', out: 'iframe-proxy.cjs' },
+  { entry: 'browser-host.ts', out: 'browser-host.cjs' },
   { entry: 'agent-browser-host.ts', out: 'agent-browser-host.cjs' },
+  { entry: 'playwright-host.ts', out: 'playwright-host.cjs' },
   { entry: 'tool-host.ts', out: 'tool-host.cjs' },
   { entry: 'git-info.ts', out: 'git-info.cjs' },
   { entry: 'recovery.ts', out: 'recovery.cjs' },
@@ -127,10 +131,12 @@ for (const { entry, out, define, assertBaked, external } of bundles) {
     alias: { dor: path.resolve(here, '../../dor/src') },
     format: 'cjs',
     target: 'node24',
+    // `ws`'s optional native accelerators stay unresolved rather than bundled.
+    external: ['bufferutil', 'utf-8-validate', ...(external ?? [])],
     logLevel: 'warning',
     ...(define ? { define } : {}),
     // Only the bundle with externals to check reads one.
-    ...(external ? { external, metafile: true } : {}),
+    ...(external ? { metafile: true } : {}),
   });
   if (assertBaked) assertConnectSrcBaked(outfile, remoteSrc);
   if (external) assertNothingInlined(result.metafile, outfile, SIDECAR_RUNTIME_DEPS);

@@ -24,9 +24,10 @@ const RemotePairingModalHost = lazy(() =>
   })),
 );
 import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
-import { markAgentBrowserSessionClosed } from './wall/agent-browser-sessions';
-import { isAllowedAgentBrowserBinary } from '../lib/agent-browser-binary';
-import { disposeAgentBrowserSurfaceController } from './wall/agent-browser-surface-controller';
+import { BROWSER_PROVIDER_GUI, hostSupportsBrowser, providerUnavailable } from './wall/browser-automation';
+import { parseRenderMode, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
+import { isToolRender } from '../lib/platform/tool-types';
+import { closeBrowserSurface, requestBrowserRenderMode, whenBrowserLaunched } from './wall/agent-browser-surface-controller';
 import { KILL_CONFIRM_MS, KILL_SHAKE_MS, KillConfirmOverlay, randomKillChar, type ConfirmKill } from './KillConfirm';
 import { NotepadArchiveFailureModal, type NotepadArchiveFailure } from './NotepadArchiveFailure';
 import { messageOf } from '../lib/errors';
@@ -80,13 +81,16 @@ import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
 import {
   resolveRenderMode,
   agentBrowserSessionFromParams,
+  launchFallbackFromParams,
+  toolBrowserLaunchParams,
+  type LaunchFallback,
   browserDisplayModeFromParams,
   browserUrlFromParams,
   isBrowserParams,
   surfaceKindFromParams,
   isToolParams, namespacedToolKey, toolKeysEqual, toolPendingFromParams, toolScopeFromParams,
 } from './wall/browser-surface';
-import { browserSurfaceUrl, hostPathDisplay } from './wall/browser-url';
+import { browserSurfaceUrl, hostPathDisplay, iframeRefusal } from './wall/browser-url';
 import { WorkspaceSelectionOverlay } from './wall/WorkspaceSelectionOverlay';
 import { LathHost } from './wall/LathHost';
 import {
@@ -212,26 +216,6 @@ function stageDefaultShell(id: string, cwd: string | undefined): void {
 function compareBySurfaceRef(a: DorSurface, b: DorSurface): number {
   return (surfaceRefNumber(a.ref) ?? Number.MAX_SAFE_INTEGER)
     - (surfaceRefNumber(b.ref) ?? Number.MAX_SAFE_INTEGER);
-}
-
-/** Killing or swapping away from an agent-browser surface closes its session —
- *  surface lifetime and browser lifetime are bound (spec → Lifecycle). No-op
- *  for other surface types. */
-function closeAgentBrowserSession(params: unknown): void {
-  const session = agentBrowserSessionFromParams(params);
-  if (!session) return;
-  // Checked, not merely typed: these params come off the persisted session
-  // blob, and `binaryPath` names a program the host will spawn
-  // (`lib/src/lib/agent-browser-binary.ts`).
-  const binaryPath = (params as { binaryPath?: unknown }).binaryPath;
-  // Mark before issuing the close so a popped-out surface's auto-revert sees
-  // the impending teardown and doesn't relaunch the session we're killing.
-  markAgentBrowserSessionClosed(session);
-  getPlatform().agentBrowserCommand?.(
-    session,
-    ['close'],
-    isAllowedAgentBrowserBinary(binaryPath) ? binaryPath : undefined,
-  ).catch(() => {});
 }
 
 function ShellSpawnNotice({
@@ -690,8 +674,7 @@ export function Wall({
       // teardown lands here: the throwaway was created straight into a door.
       const door = doorsRef.current.find(d => d.id === id);
       if (!door) return;
-      closeAgentBrowserSession(lath.getMeta(id)?.params);
-      disposeAgentBrowserSurfaceController(id);
+      closeBrowserSurface(id, lath.getMeta(id)?.params);
       // Destroy the Door: drop the meta the store kept for it and, if it was parked,
       // unmount the DOM (and any iframe document still running inside it) with it.
       lath.store.forgetLeaf(id);
@@ -714,11 +697,10 @@ export function Wall({
       fireEvent({ type: 'kill', id });
       return;
     }
-    const params = nav.paneParams(id);
-    closeAgentBrowserSession(params);
-    // Release the surface's client-side controller (connection, loops, timers,
-    // screen registration). A safe no-op for iframe/terminal surfaces.
-    disposeAgentBrowserSurfaceController(id);
+    // Close its browser session and release the client-side controller
+    // (connection, loops, timers, screen registration). A safe no-op for
+    // iframe/terminal surfaces.
+    closeBrowserSurface(id, nav.paneParams(id));
     // Two-phase kill (docs/specs/tiling-engine.md → "Animation"): fade the pane in
     // place (a last-pane kill also shrinks it toward the bottom-right), then commit
     // `remove` once the fade completes — survivors tween into the reclaimed space.
@@ -1015,6 +997,15 @@ export function Wall({
         && resolveRenderMode(params) === 'iframe';
     }).map(surfaceRefForId),
     [lath, memberSurfaceIds, surfaceRefForId],
+  );
+
+  const browserSessions = useCallback(
+    (provider: BrowserAutomationProvider): string[] => memberSurfaceIds().flatMap((id) => {
+      const params = lath.getMeta(id)?.params as { renderMode?: unknown; session?: unknown; launchSession?: unknown } | undefined;
+      if (!params || parseRenderMode(params.renderMode).provider !== provider) return [];
+      return [params.session, params.launchSession].filter((session): session is string => typeof session === 'string');
+    }),
+    [lath, memberSurfaceIds],
   );
 
   /** Whether a member Surface has a PTY behind it, as against a browser view. */
@@ -1530,16 +1521,12 @@ export function Wall({
     return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), status: 'created' } };
   }, [generatePaneId, minimizePane, surfaceRefForId, transferSurfaceRef, lath, settleAddSelection, nav]);
 
-  // The last binary path a `dor ab` surface resolved on a terminal's PATH.
-  // Re-used to spawn an agent-browser when swapping an iframe embed up to a
-  // screencast, since the webview/host PATH may not find the binary itself.
-  const lastAgentBrowserBinaryPathRef = useRef<string | undefined>(undefined);
-
   /**
    * Replace a content surface's renderer in place, preserving its slot
    * (docs/specs/dor-browser.md → "Display Modal And Render Swaps"): an atomic
-   * identity swap that closes the old surface's session if any and selects the new.
-   * The generalized form of createContentSurface's replace-untouched-terminal branch.
+   * identity swap that closes the old surface's session if any and selects the
+   * new. The generalized form of createContentSurface's replace-untouched-terminal
+   * branch.
    */
   const replaceSurface = useCallback((oldId: string, next: {
     params: Record<string, unknown>;
@@ -1548,10 +1535,9 @@ export function Wall({
     const oldParams = nav.paneParams(oldId);
     const oldVisible = nav.hasPane(oldId);
     if (!oldVisible) return null;
-    closeAgentBrowserSession(oldParams);
-    // The old renderer's controller is going away with this swap; release its
-    // client-side resources (no-op for a non-agent-browser surface).
-    disposeAgentBrowserSurfaceController(oldId);
+    // The old renderer goes away with this swap: its session and its
+    // controller's client-side resources (no-op for a non-automated surface).
+    void closeBrowserSurface(oldId, oldParams);
     // A browser Surface has no helper; the terminal's goes with the old id.
     closeHelperParent(oldId);
     const newId = generatePaneId();
@@ -1651,7 +1637,6 @@ export function Wall({
     closeSurface,
     revealSurface,
     isClosingWorkspace: useCallback(() => closingWorkspaceRef.current, []),
-    lastAgentBrowserBinaryPathRef,
     workspaceRef: useCallback(() => workspaceRefFor(effectiveWorkspaceId), [effectiveWorkspaceId]),
     // The raw prop, not `effectiveWorkspaceId`: a bare Wall keeps the unscoped
     // agent-browser session names (docs/specs/dor-browser.md → Managed identity).
@@ -1797,6 +1782,7 @@ export function Wall({
     surfaceIds: memberSurfaceIds,
     ownsSurface,
     iframeSurfaceRefs,
+    browserSessions,
     hasTouchedSurfaces: () => memberSurfaceIds().some((id) => {
       // A browser Surface has no "untouched" notion and always holds a page, so
       // it counts; so does a Tool, before its terminal exists to be asked. A
@@ -1987,43 +1973,39 @@ export function Wall({
       const params = nav.paneParams(id);
       const currentRenderMode = surfaceRenderModeFromParams(params);
 
-      // Tools keep their Session and current URL through renderer swaps.
-      if (isToolParams(params)) {
-        if (mode === currentRenderMode || mode === 'ab-popout') return;
-        const url = browserUrlFromParams(params);
-        const platform = getPlatform();
-        if (!url || (mode === 'ab-screencast' && !platform.agentBrowserOpen)) return;
-        closeAgentBrowserSession(params);
-        disposeAgentBrowserSurfaceController(id);
-        lath.store.updateParams(id, {
-          toolRender: mode, renderMode: mode, url,
-          session: undefined, wsPort: undefined, syncEngaged: mode === 'ab-screencast',
-        });
-        if (mode === 'ab-screencast') {
-          const runId = getTerminalPaneState(id).currentCommand?.id;
-          void platform.agentBrowserOpen!(url, {}, lastAgentBrowserBinaryPathRef.current).then(result => {
-            const current = lath.getMeta(id)?.params;
-            if (!current || lath.isDying(id) || current.renderMode !== mode || current.url !== url || getTerminalPaneState(id).currentCommand?.id !== runId) {
-              if (result.session) closeAgentBrowserSession({ renderMode: mode, session: result.session, binaryPath: result.binaryPath });
-              return;
-            }
-            if (result.ok && result.session) {
-              lath.store.updateParams(id, { session: result.session, wsPort: result.wsPort, binaryPath: result.binaryPath });
-            } else lath.store.updateParams(id, { toolRender: 'iframe', renderMode: 'iframe', syncEngaged: false });
-          }).catch(() => {
-            const current = lath.getMeta(id)?.params;
-            if (current?.renderMode === mode && current.url === url && !current.session) lath.store.updateParams(id, { toolRender: 'iframe', renderMode: 'iframe', syncEngaged: false });
-          });
+      // No pane, tool or not, swaps onto an iframe that would refuse its page;
+      // the Display modal never offers it (docs/specs/dor-browser.md → "Iframe
+      // Renderer").
+      // The page on screen, which the Display modal judges too: `params.url`
+      // keeps only http(s) pages, so it can name an earlier one.
+      const shownUrl = getAgentBrowserScreenController(id)?.chrome().url || browserUrlFromParams(params);
+      if (mode === 'iframe') {
+        const refused = shownUrl ? iframeRefusal(shownUrl) : null;
+        if (refused) {
+          console.warn(`[dormouse] cannot swap surface '${id}' to iframe: ${refused}`);
+          return;
         }
+      }
+
+      // Tools keep their Session and current URL through renderer swaps, and
+      // take only their declarable renders: anything else would be written
+      // as `toolRender` and launch nothing (docs/specs/dor-tool.md).
+      if (isToolParams(params)) {
+        if (mode === currentRenderMode || !isToolRender(mode)) return;
+        const url = browserUrlFromParams(params);
+        if (!url || (mode === 'ab-screencast' && !hostSupportsBrowser('agent-browser'))) return;
+        closeBrowserSurface(id, params);
+        // The Tool's browser launches itself, in the Tool's own session.
+        lath.store.updateParams(id, mode === 'ab-screencast'
+          ? { toolRender: mode, syncEngaged: true, ...toolBrowserLaunchParams(id, params ?? {}, url) }
+          : { toolRender: mode, renderMode: mode, url, session: undefined, launchSession: undefined, launchFallback: undefined, syncEngaged: false });
         return;
       }
 
       // agent-browser → iframe: frame the active tab's URL, then the replace
       // closes the now-unneeded headless browser. Webview-only.
-      if ((currentRenderMode === 'ab-screencast' || currentRenderMode === 'ab-popout') && mode === 'iframe') {
-        // Canonical params.url (mirrored from the chrome snapshot) first; fall
-        // back to the live snapshot for a surface that hasn't reported a tab yet.
-        const url = browserUrlFromParams(params) || getAgentBrowserScreenController(id)?.chrome().url;
+      if (currentRenderMode !== 'iframe' && mode === 'iframe') {
+        const url = shownUrl;
         if (!url) {
           console.warn(`[dormouse] cannot swap surface '${id}' to iframe: no URL observed yet`);
           return;
@@ -2035,17 +2017,16 @@ export function Wall({
         return;
       }
 
-      // iframe → live agent-browser (ab-screencast or ab-popout): the host must
-      // spawn a session for the URL (absent ⇒ inert, like other host-gated
-      // affordances). ab-popout spawns headed directly so the new surface mounts
-      // already popped-out (no headless launch + immediate relaunch flash).
-      //
-      // The swap lands NOW: the iframe is replaced by a session-less agent-browser
-      // pane — inert, so it cannot race the daemon boot — whose placeholder names
-      // what it is waiting for, and the daemon hands it `{session, wsPort,
-      // binaryPath}` as one params refresh. Same shape as the pane context menu's
-      // connect (docs/specs/dor-browser.md → "Pane Context Menu Connect").
-      if (currentRenderMode === 'iframe' && (mode === 'ab-screencast' || mode === 'ab-popout')) {
+      // iframe or the other provider → a live automated browser (screencast or
+      // popout): absent a host that can launch one, inert like other
+      // host-gated affordances. The swap lands NOW: the old renderer is
+      // replaced by a session-less automated pane, whose controller launches
+      // the browser at the URL — headed for a popout, so it mounts already
+      // popped out — and binds the session it answers with
+      // (docs/specs/dor-browser.md → "Display Modal And Render Swaps").
+      const provider = parseRenderMode(mode).provider;
+      const currentProvider = parseRenderMode(currentRenderMode).provider;
+      if (currentRenderMode !== null && provider !== null && provider !== currentProvider) {
         const chromeUrl = getAgentBrowserScreenController(id)?.chrome().url;
         const rawUrl = (typeof chromeUrl === 'string' && chromeUrl)
           || (browserUrlFromParams(params) ?? '');
@@ -2053,7 +2034,7 @@ export function Wall({
         // non-http(s) source but still holds it, and this path would hand it to
         // a real Chromium tab — which `dor ab open` refuses at the CLI
         // (`normalizeConcreteOpenUrl`). Same guard, so both sinks agree.
-        const platform = getPlatform();
+        const cwd = typeof params?.cwd === 'string' ? params.cwd : undefined;
         // `browserSurfaceUrl('')` is already null (normalizeNavUrl returns ''
         // for empty input), so one branch covers both dead ends — and warning
         // matches the ab-* -> iframe branch above, whose own no-URL refusal is
@@ -2061,86 +2042,79 @@ export function Wall({
         const url = browserSurfaceUrl(rawUrl);
         if (!url) {
           const why = rawUrl ? `'${rawUrl}' is not an http(s) URL` : 'no URL observed yet';
-          console.warn(`[dormouse] cannot swap surface '${id}' to agent-browser: ${why}`);
+          console.warn(`[dormouse] cannot swap surface '${id}' to ${BROWSER_PROVIDER_GUI[provider].label}: ${why}`);
           return;
         }
-        if (!platform.agentBrowserOpen) return;
-        const headed = mode === 'ab-popout';
-        const title = hostPathDisplay(url, true);
-        const eagerId = replaceSurface(id, {
-          params: { surfaceType: 'browser', renderMode: mode, url, syncEngaged: true },
-          title,
-        });
-        if (!eagerId) return;
-        const eagerDoorExists = () => doorsRef.current.some((door) => door.id === eagerId);
-        const eagerSurfaceExists = () => (
-          !!lath.getMeta(eagerId) && (lath.store.has(eagerId) || eagerDoorExists())
-        );
-        const restoreIframe = () => {
-          if (lath.isDying(eagerId)) return;
-          if (lath.store.has(eagerId)) {
-            replaceSurface(eagerId, { params: { surfaceType: 'browser', renderMode: 'iframe', url }, title });
-            return;
-          }
-          // A minimized Surface is outside the visible tree but its Door + meta
-          // are still authoritative. Swap the parked body back in place so the
-          // Door does not remain a session-less "Connecting..." pane.
-          if (!eagerDoorExists() || !lath.getMeta(eagerId)) return;
-          disposeAgentBrowserSurfaceController(eagerId);
-          lath.store.updateParams(eagerId, { surfaceType: 'browser', renderMode: 'iframe', url, syncEngaged: false });
-          lath.store.setTitle(eagerId, title);
+        if (!hostSupportsBrowser(provider)) return;
+        // A browser that cannot come up gives the previous renderer back in
+        // place, even minimized meanwhile, at the URL: the embed, or the
+        // previous provider reopened in its own session, so its key and handle
+        // still name it.
+        const previousSession = agentBrowserSessionFromParams(params);
+        const restore = {
+          ...params,
+          surfaceType: 'browser',
+          renderMode: currentRenderMode,
+          url,
+          session: undefined,
+          ...(previousSession ? { launchSession: previousSession } : {}),
         };
-        platform.agentBrowserOpen(url, { headed }, lastAgentBrowserBinaryPathRef.current).then((res) => {
-          if (!res.ok || !res.session) {
-            console.warn(`[dormouse] failed to swap iframe surface '${id}' to agent-browser:`, res.error ?? '(no session)');
-            // Nothing came up to bind: give the iframe back if the eager Surface
-            // still exists, whether it is visible or minimized meanwhile.
-            restoreIframe();
-            return;
-          }
-          if (res.binaryPath) lastAgentBrowserBinaryPathRef.current = res.binaryPath;
-          const bound = {
-            session: res.session,
-            ...(res.wsPort !== undefined ? { wsPort: res.wsPort } : {}),
-            ...(res.binaryPath !== undefined ? { binaryPath: res.binaryPath } : {}),
-          };
-          // A Door is a retained Surface even though it is outside the visible
-          // tree. Close only when the eager Surface was genuinely destroyed (or
-          // its visible pane is mid-fade); otherwise hand the session to its meta.
-          if (!eagerSurfaceExists() || lath.isDying(eagerId)) {
-            closeAgentBrowserSession({ renderMode: mode, ...bound });
-            return;
-          }
-          updateSurfaceParams(eagerId, bound);
-        }).catch((err) => {
-          console.warn('[dormouse] failed to swap iframe surface to agent-browser:', err);
-          restoreIframe();
+        replaceSurface(id, {
+          params: { surfaceType: 'browser', renderMode: mode, url, cwd, syncEngaged: true, launchFallback: { restore } satisfies LaunchFallback },
+          title: hostPathDisplay(url, true),
         });
       }
     },
     onOpenBrowserPane: (id, url) => {
-      // A new-tab request from the iframe shim → open the URL as a new iframe
-      // browser pane, split next to the source (docs/specs/dor-browser.md →
-      // "Iframe Shim").
+      // A new-tab request from the iframe shim → a new browser pane split next
+      // to the source (docs/specs/dor-browser.md → "Iframe Shim"): an iframe,
+      // or an agent-browser pane for a page the iframe would refuse.
       const reference = buildDorSurfaces().find((s) => s.id === id);
       if (!reference) return;
+      const agentBrowser = !!iframeRefusal(url) && hostSupportsBrowser('agent-browser');
       createContentSurface({
         minimized: false,
-        params: { surfaceType: 'browser', renderMode: 'iframe', url },
+        // A launch that fails takes its pane with it.
+        params: agentBrowser
+          ? { surfaceType: 'browser', renderMode: 'ab-screencast', url, syncEngaged: true, launchFallback: 'close' satisfies LaunchFallback }
+          : { surfaceType: 'browser', renderMode: 'iframe', url },
         reference,
         title: hostPathDisplay(url, true),
       });
+    },
+    onBrowserLaunchFailed: (id, error) => {
+      // The one liveness check every creator's fallback shares.
+      const params = lath.getMeta(id)?.params;
+      const fallback = launchFallbackFromParams(params);
+      if (!fallback || lath.isDying(id) || isSurfaceClosing(id)) return;
+      console.warn(`[dormouse] browser surface '${id}' could not launch:`, error);
+      if (fallback === 'close') {
+        void closeSurfaceRef.current(id, 'silent');
+        return;
+      }
+      // The failed controller goes; the pane stays, as the embed or the
+      // renderer the swap replaced.
+      void closeBrowserSurface(id, params);
+      if (fallback === 'embed') {
+        lath.store.updateParams(id, { toolRender: 'iframe', renderMode: 'iframe', syncEngaged: false, launchSession: undefined, launchFallback: undefined });
+      } else {
+        lath.store.setMeta(id, browserLeafMeta(hostPathDisplay(browserUrlFromParams(fallback.restore) ?? '', true), fallback.restore));
+      }
     },
     resolveSurfaceRef: surfaceRefForId,
     onResolveToolApproval: (id: string, choice: 'upstream' | 'folder' | 'decline' | 'retry') => {
       void resolveToolApproval(id, choice);
     },
-  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, requestKill, replaceSurface, buildDorSurfaces, createContentSurface, surfaceRefForId, updateSurfaceParams, resolveToolApproval, lath, nav]);
+  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, requestKill, replaceSurface, buildDorSurfaces, createContentSurface, surfaceRefForId, resolveToolApproval, lath, nav]);
   const contextPortLaunches = useRef(new Map<string, Promise<void>>());
   const openContextPort = useCallback(async (id: string, entry: PortUrlEntry, mode: PortMode): Promise<void> => {
-    const platform = getPlatform();
-    if (mode === 'system') { platform.openExternal?.(entry.url); return; }
-    const key = `${id}:${entry.port}:${mode === 'iframe' ? 'iframe' : 'agent'}`;
+    if (mode === 'system') { getPlatform().openExternal?.(entry.url); return; }
+    const cwd = getTerminalPaneState(id)?.cwd?.path;
+    // Null for the iframe embed, which launches no browser.
+    const provider = parseRenderMode(mode).provider;
+    // Persisted as `contextPortKey`: agent-browser keeps the `agent` it had
+    // before Playwright, so a restored pane is still found and revealed.
+    const key = `${id}:${entry.port}:${provider === 'agent-browser' ? 'agent' : provider ?? 'iframe'}`;
     const pending = contextPortLaunches.current.get(key);
     if (pending) { await pending; return openContextPort(id, entry, mode); }
     const operation = (async () => {
@@ -2149,32 +2123,31 @@ export function Wall({
       const existing = findSurfaceByParams(params => (params as { contextPortKey?: unknown } | undefined)?.contextPortKey === key);
       if (existing) {
         revealSurface(existing.id);
-        if (mode !== 'iframe') {
-          const controller = getAgentBrowserScreenController(existing.id);
-          controller?.actions.setRenderMode?.(mode);
-          controller?.chromeActions.navigate(entry.url);
-        } else updateSurfaceParams(existing.id, { url: entry.url });
+        // One intent: a pop-out/pop-in relaunch opens the URL rather than
+        // racing a navigation into its close/reopen gap — reaching the
+        // Surface's controller even before a revealed Door mounts it.
+        if (mode !== 'iframe') requestBrowserRenderMode(existing.id, lath.getMeta(existing.id)?.params ?? {}, mode, { url: entry.url });
+        else updateSurfaceParams(existing.id, { url: entry.url });
         return;
       }
-      if (mode !== 'iframe' && !platform.agentBrowserOpen) throw new Error('Agent browser is unavailable');
+      if (provider && !hostSupportsBrowser(provider)) throw new Error(providerUnavailable(provider));
       const created = createContentSurface({ minimized: false, reference, preserveSource: true,
-        params: { surfaceType: 'browser', renderMode: mode, url: entry.url, syncEngaged: true, contextPortKey: key }, title: hostPathDisplay(entry.url, true) });
+        params: {
+          surfaceType: 'browser', renderMode: mode, url: entry.url, cwd, syncEngaged: true, contextPortKey: key,
+          // The pane launches its own browser; a failure takes it along.
+          ...(provider ? { launchFallback: 'close' satisfies LaunchFallback } : {}),
+        },
+        title: hostPathDisplay(entry.url, true) });
       if (!created.ok) throw new Error(created.message);
+      const launched = mode === 'iframe' ? null : whenBrowserLaunched(created.value.id);
       enterTerminalMode(created.value.id);
-      if (mode === 'iframe') return;
-      const result = await platform.agentBrowserOpen!(entry.url, { headed: mode === 'ab-popout' }, lastAgentBrowserBinaryPathRef.current);
-      if (!result.ok || !result.session) {
-        await closeSurface(created.value.id);
-        throw new Error(result.error ?? 'Could not open agent browser');
-      }
-      if (result.binaryPath) lastAgentBrowserBinaryPathRef.current = result.binaryPath;
-      const binding = { session: result.session, wsPort: result.wsPort, binaryPath: result.binaryPath };
-      if (!lath.getMeta(created.value.id) || lath.isDying(created.value.id)) { closeAgentBrowserSession({ renderMode: mode, ...binding }); return; }
-      updateSurfaceParams(created.value.id, binding);
+      // Reported in context.
+      const failure = await launched;
+      if (failure) throw new Error(failure);
     })();
     contextPortLaunches.current.set(key, operation);
     try { await operation; } finally { contextPortLaunches.current.delete(key); }
-  }, [buildDorSurfaces, findSurfaceByParams, createContentSurface, enterTerminalMode, closeSurface, lath, revealSurface, updateSurfaceParams]);
+  }, [buildDorSurfaces, findSurfaceByParams, createContentSurface, enterTerminalMode, revealSurface, updateSurfaceParams, lath]);
   const contextActions = useMemo(() => ({
     id: contextSourceId,
     mounted: terminalContext,
@@ -2210,7 +2183,7 @@ export function Wall({
   // Engine-directed writes for the pane props contract (docs/specs/tiling-engine.md
   // → "Pane props contract"): route a pane/header's title / params writes to the
   // engine's per-leaf metadata. Memoized so the sink handed to panels via context
-  // keeps a stable identity. The render-swap and wsPort-refresh param writes in
+  // keeps a stable identity. The render-swap and binary-refresh param writes in
   // Wall.tsx above route through the same engine.
   const paneWrite = useMemo<PaneWriteActions>(() => ({
     setTitle: (id, title) => lath.store.setTitle(id, title),

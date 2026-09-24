@@ -138,23 +138,23 @@ For click targeting, see **Clicking a link inside the screencast** above (1:1 ca
 
 ## What To Watch
 
-The high-rate `[ab-panel]`/`[agent-browser]` stream and screenshot console
-diagnostics are now **off by default** — they fire per frame (~20Hz). Enable them
-before a run and reload (the flag is read once at module load):
+The high-rate `[ab-panel]` viewer-socket console diagnostics are **off by
+default** — they fire per stream event. Enable them before a run and reload (the
+flag is read once, on the first log); the same flag has the host log each viewer
+socket's rates every 5 s:
 
 ```js
 localStorage.setItem('dormouse.flags.abDebugLogs', 'true'); // then reload
 ```
 
-The connection's always-on `debugSnapshot()` ring is unaffected, and the
-`stalled`/`failed`/`error` screenshot warnings stay unconditional.
+The connection's always-on `debugSnapshot()` ring is unaffected.
 
 In the harness terminal, correlate (with the flag on):
 
 - `[sidecar] ...` for sidecar behavior
-- `[browser log] [ab-panel] connecting stream ...`
+- `[browser-viewer] {"perSecond":{"framesIn":…,"provisional":…,"crisp":…,"captures":…,"kbOut":…},"captureAvgMs":…,"eventLoopDelayMs":…}` — the host's per-socket rates and its event-loop delay (sidecar stderr)
+- `[browser log] [ab-panel] connecting viewer ...`
 - `[browser log] [ab-panel] tabs msg ...`
-- `[browser log] [agent-browser] screenshot start/done ...`
 - `[browser log] [measure] ...`
 
 For a clean `dor ab open dormouse.sh`, the first tab snapshot should look like one active tab:
@@ -165,15 +165,15 @@ For a clean `dor ab open dormouse.sh`, the first tab snapshot should look like o
 
 If the first snapshot already contains GitHub or multiple Dormouse tabs, clear the nested session and rerun.
 
-### Static-page screenshot churn (diagnosed + fixed)
+### Static-page capture churn (diagnosed + fixed)
 
-A *static* page should produce **zero** `screenshot start/done` and **zero** `tabs msg` once it settles. If you see them repeating (~20/sec) with unchanged tab snapshots, that is the known churn bug.
+A *static* page should settle to **zero** `framesIn`, `crisp` and `captures` in the `[browser-viewer]` line, and **zero** `tabs msg`. If they stay near 20/sec with unchanged tab snapshots, that is the known churn bug.
 
-Root cause: the external agent-browser **daemon re-broadcasts the current frame and tab list on a ~20Hz heartbeat even when nothing changes**. Each forwarded frame triggers a device-resolution screenshot — *a child-process spawn* (`agent-browser screenshot`) — which pokes the daemon into emitting again: a self-perpetuating feedback loop. Each redundant `tabs` message also forces a `setTabs` React re-render.
+Root cause: the external agent-browser **daemon re-broadcasts the current frame and tab list on a ~20Hz heartbeat even when nothing changes**. Each forwarded frame triggers a device-resolution capture — *a child-process spawn* (`agent-browser screenshot`) — which pokes the daemon into emitting again: a self-perpetuating feedback loop. Each redundant `tabs` message also forces a `setTabs` React re-render.
 
-Fix (in `lib/src/components/wall/agent-browser-connection.ts`): drop **byte-identical** frame and tab re-broadcasts (djb2 hash of the payload) before emitting `frame-pulse` / `tabs`, resetting the dedupe sentinels on reconnect. A genuine change (animation, navigation, new/closed/focused tab, title) alters the bytes and flows through. See `agent-browser-connection.test.ts` for the dedupe + reconnect-reprime tests.
+Fix (host-side, `viewStream` in `lib/src/host/agent-browser-host.ts`): drop frame and tab re-broadcasts **byte-identical** to the last before they reach the viewer socket, per upstream connection, so a reconnect re-primes. A genuine change (animation, navigation, new/closed/focused tab, title) alters the bytes and flows through. See the `agent-browser host viewer` tests in `lib/src/host/agent-browser-host.test.ts`.
 
-**Regression check:** open `dormouse.sh`, let it settle ~4s, then over 10s of idle confirm `grep -c "screenshot start"` and `grep -c "tabs msg"` are both **0**. To re-measure the daemon's raw vs. forwarded rate, temporarily add a 2s-window counter in the connection (count frames/tabs seen vs. dropped-as-duplicate) — on a static page it reads ~39 seen / 39 dropped per 2s before the dedupe takes effect.
+**Regression check:** open `dormouse.sh`, let it settle ~4s, then over 10s of idle confirm the `[browser-viewer]` line reads `framesIn: 0` and `captures: 0`, and `grep -c "tabs msg"` is **0**.
 
 ## Validation
 
@@ -185,7 +185,7 @@ pnpm --filter dormouse-standalone test
 pnpm --filter dormouse-standalone build
 ```
 
-After changing webview/lib code under `lib/src` (e.g. the agent-browser connection, panel, or screenshot loop), run from `lib/`:
+After changing webview/lib code under `lib/src` (e.g. the agent-browser connection, panel, or controller), run from `lib/`:
 
 ```sh
 npx tsc --noEmit -p tsconfig.json

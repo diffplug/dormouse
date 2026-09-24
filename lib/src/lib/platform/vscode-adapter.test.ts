@@ -37,6 +37,7 @@ import { HOST_MESSAGE_TOKEN_FIELD, HOST_MESSAGE_TOKEN_GLOBAL } from '../vscode-m
 import { NOTEPAD_VOLATILE_GLOBAL } from '../vscode-notepad-global';
 import type { NotepadArchiveV1, VolatileNotepadSnapshot } from '../notepad/types';
 import { VSCodeAdapter } from './vscode-adapter';
+import { BROWSER_REQUEST_TIMEOUT_MS } from './browser-automation';
 
 /** Stand-in for the per-boot token the extension host injects at webview boot. */
 const BURROW_TOKEN = 'test-host-message-token';
@@ -455,6 +456,51 @@ describe('VSCodeAdapter PTY exit handling', () => {
 // (docs/specs/notepad.md). What is covered here is what this transport adds: the
 // compare-and-swap shape on the wire, failures that reject rather than resolve,
 // and the boot mirror being consumable exactly once.
+describe('VSCodeAdapter browser requests', () => {
+  beforeEach(stubWebviewEnv);
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  it('declares both providers', () => {
+    expect(new VSCodeAdapter().browserProviders).toEqual(['agent-browser', 'playwright']);
+  });
+
+  // A command queued behind a page-loading `open` answers only after the
+  // CLI's 25s action timeout, and a launch the host bounds to answer inside
+  // the same wait; giving up sooner makes the webview ask again.
+  it('waits out a daemon command held behind a page load', async () => {
+    vi.useFakeTimers();
+    const adapter = new VSCodeAdapter();
+    const binding = { session: 'sess' };
+    for (const request of [
+      () => adapter.browser({ provider: 'agent-browser', binding, op: 'launch', url: 'https://example.com/', headed: true }),
+      () => adapter.browser({ provider: 'agent-browser', binding, op: 'history', dir: 'reload' }),
+      () => adapter.browser({ provider: 'agent-browser', binding, op: 'edit', edit: 'copy' }),
+    ]) {
+      let settled: unknown;
+      void request().then((result) => { settled = result; });
+      await vi.advanceTimersByTimeAsync(BROWSER_REQUEST_TIMEOUT_MS - 1);
+      expect(settled).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(settled).toEqual({ ok: false, error: expect.stringMatching(/timed out/) });
+    }
+  });
+
+  it('carries the typed request out and keeps everything the host answers with', async () => {
+    const adapter = new VSCodeAdapter();
+    const attached = adapter.browser({ provider: 'agent-browser', binding: { session: 'sess' }, op: 'attach', url: 'https://example.com/' });
+    const request = postMessage.mock.calls.map(([message]) => message).find((message) => message.type === 'browser:request');
+    expect(request.request).toEqual({ provider: 'agent-browser', binding: { session: 'sess' }, op: 'attach', url: 'https://example.com/' });
+    windowTarget.dispatchEvent(hostMessage({
+      type: 'browser:result', requestId: request.requestId, result: { ok: true, stream: 4321, relaunched: true, headed: true, nativeIdentity: 'id' },
+    }));
+    expect(await attached).toEqual({ ok: true, stream: 4321, relaunched: true, headed: true, nativeIdentity: 'id' });
+  });
+});
+
 describe('VSCodeAdapter notepad archive', () => {
   beforeEach(stubWebviewEnv);
 

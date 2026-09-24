@@ -16,6 +16,11 @@
  * can import it without dragging the browser-typed `platform/types` graph into
  * a Node tsconfig (and vice-versa).
  */
+/** Why a host with the iframe proxy refuses an `https://` page — the one
+ *  wording the proxy, the panel, the Display modal and `surface.iframe` share.
+ *  Every refusal names `dor ab open <url>` as the remedy. */
+export const IFRAME_HTTP_ONLY = 'the embedded view frames http:// pages only';
+
 export type IframeProxyResult =
   | { ok: true; url: string }
   | { ok: false; reason: 'unreachable' | 'scheme'; detail?: string };

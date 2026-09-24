@@ -108,6 +108,25 @@ describe("TauriAdapter cwd probing", () => {
   });
 });
 
+describe("TauriAdapter browser requests", () => {
+  it("sends every request through one browser_request, and answers a failure as a result", async () => {
+    // Frames never cross this IPC: the webview takes them over the host's
+    // viewer socket.
+    const adapter = new TauriAdapter();
+    vi.mocked(rawInvoke).mockImplementation(async (cmd: string) => (cmd === "browser_request" ? { ok: true, stream: 4321 } : undefined));
+    const binding = { session: "sess" };
+
+    const attached = await adapter.browser({ provider: "playwright", binding, op: "attach" });
+    expect(attached).toEqual({ ok: true, stream: 4321 });
+    expect(vi.mocked(rawInvoke).mock.calls.filter(([cmd]) => cmd.startsWith("browser_"))).toEqual([
+      ["browser_request", { request: { provider: "playwright", binding, op: "attach" } }],
+    ]);
+
+    vi.mocked(rawInvoke).mockRejectedValueOnce(new Error("sidecar gone"));
+    expect(await adapter.browser({ provider: "agent-browser", binding, op: "close" })).toEqual({ ok: false, error: "sidecar gone" });
+  });
+});
+
 describe("TauriAdapter port probing", () => {
   it("sends one pty_get_open_ports_many for a whole listing, and fails soft", async () => {
     // `dor list --ports` across Workspaces asks once for every terminal: the

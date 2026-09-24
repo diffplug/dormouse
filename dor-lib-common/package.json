@@ -9,9 +9,9 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./agent-browser": {
-      "types": "./dist/agent-browser.d.ts",
-      "default": "./dist/agent-browser.js"
+    "./browser-providers": {
+      "types": "./dist/browser-providers.d.ts",
+      "default": "./dist/browser-providers.js"
     }
   },
   "scripts": {

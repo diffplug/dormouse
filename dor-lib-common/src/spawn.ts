@@ -1,4 +1,5 @@
 import spawn from 'cross-spawn';
+import path from 'node:path';
 
 export interface SpawnCaptureSuccess {
   readonly ok: true;
@@ -14,6 +15,28 @@ export interface SpawnCaptureFailure {
 }
 
 export type SpawnCaptureResult = SpawnCaptureSuccess | SpawnCaptureFailure;
+
+/** The `error.code` of a spawn that `timeoutMs` ended. */
+export const SPAWN_TIMEOUT_CODE = 'ETIMEDOUT';
+
+/**
+ * How a timed-out child is ended, or null for a plain SIGKILL of the child.
+ * Windows ends the whole tree: cross-spawn runs a `.cmd` shim through
+ * `cmd.exe`, so the child is the shell and the real CLI is its descendant,
+ * which killing the shell would leave running. `taskkill` is named by its
+ * absolute path for the same reason every other spawn is (a bare name is
+ * searched in the cwd first). Takes `isWindows` so both branches are testable
+ * off Windows.
+ */
+export function treeKillCommand(
+  pid: number,
+  env: { readonly [key: string]: string | undefined },
+  isWindows: boolean,
+): { binary: string; args: string[] } | null {
+  if (!isWindows) return null;
+  const systemRoot = env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows';
+  return { binary: path.win32.join(systemRoot, 'System32', 'taskkill.exe'), args: ['/PID', String(pid), '/T', '/F'] };
+}
 
 // Grace window for 'close' to win after 'exit' before we resolve anyway. Long
 // enough that a normal command's stdio drains (its output is written before the
@@ -35,12 +58,20 @@ const CLOSE_GRACE_MS = 250;
  *    daemon's post-exit scribbles would otherwise leak into the captured output.
  *
  * Never throws: a spawn-level failure resolves as `{ ok: false, error }`.
+ *
+ * `timeoutMs` bounds the whole call: past it the child is killed (its tree on
+ * Windows, `treeKillCommand`) and the call resolves `{ ok: false }` with
+ * `SPAWN_TIMEOUT_CODE`, without waiting for the kill.
  */
-export function spawnAndCapture(binary: string, args: readonly string[]): Promise<SpawnCaptureResult> {
+export function spawnAndCapture(
+  binary: string,
+  args: readonly string[],
+  options: { cwd?: string; timeoutMs?: number } = {},
+): Promise<SpawnCaptureResult> {
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+      child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, cwd: options.cwd });
     } catch (error) {
       // Invalid argv (for example a NUL in an eval string) throws before a child
       // exists; preserve the same result contract as an asynchronous ENOENT.
@@ -54,10 +85,12 @@ export function spawnAndCapture(binary: string, args: readonly string[]): Promis
     // double-resolve; clearTimeout drops the grace timer once we've settled.
     let settled = false;
     let graceTimer: ReturnType<typeof setTimeout> | undefined;
+    let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
     const settle = (apply: () => void): void => {
       if (settled) return;
       settled = true;
       if (graceTimer !== undefined) clearTimeout(graceTimer);
+      if (timeoutTimer !== undefined) clearTimeout(timeoutTimer);
       // Capture is over. In the grace fallback a daemon still owns the write
       // ends: leaving our readers open retains both the caller's event loop and
       // the data listeners that keep accumulating ignored output.
@@ -78,6 +111,22 @@ export function spawnAndCapture(binary: string, args: readonly string[]): Promis
     // 'exit' for the daemon-holds-the-pipe case where 'close' never fires; the
     // grace lets 'close' win first so a normal command's full output flushes, and
     // the exit-time snapshot keeps post-exit daemon noise out of the result.
+    if (options.timeoutMs !== undefined) {
+      timeoutTimer = setTimeout(() => {
+        settle(() => resolve({
+          ok: false,
+          error: { code: SPAWN_TIMEOUT_CODE, message: `${binary} did not finish within ${options.timeoutMs} ms` },
+        }));
+        const killer = child.pid === undefined ? null : treeKillCommand(child.pid, process.env, process.platform === 'win32');
+        if (!killer) {
+          child.kill('SIGKILL');
+          return;
+        }
+        const taskkill = spawn(killer.binary, killer.args, { stdio: 'ignore', windowsHide: true });
+        // Best effort: a failed tree kill still leaves the shell to end.
+        taskkill.on('error', () => child.kill('SIGKILL'));
+      }, Math.max(0, options.timeoutMs));
+    }
     child.on('close', (code: number | null) => finish(code, stdout, stderr));
     child.on('exit', (code: number | null) => {
       const out = stdout;

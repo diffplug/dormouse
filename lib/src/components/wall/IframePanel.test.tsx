@@ -10,7 +10,7 @@ import type { PaneProps } from './pane-props';
 import { IframePanel } from './IframePanel';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
 import { PaneWriteContext, WallActionsContext, type PaneWriteActions, type WallActions } from './wall-context';
-import { stubWallActions as stubActions } from './wall-test-utils';
+import { installBrowserHost, stubWallActions as stubActions } from './wall-test-utils';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -122,9 +122,10 @@ describe('IframePanel', () => {
     });
 
     expect(container.querySelector('iframe')).toBeNull();
-    expect(container.textContent).toContain('only frames');
+    expect(container.textContent).toContain('frames http:// pages only');
     // `dor ab open` refuses a non-http(s) target too, so it is not the remedy here.
     expect(container.textContent).not.toContain('dor ab open');
+    expect(container.textContent).not.toContain('Open in agent-browser');
   });
 
   // The panel frames the string it checked, not the one it was handed: a
@@ -203,9 +204,7 @@ describe('IframePanel', () => {
 
   it('drives iframe back and forward from the registered chrome actions', async () => {
     const updateParameters = vi.fn();
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserOpen'>;
-    platform.agentBrowserOpen = vi.fn();
-    setPlatform(platform);
+    installBrowserHost();
     await renderPanel(stubActions(), paneProps('iframe-history'), updateParameters);
 
     await act(async () => {
@@ -227,14 +226,12 @@ describe('IframePanel', () => {
 
   it('maps proxied frame location messages into chrome without updating params', async () => {
     const updateParameters = vi.fn();
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserOpen' | 'createIframeProxyUrl'>;
-    platform.agentBrowserOpen = vi.fn();
+    const { platform } = installBrowserHost();
     platform.createIframeProxyUrl = vi.fn(async () => ({
-      ok: true,
+      ok: true as const,
       url: 'http://127.0.0.1:61234/app',
       upstream: 'http://example.test/app',
     }));
-    setPlatform(platform);
     await renderPanel(stubActions(), paneProps('iframe-proxied'), updateParameters);
 
     await act(async () => {
@@ -250,13 +247,11 @@ describe('IframePanel', () => {
 
   it('re-resolves the proxy on Back after an observed in-frame navigation', async () => {
     const updateParameters = vi.fn();
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserOpen' | 'createIframeProxyUrl'>;
-    platform.agentBrowserOpen = vi.fn();
+    const { platform } = installBrowserHost();
     // Fixed URL so the proxy origin stays stable (the message handler gates on
     // it); re-resolution is observed via the call count, not a changed src.
-    const createProxy = vi.fn(async () => ({ ok: true, url: 'http://127.0.0.1:61234/app' }));
+    const createProxy = vi.fn(async () => ({ ok: true as const, url: 'http://127.0.0.1:61234/app' }));
     platform.createIframeProxyUrl = createProxy;
-    setPlatform(platform);
     await renderPanel(stubActions(), paneProps('iframe-back'), updateParameters);
 
     // Observe an in-frame navigation: it adds a history entry but, by design,
@@ -281,35 +276,213 @@ describe('IframePanel', () => {
   });
 });
 
-describe('the pop-out affordance on a tool (regression: PR #493 review)', () => {
+describe('iframe failures offer a way out', () => {
+  const PROXY = 'http://127.0.0.1:61234';
+  function proxyPlatform(result: Awaited<ReturnType<NonNullable<PlatformAdapter['createIframeProxyUrl']>>> = { ok: true, url: `${PROXY}/app` }, swapCapable = true) {
+    // A host that drives agent-browser can swap the pane to it.
+    const platform: PlatformAdapter = swapCapable ? installBrowserHost().platform : new FakePtyAdapter();
+    platform.createIframeProxyUrl = vi.fn(async () => result);
+    setPlatform(platform);
+    return platform;
+  }
+  // The shim's load report (`pageshow` / `DOMContentLoaded`); a clicked link's
+  // report carries no `loaded`.
+  const report = async (path = '/app', loaded = true) => {
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent('message', {
+        origin: PROXY,
+        data: { __dormouse: 'location', url: `${PROXY}${path}`, ...(loaded ? { loaded: true } : {}) },
+      }));
+    });
+  };
+  const button = (label: string) => Array.from(container.querySelectorAll('button')).find((b) => b.textContent === label);
+  const banner = () => container.querySelector('[role="status"]');
+
+  it('flags a proxied document the shim never reported from, and clears it when one reports', async () => {
+    vi.useFakeTimers();
+    try {
+      const onSwapRenderMode = vi.fn();
+      const platform = proxyPlatform();
+      const iframe = await renderPanel(stubActions({ onSwapRenderMode }), paneProps('iframe-uninstrumented'));
+
+      // An instrumented document reports its location, so its load is fine.
+      await report();
+      await act(async () => { iframe.dispatchEvent(new Event('load')); });
+      await act(async () => { vi.advanceTimersByTime(1100); });
+      expect(banner()).toBeNull();
+
+      // It navigates off the proxy: a load with no report.
+      await act(async () => { vi.advanceTimersByTime(2000); });
+      await act(async () => { iframe.dispatchEvent(new Event('load')); });
+      await act(async () => { vi.advanceTimersByTime(1100); });
+      expect(banner()?.textContent).toContain('Dormouse can’t follow this page');
+
+      await act(async () => { button('Open in agent-browser')!.click(); });
+      expect(onSwapRenderMode).toHaveBeenCalledWith('iframe-uninstrumented', 'ab-screencast');
+
+      const resolved = vi.mocked(platform.createIframeProxyUrl).mock.calls.length;
+      await act(async () => { button('Reload')!.click(); });
+      expect(vi.mocked(platform.createIframeProxyUrl).mock.calls.length).toBeGreaterThan(resolved);
+      expect(banner()).toBeNull();
+
+      // Flagged again, then a later report from the shim clears it.
+      await report();
+      await act(async () => { vi.advanceTimersByTime(2000); });
+      await act(async () => { iframe.dispatchEvent(new Event('load')); });
+      await act(async () => { vi.advanceTimersByTime(1100); });
+      expect(banner()).not.toBeNull();
+      await report('/back-on-the-proxy');
+      expect(banner()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // The proxy instruments HTML only: an image, PDF or JSON document framed from
+  // the start carries no shim and is working, not lost.
+  it('judges nothing until the frame\'s shim has reported once', async () => {
+    vi.useFakeTimers();
+    try {
+      proxyPlatform();
+      const iframe = await renderPanel(stubActions(), paneProps('iframe-non-html'));
+      await act(async () => { iframe.dispatchEvent(new Event('load')); });
+      await act(async () => { vi.advanceTimersByTime(1100); });
+      expect(banner()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not count a clicked link\'s report as the next document reporting', async () => {
+    vi.useFakeTimers();
+    try {
+      proxyPlatform();
+      const iframe = await renderPanel(stubActions(), paneProps('iframe-click-report'));
+      await report();
+      await act(async () => { vi.advanceTimersByTime(2000); });
+      // A same-origin link to a proxied PDF: the page being left reports the
+      // href a tick after the click, and the shim-less PDF loads right after.
+      await report('/manual.pdf', false);
+      await act(async () => { vi.advanceTimersByTime(50); });
+      await act(async () => { iframe.dispatchEvent(new Event('load')); });
+      await act(async () => { vi.advanceTimersByTime(1100); });
+      expect(banner()).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not count a clicked link that leaves the proxy as the shim reporting', async () => {
+    vi.useFakeTimers();
+    try {
+      proxyPlatform();
+      const iframe = await renderPanel(stubActions(), paneProps('iframe-offproxy-link'));
+      await report();
+      await act(async () => { vi.advanceTimersByTime(2000); });
+      // The shim posts a clicked link's href just before the frame navigates.
+      await act(async () => {
+        window.dispatchEvent(new MessageEvent('message', { origin: PROXY, data: { __dormouse: 'location', url: 'https://elsewhere.example/' } }));
+      });
+      await act(async () => { iframe.dispatchEvent(new Event('load')); });
+      await act(async () => { vi.advanceTimersByTime(1100); });
+      expect(banner()).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('offers agent-browser on an unproxyable url, with the command as the fallback', async () => {
+    const onSwapRenderMode = vi.fn();
+    proxyPlatform({ ok: false, reason: 'scheme', detail: 'the embedded view frames http:// pages only' });
+    await act(async () => {
+      root.render(
+        <PaneWriteContext.Provider value={{ updateParams: () => {}, setTitle: () => {} }}>
+          <WallActionsContext.Provider value={stubActions({ onSwapRenderMode })}>
+            <IframePanel id="iframe-https" title="t" params={{ url: 'https://example.com/' }} />
+          </WallActionsContext.Provider>
+        </PaneWriteContext.Provider>,
+      );
+    });
+
+    expect(container.textContent).toContain('Can’t frame this URL — the embedded view frames http:// pages only.');
+    expect(container.textContent).toContain('dor ab open https://example.com/');
+    await act(async () => { button('Open in agent-browser')!.click(); });
+    expect(onSwapRenderMode).toHaveBeenCalledWith('iframe-https', 'ab-screencast');
+
+    // A host that cannot launch one keeps only the command.
+    proxyPlatform({ ok: false, reason: 'scheme' }, false);
+    await act(async () => { root.render(<></>); });
+    await act(async () => {
+      root.render(
+        <PaneWriteContext.Provider value={{ updateParams: () => {}, setTitle: () => {} }}>
+          <WallActionsContext.Provider value={stubActions()}>
+            <IframePanel id="iframe-https-2" title="t" params={{ url: 'https://example.com/' }} />
+          </WallActionsContext.Provider>
+        </PaneWriteContext.Provider>,
+      );
+    });
+    expect(button('Open in agent-browser')).toBeUndefined();
+    expect(container.textContent).toContain('dor ab open https://example.com/');
+  });
+
+  it('opens a new https:// tab in agent-browser instead of an iframe that would refuse it', async () => {
+    const onOpenBrowserPane = vi.fn();
+    proxyPlatform();
+    await renderPanel(stubActions({ onOpenBrowserPane }), paneProps('iframe-newtab'));
+    const openWindow = async (url: string) => {
+      await act(async () => {
+        window.dispatchEvent(new MessageEvent('message', { origin: PROXY, data: { __dormouse: 'open-window', url } }));
+      });
+    };
+
+    await openWindow('https://accounts.example/login');
+    expect(button('Open in new pane')).toBeUndefined();
+    await act(async () => { button('Open in agent-browser')!.click(); });
+    expect(onOpenBrowserPane).toHaveBeenLastCalledWith('iframe-newtab', 'https://accounts.example/login');
+
+    await openWindow(`${PROXY}/docs`);
+    await act(async () => { button('Open in new pane')!.click(); });
+    expect(onOpenBrowserPane).toHaveBeenLastCalledWith('iframe-newtab', 'http://example.test/docs');
+  });
+});
+
+describe('the render modes a tool is offered (regression: PR #493 review)', () => {
   // A tool's `render` is `iframe` or `ab-screencast`, so pop-out has no
   // renderer to land in: offering it tears the browser down and re-derives the
-  // same screencast, so the user asks for a native window and gets a reload.
-  // `FakePtyAdapter` has no `agentBrowserPopOut`, so both cases would read
-  // `false` off the stock fake — attach one first, or the assertion is vacuous.
-  function withPopOutCapableHost() {
-    const platform = new FakePtyAdapter() as FakePtyAdapter & { agentBrowserPopOut: () => Promise<unknown> };
-    platform.agentBrowserPopOut = async () => ({ ok: true });
-    setPlatform(platform);
+  // same screencast, so the user asks for a native window and gets a reload;
+  // and a Playwright mode would be written as its render and launch nothing.
+  // `FakePtyAdapter` launches no browser, so every mode would be absent off the
+  // stock fake — make the host capable first, or the assertion is vacuous.
+  function withCapableHost() {
+    installBrowserHost();
   }
 
-  it('offers pop-out on a plain browser surface', async () => {
-    withPopOutCapableHost();
+  it('offers every mode on a plain browser surface', async () => {
+    withCapableHost();
     await renderPanel(stubActions({}), {
       id: 'iframe-plain',
       title: 'Plain',
       params: { surfaceType: 'browser', url: 'http://example.test/app' },
     });
-    expect(getAgentBrowserScreenController('iframe-plain')?.canPopOut).toBe(true);
+    expect(getAgentBrowserScreenController('iframe-plain')?.renderModes)
+      .toEqual(['ab-screencast', 'ab-popout', 'pw-screencast', 'pw-popout', 'iframe']);
   });
 
-  it('never offers it on a tool', async () => {
-    withPopOutCapableHost();
-    await renderPanel(stubActions({}), {
+  it('offers a tool only its declarable renders, and swaps to nothing else', async () => {
+    withCapableHost();
+    const onSwapRenderMode = vi.fn();
+    await renderPanel(stubActions({ onSwapRenderMode }), {
       id: 'iframe-tool',
       title: 'storybook',
       params: { surfaceType: 'tool', url: 'http://localhost:6006/' },
     });
-    expect(getAgentBrowserScreenController('iframe-tool')?.canPopOut).toBe(false);
+    const controller = getAgentBrowserScreenController('iframe-tool')!;
+    expect(controller.renderModes).toEqual(['ab-screencast', 'iframe']);
+    await act(async () => {
+      controller.actions.setRenderMode?.('pw-screencast');
+      controller.actions.setRenderMode?.('ab-popout');
+      controller.actions.setRenderMode?.('ab-screencast');
+    });
+    expect(onSwapRenderMode).toHaveBeenCalledExactlyOnceWith('iframe-tool', 'ab-screencast');
   });
 });

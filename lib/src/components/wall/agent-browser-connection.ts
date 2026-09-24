@@ -1,23 +1,11 @@
-import type { AgentBrowserCommandResult } from '../../lib/platform/types';
+import { decodeViewerFrame, type BrowserResult, type ViewerFrame, type ViewerState } from '../../lib/platform/browser-automation';
 import { type AgentBrowserTab, parseAgentBrowserTabs } from '../../lib/agent-browser-tab';
 
 // Re-exported so existing importers keep resolving the tab type/parser from here.
 export type { AgentBrowserTab };
 export { parseAgentBrowserTabs };
 
-// Stream messages above this size are frames (a base64 JPEG); status/tabs are
-// small JSON control messages. Large frames parse only while the consumer asks
-// for provisional low-latency hover feedback; the idle hot path stays hash+pulse.
-const FRAME_PULSE_THRESHOLD = 16384;
 const DEBUG_RING_LIMIT = 300;
-
-// Fast non-cryptographic string hash (djb2) for cheap byte-identity checks on
-// stream payloads. Used to detect redundant frames/tabs the daemon re-broadcasts.
-function djb2(s: string): number {
-  let h = 5381;
-  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
-  return h;
-}
 
 export type AgentBrowserConnectionState = 'connecting' | 'open' | 'closed' | 'failed';
 
@@ -28,73 +16,49 @@ export interface AgentBrowserStreamStatus {
   viewportHeight?: number;
 }
 
-/** A frame's device dims. Both are required: a partial or zero-sized report can
- *  neither size the surface nor key a resize, so it degrades to absent metadata
- *  rather than to a half-filled record (see `frameMetadata`). */
-export interface AgentBrowserFramePulse {
-  deviceWidth: number;
-  deviceHeight: number;
-}
-
-/** Read device dims off a stream frame's envelope, in the one place both the
- *  large (>16KB) and small frame paths share. */
-function frameMetadata(raw: { deviceWidth?: unknown; deviceHeight?: unknown } | undefined): AgentBrowserFramePulse | undefined {
-  const w = raw?.deviceWidth;
-  const h = raw?.deviceHeight;
-  return typeof w === 'number' && w > 0 && typeof h === 'number' && h > 0
-    ? { deviceWidth: w, deviceHeight: h }
-    : undefined;
-}
-
 export interface AgentBrowserSnapshot {
   connection: AgentBrowserConnectionState;
   session: string;
-  streamPort: number;
+  stream: number;
   tabs: AgentBrowserTab[];
   status: AgentBrowserStreamStatus | null;
-  connectionLost: boolean;
   lastError?: string;
-  livePortOpened: boolean;
 }
 
 export type AgentBrowserConnectionEvent =
-  | { type: 'connection-open'; port: number }
-  | { type: 'connection-close'; port: number; failures: number; code: number; reason: string; wasClean: boolean }
-  | { type: 'connection-error'; port: number }
+  | { type: 'connection-open'; stream: number }
+  | { type: 'connection-close'; stream: number; failures: number; code: number; reason: string; wasClean: boolean }
+  | { type: 'connection-error'; stream: number }
   | { type: 'status'; status: AgentBrowserStreamStatus }
   | { type: 'tabs'; tabs: AgentBrowserTab[]; previousTabs: AgentBrowserTab[] }
   /** The active tab committed a navigation. Fires at commit; the `tabs`
    *  snapshot refreshes only when the driving command completes, which for a
-   *  slow page is the whole load (docs/specs/dor-browser.md → "Agent-Browser
-   *  Connection"). */
+   *  slow page is the whole load (docs/specs/dor-browser.md → "Viewer
+   *  Socket"). */
   | { type: 'url'; url: string }
-  | {
-      type: 'frame-pulse';
-      metadata?: AgentBrowserFramePulse;
-      /** CSS-resolution stream JPEG, base64 encoded. Present only when the
-       *  consumer requested a provisional paint. */
-      data?: string;
-    }
+  /** A popped-out window's page, as its browser reports it. */
+  | { type: 'page'; url: string; title: string | null }
+  /** A frame to paint: provisional (CSS resolution) or crisp. */
+  | ({ type: 'frame' } & ViewerFrame)
   | { type: 'debug'; event: AgentBrowserDebugEvent };
 
 export interface AgentBrowserDebugEvent {
   ts: number;
   session: string;
-  port: number;
+  stream: number;
   event: string;
   data?: unknown;
 }
 
 export interface AgentBrowserConnectionDeps {
   session: string;
-  streamPort: number;
-  binaryPath?: string;
-  getStreamUrl?: (port: number) => Promise<string | undefined>;
-  runCommand?: (session: string, args: string[], binaryPath?: string) => Promise<AgentBrowserCommandResult>;
+  /** The live browser's stream, as the host's launch or attach named it. */
+  stream: number;
+  /** A fresh single-use URL for the host's viewer socket on it. */
+  viewUrl: () => Promise<string>;
+  /** Make `tabId` the active tab. */
+  selectTab?: (tabId: string) => Promise<BrowserResult>;
   canSelectTabs?: () => boolean;
-  /** Whether the current stream frame's JPEG bytes are useful to the consumer.
-   *  False keeps the idle hot path at hash+pulse without parsing the large JSON. */
-  wantFrameData?: () => boolean;
   log?: (message: string) => void;
 }
 
@@ -102,6 +66,12 @@ export function createAgentBrowserConnection(deps: AgentBrowserConnectionDeps): 
   return new AgentBrowserConnection(deps);
 }
 
+/**
+ * The webview's end of one viewer socket (docs/specs/dor-browser.md → "Viewer
+ * Socket"): frames arrive binary, state as JSON, both already deduplicated by
+ * the host; input goes back as JSON. A socket that closes is dialed again with
+ * a fresh URL, backing off, and the consumer counts the failures.
+ */
 export class AgentBrowserConnection {
   private readonly listeners = new Set<(event: AgentBrowserConnectionEvent) => void>();
   private readonly debugEvents: AgentBrowserDebugEvent[] = [];
@@ -113,28 +83,15 @@ export class AgentBrowserConnection {
   private pendingNewTab: { tabId: string; initialUrl: string; seenAtMs: number } | null = null;
   private snap: AgentBrowserSnapshot;
 
-  // The agent-browser daemon re-broadcasts the current frame and tab list on a
-  // ~20Hz heartbeat even when nothing changes, so a *static* page would otherwise
-  // drive ~20 device-resolution screenshots/sec (each a child-process spawn) plus
-  // ~20 `setTabs` re-renders/sec. We drop byte-identical re-broadcasts here so an
-  // unchanged page costs nothing downstream (the screenshot loop's own contract:
-  // "a static page produces no pulses, so no shots and no cost"). `0`/`''` are
-  // pre-first-message sentinels, and reset on reconnect so a fresh stream always
-  // re-primes the canvas/tabs.
-  private lastFrameKey = 0;
-  private lastTabsSig = '';
-
   constructor(private readonly deps: AgentBrowserConnectionDeps) {
     this.snap = {
       connection: 'connecting',
       session: deps.session,
-      streamPort: deps.streamPort,
+      stream: deps.stream,
       tabs: [],
       status: null,
-      connectionLost: false,
-      livePortOpened: false,
     };
-    this.connect();
+    void this.connect();
   }
 
   subscribe(listener: (event: AgentBrowserConnectionEvent) => void): () => void {
@@ -172,7 +129,7 @@ export class AgentBrowserConnection {
     const item: AgentBrowserDebugEvent = {
       ts: Date.now(),
       session: this.deps.session,
-      port: this.deps.streamPort,
+      stream: this.deps.stream,
       event,
       ...(data !== undefined ? { data } : {}),
     };
@@ -190,160 +147,98 @@ export class AgentBrowserConnection {
   }
 
   private async connect(): Promise<void> {
-    let url: string | undefined;
+    let url: string;
     try {
-      url = await this.deps.getStreamUrl?.(this.deps.streamPort);
+      url = await this.deps.viewUrl();
     } catch (err) {
-      this.debug('stream-url-error', { error: err instanceof Error ? err.message : String(err) });
+      if (this.disposed) return;
+      const reason = err instanceof Error ? err.message : String(err);
+      this.debug('view-url-error', { error: reason });
+      this.closed({ code: 0, reason, wasClean: false });
+      return;
     }
     if (this.disposed) return;
-    const wsUrl = url ?? `ws://127.0.0.1:${this.deps.streamPort}`;
-    this.log(`[ab-panel] connecting stream ${JSON.stringify({ wsPort: this.deps.streamPort, url: wsUrl })}`);
-    this.debug('connect', { url: wsUrl });
-    this.socket = new WebSocket(wsUrl);
-    this.socket.onopen = () => {
+    this.log(`[ab-panel] connecting viewer ${JSON.stringify({ stream: this.deps.stream })}`);
+    this.debug('connect');
+    const socket = this.socket = new WebSocket(url);
+    socket.binaryType = 'arraybuffer';
+    socket.onopen = () => {
       this.failures = 0;
-      this.patch({ connection: 'open', connectionLost: false, livePortOpened: true });
-      this.log(`[ab-panel] stream open ${JSON.stringify({ wsPort: this.deps.streamPort })}`);
+      this.patch({ connection: 'open' });
+      this.log(`[ab-panel] viewer open ${JSON.stringify({ stream: this.deps.stream })}`);
       this.debug('open');
-      this.emit({ type: 'connection-open', port: this.deps.streamPort });
+      this.emit({ type: 'connection-open', stream: this.deps.stream });
     };
-    this.socket.onmessage = (ev) => this.handleMessage(ev.data);
-    this.socket.onerror = () => {
-      this.patch({ lastError: 'stream socket error' });
-      this.log(`[ab-panel] stream error ${JSON.stringify({ wsPort: this.deps.streamPort })}`);
+    socket.onmessage = (ev) => this.handleMessage(ev.data);
+    socket.onerror = () => {
+      this.patch({ lastError: 'viewer socket error' });
+      this.log(`[ab-panel] viewer error ${JSON.stringify({ stream: this.deps.stream })}`);
       this.debug('error');
-      this.emit({ type: 'connection-error', port: this.deps.streamPort });
+      this.emit({ type: 'connection-error', stream: this.deps.stream });
     };
-    this.socket.onclose = (ev) => {
+    socket.onclose = (ev) => {
       this.socket = null;
-      // A reconnected stream re-sends the current frame/tabs; clear the dedupe
-      // sentinels so that first post-reconnect snapshot always re-primes the
-      // canvas and tab list rather than being dropped as a "duplicate".
-      this.lastFrameKey = 0;
-      this.lastTabsSig = '';
       if (this.disposed) return;
-      this.failures += 1;
-      if (this.failures >= 3) this.patch({ connection: 'failed', connectionLost: true });
-      else this.patch({ connection: 'closed' });
-      const data = { wsPort: this.deps.streamPort, failures: this.failures, code: ev.code, reason: ev.reason, wasClean: ev.wasClean };
-      this.log(`[ab-panel] stream close ${JSON.stringify(data)}`);
-      this.debug('close', data);
-      this.emit({ type: 'connection-close', port: this.deps.streamPort, failures: this.failures, code: ev.code, reason: ev.reason, wasClean: ev.wasClean });
-      this.retryTimer = setTimeout(() => this.connect(), Math.min(1000 * 2 ** this.failures, 10000));
+      this.closed({ code: ev.code, reason: ev.reason, wasClean: ev.wasClean });
     };
   }
 
-  // Drop a frame whose pixels (and device dims) match the previous one — the
-  // daemon's heartbeat re-broadcasts an unchanged page, and redrawing it is pure
-  // cost. Returns true when the frame is a duplicate the caller should ignore.
-  // The dims are mixed into the hash rather than into the payload string: a frame
-  // is ~100KB of base64 at ~20Hz, so a `${data}@WxH` key would copy all of it just
-  // to hash it and throw it away.
-  private isDuplicateFrame(payload: string, metadata?: AgentBrowserFramePulse): boolean {
-    let key = djb2(payload) ^ (payload.length | 0);
-    if (metadata) key = (key ^ Math.imul(metadata.deviceWidth, 31) ^ metadata.deviceHeight) | 0;
-    if (key === this.lastFrameKey) return true;
-    this.lastFrameKey = key;
-    return false;
-  }
-
-  /** The single frame-emission point. `withData` carries the base64 body to the
-   *  consumer for a provisional paint; without it the event is a bare pulse that
-   *  only paces the crisp screenshot loop. */
-  private emitFrame(data: string, metadata: AgentBrowserFramePulse | undefined, withData: boolean): void {
-    if (this.isDuplicateFrame(data, metadata)) return;
-    this.emit({ type: 'frame-pulse', metadata, ...(withData ? { data } : {}) });
+  /** The socket closed, or could not be asked for: count it, and dial again. */
+  private closed({ code, reason, wasClean }: { code: number; reason: string; wasClean: boolean }): void {
+    this.failures += 1;
+    this.patch({ connection: this.failures >= 3 ? 'failed' : 'closed' });
+    const data = { stream: this.deps.stream, failures: this.failures, code, reason, wasClean };
+    this.log(`[ab-panel] viewer close ${JSON.stringify(data)}`);
+    this.debug('close', data);
+    this.emit({ type: 'connection-close', ...data });
+    if (this.disposed) return;
+    this.retryTimer = setTimeout(() => void this.connect(), Math.min(1000 * 2 ** this.failures, 10000));
   }
 
   private handleMessage(raw: unknown): void {
-    if (typeof raw !== 'string') return;
-    if (raw.length > FRAME_PULSE_THRESHOLD) {
-      // Size alone can't discriminate a frame from a control message: a `tabs`
-      // snapshot or URL with enough text crosses the threshold too, and routing
-      // it as a frame would silently drop the update. A frame's bulk is a base64
-      // JPEG body, whose alphabet contains no `"` or `:`, so these compact type
-      // substrings cannot occur inside a real frame — they are zero-false-positive
-      // markers for oversized control messages. Only those pay a parse; frames
-      // keep the hash+pulse fast path untouched.
-      if (
-        raw.includes('"type":"tabs"')
-        || raw.includes('"type":"status"')
-        || raw.includes('"type":"url"')
-      ) {
-        this.dispatchControl(raw);
-        return;
-      }
-      // `wantFrameData` gates only the parse itself: on the large path it is the
-      // difference between JSON.parsing ~100KB and hashing it, which is the whole
-      // point of the threshold. Emission policy lives in emitFrame. Asked here (and
-      // below) rather than once up top so `status`/`tabs` never pay for it.
-      if (this.deps.wantFrameData?.()) {
-        try {
-          const msg = JSON.parse(raw) as { type?: unknown; data?: unknown; metadata?: { deviceWidth?: unknown; deviceHeight?: unknown } };
-          if (msg.type === 'frame' && typeof msg.data === 'string') {
-            this.emitFrame(msg.data, frameMetadata(msg.metadata), true);
-            return;
-          }
-        } catch {
-          // Older/raw daemons may send the JPEG body without a JSON envelope. It
-          // still drives the crisp capture, just without a provisional paint.
-        }
-      }
-      if (this.isDuplicateFrame(raw)) return;
-      this.emit({ type: 'frame-pulse' });
+    if (raw instanceof ArrayBuffer) {
+      const frame = decodeViewerFrame(raw);
+      if (frame) this.emit({ type: 'frame', ...frame });
       return;
     }
-    this.dispatchControl(raw);
-  }
-
-  // Parse a JSON envelope and route it to the frame/status/tabs handlers. Shared
-  // by the small-message path and the oversized-control-message path above.
-  private dispatchControl(raw: string): void {
-    let msg: any;
+    if (typeof raw !== 'string') return;
+    let msg: ViewerState;
     try {
-      msg = JSON.parse(raw);
+      msg = JSON.parse(raw) as ViewerState;
     } catch {
       return;
     }
-    if (msg.type === 'frame' && typeof msg.data === 'string') {
-      this.emitFrame(msg.data, frameMetadata(msg.metadata), this.deps.wantFrameData?.() ?? false);
-    } else if (msg.type === 'status') {
+    if (msg.type === 'status') {
       const status: AgentBrowserStreamStatus = {
         connected: msg.connected === true,
         screencasting: msg.screencasting === true,
         ...(typeof msg.viewportWidth === 'number' ? { viewportWidth: msg.viewportWidth } : {}),
         ...(typeof msg.viewportHeight === 'number' ? { viewportHeight: msg.viewportHeight } : {}),
       };
-      this.patch({ status, connectionLost: msg.connected === false });
+      this.patch({ status });
       this.emit({ type: 'status', status });
     } else if (msg.type === 'tabs' && Array.isArray(msg.tabs)) {
       this.handleTabs(parseAgentBrowserTabs(msg.tabs));
     } else if (msg.type === 'url' && typeof msg.url === 'string') {
       this.debug('url', { url: msg.url });
       this.emit({ type: 'url', url: msg.url });
+    } else if (msg.type === 'page' && typeof msg.url === 'string') {
+      this.debug('page', { url: msg.url });
+      this.emit({ type: 'page', url: msg.url, title: typeof msg.title === 'string' ? msg.title : null });
     }
   }
 
   private handleTabs(next: AgentBrowserTab[]): void {
     const previousTabs = this.snap.tabs;
     if (next.length === 0 && previousTabs.length > 0) {
-      this.log(`[ab-panel] empty tabs snapshot ignored ${JSON.stringify({ w: this.deps.streamPort, previous: previousTabs.length })}`);
+      this.log(`[ab-panel] empty tabs snapshot ignored ${JSON.stringify({ stream: this.deps.stream, previous: previousTabs.length })}`);
       this.debug('tabs-empty-ignored', { previous: previousTabs.length });
       return;
     }
 
-    // Drop an identical tab-snapshot re-broadcast (same ids, active flags, urls,
-    // titles): it would otherwise re-run tab-selection and force a `setTabs`
-    // re-render every heartbeat. A real change (new/closed tab, navigation,
-    // focus, title) alters the signature and falls through.
-    const fullSig = JSON.stringify(next.map((t) => `${t.tabId}:${t.active ? 'A' : '-'}:${t.url}:${t.title ?? ''}`));
-    if (fullSig === this.lastTabsSig) return;
-    this.lastTabsSig = fullSig;
-
     this.maybeSelectNewTab(next, previousTabs);
     this.knownTabIds = new Set(next.map((t) => t.tabId));
-    const sig = JSON.stringify({ w: this.deps.streamPort, t: next.map((t) => `${t.tabId}:${t.active ? 'A' : '-'}:${t.url}`) });
+    const sig = JSON.stringify({ stream: this.deps.stream, t: next.map((t) => `${t.tabId}:${t.active ? 'A' : '-'}:${t.url}`) });
     this.log(`[ab-panel] tabs msg ${sig}`);
     this.debug('tabs', { tabs: next });
     this.patch({ tabs: next });
@@ -356,10 +251,8 @@ export class AgentBrowserConnection {
       if (!canSelect) return;
       this.log(`[ab-panel] selecting tab ${JSON.stringify({ tabId: tab.tabId, url: tab.url, reason })}`);
       this.debug('select-tab', { tabId: tab.tabId, url: tab.url, reason });
-      this.deps.runCommand?.(this.deps.session, ['tab', tab.tabId], this.deps.binaryPath).then((result) => {
-        if (result.exitCode !== 0) {
-          this.log(`[agent-browser] tab ${tab.tabId} failed: ${result.stderr || result.stdout || `exit ${result.exitCode}`}`);
-        }
+      this.deps.selectTab?.(tab.tabId).then((result) => {
+        if (!result.ok) this.log(`[agent-browser] tab ${tab.tabId} failed: ${result.error ?? 'no reason given'}`);
       }).catch((err) => this.log(`[agent-browser] tab ${tab.tabId} failed: ${err instanceof Error ? err.message : String(err)}`));
     };
 

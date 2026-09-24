@@ -1,4 +1,3 @@
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value as JsonValue};
 mod log_tail;
@@ -1004,7 +1003,7 @@ fn request_from_sidecar(
 /// must be declared `#[tauri::command(async)]` (or be an `async fn`). Tauri runs
 /// a plain sync command on the **main thread**, where the `recv_timeout` below
 /// stops the webview from painting for the whole round trip — up to
-/// `AGENT_BROWSER_TIMEOUT` (30s) for a hung agent-browser, and a visible ~3s
+/// `BROWSER_REQUEST_TIMEOUT` (40s) for a hung browser host, and a visible ~3s
 /// freeze on a cold `agent-browser open`, which is long enough to look like a
 /// pane that never appeared. `(async)` moves the same blocking body onto a
 /// runtime worker, so the UI keeps rendering while the sidecar works.
@@ -1485,149 +1484,30 @@ fn tool_control(
     Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
 }
 
-// ── agent-browser host (docs/specs/dor-browser.md → "Agent-Browser Host Capabilities").
+// ── Browser automation (docs/specs/dor-browser.md → "Browser Host").
 // Thin forwarders to the Node sidecar, which runs the shared
-// lib/src/host/agent-browser-host.ts — the very same module the VS Code
-// extension host runs. Mirrors iframe_create_proxy_url; the logic lives in lib,
-// not here, so the two hosts can't drift. ──────────────────────────────────────
+// lib/src/host/browser-host.ts — the very same module the VS Code extension
+// host runs, and the one place a request is validated. Mirrors
+// iframe_create_proxy_url; the logic lives in lib, not here, so the two hosts
+// can't drift. ────────────────────────────────────────────────────────────────
 
-// agent-browser launches Chrome (slow on first run), and pop-out is a
-// close + relaunch, so allow a generous window before a forward times out.
-const AGENT_BROWSER_TIMEOUT: Duration = Duration::from_secs(30);
-
-fn agent_browser_forward(
-    state: &SidecarState,
-    event: &str,
-    data: JsonValue,
-) -> Result<JsonValue, String> {
-    let response = request_from_sidecar_timeout(state, event, data, AGENT_BROWSER_TIMEOUT)?;
-    Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
-}
+// BROWSER_REQUEST_TIMEOUT_MS in dor-lib-common/src/browser-providers.ts: the
+// host bounds a launch (slow on a first Chrome run, and pop-out is a close +
+// relaunch) to answer inside it.
+const BROWSER_REQUEST_TIMEOUT: Duration = Duration::from_secs(40);
 
 #[tauri::command(async)]
-fn agent_browser_command(
+fn browser_request(
     state: tauri::State<'_, SidecarState>,
-    session: String,
-    args: Vec<String>,
-    binary_path: Option<String>,
+    request: JsonValue,
 ) -> Result<JsonValue, String> {
-    agent_browser_forward(
+    let response = request_from_sidecar_timeout(
         &state,
-        "agentBrowser:command",
-        serde_json::json!({ "session": session, "args": args, "binaryPath": binary_path }),
-    )
-}
-
-#[tauri::command(async)]
-fn agent_browser_edit(
-    state: tauri::State<'_, SidecarState>,
-    session: String,
-    op: String,
-    binary_path: Option<String>,
-) -> Result<JsonValue, String> {
-    agent_browser_forward(
-        &state,
-        "agentBrowser:edit",
-        serde_json::json!({ "session": session, "op": op, "binaryPath": binary_path }),
-    )
-}
-
-#[tauri::command(async)]
-fn agent_browser_stream_status(
-    state: tauri::State<'_, SidecarState>,
-    session: String,
-    binary_path: Option<String>,
-) -> Result<JsonValue, String> {
-    agent_browser_forward(
-        &state,
-        "agentBrowser:streamStatus",
-        serde_json::json!({ "session": session, "binaryPath": binary_path }),
-    )
-}
-
-#[tauri::command(async)]
-fn agent_browser_open(
-    state: tauri::State<'_, SidecarState>,
-    url: String,
-    headed: Option<bool>,
-    binary_path: Option<String>,
-) -> Result<JsonValue, String> {
-    agent_browser_forward(
-        &state,
-        "agentBrowser:open",
-        serde_json::json!({ "url": url, "headed": headed, "binaryPath": binary_path }),
-    )
-}
-
-// `rect` is accepted by the adapter but unused — no window positioning today.
-#[tauri::command(async)]
-fn agent_browser_pop_out(
-    state: tauri::State<'_, SidecarState>,
-    session: String,
-    url: Option<String>,
-    binary_path: Option<String>,
-) -> Result<JsonValue, String> {
-    agent_browser_forward(
-        &state,
-        "agentBrowser:popOut",
-        serde_json::json!({ "session": session, "url": url, "binaryPath": binary_path }),
-    )
-}
-
-#[tauri::command(async)]
-fn agent_browser_pop_in(
-    state: tauri::State<'_, SidecarState>,
-    session: String,
-    url: Option<String>,
-    binary_path: Option<String>,
-) -> Result<JsonValue, String> {
-    agent_browser_forward(
-        &state,
-        "agentBrowser:popIn",
-        serde_json::json!({ "session": session, "url": url, "binaryPath": binary_path }),
-    )
-}
-
-// The sidecar hands back the screenshot's temp-file PATH (bytes no longer ride
-// the JSON-lines stdio shared with PTY traffic). Read the file here and return a
-// raw tauri::ipc::Response so the webview gets an ArrayBuffer (the path the panel
-// decodes with createImageBitmap). A base64 `bytesBase64` field is kept as a
-// fallback for a stale sidecar bundle (dev-time version skew), but the path
-// branch is preferred.
-#[tauri::command(async)]
-fn agent_browser_screenshot(
-    state: tauri::State<'_, SidecarState>,
-    session: String,
-    format: Option<String>,
-    quality: Option<u32>,
-    binary_path: Option<String>,
-) -> Result<tauri::ipc::Response, String> {
-    let result = agent_browser_forward(
-        &state,
-        "agentBrowser:screenshot",
-        serde_json::json!({ "session": session, "format": format, "quality": quality, "binaryPath": binary_path }),
+        "browser:request",
+        serde_json::json!({ "request": request }),
+        BROWSER_REQUEST_TIMEOUT,
     )?;
-    if result.get("ok").and_then(JsonValue::as_bool) != Some(true) {
-        return Err(result
-            .get("error")
-            .and_then(JsonValue::as_str)
-            .unwrap_or("screenshot failed")
-            .to_string());
-    }
-    if let Some(path) = result.get("path").and_then(JsonValue::as_str) {
-        let bytes = std::fs::read(path)
-            .map_err(|err| format!("could not read screenshot file '{path}': {err}"))?;
-        return Ok(tauri::ipc::Response::new(bytes));
-    }
-    // Fallback: an older sidecar bundle still base64s the bytes over stdio.
-    let b64 = result
-        .get("bytesBase64")
-        .and_then(JsonValue::as_str)
-        .ok_or("screenshot returned no path or bytes")?;
-    let bytes = BASE64
-        .decode(b64)
-        .map_err(|err| format!("bad screenshot base64: {err}"))?;
-    Ok(tauri::ipc::Response::new(bytes))
+    Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
 }
 
 // Clipboard reads run natively on Windows (see clipboard_win) to avoid the
@@ -4517,13 +4397,7 @@ pub fn run() {
             load_notepad_archive,
             save_notepad_archive,
             reset_notepad_archive,
-            agent_browser_command,
-            agent_browser_edit,
-            agent_browser_screenshot,
-            agent_browser_stream_status,
-            agent_browser_open,
-            agent_browser_pop_out,
-            agent_browser_pop_in,
+            browser_request,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Dormouse")
@@ -6257,14 +6131,12 @@ mod tests {
                 }
             }
 
-            // Match direct callers of the blocking helper *and* the
-            // agent-browser commands, which reach it transitively through the
-            // `agent_browser_forward` wrapper (their bodies never name
-            // `request_from_sidecar` directly). That family carries the longest
-            // timeout (AGENT_BROWSER_TIMEOUT = 30s), so it's the worst case to
-            // let slip plain-sync.
+            // Match direct callers of the blocking helper *and* anything that
+            // reaches it transitively through `browser_request`, which carries
+            // the longest timeout (BROWSER_REQUEST_TIMEOUT = 40s), so it's the
+            // worst case to let slip plain-sync.
             let reaches_blocking = [
-                "request_from_sidecar", "agent_browser_forward", "ARRIVAL_DISK_LOCK",
+                "request_from_sidecar", "browser_request", "ARRIVAL_DISK_LOCK",
                 "record_arrival_on_disk", "mark_arrival_adopted_on_disk", "return_arrival_on_disk",
                 "forget_arrival_on_disk", "read_arrivals_from", "write_arrivals_to", "restore_arrivals",
                 "close_window_snapshot", "finish_window_close", "begin_arrival", "hand_back_arrival",

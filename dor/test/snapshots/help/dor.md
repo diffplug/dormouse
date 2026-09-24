@@ -17,6 +17,7 @@ USAGE
   dor kill <surface> [--confirm-if-read text|--confirm-dangerously] [--json] [--workspace ref]
   dor iframe [--json] [--minimize] [--surface id|ref] [--workspace ref] <target>
   dor agent-browser [--key name|--session name|--surface handle] [--workspace ref] [args...]
+  dor playwright [--key name] [--session name] [--surface handle] [--workspace ref] <args>...
   dor list [--all] [--command text] [--cwd path] [--id-format refs|ids|both] [--json] [--kind terminal|browser|tool] [--port number] [--ports] [--view paned|zoomed|minimized] [--workspace ref] [--workspaces] [--window label]
   dor workspace new|rename|close|switch|move [args...] [flags...]
   dor app restart [--json]
@@ -41,6 +42,7 @@ COMMANDS
   kill           Kill a surface.
   iframe         Open a target in an iframe surface.
   agent-browser  Drive a browser surface via your agent-browser install (alias: dor ab).
+  playwright     Drive a browser surface via your Playwright CLI install (alias: dor pw).
   list           List Dormouse Surfaces.
   workspace      Create, rename, close, switch, or move Workspaces.
   app            Restart Dormouse Standalone, resuming Claude and Codex sessions.

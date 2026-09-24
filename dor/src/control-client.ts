@@ -1,9 +1,9 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createConnection } from 'node:net';
 import type {
-  AgentBrowserSurfaceRequest,
-  AgentBrowserSurfaceResponse,
   AppRestartResponse,
+  BrowserSurfaceRequest,
+  BrowserSurfaceResponse,
   AwaitSurfaceRequest,
   AwaitSurfaceResponse,
   ControlClient,
@@ -25,8 +25,8 @@ import type {
   WorkspaceMutationResponse,
   ReadSurfaceRequest,
   ReadSurfaceResponse,
-  ResolveAgentBrowserSessionRequest,
-  ResolveAgentBrowserSessionResponse,
+  ResolveBrowserRequest,
+  ResolveBrowserResponse,
   ResolveOpenTargetRequest,
   ResolveOpenTargetResponse,
   SendSurfaceRequest,
@@ -43,6 +43,7 @@ import {
   type DorControlMethod,
 } from './protocol.js';
 import type { DorControlResult } from './protocol.js';
+import { BROWSER_REQUEST_TIMEOUT_MS } from 'dor-lib-common';
 
 export interface SocketControlClientOptions {
   socketPath: string;
@@ -148,21 +149,24 @@ export class SocketControlClient implements ControlClient {
     return this.request<IframeSurfaceResponse>(SURFACE_CONTROL_METHODS.iframe, request);
   }
 
-  agentBrowserSurface(request: AgentBrowserSurfaceRequest): Promise<AgentBrowserSurfaceResponse> {
-    return this.request<AgentBrowserSurfaceResponse>(SURFACE_CONTROL_METHODS.agentBrowser, request);
+  // The host asks the browser where it streams (`attach`) before answering,
+  // which can wait behind a launch or close of that browser for as long as
+  // the host's own request timeout; the socket deadline sits above it, so a
+  // bind that succeeds late is never reported as a failure.
+  browserSurface(request: BrowserSurfaceRequest): Promise<BrowserSurfaceResponse> {
+    return this.request<BrowserSurfaceResponse>(
+      SURFACE_CONTROL_METHODS.browser,
+      request,
+      { timeoutMs: BROWSER_REQUEST_TIMEOUT_MS + 5_000 },
+    );
+  }
+
+  resolveBrowser(request: ResolveBrowserRequest): Promise<ResolveBrowserResponse> {
+    return this.request<ResolveBrowserResponse>(SURFACE_CONTROL_METHODS.resolveBrowser, request);
   }
 
   resolveOpenTarget(request: ResolveOpenTargetRequest): Promise<ResolveOpenTargetResponse> {
     return this.request<ResolveOpenTargetResponse>(SURFACE_CONTROL_METHODS.resolveOpen, request);
-  }
-
-  resolveAgentBrowserSession(
-    request: ResolveAgentBrowserSessionRequest,
-  ): Promise<ResolveAgentBrowserSessionResponse> {
-    return this.request<ResolveAgentBrowserSessionResponse>(
-      SURFACE_CONTROL_METHODS.resolveAgentBrowser,
-      request,
-    );
   }
 
   listWorkspaces(request: ListWorkspacesRequest): Promise<ListWorkspacesResponse> {

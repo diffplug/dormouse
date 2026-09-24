@@ -3,46 +3,19 @@
  * stricli so forwarded arguments are never parsed as dor flags. */
 
 import { buildCommand } from '@stricli/core';
-// All external spawns go through dor-lib-common's spawnAndCapture, which owns the
-// Windows recipe (cross-spawn for PATHEXT/.cmd, windowsHide, exit-vs-close).
-// See docs/specs/dor-cli.md → "Spawning External Binaries".
 import {
-  spawnAndCapture,
-  parseStreamPort,
-  sessionForKey,
-  streamStatusArgs,
   AGENT_BROWSER_BIN_ENV,
+  BROWSER_PROVIDERS,
   DEFAULT_AGENT_BROWSER_BIN,
+  streamStatusArgs,
+  type BrowserAutomationProvider,
 } from 'dor-lib-common';
-import { accessSync, constants, existsSync, statSync } from 'node:fs';
-import type {
-  CliEnv,
-  AgentBrowserExecResult,
-  CliOptions,
-  CliResult,
-  Command,
-  DorCommandContext,
-  ParseResult,
-} from './types.js';
-import { errorMessage, fail, requireControlClient, stringParser, workspaceFlag, workspaceParam } from './shared.js';
-import {
-  inferredHttpUrl,
-  isSpecialOpenTarget,
-  isSurfaceOpenTarget,
-  resolveSurfaceOpenTarget,
-} from './open-target.js';
+import { runBrowserCli, type BrowserCliDescriptor } from './browser-cli.js';
+import type { CliOptions, CliResult, Command, DorCommandContext } from './types.js';
+import { stringParser, workspaceFlag } from './shared.js';
 
-const INSTALL_HINT = 'npm i -g agent-browser';
+const INSTALL_HINT = BROWSER_PROVIDERS['agent-browser'].installHint;
 const INSTALL_DOCS = 'https://agent-browser.dev';
-
-// Extensions a bare command name can carry on Windows, and the order to try
-// them in. This is `which@2`'s own hardcoded fallback — npm's list, deliberately
-// NOT cmd.exe's `.COM;.EXE;.BAT;.CMD` — because `resolveBinaryPath` now picks
-// the file that gets spawned and has to choose the same one cross-spawn's
-// `which` would (docs/specs/dor-cli.md → "Spawning External Binaries").
-// Source: `getPathInfo` in `which/which.js`. Shared by resolveBinaryPath (PATH
-// walk) and existsCandidate (explicit path, where order only affects reporting).
-const WINDOWS_BIN_EXTS = ['.EXE', '.CMD', '.BAT', '.COM'];
 
 /**
  * Clear, multi-line guidance shown when the user's agent-browser binary is
@@ -65,13 +38,8 @@ function missingBinaryMessage(binary: string): string {
   ].join('\n');
 }
 
-// A managed --key becomes part of an agent-browser session name (see
-// sessionForKey in dor-lib-common), which becomes a filesystem path — so `/` is
-// not usable; restrict to a readable, path-safe charset.
-const KEY_PATTERN = /^[A-Za-z0-9._-]+$/;
-
 export const agentBrowserCommand: Command = {
-  name: 'agent-browser',
+  name: 'agent-browser' satisfies BrowserAutomationProvider,
   helpPatches: [
     {
       scope: 'root',
@@ -106,8 +74,9 @@ command surface. The binary is resolved from PATH (override with
 DORMOUSE_AGENT_BROWSER_BIN) and is never bundled; install it with:
   ${INSTALL_HINT}
 
-After a successful command, dor opens (or reuses) the browser surface bound to
-the session: one session is always exactly one surface.
+After a successful command, dor opens the browser surface bound to the session,
+or reuses the one it already has. A Playwright browser (render_mode pw-*) is
+driven with dor pw --surface instead.
 
 In an "open" command, dor also resolves a Dormouse target in place of a URL:
 a schemeless host:port (and the ":<port>" localhost shorthand) defaults to
@@ -146,383 +115,26 @@ Examples:
   }),
 };
 
-/** The three identity flags dor intercepts, in the order they are reported when
- *  more than one is given. */
-const IDENTITY_FLAGS = ['--key', '--session', '--surface'] as const;
-
-/** Every flag dor takes out of the forwarded argv: the identities plus the
- *  container, which names a Workspace rather than a browser. */
-const INTERCEPTED_FLAGS = [...IDENTITY_FLAGS, '--workspace'] as const;
-type InterceptedFlag = (typeof INTERCEPTED_FLAGS)[number];
-
-/** How the browser was named: a raw session known CLI-side, a managed `--key`
- *  the host namespaces under the target Workspace, or a Surface handle the host
- *  resolves — exactly one of the three, by construction. `key` rides along only
- *  when it named the session: a raw or surface-addressed session may be
- *  GUI-minted, which no key names. */
-type ResolvedSessionFlags = { rest: string[]; workspace?: string } & (
-  | { session: string; key?: undefined; surface?: undefined }
-  | { key: string; session?: undefined; surface?: undefined }
-  | { surface: string; session?: undefined; key?: undefined }
-);
-
-export function extractSessionFlags(args: string[]): ParseResult<ResolvedSessionFlags> {
-  const values = new Map<InterceptedFlag, string>();
-  const rest: string[] = [];
-
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index] ?? '';
-    const flag = INTERCEPTED_FLAGS.find((name) => arg === name || arg.startsWith(`${name}=`));
-    if (!flag) {
-      rest.push(arg);
-      continue;
-    }
-
-    let value: string | undefined;
-    if (arg.includes('=')) {
-      value = arg.slice(arg.indexOf('=') + 1);
-    } else {
-      value = args[index + 1];
-      index += 1;
-    }
-    if (!value || value.startsWith('-')) {
-      return { ok: false, message: `${flag} requires a value` };
-    }
-    values.set(flag, value);
-  }
-
-  // Three ways to name one browser; naming it twice is always a mistake, never
-  // a precedence question.
-  const given = IDENTITY_FLAGS.filter((flag) => values.has(flag));
-  if (given.length > 1) {
-    // "--key and --session"; "--key, --session and --surface" — reported in
-    // IDENTITY_FLAGS order, not argv order, so the message is stable.
-    const joined = `${given.slice(0, -1).join(', ')} and ${given[given.length - 1]}`;
-    return { ok: false, message: `${joined} are mutually exclusive` };
-  }
-
-  const key = values.get('--key');
-  if (key !== undefined && !KEY_PATTERN.test(key)) {
-    return { ok: false, message: `--key must match ${KEY_PATTERN} (it becomes part of an agent-browser session name)` };
-  }
-
-  const workspace = workspaceParam(values.get('--workspace'));
-
-  const surface = values.get('--surface');
-  if (surface !== undefined) return { ok: true, value: { surface, rest, ...workspace } };
-
-  const session = values.get('--session');
-  if (session !== undefined) return { ok: true, value: { session, rest, ...workspace } };
-
-  // The key's session name belongs to the Workspace that will hold the browser,
-  // so it is resolved host-side rather than built here (`resolveSession`).
-  return { ok: true, value: { key: key ?? 'default', rest, ...workspace } };
-}
-
-export async function runAgentBrowserCli(args: string[], options: CliOptions): Promise<CliResult> {
-  const flags = extractSessionFlags(args);
-  if (!flags.ok) return fail(flags.message);
-  const { key } = flags.value;
-
-  // `--surface <handle>` names the browser Surface rather than the session, so
-  // the session comes from the host's session↔surface registry before anything
-  // is forwarded. This is the only way to drive a GUI-spawned session, whose
-  // `gui-<hex>` name no `--key` can produce.
-  const resolvedSession = await resolveSession(flags.value, options);
-  if (!resolvedSession.ok) return fail(resolvedSession.message);
-  const session = resolvedSession.value;
-
-  // `dor ab open <target>` accepts a Surface handle / bare :port wherever it
-  // takes a URL; resolve it to a URL before forwarding, because agent-browser
-  // only understands URLs. Every other command's args pass through untouched.
-  const resolvedRest = await resolveOpenTargetArgs(flags.value.rest, options, flags.value.workspace);
-  if (!resolvedRest.ok) return fail(resolvedRest.message);
-  const rest = resolvedRest.value;
-
-  const env = options.env ?? {};
-  const binary = env[AGENT_BROWSER_BIN_ENV] || DEFAULT_AGENT_BROWSER_BIN;
-  const exec = options.execAgentBrowser ?? execAgentBrowserProcess;
-
-  // Resolve the binary to an absolute path once: it proves the install present
-  // (below), is what we spawn (see `execTarget`), and travels to the host as
-  // `binaryPath` (a GUI host may not share this terminal's PATH). undefined
-  // means "not found on PATH" — or, for an explicit path, simply "returned
-  // verbatim", which agentBrowserIsMissing re-checks on disk.
-  const binaryPath = resolveBinaryPath(binary, env);
-
-  // Spawn the resolved path, never the bare name: cross-spawn resolves a bare
-  // name through `which`, which checks `process.cwd()` *before* PATH on Windows
-  // (and re-emits the bare name into cmd.exe for a `.cmd` shim, which does the
-  // same). Since `dor` inherits the pane's cwd, a bare-name spawn would let an
-  // `agent-browser.cmd` sitting in a cloned repository win the race against the
-  // real install — repo content executing with no gate, which
-  // docs/specs/dor-tool.md -> Trust treats as a boundary.
-  //
-  // The `?? binary` branch is unreachable on the real path and is a type-level
-  // belt only: agentBrowserIsMissing already ends the call whenever binaryPath is
-  // undefined, and an explicit path comes back from resolveBinaryPath verbatim.
-  // Only a stub exec (tests), which skips that check, reaches it.
-  // See docs/specs/dor-cli.md -> "Spawning External Binaries".
-  const execTarget = binaryPath ?? binary;
-
-  // Detect a missing install deterministically, before spawning. A failed spawn
-  // on Windows emits BOTH 'error' (ENOENT) and 'close' (a libuv error code); if
-  // 'close' wins that race the process resolves with a bogus exit code and no
-  // output, so `dor ab` would print nothing at all. Checking the filesystem
-  // ourselves sidesteps that ordering. Skipped when a stub exec is injected
-  // (tests), which supplies its own ENOENT behavior via the catch below.
-  if (options.execAgentBrowser === undefined && agentBrowserIsMissing(binary, env, binaryPath)) {
-    return fail(missingBinaryMessage(binary));
-  }
-
-  let result: AgentBrowserExecResult;
-  try {
-    result = await exec(execTarget, ['--session', session, ...rest]);
-  } catch (error) {
-    if (isMissingBinaryError(error)) {
-      return fail(missingBinaryMessage(binary));
-    }
-    return fail(errorMessage(error));
-  }
-
-  let stderrSuffix = '';
-  if (shouldManageSurface(result.exitCode, rest)) {
-    const client = requireControlClient(options);
-    // Outside a Dormouse terminal there is no control endpoint; stay a pure
-    // passthrough rather than nagging about the missing surface.
-    if (!(client instanceof Error)) {
-      try {
-        const status = await exec(execTarget, streamStatusArgs(session));
-        const wsPort = parseStreamPort(status.stdout);
-        // Pass the absolute path resolved above so the host (which may not share
-        // this terminal's PATH) can run host-side tab/close commands.
-        await client.agentBrowserSurface({
-          key,
-          session,
-          wsPort,
-          ...(binaryPath ? { binaryPath } : {}),
-          ...workspaceParam(flags.value.workspace),
-        });
-      } catch (error) {
-        stderrSuffix = `Warning: could not open the Dormouse browser surface: ${errorMessage(error)}\n`;
-      }
-    }
-  }
-
-  return {
-    exitCode: result.exitCode,
-    stdout: result.stdout,
-    stderr: result.stderr + stderrSuffix,
-  };
-}
-
-/**
- * The agent-browser session to forward — one `surface.resolveAgentBrowser` round
- * trip for the two forms only the host can name:
- *
- * - `--session <name>` is already the session; nothing is asked.
- * - `--key <name>` is namespaced under the Workspace that will hold the browser,
- *   which only that Workspace knows (`docs/specs/dor-browser.md` → "Managed identity").
- *   **Outside Dormouse the CLI namespaces it itself**, so `dor ab` stays a
- *   passthrough with no control endpoint.
- * - `--surface <handle>` is the session the host says that Surface is bound to.
- *   The host owns the gating: the target must have a browser, and that browser
- *   must be agent-browser-rendered with a session (an `iframe` renderer has no
- *   session to drive).
- *
- * The host's messages are printed verbatim; dor does not re-interpret them.
- * **A host that refuses fails the command** before the binary runs — there is
- * no fallback to a CLI-namespaced key, which would name the wrong Workspace's
- * browser (`docs/specs/dor-browser.md` → "Managed identity").
- */
-async function resolveSession(
-  flags: ResolvedSessionFlags,
-  options: CliOptions,
-): Promise<ParseResult<string>> {
-  if (flags.session !== undefined) return { ok: true, value: flags.session };
-  const client = requireControlClient(options);
-  if (client instanceof Error) {
-    return flags.key === undefined
-      ? { ok: false, message: client.message }
-      : { ok: true, value: sessionForKey(flags.key) };
-  }
-  try {
-    const { session } = await client.resolveAgentBrowserSession({
-      ...(flags.key === undefined ? { surface: flags.surface } : { key: flags.key }),
-      ...workspaceParam(flags.workspace),
-    });
-    return { ok: true, value: session };
-  } catch (error) {
-    return { ok: false, message: errorMessage(error) };
-  }
-}
-
-// agent-browser's URL-navigation verbs. `goto` / `navigate` are documented
-// aliases of `open`, so a Dormouse target resolves the same in all three.
-const OPEN_SUBCOMMANDS = new Set(['open', 'goto', 'navigate']);
-
-/**
- * Rewrite a forwarded navigation argv so agent-browser receives a URL:
- * `surface:` handles resolve via the host port scan, a bare `:port`/`host:port`
- * sugars to http. Non-navigation commands and plain URLs pass through unchanged.
- *
- * The target is matched by shape (not position), which is what lets `open
- * --headed surface:3` resolve — dor can't know agent-browser's flag arity, so it
- * can't reliably find "the positional". The trade-off is that a *flag value*
- * shaped like a target would be grabbed; this is safe because no agent-browser
- * `open` flag takes a `surface:`/`:port`/`host:port`-shaped value (`--headers` is
- * JSON, `--init-script` a path, `--enable` a feature name), and `inferredHttpUrl`
- * rejects a bare-integer host so a stray `n:n` value can't become a URL. Only the
- * first special-shaped arg is rewritten — these verbs take a single target.
- */
-async function resolveOpenTargetArgs(
-  rest: string[],
-  options: CliOptions,
-  workspace?: string,
-): Promise<ParseResult<string[]>> {
-  const subcommand = rest.find((arg) => !arg.startsWith('-'));
-  if (subcommand === undefined || !OPEN_SUBCOMMANDS.has(subcommand)) return { ok: true, value: rest };
-
-  const index = rest.findIndex((arg) => isSpecialOpenTarget(arg));
-  if (index === -1) return { ok: true, value: rest };
-
-  const raw = rest[index] ?? '';
-  let url: string;
-  if (isSurfaceOpenTarget(raw)) {
-    // A Surface handle only resolves against a live Dormouse host; outside one
-    // there is no control endpoint and the error says so.
-    const client = requireControlClient(options);
-    if (client instanceof Error) return { ok: false, message: client.message };
-    const resolved = await resolveSurfaceOpenTarget(raw, client, workspace);
-    if (!resolved.ok) return resolved;
-    url = resolved.value;
-  } else {
-    // A schemeless :port / host:port needs no host round trip. isSpecialOpenTarget
-    // matched a non-surface target, so inference here always succeeds; leave argv
-    // untouched rather than forward a non-URL if that ever changes.
-    const inferred = inferredHttpUrl(raw);
-    if (inferred === null) return { ok: true, value: rest };
-    url = inferred;
-  }
-
-  const next = [...rest];
-  next[index] = url;
-  return { ok: true, value: next };
-}
-
-function shouldManageSurface(exitCode: number, rest: string[]): boolean {
-  if (exitCode !== 0 || rest.length === 0) return false;
-  if (rest.includes('--help') || rest.includes('-h')) return false;
+// `goto` / `navigate` are documented aliases of `open`, so a Dormouse target
+// resolves the same in all three.
+const AGENT_BROWSER: BrowserCliDescriptor = {
+  provider: 'agent-browser',
+  sessionNoun: 'an agent-browser session name',
+  navigationVerbs: new Set(['open', 'goto', 'navigate']),
   // `close` tears the session down; the Wall notices the stream dropping and
   // placeholders the surface, so opening one here would be self-defeating.
-  const subcommand = rest.find((arg) => !arg.startsWith('-'));
-  return subcommand !== undefined && subcommand !== 'close';
-}
+  noBind: new Set(['close']),
+  informational: new Set(['--help', '-h']),
+  // Its sessions are global to the socket directory: a command runs where the
+  // caller is, with the caller's executable.
+  projectScoped: false,
+  missingBinaryMessage,
+  exec: (options) => options.execAgentBrowser,
+  // Under the caller's own socket directory and CLI, whatever state files
+  // that CLI writes (docs/specs/dor-browser.md → "agent-browser").
+  streamStatus: streamStatusArgs,
+};
 
-/**
- * Whether `candidate` is a file this platform would actually run. `which` (and
- * so cross-spawn) skips a directory or a non-executable file and keeps walking;
- * since the walk's answer is now the spawn target, a laxer test here would turn
- * a `PATH` entry `which` ignored into an EACCES/EISDIR failure. On Windows the
- * extension decides executability, so being a regular file is the whole test —
- * taken as an argument, like `binaryCandidateNames`, so both branches are
- * reachable from a Linux-only CI.
- */
-export function isExecutableFile(candidate: string, isWindows: boolean): boolean {
-  try {
-    if (!statSync(candidate).isFile()) return false;
-    if (isWindows) return true;
-    accessSync(candidate, constants.X_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * The filenames to try for a bare `binary`, in order — `which`'s extension logic,
- * which the walk has to reproduce because its answer is what gets spawned. Takes
- * `isWindows` rather than reading `process.platform` so the Windows ordering is
- * testable off Windows: every rule here is Windows-only, and a Linux-only CI
- * that could not exercise them would be asserting an unenforced claim.
- *
- * Mirrors `getPathInfo` in `which/which.js` on three points a hand-rolled walk
- * gets wrong: `||` (not `??`), so an *empty* PATHEXT falls back rather than
- * yielding no candidates; the fallback list is npm's, not `cmd.exe`'s; and an
- * empty extension comes first when the name already carries one, so
- * `agent-browser.exe` is tried as itself and not only as `agent-browser.exe.EXE`.
- */
-export function binaryCandidateNames(binary: string, env: CliEnv, isWindows: boolean): string[] {
-  if (!isWindows) return [binary];
-  // No `.filter(Boolean)`: `getPathInfo` splits without one, so a trailing
-  // separator — ordinary on Windows — leaves a final empty extension that tries
-  // the name unsuffixed. Nothing runnable lives there, but dropping it would make
-  // the walk report missing where `which` returned a path.
-  const exts = (env.PATHEXT || WINDOWS_BIN_EXTS.join(';')).split(';');
-  if (binary.includes('.')) exts.unshift('');
-  return exts.map((ext) => `${binary}${ext}`);
-}
-
-export function resolveBinaryPath(binary: string, env: CliEnv): string | undefined {
-  if (binary.includes('/') || binary.includes('\\')) return binary;
-  const pathVar = env.PATH;
-  if (!pathVar) return undefined;
-  const isWindows = process.platform === 'win32';
-  const names = binaryCandidateNames(binary, env, isWindows);
-  for (const dir of pathVar.split(isWindows ? ';' : ':')) {
-    if (!dir) continue;
-    for (const name of names) {
-      const candidate = `${dir}${isWindows ? '\\' : '/'}${name}`;
-      if (isExecutableFile(candidate, isWindows)) return candidate;
-    }
-  }
-  return undefined;
-}
-
-// Narrow, now that an unresolvable name never reaches the spawn: this catches a
-// binary that disappeared between the PATH walk and the spawn, plus a stub exec's
-// injected ENOENT.
-function isMissingBinaryError(error: unknown): boolean {
-  return !!error && typeof error === 'object' && (error as { code?: unknown }).code === 'ENOENT';
-}
-
-/**
- * Whether the binary can be proven absent without spawning it, given the path
- * `resolveBinaryPath` already produced for it. Every "not found" answer ends the
- * call here rather than at the spawn, because the spawn's own fallback is the
- * bare name and cross-spawn resolves that against the cwd first on Windows.
- */
-export function agentBrowserIsMissing(binary: string, env: CliEnv, resolvedPath: string | undefined): boolean {
-  // Explicit path (e.g. a DORMOUSE_AGENT_BROWSER_BIN override): resolveBinaryPath
-  // hands such a path back verbatim without touching disk, so check it (and
-  // Windows launcher extensions) directly.
-  if (binary.includes('/') || binary.includes('\\')) {
-    return !existsCandidate(binary, process.platform === 'win32');
-  }
-  // Bare name: resolvedPath is the PATH walk's result. With no PATH to search
-  // there is nowhere the binary could legitimately be, and falling through to
-  // the spawn would hand cross-spawn a bare name — whose `which` searches the
-  // cwd first on Windows, the one thing `execTarget` exists to prevent. So an
-  // absent PATH is "missing", not "ambiguous".
-  if (!env.PATH) return true;
-  return resolvedPath === undefined;
-}
-
-function existsCandidate(path: string, isWindows: boolean): boolean {
-  if (existsSync(path)) return true;
-  if (!isWindows) return false;
-  return WINDOWS_BIN_EXTS.some((ext) => existsSync(`${path}${ext}`));
-}
-
-// The default exec: delegate the spawn/capture/Windows handling to
-// spawnAndCapture, and adapt its never-throws result to this call site's
-// throw-on-spawn-failure contract (callers catch ENOENT via isMissingBinaryError).
-async function execAgentBrowserProcess(binary: string, args: string[]): Promise<AgentBrowserExecResult> {
-  const result = await spawnAndCapture(binary, args);
-  if (!result.ok) {
-    const error: Error & { code?: string } = new Error(result.error.message);
-    error.code = result.error.code;
-    throw error;
-  }
-  return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
+export function runAgentBrowserCli(args: string[], options: CliOptions): Promise<CliResult> {
+  return runBrowserCli(AGENT_BROWSER, args, options);
 }

@@ -53,10 +53,13 @@
  */
 import * as http from 'http';
 import * as net from 'net';
-import type { IframeProxyResult } from '../lib/platform/iframe-proxy-types';
+import { IFRAME_HTTP_ONLY, type IframeProxyResult } from '../lib/platform/iframe-proxy-types';
 import { isForeignOrigin, isLoopbackHost, isOwnOrigin } from './loopback-guard';
 import {
   FRAMING_RESPONSE_HEADERS,
+  HEAD_MARKER,
+  declaresUtf16,
+  startsWithUtf16Bom,
   PRESERVE_CSP_HEADER,
   HOP_BY_HOP_RESPONSE_HEADERS,
   errorPageHtml,
@@ -77,8 +80,16 @@ const GRANT_SWEEP_MS = 60_000;
 // Backstop against unbounded server accumulation if sweeps never run.
 const MAX_GRANTS = 32;
 // We only buffer the <head> region (to find the shim insertion point); if no
-// </head>/<body> shows up within this many bytes, inject at the front and pipe.
+// </head>/<body> shows up within this many bytes, instrument what we have and pipe.
 const HEAD_STREAM_CAP = 512 * 1024;
+// How much already-scanned text a chunk's scan re-reads, so a marker split
+// across chunks is still found. A longer `<body …>` split mid-tag is found by
+// the full-prefix instrumentation at the cap or the end instead.
+const MARKER_CARRY = 1024;
+// Fetch destinations that load a document the shim goes into. Only their
+// requests ask for an identity body, so every other request keeps its
+// compression; a request without the header (an older engine) is treated as one.
+const DOCUMENT_DESTINATIONS = new Set(['document', 'iframe', 'frame', 'embed', 'object']);
 // Idle timeout on the upstream socket (no bytes flowing). Generous so a slow or
 // streaming dev server isn't cut off, but bounded so a hung upstream becomes a
 // visible error page instead of an indefinitely blank frame.
@@ -136,7 +147,7 @@ export async function createIframeProxyUrl(
   // plain http, and rewriting authenticated https pages is the agent-browser's
   // job (spec → Target policy).
   if (upstream.protocol !== 'http:') {
-    return { ok: false, reason: 'scheme', detail: `${upstream.protocol.replace(':', '')} upstreams are not proxied yet` };
+    return { ok: false, reason: 'scheme', detail: IFRAME_HTTP_ONLY };
   }
   // SSRF guard: the proxy fetches a user-supplied URL, so refuse the link-local
   // / cloud-metadata ranges (169.254.169.254 and friends). Other private ranges
@@ -240,8 +251,9 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
   if (typeof headers.referer === 'string') {
     headers.referer = rewriteOrigin(headers.referer, grant.proxyOrigin, grant.upstream.origin);
   }
-  // Drop Accept-Encoding so HTML comes back identity — we rewrite it.
-  delete headers['accept-encoding'];
+  // Documents come back identity, so their HTML can be instrumented.
+  const dest = req.headers['sec-fetch-dest'];
+  if (typeof dest !== 'string' || DOCUMENT_DESTINATIONS.has(dest)) delete headers['accept-encoding'];
 
   const upstreamReq = http.request({
     protocol: 'http:',
@@ -252,8 +264,14 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
     headers,
   }, (upstreamRes) => {
     const contentType = String(upstreamRes.headers['content-type'] ?? '');
+    const encoding = String(upstreamRes.headers['content-encoding'] ?? 'identity').trim().toLowerCase();
     const embedder = grant.embedderOrigins?.[0];
-    if (!/text\/html/i.test(contentType) || embedder === undefined) {
+    // The shim is ASCII spliced into the body's own bytes, so it needs an
+    // identity, ASCII-compatible body: a compressed one (an upstream that
+    // ignores Accept-Encoding, or a non-document fetch) or a UTF-16 one would
+    // be corrupted, not instrumented. A UTF-16 BOM is caught in streamHtml.
+    if (!/text\/html/i.test(contentType) || encoding !== 'identity'
+      || declaresUtf16(contentType) || embedder === undefined) {
       passThrough(grant, upstreamRes, res);
       return;
     }
@@ -303,8 +321,10 @@ function passThrough(grant: Grant, upstreamRes: http.IncomingMessage, res: http.
 // document: accumulate only until the insertion point (</head>, else <body>,
 // else the cap), instrument that prefix, then pipe the rest through untouched.
 // latin1 is byte-preserving, so searching/rewriting ASCII tags and re-encoding
-// can't corrupt multibyte bytes in <head> (e.g. an em-dash in <title>). The
-// response is chunked (no content-length) since instrumentation changes length.
+// can't corrupt multibyte bytes in <head> (e.g. an em-dash in <title>), in any
+// ASCII-compatible charset — which is why the upstream's `content-type`, charset
+// included, is kept as sent. The response is chunked (no content-length) since
+// instrumentation changes length.
 function streamHtml(
   grant: Grant,
   // Taken as an argument rather than read off the grant so the type carries the
@@ -316,23 +336,46 @@ function streamHtml(
 ): void {
   const preserveCsp = upstreamRes.headers[PRESERVE_CSP_HEADER] === '1';
   const outHeaders = sanitizeResponseHeaders(grant, upstreamRes.headers);
-  outHeaders['content-type'] = 'text/html; charset=utf-8';
   delete outHeaders['content-length'];
   res.writeHead(upstreamRes.statusCode ?? 200, outHeaders);
 
-  let pending = Buffer.alloc(0);
+  const pending: Buffer[] = [];
+  let buffered = 0;
+  // The scanned text a marker split across chunks could still begin in.
+  let carry = '';
   let handled = false;
+  let bomChecked = false;
+  const prefix = () => Buffer.concat(pending).toString('latin1');
 
+  // Each chunk is decoded and searched once, plus the carry, so a large head
+  // costs linear rather than quadratic time.
   const onData = (chunk: Buffer) => {
-    pending = Buffer.concat([pending, chunk]);
-    const text = pending.toString('latin1');
-    if (pending.length <= HEAD_STREAM_CAP && !/<\/head>/i.test(text) && !/<body[^>]*>/i.test(text)) return;
+    pending.push(chunk);
+    buffered += chunk.length;
+    // A UTF-16 BOM overrides any header in the browser, so such a body is
+    // passed through as sent, like one the header labels UTF-16.
+    if (!bomChecked && buffered >= 2) {
+      bomChecked = true;
+      if (startsWithUtf16Bom(Buffer.concat(pending))) {
+        handled = true;
+        upstreamRes.off('data', onData);
+        res.write(Buffer.concat(pending));
+        pending.length = 0;
+        upstreamRes.pipe(res);
+        return;
+      }
+    }
+    const scan = carry + chunk.toString('latin1');
+    if (buffered <= HEAD_STREAM_CAP && !HEAD_MARKER.test(scan)) {
+      carry = scan.slice(-MARKER_CARRY);
+      return;
+    }
     // Found the insertion point (or hit the cap): instrument the buffered
     // prefix, then hand the remainder to a raw pipe (backpressure + end).
     handled = true;
     upstreamRes.off('data', onData);
-    res.write(Buffer.from(instrumentHtml(text, embedderOrigin, preserveCsp), 'latin1'));
-    pending = Buffer.alloc(0);
+    res.write(Buffer.from(instrumentHtml(prefix(), embedderOrigin, preserveCsp), 'latin1'));
+    pending.length = 0;
     upstreamRes.pipe(res);
   };
 
@@ -340,7 +383,7 @@ function streamHtml(
   upstreamRes.on('end', () => {
     if (handled) return; // the pipe ends `res`
     // Whole document arrived before any head marker — instrument and finish.
-    res.end(Buffer.from(instrumentHtml(pending.toString('latin1'), embedderOrigin, preserveCsp), 'latin1'));
+    res.end(Buffer.from(instrumentHtml(prefix(), embedderOrigin, preserveCsp), 'latin1'));
   });
   upstreamRes.on('error', () => { if (!res.writableEnded) res.destroy(); });
 }
@@ -376,7 +419,18 @@ function sanitizeResponseHeaders(grant: Grant, headers: http.IncomingHttpHeaders
   if (typeof loc === 'string') {
     out.location = rewriteOrigin(loc, grant.upstream.origin, grant.proxyOrigin);
   }
+  // The upstream was asked for identity or not by `Sec-Fetch-Dest`
+  // (DOCUMENT_DESTINATIONS), so a cache must key on it too: a compressed,
+  // uninstrumented fetch of a page must never answer the frame's navigation.
+  out.vary = varyAlso(out.vary, 'Sec-Fetch-Dest');
   return out;
+}
+
+function varyAlso(vary: http.OutgoingHttpHeader | undefined, field: string): string {
+  const fields = (Array.isArray(vary) ? vary.join(',') : String(vary ?? ''))
+    .split(',').map((part) => part.trim()).filter(Boolean);
+  if (fields.includes('*') || fields.some((part) => part.toLowerCase() === field.toLowerCase())) return fields.join(', ');
+  return [...fields, field].join(', ');
 }
 
 // Compare parsed origins, never string prefixes or embedded query values.

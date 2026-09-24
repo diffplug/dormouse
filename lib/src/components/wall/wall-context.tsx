@@ -64,11 +64,14 @@ export interface WallActions {
    *  surface-type replacement; screencast ↔ popout is handled inside the
    *  agent-browser panel and does not route here. */
   onSwapRenderMode: (id: string, mode: RenderMode) => void;
-  /** Open a URL as a new iframe browser pane, split next to `id`. The iframe
+  /** Open a URL as a new browser pane, split next to `id` — an iframe, or an
+   *  agent-browser screencast for a page the iframe cannot show. The iframe
    *  renderer is single-frame, so a page's new-tab request (target=_blank /
    *  window.open, surfaced by the proxy shim) becomes a new pane
    *  (docs/specs/dor-browser.md → "Iframe Shim"). */
   onOpenBrowserPane?: (id: string, url: string) => void;
+  /** A browser Surface's first launch failed: apply its `launchFallback`. */
+  onBrowserLaunchFailed?: (id: string, error: string) => void;
   /** The stable `surface:N` ref for a pane/door id (minted lazily, exactly as
    *  `dor list` assigns refs). Used by the pane context menu to show the handle. */
   resolveSurfaceRef: (id: string) => string;

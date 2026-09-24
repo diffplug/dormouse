@@ -23,11 +23,12 @@ Source of truth: `surface.tool` in `lib/src/components/wall/use-dor-control.ts`;
 
 - **Must retain the Session id, public Surface ref, terminal and notes across serving and renderer changes.** These are changes within one Surface.
 - **Must bypass browser `replaceSurface` for Tool renderer swaps**, mutating the Tool's params and releasing the retired browser resources.
+- **Never offer or apply a renderer swap outside a Tool's declarable `render` values** ([Declaring tools](#declaring-tools)): the Display modal lists no other, and `onSwapRenderMode` refuses one (rationale).
 - **Must run the terminal Activity model for a Tool**, including when its browser is visible. Watched-command defaults belong to `docs/specs/alert.md`.
 - **Never apply the untouched-shell kill or shell-replacement shortcut to a Tool**, which spawns touched.
 - **Must classify Tool params before browser params**, since a serving Tool carries `renderMode` too.
 
-Source of truth: `surfaceKindFromParams` / `isToolParams` in `lib/src/components/wall/browser-surface.ts`; `onSwapRenderMode` / `requestKill` / `isUntouchedShell` in `lib/src/components/Wall.tsx`; `lib/src/components/wall/tool-surface.test.ts`.
+Source of truth: `surfaceKindFromParams` / `isToolParams` in `lib/src/components/wall/browser-surface.ts`; `onSwapRenderMode` / `requestKill` / `isUntouchedShell` in `lib/src/components/Wall.tsx`; `isToolRender` in `lib/src/lib/platform/tool-types.ts`; `lib/src/components/wall/tool-surface.test.ts`; `never swaps a Tool to a render it cannot declare` in `lib/src/components/Wall.test.tsx`.
 
 ## Declaring tools
 
@@ -108,13 +109,12 @@ Source of truth: `createToolHost` in `lib/src/host/tool-host.ts`; `FileToolTrust
 - **Must poll unbound Tools every 1.5 seconds while their command runs.** Reset settle memory and retire browser resources when the observed command-run id changes, even when the command text is unchanged; an initial observation preserves an imported live binding. (rationale)
 - **Must let a changed announced port or path override a committed conflict or browser**, but only after a matching scan. An unchanged announcement never undoes URL-bar navigation. (rationale)
 - **Must stop ordinary port scans once a browser or conflict is committed.** An unannounced additional port appearing after settle is not detected.
-- **Must display the browser destination before awaiting agent-browser startup**, clearing the existing session/stream binding during a reopen as well. Keep the session-less renderer inert and block Workspace transfer until the binding arrives. Close any browser session whose Tool disappeared or changed command during startup.
-- **Must reuse an existing browser session and its binary path when an announcement changes its destination.**
+- **Must display the browser destination at once and leave the launch to the Surface's controller** (`docs/specs/dor-browser.md` → Browser Connection), in the session the Tool has or else its own `tool.<leafId>`, falling back to the embed. Block Workspace transfer until the session binds.
 - **Must retain a runtime re-key within the Tool's namespace**, following [Identity and dedupe](#identity-and-dedupe).
 
 Reserved: **Must derive a Tool's URL again on cold restore**, compatible with future `prespawn_port` and `DORMOUSE_TOOL_PORT` in scope **dor-tools**; [Persistence and hosts](#persistence-and-hosts) owns the saved projection.
 
-Source of truth: `useToolServing` in `lib/src/components/wall/use-tool-serving.ts`; `attachAgentBrowserSession` in `lib/src/components/wall/tool-browser-session.ts`; `listenerUrlsByPort` in `lib/src/components/wall/port-url.ts`. Tests: `lib/src/components/wall/use-tool-serving.test.tsx`.
+Source of truth: `useToolServing` in `lib/src/components/wall/use-tool-serving.ts`; `toolBrowserLaunchParams` in `lib/src/components/wall/browser-surface.ts`; `listenerUrlsByPort` in `lib/src/components/wall/port-url.ts`. Tests: `lib/src/components/wall/use-tool-serving.test.tsx`.
 
 ## Lifecycle
 

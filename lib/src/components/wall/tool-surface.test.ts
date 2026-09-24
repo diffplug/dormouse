@@ -134,7 +134,8 @@ describe('tool persistence (regression: review findings 4 and 11)', () => {
       url: 'http://localhost:6006/',
       renderMode: 'ab-screencast',
       session: 'dormouse.w.tool.p1',
-      wsPort: 51234,
+      launchSession: 'dormouse.w.tool.p1',
+      launchFallback: 'embed',
     });
     expect(persistableLeafMeta(meta).params).toEqual({
       surfaceType: 'tool',

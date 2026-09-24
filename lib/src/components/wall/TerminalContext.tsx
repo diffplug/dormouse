@@ -12,6 +12,7 @@ import { buildAppTitleResolver, createTerminalPaneState, cwdDisplay, deriveSurfa
 import { focusSession, getRunningCommandWatchKey, getRunningCommandWatchRule, getTerminalInstance, getActivitySnapshot, getTerminalPaneStateSnapshot, setCommandWatched, subscribeToActivity, subscribeToTerminalPaneState, subscribeToWatchedCommands, getWatchedCommandsSnapshot, toggleSessionTodo } from '../../lib/terminal-registry';
 import { writeTextToClipboard } from '../../lib/clipboard';
 import { listenerUrlsByPort } from './port-url';
+import { hostBrowserProviders } from './browser-automation';
 import { DEFAULT_HELPER_COMMAND } from '../../lib/terminal-context-types';
 
 export function TerminalContext({ id, title, closing, origin, warning: openWarning, tool = false, placement }: TerminalContextState & { title?: string; tool?: boolean } & Pick<TerminalContextViewProps, 'placement'>) {
@@ -59,7 +60,7 @@ export function TerminalContext({ id, title, closing, origin, warning: openWarni
     scan={scan} watchRule={offeredRule} watching={watchRule !== null} todo={activities.get(id)?.todo === true} notification={activities.get(id)?.notification}
     status={tool ? (state.currentCommand ? 'running' : 'completed') : helper?.status ?? 'waiting'} command={tool ? state.currentCommand?.rawCommandLine ?? state.lastCommand?.rawCommandLine ?? '' : helper?.command ?? defaultCommand} defaultCommand={defaultCommand} warning={warning}
     explorerLabel={IS_MAC ? 'Open in Finder' : IS_WINDOWS ? 'Open in Explorer' : 'Open folder'} canExplore={!!platform.terminalContext && !!cwd && !cwd.isRemote}
-    canAgent={!!platform.agentBrowserOpen} canIframe={!!platform.createIframeProxyUrl}
+    browserProviders={hostBrowserProviders()} canIframe={!!platform.createIframeProxyUrl}
     onClose={onClose} onCopyRef={() => copy(actions.resolveSurfaceRef(id))} onCopyPath={() => copy(cwd?.path ?? '')}
     onExplore={async () => { if (platform.terminalContext && cwd) await platform.terminalContext({ op: 'openDirectory', id, path: cwd.path }); }}
     onWatch={() => { if (offeredRule) setCommandWatched(offeredRule, watchRule === null); }} onTodo={() => toggleSessionTodo(id)}

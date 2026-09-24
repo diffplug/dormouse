@@ -2,6 +2,10 @@
 
 > Informative evidence for `docs/specs/dor-tool.md`, keyed by its headings.
 
+## The tool capability set
+
+Before the Display modal read the Surface's own render modes (2026-09), it offered a Tool Playwright screencast and popout wherever the host wired Playwright. `onSwapRenderMode`'s Tool branch then wrote `toolRender: 'pw-*'`, cleared the session and launched only for `ab-screencast`, so the pane sat on its placeholder until the next save coerced it to `iframe`; `pw-popout` also popped out a Tool. The Wall refuses independently because the in-controller popout never reaches it.
+
 ## Declaring tools
 
 YAML authors naturally collapse one-element lists to scalars. Overloading a scalar dedupe key as a command would make `prespawn_dedupe: storybook` execute instead of identify. Separate future fields avoid that ambiguity.

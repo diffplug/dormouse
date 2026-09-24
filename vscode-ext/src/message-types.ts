@@ -1,10 +1,11 @@
+import type { BrowserResult } from '../../lib/src/lib/platform/browser-automation';
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
 import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
 import type { TerminalColors, TerminalProtocolEvent } from '../../lib/src/lib/terminal-protocol';
 import type { AlertCommand, AlertEvents } from '../../lib/src/host/alert-protocol';
 import type { PersistedAlertState } from '../../lib/src/lib/session-types';
 import type { DorControlCancelPayload, DorControlRequestPayload, DorControlResponsePayload } from '../../dor/src/protocol';
-import type { AgentBrowserStreamStatusResult, IframeProxyResult, OpenPort, ToolControlResult, ToolHostRequest } from '../../lib/src/lib/platform/types';
+import type { IframeProxyResult, OpenPort, ToolControlResult, ToolHostRequest } from '../../lib/src/lib/platform/types';
 import type { VSCodeWorkbenchCommand } from '../../lib/src/lib/vscode-keybindings';
 import type { BurrowCommand, BurrowResult } from '../../lib/src/host/remote/service-protocol';
 import type { VolatileNotepadSnapshot } from '../../lib/src/lib/notepad/types';
@@ -23,14 +24,8 @@ export type WebviewMessage =
   | { type: 'clipboard:readImage'; requestId: string }
   | { type: 'dormouse:openExternal'; uri: string }
   | { type: 'dormouse:runWorkbenchCommand'; command: VSCodeWorkbenchCommand }
-  | { type: 'agentBrowser:command'; session: string; args: string[]; binaryPath?: string; requestId: string }
-  | { type: 'agentBrowser:edit'; session: string; op: 'selectAll' | 'copy' | 'cut'; binaryPath?: string; requestId: string }
-  | { type: 'agentBrowser:screenshot'; session: string; format?: 'jpeg' | 'png'; quality?: number; binaryPath?: string; requestId: string }
-  | { type: 'agentBrowser:streamStatus'; session: string; binaryPath?: string; requestId: string }
-  | { type: 'agentBrowser:getStreamUrl'; port: number; requestId: string }
-  | { type: 'agentBrowser:open'; url: string; headed?: boolean; binaryPath?: string; requestId: string }
-  | { type: 'agentBrowser:popOut'; session: string; url?: string; rect?: { x: number; y: number; width: number; height: number }; binaryPath?: string; requestId: string }
-  | { type: 'agentBrowser:popIn'; session: string; url?: string; binaryPath?: string; requestId: string }
+  // Validated host-side, so the webview's shape is not trusted here.
+  | { type: 'browser:request'; request: unknown; requestId: string }
   | { type: 'iframe:createProxyUrl'; url: string; embedderOrigins: string[]; requestId: string }
   | { type: 'tool:control'; request: ToolHostRequest; requestId: string }
   // Peer surfaces: the Burrow runs in the extension host, but the terminals
@@ -85,13 +80,7 @@ export type ExtensionMessage =
   | { type: 'pty:shells'; shells: Array<{ name: string; path: string; args: string[] }>; requestId?: string }
   | { type: 'clipboard:files'; paths: string[] | null; requestId: string }
   | { type: 'clipboard:image'; path: string | null; requestId: string }
-  | { type: 'agentBrowser:commandResult'; requestId: string; exitCode: number; stdout: string; stderr: string }
-  | { type: 'agentBrowser:editResult'; requestId: string; ok: boolean; text?: string; error?: string }
-  | { type: 'agentBrowser:screenshotResult'; requestId: string; ok: boolean; bytes?: Uint8Array; mime?: string; error?: string }
-  | ({ type: 'agentBrowser:streamStatusResult'; requestId: string } & AgentBrowserStreamStatusResult)
-  | { type: 'agentBrowser:streamUrl'; requestId: string; url: string | null }
-  | { type: 'agentBrowser:openResult'; requestId: string; ok: boolean; session?: string; wsPort?: number; binaryPath?: string; error?: string }
-  | { type: 'agentBrowser:popResult'; requestId: string; ok: boolean; wsPort?: number; error?: string }
+  | { type: 'browser:result'; result: BrowserResult; requestId: string }
   | { type: 'iframe:proxyUrl'; requestId: string; result: IframeProxyResult }
   | { type: 'tool:result'; requestId: string; result: ToolControlResult }
   | { type: 'peer:ask'; requestId: string; op: string; params: unknown }

@@ -18,18 +18,25 @@ import { NotepadPanel } from '../NotepadPanel';
 
 /** Canonical persisted state for a browser surface. `renderMode` + `url` are the
  *  single source of truth across swaps; the agent-browser fields ride flat and are
- *  present only for `ab-*` modes. */
+ *  present only for automation modes. */
 export type BrowserPanelParams = {
   surfaceType?: string;
   renderMode?: RenderMode;
   url?: string;
+  cwd?: string;
+  nativeIdentity?: string;
+  /** Bound once the browser is up; absent while the Surface's controller
+   *  launches it (docs/specs/dor-browser.md → "Browser Connection"). */
   session?: string;
+  /** With no `session`, the one the launch opens `url` in: a Tool's own, or
+   *  the previous provider's when a failed swap restores it. */
+  launchSession?: string;
   key?: string;
-  wsPort?: number;
   binaryPath?: string;
   syncEngaged?: boolean;
   /** Set only on a Surface the pane context menu opened for a port, as
-   *  `<sourceSurfaceId>:<port>:<iframe|agent>`. Reuse looks a Surface up by it,
+   *  `<sourceSurfaceId>:<port>:<iframe|agent|playwright>`, `agent` being
+   *  agent-browser's. Reuse looks a Surface up by it,
    *  so a second "open this port" reveals the pane the first one made rather
    *  than stacking another (`docs/specs/dor-browser.md` → Pane Context Menu
    *  Connect). */

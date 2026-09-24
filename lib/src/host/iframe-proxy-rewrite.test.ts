@@ -7,6 +7,8 @@ import {
   iframeShim,
   normalizeEmbedderOrigins,
   errorPageHtml,
+  declaresUtf16,
+  startsWithUtf16Bom,
   unreachablePage,
   timedOutPage,
 } from './iframe-proxy-rewrite';
@@ -57,6 +59,19 @@ describe('instrumentHtml', () => {
   it('falls back to after <body> when there is no head', () => {
     const out = instrumentHtml('<body>hi</body>', APP);
     expect(out).toMatch(/<body>\s*<script>/);
+  });
+
+  it('never places the shim ahead of the doctype or a meta charset when both head and body tags are omitted', () => {
+    const shim = /<script>\(function\(\)\{/;
+    expect(instrumentHtml('<!doctype html><title>x</title><p>hi', APP)).toMatch(/^<!doctype html><script>/);
+    const withCharset = instrumentHtml('<!DOCTYPE html><html lang="ja"><head><meta charset="shift_jis"><title>x</title><p>hi', APP);
+    expect(withCharset.indexOf('<meta charset="shift_jis">')).toBeLessThan(withCharset.search(shim));
+    expect(withCharset).toMatch(/<meta charset="shift_jis"><script>/);
+    // No prologue at all: nothing to stay behind but a UTF-8 BOM (latin1-decoded).
+    expect(instrumentHtml('<p>hi', APP)).toMatch(/^<script>/);
+    expect(instrumentHtml('\xEF\xBB\xBF<p>hi', APP)).toMatch(/^\xEF\xBB\xBF<script>/);
+    // `<header>` is not `<head>`.
+    expect(instrumentHtml('<!doctype html><header>h</header>', APP)).toMatch(/^<!doctype html><script>/);
   });
 
   it('strips an in-document CSP meta', () => {
@@ -110,6 +125,19 @@ describe('the shim addresses the grant and app, not the world', () => {
     expect(IFRAME_SHIM).toContain('P.postMessage(m,location.origin)');
     expect(IFRAME_SHIM).toContain('P.postMessage(m,TARGET)');
     expect(IFRAME_SHIM).not.toContain("postMessage(m,'*')");
+  });
+
+  it('flags the document\'s own load reports, and only those', () => {
+    const delivered: Array<Record<string, unknown>> = [];
+    const frame = shimFrame(APP, (data) => delivered.push(data as Record<string, unknown>));
+    frame.emit('DOMContentLoaded', {});
+    frame.emit('pageshow', {});
+    frame.emit('popstate', {});
+    expect(delivered).toEqual([
+      { __dormouse: 'location', url: `${PROXY}/story`, loaded: true },
+      { __dormouse: 'location', url: `${PROXY}/story`, loaded: true },
+      { __dormouse: 'location', url: `${PROXY}/story` },
+    ]);
   });
 
   it('relays pane-level messages but not nested locations through same-origin frames', () => {
@@ -211,6 +239,25 @@ describe('isBlockedAddress', () => {
   });
 });
 
+describe('UTF-16 detection', () => {
+  it('reads every WHATWG UTF-16 label, quoted or not, and nothing else', () => {
+    for (const label of ['utf-16', 'UTF-16LE', 'utf-16be', 'unicode', 'unicodeFFFE', 'unicodefeff', 'ucs-2', 'iso-10646-ucs-2', 'csUnicode']) {
+      expect(declaresUtf16(`text/html; charset=${label}`), label).toBe(true);
+      expect(declaresUtf16(`text/html;charset="${label}"`), label).toBe(true);
+    }
+    for (const type of ['text/html', 'text/html; charset=utf-8', 'text/html; charset=Shift_JIS', 'text/html; charset=utf-16x']) {
+      expect(declaresUtf16(type), type).toBe(false);
+    }
+  });
+
+  it('knows a UTF-16 byte-order mark in either byte order', () => {
+    expect(startsWithUtf16Bom(Uint8Array.from([0xff, 0xfe, 0x3c, 0]))).toBe(true);
+    expect(startsWithUtf16Bom(Uint8Array.from([0xfe, 0xff, 0, 0x3c]))).toBe(true);
+    expect(startsWithUtf16Bom(Uint8Array.from([0xef, 0xbb, 0xbf]))).toBe(false);
+    expect(startsWithUtf16Bom(Uint8Array.from([0xff]))).toBe(false);
+  });
+});
+
 describe('errorPageHtml', () => {
   it('renders a frameable page, escaping the target', () => {
     const html = errorPageHtml(unreachablePage(new URL('http://example.com/a"b'), 'ECONNREFUSED'));
@@ -222,5 +269,22 @@ describe('errorPageHtml', () => {
     const html = errorPageHtml(timedOutPage(new URL('http://localhost:5173/')));
     expect(html).toContain('isn’t responding');
     expect(html).toMatch(/reload/i);
+  });
+
+  it('follows the system color scheme instead of hardcoding a dark page', () => {
+    const html = errorPageHtml(unreachablePage(new URL('http://localhost:5173/'), 'ECONNREFUSED'));
+    expect(html).toContain('color-scheme: light dark');
+    expect(html).not.toMatch(/#[0-9a-f]{6}\b/i);
+  });
+
+  it('asks about a dev server only when the upstream is this machine', () => {
+    for (const local of ['http://localhost:5173/', 'http://127.0.0.2:8000/', 'http://app.localhost:3000/', 'http://[::1]:8080/', 'http://[::ffff:127.0.0.1]:8080/']) {
+      expect(unreachablePage(new URL(local), 'ECONNREFUSED').message, local).toContain('dev server');
+      expect(timedOutPage(new URL(local)).message, local).toContain('dev server');
+    }
+    const remote = new URL('http://box.ts.net:3000/');
+    expect(unreachablePage(remote, 'ETIMEDOUT').message).not.toContain('dev server');
+    expect(unreachablePage(remote, 'ETIMEDOUT').message).toContain('reachable from this machine');
+    expect(timedOutPage(remote).message).not.toContain('dev server');
   });
 });

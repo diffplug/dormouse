@@ -1,11 +1,19 @@
 /**
  * Surface-scoped browser lifecycle; see docs/specs/dor-browser.md →
- * "Agent-Browser Connection". The registry survives panel unmount and is
- * disposed by Wall on kill/render swap. Disposal releases client resources
- * only; Wall owns daemon teardown.
+ * "Browser Connection". The registry survives panel unmount and is
+ * released by Wall on kill/render swap: `closeBrowserSurface` closes the
+ * session too, `disposeAgentBrowserSurfaceController` only the client side.
  */
-import { getPlatform } from '../../lib/platform';
-import { isAllowedAgentBrowserBinary } from '../../lib/agent-browser-binary';
+import {
+  BROWSER_CLOSE_MAX_CANCELS,
+  isBlankUrl,
+  isBrowsableUrl,
+  viewerTextInputs,
+  type BrowserAutomationProvider,
+  type BrowserResult,
+  type ViewerFrame,
+} from '../../lib/platform/browser-automation';
+import { isAllowedBinaryFor } from '../../lib/agent-browser-binary';
 import { readTextFromClipboard } from '../../lib/clipboard';
 import { isAbDebugLogsEnabled } from '../../lib/feature-flags';
 import {
@@ -20,15 +28,27 @@ import {
   openAgentBrowserScreenModal,
 } from './agent-browser-screen';
 import { hostPathDisplay, tabDisplayTitle } from './browser-url';
-import { isToolParams } from './browser-surface';
-import { clearAgentBrowserSessionClosed, isAgentBrowserSessionClosed } from './agent-browser-sessions';
+import { parseRenderMode } from 'dor-lib-common/browser-providers';
+import {
+  BROWSER_PROVIDER_GUI,
+  browserHandle,
+  headedRenderMode,
+  hostSupportsBrowser,
+  isHeadedMode,
+  offeredRenderModes,
+  launchBinaryPath,
+  providerUnavailable,
+  rememberLaunchBinaryPath,
+  surfaceProvider,
+  type BrowserHandle,
+} from './browser-automation';
+import { agentBrowserSessionFromParams, isToolParams } from './browser-surface';
 import {
   EDIT_OPS,
   SPECIAL_KEYS,
   modifiers,
   virtualKeyCode,
 } from './agent-browser-input';
-import { createScreenshotLoop, type ScreenshotLoop } from './agent-browser-screenshot-loop';
 import {
   createAgentBrowserConnection,
   type AgentBrowserConnection,
@@ -40,19 +60,19 @@ import {
 // immediately, so quick visibility flips — or a StrictMode unmount→remount —
 // don't tear down and rebuild the stream connection.
 export const HIDDEN_PARK_DELAY_MS = 1000;
-/** Keep low-latency stream painting active briefly after pointer input. Continuous
- *  movement extends the window; idle animated pages stay on the cheaper crisp path. */
-export const PROVISIONAL_INPUT_WINDOW_MS = 250;
 
-// The high-rate `[ab-panel]` stream/screenshot diagnostics fire per frame
-// (~20Hz), so the flag is read ONCE — lazily, on the first log — and memoized:
-// toggling needs a reload, which is the right trade for a hot loop. The
-// connection's always-on debug ring is unaffected.
+// The high-rate `[ab-panel]` diagnostics fire per stream event, so the flag is
+// read ONCE — lazily, on the first log — and memoized: toggling needs a
+// reload, which is the right trade for a hot loop. The same flag has the host
+// log each viewer socket's rates. The connection's always-on debug ring is
+// unaffected.
 // `localStorage.setItem('dormouse.flags.abDebugLogs', 'true')` + reload to enable.
 let abDebugLogsEnabled: boolean | undefined;
+function abDebugLogsOn(): boolean {
+  return abDebugLogsEnabled ??= isAbDebugLogsEnabled();
+}
 function abDebugLog(message: string): void {
-  if (abDebugLogsEnabled === undefined) abDebugLogsEnabled = isAbDebugLogsEnabled();
-  if (abDebugLogsEnabled) console.log(message);
+  if (abDebugLogsOn()) console.log(message);
 }
 
 // SYNCED is "browser viewport CSS size == pane CSS size". The screencast is
@@ -67,39 +87,15 @@ function dimsMatch(a: { w: number; h: number }, b: { w: number; h: number }): bo
   return Math.abs(a.w - b.w) <= DIM_TOLERANCE && Math.abs(a.h - b.h) <= DIM_TOLERANCE;
 }
 
-// A pop-out/pop-in relaunch restores a single URL. A transient about:blank — a
-// stray tab the close+reopen can momentarily surface, or a freshly-relaunched
-// blank page — must never be treated as the page to restore, or the real URL is
-// lost on the way back in. Mirrors the host's usableRelaunchUrl.
-function isRestorableUrl(url: string | null | undefined): url is string {
-  if (typeof url !== 'string') return false;
-  const trimmed = url.trim();
-  return trimmed !== '' && trimmed !== 'about:blank';
+function dprMatch(a: number, b: number): boolean {
+  return Math.abs(a - b) <= 0.001;
 }
 
-function parseCdpUrl(stdout: string): string | null {
-  const trimmed = stdout.trim();
-  if (!trimmed) return null;
-  try {
-    const parsed = JSON.parse(trimmed) as { data?: { result?: unknown }; result?: unknown; url?: unknown };
-    const value = parsed.data?.result ?? parsed.result ?? parsed.url;
-    if (typeof value === 'string' && value.startsWith('ws://')) return value;
-  } catch {
-    // Plain text is the common CLI output.
-  }
-  return trimmed.match(/ws:\/\/\S+/)?.[0] ?? null;
-}
 
-/** Best-effort screen rect for positioning a popped-out window over the pane.
- *  VS Code webviews can't read true screen coords (the host then centers); on
- *  standalone, window.screenX/Y offset the pane's viewport rect into screen
- *  space. */
-function paneScreenRect(el: HTMLElement | null | undefined): { x: number; y: number; width: number; height: number } | undefined {
-  if (!el) return undefined;
-  const r = el.getBoundingClientRect();
-  const sx = typeof window.screenX === 'number' ? window.screenX : 0;
-  const sy = typeof window.screenY === 'number' ? window.screenY : 0;
-  return { x: Math.round(sx + r.left), y: Math.round(sy + r.top), width: Math.round(r.width), height: Math.round(r.height) };
+// A stray about:blank the close+reopen of a relaunch can surface is never the
+// page the pane shows.
+function isShownUrl(url: string | null | undefined): url is string {
+  return typeof url === 'string' && !isBlankUrl(url);
 }
 
 /** The DOM-free key shape the controller's keyboard bridge consumes. A
@@ -114,15 +110,19 @@ export type KeyLike = {
   shiftKey: boolean;
 };
 
-/** Canonical persisted params for a browser surface, as the view reads them.
- *  Pop-out is deliberately absent: it is derived from `renderMode`, never stored
+/** Canonical params for a browser surface, as the view reads them. Pop-out is
+ *  deliberately absent: it is derived from `renderMode`, never stored; nor is
+ *  the stream, which `dor` hands straight to the controller
  *  (docs/specs/dor-browser.md → "Canonical Params"). */
 export interface AgentBrowserSurfaceParams {
   surfaceType?: string;
   renderMode?: RenderMode;
+  cwd?: string;
   session?: string;
+  /** With no `session`, the one the launch opens `url` in; absent, the host
+   *  mints one. */
+  launchSession?: string;
   key?: string;
-  wsPort?: number;
   binaryPath?: string;
   url?: string;
   syncEngaged?: boolean;
@@ -137,14 +137,46 @@ export interface AgentBrowserSurfaceParams {
  * (`lib/src/host/agent-browser-host.ts`). A refused path simply falls back to
  * the host's own resolution.
  */
-function allowedBinaryPath(candidate: unknown): string | undefined {
-  return isAllowedAgentBrowserBinary(candidate) ? candidate : undefined;
+function allowedBinaryPath(candidate: unknown, provider: BrowserAutomationProvider): string | undefined {
+  return isAllowedBinaryFor(provider, candidate) ? candidate : undefined;
 }
+
+/**
+ * Where the Surface's browser is in its life (docs/specs/dor-browser.md →
+ * "Browser Connection" has the transition table). The stream connection
+ * exists exactly in `live`, and so does every daemon command (`driver`).
+ */
+type Phase =
+  /** Constructed; no view has started it yet. */
+  | { k: 'idle' }
+  /** No session yet: opening `url` in a browser whose session binds on
+   *  success — `named` when the launch names one, which a close of the
+   *  Surface meanwhile closes too, through the launch's own binding. */
+  | { k: 'launching'; named?: { session: string; browser: BrowserHandle } }
+  /** The session's stream is being asked of the host (`attach`). */
+  | { k: 'attaching' }
+  /** Viewing `stream` over the host's viewer socket. `seen`: the stream has
+   *  reported its browser connected, so a later drop means it went away — a
+   *  headed window closed. `resumed`: an unpark reconnecting to the stream it
+   *  parked at, not yet proven there — its catch-up waits until the socket
+   *  opens, and one that fails asks the host where it moved. */
+  | { k: 'live'; stream: number; seen: boolean; resumed: boolean }
+  /** Hidden long enough to shed the socket; the browser stays up at `stream`. */
+  | { k: 'parked'; stream: number }
+  /** A headed↔headless relaunch is in flight: the host closes the browser and
+   *  kills its daemon before reopening on a new stream. */
+  | { k: 'relaunching' }
+  /** Nothing to show: the browser went away, or `error` kept it from opening. */
+  | { k: 'ended'; error?: string }
+  /** Released: nothing here runs again. */
+  | { k: 'disposed' };
+
+export type BrowserSurfacePhase = Phase['k'];
 
 /** The live DOM bindings a mounted view lends the controller. `attachView`
  *  wires these; `detach()` returns them. */
 export interface AgentBrowserViewSink {
-  /** Draw target for device-resolution screenshots. */
+  /** Draw target for the viewer socket's frames. */
   canvas: HTMLCanvasElement;
   /** The content area — observed for resize and read for pane rect / pop-out
    *  positioning. */
@@ -153,84 +185,102 @@ export interface AgentBrowserViewSink {
   updateParameters(params: Record<string, unknown>): void;
   /** Set the persisted panel title (door labels / session save). */
   setTitle(title: string): void;
-  /** Ask the view to swap this surface to the iframe renderer. The ≥2-tab
+  /** Ask the view to swap to iframe or the other automation provider. The ≥2-tab
    *  typed-confirm gate and the Wall's `onSwapRenderMode` are view concerns; the
    *  view reads tabs from the snapshot and decides. */
-  requestIframeSwap(): void;
+  requestRenderSwap(mode?: RenderMode): void;
+  /** The first launch failed: the Wall applies the Surface's `launchFallback`. */
+  launchFailed(error: string): void;
 }
 
 /** The single view-facing snapshot, consumed via `useSyncExternalStore`. Only
- *  fields the view actually renders live here — parked state is read by tests via
- *  `isParked()`, and session comes straight from params, so neither belongs in
- *  the snapshot (keeping `parked` out also avoids a wasted re-render per park). */
+ *  what the view renders lives here — session comes straight from params — and
+ *  `phase` is the view's projection: a headless pane that parks or re-attaches
+ *  still shows its last frame, so it reads `live` then, rather than re-rendering
+ *  on every hide and show (`isParked()` answers tests). */
 export interface AgentBrowserViewSnapshot {
   tabs: StreamTab[];
   status: StreamStatus | null;
-  connectionLost: boolean;
   hasFrame: boolean;
+  /** Headed: the browser is (or is being opened as) a separate OS window. */
   poppedOut: boolean;
-  /** A headed↔headless relaunch is in flight: the old stream is gone by design
-   *  and the new one is not yet known, so the view shows neither "ended" nor
-   *  a pop-in/pop-out affordance. */
-  relaunching: boolean;
-  streamPort: number | undefined;
+  phase: BrowserSurfacePhase;
+  /** Why the browser could not be opened, while `phase` is `ended`. */
+  error: string | undefined;
 }
 
 const EMPTY_TABS: StreamTab[] = [];
 
 export class AgentBrowserSurfaceController {
   readonly id: string;
-  /** Gates the pop-out affordance; see `ensureStarted`. */
+  readonly provider: BrowserAutomationProvider;
+  private cwd?: string;
+  /** Whether this host can drive the Surface's provider at all. */
+  private get hosted(): boolean {
+    return hostSupportsBrowser(this.provider);
+  }
+  /** Gates the render modes offered; see `ensureStarted`. */
   private readonly isTool: boolean;
+  /** What `setRenderMode` accepts, fixed on first use with the host's
+   *  capabilities. Never a popout or another provider for a tool, whose
+   *  `render` is `iframe` or `ab-screencast`: the swap would tear the browser
+   *  down and re-derive the same screencast, so asking for a native window would
+   *  get a reload (`docs/specs/dor-tool.md` -> Declaring tools). */
+  private renderModesCache: readonly RenderMode[] | null = null;
+  private get renderModes(): readonly RenderMode[] {
+    return this.renderModesCache ??= offeredRenderModes(this.isTool, this.provider);
+  }
+
+  private phase: Phase = { k: 'idle' };
+  private handleCache: { session?: string; cwd?: string; binaryPath?: string; handle: BrowserHandle | null } | null = null;
+  /** The presentation this Surface shows: a separate OS window, or in the pane.
+   *  Seeded from `renderMode`; changed by a relaunch (optimistically, reverted
+   *  if it fails) or, for Playwright, by a native relaunch the host reports. */
+  private headed: boolean;
 
   // --- params (mirrors of the persisted blob) ---
   private session: string | undefined;
+  private launchSession: string | undefined;
   private binaryPath: string | undefined;
-  private wsPort: number | undefined;
+  /** A stream handed over before the first start, which then views it. */
+  private initialStream: number | undefined;
   private paramsUrl: string | undefined;
   private paramsKey: string | null;
   private paramsSyncEngaged: boolean | undefined;
 
-  // --- stream connection ---
-  // The `streamPort` the connection targets: seeded from params.wsPort, then
-  // driven by recovery / relaunch. Distinct from `wsPort` (the param mirror).
-  private streamPort: number | undefined;
-  private recoverySeq = 0;
+  // --- viewer socket (exists only while live) ---
   private connection: AgentBrowserConnection | null = null;
-  private screenshotLoop: ScreenshotLoop | null = null;
   private connectionUnsub: (() => void) | null = null;
   private connectionKey: string | null = null;
-  // The `session:streamPort` the connection last (re)connected to. An unpark
+  // The `session:stream` the connection last (re)connected to. An unpark
   // reconnects to the same identity, so the last good frame is still valid and
   // must not be blanked to the placeholder; only a real identity change resets
   // hasFrame.
   private lastConnectedIdentity: string | null = null;
-  private liveStreamPort: number | null = null;
+  /** The stream of the last live/parked phase, whose viewport sync still holds. */
+  private boundStream: number | undefined;
 
   // --- view state (the snapshot) ---
   private status: StreamStatus | null = null;
   private hasFrame = false;
-  private connectionLost = false;
   private tabs: StreamTab[] = EMPTY_TABS;
-  private poppedOut: boolean;
-  private parked = false;
-
-  // --- relaunch orchestration ---
-  // Gate auto-revert: only treat a dropped stream as "window closed" once the
-  // headed stream has actually connected (avoids reverting mid-relaunch).
-  private headedConnected = false;
-  // True while a headed↔headless relaunch is in flight. The host closes the
-  // current browser and kills its daemon before reopening on a new port, so the
-  // connection is dropped up front (reconcileConnection) rather than left to
-  // fail: its close would otherwise read as "the headed window closed" (an
-  // auto-revert mid-pop-out) or as a stale port (a recovery `stream status`
-  // that spawns a competing daemon — the daemon is deliberately not up). The
-  // CDP observer waits for the same reason. The host hands back the port.
-  private relaunching = false;
 
   // --- visibility / parking ---
   private visible = true;
+  /** Hidden (or detached) for the park delay: a live pane parks. */
+  private parkRequested = false;
   private parkTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /** The latest presentation and page asked for while nothing could be
+   *  driven, applied once the Surface is live: a launch, attach or relaunch
+   *  must not lose them. A launch or relaunch opens the page itself
+   *  (`launchUrl`), and a host that opened it settles it (`openedByHost`). */
+  private pendingIntent: { url?: string; headed?: boolean } = {};
+
+  /** Requests this Surface sent that can bring its browser up — a launch, a
+   *  relaunch, an attach naming a page — which the host has not answered: a
+   *  close cancels them, however late the transport delivers them (`close`). */
+  private bringingUp = new Set<string>();
 
   // --- sync-to-pane ---
   private syncEngaged: boolean;
@@ -255,14 +305,17 @@ export class AgentBrowserSurfaceController {
   // content-box size cached (the viewport div has no border/padding, so
   // contentRect matches the gBCR those hot paths used to read). null ⇒ no attached
   // view — treat as 0×0 / skip, matching the old no-element behavior. The
-  // correctness-critical reads in issueSyncToPane / paneScreenRect stay live gBCR.
+  // correctness-critical read in issueSyncToPane stays live gBCR.
   // The same observer also drives viewport-sync (debounced), so there is one
   // observer on the pane, not two.
   private paneSize: { w: number; h: number } | null = null;
   private paneSizeObserver: ResizeObserver | null = null;
+  private dprQuery: MediaQueryList | null = null;
 
   // --- canonical URL tracking ---
-  // The newest non-blank active-tab URL observed from the live stream. Kept
+  // The newest active-tab URL observed from the live stream that a relaunch
+  // can restore — http(s) only, as the host relaunches nowhere else, so a
+  // transient about:blank or a `file:`/`data:` page leaves the last one. Kept
   // separate from paramsUrl: engine param writes can lag a tab message, but
   // pop-in/auto-revert must carry the page the user just navigated to.
   private latestRestorableUrl: string | undefined;
@@ -275,58 +328,46 @@ export class AgentBrowserSurfaceController {
   private readonly screenActions: ScreenActions;
   private readonly chromeActions: ChromeActions;
 
-  // --- CDP observer (while popped out) ---
-  private cdpKey: string | null = null;
-  private cdpTeardown: (() => void) | null = null;
-
-  // --- stale-port recovery ---
-  // Bumped on every recovery attempt so a superseded in-flight `stream status`
-  // query is dropped (mirrors the old effect's cleanup `cancelled` flag).
-  private recoveryGen = 0;
-
   // --- view binding ---
   private sink: AgentBrowserViewSink | null = null;
   private attachToken: object | null = null;
-  // "The canvas changed without the crisp loop drawing it." Bumped on attachView
-  // (a fresh view mounts blank) and on every provisional paint (CSS-resolution
-  // pixels land behind the loop's back). The screenshot loop folds this into its
-  // byte-dedup key so an identical capture still repaints — otherwise it would
-  // skip the redundant bytes and leave the canvas blank, or blurry, until the
-  // page happens to change.
-  private drawGeneration = 0;
-  // Latest-wins generation shared by provisional stream decodes and crisp host
-  // screenshots. A late low-resolution decode must never overwrite a newer crisp
-  // frame (or a provisional frame from a later pointer move).
-  private frameDrawSeq = 0;
-  private provisionalUntil = 0;
-  private provisionalPaintGeneration = 0;
+  // Latest-only decoding: one frame decoding, and at most one waiting behind
+  // it, which a newer arrival replaces. Frames paint in the order they came.
+  private decoding = false;
+  private pendingFrame: ViewerFrame | null = null;
   // Param writes buffered while detached (a minimized popped-out pane can still
   // observe URL changes); flushed on the next attach.
   private pendingParams = new Map<string, unknown>();
   private pendingTitle: string | null = null;
-
-  private started = false;
-  private disposed = false;
+  private pendingLaunchFailure: string | null = null;
+  // The value this controller last wrote to each field it also takes from
+  // params, until params show it back. Params predating the write — buffered
+  // while detached, then fed by a remounted view before the flush, or a render
+  // (StrictMode's second effect pass) that ran before the store caught up —
+  // would otherwise undo it: flip the mode back, or read the session a launch
+  // bound as taken away and launch again.
+  private readonly unechoed = new Map<'renderMode' | 'session', unknown>();
 
   private readonly viewListeners = new Set<() => void>();
   private viewSnapshot: AgentBrowserViewSnapshot;
 
   constructor(id: string, params: AgentBrowserSurfaceParams) {
     this.id = id;
+    this.provider = surfaceProvider(params.renderMode);
+    this.cwd = params.cwd;
     // A Surface's kind never changes over its life (a tool's capabilities come
     // and go, its identity does not), so this is safe to seed once.
     this.isTool = isToolParams(params);
     this.session = params.session;
-    this.binaryPath = allowedBinaryPath(params.binaryPath);
-    this.wsPort = params.wsPort;
-    this.streamPort = params.wsPort;
+    this.launchSession = params.launchSession;
+    this.binaryPath = allowedBinaryPath(params.binaryPath, this.provider);
     this.paramsUrl = params.url;
     this.paramsKey = params.key ?? null;
     this.paramsSyncEngaged = params.syncEngaged;
-    this.latestRestorableUrl = isRestorableUrl(params.url) ? params.url : undefined;
-    // poppedOut is derived from the canonical renderMode; an unset mode (a direct
-    // mount in tests) is not popped out.
-    this.poppedOut = params.renderMode === 'ab-popout';
+    this.latestRestorableUrl = isBrowsableUrl(params.url) ? params.url : undefined;
+    // Headedness is derived from the canonical renderMode; an unset mode (a
+    // direct mount in tests) is not popped out.
+    this.headed = isHeadedMode(params.renderMode);
     // A fresh surface auto-engages sync (no persisted flag); a re-attached one
     // restores whatever was persisted into the layout blob.
     this.syncEngaged = params.syncEngaged ?? true;
@@ -346,31 +387,23 @@ export class AgentBrowserSurfaceController {
       applyDevice: (name) => {
         this.lastIssued = null;
         this.setSyncEngaged(false);
-        this.runAgentBrowser(['set', 'device', name]);
+        this.drive(`set device ${name}`, (browser) => browser.device(name));
       },
       applyViewport: (w, h, dpr) => {
         this.lastIssued = null;
         this.setSyncEngaged(false);
-        this.runAgentBrowser(['set', 'viewport', String(w), String(h), String(dpr)]);
+        this.drive(`set viewport ${w} ${h} ${dpr}`, (browser) => browser.viewport(w, h, dpr));
       },
       openModal: () => openAgentBrowserScreenModal(this.id),
-      setRenderMode: (mode) => {
-        // agent-browser → iframe is a render swap handled by the Wall (the view
-        // owns the ≥2-tab confirm gate + onSwapRenderMode);
-        // ab-screencast ↔ ab-popout relaunches this same session, in-controller.
-        if (mode === 'iframe') this.sink?.requestIframeSwap();
-        else if (mode === 'ab-popout') this.popOut();
-        else if (this.poppedOut) this.popIn(); // ab-popout → ab-screencast
-      },
+      setRenderMode: (mode, opts) => this.setRenderMode(mode, opts),
     };
 
-    // Native history nav — issued like tab actions (allowlisted in
-    // agentBrowserCommand).
+    // Native history nav — issued like tab actions, through the daemon gate.
     this.chromeActions = {
-      navigate: (url) => { if (url) this.runAgentBrowser(['open', url]); },
-      back: () => this.runAgentBrowser(['back']),
-      forward: () => this.runAgentBrowser(['forward']),
-      reload: () => this.runAgentBrowser(['reload']),
+      navigate: (url) => this.navigate(url),
+      back: () => this.drive('back', (browser) => browser.history('back')),
+      forward: () => this.drive('forward', (browser) => browser.history('forward')),
+      reload: () => this.drive('reload', (browser) => browser.history('reload')),
     };
 
     this.viewSnapshot = this.buildViewSnapshot();
@@ -386,14 +419,15 @@ export class AgentBrowserSurfaceController {
   snapshot = (): AgentBrowserViewSnapshot => this.viewSnapshot;
 
   private buildViewSnapshot(): AgentBrowserViewSnapshot {
+    const phase = this.phase;
+    const shown = !this.headed && (phase.k === 'parked' || phase.k === 'attaching') ? 'live' : phase.k;
     return {
       tabs: this.tabs,
       status: this.status,
-      connectionLost: this.connectionLost,
       hasFrame: this.hasFrame,
-      poppedOut: this.poppedOut,
-      relaunching: this.relaunching,
-      streamPort: this.streamPort,
+      poppedOut: this.headed,
+      phase: shown,
+      error: phase.k === 'ended' ? phase.error : undefined,
     };
   }
 
@@ -401,17 +435,44 @@ export class AgentBrowserSurfaceController {
   // useSyncExternalStore keeps a stable reference and doesn't spin re-renders.
   private emitView(): void {
     const prev = this.viewSnapshot;
+    const next = this.buildViewSnapshot();
     if (
-      prev.tabs === this.tabs &&
-      prev.status === this.status &&
-      prev.connectionLost === this.connectionLost &&
-      prev.hasFrame === this.hasFrame &&
-      prev.poppedOut === this.poppedOut &&
-      prev.relaunching === this.relaunching &&
-      prev.streamPort === this.streamPort
+      prev.tabs === next.tabs &&
+      prev.status === next.status &&
+      prev.hasFrame === next.hasFrame &&
+      prev.poppedOut === next.poppedOut &&
+      prev.phase === next.phase &&
+      prev.error === next.error
     ) return;
-    this.viewSnapshot = this.buildViewSnapshot();
+    this.viewSnapshot = next;
     for (const listener of this.viewListeners) listener();
+  }
+
+  /**
+   * Swap this Surface's render mode, going to `url` too (docs/specs/dor-browser.md
+   * → "Display Modal And Render Swaps"). Only what the modal could offer: the
+   * popout below never reaches the Wall's own tool guard. A swap to iframe or
+   * the other provider is a render swap handled by the Wall (the view owns the
+   * ≥2-tab confirm gate + onSwapRenderMode); screencast ↔ popout relaunches
+   * this same session, in-controller, carrying the page asked for rather than
+   * racing a navigation into it.
+   */
+  setRenderMode(mode: RenderMode, opts?: { url?: string }): void {
+    if (!this.renderModes.includes(mode)) return;
+    const { provider, presentation } = parseRenderMode(mode);
+    const headed = presentation === 'popout';
+    if (provider !== this.provider) this.sink?.requestRenderSwap(mode);
+    else if (headed !== this.headed) this.relaunch(headed, opts?.url);
+    else if (opts?.url) this.navigate(opts.url);
+  }
+
+  /** The render mode this Surface shows now. */
+  private renderMode(): RenderMode {
+    return headedRenderMode(this.provider, this.headed);
+  }
+
+  private get label(): string {
+    return BROWSER_PROVIDER_GUI[this.provider].label;
   }
 
   getDeviceSize(): { width: number; height: number } {
@@ -421,36 +482,35 @@ export class AgentBrowserSurfaceController {
   // --- one-time start (from the first attach; keeps side effects out of render) ---
 
   private ensureStarted(): void {
-    if (this.started || this.disposed) return;
-    this.started = true;
-    // This surface owns its session again — clear any teardown mark a prior
-    // surface (re-using the same managed name) left behind, so auto-revert works.
-    if (this.session) clearAgentBrowserSessionClosed(this.session);
-    // Display-scale (DPR) changes don't resize the pane, so ResizeObserver misses
-    // them; a window resize is the available signal.
-    window.addEventListener('resize', this.onWindowResize);
+    if (this.phase.k !== 'idle') return;
+    this.watchDpr();
     this.registration = registerAgentBrowserScreen(this.id, {
       snapshot: this.computeScreenSnapshot(),
       actions: this.screenActions,
       chrome: this.chrome,
       chromeActions: this.chromeActions,
-      hostCapable: !!getPlatform().agentBrowserCommand,
-      // Never for a tool, whose `render` is `iframe` or `ab-screencast`: the
-      // swap would tear the browser down and re-derive the same screencast, so
-      // asking for a native window would get a reload
-      // (`docs/specs/dor-tool.md` -> Declaring tools).
-      canPopOut: !this.isTool && !!getPlatform().agentBrowserPopOut,
+      hostCapable: this.hosted,
+      renderModes: this.renderModes,
     });
     this.lastPublishedScreen = null;
     this.publishScreen();
-    this.reconcile();
-    this.maybeRecoverStalePort();
+    this.bind(this.initialStream);
+    this.initialStream = undefined;
   }
 
-  private onWindowResize = (): void => {
-    // A display-scale (DPR) change doesn't resize the pane, so ResizeObserver
-    // misses it; refresh the cache off the window-resize signal too.
-    this.refreshPaneSize();
+  // A display-scale (DPR) change resizes nothing, so the pane's ResizeObserver
+  // misses it. A `(resolution)` query fires once when the scale leaves its
+  // value, and is re-armed for the new one.
+  private watchDpr(): void {
+    this.dprQuery?.removeEventListener('change', this.onDprChange);
+    this.dprQuery = typeof window.matchMedia === 'function'
+      ? window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`)
+      : null;
+    this.dprQuery?.addEventListener('change', this.onDprChange);
+  }
+
+  private onDprChange = (): void => {
+    this.watchDpr();
     if (this.syncEngaged) this.issueSyncToPane();
     this.publishScreen();
   };
@@ -474,6 +534,7 @@ export class AgentBrowserSurfaceController {
     const observer = new ResizeObserver((entries) => {
       const cr = entries[entries.length - 1]?.contentRect;
       if (cr) this.paneSize = { w: Math.round(cr.width), h: Math.round(cr.height) };
+      this.publishScreen();
       // While syncing, push the new pane size to the browser (debounced). The
       // inner re-check drops a resize whose sync was disengaged mid-debounce.
       if (!this.syncEngaged) return;
@@ -501,10 +562,6 @@ export class AgentBrowserSurfaceController {
     const token = {};
     this.attachToken = token;
     this.sink = sink;
-    // A fresh canvas mounts blank; bump the draw generation so the screenshot
-    // loop repaints it even if the next capture's bytes match the last frame.
-    this.drawGeneration += 1;
-    this.frameDrawSeq += 1;
     // Seed + observe the pane size cache before ensureStarted so the first
     // computeScreenSnapshot reads a real size.
     this.setupPaneSizeObserver();
@@ -518,29 +575,28 @@ export class AgentBrowserSurfaceController {
       sink.setTitle(this.pendingTitle);
       this.pendingTitle = null;
     }
+    if (this.pendingLaunchFailure !== null) {
+      sink.launchFailed(this.pendingLaunchFailure);
+      this.pendingLaunchFailure = null;
+    }
     // The pane-size observer fires on observe and (when syncing) debounces a
     // `set viewport`; issue once explicitly too so re-engaging at an unchanged
     // size still reclaims the viewport. issueSyncToPane no-ops when not capable.
     if (this.syncEngaged) this.issueSyncToPane();
     this.updateParkState();
-    this.reconcile();
     this.publishScreen();
-    // After a (re)attach, if a live in-pane connection exists, force one capture
-    // so a view remounted within the park debounce repaints instead of sitting
-    // blank — the connection's own frame dedup swallows the heartbeat rebroadcast,
-    // and the bumped generation defeats the screenshot loop's byte dedup.
-    if (!this.parked && !this.relaunching && !this.poppedOut && this.connection) {
-      this.screenshotLoop?.pulse();
-    }
+    // A view remounted within the park debounce mounts a blank canvas over a
+    // socket still open, whose host sends only changes: ask it for the last frame.
+    if (this.phase.k === 'live' && !this.headed) this.connection?.send({ type: 'repaint' });
     return {
       // Guard by identity: a stale handle's detach must no-op if a newer view
       // has already attached (StrictMode attach A → detach A → attach B can
       // interleave), and dispose already released everything.
       detach: () => {
-        if (this.disposed || this.attachToken !== token) return;
-        // A provisional decode aimed at the old canvas needs no cancelling here:
-        // drawProvisionalFrame captures its sink and drops the bitmap when
-        // `this.sink` has moved on, which clearing it below guarantees.
+        if (this.phase.k === 'disposed' || this.attachToken !== token) return;
+        // A decode aimed at the old canvas needs no cancelling here:
+        // `decodeFrame` captures its sink and drops the bitmap when `this.sink`
+        // has moved on, which clearing it below guarantees.
         this.sink = null;
         this.attachToken = null;
         // The observed viewport died with the unmount; drop the cache (and the
@@ -549,7 +605,7 @@ export class AgentBrowserSurfaceController {
         this.paneSize = null;
         // The canvas DOM died with the unmount; on reattach a fresh canvas
         // mounts blank, so drop hasFrame to match the minimize/reattach
-        // placeholder → first-screenshot sequence.
+        // placeholder → first-frame sequence.
         this.setHasFrame(false);
         this.updateParkState();
       },
@@ -559,56 +615,69 @@ export class AgentBrowserSurfaceController {
   // --- params ---
 
   updateParams(params: AgentBrowserSurfaceParams): void {
-    if (this.disposed) return;
-    // Mirror every field first, then reconcile once: `{session, wsPort,
-    // binaryPath}` lands as a single write when a daemon boot hands over a
-    // session-less pane, and reacting per field would fire a `stream status`
-    // for the session before its port is mirrored — a CLI spawn that queues
-    // behind the daemon's in-flight `open` only to be discarded.
-    let sessionChanged = false;
-    let binaryPathChanged = false;
-    let portChanged = false;
-    if (params.session !== this.session) {
-      this.session = params.session;
-      if (params.session) clearAgentBrowserSessionClosed(params.session);
-      sessionChanged = true;
-    }
-    const nextBinaryPath = allowedBinaryPath(params.binaryPath);
-    if (nextBinaryPath !== this.binaryPath) {
-      this.binaryPath = nextBinaryPath;
-      binaryPathChanged = true;
-    }
-    if (params.wsPort !== this.wsPort) {
-      this.wsPort = params.wsPort;
-      portChanged = true;
-    }
-    if (portChanged) {
-      // Mirrors the old useEffect(() => setStreamPort(wsPort), [wsPort]): a
-      // `dor ab` re-run refreshing wsPort reconnects to the new port.
-      this.setStreamPort(params.wsPort);
-    }
-    // Run this even after the port arm: the persisted params mirror (`wsPort`)
-    // can lag the already-live `streamPort`, making setStreamPort a no-op while
-    // the session identity still changes underneath that connection.
-    if (sessionChanged) {
-      this.reconcile();
-      this.emitView();
-      this.maybeRecoverStalePort();
-    } else if (binaryPathChanged) {
-      this.maybeRecoverStalePort();
-    }
+    if (this.phase.k === 'disposed') return;
+    // Mirror every field first, then rebind once: binding per field would bind
+    // a new session with the cwd or binary of the old.
+    if (params.cwd !== undefined) this.cwd = params.cwd;
+    // First, so neither a stream this rebinds nor one handed over next
+    // (`handOverBrowserStream`) inherits a `set viewport` meant for the old mode.
+    if (params.renderMode && this.echoed('renderMode', params.renderMode)) this.followParamsHeadedness(params.renderMode);
+    const sessionChanged = this.echoed('session', params.session) && params.session !== this.session;
+    if (sessionChanged) this.session = params.session;
+    this.launchSession = params.launchSession;
+    this.binaryPath = allowedBinaryPath(params.binaryPath, this.provider);
     if (params.url !== this.paramsUrl) {
       this.paramsUrl = params.url;
-      if (isRestorableUrl(params.url)) this.latestRestorableUrl = params.url;
+      if (isBrowsableUrl(params.url)) {
+        this.latestRestorableUrl = params.url;
+        // A new target while a launch opens the old one (a Tool re-framed):
+        // go there once live, unless the host opened it after all.
+        if (this.phase.k === 'launching') this.pendingIntent.url = params.url;
+      }
     }
     if ((params.key ?? null) !== this.paramsKey) {
       this.paramsKey = params.key ?? null;
       this.recomputeChrome();
     }
     if (params.syncEngaged !== undefined) this.paramsSyncEngaged = params.syncEngaged;
-    // renderMode is deliberately NOT reacted to: the controller owns poppedOut
-    // (seeded once at construction, then driven only by popOut/popIn). The
-    // param is a persistence echo of the controller's own writes.
+    // Before the first attach, `ensureStarted` binds whatever has arrived.
+    if (this.phase.k !== 'idle' && sessionChanged) this.bind();
+  }
+
+  /**
+   * A stream a `dor ab` / `dor pw` command just learned for this Surface's
+   * session — the same one again included — to view, leaving `ended` too.
+   */
+  handOver(stream: number): void {
+    if (this.phase.k === 'disposed') return;
+    if (this.phase.k === 'idle') this.initialStream = stream;
+    else this.adopt(stream);
+  }
+
+  /** Whether params may set `field` to `value`: not while they have yet to
+   *  show this controller's own last write of it — the echo itself included. */
+  private echoed(field: 'renderMode' | 'session', value: unknown): boolean {
+    if (!this.unechoed.has(field)) return true;
+    if (this.unechoed.get(field) === value) this.unechoed.delete(field);
+    return false;
+  }
+
+  /**
+   * A provider's native launch (Playwright's `open --headed`) can change
+   * headedness outside the Display modal; the host reports it, and the Wall
+   * records it in params (`ensureBrowserSurface`). This controller's own
+   * popOut/popIn write never reaches here (`echoed`), and a relaunch in flight
+   * owns the mode.
+   */
+  private followParamsHeadedness(renderMode: RenderMode): void {
+    if (this.phase.k === 'relaunching') return;
+    const headed = isHeadedMode(renderMode);
+    if (headed === this.headed) return;
+    // The last status came from the old browser; auto-revert waits for the
+    // new stream's own before it treats a disconnect as the window closing.
+    this.setStatus(null);
+    if (this.phase.k === 'live') this.phase.seen = false;
+    this.setHeaded(headed);
   }
 
   setVisible(visible: boolean): void {
@@ -620,58 +689,244 @@ export class AgentBrowserSurfaceController {
   // Buffer a param write while detached so a minimized (view-less) controller
   // can still record URL changes; flush on the next attach.
   private writeParams(params: Record<string, unknown>): void {
+    for (const field of ['renderMode', 'session'] as const) {
+      if (typeof params[field] === 'string') this.unechoed.set(field, params[field]);
+    }
     if (this.sink) this.sink.updateParameters(params);
     else for (const [k, v] of Object.entries(params)) this.pendingParams.set(k, v);
+  }
+
+  // --- phase ---
+
+  /** Enter `next`, with the viewer socket following it. */
+  private setPhase(next: Phase): void {
+    this.phase = next;
+    if (next.k === 'live' || next.k === 'parked') {
+      // A new or restarted browser comes up at its native viewport; if sync is
+      // engaged, reclaim the pane size. Clearing lastIssued is essential — it
+      // otherwise still holds the previous browser's pane size and
+      // issueSyncToPane would no-op, leaving the fresh browser unsynced.
+      if (next.stream !== this.boundStream) {
+        this.boundStream = next.stream;
+        this.lastIssued = null;
+      }
+    }
+    this.reconcileConnection();
+    this.emitView();
+    // An unpark's stream is proven only once its socket opens.
+    if (next.k === 'live' && !next.resumed) this.drivable();
+  }
+
+  /** The daemon can be driven again: catch up on what waited for it. */
+  private drivable(): void {
+    // issueSyncToPane no-ops until now, so a resize made meanwhile — behind a
+    // hidden tab, or across a relaunch — is pushed now (lastIssued makes this a
+    // no-op when the pane size did not change).
+    if (this.syncEngaged) this.issueSyncToPane();
+    const { url, headed } = this.pendingIntent;
+    this.pendingIntent = {};
+    if (headed !== undefined && headed !== this.headed) this.relaunch(headed, url);
+    else if (url) this.drive(`open ${url}`, (browser) => browser.navigate(url));
+  }
+
+  /** (Re)bind the current params: no session launches one, a session without
+   *  a stream learns it from the host, one whose stream was just handed over
+   *  is viewed at once. */
+  private bind(handover?: number): void {
+    if (!this.session) this.launch();
+    else if (handover) this.goLive(handover);
+    else this.attach(true);
+  }
+
+  /** A stream handed over for the bound session: view it. A launch or
+   *  relaunch in flight ignores it — the host's answer is the authoritative
+   *  stream. */
+  private adopt(stream: number): void {
+    const phase = this.phase;
+    if (phase.k === 'relaunching' || phase.k === 'launching') return;
+    if (phase.k === 'live' && phase.stream === stream) return;
+    if (phase.k === 'parked') this.setPhase({ k: 'parked', stream });
+    else this.goLive(stream);
+  }
+
+  private goLive(stream: number, resumed = false): void {
+    this.setPhase(this.parkRequested && !this.headed
+      ? { k: 'parked', stream }
+      : { k: 'live', stream, seen: false, resumed });
+  }
+
+  /**
+   * Open this Surface's page in a new browser — in `launchSession` when params
+   * name one — and bind the session the host answers with. Every GUI-created
+   * browser Surface starts here, and so does one restored before its launch
+   * landed. Resolves once the browser is up, never waiting for the page; the
+   * Wall's `whenBrowserLaunched` hears the outcome.
+   */
+  private launch(): void {
+    const url = this.launchUrl();
+    const session = this.launchSession;
+    const headed = this.headed;
+    // No creation site has to remember the binary a `dor ab` surface resolved.
+    const binaryPath = this.binaryPath ?? launchBinaryPath(this.provider);
+    const browser = browserHandle(this.provider, { session, cwd: this.cwd, binaryPath });
+    const phase: Phase = { k: 'launching', ...(session && browser ? { named: { session, browser } } : {}) };
+    this.setPhase(phase);
+    // A launch that cannot start settles as late as one that fails, so whoever
+    // created this Surface is always listening by then. A named one is sent
+    // only once every close of its session this webview sent has been
+    // answered — a failed swap reopening the previous provider's, a Tool
+    // re-run's — so no transport can deliver it first; released meanwhile, it
+    // opens nothing for a closed Surface.
+    const closing = session === undefined ? undefined : closeInFlight(this.provider, session);
+    const opened: Promise<BrowserResult> = !browser
+      ? Promise.resolve({ ok: false, error: providerUnavailable(this.provider) })
+      : !url
+        ? Promise.resolve({ ok: false, error: 'no page to open' })
+        : !closing
+          ? this.bringUp((requestId) => browser.launch(url, headed, requestId))
+          : closing.then(() => this.phase === phase ? this.bringUp((requestId) => browser.launch(url, headed, requestId)) : { ok: false });
+    opened
+      .then((res) => {
+        if (this.phase !== phase) {
+          // The browser that came up belongs to nobody: close a session the
+          // host minted, which only this answer names. A named one a close of
+          // this Surface already closed after it (`close`); one left otherwise
+          // is whoever holds that session next (a Workspace transfer's
+          // destination opens the same one).
+          if (res.session && !session) void closeSessionOn(this.provider, res.cwd ?? this.cwd, res.session, res.binaryPath);
+          return;
+        }
+        if (!res.ok || !res.session) {
+          const error = res.error ?? `Could not open ${this.label}`;
+          this.setPhase({ k: 'ended', error });
+          settleLaunch(this.id, error);
+          this.reportLaunchFailure(error);
+          return;
+        }
+        rememberLaunchBinaryPath(this.provider, res.binaryPath);
+        this.session = res.session;
+        if (res.cwd !== undefined) this.cwd = res.cwd;
+        this.binaryPath = allowedBinaryPath(res.binaryPath, this.provider) ?? allowedBinaryPath(binaryPath, this.provider);
+        this.writeParams({
+          session: res.session,
+          ...(res.cwd !== undefined ? { cwd: res.cwd } : {}),
+          ...(res.nativeIdentity !== undefined ? { nativeIdentity: res.nativeIdentity } : {}),
+          ...(this.binaryPath !== undefined ? { binaryPath: this.binaryPath } : {}),
+          // The launch is done: its session and its failure policy with it.
+          launchSession: undefined,
+          launchFallback: undefined,
+        });
+        this.launchSession = undefined;
+        this.openedByHost(url);
+        if (res.stream) this.goLive(res.stream);
+        else this.attach(false);
+        settleLaunch(this.id, null);
+      });
+  }
+
+  /** Tell the Wall this Surface's first launch failed: it applies the
+   *  fallback the Surface's creator stored (`launchFallback`). A view that is
+   *  not attached hears it when it attaches. */
+  private reportLaunchFailure(error: string): void {
+    if (this.sink) this.sink.launchFailed(error);
+    else this.pendingLaunchFailure = error;
+  }
+
+  /** The page a launch, relaunch or relaunching attach opens: the navigation
+   *  still pending, else the page this Surface is on. */
+  private launchUrl(): string | undefined {
+    const pending = this.pendingIntent.url;
+    return isBrowsableUrl(pending) ? pending : this.currentRelaunchUrl();
+  }
+
+  /** The host opened `url` in the browser it started: a navigation pending to
+   *  that page is done, or `live` would load it a second time. */
+  private openedByHost(url: string | undefined): void {
+    if (url !== undefined && this.pendingIntent.url === url) delete this.pendingIntent.url;
+  }
+
+  /**
+   * Ask the host where the session's stream is (`attach`, which never starts a
+   * daemon to answer). With `relaunch`, a session whose daemon is gone is
+   * reopened at the page this Surface had, so a restore after a reboot comes
+   * back where it was. Without, as on an unpark whose stream failed, a gone
+   * daemon is `ended`.
+   */
+  private attach(relaunch: boolean): void {
+    const session = this.session;
+    if (!session) { this.launch(); return; }
+    const browser = this.handle();
+    if (!browser) {
+      this.setPhase({ k: 'ended' });
+      return;
+    }
+    const phase: Phase = { k: 'attaching' };
+    this.setPhase(phase);
+    const url = relaunch ? this.launchUrl() : undefined;
+    // A browser this relaunches for a Surface closed meanwhile is closed by
+    // the host: it runs the close after this attach, or cancels it (`close`).
+    (url ? this.bringUp((requestId) => browser.attach({ url, headed: this.headed, requestId })) : browser.attach({ headed: this.headed }))
+      .then((res) => {
+        if (this.phase !== phase) return;
+        // Only a gone daemon is relaunched at the page; a live one was only
+        // found, so a navigation pending to it still has to run.
+        if (res.relaunched) this.openedByHost(url);
+        if (res.ok && res.stream) this.goLive(res.stream);
+        else this.setPhase({ k: 'ended', error: relaunch ? res.error : undefined });
+      });
+  }
+
+  /** Send a request that can bring the browser up under a fresh id, held in
+   *  `bringingUp` until the host answers it. */
+  private bringUp(send: (requestId: string) => Promise<BrowserResult>): Promise<BrowserResult> {
+    const requestId = crypto.randomUUID();
+    this.bringingUp.add(requestId);
+    // A handle answers failures rather than rejecting.
+    return send(requestId).then((result) => {
+      this.bringingUp.delete(requestId);
+      return result;
+    });
   }
 
   // --- parking ---
 
   private updateParkState(): void {
     if (this.parkTimer) { clearTimeout(this.parkTimer); this.parkTimer = undefined; }
-    // Detached ⇒ hidden. Popped out is exempt: its stream/CDP observer detects a
-    // headed window close and drives auto-revert, so parking it would break that.
-    const shouldPark = !this.poppedOut && (!this.visible || !this.sink);
-    if (!shouldPark) { this.setParked(false); return; }
+    // Detached ⇒ hidden. Popped out is exempt: its viewer socket brings the
+    // headed window's close, which drives auto-revert, and its page as it
+    // navigates, so parking it would break both.
+    const shouldPark = !this.headed && (!this.visible || !this.sink);
+    if (!shouldPark) { this.setParkRequested(false); return; }
     this.parkTimer = setTimeout(() => {
       this.parkTimer = undefined;
-      this.setParked(true);
+      this.setParkRequested(true);
     }, HIDDEN_PARK_DELAY_MS);
   }
 
   /** Whether the pane is parked (hidden/detached long enough to shed its stream).
    *  Not in the view snapshot — exposed for tests. */
   isParked(): boolean {
-    return this.parked;
+    return this.phase.k === 'parked';
   }
 
-  private setParked(parked: boolean): void {
-    if (this.parked === parked) return;
-    this.parked = parked;
-    // A parked pane holds no stream/screenshot loop; the daemon/session stays
-    // alive and re-broadcasts on reconnect. Treat unpark like a fresh mount for
-    // stale-port recovery: the daemon may have moved while no client was alive.
-    if (parked) this.liveStreamPort = null;
-    this.reconcile();
-    this.maybeRecoverStalePort();
-    // issueSyncToPane no-ops while parked, so a resize that happened behind a
-    // hidden tab was never pushed; reconcile it on unpark (lastIssued makes this
-    // a no-op when the pane size didn't actually change).
-    if (!parked && this.syncEngaged) this.issueSyncToPane();
+  private setParkRequested(parkRequested: boolean): void {
+    if (this.parkRequested === parkRequested) return;
+    this.parkRequested = parkRequested;
+    const phase = this.phase;
+    // A parked pane holds no viewer socket; the daemon/session stays alive and
+    // re-broadcasts on reconnect. An unpark views the stream it parked at at
+    // once, and asks the host only if that fails: the daemon may have moved
+    // while no client was alive.
+    if (parkRequested && phase.k === 'live') this.setPhase({ k: 'parked', stream: phase.stream });
+    else if (!parkRequested && phase.k === 'parked') this.goLive(phase.stream, true);
   }
 
-  // --- reconcile: connection + CDP observer (idempotent, keyed) ---
-
-  private reconcile(): void {
-    if (this.disposed) return;
-    this.reconcileConnection();
-    this.reconcileCdp();
-  }
+  // --- viewer socket (keyed; exists exactly while live) ---
 
   private reconcileConnection(): void {
-    const desired = !this.disposed && !!this.streamPort && !!this.session && !this.parked && !this.relaunching;
-    // recoverySeq forces a reconnect at the same session/port (a same-port
-    // `dor ab` refresh); it is part of the identity key so a bump re-creates.
-    const key = desired ? `${this.session}:${this.streamPort}:${this.recoverySeq}` : null;
+    const phase = this.phase;
+    // Headedness too: a headed viewer is sent no frames.
+    const key = phase.k === 'live' ? `${this.session}:${phase.stream}:${this.headed}` : null;
     if (key === this.connectionKey) return;
 
     if (this.connection) {
@@ -679,381 +934,134 @@ export class AgentBrowserSurfaceController {
       this.connectionUnsub = null;
       this.connection.dispose();
       this.connection = null;
-      this.screenshotLoop?.dispose();
-      this.screenshotLoop = null;
     }
     this.connectionKey = key;
-    if (!desired) return;
+    if (phase.k !== 'live') return;
 
     const session = this.session!;
-    const streamPort = this.streamPort!;
-
-    // Per-connection pairing: the screenshot loop and the connection are created
-    // and disposed together. The loop lives here (not in a separate effect) so a
-    // reconnect always re-creates it — a disposed loop would silently drop every
-    // frame pulse.
-    const screenshotLoop = createScreenshotLoop({
-      getSession: () => this.session,
-      getBinaryPath: () => this.binaryPath,
-      isCapable: () => !!getPlatform().agentBrowserScreenshot && !!this.session,
-      draw: this.drawBitmap,
-      // A re-attach bumps drawGeneration so a fresh (blank) canvas repaints even
-      // when the capture bytes are identical to the last displayed frame.
-      getDrawGeneration: () => this.drawGeneration,
-      getProvisionalGeneration: () => this.provisionalPaintGeneration,
-      getProvisionalDeadline: () => this.provisionalUntil,
-      log: abDebugLog,
-    });
+    const stream = phase.stream;
+    const headed = this.headed;
     const connection = createAgentBrowserConnection({
       session,
-      streamPort,
-      binaryPath: this.binaryPath,
-      getStreamUrl: async (port) => (await getPlatform().getAgentBrowserStreamUrl?.(port)) ?? undefined,
-      runCommand: (targetSession, args, targetBinaryPath) => getPlatform().agentBrowserCommand?.(targetSession, args, targetBinaryPath)
-        ?? Promise.resolve({ exitCode: 1, stdout: '', stderr: 'agent-browser commands unavailable' }),
-      canSelectTabs: () => !this.poppedOut && !this.relaunching,
-      wantFrameData: () => this.wantsProvisionalFrame(),
+      stream,
+      viewUrl: async () => {
+        const answer = await this.handle()?.view(stream, { headed, debug: abDebugLogsOn() });
+        if (!answer?.ok || !answer.url) throw new Error(answer?.error ?? `${this.label} viewer unavailable`);
+        return answer.url;
+      },
+      selectTab: (tabId) => this.driver()?.tab('select', tabId)
+        ?? Promise.resolve({ ok: false, error: `${this.label} commands unavailable` }),
+      canSelectTabs: () => !this.headed,
       log: abDebugLog,
     });
     this.connection = connection;
-    this.screenshotLoop = screenshotLoop;
     this.connectionUnsub = connection.subscribe((event) => {
+      const phase = this.phase;
+      if (phase.k !== 'live') return;
       if (event.type === 'connection-open') {
-        this.liveStreamPort = event.port;
-        this.setConnectionLost(false);
+        // The stream it parked at still answers: the daemon it drives is there.
+        if (phase.resumed) {
+          phase.resumed = false;
+          this.drivable();
+        }
       } else if (event.type === 'connection-close') {
-        if (event.failures >= 3) this.setConnectionLost(true);
+        // An unpark's daemon may have moved while nothing viewed it.
+        if (phase.resumed) this.attach(false);
+        else if (event.failures >= 3) this.streamLost();
       } else if (event.type === 'status') {
         this.setStatus(event.status);
-        this.setConnectionLost(event.status.connected === false);
+        // A browser not yet reported connected is still coming up.
+        const lost = !event.status.connected && phase.seen;
+        if (event.status.connected) phase.seen = true;
         if (typeof event.status.viewportWidth === 'number' && typeof event.status.viewportHeight === 'number') {
-          this.device = { width: event.status.viewportWidth, height: event.status.viewportHeight };
-          this.maybeDisengageSync();
-          this.publishScreen();
+          this.setDeviceSize(event.status.viewportWidth, event.status.viewportHeight);
         }
+        if (lost) this.streamLost();
       } else if (event.type === 'url') {
         // A navigation committed. `tabs` catches up only when the driving
         // command completes — for a slow page, the whole load — so record it now:
         // the header follows, and a relaunch mid-load carries the page being
         // loaded rather than the one before it.
         this.applyStreamUrl(event.url);
+      } else if (event.type === 'page') {
+        this.applyObservedNavigation(event.url, event.title);
       } else if (event.type === 'tabs') {
-        const prevActiveId = event.previousTabs.find((t) => t.active)?.tabId;
-        const nextActiveId = event.tabs.find((t) => t.active)?.tabId;
         this.setTabs(event.tabs);
-        // Switching the active tab doesn't make the daemon emit a screencast
-        // frame, and the dedup'd stream is otherwise silent on a static page, so
-        // force one capture so the surface follows the tab the user just selected.
-        if (nextActiveId && nextActiveId !== prevActiveId && !this.poppedOut && !this.relaunching) {
-          screenshotLoop.pulse();
-        }
-      } else if (event.type === 'frame-pulse') {
-        if (event.metadata) {
-          this.device = { width: event.metadata.deviceWidth, height: event.metadata.deviceHeight };
-        }
-        // The native stream frame is CSS-resolution but arrives immediately after
-        // hover/animation changes. Paint it as a provisional response, then let the
-        // host screenshot loop replace it with the crisp device-resolution frame.
-        // The body rides along only when we asked for it (via `wantFrameData`), so
-        // its presence is the request — re-testing `wantsProvisionalFrame` here would
-        // only race its own `provisionalUntil` deadline and drop a frame we wanted.
-        if (event.data) this.drawProvisionalFrame(event.data);
-        this.maybeDisengageSync();
-        this.publishScreen();
-        if (!this.poppedOut && !this.relaunching) screenshotLoop.pulse();
+      } else if (event.type === 'frame') {
+        if (event.size) this.setDeviceSize(event.size.width, event.size.height);
+        this.paintFrame(event);
       }
     });
-    // Unparking reconnects to the same session/port; the last good frame is still
-    // valid, so only blank to the placeholder when the identity actually changed.
-    const identity = `${session}:${streamPort}`;
+    // The new stream reports its own status; the last one came from whatever
+    // this Surface streamed before.
+    this.status = null;
+    // Unparking reconnects to the same session/stream; the last good frame is
+    // still valid, so only blank to the placeholder when the identity changed.
+    const identity = `${session}:${stream}`;
     if (this.lastConnectedIdentity !== identity) {
       this.lastConnectedIdentity = identity;
       this.setHasFrame(false);
     }
-    this.setConnectionLost(false);
   }
 
-  private paintBitmap(bitmap: ImageBitmap): void {
-    const canvas = this.sink?.canvas;
-    if (!canvas) {
-      bitmap.close();
-      return;
-    }
-    if (canvas.width !== bitmap.width) canvas.width = bitmap.width;
-    if (canvas.height !== bitmap.height) canvas.height = bitmap.height;
-    canvas.getContext('2d')?.drawImage(bitmap, 0, 0);
-    bitmap.close();
-    this.setHasFrame(true);
+  /** The browser's viewport, as its stream reports it: the screen indicator
+   *  and sync-to-pane follow it. */
+  private setDeviceSize(width: number, height: number): void {
+    this.device = { width, height };
+    this.maybeDisengageSync();
+    this.publishScreen();
   }
 
-  private drawBitmap = (bitmap: ImageBitmap): void => {
-    // A crisp host screenshot supersedes every provisional decode already in
-    // flight, even when that decode resolves later.
-    this.frameDrawSeq += 1;
-    this.paintBitmap(bitmap);
-  };
+  // --- painting ---
 
-  private drawProvisionalFrame(data: string): void {
+  /** Paint a frame from the viewer socket, latest-only: one decodes at a
+   *  time, and a newer arrival replaces the one waiting behind it. */
+  private paintFrame(frame: ViewerFrame): void {
+    if (this.decoding) this.pendingFrame = frame;
+    else this.decodeFrame(frame);
+  }
+
+  private decodeFrame(frame: ViewerFrame): void {
     const sink = this.sink;
     if (!sink || typeof createImageBitmap !== 'function') return;
-    let bytes: Uint8Array<ArrayBuffer>;
-    try {
-      const binary = atob(data);
-      bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-    } catch {
-      return;
-    }
-    // Latest-only, like the crisp loop: a newer pulse arriving while this decode
-    // is in flight bumps the sequence, and the stale bitmap is dropped rather
-    // than painted over the newer frame.
-    const mySeq = ++this.frameDrawSeq;
-    createImageBitmap(new Blob([bytes], { type: 'image/jpeg' })).then((bitmap) => {
-      if (this.disposed || mySeq !== this.frameDrawSeq || this.sink !== sink) {
-        bitmap.close();
-        return;
-      }
-      this.provisionalPaintGeneration += 1;
-      // This paint puts CSS-resolution pixels on the canvas behind the crisp
-      // loop's back, so its byte-dedup (`lastDrawnKey`) no longer describes what
-      // is on screen: a resting page whose crisp bytes match the last crisp draw
-      // would dedup to a no-op and strand the pane on the blur. Bump the draw
-      // generation for the same reason a re-attach does — the canvas changed
-      // underneath the loop, so the next crisp capture must repaint regardless
-      // of its bytes.
-      this.drawGeneration += 1;
-      this.paintBitmap(bitmap);
-    }).catch(() => {
-      // The crisp screenshot path remains authoritative; a malformed/unsupported
-      // provisional frame is only a missed latency optimization.
+    this.decoding = true;
+    // The frame's JPEG is a view over the socket's ArrayBuffer.
+    createImageBitmap(new Blob([frame.jpeg as Uint8Array<ArrayBuffer>], { type: 'image/jpeg' })).then((bitmap) => {
+      if (this.phase.k === 'disposed' || this.sink !== sink) bitmap.close();
+      else this.paintBitmap(sink.canvas, bitmap, frame.kind);
+    }, () => {
+      // A malformed frame is only a missed paint; the next one replaces it.
+    }).finally(() => {
+      this.decoding = false;
+      const next = this.pendingFrame;
+      this.pendingFrame = null;
+      if (next) this.decodeFrame(next);
     });
   }
 
-  private wantsProvisionalFrame(): boolean {
-    return !this.hasFrame || !getPlatform().agentBrowserScreenshot || performance.now() <= this.provisionalUntil;
-  }
-
-  // agent-browser's stream publishes the initial headed tab list but not every
-  // same-tab manual navigation. While popped out, subscribe directly to Chrome
-  // DevTools Protocol target/page events so the Dormouse URL/header tracks the
-  // headed window without polling.
-  private reconcileCdp(): void {
-    const platform = getPlatform();
-    // `get cdp-url` is a daemon command: issued mid-relaunch it lands on the
-    // daemon being killed, or spawns a competing one in the gap before the
-    // headed relaunch — which then reattaches headless ("--headed ignored").
-    const desired = !this.disposed && this.poppedOut && !this.relaunching && !!this.session && !!platform.agentBrowserCommand;
-    const key = desired ? `${this.session}:${this.streamPort}` : null;
-    if (key === this.cdpKey) return;
-    this.cdpTeardown?.();
-    this.cdpTeardown = null;
-    this.cdpKey = key;
-    if (!desired) return;
-    this.cdpTeardown = this.startCdpObserver(this.session!, platform.agentBrowserCommand!);
-  }
-
-  private startCdpObserver(
-    session: string,
-    runCommand: NonNullable<ReturnType<typeof getPlatform>['agentBrowserCommand']>,
-  ): () => void {
-    let disposed = false;
-    let ws: WebSocket | null = null;
-    let nextId = 1;
-
-    const send = (method: string, params?: Record<string, unknown>) => {
-      if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ id: nextId++, method, ...(params ? { params } : {}) }));
-    };
-    const handleTargetInfo = (targetInfo: unknown) => {
-      if (!targetInfo || typeof targetInfo !== 'object') return;
-      const info = targetInfo as { type?: unknown; url?: unknown; title?: unknown };
-      if (info.type !== 'page') return;
-      this.applyObservedNavigation(
-        typeof info.url === 'string' ? info.url : null,
-        typeof info.title === 'string' ? info.title : null,
-      );
-    };
-    const handleCdpMessage = (raw: unknown) => {
-      if (typeof raw !== 'string') return;
-      let msg: any;
-      try { msg = JSON.parse(raw); } catch { return; }
-      if (msg.method === 'Target.targetCreated' || msg.method === 'Target.targetInfoChanged') {
-        handleTargetInfo(msg.params?.targetInfo);
-      } else if (msg.method === 'Target.targetDestroyed') {
-        abDebugLog(`[ab-panel] cdp target destroyed ${JSON.stringify({ targetId: msg.params?.targetId })}`);
-      } else if (msg.method === 'Page.frameNavigated') {
-        const frame = msg.params?.frame;
-        if (!frame?.parentId) {
-          this.applyObservedNavigation(
-            typeof frame?.url === 'string' ? frame.url : null,
-            typeof frame?.name === 'string' ? frame.name : null,
-          );
-        }
-      } else if (Array.isArray(msg.result?.targetInfos)) {
-        for (const targetInfo of msg.result.targetInfos) handleTargetInfo(targetInfo);
-      }
-    };
-
-    const connect = async () => {
-      let cdpUrl: string | null = null;
-      try {
-        const result = await runCommand(session, ['get', 'cdp-url'], this.binaryPath);
-        if (result.exitCode === 0) cdpUrl = parseCdpUrl(result.stdout);
-        else abDebugLog(`[ab-panel] cdp-url failed ${JSON.stringify({ stderr: result.stderr, stdout: result.stdout })}`);
-      } catch (err) {
-        abDebugLog(`[ab-panel] cdp-url error ${String(err)}`);
-      }
-      if (disposed || !cdpUrl) return;
-      abDebugLog(`[ab-panel] connecting cdp ${JSON.stringify({ cdpUrl })}`);
-      ws = new WebSocket(cdpUrl);
-      ws.onopen = () => {
-        abDebugLog('[ab-panel] cdp open');
-        send('Target.setDiscoverTargets', { discover: true });
-        send('Target.getTargets');
-        // If get cdp-url ever returns a page websocket instead of the browser
-        // websocket, these page-level events are the navigation source.
-        send('Page.enable');
-      };
-      ws.onmessage = (ev) => handleCdpMessage(ev.data);
-      ws.onclose = () => { if (!disposed) abDebugLog('[ab-panel] cdp close'); };
-      ws.onerror = () => abDebugLog('[ab-panel] cdp error');
-    };
-
-    void connect();
-    return () => {
-      disposed = true;
-      ws?.close();
-    };
-  }
-
-  // A persisted panel may restore with a stale wsPort: the session is alive but
-  // the stream server restarted on a new port while VS Code/webview state kept
-  // the old one. Once the old socket is proven dead (or no port was persisted),
-  // ask the host for the current port and rewrite params so the WS reconnects.
-  private maybeRecoverStalePort(): void {
-    // Bump first so any change to the recovery inputs invalidates an in-flight
-    // query (mirrors the old effect's cleanup running on every dep change).
-    const gen = ++this.recoveryGen;
-    const session = this.session;
-    // Session-less is deliberate inertness, not just a null-guard: the pane
-    // context menu's eager connect creates its surface WITHOUT a session
-    // precisely so no recovery/CLI spawn can race the daemon boot
-    // (docs/specs/dor-browser.md → Pane Context Menu Connect). Never derive the
-    // session from `key` here — that would silently reintroduce the race.
-    if (!session) return;
-    // A parked pane must never query the daemon: a `stream status` at the wrong
-    // moment can spawn a competing daemon, and it's a pointless CLI spawn per
-    // hidden pane. Recovery resumes when the pane unparks.
-    if (this.parked) return;
-    // Critical: do NOT query the daemon mid-relaunch. A pop-out/pop-in close+kills
-    // the daemon before reopening; querying `stream status` in that window spawns
-    // a fresh COMPETING headless daemon on a different port and pins the panel to
-    // it — so the panel ends up streaming an about:blank ghost instead of the
-    // headed window. The host hands back the authoritative port when it's done.
-    if (this.relaunching) return;
-    // Once this exact port has opened, a later disconnect is a live stream
-    // failure, not a stale persisted port. Do not ask `stream status` here: the
-    // CLI can spawn a fresh daemon and reset the session, hiding the real failure
-    // and reverting the URL.
-    if (this.streamPort && this.liveStreamPort === this.streamPort) {
-      if (this.connectionLost || this.status?.connected === false) {
-        abDebugLog(`[ab-panel] stream recovery skipped for live port ${JSON.stringify({ session, wsPort: this.streamPort, connectionLost: this.connectionLost, connected: this.status?.connected })}`);
-      }
-      return;
+  /**
+   * Draw `bitmap` over the whole canvas. A crisp frame sizes the canvas; a
+   * provisional one, at CSS resolution, is drawn scaled into a canvas of the
+   * same shape rather than resizing it, so switching between the two never
+   * reallocates the backing store or relayouts the pane.
+   */
+  private paintBitmap(canvas: HTMLCanvasElement, bitmap: ImageBitmap, kind: ViewerFrame['kind']): void {
+    const sameShape = canvas.width > 0 && canvas.height > 0
+      && Math.abs(canvas.width / canvas.height - bitmap.width / bitmap.height) < 0.01;
+    if (kind === 'crisp' || !sameShape) {
+      if (canvas.width !== bitmap.width) canvas.width = bitmap.width;
+      if (canvas.height !== bitmap.height) canvas.height = bitmap.height;
     }
-    if (this.streamPort && !this.connectionLost && this.status?.connected !== false) return;
-    const platform = getPlatform();
-    if (!platform.agentBrowserStreamStatus) return;
-    platform.agentBrowserStreamStatus(session, this.binaryPath).then((res) => {
-      if (gen !== this.recoveryGen || this.disposed) return;
-      if (!res.ok || !res.wsPort) return;
-      this.setConnectionLost(false);
-      this.setStatus(null);
-      if (res.wsPort !== this.streamPort) {
-        this.setStreamPort(res.wsPort);
-        this.writeParams({ wsPort: res.wsPort });
-      } else {
-        this.bumpRecovery();
-      }
-    }).catch(() => {});
-  }
-
-  // The deliberate direct-port reconnect used by pop-out/pop-in (not the passive
-  // persisted-stale-port path above). Resolves true if the stream came/stayed live.
-  private reconcileStreamPort(directPort?: number): Promise<boolean> {
-    if (this.closeIfSessionMarkedClosed()) return Promise.resolve(false);
-    this.setConnectionLost(false);
-    this.setStatus(null);
-    this.setHasFrame(false);
-
-    if (directPort && directPort > 0) {
-      if (directPort !== this.streamPort) {
-        this.setStreamPort(directPort);
-        abDebugLog(`[ab-panel] subscribing to returned stream port ${JSON.stringify({ session: this.session, wsPort: directPort, previousWsPort: this.wsPort })}`);
-      }
-      if (directPort !== this.wsPort) this.writeParams({ wsPort: directPort });
-      else this.bumpRecovery();
-      return Promise.resolve(true);
-    }
-
-    const currentSession = this.session;
-    const platform = getPlatform();
-    if (!currentSession || !platform.agentBrowserStreamStatus) {
-      this.bumpRecovery();
-      return Promise.resolve(false);
-    }
-
-    return platform.agentBrowserStreamStatus(currentSession, this.binaryPath).then((res) => {
-      if (this.closeIfSessionMarkedClosed(currentSession)) return false;
-      if (!res.ok || !res.wsPort) return false;
-      if (res.wsPort !== this.streamPort) {
-        this.setStreamPort(res.wsPort);
-        this.writeParams({ wsPort: res.wsPort });
-      } else {
-        this.bumpRecovery();
-      }
-      return true;
-    }).catch(() => false);
-  }
-
-  private setStreamPort(port: number | undefined): void {
-    if (port === this.streamPort) return;
-    this.streamPort = port;
-    // A new/restarted session comes up at agent-browser's native viewport; if
-    // sync is engaged, reclaim the pane size. Clearing lastIssued is essential —
-    // it otherwise still holds the previous session's pane size and
-    // issueSyncToPane would no-op, leaving the fresh browser unsynced (SCALED).
-    if (port && this.syncEngaged) {
-      this.lastIssued = null;
-      this.issueSyncToPane();
-    }
-    this.reconcile();
-    this.emitView();
-    this.maybeRecoverStalePort();
-  }
-
-  private bumpRecovery(): void {
-    this.recoverySeq += 1;
-    this.reconcileConnection();
+    canvas.getContext('2d')?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    this.setHasFrame(true);
   }
 
   // --- view-snapshot field setters (notify on real change) ---
 
   private setStatus(status: StreamStatus | null): void {
-    const prevConnected = this.status?.connected;
     this.status = status;
     this.emitView();
-    if (status?.connected !== prevConnected) {
-      this.maybeRecoverStalePort();
-      this.maybeAutoRevert();
-    }
-  }
-
-  private setConnectionLost(connectionLost: boolean): void {
-    if (this.connectionLost === connectionLost) return;
-    this.connectionLost = connectionLost;
-    this.emitView();
-    this.maybeRecoverStalePort();
-    this.maybeAutoRevert();
   }
 
   private setHasFrame(hasFrame: boolean): void {
@@ -1070,15 +1078,14 @@ export class AgentBrowserSurfaceController {
     this.emitView();
   }
 
-  private setPoppedOut(poppedOut: boolean): void {
-    if (this.poppedOut === poppedOut) return;
-    this.poppedOut = poppedOut;
+  private setHeaded(headed: boolean): void {
+    if (this.headed === headed) return;
+    this.headed = headed;
     this.emitView();
     // Push the render-mode flip (screencast ↔ popout) to the header/modal.
     this.publishScreen();
-    this.reconcile();
+    this.reconcileConnection();
     this.updateParkState();
-    this.maybeAutoRevert();
   }
 
   private setSyncEngaged(syncEngaged: boolean): void {
@@ -1099,13 +1106,13 @@ export class AgentBrowserSurfaceController {
   // --- canonical URL tracking ---
 
   private rememberRestorableUrl(url: string | null | undefined): boolean {
-    if (!isRestorableUrl(url)) return false;
+    if (!isBrowsableUrl(url)) return false;
     this.latestRestorableUrl = url;
     // Track the active tab faithfully so params.url is always the page the user
     // is on. Two guards: freeze while a relaunch is in flight (the active tab is
     // momentarily a blank/booting page that must not overwrite the real target),
-    // and never record a transient about:blank (isRestorableUrl above).
-    if (!this.relaunching && url !== this.paramsUrl) {
+    // and never record a URL a relaunch cannot restore (latestRestorableUrl).
+    if (this.phase.k !== 'relaunching' && url !== this.paramsUrl) {
       this.paramsUrl = url;
       this.writeParams({ url });
     }
@@ -1118,7 +1125,7 @@ export class AgentBrowserSurfaceController {
   }
 
   private applyObservedNavigation(url: string | null | undefined, title?: string | null): void {
-    if (!isRestorableUrl(url)) return;
+    if (!isShownUrl(url)) return;
     this.rememberRestorableUrl(url);
     const prev = this.tabs;
     if (prev.length === 0) {
@@ -1137,7 +1144,7 @@ export class AgentBrowserSurfaceController {
   // the previous page's title no longer describes it, so the tab falls back to
   // its URL until the load completes and `tabs` brings the real title.
   private applyStreamUrl(url: string): void {
-    if (!isRestorableUrl(url)) return;
+    if (!isShownUrl(url)) return;
     this.rememberRestorableUrl(url);
     const active = this.activeTab();
     if (!active) {
@@ -1156,7 +1163,7 @@ export class AgentBrowserSurfaceController {
       this.latestRestorableUrl,
       this.chrome.url,
       this.paramsUrl,
-    ].find(isRestorableUrl);
+    ].find((url) => isBrowsableUrl(url));
   }
 
   // --- header: title + browser-chrome ---
@@ -1196,7 +1203,7 @@ export class AgentBrowserSurfaceController {
   // --- screen indicator (SYNCED/SCALED) + sync-to-pane ---
 
   private computeScreenSnapshot(): ScreenSnapshot {
-    // Read the cached pane size (updated by the ResizeObserver / window resize)
+    // Read the cached pane size (updated by the ResizeObserver)
     // rather than forcing layout on every frame. null ⇒ no attached view ⇒ 0×0.
     const pane = this.paneSize;
     const displayDpr = window.devicePixelRatio || 1;
@@ -1205,7 +1212,7 @@ export class AgentBrowserSurfaceController {
     // DPR can't be read back from frames, so report the density we'd sync to.
     const viewport = { w: device.width, h: device.height, dpr: displayDpr };
     const state: ScreenState = dimsMatch(viewport, paneCss) ? 'SYNCED' : 'SCALED';
-    const renderMode: RenderMode = this.poppedOut ? 'ab-popout' : 'ab-screencast';
+    const renderMode = this.renderMode();
     return { state, viewport, paneCss, displayDpr, syncEngaged: this.syncEngaged, renderMode };
   }
 
@@ -1232,18 +1239,18 @@ export class AgentBrowserSurfaceController {
 
   // Push the current pane size to the browser as a native `set viewport`.
   private issueSyncToPane(): void {
-    // A parked (hidden) pane must not drive the browser viewport: its rect can be
-    // degenerate while hidden. The unpark path reconciles any resize that happened
-    // while parked.
-    if (this.parked) return;
+    // Only a live browser is driven: a parked (hidden) pane's rect can be
+    // degenerate, and nothing reaches a daemon mid-launch or mid-relaunch. The
+    // next `live` reconciles any resize made meanwhile.
+    if (!this.driver()) return;
     // A popped-out surface is a real headed OS window the user drives directly;
     // never force its viewport to the (now-stub) pane size. Sync resumes when it
-    // pops back in — the streamPort-change reclaim re-issues against the fresh session.
-    if (this.poppedOut) return;
-    // Hosts without agentBrowserCommand (e.g. the web demo) can't drive the
-    // viewport; stay silent rather than warn on every resize — the surface just
-    // reads SCALED.
-    if (!getPlatform().agentBrowserCommand) return;
+    // pops back in — the new stream's reclaim re-issues against the fresh session.
+    if (this.headed) return;
+    // A host that cannot drive the provider (e.g. the web demo) can't size
+    // the viewport; stay silent rather than warn on every resize — the surface
+    // just reads SCALED.
+    if (!this.hosted) return;
     const el = this.sink?.viewport;
     if (!el) return;
     const rect = el.getBoundingClientRect();
@@ -1252,10 +1259,10 @@ export class AgentBrowserSurfaceController {
     if (!w || !h) return;
     const dpr = window.devicePixelRatio || 1;
     const prev = this.lastIssued;
-    if (prev && prev.w === w && prev.h === h && Math.abs(prev.dpr - dpr) <= 0.001) return;
+    if (prev && prev.w === w && prev.h === h && dprMatch(prev.dpr, dpr)) return;
     this.lastIssued = { w, h, dpr };
     this.syncConfirmed = false;
-    this.runAgentBrowser(['set', 'viewport', String(w), String(h), String(dpr)]);
+    this.drive(`set viewport ${w} ${h} ${dpr}`, (browser) => browser.viewport(w, h, dpr));
   }
 
   // Last-writer-wins: drop sync when an external `dor ab set …` takes the
@@ -1284,142 +1291,150 @@ export class AgentBrowserSurfaceController {
 
   // --- relaunch: pop-out / pop-in + auto-revert ---
 
-  private closeIfSessionMarkedClosed(targetSession: string | null | undefined = this.session): boolean {
-    if (!targetSession || !isAgentBrowserSessionClosed(targetSession)) return false;
-    getPlatform().agentBrowserCommand?.(targetSession, ['close'], this.binaryPath).catch(() => {});
-    return true;
+  popIn(): void {
+    this.relaunch(false);
   }
 
-  // Pop-Out: relaunch this session's browser as a native OS window. The
-  // pane becomes a stub; the stream stays connected to observe tabs/status and
-  // to auto-revert when the window closes. The new Chrome process gets a fresh
-  // stream port, which we write into params so the WS reconnects.
-  // Enter/leave the relaunch window. Entering drops the stream connection and
-  // CDP observer (reconcile gates on `relaunching`); leaving reconnects to
-  // whatever port is current, so callers set the host's port BEFORE leaving.
-  private setRelaunching(relaunching: boolean): void {
-    if (this.relaunching === relaunching) return;
-    this.relaunching = relaunching;
-    this.emitView();
-    this.reconcile();
-  }
-
-  private popOut(): void {
-    const platform = getPlatform();
+  /**
+   * Pop-Out / pop-in: relaunch this session's browser headed as a native OS
+   * window, or back headless in the pane, at `url` or the page it is on. The
+   * host closes the browser and kills its daemon before reopening on a new
+   * stream, so the viewer socket is dropped up front — its close would read as
+   * the window closing — and reconnects to the stream the host hands back. One
+   * relaunch at a time, of a bound browser: anything else keeps only the
+   * navigation asked for.
+   */
+  private relaunch(headed: boolean, url?: string): void {
     const session = this.session;
-    if (!session || !platform.agentBrowserPopOut) return;
-    // One relaunch at a time: a second pop-out/pop-in while the host is mid
-    // close→kill→reopen would interleave two relaunches of one session.
-    if (this.relaunching) { abDebugLog('[ab-panel] popOut ignored: relaunch in flight'); return; }
-    if (this.closeIfSessionMarkedClosed(session)) return;
-    this.headedConnected = false;
-    this.setRelaunching(true);
-    this.setPoppedOut(true);
-    this.writeParams({ renderMode: 'ab-popout' });
-    // Pop-out failed: revert to in-pane unless the stream came back live anyway.
-    const revertUnlessLive = () => this.reconcileStreamPort().then((live) => {
-      if (!live) {
-        this.setPoppedOut(false);
-        this.writeParams({ renderMode: 'ab-screencast' });
-      }
-      this.setRelaunching(false);
-    });
-    // Connect to the headed window's fresh port once the relaunch returns it.
-    const url = this.currentRelaunchUrl();
-    abDebugLog(`[ab-panel] popOut -> ${JSON.stringify({ session, url })}`);
-    platform.agentBrowserPopOut(session, { rect: paneScreenRect(this.sink?.viewport), url }, this.binaryPath).then((res) => {
-      abDebugLog(`[ab-panel] popOut result ${JSON.stringify(res)}`);
-      if (this.closeIfSessionMarkedClosed(session)) { this.setRelaunching(false); return; }
-      if (!res.ok) {
-        void revertUnlessLive();
+    const k = this.phase.k;
+    const capable = this.hosted;
+    if (!capable || !session || (k !== 'live' && k !== 'parked' && k !== 'ended')) {
+      // Before the browser is bound, the request waits for it; one arriving
+      // mid-relaunch is dropped — one relaunch at a time.
+      if (capable && (k === 'idle' || k === 'launching' || k === 'attaching')) this.pendingIntent.headed = headed;
+      else abDebugLog(`[ab-panel] ${headed ? 'popOut' : 'popIn'} ignored in ${k}`);
+      if (url) this.navigate(url);
+      return;
+    }
+    // The page asked for is the latest navigation, superseding a pending one.
+    if (isBrowsableUrl(url)) {
+      this.latestRestorableUrl = url;
+      this.pendingIntent.url = url;
+    }
+    const target = this.launchUrl();
+    // The phase first: flipping headedness while still live would reopen the
+    // viewer socket on the browser the relaunch is closing.
+    const phase: Phase = { k: 'relaunching' };
+    this.setPhase(phase);
+    this.setHeaded(headed);
+    this.writeParams({ renderMode: this.renderMode() });
+    abDebugLog(`[ab-panel] ${headed ? 'popOut' : 'popIn'} -> ${JSON.stringify({ session, url: target })}`);
+    this.bringUp((requestId) => this.handle()!.launch(target, headed, requestId)).then((res) => {
+      abDebugLog(`[ab-panel] relaunch result ${JSON.stringify(res)}`);
+      // Closed meanwhile, the host closes what this brought up after it.
+      if (this.phase !== phase) return;
+      if (res.ok && res.stream) {
+        this.openedByHost(target);
+        this.goLive(res.stream);
         return;
       }
-      void this.reconcileStreamPort(res.wsPort);
-      this.setRelaunching(false);
-    }).catch((err) => {
-      abDebugLog(`[ab-panel] popOut error ${String(err)}`);
-      if (this.closeIfSessionMarkedClosed(session)) { this.setRelaunching(false); return; }
-      void revertUnlessLive();
+      // Failed: back in the pane at the page it was on, relaunching headless
+      // there if no daemon came up.
+      if (headed) {
+        this.setHeaded(false);
+        this.writeParams({ renderMode: this.renderMode() });
+      }
+      this.attach(true);
     });
   }
 
-  popIn(): void {
-    const session = this.session;
-    // A session-less pane (an eager swap whose daemon is still booting) has
-    // nothing to relaunch yet; the handover lands as a params refresh.
-    if (!session) return;
-    if (this.relaunching) { abDebugLog('[ab-panel] popIn ignored: relaunch in flight'); return; }
-    if (this.closeIfSessionMarkedClosed(session)) return;
-    this.setRelaunching(true);
-    this.setPoppedOut(false);
-    this.writeParams({ renderMode: 'ab-screencast' });
-    const platform = getPlatform();
-    if (!platform.agentBrowserPopIn) { this.setRelaunching(false); return; }
-    // Connect to the fresh port the host returns; the current (headed) port is
-    // about to die with its daemon.
-    const url = this.currentRelaunchUrl();
-    abDebugLog(`[ab-panel] popIn -> ${JSON.stringify({ session, url })}`);
-    platform.agentBrowserPopIn(session, { url }, this.binaryPath).then((res) => {
-      abDebugLog(`[ab-panel] popIn result ${JSON.stringify(res)}`);
-      if (this.closeIfSessionMarkedClosed(session)) { this.setRelaunching(false); return; }
-      return (res.ok ? this.reconcileStreamPort(res.wsPort) : this.reconcileStreamPort())
-        .then(() => this.setRelaunching(false));
-    }).catch(() => {
-      if (this.closeIfSessionMarkedClosed(session)) { this.setRelaunching(false); return; }
-      void this.reconcileStreamPort().then(() => this.setRelaunching(false));
-    });
+  /**
+   * The stream says its browser is gone, or the stream itself is. A headless
+   * one has `ended`: the gate shuts, so nothing reaches a daemon whose stream
+   * this controller would never learn. A headed one seen connected auto-reverts —
+   * its window closed, so relaunch headless in the pane; one not yet seen is
+   * still opening. A Dormouse teardown (pane kill, a render-swap away) releases
+   * the controller before it closes the session, so no stream is left to see
+   * that close.
+   */
+  private streamLost(): void {
+    const phase = this.phase;
+    if (phase.k !== 'live') return;
+    if (!this.headed) this.setPhase({ k: 'ended' });
+    else if (phase.seen) this.popIn();
   }
 
-  // Auto-revert: once the headed stream has connected, a later disconnect means
-  // the window closed → relaunch headless and resume streaming. But a disconnect
-  // also happens when Dormouse itself closes the session (pane kill, or a
-  // render-swap away from popout); the closed-session mark tells those apart so
-  // we don't resurrect a session that's being torn down.
-  private maybeAutoRevert(): void {
-    if (!this.poppedOut) { this.headedConnected = false; return; }
-    // The expected mid-relaunch drop isn't the window closing — ignore it.
-    if (this.relaunching) return;
-    if (this.status?.connected === true) this.headedConnected = true;
-    else if (this.headedConnected && (this.status?.connected === false || this.connectionLost)) {
-      if (this.session && isAgentBrowserSessionClosed(this.session)) return;
-      this.popIn();
+  // --- the daemon gate ---
+
+  /** The browser to drive, only while `live`: every command, edit and capture
+   *  takes it from here, and what is asked outside it waits as the pending
+   *  intent. The host refuses whatever would reach a browser mid-launch or
+   *  mid-close, or a daemon that is gone, so this gate orders the Surface's
+   *  own intents rather than guarding the daemon (docs/specs/dor-browser.md →
+   *  "Browser Connection"). */
+  private driver(): BrowserHandle | null {
+    if (this.phase.k !== 'live' || !this.session) return null;
+    return this.handle();
+  }
+
+  /** The bound session's browser, whatever the phase: for what the gate does
+   *  not cover — a launch, attach or relaunch, the stream URL, a close.
+   *  Rebuilt only when the binding changes: captures take it per frame. */
+  private handle(): BrowserHandle | null {
+    const { session, cwd, binaryPath } = this;
+    const cached = this.handleCache;
+    if (cached && cached.session === session && cached.cwd === cwd && cached.binaryPath === binaryPath) return cached.handle;
+    const handle = browserHandle(this.provider, { session, cwd, binaryPath });
+    this.handleCache = { session, cwd, binaryPath, handle };
+    return handle;
+  }
+
+  /** One browser operation through the gate, warned about when it fails;
+   *  dropped outside `live`. */
+  private drive(label: string, act: (browser: BrowserHandle) => Promise<BrowserResult>): void {
+    const browser = this.driver();
+    if (!browser) {
+      abDebugLog(`[ab-panel] ${label} dropped in ${this.phase.k}`);
+      return;
     }
+    void act(browser).then((result) => {
+      if (!result.ok) console.warn(`[${this.provider}] ${label} failed:`, result.error ?? 'no reason given');
+    });
+  }
+
+  /** Navigate the active tab. Asked while nothing can be driven, it is kept as
+   *  the one latest intent and run on the next `live`; an ended browser is
+   *  opened again there — attached, relaunching if its daemon is gone, or
+   *  launched when it never had a session. */
+  private navigate(url: string): void {
+    if (!url) return;
+    if (this.driver()) {
+      // The latest navigation, superseding one an unpark has yet to catch up on.
+      delete this.pendingIntent.url;
+      this.drive(`open ${url}`, (browser) => browser.navigate(url));
+      return;
+    }
+    if (this.phase.k === 'disposed') return;
+    this.pendingIntent.url = url;
+    if (this.phase.k !== 'ended') return;
+    if (isBrowsableUrl(url)) this.latestRestorableUrl = url;
+    this.bind();
   }
 
   // --- input bridging ---
 
-  private runAgentBrowser(args: string[]): void {
-    const session = this.session;
-    if (!session) return;
-    // Call through the adapter instance — pulling the method into a bare variable
-    // would detach `this` and break its internal `requestResponse`.
-    const platform = getPlatform();
-    if (!platform.agentBrowserCommand) {
-      console.warn('[agent-browser] this host cannot run agent-browser commands; tab actions are unavailable');
-      return;
-    }
-    platform.agentBrowserCommand(session, args, this.binaryPath).then((result) => {
-      if (result.exitCode !== 0) {
-        console.warn(`[agent-browser] ${args.join(' ')} failed:`, result.stderr || result.stdout || `exit ${result.exitCode}`);
-      }
-    }).catch((error) => {
-      console.warn(`[agent-browser] ${args.join(' ')} failed:`, error);
-    });
-  }
-
+  /** One input message over the viewer socket, whose host also paints the
+   *  stream for a while after it. */
   send(payload: Record<string, unknown>): void {
-    if (payload.type === 'input_mouse') {
-      this.provisionalUntil = performance.now() + PROVISIONAL_INPUT_WINDOW_MS;
-    }
     this.connection?.send(payload);
   }
 
   selectTab(tab: StreamTab): void {
-    if (!tab.active) this.runAgentBrowser(['tab', tab.tabId]);
+    if (!tab.active) this.drive(`tab ${tab.tabId}`, (browser) => browser.tab('select', tab.tabId));
   }
 
   closeTab(tab: StreamTab): void {
-    this.runAgentBrowser(['tab', 'close', tab.tabId]);
+    this.drive(`tab close ${tab.tabId}`, (browser) => browser.tab('close', tab.tabId));
   }
 
   private sendKey(e: KeyLike, eventType: 'keyDown' | 'keyUp'): void {
@@ -1447,18 +1462,9 @@ export class AgentBrowserSurfaceController {
 
   // cmd/ctrl-V types the LOCAL clipboard into the page. Plain key forwarding
   // would trigger paste of the embedded Chromium's own (empty) clipboard, so
-  // bridge by replaying the text as per-character keyDown events.
+  // bridge by sending the text, which the host inserts.
   private insertText(text: string): void {
-    for (const ch of text) {
-      if (ch === '\r') continue;
-      if (ch === '\n') {
-        this.send({ type: 'input_keyboard', eventType: 'keyDown', key: 'Enter', code: 'Enter', text: '\r', windowsVirtualKeyCode: 13, modifiers: 0 });
-        this.send({ type: 'input_keyboard', eventType: 'keyUp', key: 'Enter', code: 'Enter', text: '', windowsVirtualKeyCode: 13, modifiers: 0 });
-      } else {
-        this.send({ type: 'input_keyboard', eventType: 'keyDown', key: ch, code: '', text: ch, windowsVirtualKeyCode: 0, modifiers: 0 });
-        this.send({ type: 'input_keyboard', eventType: 'keyUp', key: ch, code: '', text: '', windowsVirtualKeyCode: 0, modifiers: 0 });
-      }
-    }
+    for (const message of viewerTextInputs(text)) this.send(message);
   }
 
   handleKeyDownLike(e: KeyLike): void {
@@ -1472,18 +1478,13 @@ export class AgentBrowserSurfaceController {
     // Native editing chords (select-all/copy/cut) don't fire over the stream
     // input path (CDP commands field is dropped), on any platform — Cmd on
     // macOS, Ctrl elsewhere. Route the intent through the host's purpose-built
-    // edit channel instead. Every shipped host implements `agentBrowserEdit`;
-    // the fall-through covers a host that does not (the fake adapter), so the
+    // edit channel instead — a daemon command, so gated like the rest. A host
+    // that cannot drive the provider (the fake adapter) falls through, so the
     // page still gets the chord for its own JS shortcuts.
     if (mod && !e.altKey && !e.shiftKey) {
       const op = EDIT_OPS[e.key.toLowerCase() as keyof typeof EDIT_OPS];
-      // Call through the adapter instance — detaching the method drops `this`.
-      const platform = getPlatform();
-      const session = this.session;
-      if (op && platform.agentBrowserEdit && session) {
-        platform.agentBrowserEdit(session, op, this.binaryPath).then((r) => {
-          if (!r.ok && r.error) console.warn(`[agent-browser] ${op} failed:`, r.error);
-        }).catch((err) => console.warn(`[agent-browser] ${op} failed:`, err));
+      if (op && this.hosted && this.session) {
+        this.drive(op, (browser) => browser.edit(op));
         return;
       }
     }
@@ -1492,25 +1493,52 @@ export class AgentBrowserSurfaceController {
 
   // --- teardown ---
 
+  /** Close this Surface's browser session — the one it is bound to, or the
+   *  one its launch names — and release the controller. Sent at once: the host
+   *  runs it after the Surface's launch, relaunch or attach still running,
+   *  closing what that brings up, and cancels one it has not received yet
+   *  (docs/specs/dor-browser.md → "Browser Host"); a launch naming the session
+   *  waits for its answer (`closeInFlight`).
+   *  Returns the session closed, if any, and when the host answered. */
+  close(): { session?: string; done: Promise<void> } {
+    const phase = this.phase;
+    if (phase.k === 'disposed') return { done: Promise.resolve() };
+    const session = this.session;
+    // Its own requests still unanswered may reach the host after this close;
+    // a Surface has one or two at a time, so the newest fit any bound.
+    const cancels = [...this.bringingUp].slice(-BROWSER_CLOSE_MAX_CANCELS);
+    this.release();
+    const done = session ? closeSessionOn(this.provider, this.cwd, session, this.binaryPath, cancels)
+      : phase.k === 'launching' && phase.named ? trackClose(this.provider, phase.named.session, phase.named.browser.close(cancels))
+      : Promise.resolve();
+    return { session, done };
+  }
+
+  /** Closed or disposed: nothing here runs again, and a view still mounted
+   *  acquires a new controller for the Surface's next params. */
+  get released(): boolean {
+    return this.phase.k === 'disposed';
+  }
+
+  /** Release every client-side resource, leaving the session to whoever holds it
+   *  next (a Workspace transfer's destination). */
   dispose(): void {
-    if (this.disposed) return;
-    this.disposed = true;
+    if (this.phase.k === 'disposed') return;
+    this.release();
+  }
+
+  private release(): void {
+    // A launch in flight lands on a released controller, which closes a
+    // session the host minted for it; whoever awaited one hears that the
+    // Surface is gone.
+    settleLaunch(this.id, null);
     if (this.parkTimer) { clearTimeout(this.parkTimer); this.parkTimer = undefined; }
     this.teardownPaneSizeObserver();
     this.paneSize = null;
-    if (this.connection) {
-      this.connectionUnsub?.();
-      this.connectionUnsub = null;
-      this.connection.dispose();
-      this.connection = null;
-    }
-    this.screenshotLoop?.dispose();
-    this.screenshotLoop = null;
-    this.connectionKey = null;
-    this.cdpTeardown?.();
-    this.cdpTeardown = null;
-    this.cdpKey = null;
-    if (this.started) window.removeEventListener('resize', this.onWindowResize);
+    // Leaving `live` drops the viewer socket.
+    this.setPhase({ k: 'disposed' });
+    this.dprQuery?.removeEventListener('change', this.onDprChange);
+    this.dprQuery = null;
     this.registration?.dispose();
     this.registration = null;
     this.sink = null;
@@ -1523,12 +1551,24 @@ export class AgentBrowserSurfaceController {
 
 const registry = new Map<string, AgentBrowserSurfaceController>();
 
+/**
+ * The controller for `id`, created on first use. One driving a different
+ * provider than `params` asks for is replaced, since `provider` is fixed for a
+ * controller's life: a render swap the Wall restores in place keeps the id.
+ */
 export function acquireAgentBrowserSurfaceController(
   id: string,
   params: AgentBrowserSurfaceParams,
 ): AgentBrowserSurfaceController {
+  const provider = surfaceProvider(params.renderMode);
   const existing = registry.get(id);
-  if (existing) return existing;
+  if (existing?.provider === provider) return existing;
+  if (existing) {
+    registry.delete(id);
+    // Outside the render that asked: disposal notifies the screen registry's
+    // subscribers, other components among them.
+    queueMicrotask(() => existing.dispose());
+  }
   const controller = new AgentBrowserSurfaceController(id, params);
   registry.set(id, controller);
   return controller;
@@ -1538,19 +1578,121 @@ export function getAgentBrowserSurfaceController(id: string): AgentBrowserSurfac
   return registry.get(id) ?? null;
 }
 
-/** Release all CLIENT-side resources for a surface (connection, screenshot loop,
- *  CDP observer, timers, screen registration). Does NOT run `agent-browser
- *  close` — daemon/session teardown stays `closeAgentBrowserSession`'s job in
- *  Wall.tsx. A safe no-op for a surface with no controller (iframe/terminal). */
+/** Release all CLIENT-side resources for a surface (viewer socket, timers,
+ *  screen registration), leaving its session running — for
+ *  a Surface whose browser lives on elsewhere. A kill or a swap away uses
+ *  `closeBrowserSurface`. A safe no-op for a surface with no controller
+ *  (iframe/terminal). */
 export function disposeAgentBrowserSurfaceController(id: string): void {
   const controller = registry.get(id);
-  if (!controller) return;
   registry.delete(id);
-  controller.dispose();
+  if (controller) controller.dispose();
+  else settleLaunch(id, null);
+}
+
+/**
+ * The one way a session is closed; resolves once the host answered. A close
+ * starts no daemon, so it needs no drive gate, and the host serializes it with
+ * the browser's launches. `binaryPath` is checked, not merely typed: it may come
+ * off the persisted session blob, and names a program the host will spawn
+ * (`lib/src/lib/agent-browser-binary.ts`).
+ */
+function closeSessionOn(provider: BrowserAutomationProvider, cwd: string | undefined, session: string, binaryPath: unknown, cancels?: readonly string[]): Promise<void> {
+  const handle = browserHandle(provider, { session, cwd, binaryPath });
+  return handle ? trackClose(provider, session, handle.close(cancels)) : Promise.resolve();
+}
+
+// Closes of each session this webview has sent and the host has not answered,
+// which a launch naming the session waits out (`closeInFlight`): the host
+// serializes a browser's launches and closes in arrival order, and not every
+// transport delivers requests in the order sent.
+const closesInFlight = new Map<string, Promise<void>>();
+const closeKey = (provider: BrowserAutomationProvider, session: string) => `${provider}\0${session}`;
+
+/** Record `closing` as a close of `session` in flight until the host answers. */
+function trackClose(provider: BrowserAutomationProvider, session: string, closing: Promise<unknown>): Promise<void> {
+  const key = closeKey(provider, session);
+  const earlier = closesInFlight.get(key);
+  const tracked: Promise<void> = Promise.all([earlier, closing]).then(() => {}, () => {})
+    .finally(() => { if (closesInFlight.get(key) === tracked) closesInFlight.delete(key); });
+  closesInFlight.set(key, tracked);
+  return tracked;
+}
+
+/** What settles once every close of `session` this webview has sent has
+ *  been answered; undefined when none is in flight. */
+function closeInFlight(provider: BrowserAutomationProvider, session: string): Promise<void> | undefined {
+  return closesInFlight.get(closeKey(provider, session));
+}
+
+/** Hand `id`'s controller a stream a `dor` command just learned, with the
+ *  params that command just refreshed — acquired from them if no view has
+ *  mounted it yet, so its first start views it at once. The params go first,
+ *  so a host-reported presentation or cwd applies before the new stream: sync
+ *  never sizes a headed window. */
+export function handOverBrowserStream(id: string, params: AgentBrowserSurfaceParams, stream: number): void {
+  const controller = acquireAgentBrowserSurfaceController(id, params);
+  controller.updateParams(params);
+  controller.handOver(stream);
+}
+
+/** Ask `id`'s browser for a render mode and a page — acquired from `params`
+ *  if no view has mounted it yet (a Door a reveal is about to mount), so the
+ *  request waits for its first start rather than being dropped. */
+export function requestBrowserRenderMode(id: string, params: AgentBrowserSurfaceParams, mode: RenderMode, opts?: { url?: string }): void {
+  acquireAgentBrowserSurfaceController(id, params).setRenderMode(mode, opts);
+}
+
+/** Close `params`'s automation session, for a Surface no controller holds.
+ *  No-op for other surface types. */
+function closeBrowserSessionFromParams(params: unknown): Promise<void> {
+  const session = agentBrowserSessionFromParams(params);
+  const { renderMode, cwd, binaryPath } = params as { renderMode?: unknown; cwd?: string; binaryPath?: unknown };
+  const { provider } = parseRenderMode(renderMode);
+  return session && provider ? closeSessionOn(provider, cwd, session, binaryPath) : Promise.resolve();
+}
+
+/**
+ * A kill or a swap away from an automated renderer: surface lifetime and browser
+ * lifetime are bound (docs/specs/dor-browser.md → "Placement And Lifetime"), so
+ * close its session and release its controller. The controller closes what it
+ * holds or its launch names, after any of that session's work still in flight;
+ * `params` covers a session no controller holds. Resolves once the host
+ * answered every close. No-op for other surface types.
+ */
+export function closeBrowserSurface(id: string, params: unknown): Promise<void> {
+  const controller = registry.get(id);
+  registry.delete(id);
+  if (!controller) settleLaunch(id, null);
+  const closed = controller?.close();
+  const closing = [closed?.done ?? Promise.resolve()];
+  if (agentBrowserSessionFromParams(params) !== (closed?.session ?? null)) closing.push(closeBrowserSessionFromParams(params));
+  return Promise.all(closing).then(() => {});
+}
+
+// --- first-launch outcomes (the Wall's side of a controller-owned launch) ---
+
+const launchWaiters = new Map<string, (error: string | null) => void>();
+
+/**
+ * The outcome of the first launch of the session-less Surface `id` the caller
+ * just created: `null` once it streams — or once the Surface is gone — else why
+ * it failed. Register before the Surface can mount, and at most once per id.
+ */
+export function whenBrowserLaunched(id: string): Promise<string | null> {
+  return new Promise((resolve) => launchWaiters.set(id, resolve));
+}
+
+function settleLaunch(id: string, error: string | null): void {
+  const settle = launchWaiters.get(id);
+  launchWaiters.delete(id);
+  settle?.(error);
 }
 
 /** For tests: controllers now outlive panel unmount, so a suite reusing a
- *  surface id must release them between cases. */
+ *  surface id must release them between cases — and forget closes a case left
+ *  unanswered, which the next case's named launch would wait on. */
 export function disposeAllAgentBrowserSurfaceControllers(): void {
   for (const id of [...registry.keys()]) disposeAgentBrowserSurfaceController(id);
+  closesInFlight.clear();
 }

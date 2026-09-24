@@ -119,8 +119,10 @@ A `WebviewPanelSerializer` registered under the `dormouse` view type restores ed
 
 **On deactivate**, in this order (`extension.ts:deactivate()`):
 
-1. Kick off `closePoppedOutSessions()` — started here, joined after step 2, so its
-   external-process time overlaps the capture. **Its rejections are absorbed:** a
+1. Kick off `closeBrowserSessions()` — started here, joined after step 2, so its
+   external-process time overlaps the capture. **The browser host's cleanup
+   gets one 1.5 s deadline**, as in the sidecar's shutdown, so a hung launch
+   cannot hold the join (`vscode-ext/test/agent-browser-host.test.ts`). **Its rejections are absorbed:** a
    throw out of the join would skip the flush, the refresh, and both kills.
 2. `captureAgentRecoveryCommands(context, 1200)`.
 3. Refresh the mirror's process CWDs against the still-live PTYs, then archive
@@ -235,7 +237,7 @@ frame-src   http://127.0.0.1:* http://localhost:*
 
 **`frame-src` is loopback-only** — `dor iframe` frames its target through the transparent proxy the extension host stands up, so the only origin ever embedded is loopback on an OS-assigned port; without the override `default-src 'none'` blocks the frame and leaves a blank white pane (`docs/specs/dor-browser.md`).
 
-**The webview CSP carries no relay sources.** Its `connect-src` loopback `ws:` entries are for the agent-browser stream relay only — the Burrow holds its `/ws/burrow` socket from the *extension host*, which no CSP fences, so the origin allowlist is enforced there instead (see "Burrow: a service in the extension host").
+**The webview CSP carries no relay sources.** Its `connect-src` loopback `ws:` entries are for the host's guarded browser viewer sockets (`docs/specs/dor-browser.md` → Viewer Socket) — the Burrow holds its `/ws/burrow` socket from the *extension host*, which no CSP fences, so the origin allowlist is enforced there instead (see "Burrow: a service in the extension host").
 
 **That allowlist is a build-time constant, never a runtime value**: `vscode-ext/scripts/esbuild.mjs` substitutes `__DORMOUSE_REMOTE_CONNECT_SRC__` into `dist/extension.js`. The default, the replace-not-add override rule, and the two build-time guards are `docs/specs/relay.md` → "Where a Burrow may reach a Relay".
 

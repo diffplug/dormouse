@@ -17,6 +17,11 @@ vi.mock('../../lib/terminal-registry', () => ({
   releaseSession: (id: string) => void released.push(id),
 }));
 
+const disposedBrowsers: string[] = [];
+vi.mock('./agent-browser-surface-controller', () => ({
+  disposeAgentBrowserSurfaceController: (id: string) => void disposedBrowsers.push(id),
+}));
+
 const helpers = new Map<string, { id: string }>();
 const forgotten: string[] = [];
 vi.mock('../../lib/helper-terminal', () => ({
@@ -30,6 +35,7 @@ beforeEach(() => {
   resetWorkspaceUi();
   released.length = 0;
   forgotten.length = 0;
+  disposedBrowsers.length = 0;
   helpers.clear();
   clearAllNotepads();
 });
@@ -84,6 +90,7 @@ describe('prepareWorkspaceTransfer', () => {
     // The host may still refuse — the target window can close between the
     // drag's last probe and the drop — so the Workspace is exactly as it was.
     expect(released).toEqual([]);
+    expect(disposedBrowsers).toEqual([]);
     expect(getNotes('pane-a')).toHaveLength(1);
 
     prepared.commit();
@@ -97,9 +104,10 @@ describe('prepareWorkspaceTransfer', () => {
 
     expect(prepared.payload.terminalIds).toEqual(['pane-a']);
     expect(prepared.payload.allIds).toEqual(['pane-a', 'browser-b']);
-    // A browser Surface needs nothing: its agent-browser session lives in the
-    // host and the target reopens from the persisted params.
     expect(released).toEqual(['pane-a']);
+    // A browser's session lives in the host, where the target attaches to it:
+    // only this Window's viewer is released, its session left running.
+    expect(disposedBrowsers).toEqual(['pane-a', 'browser-b']);
   });
 
   it('takes an open helper with its source instead of leaking it', async () => {

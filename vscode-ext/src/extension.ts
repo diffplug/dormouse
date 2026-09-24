@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as ptyManager from './pty-manager';
 import { DormouseViewProvider } from './webview-view-provider';
 import { attachRouter, flushAllSessions, getAlertStates, reportWindowPresence } from './message-router';
-import { closePoppedOutSessions } from './agent-browser-host';
+import { closeBrowserSessions } from './agent-browser-host';
 import { serveWebview } from './webview-messaging';
 import { log } from './log';
 import { initToolHost } from './tool-host';
@@ -263,7 +263,7 @@ export async function deactivate() {
   // it would skip the session flush, the live-PTY refresh, and both kills,
   // leaking the pty host and every PTY under it. An orphaned Chrome window is a
   // far smaller failure than an unkilled pty host.
-  const poppedOutClosed = closePoppedOutSessions().catch((err) => {
+  const poppedOutClosed = closeBrowserSessions().catch((err) => {
     log.error('[deactivate] could not close popped-out browser windows:', String(err));
   });
   step('capturing agent recovery commands');

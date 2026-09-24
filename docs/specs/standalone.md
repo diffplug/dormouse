@@ -82,14 +82,13 @@ stdout. **stdout is the protocol** — sidecar diagnostics go to stderr, which R
 appends to the log file.
 
 Webview → Rust is Tauri invokes; the `#[tauri::command]` set and `TauriAdapter`
-own the exact command list, most of them thin sidecar forwarders. Three carve-outs
+own the exact command list, most of them thin sidecar forwarders. Two carve-outs
 are *not* forwarded:
 
 | Not forwarded | Handled | Why |
 |---|---|---|
 | `load_session` / `save_session` | Rust | the per-window session file is Rust's store (§Persistence) |
 | the `clipboard` readers (Windows only) | Rust (`clipboard_win.rs`) | native Win32 reads (`docs/specs/mouse-and-clipboard.md` §8.6) |
-| `agent_browser_screenshot` | Rust reads the bytes from a sidecar-supplied temp-file *path* | images must never ride the JSON-lines pipe shared with PTY traffic (`docs/specs/dor-browser.md`) |
 
 Request/response commands block on the sidecar's reply under a timeout.
 `OPEN_PORT_TIMEOUT_MS` and `OPEN_PORT_TIMEOUT_PER_ID_MS` in `lib.rs` mirror the
@@ -306,14 +305,15 @@ win32` in `standalone/sidecar/pty-core.test.js`.
 
 ## Sidecar lifecycle
 
-Source of truth: `standalone/sidecar/main.js`.
+Source of truth: `standalone/sidecar/main.js`. Browser cleanup is pinned by `standalone/sidecar/shutdown.test.js`.
 
 Shutdown (`sidecar:shutdown` message, stdin EOF, or SIGTERM) is **idempotent and
 ordered**:
 
-1. `agentBrowser.closePoppedOut()` under a 1.5s race — quitting must not orphan a
-   headed Chrome window, and a hung agent-browser must not wedge the exit (as in
-   the VS Code host's `deactivate()`; `docs/specs/dor-browser.md`).
+1. **Must await the browser host's cleanup under one 1.5s deadline**
+   (`browserHost.close()`, which closes Playwright's only once its lazily
+   required host exists); `docs/specs/dor-browser.md` owns the teardown
+   contract.
 2. Close the dor control socket.
 3. `host.dispose()`: the alerts (§Alerts), then the Burrow service, dropping
    the relay socket and settling every outstanding ask so nothing waits on a
@@ -1348,6 +1348,6 @@ The bridge is a transport shim over the same sidecar protocol, not a second PTY 
 
 **A CORS preflight is the one carve-out**: an `OPTIONS` answers `204` carrying those headers *before* the token check, since it can never present the non-GET content type the gate demands. **Any other unauthorized caller gets the same `404 not found` as an unknown path**, so the port does not identify itself. The harness prints the token and a ready-made `curl` on startup.
 
-The harness **may omit** native-only desktop chrome (window controls, update checks) but **must preserve** every `PlatformAdapter` contract the app uses — PTY, control-request, clipboard, iframe-proxy, Burrow, agent-browser, and the sidecar's alerts (`alert_command` in, stamped with the one window label the harness simulates, `main`; their events back; §Alerts) — so a rule that only holds across the host boundary is exercised rather than answered by a private copy. **`BrowserSidecarHost.init()` resolves on the SSE stream being open, not on its construction**, so a seed cannot precede the stream that carries its reply; **must let retryable connection failures reconnect within the open timeout**; after a reconnect the adapter sends `sync`, since whatever the sidecar sent while the stream was down is gone (`resolves on the stream's open event, not on construction` in `standalone/src/browser-sidecar-host.test.ts`; `asks the sidecar to sync when the event stream reconnects` in `standalone/src/browser-sidecar-adapter.test.ts`). Fatal startup handling follows §Boot sequence. It **must mirror** standalone's Session-persistence answer (`docs/specs/transport.md` → "The governing rule"): one `PersistedWindow` per window, in `localStorage` rather than the Rust file store, and the same agent-recovery *claim* against a per-run temp state directory. **The harness must never capture**: a reload there is a live resume over PTYs that survive it, and capture is a quit-only step (§Agent recovery). **Tauri APIs must not be required at static module-evaluation time** when `VITE_DORMOUSE_BROWSER_DEV_HOST` is set — a normal browser loads the page, not the Tauri WebView.
+The harness **may omit** native-only desktop chrome (window controls, update checks) but **must preserve** every `PlatformAdapter` contract the app uses — PTY, control-request, clipboard, iframe-proxy, Burrow, agent-browser, Playwright, and the sidecar's alerts (`alert_command` in, stamped with the one window label the harness simulates, `main`; their events back; §Alerts) — so a rule that only holds across the host boundary is exercised rather than answered by a private copy. **`BrowserSidecarHost.init()` resolves on the SSE stream being open, not on its construction**, so a seed cannot precede the stream that carries its reply; **must let retryable connection failures reconnect within the open timeout**; after a reconnect the adapter sends `sync`, since whatever the sidecar sent while the stream was down is gone (`resolves on the stream's open event, not on construction` in `standalone/src/browser-sidecar-host.test.ts`; `asks the sidecar to sync when the event stream reconnects` in `standalone/src/browser-sidecar-adapter.test.ts`). Fatal startup handling follows §Boot sequence. It **must mirror** standalone's Session-persistence answer (`docs/specs/transport.md` → "The governing rule"): one `PersistedWindow` per window, in `localStorage` rather than the Rust file store, and the same agent-recovery *claim* against a per-run temp state directory. **The harness must never capture**: a reload there is a live resume over PTYs that survive it, and capture is a quit-only step (§Agent recovery). **Tauri APIs must not be required at static module-evaluation time** when `VITE_DORMOUSE_BROWSER_DEV_HOST` is set — a normal browser loads the page, not the Tauri WebView.
 
-Source of truth: `standalone/scripts/dev-agent-browser.mjs`, `standalone/scripts/dev-run.mjs`, `standalone/scripts/dev-host-guard.mjs`, `standalone/src/browser-sidecar-host.ts`, `standalone/src/browser-sidecar-adapter.ts`; `stepBurrow` in `scripts/pairing-walkthrough/steps.mjs`; `sessionForKey` in `dor-lib-common/src/agent-browser.ts`.
+Source of truth: `standalone/scripts/dev-agent-browser.mjs`, `standalone/scripts/dev-run.mjs`, `standalone/scripts/dev-host-guard.mjs`, `standalone/src/browser-sidecar-host.ts`, `standalone/src/browser-sidecar-adapter.ts`; `stepBurrow` in `scripts/pairing-walkthrough/steps.mjs`; `sessionForKey` in `dor-lib-common/src/browser-providers.ts`.

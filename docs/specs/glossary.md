@@ -24,7 +24,7 @@ A Pane holds exactly one Surface today, but the model reserves several (a future
 |---|---|---|
 | `terminal` | — | a PTY + xterm.js instance — a **Session** |
 | `tool` | — | a PTY and an optional browser on the same Session |
-| `browser` | `iframe`, `ab-screencast`, `ab-popout` | an iframe proxy grant, or an agent-browser daemon session (`docs/specs/dor-browser.md`) |
+| `browser` | `iframe`, `ab-screencast`, `ab-popout`, `pw-screencast`, `pw-popout` | an iframe proxy grant, or an automation-provider session (`docs/specs/dor-browser.md`) |
 
 **For a browser Surface `renderMode` is canonical**; the CLI `render_mode` is derived from it and never stored.
 
@@ -35,6 +35,8 @@ A Pane holds exactly one Surface today, but the model reserves several (a future
 | browser · iframe | `'browser'` | `iframe` | `browser` | `iframe` |
 | browser · screencast | `'browser'` | `ab-screencast` | `browser` | `ab-screencast` |
 | browser · popped out | `'browser'` | `ab-popout` | `browser` | `ab-popout` |
+| browser · Playwright screencast | `'browser'` | `pw-screencast` | `browser` | `pw-screencast` |
+| browser · Playwright popout | `'browser'` | `pw-popout` | `browser` | `pw-popout` |
 
 **Kinds are capability sets, not exclusive categories** — terminal and browser carry one capability each, `tool` both. **Operations gate on the capability they need, never on the kind enum** ([Liskov contract](#liskov-contract)): `read` / `send` / `await` / port scans need the terminal, nav / render-mode / agent-browser verbs the browser. **`dor list --json` rows always emit `has_terminal` and `has_browser`** (rationale). **Must declare each kind's capabilities in the `hasTerminal` / `hasBrowser` table.** Persistence keeps its own `PersistedSurfaceType` discriminant (`docs/specs/transport.md`).
 
@@ -257,7 +259,7 @@ Use glossary names instead. A left-column term retains meaning only where noted.
 | **reconnect** | Retired: live-PTY case → **resume**; cold start → **restore**. |
 | **restore** | Keeps its cold-start rehydrate meaning. Never for Door→Pane (**reattach**) or alert-manager seeding (**seed**). |
 | **attach** | Retired at the DOM layer (`attachTerminal`) → **mount**; user-level **reattach** (Door→Pane) keeps the `re-` prefix. |
-| **session** | The durable identity of a **terminal Surface**. Never for the Activity projection (`ActivityState`, not `SessionUiState`), nor for the agent-browser daemon's lowercase `session` string (`dormouse.<workspace>.<key>`) — not a Dormouse durable unit. |
+| **session** | The durable identity of a **terminal Surface**. Never for the Activity projection (`ActivityState`, not `SessionUiState`), nor for a browser provider's lowercase `session` string (`dormouse.<scope>.<key>`) — not a Dormouse durable unit. |
 | **terminal** | Keeps its meaning for the `xterm.Terminal` instance; prose meaning "the whole thing" is **Session**. |
 | **surface** | Not retired. **Session** names only the terminal kind; **Surface** covers both. |
 | **panel / pane / leaf** | Prefer **pane** for the layout slot; **leaf** is Lath's tree node for it (1:1). "panel" survives only in React component names (`TerminalPanel`, `BrowserPanel`, `IframePanel`, `AgentBrowserPanel`). |

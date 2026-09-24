@@ -3,11 +3,11 @@
  * And Render Swaps"). Opened from the header's far-left chip, it is the
  * single place that owns *how* a surface renders:
  *
- *   - Render — swap the backend in place, preserving the target:
- *     `agent-browser screencast`, `agent-browser popout` (relaunch headed as a
- *     native OS window), or `iframe embed`. Each lists its agent/URL/feel
- *     trade-offs. Shown only when the controller wires `setRenderMode`; the
- *     popout option is gated on `canPopOut` (hidden on web).
+ *   - Render — swap the backend in place, preserving the target: each
+ *     provider's screencast and popout (relaunch headed as a native OS
+ *     window), or `iframe embed`. Each lists its agent/URL/feel trade-offs.
+ *     Shown only when the controller wires `setRenderMode`, offering only the
+ *     modes the controller declares in `renderModes`.
  *   - Resolution — the screencast viewport: *Resize with pane* (linked to the
  *     pane) or *Fixed* (a specific resolution chosen via Device or Custom).
  *     Specific to screencast, so it nests under that option and greys out
@@ -28,26 +28,16 @@ import {
   OVERLAY_MAX_HEIGHT,
 } from '../design';
 import type { RenderMode, ScreenController, ScreenSnapshot } from './agent-browser-screen';
-import { useAgentBrowserScreenSnapshot } from './agent-browser-screen';
+import { browserDisplayMode, useAgentBrowserChromeSnapshot, useAgentBrowserScreenSnapshot } from './agent-browser-screen';
+import { BROWSER_PROVIDER_IDS, parseRenderMode, renderModeFor } from 'dor-lib-common/browser-providers';
+import { BROWSER_PROVIDER_GUI, surfaceProvider } from './browser-automation';
+import { iframeRefusal } from './browser-url';
 import {
   AgentRobotIcon,
   BROWSER_DISPLAY_LABEL,
   BrowserDisplayIcon,
   BrowserPresentationIcon,
 } from './BrowserDisplayIcon';
-
-// Fixed registry — the CLI's own device set. No custom descriptors; touch +
-// mobile UA come only bundled inside `set device` (verified against 0.27.0).
-const DEVICES = [
-  'iPhone 15',
-  'iPhone 16',
-  'iPhone 16 Pro',
-  'iPhone 17',
-  'iPad',
-  'iPad Pro',
-  'Pixel 9',
-  'Galaxy S25',
-] as const;
 
 type Target = 'sync' | 'device' | 'custom';
 
@@ -61,6 +51,7 @@ export function AgentBrowserScreenModal({
   onClose: () => void;
 }) {
   const live = useAgentBrowserScreenSnapshot(controller);
+  const chrome = useAgentBrowserChromeSnapshot(controller);
   // Snapshot the state the modal opened with for pre-selection; the live one
   // still tracks the current render mode so external changes update whether
   // Apply is swapping backends.
@@ -75,7 +66,7 @@ export function AgentBrowserScreenModal({
   // A fixed device can't be pre-matched — the CLI exposes no dims map.
   const initialTarget: Target = initial?.syncEngaged ? 'sync' : 'custom';
   const [target, setTarget] = useState<Target>(initialTarget);
-  const [device, setDevice] = useState<string>(DEVICES[1]); // iPhone 16
+  const [device, setDevice] = useState<string>('iPhone 16');
   const [customW, setCustomW] = useState(String(initial?.viewport.w ?? 1280));
   const [customH, setCustomH] = useState(String(initial?.viewport.h ?? 720));
   const [customDpi, setCustomDpi] = useState(String(initial?.viewport.dpr ?? 1));
@@ -86,11 +77,16 @@ export function AgentBrowserScreenModal({
   const currentMode: RenderMode = snapshot?.renderMode ?? 'ab-screencast';
   const canSwapRender = !!controller.actions.setRenderMode;
   const [renderMode, setRenderMode] = useState<RenderMode>(currentMode);
-  // Pop-out is a render mode, gated per host/platform (hidden on web).
-  const canPopOut = controller.canPopOut ?? false;
+  // The controller declares what this Surface can take (a tool never pops out
+  // or changes provider); the current mode always shows so it stays selected.
+  const offered = (mode: RenderMode) => mode === currentMode || controller.renderModes.includes(mode);
+  const embedRefusal = currentMode === 'iframe' ? null : iframeRefusal(chrome?.url ?? '');
   // Only the screencast backend has a Dormouse-settable viewport; pop-out is a
   // native OS window and embed renders at the pane size, so both grey it out.
-  const viewportDisabled = renderMode !== 'ab-screencast';
+  const selected = parseRenderMode(renderMode);
+  const viewportDisabled = selected.presentation !== 'screencast';
+  // Each screencast's device presets are its own provider's.
+  const devices = BROWSER_PROVIDER_GUI[surfaceProvider(renderMode)].devices;
   // Whether Apply changes the render backend (vs only tweaking the current
   // screencast's viewport). A swap is gated on whether its option is shown, not
   // on the viewport-drive capability below.
@@ -118,7 +114,8 @@ export function AgentBrowserScreenModal({
   //     `set viewport`, and a valid custom size.
   const applyDisabled =
     viewportDisabled || switchingMode
-      ? false
+      // The page may have changed since iframe was picked.
+      ? renderMode === 'iframe' && embedRefusal !== null
       : (!hostCapable || (target === 'custom' && !customValid));
 
   const apply = () => {
@@ -127,7 +124,7 @@ export function AgentBrowserScreenModal({
       // A mode swap; the viewport sub-controls don't apply to the outgoing
       // surface (and are inert on embed/popout controllers anyway).
       controller.actions.setRenderMode?.(renderMode);
-    } else if (renderMode === 'ab-screencast') {
+    } else if (!viewportDisabled) {
       if (target === 'sync') controller.actions.engageSync();
       else if (target === 'device') controller.actions.applyDevice(device);
       else controller.actions.applyViewport(Number(customW), Number(customH), Number(customDpi));
@@ -187,7 +184,7 @@ export function AgentBrowserScreenModal({
               className="rounded border border-border bg-app-bg px-1.5 py-1 font-mono text-foreground outline-none focus:border-focus-ring"
             >
               <option value="">none</option>
-              {DEVICES.map((name) => (
+              {devices.map((name) => (
                 <option key={name} value={name}>{name}</option>
               ))}
             </select>
@@ -221,35 +218,47 @@ export function AgentBrowserScreenModal({
       {canSwapRender ? (
         <div className="mt-4 flex flex-col gap-3">
           {/* Screencast owns the robot capability glyph; its nested resolution
-              modes append the presentation glyph. The controls grey out for
-              the other render modes. */}
-          <RenderOption
-            checked={renderMode === 'ab-screencast'}
-            onSelect={() => setRenderMode('ab-screencast')}
-            icon={<AgentRobotIcon size={14} className="shrink-0 text-muted" />}
-            label="agent-browser screencast"
-            features={[[true, 'agents can read/write'], [true, 'any URL'], [false, 'laggy for humans']]}
-          >
-            <div className="ml-6 mt-2">{viewportControls}</div>
-          </RenderOption>
-
-          {canPopOut && (
+              modes append the presentation glyph. */}
+          {BROWSER_PROVIDER_IDS.map((provider) => {
+            const screencast = renderModeFor(provider, 'screencast');
+            const popout = renderModeFor(provider, 'popout');
+            if (!offered(screencast) && !offered(popout)) return null;
+            const popoutDisplay = browserDisplayMode({ renderMode: popout, syncEngaged: false });
+            return (
+              <div key={provider} className="flex flex-col gap-3">
+                {offered(screencast) && (
+                  <RenderOption
+                    checked={renderMode === screencast}
+                    onSelect={() => setRenderMode(screencast)}
+                    icon={<AgentRobotIcon size={14} className="shrink-0 text-muted" />}
+                    label={`${BROWSER_PROVIDER_GUI[provider].label} screencast`}
+                    features={[[true, 'agents can read/write'], [true, 'any URL'], [false, 'laggy for humans']]}
+                  >
+                    {renderMode === screencast && <div className="ml-6 mt-2">{viewportControls}</div>}
+                  </RenderOption>
+                )}
+                {offered(popout) && (
+                  <RenderOption
+                    checked={renderMode === popout}
+                    onSelect={() => setRenderMode(popout)}
+                    icon={<BrowserDisplayIcon mode={popoutDisplay} size={14} className="text-muted" />}
+                    label={BROWSER_DISPLAY_LABEL[popoutDisplay]}
+                    features={[[true, 'agents can read/write'], [true, 'any URL'], [true, 'native human experience']]}
+                  />
+                )}
+              </div>
+            );
+          })}
+          {offered('iframe') && (
             <RenderOption
-              checked={renderMode === 'ab-popout'}
-              onSelect={() => setRenderMode('ab-popout')}
-              icon={<BrowserDisplayIcon mode="ab-popout" size={14} className="text-muted" />}
-              label={BROWSER_DISPLAY_LABEL['ab-popout']}
-              features={[[true, 'agents can read/write'], [true, 'any URL'], [true, 'native human experience']]}
+              checked={renderMode === 'iframe'}
+              onSelect={() => setRenderMode('iframe')}
+              icon={<BrowserDisplayIcon mode="iframe" size={14} className="text-muted" />}
+              label={BROWSER_DISPLAY_LABEL.iframe}
+              features={[[false, 'agents cannot read/write'], [false, 'http only'], [false, 'no logins/cookies'], [true, 'native human experience']]}
+              disabledReason={embedRefusal ?? undefined}
             />
           )}
-
-          <RenderOption
-            checked={renderMode === 'iframe'}
-            onSelect={() => setRenderMode('iframe')}
-            icon={<BrowserDisplayIcon mode="iframe" size={14} className="text-muted" />}
-            label={BROWSER_DISPLAY_LABEL.iframe}
-            features={[[false, 'agents cannot read/write'], [false, 'http only'], [true, 'native human experience']]}
-          />
         </div>
       ) : (
         // No render swap wired: the legacy plain screencast resolution modal.
@@ -258,7 +267,7 @@ export function AgentBrowserScreenModal({
 
       {!hostCapable && !viewportDisabled && !switchingMode && (
         <p className="mt-3 text-xs text-muted">
-          This host can't drive the browser viewport; run <span className="font-mono">dor ab set …</span> from a
+          This host can't drive the browser viewport; run <span className="font-mono">{BROWSER_PROVIDER_GUI[surfaceProvider(currentMode)].viewportHint}</span> from a
           terminal instead.
         </p>
       )}
@@ -294,6 +303,7 @@ function RenderOption({
   icon,
   label,
   features,
+  disabledReason,
   children,
 }: {
   checked: boolean;
@@ -301,14 +311,18 @@ function RenderOption({
   icon?: ReactNode;
   label: string;
   features: [boolean, string][];
+  /** Why this option cannot be chosen here; absent ⇒ enabled. */
+  disabledReason?: string;
   children?: ReactNode;
 }) {
+  const disabled = disabledReason !== undefined;
   return (
     <div className="flex flex-col gap-1.5 text-sm">
-      <label className="flex cursor-pointer items-center gap-2">
-        <input type="radio" name="render-mode" checked={checked} onChange={onSelect} />
+      <label className={`flex items-center gap-2 ${disabled ? 'cursor-not-allowed opacity-45' : 'cursor-pointer'}`}>
+        <input type="radio" name="render-mode" checked={checked} disabled={disabled} onChange={onSelect} />
         {icon}
         <span className="text-foreground">{label}</span>
+        {disabled && <span className="text-xs text-muted">— {disabledReason}</span>}
       </label>
       <div className="ml-6 flex flex-col gap-0.5 text-xs">
         {features.map(([ok, text]) => <Feature key={text} ok={ok}>{text}</Feature>)}

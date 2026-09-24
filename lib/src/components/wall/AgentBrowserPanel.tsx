@@ -7,6 +7,7 @@ import { isEditableTarget } from '../../lib/dom';
 import type { RenderMode } from './agent-browser-screen';
 import { tabDisplayTitle } from './browser-url';
 import { resolveRenderMode } from './browser-surface';
+import { BROWSER_PROVIDER_GUI, surfaceProvider } from './browser-automation';
 import { MOUSE_BUTTONS, MOUSE_BUTTON_MASKS, modifiers } from './agent-browser-input';
 import {
   acquireAgentBrowserSurfaceController,
@@ -44,28 +45,37 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   usePaneChrome(id, elRef);
 
   const session = params?.session;
-  const wsPort = params?.wsPort;
+  const launchSession = params?.launchSession;
   const binaryPath = params?.binaryPath;
   const url = params?.url;
   const key = params?.key;
   const syncEngaged = params?.syncEngaged;
+  const cwd = params?.cwd;
   // poppedOut is derived from the canonical renderMode the shell passes; fall
   // back to resolving it from params for a direct mount (tests) / legacy blob.
   const seededMode = renderModeProp ?? resolveRenderMode(params);
+  const provider = surfaceProvider(seededMode);
+  const cli = BROWSER_PROVIDER_GUI[provider].cli;
 
   // The surface-scoped controller: get-or-create, keyed by surface id. Survives
-  // this component's unmount (minimize, layout churn, StrictMode).
+  // this component's unmount (minimize, layout churn, StrictMode). Keyed by
+  // provider too: a minimized pane keeps this view mounted while its Wall
+  // restores a failed cross-provider swap in place, and the restored provider
+  // needs its own. One released under this view is replaced when params next
+  // change (`generation`), never on the release itself: a kill releases it as
+  // the pane starts to fade, where re-acquiring would leave a live controller
+  // behind for a dead Surface.
+  const [generation, setGeneration] = useState(0);
   const controller = useMemo(
     () => acquireAgentBrowserSurfaceController(id, { ...params, renderMode: seededMode }),
-    // Only the id identifies the controller; later param changes flow through
-    // updateParams below (acquire is get-or-create and ignores params when the
-    // controller already exists).
+    // Later param changes flow through updateParams below (acquire is
+    // get-or-create and ignores params when the controller already exists).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [id],
+    [id, provider, generation],
   );
 
   const snapshot = useSyncExternalStore(controller.subscribe, controller.snapshot);
-  const { tabs, status, connectionLost, hasFrame, poppedOut, relaunching, streamPort } = snapshot;
+  const { tabs, status, hasFrame, poppedOut, phase, error } = snapshot;
 
   // Gated on the same Workspace-aware visibility the streaming body reads, so a
   // Workspace left in passthrough on a browser pane stops forwarding (and
@@ -86,12 +96,13 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   const passthroughRef = useRef(passthrough);
   passthroughRef.current = passthrough;
 
-  // Feed later param changes into the controller (diffed internally). renderMode
-  // is deliberately omitted: the controller owns poppedOut (seeded once from
-  // seededMode at acquire above) and never reacts to a later renderMode param.
+  // Feed later param changes into the controller (diffed internally). The
+  // renderMode it gets back is mostly its own popOut/popIn write; it follows
+  // one the host reported for a native launch (`followParamsHeadedness`).
   useEffect(() => {
-    controller.updateParams({ session, wsPort, binaryPath, url, syncEngaged, key });
-  }, [controller, session, wsPort, binaryPath, url, syncEngaged, key]);
+    if (controller.released) setGeneration((current) => current + 1);
+    else controller.updateParams({ session, launchSession, binaryPath, url, syncEngaged, key, cwd, renderMode: seededMode });
+  }, [controller, session, launchSession, binaryPath, url, syncEngaged, key, cwd, seededMode]);
 
   // Lend the controller this view's live DOM bindings. Last attach wins; the
   // detach is identity-guarded inside the controller so a stale StrictMode
@@ -105,12 +116,13 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
       viewport,
       updateParameters: (next) => paneWrite.updateParams(id, next),
       setTitle: (nextTitle) => paneWrite.setTitle(id, nextTitle),
-      requestIframeSwap: () => {
+      requestRenderSwap: (mode = 'iframe') => {
         // The iframe renderer is single-frame: only the active tab survives.
         // Warn + require a typed confirm when other tabs would be closed.
-        if (controller.snapshot().tabs.length >= 2) setPendingIframeSwap(true);
-        else actionsRef.current.onSwapRenderMode(id, 'iframe');
+        if (controller.snapshot().tabs.length >= 2) setPendingRenderSwap(mode);
+        else actionsRef.current.onSwapRenderMode(id, mode);
       },
+      launchFailed: (error) => actionsRef.current.onBrowserLaunchFailed?.(id, error),
     });
     return () => handle.detach();
     // The sink closes over `paneWrite` + `id`, both stable for a mounted pane
@@ -129,7 +141,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
 
   // Crossing to the single-frame iframe renderer closes all but the active tab;
   // when others are open the swap is gated behind a typed confirm (overlay below).
-  const [pendingIframeSwap, setPendingIframeSwap] = useState(false);
+  const [pendingRenderSwap, setPendingRenderSwap] = useState<RenderMode | null>(null);
   const swapConfirmRef = useRef<HTMLDivElement>(null);
 
   // --- input forwarding (stream-native input_* messages) ---
@@ -307,28 +319,38 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   // Focus the swap-confirm overlay when it appears so it captures the typed
   // confirm/cancel keys (the pane's key-forwarder skips in-pane targets).
   useEffect(() => {
-    if (pendingIframeSwap) swapConfirmRef.current?.focus();
-  }, [pendingIframeSwap]);
+    if (pendingRenderSwap) swapConfirmRef.current?.focus();
+  }, [pendingRenderSwap]);
 
   // --- placeholder state (derived from the snapshot) ---
 
+  // The browser is on its way — a launch, an attach, or a relaunch whose new
+  // stream is not yet known — not a session that ended.
+  const opening = phase === 'idle' || phase === 'launching' || phase === 'attaching' || phase === 'relaunching';
   const placeholder = (() => {
-    // Session-less: the pane context menu's eager connect pane, on screen before
-    // the daemon boots (docs/specs/dor-browser.md → Pane Context Menu Connect).
-    // It is mid-boot, not idle — telling the user to run `dor ab open` here would
-    // ask them to redo the click they just made.
-    if (!session) return 'Connecting to browser session…';
+    // Mid-launch: the pane is on screen before its browser is up. It is
+    // mid-boot, not idle — telling the user to run `dor ab open` here would ask
+    // them to redo the click they just made.
+    if (phase === 'launching') return 'Opening the browser…';
     // Mid pop-in: the headed browser is closed by design and the headless one
     // is booting — not a session that ended.
-    if (relaunching) return 'Relaunching browser…';
-    if (!streamPort) return `Waiting for browser session ${session} — run dor ab open <url>`;
-    if (connectionLost || status?.connected === false) {
-      return `Browser session ${session ?? ''} ended — run dor ab open <url> to restart it, or close this surface.`;
+    if (phase === 'relaunching') return 'Relaunching browser…';
+    // Addressed to this pane: a bare `dor ab open` drives the caller's default
+    // key, which for a keyed or GUI-launched pane is some other browser.
+    const command = `${cli} --surface ${actions.resolveSurfaceRef(id)} open <url>`;
+    // A pane whose launch never named a session has no browser to drive yet.
+    if (phase === 'ended' && error) {
+      return session
+        ? `The browser could not be opened (${error}) — run ${command} to retry, or close this surface.`
+        : `The browser could not be opened (${error}).`;
+    }
+    if (phase === 'ended') {
+      return `The browser session ended — run ${command} to restart it, or close this surface.`;
     }
     if (!hasFrame) {
       return status && !status.screencasting
-        ? 'No page is open — run dor ab open <url>'
-        : `Connecting to ${session ?? 'browser session'}…`;
+        ? `No page is open — run ${command}`
+        : 'Connecting to the browser…';
     }
     return null;
   })();
@@ -388,14 +410,14 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
             if (interactiveRef.current) e.preventDefault();
           }}
         />
-        {poppedOut ? (
+        {poppedOut && phase !== 'ended' ? (
           // Popped out to a headed OS window — the pane is a clean stub. While
-          // the window is still being opened (a relaunch in flight, or an eager
-          // swap whose daemon has not yet named its session) there is nothing to
-          // pop back in, so the affordance waits with it.
+          // the window is still being opened (a launch, attach or relaunch in
+          // flight) there is nothing to pop back in, so the affordance waits
+          // with it.
           <div className="flex flex-col items-center gap-3 px-4 text-center text-sm text-muted">
-            <div>{!session || relaunching ? 'Opening the browser window…' : 'This browser is running in a separate window.'}</div>
-            {session && !relaunching && <div className="flex gap-2 text-xs">
+            <div>{opening ? 'Opening the browser window…' : 'This browser is running in a separate window.'}</div>
+            {!opening && <div className="flex gap-2 text-xs">
               <button
                 type="button"
                 onMouseDown={(e) => e.stopPropagation()}
@@ -412,7 +434,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
         ) : placeholder ? (
           <div className="px-4 text-center text-sm text-muted">{placeholder}</div>
         ) : null}
-        {pendingIframeSwap && (
+        {pendingRenderSwap && (
           <div
             ref={swapConfirmRef}
             tabIndex={-1}
@@ -421,15 +443,15 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
             onKeyDown={(e) => {
               e.stopPropagation();
               if (e.key === 'c' || e.key === 'C') {
-                setPendingIframeSwap(false);
-                actions.onSwapRenderMode(id, 'iframe');
+                setPendingRenderSwap(null);
+                actions.onSwapRenderMode(id, pendingRenderSwap!);
               } else if (e.key === 'Escape') {
-                setPendingIframeSwap(false);
+                setPendingRenderSwap(null);
               }
             }}
           >
             <div className="max-w-sm text-sm text-foreground">
-              Switching to the iframe renderer keeps only the active tab.{' '}
+              Switching browser providers keeps only the active tab.{' '}
               <span className="font-semibold">{Math.max(0, tabs.length - 1)} other tab{tabs.length - 1 === 1 ? '' : 's'}</span> will be closed.
             </div>
             <div className="text-xs text-muted">

@@ -9,13 +9,16 @@ import {
   type BrowserDisplayMode,
   type RenderMode,
 } from './agent-browser-screen';
-import type { SurfaceKind } from 'dor/commands/types';
+import type { BrowserBinding, SurfaceKind } from 'dor/commands/types';
 import { isToolKeyScope, type ToolKeyScope } from '../../lib/platform/tool-types';
+import { parseRenderMode, renderModeFor, sessionForKey } from 'dor-lib-common/browser-providers';
 
 type BrowserParamsLike = {
   surfaceType?: unknown;
   renderMode?: unknown;
   session?: unknown;
+  cwd?: unknown;
+  binaryPath?: unknown;
   url?: unknown;
   /** Tool only: the ports found when autobind refused to choose. */
   toolPortConflict?: unknown;
@@ -32,21 +35,20 @@ function asParams(params: unknown): BrowserParamsLike {
 
 /** Resolve the canonical render mode; defaults to `iframe` when unset. */
 export function resolveRenderMode(params: unknown): RenderMode {
-  const p = asParams(params);
-  return p.renderMode === 'ab-screencast' || p.renderMode === 'ab-popout' ? p.renderMode : 'iframe';
+  return parseRenderMode(asParams(params).renderMode).mode;
 }
 
-/** Whether params describe an agent-browser-rendered surface (ab-screencast /
- *  ab-popout). */
+/** Whether params describe an automated browser, of either provider. */
 export function isAgentBrowserParams(params: unknown): boolean {
-  const p = asParams(params);
-  return p.renderMode === 'ab-screencast' || p.renderMode === 'ab-popout';
+  return parseRenderMode(asParams(params).renderMode).provider !== null;
 }
 
 /** Whether params describe a `tool` Surface — one Session with a terminal and,
  *  once it serves, a browser (`docs/specs/dor-tool.md`). Checked before the
  *  browser test below, because a serving tool also carries a `renderMode`. */
-export function isToolParams(params: unknown): params is Record<string, unknown> {
+// The predicate names the discriminant so the negative branch keeps a plain
+// params record rather than narrowing it away.
+export function isToolParams(params: unknown): params is Record<string, unknown> & { surfaceType: 'tool' } {
   return asParams(params).surfaceType === 'tool';
 }
 
@@ -196,15 +198,55 @@ export function surfaceKindFromParams(params: unknown): SurfaceKind {
   return isBrowserParams(params) ? 'browser' : 'terminal';
 }
 
-/** The agent-browser session an ab-rendered surface is bound to — the join key
+/** The automation session a browser surface is bound to — the join key
  *  of the session↔surface registry — or null when the surface is not
- *  ab-rendered, or is one the context-menu connect created eagerly and the
- *  daemon has not yet named (`docs/specs/dor-browser.md` → Pane Context Menu
- *  Connect). */
+ *  automated, or its launch has not yet named one (`docs/specs/dor-browser.md`
+ *  → "Browser Connection"). */
 export function agentBrowserSessionFromParams(params: unknown): string | null {
   if (!isAgentBrowserParams(params)) return null;
   const session = asParams(params).session;
   return typeof session === 'string' && session ? session : null;
+}
+
+/** The native binding an automated browser surface's params carry — what its
+ *  provider's CLI runs with — or null before the session is named. */
+export function browserBindingFromParams(params: unknown): BrowserBinding | null {
+  const session = agentBrowserSessionFromParams(params);
+  if (!session) return null;
+  const { cwd, binaryPath } = asParams(params);
+  return {
+    session,
+    ...(typeof cwd === 'string' ? { cwd } : {}),
+    ...(typeof binaryPath === 'string' ? { binaryPath } : {}),
+  };
+}
+
+/**
+ * What the Wall does when a Surface's first launch fails
+ * (docs/specs/dor-browser.md → "Browser Connection"), stored by whoever
+ * created it so a pane restored mid-launch still gets it: close the pane, fall
+ * a Tool back to its embed, or restore the renderer a swap replaced.
+ */
+export type LaunchFallback = 'close' | 'embed' | { restore: Record<string, unknown> };
+
+export function launchFallbackFromParams(params: unknown): LaunchFallback | null {
+  const fallback = (params as { launchFallback?: unknown } | null | undefined)?.launchFallback;
+  if (fallback === 'close' || fallback === 'embed') return fallback;
+  const restore = (fallback as { restore?: unknown } | null | undefined)?.restore;
+  return restore && typeof restore === 'object' ? { restore: restore as Record<string, unknown> } : null;
+}
+
+/** The params that launch a Tool's agent-drivable browser at `url`, in the
+ *  session it had or else its own (`tool.<leafId>`), falling back to the embed
+ *  when it cannot come up (docs/specs/dor-tool.md → Serving). */
+export function toolBrowserLaunchParams(leafId: string, params: Record<string, unknown>, url: string): Record<string, unknown> {
+  return {
+    url,
+    renderMode: renderModeFor('agent-browser', 'screencast'),
+    session: undefined,
+    launchSession: typeof params.session === 'string' ? params.session : sessionForKey(`tool.${leafId}`),
+    launchFallback: 'embed' satisfies LaunchFallback,
+  };
 }
 
 /** The target URL a browser surface carries in its params (`dor list`); null

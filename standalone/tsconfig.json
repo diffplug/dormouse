@@ -20,7 +20,7 @@
       "dor/*": ["../dor/src/*"],
       "remote-lib-common": ["../remote-lib-common/src/index.ts"],
       "dor-lib-common": ["../dor-lib-common/src/index.ts"],
-      "dor-lib-common/agent-browser": ["../dor-lib-common/src/agent-browser.ts"]
+      "dor-lib-common/browser-providers": ["../dor-lib-common/src/browser-providers.ts"]
     }
   },
   "include": ["src"]

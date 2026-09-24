@@ -1,6 +1,8 @@
+import { BROWSER_PROVIDER_IDS } from 'dor-lib-common/browser-providers';
+import { BROWSER_REQUEST_TIMEOUT_MS, type BrowserRequest, type BrowserResult } from './browser-automation';
 import { recordToolEvents } from '../tool-events';
 import type { TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
-import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, IframeProxyResult, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink, SpawnPtyOptions, ToolControlResult, ToolHostRequest, WritePtyOptions } from './types';
+import type { IframeProxyResult, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink, SpawnPtyOptions, ToolControlResult, ToolHostRequest, WritePtyOptions } from './types';
 import { openPortRequestTimeoutMs } from './types';
 import { createBurrowLinkClient } from '../../host/remote/link-client';
 import { createAlertClient, type AlertClientMethods } from '../../host/alert-client';
@@ -117,18 +119,8 @@ export class VSCodeAdapter implements PlatformAdapter {
     this.vscode = acquireVsCodeApi();
     Object.assign(this, this.alerts.methods);
 
-    // These get called through detached references in the agent-browser panel
-    // (e.g. `getPlatform().agentBrowserScreenshot`), which would otherwise drop
-    // `this` and throw on the internal `requestResponse`. Bind them once so any
-    // call style is safe.
-    this.agentBrowserCommand = this.agentBrowserCommand.bind(this);
-    this.agentBrowserEdit = this.agentBrowserEdit.bind(this);
-    this.agentBrowserScreenshot = this.agentBrowserScreenshot.bind(this);
-    this.agentBrowserStreamStatus = this.agentBrowserStreamStatus.bind(this);
-    this.getAgentBrowserStreamUrl = this.getAgentBrowserStreamUrl.bind(this);
-    this.agentBrowserOpen = this.agentBrowserOpen.bind(this);
-    this.agentBrowserPopOut = this.agentBrowserPopOut.bind(this);
-    this.agentBrowserPopIn = this.agentBrowserPopIn.bind(this);
+    // Called through a detached reference, which would otherwise drop `this`
+    // and throw on the internal `requestResponse`.
     this.createIframeProxyUrl = this.createIframeProxyUrl.bind(this);
 
     // Seed the default shell from the extension-injected global so that
@@ -374,79 +366,12 @@ export class VSCodeAdapter implements PlatformAdapter {
     this.vscode.postMessage({ type: 'dormouse:runWorkbenchCommand', command });
   }
 
-  async agentBrowserCommand(session: string, args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult> {
-    const result = await this.requestResponse<AgentBrowserCommandResult>(
-      'agentBrowser:command', 'agentBrowser:commandResult', { session, args, binaryPath },
-      (msg) => ({ exitCode: msg.exitCode, stdout: msg.stdout, stderr: msg.stderr }),
-      10000,
-    );
-    return result ?? { exitCode: 1, stdout: '', stderr: 'agent-browser command timed out' };
-  }
+  readonly browserProviders = BROWSER_PROVIDER_IDS;
 
-  async agentBrowserEdit(session: string, op: AgentBrowserEditOp, binaryPath?: string): Promise<AgentBrowserEditResult> {
-    const result = await this.requestResponse<AgentBrowserEditResult>(
-      'agentBrowser:edit', 'agentBrowser:editResult', { session, op, binaryPath },
-      (msg) => ({ ok: msg.ok, text: msg.text, error: msg.error }),
-      10000,
-    );
-    return result ?? { ok: false, error: 'agent-browser edit timed out' };
-  }
-
-  async agentBrowserScreenshot(session: string, opts: { format?: 'jpeg' | 'png'; quality?: number }, binaryPath?: string): Promise<AgentBrowserScreenshotResult> {
-    const result = await this.requestResponse<AgentBrowserScreenshotResult>(
-      'agentBrowser:screenshot', 'agentBrowser:screenshotResult',
-      { session, format: opts.format, quality: opts.quality, binaryPath },
-      (msg) => ({ ok: msg.ok, bytes: msg.bytes, mime: msg.mime, error: msg.error }),
-      10000,
-    );
-    return result ?? { ok: false, error: 'agent-browser screenshot timed out' };
-  }
-
-  async agentBrowserStreamStatus(session: string, binaryPath?: string): Promise<AgentBrowserStreamStatusResult> {
-    const result = await this.requestResponse<AgentBrowserStreamStatusResult>(
-      'agentBrowser:streamStatus', 'agentBrowser:streamStatusResult',
-      { session, binaryPath },
-      (msg) => ({ ok: msg.ok, wsPort: msg.wsPort, error: msg.error }),
-      5000,
-    );
-    return result ?? { ok: false, error: 'agent-browser stream status timed out' };
-  }
-
-  getAgentBrowserStreamUrl(port: number): Promise<string | null> {
-    // The agent-browser stream server rejects vscode-webview:// origins, so
-    // the extension host relays the stream (see agent-browser-host.ts).
-    return this.requestResponse<string | null>(
-      'agentBrowser:getStreamUrl', 'agentBrowser:streamUrl', { port },
-      (msg) => msg.url,
-      5000,
-    );
-  }
-
-  async agentBrowserOpen(url: string, opts: { headed?: boolean }, binaryPath?: string): Promise<AgentBrowserOpenResult> {
-    const result = await this.requestResponse<AgentBrowserOpenResult>(
-      'agentBrowser:open', 'agentBrowser:openResult', { url, headed: opts.headed, binaryPath },
-      (msg) => ({ ok: msg.ok, session: msg.session, wsPort: msg.wsPort, binaryPath: msg.binaryPath, error: msg.error }),
-      15000,
-    );
-    return result ?? { ok: false, error: 'agent-browser open timed out' };
-  }
-
-  async agentBrowserPopOut(session: string, opts: { rect?: { x: number; y: number; width: number; height: number }; url?: string }, binaryPath?: string): Promise<AgentBrowserPopResult> {
-    const result = await this.requestResponse<AgentBrowserPopResult>(
-      'agentBrowser:popOut', 'agentBrowser:popResult', { session, url: opts.url, rect: opts.rect, binaryPath },
-      (msg) => ({ ok: msg.ok, wsPort: msg.wsPort, error: msg.error }),
-      15000,
-    );
-    return result ?? { ok: false, error: 'agent-browser pop-out timed out' };
-  }
-
-  async agentBrowserPopIn(session: string, opts: { url?: string }, binaryPath?: string): Promise<AgentBrowserPopResult> {
-    const result = await this.requestResponse<AgentBrowserPopResult>(
-      'agentBrowser:popIn', 'agentBrowser:popResult', { session, url: opts.url, binaryPath },
-      (msg) => ({ ok: msg.ok, wsPort: msg.wsPort, error: msg.error }),
-      15000,
-    );
-    return result ?? { ok: false, error: 'agent-browser pop-in timed out' };
+  async browser(request: BrowserRequest): Promise<BrowserResult> {
+    return await this.requestResponse<BrowserResult>(
+      'browser:request', 'browser:result', { request }, (msg) => msg.result, BROWSER_REQUEST_TIMEOUT_MS,
+    ) ?? { ok: false, error: 'the browser host timed out' };
   }
 
   async toolControl(request: ToolHostRequest): Promise<ToolControlResult> {
