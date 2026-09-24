@@ -368,6 +368,18 @@ test('frames reach the viewer as binary, decoded once, their acks paced to ~20 a
     await vi.waitFor(() => expect(viewer.frames.length).toBeGreaterThan(0));
     expect(viewer.frames[0]).toMatchObject({ kind: 'provisional', size: { width: 640, height: 480 } });
     expect([...viewer.frames[0].jpeg]).toEqual([0xff, 0xd8, 1]);
+    // A capture makes Chrome send the frame it last sent again: acknowledged,
+    // never forwarded, so it pulses no capture of its own.
+    const captures = () => cdp.send.mock.calls.filter(([method]) => method === 'Page.captureScreenshot').length;
+    await vi.waitFor(() => expect(captures()).toBeGreaterThan(0));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const taken = captures();
+    for (let i = 0; i < 5; i++) {
+      screencastFrame(2);
+      await vi.waitFor(() => expect(acks()).toHaveLength(3 + i));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(captures()).toBe(taken);
   } finally {
     viewer.socket.terminate();
   }

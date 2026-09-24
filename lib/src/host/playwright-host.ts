@@ -186,18 +186,24 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
       if (v.disposed || !watching(v) || v.page !== page || v.cdp) { await cdp.detach().catch(() => {}); return; }
       v.cdp = cdp;
       let acked = 0;
+      // The last frame forwarded: a capture over the host's CDP makes Chrome
+      // send it again, which forwarded would pulse the next capture, round and
+      // round (rationale).
+      let last: string | undefined;
       cdp.on('Page.screencastFrame', event => {
         if (v.disposed || v.cdp !== cdp) return;
-        // Decoded once, here; the viewer sockets carry it as binary.
-        const jpeg = Buffer.from(event.data, 'base64');
-        const { deviceWidth: width, deviceHeight: height } = event.metadata;
-        const size = width > 0 && height > 0 ? { width, height } : undefined;
-        for (const { sink, headed } of v.subscribers) if (!headed) sink.frame(jpeg, size);
         const ack = () => {
           acked = Date.now();
           void cdp.send('Page.screencastFrameAck', { sessionId: event.sessionId }).catch(() => {});
         };
         setTimeout(ack, Math.max(0, acked + FRAME_INTERVAL_MS - Date.now())).unref();
+        if (event.data === last) return;
+        last = event.data;
+        // Decoded once, here; the viewer sockets carry it as binary.
+        const jpeg = Buffer.from(event.data, 'base64');
+        const { deviceWidth: width, deviceHeight: height } = event.metadata;
+        const size = width > 0 && height > 0 ? { width, height } : undefined;
+        for (const { sink, headed } of v.subscribers) if (!headed) sink.frame(jpeg, size);
       });
       await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 70 });
     } catch (e) {
