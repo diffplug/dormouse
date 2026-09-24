@@ -644,6 +644,7 @@ export function ModalFrame({
   ...props
 }: ModalFrameProps) {
   const surfaceRef = useRef<HTMLDivElement>(null);
+  const startedOnBackdrop = useRef(false);
   useModalFocusTrap(surfaceRef, { initialFocusRef, onEscape });
 
   return (
@@ -652,8 +653,15 @@ export function ModalFrame({
       layer={layer}
       backdrop={backdrop}
       className={overlayClassName}
+      onPointerDownCapture={(event) => {
+        startedOnBackdrop.current = event.target === event.currentTarget;
+      }}
+      onPointerCancel={() => { startedOnBackdrop.current = false; }}
       onClick={(event) => {
-        if (event.target === event.currentTarget) onOutsideClick?.();
+        // A drag out of the surface also produces a click on the overlay.
+        const outside = startedOnBackdrop.current && event.target === event.currentTarget;
+        startedOnBackdrop.current = false;
+        if (outside) onOutsideClick?.();
       }}
     >
       <ModalSurface

@@ -419,7 +419,13 @@ export const ClickOutsideToClose: Story = {
   ...Default,
   play: async ({ canvasElement }) => {
     const body = dialog(canvasElement);
-    await userEvent.click(body.getByRole('dialog').parentElement!);
+    const backdrop = body.getByRole('dialog').parentElement!;
+    await userEvent.pointer([
+      { keys: '[MouseLeft>]', target: body.getByRole('searchbox') },
+      { keys: '[/MouseLeft]', target: backdrop },
+    ]);
+    await expect(body.getByRole('dialog')).toBeInTheDocument();
+    await userEvent.click(backdrop);
     await expect(body.queryByRole('dialog')).not.toBeInTheDocument();
     await userEvent.click(body.getByRole('button', { name: 'Open settings' }));
     await expect(body.getByRole('searchbox')).toHaveFocus();

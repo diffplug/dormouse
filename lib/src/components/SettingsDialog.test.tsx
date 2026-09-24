@@ -252,7 +252,14 @@ describe('SettingsDialog navigation and search', () => {
     const close = vi.fn();
     await render(close);
     const modal = document.querySelector<HTMLElement>('[role="dialog"]')!;
+    const backdrop = modal.parentElement!;
     await act(async () => modal.click());
+    expect(close).not.toHaveBeenCalled();
+    await act(async () => {
+      modal.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+      backdrop.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+      backdrop.click();
+    });
     expect(close).not.toHaveBeenCalled();
     const theme = document.querySelector<HTMLButtonElement>('button[aria-label^="Theme:"]')!;
     await act(async () => theme.click());
@@ -260,7 +267,10 @@ describe('SettingsDialog navigation and search', () => {
     expect(close).not.toHaveBeenCalled();
     await key(theme, 'Escape');
     expect(close).toHaveBeenCalledTimes(1);
-    await act(async () => modal.parentElement!.click());
+    await act(async () => {
+      backdrop.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+      backdrop.click();
+    });
     expect(close).toHaveBeenCalledTimes(2);
   });
 });
