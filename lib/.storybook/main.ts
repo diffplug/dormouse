@@ -46,7 +46,7 @@ const config: StorybookConfig = {
       dor: path.resolve(here, '..', '..', 'dor', 'src'),
       // Same reason: `Wall` → `RemotePairingModalHost` pulls in the remote host
       // modules, which import `remote-lib-common`. Its package `exports` point
-      // at a `dist` the Storybook/Chromatic job never builds, so alias the bare
+      // at a `dist` the Storybook/Argos job never builds, so alias the bare
       // specifier to source too.
       'remote-lib-common': path.resolve(here, '..', '..', 'remote-lib-common', 'src'),
       // And `Wall` → `useDorControl` → `connect-port` imports

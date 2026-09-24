@@ -1,10 +1,8 @@
 name: Argos
 
-# Runs beside Chromatic while Argos is evaluated as its replacement: same
-# stories, and the same triggers and draft and fork gates as `chromatic.yml`,
-# whose comments give the reasons. Argos renders in this job
-# (Playwright, via the Storybook Vitest addon) rather than in its own cloud, so
-# a play-function exception fails the run here instead of passing silently.
+# Argos renders in this job (Playwright, via the Storybook Vitest addon) rather
+# than in its own cloud, so a play-function exception fails the run here instead
+# of passing silently.
 on:
   push:
     branches:
@@ -12,7 +10,18 @@ on:
     paths:
       - 'lib/**'
       - 'docs/stories/**'
+      # The lockfile is the root's, so an in-range bump of a rendering dependency
+      # reaches the stories while matching neither glob above. Here it refreshes
+      # the baseline against the commit that moved the dependency, so the pixel
+      # change is attributed there rather than surfacing inside the next
+      # unrelated `lib/**` PR and being accepted as that PR's. Not on
+      # `pull_request`, where every dependency PR would bill a full run.
       - 'pnpm-lock.yaml'
+      # `lib/.storybook/main.ts` aliases these three to source, putting them in the
+      # story dependency graph exactly as `lib/src` is: `Wall` reaches all three,
+      # and `PocketWall.stories.tsx` imports `remote-lib-common` directly. Push-only
+      # like the lockfile; they nearly always change alongside `lib/**`, so the
+      # marginal build count is close to zero.
       - 'dor/**'
       - 'remote-lib-common/**'
       - 'dor-lib-common/**'
@@ -21,12 +30,16 @@ on:
     paths:
       - 'lib/**'
       - 'docs/stories/**'
+  # Manual rebaseline. No glob catches every rendering input, and a commit editing
+  # these globs — this file — matches none of them, so without a dispatch the only
+  # way to refresh main's baseline is to wait for an unrelated qualifying commit.
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
+  # One in-flight build per PR, so a superseded push stops burning runner time.
   # Keyed by SHA on push so main never cancels: those builds are the baselines.
   group: argos-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -34,13 +47,20 @@ concurrency:
 jobs:
   argos:
     name: Argos Visual Tests
+    # A draft PR does not spend snapshots: marking it ready is the deliberate
+    # trigger. A skipped job reports success, but GitHub refuses to merge a draft at
+    # all, so for that clause the draft state is itself the gate.
+    # Fork PRs are skipped because secrets are withheld from them, leaving the upload
+    # without `ARGOS_TOKEN`. That clause has no such backstop — if this check is ever
+    # made required, a fork PR touching `lib/**` merges with it green rather than
+    # blocking as it does today.
     if: >-
       github.event_name != 'pull_request'
       || (github.event.pull_request.draft == false
       && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
-    # Unlike Chromatic's, this job does the rendering, and `--with-deps` runs an
-    # unbounded apt-get; without a cap a stalled mirror holds the runner 6h.
+    # This job does the rendering, and `--with-deps` runs an unbounded apt-get;
+    # without a cap a stalled mirror holds the runner 6h.
     timeout-minutes: 30
     steps:
       - name: Checkout
@@ -70,8 +90,8 @@ jobs:
         env:
           ARGOS_TOKEN: ${{ secrets.ARGOS_TOKEN }}
 
-      # Publish even when a story fails capture, as Chromatic does, so one throwing
-      # `play` on main does not freeze the standing Storybook link.
+      # Publish even when a story fails capture, so one throwing `play` on main
+      # does not freeze the standing Storybook link.
       - name: Build Storybook
         if: ${{ !cancelled() }}
         run: pnpm build-storybook
