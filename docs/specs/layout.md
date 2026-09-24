@@ -471,7 +471,7 @@ Source of truth: `lib/src/lib/terminal-store.ts` (registry maps and pending shel
 
 ### Agent resume on cold restore
 
-On cold restore, a terminal pane with a host-captured recovery invocation runs it automatically; `docs/specs/transport.md` owns the restore-only gate, validation, and prompt-ready typing. Layout writes one dim `⟲ resuming agent session: <command>` line **to xterm, never the PTY**, to mark the discontinuity — a passive notice with no dismiss or lifecycle. Source of truth: `restoreTerminal` in `lib/src/lib/terminal-lifecycle.ts`, called from `lib/src/lib/session-restore.ts`.
+On cold restore, a terminal pane with a host-captured recovery invocation runs it automatically; `docs/compatible-agents.md` → "Cold restore" owns the restore-only gate, validation, and prompt-ready typing. Layout writes one dim `⟲ resuming agent session: <command>` line **to xterm, never the PTY**, to mark the discontinuity — a passive notice with no dismiss or lifecycle. Source of truth: `restoreTerminal` in `lib/src/lib/terminal-lifecycle.ts`, called from `lib/src/lib/session-restore.ts`.
 
 ### Renderer
 
@@ -507,7 +507,7 @@ Startup recovery is priority-based:
 **A Window plans once per Workspace off one live-PTY list**: `collectLivePtys` runs the single PTY-list round trip for the whole webview, and each Workspace takes the slice its own saved panes name, so one host answer restores N Workspaces (`docs/specs/standalone.md` → Persistence). A single-Wall host reaches the same behavior through `resumeOrRestore`.
 
 1. **Resume** (webview recreated, retained Live or Exited PTYs): request PTY list + replay data from the platform, `resumeTerminal()` each (500ms timeout). **Saved pane and door titles are seeded back via `setTerminalUserTitle()`** (`docs/specs/transport.md`), so persisted placeholder labels never replay as user pins. If the saved session covers every retained PTY, restore the saved Lath layout when its leaf set matches and reattach saved minimized items as doors. **Never fall through to cold restore just because the visible `paneIds` list is empty** — a wall whose retained sessions are all minimized is still a resume.
-2. **Restore** (app restart, cold start): the Wall's `seed` hydrates from the restored Lath layout, else falls to (3); `restoreTerminal()` per pane with its saved cwd and title, plus the single-use agent resume invocation the host captured (`docs/specs/transport.md` → "Consuming it") and the pane's persisted TODO, which rides the spawn (`docs/specs/alert.md` → Public State). Browser surfaces are rebuilt from their persisted params instead.
+2. **Restore** (app restart, cold start): the Wall's `seed` hydrates from the restored Lath layout, else falls to (3); `restoreTerminal()` per pane with its saved cwd and title, plus the single-use agent resume invocation the host captured (`docs/compatible-agents.md` → "Cold restore") and the pane's persisted TODO, which rides the spawn (`docs/specs/alert.md` → Public State). Browser surfaces are rebuilt from their persisted params instead.
 3. **Fallback/manual pane creation**: with no saved layout safely applicable, add panes as splits from the previous pane.
 4. **Empty state**: one new pane.
 

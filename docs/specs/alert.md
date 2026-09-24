@@ -20,7 +20,7 @@ Only `watching` requires WATCHING. **Every source obeys one engagement rule — 
 
 ## Non-goals
 
-- **No process heuristics.** WATCHING applies only to command names the user explicitly asked for — never a guess that `vim`, `npm dev`, agents, or test runners deserve alerts.
+- **Must derive WATCHING only from the configured command rule set**, under WATCHING Track; never infer it from a process category.
 - **No native OS notifications on the machine Dormouse runs on**, and no progress-bar widget. The one local audible channel is the opt-in spoken alarm below, which says a Pane name and nothing else; Dormouse plays no sound effects. Push is the exception and goes only to a *remote* paired phone.
 - **No process-tree introspection** for command-exit alerts; normalized terminal semantic events are the reliable input.
 - No HTML, Markdown, ANSI styling, clickable actions, custom icons, or remote-controlled buttons in notification previews.

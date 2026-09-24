@@ -968,37 +968,6 @@ record cannot reach the installed app). The browser-dev harness sets both to its
 own per-run temp directory. Source of truth: `recovery_state_dir` in
 `standalone/src-tauri/src/lib.rs`.
 
-### Agent recovery
-
-**The sidecar owns the capture and the record** (`docs/specs/transport.md` →
-"Consuming it"): it holds the replay buffers the detection reads, and its lifetime is
-exactly one activation, so read-and-unlink has one home. Rust only bridges —
-`capture_agent_recovery` and `take_recovery_commands`, both async like every
-command reaching the blocking sidecar helper. **Both sidecar answers ride
-`respondAsync`**, so a throw comes back as `{ error }` rather than stranding the
-Rust invoke to its timeout.
-
-- **The record is `<state root>/recovery.json`**, owner-only, temp-then-rename,
-  written on every detection rather than once at the end, because the quit budget
-  can end the capture at any instant.
-- **`beginCapture` clears the previous record once per sidecar process and merges
-  after**, so a teardown that captures nothing cannot carry a stale record forward
-  and a second window's capture cannot wipe the first's.
-- **`take` is claimed once**, started by `TauriAdapter.init()` for every pane id
-  across the saved Window's Workspaces. `init()` does not await it: the boot
-  awaits `recoveryReady` before planning, and only on the branch that can
-  cold-restore, so the round trip overlaps the rest of boot.
-- **Without a state directory the store is memory-only**, warning once.
-
-Both the detection (`lib/src/host/recovery-capture.ts`) and the record store
-(`lib/src/host/recovery-store.ts`) are shared with the VS Code extension host
-(`docs/specs/vscode.md` → "Capturing agent recovery"); the primitives the detection
-runs on — `liveIds`, `receivedChars`, `outputSince` — are
-`standalone/sidecar/pty-core.js`'s. **The browser-dev harness claims but never
-captures**: a reload there is a live resume over PTYs that survive it, so pressing
-`^C` would interrupt work that is still running. Source of truth:
-`pty:captureRecovery` / `recovery:take` in `standalone/sidecar/main.js`.
-
 **Must keep the notepad archive outside `sessions/` and the debug subtree** —
 `<app_data_dir>/notepad-archive-v1.json`, its own compare-and-swap commands and
 its own lifetime, so the session sweep never reaches it
@@ -1035,6 +1004,17 @@ which resolves when the write pipeline goes idle, including after a rejected
 write; failed writes are logged. With Session persistence disabled, the pipeline
 is already idle. Drain is a completion barrier, not a guarantee of successful
 disk persistence.
+
+### Agent recovery
+
+**Must run shared capture and record ownership in the sidecar**, under `docs/compatible-agents.md`. Rust bridges `capture_agent_recovery` and `take_recovery_commands` asynchronously. **Must answer both through `respondAsync`**, returning `{ error }` on throws rather than stranding the invoke.
+
+- **Must store the record at `<state root>/recovery.json`.**
+- **Must claim the saved Window's pane ids across all its Workspaces from `TauriAdapter.init()`.** Init starts the claim without awaiting it; boot awaits `recoveryReady` only on the branch that can cold-restore.
+- **Must restrict capture to the closing Window's eligible PTYs**, following Teardown ordering and Transfer.
+- **Never capture in the browser-dev harness**; it claims records but reloads resume live PTYs.
+
+Source of truth: `pty:captureRecovery` / `recovery:take` in `standalone/sidecar/main.js`; `TauriAdapter` in `standalone/src/tauri-adapter.ts`.
 
 ## Quit flow
 

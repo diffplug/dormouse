@@ -84,7 +84,7 @@ export function restoreSession(platform: PlatformAdapter, sources: RestoreSource
   }
   // Host-owned and single-use, and read here rather than off the pane: the
   // session blob the webview saves must never carry one, or a later restore
-  // would replay it (docs/specs/transport.md -> "Consuming it"). Restore-only —
+  // would replay it (docs/compatible-agents.md -> "Cold restore"). Restore-only —
   // the live-resume path in reconnect.ts never reaches here, because there the
   // agent is still Live and has nothing to resume.
   const recoveryCommands = platform.getRecoveryCommands?.() ?? {};

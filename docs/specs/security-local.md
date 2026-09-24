@@ -168,7 +168,7 @@ behind do carry transcripts (rationale).
 
 **Standalone writes `recovery.json` beside its sessions directory**, under the
 state root, owner-only: one rebuilt agent-resume invocation per Surface, never a
-buffer, unlinked as it is read (`docs/specs/standalone.md` -> "Agent recovery").
+buffer, unlinked as it is read (`docs/compatible-agents.md` -> "Recovery record").
 
 **The notepad archive is the one store holding terminal text on purpose** —
 excerpts the user explicitly captured, their colors, the Surface title and kind,
@@ -184,7 +184,7 @@ so the modes there are VS Code's, not ours, and no transcript reaches either
 (`docs/specs/vscode.md` -> "Serialization and restore"). Dormouse also writes
 `recovery.json` under the extension's storage directory, owner-only and
 temp-then-rename: one rebuilt agent-resume invocation per Surface, no buffer,
-unlinked as it is read (`docs/specs/vscode.md` -> "Capturing agent recovery").
+unlinked as it is read (`docs/compatible-agents.md` -> "Recovery record").
 
 **The VS Code peer-link token is a local credential at rest** —
 `burrow.peer-token` in the extension's global storage, written mode `0600`

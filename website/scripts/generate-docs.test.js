@@ -36,9 +36,28 @@ function generatedHrefs() {
 }
 
 describe('compatible agents', () => {
-  it('publishes the complete authored guide with only its title removed', () => {
-    expect(data.agents.delta.map((rule) => rule.id)).toEqual(['drop-document-title']);
+  it('publishes the guide while withholding the recovery contract and future', () => {
+    expect(data.agents.delta.map((rule) => rule.id)).toEqual([
+      'drop-document-title', 'drop-front-matter', 'drop-recovery-contract', 'drop-future',
+    ]);
     expect(data.agents.source).toBe('docs/compatible-agents.md');
+    expect(data.agents.headings.map((heading) => heading.text)).toEqual([
+      'Supported agents', 'How recovery and watching work', 'Conversation recovery',
+      'Watching for attention', 'Adding an agent', 'Add the definition and fixture',
+      'Verify the integration',
+    ]);
+    expect(data.agents.blocks.some((block) => block.type === 'blockquote')).toBe(false);
+    const body = JSON.stringify(data.agents.blocks);
+    expect(body).not.toContain('Must use the shared');
+    expect(body).not.toContain('If automatic agent startup becomes disruptive');
+  });
+
+  it('sends the contributor link to the withheld contract on GitHub', () => {
+    expect(data.agents.withheldLinks).toEqual([{
+      from: '#recovery-contract-maintainers',
+      to: `${REPO_BLOB_BASE}/docs/compatible-agents.md#recovery-contract-maintainers`,
+    }]);
+    expect(generatedHrefs()).toContain(data.agents.withheldLinks[0].to);
   });
 
   it('keeps the supported-agent table aligned with executable and resume definitions', () => {

@@ -14,39 +14,9 @@
 
 **The shutdown budget is not ours.** VS Code kills the extension host on a deadline the extension does not control, and in practice it has never once let `[deactivate] done` print (2026-08).
 
-**Why the recovery record is not `workspaceState`.** Writing it there was tried and measured (2026-08): detection completed and the record was never written — the state store's SQLite flush is already tearing down while `deactivate()` runs.
-
 ## Capturing agent recovery
 
-**Why `^C` and not a signal.** SIGTERM to the pty leader is inert against both claude and codex, and the foreground-process-group signal that does reach claude leaves codex silent (2026-08). `^C` is the one gesture both agents answer; it needs no `tcgetpgrp` and no master fd node-pty does not expose, takes the same path on ConPTY, and leaves the shell alive.
-
-**Why every live PTY is interrupted.** Gating on "is this pane running an agent" would need per-pane foreground-command knowledge the host does not have, and every one of these processes is killed seconds later regardless.
-
-**Why the clocks start at the ack.** The ~600 ms fallback and the ~200 ms silence window are statements about the agent, not about the round trip; measuring from step entry folds the interrupt's own latency into the window and shortens it by an amount that varies with load.
-
-**Why the ask gate keys on an English UI string.** Claude's `Press Ctrl-C again` and Cursor's `Press Ctrl+C again` (supplied macOS exit excerpt, Cursor 2026.09.23-86fc751) could change. That failure loses recovery for that shutdown, where a mistimed second press destroys Codex's hint every time.
-
-**Two settle-on-quiet heuristics died on the same fact.** Codex says nothing for ~250 ms and then prints its entire shutdown at once, so a poll that treats silence as completion exits before codex has spoken; both attempts to settle early on quiet lost the hint that way. Polling to the ceiling instead costs nothing, the record being written the moment each command is found.
-
-**Why widening the scan is not a free optimisation.** Scanning the whole buffer let a stale hint or an old launch echo win. The narrow scan also fails in the safe direction: buffer eviction can only discard fresh output, never promote stale output as fresh.
-
-**Where a missing hint comes from.** A Dormouse launched from inside a Claude Code session inherits `CLAUDE_CODE_CHILD_SESSION`, which disables transcript saving in claude, so it legitimately prints nothing to record.
-
-**The timing measurements** (real pty, codex, 2026-08). Codex is the constraining case because its `^C` is consumed by the input line first:
-
-| State when interrupted | Gesture | Hint | At |
-| --- | --- | --- | --- |
-| idle after a pause | one `^C` | yes | 262 ms |
-| idle after a pause | two `^C`, 150 ms apart | **no** | — |
-| idle after a pause | `^C`, 800 ms, `^C` | yes | 855 ms |
-| unsent text in the input | one `^C` | **no** | — |
-| unsent text in the input | two `^C`, 150 ms apart | yes | 464 ms |
-| unsent text in the input | `^C`, 800 ms, `^C` | yes | 1061 ms |
-| freshly launched, no conversation | one `^C` | no — correctly, nothing to resume | — |
-
-Rows 1–2 are why a blanket second press is wrong; `Press Ctrl-C again` was absent from every codex cell, so an ask-gated second press can only ever serve the agents that ask (claude, and Cursor's `Ctrl+C` spelling). The 262 ms idle case leaves the retry set before the ~600 ms fallback fires. Confirmed end to end in a real pane: fallback press at +625 ms, hint at +789 ms, applied on the next activation.
-
-**Additional CLI probes** (macOS, 2026-09-24). The production capture function ran against native PTYs in disposable conversations, then launched each captured command in a fresh process. Copilot 1.0.88 captured at 659 ms while idle and 697 ms with unsent input; Antigravity 1.2.10 at 83/81 ms; Cursor 2026.09.23-86fc751 at 82/83 ms. Each restored the test reply and retained the same conversation ID through the second capture. These probes exercised shared capture and agent resume, not a complete app restart. Warp v0.2026.09.16.08.27.stable_02 stayed on its startup animation and yielded no hint; its fixture uses the supplied real exit excerpt, and its installed help confirms `--resume <RESUME>`.
+**Why the recovery record is not `workspaceState`.** Writing it there was tried and measured (2026-08): detection completed and the record was never written — the state store's SQLite flush is already tearing down while `deactivate()` runs.
 
 ## CSP policy
 
