@@ -47,8 +47,9 @@ Invariants on the flat persisted `BrowserPanelParams`:
   `cwd`/`nativeIdentity`), never nested but for a `launchFallback` restore's
   params. Pop-out is not a param — it derives from `renderMode`
   once, at controller construction.
-- **Never carry a stream port in params**: `dor ab`/`dor pw` hand one they
-  learn straight to the Surface's controller (rationale).
+- **Never carry a stream port in params**: the port `dor ab` reads, or the one
+  the Playwright host's `attach` answers for `dor pw`, goes straight to the
+  Surface's controller (rationale).
 - **`contextPortKey` is declared and persisted like any other param.** Only a
   Surface the pane context menu opened for a port carries it, and reuse looks
   one up by it ([Pane Context Menu Connect](#pane-context-menu-connect)).
@@ -295,21 +296,24 @@ place of `live`; a `dor` handover moves any phase but `launching` and
 | `ended` | No browser; `error` says why | `relaunching`; a navigation rebinds, with its page |
 | `disposed` | Released; `closed` if its session was | — |
 
-- **Every daemon command must pass one gate (`driver`), open only in `live`** —
-  chrome and Display modal actions, tabs, sync-to-pane, `get cdp-url`, edit
-  chords, screenshots (rationale).
+- **Every daemon command must pass one gate (`driver`), open only in `live`,
+  and after an unpark only once its stream opens** — chrome and Display modal
+  actions, tabs, sync-to-pane, `get cdp-url`, edit chords, screenshots
+  (rationale).
 - **A navigation asked for outside `live` is kept as the one latest intent**,
   run on the next `live`; **so is a pop-out or pop-in asked before the browser
-  is bound** (`idle`, `launching`, `attaching`), run as a relaunch. **A launch
-  or relaunch opens the pending page itself; one the host opened never loads
-  again** (rationale).
+  is bound** (`idle`, `launching`, `attaching`), run as a relaunch, and so is
+  a new `url` in params while `launching` (rationale). **A launch or relaunch
+  opens the pending page itself; one the host opened never loads again**
+  (rationale).
 - **The controller never asks a daemon-spawning CLI verb for a port**: ports
   come from a launch or relaunch answer, a `dor` handover, or `attach`.
 - **A failed first launch is reported once to the Wall, which applies the
   Surface's `launchFallback`**: `close` the pane, `embed` (a Tool's iframe), or
   `{ restore }` the params a swap replaced. A param cleared on success, it
   survives a restore mid-launch (rationale). **A launch into a
-  named session waits out a close of that session still in flight** (rationale).
+  named session waits out a close of that session still in flight**, held open
+  by any work of the closed Surface still landing (rationale).
 - **Params predating the controller's own `session` or `renderMode` write are
   ignored until they show it back.**
 - **One relaunch at a time, only of a bound browser** (`live`, `parked`,
