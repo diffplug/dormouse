@@ -4,7 +4,7 @@ import { request as httpRequest } from 'node:http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { decodeViewerFrame, type ViewerFrame, type ViewerState } from '../lib/platform/browser-automation';
-import { BrowserView, PROVISIONAL_INPUT_WINDOW_MS, createViewerServer, parseViewerInput, type Upstream } from './browser-viewer';
+import { BrowserView, PROVISIONAL_INPUT_WINDOW_MS, closeReason, createViewerServer, parseViewerInput, type Upstream } from './browser-viewer';
 import { openViewer } from './browser-host-test-utils';
 
 /** The webview's socket as a view sees it: what was sent, and input to send. */
@@ -261,6 +261,17 @@ describe('a viewer socket', () => {
     view.gone();
     expect(socket.states()).toEqual([{ type: 'status', connected: false, screencasting: false }]);
     expect(socket.closedWith).toBe(1000);
+  });
+});
+
+describe('closeReason', () => {
+  it('keeps the longest whole-character prefix a close frame holds, 123 UTF-8 bytes', () => {
+    expect(closeReason('Input backlog exceeded')).toBe('Input backlog exceeded');
+    // Three bytes each: 41 fit exactly, and none is ever split.
+    expect(closeReason('€'.repeat(60))).toBe('€'.repeat(41));
+    const emoji = closeReason(`x${'🙂'.repeat(40)}`);
+    expect(emoji).toBe(`x${'🙂'.repeat(30)}`);
+    expect(emoji.isWellFormed()).toBe(true);
   });
 });
 

@@ -88,6 +88,8 @@ export interface TestViewer {
   send(message: object): void;
   /** Settles with the close code once the host ends the socket. */
   closed: Promise<number>;
+  /** The reason the host closed it with, once it has. */
+  reason?: string;
 }
 
 /** Connect to a viewer socket URL as the webview does, once it is open. */
@@ -104,10 +106,14 @@ export async function openViewer(url: string): Promise<TestViewer> {
     const frame = decodeViewerFrame(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer);
     if (frame) frames.push(frame);
   });
-  const closed = new Promise<number>((resolve) => socket.once('close', (code) => resolve(code)));
+  const viewer: TestViewer = { socket, frames, states, send: (message) => socket.send(JSON.stringify(message)), closed: Promise.resolve(0) };
+  viewer.closed = new Promise<number>((resolve) => socket.once('close', (code, reason) => {
+    viewer.reason = reason.toString();
+    resolve(code);
+  }));
   await new Promise<void>((resolve, reject) => {
     socket.once('open', () => resolve());
     socket.once('unexpected-response', (_req, res) => reject(new Error(`viewer refused: ${res.statusCode}`)));
   });
-  return { socket, frames, states, send: (message) => socket.send(JSON.stringify(message)), closed };
+  return viewer;
 }

@@ -34,7 +34,7 @@ import {
 } from '../lib/platform/browser-automation';
 import { createBrowserCaptures } from './browser-capture';
 import type { WebSocket } from 'ws';
-import { BrowserView, createViewerServer, type Upstream, type ViewerSink } from './browser-viewer';
+import { BrowserView, closeSocket, createViewerServer, type Upstream, type ViewerSink } from './browser-viewer';
 
 /** An operation on a live browser that each provider maps to its own call:
  *  a fixed agent-browser argv, or a Playwright client call. */
@@ -514,7 +514,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
    *  close of it began since its URL was granted (`generation`). */
   function openView(socket: WebSocket, bound: Bound, stream: number, isHeaded: boolean, debug: boolean, generation: number): void {
     if (closed || (generations.get(bound.id) ?? 0) !== generation) {
-      socket.close(1001, 'the browser was relaunched or closed');
+      closeSocket(socket, 1001, 'the browser was relaunched or closed', log);
       return;
     }
     const view = new BrowserView(socket, {
@@ -530,10 +530,12 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     let open = views.get(bound.id);
     if (!open) views.set(bound.id, open = new Set());
     open.add(view);
+    // Terminal: nothing here may reject, or the host process would go down
+    // with an unhandled rejection.
     bound.p.view(bound.b, stream, { headed: isHeaded }, view).then(
       (upstream) => view.attach(upstream),
       (error: unknown) => view.close(1011, messageOf(error)),
-    );
+    ).catch(log);
   }
 
   /** One device-resolution JPEG of `bound`'s browser, for its viewer sockets'

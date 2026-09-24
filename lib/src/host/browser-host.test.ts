@@ -183,6 +183,45 @@ describe('createBrowserHost', () => {
     }
   });
 
+  // ws refuses a close reason past 123 UTF-8 bytes by throwing; a provider's
+  // error — CLI stderr, a path under a non-ASCII home — can be any length.
+  it('ends a viewer whose provider cannot subscribe, whatever its error says', async () => {
+    const fake = fakeProvider();
+    const said = `Échec: ${'é'.repeat(200)}`;
+    fake.provider.view = async () => { throw new Error(said); };
+    const host = createBrowserHost({ writeClipboardText: vi.fn(), providers: { 'agent-browser': () => fake.provider } });
+    try {
+      const viewer = await openViewer((await host.request({ provider: 'agent-browser', binding: { session: 's1' }, op: 'view', stream: 4321 })).url!);
+      expect(await viewer.closed).toBe(1011);
+      expect(Buffer.byteLength(viewer.reason!)).toBeLessThanOrEqual(123);
+      expect(said.startsWith(viewer.reason!)).toBe(true);
+    } finally {
+      await host.close();
+    }
+  });
+
+  it('rejects nothing when a subscription that lands after its viewer left throws as it is dropped', async () => {
+    const fake = fakeProvider();
+    let land!: () => void;
+    const landed = new Promise<void>((resolve) => { land = resolve; });
+    fake.provider.view = async () => {
+      await landed;
+      return { capturable: true, input: () => true, close: () => { throw new Error('upstream already gone'); } };
+    };
+    const log = vi.fn();
+    const host = createBrowserHost({ writeClipboardText: vi.fn(), log, providers: { 'agent-browser': () => fake.provider } });
+    try {
+      const viewer = await openViewer((await host.request({ provider: 'agent-browser', binding: { session: 's1' }, op: 'view', stream: 4321 })).url!);
+      viewer.socket.close();
+      await viewer.closed;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      land();
+      await vi.waitFor(() => expect(log).toHaveBeenCalledWith('[browser-host] upstream already gone'));
+    } finally {
+      await host.close();
+    }
+  });
+
   it('joins no capture of the browser a relaunch replaced', async () => {
     const fake = fakeProvider();
     const host = createBrowserHost({ writeClipboardText: vi.fn(), providers: { 'agent-browser': () => fake.provider } });

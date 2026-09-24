@@ -109,6 +109,38 @@ export function createViewerServer(): ViewerServer {
   };
 }
 
+// A WebSocket close reason is at most 123 UTF-8 bytes; `ws` throws a
+// RangeError, synchronously, for a longer one.
+const MAX_CLOSE_REASON_BYTES = 123;
+
+/** `reason`, cut to the longest whole-character prefix a close frame holds. */
+export function closeReason(reason: string): string {
+  if (Buffer.byteLength(reason) <= MAX_CLOSE_REASON_BYTES) return reason;
+  let bytes = 0;
+  let kept = '';
+  for (const char of reason) {
+    bytes += Buffer.byteLength(char);
+    if (bytes > MAX_CLOSE_REASON_BYTES) break;
+    kept += char;
+  }
+  return kept;
+}
+
+/**
+ * Close `socket` with `code` and a reason of any length — a provider's
+ * error, a path under a non-ASCII home — without ever throwing: every close
+ * the host makes runs in a handler or a promise callback, where a throw
+ * would leave the webview's socket open and reject with nothing to catch it.
+ */
+export function closeSocket(socket: WebSocket, code: number, reason: string, log?: (message: string) => void): void {
+  try {
+    socket.close(code, closeReason(reason));
+  } catch (error) {
+    log?.(`[browser-viewer] close failed: ${error instanceof Error ? error.message : String(error)}`);
+    socket.terminate();
+  }
+}
+
 // --- one socket ---
 
 /** Continued input keeps the stream painting this long after the last. */
@@ -192,7 +224,7 @@ export class BrowserView implements ViewerSink {
    *  while the webview has yet to answer the close. */
   close(code: number, reason: string): void {
     this.dispose();
-    this.socket.close(code, reason.slice(0, 120));
+    closeSocket(this.socket, code, reason, this.deps.log);
   }
 
   /** Paint the stream for a while: input reached the page another way (a
