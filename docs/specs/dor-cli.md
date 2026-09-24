@@ -561,7 +561,7 @@ in `dor/src/protocol.ts`, the `surface.resolveOpen` handler in
 
 **Must pass the bound cwd through `spawnAndCapture`'s optional cwd argument.** Omission preserves inherited cwd for existing callers.
 
-**Never spawn a bound executable the host's Playwright allowlist refuses**, since the binding comes back off persisted params; run the caller's own resolution instead. The caller's `DORMOUSE_PLAYWRIGHT_BIN` is the exact-match override.
+**Never spawn a bound executable the host's Playwright allowlist refuses**, since the binding comes back off persisted params; run the caller's own resolution instead. The caller's `DORMOUSE_PLAYWRIGHT_BIN` is the exact-match override. **Must run the caller's own executable, with a stderr warning, when the bound one is gone**, and **must fail naming a bound cwd that no longer exists** rather than report playwright-cli missing.
 
 Source of truth: `runPlaywrightCli` and `resolveBinding` in `dor/src/commands/playwright.ts`; `BrowserBinding` in `dor/src/commands/types.ts`; `isAllowedPlaywrightBinary` in `dor-lib-common/src/agent-browser.ts`; `spawnAndCapture` in `dor-lib-common/src/spawn.ts`. Pinned by `dor/test/playwright.test.mjs`.
 

@@ -1,4 +1,4 @@
-import type { PlaywrightRequest, PlaywrightResult } from './browser-automation';
+import { PLAYWRIGHT_REQUEST_TIMEOUT_MS, type PlaywrightRequest, type PlaywrightResult } from './browser-automation';
 import { recordToolDirty } from '../tool-dirty-store';
 import { recordToolAnnounce } from '../tool-announce-store';
 import { recordToolEvents } from '../tool-events';
@@ -403,7 +403,7 @@ export class VSCodeAdapter implements PlatformAdapter {
 
   async playwright(request: PlaywrightRequest): Promise<PlaywrightResult> {
     return await this.requestResponse<PlaywrightResult>(
-      'playwright:request', 'playwright:result', { request }, msg => msg.result, 40000,
+      'playwright:request', 'playwright:result', { request }, msg => msg.result, PLAYWRIGHT_REQUEST_TIMEOUT_MS,
     ) ?? { ok: false, error: 'Playwright host timed out' };
   }
 

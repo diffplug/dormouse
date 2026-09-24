@@ -1653,8 +1653,12 @@ export function useDorControl({
       // `dor ab` reads the stream port itself; the Playwright host serves the
       // stream, so it is asked here, along with the display mode and native
       // identity of the session `dor pw` just drove.
+      const key = stringParam(params.key);
       let launch: { wsPort?: number; minimized: boolean; cwd?: string; headed?: boolean; nativeIdentity?: string };
       if (provider === 'playwright') {
+        // `dor pw` asks only after its native command succeeded, so the key's
+        // session exists even when no viewer can attach below (non-Chromium).
+        if (key) browserReservations.current.confirm(key);
         const cwd = stringParam(params.cwd);
         const platform = browserPlatform(provider, cwd);
         if (!platform.agentBrowserStreamStatus) {
@@ -1675,7 +1679,6 @@ export function useDorControl({
       } else {
         launch = { wsPort: numberParam(params.wsPort), minimized: booleanParam(params.minimized) };
       }
-      const key = stringParam(params.key);
       const result = ensureAgentBrowserSurface({
         provider,
         key,

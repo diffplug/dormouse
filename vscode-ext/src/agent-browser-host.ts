@@ -44,8 +44,18 @@ const playwright = createPlaywrightHost({
 
 export const runPlaywrightRequest = playwright.request;
 
+// Both providers' cleanup shares one deadline, as in the standalone sidecar's
+// shutdown: the Playwright host first waits out in-flight launches and connects,
+// and `deactivate` joins this ahead of the notepad archive and session flush,
+// which VS Code's unknown kill budget must still reach.
+const CLOSE_DEADLINE_MS = 1500;
+
 export async function closePoppedOutSessions(): Promise<void> {
-  await Promise.all([host.closePoppedOut(), playwright.close()]);
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    Promise.all([host.closePoppedOut(), playwright.close()]),
+    new Promise<void>((resolve) => { deadline = setTimeout(resolve, CLOSE_DEADLINE_MS); }),
+  ]).finally(() => clearTimeout(deadline));
 }
 
 let relayPortPromise: Promise<number> | null = null;

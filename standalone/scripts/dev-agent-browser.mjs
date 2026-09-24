@@ -134,6 +134,7 @@ async function readCapture(result, { remove = false } = {}) {
 }
 
 const invokeMap = {
+  // PLAYWRIGHT_REQUEST_TIMEOUT_MS in lib/src/lib/platform/browser-automation.ts.
   playwright_request: async ({ request }) => readCapture(
     await requestSidecar('playwright:request', { request }, 'agentBrowser:result', (data) => data.result, 40000),
     { remove: true },

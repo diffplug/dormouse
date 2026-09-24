@@ -1,4 +1,5 @@
 /** Playwright's native CLI with Dormouse addressing and a shared browser pane. */
+import { statSync } from 'node:fs';
 import { buildCommand } from '@stricli/core';
 import {
   browserBinaryIsMissing,
@@ -86,6 +87,14 @@ function missing(binary: string): CliResult {
   return fail(`playwright-cli is not installed (looked for '${binary}').\n\nInstall it with: npm i -g @playwright/cli\nOr set ${PLAYWRIGHT_BIN_ENV} to its full path.`);
 }
 
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path, { throwIfNoEntry: false })?.isDirectory() ?? false;
+  } catch {
+    return false;
+  }
+}
+
 export async function runPlaywrightCli(args: string[], options: CliOptions): Promise<CliResult> {
   const parsed = extractSessionFlags(args, { sessionNoun: 'a Playwright session name', sessionAliases: ['-s'] });
   if (!parsed.ok) return fail(parsed.message);
@@ -110,7 +119,15 @@ export async function runPlaywrightCli(args: string[], options: CliOptions): Pro
     const proposed = mayBind ? { cwd: binding.cwd, binaryPath: defaultBinaryPath } : undefined;
     const resolved = await resolveBinding(flags, client, proposed);
     if (!resolved.ok) return fail(resolved.message);
-    binding = resolved.value ?? binding;
+    if (resolved.value) {
+      binding = resolved.value;
+      // A binding comes off saved pane params, so its directory can be gone (a
+      // removed worktree). Say so, rather than let the spawn's ENOENT read as a
+      // missing playwright-cli on every later command.
+      if (binding.cwd !== undefined && !isDirectory(binding.cwd)) {
+        return fail(`The directory this Playwright browser was first opened in no longer exists: ${binding.cwd}\nClose its Dormouse pane, or use another --key.`);
+      }
+    }
   }
 
   const resolvedRest = await resolveOpenTargetArgs(flags.rest, options, flags.workspace, NAVIGATION_VERBS);
@@ -119,9 +136,15 @@ export async function runPlaywrightCli(args: string[], options: CliOptions): Pro
 
   // A binding's pinned executable replaces the caller's, but it comes back from
   // the host (and off a hand-editable session file), so it passes the same
-  // allowlist the host spawns under or the caller's own runs instead. Walk PATH
-  // only for one not resolved above.
-  const pinned = isAllowedPlaywrightBinary(binding.binaryPath, env[PLAYWRIGHT_BIN_ENV]) ? binding.binaryPath : undefined;
+  // allowlist the host spawns under or the caller's own runs instead — as it
+  // also does once the pinned one is gone (an uninstall, a Node version
+  // switch). Walk PATH only for one not resolved above.
+  let pinned = isAllowedPlaywrightBinary(binding.binaryPath, env[PLAYWRIGHT_BIN_ENV]) ? binding.binaryPath : undefined;
+  let replacedPin = '';
+  if (pinned !== undefined && browserBinaryIsMissing(pinned, env, resolveBinaryPath(pinned, env))) {
+    replacedPin = `Warning: this browser's playwright-cli (${pinned}) is gone; ran ${defaultBinaryPath ?? defaultBinary} instead.\n`;
+    pinned = undefined;
+  }
   const binary = pinned ?? defaultBinary;
   const binaryPath = binary === defaultBinary ? defaultBinaryPath : resolveBinaryPath(binary, env);
   if (options.execPlaywright === undefined && browserBinaryIsMissing(binary, env, binaryPath)) {
@@ -132,6 +155,7 @@ export async function runPlaywrightCli(args: string[], options: CliOptions): Pro
     // Spawn the resolved path, never the bare name (docs/specs/dor-cli.md ->
     // "Spawning External Binaries"): the spawn's cwd is the project directory.
     const result = await exec(binaryPath ?? binary, [`--session=${binding.session}`, ...rest], binding.cwd);
+    result.stderr = replacedPin + result.stderr;
     if (result.exitCode === 0 && mayBind && !(client instanceof Error)) {
       try {
         await client.browserSurface({

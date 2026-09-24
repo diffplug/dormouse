@@ -27,3 +27,19 @@ test('the same key in separate workspaces has independent native sessions', () =
   expect(first.resolve('app', { ...proposed, binaryPath: '/other/playwright-cli' })).toEqual(binding);
   expect(binding.binaryPath).toBe(proposed.binaryPath);
 });
+
+test('a key whose command succeeded keeps its session with no Surface to bind', () => {
+  // `dor pw --key app open --browser=firefox`: the native browser exists, but no
+  // viewer can attach, so nothing but the reservation holds the key's session.
+  vi.useFakeTimers();
+  try {
+    const registry = new BrowserBindingReservations();
+    const binding = registry.resolve('app', { cwd: '/project' });
+    registry.confirm('app');
+    vi.advanceTimersByTime(10 * 60_000);
+    expect(registry.resolve('app', { cwd: '/elsewhere' })).toEqual(binding);
+    // A key with nothing reserved has nothing to confirm.
+    registry.confirm('other');
+    expect(registry.resolve('other', { cwd: '/elsewhere' })?.cwd).toBe('/elsewhere');
+  } finally { vi.useRealTimers(); }
+});

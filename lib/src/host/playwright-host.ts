@@ -8,7 +8,12 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type { Browser, Page, CDPSession } from 'playwright-core';
 import { spawnAndCapture } from 'dor-lib-common';
 import { messageOf } from '../lib/errors';
-import { PLAYWRIGHT_TEXT_INPUT_MAX, type PlaywrightRequest, type PlaywrightResult } from '../lib/platform/browser-automation';
+import {
+  PLAYWRIGHT_REQUEST_TIMEOUT_MS,
+  PLAYWRIGHT_TEXT_INPUT_MAX,
+  type PlaywrightRequest,
+  type PlaywrightResult,
+} from '../lib/platform/browser-automation';
 import { editScript, generateGuiSession, jpegQuality } from './browser-host-shared';
 import { resolvePlaywrightInstall, playwrightWorkspace, type PlaywrightInstall } from './playwright-install';
 import { isLoopbackHost } from './loopback-guard';
@@ -16,6 +21,16 @@ import { BrowserStreamGrants } from './browser-stream-guard';
 import { privateCaptureDir } from './private-capture-dir';
 
 const TAB_REFRESH_INTERVAL_MS = 750;
+const CONNECT_TIMEOUT_MS = 8_000;
+// A GUI launch answers inside the webview's wait for any host request
+// (`PLAYWRIGHT_REQUEST_TIMEOUT_MS`), or the webview restores the previous
+// renderer while the host is still bringing a browser up. Startup — queueing
+// behind an earlier launch, closing the old session, polling and connecting —
+// gets LAUNCH_TIMEOUT_MS from the request's arrival; a launch that gives up then
+// waits up to OPEN_SETTLE_MS for its `open` before closing the session, leaving
+// the rest for that closing CLI call and the transport.
+const OPEN_SETTLE_MS = 4_000;
+const LAUNCH_TIMEOUT_MS = PLAYWRIGHT_REQUEST_TIMEOUT_MS - OPEN_SETTLE_MS - 6_000;
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const validSession = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9._-]+$/.test(value) && value.length <= 200;
 const validUrl = (value: unknown): value is string => { try { return typeof value === 'string' && ['http:', 'https:'].includes(new URL(value).protocol); } catch { return false; } };
@@ -66,6 +81,8 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
   const connecting = new Map<string, Promise<Viewer>>();
   const generations = new Map<string, number>();
   const lifecycle = new Map<string, Promise<unknown>>();
+  // The newest launch per native identity; a failed launch's late close defers to it.
+  const latestLaunch = new Map<string, object>();
   const headed = new Map<string, Binding>();
   const grants = new BrowserStreamGrants();
   const captures = privateCaptureDir('dormouse-playwright-');
@@ -226,7 +243,7 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
       await cdp.send('Input.insertText', { text: data.text });
     }
   }
-  async function connect(b: Binding): Promise<Viewer> {
+  async function connect(b: Binding, timeout = CONNECT_TIMEOUT_MS): Promise<Viewer> {
     const key = b.key;
     const cached = viewers.get(key);
     if (cached && cached.browser.isConnected()) return cached;
@@ -251,7 +268,7 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
       if (typeof endpoint !== 'string' || !endpoint) throw new Error('Playwright browser endpoint unavailable');
       // CLI-created browsers publish private local pipes. Never dial an arbitrary network endpoint from saved data.
       if (/^[a-z]+:\/\//i.test(endpoint)) throw new Error('Only local Playwright CLI browser pipes can be viewed');
-      const browser = await b.install.library.chromium.connect(endpoint, { timeout: 8000 });
+      const browser = await b.install.library.chromium.connect(endpoint, { timeout });
       if (closed || gen !== (generations.get(key) ?? 0)) { await browser.close(); throw new Error('Browser launch superseded'); }
       const server = createServer((_req, res) => { res.writeHead(403); res.end(); });
       const wss = new WebSocketServer({ noServer: true, maxPayload: 65536 });
@@ -311,25 +328,27 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
     connecting.set(key, operation);
     try { return await operation; } finally { if (connecting.get(key) === operation) connecting.delete(key); }
   }
-  async function launch(b: Binding, url: string, isHeaded: boolean, fresh: boolean) {
+  async function launch(b: Binding, url: string, isHeaded: boolean, fresh: boolean, deadline: number) {
     if (!validUrl(url)) throw new Error('Browser navigation requires an http(s) URL');
     if (closed) throw new Error('Playwright host is shutting down');
+    if (Date.now() >= deadline) throw new Error('Playwright browser launch timed out behind an earlier one');
     await invalidate(b);
     // Finish the old CLI session before discovering the replacement endpoint.
     // A freshly minted session has none to finish.
     if (!fresh) await cli(b, ['close']);
     const key = b.key;
+    const launchToken = {};
+    latestLaunch.set(key, launchToken);
     if (isHeaded) headed.set(key, b); else headed.delete(key);
     const generation = generations.get(key);
     let result: Awaited<ReturnType<typeof cli>> | undefined;
     const opening = cli(b, ['open', url, '--browser=chromium', ...(isHeaded ? ['--headed'] : [])]);
-    void opening.then(r => { result = r; }, e => { result = { exitCode: 1, stdout: '', stderr: messageOf(e) }; });
+    const opened = opening.then(r => { result = r; }, e => { result = { exitCode: 1, stdout: '', stderr: messageOf(e) }; });
     // Endpoint readiness, not the page load, completes GUI launches.
-    const deadline = Date.now() + 30_000;
     let last: unknown;
-    while (Date.now() < deadline && !closed) {
+    for (let remaining = deadline - Date.now(); remaining > 0 && !closed; remaining = deadline - Date.now()) {
       try {
-        const v = await connect(b);
+        const v = await connect(b, Math.min(CONNECT_TIMEOUT_MS, remaining));
         // Only a completed, still-current launch may remove startup blank tabs.
         void opening.then(async () => {
           if (closed || generation !== generations.get(key) || v.disposed) return;
@@ -345,8 +364,18 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
       if (result && result.exitCode !== 0) break;
       await wait(200);
     }
+    // Until `open` registers the session, `close` has nothing to close, and the
+    // browser it then brings up is one nothing tracks. Let it land first; if it
+    // is still running, close again once it does, unless a newer launch has
+    // taken the session over by then.
+    const landed = await Promise.race([opened.then(() => true), wait(OPEN_SETTLE_MS).then(() => false)]);
     await cli(b, ['close']).catch(log);
-    throw new Error(result?.stderr || messageOf(last));
+    if (!landed) {
+      void opened.then(async () => {
+        if (latestLaunch.get(key) === launchToken) await cli(b, ['close']);
+      }).catch(log);
+    }
+    throw new Error(result?.stderr || (last === undefined ? 'Playwright browser launch timed out' : messageOf(last)));
   }
   async function execute(request: PlaywrightRequest): Promise<PlaywrightResult> {
     if (!request || typeof request !== 'object') throw new Error('Invalid Playwright request');
@@ -364,7 +393,8 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
       const url = request.url ?? '';
       const isHeaded = request.op === 'open' ? !!request.headed : request.op === 'popOut';
       const fresh = request.op === 'open';
-      const v = await serialize(b, () => launch(b, url, isHeaded, fresh));
+      const deadline = Date.now() + LAUNCH_TIMEOUT_MS;
+      const v = await serialize(b, () => launch(b, url, isHeaded, fresh, deadline));
       return { ok: true, session, cwd, binaryPath: install.binary, wsPort: v.port, nativeIdentity: b.key };
     }
     if (request.op === 'command' && request.args?.[0] === 'close') {

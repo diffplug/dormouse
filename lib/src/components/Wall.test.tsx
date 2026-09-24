@@ -709,6 +709,76 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('keeps a Playwright key on its session when no viewer can attach to the browser it opened', async () => {
+    const playwright = vi.fn(async () => ({ ok: false, error: 'Dormouse currently views Chromium Playwright sessions only. The native CLI command still ran.' }));
+    Object.assign(fake, { playwright });
+    await act(async () => { root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />); });
+    await flush();
+    const control = async (method: string, params: Record<string, unknown>) => {
+      let response: { ok: boolean; result?: { binding?: { session: string; cwd?: string } | null } } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: { method, params, surfaceId: 'pane-a', respond: (r: typeof response) => { response = r; } },
+        }));
+      });
+      await flush();
+      return response;
+    };
+    // `dor pw --key app open --browser=firefox :5173`: resolve, run natively, bind.
+    const first = (await control(SURFACE_CONTROL_METHODS.resolveBrowser, { provider: 'playwright', key: 'app', proposed: { cwd: '/project' } }))?.result?.binding;
+    expect(first).toMatchObject({ cwd: '/project' });
+    expect((await control(SURFACE_CONTROL_METHODS.browser, { provider: 'playwright', key: 'app', session: first!.session, cwd: '/project' }))?.ok).toBe(false);
+
+    // Past the two minutes an unbound first launch is held for.
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 10 * 60_000);
+    try {
+      const later = (await control(SURFACE_CONTROL_METHODS.resolveBrowser, { provider: 'playwright', key: 'app', proposed: { cwd: '/elsewhere' } }))?.result?.binding;
+      expect(later).toEqual(first);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('reveals a restored context-port browser instead of opening a second', async () => {
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    const helperSpy = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'context-helper', parentId: 'pane-a', command: '', status: 'preserved' });
+    const open = vi.fn(async () => ({ ok: true, session: 'second', wsPort: 1 }));
+    Object.assign(fake, {
+      agentBrowserOpen: open,
+      agentBrowserCommand: vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' })),
+    });
+    try {
+      // The key a pre-Playwright build persisted for this port's agent-browser pane.
+      await act(async () => {
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" initialDoors={[{
+          id: 'restored-ab', title: 'localhost:5173', component: 'browser', tabComponent: 'surface',
+          params: { surfaceType: 'browser', renderMode: 'ab-screencast', session: 'restored', url: 'http://localhost:5173/', contextPortKey: 'pane-a:5173:agent' },
+        }]} />);
+      });
+      await flush();
+      if (!fake.hasPty('pane-a')) fake.spawnPty('pane-a');
+      fake.setOpenPorts('pane-a', [{ protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port: 5173, pid: 100, processName: 'vite' }]);
+      await act(async () => {
+        container.querySelector<HTMLElement>('[data-pane-header-for="pane-a"]')!.dispatchEvent(new MouseEvent('contextmenu', {
+          bubbles: true, cancelable: true, clientX: 10, clientY: 10,
+        }));
+      });
+      await flush();
+      await act(async () => {
+        document.querySelector<HTMLButtonElement>('[data-terminal-context] button[aria-label="Open in agent-browser screencast"]')!.click();
+      });
+      await flush();
+
+      expect(open).not.toHaveBeenCalled();
+      expect(container.querySelector('[data-lath-leaf="restored-ab"]')).not.toBeNull();
+      expect(leafCount()).toBe(2);
+    } finally {
+      helperSpy.mockRestore();
+      untouchedSpy.mockRestore();
+    }
+  });
+
   it('names Playwright when a context-menu Playwright launch fails', async () => {
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
     // The mocked TerminalPane registers no terminal, so the helper would report

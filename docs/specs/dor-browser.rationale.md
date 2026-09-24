@@ -80,6 +80,8 @@ A post-open blank-tab sweep can become such a query when a later relaunch, expli
 
 ## Playwright Renderer
 
+**Why a failed launch waits for its `open`.** `open` runs unawaited while the host polls for the endpoint. A `close` issued before the CLI has registered the session closes nothing, and the `open` then brings up a Chromium window nothing tracks. Before the launch had a deadline, its worst case (close, 30 s of polling, an 8 s connect, close) ran past the webview's 40 s wait, so a slow pop-out could finish after the webview had restored the previous renderer (review of #773, 2026-09).
+
 **Why a paste is text, not keys.** agent-browser's stream takes only key and mouse events, so its paste replays a key down and up per character. Sent to the Playwright host, whose input queue closes the viewer (1008) at 256 queued messages, any paste over about 128 characters arriving as one burst truncated and dropped the pane into a 2 s reconnect (static reading, 2026-09). The 8192-character chunk keeps a message under the 64 KiB socket cap even when every character JSON-escapes to six bytes.
 
 ## Iframe Renderer

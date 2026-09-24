@@ -2154,7 +2154,9 @@ export function Wall({
     // Null for the iframe embed, which launches no browser.
     const provider = automationProvider(mode);
     const platform = provider ? browserPlatform(provider, cwd) : null;
-    const key = `${id}:${entry.port}:${provider ?? 'iframe'}`;
+    // Persisted as `contextPortKey`: agent-browser keeps the `agent` it had
+    // before Playwright, so a restored pane is still found and revealed.
+    const key = `${id}:${entry.port}:${provider === 'agent-browser' ? 'agent' : provider ?? 'iframe'}`;
     const pending = contextPortLaunches.current.get(key);
     if (pending) { await pending; return openContextPort(id, entry, mode); }
     const operation = (async () => {

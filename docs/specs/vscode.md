@@ -111,7 +111,9 @@ A `WebviewPanelSerializer` registered under the `dormouse` view type restores ed
 **On deactivate**, in this order (`extension.ts:deactivate()`):
 
 1. Kick off `closePoppedOutSessions()` — started here, joined after step 2, so its
-   external-process time overlaps the capture. **Its rejections are absorbed:** a
+   external-process time overlaps the capture. **Both browser providers' cleanup
+   shares one 1.5 s deadline**, as in the sidecar's shutdown, so a hung launch
+   cannot hold the join (`vscode-ext/test/agent-browser-host.test.ts`). **Its rejections are absorbed:** a
    throw out of the join would skip the flush, the refresh, and both kills.
 2. `captureAgentRecoveryCommands(context, 1200)`.
 3. Refresh the mirror's process CWDs against the still-live PTYs, then archive

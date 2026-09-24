@@ -1491,6 +1491,8 @@ fn playwright_request(
     state: tauri::State<'_, SidecarState>,
     request: JsonValue,
 ) -> Result<JsonValue, String> {
+    // PLAYWRIGHT_REQUEST_TIMEOUT_MS in lib/src/lib/platform/browser-automation.ts:
+    // the host bounds a GUI launch to answer inside it.
     let response = request_from_sidecar_timeout(
         &state,
         "playwright:request",

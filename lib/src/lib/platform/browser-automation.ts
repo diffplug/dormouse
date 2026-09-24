@@ -28,6 +28,12 @@ export interface PlaywrightResult {
   mime?: string;
 }
 
+/** How long the webview waits for any Playwright host request before its
+ *  transport gives up. The host bounds a GUI launch to answer inside it, and
+ *  every transport waits exactly this long (VS Code's `requestResponse`, the
+ *  Tauri `playwright_request` command, the browser-dev harness). */
+export const PLAYWRIGHT_REQUEST_TIMEOUT_MS = 40_000;
+
 /** The most characters one Playwright viewer `input_text` message carries. A
  *  paste takes as many messages as it needs, each under the viewer socket's
  *  64 KiB payload cap even when every character JSON-escapes to six bytes. */

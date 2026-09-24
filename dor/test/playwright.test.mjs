@@ -1,6 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { runCli } from '../dist/cli.js';
+
+// A host binding names real directories and executables: `dor pw` checks both.
+const root = mkdtempSync(join(tmpdir(), 'dor-pw-'));
+const firstProject = join(root, 'first-project');
+const guiProject = join(root, 'gui');
+mkdirSync(firstProject);
+mkdirSync(guiProject);
+const pinnedCli = join(root, 'first', 'playwright-cli');
+mkdirSync(join(root, 'first'));
+writeFileSync(pinnedCli, '#!/bin/sh\n');
+chmodSync(pinnedCli, 0o755);
 
 function fixture(binding = null) {
   const calls = [];
@@ -24,16 +38,35 @@ test('pw alias forwards native arguments and binds only to Playwright', async ()
   assert.equal(calls.at(-1)[1].provider, 'playwright');
 });
 test('existing key pins executable, cwd and native session across terminal directories', async () => {
-  const { calls, options } = fixture({ session: 'gui-123', cwd: '/first-project', binaryPath: '/first/playwright-cli' });
+  const { calls, options } = fixture({ session: 'gui-123', cwd: firstProject, binaryPath: pinnedCli });
   await runCli(['playwright', 'screenshot', 'relative.png'], options);
-  assert.deepEqual(calls.find(c => c[0] === 'exec'), ['exec', '/first/playwright-cli', ['--session=gui-123', 'screenshot', 'relative.png'], '/first-project']);
+  assert.deepEqual(calls.find(c => c[0] === 'exec'), ['exec', pinnedCli, ['--session=gui-123', 'screenshot', 'relative.png'], firstProject]);
+});
+test('a pinned executable that is gone runs the caller\'s own, and says so', async () => {
+  const gone = join(root, 'uninstalled', 'playwright-cli');
+  const { calls, options } = fixture({ session: 'gui-123', cwd: firstProject, binaryPath: gone });
+  const result = await runCli(['pw', 'snapshot'], options);
+  assert.deepEqual(calls.find(c => c[0] === 'exec'), ['exec', '/tools/playwright-cli', ['--session=gui-123', 'snapshot'], firstProject]);
+  assert.equal(result.exitCode, 0);
+  assert.match(result.stderr, new RegExp(`playwright-cli \\(${gone}\\) is gone`));
+  // The pane then learns the executable that ran.
+  assert.equal(calls.at(-1)[1].binaryPath, '/tools/playwright-cli');
+});
+test('a pinned directory that is gone is named, not reported as a missing playwright-cli', async () => {
+  const gone = join(root, 'removed-worktree');
+  const { calls, options } = fixture({ session: 'gui-123', cwd: gone, binaryPath: pinnedCli });
+  const result = await runCli(['pw', '--key', 'app', 'snapshot'], options);
+  assert.equal(result.exitCode, 1);
+  assert.match(result.stderr, new RegExp(`no longer exists: ${gone}`));
+  assert.doesNotMatch(result.stderr, /not installed/);
+  assert.equal(calls.some(c => c[0] === 'exec'), false);
 });
 test('a pinned executable outside the allowlist runs the caller\'s own instead', async () => {
   // The binding comes back from the host, and off a hand-editable session file.
   for (const binaryPath of ['/bin/sh', './playwright-cli', '/opt/../bin/playwright-cli']) {
-    const { calls, options } = fixture({ session: 'gui-123', cwd: '/first-project', binaryPath });
+    const { calls, options } = fixture({ session: 'gui-123', cwd: firstProject, binaryPath });
     await runCli(['pw', 'snapshot'], options);
-    assert.deepEqual(calls.find(c => c[0] === 'exec'), ['exec', '/tools/playwright-cli', ['--session=gui-123', 'snapshot'], '/first-project'], binaryPath);
+    assert.deepEqual(calls.find(c => c[0] === 'exec'), ['exec', '/tools/playwright-cli', ['--session=gui-123', 'snapshot'], firstProject], binaryPath);
   }
 });
 test('raw -s bypasses workspace addressing', async () => {
@@ -44,7 +77,7 @@ test('raw -s bypasses workspace addressing', async () => {
   assert.equal(calls.at(-1)[1].key, undefined);
 });
 test('surface addressing resolves GUI-created sessions and rejects missing sessions', async () => {
-  const { calls, options } = fixture({ session: 'gui-123', cwd: '/gui' });
+  const { calls, options } = fixture({ session: 'gui-123', cwd: guiProject });
   await runCli(['pw', '--surface', 'surface:3', 'snapshot'], options);
   assert.equal(calls[0][1].surface, 'surface:3');
   const missing = fixture();

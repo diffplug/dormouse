@@ -1,10 +1,10 @@
 // @vitest-environment node
-import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { Server } from 'node:http';
 import { WebSocket } from 'ws';
 import { createPlaywrightHost } from './playwright-host';
-import { PLAYWRIGHT_TEXT_INPUT_MAX, playwrightTextInputs } from '../lib/platform/browser-automation';
+import { PLAYWRIGHT_REQUEST_TIMEOUT_MS, PLAYWRIGHT_TEXT_INPUT_MAX, playwrightTextInputs } from '../lib/platform/browser-automation';
 
 const mocks = vi.hoisted(() => ({ cli: vi.fn(), connect: vi.fn(), clipboard: vi.fn() }));
 vi.mock('dor-lib-common', async importOriginal => ({ ...await importOriginal<typeof import('dor-lib-common')>(), spawnAndCapture: mocks.cli }));
@@ -217,4 +217,97 @@ test('a long paste reaches the page whole without tripping the input backlog', a
   } finally {
     ws.terminate();
   }
+});
+
+describe('a GUI launch that gives up', () => {
+  const ok = { ok: true, exitCode: 0, stdout: '', stderr: '' };
+  let events: string[];
+  let open: PromiseWithResolvers<typeof ok>;
+  let listed: () => boolean;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    events = [];
+    open = Promise.withResolvers();
+    listed = () => false;
+    mocks.cli.mockImplementation(async (_binary, args) => {
+      events.push(args[1]);
+      if (args[1] === 'open') return open.promise;
+      if (args[1] === 'list') {
+        const servers = listed() ? [{ title: 'test', workspaceDir: process.cwd(), playwrightLib: process.cwd(), endpoint: '/tmp/test-playwright.pipe', browser: { browserName: 'chromium' } }] : [];
+        return { ...ok, stdout: JSON.stringify({ servers }) };
+      }
+      return ok;
+    });
+  });
+  afterEach(() => { vi.useRealTimers(); });
+
+  const popOut = () => {
+    const done = { at: -1 };
+    const start = Date.now();
+    const answer = host.request({ ...binding, op: 'popOut', url: 'http://localhost/' }).then((r) => { done.at = Date.now() - start; return r; });
+    return { answer, done };
+  };
+
+  test('lets its open land before closing the session', async () => {
+    const { answer } = popOut();
+    // The endpoint never appears; the open is still starting the browser.
+    await vi.advanceTimersByTimeAsync(31_000);
+    expect(events.filter(verb => verb === 'close')).toHaveLength(1); // the relaunch's own
+    events.push('open landed');
+    open.resolve(ok);
+    await vi.advanceTimersByTimeAsync(0);
+    expect((await answer).ok).toBe(false);
+    expect(events.slice(events.indexOf('open landed'))).toContain('close');
+  });
+
+  test('closes an open that lands after it answered, unless a newer launch owns the session', async () => {
+    const { answer, done } = popOut();
+    await vi.advanceTimersByTimeAsync(PLAYWRIGHT_REQUEST_TIMEOUT_MS);
+    expect((await answer).ok).toBe(false);
+    expect(done.at).toBeLessThan(PLAYWRIGHT_REQUEST_TIMEOUT_MS);
+    const closes = () => events.filter(verb => verb === 'close').length;
+    const before = closes();
+    open.resolve(ok);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(closes()).toBe(before + 1);
+
+    // A newer launch of the session: the earlier open landing must not close it.
+    const stale = open = Promise.withResolvers();
+    const gaveUp = popOut();
+    await vi.advanceTimersByTimeAsync(PLAYWRIGHT_REQUEST_TIMEOUT_MS);
+    await gaveUp.answer;
+    open = Promise.withResolvers();
+    const newer = popOut();
+    await vi.advanceTimersByTimeAsync(1_000);
+    const settled = closes();
+    stale.resolve(ok);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(closes()).toBe(settled);
+    await vi.advanceTimersByTimeAsync(PLAYWRIGHT_REQUEST_TIMEOUT_MS);
+    await newer.answer;
+  });
+
+  test('answers inside the transport budget when the endpoint appears only as time runs out', async () => {
+    // An 8 s connect started at the last moment used to run past the webview's wait.
+    const start = Date.now();
+    listed = () => Date.now() - start >= 29_800;
+    mocks.connect.mockImplementation((_endpoint: string, { timeout }: { timeout: number }) => new Promise((_resolve, reject) => {
+      setTimeout(() => reject(new Error('connect timed out')), timeout);
+    }));
+    const { answer, done } = popOut();
+    await vi.advanceTimersByTimeAsync(PLAYWRIGHT_REQUEST_TIMEOUT_MS);
+    expect((await answer).ok).toBe(false);
+    expect(done.at).toBeGreaterThan(0);
+    expect(done.at).toBeLessThan(PLAYWRIGHT_REQUEST_TIMEOUT_MS);
+  });
+
+  test('a launch queued behind a slow one still answers inside its own budget', async () => {
+    const first = popOut();
+    await vi.advanceTimersByTimeAsync(1_000);
+    const second = popOut();
+    await vi.advanceTimersByTimeAsync(PLAYWRIGHT_REQUEST_TIMEOUT_MS);
+    expect((await first.answer).ok).toBe(false);
+    expect((await second.answer).ok).toBe(false);
+    expect(second.done.at).toBeLessThan(PLAYWRIGHT_REQUEST_TIMEOUT_MS);
+  });
 });
