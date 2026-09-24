@@ -150,7 +150,7 @@ export class BrowserView implements ViewerSink {
   // What the socket last carried, which is what the webview's canvas shows.
   private last: { kind: ViewerFrameKind; jpeg: Uint8Array; message: Uint8Array } | null = null;
   private size: { width: number; height: number } | undefined;
-  private provisionalUntil = 0;
+  private provisionalUntil = -Infinity;
   private activeTab: string | undefined;
   // Counts the provisional paints that supersede a capture in flight — not
   // those made only because one is overdue, which it is newer than.

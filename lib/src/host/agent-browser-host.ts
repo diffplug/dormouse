@@ -431,7 +431,6 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
    * messages come back from it, and only validated input goes to it.
    */
   async function viewStream(b: ProviderBinding, port: number, headed: boolean, sink: ViewerSink): Promise<Upstream> {
-    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('an agent-browser stream is a TCP port');
     // Only a daemon in the host's own socket directory is one it can capture.
     const capturable = (await readStateNumber(b.session, 'stream')) === port;
     const socket = new WebSocket(`ws://127.0.0.1:${port}`, { handshakeTimeout: STREAM_CONNECT_TIMEOUT_MS, perMessageDeflate: false });

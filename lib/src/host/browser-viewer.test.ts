@@ -96,7 +96,7 @@ describe('a viewer socket', () => {
 
     // A canvas that mounted blank gets the last frame back.
     socket.input({ type: 'repaint' });
-    expect(socket.kinds().at(-1)).toBe('crisp 9');
+    expect(socket.kinds()).toEqual(['provisional 1', 'crisp 9', 'provisional 3', 'crisp 9', 'crisp 9']);
   });
 
   it('keeps a capture a provisional paint superseded owed, with nothing left to pulse it', async () => {
@@ -243,6 +243,17 @@ describe('a viewer socket', () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(capture).toHaveBeenCalledOnce();
     expect(socket.kinds()).toEqual(['provisional 1']);
+  });
+
+  it('skips a provisional frame for a socket backed up past 2 MB, never a crisp one', async () => {
+    const { socket, view, captures } = makeView();
+    socket.bufferedAmount = 3_000_000;
+    view.frame(jpeg(1));
+    expect(socket.frames()).toEqual([]);
+    await vi.advanceTimersByTimeAsync(100);
+    captures[0](jpeg(9));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.kinds()).toEqual(['crisp 9']);
   });
 
   it('tells the webview a browser that went away on its own is gone', () => {

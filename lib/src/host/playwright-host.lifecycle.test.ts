@@ -331,6 +331,14 @@ test('a long paste reaches the page whole without tripping the input backlog', a
   }
 });
 
+test('closes a viewer socket whose input backs up behind CDP', async () => {
+  const viewer = await viewSession();
+  // CDP stops answering input.
+  cdp.send.mockImplementation((method: string) => method.startsWith('Input.') ? new Promise(() => {}) : Promise.resolve({ data: 'aGVsbG8=' }));
+  for (let i = 0; i < 300; i++) viewer.send({ type: 'input_mouse', eventType: 'mouseMoved', x: i, y: 1 });
+  expect(await viewer.closed).toBe(1008);
+});
+
 test('frames reach the viewer as binary, decoded once, their acks paced to ~20 a second', async () => {
   const handlers = new Map<string, (event: unknown) => void>();
   cdp.on.mockImplementation((event: string, handler: (event: unknown) => void) => { handlers.set(event, handler); });

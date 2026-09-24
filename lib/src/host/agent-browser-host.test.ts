@@ -700,11 +700,11 @@ describe('agent-browser host viewer', () => {
     expect([...viewer.frames.find((f) => f.kind === 'crisp')!.jpeg]).toEqual([0xff, 0xd8, 0x99]);
   });
 
-  it('routes a tab list or URL too large to tell from a frame by size as state', async () => {
+  it.each([false, true])('routes a tab list or URL too large to tell from a frame by size as state (headed: %s)', async (headed) => {
     running(session);
     const daemon = await fakeServer();
     writeState(session, 'stream', daemon.port);
-    const viewer = await view(daemon.port);
+    const viewer = await view(daemon.port, headed);
     await daemon.connected();
     const tabs = Array.from({ length: 80 }, (_, i) => ({
       tabId: `t${i}`,
