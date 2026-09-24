@@ -24,7 +24,7 @@ import {
 } from '../../lib/rect-tween';
 import { useFocusRingColor } from '../../lib/themes/use-focus-ring-color';
 import { resolvePaneElement } from './resolve-pane-element';
-import { isWorkspaceSelection, type WallMode, type WallSelectionKind } from './wall-types';
+import { isWorkspaceSelection, workspaceIdOfSelection, type WallMode, type WallSelectionKind } from './wall-types';
 import { DoorElementsContext, PaneElementsContext, RingHandoffContext, WindowFocusedContext } from './wall-context';
 import { workspaceTabElement } from '../workspace-tab-elements';
 import { getWorkspacesSnapshot, subscribeToWorkspaces } from '../../lib/workspace-store';
@@ -57,9 +57,12 @@ export interface LathOverlayStore {
  *  stroke centerline stays on the gutter's midline: the pane inset lands the
  *  centerline at PANE_GUTTER_PX / 2 from the pane edge (the same line the 1px
  *  passthrough border sits on); the door ring has no gutter, so it straddles the
- *  door edge (inset = strokeWidth / 2). Workspace tabs share that shape. Radii +
- *  inset ride the tween. */
+ *  door edge (inset = strokeWidth / 2). Workspace tabs share that shape; the +
+ *  button keeps its 4px all-round corners. Radii + inset ride the tween. */
 function ringShape(kind: WallSelectionKind): RingShape {
+  if (kind === 'workspace-new') {
+    return { tl: 4, tr: 4, br: 4, bl: 4, inset: cfg.marchingAnts.strokeWidth / 2 };
+  }
   if (kind !== 'pane') {
     const r = TERMINAL_BORDER_RADIUS_PX;
     return { tl: r, tr: r, br: 0, bl: 0, inset: cfg.marchingAnts.strokeWidth / 2 };
@@ -390,7 +393,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     const instant = motionIsInstant();
 
     const target = () => {
-      if (isWorkspaceSelection(selectedType)) return workspaceTabElement(selectedId);
+      if (isWorkspaceSelection(selectedType)) return workspaceTabElement(workspaceIdOfSelection(selectedType, selectedId));
       return selectedType === 'door' ? doorElements.get(selectedId) : resolvePaneElement(paneElements.get(selectedId));
     };
     const update = () => {

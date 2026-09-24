@@ -187,6 +187,20 @@ describe('WorkspaceWindow', () => {
     expect(getWorkspaceUiSnapshot().pendingClose?.id).toBe(replacement);
   });
 
+  it('returns from the successor tab to pane navigation after a Workspace close', async () => {
+    const first = getActiveWorkspaceId();
+    createWorkspace({ id: 'ws-2', activate: false });
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
+    await act(async () => { await closeWorkspaceWithSurfaces(first); });
+    await flush();
+    expect(getActiveWorkspaceId()).toBe('ws-2');
+    for (const key of ['ArrowDown', 'Enter']) {
+      await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); });
+      await flush();
+    }
+    expect(wallFor('ws-2').querySelector('[data-focused="true"]')).not.toBeNull();
+  });
+
   it('keeps the closing tab and its Surfaces until the workspace collapse finishes', async () => {
     createWorkspace({ id: 'ws-2' });
     await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
@@ -244,12 +258,39 @@ describe('WorkspaceWindow', () => {
     expect(focused()).toBe(mode === 'passthrough');
   });
 
+  it('comma edits the highlighted Workspace without switching, then returns to navigation', async () => {
+    const first = getActiveWorkspaceId();
+    createWorkspace({ id: 'ws-2', name: 'Build', activate: false });
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
+    const press = async (key: string, target: EventTarget = window) => {
+      await act(async () => { target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); });
+      await flush();
+    };
+    await press('ArrowUp');
+    await press('ArrowRight');
+    await press(',');
+    const input = container.querySelector<HTMLInputElement>('[data-workspace-rename-for="ws-2"]')!;
+    expect(document.activeElement).toBe(input);
+    expect(input.value).toBe('Build');
+    expect(getActiveWorkspaceId()).toBe(first);
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Deploy');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await press('Enter', input);
+    expect(getWorkspacesSnapshot().workspaces.find(workspace => workspace.id === 'ws-2')?.name).toBe('Deploy');
+    expect(container.querySelector('[data-workspace-rename-for]')).toBeNull();
+    expect(getActiveWorkspaceId()).toBe(first);
+    await press('Enter');
+    expect(getActiveWorkspaceId()).toBe('ws-2');
+  });
+
   it('keeps removed Workspace commands inert on a selected tab', async () => {
     const first = getActiveWorkspaceId();
     createWorkspace({ id: 'ws-2', activate: false });
     await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
     await act(async () => { getWallHandle(first)!.selectWorkspaceTab(); });
-    for (const key of ['n', 'p', '$', '&', 'x', 'Enter', 'ArrowUp', 'ArrowRight', 'ArrowDown', 'ArrowLeft']) {
+    for (const key of ['n', 'p', '$', '&', 'x']) {
       await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); });
       await flush();
       expect(getActiveWorkspaceId()).toBe(first);
@@ -261,6 +302,44 @@ describe('WorkspaceWindow', () => {
     await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: '2', bubbles: true, cancelable: true })); });
     await flush();
     expect(getActiveWorkspaceId()).toBe('ws-2');
+  });
+
+  it('navigates Workspace tabs with arrows and Enter, entering the active tab or creating from +', async () => {
+    const first = getActiveWorkspaceId();
+    createWorkspace({ id: 'ws-2', activate: false });
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
+    const press = async (key: string, location = 0) => {
+      await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key, location, bubbles: true, cancelable: true })); });
+      await flush();
+    };
+    await press('ArrowUp');
+    await press('ArrowRight');
+    expect(getActiveWorkspaceId()).toBe(first);
+    await press('Enter');
+    expect(getActiveWorkspaceId()).toBe('ws-2');
+    expect(wallFor('ws-2').querySelector('[data-focused="true"]')).toBeNull();
+    await press('Enter');
+    expect(wallFor('ws-2').querySelector('[data-focused="true"]')).not.toBeNull();
+    expect(container.querySelector('[data-workspace-rename-for]')).toBeNull();
+
+    await press('Shift', 1);
+    await press('Shift', 2);
+    await press('ArrowUp');
+    await press('ArrowLeft');
+    await press('ArrowDown');
+    expect(getActiveWorkspaceId()).toBe('ws-2');
+    await press('Enter');
+    expect(wallFor('ws-2').querySelector('[data-focused="true"]')).not.toBeNull();
+
+    await press('Shift', 1);
+    await press('Shift', 2);
+    await press('ArrowUp');
+    await press('ArrowRight'); // +
+    await press('Enter');
+    const created = getActiveWorkspaceId();
+    expect(getWorkspacesSnapshot().workspaces).toHaveLength(3);
+    expect(created).not.toBe('ws-2');
+    expect(wallFor(created).querySelector('[data-focused="true"]')).not.toBeNull();
   });
 
   /** docs/specs/layout.md -> "Workspace tabs": the pill is a click on the TODO
@@ -410,8 +489,9 @@ describe('WorkspaceWindow', () => {
     const first = getActiveWorkspaceId();
     createWorkspace({ id: 'ws-2', activate: false });
     await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
-    await act(async () => { setActiveWorkspace('ws-2'); });
-    await act(async () => { getWallHandle('ws-2')!.selectWorkspaceTab(); });
+    for (const key of ['ArrowUp', 'ArrowRight']) {
+      await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })); });
+    }
     await act(async () => { closeWorkspace('ws-2'); });
     await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
     await flush();

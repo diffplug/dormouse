@@ -15,7 +15,7 @@ import type { WallKeyboardCtx } from './types';
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
 
 function ctxWith(workspaceId?: string): WallKeyboardCtx {
-  return { workspaceId } as unknown as WallKeyboardCtx;
+  return { workspaceId, selectedTypeRef: { current: 'pane' } } as unknown as WallKeyboardCtx;
 }
 
 function keydown(key: string, init: KeyboardEventInit = {}): KeyboardEvent {
@@ -75,6 +75,30 @@ describe('handleWorkspaceShortcuts', () => {
     expect(getWorkspacesSnapshot()).toBe(before);
     expect(getWorkspaceUiSnapshot().renamingId).toBeNull();
     expect(getWorkspaceUiSnapshot().pendingClose).toBeNull();
+  });
+
+  it.each(['active', 'inactive'])('renames the selected %s Workspace without activating it', target => {
+    const active = getActiveWorkspaceId();
+    const inactive = createWorkspace({ id: 'ws-2', activate: false }).id;
+    const selected = target === 'active' ? active : inactive;
+    ctx.selectedTypeRef = { current: 'workspace' };
+    ctx.selectedIdRef = { current: selected };
+    const event = keydown(',');
+    expect(handleWorkspaceShortcuts(event, ctx)).toBe(true);
+    expect(event.defaultPrevented).toBe(true);
+    expect(getWorkspaceUiSnapshot().renamingId).toBe(selected);
+    expect(getActiveWorkspaceId()).toBe(active);
+  });
+
+  it('leaves modified comma and comma on + unbound', () => {
+    ctx.selectedTypeRef = { current: 'workspace' };
+    ctx.selectedIdRef = { current: getActiveWorkspaceId() };
+    for (const modifier of [{ metaKey: true }, { ctrlKey: true }, { altKey: true }]) {
+      expect(handleWorkspaceShortcuts(keydown(',', modifier), ctx)).toBe(false);
+    }
+    ctx.selectedTypeRef.current = 'workspace-new';
+    expect(handleWorkspaceShortcuts(keydown(','), ctx)).toBe(false);
+    expect(getWorkspaceUiSnapshot().renamingId).toBeNull();
   });
 
   it('ignores a modified key, so a host or clipboard chord passes through', () => {

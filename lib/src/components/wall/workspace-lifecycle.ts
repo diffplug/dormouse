@@ -29,6 +29,23 @@ export async function enterWorkspace(id: WorkspaceId): Promise<void> {
   if (getActiveWorkspaceId() === id) handle?.enterSelectedPane();
 }
 
+/**
+ * Keyboard Enter on an inactive tab: activate it in command mode with the ring
+ * still on its tab, as a click leaves the user in command mode. Activation never
+ * waits on the Wall, as a click does not; selecting in the same tick keeps the
+ * ring from gliding to the Wall's pane first.
+ */
+export async function activateWorkspaceTab(id: WorkspaceId): Promise<void> {
+  const handle = getWallHandle(id);
+  handle?.selectWorkspaceTab();
+  setActiveWorkspace(id);
+  if (handle) return;
+  // A Wall still registering selects its tab once it does, unless the user
+  // has moved to another Workspace in the meantime.
+  const late = await awaitWallHandle(id);
+  if (getActiveWorkspaceId() === id) late?.selectWorkspaceTab();
+}
+
 const CLOSE_IN_FLIGHT_REFUSAL = 'another Workspace is closing';
 
 /** Serialize closure and successor selection across the Window. */

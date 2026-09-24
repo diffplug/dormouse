@@ -26,7 +26,10 @@ export const cfg = {
     resizeDebounce: 500,
     /** ms — default inactivity timeout: presence lapses this long after the last typing, mouse, or scroll input. */
     inactivityTimeout: 15_000,
-    /** ms — output and completions this soon after a keystroke into a Session answer that keystroke and are ignored. */
+    /** ms — shared grace period for keystroke echo AND fast command completions.
+     * Both are intentionally suppressed: completions inside it neither ring nor
+     * wait to ring on inactivity. Keep these effects coupled; there is no separate
+     * minimum command runtime (product decision, 2026-09-24). */
     echoWindow: 750,
     /** ms — longest a terminal notification may wait behind animation before it rings anyway. */
     deferCeiling: 30_000,

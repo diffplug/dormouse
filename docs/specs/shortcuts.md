@@ -10,7 +10,7 @@
 |-----|--------|-------------|
 | Left ⌘ → Right ⌘ (within 500 ms) | Enter command mode | Only exits passthrough; inert in command mode. |
 | Left ⇧ → Right ⇧ (within 500 ms) | Enter command mode | Independent of the ⌘ track; the gesture for keyboards with no right ⌘. |
-| `Enter` (command) | Enter passthrough | Focus the selected pane or reattach a door. |
+| `Enter` (command) | Enter passthrough or activate | Focus the selected pane or reattach a door; Workspace targets follow the table below. |
 
 A focused cross-origin iframe surface swallows the gesture; the proxy shim detects it in-frame and re-posts it to the Wall (`docs/specs/dor-browser.md`).
 
@@ -23,7 +23,7 @@ A focused cross-origin iframe surface swallows the gesture; the proxy shim detec
 | `z` | Zoom and focus | Enters passthrough; on the pane that already owns zoom, unzooms. |
 | `m` or `d` | Minimize / reattach | Stays in command mode, unlike `Enter` on a door. |
 | `k` or `x` | Kill | Kills the selected pane or door behind a random-letter prompt; an untouched Surface skips it. |
-| `,` | Rename | Inline rename of the selected terminal pane's title; consumed no-op on browser surfaces and doors. |
+| `,` | Rename selected item | Rename the selected terminal pane or Workspace tab; consumed no-op on browser surfaces, doors, and `+`. |
 | `a` | Alert | Dismiss the ring if any, then open the terminal context. Terminal Surfaces only; doors excluded. |
 | `t` | Toggle todo | Toggle the TODO marker on the selected Surface, terminal or browser; doors excluded. |
 | `>` | Terminal context | Terminal panes only; consumed no-op on browser panes, inert on doors. |
@@ -31,15 +31,20 @@ A focused cross-origin iframe surface swallows the gesture; the proxy shim detec
 ## Workspaces (command mode)
 
 Standalone only — a bare Wall (VS Code, the website playground) leaves these keys unbound.
+
 | Key | Action | Description |
 |-----|--------|-------------|
 | `1`–`9` | Select by position | The nth Workspace in strip order; out of range is a consumed no-op. |
+| `,` | Rename selected item | Edit the highlighted Workspace tab, without activating it. |
+| `Enter` (Workspace tab) | Activate / focus | An inactive tab activates in command mode; an active tab enters its terminal in passthrough. |
+| `Enter` (`+`) | New Workspace | Creates and focuses its terminal in passthrough after mount. |
 
 ## Navigation (command mode)
 
 | Key | Action | Description |
 |-----|--------|-------------|
-| `↑` / `↓` / `←` / `→` | Move selection | Navigate panes and doors; opposite directions backtrack between panes. Down with no pane below selects the first door; Up from a door selects the last pane. |
+| `↑` / `↓` / `←` / `→` | Move selection | Navigate panes and doors; opposite directions backtrack between panes. Down with no pane below selects the first door; Up from a door selects the last pane. Up from a top-edge pane highlights the active Workspace tab. |
+| `←` / `→` (Workspace strip) | Highlight tab / `+` | Traverse without activation, stopping at either end. Down returns to the originating live pane, or the first if gone. |
 | `⌘`+arrows or `Ctrl`+arrows | Swap surfaces | Swap the two panes' Surfaces; the opposite chord swaps back exactly. Either modifier, every platform; consumed no-op on non-pane chrome. |
 
 ## Terminal selection & clipboard

@@ -72,7 +72,7 @@ import { DEFAULT_WORKSPACE_ID, type PersistedSurfaceRefs, type WorkspaceId } fro
 import { clearWorkspaceSurfaces, setWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { nextTodoMember } from '../lib/workspace-union';
 import { deriveDisplayedSurfaceLabel } from '../lib/session-label';
-import { getWorkspace, workspaceRefFor } from '../lib/workspace-store';
+import { getWorkspace, getWorkspacesSnapshot, subscribeToWorkspaces, workspaceRefFor } from '../lib/workspace-store';
 import { awaitWallEmpty } from './wall/close-all';
 import { registerWallHandle, type WallHandle } from './wall/wall-handles';
 import { prepareWorkspaceTransfer } from './wall/workspace-transfer';
@@ -575,17 +575,22 @@ export function Wall({
     if (id) selectPane(id);
   }, [livePaneId, selectPane]);
 
-  const selectWorkspace = useCallback((id: string) => {
+  const selectWorkspace = useCallback((id: string | null) => {
     doorKillReturnRef.current = null;
     const element = workspaceTabElement(id);
     if (workspaceId === undefined || !element) return;
     releaseZoomExcept();
-    selectedIdRef.current = id;
-    selectedTypeRef.current = 'workspace';
-    setSelectedId(id);
-    setSelectedType('workspace');
+    selectedIdRef.current = id ?? '+';
+    selectedTypeRef.current = id === null ? 'workspace-new' : 'workspace';
+    setSelectedId(selectedIdRef.current);
+    setSelectedType(selectedTypeRef.current);
     revealWorkspaceTab(element);
   }, [workspaceId, releaseZoomExcept]);
+
+  useEffect(() => subscribeToWorkspaces(() => {
+    if (selectedTypeRef.current === 'workspace'
+      && !getWorkspacesSnapshot().workspaces.some(workspace => workspace.id === selectedIdRef.current)) returnToPane();
+  }), [returnToPane]);
 
   // The shared tail of both reattach paths (click-reattach + drag-out): drop the Door
   // chip from the baseboard and select the now-restored pane.
@@ -2220,6 +2225,8 @@ export function Wall({
     handleReattachRef,
     selectPane,
     selectDoor,
+    selectWorkspace,
+    returnToPane,
     enterTerminalMode,
     exitTerminalMode,
     minimizePane,
