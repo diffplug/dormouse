@@ -3952,8 +3952,11 @@ describe('Wall on the Lath engine', () => {
       // local http:// page, though params.url still names the https login.
       const real = getAgentBrowserScreenController(tab)!;
       const lookup = agentBrowserScreen.getAgentBrowserScreenController;
+      // Stable objects, as the ScreenController contract requires.
+      const shownChrome = { ...real.chrome(), url: 'http://localhost:5173/report' };
+      const shownController = { ...real, chrome: () => shownChrome };
       const shown = vi.spyOn(agentBrowserScreen, 'getAgentBrowserScreenController').mockImplementation((id) => (
-        id === tab ? { ...real, chrome: () => ({ ...real.chrome(), url: 'http://localhost:5173/report' }) } : lookup(id)));
+        id === tab ? shownController : lookup(id)));
       const beforeSwap = leafIds();
       await act(async () => { real.actions.setRenderMode?.('iframe'); });
       await flush();

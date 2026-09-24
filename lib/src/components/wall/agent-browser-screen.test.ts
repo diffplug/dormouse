@@ -125,6 +125,29 @@ describe('agent-browser screen registry', () => {
     registration.dispose();
   });
 
+  it('returns the same snapshot objects until their own channel publishes', () => {
+    const registration = register('pane-stable');
+    const controller = getAgentBrowserScreenController('pane-stable')!;
+
+    // useSyncExternalStore loops the render on a fresh object per read.
+    const chrome = controller.chrome();
+    const snapshot = controller.snapshot();
+    expect(controller.chrome()).toBe(chrome);
+    expect(controller.snapshot()).toBe(snapshot);
+
+    const nextSnapshot: ScreenSnapshot = { ...SNAPSHOT, state: 'SYNCED' };
+    registration.update(nextSnapshot);
+    expect(controller.snapshot()).toBe(nextSnapshot);
+    expect(controller.chrome()).toBe(chrome);
+
+    const nextChrome: ChromeSnapshot = { ...CHROME, url: 'http://localhost:5173/app' };
+    registration.updateChrome(nextChrome);
+    expect(controller.chrome()).toBe(nextChrome);
+    expect(controller.snapshot()).toBe(nextSnapshot);
+
+    registration.dispose();
+  });
+
   it('a stale registration does not clobber a re-registered surface on dispose', () => {
     const first = register('pane-3');
     const second = register('pane-3');

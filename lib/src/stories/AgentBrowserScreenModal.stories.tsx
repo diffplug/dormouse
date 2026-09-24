@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { AgentBrowserScreenModal } from '../components/wall/AgentBrowserScreenModal';
-import type { RenderMode, ScreenController, ScreenSnapshot, ScreenState } from '../components/wall/agent-browser-screen';
+import type { ChromeSnapshot, RenderMode, ScreenController, ScreenSnapshot, ScreenState } from '../components/wall/agent-browser-screen';
 
 interface StoryArgs {
   /** Render backend — `embed` greys out the Screen (viewport) section. */
@@ -23,9 +23,17 @@ interface StoryArgs {
   hostCapable: boolean;
 }
 
-// A standalone controller backed by a fixed snapshot — no registry, no live
-// updates. `snapshot()` must return a stable reference for useSyncExternalStore,
-// so it's memoised per args.
+const CHROME: ChromeSnapshot = {
+  url: 'http://localhost:5173/',
+  displayUrl: 'localhost:5173',
+  title: 'Vite + React',
+  key: null,
+};
+
+// A standalone controller backed by fixed snapshots — no registry, no live
+// updates. `snapshot()` and `chrome()` must return stable references for
+// useSyncExternalStore, so the screen snapshot is memoised per args and the
+// chrome one is a constant.
 function useMockController(args: StoryArgs): ScreenController {
   return useMemo<ScreenController>(() => {
     const snapshot: ScreenSnapshot = {
@@ -41,12 +49,7 @@ function useMockController(args: StoryArgs): ScreenController {
       subscribe: () => () => {},
       snapshot: () => snapshot,
       subscribeChrome: () => () => {},
-      chrome: () => ({
-        url: 'http://localhost:5173/',
-        displayUrl: 'localhost:5173',
-        title: 'Vite + React',
-        key: null,
-      }),
+      chrome: () => CHROME,
       chromeActions: {
         navigate: (url) => console.log('[story] navigate', url),
         back: () => console.log('[story] back'),

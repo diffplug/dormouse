@@ -83,6 +83,10 @@ export interface ChromeActions {
   reload(): void;
 }
 
+/** `snapshot()` and `chrome()` feed useSyncExternalStore, so each must return
+ *  the same object until its own channel notifies; a fresh object per call
+ *  loops React's render. `registerAgentBrowserScreen` builds the only
+ *  production implementation. */
 export interface ScreenController {
   readonly id: string;
   subscribe(listener: () => void): () => void;
