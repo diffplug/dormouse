@@ -234,6 +234,8 @@ Sequence syntax lives in `docs/specs/terminal-escapes.md`; what each means here:
 
   **Titles name the running command** — its watch key, else its display command — and fall back to a generic title with none running; the body is `Progress <percent>%`, or none.
 
+  Claude Code runs one cycle per turn under the advertised iTerm2 version, so **a turn ending on an unengaged Session rings `claude finished`** (rationale). Pinned by `a Claude Code turn` in `lib/src/lib/alert-engagement.test.ts`.
+
 Source of truth: the OSC 777 and OSC 99 grammars, parsing, sanitization limits, OSC 99 chunk state, and `applyTerminalEvents` in `lib/src/lib/terminal-protocol.ts`; `createOwnerPtyStream` in `lib/src/host/owner-pty.ts`; `updateProtocolProgress` / `finishProtocolProgressCycle` / `PROGRESS_TITLES` in `lib/src/lib/alert-manager.ts`. Pinned by `silently ends a progress cycle the program abandoned` and `names the running command in a progress %s title` in `lib/src/lib/alert-manager.test.ts`.
 
 ## Command-exit Track
@@ -317,7 +319,7 @@ Rules:
 - **Must deliver at most once per sink per episode**, due at the episode's start plus the Session's delay; a source joining the episode delivers nothing, and the ring clearing consumes what it had pending.
 - **Must recheck at the deadline, and consume a deadline that fails, never retrying it**: **speech only while the Session is not engaged** (Engagement); **push only while no viewer is present**, VS Code's focused, active window counting as one (`docs/specs/vscode.md` → Workspaces; rationale).
 - **Disabling consumes pending work immediately; enabling never replays an episode**, one that began disabled included. Delay edits never move a deadline; speech reads the current voice at engine admission.
-- **Each realm publishes every Session it shows** — Pane label and Workspace overrides — as one `sessions` op replacing its last: membership and override changes at the end of their task, label changes on a `LABEL_PUBLISH_THROTTLE_MS` trailing throttle (rationale), nothing unchanged resent. **The host keeps each Session's last publisher's entry until the Session is removed**, a realm's end included; an unpublished Session uses the defaults.
+- **Each realm publishes every Session it shows** — Pane label and Workspace overrides — as one `sessions` op replacing its last: membership and override changes at the end of their task, label changes on a `LABEL_PUBLISH_THROTTLE_MS` trailing throttle (rationale), nothing unchanged resent. **The host keeps each Session's last publisher's entry until the Session is removed**, through its realm's end and a respawn under its id; an unpublished Session uses the defaults.
 - **A due push goes from the host's own Burrow** (Push notifications), titled by the published label, whether or not a realm still shows the Session; **a due spoken alarm goes to the realm showing it** as `alert:speak`, and with none is not spoken.
 
 Source of truth: `normalizeAlertDeliveryOverrides` / `resolveAlertDeliveryPolicy` in `lib/src/lib/alert-delivery-model.ts`; `createAlertDeliveryScheduler` in `lib/src/lib/alert-delivery-scheduler.ts`; `startAlertDelivery` / `LABEL_PUBLISH_THROTTLE_MS` in `lib/src/lib/alert-delivery.ts`; `getSessionAlertPolicy` in `lib/src/lib/alert-delivery-policy.ts`; `setWorkspaceAlertDelivery` in `lib/src/lib/workspace-store.ts`. Pinned by `lib/src/lib/alert-delivery-scheduler.test.ts`, `lib/src/lib/alert-delivery.test.ts`, and `delivery` in `lib/src/host/alert-host.test.ts`.

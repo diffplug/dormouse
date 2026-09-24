@@ -100,6 +100,8 @@
 
 **Why the titles name the command.** The generic `Progress complete` said nothing about which run finished; the watch key is the name the user already knows the pane by, and the watch record is live exactly while a cycle can end.
 
+**Why every Claude turn may ring.** Advertising iTerm2 3.6.6 turns on Claude Code's progress reports, so its turn end is a report completion, and reports are independent of WATCHING. Gating a cycle's end on a watched command was rejected: engagement is what spares the user who is watching, and a user who left wants the turn's end (product decision, 2026-09-23). Recorded the same day (Claude Code 2.1.281, a one-sentence answer): `9;4;3` 47ms after Enter, a frame about every 110ms, `9;4;0` 1.8s after Enter with one trailing frame, then silence until the idle `OSC 99` 60s later. A turn that short never confirms BUSY, so its end rings at once; a longer one is deferred until quiet.
+
 ## Command-exit Track
 
 **Why the minimum runtime is not the inactivity timeout.** The two answer different questions — how long "looking at this pane" lasts, and how short a run the user probably watched. Shared, a user who shortened the timeout to three seconds was rung for every four-second `git status` they turned away from, and one who lengthened it lost exit alerts for every build shorter than the new window (2026-09-23).

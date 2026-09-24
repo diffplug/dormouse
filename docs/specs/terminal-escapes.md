@@ -104,6 +104,7 @@ Source of truth: `normalizeExternalUri` in `lib/src/lib/external-links.ts` (pinn
 | `CSI ? ... h` (DECSET) / `CSI ? ... l` (DECRST) | Private-mode set/reset, including mouse tracking and bracketed paste | Observed via xterm.js parser hooks returning false, so xterm still handles the sequence; the mouse-selection store reads `terminal.modes` in a microtask. | [mouse-and-clipboard.md](mouse-and-clipboard.md), `lib/src/lib/mouse-mode-observer.ts` |
 | Kitty keyboard protocol | Disambiguated key-event reporting (CSI u with modifiers, e.g. Shift+Enter distinguishable from Enter) | Enabled by `vtExtensions: { kittyKeyboard: true }` on the xterm.js `Terminal` constructor; xterm.js handles the push/pop (`CSI > u` / `CSI < u`) and the modified key reports. | `lib/src/lib/terminal-lifecycle.ts` |
 | `CSI ? 9001 h/l` (win32-input-mode) | Faithful Win32 `INPUT_RECORD` key reporting for ConPTY apps reading via the Console API — Codex on Windows, which cannot negotiate the kitty protocol there (rationale) | Advertised **only on Windows** (`vtExtensions: { win32InputMode: IS_WINDOWS }`); xterm.js then emits `CSI Vk;Sc;Uc;Kd;Cs;Rc _` key records. **Mutually exclusive with the kitty protocol**, so a per-pane arbiter watches `CSI > … u` / `CSI < … u` — counting nested pushes, honoring the pop count — and toggles the option off while any kitty consumer is on the stack (rationale). | `lib/src/lib/keyboard-protocol-arbiter.ts` |
+| `CSI ? 996 n` / `CSI ? 2031 h/l` | Color-scheme query; change reports on/off | Answered by the owner's xterm.js (`colorSchemeQuery`): `CSI ? 997 ; 1 n` dark, `; 2 n` light, unsolicited on a theme change while 2031 is set — a [terminal reply](#report-filtering-on-the-input-side). Pinned by `lib/src/lib/terminal-color-scheme.test.ts`. | `xtermVtExtensions` in `lib/src/lib/terminal-lifecycle.ts` |
 | `CSI c` | Primary device-attributes query | The owner's ImageAddon answers `CSI ? 62 ; 4 ; 9 ; 22 c`, advertising SIXEL. | [Inline graphics](#inline-graphics) |
 | `CSI 14 t` / `CSI 16 t` / `CSI 18 t` | Window-pixel, cell-pixel, and window-character size queries | Enabled and answered by the owner's xterm.js for image preparation. | [Inline graphics](#inline-graphics) |
 | `CSI ? 80 h/l` | SIXEL scrolling off/on | Observed by ImageAddon; xterm.js continues handling the private mode. | [Inline graphics](#inline-graphics) |
@@ -147,7 +148,9 @@ Unknown CSI sequences pass through to xterm.js, like unknown OSC families, and *
 
 ## iTerm2 identity
 
-Dormouse reports an iTerm2-compatible identity to unlock the iTerm2-style escape codes this spec set supports (rationale). **One compatibility version spans env and device responses**: `ITERM2_COMPAT_VERSION`, currently `3.5.0`, defined twice — in `standalone/sidecar/pty-core.js` and `lib/src/lib/terminal-protocol.ts` — pinned together by `lib/src/lib/mirrored-constants.test.ts`.
+Dormouse reports an iTerm2-compatible identity to unlock the iTerm2-style escape codes this spec set supports (rationale). **One compatibility version spans env and device responses**: `ITERM2_COMPAT_VERSION`, currently `3.6.6`, defined twice — in `standalone/sidecar/pty-core.js` and `lib/src/lib/terminal-protocol.ts` — pinned together by `lib/src/lib/mirrored-constants.test.ts`.
+
+**Must advertise the newest iTerm2 version whose escape-code additions Dormouse all supports** — 3.6.6 added `OSC 9;4` progress and color-scheme reporting, 3.6.7 `OSC 8`'s unsupported `target=` (rationale).
 
 Environment for spawned PTYs:
 

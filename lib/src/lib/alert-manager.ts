@@ -314,6 +314,7 @@ export class AlertManager {
   /** Each present viewer's focus. An absent viewer engages nothing, so it is not kept. */
   private viewers = new Map<string, string | null>();
   private listeners = new Set<(id: string, state: AlertState) => void>();
+  private removeListeners = new Set<(id: string) => void>();
   private lastEmitted = new Map<string, AlertState>();
   private watchedCommands = new Set<string>();
   /** Helper Sessions alert no one until promotion (docs/specs/alert.md → Pane
@@ -365,6 +366,15 @@ export class AlertManager {
   onStateChange(listener: (id: string, state: AlertState) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  /**
+   * A Session gone for good: every `remove`, whatever state it left, and never
+   * a `restart`, whose Session goes on under the same id.
+   */
+  onRemove(listener: (id: string) => void): () => void {
+    this.removeListeners.add(listener);
+    return () => this.removeListeners.delete(listener);
   }
 
   // --- Feed PTY events ---
@@ -1270,6 +1280,21 @@ export class AlertManager {
 
   /** Completely remove alert state for a PTY (used when PTY is destroyed) */
   remove(id: string): void {
+    this.discard(id);
+    for (const listener of this.removeListeners) listener(id);
+  }
+
+  /**
+   * A new PTY generation under `id`: what the old one left goes as on
+   * `remove`, but no tombstone, since the output about to arrive is the new
+   * Session's own, and no removal, since the Session lives on.
+   */
+  restart(id: string): void {
+    this.discard(id);
+    this.removed.delete(id);
+  }
+
+  private discard(id: string): void {
     this.removed.add(id);
     // Nobody parked here has anything left to wait for.
     this.settleWaiters(id, 'died');
@@ -1286,16 +1311,6 @@ export class AlertManager {
     // Last, so `notify` still knows a helper that never published has nothing
     // for subscribers to forget.
     this.helpers.delete(id);
-  }
-
-  /**
-   * A new PTY generation under `id`: what the old one left goes as on
-   * `remove`, but no tombstone, since the output about to arrive is the new
-   * Session's own.
-   */
-  restart(id: string): void {
-    this.remove(id);
-    this.removed.delete(id);
   }
 
   /**
@@ -1342,6 +1357,7 @@ export class AlertManager {
     this.claimants.clear();
     this.viewers.clear();
     this.listeners.clear();
+    this.removeListeners.clear();
     this.lastEmitted.clear();
   }
 

@@ -870,6 +870,7 @@ describe('terminal-registry alert behavior', () => {
     ['kitty keyboard query reply', '\x1b[?0u'],
     ['kitty keyboard flags reply', '\x1b[?31u'],
     ['kitty support probe replies', '\x1b[?0u\x1b[?1;2c'],
+    ['color-scheme report', '\x1b[?997;1n'],
     ['focus report', '\x1b[I'],
     ['combined replies', '\x1bP1$r0m\x1b\\\x1b[?1;2c'],
     ['SGR hover report', '\x1b[<35;10;20M'],

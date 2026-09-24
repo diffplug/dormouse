@@ -18,7 +18,7 @@ import { DEFAULT_ALERT_SETTINGS, type AlertSettings } from './alert-settings-mod
  */
 
 export interface AlertDeliverySchedulerOptions {
-  manager: Pick<AlertManager, 'onStateChange' | 'has' | 'isEngaged' | 'viewerIds'>;
+  manager: Pick<AlertManager, 'onStateChange' | 'onRemove' | 'isEngaged' | 'viewerIds'>;
   /** A spoken alarm is due, for the realm showing the Session to speak. */
   speak(id: string, episodeId: string): void;
   /** A push is due, titled by the Session's published Pane label. */
@@ -95,7 +95,6 @@ export function createAlertDeliveryScheduler(options: AlertDeliverySchedulerOpti
   }
 
   function onState(id: string, state: AlertState): void {
-    if (!manager.has(id)) published.delete(id);
     const episode = state.episode ?? null;
     const current = episodes.get(id);
     // At most once per sink per episode: a source joining it delivers nothing.
@@ -122,7 +121,12 @@ export function createAlertDeliveryScheduler(options: AlertDeliverySchedulerOpti
     }
   }
 
-  const stop = manager.onStateChange(onState);
+  const stops = [
+    manager.onStateChange(onState),
+    // Only a Session gone for good: a respawn under the same id keeps what its
+    // realm published, which the realm never sends again unchanged.
+    manager.onRemove((id) => void published.delete(id)),
+  ];
 
   return {
     publish(realmId, raw) {
@@ -156,7 +160,7 @@ export function createAlertDeliveryScheduler(options: AlertDeliverySchedulerOpti
     },
 
     dispose() {
-      stop();
+      for (const stop of stops) stop();
       for (const { timers } of episodes.values()) {
         for (const timer of timers.values()) clearTimeout(timer);
       }

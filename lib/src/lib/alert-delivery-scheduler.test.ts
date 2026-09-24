@@ -164,9 +164,13 @@ describe('published Sessions', () => {
     expect(sinks()).toEqual(['speech', 'speech']);
   });
 
-  it('keeps a live Session\'s publication past its realm, and forgets a removed one\'s', () => {
+  it.each([
+    ['ringing', () => ring(OTHER)],
+    // Nothing to publish on its way out: its last state was the default.
+    ['answered', () => { ring(OTHER); manager.acknowledge(OTHER, { input: true }); }],
+  ] as const)('keeps a live Session\'s publication past its realm, and forgets one removed %s', (_state, before) => {
     scheduler.publish('main', { [PANE]: session({ pushEnabled: false }), [OTHER]: session({ pushEnabled: false }) });
-    ring(OTHER);
+    before();
     manager.remove(OTHER);
     // The realm is gone, and never published again; a Session reusing the id
     // is not the one it described.
@@ -174,6 +178,16 @@ describe('published Sessions', () => {
     ring(OTHER);
     vi.advanceTimersByTime(PUSH_MS);
     expect(delivered.filter((delivery) => delivery.sink === 'push')).toEqual([{ sink: 'push', id: OTHER, title: 'terminal' }]);
+  });
+
+  it('keeps a Session\'s publication through a respawn under its id', () => {
+    // The realm sends a Session again only once its label or overrides change.
+    scheduler.publish('main', { [PANE]: session({ speakEnabled: false }, 'claude') });
+    ring();
+    manager.restart(PANE);
+    ring();
+    vi.advanceTimersByTime(PUSH_MS);
+    expect(delivered).toEqual([{ sink: 'push', id: PANE, title: 'claude' }]);
   });
 
   it('revalidates what a realm publishes', () => {

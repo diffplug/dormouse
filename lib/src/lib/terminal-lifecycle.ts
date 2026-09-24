@@ -1,7 +1,7 @@
 import { clearToolAnnounce } from './tool-announce-store';
 import { clearToolDirty } from './tool-dirty-store';
 import { serializeTransferTerminal, type TerminalGrid } from './terminal-transfer';
-import { Terminal, type IBufferRange } from '@xterm/xterm';
+import { Terminal, type IBufferRange, type ITerminalOptions } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { SerializeAddon } from '@xterm/addon-serialize';
 import { ImageAddon, type IImageAddonOptions } from '@xterm/addon-image';
@@ -136,6 +136,22 @@ function readDisplayTextFromBuffer(terminal: Terminal, range: IBufferRange): str
   }
 }
 
+/**
+ * The negotiated VT extensions every terminal offers. kittyKeyboard
+ * disambiguates Shift+Enter from Enter for TUIs that read raw VT (Claude Code
+ * everywhere; Codex on macOS/Linux). win32InputMode covers Windows TUIs that
+ * read via the Console API behind ConPTY (Codex), which can't negotiate the
+ * kitty protocol there: when conhost enables it (CSI ? 9001 h), xterm sends
+ * faithful Win32 INPUT_RECORD key events so Shift+Enter and Ctrl+J reach the
+ * app intact. Both are opt-in/negotiated, so they coexist — each program turns
+ * on whichever it understands. colorSchemeQuery answers DSR 996 and DECSET
+ * 2031, which the advertised iTerm2 version promises
+ * (docs/specs/terminal-escapes.md -> iTerm2 identity).
+ */
+export function xtermVtExtensions(): ITerminalOptions['vtExtensions'] {
+  return { kittyKeyboard: true, win32InputMode: IS_WINDOWS, colorSchemeQuery: true };
+}
+
 function createXtermHost(grid?: TerminalGrid): { terminal: Terminal; fit: FitAddon; serialize: SerializeAddon; element: HTMLDivElement } {
   const styles = getComputedStyle(document.body);
   const editorFontSize = parseInt(styles.getPropertyValue('--vscode-editor-font-size'), 10) || 12;
@@ -149,14 +165,7 @@ function createXtermHost(grid?: TerminalGrid): { terminal: Terminal; fit: FitAdd
     fontFamily: editorFontFamily,
     cursorBlink: cfg.terminal.cursorBlink,
     theme,
-    // kittyKeyboard disambiguates Shift+Enter from Enter for TUIs that read
-    // raw VT (Claude Code everywhere; Codex on macOS/Linux). win32InputMode
-    // covers Windows TUIs that read via the Console API behind ConPTY (Codex),
-    // which can't negotiate the kitty protocol there: when conhost enables it
-    // (CSI ? 9001 h), xterm sends faithful Win32 INPUT_RECORD key events so
-    // Shift+Enter and Ctrl+J reach the app intact. Both are opt-in/negotiated,
-    // so they coexist — each program turns on whichever it understands.
-    vtExtensions: { kittyKeyboard: true, win32InputMode: IS_WINDOWS },
+    vtExtensions: xtermVtExtensions(),
     linkHandler: {
       activate: (event, uri, range) => {
         event.preventDefault();

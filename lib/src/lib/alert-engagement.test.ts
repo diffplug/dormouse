@@ -3,6 +3,7 @@ import { AlertManager, type ActivityNotification, type AwaitOutcome } from './al
 import { applyTerminalEvents, TerminalProtocolParser } from './terminal-protocol';
 import { cfg } from '../cfg';
 import { engage, finishCommand, goIdle, leave, runCommand, VIEWER } from './alert-manager-test-utils';
+import { alertedPty, createOwnerPtyStream } from '../host/owner-pty';
 
 /**
  * Engagement (`docs/specs/alert.md` -> Engagement): presence and focus arrive
@@ -327,5 +328,155 @@ describe('walking away from a permission prompt', () => {
       todo: true,
       notification: { body: 'Claude needs your permission' },
     });
+  });
+});
+
+/**
+ * One Claude Code 2.1.281 turn, recorded under the iTerm2 3.6.6 identity
+ * (2026-09-23, `claude --model haiku`, a one-sentence answer), which Claude
+ * answers with progress reports: `OSC 9;4;3` 47ms after Enter, a frame about
+ * every 110ms, `OSC 9;4;0` 1.8s after Enter and one trailing frame, then
+ * silence until its idle `OSC 99` 60s later. Replayed as bytes through the
+ * host's parse site and input path; a longer answer only adds frames.
+ */
+describe('a Claude Code turn', () => {
+  const ENTER_AT = 8_236;
+  const RECORDED_TURN_MS = 1_785;
+  const LONG_TURN_MS = 8_000;
+  const IDLE_NOTICE_AFTER_MS = 60_011;
+  const QUIET_MS = cfg.alert.mightNeedAttention + cfg.alert.needsAttentionConfirm;
+  const IDLE_NOTICE = '\x1b]99;i=3319:d=0:p=title;Claude Code\x07\x1b]99;i=3319:p=body;Claude is waiting for your input\x07\x1b]99;i=3319:d=1:a=focus;\x07';
+  const FINISHED: ActivityNotification = { source: 'OSC 9;4', title: 'claude finished', body: null };
+
+  interface Step { at: number; step: () => void }
+  let emit: (at: number, data: string) => Step;
+  let key: (at: number, data: string) => Step;
+  let episodes: Set<string>;
+
+  beforeEach(() => {
+    const stream = createOwnerPtyStream(PANE, {
+      alerts: manager,
+      colorProvider: () => null,
+      onToolEvents() {},
+      onSemanticEvents() {},
+      writeResponse() {},
+      onChunk() {},
+    });
+    const pty = alertedPty(manager, { write() {}, resize() {} });
+    emit = (at, data) => ({ at, step: () => stream.write(data) });
+    key = (at, data) => ({ at, step: () => pty.write(PANE, data, { userInput: true }) });
+    episodes = new Set();
+    manager.onStateChange((id, state) => { if (id === PANE && state.episode) episodes.add(state.episode.id); });
+  });
+
+  const at = (ms: number, step: () => void): Step => ({ at: ms, step });
+
+  /** The turn's bytes and keystrokes: the prompt typed and submitted, then Claude working for `turnMs`. */
+  function turn(turnMs: number): Step[] {
+    const endAt = ENTER_AT + turnMs;
+    const steps = [
+      // Shell integration names the command; Claude paints and clears any stale progress.
+      emit(0, '\x1b]633;E;claude\x07\x1b]633;C\x07'),
+      emit(358, 'Claude Code'),
+      emit(715, '\x1b]9;4;0;\x07'),
+      emit(945, '> '),
+      key(ENTER_AT, '\r'),
+      emit(ENTER_AT + 47, '\x1b]9;4;3;\x07'),
+      emit(endAt, '\x1b]9;4;0;\x07'),
+      emit(endAt + 3, 'Worked for 1s'),
+      emit(endAt + IDLE_NOTICE_AFTER_MS, IDLE_NOTICE),
+    ];
+    // The prompt, a key every 42ms, each echoed.
+    for (let t = 6_003; t < 7_900; t += 42) steps.push(key(t, 'x'), emit(t + 12, 'x'));
+    for (let t = ENTER_AT + 49; t < endAt; t += 110) steps.push(emit(t, 'frame'));
+    return steps;
+  }
+
+  /** Runs `steps` in time order (ties in list order), advancing the clock between them. */
+  function player(steps: Step[]): { to(ms: number): void } {
+    const queue = [...steps].sort((a, b) => a.at - b.at);
+    let now = 0;
+    return {
+      to(ms) {
+        while (queue.length > 0 && queue[0].at <= ms) {
+          const next = queue.shift()!;
+          vi.advanceTimersByTime(next.at - now);
+          now = next.at;
+          next.step();
+        }
+        vi.advanceTimersByTime(ms - now);
+        now = ms;
+      },
+    };
+  }
+
+  it('holds the finish while the user watches, and drops it once they type', () => {
+    const endAt = ENTER_AT + RECORDED_TURN_MS;
+    const typedAt = endAt + 2_000;
+    const run = player([
+      at(0, () => engage(manager, PANE)),
+      ...turn(RECORDED_TURN_MS),
+      key(typedAt, 'x'),
+      at(typedAt + cfg.alert.inactivityTimeout, () => goIdle(manager, PANE)),
+    ]);
+
+    run.to(typedAt - 1);
+    expect(manager.getState(PANE)).toMatchObject({ todo: false, notification: null });
+    run.to(endAt + IDLE_NOTICE_AFTER_MS - 1);
+    expect(episodes.size).toBe(0);
+    expect(manager.getState(PANE)).toMatchObject({ todo: false, notification: null });
+  });
+
+  it.each([
+    ['at the end of the recorded turn, too short to look busy', RECORDED_TURN_MS, 0],
+    ['once a longer turn has gone quiet', LONG_TURN_MS, 3 + QUIET_MS],
+  ] as const)('rings "claude finished" once when the user moved away mid-turn: %s', (_when, turnMs, afterEndMs) => {
+    const ringAt = ENTER_AT + turnMs + afterEndMs;
+    const run = player([
+      at(0, () => engage(manager, PANE)),
+      at(ENTER_AT + 600, () => engage(manager, OTHER)),
+      ...turn(turnMs),
+    ]);
+
+    run.to(ringAt - 1);
+    expect(ringing(PANE)).toBe(false);
+    run.to(ringAt);
+    expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', todo: true, notification: FINISHED });
+    run.to(ringAt + 30_000);
+    expect(episodes.size).toBe(1);
+  });
+
+  it('records the idle notice after a click on the ring as TODO, without a second summons', () => {
+    const endAt = ENTER_AT + RECORDED_TURN_MS;
+    const clickAt = endAt + 5_000;
+    const run = player([
+      at(0, () => engage(manager, PANE)),
+      at(ENTER_AT + 600, () => engage(manager, OTHER)),
+      ...turn(RECORDED_TURN_MS),
+      at(clickAt, () => { engage(manager, PANE); manager.acknowledge(PANE, { input: false }); }),
+      at(clickAt + cfg.alert.inactivityTimeout, () => goIdle(manager, PANE)),
+    ]);
+
+    run.to(endAt + IDLE_NOTICE_AFTER_MS);
+    expect(ringing(PANE)).toBe(false);
+    expect(manager.getState(PANE)).toMatchObject({
+      todo: true,
+      notification: { source: 'OSC 99', title: 'Claude Code', body: 'Claude is waiting for your input' },
+    });
+    expect(episodes.size).toBe(1);
+  });
+
+  it('rings once the user, still focused on the pane, has gone idle', () => {
+    const idleAt = ENTER_AT + cfg.alert.inactivityTimeout;
+    const run = player([
+      at(0, () => engage(manager, PANE)),
+      ...turn(RECORDED_TURN_MS),
+      at(idleAt, () => goIdle(manager, PANE)),
+    ]);
+
+    run.to(idleAt - 1);
+    expect(manager.getState(PANE)).toMatchObject({ todo: false, notification: null });
+    run.to(idleAt);
+    expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', todo: true, notification: FINISHED });
   });
 });
