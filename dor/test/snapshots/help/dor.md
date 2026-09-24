@@ -45,6 +45,6 @@ COMMANDS
   playwright     Drive a browser surface via your Playwright CLI install (alias: dor pw).
   list           List Dormouse Surfaces.
   workspace      Create, rename, close, switch, or move Workspaces.
-  app            Restart Dormouse Standalone, resuming Claude and Codex sessions.
+  app            Restart Dormouse Standalone, resuming supported agent sessions.
 
 ```

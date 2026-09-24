@@ -1,4 +1,5 @@
-import { loadJson, saveJson } from './local-json-store';
+import { getStorage, loadJson, saveJson } from './local-json-store';
+import { DEFAULT_WATCHED_COMMANDS } from './coding-agents';
 import { getPlatform } from './platform';
 import { isWatchKey, watchRuleFor } from './terminal-state';
 import { getRunningCommandWatchKey } from './terminal-state-store';
@@ -21,6 +22,13 @@ function isStringArray(value: unknown): value is string[] {
 }
 
 function readStored(): string[] {
+  try {
+    // Only an absent key gets defaults: a saved [] is an explicit opt-out, and
+    // malformed saved data falls back to empty.
+    if (getStorage()?.getItem(STORAGE_KEY) == null) return normalize(DEFAULT_WATCHED_COMMANDS);
+  } catch {
+    return [];
+  }
   return normalize(loadJson<string[], string[]>(STORAGE_KEY, [], isStringArray));
 }
 
@@ -31,10 +39,11 @@ function readStored(): string[] {
 // `C:toolsclaude.exe`, a relative one to `toolsdor.cmd`, a bare launcher stored
 // cleanly as `npm.cmd`. Residual: a mangled *relative* path with no suffix
 // (`bin\claude` -> `binclaude`) is indistinguishable from a program actually
-// named that, and survives until the user deletes it. Applied to both sources,
+// named that, and survives until the user deletes it. Applied to every source:
 // `localStorage` and the host's canonical snapshot, since a stale key reaches
-// the mirror either way.
-function normalize(names: string[]): string[] {
+// the mirror either way, and the fresh-install defaults, which pass the same
+// gate.
+function normalize(names: readonly string[]): string[] {
   return [...new Set(names.map((name) => name.trim()).filter(Boolean).filter(isWatchKey))].sort();
 }
 

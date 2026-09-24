@@ -298,6 +298,12 @@ describe('AgentBrowserPanel render mode controller', () => {
     });
 
     expect(updateParameters).toHaveBeenCalledWith({ url: 'https://example.com/' });
+
+    // The new-tab page the launch opened beside it is not the page it shows.
+    await act(async () => {
+      WebSocketMock.instances[0].emitMessage(JSON.stringify({ type: 'page', url: 'chrome://newtab/', title: 'New Tab' }));
+    });
+    expect(getAgentBrowserScreenController('ab-panel')?.chrome().url).toBe('https://example.com/');
   });
 
   it('actively selects a newly opened tab when the stream does not mark it active', async () => {
@@ -435,20 +441,19 @@ describe('AgentBrowserPanel Playwright params', () => {
   // Wall records the host-reported mode (and a fresh viewer port) in params,
   // which reach the controller only through this panel.
   it('follows a native headed relaunch and its cwd, and never sizes the headed window', async () => {
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
-      { width: 800, height: 600, left: 0, top: 0, right: 800, bottom: 600, x: 0, y: 0, toJSON() {} } as DOMRect,
-    );
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(800);
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600);
     const host = installBrowserHost();
-    // Every operation that drives the browser, in the directory it ran for.
-    const commands = (cwd?: string) => host.browser.mock.calls
-      .map(([request]) => request)
-      .filter((request) => DRIVES.has(request.op) && (cwd === undefined || request.binding.cwd === cwd))
-      .map((request) => request.op === 'viewport' ? `set viewport ${request.width} ${request.height} ${request.dpr}` : request.op);
+    // Every operation that drives the browser.
+    const commands = () => host.browser.mock.calls.map(([request]) => request.op).filter((op) => DRIVES.has(op));
+    const stream = (port: number) => WebSocketMock.instances.findLast((ws) => ws.url === `ws://127.0.0.1:${port}`)!;
+    // The pane sizes the host was asked to sync each stream's browser to.
+    const synced = (port: number) => stream(port).sent.map((raw) => JSON.parse(raw))
+      .filter((message) => message.type === 'sync').map(({ width, height, dpr }) => `${width}x${height}@${dpr}`);
     const params = { surfaceType: 'browser', renderMode: 'pw-screencast', session: 'app', cwd: '/first', stream: 4321 };
 
     await renderPanel(paneProps('pw-panel', params));
-    expect(commands()).toContain('set viewport 800 600 1');
-    const stream = (port: number) => WebSocketMock.instances.findLast((ws) => ws.url === `ws://127.0.0.1:${port}`)!;
+    await vi.waitFor(() => expect(synced(4321)).toContain('800x600@1'));
     await act(async () => { stream(4321).emitMessage(JSON.stringify({ type: 'status', connected: true, screencasting: true })); });
     host.browser.mockClear();
 
@@ -456,6 +461,7 @@ describe('AgentBrowserPanel Playwright params', () => {
     expect(getAgentBrowserScreenController('pw-panel')?.snapshot().renderMode).toBe('pw-popout');
     expect(container.textContent).toContain('This browser is running in a separate window.');
     expect(commands()).toEqual([]);
+    expect(synced(4322)).toEqual([]);
     // The old browser's status is not the new window's: a disconnect before
     // the new stream reports is not the user closing that window.
     await act(async () => { stream(4322).emitMessage(JSON.stringify({ type: 'status', connected: false, screencasting: false })); });
@@ -463,7 +469,9 @@ describe('AgentBrowserPanel Playwright params', () => {
 
     await renderPanel(paneProps('pw-panel', { ...params, cwd: '/second', stream: 4323 }));
     expect(getAgentBrowserScreenController('pw-panel')?.snapshot().renderMode).toBe('pw-screencast');
-    expect(commands('/second')).toContain('set viewport 800 600 1');
+    await vi.waitFor(() => expect(synced(4323)).toContain('800x600@1'));
+    // The browser it views runs in the new directory.
+    expect(host.requests('view').at(-1)).toMatchObject({ binding: { cwd: '/second' }, stream: 4323 });
   });
 
   it('keeps its own mode write over params that predate it', async () => {

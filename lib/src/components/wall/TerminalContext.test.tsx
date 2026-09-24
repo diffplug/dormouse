@@ -195,6 +195,8 @@ it('opens the parent notepad from the Helper control and keeps edits on that par
 
 
 it('offers the rule covering the running script, else that script\'s own key', async () => {
+  const clearRules = () => act(() => { for (const name of terminalRegistry.getWatchedCommands()) terminalRegistry.setCommandWatched(name, false); });
+  clearRules();
   const open = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'helper', parentId: 'watch-row', command: '', status: 'off' });
   terminalRegistry.applyTerminalSemanticEvents('watch-row', [
     { type: 'commandLine', commandLine: 'cd web && pnpm run dev' },
@@ -213,7 +215,7 @@ it('offers the rule covering the running script, else that script\'s own key', a
     expect(terminalRegistry.getWatchedCommands()).toEqual(['pnpm dev']);
   } finally {
     open.mockRestore();
-    act(() => { for (const name of terminalRegistry.getWatchedCommands()) terminalRegistry.setCommandWatched(name, false); });
+    clearRules();
     terminalRegistry.removeTerminalPaneState('watch-row');
   }
 });
@@ -266,4 +268,23 @@ it('position buttons preserve input focus and report the destination', async () 
   expect(button('Use automatic helper placement')).toBeNull();
   expect(button('Place helper at top').getAttribute('aria-pressed')).toBe('true');
   expect(document.activeElement).toBe(input);
+});
+
+
+it.each(['composing', 'WebKit ending'])('leaves detail Escape and Tab to the IME (%s)', async phase => {
+  render();
+  await click('Modify autorun command');
+  const input = container.querySelector<HTMLInputElement>('[role="dialog"] input')!;
+  act(() => input.focus());
+  for (const key of ['Tab', 'Escape']) {
+    const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, isComposing: phase === 'composing' });
+    if (phase === 'WebKit ending') Object.defineProperty(event, 'keyCode', { value: 229 });
+    act(() => input.dispatchEvent(event));
+    expect(event.defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(input);
+    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(props.onClose).not.toHaveBeenCalled();
+  }
+  act(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
 });

@@ -11,7 +11,8 @@ import {
   resolveRepoLinks,
   securityAudiences,
 } from './generate-docs.js';
-import { createSlugger, parseMarkdown, visit } from './docs-parser.js';
+import { createSlugger, inlineToText, parseMarkdown, visit } from './docs-parser.js';
+import { CODING_AGENTS } from '../../lib/src/lib/coding-agents.ts';
 
 const data = await generateDocs();
 
@@ -29,9 +30,46 @@ function generatedHrefs() {
   collect(data.selfhost.blocks);
   collect(data.security.blocks);
   collect(data.skill.blocks);
+  collect(data.agents.blocks);
   for (const section of data.cli.intro) collect(section.blocks);
   return hrefs;
 }
+
+describe('compatible agents', () => {
+  it('publishes the guide while withholding the recovery contract and future', () => {
+    expect(data.agents.delta.map((rule) => rule.id)).toEqual([
+      'drop-document-title', 'drop-front-matter', 'drop-recovery-contract', 'drop-future',
+    ]);
+    expect(data.agents.source).toBe('docs/compatible-agents.md');
+    expect(data.agents.headings.map((heading) => heading.text)).toEqual([
+      'Supported agents', 'How recovery and watching work', 'Conversation recovery',
+      'Watching for attention', 'Adding an agent', 'Add the definition and fixture',
+      'Verify the integration',
+    ]);
+    expect(data.agents.blocks.some((block) => block.type === 'blockquote')).toBe(false);
+    const body = JSON.stringify(data.agents.blocks);
+    expect(body).not.toContain('Must use the shared');
+    expect(body).not.toContain('If automatic agent startup becomes disruptive');
+  });
+
+  it('sends the contributor link to the withheld contract on GitHub', () => {
+    expect(data.agents.withheldLinks).toEqual([{
+      from: '#recovery-contract-maintainers',
+      to: `${REPO_BLOB_BASE}/docs/compatible-agents.md#recovery-contract-maintainers`,
+    }]);
+    expect(generatedHrefs()).toContain(data.agents.withheldLinks[0].to);
+  });
+
+  it('keeps the supported-agent table aligned with executable and resume definitions', () => {
+    const table = data.agents.blocks.find((block) => block.type === 'table');
+    expect(table.header.map(inlineToText)).toEqual(['Agent', 'Command', 'Resume command', 'Watch by default']);
+    expect(table.rows.map((row) => row.map(inlineToText))).toEqual(
+      CODING_AGENTS.flatMap((agent) => agent.commands.map((command) => [
+        agent.name, command, `${command} ${agent.resume} <id>`, agent.watchByDefault ? 'Yes' : 'No',
+      ])),
+    );
+  });
+});
 
 describe('product guide', () => {
   it('drops exactly the document title and records the delta', () => {

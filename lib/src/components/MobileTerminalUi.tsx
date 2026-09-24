@@ -38,7 +38,7 @@ import {
   type MobileGestureTrackingState,
 } from '../lib/mobile-gesture-menu';
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
-import { isEditableTarget } from '../lib/dom';
+import { isComposingKey, isEditableTarget } from '../lib/dom';
 import { TouchUiContext } from './touch-ui-context';
 import { AlertRingInset, alertRingRow, useAlertRingBurst } from './alert-ring';
 import type { AlertEpisode } from '../lib/alert-episode';
@@ -975,9 +975,8 @@ export function MobileTerminalUi({
         inputMode="text"
         enterKeyHint="enter"
         onKeyDown={(event) => {
-          // IME navigation and confirmation belong to the composition. Safari
-          // can clear isComposing before its final keydown but still reports 229.
-          if (composingRef.current || event.nativeEvent.isComposing || event.keyCode === 229) return;
+          // IME navigation and confirmation belong to the composition.
+          if (composingRef.current || isComposingKey(event.nativeEvent)) return;
           const sequence = keyDownSequence(event);
           if (!sequence) return;
           event.preventDefault();

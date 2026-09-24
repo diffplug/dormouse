@@ -110,7 +110,7 @@ describe('stripTerminalControls', () => {
     // read as text — welded straight onto a greedy id capture.
     expect(stripTerminalControls('claude --resume aaa\x1b[38;5')).toBe('claude --resume aaa');
     expect(stripTerminalControls('claude --resume aaa\x1b[', { boundaries: true })).toBe(
-      'claude --resume aaa\n',
+      'claude --resume aaa',
     );
   });
 
@@ -145,6 +145,10 @@ describe('stripTerminalControls', () => {
   });
 
   describe('boundaries', () => {
+    it.each(['\x1b', '\x1b[38;5', '\x1b('])('never invents a boundary for an unfinished control %j', (tail) => {
+      expect(stripTerminalControls(`word${tail}`, { boundaries: true })).toBe('word');
+    });
+
     it('seams non-SGR CSI and backspace but not SGR or charset designators', () => {
       expect(stripTerminalControls('building...\x1b[1;1H➜  ~ ', { boundaries: true })).toBe(
         'building...\n➜  ~ ',

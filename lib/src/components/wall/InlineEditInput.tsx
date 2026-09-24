@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
+import { isComposingKey } from '../../lib/dom';
 
 interface InlineEditInputProps {
   /** Seed value, read once at mount. Later changes are ignored — the field
@@ -66,6 +67,8 @@ export function InlineEditInput({
       ref={selectOnMount}
       onChange={(e) => { touchedRef.current = true; setDraft(e.target.value); }}
       onKeyDown={(e) => {
+        e.stopPropagation();
+        if (isComposingKey(e.nativeEvent)) return;
         if (e.key === 'Enter') {
           settledRef.current = true;
           submit(e.currentTarget);
@@ -73,7 +76,6 @@ export function InlineEditInput({
           settledRef.current = true;
           onCancel();
         }
-        e.stopPropagation();
       }}
       onBlur={(e) => {
         if (settledRef.current) return;

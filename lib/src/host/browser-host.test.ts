@@ -1,7 +1,8 @@
 // @vitest-environment node
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createBrowserHost } from './browser-host';
-import { fakeProvider, openViewer } from './browser-host-test-utils';
+import { fakeProvider, openViewer, syncStates } from './browser-host-test-utils';
+import { SYNC_SETTLE_MS } from './browser-sync';
 
 const flush = async () => { for (let i = 0; i < 10; i++) await new Promise((resolve) => setImmediate(resolve)); };
 
@@ -339,5 +340,229 @@ describe('createBrowserHost', () => {
     const unused = vi.fn(() => fake.provider);
     await createBrowserHost({ writeClipboardText: vi.fn(), providers: { playwright: unused } }).close();
     expect(unused).not.toHaveBeenCalled();
+  });
+});
+
+describe('sync-to-pane', () => {
+  const s1 = { provider: 'agent-browser', binding: { session: 's1' } } as const;
+  const hosts: ReturnType<typeof createBrowserHost>[] = [];
+  afterEach(async () => { await Promise.all(hosts.splice(0).map((host) => host.close())); });
+  const settled = () => new Promise((resolve) => setTimeout(resolve, SYNC_SETTLE_MS + 100));
+
+  /** A pane's viewer socket on browser `s1`, streaming at 4321. */
+  async function paneOn({ headed = false } = {}) {
+    const fake = fakeProvider();
+    const host = createBrowserHost({ writeClipboardText: vi.fn(), providers: { 'agent-browser': () => fake.provider } });
+    hosts.push(host);
+    const viewer = await openViewer((await host.request({ ...s1, op: 'view', stream: 4321, ...(headed ? { headed } : {}) })).url!);
+    await vi.waitFor(() => expect(fake.views).toHaveLength(1));
+    return {
+      fake,
+      host,
+      viewer,
+      /** The provider's word on the browser's viewport, taken at `takenAt`. */
+      seen: (width: number, height: number, takenAt = performance.now()) => fake.views[0].sink.viewport({ width, height }, takenAt),
+      /** The pane's size, once the host has answered it. */
+      async size(width: number, height: number, engagement = 'e1') {
+        const answered = syncStates(viewer).length;
+        viewer.send({ type: 'sync', width, height, dpr: 2, engagement });
+        await vi.waitFor(() => expect(syncStates(viewer).length).toBeGreaterThan(answered));
+      },
+      writes: () => fake.calls.filter((call) => call.startsWith('viewport ') || call.startsWith('device ')),
+      state: () => syncStates(viewer).at(-1),
+    };
+  }
+
+  it('writes one size at a time, and a drag coalesces to the last size asked for meanwhile', async () => {
+    const pane = await paneOn();
+    pane.fake.gate('viewport s1 800x600@2');
+    await pane.size(800, 600);
+    for (let width = 810; width <= 900; width += 10) await pane.size(width, 600);
+    expect(pane.writes()).toEqual(['viewport s1 800x600@2']);
+    expect(pane.state()).toBe('applying');
+    pane.fake.release('viewport s1 800x600@2');
+    await vi.waitFor(() => expect(pane.writes()).toEqual(['viewport s1 800x600@2', 'viewport s1 900x600@2']));
+    await flush();
+    pane.seen(900, 600);
+    await vi.waitFor(() => expect(pane.state()).toBe('synced'));
+    // A size it holds is not written again.
+    await pane.size(900, 600);
+    expect(pane.writes()).toHaveLength(2);
+  });
+
+  it('judges a write only by a viewport taken after it landed, never by one begun before', async () => {
+    const pane = await paneOn();
+    await pane.size(800, 600);
+    await vi.waitFor(() => expect(pane.writes()).toHaveLength(1));
+    await flush();
+    pane.seen(800, 600);
+    await vi.waitFor(() => expect(pane.state()).toBe('synced'));
+
+    // A poll begins measuring while the drag's next size is written, and
+    // answers the size before it only once that write has landed.
+    pane.fake.gate('viewport s1 900x600@2');
+    await pane.size(900, 600);
+    const begun = performance.now();
+    pane.seen(800, 600, begun);
+    pane.fake.release('viewport s1 900x600@2');
+    await flush();
+    pane.seen(800, 600, begun);
+    await settled();
+    expect(pane.state()).toBe('applying');
+    pane.seen(900, 600);
+    await vi.waitFor(() => expect(pane.state()).toBe('synced'));
+  });
+
+  it('stops syncing a browser another writer sized after its write settled, until the pane engages again', async () => {
+    const pane = await paneOn();
+    await pane.size(800, 600);
+    await vi.waitFor(() => expect(pane.writes()).toHaveLength(1));
+    await flush();
+    // A frame in flight as the write landed is replaced within the settle time.
+    pane.seen(1280, 720);
+    pane.seen(800, 600);
+    await settled();
+    expect(pane.state()).toBe('synced');
+
+    // An agent's `set viewport`.
+    pane.seen(1024, 768);
+    await vi.waitFor(() => expect(pane.state()).toBe('off'));
+    // The pane's next size writes nothing; choosing Resize with pane again
+    // reclaims the viewport, at a size it wrote before too.
+    await pane.size(820, 600);
+    expect(pane.state()).toBe('off');
+    expect(pane.writes()).toHaveLength(1);
+    await pane.size(800, 600, 'e2');
+    await vi.waitFor(() => expect(pane.writes()).toEqual(['viewport s1 800x600@2', 'viewport s1 800x600@2']));
+  });
+
+  it('sizes a page shown anew, never reading its own size as another writer', async () => {
+    const pane = await paneOn();
+    const tabs = (active: string) => pane.fake.views[0].sink.state({ type: 'tabs', tabs: ['t1', 't2'].map((tabId) => ({ tabId, title: tabId, url: `http://localhost/${tabId}`, active: tabId === active })) });
+    tabs('t1');
+    await pane.size(800, 600);
+    await vi.waitFor(() => expect(pane.writes()).toHaveLength(1));
+    await flush();
+    pane.seen(800, 600);
+
+    // An agent opens a tab, which comes up at its own size.
+    tabs('t2');
+    pane.seen(1280, 720);
+    await vi.waitFor(() => expect(pane.writes()).toEqual(['viewport s1 800x600@2', 'viewport s1 800x600@2']));
+    await flush();
+    pane.seen(800, 600);
+    await settled();
+    expect(pane.state()).toBe('synced');
+  });
+
+  it('ends sync for a Fixed resolution, which lands after the write in flight', async () => {
+    const pane = await paneOn();
+    pane.fake.gate('viewport s1 800x600@2');
+    await pane.size(800, 600);
+    const fixed = pane.host.request({ ...s1, op: 'device', name: 'iPhone 15' });
+    await vi.waitFor(() => expect(pane.state()).toBe('off'));
+    expect(pane.writes()).toEqual(['viewport s1 800x600@2']);
+    pane.fake.release('viewport s1 800x600@2');
+    expect((await fixed).ok).toBe(true);
+    expect(pane.writes()).toEqual(['viewport s1 800x600@2', 'device s1 iPhone 15']);
+    // A pane size still on its way is not a new engagement.
+    await pane.size(820, 600);
+    expect(pane.writes()).toHaveLength(2);
+  });
+
+  it.each([
+    { op: 'viewport', width: 1024, height: 768, dpr: 1 },
+    { op: 'device', name: 'iPhone 15' },
+  ] as const)('cancels unseen sync intents when Fixed $op arrives first', async (op) => {
+    const pane = await paneOn();
+    expect((await pane.host.request({ ...s1, ...op, endsSync: 'e1' })).ok).toBe(true);
+    // Sent before Fixed on the socket, but delivered after its host request.
+    await pane.size(800, 600, 'e1');
+    expect(pane.state()).toBe('off');
+    expect(pane.writes()).toHaveLength(1);
+    // A fresh choice can sync; replaying the cancelled engagement cannot
+    // overwrite it or resurrect the cancelled pane size.
+    await pane.size(900, 600, 'e2');
+    await vi.waitFor(() => expect(pane.writes()).toHaveLength(2));
+    await pane.size(800, 600, 'e1');
+    expect(pane.writes()).toHaveLength(2);
+    await flush();
+    pane.seen(900, 600);
+    await vi.waitFor(() => expect(pane.state()).toBe('synced'));
+    expect(pane.viewer.states.at(-1)).toMatchObject({ engagement: 'e2' });
+  });
+
+  it('rejects malformed ended engagements before writing a viewport or device', async () => {
+    const pane = await paneOn();
+    for (const endsSync of ['', 'has space', 'x'.repeat(65), 7]) {
+      for (const op of [{ op: 'viewport', width: 800, height: 600, dpr: 1 }, { op: 'device', name: 'iPhone 15' }]) {
+        expect(await pane.host.request({ ...s1, ...op, endsSync })).toEqual({ ok: false, error: 'invalid sync engagement' });
+      }
+    }
+    expect(pane.writes()).toEqual([]);
+  });
+
+  it('finishes a Fixed write before a newer sync engagement writes the pane size', async () => {
+    const pane = await paneOn();
+    pane.fake.gate('viewport s1 1024x768@1');
+    const fixed = pane.host.request({ ...s1, op: 'viewport', width: 1024, height: 768, dpr: 1 });
+    await vi.waitFor(() => expect(pane.writes()).toEqual(['viewport s1 1024x768@1']));
+    await pane.size(800, 600);
+    expect(pane.writes()).toEqual(['viewport s1 1024x768@1']);
+    pane.fake.release('viewport s1 1024x768@1');
+    expect((await fixed).ok).toBe(true);
+    await vi.waitFor(() => expect(pane.writes()).toEqual(['viewport s1 1024x768@1', 'viewport s1 800x600@2']));
+    await flush();
+    pane.seen(800, 600);
+    await settled();
+    expect(pane.state()).toBe('synced');
+  });
+
+  it('drops a Fixed resolution that waited on a write once a launch replaces the browser', async () => {
+    const pane = await paneOn();
+    pane.fake.gate('viewport s1 800x600@2');
+    await pane.size(800, 600);
+    const fixed = pane.host.request({ ...s1, op: 'viewport', width: 1024, height: 768, dpr: 1 });
+    await flush();
+    pane.fake.gate('stop s1');
+    const relaunch = pane.host.request({ ...s1, op: 'launch', url: 'http://localhost:5173/', headed: true });
+    await vi.waitFor(() => expect(pane.fake.calls).toContain('stop s1'));
+    pane.fake.release('viewport s1 800x600@2');
+    expect(await fixed).toEqual({ ok: false, error: 'the browser is being relaunched or closed' });
+    pane.fake.release('stop s1');
+    expect((await relaunch).ok).toBe(true);
+    expect(pane.writes()).toEqual(['viewport s1 800x600@2']);
+  });
+
+  it('drops a Fixed resolution that waited on a write through a whole relaunch', async () => {
+    const pane = await paneOn();
+    pane.fake.gate('viewport s1 800x600@2');
+    await pane.size(800, 600);
+    const fixed = pane.host.request({ ...s1, op: 'device', name: 'iPhone 15' });
+    await flush();
+    expect((await pane.host.request({ ...s1, op: 'launch', url: 'http://localhost:5173/' })).ok).toBe(true);
+    pane.fake.release('viewport s1 800x600@2');
+    expect(await fixed).toEqual({ ok: false, error: 'the browser is being relaunched or closed' });
+    expect(pane.writes()).toEqual(['viewport s1 800x600@2']);
+  });
+
+  it('drops a Fixed resolution that waited on a write through shutdown', async () => {
+    const pane = await paneOn();
+    pane.fake.gate('viewport s1 800x600@2');
+    await pane.size(800, 600);
+    const fixed = pane.host.request({ ...s1, op: 'viewport', width: 1024, height: 768, dpr: 1 });
+    await flush();
+    await pane.host.close();
+    pane.fake.release('viewport s1 800x600@2');
+    expect(await fixed).toEqual({ ok: false, error: 'the browser host is shutting down' });
+    expect(pane.writes()).toEqual(['viewport s1 800x600@2']);
+  });
+
+  it('never sizes a popped-out window', async () => {
+    const pane = await paneOn({ headed: true });
+    pane.viewer.send({ type: 'sync', width: 800, height: 600, dpr: 2, engagement: 'e1' });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(pane.writes()).toEqual([]);
+    expect(pane.state()).toBeUndefined();
   });
 });

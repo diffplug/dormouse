@@ -122,8 +122,8 @@ export interface BrowserHandle {
   navigate(url: string): Promise<BrowserResult>;
   history(dir: 'back' | 'forward' | 'reload'): Promise<BrowserResult>;
   tab(action: 'select' | 'close', tabId: string): Promise<BrowserResult>;
-  viewport(width: number, height: number, dpr: number): Promise<BrowserResult>;
-  device(name: string): Promise<BrowserResult>;
+  viewport(width: number, height: number, dpr: number, endsSync?: string): Promise<BrowserResult>;
+  device(name: string, endsSync?: string): Promise<BrowserResult>;
   /** `cancels`: the closing Surface's own requests still unanswered. */
   close(cancels?: readonly string[]): Promise<BrowserResult>;
 }
@@ -164,8 +164,8 @@ export function browserHandle(provider: BrowserAutomationProvider, binding: Omit
     navigate: (url) => send({ op: 'navigate', url }),
     history: (dir) => send({ op: 'history', dir }),
     tab: (action, tabId) => send({ op: 'tab', action, tabId }),
-    viewport: (width, height, dpr) => send({ op: 'viewport', width, height, dpr }),
-    device: (name) => send({ op: 'device', name }),
+    viewport: (width, height, dpr, endsSync) => send({ op: 'viewport', width, height, dpr, ...(endsSync !== undefined ? { endsSync } : {}) }),
+    device: (name, endsSync) => send({ op: 'device', name, ...(endsSync !== undefined ? { endsSync } : {}) }),
     close: (cancels = []) => send({ op: 'close', ...(cancels.length ? { cancels: [...cancels] } : {}) }),
   };
 }

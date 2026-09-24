@@ -5,7 +5,7 @@
 import { WebSocket } from 'ws';
 import type { BrowserProvider, ProviderBinding } from './browser-host';
 import type { Upstream, ViewerSink } from './browser-viewer';
-import { decodeViewerFrame, type ViewerFrame, type ViewerInput, type ViewerState } from '../lib/platform/browser-automation';
+import { decodeViewerFrame, type ViewerBrowserInput, type ViewerFrame, type ViewerState, type ViewerSyncState } from '../lib/platform/browser-automation';
 
 /** One subscription the host made through the fake provider's `view`. */
 export interface FakeView {
@@ -13,12 +13,13 @@ export interface FakeView {
   stream: number;
   headed: boolean;
   sink: ViewerSink;
-  inputs: Exclude<ViewerInput, { type: 'repaint' }>[];
+  inputs: ViewerBrowserInput[];
   closed: boolean;
 }
 
 /** A provider that records every primitive the host calls, in order; `stop`,
- *  `close`, `open` and `screenshot` can be held open by a test. */
+ *  `close`, `open`, `screenshot` and each viewport or device write can be
+ *  held open by a test. */
 export function fakeProvider() {
   const calls: string[] = [];
   const held = new Map<string, () => void>();
@@ -47,7 +48,10 @@ export function fakeProvider() {
     listTabs: async () => tabs,
     closeTab: async (b, tabId) => { calls.push(`tab ${b.session} close ${tabId}`); },
     act: async (b, act) => {
-      calls.push(`${act.op} ${b.session}${act.op === 'tab' ? ` ${act.action} ${act.tabId}` : ''}`);
+      const args = act.op === 'tab' ? ` ${act.action} ${act.tabId}`
+        : act.op === 'viewport' ? ` ${act.width}x${act.height}@${act.dpr}`
+        : act.op === 'device' ? ` ${act.name}` : '';
+      await step(`${act.op} ${b.session}${args}`);
       return { ok: true };
     },
     evaluate: async () => '',
@@ -90,6 +94,11 @@ export interface TestViewer {
   closed: Promise<number>;
   /** The reason the host closed it with, once it has. */
   reason?: string;
+}
+
+/** What the host reported of its sync-to-pane to `viewer`, in order. */
+export function syncStates(viewer: TestViewer): ViewerSyncState[] {
+  return viewer.states.flatMap((state) => (state.type === 'sync' ? [state.state] : []));
 }
 
 /** Connect to a viewer socket URL as the webview does, once it is open. */

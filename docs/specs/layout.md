@@ -305,6 +305,7 @@ Wall starts in `command` mode. Embedders may pass `initialMode="passthrough"` wh
 - Detected in a capture-phase `keydown` listener on `e.key === 'Meta'` (or `'Shift'`) plus `e.location`, so it fires even while xterm holds DOM focus. **Anything but `location === 1` counts as the right-hand key.**
 - **The Meta and Shift tracks are independent** — Left Cmd then Right Shift does not trigger — and **both are always live** (rationale).
 - **A bare Meta/Shift press outside the terminal context is always consumed by this detector**, so no later handler mistakes it for a command key; a key targeted inside the context never reaches it ([Keyboard shortcuts](#keyboard-shortcuts-command-mode)).
+- **Must cancel a pending in-Wall mode-exit gesture when any non-Meta/Shift key intervenes.** Pinned by `cancels an interrupted %s leader without leaving passthrough` in `lib/src/components/Wall.test.tsx`.
 - A zoomed focused pane starts unzoom immediately when keyboard focus returns to command mode.
 
 ## Keyboard shortcuts (command mode)
@@ -324,6 +325,10 @@ That order is load-bearing twice: a rename input suppresses the pane shortcuts b
 **Must defer Workspace close and move confirmations while an inline Workspace rename editor is open**, leaving its keys to the input; the pending gate appears after rename ends. Pinned by `defers the %s gate while another Workspace is being renamed` in `lib/src/components/WorkspaceStrip.test.tsx`.
 
 **Chrome outside every Wall takes the chrome keyboard lease instead**: the Workspace strip's rename editor and close confirmation live in the app bar, where `stopPropagation` cannot reach a capture-phase window listener. **The Workspace branch is inert on a Wall with no Workspace id**, which is what leaves those keys unbound on a bare Wall. Source of truth: `acquireChromeKeyboardLease` in `lib/src/components/wall/chrome-keyboard-lease.ts`; `handleWorkspaceShortcuts` in `lib/src/components/wall/keyboard/handle-workspace-shortcuts.ts`.
+
+**Must leave Escape and Tab to IME composition in modal/popover focus traps and terminal-context dialogs, and Enter/Escape in shared inline editors**, including WebKit's composition-ending key (`isComposing` false, `keyCode` 229).
+
+Source of truth: `isComposingKey` in `lib/src/lib/dom.ts`; `usePopoverFocusTrap` in `lib/src/components/use-popover-focus-trap.ts`; `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`; `useModalFocusTrap` in `lib/src/components/design.tsx`; `InlineEditInput` in `lib/src/components/wall/InlineEditInput.tsx`. Tests: `lib/src/components/use-popover-focus-trap.test.tsx`; `lib/src/components/wall/TerminalContext.test.tsx`; `lib/src/components/ModalOverlay.test.tsx`; `lib/src/components/wall/InlineEditInput.test.tsx`.
 
 ### Split cwd inheritance
 
@@ -472,7 +477,7 @@ Source of truth: `lib/src/lib/terminal-store.ts` (registry maps and pending shel
 
 ### Agent resume on cold restore
 
-On cold restore, a terminal pane with a host-captured recovery invocation runs it automatically; `docs/specs/transport.md` owns the restore-only gate, validation, and prompt-ready typing. Layout writes one dim `⟲ resuming agent session: <command>` line **to xterm, never the PTY**, to mark the discontinuity — a passive notice with no dismiss or lifecycle. Source of truth: `restoreTerminal` in `lib/src/lib/terminal-lifecycle.ts`, called from `lib/src/lib/session-restore.ts`.
+On cold restore, a terminal pane with a host-captured recovery invocation runs it automatically; `docs/compatible-agents.md` → "Cold restore" owns the restore-only gate, validation, and prompt-ready typing. Layout writes one dim `⟲ resuming agent session: <command>` line **to xterm, never the PTY**, to mark the discontinuity — a passive notice with no dismiss or lifecycle. Source of truth: `restoreTerminal` in `lib/src/lib/terminal-lifecycle.ts`, called from `lib/src/lib/session-restore.ts`.
 
 ### Renderer
 
@@ -508,7 +513,7 @@ Startup recovery is priority-based:
 **A Window plans once per Workspace off one live-PTY list**: `collectLivePtys` runs the single PTY-list round trip for the whole webview, and each Workspace takes the slice its own saved panes name, so one host answer restores N Workspaces (`docs/specs/standalone.md` → Persistence). A single-Wall host reaches the same behavior through `resumeOrRestore`.
 
 1. **Resume** (webview recreated, retained Live or Exited PTYs): request PTY list + replay data from the platform, `resumeTerminal()` each (500ms timeout). **Saved pane and door titles are seeded back via `setTerminalUserTitle()`** (`docs/specs/transport.md`), so persisted placeholder labels never replay as user pins. If the saved session covers every retained PTY, restore the saved Lath layout when its leaf set matches and reattach saved minimized items as doors. **Never fall through to cold restore just because the visible `paneIds` list is empty** — a wall whose retained sessions are all minimized is still a resume.
-2. **Restore** (app restart, cold start): the Wall's `seed` hydrates from the restored Lath layout, else falls to (3); `restoreTerminal()` per pane with its saved cwd and title, plus the single-use agent resume invocation the host captured (`docs/specs/transport.md` → "Consuming it") and the pane's persisted TODO, which rides the spawn (`docs/specs/alert.md` → Public State). Browser surfaces are rebuilt from their persisted params instead.
+2. **Restore** (app restart, cold start): the Wall's `seed` hydrates from the restored Lath layout, else falls to (3); `restoreTerminal()` per pane with its saved cwd and title, plus the single-use agent resume invocation the host captured (`docs/compatible-agents.md` → "Cold restore") and the pane's persisted TODO, which rides the spawn (`docs/specs/alert.md` → Public State). Browser surfaces are rebuilt from their persisted params instead.
 3. **Fallback/manual pane creation**: with no saved layout safely applicable, add panes as splits from the previous pane.
 4. **Empty state**: one new pane.
 

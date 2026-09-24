@@ -5,8 +5,7 @@
  * over `vscode-ext/src/pty-manager.ts`, the Tauri sidecar over `pty-core.js`.
  * Both reach it through the same four primitives — interrupt, a monotonic
  * received count, the output since a mark, and the live id set — because that is
- * all the detection ever needed (docs/specs/vscode.md -> "Capturing agent
- * recovery", docs/specs/standalone.md -> "Agent recovery").
+ * all the detection ever needed (docs/compatible-agents.md -> "Capture").
  *
  * The gesture is always `^C` written *into* the pty, never a signal: the tty
  * line discipline delivers the SIGINT to the foreground process group, so the
@@ -19,19 +18,18 @@
 import { detectResumeCommand } from '../lib/resume-patterns';
 import { stripTerminalControls } from '../lib/terminal-controls';
 
-// Claude's explicit request permits an immediate second press. Other panes
-// without a recovery hint must pass both fallback clocks below before retrying.
-//
-// Keying on an English UI string is deliberate, not an oversight: claude could
-// reword it, and that failure is visible and costs one shutdown's claude
-// recovery, where a mistimed second press destroys codex's hint every time.
-const ASKS_FOR_SECOND_PRESS = /Press Ctrl-C again/i;
+// An explicit ask (Claude's `Press Ctrl-C again`, Cursor's `Press Ctrl+C
+// again`) permits an immediate second press. Other panes without a recovery
+// hint must pass both fallback clocks below before retrying. Keying on an
+// English UI string is deliberate: docs/compatible-agents.rationale.md.
+const ASKS_FOR_SECOND_PRESS = /Press Ctrl[-+]C again/i;
 
 // When to press a silent pane again without having been asked.
 //
-// Both agents' response to `^C` turns out to be state-dependent. Observed in a
-// real pane: codex answered the first press by repainting its TUI (+256 bytes of
-// cursor positioning, ending on its footer hint) and simply carried on running.
+// Claude's and codex's response to `^C` turns out to be state-dependent.
+// Observed in a real pane: codex answered the first press by repainting its TUI
+// (+256 bytes of cursor positioning, ending on its footer hint) and simply
+// carried on running.
 // It never printed a hint and never asked for another press, so an ask-only gate
 // left it stuck there for the whole poll.
 export const BLIND_SECOND_PRESS_MS = 600;
