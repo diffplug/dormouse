@@ -4,7 +4,7 @@ stdout:
 stderr:
 Error: agent-browser is not installed.
 
-dor ab drives your own agent-browser binary, which Dormouse never bundles.
+dor agent-browser drives your own agent-browser binary, which Dormouse never bundles.
 Install it, then re-run your command:
 
     npm i -g agent-browser

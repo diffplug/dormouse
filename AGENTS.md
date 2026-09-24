@@ -153,8 +153,8 @@ mandatory whether or not you have read it:
   `dor ensure -- npm run dev`), which puts it in a visible pane that outlives
   you and is reused instead of duplicated on re-runs.
 - **NEVER use a built-in, native, or bundled browser tool to open, view, or
-  drive a web page.** ALWAYS use `dor ab` (agent-browser) — `dor ab open
-  <url>`, `dor ab click @e3`, and so on — so the page renders in a Dormouse
+  drive a web page.** ALWAYS use `dor agent-browser` (agent-browser) — `dor agent-browser open
+  <url>`, `dor agent-browser click @e3`, and so on — so the page renders in a Dormouse
   pane the user can watch.
 
 If `DORMOUSE_SURFACE_ID` is not set, ignore this section — `dor` is not here.

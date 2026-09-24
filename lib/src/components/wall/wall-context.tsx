@@ -65,7 +65,7 @@ export interface WallActions {
    *  (docs/specs/dor-browser.md → "Display Modal And Render Swaps"). agent-browser ↔ iframe is a
    *  surface-type replacement; screencast ↔ popout is handled inside the
    *  agent-browser panel and does not route here. */
-  onSwapRenderMode: (id: string, mode: RenderMode) => void;
+  onSwapRenderMode: (id: string, mode: RenderMode, viewport?: import('dor-lib-common/browser-viewports').BrowserViewportSetting) => void;
   /** Open a URL as a new browser pane, split next to `id` — an iframe, or an
    *  agent-browser screencast for a page the iframe cannot show. The iframe
    *  renderer is single-frame, so a page's new-tab request (target=_blank /

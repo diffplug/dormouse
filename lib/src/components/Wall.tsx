@@ -1238,7 +1238,7 @@ export function Wall({
    *  enters passthrough in place; a minimized one reattaches on the same terms
    *  as clicking its Door chip, except that a reveal moves focus without
    *  acknowledging — `dor` reveals too, and an agent showing a pane is not the
-   *  human answering it. This is deliberately unlike `dor ab`, whose
+   *  human answering it. This is deliberately unlike `dor agent-browser`, whose
    *  agent-initiated control path remains focus-neutral.
    *
    *  Returns whether the Surface ended up visible, so `dor` can report the
@@ -1468,7 +1468,7 @@ export function Wall({
     params: Record<string, unknown>;
     reference: DorSurface;
     title: string;
-    // `dor iframe` / `dor ab` pass this to open the surface in the background
+    // `dor iframe` / `dor agent-browser` pass this to open the surface in the background
     // without moving focus off the caller, matching `dor ensure`.
     focusNeutral?: boolean;
     preserveSource?: boolean;
@@ -1734,6 +1734,7 @@ export function Wall({
           toolArgv: typeof resolved.run === 'string' ? undefined : [...resolved.run],
           ...(resolved.scope ? { toolScope: resolved.scope } : {}),
           toolRender: resolved.render,
+          browserViewport: resolved.viewport,
           toolPort: resolved.port,
           ...(key ? { toolKey: key } : {}),
         });
@@ -1986,7 +1987,7 @@ export function Wall({
     onCancelRename: () => {
       setRenamingPaneId(null);
     },
-    onSwapRenderMode: (id, mode) => {
+    onSwapRenderMode: (id, mode, viewport) => {
       const visible = nav.hasPane(id);
       if (!visible) return;
       const params = nav.paneParams(id);
@@ -2012,11 +2013,12 @@ export function Wall({
       if (isToolParams(params)) {
         if (mode === currentRenderMode || !isToolRender(mode)) return;
         const url = browserUrlFromParams(params);
-        if (!url || (mode === 'ab-screencast' && !hostSupportsBrowser('agent-browser'))) return;
+        const toolProvider = parseRenderMode(mode).provider;
+        if (!url || (toolProvider && !hostSupportsBrowser(toolProvider))) return;
         closeBrowserSurface(id, params);
         // The Tool's browser launches itself, in the Tool's own session.
-        lath.store.updateParams(id, mode === 'ab-screencast'
-          ? { toolRender: mode, syncEngaged: true, ...toolBrowserLaunchParams(id, params ?? {}, url) }
+        lath.store.updateParams(id, toolProvider
+          ? { toolRender: mode, ...toolBrowserLaunchParams(id, params ?? {}, url, toolProvider), syncEngaged: viewport?.mode === 'pane-sync', ...(viewport ? { browserViewport: viewport } : {}) }
           : { toolRender: mode, renderMode: mode, url, session: undefined, launchSession: undefined, launchFallback: undefined, syncEngaged: false });
         return;
       }
@@ -2051,7 +2053,7 @@ export function Wall({
           || (browserUrlFromParams(params) ?? '');
         // The swap is the second sink params.url reaches: IframePanel refuses a
         // non-http(s) source but still holds it, and this path would hand it to
-        // a real Chromium tab — which `dor ab open` refuses at the CLI
+        // a real Chromium tab — which `dor agent-browser open` refuses at the CLI
         // (`normalizeConcreteOpenUrl`). Same guard, so both sinks agree.
         const cwd = typeof params?.cwd === 'string' ? params.cwd : undefined;
         // `browserSurfaceUrl('')` is already null (normalizeNavUrl returns ''
@@ -2079,7 +2081,7 @@ export function Wall({
           ...(previousSession ? { launchSession: previousSession } : {}),
         };
         replaceSurface(id, {
-          params: { surfaceType: 'browser', renderMode: mode, url, cwd, syncEngaged: true, launchFallback: { restore } satisfies LaunchFallback },
+          params: { surfaceType: 'browser', renderMode: mode, url, cwd, syncEngaged: viewport?.mode === 'pane-sync', ...(viewport ? { browserViewport: viewport } : {}), launchFallback: { restore } satisfies LaunchFallback },
           title: hostPathDisplay(url, true),
         });
       }
@@ -2095,7 +2097,7 @@ export function Wall({
         minimized: false,
         // A launch that fails takes its pane with it.
         params: agentBrowser
-          ? { surfaceType: 'browser', renderMode: 'ab-screencast', url, syncEngaged: true, launchFallback: 'close' satisfies LaunchFallback }
+          ? { surfaceType: 'browser', renderMode: 'agent-browser-screencast', url, syncEngaged: false, launchFallback: 'close' satisfies LaunchFallback }
           : { surfaceType: 'browser', renderMode: 'iframe', url },
         reference,
         title: hostPathDisplay(url, true),
@@ -2152,7 +2154,7 @@ export function Wall({
       if (provider && !hostSupportsBrowser(provider)) throw new Error(providerUnavailable(provider));
       const created = createContentSurface({ minimized: false, reference, preserveSource: true,
         params: {
-          surfaceType: 'browser', renderMode: mode, url: entry.url, cwd, syncEngaged: true, contextPortKey: key,
+          surfaceType: 'browser', renderMode: mode, url: entry.url, cwd, syncEngaged: false, contextPortKey: key,
           // The pane launches its own browser; a failure takes it along.
           ...(provider ? { launchFallback: 'close' satisfies LaunchFallback } : {}),
         },

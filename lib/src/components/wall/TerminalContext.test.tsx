@@ -73,12 +73,12 @@ it('uses labeled title, directory and port actions without a redundant heading',
   for (const label of ['Explain this title', 'Copy absolute path', 'Open in Finder', 'Open in system browser', 'Open in iframe embed', 'Open in agent-browser screencast', 'Open in agent-browser popout']) expect(button(label)).not.toBeNull();
   expect(container.querySelector('select')).toBeNull();
 });
-it.each(['system', 'iframe', 'ab-screencast', 'ab-popout'] as const)('dispatches the selected port to %s', async mode => {
+it.each(['system', 'iframe', 'agent-browser-screencast', 'agent-browser-popout'] as const)('dispatches the selected port to %s', async mode => {
   props.scan = { status: 'loaded', entries: [port(5173), port(6006), port(9229)] }; render();
   const select = container.querySelector('select')!;
   act(() => { select.value = '6006'; select.dispatchEvent(new Event('change', { bubbles: true })); });
   expect(select.parentElement?.textContent).toContain('3 ports');
-  const label = { system: 'Open in system browser', iframe: 'Open in iframe embed', 'ab-screencast': 'Open in agent-browser screencast', 'ab-popout': 'Open in agent-browser popout' }[mode];
+  const label = { system: 'Open in system browser', iframe: 'Open in iframe embed', 'agent-browser-screencast': 'Open in agent-browser screencast', 'agent-browser-popout': 'Open in agent-browser popout' }[mode];
   await click(label); expect(props.onPort).toHaveBeenCalledWith(port(6006), mode); expect(props.onClose).not.toHaveBeenCalled();
 });
 it.each(['scanning', 'failed', 'empty'] as const)('distinguishes %s ports', state => {
@@ -90,7 +90,7 @@ it('disables unsupported host capabilities with an explanation', () => {
   props.browserProviders = ['playwright']; props.canExplore = false; render();
   // Both of agent-browser's targets name the provider the host lacks.
   expect([...container.querySelectorAll<HTMLButtonElement>('button[aria-label="agent-browser unavailable on this host"]')].map(b => b.disabled)).toEqual([true, true]);
-  expect(button('Open in Playwright popout').disabled).toBe(false);
+  expect(button('Open in playwright popout').disabled).toBe(false);
   expect(button('Directory unavailable on this host').disabled).toBe(true);
 });
 it('opens title explanation as a disclosure', async () => {

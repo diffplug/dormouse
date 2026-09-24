@@ -11,6 +11,8 @@ import { BUILTIN_FILE_TOOL } from 'dor/file-viewer-format';
 import { isRecord } from '../lib/is-record';
 import { hasShellInputControls } from 'dor/commands/shell-quote';
 import { isToolRender, TOOL_RENDERS, type ToolRender } from '../lib/platform/tool-types';
+import type { BrowserViewportSelection } from 'dor-lib-common/browser-viewports';
+import { parseBrowserConfig, parseViewportSelection, type BrowserConfigLayer } from './browser-config';
 
 /** Where a tool file came from. `$PROJECT_ROOT` exists only for `repo`. */
 export type ToolScope = 'repo' | 'user';
@@ -24,6 +26,7 @@ export type ToolPortMode = 'announced' | 'auto';
 const TOOL_PORT_MODES: readonly ToolPortMode[] = ['announced', 'auto'];
 
 export interface ToolEntry {
+  readonly viewport?: BrowserViewportSelection;
   readonly name: string;
   /** Command typed into the spawned shell, exactly as `dor ensure` types one. */
   readonly run: string | readonly string[];
@@ -42,6 +45,7 @@ export interface ToolEntry {
 export interface OpenRule { readonly match: string; readonly tool: string }
 
 export interface ToolFile {
+  readonly browser?: BrowserConfigLayer;
   readonly open: readonly OpenRule[];
   readonly scope: ToolScope;
   /** Absolute directory holding the file. `$PROJECT_ROOT` for a repo scope. */
@@ -72,7 +76,7 @@ export function usesTarget(elements: readonly string[]): boolean {
 // field: silently dropping a dedupe directive the author wrote is the
 // destructive failure (two tools, one port), where failing to parse is loud.
 const KNOWN_PRESPAWN_FIELDS = new Set(['prespawn_dedupe']);
-const KNOWN_ENTRY_FIELDS = new Set(['run', 'render', 'port', 'prespawn_dedupe']);
+const KNOWN_ENTRY_FIELDS = new Set(['run', 'render', 'viewport', 'port', 'prespawn_dedupe']);
 
 /** Coerce one `prespawn_dedupe` value to its element list. A bare scalar is a
  *  one-element key, unambiguous because the field has exactly one value shape
@@ -127,6 +131,12 @@ export function parseToolFile(
     return { scope, dir, tools: new Map(), warnings: [], open: [] };
   }
   if (!isRecord(doc)) throw new ToolFileError(`${path}: expected a mapping at the top level`);
+  let browser: BrowserConfigLayer | undefined;
+  try {
+    if (doc.browser !== undefined) browser = parseBrowserConfig(doc.browser, `${path}: browser`);
+  } catch (error) {
+    throw new ToolFileError(error instanceof Error ? error.message : String(error));
+  }
 
   const toolsNode = doc.tools === undefined ? {} : doc.tools;
   if (!isRecord(toolsNode)) throw new ToolFileError(`${path}: 'tools' must be a mapping of name to entry`);
@@ -184,6 +194,13 @@ export function parseToolFile(
       throw new ToolFileError(`${where}: 'render' must be one of ${TOOL_RENDERS.join(', ')}`);
     }
     const render: ToolRender = rawRender ?? 'iframe';
+    let viewport: BrowserViewportSelection | undefined;
+    try {
+      if (rawEntry.viewport !== undefined) viewport = parseViewportSelection(rawEntry.viewport, `${where}.viewport`);
+      if (render === 'iframe' && viewport !== undefined && viewport !== 'pane-sync') throw new Error(`${where}: iframe Tools require viewport: pane-sync`);
+    } catch (error) {
+      throw new ToolFileError(error instanceof Error ? error.message : String(error));
+    }
 
     const rawPort = rawEntry.port;
     if (rawPort !== undefined && !(TOOL_PORT_MODES as readonly unknown[]).includes(rawPort)) {
@@ -191,7 +208,7 @@ export function parseToolFile(
     }
     const port = (rawPort as ToolPortMode | undefined) ?? 'announced';
 
-    tools.set(name, { name, run: typeof run === 'string' ? run.trim() : run, render, port, dedupeTemplate });
+    tools.set(name, { name, run: typeof run === 'string' ? run.trim() : run, render, port, dedupeTemplate, ...(viewport !== undefined ? { viewport } : {}) });
   }
 
   // Associations are user-only (`docs/specs/dor-tool.md` -> Opening local files).
@@ -199,7 +216,7 @@ export function parseToolFile(
     warnings.push(`${path}: project open rules are ignored; configure associations in the user file`);
   }
   const open = scope === 'repo' ? [] : parseOpenRules(doc.open, tools, path);
-  return { scope, dir, tools, warnings, open };
+  return { scope, dir, tools, warnings, open, ...(browser ? { browser } : {}) };
 }
 
 export interface SubstitutionContext {

@@ -239,7 +239,7 @@ export function IframePanel({ id, title, params }: PaneProps) {
   // other registration site is `agent-browser-surface-controller.ts`.
   const renderModes = useMemo(() => offeredRenderModes(isTool, null), [isTool]);
   const swapCapable = renderModes.some((mode) => mode !== 'iframe');
-  const agentBrowserCapable = renderModes.includes('ab-screencast');
+  const agentBrowserCapable = renderModes.includes('agent-browser-screencast');
   const screenActions = useMemo<ScreenActions>(() => ({
     engageSync() {},
     applyDevice() {},
@@ -249,11 +249,14 @@ export function IframePanel({ id, title, params }: PaneProps) {
     // automated browser. Wired only when the host can launch one — without it
     // the modal hides its Render section, but the chrome (URL/nav) still shows.
     setRenderMode: swapCapable
-      ? (mode) => { if (mode !== 'iframe' && renderModes.includes(mode)) actionsRef.current.onSwapRenderMode(id, mode); }
+      ? (mode, opts) => { if (mode !== 'iframe' && renderModes.includes(mode)) {
+        if (opts?.viewport) actionsRef.current.onSwapRenderMode(id, mode, opts.viewport);
+        else actionsRef.current.onSwapRenderMode(id, mode);
+      } }
       : undefined,
   }), [id, swapCapable, renderModes]);
   const setRenderMode = screenActions.setRenderMode;
-  const openInAgentBrowser = setRenderMode && agentBrowserCapable ? () => setRenderMode('ab-screencast') : undefined;
+  const openInAgentBrowser = setRenderMode && agentBrowserCapable ? () => setRenderMode('agent-browser-screencast') : undefined;
   const chromeActions = useMemo<ChromeActions>(() => ({
     navigate(next) { commitUrl(next); },
     back() { goToHistoryIndex(historyIndexRef.current - 1); },
@@ -519,7 +522,7 @@ function PanelMessage({ resolution, url, onOpenInAgentBrowser }: {
   // agent-browser is the remedy only where the URL itself is fine and the proxy
   // can't front it. It refuses a non-http(s) target too (`normalizeConcreteOpenUrl`),
   // so pointing a refused scheme at it would be a dead end.
-  const command = <code className="rounded bg-app-bg px-1 py-0.5">dor ab open {url}</code>;
+  const command = <code className="rounded bg-app-bg px-1 py-0.5">dor agent-browser open {url}</code>;
   return (
     <PaneMessage className="text-muted" contentClassName="flex flex-col gap-2">
       <div>{messageFor(resolution)}</div>

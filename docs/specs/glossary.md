@@ -24,19 +24,19 @@ A Pane holds exactly one Surface today, but the model reserves several (a future
 |---|---|---|
 | `terminal` | — | a PTY + xterm.js instance — a **Session** |
 | `tool` | — | a PTY and an optional browser on the same Session |
-| `browser` | `iframe`, `ab-screencast`, `ab-popout`, `pw-screencast`, `pw-popout` | an iframe proxy grant, or an automation-provider session (`docs/specs/dor-browser.md`) |
+| `browser` | `iframe`, `agent-browser-screencast`, `agent-browser-popout`, `playwright-screencast`, `playwright-popout` | an iframe proxy grant, or an automation-provider session (`docs/specs/dor-browser.md`) |
 
 **For a browser Surface `renderMode` is canonical**; the CLI `render_mode` is derived from it and never stored.
 
 | Surface | Persisted `surfaceType` (`docs/specs/transport.md`) | `renderMode` (`docs/specs/dor-browser.md`) | CLI `kind` | CLI `render_mode` |
 |---|---|---|---|---|
-| tool Session | `'tool'` | `iframe` or `ab-screencast` when serving | `tool` | renderer or `null` |
+| tool Session | `'tool'` | `iframe`, `agent-browser-screencast` or `playwright-screencast` when serving | `tool` | renderer or `null` |
 | terminal Session | `'terminal'` (default, omitted) | — | `terminal` | `null` |
 | browser · iframe | `'browser'` | `iframe` | `browser` | `iframe` |
-| browser · screencast | `'browser'` | `ab-screencast` | `browser` | `ab-screencast` |
-| browser · popped out | `'browser'` | `ab-popout` | `browser` | `ab-popout` |
-| browser · Playwright screencast | `'browser'` | `pw-screencast` | `browser` | `pw-screencast` |
-| browser · Playwright popout | `'browser'` | `pw-popout` | `browser` | `pw-popout` |
+| browser · screencast | `'browser'` | `agent-browser-screencast` | `browser` | `agent-browser-screencast` |
+| browser · popped out | `'browser'` | `agent-browser-popout` | `browser` | `agent-browser-popout` |
+| browser · playwright screencast | `'browser'` | `playwright-screencast` | `browser` | `playwright-screencast` |
+| browser · playwright popout | `'browser'` | `playwright-popout` | `browser` | `playwright-popout` |
 
 **Kinds are capability sets, not exclusive categories** — terminal and browser carry one capability each, `tool` both. **Operations gate on the capability they need, never on the kind enum** ([Liskov contract](#liskov-contract)): `read` / `send` / `await` / port scans need the terminal, nav / render-mode / agent-browser verbs the browser. **`dor list --json` rows always emit `has_terminal` and `has_browser`** (rationale). **Must declare each kind's capabilities in the `hasTerminal` / `hasBrowser` table.** Persistence keeps its own `PersistedSurfaceType` discriminant (`docs/specs/transport.md`).
 
@@ -247,7 +247,7 @@ Source of truth: `focusSession` / `refitSession` in `lib/src/lib/terminal-lifecy
 - I7: Every Surface sits in exactly one Pane; every Pane and its Surfaces belong to exactly one Workspace; every Workspace belongs to one Window.
 - I8: **Must preserve Process and Activity during `switchWorkspace`, without firing a fresh ring** (I3). A switch reattaches terminal elements but resumes and restores nothing, so no ring can fire (`docs/specs/layout.md` → Workspaces).
 - I9: A Workspace's union status is a pure projection of its members' Activity: no independent state, destroyed with the Workspace.
-- I10: **Must preserve a terminal Surface's `SessionId`** (I1). **Must transfer the `surface:N` CLI ref when replacing a browser Surface**, minting a new id in the same layout slot with its target URL. An `ab-screencast` ⇄ `ab-popout` relaunch keeps the Surface id; render-mode changes do not universally imply replacement (rationale; `docs/specs/dor-browser.md` → Display Modal And Render Swaps).
+- I10: **Must preserve a terminal Surface's `SessionId`** (I1). **Must transfer the `surface:N` CLI ref when replacing a browser Surface**, minting a new id in the same layout slot with its target URL. An `agent-browser-screencast` ⇄ `agent-browser-popout` relaunch keeps the Surface id; render-mode changes do not universally imply replacement (rationale; `docs/specs/dor-browser.md` → Display Modal And Render Swaps).
 
 ## Retired / overloaded terms
 

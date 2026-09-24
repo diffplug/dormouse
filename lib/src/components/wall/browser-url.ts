@@ -47,7 +47,7 @@ export function pathDisplay(rawUrl: string): string {
 
 /** Turn a typed address-bar value into a navigable URL: keep an explicit scheme,
  *  otherwise add one. An explicit port picks `http://` — a bare `host:port` is a
- *  dev/infra server (the port is the signal), matching `dor iframe` / `dor ab
+ *  dev/infra server (the port is the signal), matching `dor iframe` / `dor agent-browser
  *  open` (docs/specs/dor-cli.md → Browser Open Target Resolution). Without a
  *  port, `http://` for loopback hosts (a bare `localhost` speaks http, and
  *  `https` there just SSL-errors) and `https://` for everything else. Empty

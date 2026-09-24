@@ -6,7 +6,7 @@ Why the test is "puts on a user's machine" rather than "everything a user runs":
 
 Why `dormouse-lib` has to be named a root rather than left as a workspace edge: `vscode-ext` declares only `node-pty` and `ws`, reaching the lib through relative imports into `../lib/src/` from fifteen files, so the extension's dependency walk never arrives at it. Only `dormouse-standalone`'s edge would — which puts the disclosure of lib's entire subtree one refactor away from silently vanishing. Naming it a root is what makes that not matter.
 
-Why external binaries cannot be disclosed: Dormouse is a terminal, so it spawns the user's shell, and `dor ab` forwards to an `agent-browser` CLI the user installs themselves and that is resolved off `PATH`. Those are the user's software, not ours, and disclosing them is neither possible nor meaningful.
+Why external binaries cannot be disclosed: Dormouse is a terminal, so it spawns the user's shell, and `dor agent-browser` forwards to an `agent-browser` CLI the user installs themselves and that is resolved off `PATH`. Those are the user's software, not ours, and disclosing them is neither possible nor meaningful.
 
 Where the snapshots come from: they are generated from the lockfiles and reviewed as part of release work. The `pnpm install --frozen-lockfile` precondition matters because a stale `node_modules` makes the regeneration check pass locally on a tree that would fail in CI.
 

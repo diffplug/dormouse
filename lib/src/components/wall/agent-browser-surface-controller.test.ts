@@ -95,7 +95,7 @@ function emitFrame(socket: WebSocketMock | undefined, kind: 'provisional' | 'cri
   socket?.emitMessage(encodeViewerFrame({ kind, jpeg: new Uint8Array([0xff, 0xd8, n]), ...(size ? { size } : {}) }).buffer);
 }
 
-/** A controller whose first start streams from `port`, as `dor ab` hands
+/** A controller whose first start streams from `port`, as `dor agent-browser` hands
  *  one over. */
 function withPort(id: string, params: AgentBrowserSurfaceParams, port: number): AgentBrowserSurfaceController {
   const controller = acquireAgentBrowserSurfaceController(id, params);
@@ -332,7 +332,7 @@ describe('sync-to-pane', () => {
 
   it('names the engagement a Fixed viewport or device ends', async () => {
     const host = installBrowserHost();
-    const controller = withPort('id', { session: 'sess' }, 4321);
+    const controller = withPort('id', { session: 'sess', browserViewport: { mode: 'pane-sync' } }, 4321);
     controller.attachView(resizablePane().sink);
     await vi.advanceTimersByTimeAsync(0);
     const screen = getAgentBrowserScreenController('id')!;
@@ -363,10 +363,10 @@ describe('sync-to-pane', () => {
     vi.spyOn(window, 'devicePixelRatio', 'get').mockImplementation(() => dpr);
     const pane = resizablePane();
 
-    const controller = withPort('id', { session: 'sess' }, 4321);
+    const controller = withPort('id', { session: 'sess', browserViewport: { mode: 'pane-sync' } }, 4321);
     controller.attachView(pane.sink);
     await vi.advanceTimersByTimeAsync(0);
-    // Sync is engaged by default: the host sizes the browser, never the webview.
+    // This explicit pane-sync preset sizes the browser through the host.
     expect(syncs(4321).at(-1)).toEqual([800, 600, 1]);
     expect(host.requests('viewport')).toEqual([]);
     const sent = syncs(4321).length;
@@ -392,7 +392,7 @@ describe('sync-to-pane', () => {
     const pane = resizablePane();
     // A Workspace entering: the Wall's subtree is drawn at a scale while it moves.
     pane.sink.viewport.getBoundingClientRect = () => ({ width: 790, height: 593 }) as DOMRect;
-    const controller = withPort('id', { session: 'sess' }, 4321);
+    const controller = withPort('id', { session: 'sess', browserViewport: { mode: 'pane-sync' } }, 4321);
     controller.attachView(pane.sink);
     await vi.advanceTimersByTimeAsync(0);
     expect(syncs(4321).at(-1)).toEqual([800, 600, 1]);
@@ -402,7 +402,7 @@ describe('sync-to-pane', () => {
 
   it('follows the host alone: its `off` disengages, never a frame, a status or an older engagement', async () => {
     const pane = resizablePane();
-    const controller = withPort('id', { session: 'sess' }, 4321);
+    const controller = withPort('id', { session: 'sess', browserViewport: { mode: 'pane-sync' } }, 4321);
     controller.attachView(pane.sink);
     await vi.advanceTimersByTimeAsync(0);
     const screen = getAgentBrowserScreenController('id')!;
@@ -446,7 +446,7 @@ describe('sync-to-pane while parked', () => {
     try {
       installBrowserHost({ attach: async () => ({ ok: true, stream: 4321 }) });
       const pane = resizablePane();
-      const controller = withPort('id', { session: 'sess' }, 4321);
+      const controller = withPort('id', { session: 'sess', browserViewport: { mode: 'pane-sync' } }, 4321);
       controller.attachView(pane.sink);
       await vi.advanceTimersByTimeAsync(0);
       controller.setVisible(false);
@@ -509,7 +509,7 @@ describe('param-write buffering', () => {
     // Popped out ⇒ exempt from parking, so a detached (minimized) pane keeps its
     // stream observer and can still record a URL change.
     const controller = withPort('id', {
-      session: 'sess', renderMode: 'ab-popout', url: 'https://google.com/',
+      session: 'sess', renderMode: 'agent-browser-popout', url: 'https://google.com/',
     }, 1111);
     const first = makeSink();
     const handle = controller.attachView(first);
@@ -554,7 +554,7 @@ describe('updateParams', () => {
 
   it('follows a headedness the host reports, for either provider', async () => {
     installBrowserHost();
-    for (const [id, screencast, popout] of [['ab', 'ab-screencast', 'ab-popout'], ['pw', 'pw-screencast', 'pw-popout']] as const) {
+    for (const [id, screencast, popout] of [['ab', 'agent-browser-screencast', 'agent-browser-popout'], ['pw', 'playwright-screencast', 'playwright-popout']] as const) {
       const controller = withPort(id, { renderMode: screencast, session: 'sess' }, 1111);
       controller.attachView(makeSink());
       await flushMicrotasks();
@@ -576,16 +576,16 @@ describe('launch', () => {
     const launched = whenBrowserLaunched('id');
     // A restored pane whose launch never landed is the same pane.
     const controller = acquireAgentBrowserSurfaceController('id', {
-      renderMode: 'ab-screencast', url: 'https://page.example/', binaryPath: '/usr/bin/agent-browser',
+      renderMode: 'agent-browser-screencast', url: 'https://page.example/', binaryPath: '/usr/bin/agent-browser',
     });
     const sink = makeSink();
     controller.attachView(sink);
     expect(controller.snapshot().phase).toBe('launching');
     await flushMicrotasks();
 
-    expect(host.requests('launch')).toEqual([{
+    expect(host.requests('launch')).toEqual([expect.objectContaining({
       provider: 'agent-browser', binding: { binaryPath: '/usr/bin/agent-browser' }, op: 'launch', url: 'https://page.example/', headed: false,
-    }]);
+    })]);
     expect(sink.updateParameters).toHaveBeenCalledWith({ session: 'dormouse.1.gui-abc', binaryPath: '/usr/bin/agent-browser' });
     expect(streamSocket(4321)?.readyState).toBe(1);
     expect(host.requests('attach')).toEqual([]);
@@ -598,8 +598,8 @@ describe('launch', () => {
 
     // Params that predate that write — a remounted view feeding them before its
     // flush — do not take the session away and launch again.
-    controller.updateParams({ renderMode: 'ab-screencast', url: 'https://page.example/' });
-    controller.updateParams({ renderMode: 'ab-screencast', url: 'https://page.example/', session: 'dormouse.1.gui-abc' });
+    controller.updateParams({ renderMode: 'agent-browser-screencast', url: 'https://page.example/' });
+    controller.updateParams({ renderMode: 'agent-browser-screencast', url: 'https://page.example/', session: 'dormouse.1.gui-abc' });
     await flushMicrotasks();
     expect(host.requests('launch')).toHaveLength(1);
     expect(streamSockets(4321)).toHaveLength(1);
@@ -608,7 +608,7 @@ describe('launch', () => {
   it('opens in the session params name, headed for a pop-out, and binds it', async () => {
     const host = launchHost(async () => ({ ok: true, session: 'dormouse.1.tool.t', stream: 4321 }));
     const controller = acquireAgentBrowserSurfaceController('id', {
-      renderMode: 'ab-popout', url: 'http://localhost:6006/', launchSession: 'dormouse.1.tool.t',
+      renderMode: 'agent-browser-popout', url: 'http://localhost:6006/', launchSession: 'dormouse.1.tool.t',
     });
     const sink = makeSink();
     controller.attachView(sink);
@@ -622,11 +622,11 @@ describe('launch', () => {
   it('a failed launch says why, in the pane and to whoever awaited it', async () => {
     installBrowserHost({ launch: async () => ({ ok: false }) });
     const launched = whenBrowserLaunched('pw');
-    const controller = acquireAgentBrowserSurfaceController('pw', { renderMode: 'pw-screencast', url: 'https://page.example/' });
+    const controller = acquireAgentBrowserSurfaceController('pw', { renderMode: 'playwright-screencast', url: 'https://page.example/' });
     controller.attachView(makeSink());
     await flushMicrotasks();
-    expect(await launched).toBe('Could not open Playwright');
-    expect(controller.snapshot()).toMatchObject({ phase: 'ended', error: 'Could not open Playwright' });
+    expect(await launched).toBe('Could not open playwright');
+    expect(controller.snapshot()).toMatchObject({ phase: 'ended', error: 'Could not open playwright' });
     expect(WebSocketMock.instances).toHaveLength(0);
   });
 
@@ -634,11 +634,11 @@ describe('launch', () => {
     const launch = pending();
     const host = launchHost(() => launch.promise);
     const launched = whenBrowserLaunched('id');
-    const controller = acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-screencast', url: 'https://page.example/' });
+    const controller = acquireAgentBrowserSurfaceController('id', { renderMode: 'agent-browser-screencast', url: 'https://page.example/' });
     controller.attachView(makeSink());
     await flushMicrotasks();
 
-    closeBrowserSurface('id', { surfaceType: 'browser', renderMode: 'ab-screencast', url: 'https://page.example/' });
+    closeBrowserSurface('id', { surfaceType: 'browser', renderMode: 'agent-browser-screencast', url: 'https://page.example/' });
     expect(await launched).toBeNull();
     expect(host.requests('close')).toEqual([]);
 
@@ -651,12 +651,12 @@ describe('launch', () => {
   it('a navigation out of a failed launch launches at its page, and loads it once', async () => {
     const answers: BrowserResult[] = [{ ok: false, error: 'boom' }, { ok: true, session: 'dormouse.1.gui-n', stream: 4321 }];
     const host = launchHost(async () => answers.shift()!);
-    acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-screencast', url: 'https://page.example/' }).attachView(makeSink());
+    acquireAgentBrowserSurfaceController('id', { renderMode: 'agent-browser-screencast', url: 'https://page.example/' }).attachView(makeSink());
     await flushMicrotasks();
 
     getAgentBrowserScreenController('id')!.chromeActions.navigate('https://next.example/');
     await flushMicrotasks();
-    expect(host.requests('launch').at(-1)).toEqual({ provider: 'agent-browser', binding: {}, op: 'launch', url: 'https://next.example/', headed: false });
+    expect(host.requests('launch').at(-1)).toEqual(expect.objectContaining({ provider: 'agent-browser', binding: {}, op: 'launch', url: 'https://next.example/', headed: false }));
     expect(streamSocket(4321)?.readyState).toBe(1);
     expect(opens(host)).toEqual([]);
   });
@@ -665,13 +665,13 @@ describe('launch', () => {
     const launch = pending();
     const host = launchHost(() => launch.promise);
     const controller = acquireAgentBrowserSurfaceController('id', {
-      renderMode: 'ab-screencast', url: 'http://localhost:6006/', launchSession: 'dormouse.1.tool.t',
+      renderMode: 'agent-browser-screencast', url: 'http://localhost:6006/', launchSession: 'dormouse.1.tool.t',
     });
     controller.attachView(makeSink());
     await flushMicrotasks();
 
     // A new announcement: the same session, another page.
-    controller.updateParams({ renderMode: 'ab-screencast', url: 'http://localhost:6007/docs', launchSession: 'dormouse.1.tool.t' });
+    controller.updateParams({ renderMode: 'agent-browser-screencast', url: 'http://localhost:6007/docs', launchSession: 'dormouse.1.tool.t' });
     launch.resolve({ ok: true, session: 'dormouse.1.tool.t', stream: 4321 });
     await flushMicrotasks();
     expect(streamSocket(4321)?.readyState).toBe(1);
@@ -680,12 +680,12 @@ describe('launch', () => {
 
   it('ignores params that predate the session its launch bound', async () => {
     const host = launchHost(async () => ({ ok: true, session: 'dormouse.1.gui-abc', stream: 4321 }));
-    const controller = acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-screencast', url: 'https://page.example/' });
+    const controller = acquireAgentBrowserSurfaceController('id', { renderMode: 'agent-browser-screencast', url: 'https://page.example/' });
     controller.attachView(makeSink());
     await flushMicrotasks();
 
     // A remounted view feeds the params it rendered with, before the write shows.
-    controller.updateParams({ renderMode: 'ab-screencast', url: 'https://page.example/' });
+    controller.updateParams({ renderMode: 'agent-browser-screencast', url: 'https://page.example/' });
     await flushMicrotasks();
     expect(host.requests('launch')).toHaveLength(1);
     expect(streamSocket(4321)?.readyState).toBe(1);
@@ -695,12 +695,12 @@ describe('launch', () => {
     const launch = pending();
     const host = launchHost(() => launch.promise);
     const controller = acquireAgentBrowserSurfaceController('id', {
-      renderMode: 'ab-screencast', url: 'http://localhost:6006/', launchSession: 'dormouse.1.tool.t',
+      renderMode: 'agent-browser-screencast', url: 'http://localhost:6006/', launchSession: 'dormouse.1.tool.t',
     });
     controller.attachView(makeSink());
     await flushMicrotasks();
 
-    controller.updateParams({ renderMode: 'ab-screencast', url: 'http://localhost:6006/', session: 'dormouse.1.tool.t' });
+    controller.updateParams({ renderMode: 'agent-browser-screencast', url: 'http://localhost:6006/', session: 'dormouse.1.tool.t' });
     controller.handOver(4321);
     launch.resolve({ ok: true, session: 'dormouse.1.tool.t', stream: 4321 });
     await flushMicrotasks();
@@ -708,20 +708,20 @@ describe('launch', () => {
     expect(streamSocket(4321)?.readyState).toBe(1);
   });
 
-  it('launches with the binary `dor ab` last resolved, and remembers the one it ran', async () => {
+  it('launches with the binary `dor agent-browser` last resolved, and remembers the one it ran', async () => {
     const host = launchHost(async () => ({ ok: true, session: 'dormouse.1.gui-b', stream: 4321, binaryPath: '/opt/ab/agent-browser' }));
     rememberLaunchBinaryPath('agent-browser', '/usr/local/bin/agent-browser');
-    acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-screencast', url: 'https://page.example/' }).attachView(makeSink());
+    acquireAgentBrowserSurfaceController('id', { renderMode: 'agent-browser-screencast', url: 'https://page.example/' }).attachView(makeSink());
     await flushMicrotasks();
-    expect(host.requests('launch')).toEqual([{
+    expect(host.requests('launch')).toEqual([expect.objectContaining({
       provider: 'agent-browser', binding: { binaryPath: '/usr/local/bin/agent-browser' }, op: 'launch', url: 'https://page.example/', headed: false,
-    }]);
+    })]);
     expect(launchBinaryPath('agent-browser')).toBe('/opt/ab/agent-browser');
   });
 
   it('tells the Wall about a failed launch, once a view is attached to hear it', async () => {
     launchHost(async () => ({ ok: false, error: 'boom' }));
-    const controller = acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-screencast', url: 'https://page.example/' });
+    const controller = acquireAgentBrowserSurfaceController('id', { renderMode: 'agent-browser-screencast', url: 'https://page.example/' });
     const first = makeSink();
     const handle = controller.attachView(first);
     handle.detach();
@@ -735,9 +735,9 @@ describe('launch', () => {
   it('a launch released without a close leaves a session it named, and closes one the host minted', async () => {
     const answers: Array<(res: BrowserResult) => void> = [];
     const host = launchHost(() => new Promise((resolve) => { answers.push(resolve); }));
-    const named = acquireAgentBrowserSurfaceController('named', { renderMode: 'ab-screencast', url: 'https://page.example/', launchSession: 'dormouse.1.tool.t' });
+    const named = acquireAgentBrowserSurfaceController('named', { renderMode: 'agent-browser-screencast', url: 'https://page.example/', launchSession: 'dormouse.1.tool.t' });
     named.attachView(makeSink());
-    const minted = acquireAgentBrowserSurfaceController('minted', { renderMode: 'ab-screencast', url: 'https://page.example/' });
+    const minted = acquireAgentBrowserSurfaceController('minted', { renderMode: 'agent-browser-screencast', url: 'https://page.example/' });
     minted.attachView(makeSink());
     await flushMicrotasks();
 
@@ -753,7 +753,7 @@ describe('launch', () => {
   it('a controller released before it ever started still settles its waiter', async () => {
     launchHost(async () => ({ ok: true }));
     const launched = whenBrowserLaunched('id');
-    acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-screencast', url: 'https://page.example/' });
+    acquireAgentBrowserSurfaceController('id', { renderMode: 'agent-browser-screencast', url: 'https://page.example/' });
     disposeAgentBrowserSurfaceController('id');
     expect(await launched).toBeNull();
   });
@@ -761,7 +761,7 @@ describe('launch', () => {
   it('a Surface killed before its view ever mounted still settles its waiter', async () => {
     launchHost(async () => ({ ok: true }));
     const launched = whenBrowserLaunched('never-mounted');
-    closeBrowserSurface('never-mounted', { surfaceType: 'browser', renderMode: 'ab-screencast', url: 'https://page.example/' });
+    closeBrowserSurface('never-mounted', { surfaceType: 'browser', renderMode: 'agent-browser-screencast', url: 'https://page.example/' });
     expect(await launched).toBeNull();
   });
 });
@@ -790,14 +790,14 @@ describe('a closed Surface and the next launch into its session', () => {
    *  check the close came after it and the next launch after the close. */
   async function expectNextLaunchAfterClose(host: ReturnType<typeof realHost>, id: string, work: string[]) {
     void closeBrowserSurface(id, {});
-    const next = acquireAgentBrowserSurfaceController('next', { renderMode: 'ab-screencast', url: page, launchSession: session });
+    const next = acquireAgentBrowserSurfaceController('next', { renderMode: 'agent-browser-screencast', url: page, launchSession: session });
     next.attachView(makeSink());
     await flushMicrotasks();
     expect(host.lifecycle()).toEqual([`stop ${session}`]);
 
     host.fake.release(`stop ${session}`);
     await vi.waitFor(() => expect(next.snapshot().phase).toBe('live'));
-    expect(host.lifecycle()).toEqual([...work, `close ${session}`, `stop ${session}`, `open ${session} ${page}`]);
+    expect(host.lifecycle()).toEqual([...work, `close ${session}`, `stop ${session}`, `open ${session} blank`]);
   }
 
   it.each([
@@ -811,7 +811,7 @@ describe('a closed Surface and the next launch into its session', () => {
     const host = realHost((request, send) => (request.op === 'close' ? closeHeld.then(send) : send()));
     if (launching) {
       host.fake.gate(`stop ${session}`);
-      acquireAgentBrowserSurfaceController('first', { renderMode: 'ab-screencast', url: page, launchSession: session }).attachView(makeSink());
+      acquireAgentBrowserSurfaceController('first', { renderMode: 'agent-browser-screencast', url: page, launchSession: session }).attachView(makeSink());
     } else {
       withPort('first', { session, url: page }, 1111).attachView(makeSink());
     }
@@ -819,7 +819,7 @@ describe('a closed Surface and the next launch into its session', () => {
     const firstWork = launching ? [`stop ${session}`] : [];
 
     void closeBrowserSurface('first', {});
-    const next = acquireAgentBrowserSurfaceController('next', { renderMode: 'ab-screencast', url: page, launchSession: session });
+    const next = acquireAgentBrowserSurfaceController('next', { renderMode: 'agent-browser-screencast', url: page, launchSession: session });
     next.attachView(makeSink());
     await flushMicrotasks();
     // The close is still on its way, so the next launch has not been sent.
@@ -831,8 +831,8 @@ describe('a closed Surface and the next launch into its session', () => {
     if (launching) host.fake.release(`stop ${session}`);
     await vi.waitFor(() => expect(next.snapshot().phase).toBe('live'));
     expect(host.lifecycle()).toEqual([
-      ...(launching ? [`stop ${session}`, `open ${session} ${page}`] : []),
-      `close ${session}`, `stop ${session}`, `open ${session} ${page}`,
+      ...(launching ? [`stop ${session}`, `open ${session} blank`] : []),
+      `close ${session}`, `stop ${session}`, `open ${session} blank`,
     ]);
   });
 
@@ -847,12 +847,12 @@ describe('a closed Surface and the next launch into its session', () => {
     const held = new Promise<void>((resolve) => { deliver = resolve; });
     const host = realHost((request, send) => (request.op === op ? held.then(send) : send()));
     if (name === 'launch naming it') {
-      acquireAgentBrowserSurfaceController('first', { renderMode: 'ab-screencast', url: page, launchSession: session }).attachView(makeSink());
+      acquireAgentBrowserSurfaceController('first', { renderMode: 'agent-browser-screencast', url: page, launchSession: session }).attachView(makeSink());
     } else if (name === 'pop-out') {
       const first = withPort('first', { session, url: page }, 1111);
       first.attachView(makeSink());
       await flushMicrotasks();
-      first.setRenderMode('ab-popout');
+      first.setRenderMode('agent-browser-popout');
     } else {
       acquireAgentBrowserSurfaceController('first', { session, url: page }).attachView(makeSink());
     }
@@ -871,27 +871,27 @@ describe('a closed Surface and the next launch into its session', () => {
   it('closes a launch that was opening it before the next launch', async () => {
     const host = realHost();
     host.fake.gate(`stop ${session}`);
-    acquireAgentBrowserSurfaceController('first', { renderMode: 'ab-screencast', url: page, launchSession: session })
+    acquireAgentBrowserSurfaceController('first', { renderMode: 'agent-browser-screencast', url: page, launchSession: session })
       .attachView(makeSink());
     await flushMicrotasks();
-    await expectNextLaunchAfterClose(host, 'first', [`stop ${session}`, `open ${session} ${page}`]);
+    await expectNextLaunchAfterClose(host, 'first', [`stop ${session}`, `open ${session} blank`]);
   });
 
   it('a launch closed before its turn opens nothing', async () => {
     const host = realHost();
     host.fake.gate(`stop ${session}`);
-    acquireAgentBrowserSurfaceController('first', { renderMode: 'ab-screencast', url: page, launchSession: session })
+    acquireAgentBrowserSurfaceController('first', { renderMode: 'agent-browser-screencast', url: page, launchSession: session })
       .attachView(makeSink());
     await flushMicrotasks();
     void closeBrowserSurface('first', {});
-    acquireAgentBrowserSurfaceController('next', { renderMode: 'ab-screencast', url: page, launchSession: session })
+    acquireAgentBrowserSurfaceController('next', { renderMode: 'agent-browser-screencast', url: page, launchSession: session })
       .attachView(makeSink());
     await flushMicrotasks();
     // Swapped away again before the first launch landed.
     const closed = closeBrowserSurface('next', {});
     host.fake.release(`stop ${session}`);
     await closed;
-    expect(host.lifecycle()).toEqual([`stop ${session}`, `open ${session} ${page}`, `close ${session}`, `close ${session}`]);
+    expect(host.lifecycle()).toEqual([`stop ${session}`, `open ${session} blank`, `close ${session}`, `close ${session}`]);
   });
 
   it('closes a pop-out that was relaunching it before the next launch', async () => {
@@ -900,7 +900,7 @@ describe('a closed Surface and the next launch into its session', () => {
     first.attachView(makeSink());
     await flushMicrotasks();
     host.fake.gate(`stop ${session}`);
-    first.setRenderMode('ab-popout');
+    first.setRenderMode('agent-browser-popout');
     await flushMicrotasks();
     await expectNextLaunchAfterClose(host, 'first', [`stop ${session}`, `open ${session} ${page} headed`]);
   });
@@ -913,7 +913,7 @@ describe('a closed Surface and the next launch into its session', () => {
     acquireAgentBrowserSurfaceController('first', { session, url: page }).attachView(makeSink());
     await flushMicrotasks();
     expect(host.browser).toHaveBeenCalledWith(expect.objectContaining({ op: 'attach', url: page }));
-    await expectNextLaunchAfterClose(host, 'first', [`stop ${session}`, `open ${session} ${page}`]);
+    await expectNextLaunchAfterClose(host, 'first', [`stop ${session}`, `open ${session} blank`]);
   });
 });
 
@@ -925,7 +925,7 @@ describe('attach', () => {
   it('a restored pane attaches at the page and presentation it had', async () => {
     const host = attachHost(async () => ({ ok: true, stream: 2222 }));
     const controller = acquireAgentBrowserSurfaceController('id', {
-      session: 'sess', renderMode: 'ab-popout', url: 'https://restored.example/',
+      session: 'sess', renderMode: 'agent-browser-popout', url: 'https://restored.example/',
     });
     const sink = makeSink();
     controller.attachView(sink);
@@ -960,7 +960,7 @@ describe('attach', () => {
   /** A live pane on 1111, parked. */
   async function parkedAt1111(attach: NonNullable<BrowserAnswers['attach']>) {
     const host = attachHost(attach);
-    const controller = withPort('id', { session: 'sess', url: 'https://page.example/' }, 1111);
+    const controller = withPort('id', { session: 'sess', url: 'https://page.example/', browserViewport: { mode: 'pane-sync' } }, 1111);
     controller.attachView(makeSink());
     await vi.advanceTimersByTimeAsync(0);
     expect(streamSocket(1111)?.readyState).toBe(1);
@@ -1016,7 +1016,7 @@ describe('attach', () => {
       const sink = makeSink();
       let size = { width: 800, height: 600 };
       layOut(sink.viewport, () => size);
-      const controller = withPort('id', { session: 'sess', url: 'https://page.example/' }, 1111);
+      const controller = withPort('id', { session: 'sess', url: 'https://page.example/', browserViewport: { mode: 'pane-sync' } }, 1111);
       controller.attachView(sink);
       await vi.advanceTimersByTimeAsync(0);
       controller.setVisible(false);
@@ -1080,7 +1080,7 @@ describe('attach', () => {
     expect(socket.readyState).toBe(3);
     expect(host.requests('attach')).toEqual([]);
 
-    // `dor ab open` brings it back on the port it had.
+    // `dor agent-browser open` brings it back on the port it had.
     handOverBrowserStream('id', { session: 'sess', url: 'https://page.example/' }, 1111);
     await flushMicrotasks();
     expect(controller.snapshot().phase).toBe('live');
@@ -1093,7 +1093,7 @@ describe('attach', () => {
     streamSocket(1111)!.emitMessage(JSON.stringify({ type: 'status', connected: false, screencasting: false }));
     getAgentBrowserScreenController('id')!.chromeActions.navigate('https://next.example/');
     expect(host.requests('navigate')).toEqual([]);
-    expect(host.requests('attach')).toEqual([onSess({ op: 'attach', url: 'https://next.example/', headed: false })]);
+    expect(host.requests('attach')).toEqual([expect.objectContaining(onSess({ op: 'attach', url: 'https://next.example/', headed: false }))]);
     await flushMicrotasks();
     expect(streamSocket(3333)?.readyState).toBe(1);
     expect(host.requests('navigate')).toEqual([onSess({ op: 'navigate', url: 'https://next.example/' })]);
@@ -1107,7 +1107,7 @@ describe('attach', () => {
 
     getAgentBrowserScreenController('id')!.chromeActions.navigate('https://next.example/');
     await flushMicrotasks();
-    expect(host.requests('attach').at(-1)).toEqual(onSess({ op: 'attach', url: 'https://next.example/', headed: false }));
+    expect(host.requests('attach').at(-1)).toEqual(expect.objectContaining(onSess({ op: 'attach', url: 'https://next.example/', headed: false })));
     expect(streamSocket(3333)?.readyState).toBe(1);
     expect(opens(host)).toEqual([]);
   });
@@ -1121,7 +1121,7 @@ describe('attach', () => {
     controller.attachView(sink);
     await flushMicrotasks();
 
-    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout');
+    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('agent-browser-popout');
     expect(host.requests('launch')).toEqual([onSess({ op: 'launch', url: undefined, headed: true })]);
     host.browser.mockClear();
 
@@ -1164,9 +1164,9 @@ describe('closeBrowserSurface', () => {
     const controller = withPort('id', { session: 'sess' }, 1111);
     controller.attachView(makeSink());
     await flushMicrotasks();
-    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout');
+    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('agent-browser-popout');
 
-    closeBrowserSurface('id', { renderMode: 'ab-popout', session: 'sess' });
+    closeBrowserSurface('id', { renderMode: 'agent-browser-popout', session: 'sess' });
     expect(closes()).toHaveLength(1);
     expect(getAgentBrowserSurfaceController('id')).toBeNull();
 
@@ -1181,7 +1181,7 @@ describe('closeBrowserSurface', () => {
   it('closes the session a launch names, at once', async () => {
     const launch = pending();
     const host = installBrowserHost({ launch: () => launch.promise });
-    acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-screencast', url: 'http://localhost:6006/', launchSession: 'dormouse.1.tool.t', binaryPath: '/opt/agent-browser' })
+    acquireAgentBrowserSurfaceController('id', { renderMode: 'agent-browser-screencast', url: 'http://localhost:6006/', launchSession: 'dormouse.1.tool.t', binaryPath: '/opt/agent-browser' })
       .attachView(makeSink());
     await flushMicrotasks();
 
@@ -1202,9 +1202,9 @@ describe('closeBrowserSurface', () => {
     controller.attachView(makeSink());
     await flushMicrotasks();
     // A pop-out the host answered, then a pop-in still on its way.
-    controller.setRenderMode('ab-popout');
+    controller.setRenderMode('agent-browser-popout');
     await flushMicrotasks();
-    controller.setRenderMode('ab-screencast');
+    controller.setRenderMode('agent-browser-screencast');
     await flushMicrotasks();
 
     void closeBrowserSurface('id', {});
@@ -1219,7 +1219,7 @@ describe('closeBrowserSurface', () => {
     const controller = withPort('id', { session: 'sess' }, 1111);
     controller.attachView(makeSink());
     await flushMicrotasks();
-    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout');
+    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('agent-browser-popout');
 
     disposeAgentBrowserSurfaceController('id');
     resolvePopOut({ ok: true, stream: 3456 });
@@ -1229,7 +1229,7 @@ describe('closeBrowserSurface', () => {
 
   it('closes a session no controller holds from its params, with only a checked binary', async () => {
     const { host } = closeHost();
-    closeBrowserSurface('never-mounted', { surfaceType: 'browser', renderMode: 'ab-screencast', session: 'sess', binaryPath: '/usr/bin/curl' });
+    closeBrowserSurface('never-mounted', { surfaceType: 'browser', renderMode: 'agent-browser-screencast', session: 'sess', binaryPath: '/usr/bin/curl' });
     closeBrowserSurface('iframe', { surfaceType: 'browser', renderMode: 'iframe', url: 'http://localhost:5173/' });
     expect(host.browser).toHaveBeenCalledExactlyOnceWith(onSess({ op: 'close' }));
   });
@@ -1258,7 +1258,7 @@ describe('relaunch (pop-out / pop-in)', () => {
     const old = streamSocket(1111);
     expect(old?.readyState).toBe(1);
 
-    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout');
+    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('agent-browser-popout');
     await flushMicrotasks();
     // The host is about to close this browser and kill its daemon: the old
     // socket is released now rather than left to fail into "ended"/recovery.
@@ -1284,9 +1284,9 @@ describe('relaunch (pop-out / pop-in)', () => {
     controller.attachView(makeSink());
     await flushMicrotasks();
 
-    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout');
+    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('agent-browser-popout');
     controller.popIn();
-    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout');
+    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('agent-browser-popout');
     await flushMicrotasks();
 
     expect(host.relaunches(true)).toHaveLength(1);
@@ -1303,7 +1303,7 @@ describe('relaunch (pop-out / pop-in)', () => {
     const host = relaunchHost();
     // The first launch opens a new session, and never answers.
     host.answers.launch = () => new Promise<never>(() => {});
-    const controller = acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-popout', url: 'https://page.example/' });
+    const controller = acquireAgentBrowserSurfaceController('id', { renderMode: 'agent-browser-popout', url: 'https://page.example/' });
     const sink = makeSink();
     controller.attachView(sink);
     await flushMicrotasks();
@@ -1311,7 +1311,7 @@ describe('relaunch (pop-out / pop-in)', () => {
     controller.popIn();
     expect(host.requests('launch')).toEqual([{ provider: 'agent-browser', binding: {}, op: 'launch', url: 'https://page.example/', headed: true }]);
     expect(controller.snapshot()).toMatchObject({ poppedOut: true, phase: 'launching' });
-    expect(sink.updateParameters).not.toHaveBeenCalledWith({ renderMode: 'ab-screencast' });
+    expect(sink.updateParameters).not.toHaveBeenCalledWith({ renderMode: 'agent-browser-screencast' });
   });
 
   it('a relaunch carries the URL the stream committed, not the one the last tabs snapshot reported', async () => {
@@ -1332,7 +1332,7 @@ describe('relaunch (pop-out / pop-in)', () => {
     expect(getAgentBrowserScreenController('id')?.chrome().title).toBeNull();
     expect(sink.updateParameters).toHaveBeenCalledWith({ url: 'https://slow.example/' });
 
-    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout');
+    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('agent-browser-popout');
     expect(host.relaunches(true)).toEqual([onSess({ op: 'launch', url: 'https://slow.example/', headed: true })]);
   });
 
@@ -1349,7 +1349,7 @@ describe('relaunch (pop-out / pop-in)', () => {
     expect(getAgentBrowserScreenController('id')?.chrome().url).toBe('file:///tmp/report.html');
     expect(sink.updateParameters).not.toHaveBeenCalledWith({ url: 'file:///tmp/report.html' });
 
-    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout');
+    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('agent-browser-popout');
     expect(host.relaunches(true)).toEqual([onSess({ op: 'launch', url: 'https://app.example/report', headed: true })]);
   });
 
@@ -1396,7 +1396,7 @@ describe('relaunch (pop-out / pop-in)', () => {
         ],
       }));
       const screen = getAgentBrowserScreenController('id')!;
-      screen.actions.setRenderMode?.('ab-popout');
+      screen.actions.setRenderMode?.('agent-browser-popout');
       expect(host.relaunches(true)).toHaveLength(1);
       host.browser.mockClear();
 
@@ -1431,7 +1431,7 @@ describe('relaunch (pop-out / pop-in)', () => {
     const host = relaunchHost();
     const popIn = pending();
     host.answers.launch = () => popIn.promise;
-    const controller = withPort('id', { session: 'sess', renderMode: 'ab-popout' }, 1111);
+    const controller = withPort('id', { session: 'sess', renderMode: 'agent-browser-popout' }, 1111);
     const sink = makeSink();
     layOut(sink.viewport, () => ({ width: 800, height: 600 }));
     controller.attachView(sink);
@@ -1456,7 +1456,7 @@ describe('relaunch (pop-out / pop-in)', () => {
     const host = relaunchHost();
     const popIn = pending();
     host.answers.launch = (request) => request.headed ? Promise.resolve({ ok: true, stream: 3456 }) : popIn.promise;
-    const controller = withPort('id', { session: 'sess', renderMode: 'ab-popout', url: 'https://page.example/' }, 1111);
+    const controller = withPort('id', { session: 'sess', renderMode: 'agent-browser-popout', url: 'https://page.example/' }, 1111);
     const sink = makeSink();
     layOut(sink.viewport, () => ({ width: 800, height: 600 }));
     controller.attachView(sink);
@@ -1477,8 +1477,8 @@ describe('relaunch (pop-out / pop-in)', () => {
       { connected: true, viewportWidth: 1200, viewportHeight: 736, devicePixelRatio: 1.5 },
     );
     popIn();
-    expect(host.relaunches(false)).toEqual([onSess({ op: 'launch', url: 'https://page.example/', headed: false })]);
-    expect(sink.updateParameters).toHaveBeenCalledWith({ syncEngaged: false });
+    expect(host.relaunches(false)).toEqual([expect.objectContaining(onSess({ op: 'launch', url: 'https://page.example/', headed: false }))]);
+    expect(sink.updateParameters).toHaveBeenCalledWith({ browserViewport: { mode: 'fixed', width: 1200, height: 736, dpr: 1.5 } });
     // Nothing reaches the browser the relaunch is replacing.
     expect(host.requests('viewport')).toEqual([]);
 
@@ -1487,7 +1487,7 @@ describe('relaunch (pop-out / pop-in)', () => {
     expect(host.requests('viewport')).toEqual([onSess({ op: 'viewport', width: 1200, height: 736, dpr: 1.5, endsSync: expect.any(String) })]);
     // The Display modal shows Fixed, at those numbers.
     expect(getAgentBrowserScreenController('id')!.snapshot()).toMatchObject({
-      renderMode: 'ab-screencast', syncEngaged: false, viewport: { w: 1200, h: 736, dpr: 1.5 },
+      renderMode: 'agent-browser-screencast', syncEngaged: false, viewport: { w: 1200, h: 736, dpr: 1.5 },
     });
   });
 
@@ -1503,13 +1503,14 @@ describe('relaunch (pop-out / pop-in)', () => {
 
     // The modal reports the ratio it fixed, until another resolution is picked.
     for (const pick of [() => screen.actions.engageSync(), () => screen.actions.applyDevice('iPhone 16')]) {
-      screen.actions.applyViewport(1024, 768, 3);
+      await screen.actions.applyViewportSetting?.({ mode: 'fixed', width: 1024, height: 768, dpr: 3 });
       expect(screen.snapshot()).toMatchObject({ syncEngaged: false, viewport: { dpr: 3 } });
       pick();
+      await flushMicrotasks();
       expect(screen.snapshot()?.viewport.dpr).toBe(1);
     }
     // Or until another browser streams.
-    screen.actions.applyViewport(1024, 768, 3);
+    await screen.actions.applyViewportSetting?.({ mode: 'fixed', width: 1024, height: 768, dpr: 3 });
     controller.handOver(4321);
     await flushMicrotasks();
     emitFrame(streamSocket(4321), 'provisional', 1, { width: 1024, height: 768 });
@@ -1522,7 +1523,7 @@ describe('relaunch (pop-out / pop-in)', () => {
     controller.attachView(makeSink());
     await flushMicrotasks();
     const screen = getAgentBrowserScreenController('id')!;
-    screen.actions.setRenderMode?.('ab-popout');
+    screen.actions.setRenderMode?.('agent-browser-popout');
     screen.actions.applyViewport(1024, 768, 2);
     host.resolvePopOut({ ok: true, stream: 3456 });
     await flushMicrotasks();
@@ -1540,7 +1541,7 @@ describe('relaunch (pop-out / pop-in)', () => {
     host.browser.mockClear();
 
     // Out again: this window reports only the daemon's viewport.
-    screen.actions.setRenderMode?.('ab-popout');
+    screen.actions.setRenderMode?.('agent-browser-popout');
     await flushMicrotasks();
     streamSocket(3456)!.emitMessage(JSON.stringify({ type: 'status', connected: true, screencasting: false, viewportWidth: 1280, viewportHeight: 720 }));
     host.answers.launch = (request) => Promise.resolve({ ok: true, stream: request.headed ? 3456 : 5556 });
@@ -1558,7 +1559,7 @@ describe('relaunch (pop-out / pop-in)', () => {
     await flushMicrotasks();
 
     // The pane context menu's reuse of an existing port target.
-    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout', { url: 'http://localhost:5173/' });
+    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('agent-browser-popout', { url: 'http://localhost:5173/' });
     expect(host.relaunches(true)).toEqual([onSess({ op: 'launch', url: 'http://localhost:5173/', headed: true })]);
     host.resolvePopOut({ ok: true, stream: 3456 });
     await flushMicrotasks();
@@ -1571,7 +1572,7 @@ describe('relaunch (pop-out / pop-in)', () => {
     controller.attachView(makeSink());
     await flushMicrotasks();
 
-    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout');
+    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('agent-browser-popout');
     getAgentBrowserScreenController('id')!.chromeActions.navigate('https://page.example/');
     host.resolvePopOut({ ok: true, stream: 3456 });
     await flushMicrotasks();
@@ -1594,7 +1595,7 @@ describe('relaunch (pop-out / pop-in)', () => {
       expect(controller.isParked()).toBe(true);
 
       getAgentBrowserScreenController('id')!.chromeActions.navigate('https://next.example/');
-      getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout', asked ? { url: asked } : undefined);
+      getAgentBrowserScreenController('id')?.actions.setRenderMode?.('agent-browser-popout', asked ? { url: asked } : undefined);
       expect(host.relaunches(true)).toEqual([expect.objectContaining({ url: opened })]);
       host.resolvePopOut({ ok: true, stream: 3456 });
       await vi.advanceTimersByTimeAsync(0);
@@ -1610,7 +1611,7 @@ describe('relaunch (pop-out / pop-in)', () => {
     host.answers.attach = () => attach.promise;
     const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', url: 'https://page.example/' });
     // Before any view mounts it, as for a Door the context menu reveals.
-    controller.setRenderMode('ab-popout', { url: 'http://localhost:5173/' });
+    controller.setRenderMode('agent-browser-popout', { url: 'http://localhost:5173/' });
     controller.attachView(makeSink());
     await flushMicrotasks();
     expect(host.requests('attach')).toHaveLength(1);
@@ -1628,16 +1629,16 @@ describe('relaunch (pop-out / pop-in)', () => {
     controller.attachView(sink);
     await flushMicrotasks();
 
-    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout');
+    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('agent-browser-popout');
     host.resolvePopOut({ ok: false });
     await flushMicrotasks();
-    expect(host.requests('attach')).toEqual([onSess({ op: 'attach', url: 'https://page.example/', headed: false })]);
-    expect(sink.updateParameters).toHaveBeenLastCalledWith({ renderMode: 'ab-screencast' });
+    expect(host.requests('attach')).toEqual([expect.objectContaining(onSess({ op: 'attach', url: 'https://page.example/', headed: false }))]);
+    expect(sink.updateParameters).toHaveBeenCalledWith({ renderMode: 'agent-browser-screencast' });
     expect(controller.snapshot()).toMatchObject({ poppedOut: false, phase: 'live' });
     expect(streamSocket(9999)?.readyState).toBe(1);
   });
 
-  it('a `dor ab` re-run handing over a new port reconnects there and asks the daemon nothing', async () => {
+  it('a `dor agent-browser` re-run handing over a new port reconnects there and asks the daemon nothing', async () => {
     const host = relaunchHost();
     const controller = withPort('id', { session: 'sess', url: 'https://x.example/' }, 1111);
     controller.attachView(makeSink());
@@ -1653,11 +1654,33 @@ describe('relaunch (pop-out / pop-in)', () => {
 });
 
 describe('Playwright provider', () => {
+  it('persists an external DPR-only change when the fixed choice omitted DPR', async () => {
+    const host = installBrowserHost({ measure: () => ({ ok: true, viewport: { width: 1024, height: 768, dpr: 2 } }) });
+    const controller = withPort('pw', {
+      renderMode: 'playwright-screencast', session: 's',
+      browserViewport: { mode: 'fixed', width: 1024, height: 768 },
+    }, 4321);
+    const sink = makeSink();
+    controller.attachView(sink);
+    await flushMicrotasks();
+
+    streamSocket(4321)!.emitMessage(JSON.stringify({
+      type: 'status', connected: true, screencasting: true,
+      viewportWidth: 1024, viewportHeight: 768, devicePixelRatio: 2,
+    }));
+    await flushMicrotasks();
+
+    expect(host.requests('measure')).toHaveLength(1);
+    expect(sink.updateParameters).toHaveBeenCalledWith({
+      browserViewport: { mode: 'fixed', width: 1024, height: 768, dpr: 2 },
+    });
+  });
+
   it('pastes as whole-text messages the host inserts, not a key pair per character', async () => {
     const host = installBrowserHost();
     const pasted = `${'x'.repeat(VIEWER_TEXT_INPUT_MAX + 10)}\r\nend`;
     (host.platform as PlatformAdapter).readClipboardText = vi.fn(async () => pasted);
-    const controller = withPort('pw', { renderMode: 'pw-screencast', session: 's' }, 4321);
+    const controller = withPort('pw', { renderMode: 'playwright-screencast', session: 's' }, 4321);
     controller.attachView(makeSink());
     await flushMicrotasks();
 
@@ -1673,7 +1696,7 @@ describe('Playwright provider', () => {
 
   it('shows the ratio its browser measures, which Playwright keeps as its own', async () => {
     installBrowserHost();
-    const controller = withPort('pw', { renderMode: 'pw-screencast', session: 's' }, 4321);
+    const controller = withPort('pw', { renderMode: 'playwright-screencast', session: 's' }, 4321);
     controller.attachView(makeSink());
     await flushMicrotasks();
     const screen = getAgentBrowserScreenController('pw')!;
@@ -1685,7 +1708,7 @@ describe('Playwright provider', () => {
   it('names Playwright in a failed host command warning', async () => {
     installBrowserHost({ history: async () => ({ ok: false, error: 'boom' }) });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const controller = withPort('pw', { renderMode: 'pw-screencast', session: 's' }, 4321);
+    const controller = withPort('pw', { renderMode: 'playwright-screencast', session: 's' }, 4321);
     controller.attachView(makeSink());
     getAgentBrowserScreenController('pw')!.chromeActions.reload();
     await flushMicrotasks();
@@ -1695,7 +1718,7 @@ describe('Playwright provider', () => {
   it('uses the shared controller with provider-scoped host calls and cwd', async () => {
     // The swap back to agent-browser is offered only where the host can launch one.
     const host = installBrowserHost();
-    const controller = withPort('pw', { renderMode: 'pw-screencast', session: 'shared-name', cwd: '/first-project' }, 4321);
+    const controller = withPort('pw', { renderMode: 'playwright-screencast', session: 'shared-name', cwd: '/first-project' }, 4321);
     const sink = makeSink();
     controller.attachView(sink);
     await flushMicrotasks();
@@ -1705,10 +1728,10 @@ describe('Playwright provider', () => {
       provider: 'playwright', binding: { session: 'shared-name', cwd: '/first-project' }, op: 'navigate', url: 'https://example.com/next',
     }]);
     expect(host.browser.mock.calls.filter(([request]) => request.provider !== 'playwright')).toEqual([]);
-    expect(getAgentBrowserScreenController('pw')!.snapshot().renderMode).toBe('pw-screencast');
-    getAgentBrowserScreenController('pw')!.actions.setRenderMode?.('ab-screencast');
-    expect(sink.requestRenderSwap).toHaveBeenCalledWith('ab-screencast');
-    controller.updateParams({ renderMode: 'pw-popout', session: 'shared-name', cwd: '/first-project' });
-    expect(getAgentBrowserScreenController('pw')!.snapshot().renderMode).toBe('pw-popout');
+    expect(getAgentBrowserScreenController('pw')!.snapshot().renderMode).toBe('playwright-screencast');
+    getAgentBrowserScreenController('pw')!.actions.setRenderMode?.('agent-browser-screencast');
+    expect(sink.requestRenderSwap).toHaveBeenCalledWith('agent-browser-screencast', undefined);
+    controller.updateParams({ renderMode: 'playwright-popout', session: 'shared-name', cwd: '/first-project' });
+    expect(getAgentBrowserScreenController('pw')!.snapshot().renderMode).toBe('playwright-popout');
   });
 });

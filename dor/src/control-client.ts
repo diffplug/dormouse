@@ -4,6 +4,8 @@ import type {
   AppRestartResponse,
   BrowserSurfaceRequest,
   BrowserSurfaceResponse,
+  BrowserViewportRequest,
+  BrowserViewportResponse,
   AwaitSurfaceRequest,
   AwaitSurfaceResponse,
   ControlClient,
@@ -156,6 +158,14 @@ export class SocketControlClient implements ControlClient {
   browserSurface(request: BrowserSurfaceRequest): Promise<BrowserSurfaceResponse> {
     return this.request<BrowserSurfaceResponse>(
       SURFACE_CONTROL_METHODS.browser,
+      request,
+      { timeoutMs: BROWSER_REQUEST_TIMEOUT_MS + 5_000 },
+    );
+  }
+
+  browserViewport(request: BrowserViewportRequest): Promise<BrowserViewportResponse> {
+    return this.request<BrowserViewportResponse>(
+      SURFACE_CONTROL_METHODS.browserViewport,
       request,
       { timeoutMs: BROWSER_REQUEST_TIMEOUT_MS + 5_000 },
     );

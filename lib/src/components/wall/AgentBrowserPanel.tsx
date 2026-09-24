@@ -116,10 +116,11 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
       viewport,
       updateParameters: (next) => paneWrite.updateParams(id, next),
       setTitle: (nextTitle) => paneWrite.setTitle(id, nextTitle),
-      requestRenderSwap: (mode = 'iframe') => {
+      requestRenderSwap: (mode = 'iframe', viewport) => {
         // The iframe renderer is single-frame: only the active tab survives.
         // Warn + require a typed confirm when other tabs would be closed.
         if (controller.snapshot().tabs.length >= 2) setPendingRenderSwap(mode);
+        else if (viewport) actionsRef.current.onSwapRenderMode(id, mode, viewport);
         else actionsRef.current.onSwapRenderMode(id, mode);
       },
       launchFailed: (error) => actionsRef.current.onBrowserLaunchFailed?.(id, error),
@@ -329,13 +330,13 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   const opening = phase === 'idle' || phase === 'launching' || phase === 'attaching' || phase === 'relaunching';
   const placeholder = (() => {
     // Mid-launch: the pane is on screen before its browser is up. It is
-    // mid-boot, not idle — telling the user to run `dor ab open` here would ask
+    // mid-boot, not idle — telling the user to run `dor agent-browser open` here would ask
     // them to redo the click they just made.
     if (phase === 'launching') return 'Opening the browser…';
     // Mid pop-in: the headed browser is closed by design and the headless one
     // is booting — not a session that ended.
     if (phase === 'relaunching') return 'Relaunching browser…';
-    // Addressed to this pane: a bare `dor ab open` drives the caller's default
+    // Addressed to this pane: a bare `dor agent-browser open` drives the caller's default
     // key, which for a keyed or GUI-launched pane is some other browser.
     const command = `${cli} --surface ${actions.resolveSurfaceRef(id)} open <url>`;
     // A pane whose launch never named a session has no browser to drive yet.

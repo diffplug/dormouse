@@ -6,7 +6,7 @@ import type { ChromeSnapshot, RenderMode, ScreenController, ScreenSnapshot, Scre
 interface StoryArgs {
   /** Render backend — `embed` greys out the Screen (viewport) section. */
   renderMode: RenderMode;
-  /** Whether the host can pop out (adds `ab-popout` to the offered render modes). */
+  /** Whether the host can pop out (adds `agent-browser-popout` to the offered render modes). */
   canPopOut: boolean;
   state: ScreenState;
   /** Browser CSS viewport + inferred DPR. */
@@ -57,7 +57,7 @@ function useMockController(args: StoryArgs): ScreenController {
         reload: () => console.log('[story] reload'),
       },
       hostCapable: args.hostCapable,
-      renderModes: ['ab-screencast', ...(args.canPopOut ? ['ab-popout' as const] : []), 'iframe'],
+      renderModes: ['agent-browser-screencast', ...(args.canPopOut ? ['agent-browser-popout' as const] : []), 'iframe'],
       actions: {
         engageSync: () => console.log('[story] engageSync'),
         applyDevice: (name) => console.log('[story] applyDevice', name),
@@ -83,7 +83,7 @@ const meta: Meta<typeof AgentBrowserScreenModalStory> = {
   title: 'Modals/AgentBrowserScreenModal',
   component: AgentBrowserScreenModalStory,
   argTypes: {
-    renderMode: { control: 'inline-radio', options: ['ab-screencast', 'ab-popout', 'iframe'] },
+    renderMode: { control: 'inline-radio', options: ['agent-browser-screencast', 'agent-browser-popout', 'iframe'] },
     canPopOut: { control: 'boolean' },
     state: { control: 'inline-radio', options: ['SYNCED', 'SCALED'] },
     vpW: { control: 'number' },
@@ -98,7 +98,7 @@ const meta: Meta<typeof AgentBrowserScreenModalStory> = {
   // Defaults shared by every story (each story overrides the viewport knobs);
   // a swap-capable, pop-out-capable surface so both new affordances show.
   args: {
-    renderMode: 'ab-screencast',
+    renderMode: 'agent-browser-screencast',
     canPopOut: true,
   },
 };
@@ -132,7 +132,7 @@ export const ScaledCustom: Story = {
 };
 
 // Host can't drive the viewport (Tauri) ⇒ Apply is disabled and a note points
-// the user at `dor ab set …`.
+// the user at `dor agent-browser set …`.
 export const HostIncapable: Story = {
   args: {
     state: 'SCALED',
@@ -149,7 +149,7 @@ export const HostIncapable: Story = {
 // its own size).
 export const Popout: Story = {
   args: {
-    renderMode: 'ab-popout',
+    renderMode: 'agent-browser-popout',
     state: 'SYNCED',
     vpW: 980, vpH: 560, vpDpr: 2,
     paneW: 980, paneH: 560,

@@ -51,7 +51,7 @@ interface Sync<B> {
 
 export interface ViewportSyncDeps<B> {
   /** Size the browser; answers once the write has landed or failed. */
-  write(browser: B, size: SyncSize): Promise<BrowserResult>;
+  write(browser: B, size: SyncSize, isCurrent: () => boolean): Promise<BrowserResult>;
   /** Send `message` to every pane viewing browser `id`. */
   report(id: string, message: Extract<ViewerState, { type: 'sync' }>): void;
   /** Whether nothing may reach browser `id` now: a launch or close of it
@@ -118,7 +118,8 @@ export function createViewportSync<B extends { id: string }>(deps: ViewportSyncD
     s.stale = false;
     clearMismatch(s);
     setState(s, 'applying');
-    s.writing = deps.write(s.browser, size)
+    const engagement = s.engagement;
+    s.writing = deps.write(s.browser, size, () => syncs.get(id) === s && s.state !== 'off' && s.engagement === engagement)
       .catch((error: unknown): BrowserResult => ({ ok: false, error: messageOf(error) }))
       .then((result) => {
         s.writing = undefined;
@@ -140,7 +141,7 @@ export function createViewportSync<B extends { id: string }>(deps: ViewportSyncD
       return;
     }
     let s = syncs.get(id);
-    // Another browser streams under this identity now (a `dor ab` re-run).
+    // Another browser streams under this identity now (a `dor agent-browser` re-run).
     if (s && s.stream !== stream) {
       forget(id);
       s = undefined;
@@ -201,14 +202,17 @@ export function createViewportSync<B extends { id: string }>(deps: ViewportSyncD
       };
     },
 
-    /** A Fixed viewport or device ends this engagement. The host queues its
-     *  write alongside sync writes. */
+    /** Commit a successful Fixed viewport or device. An engagement chosen
+     *  after the Fixed request arrived owns the browser's next size. */
     fixed(id: string, engagement?: string): void {
-      if (engagement !== undefined) end(id, engagement);
+      if (engagement === undefined) return;
+      end(id, engagement);
       const s = syncs.get(id);
-      if (!s) return;
+      if (!s || s.engagement !== engagement) return;
       release(s);
     },
+
+    current(id: string): string | undefined { return syncs.get(id)?.engagement; },
 
     /** A launch or close replaces or ends browser `id`. */
     forget,

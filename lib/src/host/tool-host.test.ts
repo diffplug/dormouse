@@ -29,6 +29,27 @@ afterEach(async () => {
 });
 
 describe('createToolHost', () => {
+  it('reads browser settings before any Tool execution grant and merges user presets', async () => {
+    const userConfigPath = join(repo, 'user.yml');
+    await writeFile(userConfigPath, 'browser:\n  viewports:\n    custom: { width: 1100, height: 800, dpr: 2 }\n');
+    await writeFile(join(repo, 'dormouse.yml'), 'browser:\n  default_viewport: custom\n');
+    const host = createToolHost({ userConfigPath });
+    expect(await host.handle({ op: 'browser-config', cwd: repo })).toMatchObject({
+      status: 'browser-config', config: { defaultViewport: 'custom', viewports: { custom: { width: 1100, height: 800, dpr: 2 } } },
+    });
+  });
+
+  it('resolves a trusted Tool viewport from project and user configuration', async () => {
+    const userConfigPath = join(repo, 'user.yml');
+    await writeFile(userConfigPath, 'browser:\n  viewports:\n    custom: { width: 1100, height: 800 }\n');
+    await writeFile(join(repo, 'dormouse.yml'), 'tools:\n  app:\n    run: pnpm dev\n    render: playwright-screencast\n    viewport: custom\n');
+    const host = createToolHost({ userConfigPath });
+    await host.handle({ op: 'trust', kind: 'folder', projectRoot: repo });
+    expect(await host.handle({ op: 'lookup', name: 'app', cwd: repo })).toMatchObject({
+      status: 'ok', render: 'playwright-screencast', viewport: { mode: 'fixed', width: 1100, height: 800 },
+    });
+  });
+
   it('asks for trust before resolving anything runnable', async () => {
     const host = createToolHost({ stateDir });
     expect(await host.handle({ op: 'lookup', name: 'storybook', cwd: repo })).toMatchObject({

@@ -13,12 +13,15 @@ import type { ToolControlResult, ToolHostRequest } from '../lib/platform/tool-ty
 import { resolveUpstreamUrl } from './git-upstream';
 import { resolveOpenTool } from './tool-open';
 import type { ToolInput } from './tool-input';
-import type { ToolEntry } from './tool-registry';
+import { parseToolFile, type ToolEntry } from './tool-registry';
+import { mergeBrowserConfig, toolViewport } from './browser-config';
+import type { BrowserViewportConfig } from 'dor-lib-common/browser-viewports';
 import { readUserToolFile, resolveUserTool, userToolConfigPath } from './tool-user-config';
 import {
   FileToolTrustStore,
   MemoryToolTrustStore,
   folderGrantKey,
+  findToolFile,
   lookupTool,
   upstreamGrantKey,
   type ToolTrustStore,
@@ -33,6 +36,7 @@ function okResult(
   entry: ToolEntry,
   input: ToolInput,
   source: { projectRoot: string; path: string; warnings: readonly string[] },
+  browserConfig: BrowserViewportConfig,
 ): ToolControlResult {
   return {
     status: 'ok',
@@ -41,6 +45,7 @@ function okResult(
     name: entry.name,
     ...input,
     render: entry.render,
+    viewport: toolViewport(entry.render, entry.viewport, browserConfig),
     port: entry.port,
     warnings: [...source.warnings],
   };
@@ -76,18 +81,23 @@ export function createToolHost(options: { stateDir?: string; userConfigPath?: st
 
       try {
         const userPath = options.userConfigPath ?? userToolConfigPath();
+        if (request.op === 'browser-config') {
+          return { status: 'browser-config', config: await readBrowserConfig(request.cwd, userPath) };
+        }
         if (request.op === 'open') return await resolveOpenTool(request, userPath);
         const args = request.args ?? [];
         const project = request.global ? null : await lookupTool(request.name, request.cwd, trust, { args });
         if (project?.status === 'ok') {
-          return okResult(project.entry, project.input, { projectRoot: project.projectRoot, path: project.path, warnings: project.file.warnings });
+          const userFile = await readUserToolFile(userPath);
+          return okResult(project.entry, project.input, { projectRoot: project.projectRoot, path: project.path, warnings: project.file.warnings }, mergeBrowserConfig(userFile?.browser, project.file.browser));
         }
         if (project && project.status !== 'no-file' && project.status !== 'unknown-tool') return project;
 
         // A project miss falls through to the user's own Tools, which need no grant.
         const file = await readUserToolFile(userPath);
         const entry = file?.tools.get(request.name);
-        if (file && entry) return await resolveUserTool(file, userPath, entry, request.cwd, args);
+        if (file && entry) return await resolveUserTool(file, userPath, entry, request.cwd, args,
+          request.global ? mergeBrowserConfig(file.browser) : await readBrowserConfig(request.cwd, userPath));
         if (project && (project.status !== 'no-file' || !file)) return project;
         return { status: 'unknown-tool', projectRoot: dirname(userPath), path: userPath, names: [...(file?.tools.keys() ?? [])].sort() };
       } catch (error) {
@@ -95,4 +105,12 @@ export function createToolHost(options: { stateDir?: string; userConfigPath?: st
       }
     },
   };
+}
+
+/** Same bounded discovery and parsing as Tools, without their execution gate. */
+async function readBrowserConfig(cwd: string, userPath: string): Promise<BrowserViewportConfig> {
+  const user = await readUserToolFile(userPath);
+  const found = await findToolFile(cwd);
+  const project = found ? parseToolFile(found.text, { path: found.path, dir: found.dir, scope: 'repo' }) : undefined;
+  return mergeBrowserConfig(user?.browser, project?.browser);
 }

@@ -442,9 +442,9 @@ describe('SurfacePaneHeader — browser chrome', () => {
 
   it('uses the shared capability-first icon pair for every browser display mode', () => {
     const cases = [
-      [{ ...SCREEN, renderMode: 'ab-screencast', syncEngaged: true }, 'ab-resize', 2],
-      [{ ...SCREEN, renderMode: 'ab-screencast', syncEngaged: false }, 'ab-fixed', 2],
-      [{ ...SCREEN, renderMode: 'ab-popout', syncEngaged: false }, 'ab-popout', 2],
+      [{ ...SCREEN, renderMode: 'agent-browser-screencast', syncEngaged: true }, 'agent-browser-resize', 2],
+      [{ ...SCREEN, renderMode: 'agent-browser-screencast', syncEngaged: false }, 'agent-browser-fixed', 2],
+      [{ ...SCREEN, renderMode: 'agent-browser-popout', syncEngaged: false }, 'agent-browser-popout', 2],
       [{ ...SCREEN, renderMode: 'iframe', syncEngaged: false }, 'iframe', 1],
     ] as const;
 

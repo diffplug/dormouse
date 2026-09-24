@@ -5,6 +5,7 @@
  * operations — no CLI argv, script or CDP method crosses it.
  */
 import type { BrowserAutomationProvider, BrowserBinding } from 'dor-lib-common/browser-providers';
+import type { BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import type { AgentBrowserTab } from '../agent-browser-tab';
 
 export type { BrowserAutomationProvider };
@@ -25,10 +26,10 @@ export type BrowserOp =
    *  named one: navigating it when it is up in the mode asked for, else
    *  relaunching it headed or headless. Answers once the browser is up, never
    *  waiting for the page. */
-  | { op: 'launch'; url?: string; headed: boolean; requestId?: string }
+  | { op: 'launch'; url?: string; headed: boolean; requestId?: string; initialViewport?: BrowserViewportSetting }
   /** Where the session streams now, found without starting a browser; one
    *  that is gone relaunches at `url` when the caller names one. */
-  | { op: 'attach'; url?: string; headed?: boolean; requestId?: string }
+  | { op: 'attach'; url?: string; headed?: boolean; requestId?: string; initialViewport?: BrowserViewportSetting }
   /** A single-use URL for one viewer socket on the browser at `stream` (what
    *  a launch or attach answered): its frames, state and input. `headed`: the
    *  Surface shows it as its own window, so no frame is sent. `debug` logs the
@@ -40,8 +41,10 @@ export type BrowserOp =
   | { op: 'tab'; action: 'select' | 'close'; tabId: string }
   /** `endsSync` cancels this pane's engagement even before its first socket
    *  intent reaches the host. */
-  | { op: 'viewport'; width: number; height: number; dpr: number; endsSync?: string }
+  | { op: 'viewport'; width: number; height: number; dpr?: number; endsSync?: string }
   | { op: 'device'; name: string; endsSync?: string }
+  /** Read the active page's CSS viewport and effective device pixel ratio. */
+  | { op: 'measure' }
   /** Close the session — after the launch or attach of it running now — and
    *  cancel `cancels`: requests the closing Surface sent that can bring the
    *  browser up, by their `requestId`, however late the transport delivers
@@ -72,6 +75,8 @@ export interface BrowserResult {
   url?: string;
   /** `edit`: the text copy/cut placed on the OS clipboard. */
   text?: string;
+  /** `measure`: the active page's own values, not frame or pane dimensions. */
+  viewport?: { width: number; height: number; dpr: number };
 }
 
 

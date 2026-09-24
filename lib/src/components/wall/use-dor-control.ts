@@ -34,7 +34,7 @@ import { isSurfaceClosing } from '../../lib/notepad/notepad-store';
 import { clearToolAnnounce } from '../../lib/tool-announce-store';
 import { isWorkspaceTransferPending } from '../../lib/window-session-aggregator';
 import { stringParam } from './dor-control-shared';
-import { handOverBrowserStream } from './agent-browser-surface-controller';
+import { getAgentBrowserSurfaceController, handOverBrowserStream } from './agent-browser-surface-controller';
 import {
   callerStillPlaceable,
   callerStillRunnable,
@@ -47,6 +47,7 @@ import { browserSurfaceUrl, hostPathDisplay, iframeRefusal } from './browser-url
 import { isBrowserProvider, isTcpPort, parseRenderMode, renderModeFor } from 'dor-lib-common/browser-providers';
 import type { BrowserResult } from '../../lib/platform/browser-automation';
 import { BROWSER_PROVIDER_GUI, browserHandle, headedRenderMode, providerUnavailable, rememberLaunchBinaryPath } from './browser-automation';
+import { defaultBrowserViewportConfig, isBrowserViewportSetting, resolveBrowserViewport, type BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import { BrowserBindingReservations } from './browser-binding-reservations';
 import { listWallHandles } from './wall-handles';
 import {
@@ -105,6 +106,8 @@ export type DorControlParams = {
   global?: unknown;
   file?: unknown;
   tool?: unknown;
+  setting?: unknown;
+  initialViewport?: unknown;
 };
 
 // The webview view of a control request: the shared wire payload, but with
@@ -129,8 +132,8 @@ type EnsureBrowserSurfaceResult =
   | { ok: true; status: 'created' | 'existing' | 'replaced'; surfaceId: string; surfaceRef: string; minimized: boolean }
   | { ok: false; message: string };
 
-/** Reuse-or-create an automated browser surface for the session a `dor ab` /
- *  `dor pw` command just drove — the surface half of the control plane. */
+/** Reuse-or-create an automated browser surface for the session a `dor agent-browser` /
+ *  `dor playwright` command just drove — the surface half of the control plane. */
 type EnsureBrowserSurface = (args: {
   provider: BrowserAutomationProvider;
   headed?: boolean;
@@ -141,8 +144,9 @@ type EnsureBrowserSurface = (args: {
   /** The browser's stream, for the Surface's controller to view at once. */
   stream?: number;
   binaryPath?: string;
+  initialViewport?: BrowserViewportSetting;
   /** Resolved lazily, only when a fresh surface must be created: the reuse path
-   *  must succeed without a visible reference (e.g. `dor ab` from a minimized
+   *  must succeed without a visible reference (e.g. `dor agent-browser` from a minimized
    *  terminal refreshing an existing surface). */
   reference: () => ParseResult<DorSurface>;
   minimized?: boolean;
@@ -361,7 +365,6 @@ const CREATING_CONTROL_METHODS = new Set<string>([
   SURFACE_CONTROL_METHODS.ensure,
   SURFACE_CONTROL_METHODS.iframe,
   SURFACE_CONTROL_METHODS.browser,
-  SURFACE_CONTROL_METHODS.agentBrowser,
 ]);
 
 const ENSURE_CANCELLED = 'ensure was cancelled';
@@ -663,7 +666,7 @@ export function useDorControl({
     return target;
   }, [requireListedSurface]);
 
-  // The browser half of the same gate, for `dor ab --surface` (browser-gated;
+  // The browser half of the same gate, for `dor agent-browser --surface` (browser-gated;
   // docs/specs/glossary.md → Panes and Surfaces). Minimized targets pass: a
   // parked ab surface keeps its daemon session alive.
   const requireBrowserSurface = useCallback((
@@ -693,7 +696,7 @@ export function useDorControl({
       // Name the command that does work on it, so the caller's next try lands.
       const remedy = rendering
         ? `drive it with ${BROWSER_PROVIDER_GUI[rendering].cli} --surface ${target.ref}`
-        : `an iframe cannot be driven; open its page with dor ab open ${browserUrlFromParams(lath.getMeta(target.id)?.params) ?? '<url>'}`;
+        : `an iframe cannot be driven; open its page with dor agent-browser open ${browserUrlFromParams(lath.getMeta(target.id)?.params) ?? '<url>'}`;
       detail.respond({
         ok: false,
         error: `surface '${target.ref}' is not ${provider} rendered (render_mode: ${target.renderMode}) — ${remedy}`,
@@ -780,6 +783,7 @@ export function useDorControl({
     session,
     stream,
     binaryPath,
+    initialViewport,
     reference,
     minimized = false,
   }) => {
@@ -824,12 +828,13 @@ export function useDorControl({
         renderMode: renderModeFor(provider, 'screencast'),
         ...(cwd ? { cwd } : {}),
         session,
+        ...(initialViewport ? { browserViewport: initialViewport, syncEngaged: initialViewport.mode === 'pane-sync' } : {}),
         ...(key !== undefined ? { key } : {}),
         ...refreshedParams,
       },
       reference: target.value,
       title,
-      // `dor ab` opens the screencast in the background; caller keeps focus.
+      // `dor agent-browser` opens the screencast in the background; caller keeps focus.
       focusNeutral: true,
     });
     if (!result.ok) return { ok: false, message: result.message };
@@ -968,6 +973,7 @@ export function useDorControl({
         const toolArgs = stringArrayParam(params.args) ?? [];
         let warnings: string[] = [];
         let render: ToolRender = 'iframe';
+        let viewport: BrowserViewportSetting | undefined;
         // `dor tool -- <command>` has nowhere to declare a strategy, so it
         // autobinds. Safe by construction now that `auto` refuses two ports
         // rather than tie-breaking; a declared tool opts in with one line.
@@ -1029,6 +1035,7 @@ export function useDorControl({
           if (unavailable()) return;
           switch (lookup.status) {
             case 'trust-recorded':
+            case 'browser-config':
               // Only a `trust` op can produce this; a lookup never does.
               detail.respond({ ok: false, error: 'unexpected tool host response' });
               return;
@@ -1042,6 +1049,7 @@ export function useDorControl({
               // re-key cannot name another tool's key.
               key = namespacedToolKey(lookup.name, lookup.key);
               render = lookup.render;
+              viewport = lookup.viewport;
               port = lookup.port;
               warnings = lookup.warnings;
               break;
@@ -1165,6 +1173,7 @@ export function useDorControl({
           ...(typeof toolRun === 'string' ? {} : { toolArgv: [...toolRun] }),
           cwd,
           toolRender: render,
+          ...(viewport ? { browserViewport: viewport } : {}),
           ...(toolScope ? { toolScope } : {}),
           toolPort: port,
           ...(key ? { toolKey: key } : {}),
@@ -1575,7 +1584,7 @@ export function useDorControl({
       // Refused here, where the caller can act on it, not in the pane.
       const refusal = iframeRefusal(url);
       if (refusal) {
-        detail.respond({ ok: false, error: `${refusal} — open it with dor ab open ${url}` });
+        detail.respond({ ok: false, error: `${refusal} — open it with dor agent-browser open ${url}` });
         return;
       }
       const target = resolveVisibleSurface(stringParam(params.surface), detail.surfaceId);
@@ -1608,20 +1617,14 @@ export function useDorControl({
       return;
     }
 
-    // The provider a browser request names: agent-browser for the pre-merge
-    // spellings an older `dor ab` sends, else its `provider`.
-    const requestedProvider = (legacy: boolean): BrowserAutomationProvider | null => {
-      if (legacy) return 'agent-browser';
+    const requestedProvider = (): BrowserAutomationProvider | null => {
       if (isBrowserProvider(params.provider)) return params.provider;
       detail.respond({ ok: false, error: `unknown browser provider '${String(params.provider)}'` });
       return null;
     };
 
-    // `surface.resolveAgentBrowser` answers the same, as the bare session the
-    // older `dor ab` read.
-    if (detail.method === SURFACE_CONTROL_METHODS.resolveBrowser || detail.method === SURFACE_CONTROL_METHODS.resolveAgentBrowser) {
-      const legacy = detail.method === SURFACE_CONTROL_METHODS.resolveAgentBrowser;
-      const provider = requestedProvider(legacy);
+    if (detail.method === SURFACE_CONTROL_METHODS.resolveBrowser) {
+      const provider = requestedProvider();
       if (!provider) return;
       // `--surface`: that Surface's binding, once it is this provider's and named.
       const key = stringParam(params.key);
@@ -1629,7 +1632,11 @@ export function useDorControl({
         const target = requireBrowserSurface(params.surface, detail);
         if (!target || !requireAutomationSession(target, provider, detail)) return;
         const binding = browserBindingFromParams(lath.getMeta(target.id)?.params)!;
-        detail.respond({ ok: true, result: legacy ? { surfaceId: target.id, surfaceRef: target.ref, session: binding.session } : { binding } });
+        const stored = (lath.getMeta(target.id)?.params as { browserViewport?: unknown } | undefined)?.browserViewport;
+        const initialViewport = isBrowserViewportSetting(stored) ? stored : undefined;
+        const launchViewport = initialViewport?.mode === 'fixed' ? initialViewport
+          : initialViewport?.mode === 'pane-sync' ? getAgentBrowserSurfaceController(target.id)?.getMeasuredPaneSize() ?? { width: 1440, height: 900 } : undefined;
+        detail.respond({ ok: true, result: { binding, fresh: false, ...(provider === 'playwright' && initialViewport ? { initialViewport, launchViewport } : {}) } });
         return;
       }
       // `--key`: the Surface in this Wall bound to that key, else the key's
@@ -1641,12 +1648,142 @@ export function useDorControl({
           // Window-wide: a Surface bound to this key's session may have left
           // for another Workspace, still holding it.
           (session) => listWallHandles().some((wall) => wall.browserSessions(provider).includes(session)));
-      detail.respond({ ok: true, result: legacy ? { session: binding.session } : { binding } });
+      if (found || !params.proposed) {
+        const stored = found && (lath.getMeta(found.id)?.params as { browserViewport?: unknown } | undefined)?.browserViewport;
+        const initialViewport = isBrowserViewportSetting(stored) ? stored : undefined;
+        const launchViewport = initialViewport?.mode === 'fixed' ? initialViewport
+          : initialViewport?.mode === 'pane-sync' ? (found ? getAgentBrowserSurfaceController(found.id)?.getMeasuredPaneSize() : undefined) ?? { width: 1440, height: 900 } : undefined;
+        detail.respond({ ok: true, result: { binding, fresh: false, ...(provider === 'playwright' && initialViewport ? { initialViewport, launchViewport } : {}) } });
+      } else {
+        const existingNative = await browserHandle(provider, binding)?.measure();
+        if (existingNative?.ok && existingNative.viewport) {
+          detail.respond({ ok: true, result: { binding, fresh: false } });
+          return;
+        }
+        const configResult = await getPlatform().toolControl?.({ op: 'browser-config', cwd: binding.cwd ?? '' });
+        if (configResult?.status === 'error') {
+          detail.respond({ ok: false, error: configResult.message });
+          return;
+        }
+        const config = configResult?.status === 'browser-config' ? configResult.config : defaultBrowserViewportConfig();
+        let initialViewport: BrowserViewportSetting;
+        try { initialViewport = resolveBrowserViewport(config); }
+        catch (error) {
+          detail.respond({ ok: false, error: error instanceof Error ? error.message : String(error) });
+          return;
+        }
+        const launchViewport = initialViewport.mode === 'fixed' ? initialViewport : { width: 1440, height: 900 };
+        detail.respond({ ok: true, result: { binding, fresh: true, initialViewport, launchViewport } });
+      }
       return;
     }
 
-    if (detail.method === SURFACE_CONTROL_METHODS.browser || detail.method === SURFACE_CONTROL_METHODS.agentBrowser) {
-      const provider = requestedProvider(detail.method === SURFACE_CONTROL_METHODS.agentBrowser);
+    if (detail.method === SURFACE_CONTROL_METHODS.browserViewport) {
+      const provider = requestedProvider();
+      if (!provider) return;
+      let target: { id: string; ref: string } | null = null;
+      const key = stringParam(params.key);
+      const session = stringParam(params.session);
+      if (key !== undefined) {
+        const found = findBrowserSurface(provider, { key });
+        if (found) target = { id: found.id, ref: surfaceRefForId(found.id) };
+      } else if (session !== undefined) {
+        const matches = buildDorSurfaces().filter((surface) => {
+          const p = lath.getMeta(surface.id)?.params;
+          return parseRenderMode((p as { renderMode?: unknown } | undefined)?.renderMode).provider === provider
+            && agentBrowserSessionFromParams(p) === session;
+        });
+        if (matches.length === 1) target = { id: matches[0].id, ref: matches[0].ref };
+        else if (matches.length > 1) {
+          detail.respond({ ok: false, error: `session '${session}' is bound to multiple Surfaces; use --surface` });
+          return;
+        }
+      } else {
+        const found = requireBrowserSurface(params.surface, detail);
+        if (!found || !requireAutomationSession(found, provider, detail)) return;
+        target = { id: found.id, ref: found.ref };
+      }
+      if (!target) {
+        detail.respond({ ok: false, error: 'No bound browser Surface; use --surface with a screencast' });
+        return;
+      }
+      const surfaceParams = lath.getMeta(target.id)?.params;
+      const mode = parseRenderMode((surfaceParams as { renderMode?: unknown } | undefined)?.renderMode);
+      if (params.setting !== undefined && mode.presentation !== 'screencast') {
+        detail.respond({ ok: false, error: 'dor-embed-size requires a screencast Surface' });
+        return;
+      }
+      const binding = browserBindingFromParams(surfaceParams);
+      if (!binding) {
+        detail.respond({ ok: false, error: 'Browser Surface has no active session' });
+        return;
+      }
+      const requested = params.setting;
+      let setting: BrowserViewportSetting | undefined;
+      if (requested !== undefined) {
+        if (isBrowserViewportSetting(requested)) setting = requested;
+        else if (requested && typeof requested === 'object' && typeof (requested as { preset?: unknown }).preset === 'string') {
+          const choice = requested as { preset: string; dpr?: unknown };
+          try {
+            const result = await getPlatform().toolControl?.({ op: 'browser-config', cwd: binding.cwd ?? '' });
+            if (result?.status === 'error') throw new Error(result.message);
+            const config = result?.status === 'browser-config' ? result.config : defaultBrowserViewportConfig();
+            setting = resolveBrowserViewport(config, choice.preset);
+            if (choice.dpr !== undefined) {
+              if (setting.mode !== 'fixed' || typeof choice.dpr !== 'number') throw new Error('--dpr requires a fixed preset');
+              setting = resolveBrowserViewport(config, { width: setting.width, height: setting.height, dpr: choice.dpr });
+            }
+          } catch (error) {
+            detail.respond({ ok: false, error: error instanceof Error ? error.message : String(error) });
+            return;
+          }
+        } else {
+          detail.respond({ ok: false, error: 'Invalid browser viewport setting' });
+          return;
+        }
+      }
+      const browser = browserHandle(provider, binding);
+      if (!browser) {
+        detail.respond({ ok: false, error: providerUnavailable(provider) });
+        return;
+      }
+      const controller = getAgentBrowserSurfaceController(target.id);
+      try {
+        if (setting) {
+          if (controller) await controller.applyViewportSetting(setting);
+          else if (setting.mode === 'fixed') {
+            const changed = await browser.viewport(setting.width, setting.height, setting.dpr);
+            if (!changed.ok) throw new Error(changed.error ?? 'Could not resize browser viewport');
+          } else throw new Error('pane-sync requires a mounted screencast pane');
+          updateSurfaceParams(target.id, { browserViewport: setting, syncEngaged: setting.mode === 'pane-sync' });
+        }
+        const measured = await browser.measure();
+        if (!measured.ok && setting) throw new Error(measured.error ?? 'Could not measure browser viewport');
+        if (setting?.mode === 'fixed' && measured.viewport && (
+          measured.viewport.width !== setting.width || measured.viewport.height !== setting.height
+          || (setting.dpr !== undefined && measured.viewport.dpr !== setting.dpr)
+        )) throw new Error('Browser reported a different viewport after resizing');
+        if (!setting && measured.ok && measured.viewport && mode.presentation === 'screencast') {
+          const stored = (lath.getMeta(target.id)?.params as { browserViewport?: unknown } | undefined)?.browserViewport;
+          if (!isBrowserViewportSetting(stored) || stored.mode !== 'pane-sync') {
+            if (controller) controller.adoptMeasuredViewport(measured.viewport);
+            else updateSurfaceParams(target.id, { browserViewport: { mode: 'fixed', ...measured.viewport }, syncEngaged: false });
+          }
+        }
+        const stored = (lath.getMeta(target.id)?.params as { browserViewport?: unknown } | undefined)?.browserViewport;
+        const effective = setting ?? (isBrowserViewportSetting(stored) ? stored : { mode: 'fixed', width: 1440, height: 900 });
+        detail.respond({ ok: true, result: {
+          surfaceId: target.id, surfaceRef: target.ref, provider, renderMode: mode.mode,
+          requested: effective, ...(measured.viewport ? { actual: measured.viewport } : {}), ready: measured.ok && !!measured.viewport,
+        } });
+      } catch (error) {
+        detail.respond({ ok: false, error: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
+
+    if (detail.method === SURFACE_CONTROL_METHODS.browser) {
+      const provider = requestedProvider();
       if (!provider) return;
       const session = stringParam(params.session);
       if (!session) {
@@ -1681,7 +1818,7 @@ export function useDorControl({
       // The host reports where the session the command just drove streams,
       // its headedness when it can tell, and its native identity. No page
       // named: a session the command left closed is not relaunched. The port
-      // `dor ab` read itself, under its own socket directory and CLI, is
+      // `dor agent-browser` read itself, under its own socket directory and CLI, is
       // streamed from as it is; the host's state files may not describe that
       // daemon at all (docs/specs/dor-browser.md → "agent-browser").
       const callerPort = provider === 'agent-browser' && isTcpPort(params.wsPort) ? params.wsPort : undefined;
@@ -1701,6 +1838,7 @@ export function useDorControl({
         session,
         cwd,
         binaryPath,
+        initialViewport: isBrowserViewportSetting(params.initialViewport) ? params.initialViewport : undefined,
         stream: status.stream,
         headed: status.headed,
         // agent-browser's is its session; every host answer names one.
@@ -1711,6 +1849,15 @@ export function useDorControl({
       if (!result.ok) {
         detail.respond({ ok: false, error: result.message });
         return;
+      }
+      if (!isBrowserViewportSetting(params.initialViewport)) {
+        const observed = await browser.measure();
+        const stored = (lath.getMeta(result.surfaceId)?.params as { browserViewport?: unknown } | undefined)?.browserViewport;
+        if (observed.ok && observed.viewport && (!isBrowserViewportSetting(stored) || stored.mode !== 'pane-sync')) {
+          const controller = getAgentBrowserSurfaceController(result.surfaceId);
+          if (controller) controller.adoptMeasuredViewport(observed.viewport);
+          else updateSurfaceParams(result.surfaceId, { browserViewport: { mode: 'fixed', ...observed.viewport }, syncEngaged: false });
+        }
       }
       // Bound: later commands for the key resolve to this Surface.
       if (key) browserReservations.current.delete(provider, key);
@@ -1729,7 +1876,7 @@ export function useDorControl({
 
     if (detail.method === SURFACE_CONTROL_METHODS.resolveOpen) {
       // Resolve a terminal Surface handle to the dev-server URL it owns, for
-      // `dor ab open <surface>` / `dor iframe <surface>`. Same port scan as
+      // `dor agent-browser open <surface>` / `dor iframe <surface>`. Same port scan as
       // `dor list --ports`; minimized doors are valid targets. Ports ride the
       // terminal, so a target without one is rejected by the guard.
       const target = requireTerminalSurface(params.surface, detail);

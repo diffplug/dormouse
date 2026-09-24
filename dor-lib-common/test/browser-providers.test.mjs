@@ -23,8 +23,8 @@ test('parseRenderMode decodes every automated mode and renderModeFor inverts it'
       assert.deepEqual(parseRenderMode(mode), { provider, presentation, mode });
     }
   }
-  assert.equal(renderModeFor('agent-browser', 'screencast'), 'ab-screencast');
-  assert.equal(renderModeFor('playwright', 'popout'), 'pw-popout');
+  assert.equal(renderModeFor('agent-browser', 'screencast'), 'agent-browser-screencast');
+  assert.equal(renderModeFor('playwright', 'popout'), 'playwright-popout');
 });
 
 test('parseRenderMode reads anything else as the embed, inherited names included', () => {

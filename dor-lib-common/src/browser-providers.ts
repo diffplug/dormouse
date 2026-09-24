@@ -22,11 +22,11 @@ export type BrowserPresentation = 'screencast' | 'popout';
 const BARE_WALL_SCOPE = '1';
 
 // A session name becomes a filesystem path (the daemon's socket dir), so both
-// halves are held to the charset `dor ab --key` enforces CLI-side: the key
+// halves are held to the charset `dor agent-browser --key` enforces CLI-side: the key
 // arrives over the control socket too, from clients that are not `dor`.
 const UNSAFE_SESSION_CHARS = /[^A-Za-z0-9._-]/g;
 
-/** Env var that overrides which agent-browser binary to run; shared so `dor ab`
+/** Env var that overrides which agent-browser binary to run; shared so `dor agent-browser`
  * and the host key off the same name. */
 export const AGENT_BROWSER_BIN_ENV = 'DORMOUSE_AGENT_BROWSER_BIN';
 
@@ -43,10 +43,10 @@ export const DEFAULT_PLAYWRIGHT_BIN = 'playwright-cli';
  * "Browser Host").
  *
  * `binaryPath` exists because the GUI host's `PATH` is often the login `PATH`
- * with no nvm/volta shims, so `dor ab` / `dor pw` resolve an absolute path in
+ * with no nvm/volta shims, so `dor agent-browser` / `dor playwright` resolve an absolute path in
  * the user's terminal and hand it along. That makes it an **exec channel**
  * rather than a hint: it crosses the webview boundary, it is persisted into a
- * pane's Lath params, and the host hands it back to `dor pw`, so a compromised
+ * pane's Lath params, and the host hands it back to `dor playwright`, so a compromised
  * webview realm and a hand-edited session file could otherwise choose what the
  * extension host, the Tauri sidecar, or `dor` spawns.
  *
@@ -113,7 +113,7 @@ export interface BrowserBinding {
   binaryPath?: string;
 }
 
-/** An agent-browser session name. `dor ab --session` passes a user's raw name
+/** An agent-browser session name. `dor agent-browser --session` passes a user's raw name
  *  through, so anything goes but what agent-browser would read as an option or
  *  its socket directory as a path: the name lands after `--session` and in
  *  `<socket dir>/<session>.pid`, whose pid a relaunch signals. */
@@ -127,14 +127,13 @@ function isPlaywrightSession(value: unknown): value is string {
   return typeof value === 'string' && /^[A-Za-z0-9._-]{1,200}$/.test(value);
 }
 
-/** One provider's row. The provider's id is also its long `dor` command;
- *  `alias` is its short one and the prefix of its render modes; `modes` are the
+/** One provider's row. The provider's id is also its `dor` command;
+ *  `modes` are the
  *  persisted `renderMode` strings, which are also the public `render_mode` and
  *  `dormouse.yml` `render` values. */
 interface BrowserProviderSpec {
   /** The provider's name in user-facing text. */
   label: string;
-  alias: string;
   modes: Readonly<Record<BrowserPresentation, string>>;
   /** The CLI's session flag, as argv. */
   sessionArgs(session: string): string[];
@@ -149,8 +148,7 @@ interface BrowserProviderSpec {
 export const BROWSER_PROVIDERS = {
   'agent-browser': {
     label: 'agent-browser',
-    alias: 'ab',
-    modes: { screencast: 'ab-screencast', popout: 'ab-popout' },
+    modes: { screencast: 'agent-browser-screencast', popout: 'agent-browser-popout' },
     sessionArgs: (session: string) => ['--session', session],
     isSessionName: isAgentBrowserSession,
     binEnv: AGENT_BROWSER_BIN_ENV,
@@ -159,9 +157,8 @@ export const BROWSER_PROVIDERS = {
     isAllowedBinary: isAllowedAgentBrowserBinary,
   },
   playwright: {
-    label: 'Playwright',
-    alias: 'pw',
-    modes: { screencast: 'pw-screencast', popout: 'pw-popout' },
+    label: 'playwright',
+    modes: { screencast: 'playwright-screencast', popout: 'playwright-popout' },
     sessionArgs: (session: string) => [`--session=${session}`],
     isSessionName: isPlaywrightSession,
     binEnv: PLAYWRIGHT_BIN_ENV,

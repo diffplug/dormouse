@@ -27,7 +27,7 @@ test.skipIf(!binaryPath)('real CLI: GUI launch, viewer sockets, native tabs, inp
   const cwd = await mkdtemp(path.join(os.tmpdir(), 'dor-pw-test-'));
   await mkdir(path.join(cwd, '.playwright'));
   await mkdir(path.join(cwd, 'nested'));
-  const server = createServer((_req, res) => { res.end('<title>Playwright fixture</title><input autofocus value="hello"><a href="/next">Next</a>'); });
+  const server = createServer((_req, res) => { res.end('<title>Playwright fixture</title><script>document.title = `first:${innerWidth}x${innerHeight}@${devicePixelRatio}`</script><input autofocus value="hello"><a href="/next">Next</a>'); });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   let clipboard = '';
@@ -41,7 +41,7 @@ test.skipIf(!binaryPath)('real CLI: GUI launch, viewer sockets, native tabs, inp
     expect(predicate()).toBe(true);
   };
   try {
-    const opened = await pw({ op: 'launch', url, headed: false }, { cwd, binaryPath });
+    const opened = await pw({ op: 'launch', url, headed: false, initialViewport: { mode: 'fixed', width: 1440, height: 900 } }, { cwd, binaryPath });
     expect(opened.error).toBeUndefined();
     expect(opened.ok).toBe(true);
     session = opened.session!;
@@ -52,6 +52,7 @@ test.skipIf(!binaryPath)('real CLI: GUI launch, viewer sockets, native tabs, inp
     const { url: viewUrl } = await pw({ op: 'view', stream: opened.stream! }, req);
     viewer = await openViewer(viewUrl!);
     await waitFor(() => viewer!.frames.length > 0 && viewer!.states.some(m => m.type === 'tabs'));
+    await waitFor(() => viewer!.states.some(m => m.type === 'tabs' && m.tabs.some(t => t.title.startsWith('first:1440x900@'))));
     await expect(openViewer(viewUrl!)).rejects.toThrow('403');
     // Parking drops the viewer socket, then reconnects to the same CLI browser.
     viewer.socket.close();
@@ -74,11 +75,15 @@ test.skipIf(!binaryPath)('real CLI: GUI launch, viewer sockets, native tabs, inp
     await waitFor(() => viewer!.states.some(m => m.type === 'tabs' && m.tabs.length === 2 && m.tabs[1].active));
     expect((await pw({ op: 'tab', action: 'select', tabId: '0' }, req)).ok).toBe(true);
     const lastTabs = () => [...viewer!.states].reverse().find((m): m is Extract<ViewerState, { type: 'tabs' }> => m.type === 'tabs');
-    await waitFor(() => viewer!.states.at(-1)?.type === 'status' && !!lastTabs()?.tabs[0].active);
-    const viewport = await pw({ op: 'viewport', width: 640, height: 480, dpr: 2 }, req);
+    await waitFor(() => !!lastTabs()?.tabs[0].active);
+    const current = await pw({ op: 'measure' }, req);
+    expect(current.ok).toBe(true);
+    const differentDpr = current.viewport!.dpr === 2 ? 1 : 2;
+    expect((await pw({ op: 'viewport', width: 640, height: 480, dpr: differentDpr }, req)).ok).toBe(false);
+    const viewport = await pw({ op: 'viewport', width: 640, height: 480 }, req);
     expect(viewport.ok).toBe(true);
     // Captured at device resolution, unlike the CSS-resolution stream.
-    await waitFor(() => viewer!.frames.some(f => f.kind === 'crisp' && jpegWidth(f.jpeg) === 1280));
+    await waitFor(() => viewer!.frames.some(f => f.kind === 'crisp' && jpegWidth(f.jpeg) === 640 * current.viewport!.dpr));
     // No operation outside the typed set reaches the CLI.
     expect((await host.request({ provider: 'playwright', binding: req, op: 'eval', script: 'process.exit()' })).ok).toBe(false);
     const popped = await pw({ op: 'launch', url, headed: true }, req);
@@ -86,8 +91,13 @@ test.skipIf(!binaryPath)('real CLI: GUI launch, viewer sockets, native tabs, inp
     expect((await pw({ op: 'attach' }, req)).headed).toBe(true);
     await new Promise(r => setTimeout(r, 1000));
     // The relaunch swept its startup blank tab.
-    const popTabs = await spawnAndCapture(binaryPath!, [`--session=${session}`, 'tab-list', '--json'], { cwd });
-    expect(popTabs.ok && popTabs.stdout.match(/\d+:/g)).toHaveLength(1);
+    let popTabs = await spawnAndCapture(binaryPath!, [`--session=${session}`, 'tab-list', '--json'], { cwd });
+    const tabCount = () => popTabs.ok ? (String(JSON.parse(popTabs.stdout).result).match(/(?:^|\n)- \d+:/g)?.length ?? 0) : 0;
+    for (let attempt = 0; attempt < 10 && tabCount() > 1; attempt++) {
+      await new Promise(r => setTimeout(r, 200));
+      popTabs = await spawnAndCapture(binaryPath!, [`--session=${session}`, 'tab-list', '--json'], { cwd });
+    }
+    expect(tabCount()).toBe(1);
     const relaunched = await pw({ op: 'launch', url, headed: false }, req);
     expect(relaunched.ok, relaunched.error).toBe(true);
     expect(relaunched.stream).not.toBe(opened.stream);

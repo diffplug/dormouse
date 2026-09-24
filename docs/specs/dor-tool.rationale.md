@@ -4,7 +4,7 @@
 
 ## The tool capability set
 
-Before the Display modal read the Surface's own render modes (2026-09), it offered a Tool Playwright screencast and popout wherever the host wired Playwright. `onSwapRenderMode`'s Tool branch then wrote `toolRender: 'pw-*'`, cleared the session and launched only for `ab-screencast`, so the pane sat on its placeholder until the next save coerced it to `iframe`; `pw-popout` also popped out a Tool. The Wall refuses independently because the in-controller popout never reaches it.
+Before the Display modal read the Surface's own render modes (2026-09), it offered a Tool Playwright screencast and popout wherever the host wired Playwright. `onSwapRenderMode`'s Tool branch then wrote `toolRender: 'pw-*'`, cleared the session and launched only for `agent-browser-screencast`, so the pane sat on its placeholder until the next save coerced it to `iframe`; `playwright-popout` also popped out a Tool. The Wall refuses independently because the in-controller popout never reaches it.
 
 ## Declaring tools
 

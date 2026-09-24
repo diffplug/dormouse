@@ -7,6 +7,68 @@ import { SYNC_SETTLE_MS } from './browser-sync';
 const flush = async () => { for (let i = 0; i < 10; i++) await new Promise((resolve) => setImmediate(resolve)); };
 
 describe('createBrowserHost', () => {
+  it('sizes a new agent-browser before navigating and measures the page independently of its frame', async () => {
+    const fake = fakeProvider();
+    fake.provider.evaluate = async () => ({ width: 1440, height: 900, dpr: 2 });
+    const host = createBrowserHost({ writeClipboardText: vi.fn(), providers: { 'agent-browser': () => fake.provider } });
+    const browser = { provider: 'agent-browser', binding: { session: 'sized' } } as const;
+    try {
+      expect(await host.request({ ...browser, op: 'launch', headed: false, url: 'https://example.com/', initialViewport: { mode: 'fixed', width: 1440, height: 900, dpr: 2 } })).toMatchObject({ ok: true });
+      expect(fake.calls.slice(0, 4)).toEqual(['stop sized', 'open sized blank', 'viewport sized 1440x900@2', 'navigate sized']);
+      fake.provider.find = async () => ({ stream: 4321 });
+      expect(await host.request({ ...browser, op: 'measure' })).toEqual({ ok: true, viewport: { width: 1440, height: 900, dpr: 2 } });
+    } finally { await host.close(); }
+  });
+
+  it('never navigates a staged launch closed while its initial size is pending', async () => {
+    const fake = fakeProvider();
+    const host = createBrowserHost({ writeClipboardText: vi.fn(), providers: { 'agent-browser': () => fake.provider } });
+    const browser = { provider: 'agent-browser', binding: { session: 'cancelled' } } as const;
+    fake.gate('viewport cancelled 1440x900@2');
+    try {
+      const launching = host.request({ ...browser, op: 'launch', headed: false, url: 'https://example.com/',
+        initialViewport: { mode: 'fixed', width: 1440, height: 900, dpr: 2 } });
+      await vi.waitFor(() => expect(fake.calls).toContain('viewport cancelled 1440x900@2'));
+      const closing = host.request({ ...browser, op: 'close' });
+      fake.release('viewport cancelled 1440x900@2');
+      expect(await launching).toMatchObject({ ok: false, error: 'the browser was closed' });
+      expect(await closing).toEqual({ ok: true });
+      expect(fake.calls).not.toContain('navigate cancelled');
+      expect(fake.calls.filter((call) => call === 'close cancelled')).toHaveLength(1);
+    } finally { await host.close(); }
+  });
+
+  it('waits for a queued viewport write before measuring and rejects fractions', async () => {
+    const fake = fakeProvider();
+    fake.provider.find = async () => ({ stream: 4321 });
+    fake.provider.evaluate = async () => ({ width: 800, height: 600, dpr: 1 });
+    const host = createBrowserHost({ writeClipboardText: vi.fn(), providers: { 'agent-browser': () => fake.provider } });
+    const browser = { provider: 'agent-browser', binding: { session: 'measured' } } as const;
+    try {
+      expect((await host.request({ ...browser, op: 'viewport', width: 800.5, height: 600 })).ok).toBe(false);
+      fake.gate('viewport measured 800x600@undefined');
+      const sizing = host.request({ ...browser, op: 'viewport', width: 800, height: 600 });
+      await flush();
+      const measured = host.request({ ...browser, op: 'measure' });
+      await flush();
+      expect(fake.calls).toEqual(['viewport measured 800x600@undefined']);
+      fake.release('viewport measured 800x600@undefined');
+      expect((await sizing).ok).toBe(true);
+      expect(await measured).toEqual({ ok: true, viewport: { width: 800, height: 600, dpr: 1 } });
+    } finally { await host.close(); }
+  });
+
+  it('rejects a different explicit playwright DPR before navigating the destination', async () => {
+    const fake = fakeProvider();
+    fake.provider.evaluate = async () => ({ width: 1440, height: 900, dpr: 1 });
+    const host = createBrowserHost({ writeClipboardText: vi.fn(), providers: { playwright: () => fake.provider } });
+    try {
+      const result = await host.request({ provider: 'playwright', binding: { session: 'retina' }, op: 'launch', headed: false, url: 'https://example.com/', initialViewport: { mode: 'fixed', width: 1440, height: 900, dpr: 2 } });
+      expect(result).toMatchObject({ ok: false, error: expect.stringContaining('cannot change DPR') });
+      expect(fake.calls).toEqual(['stop retina', 'open retina blank', 'close retina']);
+    } finally { await host.close(); }
+  });
+
   it('finishes a close of a session before a launch into it begins', async () => {
     const fake = fakeProvider();
     const host = createBrowserHost({ writeClipboardText: vi.fn(), providers: { 'agent-browser': () => fake.provider } });
@@ -460,10 +522,11 @@ describe('sync-to-pane', () => {
     pane.fake.gate('viewport s1 800x600@2');
     await pane.size(800, 600);
     const fixed = pane.host.request({ ...s1, op: 'device', name: 'iPhone 15' });
-    await vi.waitFor(() => expect(pane.state()).toBe('off'));
+    expect(pane.state()).toBe('applying');
     expect(pane.writes()).toEqual(['viewport s1 800x600@2']);
     pane.fake.release('viewport s1 800x600@2');
     expect((await fixed).ok).toBe(true);
+    await vi.waitFor(() => expect(pane.state()).toBe('off'));
     expect(pane.writes()).toEqual(['viewport s1 800x600@2', 'device s1 iPhone 15']);
     // A pane size still on its way is not a new engagement.
     await pane.size(820, 600);
@@ -516,6 +579,28 @@ describe('sync-to-pane', () => {
     pane.seen(800, 600);
     await settled();
     expect(pane.state()).toBe('synced');
+  });
+
+  it('lets a newer pane engagement win when a prior Fixed request commits', async () => {
+    const pane = await paneOn();
+    await pane.size(800, 600, 'e1');
+    await vi.waitFor(() => expect(pane.writes()).toEqual(['viewport s1 800x600@2']));
+    await flush();
+    pane.seen(800, 600);
+    await vi.waitFor(() => expect(pane.state()).toBe('synced'));
+    pane.fake.gate('viewport s1 1024x768@1');
+    const fixed = pane.host.request({ ...s1, op: 'viewport', width: 1024, height: 768, dpr: 1, endsSync: 'e1' });
+    await vi.waitFor(() => expect(pane.writes()).toContain('viewport s1 1024x768@1'));
+    await pane.size(900, 600, 'e2');
+    expect(pane.state()).toBe('applying');
+    pane.fake.release('viewport s1 1024x768@1');
+    expect((await fixed).ok).toBe(true);
+    await vi.waitFor(() => expect(pane.writes()).toEqual(['viewport s1 800x600@2', 'viewport s1 1024x768@1', 'viewport s1 900x600@2']));
+    await flush();
+    pane.seen(900, 600);
+    await vi.waitFor(() => expect(pane.state()).toBe('synced'));
+    await pane.size(800, 600, 'e1');
+    expect(pane.writes()).toHaveLength(3);
   });
 
   it('drops a Fixed resolution that waited on a write once a launch replaces the browser', async () => {

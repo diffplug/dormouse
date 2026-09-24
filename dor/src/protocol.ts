@@ -24,13 +24,9 @@ export const SURFACE_CONTROL_METHODS = {
   kill: 'surface.kill',
   iframe: 'surface.iframe',
   browser: 'surface.browser',
+  browserViewport: 'surface.browserViewport',
   resolveBrowser: 'surface.resolveBrowser',
   resolveOpen: 'surface.resolveOpen',
-  /** Legacy aliases of `browser` / `resolveBrowser` for agent-browser, which a
-   *  `dor` older than its host still sends (docs/specs/dor-cli.md → "Browser
-   *  Surface Addressing"). No current `dor` sends them. */
-  agentBrowser: 'surface.agentBrowser',
-  resolveAgentBrowser: 'surface.resolveAgentBrowser',
 } as const;
 
 export type SurfaceControlMethod = (typeof SURFACE_CONTROL_METHODS)[keyof typeof SURFACE_CONTROL_METHODS];

@@ -12,16 +12,16 @@ One body component renders all web content: `BrowserPanel`, persisted as
 `surfaceType: 'browser'` with a swappable `renderMode`. Two axes define a browser
 pane — its **target** (today always a bare URL; process-backed targets belong to
 the **dor-tools** scope, `docs/specs/dor-tool.md`) and its **render** mode
-(`ab-screencast`, `ab-popout`, `pw-screencast`, `pw-popout`, `iframe`). **Render is a pane parameter, never a
+(`agent-browser-screencast`, `agent-browser-popout`, `playwright-screencast`, `playwright-popout`, `iframe`). **Render is a pane parameter, never a
 separate surface kind**; `docs/specs/glossary.md` owns the `kind` / `render_mode`
 mapping.
 
 Browser entry points take a URL, a schemeless `host:port`, or a terminal Surface
 handle (`docs/specs/dor-cli.md` → Browser Open Target Resolution):
 
-- `dor ab ...` / `dor agent-browser ...` forwards to the user's own
+- `dor agent-browser ...` forwards to the user's own
   `agent-browser` binary and binds that session to a browser pane.
-- `dor pw ...` / `dor playwright ...` binds the user-installed Playwright CLI.
+- `dor playwright ...` binds the user-installed Playwright CLI.
 - `dor iframe <url>` uses the iframe renderer, for `http://` pages
   ([Iframe Renderer](#iframe-renderer)).
 
@@ -37,15 +37,14 @@ An automated renderer belongs to one **provider**, the CLI that drives its
 browser. **Must read every per-provider fact from the one registry** — render
 modes, CLI, binary for `dor`, the hosts and the webview; label, device presets
 and viewport hint for the GUI — never a ternary on the provider or a mode
-prefix. **Never change a persisted mode string**: they are the public
-`render_mode` and `dormouse.yml` `render` values. `parseRenderMode` decodes one
+prefix. **Must spell provider names in full and lowercase in UI, commands and renderer identifiers**, including public `render_mode` and `dormouse.yml` `render` values; abbreviated modes are not aliases. `parseRenderMode` decodes one
 to its provider and presentation (`screencast` / `popout`), reading anything
 else as `iframe`.
 
 | Provider | CLI | Render modes | Binary override / name | Install |
 | --- | --- | --- | --- | --- |
-| agent-browser | `dor ab` | `ab-screencast`, `ab-popout` | `DORMOUSE_AGENT_BROWSER_BIN` / `agent-browser` | `npm i -g agent-browser` |
-| Playwright | `dor pw` | `pw-screencast`, `pw-popout` | `DORMOUSE_PLAYWRIGHT_BIN` / `playwright-cli` | `npm i -g @playwright/cli` |
+| agent-browser | `dor agent-browser` | `agent-browser-screencast`, `agent-browser-popout` | `DORMOUSE_AGENT_BROWSER_BIN` / `agent-browser` | `npm i -g agent-browser` |
+| playwright | `dor playwright` | `playwright-screencast`, `playwright-popout` | `DORMOUSE_PLAYWRIGHT_BIN` / `playwright-cli` | `npm i -g @playwright/cli` |
 
 Source of truth: `BROWSER_PROVIDERS` and `parseRenderMode` in
 `dor-lib-common/src/browser-providers.ts`; `BROWSER_PROVIDER_GUI` in
@@ -62,12 +61,12 @@ Invariants on the flat persisted `BrowserPanelParams`:
   Agent-browser mirrors the newest http(s) active tab URL into it — the host
   relaunches at nothing else; iframe persists only navigations initiated by
   Dormouse chrome.
-- **Must keep automation state flat** (`session`, `launchSession`,
+- **Must keep browser binding and lifecycle fields flat** (`session`, `launchSession`,
   `launchFallback`, `binaryPath`, `cwd`, `nativeIdentity`, `syncEngaged`,
-  `key`), never nested but for a `launchFallback` restore's params. Pop-out is not a param — it derives from `renderMode`
+  `key`); `browserViewport` stores resolved sizing, and `launchFallback` may carry restore params. Pop-out is not a param — it derives from `renderMode`
   once, at controller construction.
-- **Never carry a stream in params**: the port `dor ab` reads, or the stream
-  the host's `attach` answers for `dor pw`, goes straight to the Surface's
+- **Never carry a stream in params**: the port `dor agent-browser` reads, or the stream
+  the host's `attach` answers for `dor playwright`, goes straight to the Surface's
   controller (rationale).
 - **`contextPortKey` is declared and persisted like any other param.** Only a
   Surface the pane context menu opened for a port carries it, and reuse looks
@@ -181,7 +180,7 @@ Source of truth: `lib/src/components/wall/use-dev-server-ports.ts`,
 
 **Must scan once per context opening**, using the shared per-port URL selection in `docs/specs/dor-cli.md` → Browser Open Target Resolution. Zero/one port uses an inline row; multiple ports use a selector. Failed scans are distinct from no listeners.
 
-**Must offer System browser, Iframe, and each automation provider’s screencast and popout for the selected port**, each target named by its provider's label (`agent-browser`, `agent-browser popout`, `Playwright`, `Playwright popout`) and disabled with a reason when the host does not offer it (`agent-browser unavailable on this host`). Opening a browser from context always preserves the source terminal, including an untouched one.
+**Must offer System browser, Iframe, and each automation provider’s screencast and popout for the selected port**, each target named by its provider's label (`agent-browser`, `agent-browser popout`, `playwright`, `playwright popout`) and disabled with a reason when the host does not offer it (`agent-browser unavailable on this host`). Opening a browser from context always preserves the source terminal, including an untouched one.
 
 **Must reuse targets per source, port, and provider**: each provider’s screencast and popout share a browser session and switch display modes. **A reuse is one intent, `setRenderMode(mode, { url })`, reaching the Surface's controller by id** (`requestBrowserRenderMode`), so a mode switch relaunches at the port's page rather than racing a navigation into it, even in an unmounted Door. Reattach minimized targets and recreate closed ones. System browser follows the OS opener's behavior.
 
@@ -227,17 +226,16 @@ Resolution controls apply to both screencast providers. **Fixed** issues
   the host shut down**. **Must carry the pane's ended engagement to the host,
   which rejects its later socket intents even when none arrived before Fixed.**
 
-**Only `syncEngaged` persists** — device/custom viewport state lives in
-the browser itself. **The webview disengages only on the host's `off` for its
+**Must persist resolved viewport settings**, restoring them when the browser is recreated without rereading a preset definition. **The webview disengages only on the host's `off` for its
 engagement**; `SYNCED` only while the host reports it `synced`. **The modal shows
 the ratio the browser measures (a Playwright page, a popped-out window), else the
 one this Surface last fixed on this browser, else the display's.**
 
 | From -> To | Behavior |
 | --- | --- |
-| `iframe` or the other provider -> `ab-*` / `pw-*` | **The pane swaps at once** to a session-less pane whose controller launches at the current URL, headed for a popout (rationale). **A failed launch restores the previous renderer in place** (`launchFallback: { restore }`), even minimized: the embed, or the previous provider reopened in its own session, keeping its `key` (rationale). Inert without the capability. **A non-http(s) `url` refuses the swap** — the same `browserSurfaceUrl` check the iframe sink applies. |
-| `ab-screencast` <-> `ab-popout` | Same Surface id and session, headed/headless relaunch in the surface controller; preserves only the active URL. |
-| `ab-*` -> `iframe` | Uses canonical `params.url`; with multiple tabs, requires the user to press `c` in the warning overlay, because only the active tab survives. |
+| `iframe` or the other provider -> `agent-browser-*` / `playwright-*` | **The pane swaps at once** to a session-less pane whose controller launches at the current URL, headed for a popout (rationale). **A failed launch restores the previous renderer in place** (`launchFallback: { restore }`), even minimized: the embed, or the previous provider reopened in its own session, keeping its `key` (rationale). Inert without the capability. **A non-http(s) `url` refuses the swap** — the same `browserSurfaceUrl` check the iframe sink applies. |
+| `agent-browser-screencast` <-> `agent-browser-popout` | Same Surface id and session, headed/headless relaunch in the surface controller; preserves only the active URL. |
+| `agent-browser-*` -> `iframe` | Uses canonical `params.url`; with multiple tabs, requires the user to press `c` in the warning overlay, because only the active tab survives. |
 
 Source of truth: `lib/src/components/wall/AgentBrowserScreenModal.tsx`,
 `offeredRenderModes` in `lib/src/components/wall/browser-automation.ts`,
@@ -249,13 +247,34 @@ and `sync-to-pane` in `lib/src/host/browser-host.test.ts`,
 `lib/src/host/playwright-host.lifecycle.test.ts` and
 `lib/src/components/wall/agent-browser-surface-controller.test.ts`.
 
+## Viewport presets
+
+**Must default new automated screencasts to fixed `desktop` sizing**, independent of pane layout. Splitting, resizing, minimizing and maximizing change presentation only. **Must preserve live browser sizing on reuse**, including native resize/device choices and externally attached browsers. Iframes remain pane-sized; popouts remain window-sized.
+
+**Must resolve the nearest ancestor `dormouse.yml` browser settings over user configuration over built-ins**, using the browser's bound working directory. A named preset replaces its whole lower-priority definition. `pane-sync` is reserved and cannot be redefined. `browser.default_viewport` defaults to `desktop`; a Tool's explicit viewport takes precedence. User-only Tool lookup excludes project settings. Browser configuration is data and grants no Tool execution authority.
+
+| Built-in preset | CSS width × height |
+| --- | --- |
+| `desktop` | 1440 × 900 |
+| `laptop` | 1280 × 800 |
+| `tablet` | 768 × 1024 |
+| `phone` | 390 × 844 |
+| `pane-sync` | Follow the pane |
+
+**Must preserve the current device-pixel ratio when DPR is omitted.** A requested ratio unsupported by the provider fails before changing dimensions; playwright can accept only its current context ratio. Presets describe viewport geometry, not devices. **Must keep device emulation separate in the Display modal and label pixel density DPR.**
+
+**Must apply initial dimensions before the destination page's first script runs**, for managed CLI, GUI and Tool launches. Agent-browser launches blank, sets the viewport and then navigates; playwright uses its context viewport configuration. A failed initialization never navigates at a silently substituted size. **Must apply a renderer and viewport chosen together to the new renderer**, not discard sizing during a swap.
+
+**Must query the active page's measured CSS dimensions and DPR**, never infer them from the pane or screenshot. Dormouse sizing commands require an existing bound Surface, do not create a browser, and use the same serialized writes as the Display modal. The command contract belongs to `docs/specs/dor-cli.md` → Browser viewport control.
+
+Source of truth: `resolveBrowserViewport` in `dor-lib-common/src/browser-viewports.ts`; `parseBrowserConfig` / `mergeBrowserConfig` in `lib/src/host/browser-config.ts`; `createToolHost` in `lib/src/host/tool-host.ts`; `lib/src/host/browser-config.test.ts`, `lib/src/host/tool-host.test.ts`.
+
 ## Automated Browser
 
 **Dormouse is a viewer/client for the user's installed provider CLI** — it
-neither bundles nor forks a browser ([Providers](#providers)). `dor ab` / `dor
-pw` intercept only the identity flags and forward everything else verbatim to
-the provider's CLI against the resolved session; the only rewrite is a
-navigation verb's Dormouse target (`surface:N`, `:port`, `host:port`), resolved
+neither bundles nor forks a browser ([Providers](#providers)). `dor agent-browser` / `dor playwright` extract identity flags, handle
+`dor-embed-size` and prepare initial sizing ([Viewport presets](#viewport-presets)); native commands then run against the resolved session. A
+navigation verb's Dormouse target (`surface:N`, `:port`, `host:port`) is resolved
 to a URL first (`docs/specs/dor-cli.md` → Browser Surface Addressing). Flags
 Dormouse does not model still pass through.
 
@@ -509,7 +528,7 @@ Source of truth: `createViewerServer`, `BrowserView` (`pages`,
 
 ### Pop-Out
 
-A popout (`ab-popout`, `pw-popout`) relaunches the same session headed, because
+A popout (`agent-browser-popout`, `playwright-popout`) relaunches the same session headed, because
 Chrome fixes headed/headless at launch. The pane becomes a stub with Pop back in;
 while the window is still opening (a launch, attach or relaunch in flight) the
 stub offers nothing. **State carried in v1 is only the last
@@ -561,6 +580,7 @@ host; standalone runs the bundled copy in the sidecar behind one Rust command.
 | --- | --- |
 | `launch` | Without a session, open an http(s) `url` in a new GUI session; with one, navigate it when it is up in the mode asked for, else relaunch it headed or headless at `url`, blank when that page is not http(s). Resolves when the browser is up, not when the page loads ([Pop-Out](#pop-out)). |
 | `attach` | The live browser's stream, found without starting a browser ([agent-browser](#agent-browser), [Playwright](#playwright)), with headedness where the provider can tell. Only a gone browser, for a caller naming a page, is relaunched there (headed on request), answering `relaunched`; one it cannot view is left alone. |
+| `measure` | Measure the active page's CSS width, height and device-pixel ratio without starting a browser. |
 | `view` | A single-use viewer socket URL for the browser at a `stream`, `headed` for a popped-out pane ([Viewer Socket](#viewer-socket)). |
 | `edit` | select-all/copy/cut via fixed host-owned JS plus an OS clipboard write. |
 | `navigate`, `history`, `tab`, `viewport`, `device`, `close` | One fixed argv (agent-browser) or client call (Playwright) each. |
@@ -664,7 +684,7 @@ relaunch changes the mode.
   daemon** (`liveDaemon`): named by a pid file from this boot, alive, beside a
   stream port that accepts, checked before `close` (rationale).
 - **A launch runs `open` in the binding's project directory while it exists**,
-  so a relaunch reads the same `./agent-browser.json` the `dor ab` there did;
+  so a relaunch reads the same `./agent-browser.json` the `dor agent-browser` there did;
   every other call runs in the host's.
 - **Every spawn passes the `binaryPath` gate in `runWithBinaryFallback`**, the
   host's `DORMOUSE_AGENT_BROWSER_BIN` being the exact-match override.
@@ -672,7 +692,7 @@ relaunch changes the mode.
   operation, a capture or `get cdp-url` runs only on that same proof, since
   any verb starts a daemon at `about:blank` to answer; **a stream is captured
   only when the proof names its port**.
-- **`dor ab` must read the stream port itself after a command that may bind**
+- **`dor agent-browser` must read the stream port itself after a command that may bind**
   (`stream status --json`, safe once the command made the daemon) and hand it
   over; the host views it on loopback without reading the caller's socket
   directory (rationale). **Never carry a socket directory to the host** — it
@@ -694,15 +714,15 @@ Source of truth: `createAgentBrowserProvider` (`listTabs`, `closeTab`,
 
 **Must use the user's installed `@playwright/cli`, resolved from `DORMOUSE_PLAYWRIGHT_BIN` or `PATH`.** GUI launches use Chromium. Native commands retain Playwright semantics: `open` restarts, `goto` navigates; commands for unsupported engines still run, with a viewer warning. The viewer requires CLI 0.1.19’s local browser-binding endpoint; installation errors name this requirement. A Playwright session lives in its CLI project scope, so a binding's cwd and executable pin every later command, relative paths included; `--session` uses the caller's own scope. GUI Connect inherits the source terminal's cwd; a swap without one uses the host cwd.
 
-**Must discover the native session in its CLI project scope and connect using that installation's matching Playwright client.** Accept only a unique registry entry matching session, workspace and library, with a local pipe endpoint and Chromium engine. Never load modules from the registry's library path. The host derives the client from the validated CLI installation. **`attach` relaunches at the page only when the registry lists no browser for the session**, never one it cannot view; `dor pw`'s binding attaches with no page, and reports the browser's headedness. Native CLI tabs and the pane share the selected tab; the host polls tab selection and metadata every 750ms while viewed, broadcasting only changes, and the current state to each connecting viewer; each also reports the browser's page count ([Viewer Socket](#viewer-socket)) and the active page's viewport and ratio. Captures reuse tab state for up to 750ms; explicit host controls refresh immediately. **The controller must apply a host-reported mode before the new stream**, so sync never sizes a headed window, except mid-relaunch or as an echo ([Browser Connection](#browser-connection)).
+**Must discover the native session in its CLI project scope and connect using that installation's matching Playwright client.** Accept only a unique registry entry matching session, workspace and library, with a local pipe endpoint and Chromium engine. Never load modules from the registry's library path. The host derives the client from the validated CLI installation. **`attach` relaunches at the page only when the registry lists no browser for the session**, never one it cannot view; `dor playwright`'s binding attaches with no page, and reports the browser's headedness. Native CLI tabs and the pane share the selected tab; the host polls tab selection and metadata every 750ms while viewed, broadcasting only changes, and the current state to each connecting viewer; each also reports the browser's page count ([Viewer Socket](#viewer-socket)) and the active page's viewport and ratio. Captures reuse tab state for up to 750ms; explicit host controls refresh immediately. **The controller must apply a host-reported mode before the new stream**, so sync never sizes a headed window, except mid-relaunch or as an echo ([Browser Connection](#browser-connection)).
 
-Arbitrary CLI arguments, JavaScript and CDP methods are unavailable through the webview channel; the trusted `dor pw` process retains native passthrough. Executable hints use the same filename/exact-host-override boundary as agent-browser, with `playwright-cli` as the accepted name; `dor pw` applies it to the executable a binding returns (`docs/specs/dor-cli.md` → Browser Surface Addressing).
+Arbitrary CLI arguments, JavaScript and CDP methods are unavailable through the webview channel; the trusted `dor playwright` process retains native passthrough. Executable hints use the same filename/exact-host-override boundary as agent-browser, with `playwright-cli` as the accepted name; `dor playwright` applies it to the executable a binding returns (`docs/specs/dor-cli.md` → Browser Surface Addressing).
 
 A relaunch closes the previous CLI session, and a launch completes when the browser endpoint is ready; its stream is the host's number for that connection. **Every CLI call a launch waits on is killed at its deadline; every other one at 10 s, except `open`**, which lasts as long as the page load and whose end could take its browser down; nothing waits on it past a launch's own bounds. Shutdown also disconnects viewers. Viewer disconnect alone leaves the CLI browser alive; **a browser that disconnects on its own is reported gone to its viewers**. Concurrent input/captures share CDP attachments; disposal releases late attachments. **A screencast that fails to start must forget its page**, so the next poll releases the attachment and retries.
 
 The viewer socket ([Viewer Socket](#viewer-socket)) takes its frames from the CDP screencast, **decoded once and acknowledged no faster than 20 a second** (rationale), and inserts a paste with CDP `Input.insertText`. **Must drop a frame byte-identical to the last, still acknowledging it** (rationale). **Input waiting on CDP past 256 messages closes the viewer socket.**
 
-**Must write a page's viewport only through Playwright's own `setViewportSize`** — sync, a Fixed size and a device alike — **never a CDP metrics override from the host's session** (rationale). A page keeps its browser context's ratio (1 for a browser the CLI opened), whatever ratio a request names. **A device adds only its touch and user agent over the host's CDP session, which the next viewport write resets.**
+**Must write a page's viewport only through Playwright's own `setViewportSize`** — sync, a Fixed size and a device alike — **never a CDP metrics override from the host's session** (rationale). **Must preserve the browser context's measured ratio when DPR is omitted, and reject an explicit different DPR before writing dimensions.** **A device adds only its touch and user agent over the host's CDP session, which the next viewport write resets.**
 
 Source of truth: `followParamsHeadedness` in `lib/src/components/wall/agent-browser-surface-controller.ts`; `createPlaywrightProvider` in `lib/src/host/playwright-host.ts`; `resolvePlaywrightInstall` in `lib/src/host/playwright-install.ts`. Pinned by `lib/src/host/playwright-host.test.ts` (opt-in real CLI via `DORMOUSE_PLAYWRIGHT_TEST_BIN`), `lib/src/host/playwright-host.lifecycle.test.ts`, and `AgentBrowserPanel Playwright params` in `lib/src/components/wall/AgentBrowserPanel.test.tsx`.
 
@@ -723,8 +743,8 @@ The proxy instruments any `http://` upstream, loopback and remote alike:
   "couldn't connect" and "didn't respond in 30s of socket idle", in the system
   color scheme; **only a loopback upstream is called a dev server**.
 - HTTPS: refused, per the table below. **Every panel error but a non-http(s)
-  URL offers Open in agent-browser** (a swap to `ab-screencast`) where the host
-  can launch one, with `dor ab open <url>` as the fallback text.
+  URL offers Open in agent-browser** (a swap to `agent-browser-screencast`) where the host
+  can launch one, with `dor agent-browser open <url>` as the fallback text.
 - **Link-local / cloud-metadata address: refused (`scheme`)** — an SSRF guard
   that stands regardless of the loosened framing policy. **Canonicalize every
   equivalent spelling** (decimal/octal/hex, short forms, IPv4-mapped IPv6) before
@@ -737,11 +757,11 @@ https raw):
 
 | Entry | Outcome |
 | --- | --- |
-| `surface.iframe` (`dor iframe`) | refused before any pane opens, naming `dor ab open <url>` |
+| `surface.iframe` (`dor iframe`) | refused before any pane opens, naming `dor agent-browser open <url>` |
 | Display modal | iframe option disabled, showing the wording |
 | Render swap to `iframe`, tool or not | refused with a console warning; the modal never offers it, since both judge the page on screen (chrome URL, then `params.url`) |
-| New-tab request from a framed page | an `ab-screencast` pane, bound to its launch like a render swap, closed if the launch fails |
-| A pane already holding one | `scheme` panel error with Open in agent-browser and `dor ab open <url>` |
+| New-tab request from a framed page | an `agent-browser-screencast` pane, bound to its launch like a render swap, closed if the launch fails |
+| A pane already holding one | `scheme` panel error with Open in agent-browser and `dor agent-browser open <url>` |
 
 The terminal context's port rows are always `http://` (`listenerUrlsByPort`).
 
@@ -914,7 +934,6 @@ Source of truth: `lib/src/lib/platform/iframe-proxy-types.ts`,
 
 - Stable agent-browser profile/state persistence so pop-out preserves logins,
   cookies, tabs, DOM state, and scroll.
-- CLI affordance to re-engage Dormouse sync-to-pane.
 - Upstream support for stream keyboard `commands`, replacing the host edit
   workaround and enabling undo/redo.
 - General per-surface teardown hook for iframe proxy grants and future

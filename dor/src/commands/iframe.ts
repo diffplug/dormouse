@@ -35,7 +35,7 @@ export const iframeCommand: Command = {
       brief: 'Open a target in an iframe surface.',
       fullDescription: `Opens an http:// page in a high-fidelity iframe surface for a human to look at.
 
-Agents cannot read or drive an iframe surface, and it drops the page's cookies, so logins do not work in it. For those, and for any https:// page, which the iframe refuses, use \`dor ab open <url>\`.
+Agents cannot read or drive an iframe surface, and it drops the page's cookies, so logins do not work in it. For those, and for any https:// page, which the iframe refuses, use \`dor agent-browser open <url>\`.
 
 If the caller surface is an untouched terminal, Dormouse replaces that terminal with the iframe. Otherwise Dormouse creates a split next to the caller/focused surface.
 

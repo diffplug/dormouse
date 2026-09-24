@@ -894,7 +894,7 @@ export default function Home() {
           <div className="overflow-x-auto rounded-lg border border-[var(--color-text)]/15 bg-[var(--color-text)]/[0.04] p-4 font-mono text-sm leading-relaxed">
             <div><span className="opacity-40">$ </span>dor ensure -- pnpm dev</div>
             <div className="opacity-60">created surface:3&nbsp;&nbsp;&quot;pnpm dev&quot;</div>
-            <div className="mt-3"><span className="opacity-40">$ </span>dor ab open surface:3</div>
+            <div className="mt-3"><span className="opacity-40">$ </span>dor agent-browser open surface:3</div>
             <div className="opacity-60">&#8594; <span className="text-[var(--color-caramel)]">http://localhost:5173/</span></div>
           </div>
           <div className="overflow-hidden rounded-lg border border-[var(--color-text)]/15 bg-[var(--color-text)]/[0.04]">
@@ -929,7 +929,7 @@ export default function Home() {
               alt-tab and no second monitor.
             </p>
             <p className="text-lg leading-relaxed opacity-70 mb-4">
-              <code className={SITE_CODE_CLASS}>dor ab open surface:2</code>{" "}
+              <code className={SITE_CODE_CLASS}>dor agent-browser open surface:2</code>{" "}
               aims a browser at the port that terminal is serving — the one from
               the section above. Your agents run the same command, so when an
               agent wants to see what it just built, it opens a pane you're

@@ -29,7 +29,7 @@ function findPlaywrightInstall(hint: string | undefined, configured: string | un
   const candidates = [isAllowedPlaywrightBinary(hint, configured) ? hint : undefined, configured, DEFAULT_PLAYWRIGHT_BIN];
   for (const candidate of candidates) {
     if (!candidate) continue;
-    // The file `dor pw` spawns for this name (docs/specs/dor-cli.md → "Spawning
+    // The file `dor playwright` spawns for this name (docs/specs/dor-cli.md → "Spawning
     // External Binaries"); an explicit path comes back verbatim, unchecked.
     const binary = resolveBinaryPath(candidate, process.env);
     if (binary === undefined || !existsSync(binary)) continue;
@@ -52,7 +52,7 @@ function findPlaywrightInstall(hint: string | undefined, configured: string | un
       dir = parent;
     }
   }
-  throw new Error(`Playwright CLI installation unavailable or incompatible. Install npm i -g @playwright/cli (tested with 0.1.19), or set ${PLAYWRIGHT_BIN_ENV}.`);
+  throw new Error(`playwright CLI installation unavailable or incompatible. Install npm i -g @playwright/cli (tested with 0.1.19), or set ${PLAYWRIGHT_BIN_ENV}.`);
 }
 
 export function playwrightWorkspace(cwd: string): string | undefined {

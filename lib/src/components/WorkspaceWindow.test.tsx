@@ -715,7 +715,6 @@ describe('WorkspaceWindow', () => {
   it.each([
     SURFACE_CONTROL_METHODS.split,
     SURFACE_CONTROL_METHODS.tool,
-    SURFACE_CONTROL_METHODS.agentBrowser,
     SURFACE_CONTROL_METHODS.browser,
   ])('refuses %s while its Workspace is closing', async (method) => {
     await render();
@@ -784,18 +783,18 @@ describe('WorkspaceWindow', () => {
     await act(async () => { createWorkspace({ id: 'ws-2', name: 'build' }); });
     await flush();
 
-    /** `dor ab --key default` asking whichever Workspace will hold the browser
+    /** `dor agent-browser --key default` asking whichever Workspace will hold the browser
      *  what that key's session is called. */
     const sessionFor = (workspaceId: string): string => {
       const respond = vi.fn();
       getWallHandle(workspaceId)!.handleDorControl({
         requestId: 'r1',
-        method: SURFACE_CONTROL_METHODS.resolveAgentBrowser,
-        params: { key: 'default' },
+        method: SURFACE_CONTROL_METHODS.resolveBrowser,
+        params: { provider: 'agent-browser', key: 'default' },
         respond,
       });
-      expect(respond).toHaveBeenCalledWith({ ok: true, result: { session: expect.any(String) } });
-      return respond.mock.calls[0][0].result.session;
+      expect(respond).toHaveBeenCalledWith({ ok: true, result: { binding: { session: expect.any(String) }, fresh: false } });
+      return respond.mock.calls[0][0].result.binding.session;
     };
 
     // One `--key default` per Workspace, not one shared browser: the session
