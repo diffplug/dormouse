@@ -1222,7 +1222,10 @@ describe('relaunch (pop-out / pop-in)', () => {
     expect(opens(platform)).toEqual([]);
   });
 
-  it('a pop-out from a parked pane opens the page asked for while it was parked', async () => {
+  it.each([
+    ['the page asked for while it was parked', undefined, 'https://next.example/'],
+    ['the page it asks for, over one asked for earlier', 'http://localhost:5173/', 'http://localhost:5173/'],
+  ])('a pop-out from a parked pane opens %s, once', async (_name, asked, opened) => {
     vi.useFakeTimers();
     try {
       const platform = relaunchPlatform();
@@ -1234,8 +1237,8 @@ describe('relaunch (pop-out / pop-in)', () => {
       expect(controller.isParked()).toBe(true);
 
       getAgentBrowserScreenController('id')!.chromeActions.navigate('https://next.example/');
-      getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout');
-      expect(platform.agentBrowserPopOut).toHaveBeenCalledWith('sess', expect.objectContaining({ url: 'https://next.example/' }), undefined);
+      getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout', asked ? { url: asked } : undefined);
+      expect(platform.agentBrowserPopOut).toHaveBeenCalledWith('sess', expect.objectContaining({ url: opened }), undefined);
       platform.resolvePopOut({ ok: true, wsPort: 3456 });
       await vi.advanceTimersByTimeAsync(0);
       expect(opens(platform)).toEqual([]);
