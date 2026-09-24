@@ -871,7 +871,7 @@ describe('relaunch (pop-out / pop-in)', () => {
     // The host is about to close this browser and kill its daemon: the old
     // socket is released now rather than left to fail into "ended"/recovery.
     expect(old?.readyState).toBe(3);
-    expect(controller.snapshot().relaunching).toBe(true);
+    expect(controller.snapshot().phase).toBe('relaunching');
     expect(controller.snapshot().poppedOut).toBe(true);
     // No daemon command while the relaunch is in flight: not even the popped-out
     // CDP observer's `get cdp-url`.
@@ -879,7 +879,7 @@ describe('relaunch (pop-out / pop-in)', () => {
 
     platform.resolvePopOut({ ok: true, wsPort: 3456 });
     await flushMicrotasks();
-    expect(controller.snapshot().relaunching).toBe(false);
+    expect(controller.snapshot().phase).toBe('live');
     expect(streamSockets(3456).length).toBe(1);
     expect(streamSockets(1111).length).toBe(1);
     expect(platform.agentBrowserCommand).toHaveBeenCalledWith('sess', ['get', 'cdp-url'], undefined);

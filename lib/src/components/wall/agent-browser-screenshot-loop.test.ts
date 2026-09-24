@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { FakePtyAdapter, setPlatform } from '../../lib/platform';
+import { FakePtyAdapter, getPlatform, setPlatform } from '../../lib/platform';
 import type { AgentBrowserScreenshotResult, PlatformAdapter } from '../../lib/platform/types';
 import { createScreenshotLoop } from './agent-browser-screenshot-loop';
 
@@ -34,8 +34,7 @@ describe('screenshot loop byte dedup', () => {
     setScreenshot(screenshot);
     const draw = vi.fn();
     const loop = createScreenshotLoop({
-      getSession: () => 'sess',
-      getBinaryPath: () => undefined,
+      capture: (opts) => getPlatform().agentBrowserScreenshot?.('sess', opts) ?? null,
       isCapable: () => true,
       draw,
     });
@@ -62,8 +61,7 @@ describe('screenshot loop byte dedup', () => {
     const draw = vi.fn();
     let generation = 0;
     const loop = createScreenshotLoop({
-      getSession: () => 'sess',
-      getBinaryPath: () => undefined,
+      capture: (opts) => getPlatform().agentBrowserScreenshot?.('sess', opts) ?? null,
       isCapable: () => true,
       draw,
       getDrawGeneration: () => generation,
@@ -95,8 +93,7 @@ describe('screenshot loop backpressure', () => {
     const draw = vi.fn();
     let provisionalGeneration = 0;
     const loop = createScreenshotLoop({
-      getSession: () => 'sess',
-      getBinaryPath: () => undefined,
+      capture: (opts) => getPlatform().agentBrowserScreenshot?.('sess', opts) ?? null,
       isCapable: () => true,
       draw,
       getProvisionalGeneration: () => provisionalGeneration,
@@ -131,8 +128,7 @@ describe('screenshot loop backpressure', () => {
     let provisionalGeneration = 0;
     let provisionalDeadline = 0;
     const loop = createScreenshotLoop({
-      getSession: () => 'sess',
-      getBinaryPath: () => undefined,
+      capture: (opts) => getPlatform().agentBrowserScreenshot?.('sess', opts) ?? null,
       isCapable: () => true,
       draw,
       getProvisionalGeneration: () => provisionalGeneration,
@@ -166,8 +162,7 @@ describe('screenshot loop backpressure', () => {
     const draw = vi.fn();
     let provisionalGeneration = 0;
     const loop = createScreenshotLoop({
-      getSession: () => 'sess',
-      getBinaryPath: () => undefined,
+      capture: (opts) => getPlatform().agentBrowserScreenshot?.('sess', opts) ?? null,
       isCapable: () => true,
       draw,
       getProvisionalGeneration: () => provisionalGeneration,
@@ -202,8 +197,7 @@ describe('screenshot loop backpressure', () => {
     const draw = vi.fn();
     let provisionalGeneration = 0;
     const loop = createScreenshotLoop({
-      getSession: () => 'sess',
-      getBinaryPath: () => undefined,
+      capture: (opts) => getPlatform().agentBrowserScreenshot?.('sess', opts) ?? null,
       isCapable: () => true,
       draw,
       getProvisionalGeneration: () => provisionalGeneration,
@@ -245,8 +239,7 @@ describe('screenshot loop behind a blocking command', () => {
     setScreenshot(screenshot as unknown as PlatformAdapter['agentBrowserScreenshot']);
     const draw = vi.fn();
     const loop = createScreenshotLoop({
-      getSession: () => 'sess',
-      getBinaryPath: () => undefined,
+      capture: (opts) => getPlatform().agentBrowserScreenshot?.('sess', opts) ?? null,
       isCapable: () => true,
       draw,
     });
@@ -286,7 +279,7 @@ describe('screenshot loop behind a blocking command', () => {
     const screenshot = vi.fn(() => new Promise<AgentBrowserScreenshotResult>((resolve) => { releases.push(resolve); }));
     setScreenshot(screenshot as unknown as PlatformAdapter['agentBrowserScreenshot']);
     vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const loop = createScreenshotLoop({ getSession: () => 'sess', getBinaryPath: () => undefined, isCapable: () => true, draw: vi.fn() });
+    const loop = createScreenshotLoop({ capture: (opts) => getPlatform().agentBrowserScreenshot?.('sess', opts) ?? null, isCapable: () => true, draw: vi.fn() });
 
     loop.pulse();
     await vi.advanceTimersByTimeAsync(300);

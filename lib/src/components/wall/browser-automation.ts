@@ -28,6 +28,12 @@ export function automationProvider(mode: unknown): BrowserAutomationProvider | n
   return isAutomationMode(mode) ? AUTOMATION_MODES[mode].provider : null;
 }
 
+/** The provider an automated browser Surface drives; an unset mode (a direct
+ *  mount in tests) is agent-browser. */
+export function surfaceProvider(mode: unknown): BrowserAutomationProvider {
+  return automationProvider(mode) ?? 'agent-browser';
+}
+
 export function isPopout(mode: unknown): boolean {
   return isAutomationMode(mode) && AUTOMATION_MODES[mode].headed;
 }

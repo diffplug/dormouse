@@ -7,7 +7,7 @@ import { isEditableTarget } from '../../lib/dom';
 import type { RenderMode } from './agent-browser-screen';
 import { tabDisplayTitle } from './browser-url';
 import { resolveRenderMode } from './browser-surface';
-import { automationCli, automationProvider } from './browser-automation';
+import { automationCli, surfaceProvider } from './browser-automation';
 import { MOUSE_BUTTONS, MOUSE_BUTTON_MASKS, modifiers } from './agent-browser-input';
 import {
   acquireAgentBrowserSurfaceController,
@@ -55,7 +55,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   // poppedOut is derived from the canonical renderMode the shell passes; fall
   // back to resolving it from params for a direct mount (tests) / legacy blob.
   const seededMode = renderModeProp ?? resolveRenderMode(params);
-  const provider = automationProvider(seededMode) ?? 'agent-browser';
+  const provider = surfaceProvider(seededMode);
   const cli = automationCli(provider);
 
   // The surface-scoped controller: get-or-create, keyed by surface id. Survives

@@ -1,4 +1,4 @@
-import { getPlatform } from '../../lib/platform';
+import type { AgentBrowserScreenshotResult } from '../../lib/platform/types';
 
 // Fast non-cryptographic hash (djb2, xor length) over the raw screenshot bytes —
 // the byte analogue of the connection's frame dedup. A static page the daemon
@@ -11,9 +11,9 @@ function djb2Bytes(bytes: Uint8Array): number {
 }
 
 export interface ScreenshotLoopDeps {
-  getPlatform?: () => Pick<ReturnType<typeof getPlatform>, 'agentBrowserScreenshot'>;
-  getSession: () => string | undefined;
-  getBinaryPath: () => string | undefined;
+  /** Start one host capture, or null when none can be taken now — the
+   *  controller's daemon gate decides. */
+  capture: (opts: { format: 'jpeg'; quality: number }) => Promise<AgentBrowserScreenshotResult> | null;
   isCapable: () => boolean;
   draw: (bitmap: ImageBitmap) => void;
   /** A monotonic draw-target generation. Included in the byte-dedup key so a
@@ -125,19 +125,18 @@ export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
   };
 
   const take = () => {
-    const platform = (deps.getPlatform ?? getPlatform)();
-    const session = deps.getSession();
-    if (!platform.agentBrowserScreenshot || !session) return;
+    const capture = deps.capture({ format: 'jpeg', quality: 85 });
+    if (!capture) return;
     inFlight = true;
     dirty = false;
     const mySeq = ++seq;
     const provisionalAtStart = deps.getProvisionalGeneration?.() ?? 0;
     lastStart = performance.now();
-    deps.log?.(`[agent-browser] screenshot start ${JSON.stringify({ session, seq: mySeq })}`);
+    deps.log?.(`[agent-browser] screenshot start ${JSON.stringify({ seq: mySeq })}`);
     const stalled = () => performance.now() - lastStart > STALL_WARNING_MS;
-    platform.agentBrowserScreenshot(session, { format: 'jpeg', quality: 85 }, deps.getBinaryPath()).then((res) => {
+    capture.then((res) => {
       const elapsedMs = performance.now() - lastStart;
-      deps.log?.(`[agent-browser] screenshot done ${JSON.stringify({ session, seq: mySeq, ok: res.ok, bytes: res.bytes?.byteLength ?? 0, elapsedMs: Math.round(elapsedMs), stalled: stalled(), dirty })}`);
+      deps.log?.(`[agent-browser] screenshot done ${JSON.stringify({ seq: mySeq, ok: res.ok, bytes: res.bytes?.byteLength ?? 0, elapsedMs: Math.round(elapsedMs), stalled: stalled(), dirty })}`);
       avgMs = avgMs * 0.6 + Math.min(elapsedMs, overdueAfterMs()) * 0.4;
       inFlight = false;
       // A provisional stream frame painted during this capture is visibly newer.
@@ -160,7 +159,7 @@ export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
       }
       if (dirty) schedule();
     }).catch((err) => {
-      console.warn(`[agent-browser] screenshot error ${JSON.stringify({ session, seq: mySeq, stalled: stalled() })}:`, err);
+      console.warn(`[agent-browser] screenshot error ${JSON.stringify({ seq: mySeq, stalled: stalled() })}:`, err);
       inFlight = false;
       if (dirty) schedule();
     });
