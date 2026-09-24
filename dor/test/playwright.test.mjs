@@ -69,6 +69,12 @@ test('a pinned executable outside the allowlist runs the caller\'s own instead',
     assert.deepEqual(calls.find(c => c[0] === 'exec'), ['exec', '/tools/playwright-cli', ['--session=gui-123', 'snapshot'], firstProject], binaryPath);
   }
 });
+test('an empty DORMOUSE_PLAYWRIGHT_BIN is unset', async () => {
+  const { calls, options } = fixture();
+  options.env.DORMOUSE_PLAYWRIGHT_BIN = '';
+  await runCli(['pw', 'snapshot'], options);
+  assert.equal(calls.find(c => c[0] === 'exec')[1], 'playwright-cli');
+});
 test('raw -s bypasses workspace addressing', async () => {
   const { calls, options } = fixture();
   await runCli(['pw', '-s=raw-session', 'goto', ':8080'], options);

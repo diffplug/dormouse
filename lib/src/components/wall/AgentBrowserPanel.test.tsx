@@ -9,7 +9,11 @@ import type { AgentBrowserPopResult, AgentBrowserStreamStatusResult, PlatformAda
 import type { PaneProps } from './pane-props';
 import { AgentBrowserPanel, HIDDEN_PARK_DELAY_MS } from './AgentBrowserPanel';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
-import { disposeAllAgentBrowserSurfaceControllers } from './agent-browser-surface-controller';
+import {
+  disposeAgentBrowserSurfaceController,
+  disposeAllAgentBrowserSurfaceControllers,
+  getAgentBrowserSurfaceController,
+} from './agent-browser-surface-controller';
 import { ModeContext, PaneWriteContext, SelectedIdContext, WallActionsContext, WorkspaceActiveContext, type PaneWriteActions } from './wall-context';
 import { stubWallActions as stubActions } from './wall-test-utils';
 
@@ -508,6 +512,49 @@ describe('AgentBrowserPanel Playwright params', () => {
     await renderPanel(paneProps('pw-panel', { ...popped, renderMode: 'pw-screencast', wsPort: 4330 }), updateParameters);
     await renderPanel(paneProps('pw-panel', { ...popped, wsPort: 4331 }), updateParameters);
     expect(getAgentBrowserScreenController('pw-panel')?.snapshot().renderMode).toBe('pw-popout');
+  });
+});
+
+describe('AgentBrowserPanel across a provider change', () => {
+  // A minimized pane keeps this view mounted while its Wall restores a failed
+  // cross-provider swap in place: same id, the other provider's params.
+  function withBothProviders() {
+    const platform: PlatformAdapter = new FakePtyAdapter();
+    platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
+    platform.playwright = vi.fn(async (request) => request.op === 'streamUrl'
+      ? { ok: true, url: `ws://127.0.0.1:${request.port}` }
+      : { ok: true });
+    setPlatform(platform);
+  }
+  const pw = { surfaceType: 'browser', renderMode: 'pw-screencast', session: 'failed-swap', wsPort: 4400 };
+  const ab = { surfaceType: 'browser', renderMode: 'ab-screencast', session: 'relaunched', wsPort: 4401 };
+
+  it('takes a fresh controller when the Wall disposes the old one and restores the other provider', async () => {
+    withBothProviders();
+    await renderPanel(paneProps('swap-panel', pw));
+    const failed = getAgentBrowserSurfaceController('swap-panel');
+    await act(async () => { disposeAgentBrowserSurfaceController('swap-panel'); });
+    await renderPanel(paneProps('swap-panel', ab));
+
+    const restored = getAgentBrowserSurfaceController('swap-panel');
+    expect(restored).not.toBeNull();
+    expect(restored).not.toBe(failed);
+    expect(getAgentBrowserScreenController('swap-panel')?.snapshot().renderMode).toBe('ab-screencast');
+    // The relaunched session's binding reaches the live controller.
+    await act(async () => { await Promise.resolve(); });
+    expect(WebSocketMock.instances.some((ws) => ws.url.includes('4401'))).toBe(true);
+  });
+
+  it('replaces a controller of the other provider even when nothing disposed it', async () => {
+    withBothProviders();
+    await renderPanel(paneProps('swap-panel', pw));
+    const failed = getAgentBrowserSurfaceController('swap-panel')!;
+    await renderPanel(paneProps('swap-panel', ab));
+    await act(async () => { await Promise.resolve(); });
+    expect(getAgentBrowserSurfaceController('swap-panel')).not.toBe(failed);
+    expect(getAgentBrowserScreenController('swap-panel')?.snapshot().renderMode).toBe('ab-screencast');
+    // The replaced one is released, its stream with it.
+    expect(WebSocketMock.instances.filter((ws) => ws.url.includes('4400')).every((ws) => ws.readyState === 3)).toBe(true);
   });
 });
 

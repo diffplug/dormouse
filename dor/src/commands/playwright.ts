@@ -105,7 +105,8 @@ export async function runPlaywrightCli(args: string[], options: CliOptions): Pro
   const mayBind = nativeCommand !== undefined && !NO_BIND.has(nativeCommand) && !informational;
 
   const env = options.env ?? {};
-  const defaultBinary = env[PLAYWRIGHT_BIN_ENV] ?? DEFAULT_PLAYWRIGHT_BIN;
+  // An empty override is unset, as for `dor ab` and the host.
+  const defaultBinary = env[PLAYWRIGHT_BIN_ENV] || DEFAULT_PLAYWRIGHT_BIN;
   const defaultBinaryPath = resolveBinaryPath(defaultBinary, env);
   const client = requireControlClient(options);
 

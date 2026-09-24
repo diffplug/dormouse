@@ -151,6 +151,46 @@ test('a GUI open launches its fresh session without closing it first; a relaunch
   expect(mocks.cli.mock.calls[0][1]).toEqual([`--session=${opened.session}`, 'close']);
 });
 
+test('a relaunch without an http(s) page reopens blank; a GUI open still needs one', async () => {
+  // A bare `dor pw open` pane sits on about:blank; a headed window can be left
+  // on a file, data or error page when the user closes it.
+  for (const url of [undefined, 'about:blank', 'file:///etc/passwd', 'data:text/html,hi', 'chrome-error://chromewebdata/']) {
+    for (const op of ['popOut', 'popIn'] as const) {
+      mocks.cli.mockClear();
+      const result = await host.request({ ...binding, op, ...(url === undefined ? {} : { url }) });
+      expect(result.error, `${op} ${url}`).toBeUndefined();
+      const open = mocks.cli.mock.calls.find(([, args]) => args[1] === 'open')![1];
+      expect(open, `${op} ${url}`).toEqual(['--session=test', 'open', '--browser=chromium', ...(op === 'popOut' ? ['--headed'] : [])]);
+    }
+  }
+  mocks.cli.mockClear();
+  expect((await host.request({ ...binding, op: 'popIn', url: 'http://localhost/next' })).ok).toBe(true);
+  expect(mocks.cli.mock.calls.find(([, args]) => args[1] === 'open')![1]).toContain('http://localhost/next');
+  expect((await host.request({ cwd: process.cwd(), op: 'open', url: 'file:///etc/passwd' })).error).toBe('Browser navigation requires an http(s) URL');
+});
+
+test.each(['attach', 'startScreencast'] as const)('a screencast whose %s fails mid-navigation is retried on the next poll', async (failing) => {
+  const { wsPort } = await host.request({ ...binding, op: 'streamStatus' });
+  const starts = () => cdp.send.mock.calls.filter(([method]) => method === 'Page.startScreencast').length;
+  if (failing === 'attach') attach.mockRejectedValueOnce(new Error('Target navigated'));
+  else {
+    cdp.send.mockImplementationOnce(async (method: string) => {
+      if (method === 'Page.startScreencast') throw new Error('Target navigated');
+      return { data: 'aGVsbG8=' };
+    });
+  }
+  const { url } = await host.request({ op: 'streamUrl', port: wsPort! });
+  const ws = new WebSocket(url!);
+  ws.on('error', () => {});
+  try {
+    await new Promise(resolve => ws.once('open', resolve));
+    // The next 750 ms poll attaches again and starts the screencast.
+    await vi.waitFor(() => expect(starts()).toBe(failing === 'attach' ? 1 : 2), { timeout: 3000 });
+  } finally {
+    ws.terminate();
+  }
+});
+
 test('copy runs the shared edit script and never overwrites the clipboard with an empty selection', async () => {
   page.evaluate = vi.fn(async (script: unknown) => typeof script === 'string' ? '' : { width: 640, height: 480 });
   expect(await host.request({ ...binding, op: 'edit', edit: 'copy' })).toMatchObject({ ok: true, text: '' });

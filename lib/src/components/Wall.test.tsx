@@ -14,6 +14,7 @@ import { sessionForKey } from 'dor-lib-common/agent-browser';
 import { Wall } from './Wall';
 import * as helpers from '../lib/helper-terminal';
 import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
+import { getAgentBrowserSurfaceController } from './wall/agent-browser-surface-controller';
 import * as browserAutomation from './wall/browser-automation';
 import { setPlatform } from '../lib/platform';
 import { FakePtyAdapter } from '../lib/platform/fake-adapter';
@@ -899,6 +900,46 @@ describe('Wall on the Lath engine', () => {
 
       expect((await dispatchKill(browserId))?.ok).toBe(true);
       expect(agentBrowserCommand).toHaveBeenCalledWith(defaultSession, ['close'], undefined);
+    } finally {
+      untouchedSpy.mockRestore();
+    }
+  });
+
+  it('binds a minimized pane restored after a failed provider swap to a live controller', async () => {
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(true);
+    const pwOpen = Promise.withResolvers<{ ok: boolean; error?: string }>();
+    const relaunch = vi.fn(async () => ({ ok: true, session: 'relaunched', wsPort: 4321 }));
+    Object.assign(fake, {
+      playwright: vi.fn((request: { op: string }) => request.op === 'open' ? pwOpen.promise : Promise.resolve({ ok: true })),
+      agentBrowserOpen: relaunch,
+      agentBrowserCommand: vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' })),
+    });
+    try {
+      await act(async () => {
+        root.render(<Wall
+          restoredLathLayout={{ version: 1, tree: { root: { kind: 'leaf', id: 'ab-pane' } }, leafMeta: {
+            'ab-pane': { component: 'browser', tabComponent: 'surface', title: 'localhost:5173', params: {
+              surfaceType: 'browser', renderMode: 'ab-screencast', session: 'ab-live', url: 'http://localhost:5173/',
+            } },
+          } }}
+          initialMode="command"
+        />);
+      });
+      await flush();
+      await act(async () => { getAgentBrowserScreenController('ab-pane')?.actions.setRenderMode?.('pw-screencast'); });
+      await flush();
+      const eagerLeaf = container.querySelector<HTMLElement>('[data-lath-leaf]')!;
+      const eagerId = eagerLeaf.dataset.lathLeaf!;
+      expect(eagerId).not.toBe('ab-pane');
+      await act(async () => { eagerLeaf.querySelector<HTMLButtonElement>('[aria-label="Minimize"]')!.click(); });
+      await flush();
+
+      // Playwright is not installed: the Door comes back as agent-browser.
+      await act(async () => { pwOpen.resolve({ ok: false, error: 'playwright-cli is not installed' }); });
+      await flush();
+      expect(relaunch).toHaveBeenCalledWith('http://localhost:5173/', { headed: false }, undefined);
+      expect(getAgentBrowserSurfaceController(eagerId)?.provider).toBe('agent-browser');
+      expect(getAgentBrowserScreenController(eagerId)?.snapshot().renderMode).toBe('ab-screencast');
     } finally {
       untouchedSpy.mockRestore();
     }

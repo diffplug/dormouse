@@ -192,7 +192,7 @@ const EMPTY_TABS: StreamTab[] = [];
 
 export class AgentBrowserSurfaceController {
   readonly id: string;
-  private readonly provider: BrowserAutomationProvider;
+  readonly provider: BrowserAutomationProvider;
   private cwd?: string;
   /** Rebuilt only when `cwd` changes: the Playwright adapter closes over it,
    *  and every stream frame reads it several times. */
@@ -1592,12 +1592,24 @@ export class AgentBrowserSurfaceController {
 
 const registry = new Map<string, AgentBrowserSurfaceController>();
 
+/**
+ * The controller for `id`, created on first use. One driving a different
+ * provider than `params` asks for is replaced, since `provider` is fixed for a
+ * controller's life: a render swap the Wall restores in place keeps the id.
+ */
 export function acquireAgentBrowserSurfaceController(
   id: string,
   params: AgentBrowserSurfaceParams,
 ): AgentBrowserSurfaceController {
+  const provider = automationProvider(params.renderMode) ?? 'agent-browser';
   const existing = registry.get(id);
-  if (existing) return existing;
+  if (existing?.provider === provider) return existing;
+  if (existing) {
+    registry.delete(id);
+    // Outside the render that asked: disposal notifies the screen registry's
+    // subscribers, other components among them.
+    queueMicrotask(() => existing.dispose());
+  }
   const controller = new AgentBrowserSurfaceController(id, params);
   registry.set(id, controller);
   return controller;

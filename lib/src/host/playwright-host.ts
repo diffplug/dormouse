@@ -192,15 +192,24 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
   async function startFrames(v: Viewer) {
     if (!v.page || v.cdp || v.disposed || v.headed) return;
     const page = v.page;
-    const cdp = await page.context().newCDPSession(page);
-    // Another refresh, tab change, or parking may finish while CDP attaches.
-    if (v.disposed || !v.sockets.size || v.page !== page || v.cdp) { await cdp.detach(); return; }
-    v.cdp = cdp;
-    cdp.on('Page.screencastFrame', event => {
-      void cdp.send('Page.screencastFrameAck', { sessionId: event.sessionId }).catch(() => {});
-      if (!v.disposed && v.cdp === cdp) broadcast(v, JSON.stringify({ type: 'frame', data: event.data, metadata: event.metadata }), true);
-    });
-    await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 70 });
+    try {
+      const cdp = await page.context().newCDPSession(page);
+      // Another refresh, tab change, or parking may finish while CDP attaches.
+      if (v.disposed || !v.sockets.size || v.page !== page || v.cdp) { await cdp.detach().catch(() => {}); return; }
+      v.cdp = cdp;
+      cdp.on('Page.screencastFrame', event => {
+        void cdp.send('Page.screencastFrameAck', { sessionId: event.sessionId }).catch(() => {});
+        if (!v.disposed && v.cdp === cdp) broadcast(v, JSON.stringify({ type: 'frame', data: event.data, metadata: event.metadata }), true);
+      });
+      await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 70 });
+    } catch (e) {
+      // A page that navigates while CDP attaches fails either call. Forget the
+      // page, so the next refresh sees a new one: it releases the attachment
+      // and starts again, instead of leaving the viewer frozen on a screencast
+      // that never started.
+      if (v.page === page) v.page = undefined;
+      throw e;
+    }
   }
   function schedule(v: Viewer) {
     if (v.disposed || !v.sockets.size || v.timer) return;
@@ -342,8 +351,8 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
     connecting.set(key, operation);
     try { return await operation; } finally { if (connecting.get(key) === operation) connecting.delete(key); }
   }
-  async function launch(b: Binding, url: string, isHeaded: boolean, fresh: boolean, requestDeadline: number) {
-    if (!validUrl(url)) throw new Error('Browser navigation requires an http(s) URL');
+  /** Launch `b`'s browser at `url`, or blank when there is none. */
+  async function launch(b: Binding, url: string | undefined, isHeaded: boolean, fresh: boolean, requestDeadline: number) {
     if (closed) throw new Error('Playwright host is shutting down');
     const deadline = requestDeadline - LAUNCH_CLOSE_RESERVE_MS;
     if (Date.now() >= deadline) throw new Error('Playwright browser launch timed out behind an earlier one');
@@ -357,7 +366,7 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
     if (isHeaded) headed.set(key, b); else headed.delete(key);
     const generation = generations.get(key);
     let result: Awaited<ReturnType<typeof cli>> | undefined;
-    const opening = cli(b, ['open', url, '--browser=chromium', ...(isHeaded ? ['--headed'] : [])], null);
+    const opening = cli(b, ['open', ...(url === undefined ? [] : [url]), '--browser=chromium', ...(isHeaded ? ['--headed'] : [])], null);
     const opened = opening.then(r => { result = r; }, e => { result = { exitCode: 1, stdout: '', stderr: messageOf(e) }; });
     // Endpoint readiness, not the page load, completes GUI launches.
     let last: unknown;
@@ -405,7 +414,12 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
     if (!validSession(session)) throw new Error('Invalid Playwright session name');
     const b = bind(session, cwd, install);
     if (request.op === 'open' || request.op === 'popOut' || request.op === 'popIn') {
-      const url = request.url ?? '';
+      // A GUI open navigates where it was asked, so that URL must pass the
+      // http(s) check. A relaunch only carries the page along: one Dormouse may
+      // not navigate to (about:blank, `file:`, `data:`, an error page) reopens
+      // blank rather than failing the pop-out or pop-in.
+      if (request.op === 'open' && !validUrl(request.url)) throw new Error('Browser navigation requires an http(s) URL');
+      const url = validUrl(request.url) ? request.url : undefined;
       const isHeaded = request.op === 'open' ? !!request.headed : request.op === 'popOut';
       const fresh = request.op === 'open';
       const deadline = Date.now() + REQUEST_BUDGET_MS;

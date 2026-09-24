@@ -47,8 +47,9 @@ Public PTY env:
   hex — `randomBytes` in the VS Code host, `getrandom` in the standalone host)
   and never goes on the wire.
 
-The CLI also reads `DORMOUSE_AGENT_BROWSER_BIN`, the user's own binary override
-that no host sets (`docs/specs/dor-browser.md`).
+The CLI also reads `DORMOUSE_AGENT_BROWSER_BIN` and `DORMOUSE_PLAYWRIGHT_BIN`,
+the user's own binary overrides that no host sets (`docs/specs/dor-browser.md`).
+**An empty override must read as unset**, in `dor` and the hosts alike.
 
 **`DORMOUSE_CLI_BIN` is host-internal spawn configuration, never
 terminal-facing:** `pty-core` prepends its *value* to the child's `PATH`, then

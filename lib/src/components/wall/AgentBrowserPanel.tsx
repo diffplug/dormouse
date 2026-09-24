@@ -54,17 +54,22 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   // poppedOut is derived from the canonical renderMode the shell passes; fall
   // back to resolving it from params for a direct mount (tests) / legacy blob.
   const seededMode = renderModeProp ?? resolveRenderMode(params);
-  const cli = automationProvider(seededMode) === 'playwright' ? 'dor pw' : 'dor ab';
+  const provider = automationProvider(seededMode) ?? 'agent-browser';
+  const cli = provider === 'playwright' ? 'dor pw' : 'dor ab';
 
   // The surface-scoped controller: get-or-create, keyed by surface id. Survives
-  // this component's unmount (minimize, layout churn, StrictMode).
+  // this component's unmount (minimize, layout churn, StrictMode). Keyed by
+  // provider too: a minimized pane keeps this view mounted while its Wall
+  // restores a failed cross-provider swap in place, disposing the controller
+  // it held, and the restored provider needs its own. A same-provider disposal
+  // only ever precedes the pane going away (a kill's fade), where re-acquiring
+  // would leave a live controller behind for a dead Surface.
   const controller = useMemo(
     () => acquireAgentBrowserSurfaceController(id, { ...params, renderMode: seededMode }),
-    // Only the id identifies the controller; later param changes flow through
-    // updateParams below (acquire is get-or-create and ignores params when the
-    // controller already exists).
+    // Later param changes flow through updateParams below (acquire is
+    // get-or-create and ignores params when the controller already exists).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [id],
+    [id, provider],
   );
 
   const snapshot = useSyncExternalStore(controller.subscribe, controller.snapshot);
