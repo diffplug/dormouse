@@ -56,7 +56,7 @@ function setupPanel(
   // A panel's panes are interrupted by the teardown capture along with every
   // other live PTY, so they have a recovery command waiting too — claimed by
   // pane id, since the Dormouse view is claiming its own share of the same
-  // record (docs/specs/transport.md -> "Consuming it").
+  // record (docs/specs/agent-recovery.md -> "Cold restore").
   const recoveryCommands = takeRecoveryCommands(
     context,
     (savedSession?.panes ?? []).map((pane) => pane.id),

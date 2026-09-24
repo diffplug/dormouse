@@ -26,7 +26,7 @@ The webview is the shared `lib/` frontend, unmodified for this host (`docs/specs
 
 ### Invariants (VS Code-specific)
 
-- **Capture, then save, then kill.** `deactivate()` runs the agent-recovery capture *first* and both kills *last*, the state flush and live-PTY refresh in between. Source of truth: `deactivate()` in `vscode-ext/src/extension.ts`.
+- Shutdown ordering follows Serialization and restore.
 - **Alert state is global.** One module-level alert host (`createAlertHost`) in `message-router.ts` is shared across all routers, survives router disposal, and is fed by PTY data regardless of webview visibility.
 - **Each router is one realm of it**, under its `routerId` (`docs/specs/alert.md` → Engagement). **Must end the realm on router disposal and on a `dormouse:init` re-init** (`endRealm`): recreated content is a new realm. Pinned by `engagement viewers` and `await requests` in `vscode-ext/test/message-router.test.ts`.
 - **Never let a resuming router steal another webview's PTYs.** Each router tracks its PTYs in `ownedPtyIds`; a module-level `globalOwnedPtyIds` set enforces it.
@@ -133,18 +133,7 @@ A `WebviewPanelSerializer` registered under the `dormouse` view type restores ed
 5. `refreshSavedSessionStateFromPtys()` — re-read CWD while the processes are alive.
 6. `gracefulKillAll(2000)` (SIGTERM, wait), then `killAll()` (force).
 
-**Recovery must go first** — the resume hint exists only between the interrupt and
-the kill, and the shutdown budget is not ours (rationale), so the one step whose
-data cannot be reconstructed afterwards runs before the ones that can (cwd
-re-reads, alert merges). `captureAgentRecoveryCommands` writes `^C` into every
-live PTY, waits bounded, scans those buffers, and records the invocation to
-`recovery.json` under `context.storageUri`, **written synchronously, owner-only,
-and replaced temp-then-rename**. **Never `workspaceState`**, whose SQLite flush is already
-tearing down (rationale), and **never `PersistedPane.resumeCommand`**, which the
-step-4 flush would overwrite with the webview's stale copy. **The record is
-rewritten the moment each command is found and every wait is bounded**, so being
-killed mid-poll costs at most a late agent's command and a timeout loses a
-recovery command rather than delaying shutdown.
+**Must capture before the session flush and PTY kills** (rationale). Shared capture and durability follow `docs/specs/agent-recovery.md`.
 
 **Live notepad notes are never in any of this.** They ride a volatile in-memory
 mirror the extension host keeps per webview, archived by the disposals above and
@@ -156,51 +145,15 @@ a cold restore** (`docs/specs/notepad.md` → "Live resume").
 (`docs/specs/transport.md` → "Persisted session types") and is injected into
 the webview for cold-start restore. The WebviewView and each deserialized WebviewPanel then
 claim their own pane ids' recovery commands out of the single record, under
-`docs/specs/transport.md` → "Consuming it". **A panel's pane ids come from the
+`docs/specs/agent-recovery.md` → "Recovery record". **A panel's pane ids come from the
 `vscode.setState()` blob returned at `deserializeWebviewPanel`**, so recovery
 needs no host-side per-panel store.
 
 #### Capturing agent recovery
 
-**Both halves are shared with the Tauri sidecar.** The press-wait-press machine
-is `captureAgentRecovery` (`lib/src/host/recovery-capture.ts`), over four
-primitives each host supplies — the live id set, interrupt, a monotonic received
-count, and the output since a mark — and the record itself is
-`createRecoveryStore` (`docs/specs/standalone.md` → "Agent recovery"), so one
-format, one destructive read, and one set of file modes serve both. Its timings,
-its gates and the arguments for each are in that module's comments; the rules
-that constrain a host are:
+**Must offer every live extension-host PTY to shared capture**, across the view and editor panels. **Must store the record under `storageUri`, falling back to `globalStorageUri`; never `workspaceState`** (rationale). If neither directory exists, skip capture. Shared behavior follows `docs/specs/agent-recovery.md`.
 
-- **Write `^C` into the pty; never signal it** — the agents print their resume
-  invocation when interrupted, not when signalled (rationale).
-- **Interrupt every live PTY, not just recognized agents** — `detectResumeCommand`
-  filters the recovery invocations (rationale) — but **exclude exited PTYs**,
-  which can yield no hint and would permanently defeat the "nothing left to wait
-  for" early exit.
-- **Never finish early on quiet**, and **never simplify to a single gesture**:
-  claude prints only on a second press, codex only on the first and at no
-  constant latency, so a blanket second press destroys codex's idle case and an
-  ask-gated one never fires for codex at all (rationale).
-- **Only post-interrupt bytes count, and never widen that scan.** Each pane's
-  received-count mark (`getScrollbackReceived`, `docs/specs/transport.md` →
-  Universal invariants) is taken before the first `^C` — a correctness boundary,
-  since the command auto-runs on the next restore without confirmation
-  (`docs/specs/transport.md` → "Consuming it") and only bytes produced in
-  response to Dormouse's own interrupt may become executable state (rationale).
-- **Clear any previous record before the first early return** — consumption
-  happens only when a container actually resolves, so a session where the
-  Dormouse view is never opened would otherwise auto-run a week-old invocation on
-  some much later restore. A missing hint is ordinary (rationale).
-
-What stays this host's is which PTYs the extension host offers the machine and
-which directory the store writes into: `storageUri`, falling back to
-`globalStorageUri`. It is a plain file written synchronously because
-`workspaceState` batches its flush and `deactivate()` outruns it (rationale).
-
-Source of truth: `captureAgentRecoveryCommands` and `takeRecoveryCommands` in
-`vscode-ext/src/session-state.ts`, `captureAgentRecovery` in
-`lib/src/host/recovery-capture.ts`, `createRecoveryStore` in
-`lib/src/host/recovery-store.ts`, `interrupt` in `vscode-ext/src/pty-manager.ts`.
+Source of truth: `captureAgentRecoveryCommands` / `takeRecoveryCommands` in `vscode-ext/src/session-state.ts`; `interrupt` in `vscode-ext/src/pty-manager.ts`.
 
 ### Theme integration
 

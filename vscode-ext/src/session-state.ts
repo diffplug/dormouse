@@ -168,7 +168,7 @@ export async function captureAgentRecoveryCommands(
  *
  * The result never joins the persisted session — it rides its own boot global, so
  * the webview has nothing to write back and no save/restore cycle can resurrect it
- * (docs/specs/transport.md -> "Consuming it").
+ * (docs/specs/agent-recovery.md -> "Cold restore").
  */
 export function takeRecoveryCommands(
   context: vscode.ExtensionContext,

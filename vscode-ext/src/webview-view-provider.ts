@@ -77,7 +77,7 @@ export class DormouseViewProvider implements vscode.WebviewViewProvider {
     const savedPaneIds = (savedSession?.panes ?? []).map((pane) => pane.id);
     // Claimed by pane id, and deliberately separate from the session: the commands
     // ride their own boot global, so the webview cannot save them back and a
-    // resume happens exactly once (docs/specs/transport.md -> "Consuming it").
+    // resume happens exactly once (docs/specs/agent-recovery.md -> "Cold restore").
     // Scoped to *this* view's panes because the capture interrupts every live PTY,
     // including any owned by an editor panel — taking the record whole would delete
     // their commands before the panel ever resolved.

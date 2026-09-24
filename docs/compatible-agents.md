@@ -77,4 +77,4 @@ These tests use fixtures and require no installed agents or credentials. Before 
 - Check watching during a response, after completion, at a permission prompt, and while idle. It should settle when attention is needed and should not keep ringing during idle redraws.
 - Record the agent version, operating system, Dormouse host tested, and any limitations. Do not claim a platform or scenario you have not tested.
 
-Open a **draft pull request** with the entry, fixture, documentation, and verification results. Changes to shared behavior also update its owning spec: [recovery](specs/transport.md#persisted-session-types), [watching](specs/alert.md#watching-track), or [shutdown capture](specs/vscode.md#capturing-agent-recovery).
+Open a **draft pull request** with the entry, fixture, documentation, and verification results. Changes to shared behavior also update its owning spec: [recovery and shutdown capture](specs/agent-recovery.md), or [watching](specs/alert.md#watching-track).

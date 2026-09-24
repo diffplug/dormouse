@@ -53,6 +53,7 @@ A spec is the accurate reference for the current code: it states the invariants 
 - **`docs/specs/terminal-state.md`** — Per-Session semantic state: CWD, prompt/command lifecycle, title candidates and header derivation, grouping keys.
 - **`docs/specs/terminal-context.md`** — Unified terminal context and helper terminal: lifecycle, promotion, source closure, and global autorun settings.
 - **`docs/specs/terminal-escapes.md`** — Registry of every escape sequence parsed, answered, or ignored, each row pointing at its owning spec. Read before touching OSC/CSI parsing.
+- **`docs/specs/agent-recovery.md`** — Shared CLI-agent shutdown capture, resume-command detection, single-use records, and cold-restore execution.
 - **`docs/specs/transport.md`** — Adapter-agnostic webview ↔ host protocol: PTY lifecycle and buffering, reconnection, message contracts, persisted-session types, the invariants every adapter honors.
 - **`docs/specs/mouse-and-clipboard.md`** — Terminal-owned selection, copy (Raw / Rewrapped), paste tiers, smart URL/path extension, the mouse-ownership state matrix.
 - **`docs/specs/notepad.md`** — The per-Surface notepad: the note model and host archive port, capture from a terminal selection, source pins back to scrollback, the panel/Door/Archive UI, and every closure path that archives notes.
