@@ -3,20 +3,18 @@ import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, u
 import { createPortal } from 'react-dom';
 import { tv } from 'tailwind-variants';
 import {
-  ArrowLineDownIcon,
-  ArrowsInIcon,
-  ArrowsOutIcon,
   CursorClickIcon,
   CursorTextIcon,
   SplitHorizontalIcon,
   SplitVerticalIcon,
-  XIcon,
 } from '@phosphor-icons/react';
+import { ToolDirtyIndicator, useToolDirty } from '../ToolDirtyIndicator';
 import { HeaderActionButton } from '../HeaderActionButton';
-import { HEADER_PALETTE_TRANSITION_CLASS, paneZoomButtonClass, POPUP_SURFACE_CLASS, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from '../design';
-import { AlertBell } from '../AlertBell';
+import { HEADER_PALETTE_TRANSITION_CLASS, POPUP_SURFACE_CLASS, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from '../design';
 import { useTodoPillContent } from '../TodoPillBody';
+import { useHeaderTier } from './use-header-tier';
 import { NotepadHeaderButton } from './NotepadHeaderButton';
+import { PaneActionGroup } from './PaneActionButtons';
 import type { PaneProps } from './pane-props';
 import { IllegalRenameWarning, type RenameRejection } from './IllegalRenameWarning';
 import { InlineEditInput } from './InlineEditInput';
@@ -32,11 +30,9 @@ import {
   getTerminalPaneStateSnapshot,
   subscribeToActivity,
   subscribeToTerminalPaneState,
-  type SessionStatus,
 } from '../../lib/terminal-registry';
 import {
   buildAppTitleResolver,
-  commandArgv0,
   createTerminalPaneState,
   COMMAND_FAIL_GLYPH,
   deriveHeader,
@@ -55,7 +51,7 @@ import {
 const tabVariant = tv({
   // The active/inactive palette swap crossfades in step with the focus ring's
   // travel (HEADER_PALETTE_TRANSITION_CLASS); children inherit via `text-inherit`.
-  base: `flex h-full w-full cursor-grab items-center gap-1.5 ${TERMINAL_TOP_RADIUS_CLASS} pl-2 pr-[5px] text-sm leading-none font-mono select-none active:cursor-grabbing ${HEADER_PALETTE_TRANSITION_CLASS}`,
+  base: `flex h-full min-w-0 flex-1 cursor-grab items-center gap-1.5 ${TERMINAL_TOP_RADIUS_CLASS} pl-2 pr-[5px] text-sm leading-none font-mono select-none active:cursor-grabbing ${HEADER_PALETTE_TRANSITION_CLASS}`,
   variants: {
     state: {
       active: 'bg-header-active-bg text-header-active-fg',
@@ -64,23 +60,28 @@ const tabVariant = tv({
   },
 });
 
-type HeaderTier = 'full' | 'compact' | 'minimal';
+type TerminalHeaderTier = 'full' | 'compact' | 'minimal' | 'minimal-tight' | 'bare' | 'tiny';
+// Border-box widths, so they include the header's 8px left + 5px right padding
+// (`docs/specs/layout.rationale.md` derives each boundary). Measuring the
+// border box also tells a narrow header from a hidden one. The bottom three
+// boundaries are the widths at which the pane-action group stops fitting: with
+// a notepad icon beside it, then without one. `minimal-tight` is the band where
+// the notepad fits only while no unsaved-change dot is taking its own 12px —
+// the tier stays a pure function of width so it survives a dirty report that
+// arrives without a resize, exactly as the browser header's `tight` does.
+const terminalHeaderTier = (width: number): TerminalHeaderTier =>
+  width > 293 ? 'full'
+    : width > 173 ? 'compact'
+      : width > 128 ? 'minimal'
+        : width > 116 ? 'minimal-tight'
+          : width > 98 ? 'bare'
+            : 'tiny';
 
-// WATCHING is a rule on the running command, so the bell says which command it
-// would act on rather than naming an abstract toggle (`docs/specs/alert.md`).
-function alertButtonLabelsFor(status: SessionStatus, argv0: string | null): { aria: string; tooltip: string } {
-  if (status === 'ALERT_RINGING') return { aria: 'Alert ringing', tooltip: 'Alert ringing' };
-  if (status === 'OSC_NOTIF_BUSY') return { aria: 'Progress active', tooltip: 'Progress active' };
-  if (status === 'COMMAND_EXIT_ARMED') return { aria: 'Command running', tooltip: 'Command running' };
-  if (!argv0) return { aria: 'Alerts are per command', tooltip: '[a] Alerts are per command' };
-  return status === 'WATCHING_DISABLED'
-    ? { aria: `Alert on all ${argv0}`, tooltip: `[a] Alert on all "${argv0}"` }
-    : { aria: `Stop alerting on all ${argv0}`, tooltip: `[a] Stop alerting on all "${argv0}"` };
-}
 const TODO_PREVIEW_GAP = 6;
 const TODO_PREVIEW_MARGIN = 8;
 
-export function TerminalPaneHeader({ id, title }: PaneProps) {
+export function TerminalPaneHeader({ id, title, params }: PaneProps) {
+  const dirty = useToolDirty(id, params);
   const mode = useContext(ModeContext);
   const selectedId = useContext(SelectedIdContext);
   const renamingId = useContext(RenamingIdContext);
@@ -125,21 +126,17 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
   const isActiveHeader = mode === 'passthrough' && isSelected && windowFocused;
   const isRenaming = renamingId === id;
   const tabRef = useRef<HTMLDivElement>(null);
-  const suppressAlertClickRef = useRef(false);
-  const [tier, setTier] = useState<HeaderTier>('full');
+  const tier = useHeaderTier(tabRef, terminalHeaderTier);
   const [todoPreviewRect, setTodoPreviewRect] = useState<DOMRect | null>(null);
   const [renameWarning, setRenameWarning] = useState<{ rect: DOMRect; reason: RenameRejection; value: string } | null>(null);
   const todoPill = useTodoPillContent(activity.todo);
-  const showTodoPill = todoPill.visible && tier !== 'minimal';
-  const runningArgv0 = paneState.currentCommand?.rawCommandLine
-    ? commandArgv0(paneState.currentCommand.rawCommandLine)
-    : null;
-  const alertButtonLabels = alertButtonLabelsFor(activity.status, runningArgv0);
-  const alertButtonAriaLabel = alertButtonLabels.aria;
-  const alertButtonTooltip = alertButtonLabels.tooltip;
-  const alertButtonTooltipDetail = activity.status === 'ALERT_RINGING'
-    ? 'Click to dismiss and show options'
-    : 'Right-click for options';
+  // Named once so inserting a tier does not mean re-deriving a band at every
+  // site that tests one. Below `roomForNotepad` the notepad would push the
+  // pane-action group off the header's right edge, so it goes first.
+  const compactOrWider = tier === 'full' || tier === 'compact';
+  const roomForNotepad = compactOrWider || tier === 'minimal' || (tier === 'minimal-tight' && !dirty);
+  const tiny = tier === 'tiny';
+  const showTodoPill = todoPill.visible && compactOrWider;
   const todoNotificationPreview = formatNotificationPreview(activity.notification);
   const todoPreviewId = `todo-notification-preview-${id}`;
 
@@ -159,29 +156,6 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
     setTodoPreviewRect(button.getBoundingClientRect());
   }, [activity.notification]);
 
-  const triggerAlertButtonAction = useCallback((displayedStatus: SessionStatus, button: HTMLButtonElement) => {
-    const result = actions.onAlertButton(id, displayedStatus);
-    // 'no-command' opens the dialog too — it is where we explain that alerts are
-    // keyed on the running command and there is nothing running here.
-    if (result === 'dismissed' || result === 'menu' || result === 'no-command') {
-      const rect = button.getBoundingClientRect();
-      context.open(id, { origin: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } });
-    }
-  }, [actions, id, context]);
-
-  useEffect(() => {
-    const el = tabRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(([entry]) => {
-      const w = entry.contentRect.width;
-      if (w > 280) setTier('full');
-      else if (w > 160) setTier('compact');
-      else setTier('minimal');
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
   useEffect(() => {
     if (!activity.notification) setTodoPreviewRect(null);
   }, [activity.notification]);
@@ -193,12 +167,14 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
       className={tabVariant({ state: isActiveHeader ? 'active' : 'inactive' })}
       onMouseDown={() => actions.onClickPanel(id)}
       onContextMenu={(e) => {
-        // Header and alert entry points share the terminal context.
+        // The whole header is the terminal context's entry point; `[a]` opens
+        // the same menu anchored here (`docs/specs/alert.md` -> Pane Header).
         e.preventDefault();
         e.stopPropagation();
         context.open(id, { origin: { x: e.clientX, y: e.clientY } });
       }}
     >
+      <ToolDirtyIndicator dirty={dirty} />
       <div className="flex flex-1 min-w-0 items-center gap-1.5 overflow-hidden">
         {isRenaming ? (
           <InlineEditInput
@@ -225,39 +201,6 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
             )}
           </span>
         )}
-        <HeaderActionButton
-          className={[
-            'flex h-5 min-w-5 items-center justify-center rounded transition-colors shrink-0 hover:bg-current/10',
-            activity.status === 'ALERT_RINGING'
-              ? (isActiveHeader ? 'text-alarm-vs-header-active' : 'text-alarm-vs-header-inactive')
-              : '',
-          ].join(' ')}
-          onMouseDownCapture={(e) => {
-            if (e.button !== 0) return;
-            suppressAlertClickRef.current = true;
-            e.preventDefault();
-            e.stopPropagation();
-            e.nativeEvent.stopImmediatePropagation?.();
-            triggerAlertButtonAction(activity.status, e.currentTarget);
-          }}
-          onClick={(e) => {
-            if (suppressAlertClickRef.current) {
-              suppressAlertClickRef.current = false;
-              return;
-            }
-            triggerAlertButtonAction(activity.status, e.currentTarget);
-          }}
-          onContextMenu={(e) => context.open(id, { origin: { x: e.clientX, y: e.clientY } })}
-          ariaLabel={alertButtonAriaLabel}
-          tooltip={alertButtonTooltip}
-          tooltipDetail={alertButtonTooltipDetail}
-          tooltipAlign="left"
-          dataAlertButtonFor={id}
-        >
-          <span className="flex items-center justify-center">
-            <AlertBell status={activity.status} ringSeq={activity.ringSeq} size={14} />
-          </span>
-        </HeaderActionButton>
         {showTodoPill && (
           <button
             type="button"
@@ -284,7 +227,7 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
       </div>
       {!isRenaming && (
         <>
-          {showMouseIcon && tier !== 'minimal' && (
+          {showMouseIcon && compactOrWider && (
             <div className="ml-1 shrink-0">
               <HeaderActionButton
                 className="flex h-5 min-w-5 items-center justify-center rounded transition-colors shrink-0 hover:bg-current/10"
@@ -306,7 +249,7 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
               </HeaderActionButton>
             </div>
           )}
-          <NotepadHeaderButton surfaceId={id} hideWhenEmpty={tier === 'minimal'} />
+          {roomForNotepad && <NotepadHeaderButton surfaceId={id} hideWhenEmpty={!compactOrWider} />}
           {tier === 'full' && (
             <div className="ml-1 flex shrink-0 items-center gap-0.5">
               <HeaderActionButton
@@ -321,36 +264,12 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
                 ariaLabel="Split top/bottom"
                 tooltip={'Split top/bottom [-] or ["]'}
               ><SplitVerticalIcon size={14} /></HeaderActionButton>
-              <HeaderActionButton
-                className={paneZoomButtonClass(zoomed, isActiveHeader)}
-                onClick={(e) => { e.stopPropagation(); actions.onZoom(id); }}
-                ariaLabel={zoomed ? 'Unzoom' : 'Zoom'}
-                tooltip={zoomed ? 'Unzoom' : 'Zoom [z]'}
-              >{zoomed ? <ArrowsInIcon size={14} /> : <ArrowsOutIcon size={14} />}</HeaderActionButton>
             </div>
           )}
-          {/*
-            Minimize + close are the highest-priority controls: they must stay
-            visible no matter how narrow the header gets. They sit last (so
-            nothing fixed-width is to their right to push them off) and every
-            other element yields first — the title/bell region clips via
-            `overflow-hidden`, split/zoom drop below the `full` tier, and the
-            mouse icon drops at the `minimal` tier.
-          */}
-          <div className="ml-1 flex shrink-0 items-center gap-0.5">
-            <HeaderActionButton
-              className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
-              onClick={(e) => { e.stopPropagation(); actions.onMinimize(id); }}
-              ariaLabel="Minimize"
-              tooltip="Minimize [m] or [d]"
-            ><ArrowLineDownIcon size={14} /></HeaderActionButton>
-            <HeaderActionButton
-              className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-error/10 hover:text-error"
-              onClick={(e) => { e.stopPropagation(); actions.onKill(id); }}
-              ariaLabel="Kill"
-              tooltip="Kill [k] or [x]"
-            ><XIcon size={14} /></HeaderActionButton>
-          </div>
+          {/* The title region clips via `overflow-hidden` so this group
+              never has to (`docs/specs/layout.md` → "Pane header responsive
+              sizing"). */}
+          <PaneActionGroup surfaceId={id} zoomed={zoomed} activeHeader={isActiveHeader} showMinimizeKill={!tiny} />
         </>
       )}
       {todoPreviewRect && activity.notification && context.id !== id && (

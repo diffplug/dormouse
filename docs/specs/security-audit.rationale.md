@@ -6,7 +6,9 @@ The three release-gate pieces are named separately because they break independen
 
 ## Domains
 
-One context holding all three subject matters degrades application security — the newest domain, with the most code behind it, and the easiest to crowd out with API responses.
+One context holding every subject matter degrades application security — the domain with the most code behind it, and the easiest to crowd out with API responses.
+
+Hosted accounts were split out of `application-security` on 2026-09-21. That domain already carried remote control (where the depth goes), the local boundaries, Hosted, and the catch-all sweep, and it had overrun the 32-minute deadline more than once, so a remote-control pass that ran out of time took the Hosted results down with it. Hosted is a disjoint tree — `hosted/`, `vendor/`, and the two `hosted-*.yml` workflows it reads for the Deployment boundary — with its own spec, so it splits cleanly and now writes its own fragment. It also gives the pgstencil provenance checks a prompt that is about them rather than a paragraph inside one about pairing code. It runs on Opus for the same reason `application-security` does: the Worker's origin gate and the deployment path are read, not enumerated.
 
 Folding the application-security scope back into a shared context is how that spec stops being audited without anyone deciding to stop auditing it.
 
@@ -34,15 +36,37 @@ The fix is not to stop delegating. `--allowed-tools` only auto-approves and remo
 
 The deadline is persisted because one longer than the ten-minute Bash cap cannot fire inside a single call: a re-issued loop that recomputes it from `now` never reaches it, so the bound is written down but never binds, and only the runner's cancellation ends the wait. `RUNNER_TEMP` carries no fallback on purpose — a repo-root fallback would survive between hand-runs and hand an already-expired deadline to the next one.
 
+A call that reaches the cap is *moved to the background*, not returned: it prints nothing back, so re-issuing becomes a judgement call rather than a step. Run 34457954349 happened to re-issue a third time and its deadline fell inside that call, so it merged and published two PASS domains; run 34581574869 spent one extra call checking the fragments, which shifted the phase enough that a third wait would have been needed, ended its turn instead, and published no report at all — the same two domains' PASS fragments survived only in the artifact. A loop that ends itself under the cap turns both nights into the same printed answer.
+
+The answer is the call's last line, below a per-domain status, rather than an `ls` listing: once domains append as they go, every fragment exists within minutes, so a listing of them no longer means that many reports.
+
+The 25-minute deadline was raised to 32 after `application-security` failed to report inside it two nights running — the deadline expired on it on 2026-09-10, and on 2026-09-11 it was still sweeping when the run ended at 21 minutes — while roughly 13 of the job's 40 minutes went unused on both nights. On 2026-09-15 every domain reported in an agent step that ran 25.5 minutes, so the old deadline had little slack even on a night that finished.
+
 At `timeout-minutes: 20` the runner cancelled the job before the 25-minute deadline could fire, so the graceful "give up and report what the domains found" path was unreachable and every overrun landed as INCONCLUSIVE. The 40-minute slack also covers the merge, verdict, redact, upload, and reporting steps after the wait.
 
 A missing fragment is indistinguishable, in the merged report, from a domain that found nothing, and only one of those is safe to publish a release on.
+
+A domain that writes its fragment once, at the end, publishes nothing at all if it does not reach the end. Run 35205193090 is the case: `application-security` fanned out to fourteen nested subagents, every one of them returned (the last at 09:45:12), and the domain then produced no further output before the wait deadline at 09:53:15 — no completion notification for it ever arrived, unlike the sixteen other agents in the run. Seven work streams of finished audit were in its context and none of it was in its file, so the night's report carried `Qualitative findings: Pending.` and the ninth consecutive run held the release gate shut. Appending as findings are determined makes the same death cost only the synthesis.
+
+A domain that delegates hits the orchestrator's own §2 failure one level down, and never reads the file that warns about it. Run 35327271988's `application-security` fanned out to eight nested agents, issued its wait loop with `run_in_background: true` — which returns an id and blocks nothing — reported "I'm holding for them before assembling the final fragment", and ended its turn at 09:11:56. Ending the turn is how a subagent completes, so the orchestrator saw the task finish with no sentinel written; the four outstanding work streams returned at 09:13:00, 09:13:04, 09:13:45 and 09:19:29, all inside a deadline that did not expire until 09:33:24, and every one of their results was discarded. The orchestrator then published the failure as "cut off ... at the 32-minute deadline" — a cause it could not have observed, twenty-one minutes wrong.
+
+The sentinel exists because the same run showed that existence is the wrong predicate. The domain wrote a placeholder into its real fragment path at 09:40 to satisfy "write that file before you return"; `[ -s audit-application.md ]` went true, and the orchestrator — correctly unwilling to merge a placeholder — improvised `grep -q "Audit in progress"`, a predicate that worked only because it guessed wording no contract defined. With findings appended continuously the file is nonempty for most of the run, so the predicate has to be something the domain writes deliberately and last.
+
+The sentinel is checked in the reporting step too, not only in the orchestrator's wait. A domain rewrites its verdict line and then writes the sentinel, so a death between those two writes leaves `VERDICT: PASS` on line 1 of a report that stopped early — the one state where every other guard is satisfied and `PASS` closes the failure issue and opens the release gate.
+
+Every reader compares the last *non-blank* line rather than `tail -n1`: a fragment ending `-->\n\n` is finished, and reading it as cut off would report the lost-report bug the sentinel exists to catch.
+
+Run 35205193090's `## Summary` also inverted the placeholder it was reading: "two of seven work streams ... had not reported" was published as "completed only two of seven planned work streams", describing five audited streams as unaudited. A summary that repeats a cut-off fragment's account of its own progress is reporting a moment, not the run.
 
 ## Outcomes and reporting
 
 Collapsing the inconclusive case into `FAIL`, as the step originally did, filed an identical issue for "the repo is insecure" and "the auditor stopped early".
 
+A `FAIL IF` condition no audit run can read makes the verdict a coin flip, because no run can ever determine it. `AUDIT_PAT`-readable GitHub state is not in that class: a failed call there is a real `UNVERIFIABLE`. `## Future` holds such an obligation only while its subject is unbuilt, since a staged item must eventually be promoted; a standing obligation on existing infrastructure is present-tense fact and stays beside its rule. `security-hosted.md` carried two: the Cloudflare script-injection exclusion, which is a zone setting, and a closing activation sentence that stated its own answer. Run 35586089654 (2026-09-21) reached both as `UNVERIFIABLE` in its sub-auditors and its domain lead resolved both to PASS, on the ground that the audited condition was the in-repo half; run 35709640946 (2026-09-22) left both `UNVERIFIABLE`, so a pass with 375 PASS and 0 FAIL returned INCONCLUSIVE and held the release gate shut (issue #747). Nothing in the tree had changed between them. #757 staged both under `security-hosted.md`'s `## Future` and kept the in-repo half — the deploy's `preflight` gate — as a `FAIL IF`.
+
 GitHub rejects an over-long issue body outright; that rejection lands on a `set -e` step *after* the verdict is decided, and the finding then reaches no issue and no comment — only a red run and an artifact that expires. Truncation keeps the head because that is where the verdict and the links are, and the clamp call is non-fatal so a failure of the helper cannot reopen the window it closes.
+
+Keeping the head is not the same as keeping what decides. Run 35842217451 (2026-09-23) composed a 226,302-character body: the posted issue carried `VERDICT: INCONCLUSIVE` for `audit-ci-secrets.md` and a note sending the reader to its `UNVERIFIABLE` checks, while that domain's one `UNVERIFIABLE` line sat past the cut along with the whole of `## Application security`, `## Hosted accounts` and `## Summary`. The deciding lines are not positionally predictable, so the clamp cannot be taught to keep them; lifting them into the head, which the clamp keeps by construction, is what makes the notes' pointers resolve. The lift matches at line start after an optional heading or bullet marker because every fragment is written in `FAIL IF` vocabulary — `### FAIL IF results` heads the passing list, and a `- PASS:` bullet quotes the clause it passed — so a bare `FAIL` match would lift the passing evidence as findings. The findings are bounded at 40 lines, and every lifted line at 500 characters, so the lift cannot itself exhaust the budget it protects; the real report produced 8 lines and 1,571 characters. The cap falls on the findings alone because one verdict line per fragment is bounded by the fragment count while a single domain's findings are not, so a shared cap would let the first domain's findings push the last domain's verdict out — the loss the lift exists to prevent. The first draft of the lift piped `grep` without `|| true`: a nonempty fragment carrying no marker line — the unreadable-verdict state the guard loop above already reports — made the pipeline exit 1, and `set -eo pipefail` ended the step before `audit-comment.md` was composed, so nothing was posted at all. Caught by the review on the PR that introduced it and pinned by a markerless-fragment case.
 
 Issue prose per combination of conditions cannot be kept correct by fixing combinations. Four consecutive review rounds found the same defect in different clothes — an arm whose text was true only of the states that could reach it, made false by the next gate that widened. A note claiming nothing about the other conditions cannot be invalidated by a new one.
 
@@ -58,6 +82,8 @@ Without the transcript a run that produces no verdict is undiagnosable: `claude-
 
 Two weakenings found by the audit's own first run were covered by no example in the judgement bullet, and both became their own bullets.
 
+Publishing the fragments when no merged report exists is the same "a prompt is not a control" split as the guards above. Run 34581574869 (2026-09-11) ended its turn before the merge, so this step's report section was one line saying no report was produced — while `supply-chain` and `ci-and-secrets` had finished `VERDICT: PASS` fragments in the working directory, already redacted and already read twice by the guard loops. `.github/audit/orchestrator.md` §4 now forbids ending the turn there, but the run's findings should not depend on that sentence being followed. Verbatim and unmerged, because §3's merge is the only thing entitled to characterise a fragment; the cut-off and absent markers are the exception, being the same mechanical tests the step's own guard loops already ran, and a fragment published without them reads as a finished report.
+
 ## Environment and `AUDIT_PAT`
 
 A bot-pushed feature branch cannot reach the audit job at all — GitHub rejects the run before any step starts — so `AUDIT_PAT` cannot be exfiltrated through a hand-authored workflow on a non-admin-gated ref.
@@ -65,3 +91,9 @@ A bot-pushed feature branch cannot reach the audit job at all — GitHub rejects
 Without the PAT the audit cannot read the administration endpoints behind ruleset bypass actors, repo-level secret listing, and environment policies, so the specs it enforces would be unenforceable in their key sections.
 
 Passing the PAT only as an unexpanded `GH_TOKEN=` prefix is a convention, not a control: the agent holds unrestricted Bash and audits code that touches secrets, so one `printenv` or one `set -x` would publish an admin-read PAT for the artifact's whole retention.
+
+Provisioning the secret, for whoever has to rotate it:
+
+```bash
+gh secret set AUDIT_PAT --env security-audit --repo diffplug/dormouse --body 'github_pat_…'
+```

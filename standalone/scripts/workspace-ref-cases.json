@@ -1,0 +1,42 @@
+[
+  {
+    "id": "workspace-7",
+    "ref": "workspace:7"
+  },
+  {
+    "id": "workspace-007",
+    "ref": "workspace:7"
+  },
+  {
+    "id": "workspace-0",
+    "ref": "workspace:0"
+  },
+  {
+    "id": "workspace-+7",
+    "ref": "workspace:workspace-+7"
+  },
+  {
+    "id": "workspace--7",
+    "ref": "workspace:workspace--7"
+  },
+  {
+    "id": "workspace-1.5",
+    "ref": "workspace:workspace-1.5"
+  },
+  {
+    "id": "workspace-\u0661",
+    "ref": "workspace:workspace-\u0661"
+  },
+  {
+    "id": "workspace-",
+    "ref": "workspace:workspace-"
+  },
+  {
+    "id": "workspace-abc12345-3",
+    "ref": "workspace:workspace-abc12345-3"
+  },
+  {
+    "id": "ws-a",
+    "ref": "workspace:ws-a"
+  }
+]

@@ -1,9 +1,11 @@
 import { useState, type ReactNode } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
-import { BellIcon, FrameCornersIcon, XIcon } from '@phosphor-icons/react';
+import { expect, within } from 'storybook/test';
+import { FrameCornersIcon, XIcon } from '@phosphor-icons/react';
 import { PANE_HEADER_HEIGHT_PX } from '../components/design';
 import { NotepadHeaderButton } from '../components/wall/NotepadHeaderButton';
 import { NotepadPanel } from '../components/NotepadPanel';
+import { placeTerminalContext, type ContextSide } from '../components/wall/terminal-context-placement';
 import { TerminalContextView } from '../components/wall/TerminalContextView';
 
 // Sample terminal output with the shared context presentation and notepad UI.
@@ -87,17 +89,20 @@ function TerminalOutput({ scenario }: { scenario: Scenario }) {
   </>;
 }
 
-function ContextPrototype({ scenario, initialDetail = null, paneWidth }: { scenario: Scenario; initialDetail?: 'title' | 'modify' | 'reset' | null; paneWidth: number }) {
+function ContextPrototype({ scenario, initialDetail = null, paneWidth, paneHeight }: { scenario: Scenario; initialDetail?: 'title' | 'modify' | 'reset' | null; paneWidth: number; paneHeight: number }) {
+  const [side, setSide] = useState<ContextSide | undefined>();
+  const bounds = { x: 0, y: 0, width: paneWidth, height: paneHeight };
+  const placement = placeTerminalContext(bounds, bounds, false, side);
   const [watching, setWatching] = useState(false);
   const [todo, setTodo] = useState(scenario === 'notification');
   const [command, setCommand] = useState(scenario === 'autorunOff' ? '' : 'git status');
   const preserved = ['preserved', 'editor', 'differentDirectory'].includes(scenario);
   const ports = (scenario === 'multiplePorts' ? [5173, 6006, 9229] : [5173]).map(port => ({ port, host: 'localhost', url: `http://localhost:${port}/`, processName: port === 5173 ? 'vite' : port === 6006 ? 'storybook' : 'node inspector' }));
-  return <div className="relative h-[680px] overflow-hidden rounded-lg bg-terminal-bg font-mono text-sm text-terminal-fg" style={{ width: paneWidth }}>
-    <div className="flex items-center gap-2 bg-header-active-bg px-2.5 text-header-active-fg" style={{ height: PANE_HEADER_HEIGHT_PX }}><span>pnpm dev</span><BellIcon size={13} /><span className="ml-auto flex items-center gap-3"><FrameCornersIcon size={13} /><XIcon size={13} /></span></div>
+  return <div className="relative overflow-hidden rounded-lg bg-terminal-bg font-mono text-sm text-terminal-fg" style={{ width: paneWidth, height: paneHeight }}>
+    <div className="flex items-center gap-2 bg-header-active-bg px-2.5 text-header-active-fg" style={{ height: PANE_HEADER_HEIGHT_PX }}><span>pnpm dev</span><span className="ml-auto flex items-center gap-3"><FrameCornersIcon size={13} /><XIcon size={13} /></span></div>
     <pre className="m-0 p-3 leading-6 text-muted">{'~/projects/dormouse ❯ pnpm dev\n\n  VITE ready\n  ➜  Local: http://localhost:5173/'}</pre>
-    <div className="absolute inset-0">
-      <TerminalContextView title="pnpm dev" surfaceRef="surface:3" cwd={PARENT_DIR} helperCwd={HELPER_DIR} mismatch={scenario === 'differentDirectory'}
+    <div className="absolute" style={{ left: placement.rect.x, top: placement.rect.y, width: placement.rect.width, height: placement.rect.height }}>
+      <TerminalContextView placement={{ ...placement, onChange: setSide }} title="pnpm dev" surfaceRef="surface:3" cwd={PARENT_DIR} helperCwd={HELPER_DIR} mismatch={scenario === 'differentDirectory'}
         titleSources={[{ source: 'User override', value: 'Not set' }, { source: 'OSC 2', value: 'pnpm dev', note: 'Used' }, { source: 'OSC 0', value: 'zsh', note: 'Not used' }, { source: 'Command', value: 'pnpm dev', note: 'Fallback' }]}
         scan={scenario === 'scanFailed' ? { status: 'failed' } : { status: 'loaded', entries: scenario === 'noPorts' ? [] : ports }}
         argv0="pnpm" watching={watching} todo={todo} notification={scenario === 'notification' ? { title: 'Tests complete', body: '341 passed, 0 failed' } : null}
@@ -112,7 +117,7 @@ function ContextPrototype({ scenario, initialDetail = null, paneWidth }: { scena
   </div>;
 }
 
-function TerminalContextStory({ initialScenario = 'fresh', initialDetail = null, paneWidth = 900 }: { initialScenario?: Scenario; initialDetail?: 'title' | 'modify' | 'reset' | null; paneWidth?: number }) {
+function TerminalContextStory({ initialScenario = 'fresh', initialDetail = null, paneWidth = 900, paneHeight = 680 }: { initialScenario?: Scenario; initialDetail?: 'title' | 'modify' | 'reset' | null; paneWidth?: number; paneHeight?: number }) {
   const [scenario, setScenario] = useState(initialScenario);
   return <main className="min-h-screen bg-app-bg p-5 font-mono text-sm text-foreground">
     <div className="mb-3 w-[900px]">
@@ -121,7 +126,7 @@ function TerminalContextStory({ initialScenario = 'fresh', initialDetail = null,
         {SCENARIOS.map(item => <button key={item.id} type="button" aria-pressed={scenario === item.id} onClick={() => setScenario(item.id)} className={`rounded px-2 py-1 ${scenario === item.id ? 'bg-header-active-bg text-header-active-fg' : 'text-muted hover:bg-foreground/10'}`}>{item.label}</button>)}
       </div>
     </div>
-    <ContextPrototype key={scenario} scenario={scenario} initialDetail={initialDetail} paneWidth={paneWidth} />
+    <ContextPrototype key={scenario} scenario={scenario} initialDetail={initialDetail} paneWidth={paneWidth} paneHeight={paneHeight} />
   </main>;
 }
 
@@ -130,6 +135,27 @@ const meta = {
   component: TerminalContextStory,
   parameters: { layout: 'fullscreen' },
   args: { initialScenario: 'fresh' },
+  play: async ({ args, canvasElement }) => {
+    // These snapshots must actually expose the state named in the story.
+    if (['noPorts', 'multiplePorts', 'notification', 'scanFailed'].includes(args.initialScenario ?? 'fresh')) {
+      const canvas = within(canvasElement);
+      const target = canvas.getByText(args.initialScenario === 'notification' ? 'Tests complete' : 'Ports', { exact: true });
+      target.scrollIntoView({ block: 'nearest' });
+      await expect(target).toBeVisible();
+    }
+    const panel = canvasElement.querySelector<HTMLElement>('[data-terminal-context]')!;
+    const bounds = panel.getBoundingClientRect();
+    // DOM visibility matchers do not catch overflow clipping; check actual bounds.
+    for (const element of [within(panel).getByTitle('pnpm dev'), ...panel.querySelectorAll('button')]) {
+      const box = element.getBoundingClientRect();
+      expect(box.width).toBeGreaterThan(0);
+      expect(box.left).toBeGreaterThanOrEqual(bounds.left);
+      expect(box.right).toBeLessThanOrEqual(bounds.right);
+    }
+    const terminal = panel.querySelector<HTMLElement>('.bg-terminal-bg')!;
+    expect(terminal.getBoundingClientRect().height).toBeGreaterThanOrEqual(64);
+    canvasElement.dataset.contextCheck = 'passed';
+  },
 } satisfies Meta<typeof TerminalContextStory>;
 export default meta;
 type Story = StoryObj<typeof meta>;
@@ -146,3 +172,9 @@ export const PortScanFailed: Story = { args: { initialScenario: 'scanFailed' } }
 export const TitleSources: Story = { args: { initialDetail: 'title' } };
 export const ModifyAutorun: Story = { args: { initialDetail: 'modify' } };
 export const ResetConfirmation: Story = { args: { initialScenario: 'editor', initialDetail: 'reset' } };
+
+export const MinimumWidth: Story = { args: { paneWidth: 280, paneHeight: 620 } };
+export const ShortWindow: Story = { args: { paneWidth: 480, paneHeight: 280 } };
+export const NarrowDetails: Story = { args: { initialScenario: 'multiplePorts', paneWidth: 380, paneHeight: 520 } };
+export const NarrowDirectoryWarning: Story = { args: { initialScenario: 'differentDirectory', paneWidth: 380, paneHeight: 520 } };
+export const NarrowResetConfirmation: Story = { args: { initialScenario: 'editor', initialDetail: 'reset', paneWidth: 380, paneHeight: 520 } };

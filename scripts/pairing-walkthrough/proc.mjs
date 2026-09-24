@@ -18,6 +18,25 @@ import { setTimeout as delay } from 'node:timers/promises';
 const started = [];
 
 /**
+ * One byte stream's chunks, split into whole lines. A `StringDecoder` rather
+ * than `chunk.toString()`, so a multi-byte character split across two reads
+ * survives; the carry holds the trailing partial line until its newline lands.
+ *
+ * **Both pieces of state belong to one stream.** Exported so the rule is
+ * testable without a child process; `spawnLogged` builds one of these per pipe.
+ */
+export function lineAccumulator(onLine) {
+  const decoder = new StringDecoder('utf8');
+  let carry = '';
+  return (chunk) => {
+    carry += decoder.write(chunk);
+    const parts = carry.split('\n');
+    carry = parts.pop() ?? '';
+    for (const line of parts) onLine(line);
+  };
+}
+
+/**
  * Spawn a long-running child in its own process group, tee its output into
  * `logPath`, and hand back a handle whose `lines` the caller can poll.
  *
@@ -48,26 +67,30 @@ export function spawnLogged(command, args, { cwd, env, dropEnv, logPath, prefix 
   });
   /** Everything the child has written, newest last, for `waitForLine`. */
   const lines = [];
-  // A decoder rather than `chunk.toString()`, so a multi-byte character split
-  // across two reads survives into `lines`.
-  const decoder = new StringDecoder('utf8');
-  let carry = '';
-  const consume = (chunk) => {
-    log.write(chunk);
-    carry += decoder.write(chunk);
-    const parts = carry.split('\n');
-    carry = parts.pop() ?? '';
-    for (const line of parts) lines.push(line);
+  // **One accumulator per stream.** stdout and stderr are independent pipes, so
+  // sharing a decoder and a carry between them lets a stdout chunk that ended
+  // mid-character be completed by stderr's next byte, and splices the partial
+  // stdout line onto whatever stderr wrote next — a single `lines` entry whose
+  // join `waitForLine`'s anchored patterns then capture across
+  // (`BURROW_STATE_DIR_LINE`'s `(.+)$` swallows the stderr text as part of the
+  // path). The raw log is unaffected either way: `log.write` takes the bytes.
+  const teeToLines = () => {
+    const accumulate = lineAccumulator((line) => lines.push(line));
+    return (chunk) => {
+      log.write(chunk);
+      accumulate(chunk);
+    };
   };
-  child.stdout.on('data', consume);
-  child.stderr.on('data', consume);
+  child.stdout.on('data', teeToLines());
+  child.stderr.on('data', teeToLines());
 
   let exit = null;
   child.on('exit', (code, signal) => { exit = { code, signal }; });
   // **The log ends on `close`, never on `exit`.** The tree a leader started
   // holds the same stdout pipe, so chunks keep arriving after the leader is
-  // gone — and `consume` writing them to an ended stream drops them without
-  // even raising `error`, losing exactly the tail that says why it died.
+  // gone — and a `teeToLines` handler writing them to an ended stream drops
+  // them without even raising `error`, losing exactly the tail that says why
+  // it died.
   // `exit` still has to be set where it is: `waitForLine` and `launchChrome`
   // both want the early-death signal, which `close` is too late for.
   child.on('close', (code, signal) => {

@@ -6,6 +6,7 @@ import { TerminalContextView, type TerminalContextViewProps } from './TerminalCo
 import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { TerminalPanel } from './TerminalPanel';
 import { TerminalContext } from './TerminalContext';
+import * as terminalRegistry from '../../lib/terminal-registry';
 import * as helpers from '../../lib/helper-terminal';
 import { addPlainNote, clearAllNotepads, getNotes, getOpenNotepadId } from '../../lib/notepad/notepad-store';
 import { TerminalContextContext } from './wall-context';
@@ -156,18 +157,18 @@ it('keeps the focus ring on an in-flight button while withholding only its hover
 it('shows both directories in the mismatch warning', () => {
   props.mismatch = true; props.helperCwd = '~/other'; render(); expect(container.querySelector('[role="alert"]')?.textContent).toContain('~/other'); expect(container.querySelector('[role="alert"]')?.textContent).toContain('~/repo');
 });
-it('shares header, alert and uncaptured body entry points; captured mouse has no Shift escape', () => {
+it('shares header and uncaptured body entry points; captured mouse has no Shift escape', () => {
   const open = vi.fn(); const value = { id: null, mounted: null, open, close: vi.fn(), promote: vi.fn(), openPort: vi.fn() };
   act(() => root.render(<TerminalContextContext.Provider value={value}><TerminalPaneHeader id="parent" /><TerminalPanel id="parent" /></TerminalContextContext.Provider>));
   const header = container.querySelector('[data-pane-header-for]')!;
   const body = container.querySelector('textarea')!;
   const rightClick = (target: Element, shiftKey = false) => act(() => target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, shiftKey, clientX: 120, clientY: 90 })));
-  rightClick(header); rightClick(container.querySelector('[data-alert-button-for]')!); rightClick(body);
-  expect(open).toHaveBeenCalledTimes(3);
+  rightClick(header); rightClick(body);
+  expect(open).toHaveBeenCalledTimes(2);
   for (const call of open.mock.calls) expect(call).toEqual(['parent', { origin: { x: 120, y: 90 } }]);
   act(() => setMouseReporting('parent', 'vt200'));
-  rightClick(body); rightClick(body, true); expect(open).toHaveBeenCalledTimes(3);
-  rightClick(header); expect(open).toHaveBeenCalledTimes(4);
+  rightClick(body); rightClick(body, true); expect(open).toHaveBeenCalledTimes(2);
+  rightClick(header); expect(open).toHaveBeenCalledTimes(3);
 });
 
 it('opens the parent notepad from the Helper control and keeps edits on that parent', async () => {
@@ -189,4 +190,49 @@ it('opens the parent notepad from the Helper control and keeps edits on that par
     get.mockRestore(); open.mockRestore();
     act(() => clearAllNotepads());
   }
+});
+
+
+it('uses the Tool primary terminal without creating a helper or offering helper lifecycle actions', async () => {
+  const openHelper = vi.spyOn(helpers, 'openHelper');
+  const focusTerminal = vi.fn();
+  const terminal = vi.spyOn(terminalRegistry, 'getTerminalInstance').mockReturnValue({ focus: focusTerminal } as unknown as ReturnType<typeof terminalRegistry.getTerminalInstance>);
+  const focusSurface = vi.spyOn(terminalRegistry, 'focusSession');
+  await act(async () => { root.render(<TerminalContext id="tool-source" title="Storybook" tool />); });
+  expect(openHelper).not.toHaveBeenCalled();
+  expect(container.querySelector('[data-context-terminal="tool-source"]')).not.toBeNull();
+  expect(container.querySelector('[data-helper-terminal]')).toBeNull();
+  expect(container.querySelector('[aria-label="Tool terminal status"]')).not.toBeNull();
+  expect(container.querySelector('[aria-label="Modify autorun command"]')).toBeNull();
+  expect(container.querySelector('[aria-label="Reset helper terminal"]')).toBeNull();
+  expect(container.querySelector('[aria-label="Move this terminal into a new pane"]')).toBeNull();
+  act(() => container.querySelector('[data-context-terminal]')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
+  expect(focusTerminal).toHaveBeenCalledOnce();
+  expect(focusSurface).not.toHaveBeenCalled();
+  openHelper.mockRestore(); terminal.mockRestore(); focusSurface.mockRestore();
+});
+
+it('always shows context details alongside the helper', () => {
+  render();
+  expect(button('Terminal context details')).toBeNull();
+  expect(button('Open in system browser')).not.toBeNull();
+  expect(button('Explain this title')).not.toBeNull();
+  expect(button('Copy absolute path')).not.toBeNull();
+  expect(container.textContent).toContain('Alerts');
+  expect(container.querySelector('textarea')).not.toBeNull();
+});
+
+it('position buttons preserve input focus and report the destination', async () => {
+  props.placement = { side: 'top', available: ['top', 'bottom'], onChange: vi.fn() };
+  render();
+  const input = container.querySelector('textarea')!;
+  act(() => input.focus());
+  const down = new MouseEvent('pointerdown', { bubbles: true, cancelable: true });
+  act(() => button('Place helper at bottom').dispatchEvent(down));
+  expect(down.defaultPrevented).toBe(true);
+  await click('Place helper at bottom');
+  expect(props.placement.onChange).toHaveBeenCalledWith('bottom');
+  expect(button('Use automatic helper placement')).toBeNull();
+  expect(button('Place helper at top').getAttribute('aria-pressed')).toBe('true');
+  expect(document.activeElement).toBe(input);
 });

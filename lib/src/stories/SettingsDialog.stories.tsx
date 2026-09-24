@@ -4,6 +4,13 @@ import type { DormouseTheme } from '../lib/themes';
 import { SettingsDialog } from '../components/SettingsDialog';
 import { enrolledStatus, UNENROLLED_STATUS } from '../host/remote/test-burrow-link';
 
+/** The dialog renders into `document.body`, outside `canvasElement`
+ *  (docs/specs/layout.md → "Selection overlay"), so play queries scope to the
+ *  document body. */
+function dialog(canvasElement: HTMLElement) {
+  return within(canvasElement.ownerDocument.body);
+}
+
 /**
  * The app-global Settings dialog, normally opened from the far right of the
  * baseboard. Rendering the dialog directly keeps these stories about its own
@@ -45,15 +52,15 @@ export const WithRules: Story = {
   },
 };
 
-/** The animation watcher gates terminal-notification alerts. */
-export const DeferralEnabled: Story = {
+/** The escape hatch: deferral off, so terminal notifications ring during animation. */
+export const DeferralDisabled: Story = {
   parameters: {
     primedWatchedCommands: ['claude', 'codex'],
-    primedAlertSettings: { deferAlertsUntilQuiet: true },
+    primedAlertSettings: { deferAlertsUntilQuiet: false },
   },
   play: async ({ canvasElement }) => {
-    await within(canvasElement).findByRole('switch', {
-      name: 'Defer alerts until animation stops on',
+    await dialog(canvasElement).findByRole('switch', {
+      name: 'Defer alerts until animation stops off',
     });
   },
 };
@@ -110,7 +117,7 @@ export const PushNotEnrolled: Story = {
     primedBurrow: { status: UNENROLLED_STATUS },
   },
   play: async ({ canvasElement }) => {
-    await within(canvasElement).findByText(/Relay below to send push/);
+    await dialog(canvasElement).findByText(/Relay below to send push/);
   },
 };
 
@@ -164,24 +171,22 @@ export const NotepadArchiveEntry: Story = {
     primedAlertSettings: {},
   },
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
-    const open = await canvas.findByRole('button', { name: 'Open archive' });
+    const body = dialog(canvasElement);
+    const open = await body.findByRole('button', { name: 'Open archive' });
     open.scrollIntoView();
     await userEvent.click(open);
-    await canvas.findByRole('button', { name: /Back to Settings/ });
+    await body.findByRole('button', { name: /Back to Settings/ });
   },
 };
 
-/** Opens the picker whose trigger matches `name`.
+/** Opens the picker whose trigger matches `name`, inside the dialog.
  *
  *  Storybook's `play` runs before the snapshot, but the menu positions itself
  *  from a measured trigger rect — one commit later. Settle before returning so
- *  Chromatic never captures the pre-measurement frame. The dialog renders in a
- *  portal-less overlay above `canvasElement`, so scope to the document body. */
+ *  Chromatic never captures the pre-measurement frame. */
 function openPickerMenu(name: RegExp) {
   return async ({ canvasElement }: { canvasElement: HTMLElement }) => {
-    const body = within(canvasElement.ownerDocument.body);
-    await userEvent.click(body.getByRole('button', { name }));
+    await userEvent.click(dialog(canvasElement).getByRole('button', { name }));
     await new Promise((resolve) => setTimeout(resolve, 100));
   };
 }
@@ -302,6 +307,6 @@ export const WithRemoteControl: Story = {
     primedAlertSettings: { pushEnabled: true },
   },
   play: async ({ canvasElement }) => {
-    await within(canvasElement).findByText('1 paired phone.');
+    await dialog(canvasElement).findByText('1 paired phone.');
   },
 };

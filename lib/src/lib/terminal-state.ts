@@ -71,7 +71,6 @@ export interface TerminalPaneState {
   pendingCommandLine: string | null;
   currentCommand: CommandRun | null;
   lastCommand: CommandRun | null;
-  title: TerminalTitle | null;
   titleCandidates: TerminalTitleCandidates;
 }
 
@@ -92,7 +91,6 @@ export interface DirectoryDisplayOptions {
 }
 
 export interface HeaderOptions extends DirectoryDisplayOptions {
-  shellName?: string;
   appTitleForPane?: (pane: TerminalPaneState) => string | null | undefined;
 }
 
@@ -142,22 +140,13 @@ const COMMAND_TITLE_LIMIT = 48;
 let nextCommandRunId = 0;
 
 export function createTerminalPaneState(initial?: Partial<TerminalPaneState>): TerminalPaneState {
-  const titleCandidates: TerminalTitleCandidates = { ...initial?.titleCandidates };
-  if (initial?.title) titleCandidates[initial.title.source] = initial.title;
-  let title = initial?.title ?? null;
-  if (!title) {
-    for (const candidate of Object.values(titleCandidates)) {
-      if (candidate && (!title || candidate.updatedAt > title.updatedAt)) title = candidate;
-    }
-  }
   return {
     cwd: initial?.cwd ?? null,
     activity: initial?.activity ?? { kind: 'unknown' },
     pendingCommandLine: initial?.pendingCommandLine ?? null,
     currentCommand: initial?.currentCommand ?? null,
     lastCommand: initial?.lastCommand ?? null,
-    title,
-    titleCandidates,
+    titleCandidates: { ...initial?.titleCandidates },
   };
 }
 
@@ -231,12 +220,9 @@ export function reduceTerminalState(
     }
     case 'title': {
       const existing = state.titleCandidates[event.title.source];
-      if (state.title && existing && sameTitle(state.title, event.title) && sameTitle(existing, event.title)) {
-        return state;
-      }
+      if (existing && sameTitle(existing, event.title)) return state;
       return {
         ...state,
-        title: event.title,
         titleCandidates: {
           ...state.titleCandidates,
           [event.title.source]: event.title,
@@ -407,10 +393,17 @@ export function summarizeCommandLine(raw: string): string {
  * This is the key WATCHING rules are stored under — see `docs/specs/alert.md`.
  */
 export function commandArgv0(raw: string): string | null {
-  const commandTokens = takePrimaryCommandTokens(tokenizeCommand(raw.trim()));
-  const command = commandTokens[0];
-  if (!command) return null;
-  return commandProgramName(command) || null;
+  return commandProgramName(primaryCommandTokens(raw)[0] ?? '') || null;
+}
+
+/**
+ * The tokens of the first command on a line: quote- and escape-aware, truncated
+ * at the first pipeline/compound boundary, with leading `VAR=value` assignments
+ * and a leading `env` skipped. `commandArgv0` is `commandProgramName` of the
+ * first of these.
+ */
+export function primaryCommandTokens(raw: string): string[] {
+  return takePrimaryCommandTokens(tokenizeCommand(raw.trim()));
 }
 
 export interface ResolvedCommandStart {
@@ -465,6 +458,19 @@ function canonicalizeCwdForMatch(path: string): string {
 }
 
 /**
+ * Whether two reported paths name the same directory. The CLI sends a
+ * path.resolve'd cwd (trailing slashes, `..`, `.` collapsed), so the only
+ * remaining divergence to bridge is the Windows/MSYS dialect split (see
+ * canonicalizeCwdForMatch). Symlinks and true case differences are still
+ * treated as distinct, matching the exact-key intent. A missing path on either
+ * side never matches.
+ */
+export function cwdPathsEqual(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false;
+  return canonicalizeCwdForMatch(a) === canonicalizeCwdForMatch(b);
+}
+
+/**
  * The idempotency predicate for `dor ensure`: true when the pane is *currently
  * running* `command` in `cwdPath`. It matches only while the command is live
  * (`currentCommand` is set between commandStart and commandFinish) and only on
@@ -480,22 +486,11 @@ export function surfaceRunsCommand(
   const run = state.currentCommand;
   if (!run || run.rawCommandLine === null) return false;
   if (run.rawCommandLine !== command) return false;
-  // The CLI sends a path.resolve'd cwd (trailing slashes, `..`, `.` collapsed),
-  // so the only remaining divergence to bridge is the Windows/MSYS dialect split
-  // (see canonicalizeCwdForMatch). Symlinks and true case differences are still
-  // treated as distinct, matching the exact-key intent.
-  const runCwd = run.cwdAtStart?.path ?? state.cwd?.path;
-  if (runCwd === undefined) return false;
-  return canonicalizeCwdForMatch(runCwd) === canonicalizeCwdForMatch(cwdPath);
+  return cwdPathsEqual(run.cwdAtStart?.path ?? state.cwd?.path, cwdPath);
 }
 
-export function deriveFallbackCommandTitle(
-  state?: TerminalPaneState | null,
-  options: { shellName?: string } = {},
-): string {
-  const title = latestTerminalTitleCandidate(state)?.title.trim();
-  if (title) return title;
-  return options.shellName?.trim() || DEFAULT_COMMAND_TITLE;
+export function deriveFallbackCommandTitle(state?: TerminalPaneState | null): string {
+  return latestTerminalTitleCandidate(state)?.title.trim() || DEFAULT_COMMAND_TITLE;
 }
 
 export function resolveDisplayPrimary(
@@ -516,11 +511,11 @@ export function deriveHeader(
 ): DerivedHeader {
   const primary = headerPrimary(pane, options);
   const samePrimary = visiblePanes.filter((candidate) => headerPrimary(candidate, options).text === primary.text);
-  const cwd = cwdForHeader(pane);
+  const cwd = effectiveCwd(pane);
   let secondary: string | undefined;
 
   if (samePrimary.length > 1) {
-    const candidateCwds = samePrimary.map(cwdForHeader).filter((value): value is CwdState => !!value);
+    const candidateCwds = samePrimary.map(effectiveCwd).filter((value): value is CwdState => !!value);
     if (cwd) {
       secondary = shortestUniqueCwdLabels(candidateCwds, options).get(cwdIdentity(cwd)) ?? cwdDisplay(cwd, options);
     } else {
@@ -642,10 +637,10 @@ export function groupTerminalPanes(
   }
 
   if (mode === 'directory') {
-    const cwds = panes.map(directoryGroupCwd).filter((cwd): cwd is CwdState => !!cwd);
+    const cwds = panes.map(effectiveCwd).filter((cwd): cwd is CwdState => !!cwd);
     const labels = shortestUniqueCwdLabels(cwds, options);
     return groupBy(panes, (pane) => {
-      const cwd = directoryGroupCwd(pane);
+      const cwd = effectiveCwd(pane);
       if (!cwd) return { key: 'unknown', label: DEFAULT_DIRECTORY_LABEL };
       const key = cwdIdentity(cwd);
       return { key, label: labels.get(key) ?? cwdDisplay(cwd, options) };
@@ -1001,9 +996,9 @@ export const WINDOWS_EXECUTABLE_SUFFIX = /\.(?:exe|cmd|bat|com|ps1)$/i;
 /**
  * argv[0] reduced to the one name a program answers to: no path, no launcher
  * suffix. The single answer to "which program is this", so the header, the
- * WATCHING rule row and the bell tooltip cannot disagree about it.
+ * WATCHING rule row and the terminal context cannot disagree about it.
  */
-function commandProgramName(command: string): string {
+export function commandProgramName(command: string): string {
   return commandBasename(command).replace(WINDOWS_EXECUTABLE_SUFFIX, '');
 }
 
@@ -1155,12 +1150,9 @@ function findInRunTerminalTitle(pane: TerminalPaneState, command: CommandRun): T
   return best;
 }
 
-function cwdForHeader(pane: TerminalPaneState): CwdState | null {
-  if (pane.currentCommand?.cwdAtStart) return pane.currentCommand.cwdAtStart;
-  return pane.cwd;
-}
-
-function directoryGroupCwd(pane: TerminalPaneState): CwdState | null {
+/** The directory a pane is "in": the running command's `cwdAtStart`, else the
+ *  shell's cwd (`docs/specs/terminal-state.md`). */
+export function effectiveCwd(pane: TerminalPaneState): CwdState | null {
   return pane.currentCommand?.cwdAtStart ?? pane.cwd;
 }
 

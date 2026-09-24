@@ -1,3 +1,4 @@
+import { markAlertConsumed } from '../../lib/alert-delivery-state';
 /**
  * Push notifications for unattended alarms (`docs/specs/alert.md` -> Push
  * notifications). When a Session rings and stays unattended for `pushDelayMs`,
@@ -15,7 +16,7 @@
  * never fetches it.
  */
 
-import { getAlertSettings } from '../../lib/alert-settings';
+import { getSessionAlertPolicy, subscribeToAlertDeliveryPolicy } from '../../lib/alert-delivery-policy';
 import { watchUnattendedRings } from '../../lib/alert-ring-watch';
 import { deriveSessionLabel } from '../../lib/session-label';
 import { setPushDevices, type PushDevice, type PushDevicesState } from '../../lib/push-devices';
@@ -24,10 +25,11 @@ let pushDevicesRefreshSequence = 0;
 
 /**
  * Run `load` and publish its result to the dialog's store, fenced as below.
- * `load` goes over the service bridge (`activation.ts`), because the ACL the
- * list is joined against is the Burrow's — and it answers `null` when no Burrow is
- * running, which is "nowhere to push", not an empty list. Failure is reported
- * as `error` rather than an empty list: "we could not ask" and "no devices are
+ * `load` goes over the service bridge (`activation.ts`) as a `pushDevices`
+ * command, because the ACL the list is joined against is the Burrow's — and it
+ * answers `null` when no Burrow is running, which is "nowhere to push"
+ * (rendered `no-burrow`), not an empty list. Failure is reported as `error`
+ * rather than an empty list: "we could not ask" and "no devices are
  * subscribed" are different things to show a user.
  */
 export async function commitPushDevices(
@@ -76,8 +78,10 @@ export function invalidatePushDeviceRefreshes(): void {
  */
 export function watchPushRings(fire: (sessionId: string, title: string) => void): () => void {
   return watchUnattendedRings({
-    enabled: () => getAlertSettings().pushEnabled,
-    delayMs: () => getAlertSettings().pushDelayMs,
-    fire: (id) => fire(id, deriveSessionLabel(id)),
+    sink: 'push',
+    enabled: (id) => getSessionAlertPolicy(id).pushEnabled,
+    delayMs: (id) => getSessionAlertPolicy(id).pushDelayMs,
+    subscribe: subscribeToAlertDeliveryPolicy,
+    fire: (id, episode) => { markAlertConsumed('push', id, episode.id); fire(id, deriveSessionLabel(id)); },
   });
 }

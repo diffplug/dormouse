@@ -34,7 +34,13 @@
  *      release line (5.6.0-beta.1..143, then 6.1.0-beta.1..302), so a `-sdfNNN`
  *      counter does not say which line it came from. Check 1 is what closes
  *      that, via the fork's declared peer range; this check catches the cheaper
- *      mistake of a URL whose tag, filename and counter disagree.
+ *      mistake of a URL whose tag, filename and counter disagree. The same
+ *      check reads the UpstreamVsFork baseline triple, which is hand-copied
+ *      into canopy/src/GlTerminal.stories.tsx and canopy/README.md, and holds
+ *      its addon and core against canopy's pins and its commit against itself
+ *      — the story compares the fork with an upstream addon that must come
+ *      from the fork base, and a stale hand-copy makes the harness compare
+ *      against something we no longer ship.
  *   5. Format sanity: finding no `@xterm/*` entries at all is a failure, not a
  *      pass — it means the lockfile format moved.
  */
@@ -182,6 +188,33 @@ if (lib && standalone) {
   }
 }
 
+/**
+ * The recorded UpstreamVsFork baseline: `addon <v> == core <v> == commit <sha>`.
+ *
+ * One spelling in both files so this has one grammar to parse; backticks are
+ * optional because the README writes the versions as code spans.
+ */
+const TRIPLE = /addon\s+`?([\w.-]+)`?\s*==\s*core\s+`?([\w.-]+)`?\s*==\s*commit\s+`?([0-9a-f]{7,40})`?/;
+const TRIPLE_FILES = ['canopy/src/GlTerminal.stories.tsx', 'canopy/README.md'];
+
+/** @returns {{rel: string, addon: string, core: string, commit: string}[]} */
+function canopyTriples() {
+  const found = [];
+  for (const rel of TRIPLE_FILES) {
+    if (!existsSync(join(ROOT, rel))) continue;
+    const m = TRIPLE.exec(read(rel));
+    if (!m) {
+      problems.push(
+        `${rel}: no "addon <version> == core <version> == commit <sha>" line — that triple is ` +
+        'the UpstreamVsFork baseline, and without it nothing checks the hand-copy against the pins',
+      );
+      continue;
+    }
+    found.push({ rel, addon: m[1], core: m[2], commit: m[3] });
+  }
+  return found;
+}
+
 // --- Check 4: canopy fork lockstep -------------------------------------------
 const canopy = workspaces.find((w) => w.dir === 'canopy');
 if (canopy) {
@@ -220,6 +253,31 @@ if (canopy) {
         'both move together (docs/specs/webgl-text.md → Following upstream)',
       );
     }
+  }
+
+  // The recorded triple, against the pins it claims to describe.
+  const upstreamAddon = canopy.pins['@xterm/addon-webgl'];
+  const triples = canopyTriples();
+  for (const { rel, addon, core: recordedCore } of triples) {
+    if (upstreamAddon && addon !== upstreamAddon) {
+      problems.push(
+        `${rel}: records upstream addon ${addon}, but canopy/package.json pins ${upstreamAddon} ` +
+        '(docs/specs/webgl-text.md → Canopy lab)',
+      );
+    }
+    if (core && recordedCore !== core) {
+      problems.push(
+        `${rel}: records core ${recordedCore}, but canopy/package.json pins ${core} ` +
+        '(docs/specs/webgl-text.md → Canopy lab)',
+      );
+    }
+  }
+  // No pin records the commit, so the two copies are each other's only check.
+  if (triples.length === TRIPLE_FILES.length && triples[0].commit !== triples[1].commit) {
+    problems.push(
+      `${triples[0].rel} records fork-base commit ${triples[0].commit} but ${triples[1].rel} ` +
+      `records ${triples[1].commit} — one of them was left behind by a rebase`,
+    );
   }
 }
 

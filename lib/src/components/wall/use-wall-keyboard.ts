@@ -5,8 +5,16 @@ import { handleMouseSelectionKeys } from './keyboard/handle-mouse-selection-keys
 import { handleKillConfirm } from './keyboard/handle-kill-confirm';
 import { handlePaneShortcuts } from './keyboard/handle-pane-shortcuts';
 import { handlePaneNavigation } from './keyboard/handle-pane-navigation';
+import { handleWorkspaceShortcuts } from './keyboard/handle-workspace-shortcuts';
 import { isProxyOrigin } from '../../lib/iframe-proxy-registry';
+import { chromeKeyboardHeld } from './chrome-keyboard-lease';
 import type { NavHistoryRef, WallKeyboardCtx } from './keyboard/types';
+
+// Keystrokes an active Wall has already answered. A key that activates another
+// Workspace commits that Wall's `active` in the microtask checkpoint the browser
+// runs between listeners, so without this claim its listener would answer the
+// same key too — `n` switching straight back, `Enter` activating then renaming.
+const answeredKeys = new WeakSet<KeyboardEvent>();
 
 export function useWallKeyboard(ctx: WallKeyboardCtx): void {
   const lastCmdSide = useRef<'left' | 'right' | null>(null);
@@ -26,11 +34,17 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
 
     const handler = (e: KeyboardEvent) => {
       const c = ctxRef.current;
+      // A hidden Workspace's Wall keeps its listeners but dispatches nothing:
+      // exactly one Wall answers window input (docs/specs/layout.md →
+      // "Workspaces").
+      if (!c.activeRef.current || answeredKeys.has(e)) return;
+      answeredKeys.add(e);
 
       const context = (e.target as HTMLElement | null)?.closest?.('[data-terminal-context]');
       if (context) {
         if (handleEditableClipboard(e)) return;
-        const helperId = (e.target as HTMLElement).closest<HTMLElement>('[data-helper-terminal]')?.dataset.helperTerminal;
+        const terminalElement = (e.target as HTMLElement).closest<HTMLElement>('[data-helper-terminal], [data-context-terminal]');
+        const helperId = terminalElement?.dataset.helperTerminal ?? terminalElement?.dataset.contextTerminal;
         if (helperId) handleMouseSelectionKeys(e, { ...c, selectedIdRef: { current: helperId } });
         return;
       }
@@ -40,9 +54,12 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
       if (handleEditableClipboard(e)) return;
       if (handleMouseSelectionKeys(e, c)) return;
       if (c.modeRef.current === 'passthrough') return;
-      if (c.renamingRef.current) return;
+      // A pane rename, or chrome outside every Wall holding the lease (the
+      // Workspace strip's rename editor / close confirmation).
+      if (c.renamingRef.current || chromeKeyboardHeld()) return;
       if (handleKillConfirm(e, c)) return;
       if (c.dialogKeyboardActiveRef.current) return;
+      if (handleWorkspaceShortcuts(e, c)) return;
       if (handlePaneShortcuts(e, c, navHistory)) return;
       handlePaneNavigation(e, c, navHistory);
     };
@@ -57,6 +74,7 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
       if (!data || data.__dormouse !== 'leader') return;
       if (!isProxyOrigin(e.origin)) return;
       const c = ctxRef.current;
+      if (!c.activeRef.current) return;
       if (c.modeRef.current === 'passthrough') c.exitTerminalMode();
     };
 

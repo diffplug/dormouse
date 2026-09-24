@@ -8,8 +8,6 @@ export const cfg = {
     dashFraction: 0.6,
     /** Seconds for one full dash-gap cycle. */
     cycleDuration: 0.4,
-    /** Cycles to run when command mode starts or the active selection changes. */
-    cyclesPerSelection: 4,
     /** Stroke width in px. */
     strokeWidth: 2,
     /** When true, animation is frozen at T=0 (for deterministic Chromatic snapshots). */
@@ -28,7 +26,7 @@ export const cfg = {
     resizeDebounce: 500,
     /** ms — attention idle expiry. How long before "looking at this pane" wears off. */
     userAttention: 15_000,
-    /** When true, the ALERT_RINGING bell-ring animation is frozen at T=0 (for deterministic Chromatic snapshots). */
+    /** When true, the ALERT_RINGING alarm pulse animations are frozen at T=0 (for deterministic Chromatic snapshots). */
     ringingPaused: false,
   },
   terminal: {
@@ -60,6 +58,12 @@ export const cfg = {
      *  clipped (`user@dormouse:~$` → `user@do`) even after the geometry settles.
      *  Snapping straight to the final geometry removes that whole race. */
     animate: true,
+  },
+  killConfirm: {
+    /** The letter a kill confirmation asks for; null draws one at random per
+     *  prompt. Pinned under visual snapshots, where a random letter would
+     *  change the capture on every run. */
+    char: null as string | null,
   },
   overlays: {
     /** ms before the illegal-rename warning dismisses itself. 0 disables the

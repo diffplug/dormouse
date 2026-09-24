@@ -55,7 +55,9 @@ fi
 for arg in "$@"; do
   case "$arg" in
     --yes|-y) ASSUME_YES=1 ;;
-    --help|-h) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    # The whole header comment, however long it grows: a hardcoded last line
+    # silently dropped a documented environment variable when the header grew.
+    --help|-h) awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$0"; exit 0 ;;
     *) echo "unknown argument: $arg" >&2; exit 64 ;;
   esac
 done
@@ -917,6 +919,9 @@ cmd_verify() {
       pass "Serve proxies / to 127.0.0.1:$PORT"
     else
       fail "Serve does not proxy / to 127.0.0.1:$PORT"
+      # The remedy is one command and `verify` already knows it, so print it
+      # rather than leaving the reader to find `manage serve` in the runbook.
+      printf '      re-apply it with: "%s/bin/manage" serve\n' "$ROOT"
       printf '%s\n' "$serve_out" | sed 's/^/      /'
     fi
     if [ -n "$ORIGIN" ] && grep -q "${ORIGIN#https://}" <<<"$serve_out"; then
@@ -955,16 +960,42 @@ cmd_verify() {
 
   if [ -L "$ROOT/previous" ] && [ "$(readlink "$ROOT/previous")" = "$(readlink "$ROOT/current" 2>/dev/null)" ]; then
     fail "previous names the same release as current — there is no rollback target"
+  elif [ -L "$ROOT/previous" ] && [ ! -d "$ROOT/previous" ]; then
+    fail "the previous symlink points at a release that no longer exists"
   elif [ -L "$ROOT/previous" ]; then
     pass "a previous release is retained for rollback"
   else
     warn "no previous release retained yet — rollback is unavailable until the next update"
   fi
 
-  # The release must not depend on the source checkout.
+  # The service definition and the wrapper carry the enrollment offer's *path*
+  # and nothing else secret (docs/specs/security-remote.md -> "Credentials at
+  # rest"). A name, not a value: the installer supplies none of these, so one
+  # appearing means a hand-edit or a regression put a credential where any
+  # process that can read the definition can read it. Extracting names before
+  # filtering exempts exactly DORMOUSE_ENROLL_TOKEN_FILE; a bare token or any
+  # other suffix remains a finding on every platform.
+  #
+  # `grep -q` exits 2 on a file it cannot open, which is neither a match nor a
+  # miss, so both searches report on definition_read rather than green-ticking
+  # a definition nothing read.
+  local definition_read=0
+  if [ -r "$PLIST" ] && [ -r "$ROOT/bin/run-relay" ]; then definition_read=1; fi
+  if [ "$definition_read" = 0 ]; then
+    fail "the LaunchAgent or bin/run-relay could not be read — it was searched for neither a credential nor the source checkout"
+  elif grep -hEo 'DORMOUSE_SETUP_PASSWORD|DORMOUSE_VAPID_PRIVATE_KEY|DORMOUSE_ENROLL_TOKEN(_[[:alnum:]_]+)?' \
+       "$PLIST" "$ROOT/bin/run-relay" 2>/dev/null |\
+       grep -qvx 'DORMOUSE_ENROLL_TOKEN_FILE'; then
+    fail "the LaunchAgent or wrapper names a credential — it must carry only paths"
+  else
+    pass "the service definition names no credential"
+  fi
+
+  # The release must not depend on the source checkout. Unreadable inputs have
+  # already failed above, so this search stays silent rather than failing twice.
   local src
   src="$(release_field source_checkout || echo '')"
-  if [ -n "$src" ]; then
+  if [ -n "$src" ] && [ "$definition_read" = 1 ]; then
     if grep -q "$src" "$PLIST" 2>/dev/null || grep -q "$src" "$ROOT/bin/run-relay" 2>/dev/null; then
       fail "the LaunchAgent or wrapper references the source checkout ($src)"
     else

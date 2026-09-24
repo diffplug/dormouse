@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { copyFile, mkdir, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
+import { get } from 'node:http';
 import { setTimeout as delay } from 'node:timers/promises';
 import { sessionForKey } from 'dor-lib-common/agent-browser';
 import { cleanEnv, devWorkspace, runner, writeShims } from './dev-fixture.mjs';
@@ -58,7 +59,9 @@ async function fixture(t) {
           this.app = (await this.wait(/app URL: (http:\/\/localhost:\d+)/))[1];
           this.bridge = (await this.wait(/starting browser dev host on (http:\/\/127.0.0.1:\d+)/))[1];
           this.token = (await this.wait(/bridge token: ([a-f0-9]+)/))[1];
-          this.session = (await this.wait(/agent-browser session: (\S+)/))[1];
+          const identity = await this.wait(/agent-browser (session|key): (\S+)/);
+          this.identityKind = identity[1];
+          this.session = identity[2];
           this.args = JSON.parse((await this.wait(/BROWSER_ARGS (.+)/))[1]);
           return this;
         },
@@ -74,10 +77,10 @@ async function fixture(t) {
   };
 }
 
-async function invoke(run, token = run.token, origin = run.app) {
+async function invoke(run, token = run.token, origin = run.app, cmd = 'pty_get_cwd', args = { id: 'test' }) {
   return fetch(`${run.bridge}/__dormouse_dev_host/invoke?t=${token}`, {
     method: 'POST', headers: { 'content-type': 'application/json', origin },
-    body: JSON.stringify({ cmd: 'pty_get_cwd', args: { id: 'test' } }),
+    body: JSON.stringify({ cmd, args }),
     signal: AbortSignal.timeout(5000),
   });
 }
@@ -99,11 +102,34 @@ test('parallel worktrees own ports, browser identities and bridges; stopping one
   const key = one.args[2];
   assert.match(key, /^innerdogfood-[a-f0-9]{16}$/);
   assert.deepEqual(one.args, ['ab', '--key', key, 'open', one.app]);
-  assert.equal(one.session, sessionForKey(key));
+  // Inside Dormouse the harness names the key, not a session: the Workspace that
+  // takes the browser is what namespaces it, so `sessionForKey`'s bare-Wall scope
+  // would be a session nothing ever created.
+  assert.equal(one.identityKind, 'key');
+  assert.equal(one.session, key);
+  assert.notEqual(one.session, sessionForKey(key));
+  assert.equal(two.identityKind, 'session');
   assert.deepEqual(two.args, ['--session', two.session, 'open', two.app]);
   for (const [run, dir, other] of [[one, a.root, two], [two, b.root, one]]) {
     const js = await (await fetch(`${run.app}/app.js`)).text();
     assert.ok(js.includes(`${run.bridge}/?t=${run.token}`));
+    // `cors: false` in dev-run.mjs, pinned here because nothing else would
+    // notice its removal: these modules carry the bridge token, and Vite's
+    // default answers every http://localhost:* origin with an acao of its own,
+    // which is a read of the token by any other page in the developer's browser.
+    const foreign = await fetch(`${run.app}/app.js`, { headers: { origin: 'http://localhost:31337' } });
+    assert.equal(foreign.status, 200);
+    assert.equal(foreign.headers.get('access-control-allow-origin'), null);
+    // DNS rebinding looks same-origin to a browser; the Host check must refuse it.
+    const reboundStatus = await new Promise((resolve, reject) => {
+      get(`${run.app}/app.js`, {
+        headers: { host: 'evil.example' }, signal: AbortSignal.timeout(5000),
+      }, response => {
+        response.resume();
+        resolve(response.statusCode);
+      }).on('error', reject);
+    });
+    assert.equal(reboundStatus, 403);
     // HMR must share this listener, even with a Tauri-specific host inherited.
     await new Promise((resolve, reject) => {
       const ws = new WebSocket(run.app.replace('http:', 'ws:'), 'vite-ping');
@@ -121,8 +147,11 @@ test('parallel worktrees own ports, browser identities and bridges; stopping one
   assert.equal((await one.stop()).code, 0);
   await assertClosed(one);
   assert.equal((await invoke(two)).status, 200);
+  // Stable across restarts: the identity is derived from the canonical worktree
+  // path. This run is outside Dormouse, so it resolves the same key and prints
+  // it namespaced.
   const restarted = await a.start().ready();
-  assert.equal(restarted.session, one.session);
+  assert.equal(restarted.session, sessionForKey(one.session));
 });
 
 test('explicit ports and raw browser sessions are honored; occupied ports fail without adopting a peer', { timeout: 60000 }, async t => {
@@ -183,4 +212,24 @@ test('shutdown kills an owned browser launcher that ignores SIGTERM', {
       await delay(25);
     }
   }, { code: 'ESRCH' });
+});
+
+
+test('registry seeds reservations above restored IDs and mirrors canonical workspace refs', async t => {
+  const f = await fixture(t);
+  const run = await f.start().ready();
+  async function command(cmd, args = {}) {
+    const response = await invoke(run, run.token, run.app, cmd, args);
+    assert.equal(response.status, 200);
+    return (await response.json()).result;
+  }
+  const cases = JSON.parse(await readFile(path.join(scripts, 'workspace-ref-cases.json'), 'utf8'));
+  await command('workspace_report', { entries: cases.map(({ id }) => ({ id, name: id, active: false })) });
+  const registry = await command('workspace_registry');
+  assert.deepEqual(registry.windows[0].workspaces.map(({ id, ref }) => ({ id, ref })), cases);
+  await command('workspace_report', { entries: [{ id: 'workspace-400', name: 'Restored', active: true }] });
+  assert.deepEqual(await command('workspace_reserve_ids', { count: 2 }), ['workspace-401', 'workspace-402']);
+  // Repeated/lower restored reports never wind the process counter backwards.
+  await command('workspace_report', { entries: [{ id: 'workspace-400', name: 'Restored', active: true }] });
+  assert.deepEqual(await command('workspace_reserve_ids', { count: 1 }), ['workspace-403']);
 });

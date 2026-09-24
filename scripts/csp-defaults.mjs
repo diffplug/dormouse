@@ -41,9 +41,10 @@ function isSupportedSource(source) {
  *
  * An override the runtime matcher cannot parse fails the build. Silently it
  * matches nothing — `originAllowedByConnectSrc` fails closed on a source it
- * cannot read — so a trailing slash or a missing scheme produces a binary that
- * builds green and then refuses to enroll against the very server it was built
- * for, with an error naming the list it was already given.
+ * cannot read — so a trailing slash, a path, a bare host, a scheme outside
+ * http/https/ws/wss, or a port outside 1–65535 produces a binary that builds
+ * green and then refuses to enroll against the very server it was built for,
+ * with an error naming the list it was already given.
  */
 export function resolveRemoteConnectSrc(env = process.env, label = 'build') {
   const override = env.DORMOUSE_REMOTE_CONNECT_SRC?.trim();

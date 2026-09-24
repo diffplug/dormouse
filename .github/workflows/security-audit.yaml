@@ -21,7 +21,7 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     env:
-      # The three per-domain fragment filenames, in one place. They are
+      # The four per-domain fragment filenames, in one place. They are
       # named by the redactor's argv, its fail-closed `rm -f`, and the
       # reporting step's guard loop, and drift between two of those lists
       # is precisely what the `FAIL IF` on the redactor exists to catch —
@@ -30,9 +30,9 @@ jobs:
       # space-separated and shell-safe. The artifact `path:` needs one
       # entry per line and so cannot consume it; that list is spelled out
       # and carries a pointer back here.
-      AUDIT_FRAGMENTS: audit-supply-chain.md audit-ci-secrets.md audit-application.md
+      AUDIT_FRAGMENTS: audit-supply-chain.md audit-ci-secrets.md audit-application.md audit-hosted.md
     # Must stay well above the orchestrator's own wait deadline in
-    # `.github/audit/orchestrator.md` (25 minutes, counted from the first
+    # `.github/audit/orchestrator.md` (32 minutes, counted from the first
     # time its wait loop runs — i.e. after checkout, setup-node, the
     # install, and the spawn — and persisted across the loop's
     # re-issues so it accumulates rather than restarting).
@@ -77,7 +77,7 @@ jobs:
           exit 1
 
       - name: Audit against the security specs
-        uses: anthropics/claude-code-action@9c5ddab2e6d17b83ea679153b31f1d5f023cf636 # v1
+        uses: anthropics/claude-code-action@cfc3eb22bfed5c26ef66e3223c982af27e4524de # v1
         env:
           # `claude-code-action` resets `GH_TOKEN` to its own internal
           # workflow token, so setting `GH_TOKEN` at this scope is
@@ -85,6 +85,20 @@ jobs:
           # and have the prompt instruct Claude to prefix `gh api`
           # calls with `GH_TOKEN=$AUDIT_PAT`.
           AUDIT_PAT: ${{ secrets.AUDIT_PAT }}
+          # Process-wide: this raises the cap on every Bash call in the
+          # session, the four domain subagents' as well as the
+          # orchestrator's. What it is for is the orchestrator's wait loop,
+          # which breaks itself at 540s so a capped call still prints
+          # `STILL WAITING`; at the two-minute default that call is
+          # backgrounded before the break can print, leaving no line to act
+          # on — the run 34581574869 failure. The prompt asks for
+          # `timeout: 600000` per call, and this makes forgetting it
+          # harmless rather than fatal. The wider scope is accepted, not
+          # incidental: a domain's own long commands (`application-security`
+          # re-runs vitest and the repo lints) stop being backgrounded
+          # mid-run, and the cost is that a subagent that blocks with no
+          # self-break loses ten minutes rather than two.
+          BASH_DEFAULT_TIMEOUT_MS: "600000"
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # release.yml dispatches this workflow with the default
@@ -111,21 +125,22 @@ jobs:
           # release gate for $5 and no verdict.
           #
           # The cause was ending the turn, not delegating. `Task` is
-          # therefore allowed on purpose — the audit fans out to three
+          # therefore allowed on purpose — the audit fans out to four
           # scoped domain agents — and the orchestrator prompt carries
           # the rule that makes it safe: block in a Bash `until` loop on
           # the fragment files, never end the turn to wait. `Workflow`
           # stays denied because nothing here should be spawning one.
-          # Two of the three domains are mechanical — run a generator, read
+          # Two of the four domains are mechanical — run a generator, read
           # `gh api`, compare a pin — and the session default (Sonnet)
-          # does them well. `application-security` is the one that has to
-          # read code adversarially, and its findings have been the ones
-          # that needed real reasoning: tracing a relay-minted `clientId`
-          # to a keystroke-injection path, or working out that an 8-char
-          # fingerprint carries ~40 bits because a P-256 point's leading
-          # byte is constant. It runs on Opus; the orchestrator and the
-          # other two stay on the cheaper default, so the cost lands only
-          # where the depth does.
+          # does them well. `application-security` and `hosted` are the
+          # ones that read code adversarially, and their findings have
+          # been the ones that needed real reasoning: tracing a
+          # relay-minted `clientId` to a keystroke-injection path, or
+          # working out that an 8-char fingerprint carries ~40 bits
+          # because a P-256 point's leading byte is constant. They run on
+          # Opus; the orchestrator and the two mechanical domains stay on
+          # the cheaper default, so the cost lands only where the depth
+          # does.
           #
           # Each agent's prompt is a pointer, not a copy — the content
           # stays in `.github/audit/` so CI and
@@ -134,7 +149,7 @@ jobs:
             --model sonnet
             --allowed-tools "Read,Write,Edit,Bash,Grep,Glob,Task,Agent"
             --disallowed-tools "Workflow"
-            --agents '{"supply-chain":{"description":"Audits docs/specs/security-supply-chain.md.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/supply-chain.md`, and follow them exactly."},"ci-and-secrets":{"description":"Audits docs/specs/security.md, docs/specs/security-ci.md, and docs/specs/security-audit.md.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/ci-and-secrets.md`, and follow them exactly."},"application-security":{"description":"Audits docs/specs/security-local.md and docs/specs/security-remote.md, and sweeps the rest of the product code.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/application-security.md`, and follow them exactly.","model":"opus"}}'
+            --agents '{"supply-chain":{"description":"Audits docs/specs/security-supply-chain.md.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/supply-chain.md`, and follow them exactly."},"ci-and-secrets":{"description":"Audits docs/specs/security.md, docs/specs/security-ci.md, and docs/specs/security-audit.md.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/ci-and-secrets.md`, and follow them exactly."},"application-security":{"description":"Audits docs/specs/security-local.md and docs/specs/security-remote.md, and sweeps the rest of the product code.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/application-security.md`, and follow them exactly.","model":"opus"},"hosted":{"description":"Audits docs/specs/security-hosted.md: Hosted accounts and the pgstencil provenance link.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/hosted.md`, and follow them exactly.","model":"opus"}}'
           # The prompts live in `.github/audit/`, not inline here: they
           # are long enough to need real diffs in review, they must be
           # runnable locally against the same text CI uses
@@ -202,7 +217,7 @@ jobs:
           TRANSCRIPT="$RUNNER_TEMP/claude-execution-output.json"
           # Every sink that the archive step below publishes has to be in
           # the argument list, and the fail-closed `rm -f` has to delete
-          # the same set — docs/specs/security-audit.md names `audit-report.md`, the three
+          # the same set — docs/specs/security-audit.md names `audit-report.md`, the four
           # per-domain fragments, and the transcript. The fragments are
           # agent output like any other: a subagent that shells out and
           # prints an environment lands the value in its own fragment,
@@ -262,6 +277,7 @@ jobs:
             audit-supply-chain.md
             audit-ci-secrets.md
             audit-application.md
+            audit-hosted.md
           retention-days: 14
           if-no-files-found: warn
 
@@ -285,21 +301,20 @@ jobs:
           # `security-audit-failure`: an audit that produced no verdict
           # must not let the release gate in `release.yml` pass, and a
           # later PASS should auto-close it like any other failure.
-          if [ -s audit-status.txt ]; then
-            STATUS=$(cat audit-status.txt)
-          fi
-          case "${STATUS:-}" in
-            PASS|FAIL) ;;
-            *) STATUS=MISSING ;;
-          esac
 
-          # What the *file* said, kept separate from `STATUS`, which the guards
-          # below mutate. Every note in the issue body is written about a
-          # condition rather than about a branch, and "the audit never wrote a
-          # verdict" is one of those conditions — it cannot be recovered from
-          # `STATUS` afterwards, because a dissent can raise that same MISSING
-          # to FAIL.
-          if [ "$STATUS" = "MISSING" ]; then STATUS_FILE_VERDICT=none; else STATUS_FILE_VERDICT="$STATUS"; fi
+          # What the *file* said, parsed once and never mutated. Every note in
+          # the issue body is written about a condition rather than about a
+          # branch, and "the audit never wrote a verdict" is one of those
+          # conditions — it cannot be recovered from `STATUS` afterwards,
+          # because the escalation below can raise that same MISSING to FAIL.
+          if [ -s audit-status.txt ]; then
+            FILE_STATUS=$(cat audit-status.txt)
+          fi
+          case "${FILE_STATUS:-}" in
+            PASS|FAIL) ;;
+            *) FILE_STATUS=MISSING ;;
+          esac
+          STATUS="$FILE_STATUS"
 
           # A PASS is only as good as the evidence behind it. Each domain
           # writes its own fragment before returning a verdict, so a
@@ -336,7 +351,7 @@ jobs:
 
           # Existence is not agreement. The loop above catches a domain that
           # produced nothing; this catches one that produced a FAIL the merge
-          # then lost — a mis-summarised verdict, or three domains flattened
+          # then lost — a mis-summarised verdict, or four domains flattened
           # into an optimistic paragraph. That case is worse than a missing
           # fragment, because PASS *closes* the open failure issue below and
           # opens the release gate, leaving the finding only in a 14-day
@@ -353,6 +368,20 @@ jobs:
           # shellcheck disable=SC2086
           for f in $AUDIT_FRAGMENTS; do
             [ -s "$f" ] || continue
+            # A verdict line is not a finished report. Domains append findings
+            # as they determine them and write the sentinel last, so a fragment
+            # without one belongs to a domain that was cut off — and its first
+            # line may already have been rewritten to `VERDICT: PASS` in the
+            # moment before it died. Checked here rather than left to
+            # `.github/audit/orchestrator.md` §4 for the same reason as every
+            # other guard in this loop: a prompt is not a control, and this is
+            # the one that decides whether the release gate opens.
+            # Last non-blank line, not `tail -n1`: a trailing blank line after the
+            # sentinel still ends a finished report.
+            if [ "$(sed -e '/^[[:space:]]*$/d' "$f" | tail -n1)" != "<!-- END OF REPORT -->" ]; then
+              echo "::warning::$f has no completion sentinel; its domain was cut off mid-report."
+              UNFINISHED="${UNFINISHED:+$UNFINISHED, }$f"
+            fi
             # An unrecognized first line — a subagent that ignored the preamble, a stray heading
             # or blank line — must not fall through to an unchallenged PASS:
             # that would put the verdict back on a prompt having been
@@ -391,7 +420,7 @@ jobs:
           if [ -n "${DISSENTING:-}" ]; then
             STATUS=FAIL
           elif [ "$STATUS" != "FAIL" ] &&
-               { [ -n "${MISSING_FRAGMENTS:-}" ] || [ -n "${UNREADABLE_VERDICTS:-}" ] || [ -n "${INCONCLUSIVE_DOMAINS:-}" ]; }; then
+               { [ -n "${MISSING_FRAGMENTS:-}" ] || [ -n "${UNREADABLE_VERDICTS:-}" ] || [ -n "${INCONCLUSIVE_DOMAINS:-}" ] || [ -n "${UNFINISHED:-}" ]; }; then
             STATUS=MISSING
           fi
 
@@ -454,12 +483,55 @@ jobs:
           if [ -n "${UNREADABLE_VERDICTS:-}" ]; then
             echo "- **A domain's verdict could not be read.** The first line of $UNREADABLE_VERDICTS is not an exact \`VERDICT: PASS\`, \`VERDICT: FAIL\`, or \`VERDICT: INCONCLUSIVE\`. Read its fragment; the domain did report, but its verdict is unconfirmed." >> "$NOTES"
           fi
+          if [ -n "${UNFINISHED:-}" ]; then
+            echo "- **A domain was cut off mid-report.** $UNFINISHED never wrote its \`<!-- END OF REPORT -->\` sentinel, so what it published is what it had recorded when it stopped, and its verdict line covers less than it appears to. The findings it did write are still findings." >> "$NOTES"
+          fi
           if [ -n "${INCONCLUSIVE_DOMAINS:-}" ]; then
             echo "- **A domain could not determine every check.** $INCONCLUSIVE_DOMAINS returned \`VERDICT: INCONCLUSIVE\`; read its \`UNVERIFIABLE\` checks. Those checks do not count as passing." >> "$NOTES"
           fi
-          if [ "$STATUS_FILE_VERDICT" = "none" ]; then
-            echo "- **The audit wrote no verdict.** \`audit-status.txt\` was absent, empty, or not \`PASS\`/\`FAIL\`, so the run ended without deciding. Start at the report's own markers: \`UNVERIFIABLE\` is a check the agent could not determine, while a domain section reading \`_No report …_\` is one that never reported — which is what an expired wait deadline looks like." >> "$NOTES"
+          if [ "$FILE_STATUS" = "MISSING" ]; then
+            echo "- **The audit wrote no verdict.** \`audit-status.txt\` was absent, empty, or not \`PASS\`/\`FAIL\`, so the run ended without deciding. Start at the report's own markers: \`UNVERIFIABLE\` is a check the agent could not determine, \`_Incomplete …_\` heads a domain that was cut off mid-report, and a domain section reading \`_No report …_\` is one that never reported — which is what an expired wait deadline looks like." >> "$NOTES"
           fi
+
+          # The notes above index the report by marker, and the clamp below
+          # keeps the head — so on a report too long to post, the markers they
+          # send the reader to are the part that gets cut. Run 35842217451
+          # posted `VERDICT: INCONCLUSIVE` naming `audit-ci-secrets.md`, and
+          # its one `UNVERIFIABLE` line, along with two whole later domains
+          # and their verdicts, fell past 32,000 characters of a 226,302-
+          # character body. Lift every line that carries a verdict or a
+          # non-passing finding into the head, where the clamp cannot reach
+          # it; the full sections still follow for whatever survives.
+          #
+          # Verdicts and findings are collected separately so the cap can fall
+          # on the findings alone: one verdict line per fragment is bounded by
+          # the fragment count, while a single domain's findings are not, and
+          # a shared cap would let the first domain's findings push the last
+          # domain's verdict out — the loss this lift exists to prevent.
+          #
+          # Matched at line start after an optional heading or bullet marker,
+          # which is what keeps `### FAIL IF results` and every `- PASS:`
+          # bullet quoting a **FAIL IF** clause out of the lift. `FAIL:` takes
+          # its colon for the same reason; a domain-level failure arrives as
+          # `VERDICT: FAIL` and is caught by the verdict pass.
+          #
+          # `|| true` on both: `grep` exits 1 when it matches nothing, and
+          # under this step's `set -eo pipefail` that would end the step here,
+          # before `audit-comment.md` is composed and before any `gh issue`
+          # call — turning a truncated report into no report at all. A
+          # nonempty fragment with no marker line is exactly the state the
+          # verdict loop above already reports as unreadable.
+          VERDICTS=$(mktemp)
+          FINDINGS=$(mktemp)
+          # Unquoted on purpose: `AUDIT_FRAGMENTS` is a filename list.
+          # shellcheck disable=SC2086
+          for f in $AUDIT_FRAGMENTS; do
+            [ -s "$f" ] || continue
+            { grep -hE '^[[:space:]]*(#+[[:space:]]*)?([-*][[:space:]]*)?VERDICT:' "$f" || true; } |
+              cut -c1-500 | sed "s|^|- \`$f\`: |" >> "$VERDICTS"
+            { grep -hE '^[[:space:]]*(#+[[:space:]]*)?([-*][[:space:]]*)?(FAIL:|UNVERIFIABLE|BLOCKER|WARNING)' "$f" || true; } |
+              cut -c1-500 | sed "s|^|- \`$f\`: |" >> "$FINDINGS"
+          done
 
           if [ "$STATUS" = "FAIL" ]; then
             TITLE="[security-audit] FAIL on $(date -u +%Y-%m-%d)"
@@ -484,13 +556,61 @@ jobs:
               echo "- **Inconclusive for a reason this step could not name.** That is itself a bug in the reporting step."
               echo
             fi
+            if [ -s "$VERDICTS" ] || [ -s "$FINDINGS" ]; then
+              echo "### Lines that decided this verdict"
+              echo
+              echo "_Lifted out of the fragments so truncation cannot cut them. Each domain's full section follows for as far as the body reaches._"
+              echo
+              cat "$VERDICTS"
+              head -n 40 "$FINDINGS"
+              LIFTED=$(wc -l < "$FINDINGS")
+              if [ "$LIFTED" -gt 40 ]; then
+                echo "- _…and $((LIFTED - 40)) more findings; read them in the transcript._"
+              fi
+              echo
+            fi
             if [ -s audit-report.md ]; then
               cat audit-report.md
             else
-              echo "_No \`audit-report.md\` was produced._"
+              # The merge never ran. `.github/audit/orchestrator.md` §4 forbids
+              # ending the turn before it does, but a prompt is not a control —
+              # the same reason every guard above is here rather than there.
+              # Run 34581574869 ended its turn at 21 minutes and this arm
+              # published one line, while two domains' finished `VERDICT: PASS`
+              # fragments sat in the working directory and reached a human only
+              # through the 14-day artifact. The fragments have already been
+              # through `Redact secrets from agent output` and the loops above
+              # have already read them, so publish them unmerged rather than
+              # losing the run's findings. Verbatim, with no summary: §3's
+              # merge is the only thing entitled to characterise a fragment.
+              # The one exception is the cut-off marker below, for the reason
+              # stated there.
+              echo "_No \`audit-report.md\` was produced — the merge never ran. Each domain's fragment follows verbatim and unmerged._"
+              echo
+              # Unquoted on purpose: `AUDIT_FRAGMENTS` is a filename list.
+              # shellcheck disable=SC2086
+              for f in $AUDIT_FRAGMENTS; do
+                echo "## $f"
+                echo
+                if [ ! -s "$f" ]; then
+                  echo "_No report — this domain produced no fragment._"
+                else
+                  # The same sentinel test the guard loop above already ran,
+                  # and the same marker §3's `emit` writes. Not a
+                  # characterisation of the findings but the identical
+                  # mechanical check, so it is this step's to make: without it
+                  # a fragment whose domain was cut off is published looking
+                  # finished, and the no-verdict note above sends the reader
+                  # after a marker this arm never wrote.
+                  [ "$(sed -e '/^[[:space:]]*$/d' "$f" | tail -n1)" = "<!-- END OF REPORT -->" ] ||
+                    echo "_Incomplete — this domain never closed its report. What follows is what it had recorded, not a finished report._"
+                  cat "$f"
+                fi
+                echo
+              done
             fi
           } > audit-comment.md
-          rm -f "$NOTES"
+          rm -f "$NOTES" "$VERDICTS" "$FINDINGS"
 
           # Truncate before posting, non-fatally. See docs/specs/security-audit.md -> "Outcomes and reporting".
           node scripts/clamp-issue-body.mjs audit-comment.md \

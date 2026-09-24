@@ -1474,14 +1474,17 @@ function Invoke-Verify {
   # CIM round trip into the Task Scheduler service -- the priciest call in this
   # whole path -- so it is made once here rather than once per check.
   #
-  # It can also come back $null: CIM blocked by policy, the Task Scheduler
-  # service momentarily unavailable, or the task unregistered between Get-Task
-  # and here. Treat that as its own outcome and fail rather than verifying a
-  # definition we could not inspect.
+  # Either can come back unread. The export is $null when CIM is blocked by
+  # policy, when the Task Scheduler service is momentarily unavailable, or when
+  # the task is unregistered between Get-Task and here; the wrapper text stays
+  # '' when the file is missing. "$null" is the empty string, so neither search
+  # can fire on one -- both report on $definitionRead instead, and a definition
+  # nothing inspected fails rather than green-ticking twice.
   $taskXml = Export-ScheduledTask -TaskName $LABEL -TaskPath $TASK_PATH -ErrorAction SilentlyContinue
   $wrapper = Join-Path $Root 'bin\run-relay.ps1'
   $wrapperText = ''
   if (Test-Path -LiteralPath $wrapper -PathType Leaf) { $wrapperText = [IO.File]::ReadAllText($wrapper) }
+  $definitionRead = [bool]$taskXml -and [bool]$wrapperText
 
   $task = Get-Task
   if ($task) {
@@ -1522,12 +1525,6 @@ function Invoke-Verify {
     } else {
       Fail "bin\run-relay.ps1 is missing or has no supervision loop"
     }
-
-    # The only consumer left is the source-checkout search near the end, so an
-    # export that failed means that search covered the wrapper alone. Reported
-    # here, inside the registered-task branch, so an unregistered task fails
-    # once rather than twice.
-    if (-not $taskXml) { Fail "the task definition could not be exported -- it was not searched for the source checkout" }
   } else {
     Fail "Scheduled Task $TASK_PATH$LABEL is not registered"
   }
@@ -1604,6 +1601,9 @@ function Invoke-Verify {
       Pass "Serve proxies / to 127.0.0.1:$PORT"
     } else {
       Fail "Serve does not proxy / to 127.0.0.1:$PORT"
+      # The remedy is one command and `verify` already knows it, so print it
+      # rather than leaving the reader to find `manage serve` in the runbook.
+      Write-Host ('      re-apply it with: "{0}\bin\manage.cmd" serve' -f $Root)
       foreach ($l in $serveText.Split("`n")) { if ($l.Trim()) { Write-Host "      $($l.TrimEnd())" } }
     }
     if ($ORIGIN -and ($serveText -match [regex]::Escape($ORIGIN.Replace('https://', '')))) {
@@ -1684,20 +1684,36 @@ function Invoke-Verify {
   $prev = Get-PreviousRelease
   if ($prev -and $prev -eq $cur) {
     Fail "previous names the same release as current -- there is no rollback target"
+  } elseif ($prev -and -not (Test-Path -LiteralPath (Join-Path $Root "releases\$prev") -PathType Container)) {
+    Fail "previous.txt points at a release that no longer exists"
   } elseif ($prev) {
     Pass "a previous release is retained for rollback"
   } else {
     Warn "no previous release retained yet -- rollback is unavailable until the next update"
   }
 
-  # The release must not depend on the source checkout.
+  # The task definition and the wrapper carry the enrollment offer's *path* and
+  # nothing else secret (docs/specs/security-remote.md -> "Credentials at
+  # rest"). A name, not a value: the installer supplies none of these, so one
+  # appearing means a hand-edit or a regression put a credential where any
+  # process that can read the definition can read it.
+  if (-not $definitionRead) {
+    Fail "the task definition or bin\run-relay.ps1 could not be read -- it was searched for neither a credential nor the source checkout"
+  } elseif (("$taskXml" + "`n" + $wrapperText) -match 'DORMOUSE_SETUP_PASSWORD|DORMOUSE_VAPID_PRIVATE_KEY|DORMOUSE_ENROLL_TOKEN(?!_FILE\b)') {
+    Fail "the Scheduled Task or wrapper names a credential -- it must carry only paths"
+  } else {
+    Pass "the service definition names no credential"
+  }
+
+  # The release must not depend on the source checkout. Unreadable inputs have
+  # already failed above, so this search stays silent rather than failing twice.
   $src = Get-ReleaseField 'source_checkout'
-  if ($src) {
+  if ($src -and $definitionRead) {
     $refs = $false
     if ($wrapperText -match [regex]::Escape($src)) { $refs = $true }
     if ($taskXml -match [regex]::Escape($src)) { $refs = $true }
     if ($refs) { Fail "the Scheduled Task or wrapper references the source checkout ($src)" }
-    elseif ($taskXml) { Pass "the installed service does not reference the source checkout" }
+    else { Pass "the installed service does not reference the source checkout" }
   }
 
   Write-Host ""

@@ -1,3 +1,6 @@
+import { getToolDirtySnapshot, subscribeToToolDirty } from '../lib/tool-dirty-store';
+import { setWorkspaceAlertDelivery } from '../lib/workspace-store';
+import { useWorkspaceAlertPolicy } from './wall/use-workspace-alert-policy';
 import { useCallback, useRef, useState, useMemo, useLayoutEffect, useContext, useSyncExternalStore, type ReactNode } from 'react';
 import {
   DeviceMobileSlashIcon,
@@ -14,7 +17,7 @@ import { SettingsPreview } from './SettingsPreview';
 import { Door } from './Door';
 import { DoorNotepadPopover } from './DoorNotepadPopover';
 import { sourceNoticeFor, type SourceNotice } from './NoteList';
-import { DoorElementsContext, useDialogKeyboardOwner } from './wall/wall-context';
+import { DoorElementsContext, SelectedIdContext, useDialogKeyboardOwner } from './wall/wall-context';
 import type { DoorChip, DooredItem } from './wall/wall-types';
 import { hasTerminal } from 'dor/commands/types';
 import { IS_MAC } from '../lib/platform';
@@ -29,11 +32,9 @@ import {
   buildAppTitleResolver,
   DEFAULT_ACTIVITY_STATE,
   getActivitySnapshot,
-  getAlertSettings,
   getAlertSpeechSnapshot,
   getTerminalPaneStateSnapshot,
   subscribeToActivity,
-  subscribeToAlertSettings,
   subscribeToAlertSpeech,
   subscribeToTerminalPaneState,
   updateAlertSettings,
@@ -61,15 +62,17 @@ export interface BaseboardProps {
 }
 export function Baseboard({ items, onReattach, notice, onDoorDragStart }: BaseboardProps) {
   const { elements: doorElements, bumpVersion } = useContext(DoorElementsContext);
+  const selectedId = useContext(SelectedIdContext);
   const activityStates = useSyncExternalStore(subscribeToActivity, getActivitySnapshot);
   const speechStates = useSyncExternalStore(subscribeToAlertSpeech, getAlertSpeechSnapshot);
-  const settings = useSyncExternalStore(subscribeToAlertSettings, getAlertSettings);
+  const { workspaceId, overrides, policy: settings } = useWorkspaceAlertPolicy();
   const terminalStates = useSyncExternalStore(subscribeToTerminalPaneState, getTerminalPaneStateSnapshot);
   // One subscription for every Door's note count, like the activity one above.
   // A host with no notepad reports zero everywhere, so the Door stays a pure
   // props component and never asks the platform anything.
   const notepadNotes = useSyncExternalStore(subscribeToNotepad, getNotepadSnapshot);
   const notepadAvailable = hasNotepadArchive();
+  const dirtyTools = useSyncExternalStore(subscribeToToolDirty, getToolDirtySnapshot);
   const appTitleForPane = useMemo(
     () => buildAppTitleResolver(terminalStates, activityStates),
     [terminalStates, activityStates],
@@ -100,10 +103,11 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   const previewSequence = useRef(0);
   const closeSettingsPreview = useCallback(() => setSettingsPreview(null), []);
   const toggleAlarm = (sink: AlarmSink, anchor: HTMLElement) => {
-    const current = getAlertSettings();
-    updateAlertSettings(sink === 'speech'
-      ? { speakEnabled: !current.speakEnabled }
-      : { pushEnabled: !current.pushEnabled });
+    const patch = sink === 'speech'
+      ? { speakEnabled: !settings.speakEnabled }
+      : { pushEnabled: !settings.pushEnabled };
+    if (workspaceId) setWorkspaceAlertDelivery(workspaceId, { ...overrides, ...patch });
+    else updateAlertSettings(patch);
     setSettingsPreview({ sink, anchor, sequence: ++previewSequence.current });
   };
 
@@ -156,13 +160,10 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
     if (arrowMeasureEl.current) {
       layoutMetrics.current.arrowWidth = arrowMeasureEl.current.offsetWidth;
     }
-  }, [items, activityStates, speechStates, terminalStates, notepadNotes]);
+  }, [items, activityStates, speechStates, terminalStates, notepadNotes, dirtyTools]);
 
-  // Reset startIndex when the set of door items changes (not just count)
   const itemKey = useMemo(() => items.map(i => i.id).join('\0'), [items]);
-  useLayoutEffect(() => {
-    setStartIndex(0);
-  }, [itemKey]);
+  const previousItems = useRef(itemKey);
 
   const shortcutHint = IS_MAC
     ? 'LCmd → RCmd to enter command mode'
@@ -199,6 +200,17 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   const endIndex = startIndex + visibleCount;
   const hiddenLeft = startIndex;
   const hiddenRight = items.length - endIndex;
+
+  useLayoutEffect(() => {
+    const changed = previousItems.current !== itemKey;
+    previousItems.current = itemKey;
+    const index = items.findIndex(item => item.id === selectedId);
+    if (index >= 0) {
+      if (index < startIndex || index >= endIndex) setStartIndex(index);
+    } else if (changed) setStartIndex(0);
+    // Selection/membership changes reveal the cursor; manual overflow scrolling
+    // must remain free to move away from it without immediately being undone.
+  }, [itemKey, selectedId]);
 
   useLayoutEffect(() => {
     const container = containerRef.current;
@@ -243,10 +255,11 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
         ? deriveSurfaceLabel(terminalStates.get(item.id) ?? createTerminalPaneState(), appTitleForPane, item.title)
         : item.title,
       browserDisplay: item.browserDisplay,
+      toolDirty: item.kind === 'tool' && dirtyTools.get(item.id) === true,
       status: activity.status,
-      ringSeq: activity.ringSeq,
       todo: activity.todo,
       speechState: speechStates.get(item.id),
+      episode: activity.episode ?? null,
       noteCount: notepadAvailable ? (notepadNotes.get(item.id)?.length ?? 0) : 0,
     };
   };

@@ -1,7 +1,10 @@
 import type { PlaywrightRequest, PlaywrightResult } from './browser-automation';
+import { recordToolDirty } from '../tool-dirty-store';
+import { recordToolAnnounce } from '../tool-announce-store';
+import { recordToolEvents } from '../tool-events';
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
-import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink } from './types';
-import { OPEN_PORT_TIMEOUT_MS } from './types';
+import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink, ToolControlResult, ToolHostRequest, WritePtyOptions } from './types';
+import { openPortRequestTimeoutMs } from './types';
 import { createBurrowLinkClient } from '../../host/remote/link-client';
 import type { AwaitHandle, AwaitOptions, AwaitOutcome } from '../alert-manager';
 import type { AlertSettings } from '../alert-settings';
@@ -179,10 +182,15 @@ export class VSCodeAdapter implements PlatformAdapter {
         // backstop, not the contract.
         const parser = new TerminalProtocolParser(themeColorProvider);
         const parsed = parser.process(msg.data);
+        recordToolEvents(msg.id, parsed.events);
         applyTerminalSemanticEvents(msg.id, collectTerminalSemanticEvents(parsed.events));
         for (const handler of this.replayHandlers) {
           handler({ id: msg.id, data: parsed.visibleData });
         }
+      } else if (msg.type === 'terminal:toolState') {
+        recordToolDirty(msg.id, msg.dirty);
+      } else if (msg.type === 'terminal:toolAnnounce') {
+        recordToolAnnounce(msg.id, msg.announce);
       } else if (msg.type === 'terminal:semanticEvents') {
         applyTerminalSemanticEvents(msg.id, msg.events ?? []);
       } else if (msg.type === 'dormouse:flushSessionSave') {
@@ -344,8 +352,8 @@ export class VSCodeAdapter implements PlatformAdapter {
     this.vscode.postMessage({ type: 'pty:spawn', id, options });
   }
 
-  writePty(id: string, data: string): void {
-    this.vscode.postMessage({ type: 'pty:input', id, data });
+  writePty(id: string, data: string, options?: WritePtyOptions): void {
+    this.vscode.postMessage({ type: 'pty:input', id, data, paced: options?.paced });
   }
 
   resizePty(id: string, cols: number, rows: number): void {
@@ -364,7 +372,7 @@ export class VSCodeAdapter implements PlatformAdapter {
     const result = await this.requestResponse<OpenPort[]>(
       'pty:getOpenPorts', 'pty:openPorts', { id },
       (msg) => msg.ports as OpenPort[],
-      OPEN_PORT_TIMEOUT_MS,
+      openPortRequestTimeoutMs(1, 2),
     );
     return result ?? [];
   }
@@ -472,6 +480,17 @@ export class VSCodeAdapter implements PlatformAdapter {
       15000,
     );
     return result ?? { ok: false, error: 'agent-browser pop-in timed out' };
+  }
+
+  async toolControl(request: ToolHostRequest): Promise<ToolControlResult> {
+    // The extension host owns the filesystem (vscode-ext/src/tool-host.ts). A
+    // timeout reports an error rather than hanging `dor tool`, which blocks on it.
+    const result = await this.requestResponse<ToolControlResult>(
+      'tool:control', 'tool:result', { request },
+      (msg) => msg.result,
+      5000,
+    );
+    return result ?? { status: 'error', message: 'tool request timed out' };
   }
 
   async createIframeProxyUrl(url: string): Promise<IframeProxyResult> {

@@ -30,9 +30,10 @@ Remembering the id and deleting it in the very mutation that re-appends it repla
 the batch wholesale instead, so edits, additions, and the user's own deletions all
 survive. That is why deletes apply before appends, and why the note-id dedupe is
 computed after them — otherwise the batch being replaced would still count as
-storing its own notes. The dedupe stays because the VS Code mirror path mints a
-fresh id per teardown and has nothing to address an earlier write by; a note id is
-a UUID, so "already stored" is an exact test there rather than a heuristic.
+storing its own notes. The dedupe stays for the VS Code mirror path: a mirrored
+Surface carrying no pending batch id still mints a fresh one at teardown, leaving
+that batch nothing to address an earlier write by; a note id is a UUID, so
+"already stored" is an exact test there rather than a heuristic.
 
 `MAX_SAVE_ATTEMPTS` is 5. An unbounded retry against an archive somebody else is
 rewriting in a loop would spin instead of telling the user, and the closure paths
@@ -67,6 +68,10 @@ first sixteen are the user's and the rest are a fixed formula xterm itself appli
 
 ## Source links
 
+In Tauri manual testing (2026-09-11), a transferred pin remained visible but failed
+its text proof on use. Rebuilt buffers do not guarantee identical absolute row
+positions. Transfers therefore retain notes without presenting unusable pins.
+
 The pin could have stored a scrollback line number. It stores two xterm markers
 because a marker is the only handle xterm keeps correct as the buffer scrolls, and
 scrolling is the normal case — a capture is usually of something that has already
@@ -80,11 +85,14 @@ scrollback, a program that overwrote the rows — into one honest outcome instea
 scrolling the user to plausible-looking wrong output. It is why column restoration
 is allowed to be best effort at all.
 
-Failure removes the pin rather than leaving it to fail again. A pin the user can
-see is one that resolved the last time it was asked, which is a more useful promise
-than a button that sometimes apologizes.
+An initial proof failure removes the pin rather than leaving it to fail again.
+Opening Tool context is different: its narrower grid can change wrapping after
+the same pin has just passed its proof. A second proof prevents stale-coordinate
+selection, while keeping the link avoids treating our own layout change as lost
+content. This bounded exception does not reconstruct columns or soft-wrap proof;
+trying again while the grid still differs can fail the ordinary initial check.
 
-The alternate buffer is the one failure that is not about the capture. A
+The alternate buffer also fails for a reason unrelated to the capture. A
 full-screen program covers the normal buffer rather than rewriting it, so the
 markers stay live and the range is still there underneath; the earlier code let
 the out-of-range rows fall through to the same removal as a dead pin, which meant
@@ -203,7 +211,7 @@ who had just been told the notes were not stored and had chosen Cancel.
 quit they already asked for; a slower answer is a failure worth surfacing.
 
 The file is a sibling of `sessions/` rather than a member of it because the two have
-different lifetimes: session snapshots are per window and swept by `clear_session`,
+different lifetimes: session snapshots are per window and swept with it,
 while archived notes outlive the window that produced them and must survive that
 sweep. They share `write_file_atomically` because both carry user text and both
 must survive a crash mid-write; that is one implementation, not two.
@@ -251,13 +259,15 @@ meant the new view showed a batch the user had already deleted, still offering
 Undo, which `deactivate()` would then delete for real hours later. Committing at
 the disposal makes the promise true and leaves nothing pending to hand a resume.
 
-The mirror carries a PTY id purely so a teardown can ask where each process is: the
-extension host knows nothing of Surface ids, and `ptyManager.getCwd` answers for the
-Session id the webview spawned under. On an editor-panel disposal the kills moved
-*after* the archive write for that one reason — the loop used to run first, so by
-the time the refresh asked, the PTY it was asking about was already dead. Every
-other bookkeeping step in that disposal stayed synchronous and where it was; only
-the kills wait, and they run in a `finally`, so a failed write still kills them.
+A teardown asks `ptyManager.getCwd` for each mirrored terminal Surface's id, which
+is the Session id the webview spawned the PTY under. The mirror carried that id a
+second time as a `terminalId` field until it became clear the two are always equal;
+the kind is what decides whether there is anything to ask. On an editor-panel
+disposal the kills moved *after* the archive write so there would be a PTY left to
+ask — the loop used to run first, so by the time the refresh asked, the process was
+already dead. Every other bookkeeping step in that disposal stayed synchronous and
+where it was; only the kills wait, and they run in a `finally`, so a failed write
+still kills them.
 
 The original `globalState` store was workspace-independent but cached separately
 in every extension host. A process-local queue and revision counter therefore

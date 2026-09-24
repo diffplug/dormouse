@@ -1,3 +1,4 @@
+import type { AlertRuntimeSnapshot } from '../alert-manager';
 import { DEFAULT_HELPER_COMMAND, type HelperIdentity, type TerminalContextRequest, type TerminalContextInfo } from '../terminal-context-types';
 import type { AlertStateDetail, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink } from './types';
 import { AlertManager } from '../alert-manager';
@@ -325,6 +326,11 @@ export class FakePtyAdapter implements PlatformAdapter {
   notifySessionFlushComplete(_requestId: string): void {}
 
   // Alert management (local AlertManager, same as TauriAdapter)
+  alertPauseForTransfer(id: string): AlertRuntimeSnapshot | null { return this.alertManager.pauseForTransfer(id); }
+  alertResumeFromTransfer(id: string, snapshot: AlertRuntimeSnapshot, replayRequestId?: string): void {
+    this.alertManager.resumeFromTransfer(id, snapshot, replayRequestId);
+  }
+
   alertRemove(id: string): void { this.alertManager.remove(id); }
   alertSetWatchedCommands(names: string[]): void { this.alertManager.setWatchedCommands(names); }
   alertSetCommandWatched(name: string, watched: boolean): void { this.alertManager.setCommandWatched(name, watched); }
@@ -362,12 +368,12 @@ export class FakePtyAdapter implements PlatformAdapter {
    * the alert-manager's activity feed the same way real PTY data does in
    * the Tauri/VSCode adapters — without this, browser-side echo (e.g.
    * TutorialShell's per-character echo, AsciiSplashRunner frames) never
-   * reaches the activity monitor and the bell can never tilt or ring.
+   * reaches the activity monitor and a pane can never ring.
    *
    * Pass `{ skipActivity: true }` for writes that are pure UI chrome and
    * shouldn't count as a "task is active" signal — e.g. a tutorial TUI
    * re-rendering its menu on state change. Without the opt-out, every
-   * runner frame would tilt the bell on whichever pane hosts the runner.
+   * runner frame would look like work on whichever pane hosts the runner.
    */
   sendOutput(id: string, data: string, options: { skipActivity?: boolean } = {}): void {
     if (!this.terminals.has(id)) return;
@@ -379,7 +385,7 @@ export class FakePtyAdapter implements PlatformAdapter {
    * no data output — useful for animating a fake "task running" state on
    * a pane while the visual feedback lives elsewhere. Calls
    * `alertManager.onData(id)` immediately, then again every `intervalMs`
-   * until `durationMs` elapses, after which silence resumes and the bell
+   * until `durationMs` elapses, after which silence resumes and the Session
    * transitions naturally to MIGHT_NEED_ATTENTION → ALERT_RINGING.
    * Returns a dispose handle that cancels remaining ticks.
    */

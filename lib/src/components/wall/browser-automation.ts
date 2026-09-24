@@ -14,7 +14,7 @@ export function automationMode(provider: BrowserAutomationProvider, headed: bool
 export type BrowserPlatform = Pick<PlatformAdapter,
   | 'agentBrowserCommand' | 'agentBrowserEdit' | 'agentBrowserScreenshot'
   | 'agentBrowserStreamStatus' | 'getAgentBrowserStreamUrl' | 'agentBrowserOpen'
-  | 'agentBrowserPopOut' | 'agentBrowserPopIn' | 'agentBrowserBringToFront'
+  | 'agentBrowserPopOut' | 'agentBrowserPopIn'
 >;
 
 export function browserPlatform(mode: unknown, cwd?: string): BrowserPlatform {
@@ -44,7 +44,6 @@ export function browserPlatform(mode: unknown, cwd?: string): BrowserPlatform {
     agentBrowserOpen: (url: string, opts: { headed?: boolean }, binaryPath?: string) => call({ op: 'open', url, ...opts, binaryPath }),
     agentBrowserPopOut: (session: string, opts: { url?: string }, binaryPath?: string) => call({ op: 'popOut', session, ...opts, binaryPath }),
     agentBrowserPopIn: (session: string, opts: { url?: string }, binaryPath?: string) => call({ op: 'popIn', session, ...opts, binaryPath }),
-    agentBrowserBringToFront: undefined,
   };
 }
 

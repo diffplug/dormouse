@@ -27,6 +27,7 @@ import {
   type TerminalTitle,
 } from '../lib/terminal-registry';
 import { createTerminalPaneState } from '../lib/terminal-state';
+import { flattenScenario, SCENARIO_SHELL_PROMPT } from '../lib/platform';
 import { requireElement, settleTerminals, waitForPrimedState } from './settle-terminals';
 
 const HEADER_WIDTH = 380;
@@ -44,7 +45,6 @@ interface ShellCwdCase {
 const noopActions: WallActions = {
   onKill: () => {},
   onMinimize: () => {},
-  onAlertButton: () => 'noop',
   onToggleTodo: () => {},
   onSplitH: () => {},
   onSplitV: () => {},
@@ -56,6 +56,7 @@ const noopActions: WallActions = {
   onCancelRename: () => {},
   onSwapRenderMode: () => {},
   resolveSurfaceRef: (id) => id,
+  onResolveToolApproval: () => {},
 };
 
 const meta: Meta<typeof ShellCwdMatrix> = {
@@ -124,16 +125,24 @@ export const TitleFallbacksAndPinnedTitles: Story = storyFor([
   caseState('title-long-user', 'Long user title', idle({ cwd: manual('/repo/app'), title: terminalTitle('my-extremely-long-running-background-process-with-a-very-descriptive-name', 'user') }), 'Truncates before controls'),
 ]);
 
+const titleCandidatesInHeaderMenu = storyFor([
+  caseState(
+    'title-candidates-popup',
+    'Title candidates in header menu',
+    titleCandidateState(),
+    'The context title explanation shows the latest title per channel',
+  ),
+]);
+
 export const TitleCandidatesInHeaderMenu: Story = {
-  ...storyFor([
-    caseState(
-      'title-candidates-popup',
-      'Title candidates in header menu',
-      titleCandidateState(),
-      'The context title explanation shows the latest title per channel',
-    ),
-  ]),
-  render: () => <div style={{ width: 900, height: 680 }}><Wall initialPaneIds={['title-candidates-popup']} /></div>,
+  ...titleCandidatesInHeaderMenu,
+  parameters: {
+    ...titleCandidatesInHeaderMenu.parameters,
+    // Output for the Wall's terminal, which `settleTerminals` waits on.
+    fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) },
+  },
+  // A flex column, or the `flex-1` Wall collapses to its Baseboard and hides the pane.
+  render: () => <div className="flex flex-col" style={{ width: 900, height: 680 }}><Wall initialPaneIds={['title-candidates-popup']} /></div>,
   play: openHeaderContextMenu,
 };
 
@@ -280,7 +289,12 @@ function idle({
   activity?: ShellActivity;
   title?: TerminalTitle | null;
 } = {}): TerminalPaneState {
-  return createTerminalPaneState({ cwd, activity, title });
+  return createTerminalPaneState({ cwd, activity, ...titleCandidatesOf(title) });
+}
+
+/** A pane state's whole title channel, from the one candidate a story pins. */
+function titleCandidatesOf(title: TerminalTitle | null): Pick<TerminalPaneState, 'titleCandidates'> {
+  return { titleCandidates: title ? { [title.source]: title } : {} };
 }
 
 function running(
@@ -299,7 +313,7 @@ function running(
   return createTerminalPaneState({
     cwd: currentCwd,
     activity: { kind: 'running' },
-    title: options.title ?? null,
+    ...titleCandidatesOf(options.title ?? null),
     currentCommand: commandRun({
       id: `cmd-${displayCommand}-${startCwdPath ?? 'unknown'}`,
       rawCommandLine,
@@ -380,11 +394,7 @@ function titleCandidateState(): TerminalPaneState {
     osc99: terminalTitleAt('Codex waiting', 'osc99', BASE_TIME + 4_000),
     osc777: terminalTitleAt('Tests complete', 'osc777', BASE_TIME + 3_000),
   } satisfies TerminalPaneState['titleCandidates'];
-  return createTerminalPaneState({
-    ...pane,
-    title: candidates.user,
-    titleCandidates: candidates,
-  });
+  return createTerminalPaneState({ ...pane, titleCandidates: candidates });
 }
 
 async function openHeaderContextMenu() {

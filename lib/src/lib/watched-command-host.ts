@@ -1,6 +1,6 @@
 import type { AlertManager } from './alert-manager';
 
-type WatchedCommandTarget = Pick<
+export type WatchedCommandTarget = Pick<
   AlertManager,
   'getWatchedCommands' | 'setCommandWatched' | 'setWatchedCommands'
 >;

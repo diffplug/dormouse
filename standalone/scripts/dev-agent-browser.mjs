@@ -102,15 +102,19 @@ function requestSidecar(event, data, responseEvent, pick, timeoutMs = 10000) {
 
 const fireAndForget = {
   pty_spawn: ({ id, options }) => writeSidecar('pty:spawn', { id, options }),
-  pty_write: ({ id, data }) => writeSidecar('pty:input', { id, data }),
+  pty_write: ({ id, data, paced }) => writeSidecar('pty:input', { id, data, paced }),
   pty_resize: ({ id, cols, rows }) => writeSidecar('pty:resize', { id, cols, rows }),
   pty_theme_colors: ({ colors }) => writeSidecar('pty:themeColors', colors),
   pty_kill: ({ id }) => writeSidecar('pty:kill', { id }),
-  pty_request_init: () => writeSidecar('pty:requestInit'),
+  pty_request_init: ({ requestId } = {}) => writeSidecar('pty:requestInit', { requestId }),
   dor_control_response: ({ response }) => writeSidecar('dor:controlResponse', response),
   // The Burrow's whole bridge rides one passthrough, exactly as it does
   // through Rust (`burrow_command` in src-tauri/src/lib.rs).
   burrow_command: ({ payload }) => writeSidecar('burrow:command', payload),
+  // The app-global alert stores live in the sidecar; their broadcasts come back
+  // over the event stream like every other sidecar line (`alert_command` in
+  // src-tauri/src/lib.rs).
+  alert_command: ({ payload }) => writeSidecar('alert:command', payload),
   kill_sidecar_now: () => shutdown(),
 };
 
@@ -126,8 +130,10 @@ const invokeMap = {
   },
   get_available_shells: (_args) => requestSidecar('pty:getShells', {}, 'pty:shells', (data) => data.shells ?? []),
   pty_get_cwd: ({ id }) => requestSidecar('pty:getCwd', { id }, 'pty:cwd', (data) => data.cwd ?? null),
+  pty_get_cwds: ({ ids }) => requestSidecar('pty:getCwds', { ids }, 'pty:cwds', (data) => data.cwds ?? {}),
   pty_context: ({ request }) => requestSidecar('pty:context', request, 'pty:context', data => data),
   pty_get_open_ports: ({ id }) => requestSidecar('pty:getOpenPorts', { id }, 'pty:openPorts', (data) => data.ports ?? []),
+  pty_get_open_ports_many: ({ ids }) => requestSidecar('pty:getOpenPortsMany', { ids }, 'pty:openPortsMany', (data) => data.ports ?? {}),
   read_clipboard_file_paths: () => requestSidecar('clipboard:readFiles', {}, 'clipboard:files', (data) => data.paths ?? null),
   read_clipboard_image_as_file_path: () => requestSidecar('clipboard:readImage', {}, 'clipboard:image', (data) => data.path ?? null),
   read_clipboard_text: () => requestSidecar('clipboard:readText', {}, 'clipboard:text', (data) => data.text ?? null),
@@ -147,10 +153,60 @@ const invokeMap = {
     return result;
   },
   agent_browser_stream_status: ({ session, binaryPath }) => requestSidecar('agentBrowser:streamStatus', { session, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
+  tool_control: ({ request }) =>
+    requestSidecar('tool:control', { request }, 'tool:result', (data) => data.result),
+  git_info: ({ paths }) =>
+    requestSidecar('git:info', { paths }, 'git:infoResult', (data) => data.result),
   agent_browser_open: ({ url, headed, binaryPath }) => requestSidecar('agentBrowser:open', { url, headed, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
   agent_browser_pop_out: ({ session, url, rect, binaryPath }) => requestSidecar('agentBrowser:popOut', { session, url, rect, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
   agent_browser_pop_in: ({ session, url, binaryPath }) => requestSidecar('agentBrowser:popIn', { session, url, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
+  // Agent recovery (docs/specs/standalone.md -> "Agent recovery"). The harness
+  // mirrors the persistence answer, so it claims exactly as Rust does, over the
+  // identical sidecar half. There is no `capture_agent_recovery` here: capture
+  // is a quit-only step and the harness has no quit.
+  take_recovery_commands: ({ paneIds }) =>
+    requestSidecar('recovery:take', { paneIds }, 'recovery:commands', (data) => data.commands ?? {}),
+  // The Workspace registry (docs/specs/standalone.md -> "Workspace registry"):
+  // one id counter and one window, since the harness simulates no second one.
+  workspace_reserve_ids: ({ count }) => {
+    const n = Math.max(1, Math.min(64, Number(count) || 1));
+    const first = nextWorkspaceId;
+    nextWorkspaceId += n;
+    return Array.from({ length: n }, (_, i) => `workspace-${first + i}`);
+  },
+  workspace_report: ({ entries }) => {
+    // Restored browser state survives this process; mirror Rust's report seed.
+    for (const entry of entries ?? []) {
+      const minted = refNumber(entry?.id ?? '');
+      if (minted !== undefined) nextWorkspaceId = Math.max(nextWorkspaceId, minted + 1);
+    }
+    const next = JSON.stringify(entries ?? []);
+    if (next === registryEntries) return null;
+    registryEntries = next;
+    registryRevision += 1;
+    broadcast('sidecar', { event: 'dormouse://workspaces', data: registrySnapshot() });
+    return null;
+  },
+  workspace_registry: () => registrySnapshot(),
 };
+
+let nextWorkspaceId = 2;
+let registryEntries = '[]';
+let registryRevision = 0;
+/** A minted id's counter number, else undefined; mirrors `ref_number` in standalone/src-tauri/src/workspaces.rs. */
+function refNumber(id) {
+  const minted = /^workspace-(\d+)$/.exec(id);
+  return minted ? Number(minted[1]) : undefined;
+}
+function registrySnapshot() {
+  const workspaces = JSON.parse(registryEntries).map((entry) => ({
+    id: entry.id,
+    ref: `workspace:${refNumber(entry.id) ?? entry.id}`,
+    name: entry.name,
+    active: Boolean(entry.active),
+  }));
+  return { revision: registryRevision, windows: [{ label: 'main', workspaces }] };
+}
 
 async function readJson(req) {
   // The application/json requirement is enforced in the gate below, before
@@ -248,10 +304,15 @@ function startSidecar() {
       DORMOUSE_CLI_JS: dorEntrypoint,
       DORMOUSE_CONTROL_TOKEN: controlToken,
       DORMOUSE_STATE_DIR: stateDir,
+      // The harness mirrors the persistence answer, so a reload here claims from
+      // the same agent-recovery record the app's quit writes — under this run's
+      // own temp state, never the installed app's.
+      DORMOUSE_RECOVERY_DIR: stateDir,
     },
   });
   log(`sidecar pid=${sidecar.pid}`);
   log(`burrow state dir: ${stateDir}`);
+  log(`recovery state dir: ${stateDir}`);
 
   createInterface({ input: sidecar.stdout }).on('line', (line) => {
     let msg;
@@ -315,7 +376,11 @@ async function openAgentBrowser() {
       ? resolve()
       : reject(new Error(`${binary} exited code=${code} signal=${signal}`)));
   });
-  log(`agent-browser session: ${browserSession}`);
+  // Name what was actually passed. `dor ab --key` is namespaced by the Workspace
+  // that will hold the browser, which only the host can resolve
+  // (docs/specs/dor-browser.md -> "Managed identity"), so printing a
+  // `sessionForKey` guess here would name a bare-Wall session nothing created.
+  log(`agent-browser ${identity[0] === '--key' ? 'key' : 'session'}: ${identity[1]}`);
   log(`try: ${command} snapshot -i`);
 }
 
@@ -356,6 +421,11 @@ try {
   log(`try: curl -H 'content-type: application/json' -d '{"cmd":"pty_request_init"}' 'http://127.0.0.1:${hostPort}/__dormouse_dev_host/send?t=${bridgeToken}'`);
   await startVite();
   startSidecar();
+  // Announce the actual bound port, including an OS-assigned one.
+  const vitePort = Number(new URL(viteOrigin).port);
+  process.stdout.write(
+    `\u001b]367;serve;${JSON.stringify({ port: vitePort, name: 'Dormouse dev', v: 1 })}\u001b\\`,
+  );
   await openAgentBrowser();
   log('running; Ctrl-C to stop');
 } catch (err) {

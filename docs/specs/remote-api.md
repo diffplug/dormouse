@@ -59,6 +59,134 @@ Source of truth: the surface model the wire shapes reuse — `dor/src/protocol.t
 
 Source of truth: `BurrowRuntime.#promoteConnection` in `lib/src/remote/burrow/burrow-runtime.ts`.
 
+### Direct path
+
+After authorization the same Noise session moves off the Relay onto a WebRTC
+data channel. **The presence protocol is inherited unchanged and the Relay is
+never trusted with authorization.** **The standalone Burrow answers**, over
+`node-datachannel`'s W3C polyfill in the sidecar — **loaded at the first offer,
+never at boot**, a load failure declining from then on
+([standalone.md](./standalone.md) → "Burrow service"). **VS Code declines**: it
+carries no addon ([Future](#future)).
+
+**Every signal rides inside the session**, as one of four control messages
+([relay.md](./relay.md) → E2E framing) on the established session over the relay
+path: `direct-offer` (Client→Burrow, SDP), `direct-answer` (Burrow→Client, SDP),
+`direct-decline` (Burrow→Client), `direct-switch` (either direction) — each
+`{ v: 1, t }` with exact keys and no other field. **The Relay never sees an SDP,
+a candidate, or that a direct path exists.** **An unknown control shape on an
+established session is ignored, never a session failure**, so a peer without
+this stack simply stays relayed.
+
+**The Client offers once, after `ConnectionOutcomeV1 { ok: true }`, and never
+retries**; it is always the offerer and creates the one ordered, reliable data
+channel (`dormouse`, `arraybuffer`). **The Burrow answers at most one offer per
+session**, and declines where it has no peer to build. **Each side sends its
+whole description only after ICE gathering completes** — no trickle — bounded by
+`DIRECT_GATHER_TIMEOUT_MS`, past which what it has is what travels. **The
+answerer's setup budget is the shorter one** (`DIRECT_ANSWER_TIMEOUT_MS`, not
+`DIRECT_SETUP_TIMEOUT_MS`), since it arms a relay hop later and must be the end
+that gives up first. **An SDP
+over `MAX_DIRECT_SDP_LENGTH` is never sent**: the Client skips the offer, the
+Burrow declines. That bound derives from `CONTROL_PAYLOAD_SIZE`, so a maximal
+signal always fits one control body.
+
+**No ICE servers**, and **never a public STUN or TURN default**: `iceServers:
+[]` at both ends, host candidates only. (rationale)
+
+**The two shipped stacks are proven against each other by hand**, by
+`scripts/direct-interop/run.mjs` over the shipped `DirectPeer`, which also
+measures a real browser's offer against `MAX_DIRECT_SDP_LENGTH` (rationale).
+
+**Every byte on the channel is a Noise transport message of the promoted
+session**: one message per channel frame, raw bytes, the same two `CipherState`s
+and counters. **Every inbound channel frame is bounded at
+`NOISE_MAX_MESSAGE_LENGTH` before decryption**, and a frame over it — or a
+non-binary channel message — disposes the session. (rationale)
+
+**The channel a session rides is reliable, ordered, and named
+`DIRECT_CHANNEL_LABEL`**, and one whose association reports a per-message limit
+under `NOISE_MAX_MESSAGE_LENGTH` is refused: both are checked before the open is
+reported, so either abandons the attempt while the relay is still carrying the
+session, and an answerer that refuses before it has answered declines rather
+than leaving the offerer to wait out its setup budget. A limit the
+implementation does not report is not treated as small.
+
+**Two limits of those checks are known and accepted**: on the standalone Burrow
+the reliability flags reach nothing, so only the label comparison is
+load-bearing; and the message limit is the *remote's* advertised one, so where
+the two ends disagree a peer that has already switched loses the session rather
+than staying relayed. (rationale)
+
+**A sender bounds its own queue rather than the implementation's.** Past
+`DIRECT_BUFFER_HIGH` of buffered channel data the ciphertext queues, draining at
+`DIRECT_BUFFER_LOW`; once anything is queued everything queues, so nothing
+overtakes a frame encrypted before it. **A frame is written once or not at all** —
+the implementation's send either consumes a message or throws, and a retry would
+put counted ciphertext on the wire twice. Overflowing
+`MAX_DIRECT_PENDING_FRAMES` / `MAX_DIRECT_PENDING_BYTES` — the one pair both
+directions use — disposes the session, as the receiver's hold does. **Each failure is reported in its own words** — a
+queue overrun and a refused write are opposite diagnoses in a burrow-loss log.
+
+**The switch preserves order per direction:**
+
+* A sender's `direct-switch` is its **last** message on the relay path; every
+  later message, keepalives included, goes on the channel.
+* A receiver processes relay frames until it decrypts `direct-switch`, holding
+  channel frames meanwhile — at most `MAX_DIRECT_PENDING_FRAMES` /
+  `MAX_DIRECT_PENDING_BYTES`, **overflow disposing the session** — then drains
+  them in arrival order through the same decrypt path.
+* **After inbound has switched, a relay `transport` frame disposes the
+  session**, refused before any decrypt, as does a `ct` that will not decode.
+* **After either direction has switched, the channel closing or erroring
+  disposes the session**: the Client reports burrow loss exactly as a
+  `burrow-gone`, the Burrow disposes the established entry. **Before any switch
+  a channel failure only abandons the attempt** — including a channel not open
+  by `DIRECT_SETUP_TIMEOUT_MS` — and the session stays relayed.
+* **A `direct-switch` arriving at an end that has abandoned its channel ends the
+  session** too: nothing that peer sends can arrive, and the alternative is a
+  session whose every request hangs unanswered.
+* **A peer that does not switch back within `DIRECT_HANDOFF_TIMEOUT_MS` ends the
+  session.** From its own switch this end sends only on the channel, so the wait
+  is its own deadline rather than however long the hold takes to fill; an end
+  whose peer had already switched waits on nothing.
+* **A connection reporting `failed` or `closed` ends the attempt at once, and
+  `disconnected` is waited out** for `DIRECT_DISCONNECTED_GRACE_MS` — ICE reports
+  it on gaps that recover, and after the switch ending one costs a fresh
+  handshake and a WebAuthn prompt.
+
+**The Relay stays the lifecycle authority.** `client-gone`, `burrow-gone`, and
+either relay socket closing dispose the session, channel included, exactly as
+they do relayed; the idle deadline, keepalives, and every Burrow bound are
+path-agnostic — a keepalive decrypted off the channel refreshes the deadline
+like any other ([remote-security-model.md](./remote-security-model.md) → Burrow
+bounds).
+
+**One peer connection per session**, created at the offer, closed on every
+disposal path, never existing before promotion. **Both ends build it through an
+injected factory** — `PocketClientDeps.createDirectPeer`,
+`BurrowOptions.createDirectPeer`, threaded through `BurrowServiceOptions` —
+`null` where a runtime has none, so neither end reaches a WebRTC global.
+**Pocket shows which path carries the session**, and where it stayed relayed
+which of the three `DirectRelayCause`s it was — **a closed set, never an
+attempt's failure text** ([pocket-app.md](./pocket-app.md)).
+
+Source of truth: `remote-lib-common/src/security/direct-path.ts` (the signals,
+their guard, the constants, the `DirectFrameQueue` both queues are, and the
+`DirectCutover` both ends run),
+`lib/src/remote/direct/direct-peer.ts` (`DirectPeerLike` and the negotiation),
+`DirectEndpoint` in `lib/src/remote/direct/direct-endpoint.ts` (the whole
+direct-path policy, one per authorized session; `onRelayFrame` is both ends' only
+way in from the relay and `send` their only way out; constructed at promotion by
+`PocketClient.#directEndpoint` in `lib/src/remote/client/pocket-client.ts` and
+`BurrowRuntime.#promoteConnection` in
+`lib/src/remote/burrow/burrow-runtime.ts`); pinned by
+`remote-lib-common/test/direct-path.test.mjs`,
+`lib/src/remote/direct/direct-endpoint.test.ts`,
+`lib/src/remote/direct/direct-peer.test.ts`, and the end-to-end cases in
+`lib/src/remote/client/pocket-client.test.ts` and
+`lib/src/remote/burrow/burrow-bounds.test.ts`.
+
 ### Envelope
 
 Requests are correlated by `requestId`, events by `subId` (`RemoteRequest`, `RemoteResponse`, `RemoteEventMsg`).
@@ -76,6 +204,12 @@ Reserved: a `capabilities` field on the client hello (what the client can render
 ## Directory (the phone's picker)
 
 `directory.watch` subscribes to a live, lightweight listing of every pane — enough to render the picker and know which pane wants attention, without attaching. `DirectoryEntry` / `DirectorySnapshot` carry the terminal-only payload: identity, derived title, focus, semantic state, PTY liveness, and the `ringing` / `hasTODO` badges. Nothing else — thumbnails are staged.
+
+Reserved: **`paneRef` is set to the same value as `surfaceId`** and no Client
+reads it — it becomes the Pane handle when `window.watch` lands ([Future](#future),
+The Window), so a Burrow keeps setting it. **`focused` and `exitCode` likewise
+have no Client reader today**, produced for picker affordances the phone does
+not render yet.
 
 **Snapshot-only, never deltas**: on any change the Burrow coalesces (150ms window, `DIRECTORY_DEBOUNCE_MS`) and resends the whole listing. (rationale)
 
@@ -226,7 +360,7 @@ The wire half, as new event names:
 { event: 'terminal.semantic'; data: TerminalSemanticEvent }
 ```
 
-`terminal.resize` lets an attached viewer show its own tether state instead of rendering garbled wrap until re-attach; `terminal.semantic` frees the attached pane's header from the coalesced `directory.snapshot` cadence.
+`terminal.resize` lets an attached viewer show its own tether state instead of rendering garbled wrap until re-attach; `terminal.semantic` frees the attached pane's header from the coalesced `directory.snapshot` cadence. Attention rides the same stage — a `terminal.attend` on touch, without which a Client cannot put a ring out (`alertAttend` is inert today).
 
 ### 6. Graded grants and layout mutations
 
@@ -277,9 +411,14 @@ These are the methods the dor CLI speaks today; the remote API reuses their requ
 
 **Window lease.** A VR session may request `window.lease { windowRef }`, declaring itself that Window's primary display. Sizing needs no lease — last-attach-wins already hands VR the panes it displays — so the lease is presentational: that Window tethers wholesale instead of pane by pane, and panes created in it while the lease is held open tethered to the leaseholder. One lease per Window; the Burrow user can always reclaim it locally. Phones never need it.
 
-### 8. WebRTC rendezvous
+### 8. Direct path (WebRTC)
 
-Latency. WebRTC replaces only the relay *transport* of the same Noise transport messages ([Transport](#transport)), and only after authorization: the Relay signals but is never trusted with authorization, and the presence protocol is inherited unless separately reviewed.
+**Scope: direct-path** — latency. The shipped half is [Transport → Direct path](#direct-path), which Pocket and the standalone Burrow speak today. What remains, in staged order:
+
+1. **VS Code Burrow** — platform-targeted VSIX builds carrying the addon per target (`docs/specs/deploy.md`).
+2. **Dogfood** across a tailnet, keystroke round-trip measured relayed and direct into the rationale.
+
+Relay-supplied ICE servers are unstaged (SaaS), as is a session surviving relay loss.
 
 ### 9. Audio
 
@@ -292,4 +431,4 @@ Browser surfaces can produce audio; VR will want it (spatial, per-panel).
 
 ### Open questions
 
-* **Browser media**: screencast frames over the WebSocket first; when WebRTC arrives, a video track would be smoother for VR. Possibly phone=frames, VR=track, negotiated in the hello.
+* **Browser media**: screencast frames over the WebSocket first; once the direct path ships, a video track would be smoother for VR. Possibly phone=frames, VR=track, negotiated in the hello.

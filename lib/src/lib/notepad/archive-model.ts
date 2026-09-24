@@ -145,16 +145,6 @@ export function readCwdState(value: unknown): CwdState | null {
   return cwd;
 }
 
-/** The mirror's PTY id: a non-empty string, or nothing. Mirror-only, so it never
- *  goes through a batch reader — a batch carrying it would be rejected on the
- *  next load — and the answer is `undefined` rather than `null` because the
- *  field is spread in, never assigned (`VolatileSurfaceNotes` in
- *  `lib/src/lib/notepad/types.ts`). A Surface without one is simply not asked
- *  where its process is. */
-export function readMirrorTerminalId(value: unknown): string | undefined {
-  return typeof value === 'string' && value ? value : undefined;
-}
-
 function readBatch(value: unknown): ArchiveBatch | null {
   if (!isRecord(value, BATCH_KEYS)) return null;
   if (typeof value.id !== 'string' || !value.id) return null;
@@ -246,9 +236,9 @@ export function applyArchiveMutation(archive: NotepadArchiveV1, mutation: Notepa
   // replacement is appended.
   const present = new Set(batches.map((b) => b.id));
   // Every note id already stored. A note id is a UUID, so "already archived" is
-  // exact, which is what keeps the VS Code mirror path — the one appender that
-  // still mints a fresh batch id per teardown — from duplicating notes an
-  // earlier write stored.
+  // exact, which is what keeps the VS Code mirror path — whose teardown mints a
+  // fresh batch id for any mirrored Surface carrying no pending one — from
+  // duplicating notes an earlier write stored.
   const stored = new Set<string>();
   for (const batch of batches) for (const note of batch.notes) stored.add(note.id);
   for (const batch of mutation.append ?? []) {

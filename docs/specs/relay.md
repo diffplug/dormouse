@@ -37,10 +37,13 @@ primitive lives in `remote-lib-common`, the terminal UI in `lib`/`standalone`.
   prune** — `ChallengeIssuer.issue` drops expired entries on every call, as
   do the presence-nonce and setup-token stores (rationale).
 * **A cap that one caller can spend on another's behalf is not a cap.** Every
-  bounded transient store here is keyed by whoever grew it: setup tokens per
+  *keyed* transient store here is keyed by whoever grew it: setup tokens per
   minting Burrow (`MAX_TOKENS_PER_BURROW`), presence nonces per session
   (`MAX_PENDING_REAUTH_NONCES_PER_SESSION`, `MAX_REAUTH_NONCE_SESSIONS` LRU
-  buckets bounding the total) (rationale).
+  buckets bounding the total). **The two challenge issuers are the accepted
+  exception** — one flat `MAX_PENDING_CHALLENGES` map apiece, whose oldest entry
+  a caller past that route's gate can evict at the cost of one ceremony's retry,
+  and sign-in has no gate (WebAuthn below; rationale).
 
 ## Configuration
 
@@ -56,9 +59,16 @@ Production configuration (`pnpm --filter relay start`, containers, and installer
 | `DORMOUSE_BIND_HOST`      | Interface to listen on; unset binds every interface (below). |
 | `DORMOUSE_VAPID_PUBLIC_KEY` / `DORMOUSE_VAPID_PRIVATE_KEY` | Web Push signing keypair; set both or neither. At startup the Relay decodes both, derives the P-256 public point from the private key, and exits on a missing, malformed, or mismatched pair. Unset, it mints a pair on first boot into `vapid.json`. |
 | `DORMOUSE_VAPID_SUBJECT`  | `mailto:`/`https:` contact for push-service operators (RFC 8292), defaulted from `DORMOUSE_ORIGIN` and validated at startup — Web Push below. |
-| `DORMOUSE_RUNTIME_FILE`   | Absolute path the Relay records `{pid, releaseId, port, origin, startedAt}` into once it has **bound**, mode `0600`. Unset — dev, containers, every test — writes nothing. A relative value is a `ConfigError`, and the path lives outside `DORMOUSE_STATE_DIR` (rationale). |
+| `DORMOUSE_RUNTIME_FILE`   | Absolute path the Relay records `{pid, releaseId, port, origin, startedAt}` into once it has **bound**, mode `0600`. Unset — dev, containers, every test — writes nothing. A relative value is a `ConfigError`; the installers keep it in `run/`, outside `DORMOUSE_STATE_DIR` (`SELF_HOST.md`), which nothing in the Relay enforces (rationale). |
 | `DORMOUSE_RELEASE_ID`     | The release directory's name, supplied by the installer's `run-relay` wrapper, recorded in the runtime file. `null` when the Relay was not started by an installer. |
-| `DORMOUSE_ENROLL_TOKEN_FILE` | Absolute installer offer path — `{origin, token, mintedAt}`, the token 64 hex characters, shape in `remote-lib-common/src/remote/enroll-offer.ts` — which `POST /api/burrow/enroll` accepts in place of the setup password; unset, one-click enrollment is off. A relative value is a `ConfigError` (rationale). **The offer lasts until the first Burrow enrollment or 24 hours, whichever comes first**, `burrows.json` being the durable marker (rationale); the Burrow-store mutex serializes password/token requests. **Redemption atomically renames the file before minting**, so exactly one concurrent redemption wins, and a mismatched claim is restored by no-clobber hard link so a newer installer generation wins. The installer rotates offers only before `burrows.json` exists. |
+| `DORMOUSE_ENROLL_TOKEN_FILE` | Absolute path to the installer's enrollment offer — `{origin, token, mintedAt}`, shape in `remote-lib-common/src/remote/enroll-offer.ts` — which `POST /api/burrow/enroll` accepts in place of the setup password; unset, one-click enrollment is off. A relative value is a `ConfigError` (rationale). |
+
+**The enrollment offer lasts until the first Burrow enrollment or 24 hours,
+whichever comes first**, `burrows.json` being the durable marker (rationale).
+**Redemption renames the file before minting**, so exactly one concurrent
+redemption wins and a claim holding a newer offer is put back untouched.
+Source of truth: `relay/src/enroll-token.ts`; test:
+`relay/test/enroll-token.test.mjs`.
 
 **Must generate the setup password inside the Relay on first boot, never accept
 it as configuration, and persist it as `setup-password.json`.** Use 32
@@ -85,11 +95,12 @@ not admission*: the HTTP API table owns the public routes and credential gates.
 
 **`DORMOUSE_ORIGIN` is normalized to a bare origin exactly once**, in
 `readConfig` by the shared `normalizeOrigin` in `remote-lib-common`; a value that
-is not a URL with a host is a `ConfigError` naming the variable (rationale).
+is not an `http`/`https` URL with a host is a `ConfigError` naming the variable
+(rationale).
 WebAuthn clientData checks, passkey assertion verification, the Burrow enrollment
 policy and the pairing URL a Burrow composes all compare against that string
-rather than re-parsing it; `createApp` parses it only to take `rpId` from the
-hostname.
+rather than re-parsing it; `createApp` re-checks that same shape and takes
+`rpId` from the hostname.
 
 **`startRelay` in `relay/src/start.ts` validates the VAPID pair and subject before building the
 app** — the only disk half of an otherwise pure env→config mapping.
@@ -129,13 +140,12 @@ override rule; `standalone/scripts/build-sidecar-proxy.mjs` and
 `bakedConnectSrc()` in `lib/src/host/remote/connect-src.ts` is the single reader
 — **reading it as a `declare const`, never an import**, so the value is a literal
 nothing at runtime can move.
-Two build-time guards, both because their failure mode is silent (rationale):
-`assertConnectSrcBaked` greps the bundle for the define, and
-`resolveRemoteConnectSrc` rejects an override the matcher could never read — a
-trailing slash, a path, a bare host, a scheme outside `http`/`https`/`ws`/`wss`,
-a port outside 1–65535. The grammar is one regex duplicated into the `.mjs`,
-which cannot import TypeScript; `connect-src.test.ts` pins both patterns, and
-both copies of the default, as identical.
+**Both failure modes are silent, so the bundle is grepped for the define and
+the override grammar is validated, at build time** (rationale):
+`assertConnectSrcBaked` and `resolveRemoteConnectSrc`. The grammar is one regex
+duplicated into the `.mjs`, which cannot import TypeScript;
+`lib/src/host/remote/connect-src.test.ts` pins both patterns, and both copies of
+the default, as identical.
 
 **Enforcement is `originAllowedByConnectSrc` in
 `lib/src/host/remote/service.ts`:**
@@ -149,8 +159,7 @@ both copies of the default, as identical.
 Matching is narrower than a browser's: `https`/`wss` are one scheme class and
 `http`/`ws` the other, hostname matches exactly or by a leading `*.` wildcard
 covering any depth of sub-domain but never the bare domain, ports must match
-unless the source says `*` (numeric ports canonicalized as `URL` does, so a
-leading zero is not a silent miss), and anything unparseable fails closed.
+unless the source says `*`, and anything unparseable fails closed.
 **Enrollment and Burrow-authenticated push fetches must use `redirect: 'error'`** —
 a Node process does not re-check a redirect target, so following one could carry
 the setup password, Burrow bearer token, or notification metadata outside the baked
@@ -231,8 +240,8 @@ stale row rather than leave one per rotation:
   them (rationale). Rows already carrying the *presented* endpoint are the same
   scope and stay, which is what makes a second Burrow's registration additive.
 * **The response reports the state that mutation left behind** — every Burrow the
-  presented endpoint is still registered with — so a committed POST whose
-  response was lost is repaired by its own idempotent retry.
+  presented endpoint is still registered with under the current VAPID key — so a
+  committed POST whose response was lost is repaired by its own idempotent retry.
 * **Removing a Burrow row is observed lazily**, nothing cascading on write:
   `listForBurrow` answers nothing for a `burrowId` that is gone, so its rows are
   unreachable the moment the edit lands and leave disk on the next 404/410 prune
@@ -294,7 +303,7 @@ The Relay owns the fixed `/api/hello` health response, pinned by
 | -------------------------------- | -------------- | ------------------------------------------------- |
 | `GET /api/hello`                 | —              | Fixed `{ message: "Hello, world!" }` health response. **Carries no release identity** — it is unauthenticated and reachable through the HTTPS proxy; the runtime file carries it ("Installing it") |
 | `POST /api/setup/begin`          | setup token    | Issues a registration challenge, gated exactly as `finish` is so neither is softer. Answers the account's credential ids for a retry's `excludeCredentials`, so no passkey that already signs in is duplicated — an orphan the Relay never registered is absent, and is still replaced |
-| `POST /api/setup/finish`         | setup token    | Registers the passkey in `account.json`; the token is spent at the gate and put back if registration then fails. `label` is **reduced, not refused** — the same `boundedPushText` a pairing label goes through, to `MAX_PASSKEY_LABEL_LENGTH` code points with control and bidi characters stripped |
+| `POST /api/setup/finish`         | setup token    | Registers the passkey in `account.json`; the token is spent at the gate and put back if registration then fails. `label` is **reduced, not refused** — the same `boundedPushText` a pairing label goes through, to `MAX_PASSKEY_LABEL_LENGTH` code points, control characters becoming spaces that then collapse and the bidi and zero-width set dropped outright |
 | `POST /api/setup/retire`         | session token  | Spends a live setup token without registering anything (rationale). 204, or 401 `SETUP_TOKEN_INVALID_ERROR` |
 | `POST /api/signin/begin`         | —              | Issues a sign-in challenge                          |
 | `POST /api/signin/finish`        | —              | Verifies the assertion and issues a 12-hour in-memory session token |
@@ -359,8 +368,8 @@ because only a Burrow sends one; **a rejected setup token answers the distinct
 ### Setup tokens and the pairing QR
 
 An enrolled Burrow mints a setup token over its own authenticated channel; the
-response carries the token alone — the Burrow knows its enrolled origin and
-composes the QR itself. **Scanning is the only way a passkey is registered** —
+response carries `{ token, expiresAt }` and no origin or URL — the Burrow knows
+its enrolled origin and composes the QR itself. **Scanning is the only way a passkey is registered** —
 `/api/setup/*` takes no other credential.
 
 **The QR grammar is this spec's.** Exactly
@@ -484,10 +493,13 @@ Relay's Web Push dependency. Burrow and webview halves:
   **Must count sender throws and rejections as `failed`, preserving sibling
   deliveries and subscriptions**, pinned by `relay/test/push.test.mjs`. Both are
   separate from the 300-second provider TTL — an alarm an hour late is noise.
-- **Push is disabled, not half-working**, when no VAPID key **or no VAPID
-  subject** is configured: the config route reports `null` and subscribe/send
-  answer 503; a phone registered against a key the Relay has no contact to sign
-  with would be subscribed to a push it can never receive.
+- **Push is disabled, not half-working**, and **only a missing VAPID subject
+  turns it off**: `startRelay` always resolves a keypair, minting one into
+  `vapid.json` when env supplies none, so the contact is the whole switch. With
+  none the config route reports `null` and subscribe/send answer 503 — a phone
+  registered against a key the Relay has no contact to sign with would be
+  subscribed to a push it can never receive. Only an injected `createApp` config
+  reaches the key-less path.
 - **A VAPID subject naming a loopback host is a startup error, not a default**
   (rationale). The default is `DORMOUSE_ORIGIN` when that origin is https and not
   loopback; otherwise there is none, and a loopback dev server turns push off
@@ -643,10 +655,15 @@ framed as application messages on the Noise session (below).
   reorder (which Noise's counter turns into a decrypt failure), or a framing
   violation destroys it and every later call throws — there is no
   resynchronization point in a stream cipher.
+- **The control messages are the two ceremonies' outcomes and the direct path's
+  four signals** ([remote-api.md](./remote-api.md) → Direct path), which the
+  Relay routes without reading, like every other ciphertext.
 - **Prologues are `lengthPrefixedConcat`** of `dormouse/e2e/v1`, the ceremony
-  kind, the `burrowId`, and — for a connection — the connection id; for a pairing,
-  every field of its invitation in QR order ("Setup tokens and the pairing QR"
-  above), so a transcript is useless against another Burrow, id, or ceremony.
+  kind, the `burrowId`, and — for a connection — the connection id; for a
+  pairing, the invitation's own fields in QR order after that — `v`, `inviteId`,
+  `expiry`, `setupToken`, `ephPub` ("Setup tokens and the pairing QR" above) —
+  the `burrowId` ahead of `v` here, behind it in the QR. A transcript is
+  therefore useless against another Burrow, id, or ceremony.
 
 Source of truth: `remote-lib-common/src/security/noise-transport.ts`, pinned by
 `remote-lib-common/test/noise-transport.test.mjs` and driven through the real
@@ -801,8 +818,7 @@ the build cannot do.
 `no-burrow`**, a superset covering both a Burrow service that has not enrolled *and*
 a build with no Burrow service at all ([alert.md](./alert.md) -> Push
 notifications). Only the first has a section beneath it, so only the first says
-"below". `describePushTargets` takes the seam as an argument; the `PushNoBurrow` /
-`PushNotEnrolled` story pair holds the two apart.
+"below"; the `PushNoBurrow` / `PushNotEnrolled` story pair holds the two apart.
 
 Un-enrolled it is a three-field form (Relay, setup password, Burrow name —
 prefilled with the `suggestedLabel` `status` carries) calling the service's
@@ -817,7 +833,7 @@ exists to honor:
   three-field form folded behind "Enroll with a different Relay…" — **folded
   with `hidden`, never unmounted**, so typed input survives the disclosure and an
   offer appearing underneath it. **Reading the file is bounded to the un-enrolled
-  state**; enrolled answers `offer: null` without touching disk (rationale).
+  state** (rationale).
 - **The offer's token never enters a webview.** `status` carries only the origin;
   `enrollOffer` re-reads the file in the Burrow service, so an old card cannot
   reuse a spent offer (`docs/specs/security-remote.md` -> "Credentials at rest").
@@ -825,54 +841,46 @@ exists to honor:
   file that no longer names it — an installer rerun rewrites the offer with an
   origin nobody reviewed. `enrollOffer` takes `{ origin, label }`: the origin
   reviewed, never the one enrolled against, which stays the file's.
-- **The card outlives its offer**, so a refusal landing after the enroll unlinked
-  the file is not silence over a spent token.
+- **The card outlives its offer**, so a late refusal is not silence over a spent
+  token.
 - **Only one enrollment may run.** One synchronous gate covers both forms and
   pre-render double clicks.
 - **The password is passed through, never held**, cleared on success; `enroll`
   answers `{ burrowId, relayUrl }`, so `burrowToken` never re-enters the webview.
 - **Refusals are shown, not swallowed**, the offer card included: the allowlist
-  error (above) is what the form renders, so the failure reads as "this build
-  will not talk to that Relay" rather than as a wrong password.
+  error (above) is what the form renders, never a wrong-password message.
 - **Enrolled, "Set up a phone" opens an inline QR panel**, so a phone is set up
   by pointing a camera at the laptop rather than typing an origin and a 64-hex
   password. It mints on open and never before, re-mints shortly before
   `expiresAt` while the panel stays open, and always offers New code and Done,
   the only exit from a dead code (`RemoteControlSection.test.tsx`). Rules it
   exists to honor:
-  - **The panel owns its busy and error**, not the section's shared pair, since
-    its mint also fires on a timer.
-  - **Must clamp refresh delay to `[30 s, DEFAULT_PAIRING_TTL_MS - 20 s]`**: the
-    floor stops a fast-clock mint loop, the ceiling replaces a slow-clock code
-    before its real Relay expiry.
+  - **The panel owns its busy and error**, not the section's shared pair.
+  - **Must clamp refresh delay to `[30 s, DEFAULT_PAIRING_TTL_MS - 20 s]`.**
   - **The code being replaced stays on screen** until its replacement lands;
     only a first mint blanks.
   - **An invitation state change flips only the panel showing that `inviteId`**,
-    so a second window offering a different code stays live, and **the panel
-    stays subscribed past the QR**: `reserved` spends the code, `consumed` says
-    the request it produced has been answered.
+    and **the panel stays subscribed past the QR**: `reserved` spends the code,
+    `consumed` says the request it produced has been answered.
   - **The panel reports which decision ended the code**, in fixed copy per
     outcome (rationale), riding that `consumed` event; a retirement nobody
-    decided carries none. **One region reports it**: the panel where it
-    supersedes that sentence, the section otherwise. **Only a user action clears
-    it**, never the timed re-mint.
+    decided carries none. **One region reports it** — the panel where it
+    supersedes that sentence, the section otherwise — and **only a user action
+    clears it**.
   - **The view is keyed by enrollment identity and the QR sits behind its own
-    error boundary**: a Relay swap drops the stale code, and a failed chunk
-    fetch or refused encode costs a retry button, not the app-wide ErrorBoundary.
+    error boundary**: a Relay swap drops the stale code, and a refused encode
+    costs a retry rather than the app-wide ErrorBoundary.
 - **Disconnect asks first**: clearing the enrollment drops every paired phone
   until each pairs again.
-- **Status is re-read, not patched, and the connection is polled.** The
-  service's `status` event carries only `{ enrolled }`, so every event triggers a
-  full `status` command, and the dialog re-reads on open since another window may
-  have enrolled meanwhile. The *connection* moves with no event at all, so the
-  store polls every 2 s **while something is subscribed**, never as a standing
-  timer in every window, comparing field-wise before publishing (rationale; same
-  rule as `setPushDevices` in `lib/src/lib/push-devices.ts`).
+- **Status is re-read, not patched**: the service's `status` event carries only
+  `{ enrolled }`, so every event triggers a full `status` command, and the dialog
+  re-reads on open since another window may have enrolled meanwhile. **The
+  connection is polled every 2 s while something is subscribed**, never as a
+  standing timer in every window, comparing field-wise before publishing
+  (rationale; same rule as `setPushDevices` in `lib/src/lib/push-devices.ts`).
 - **Reads are serialized, and coalescing stops at anything that changes the
-  answer.** Ticks arriving during a slow read queue behind it, so a 15-second
-  Burrow-service timeout becomes the visible error rather than being superseded by
-  newer polls; `enroll`, `reconnect`, `clearEnrollment` and losing the last
-  subscriber each *drop* the read in flight (rationale).
+  answer** — `enroll`, `reconnect`, `clearEnrollment` and losing the last
+  subscriber each drop the read in flight (rationale).
 
 Source of truth: `useSetupQr` and `ScannableCode` in
 `lib/src/components/RemoteControlSection.tsx` over `lib/src/components/QrCode.tsx`
@@ -1009,8 +1017,8 @@ synced passkey signs it in; clearing site data destroys them → re-pair, per th
 security model; a dropped WebSocket sends you back to the Burrows view — reconnect
 by tapping Connect again.
 
-`scripts/pairing-walkthrough/` drives all three in real browsers, ending at a
-command typed from Pocket. Not in CI.
+`scripts/pairing-walkthrough/run.mjs` drives all three in real browsers, ending
+at a command typed from Pocket; the run is not in CI.
 
 - **Must learn the walkthrough's Relay origin from its owned dev runner, including
   with `--skip-build`, before staging the Burrow's allowlist and opening Pocket.**
@@ -1067,9 +1075,10 @@ single-owner selfhost Relay and a multi-tenant SaaS on `*.dormouse.sh`,
 including the Bring-Your-Own-Tailnet (BYOT) posture that puts the relay inside a
 customer's own tailnet without a custom client build. The wire API and security
 model are unchanged from selfhost ([remote-api.md](./remote-api.md), Transport);
-everything here is deployment and relay plumbing beneath them. The SaaS account
-model (email + passkey self-serve signup) is this scope's own — **Accounts**
-below. Front-door work staged elsewhere and not restated: CloudFlare routing +
+everything here is deployment and relay plumbing beneath them. Hosted account
+identity lives in [hosted.md](./hosted.md); this scope adds Relay tenant ownership
+and passkey enrollment — **Accounts** below. Front-door work staged elsewhere
+and not restated: CloudFlare routing +
 Pocket static serving in [pocket-app.md](./pocket-app.md) `## Future`.
 
 Framing invariant: Tailscale is network-layer defense-in-depth *under* the
@@ -1087,8 +1096,8 @@ Selfhost (everything above the fold) stays as-is; SaaS is a parallel deployment
 that lifts each single-tenant simplification, every one chosen to be liftable:
 
 * **Accounts.** One `accountId: "owner"` behind a shared setup password becomes
-  many accounts, each created by email +
-  passkey. The two hand-edited JSON files (`account.json`, `burrows.json`) become
+  many Hosted account IDs with enrolled passkeys. The two hand-edited JSON files
+  (`account.json`, `burrows.json`) become
   a real per-tenant store with per-tenant revocation, and Burrow enrollment moves
   from the global setup password to the authenticated account.
 * **Relay tenant-scoping (an invariant, not a check).** The relay binds one Burrow

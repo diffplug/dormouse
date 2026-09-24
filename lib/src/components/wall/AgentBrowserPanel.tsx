@@ -1,4 +1,4 @@
-import { automationProvider, browserPlatform } from './browser-automation';
+import { automationProvider } from './browser-automation';
 /** React view for the surface-scoped lifecycle in
  * `agent-browser-surface-controller.ts`; see docs/specs/dor-browser.md. */
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -24,6 +24,7 @@ import {
   PaneWriteContext,
   SelectedIdContext,
   WallActionsContext,
+  WorkspaceActiveContext,
 } from './wall-context';
 
 type AgentBrowserPanelParams = AgentBrowserSurfaceParams;
@@ -68,7 +69,12 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   const snapshot = useSyncExternalStore(controller.subscribe, controller.snapshot);
   const { tabs, status, connectionLost, hasFrame, poppedOut, relaunching, streamPort } = snapshot;
 
-  const interactive = mode === 'passthrough' && selectedId === id;
+  // Gated on the same Workspace-aware visibility the streaming body reads, so a
+  // Workspace left in passthrough on a browser pane stops forwarding (and
+  // preventDefault-ing) window keystrokes the moment it is hidden. `parked` is
+  // deliberately not part of it: a parked leaf is never the selected pane.
+  const workspaceActive = useContext(WorkspaceActiveContext);
+  const interactive = workspaceActive && mode === 'passthrough' && selectedId === id;
   const interactiveRef = useRef(interactive);
   interactiveRef.current = interactive;
   // A direct mouse click on the canvas should reach the page even when this pane
@@ -250,7 +256,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
     };
     canvas.addEventListener('wheel', onWheel, { passive: false });
     return () => canvas.removeEventListener('wheel', onWheel);
-  }, [controller, toDevice]);
+  }, [controller, id, toDevice]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (!interactiveRef.current) return;
@@ -284,7 +290,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
       // A screen modal (or any dialog) renders outside the pane element, so the
       // contains() check above misses it; without this, typing into the modal's
       // Custom W/H/DPI fields would be swallowed and forwarded to the browser.
-      if (e.target instanceof Element && e.target.closest('[role="dialog"]')) return;
+      if (e.target instanceof Element && e.target.closest('[role="dialog"], [data-terminal-context]')) return;
       // Likewise never hijack keystrokes destined for an editable field that
       // lives outside the pane — notably the header's URL editor.
       if (isEditableTarget(e.target)) return;
@@ -298,7 +304,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
       window.removeEventListener('keydown', forward, true);
       window.removeEventListener('keyup', forward, true);
     };
-  }, [controller, interactive]);
+  }, [controller, id, interactive]);
 
   // Focus the swap-confirm overlay when it appears so it captures the typed
   // confirm/cancel keys (the pane's key-forwarder skips in-pane targets).
@@ -388,23 +394,10 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
           // Popped out to a headed OS window — the pane is a clean stub. While
           // the window is still being opened (a relaunch in flight, or an eager
           // swap whose daemon has not yet named its session) there is nothing to
-          // bring to front or pop back in, so the affordances wait with it.
+          // pop back in, so the affordance waits with it.
           <div className="flex flex-col items-center gap-3 px-4 text-center text-sm text-muted">
             <div>{!session || relaunching ? 'Opening the browser window…' : 'This browser is running in a separate window.'}</div>
             {session && !relaunching && <div className="flex gap-2 text-xs">
-              {browserPlatform(seededMode, params?.cwd).agentBrowserBringToFront && (
-                <button
-                  type="button"
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    controller.bringToFront();
-                  }}
-                  className="rounded border border-border px-2.5 py-1 text-muted transition-colors hover:border-foreground hover:text-foreground"
-                >
-                  Bring to front
-                </button>
-              )}
               <button
                 type="button"
                 onMouseDown={(e) => e.stopPropagation()}

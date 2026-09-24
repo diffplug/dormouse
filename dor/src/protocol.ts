@@ -17,6 +17,7 @@ export const SURFACE_CONTROL_METHODS = {
   list: 'surface.list',
   split: 'surface.split',
   ensure: 'surface.ensure',
+  tool: 'surface.tool',
   send: 'surface.send',
   read: 'surface.read',
   await: 'surface.await',
@@ -30,6 +31,93 @@ export const SURFACE_CONTROL_METHODS = {
 } as const;
 
 export type SurfaceControlMethod = (typeof SURFACE_CONTROL_METHODS)[keyof typeof SURFACE_CONTROL_METHODS];
+
+/**
+ * The wire identifier for each Workspace control operation, enumerated here
+ * beside the Surface methods for the same reason. These are container verbs, so
+ * the window-level router answers them itself rather than handing them to a Wall
+ * (`docs/specs/dor-cli.md` → "dor workspace").
+ */
+export const WORKSPACE_CONTROL_METHODS = {
+  list: 'workspace.list',
+  new: 'workspace.new',
+  rename: 'workspace.rename',
+  close: 'workspace.close',
+  switch: 'workspace.switch',
+  move: 'workspace.move',
+} as const;
+
+export type WorkspaceControlMethod = (typeof WORKSPACE_CONTROL_METHODS)[keyof typeof WORKSPACE_CONTROL_METHODS];
+
+/**
+ * The wire identifier for each app control operation — verbs on the running
+ * app itself (`docs/specs/dor-cli.md` → "dor app").
+ */
+export const APP_CONTROL_METHODS = {
+  restart: 'app.restart',
+} as const;
+
+export type AppControlMethod = (typeof APP_CONTROL_METHODS)[keyof typeof APP_CONTROL_METHODS];
+
+/** Every method the control channel carries. */
+export type DorControlMethod = SurfaceControlMethod | WorkspaceControlMethod | AppControlMethod;
+
+const WORKSPACE_METHOD_SET: ReadonlySet<string> = new Set(Object.values(WORKSPACE_CONTROL_METHODS));
+const APP_METHOD_SET: ReadonlySet<string> = new Set(Object.values(APP_CONTROL_METHODS));
+
+/**
+ * A host's refusal of a method it does not know. **Frozen text:** a newer `dor`
+ * recognizes an older host by it (`docs/specs/dor-cli.md` → "dor app").
+ */
+export function unsupportedControlMethodMessage(method: string): string {
+  return `unsupported Dormouse control method '${method}'`;
+}
+
+/** Whether this method acts on the running app rather than on any Workspace. */
+export function isAppControlMethod(method: string): method is AppControlMethod {
+  return APP_METHOD_SET.has(method);
+}
+
+/** Whether this method is a container verb — answered by the Window rather than
+ *  by one Workspace's Wall. */
+export function isWorkspaceControlMethod(method: string): method is WorkspaceControlMethod {
+  return WORKSPACE_METHOD_SET.has(method);
+}
+
+/**
+ * Whether this request reaches beyond a single Workspace: a container verb, or
+ * the `scope: 'all'` listing. A host that cannot answer for more than one
+ * Workspace refuses exactly these (`docs/specs/vscode.md` → "Workspaces").
+ */
+export function spansWorkspaces(method: string, params?: Record<string, unknown>): boolean {
+  return isWorkspaceControlMethod(method)
+    || (method === SURFACE_CONTROL_METHODS.list && params?.scope === 'all');
+}
+
+/** The two readings of a `workspace:<n|name>` target (`docs/specs/dor-cli.md` →
+ *  "Handle Model"). Both spellings are accepted bare. */
+export interface ParsedWorkspaceRef {
+  /** The target as written, trimmed — what an error message quotes back. */
+  target: string;
+  /** The number the ref reads as, else null. What that number *means* is the
+   *  resolving host's business: a registry host matches it against the
+   *  Workspace's minted id, a host without one falls back to the strip
+   *  position. Named for the reading, not for either resolution. */
+  number: number | null;
+  /** The Workspace name it reads as otherwise; empty when it is numeric. */
+  name: string;
+}
+
+const NUMERIC_WORKSPACE_REF = /^[1-9]\d*$/;
+
+/** Split a `workspace:<n|name>` target into its readings. A ref that reads as a
+ *  number is a number, never a name. */
+export function parseWorkspaceRef(ref: string): ParsedWorkspaceRef {
+  const target = ref.trim();
+  const bare = (target.startsWith('workspace:') ? target.slice('workspace:'.length) : target).trim();
+  const numeric = NUMERIC_WORKSPACE_REF.test(bare);
+  return { target, number: numeric ? Number(bare) : null, name: numeric ? '' : bare };
+}
 
 /** A control request as it travels over a transport, correlated by `requestId`. */
 export interface DorControlRequestPayload {

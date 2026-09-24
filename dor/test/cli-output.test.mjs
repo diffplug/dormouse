@@ -7,6 +7,7 @@ import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runCli } from '../dist/cli.js';
 import { buildShellCommandForKind, shellCommandKind } from '../dist/commands/shell-quote.js';
+import { browserBinaryIsMissing as agentBrowserIsMissing, binaryCandidateNames, isExecutableFile } from '../dist/commands/browser-cli.js';
 import { msysToWindowsCwd } from '../dist/commands/shared.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -96,17 +97,55 @@ const fixtureSurfaces = [
   },
 ];
 
+// The Window's Workspaces, as the host projects them for `--workspaces` and for
+// the `--all` group headers.
+const fixtureWorkspaces = [
+  { ref: 'workspace:1', id: 'workspace-1', name: 'Workspace 1', active: true, ringing: false, todo: false, count: 0 },
+  { ref: 'workspace:2', id: 'workspace-2b1c', name: 'build', active: false, ringing: true, todo: true, count: 2 },
+];
+
 // Listening ports the host would attach to a terminal Surface for `--ports`.
 const fixturePortsByRef = {
   'surface:1': [{ family: 'IPv4', address: '0.0.0.0', port: 5173, pid: 4242, processName: 'node' }],
   'surface:4': [{ family: 'IPv6', address: '::1', port: 8080, pid: 5151, processName: 'python' }],
 };
 
+/** The Workspace a `workspace:<n|name>` target names in the fixture, the way the
+ *  host resolves one — positional ref, bare position, or exact name. */
+function fixtureWorkspace(target) {
+  const bare = String(target).replace(/^workspace:/, '');
+  return fixtureWorkspaces.find((row) => (
+    row.ref === target || row.ref === `workspace:${bare}` || row.name === bare
+  )) ?? fixtureWorkspaces[0];
+}
+
+/** The `surface.agentBrowser` request a `dor ab` run made, if it opened one at
+ *  all: every run now asks the host to name its session first, so the surface
+ *  call is never the first entry. */
+function surfaceRequest(client) {
+  return client.requests.find((entry) => entry.method === 'agentBrowserSurface')?.request;
+}
+
 function fixtureClient(surfacesFixture = fixtureSurfaces) {
   return {
     requests: [],
     async listSurfaces(request) {
       this.requests.push(request);
+      // Mirror the host's cross-Workspace listing: every Workspace's rows in
+      // one list, each tagged with the Workspace it came from, plus the
+      // directory the CLI renders headers from.
+      if (request.scope === 'all') {
+        return {
+          surfaces: [
+            { ...fixtureSurfaces[0], workspaceRef: 'workspace:1' },
+            { ...fixtureSurfaces[2], ref: 'surface:1', workspaceRef: 'workspace:2' },
+            { ...fixtureSurfaces[3], ref: 'surface:2', workspaceRef: 'workspace:2' },
+          ],
+          workspaces: fixtureWorkspaces,
+          windowRef: 'window:1',
+          workspaceRef: 'workspace:1',
+        };
+      }
       const paneTarget = request.pane;
       const matched = paneTarget
         ? surfacesFixture.filter((surface) => (
@@ -137,6 +176,27 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
         direction: request.direction === 'auto' ? 'right' : request.direction,
         minimized: request.minimized,
         ...(command ? { command } : {}),
+      };
+    },
+    async toolSurface(request) {
+      this.requests.push({ method: 'toolSurface', request });
+      // Mirror the host: a named tool renders from the (fixture) registry, a
+      // `--` tail is quoted argv. `storybook` is the keyed entry, so it is the
+      // one that can come back as an existing match.
+      const named = typeof request.name === 'string';
+      const command = named
+        ? `pnpm ${request.name}`
+        : request.file ? `viewer ${request.file}` : buildShellCommandForKind('posix', request.command);
+      const keyed = named && request.name === 'storybook' && !request.fresh;
+      return {
+        status: keyed ? 'existing' : 'created',
+        surfaceId: '44444444-4444-4444-8444-444444444444',
+        surfaceRef: 'surface:4',
+        command,
+        cwd: request.cwd,
+        minimized: request.minimized,
+        key: keyed ? ['storybook', '/work/site'] : null,
+        ...(named && request.name === 'noisy' ? { warnings: ['dormouse.yml: tools.noisy: ignoring unknown field \'colour\''] } : {}),
       };
     },
     async ensureSurface(request) {
@@ -218,6 +278,14 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
     // the CLI has one catch and prints whatever comes back.
     async resolveAgentBrowserSession(request) {
       this.requests.push({ method: 'resolveAgentBrowserSession', request });
+      // A managed key names no Surface: the answering Workspace namespaces it,
+      // so the same key in `build` is another browser entirely.
+      if (request.key !== undefined) {
+        const workspace = fixtureWorkspaces.find((row) => (
+          request.workspace === row.name || request.workspace === row.ref
+        ));
+        return { session: `dormouse.${workspace ? workspace.id : '1'}.${request.key}` };
+      }
       if (request.surface === 'surface:1') {
         throw new Error("surface 'surface:1' has no browser (kind: terminal)");
       }
@@ -226,6 +294,48 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
         surfaceRef: 'surface:3',
         session: 'dormouse.1.gui-a1b2c3',
       };
+    },
+    async listWorkspaces(request) {
+      this.requests.push({ method: 'listWorkspaces', request });
+      return { workspaces: fixtureWorkspaces, windowRef: 'window:1' };
+    },
+    async newWorkspace(request) {
+      this.requests.push({ method: 'newWorkspace', request });
+      return {
+        status: 'created',
+        workspaceId: 'workspace-9f3a',
+        workspaceRef: 'workspace:3',
+        name: request.name ?? 'Workspace 3',
+      };
+    },
+    async renameWorkspace(request) {
+      this.requests.push({ method: 'renameWorkspace', request });
+      // Mirror the host: the answer names the Workspace the target resolved to,
+      // so a test can tell a forwarded target from an ignored one.
+      const target = fixtureWorkspace(request.workspace);
+      return { status: 'renamed', workspaceId: target.id, workspaceRef: target.ref, name: request.name };
+    },
+    async closeWorkspace(request) {
+      this.requests.push({ method: 'closeWorkspace', request });
+      // Mirror the host: a Workspace holding work refuses without --force.
+      if (!request.force) {
+        throw new Error("workspace 'workspace:2' holds running or touched Surfaces; pass --force to close it");
+      }
+      return { status: 'closed', workspaceId: 'workspace-2b1c', workspaceRef: 'workspace:2', name: 'build' };
+    },
+    async switchWorkspace(request) {
+      this.requests.push({ method: 'switchWorkspace', request });
+      const target = fixtureWorkspace(request.workspace);
+      return { status: 'active', workspaceId: target.id, workspaceRef: target.ref, name: target.name };
+    },
+    async moveWorkspace(request) {
+      this.requests.push({ method: 'moveWorkspace', request });
+      const target = fixtureWorkspace(request.workspace);
+      return { status: 'moved', workspaceId: target.id, workspaceRef: target.ref, name: target.name };
+    },
+    async restartApp() {
+      this.requests.push({ method: 'restartApp' });
+      return { relaunch: true };
     },
     async resolveOpenTarget(request) {
       this.requests.push({ method: 'resolveOpenTarget', request });
@@ -260,6 +370,17 @@ function awaitClient(outcome) {
       };
     },
   };
+}
+
+// Windows resolves a path case-insensitively and `which` returns the extension
+// as PATHEXT spells it, not as the file on disk does — so a `.cmd` install is
+// legitimately reported as `...\\agent-browser.CMD`. Compare accordingly there.
+function assertSamePath(actual, expected, message) {
+  if (process.platform === 'win32') {
+    assert.equal(String(actual).toLowerCase(), expected.toLowerCase(), message);
+  } else {
+    assert.equal(actual, expected, message);
+  }
 }
 
 function fakeAgentBrowser({ exitCode = 0, stdout = '✓ ok\n', stderr = '' } = {}) {
@@ -983,10 +1104,32 @@ test('agent-browser resolves --key to a namespaced session and opens a surface',
     ['agent-browser', '--session', 'dormouse.1.storybook', 'open', 'http://localhost:6006'],
     ['agent-browser', '--session', 'dormouse.1.storybook', 'stream', 'status', '--json'],
   ]);
-  assert.deepEqual(client.requests, [{
-    method: 'agentBrowserSurface',
-    request: { key: 'storybook', session: 'dormouse.1.storybook', wsPort: 61141 },
-  }]);
+  assert.deepEqual(client.requests, [
+    // The host names the session, because only the Workspace that will hold the
+    // browser can namespace a key.
+    { method: 'resolveAgentBrowserSession', request: { key: 'storybook' } },
+    { method: 'agentBrowserSurface', request: { key: 'storybook', session: 'dormouse.1.storybook', wsPort: 61141 } },
+  ]);
+});
+
+test('agent-browser --key in another Workspace drives that Workspace own session', async () => {
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  await runCli(['ab', '--workspace', 'build', '--key', 'default', 'open', 'http://localhost:6006'], { client, execAgentBrowser: ab.exec });
+  // The same key in another Workspace is another browser: the session name is
+  // namespaced by the Workspace's stable id, so nothing here can reach the
+  // first Workspace's `dormouse.1.default`.
+  assert.deepEqual(ab.calls, [
+    ['agent-browser', '--session', 'dormouse.workspace-2b1c.default', 'open', 'http://localhost:6006'],
+    ['agent-browser', '--session', 'dormouse.workspace-2b1c.default', 'stream', 'status', '--json'],
+  ]);
+  assert.deepEqual(client.requests, [
+    { method: 'resolveAgentBrowserSession', request: { key: 'default', workspace: 'build' } },
+    {
+      method: 'agentBrowserSurface',
+      request: { key: 'default', session: 'dormouse.workspace-2b1c.default', wsPort: 61141, workspace: 'build' },
+    },
+  ]);
 });
 
 test('agent-browser defaults to --key default', async () => {
@@ -994,7 +1137,7 @@ test('agent-browser defaults to --key default', async () => {
   const client = fixtureClient();
   await runCli(['agent-browser', 'open', 'http://localhost:5173'], { client, execAgentBrowser: ab.exec });
   assert.equal(ab.calls[0][2], 'dormouse.1.default');
-  assert.deepEqual(client.requests[0].request, { key: 'default', session: 'dormouse.1.default', wsPort: 61141 });
+  assert.deepEqual(client.requests[1].request, { key: 'default', session: 'dormouse.1.default', wsPort: 61141 });
 });
 
 test('agent-browser raw --session skips key namespacing', async () => {
@@ -1002,7 +1145,30 @@ test('agent-browser raw --session skips key namespacing', async () => {
   const client = fixtureClient();
   await runCli(['ab', '--session', 'mine', 'snapshot'], { client, execAgentBrowser: ab.exec });
   assert.equal(ab.calls[0][2], 'mine');
-  assert.deepEqual(client.requests[0].request, { key: undefined, session: 'mine', wsPort: 61141 });
+  // A raw session is already the session: nothing is asked of the host but the
+  // surface it binds to.
+  assert.deepEqual(client.requests, [
+    { method: 'agentBrowserSurface', request: { key: undefined, session: 'mine', wsPort: 61141 } },
+  ]);
+});
+
+test('agent-browser --workspace names the Workspace and never reaches the binary', async () => {
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  await runCli(['ab', '--workspace', 'build', 'open', 'surface:1'], { client, execAgentBrowser: ab.exec });
+  // Intercepted like the identity flags: the browser opens in `build`, the
+  // handle resolves there, and agent-browser sees neither the flag nor its value.
+  assert.deepEqual(ab.calls, [
+    ['agent-browser', '--session', 'dormouse.workspace-2b1c.default', 'open', 'http://localhost:5173/'],
+    ['agent-browser', '--session', 'dormouse.workspace-2b1c.default', 'stream', 'status', '--json'],
+  ]);
+  // Every host round trip the run makes names it: the session namespace, the
+  // handle resolution, and the surface the browser lands in.
+  assert.deepEqual(client.requests.map((entry) => [entry.method, entry.request.workspace]), [
+    ['resolveAgentBrowserSession', 'build'],
+    ['resolveOpenTarget', 'build'],
+    ['agentBrowserSurface', 'build'],
+  ]);
 });
 
 test('agent-browser open resolves a surface handle to a URL before forwarding', async () => {
@@ -1014,7 +1180,7 @@ test('agent-browser open resolves a surface handle to a URL before forwarding', 
     ['agent-browser', '--session', 'dormouse.1.default', 'open', 'http://localhost:5173/'],
     ['agent-browser', '--session', 'dormouse.1.default', 'stream', 'status', '--json'],
   ]);
-  assert.deepEqual(client.requests[0], { method: 'resolveOpenTarget', request: { surface: 'surface:1' } });
+  assert.deepEqual(client.requests[1], { method: 'resolveOpenTarget', request: { surface: 'surface:1' } });
 });
 
 test('agent-browser open sugars a bare :port without a host round trip', async () => {
@@ -1080,7 +1246,7 @@ test('agent-browser close skips surface management', async () => {
   const client = fixtureClient();
   await runCli(['ab', 'close'], { client, execAgentBrowser: ab.exec });
   assert.deepEqual(ab.calls, [['agent-browser', '--session', 'dormouse.1.default', 'close']]);
-  assert.deepEqual(client.requests, []);
+  assert.equal(surfaceRequest(client), undefined);
 });
 
 test('agent-browser without a control endpoint stays a pure passthrough', async () => {
@@ -1097,7 +1263,7 @@ test('agent-browser forwards child exit code and skips surface on failure', asyn
   const result = await runCli(['ab', 'open', 'nope'], { client, execAgentBrowser: ab.exec });
   assert.equal(result.exitCode, 1);
   assert.equal(result.stderr, '✗ boom\n');
-  assert.deepEqual(client.requests, []);
+  assert.equal(surfaceRequest(client), undefined);
 });
 
 test('agent-browser --surface drives the session the host says the surface is bound to', async () => {
@@ -1140,6 +1306,23 @@ test('agent-browser --surface prints the host gate error and never forwards', as
   assert.equal(result.stdout, '');
   assert.equal(result.stderr, "Error: surface 'surface:1' has no browser (kind: terminal)\n");
   // An unresolved handle must never reach agent-browser as a session.
+  assert.deepEqual(ab.calls, []);
+});
+
+test('agent-browser fails fast when the host refuses to name a managed key, never running the binary', async () => {
+  // A Wall still mounting, a webview mid-reload, the VS Code guard: the host
+  // answers with a refusal rather than the session, and there is no CLI-side
+  // fallback that could name the right Workspace's browser
+  // (`docs/specs/dor-browser.md` → "Managed identity").
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  client.resolveAgentBrowserSession = async () => {
+    throw new Error("workspace 'workspace:1' is still mounting");
+  };
+  const result = await runCli(['ab', 'tab', 'list'], { client, execAgentBrowser: ab.exec });
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.stdout, '');
+  assert.equal(result.stderr, "Error: workspace 'workspace:1' is still mounting\n");
   assert.deepEqual(ab.calls, []);
 });
 
@@ -1212,10 +1395,10 @@ test('agent-browser respects DORMOUSE_AGENT_BROWSER_BIN and forwards it as binar
     env: { DORMOUSE_AGENT_BROWSER_BIN: '/opt/custom/agent-browser' },
   });
   assert.equal(ab.calls[0][0], '/opt/custom/agent-browser');
-  assert.equal(client.requests[0].request.binaryPath, '/opt/custom/agent-browser');
+  assert.equal(surfaceRequest(client).binaryPath, '/opt/custom/agent-browser');
 });
 
-test('agent-browser resolves the binary on PATH to an absolute binaryPath', async () => {
+test('agent-browser spawns the PATH-resolved absolute path, never the bare name', async () => {
   await withTempDir('dor-ab-', async (dir) => {
     // On Windows a bare name isn't executable and resolveBinaryPath walks
     // PATHEXT (.cmd/.exe/.bat), so the on-disk shim must carry one of those
@@ -1232,8 +1415,145 @@ test('agent-browser resolves the binary on PATH to an absolute binaryPath', asyn
       // resolveBinaryPath splits on the same, so a POSIX-only `:` would hide dir.
       env: { PATH: ['/nonexistent', dir].join(delimiter) },
     });
-    assert.equal(client.requests[0].request.binaryPath, binPath);
+    // Both spawns take the resolved path. Spawning the bare name instead would
+    // hand the inherited cwd a code-execution primitive on Windows, where
+    // cross-spawn's `which` searches it before PATH — docs/specs/dor-cli.md ->
+    // "Spawning External Binaries".
+    assert.equal(ab.calls.length, 2);
+    for (const [target] of ab.calls) assertSamePath(target, binPath);
+    assertSamePath(surfaceRequest(client).binaryPath, binPath);
   });
+});
+
+test('agent-browser skips a PATH entry that is not an executable file', async () => {
+  await withTempDir('dor-ab-skip-', async (shadowRoot) => {
+    await withTempDir('dor-ab-real-', async (realRoot) => {
+      // `which` (and so cross-spawn, which the bare-name spawn used to reach)
+      // walks past a directory or a non-executable file. resolveBinaryPath now
+      // picks what gets spawned, so a laxer test would turn a PATH entry `which`
+      // ignored into an EACCES/EISDIR failure instead of finding the real
+      // install further along.
+      const ext = process.platform === 'win32' ? '.cmd' : '';
+      await mkdir(join(shadowRoot, `agent-browser${ext}`));
+      // Off Windows a second shadow, a regular file without the executable bit:
+      // the directory above is rejected by the isFile() test alone, so this is
+      // what makes the X_OK probe load-bearing in the walk itself.
+      if (process.platform !== 'win32') {
+        await mkdir(join(shadowRoot, 'second'));
+        await writeFile(join(shadowRoot, 'second', 'agent-browser'), '', { mode: 0o644 });
+      }
+      const realPath = join(realRoot, `agent-browser${ext}`);
+      await writeFile(realPath, '#!/bin/sh\n', { mode: 0o755 });
+      const ab = fakeAgentBrowser();
+      const client = fixtureClient();
+      await runCli(['ab', 'snapshot'], {
+        client,
+        execAgentBrowser: ab.exec,
+        env: {
+          PATH: [shadowRoot, join(shadowRoot, 'second'), realRoot].join(delimiter),
+        },
+      });
+      assertSamePath(ab.calls[0][0], realPath);
+      assertSamePath(surfaceRequest(client).binaryPath, realPath);
+    });
+  });
+});
+
+// Windows-only: off Windows the walk uses a single empty extension, so the name
+// is already tried as itself and there is nothing to regress.
+test('agent-browser tries a name that already carries an extension as itself', {
+  skip: process.platform !== 'win32' ? 'Windows-only PATHEXT behaviour' : false,
+}, async () => {
+  await withTempDir('dor-ab-ext-', async (dir) => {
+    const binPath = join(dir, 'agent-browser.exe');
+    await writeFile(binPath, '', { mode: 0o755 });
+    const ab = fakeAgentBrowser();
+    const client = fixtureClient();
+    // `which` unshifts an empty extension when the command contains a `.`;
+    // without it the walk only ever looks for `agent-browser.exe.EXE` and
+    // reports a present install as missing.
+    await runCli(['ab', 'snapshot'], {
+      client,
+      execAgentBrowser: ab.exec,
+      env: { PATH: dir, DORMOUSE_AGENT_BROWSER_BIN: 'agent-browser.exe' },
+    });
+    assertSamePath(ab.calls[0][0], binPath);
+  });
+});
+
+test('isExecutableFile rejects a directory on both platforms, and a non-executable file off Windows', async () => {
+  await withTempDir('dor-exec-', async (dir) => {
+    const asDirectory = join(dir, 'shadow');
+    await mkdir(asDirectory);
+    const notExecutable = join(dir, 'not-executable');
+    await writeFile(notExecutable, '', { mode: 0o644 });
+    const executable = join(dir, 'executable');
+    await writeFile(executable, '', { mode: 0o755 });
+
+    // `isWindows` is a parameter rather than a `process.platform` read so both
+    // branches are reachable from this Linux-only suite. `statSync().isFile()`
+    // alone covers the directory, so the X_OK probe is what the middle pair pins.
+    assert.equal(isExecutableFile(asDirectory, false), false);
+    assert.equal(isExecutableFile(asDirectory, true), false);
+    assert.equal(isExecutableFile(executable, false), true);
+    assert.equal(isExecutableFile(join(dir, 'absent'), false), false);
+    // On Windows the extension decides executability, so a mode-0644 regular
+    // file is runnable there and `accessSync(X_OK)` reports every readable file
+    // as executable — which is why the POSIX half cannot be asserted there.
+    assert.equal(isExecutableFile(notExecutable, true), true);
+    if (process.platform !== 'win32') {
+      assert.equal(isExecutableFile(notExecutable, false), false);
+    }
+  });
+});
+
+test('the Windows candidate list mirrors which(1) on every edge', () => {
+  // Exercised off Windows by passing isWindows, because all three rules are
+  // Windows-only and this suite runs on Linux in CI — a platform-gated
+  // assertion here would be an unenforced claim. `which`'s own logic:
+  // `opt.pathExt || process.env.PATHEXT || '.EXE;.CMD;.BAT;.COM'`, plus an
+  // empty extension unshifted when the command contains a `.`.
+  const npmOrder = ['.EXE', '.CMD', '.BAT', '.COM'];
+  assert.deepEqual(
+    binaryCandidateNames('agent-browser', {}, true),
+    npmOrder.map((ext) => `agent-browser${ext}`),
+    'unset PATHEXT takes npm\u2019s list, not cmd.exe\u2019s .COM-first order',
+  );
+  assert.deepEqual(
+    binaryCandidateNames('agent-browser', { PATHEXT: '' }, true),
+    npmOrder.map((ext) => `agent-browser${ext}`),
+    'an empty PATHEXT falls back rather than yielding no candidates',
+  );
+  assert.deepEqual(
+    binaryCandidateNames('agent-browser', { PATHEXT: '.EXE;.PS1' }, true),
+    ['agent-browser.EXE', 'agent-browser.PS1'],
+    'a customised PATHEXT is honoured verbatim, in its own order',
+  );
+  assert.deepEqual(
+    binaryCandidateNames('agent-browser', { PATHEXT: '.EXE;' }, true),
+    ['agent-browser.EXE', 'agent-browser'],
+    'a trailing separator keeps the empty extension, as splitting without a filter does',
+  );
+  assert.deepEqual(
+    binaryCandidateNames('agent-browser.exe', {}, true)[0],
+    'agent-browser.exe',
+    'a name carrying an extension is tried as itself first',
+  );
+  assert.deepEqual(
+    binaryCandidateNames('agent-browser', { PATHEXT: '.EXE' }, false),
+    ['agent-browser'],
+    'PATHEXT is Windows-only; off Windows the name is the only candidate',
+  );
+});
+
+test('an unresolvable bare name is a missing install, including with no PATH', () => {
+  // The bare-name fallback at the spawn is for "the walk found nothing on a PATH
+  // we searched". With no PATH there is nothing to search, and reporting
+  // "ambiguous" would fall through to cross-spawn with the bare name — cwd-first
+  // on Windows, which is what spawning the resolved path exists to prevent.
+  // Pinned on the helper because the CLI's two paths produce the same message.
+  assert.equal(agentBrowserIsMissing('agent-browser', {}, undefined), true);
+  assert.equal(agentBrowserIsMissing('agent-browser', { PATH: '/nonexistent' }, undefined), true);
 });
 
 // The caller terminal (surface:2) plus the host identity `dor list --json` folds
@@ -1247,6 +1567,8 @@ const listEnv = {
   DORMOUSE_HOST_WORKSPACE: '/Users/me/projects/site',
   DORMOUSE_CONTROL_SOCKET: '/tmp/dormouse-control.sock',
 };
+
+const standaloneEnv = { ...listEnv, DORMOUSE_HOST: 'standalone', DORMOUSE_HOST_WORKSPACE: undefined };
 
 test('list text output', async () => {
   const client = fixtureClient();
@@ -1268,6 +1590,179 @@ test('list tags an awaited surface after its todo', async () => {
   );
 });
 
+test('list --all groups every Workspace under a header', async () => {
+  const client = fixtureClient();
+  const result = await runCli(['list', '--all'], { client, env: listEnv });
+  assert.deepEqual(client.requests, [{ includePorts: false, scope: 'all' }]);
+  await snapshot('list-all-text', result);
+});
+
+test('list --all json tags each row with its Workspace and carries the directory', async () => {
+  const result = await runCli(['list', '--all', '--json'], { client: fixtureClient(), env: listEnv });
+  const payload = JSON.parse(result.stdout);
+  assert.deepEqual(
+    payload.surfaces.map((surface) => [surface.workspace_ref, surface.ref]),
+    [['workspace:1', 'surface:1'], ['workspace:2', 'surface:1'], ['workspace:2', 'surface:2']],
+  );
+  assert.deepEqual(payload.workspaces.map((row) => row.ref), ['workspace:1', 'workspace:2']);
+  await snapshot('list-all-json', result);
+});
+
+test('list --all keeps the header of a Workspace its filters emptied', async () => {
+  const result = await runCli(['list', '--all', '--kind', 'browser'], { client: fixtureClient(), env: listEnv });
+  // The text listing says which Workspaces there are, exactly as the JSON
+  // payload's `workspaces` array does — a filtered-out group is a header with
+  // no rows under it, not a Workspace that vanished.
+  assert.match(result.stdout, /^workspace:1 {2}Workspace 1 {2}\[active\]\n\nworkspace:2 {2}build\n {4}/);
+});
+
+test('list --workspace asks the host for another Workspace', async () => {
+  const client = fixtureClient();
+  await runCli(['list', '--workspace', 'build'], { client, env: listEnv });
+  assert.deepEqual(client.requests, [{ includePorts: false, workspace: 'build' }]);
+});
+
+test('list --workspaces prints the overview', async () => {
+  const client = fixtureClient();
+  const result = await runCli(['list', '--workspaces'], { client, env: listEnv });
+  assert.deepEqual(client.requests, [{ method: 'listWorkspaces', request: {} }]);
+  await snapshot('list-workspaces-text', result);
+  await snapshot(
+    'list-workspaces-json',
+    await runCli(['list', '--workspaces', '--json'], { client: fixtureClient(), env: listEnv }),
+  );
+});
+
+test('list container flags that name two scopes are refused', async () => {
+  await snapshot(
+    'list-all-and-workspace',
+    await runCli(['list', '--all', '--workspace', '2'], { client: fixtureClient(), env: listEnv }),
+  );
+  await snapshot(
+    'list-workspaces-with-filter',
+    await runCli(['list', '--workspaces', '--kind', 'terminal'], { client: fixtureClient(), env: listEnv }),
+  );
+});
+
+test('workspace mutation verbs', async () => {
+  // One client across all four runs, so the assertion below is the whole
+  // conversation in order: each verb calls exactly its own control method, with
+  // the target the user typed.
+  const client = fixtureClient();
+  await snapshot('workspace-new', await runCli(['workspace', 'new', 'build'], { client, env: listEnv }));
+  await snapshot('workspace-new-json', await runCli(['workspace', 'new', '--json'], { client, env: listEnv }));
+  await snapshot('workspace-rename', await runCli(['workspace', 'rename', 'workspace:2', 'agents'], { client, env: listEnv }));
+  await snapshot('workspace-switch', await runCli(['workspace', 'switch', 'build'], { client, env: listEnv }));
+  assert.deepEqual(client.requests, [
+    { method: 'newWorkspace', request: { name: 'build' } },
+    { method: 'newWorkspace', request: {} },
+    { method: 'renameWorkspace', request: { workspace: 'workspace:2', name: 'agents' } },
+    { method: 'switchWorkspace', request: { workspace: 'build' } },
+  ]);
+});
+
+test('workspace close refuses running work until forced', async () => {
+  await snapshot(
+    'workspace-close-refused',
+    await runCli(['workspace', 'close', 'workspace:2'], { client: fixtureClient(), env: listEnv }),
+  );
+  const client = fixtureClient();
+  await snapshot('workspace-close-force', await runCli(['workspace', 'close', 'workspace:2', '--force'], { client, env: listEnv }));
+  assert.deepEqual(client.requests, [{ method: 'closeWorkspace', request: { workspace: 'workspace:2', force: true } }]);
+});
+
+test('workspace move sends the window and the index in one request', async () => {
+  // `--window` becomes `toWindow` and `--index` rides beside it: the slot is
+  // the target's, and the host carries it across rather than dropping it.
+  const client = fixtureClient();
+  await snapshot(
+    'workspace-move',
+    await runCli(['workspace', 'move', 'build', '--window', 'ws-2', '--index', '0'], { client, env: listEnv }),
+  );
+  assert.deepEqual(client.requests, [{
+    method: 'moveWorkspace',
+    request: { workspace: 'build', toWindow: 'ws-2', index: 0, dangerouslyDestroyIframePageState: false },
+  }]);
+});
+
+test('workspace move flags are refused off the action, and move needs one of them', async () => {
+  await snapshot('workspace-window-misuse', await runCli(['workspace', 'switch', '2', '--window', 'ws-2'], { client: fixtureClient(), env: listEnv }));
+  await snapshot('workspace-index-misuse', await runCli(['workspace', 'switch', '2', '--index', '0'], { client: fixtureClient(), env: listEnv }));
+  await snapshot('workspace-destroy-iframe-misuse', await runCli(['workspace', 'switch', '2', '--dangerously-destroy-iframe-page-state'], { client: fixtureClient(), env: listEnv }));
+  await snapshot('workspace-move-needs-flag', await runCli(['workspace', 'move', '2'], { client: fixtureClient(), env: listEnv }));
+  await snapshot('workspace-invalid-index', await runCli(['workspace', 'move', '2', '--index', 'x'], { client: fixtureClient(), env: listEnv }));
+});
+
+test('list --window asks the host for another window', async () => {
+  const client = fixtureClient();
+  await runCli(['list', '--window', 'ws-2'], { client, env: listEnv });
+  await runCli(['list', '--workspaces', '--window', 'ws-2'], { client, env: listEnv });
+  assert.deepEqual(client.requests, [
+    { includePorts: false, window: 'ws-2' },
+    { method: 'listWorkspaces', request: { window: 'ws-2' } },
+  ]);
+});
+
+test('workspace usage errors name the action', async () => {
+  await snapshot('workspace-missing-action', await runCli(['workspace'], { client: fixtureClient(), env: listEnv }));
+  await snapshot('workspace-unknown-action', await runCli(['workspace', 'destroy', 'x'], { client: fixtureClient(), env: listEnv }));
+  await snapshot('workspace-list-action', await runCli(['workspace', 'list'], { client: fixtureClient(), env: listEnv }));
+  await snapshot('workspace-rename-arity', await runCli(['workspace', 'rename', 'workspace:2'], { client: fixtureClient(), env: listEnv }));
+  await snapshot('workspace-force-misuse', await runCli(['workspace', 'switch', '2', '--force'], { client: fixtureClient(), env: listEnv }));
+});
+
+test('app restart asks the host once', async () => {
+  const client = fixtureClient();
+  await snapshot('app-restart', await runCli(['app', 'restart'], { client, env: standaloneEnv }));
+  await snapshot('app-restart-json', await runCli(['app', 'restart', '--json'], { client, env: standaloneEnv }));
+  assert.deepEqual(client.requests, [{ method: 'restartApp' }, { method: 'restartApp' }]);
+});
+
+test('app restart that joins a quit in progress fails, since nothing will relaunch', async () => {
+  const client = { async restartApp() { return { relaunch: false }; } };
+  await snapshot('app-restart-joined-quit', await runCli(['app', 'restart'], { client, env: standaloneEnv }));
+});
+
+// A host from before `app.*` answers with its Wall's catch-all refusal. Only a
+// standalone terminal gets the quit-and-reopen hint; VS Code refuses the same
+// way, and the hint would be wrong there.
+test('app restart against a Dormouse that predates it', async () => {
+  const client = {
+    async restartApp() { throw new Error("unsupported Dormouse control method 'app.restart'"); },
+  };
+  await snapshot('app-restart-predates', await runCli(['app', 'restart'], { client, env: standaloneEnv }));
+  await snapshot('app-restart-predates-vscode', await runCli(['app', 'restart'], { client, env: listEnv }));
+});
+
+test('app restart passes a host refusal through', async () => {
+  const client = { async restartApp() { throw new Error('Restart needs a packaged build'); } };
+  await snapshot('app-restart-refused', await runCli(['app', 'restart'], { client, env: standaloneEnv }));
+});
+
+test('app usage errors name the action', async () => {
+  await snapshot('app-missing-action', await runCli(['app'], { client: fixtureClient(), env: standaloneEnv }));
+  await snapshot('app-unknown-action', await runCli(['app', 'quit'], { client: fixtureClient(), env: standaloneEnv }));
+  await snapshot('app-restart-arity', await runCli(['app', 'restart', 'now'], { client: fixtureClient(), env: standaloneEnv }));
+});
+
+test('every action command forwards --workspace to the host', async () => {
+  const calls = [
+    [['split', '--workspace', 'build', '--', 'pnpm', 'dev'], 'splitSurface'],
+    [['ensure', '--workspace', 'build', '--', 'pnpm', 'dev'], 'ensureSurface'],
+    [['send', 'surface:1', '--text', 'hi', '--workspace', 'build'], 'sendSurface'],
+    [['read', 'surface:1', '--workspace', 'build'], 'readSurface'],
+    [['kill', 'surface:1', '--confirm-dangerously', '--workspace', 'build'], 'killSurface'],
+    [['iframe', 'http://localhost:5173', '--workspace', 'build'], 'iframeSurface'],
+  ];
+  for (const [argv, method] of calls) {
+    const client = fixtureClient();
+    const result = await runCli(argv, { client, env: listEnv });
+    assert.equal(result.exitCode, 0, `${argv[0]} should succeed: ${result.stderr}`);
+    const call = client.requests.find((entry) => entry.method === method);
+    assert.equal(call.request.workspace, 'build', `${argv[0]} should forward --workspace`);
+  }
+});
+
 test('list json output', async () => {
   await snapshot(
     'list-json',
@@ -1287,14 +1782,6 @@ test('list id-format ids output', async () => {
     'list-id-format-ids',
     await runCli(['list', '--id-format', 'ids'], { client: fixtureClient(), env: listEnv }),
   );
-});
-
-test('list accepts uuids as an id-format compatibility alias', async () => {
-  const ids = await runCli(['list', '--id-format', 'ids'], { client: fixtureClient(), env: listEnv });
-  const uuids = await runCli(['list', '--id-format', 'uuids'], { client: fixtureClient(), env: listEnv });
-  assert.equal(uuids.stdout, ids.stdout);
-  assert.equal(uuids.stderr, '');
-  assert.equal(uuids.exitCode, 0);
 });
 
 test('list json schema includes ids and refs regardless of id-format', async () => {
@@ -1382,4 +1869,135 @@ test('ensure missing command output', async () => {
 
 test('split conflicting direction output', async () => {
   await snapshot('split-conflicting-direction', await runCli(['split', '--left', '--right'], { client: fixtureClient() }));
+});
+
+test('tool named form text output', async () => {
+  await snapshot(
+    'tool-named',
+    await runCli(['tool', 'storybook'], { client: fixtureClient(), env: { PWD: '/work/site' } }),
+  );
+});
+
+test('tool command form text output', async () => {
+  await snapshot(
+    'tool-command',
+    await runCli(['tool', '--', 'pnpm', 'dev'], { client: fixtureClient(), env: { PWD: '/work/site' } }),
+  );
+});
+
+test('tool json output carries the resolved key', async () => {
+  await snapshot(
+    'tool-json',
+    await runCli(['tool', '--json', 'storybook'], { client: fixtureClient(), env: { PWD: '/work/site' } }),
+  );
+});
+
+test('tool sends the name, never a command', async () => {
+  const client = fixtureClient();
+  await runCli(['tool', 'storybook'], { client, env: { PWD: '/work/site' } });
+  client.requests[0].request.cwd = smudgeWindowsPaths(client.requests[0].request.cwd);
+  assert.deepEqual(client.requests, [{
+    method: 'toolSurface',
+    request: {
+      name: 'storybook',
+      args: [],
+      global: false,
+      fresh: false,
+      minimized: false,
+      surface: undefined,
+      cwd: '/work/site',
+    },
+  }]);
+});
+
+test('tool forwards named arguments as separate argv values', async () => {
+  const client = fixtureClient();
+  const result = await runCli(['tool', '--global', 'viewer', 'a b; $(bad).md'], { client });
+  assert.equal(result.exitCode, 0);
+  assert.equal(client.requests[0].request.name, 'viewer');
+  assert.equal(client.requests[0].request.global, true);
+  assert.deepEqual(client.requests[0].request.args, ['a b; $(bad).md']);
+});
+
+test('tool -- sends argv as a command, never a name', async () => {
+  const client = fixtureClient();
+  await runCli(['tool', '--', 'pnpm', 'dev'], { client, env: { PWD: '/work/site' } });
+  client.requests[0].request.cwd = smudgeWindowsPaths(client.requests[0].request.cwd);
+  assert.deepEqual(client.requests, [{
+    method: 'toolSurface',
+    request: {
+      command: ['pnpm', 'dev'],
+      fresh: false,
+      minimized: false,
+      surface: undefined,
+      cwd: '/work/site',
+    },
+  }]);
+});
+
+test('tool --fresh forwards the opt-out', async () => {
+  const client = fixtureClient();
+  await runCli(['tool', '--fresh', 'storybook'], { client, env: { PWD: '/work/site' } });
+  assert.equal(client.requests[0].request.fresh, true);
+});
+
+test('tool prints dormouse.yml warnings to stderr, keeping --json parseable', async () => {
+  const result = await runCli(['tool', '--json', 'noisy'], {
+    client: fixtureClient(),
+    env: { PWD: '/work/site' },
+  });
+  assert.match(result.stderr, /ignoring unknown field 'colour'/);
+  assert.deepEqual(JSON.parse(result.stdout).status, 'created');
+});
+
+test('tool with neither a name nor a command tail', async () => {
+  await snapshot('tool-missing-target', await runCli(['tool'], { client: fixtureClient() }));
+});
+
+test('tool keeps escaped named arguments separate from anonymous commands', async () => {
+  const client = fixtureClient();
+  const result = await runCli(['tool', 'viewer', '--', '--flag', 'a b'], { client });
+  assert.equal(result.exitCode, 0);
+  assert.equal(client.requests[0].request.name, 'viewer');
+  assert.deepEqual(client.requests[0].request.args, ['--flag', 'a b']);
+  assert.equal(client.requests[0].request.command, undefined);
+});
+
+test('tool rejects an empty command tail', async () => {
+  await snapshot('tool-empty-tail', await runCli(['tool', '--'], { client: fixtureClient() }));
+});
+
+test('tool rejects an unknown option', async () => {
+  await snapshot('tool-unknown-option', await runCli(['tool', '--nope', 'storybook'], { client: fixtureClient() }));
+});
+
+test('tool routes named and anonymous launches to an explicit Workspace', async () => {
+  for (const tail of [['storybook'], ['--', 'pnpm', 'dev']]) {
+    const client = fixtureClient();
+    const result = await runCli(['tool', '--workspace', 'workspace:2', ...tail], { client, env: { PWD: '/work/site' } });
+    assert.equal(result.exitCode, 0);
+    assert.equal(client.requests[0].method, 'toolSurface');
+    assert.equal(client.requests[0].request.workspace, 'workspace:2');
+  }
+});
+
+test('open forwards one file, explicit handler, placement, and Workspace to Tool dispatch', async () => {
+  const client = fixtureClient();
+  const result = await runCli(['open', '--json', '--tool', 'markdown', '--workspace', 'workspace:2', '--fresh', '--minimize', '--surface', 'surface:4', 'a b.md'], { client, env: { PWD: '/repo' } });
+  assert.equal(result.exitCode, 0);
+  client.requests[0].request.cwd = smudgeWindowsPaths(client.requests[0].request.cwd);
+  assert.deepEqual(client.requests[0], { method: 'toolSurface', request: {
+    file: 'a b.md', tool: 'markdown', cwd: '/repo',
+    workspace: 'workspace:2', fresh: true, minimized: true, surface: 'surface:4',
+  } });
+  assert.equal(JSON.parse(result.stdout).surface_ref, 'surface:4');
+});
+
+test('open requires exactly one file', async () => {
+  for (const args of [['open'], ['open', 'one.md', 'two.md']]) {
+    const client = fixtureClient();
+    const result = await runCli(args, { client });
+    assert.equal(result.exitCode, 1);
+    assert.equal(client.requests.length, 0);
+  }
 });

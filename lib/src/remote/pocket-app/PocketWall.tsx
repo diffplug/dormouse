@@ -10,6 +10,7 @@ import {
 import type { DirectoryEntry } from 'remote-lib-common';
 import {
   MobileTerminalUi,
+  paneMouseOverride,
   type MobileTerminalKeyboardMode,
   type MobileTerminalTouchMode,
 } from '../../components/MobileTerminalUi';
@@ -87,13 +88,13 @@ export function PocketWall({ adapter, onError }: {
   const cursorTouchAvailable =
     activeMouseState?.mouseReporting !== undefined && activeMouseState.mouseReporting !== 'none';
 
-  // Touch mode × each pane's own reporting decides its mouse override — configure
-  // every pane so one switched away from isn't left in a stale override.
+  // Every pane, not just the active one: `paneMouseOverride` is a function of
+  // touch mode and that pane's own reporting, so one switched away from would
+  // otherwise keep a stale override.
   useEffect(() => {
     for (const entry of entries) {
       const reporting = mouseStates.get(entry.surfaceId)?.mouseReporting ?? 'none';
-      const override = touchMode === 'selection' && reporting !== 'none' ? 'permanent' : 'off';
-      setMouseOverride(entry.surfaceId, override);
+      setMouseOverride(entry.surfaceId, paneMouseOverride(touchMode, reporting));
     }
   }, [entries, mouseStates, touchMode]);
 

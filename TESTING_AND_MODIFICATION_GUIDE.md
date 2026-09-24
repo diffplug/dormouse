@@ -1,0 +1,282 @@
+# Workspaces stack: testing and modification guide
+
+For an agent picking up the Workspaces work. Read `AGENTS.md` first (worktree rules,
+spec conventions); this guide covers only what is specific to the stack.
+
+## 1. Where the code is
+
+The work is a stack of eleven branches, each PR based on the one before it.
+Every branch has its own worktree listed below. **Sections 1 and 1a apply while
+the stack is open**; after it lands, use `main` and the owning specs. Branch and
+worktree paths below are historical after merge:
+
+| # | PR | Branch | Worktree | What it adds |
+|---|---|---|---|---|
+| 1 | #614 | `workspaces-window` | `dormouse.workspaces-2/.claude/worktrees/workspaces-window` | Workspace strip, one Wall per Workspace, hidden-Workspace minimize |
+| 2 | #615 | `workspaces-persist` | `dormouse.workspaces-2/.claude/worktrees/workspaces-persist` | Per-Workspace persistence, agent recovery |
+| 3 | #616 | `workspaces-multiwindow` | `dormouse.workspaces-2/.claude/worktrees/workspaces-multiwindow` | Several windows, routing, quit voting, transfer, drag |
+| 4 | #617 | `workspaces-dor` | `dormouse.workspaces-2/.claude/worktrees/workspaces-dor` | `dor workspace` verbs |
+| 5 | #618 | `workspaces-harden` | `dormouse.workspaces-harden` | Held events in the transfer gap, drift cleanup |
+| 6 | #619 | `workspaces-registry` | `dormouse.workspaces-registry` | Rust registry, stable `workspace:<n>` refs, cross-window routing |
+| 7 | #620 | `workspaces-durability` | `dormouse.workspaces-durability` | Journal in-flight transfers for crash recovery |
+| 8 | #621 | `workspaces-fidelity` | `dormouse.workspaces-fidelity` | Marks and serialized xterm buffers; pin transfer superseded by #630 |
+| 9 | #622 | `workspaces-move-verb` | `dormouse.workspaces-move-verb` | `dor workspace move`, `dor list --window`, iframe move gate |
+| 10 | #623 | `workspaces-harness` | `dormouse.workspaces-harness` | Harness alert stores through the sidecar |
+| 11 | #630 | `workspaces-transfer-fixes` | `dormouse.workspaces-transfer-fixes` | Transfer mouse/grid/command state, notes without pins, shared Workspace kill confirmation, review fixes |
+
+**Work on the tip** (`dormouse.workspaces-transfer-fixes`) for testing and for any tweak,
+unless the tweak clearly belongs to an earlier stage and you want it reviewed
+there. If you commit on an earlier stage, merge it forward through every later
+branch (`git merge --no-ff <previous>` in each worktree, in order), or the PRs
+diverge. Push with `git push origin <branch>`; the PRs update themselves.
+
+Never `git switch -c` inside an existing worktree. New branches:
+`wt switch --create <name> --base @` from the worktree you are stacking on.
+
+## 1a. Changing the stack, and landing it
+
+**Test Workspace changes locally before opening a PR.** The final fixes for this
+stack are collected in #630.
+
+**Default after this stack: put changes in new PRs on top of the tip.** A change to an early
+stage has to be merged forward through every later branch; a new PR at the tip
+touches nothing behind it, and testing findings usually cut across stages anyway.
+Edit an existing PR only when (a) the bug would make that PR wrong to merge on
+its own, (b) it answers review feedback on that PR, or (c) the stage's spec text
+is untrue. After editing an earlier stage, merge it forward at once, stage by
+stage, and run the tip's suites once at the end.
+
+**Land with merge commits, in order, never squash.** The stack is built on merge
+commits, so merging PR N with a merge commit leaves PR N+1's diff exactly its own
+and GitHub retargets it to `main` when PR N's branch is deleted; nothing else is
+needed. If a PR is squash-merged by mistake, PR N+1 will show PR N's changes
+again until `main` is merged into its branch (that merge resolves cleanly, since
+both sides carry identical content). The repo's default is a merge commit; keep it.
+
+Keep every PR a draft until it is actually up for review (Chromatic and Argos
+bill on ready-for-review).
+
+## 2. Setup in a worktree
+
+```
+pnpm install
+pnpm --filter dor-lib-common build      # dor tests import its dist
+pnpm --filter remote-lib-common build   # vscode-ext tests import its dist
+pnpm --filter dor build                 # dor CLI tests and help snapshots
+```
+
+For `cargo test`, the build script needs a self-contained Node 24.18.0 binary and
+rejects Homebrew's. Copy the bundled one from the main checkout and point the env
+var at that source path, **never at the worktree's own `binaries/` path** (the
+build script copies source onto destination and truncates the file to 0 bytes):
+
+```
+DORMOUSE_MAIN_CHECKOUT=/path/to/main-checkout
+mkdir -p standalone/src-tauri/binaries
+cp "$DORMOUSE_MAIN_CHECKOUT/standalone/src-tauri/binaries/node-aarch64-apple-darwin" standalone/src-tauri/binaries/
+cd standalone/src-tauri
+DORMOUSE_NODE_BINARY="$DORMOUSE_MAIN_CHECKOUT/standalone/src-tauri/binaries/node-aarch64-apple-darwin" cargo test
+```
+
+## 3. Running the app
+
+- **Tauri (real thing, several windows):** `pnpm dev:standalone` from the repo
+  root of the worktree. Dev builds use a separate state root
+  (`<app_data_dir>/dev`), so dev and installed app never share snapshots.
+- **Browser harness (one window only):** inside Dormouse,
+  `dor ensure -- pnpm innerdogfood`; outside, `pnpm innerdogfood`. It prints the
+  URL and an `agent-browser` command. The skill
+  `.claude/skills/debug-standalone-agent-browser/SKILL.md` covers driving it.
+  The harness simulates **one** window: transfer, tear-out, quit voting, and
+  cross-window `dor` routing only run in Tauri.
+
+Opening a second window: drag a Workspace tab out of the strip and release it
+outside the window, or from a Dormouse terminal run
+`dor workspace move <ref> --window new`.
+
+## 4. Automated tests
+
+Per package, from the worktree root:
+
+```
+(cd lib && npx tsc --noEmit -p . && npx vitest run)          # ~3000 tests
+(cd standalone && npx tsc --noEmit -p . && npx vitest run && node --test scripts/*.test.mjs)
+(cd standalone/sidecar && node --test)
+(cd dor && node --test)                                        # help snapshots
+(cd vscode-ext && npx vitest run)
+pnpm lint:specs && node scripts/xterm-lint.mjs                  # fast inner loop
+pnpm test                                                      # full CI test gate
+cargo test                                                     # see §2
+```
+
+Help snapshots: after changing any `dor` help text, rebuild and refresh with
+`cd dor && pnpm build && UPDATE_SNAPSHOTS=1 node --test`, then run `node --test`
+again and commit `dor/test/snapshots/`.
+
+Tests that pin the stack's non-obvious rules, by concern:
+
+| Concern | Tests |
+|---|---|
+| Hidden-Workspace minimize | `lib/src/components/TerminalPane.test.tsx` ("a hidden Workspace minimizes its terminals") |
+| Composition, switching, close race | `lib/src/components/WorkspaceWindow.test.tsx`, `Wall.test.tsx` |
+| Strip | `lib/src/components/WorkspaceStrip.test.tsx`, `workspace-strip-drag.test.ts` |
+| Quit / close arbitration and shared confirmation | `standalone/src/quit.test.ts`, `teardown-arbiter.test.ts`, `window-close.test.ts`, `WorkspaceTeardownModal.test.ts`, `lib/src/components/WorkspaceStrip.test.tsx`; Rust `quit_state` |
+| Routing table, arrivals, marking, held events | Rust `routing::tests` |
+| Transfer, content, tear-out boot | `standalone/src/workspace-move.test.ts` |
+| Cross-window drag and iframe gate | `standalone/src/workspace-drag.test.ts` |
+| Registry, stable refs | Rust `workspaces::tests`, `standalone/src/workspace-registry.test.ts`, `lib/src/lib/workspace-store.test.ts` |
+| Sidecar marks and since-mark replay | `standalone/sidecar/pty-core.test.js` |
+| Notes across a move | `lib/src/components/wall/workspace-transfer.test.ts` |
+| `dor workspace` verbs, move gate | `lib/src/components/wall/workspace-control.test.ts`, `dor-control-router.test.ts` |
+| Crash durability of a transfer | Rust `tests::an_arrival_record_round_trips_until_it_is_forgotten` and the `a_leftover_arrival_*` boot-merge tests |
+
+## 5. Manual test checklist
+
+User-run results are recorded under "Transfer findings" below. Items marked
+**WKWebView** need native testing beyond their Chromium coverage.
+
+**Hidden-Workspace minimize (WKWebView)**
+- Two Workspaces, three terminals each. Switch away; in Safari Web Inspector the
+  hidden Workspace's canvases should have lost their WebGL contexts and the
+  visible one's should be live.
+- Switch back: zero PTY resizes at an unchanged grid (watch `pty:resize` in the
+  sidecar log). Resize the window while hidden: exactly one resize on return.
+- 30+ switches with more than 16 terminals total: every pane still shows
+  `data-renderer="webgl"`, no "too many active WebGL contexts" in the console.
+- A full-screen TUI (`btop`) on switch-back: look for a one-frame blank. If seen,
+  keep the outgoing Wall painted one extra frame; do not abandon detaching.
+- Switch into an 8-pane Workspace: watch for jank from N context creations.
+
+**Transfer and tear-out**
+- Move a Workspace with a long-running TUI and 10k+ lines of scrollback to a
+  second window: scrollback, cursor, and colors intact; output continues with
+  nothing repeated or lost at the seam.
+- A captured note survives the move without its source pin.
+- Kill the app mid-drag (after the drop, before the target finishes): on
+  relaunch the Workspace is in the target window with fresh shells, and not in
+  the source.
+- Tear out a Workspace whose terminals are idle (no output): the new window
+  appears within a second (the mark round trip is the only wait).
+- Drop onto a target and close that target before it adopts: the Workspace
+  stays in the source, its terminals keep receiving output.
+
+**Iframe gate**
+- A Workspace holding a `dor iframe` Surface: dragging it to another window
+  raises the typed-letter dialog naming the count; Escape leaves everything as
+  it was; the letter moves it and the iframe reloads at its URL.
+- Same Workspace with only agent-browser Surfaces: no dialog.
+- `dor workspace move workspace:<n> --window <label>` refuses and names the
+  Surfaces; `--dangerously-destroy-iframe-page-state` moves it.
+
+**Registry and refs**
+- `dor list --workspaces` in two windows: refs never collide and never renumber
+  after a reorder or a move.
+- From window A, `dor list --workspace <ref in B>` and
+  `dor list --window ws-2` answer from B.
+- `dor workspace move --index 0` reorders without changing the ref.
+
+**Quit (shared confirmation UI still needs native retesting)**
+- Workspace close, window close, and app quit should all show "Confirm kill
+  workspace" with the affected Workspace names. Escape must leave the app usable.
+- Two windows, one with a running command. Cmd+Q, then Cmd+Q again while the
+  dialog is up, then confirm: the app quits (this was the wedge).
+- Relaunch: both windows and their Workspaces come back; the interrupted agent
+  resumes on its own.
+- `dor app restart` (packaged build) asks what Cmd+Q asks — the requesting pane
+  aside — then relaunches into whatever bundle is installed.
+
+**Harness alert stores**
+- In `innerdogfood`, toggle a watched command and change alarm settings: they
+  survive a page reload (they now live in the sidecar).
+
+## 6. Where to change what
+
+Each row names the code and the spec section that must change with it. Spec
+lint enforces word budgets: after editing a spec, run `pnpm lint:specs`; if it
+reports a budget, `node scripts/spec-lint.mjs --ratchet docs/specs/<name>.md`
+in the same commit. The "why" of a rule goes in `<name>.rationale.md`, keyed by
+the heading, and the rule gets a `(rationale)` marker.
+
+| Concern | Code | Spec |
+|---|---|---|
+| Strip look, tabs, menus, rename, indicators | `lib/src/components/WorkspaceStrip.tsx`, `workspace-strip-drag.ts`, stories in `lib/src/stories/` | `docs/specs/layout.md` → Workspaces; `standalone.md` → AppBar; `alert.md` → Workspace union |
+| Shared Workspace kill confirmation and iframe move gate | `lib/src/components/WorkspaceKillConfirm.tsx` ("Confirm kill workspace"), `lib/src/components/WorkspaceStrip.tsx` (`pendingClose` and the iframe `pendingMove` gate), `standalone/src/WorkspaceTeardownModal.tsx` (window close / app quit), `lib/src/lib/workspace-ui-store.ts` | `layout.md` → Workspaces; `standalone.md` → Confirmation UI |
+| Command-mode keys (`c n p l 1-9 W & !` etc.) | `lib/src/components/wall/keyboard/handle-workspace-shortcuts.ts` | `layout.md` → Workspaces, `shortcuts.md` |
+| Composition, active/hidden Wall, input gating | `lib/src/components/WorkspaceWindow.tsx`, `Wall.tsx` (`WorkspaceActiveContext`) | `layout.md` → Workspaces |
+| Hidden-Workspace terminal minimize | `lib/src/components/TerminalPane.tsx` mount effect (gated on `workspaceActive`), `lib/src/lib/terminal-lifecycle.ts` (`mountElement`/`unmountElement`), `terminal-webgl.ts` | `layout.md` → Workspaces, Renderer; `layout.rationale.md` → Workspaces |
+| Workspace store, ids, refs | `lib/src/lib/workspace-store.ts` (`installWorkspaceIdPool`, `workspaceRefFor`, `resolveWorkspaceRef`) | `dor-cli.md` → Handle Model; `standalone.md` → Workspace registry |
+| Registry (Rust) | `standalone/src-tauri/src/workspaces.rs`; commands `workspace_reserve_ids` / `workspace_report` / `workspace_registry` in `lib.rs`; `standalone/src/workspace-registry.ts` (`useWorkspaceRegistry` for UI that needs other windows' Workspaces) | `standalone.md` → Workspace registry |
+| Sidecar event routing | `standalone/src-tauri/src/routing.rs` (`route`, pure) and `dispatch_sidecar_event` in `lib.rs` | `standalone.md` → Routing (the table) |
+| Transfer protocol | Source and target halves in `standalone/src/workspace-move.ts`; lib half in `lib/src/components/wall/workspace-transfer.ts` (`prepareWorkspaceTransfer`, `captureTransferContent`); Rust `begin_arrival` / `transfer_workspace_content` / `adopt_ready` / `adopt_done` / `hand_back_arrival` in `lib.rs`, `Arrival` in `routing.rs` | `standalone.md` → Transfer, Tear-out, Arrival queue; `transport.md` → Transferring a Workspace |
+| Marks and since-mark replay | `mark` / `list` in `standalone/sidecar/pty-core.js`; `pty:marked` routing and bookkeeping in `routing.rs` / `lib.rs`; `serializeTerminal` / `flushTerminal` in `terminal-lifecycle.ts` | `transport.md` → Transferring a Workspace; `standalone.rationale.md` → Arrival queue |
+| Notes across a move | `lib/src/components/wall/workspace-transfer.ts` | `transport.md`, `notepad.md` |
+| Crash durability of a transfer | `record_arrival_on_disk` / `forget_arrival_on_disk` / `restore_arrivals` in `standalone/src-tauri/src/lib.rs` (`sessions/arrivals.json`, merged at boot) | `standalone.md` → Arrival queue |
+| Arrival deadline, held events, hand-back replay | `ARRIVAL_MAX`, `expire_arrival`, `hold_event` / `lift_suppression`, `hand_back_ids` in `standalone/src-tauri/src/routing.rs`; `spawn_arrival_watchdog`, `hand_back_arrival` in `standalone/src-tauri/src/lib.rs`; `acceptHandBackReplay` in `standalone/src/workspace-move.ts` | `standalone.md` → Arrival queue, Routing |
+| Cross-window drag | `standalone/src/workspace-drag.ts` (release gate in `onDropOnOtherWindow`), `window_at_cursor` in Rust | `standalone.md` → Dragging a Workspace between windows |
+| Quit and per-window close | `standalone/src/quit.ts`, `teardown-flow.ts`, `window-close.ts`; Rust `quit_state.rs`, `macos_terminate.rs` | `standalone.md` → Quit flow, Per-window close |
+| Persistence and restore | `lib/src/lib/window-session-aggregator.ts`, `standalone/src/window-restore.ts`, Rust `save_session` etc. | `standalone.md` → Persistence; `transport.md` |
+| `dor workspace` verbs, `dor list` | `dor/src/commands/workspace.ts`, `list.ts`, `dor/src/protocol.ts`, `dor/src/control-client.ts`, `dor/src/commands/types.ts`; window handler `lib/src/components/wall/workspace-control.ts`; router `dor-control-router.ts` | `dor-cli.md` → dor workspace, Standalone, Handle Model |
+| Platform hooks the stack added | `onPtyMarked`, `transferWorkspace` on `PlatformAdapter` (`lib/src/lib/platform/types.ts`), implemented in `standalone/src/tauri-adapter.ts` and `browser-sidecar-adapter.ts` | `transport.md` |
+| Browser harness | `standalone/scripts/dev-agent-browser.mjs` (`invokeMap`, `fireAndForget`), `browser-sidecar-adapter.ts` | `standalone.md` → Standalone browser-dev harness |
+
+## 7. Rules that bite
+
+- **Every Tauri `listen` must be `listenToWindow`** (`standalone/src/window-label.ts`).
+  A bare `listen` receives every window's traffic; `scripts/window-listeners.test.mjs`
+  fails the build otherwise. Broadcasts (`app.emit`) still reach scoped listeners.
+- Workspace id allocation and reservation-failure fallback follow
+  `docs/specs/standalone.md` → Workspace registry; use `createWorkspace()`.
+- Session release boundaries follow `docs/specs/transport.md` → Transferring a
+  Workspace and the `releaseSession` comment in `lib/src/lib/terminal-lifecycle.ts`.
+- **`take_arrivals` does not consume**, and an arrival without content is not
+  drainable. If you change the transfer sequence, keep: source invokes → Rust marks
+  → source serializes → `transfer_workspace_content` → target nudged/built.
+- **The routing lock is never held across an emit**, and the registry lock is taken
+  only for `dor:controlRequest`. Read the comment above `dispatch_sidecar_event`.
+- **Spec lint** rejects a bare file name in a `Source of truth:` line; use full
+  repo paths. Each rationale `## Heading` must exist in the spec.
+- **`DORMOUSE_NODE_BINARY`** must not point at the worktree's own `binaries/` file
+  (see §2).
+
+## 8. Known gaps
+
+- The browser harness simulates one window; multi-window behavior is Tauri-only.
+- `dor list --all` still lists the answering window only (`dor-cli.md` → Future).
+- A mark can fall inside an escape sequence the sidecar's parser is holding; the
+  target's parser resynchronizes on the next ground byte, the same class of cut
+  the old bounded replay made. Documented in `standalone.rationale.md` → Arrival queue.
+- The alert stores in the sidecar are memory-only; a sidecar respawn loses them
+  until a window re-seeds (the harness re-seeds on stream reconnect).
+- `dor workspace move` reports `moved` only once the target adopted the
+  Workspace; a hand-back is an error with its reason. `dor ab` fails fast when
+  no Wall answers; there is no CLI-side key fallback.
+- The one-frame blank on switch-back and WKWebView context release are unverified
+  (§5).
+
+## Transfer findings (user-run Tauri, 2026-09-11 through 2026-09-14)
+
+- `ascii-splash` mouse interaction failed after both tear-out and transfer into
+  an existing window; resizing did not repair it, restarting the TUI did.
+  Ordinary Workspace switching and window focus changes preserved mouse input.
+- Moving a window's last Workspace into another window left stale TUI drawing
+  until a resize. Tear-out drawing appeared correct.
+- A source pin remained visible after moving, then reported unavailable and
+  disappeared on use. Pins are now intentionally dropped on transfer.
+- Earlier checks passed: switching, idle tear-out, stable cross-window refs,
+  continuous numbered output without observed gaps, and identical retained
+  scrollback before and after transfer.
+
+Native follow-up checks passed:
+- `ascii-splash` mouse interaction survives transfer after the mouse-mode fix.
+- A transferred running command prompts before window close after preserving
+  semantic state across the move.
+- With a Workspace kill confirmation open, tearing out dismisses the source
+  confirmation without killing the process; closing the destination asks again.
+- Retained scrollback after 12,000 numbered lines had the same topmost line
+  (10953) before and after transfer.
+
+The shared "Confirm kill workspace" component now also handles app quit and
+window close, and renders the iframe move gate, whose modifier keys no longer
+answer it. Its automated tests pass; the replacement app-quit UI and the move
+gate's new key rule have not yet been manually tested. The last-Workspace merge redraw needs a specific native
+retest; the successful mouse retest does not establish that drawing result.

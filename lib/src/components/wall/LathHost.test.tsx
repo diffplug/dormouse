@@ -6,7 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LathHost, LATH_ZOOM_MARGIN, LATH_ZOOM_SHADOW } from './LathHost';
 import { createLathWallStore, type LathWallStore, type LeafMeta, LATH_LAYOUT_OPTS } from './lath-wall-store';
-import { createLathWallEngine } from './lath-wall-engine';
+import { type ContextHelper, createLathWallEngine } from './lath-wall-engine';
 import { layout } from '../../lib/lath/layout';
 import { LATH_EASING } from '../../lib/lath/animator';
 import { type DropTarget, move } from '../../lib/lath/ops';
@@ -435,6 +435,28 @@ describe('LathHost — empty tree', () => {
     expect(() => mount(store)).not.toThrow();
     expect(leafOrder()).toEqual([]);
     expect(container.querySelector('[data-lath-sash]')).toBeNull();
+  });
+});
+
+describe('LathHost — terminal context placement', () => {
+  it('places the context from each painted frame before notifying chrome', () => {
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
+    const { engine } = mount(store);
+    const element = document.createElement('div');
+    const placedWidths: number[] = [];
+    const seen: (ContextHelper | null)[] = [];
+    const unsubscribe = engine.subscribeFrames(() => seen.push(engine.contextHelper()));
+    act(() => engine.setContextPlacer(paint => {
+      placedWidths.push(paint.get('a')!.rect.width);
+      return { sourceId: 'a', element, side: 'right' };
+    }));
+    expect(seen.at(-1)).toEqual({ sourceId: 'a', element, side: 'right' });
+    expect(`${placedWidths.at(-1)}px`).toBe(leafDiv('a')!.style.width);
+    act(() => store.addLeaf('c', leafMeta({ title: 'C' }), { refId: 'b', edge: 'right' }));
+    expect(`${placedWidths.at(-1)}px`).toBe(leafDiv('a')!.style.width);
+    act(() => engine.setContextPlacer(null));
+    expect(seen.at(-1)).toBeNull();
+    unsubscribe();
   });
 });
 

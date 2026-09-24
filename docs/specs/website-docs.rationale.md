@@ -13,6 +13,11 @@ nothing in CI or a local build notices — only a human opening the live listing
 does. An invocation with `--packagePath` republishes an already-built VSIX,
 whose URLs were rewritten when it was packaged.
 
+**Why the generator still parses a page nobody serves.** The pass validates the
+guide's media against the Marketplace rules and copies `vscode-ext/images/` to
+`public/guide/images/`, which is what the packaged listing resolves its images
+against; the parsed guide is also what a replacement page would render.
+
 Generated guide media gets `public/guide/` to itself; `syncGuideMedia`
 replaces its `images/` directory on every build. It previously wrote to
 `public/images/`, which is the natural home for hand-authored site assets, and
@@ -75,10 +80,19 @@ The signup action originally reused the corrected link color on 10% and 20%
 tints of itself. Those composites pulled every bundled theme below AA, so its
 foreground is corrected against the stronger hover tint and checked on both.
 
-Anchor offsets are tight by measurement, not by estimate. The mobile bar is
-45px and the site header 64px, 80px from `md` up with no `lg` step, so the two
-steps that clear both have 3px in hand and `lg` clears the header alone by
-16px.
+## Marketplace and Open VSX constraints
+
+`github.com/user-attachments` URLs are the tempting remote media, and the worst
+kind: they 302 to a signature-expiring S3 object (so `HEAD` 403s where `GET`
+succeeds), cannot be cached downstream, leak every visitor's IP to a third
+party, and disappear with the comment they were uploaded to — taking the
+listing's images with them.
+
+## Homepage browser proof
+
+Proving the transcript end to end would need a live Burrow and a real
+`agent-browser` in CI, and a captured dev-server port is not stable enough to
+commit — a busy 5173 silently becomes 5174.
 
 ## Markdown rendering contract
 

@@ -3,11 +3,13 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TerminalPane } from './TerminalPane';
+import { focusSession } from '../lib/terminal-registry';
 import { LathHost } from './wall/LathHost';
 import { createLathWallEngine, terminalLeafMeta, type LathWallEngine } from './wall/lath-wall-engine';
 import { createLathWallStore, type LathWallStore } from './wall/lath-wall-store';
 import { leaf, split, tree } from '../lib/lath/test-util';
 import { PANE_HEADER_HEIGHT_PX } from './design';
+import { WorkspaceActiveContext, WorkspaceVisibleContext } from './wall/wall-context';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -40,7 +42,7 @@ vi.mock('../lib/terminal-registry', () => ({
     registry.resizes.push({ id, cols, rows });
   },
 }));
-vi.mock('./wall/AlertSpeechIndicator', () => ({ AlertSpeechIndicator: () => null }));
+vi.mock('./wall/AlertRingIndicator', () => ({ AlertRingIndicator: () => null }));
 vi.mock('./SelectionOverlay', () => ({ SelectionOverlay: () => null }));
 vi.mock('./SelectionPopup', () => ({ SelectionPopup: () => null }));
 vi.mock('./wall/MouseOverrideBanner', () => ({ MouseOverrideBanner: () => null }));
@@ -124,11 +126,18 @@ function settle() {
   for (let i = 0; i < 30; i++) frame();
   act(() => vi.advanceTimersByTime(200));
 }
-function mount() {
-  act(() => root.render(<LathHost lath={engine}
+const paneComponents = {
+  bodies: { terminal: ({ id }: { id: string }) => <TerminalPane id={id} /> },
+  tabs: { terminal: () => null },
+};
+function render(active: boolean, visible: boolean | null = null) {
+  act(() => root.render(<WorkspaceActiveContext.Provider value={active}><WorkspaceVisibleContext.Provider value={visible}><LathHost lath={engine}
     onCommitResize={(path, boundary, delta) => { store.resizeBoundary(path, boundary, delta); }}
-    componentsOverride={{ bodies: { terminal: ({ id }) => <TerminalPane id={id} /> }, tabs: { terminal: () => null } }}
-  />));
+    componentsOverride={paneComponents}
+  /></WorkspaceVisibleContext.Provider></WorkspaceActiveContext.Provider>));
+}
+function mount(active = true) {
+  render(active);
   settle();
   registry.resizes.length = 0;
   registry.fits.mockClear();
@@ -255,4 +264,81 @@ describe('terminal fitting follows settled layout, not animated geometry', () =>
     act(() => vi.advanceTimersByTime(150));
     expect(registry.resizes).toEqual([{ id: 'standalone', cols: 100, rows: 30 }]);
   });
+});
+
+describe('a hidden Workspace minimizes its terminals', () => {
+  it('keeps terminal elements attached during an inactive Workspace fade', () => {
+    mount();
+    const original = registry.entries.get('a')!.container;
+    render(false, true);
+    settle();
+    expect(registry.entries.get('a')!.container).toBe(original);
+    expect(registry.resizes).toEqual([]);
+    render(false, false);
+    settle();
+    expect(registry.entries.get('a')!.container).toBeUndefined();
+    expect(registry.entries.get('b')!.container).toBeUndefined();
+  });
+
+  it('detaches every terminal and fits nothing, even when the host resizes', () => {
+    mount();
+    expect(registry.entries.get('a')!.container).toBeDefined();
+    render(false);
+    settle();
+    expect(registry.entries.get('a')!.container).toBeUndefined();
+    expect(registry.entries.get('b')!.container).toBeUndefined();
+    registry.fits.mockClear();
+    hostWidth = 1200;
+    notifyResize();
+    settle();
+    expect(registry.fits).not.toHaveBeenCalled();
+    expect(registry.resizes).toEqual([]);
+  });
+
+  it('reattaches on activation with no PTY resize at the same grid', () => {
+    mount();
+    const terminal = registry.entries.get('b');
+    render(false);
+    settle();
+    render(true);
+    settle();
+    expect(registry.entries.get('b')).toBe(terminal);
+    expect(registry.entries.get('b')!.container).toBeDefined();
+    expect(registry.resizes).toEqual([]);
+  });
+
+  it('sends exactly one grid transition per terminal after a resize while hidden', () => {
+    mount();
+    render(false);
+    settle();
+    hostWidth = 1200;
+    notifyResize();
+    settle();
+    expect(registry.resizes).toEqual([]);
+    render(true);
+    settle();
+    expect(registry.resizes).toEqual([
+      { id: 'a', cols: 59, rows: 28 }, { id: 'b', cols: 59, rows: 28 },
+    ]);
+  });
+
+  it('creates a Session mounted into a hidden Workspace without attaching it', () => {
+    mount(false);
+    expect(registry.entries.has('a')).toBe(true);
+    expect(registry.entries.get('a')!.container).toBeUndefined();
+    expect(registry.fits).not.toHaveBeenCalled();
+    render(true);
+    settle();
+    expect(registry.entries.get('a')!.container).toBeDefined();
+    // The first fit of any Session, hidden-born or not: one transition per terminal.
+    expect(registry.resizes.map(e => e.id).sort()).toEqual(['a', 'b']);
+  });
+});
+
+// A retiring Tool iframe may still own the Surface focus handle this commit.
+it('targets xterm when the terminal becomes focused again', () => {
+  act(() => root.render(<TerminalPane id="tool" isFocused={false} />));
+  vi.mocked(focusSession).mockClear();
+  act(() => root.render(<TerminalPane id="tool" isFocused />));
+  expect(focusSession).toHaveBeenCalledWith('tool', true, 'terminal');
 });

@@ -3,7 +3,7 @@ import isChromatic from 'chromatic/isChromatic';
 import { useEffect, useLayoutEffect, StrictMode } from 'react';
 import { createElement } from 'react';
 import '../src/theme.css';
-import '../src/index.css';
+import './preview.css';
 import { initPlatform, type FakeScenario } from '../src/lib/platform';
 import {
   applyAlertSettingsFromHost,
@@ -40,6 +40,37 @@ import { cfg } from '../src/cfg';
 import type { DormouseTheme } from '../src/lib/themes';
 import { clearPersistedShellSelection, seedShellStore } from '../src/lib/shell-store';
 import type { ShellEntry } from '../src/lib/shell-defaults';
+import { getWorkspacesSnapshot, resetWorkspaces, setWorkspaces, type WorkspaceMeta } from '../src/lib/workspace-store';
+import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../src/lib/workspace-surfaces';
+import { resetWorkspaceUi } from '../src/lib/workspace-ui-store';
+
+/** `parameters.primedWorkspaces`: the Window a Workspace story renders. */
+interface PrimedWorkspaces {
+  workspaces: WorkspaceMeta[];
+  /** Defaults to the first. */
+  activeId?: string;
+  /** Member Surface ids per Workspace id, for the union indicators. */
+  membership?: Record<string, string[]>;
+}
+
+/** Written during render, not in the effect below: the strip and the Window read
+ *  the Workspace store on their FIRST render, so priming a frame later would
+ *  paint the default single Workspace first. Re-applied only when it differs, so
+ *  a re-render never notifies a subscriber mid-render. */
+function applyPrimedWorkspaces(primed: PrimedWorkspaces | undefined): void {
+  if (!primed) return;
+  const current = getWorkspacesSnapshot();
+  const activeId = primed.activeId ?? primed.workspaces[0]?.id;
+  const same = current.activeId === activeId
+    && current.workspaces.length === primed.workspaces.length
+    && current.workspaces.every((ws, i) => ws.id === primed.workspaces[i].id && ws.name === primed.workspaces[i].name);
+  if (same) return;
+  setWorkspaces({ workspaces: primed.workspaces, activeId });
+  resetWorkspaceSurfaces();
+  for (const [id, surfaceIds] of Object.entries(primed.membership ?? {})) {
+    setWorkspaceSurfaces(id, surfaceIds);
+  }
+}
 
 /** Fallback for one frame when the renderer is not painting (see `afterFrame`).
  *  Matches `paintFrame()` in `settle-terminals.ts`: long enough that a slow-but-real
@@ -50,15 +81,21 @@ const FRAME_FALLBACK_MS = 100;
 // Initialize fake platform once at module scope
 const fakePlatform = initPlatform('fake');
 
-// Pin animations at T=0 for deterministic Chromatic snapshots.
-//
-// Ask `isChromatic()`, never the user agent: Chromatic only rewrites the UA on
-// its Chrome runner, and identifies every other browser (Safari, Firefox, Edge)
-// with a `chromatic=true` query parameter instead. A UA sniff therefore left
-// every guard below OFF in Safari — a bell ringing on an 800ms infinite loop, a
-// blinking cursor, terminals on WebGL, and mid-tween pane geometry — which is
-// what made the Safari snapshots unstable while Chrome's stayed clean.
-if (isChromatic()) {
+/** Defined only by `lib/vitest.argos.config.ts`; absent in the real Storybook. */
+declare const __ARGOS_SNAPSHOT__: true | undefined;
+
+/** A visual-snapshot run — Chromatic or Argos — that must render deterministically.
+ *
+ *  Ask `isChromatic()`, never the user agent: Chromatic only rewrites the UA on
+ *  its Chrome runner, and identifies every other browser (Safari, Firefox, Edge)
+ *  with a `chromatic=true` query parameter instead. A UA sniff therefore left
+ *  every guard below OFF in Safari — an alarm pulsing on a 650ms infinite loop, a
+ *  blinking cursor, terminals on WebGL, and mid-tween pane geometry — which is
+ *  what made the Safari snapshots unstable while Chrome's stayed clean. */
+const visualSnapshot = isChromatic() || typeof __ARGOS_SNAPSHOT__ !== 'undefined';
+
+// Pin animations at T=0 for deterministic snapshots.
+if (visualSnapshot) {
   cfg.marchingAnts.paused = true;
   cfg.alert.ringingPaused = true;
   // A blinking cursor is captured on-or-off depending on the frame; freeze it to a
@@ -78,13 +115,15 @@ if (isChromatic()) {
   // seconds after it appears, which a play function cannot outrun: whether it is
   // still on screen at capture time depends on how loaded the runner is.
   cfg.overlays.warningAutoDismissMs = 0;
+  // One kill-confirm letter rather than a random one per prompt.
+  cfg.killConfirm.char = 'q';
   // Zero every CSS transition. Unlike the keyframe animations above, each of
   // which has a static substitute, transitions are started by state that lands
   // AFTER first paint — the primed-state decorator applies two rAFs in, which
-  // kicks off the bell's `transition-transform` rotation — so a capture can land
-  // mid-tween. Only the duration is overridden, so the resting appearance is
-  // unchanged; it is simply reached on the first frame. An author `!important`
-  // outranks even inline transition declarations (the selection ring's
+  // kicks off the header palette's `transition-colors` crossfade — so a capture
+  // can land mid-tween. Only the duration is overridden, so the resting
+  // appearance is unchanged; it is simply reached on the first frame. An author
+  // `!important` outranks even inline transition declarations (the selection ring's
   // unfocus-saturate fade), so a snapshot showing such a fade already finished
   // is expected, not a regression.
   const instantTransitions = document.createElement('style');
@@ -188,6 +227,10 @@ function resolveStorybookTheme(requestedThemeName: string | undefined) {
 const preview: Preview = {
   parameters: {
     layout: 'fullscreen',
+    // Argos otherwise shrinks the body to fit-content at 2x zoom, collapsing every
+    // fullscreen layout into a sliver; capture the page at the viewport width,
+    // as Chromatic does.
+    argos: { fitToContent: false },
   },
   globalTypes: {
     theme: {
@@ -318,6 +361,11 @@ const preview: Preview = {
       clearPersistedShellSelection();
       seedShellStore(primedShells ?? []);
 
+      // The Workspace model a strip / Window story renders, and the membership
+      // its indicators project. Activity for those members is primed with the
+      // rest below, two frames in.
+      applyPrimedWorkspaces(context.parameters?.primedWorkspaces as PrimedWorkspaces | undefined);
+
       useEffect(() => {
         let cancelled = false;
         let raf = 0;
@@ -379,8 +427,8 @@ const preview: Preview = {
         // alone. A renderer that is not painting (a hidden or occluded tab, a
         // throttled background window) never fires rAF at all, which would leave
         // every primed story rendering its unprimed default: no TODO pill, no
-        // notification, a bell with nothing to show. `settle-terminals.ts` holds
-        // the same rule for the same reason.
+        // notification, no alarm treatment. `settle-terminals.ts` holds the same
+        // rule for the same reason.
         const afterFrame = (fn: () => void) => {
           let done = false;
           const run = () => {
@@ -408,6 +456,10 @@ const preview: Preview = {
           }
           platform.clearDefaultScenario();
           disposeAllSessions();
+          // A story must not leak its Workspaces into the next one.
+          resetWorkspaces();
+          resetWorkspaceSurfaces();
+          resetWorkspaceUi();
         };
       }, [platform, primedSessionState, primedTerminalState, primedWatchedCommands, primedAlertSettings, primedPushDevices, primedAlertSpeech]);
 

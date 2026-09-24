@@ -2,6 +2,7 @@ packages:
   - canopy
   - dor
   - dor-lib-common
+  - hosted
   - lib
   - relay
   - remote-lib-common
@@ -10,12 +11,20 @@ packages:
   - vscode-ext
   - website
 allowBuilds:
+  cpu-features: false
+  protobufjs: false
+  ssh2: false
+  workerd: true
   "@swc/core": true
   "@vscode/vsce-sign": false
   esbuild: true
   keytar: false
   node-pty: true
   sharp: true
+# An unmet peer fails the install instead of warning, so a bump that leaves a
+# shared library outside a dependent's range (pgstencil's kysely/hono, the
+# @hono adapters) goes red in its own PR. Widen deliberately below, with a reason.
+strictPeerDependencies: true
 peerDependencyRules:
   allowedVersions:
     "react-helmet-async>react": ^19.0.0
@@ -33,3 +42,6 @@ peerDependencyRules:
     # sockets that would break first.
     "@hono/node-ws>@hono/node-server": ^2.0.0
 minimumReleaseAge: 1440
+overrides:
+  pgstencil: file:vendor/pgstencil-0.1.0.tgz
+  '@pgstencil/auth': file:vendor/pgstencil-auth-0.1.0.tgz

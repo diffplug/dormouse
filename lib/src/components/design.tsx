@@ -2,6 +2,7 @@ import { clsx } from 'clsx';
 import { tv, type VariantProps } from 'tailwind-variants';
 import { XIcon } from '@phosphor-icons/react';
 import { forwardRef, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { ButtonHTMLAttributes, ComponentProps, CSSProperties, HTMLAttributes, InputHTMLAttributes, ReactNode, RefObject } from 'react';
 import { stepFocus } from './focus-step';
 import { OVERLAY_VIEWPORT_MARGIN_PX } from '../lib/ui-geometry';
@@ -12,6 +13,9 @@ import { OVERLAY_VIEWPORT_MARGIN_PX } from '../lib/ui-geometry';
 /** Desktop pane-header height. Geometry derived from the header (such as the
  * elevated zoom inset) must use this constant so the chrome stays proportional. */
 export const PANE_HEADER_HEIGHT_PX = 30;
+
+/** Soft app-ground halo separates zoomed panes and context popups from content below. */
+export const ELEVATED_PANE_SHADOW = '0 0 5px 5px var(--color-app-bg)';
 
 // Pane headers/doors own the top corners; terminal bodies own the bottom.
 // All terminal-radius constants derive from this single source so the CSS
@@ -25,6 +29,53 @@ export const TERMINAL_TOP_RADIUS_CLASS = 'rounded-t-lg';
 export const TERMINAL_BOTTOM_RADIUS_CLASS = 'rounded-b-lg';
 export const TERMINAL_SELECTION_BORDER_RADIUS = `${TERMINAL_BORDER_RADIUS_REM}rem`;
 
+/** Shared shape, size bounds, and type for Baseboard Doors and Workspace tabs. */
+export const DOOR_TAB_CLASS = clsx(
+  'relative flex h-6 max-w-[220px] min-w-[68px] items-center overflow-hidden text-sm font-medium font-mono',
+  TERMINAL_TOP_RADIUS_CLASS,
+);
+
+/** A Workspace name the app derived rather than one a user set
+ *  (`docs/specs/layout.md` → "Workspace names"). */
+export const AUTO_NAME_CLASS = 'italic';
+
+/** The `max-w-` / `h-` bounds of `DOOR_TAB_CLASS`, for the host code that has to
+ *  reason about a tab's size without a rendered element (the cross-window tab
+ *  drag). Tailwind needs the arbitrary values spelled literally above, so these
+ *  two are a mirror — keep them in sync. */
+export const DOOR_TAB_MAX_WIDTH_PX = 220;
+export const DOOR_TAB_HEIGHT_PX = 24;
+
+/** The surface an alarm inset is drawn on, which is what picks its token: each
+ *  `--color-alarm-vs-*` is contrast-picked against one background. */
+export type AlertRingGround = 'door' | 'header-active' | 'header-inactive';
+
+export const ALERT_RING_INSET_CLASS = 'pointer-events-none absolute inset-0';
+
+/** Spelled out per ground, never built from a template — Tailwind's scanner
+ *  reads source text, so a composed arbitrary value would never be emitted. */
+export const ALERT_RING_INSET_BY_GROUND: Record<AlertRingGround, string> = {
+  door: 'shadow-[inset_0_0_0_2px_var(--color-alarm-vs-door)]',
+  'header-active': 'shadow-[inset_0_0_0_2px_var(--color-alarm-vs-header-active)]',
+  'header-inactive': 'shadow-[inset_0_0_0_2px_var(--color-alarm-vs-header-inactive)]',
+};
+
+// The Workspace strip's two halves of one idea: the selected tab is seated
+// against the Wall, and the rest recede into the app ground. Keep them
+// together so a palette change can't move one endpoint without the other.
+export const TAB_WALL_JOIN_GRADIENT = 'linear-gradient(to bottom, var(--color-header-active-bg), var(--color-app-bg))';
+
+// The inactive tab's fade, starting at 70% of the 24px tab — just below the
+// label's baseline — and ending at 70% app background, i.e. a 30/70 sRGB mix
+// with the header color under it. Deliberately TRANSLUCENT rather than a
+// gradient between the two tokens: it composites over the `bg-header-*` class,
+// so HEADER_PALETTE_TRANSITION_CLASS still crossfades beneath it. A gradient
+// naming the header token would paint over that crossfade, which
+// `transition-colors` cannot tween.
+export const TAB_INACTIVE_FADE_STYLE = {
+  backgroundImage: 'linear-gradient(to bottom, transparent 70%, color-mix(in srgb, var(--color-app-bg) 70%, transparent))',
+} as const;
+
 // The gutter between panes (and around the wall's top/sides — the baseboard
 // side stays a tight 2px). Deliberately ODD: the passthrough ring is a 1px
 // stroke, and a 1px stroke can only sit dead-center of a gutter on whole
@@ -32,6 +83,12 @@ export const TERMINAL_SELECTION_BORDER_RADIUS = `${TERMINAL_BORDER_RADIUS_REM}re
 // mirrored by the Tailwind inset classes in Wall.tsx / Baseboard.tsx
 // (`*-1.75` = 7px) — keep them in sync.
 export const PANE_GUTTER_PX = 7;
+
+/** Pointer travel before a press becomes a drag; below it the element's own
+ *  click behavior (select / enter passthrough / rename / activate) is untouched.
+ *  Shared by the pane/Door drag and the Workspace strip's reorder, so both feel
+ *  like one gesture vocabulary. */
+export const DRAG_THRESHOLD_PX = 5;
 
 // Concentric-corners rule: when a rounded outline wraps a rounded edge, both
 // arcs must share a corner center — outer radius = inner radius + offset.
@@ -69,16 +126,36 @@ export const HEADER_PALETTE_TRANSITION_CLASS =
 // tiny label legible. Shared so both pill sites stay in sync.
 export const TODO_PILL_TRACKING_CLASS = 'tracking-[0.08em]';
 
-// Spoken-alarm delivery is intentionally louder than resting chrome.
-// `--color-alarm-vs-terminal` is the dynamic black/white contrast pick for the
-// terminal body behind the overlay. The pulse itself is `alertSpeakingAnimationClass`
-// in `bell-icon-class.ts`, beside the other Chromatic-frozen alert animation.
+// Letter-spacing for the alarm overlay's `SPEAKING` / `SPOKEN` labels — wider
+// tracking keeps the small all-caps label legible over the wash.
 export const ALERT_SPEECH_TRACKING_CLASS = 'tracking-[0.12em]';
 
 // Chrome for small anchored popovers (title candidates, TODO preview, pane
 // context menu, rename warning). Text size and padding vary per popover and
 // stay at the call site; the surface recipe is shared so they can't drift.
 export const POPUP_SURFACE_CLASS = 'z-[1000] rounded border border-border bg-surface-raised font-mono text-foreground shadow-md';
+
+// Message-only panes use the terminal ground because they stand in for a
+// Surface, not chrome. PaneMessage pairs this scrollable root with content that
+// stays centered when it fits and fully reachable when the pane is small.
+const PANE_MESSAGE_CLASS = 'flex h-full min-h-0 w-full min-w-0 flex-col overflow-auto bg-terminal-bg px-6 py-6 text-center text-sm';
+
+export function PaneMessage({
+  children,
+  className,
+  contentClassName,
+  ...props
+}: ComponentProps<'div'> & { contentClassName?: string }) {
+  return (
+    <div {...props} className={clsx(PANE_MESSAGE_CLASS, className)}>
+      {/* Auto margins center only spare space; overflowing content starts at the
+          scroll origin instead of being centered beyond its reachable bounds. */}
+      <div className={clsx('my-auto w-full min-w-0 max-w-[30rem] shrink-0 self-center [overflow-wrap:anywhere]', contentClassName)}>
+        {children}
+      </div>
+    </div>
+  );
+}
 
 // `ComponentProps<'div'>` rather than `HTMLAttributes<HTMLDivElement>` so `ref`
 // is among the props (React 19 ref-as-prop): an anchored menu needs the row
@@ -118,8 +195,13 @@ export interface ModalRect {
   height: number;
 }
 
+/** The selection ring's z-index. Under `WorkspaceWindow` it paints from
+ *  `document.body`, where every modal layer must sit above it
+ *  (docs/specs/layout.md → "Selection overlay"). */
+export const SELECTION_RING_Z_INDEX = 50;
+
 export const MODAL_LAYERS = {
-  app: 50,
+  app: 60,
   pane: 100,
   critical: 9999,
 } as const;
@@ -496,7 +578,7 @@ export function ModalOverlay({
       }
     : { zIndex: resolvedZIndex, ...style };
 
-  return (
+  const overlay = (
     <div
       className={clsx(modalOverlay({ scope: rect ? 'target' : 'viewport', backdrop }), className)}
       style={overlayStyle}
@@ -505,6 +587,10 @@ export function ModalOverlay({
       {children}
     </div>
   );
+  // In `document.body`, so no Workspace's stacking context or presentation
+  // transform holds it under the selection ring (docs/specs/layout.md ->
+  // "Selection overlay"). The server renderer has no portals.
+  return typeof document === 'undefined' ? overlay : createPortal(overlay, document.body);
 }
 
 export type ModalSurfaceProps = HTMLAttributes<HTMLDivElement> & ModalSurfaceVariants;
@@ -577,6 +663,33 @@ export function ModalFrame({
         {children}
       </ModalSurface>
     </ModalOverlay>
+  );
+}
+
+/**
+ * A native modal `<dialog>`, shown on mount. Mount it only while open: closing
+ * unmounts it, which discards everything its owner held, so no reset-on-close
+ * logic is needed and no in-flight work can reach the next open.
+ */
+export function NativeModalDialog({
+  onClose,
+  className,
+  children,
+}: {
+  onClose: () => void;
+  className?: string;
+  children: ReactNode;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    // StrictMode runs this twice on one element, and a second showModal throws.
+    if (dialog && !dialog.open) dialog.showModal();
+  }, []);
+  return (
+    <dialog ref={dialogRef} onClose={onClose} className={className}>
+      {children}
+    </dialog>
   );
 }
 

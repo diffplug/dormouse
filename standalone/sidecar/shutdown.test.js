@@ -15,6 +15,7 @@ function fixture() {
     playwright: { close: () => new Promise(resolve => { closePlaywright = resolve; }) },
     setTimeout: callback => { deadline = callback; return { unref() {} }; },
     dorControl: { close: () => calls.push('control') },
+    alertStore: { dispose: () => calls.push('alerts') },
     burrow: { dispose: () => calls.push('burrow') },
     mgr: { killAll: () => calls.push('ptys') },
     process: { exit: () => calls.push('exit') },
@@ -30,7 +31,7 @@ test('shutdown waits for both browser providers before tearing down the sidecar'
   assert.deepEqual(f.calls, []);
   f.closePlaywright();
   await done;
-  assert.deepEqual(f.calls, ['control', 'burrow', 'ptys', 'exit']);
+  assert.deepEqual(f.calls, ['control', 'alerts', 'burrow', 'ptys', 'exit']);
   await f.shutdown();
   assert.equal(f.calls.filter(call => call === 'exit').length, 1);
 });
@@ -41,5 +42,5 @@ test('the shared deadline still permits shutdown when a browser provider hangs',
   f.closePlaywright();
   f.deadline();
   await done;
-  assert.deepEqual(f.calls, ['control', 'burrow', 'ptys', 'exit']);
+  assert.deepEqual(f.calls, ['control', 'alerts', 'burrow', 'ptys', 'exit']);
 });

@@ -9,6 +9,7 @@ import {
   type StricliProcess,
 } from '@stricli/core';
 import { agentBrowserCommand, runAgentBrowserCli } from './commands/agent-browser.js';
+import { appCommand } from './commands/app.js';
 import { awaitCommand } from './commands/await.js';
 import { ensureCommand } from './commands/ensure.js';
 import { iframeCommand } from './commands/iframe.js';
@@ -18,8 +19,13 @@ import { readCommand } from './commands/read.js';
 import { sendCommand } from './commands/send.js';
 import { skillCommand } from './commands/skill.js';
 import { splitCommand } from './commands/split.js';
+import { toolCommand } from './commands/tool.js';
+import { openCommand } from './commands/open.js';
 import { versionCommand } from './commands/version.js';
+import { workspaceCommand } from './commands/workspace.js';
 import { errorLine, errorMessage, fail } from './commands/shared.js';
+import { VIEW_FILE_ARGV } from './file-viewer-format.js';
+import { runFileViewer } from './file-viewer.js';
 import type {
   CliEnv,
   CliOptions,
@@ -34,6 +40,7 @@ export type {
   AgentBrowserExecResult,
   AgentBrowserSurfaceRequest,
   AgentBrowserSurfaceResponse,
+  AppRestartResponse,
   AwaitCause,
   AwaitSurfaceOutcome,
   AwaitSurfaceRequest,
@@ -53,8 +60,17 @@ export type {
   KillSurfaceConfirmation,
   KillSurfaceRequest,
   KillSurfaceResponse,
+  ListScope,
   ListSurfacesRequest,
   ListSurfacesResponse,
+  ListWorkspacesRequest,
+  ListWorkspacesResponse,
+  NewWorkspaceRequest,
+  CloseWorkspaceRequest,
+  RenameWorkspaceRequest,
+  SwitchWorkspaceRequest,
+  WorkspaceMutationResponse,
+  WorkspaceRow,
   ReadSurfaceRequest,
   ReadSurfaceResponse,
   ResolvedSplitDirection,
@@ -71,12 +87,16 @@ export type {
   SurfacePort,
   SurfaceRenderMode,
   SurfaceView,
+  ToolSurfaceRequest,
+  ToolSurfaceResponse,
   VersionMetadata,
 } from './commands/types.js';
 
 const COMMANDS = [
   splitCommand,
   ensureCommand,
+  toolCommand,
+  openCommand,
   versionCommand,
   skillCommand,
   sendCommand,
@@ -87,11 +107,15 @@ const COMMANDS = [
   agentBrowserCommand,
   playwrightCommand,
   listCommand,
+  workspaceCommand,
+  appCommand,
 ] as const satisfies readonly Command[];
 
 const ROUTES = {
   split: splitCommand.command,
   ensure: ensureCommand.command,
+  tool: toolCommand.command,
+  open: openCommand.command,
   version: versionCommand.command,
   skill: skillCommand.command,
   send: sendCommand.command,
@@ -102,6 +126,8 @@ const ROUTES = {
   'agent-browser': agentBrowserCommand.command,
   playwright: playwrightCommand.command,
   list: listCommand.command,
+  workspace: workspaceCommand.command,
+  app: appCommand.command,
 };
 
 const DOR_TEXT: ApplicationText = {
@@ -178,6 +204,12 @@ export async function runCli(rawArgv: string[], options: CliOptions = {}): Promi
   if (argv[0] === 'agent-browser' && !isAgentBrowserHelpInvocation(argv)) {
     return runAgentBrowserCli(argv.slice(1), options);
   }
+  // `dor __view-file <file>` is the built-in viewer's private entry
+  // (docs/specs/dor-tool.md -> Opening local files). Its server outlives this
+  // call; the announcement is the only output.
+  if (argv[0] === VIEW_FILE_ARGV && argv.length === 2) {
+    return { stdout: await runFileViewer(argv[1]), stderr: '', exitCode: 0 };
+  }
 
   const helpTarget = getHelpTarget(argv);
   const [commandName, ...args] = rewriteHelpArgv(argv);
@@ -193,18 +225,13 @@ export async function runCli(rawArgv: string[], options: CliOptions = {}): Promi
     if (!check.ok) return fail(check.message);
   }
 
-  // stricli discards the `--` escape sequence during parsing, so capture its
-  // presence here (pre-parse) for commands that must distinguish an empty
-  // command tail from none — e.g. `dor split --` vs bare `dor split`.
-  const hasArgumentEscape = args.includes('--');
-
   const capture = createCaptureProcess(options.env);
   await runStricli(APPLICATION, commandName ? [commandName, ...args] : [], {
     process: capture.process,
     forCommand: (): DorCommandContext => ({
       process: capture.process,
       options,
-      hasArgumentEscape,
+      commandArgs: args,
     }),
   });
 

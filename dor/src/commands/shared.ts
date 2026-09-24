@@ -34,6 +34,15 @@ export function parsePositiveInt(input: string, flag: string, max = Number.POSIT
   return value;
 }
 
+/** Flag parser for non-negative integers (`--index`, 0-based). */
+export function parseNonNegativeInt(input: string, flag: string): number {
+  const value = Number(input);
+  if (input.trim() === '' || !Number.isInteger(value) || value < 0) {
+    throw new SyntaxError(`invalid ${flag} '${input}'`);
+  }
+  return value;
+}
+
 export function renderJson(payload: unknown): string {
   return `${JSON.stringify(payload, null, 2)}\n`;
 }
@@ -44,8 +53,40 @@ export function isIdFormat(value: string): value is IdFormat {
 
 export function parseIdFormat(value: string): IdFormat {
   if (isIdFormat(value)) return value;
-  if (value === 'uuids') return 'ids';
   throw new SyntaxError(`invalid --id-format '${value}'`);
+}
+
+export interface PreDelimiterArgSpec {
+  /** Flags taking no value. */
+  readonly booleans: ReadonlySet<string>;
+  /** Flags consuming the next argument. */
+  readonly valued: ReadonlySet<string>;
+  /** `'reject'` fails on the first non-flag argument; `'collect'` returns them all. */
+  readonly positionals: 'collect' | 'reject';
+}
+
+/**
+ * The argv-head shape check `dor ensure` and `dor tool` share. stricli cannot
+ * express "only these flags may precede `--`", so `cli.ts` runs this before it
+ * parses; each command supplies its own flag sets and keeps them beside its
+ * `parameters.flags`.
+ */
+export function scanPreDelimiterArgs(head: readonly string[], spec: PreDelimiterArgSpec): ParseResult<string[]> {
+  const positionals: string[] = [];
+  for (let index = 0; index < head.length; index += 1) {
+    const arg = head[index];
+    if (spec.booleans.has(arg)) continue;
+    if (spec.valued.has(arg)) {
+      const value = head[index + 1];
+      if (!value || value.startsWith('-')) return { ok: false, message: `${arg} requires a value` };
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith('-')) return { ok: false, message: `unknown option '${arg}'` };
+    if (spec.positionals === 'reject') return { ok: false, message: `unexpected argument '${arg}' before --` };
+    positionals.push(arg);
+  }
+  return { ok: true, value: positionals };
 }
 
 function resolveControlClient(options: CliOptions, timeoutMs?: number): ParseResult<ControlClient> {
@@ -75,6 +116,21 @@ function resolveControlClient(options: CliOptions, timeoutMs?: number): ParseRes
 export function requireControlClient(options: CliOptions, timeoutMs?: number): ControlClient | Error {
   const result = resolveControlClient(options, timeoutMs);
   return result.ok ? result.value : new Error(result.message);
+}
+
+/** The `--workspace <ref>` flag every action command carries, defined once so
+ *  its wording cannot drift (`docs/specs/dor-cli.md` → "Handle Model"). */
+export const workspaceFlag = {
+  kind: 'parsed',
+  parse: stringParser,
+  brief: "Workspace to act in, instead of the caller's.",
+  optional: true,
+  placeholder: 'ref',
+} as const;
+
+/** The `workspace` field of a request, present only when the flag was given. */
+export function workspaceParam(workspace: string | undefined): { workspace?: string } {
+  return workspace === undefined ? {} : { workspace };
 }
 
 export function renderHandle(handle: { ref: string; id: string }, idFormat: IdFormat): string {
@@ -113,7 +169,7 @@ export function msysToWindowsCwd(pwd: string, platform: string): string {
 // travel in the request. Prefer the shell's PWD (injectable, matches what the
 // user sees) and fall back to the process cwd. resolvePath canonicalizes both the
 // default and a relative/absolute path into one absolute path the host can key on.
-// Shared by `dor ensure --cwd` and `dor list --cwd`.
+// Shared by `ensure`, `list`, `tool`, `open`, and `skill`.
 export function callerWorkingDirectory(flag: string | undefined, env: CliEnv | undefined): string {
   const base = msysToWindowsCwd(env?.PWD ?? process.cwd(), process.platform);
   return resolvePath(base, flag ?? '.');

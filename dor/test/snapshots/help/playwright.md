@@ -4,7 +4,7 @@ Invocation: `dor playwright --help`
 
 ```text
 USAGE
-  dor playwright [--key name] [--session name] [--surface handle] <args>...
+  dor playwright [--key name] [--session name] [--surface handle] [--workspace ref] <args>...
   dor playwright --help
 
 Forwards native playwright-cli commands to your installed @playwright/cli.
@@ -29,11 +29,12 @@ Examples:
   dor pw --surface surface:4 goto :5173
 
 FLAGS
-     [--key]      Workspace browser key (default "default").
-     [--session]  Raw Playwright session name (alias: -s).
-     [--surface]  Existing Playwright surface handle.
-  -h  --help      Print help information and exit
-      --          All subsequent inputs should be interpreted as arguments
+     [--key]        Workspace browser key (default "default").
+     [--session]    Raw Playwright session name (alias: -s).
+     [--surface]    Existing Playwright surface handle.
+     [--workspace]  Workspace to act in, instead of the caller's.
+  -h  --help        Print help information and exit
+      --            All subsequent inputs should be interpreted as arguments
 
 ARGUMENTS
   args...  Native Playwright CLI arguments.

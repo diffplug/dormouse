@@ -16,7 +16,9 @@ export function NotepadHeaderButton({
 }: {
   surfaceId: string;
   /** The minimal tier: an empty notepad yields its space to the title, one with
-   *  notes stays, so notes are never invisible. */
+   *  notes stays. Narrower still, the caller drops the button outright — only
+   *  the pane-action group fits (`docs/specs/layout.md` → "Pane header
+   *  responsive sizing"). */
   hideWhenEmpty?: boolean;
 }) {
   const notes = useNoteCount(surfaceId);

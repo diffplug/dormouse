@@ -1,3 +1,4 @@
+import { recordToolDirty } from './tool-dirty-store';
 import { registry } from './terminal-store';
 import {
   commandArgv0,
@@ -18,7 +19,7 @@ import {
   type PromptSubmitState,
 } from './terminal-command-input';
 import { derivePromptShape, extractCommand, type PromptShape } from './terminal-prompt-shape';
-import { stripTerminalControls, TerminalControlStreamFilter } from './terminal-controls';
+import { stripTerminalControlsBothWays, TerminalControlStreamFilter } from './terminal-controls';
 
 const paneStates = new Map<string, TerminalPaneState>();
 const promptSubmitStates = new Map<string, PromptSubmitState>();
@@ -28,7 +29,7 @@ const promptAltScreenFilters = new Map<string, PromptAltScreenFilter>();
 // Panes with authentic OSC 633/133 boundaries; the keystroke fallback stands
 // down for each id here until the pane is reset or removed.
 const oscDrivenPanes = new Set<string>();
-const listeners = new Set<() => void>();
+const listeners = new Set<(changedId?: string) => void>();
 
 // Authentic shell boundaries; heuristic-synthesized prompt markers are excluded.
 function isOscDrivenBoundary(event: TerminalSemanticEvent): boolean {
@@ -45,7 +46,9 @@ function isOscDrivenBoundary(event: TerminalSemanticEvent): boolean {
 }
 let cachedSnapshot: Map<string, TerminalPaneState> | null = null;
 
-export function subscribeToTerminalPaneState(listener: () => void): () => void {
+/** `changedId` names the one pane whose state moved; omitting it means a
+ *  store-wide change every listener must take. */
+export function subscribeToTerminalPaneState(listener: (changedId?: string) => void): () => void {
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
@@ -62,11 +65,19 @@ export function getTerminalPaneState(id: string): TerminalPaneState {
   return paneStates.get(id) ?? createTerminalPaneState();
 }
 
+/** The cwd a new local shell may inherit from `id`. A remote cwd (OSC 7 over ssh)
+ *  names a path on the remote host, not one the local shell can chdir to. */
+export function getInheritableCwd(id: string): string | undefined {
+  const cwd = paneStates.get(id)?.cwd;
+  return cwd && !cwd.isRemote ? cwd.path : undefined;
+}
+
 /**
  * The bare program name of the pane's foreground command, or null when the pane
  * is at a prompt (or its shell reported no command line). This is the key the
- * WATCHING rule set is stored under, so the bell and the alert dialog both use
- * it to decide which rule they are toggling — see `docs/specs/alert.md`.
+ * WATCHING rule set is stored under, so the terminal context and the alert
+ * dialog both use it to decide which rule they are toggling — see
+ * `docs/specs/alert.md`.
  */
 export function getRunningCommandArgv0(id: string): string | null {
   const raw = paneStates.get(id)?.currentCommand?.rawCommandLine;
@@ -75,10 +86,24 @@ export function getRunningCommandArgv0(id: string): string | null {
 
 // Count sessions whose latest activity is a live/running command (not an idle
 // shell at a prompt). The standalone quit orchestrator uses this to decide
-// whether a quit needs a confirmation (docs/specs/standalone.md §Quit flow).
-export function countRunningSessions(): number {
+// whether a quit needs a confirmation (docs/specs/standalone.md §Quit flow);
+// `except` is a Session that does not count — a restart's requester
+// (docs/specs/standalone.md → "Restart").
+export function countRunningSessions(except?: string | null): number {
+  return countRunning(null, except);
+}
+
+/** The same count restricted to `ids` — the Workspace close confirmation asks it
+ *  of one Workspace's member Surfaces (`docs/specs/layout.md` → "Workspaces").
+ *  `null` means every Session in the Window. */
+export function countRunningSessionsIn(ids: Iterable<string> | null): number {
+  return countRunning(ids === null ? null : new Set(ids), null);
+}
+
+function countRunning(scope: ReadonlySet<string> | null, except: string | null | undefined): number {
   let count = 0;
   for (const [id, state] of paneStates) {
+    if ((scope && !scope.has(id)) || id === except) continue;
     const entry = registry.get(id);
     if (state.activity.kind === 'running' || (entry?.helper && !entry.exited && entry.helperBusy !== false)) count++;
   }
@@ -96,7 +121,7 @@ export function ensureTerminalPaneState(id: string, initial?: Partial<TerminalPa
   if (existing) return existing;
   const next = createTerminalPaneState(initial);
   paneStates.set(id, next);
-  notifyTerminalPaneStateListeners();
+  notifyTerminalPaneStateListeners(id);
   return next;
 }
 
@@ -113,13 +138,29 @@ function clearPaneScratch(id: string): void {
 export function resetTerminalPaneState(id: string, initial?: Partial<TerminalPaneState>): void {
   clearPaneScratch(id);
   paneStates.set(id, createTerminalPaneState(initial));
-  notifyTerminalPaneStateListeners();
+  notifyTerminalPaneStateListeners(id);
+}
+
+/** Runtime-only state at a transfer mark; never part of disk persistence. */
+export interface TransferredTerminalState {
+  pane: TerminalPaneState;
+  oscDriven: boolean;
+}
+
+export function snapshotTerminalState(id: string): TransferredTerminalState {
+  return { pane: getTerminalPaneState(id), oscDriven: isPaneOscDriven(id) };
+}
+
+/** Seed before the since-mark replay so its newer events remain authoritative. */
+export function restoreTransferredTerminalState(id: string, state: TransferredTerminalState): void {
+  resetTerminalPaneState(id, state.pane);
+  if (state.oscDriven) oscDrivenPanes.add(id);
 }
 
 export function removeTerminalPaneState(id: string): void {
   clearPaneScratch(id);
   if (!paneStates.delete(id)) return;
-  notifyTerminalPaneStateListeners();
+  notifyTerminalPaneStateListeners(id);
 }
 
 export function applyTerminalSemanticEvents(
@@ -146,7 +187,7 @@ export function applyTerminalSemanticEvents(
   }
   if (next === prev && paneStates.has(id)) return;
   paneStates.set(id, next);
-  notifyTerminalPaneStateListeners();
+  notifyTerminalPaneStateListeners(id);
 }
 
 // Reads the cursor's full rendered logical line (`prompt + command`) from the
@@ -161,8 +202,11 @@ export function recordTerminalUserInput(id: string, input: string, reader?: Prom
   // Shell integration is authoritative once it's emitting OSC boundaries; don't
   // also synthesize command starts from keystrokes (that would double-count).
   if (oscDrivenPanes.has(id)) return;
-  const state = paneStates.get(id) ?? createTerminalPaneState();
-  if (state.currentCommand || state.activity.kind === 'running' || state.activity.kind === 'finished') return;
+  // One synthesized command at a time: keystrokes into a running program are
+  // not submissions, and its output is not a prompt line. (`finished` and a
+  // `currentCommand`-less `running` are only ever reached through a real
+  // `commandFinish`/`commandStart`, which retires this path above.)
+  if ((paneStates.get(id) ?? createTerminalPaneState()).currentCommand) return;
 
   const submitState = promptSubmitStates.get(id) ?? createPromptSubmitState();
   const next = detectPromptSubmit(submitState, input);
@@ -177,6 +221,8 @@ export function recordTerminalUserInput(id: string, input: string, reader?: Prom
   const shape = promptShapes.get(id) ?? null;
   const commandLine = renderedLine && shape ? extractCommand(renderedLine, shape) : null;
   if (commandLine) {
+    // A synthetic start has no protocol event to retire the Tool's last report.
+    recordToolDirty(id, null);
     applyTerminalSemanticEvents(id, [
       { type: 'commandLine', commandLine },
       { type: 'commandStart', source: 'user_input' },
@@ -194,6 +240,7 @@ export function seedLaunchedCommand(id: string, command: string, cwdPath?: strin
   if (cwd) events.push({ type: 'cwd', cwd });
   events.push({ type: 'commandLine', commandLine: command });
   events.push({ type: 'commandStart', source: 'user_input' });
+  recordToolDirty(id, null);
   applyTerminalSemanticEvents(id, events);
 }
 
@@ -298,7 +345,7 @@ export function seedTerminalManualCwd(id: string, path: string | null | undefine
   }
   if (current.cwd) return;
   paneStates.set(id, { ...current, cwd });
-  notifyTerminalPaneStateListeners();
+  notifyTerminalPaneStateListeners(id);
 }
 
 export function fillTerminalProcessCwd(id: string, path: string | null | undefined): void {
@@ -313,7 +360,7 @@ function updateCwdIfAllowed(id: string, cwd: CwdState): void {
   if (!current) return;
   if (!processCwdMayReplace(current.cwd?.source)) return;
   paneStates.set(id, { ...current, cwd });
-  notifyTerminalPaneStateListeners();
+  notifyTerminalPaneStateListeners(id);
 }
 
 // Detect a returned/idle shell prompt for shells without OSC 133/633
@@ -331,7 +378,7 @@ function detectReturnedShellPrompt(visible: string): string | null {
   // redraw's cursor move welds text that was never adjacent on screen, and this
   // reads the result as a *line*. Without it, `building...\x1b[1;1H➜  ~ ` reads
   // as the single line `building...➜  ~ `, and the prompt goes undetected.
-  const text = normalizeBreaks(stripTerminalControls(visible, { boundaries: true }));
+  //
   // A boundary is not a real line break, though, and the difference decides the
   // safe direction. A genuine trailing newline means nothing has been painted on
   // the current line yet — no prompt — and that must keep returning null, because
@@ -339,9 +386,11 @@ function detectReturnedShellPrompt(visible: string): string | null {
   // the tail means only that a control sequence closed the line: a prompt that
   // clears to end-of-line after painting itself (`➜  ~ \x1b[K`) is the common
   // case, and treating that as an empty last line would hide every such prompt.
-  // Stripping without boundaries leaves exactly the real breaks, so it answers
-  // which one this is.
-  const endsOnRealNewline = /\n$/.test(normalizeBreaks(stripTerminalControls(visible)));
+  // The `plain` reading leaves exactly the real breaks, so it answers which one
+  // this is — both come off one strip.
+  const stripped = stripTerminalControlsBothWays(visible);
+  const text = normalizeBreaks(stripped.boundaries);
+  const endsOnRealNewline = /\n$/.test(normalizeBreaks(stripped.plain));
   let searchEnd = text.length;
   if (!endsOnRealNewline) {
     while (searchEnd > 0 && text[searchEnd - 1] === '\n') searchEnd--;
@@ -466,7 +515,7 @@ class PromptAltScreenFilter {
   }
 }
 
-function notifyTerminalPaneStateListeners(): void {
+function notifyTerminalPaneStateListeners(changedId?: string): void {
   cachedSnapshot = null;
-  listeners.forEach((listener) => listener());
+  listeners.forEach((listener) => listener(changedId));
 }

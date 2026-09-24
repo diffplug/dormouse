@@ -2,11 +2,25 @@
 
 > Informative companion to [layout.md](layout.md): the evidence, measurements, and dead-approach history behind its rules, keyed by that spec's headings (AGENTS.md → "What, not why"). Nothing here is normative.
 
+## Pane header responsive sizing
+
+A viewport breakpoint says nothing about a narrow split inside a wide window: at a 1200px viewport every control stayed rendered in a 103px pane and overflowed into its neighbor (innerdogfood QC, 2026-09). Tool headers have even less browser width because Terminal Context occupies its own button. Measuring the header and moving fixed controls together keeps long keys, note buttons, and renderer chips from pushing minimize/kill into a neighboring pane; quantizing the measurement to a tier keeps the header from re-rendering on every frame of a sash drag or tween.
+
+In the same run, real clicks exposed premature popup dismissal before the action ran. After repair, Zoom reached 716×403 pixels, Unzoom returned to the compact header, Reload worked, and Display retained modal focus. Header buttons stayed within their panes at the final 1200×800 viewport.
+
+Terminal border-box thresholds of 293/173 pixels preserve the former 280/160 content-box thresholds plus 13 pixels of horizontal padding. A content box can clamp to zero in a visible tiny leaf; treating that as hidden retained the full tier. Positive border-box width distinguishes that case from a hidden leaf.
+
+The terminal's three lowest boundaries are where the pane-action group stops fitting with its 5-pixel right padding intact. The group is 68 pixels (a 4-pixel `ml-1`, three 20-pixel buttons, two 2-pixel gaps) and the header root puts its own 6-pixel `gap-1.5` before it, so a bare header needs 8 + 6 + 68 + 5 = 87, one carrying a notepad icon another 6 + 24 = 117, and either one another 6 + 6 = 12 when a Tool's unsaved-change dot is showing, since that dot is a root-level sibling outside the region that clips. Measured in Storybook at 1-pixel steps (2026-09): the group sits flush at 82 and 112 respectively and clips only below that, so the published boundaries buy back padding rather than avert a clip — but a flush width is one pixel from real clipping, which is no margin against a font or icon change.
+
+Only the notepad boundary is a dirty-aware band (117–128). The group's own dot band, 87–98, sits entirely below the 100-pixel `minLeaf`, so reserving the dot's 12 pixels unconditionally there costs nothing reachable and saves a tier; erring early also errs safe, since the invariant is that the group never clips.
+
+The browser's 94/102 pair is the former 72/80 pair plus the zoom button and its gap, zoom having moved into the group; the 8-pixel spread is the unsaved-change dot and its gap. Its collapsed root is `gap-0.5 px-1`, already counted, so it needs no equivalent correction.
+
 ## Pane body
 
 xterm.js paints only its own rendered surface, and integer row fitting leaves a sub-row remainder at the bottom of the pane: a host background differing from the terminal screen shows as a stripe under the last row, and an unclipped host squares off the rounded bottom corners.
 
-## Spoken-alarm overlay
+## Alarm overlay
 
 **Why the wash sits below the header.** `--color-alarm-vs-terminal` is picked for contrast against the *terminal body*, so it carries no contrast guarantee over the header band.
 
@@ -14,9 +28,27 @@ xterm.js paints only its own rendered surface, and integer row fitting leaves a 
 
 **Why header popovers are not a factor.** Every one — pane context menu, title candidates, notification preview, rename warning — portals to `document.body` with `position: fixed`, so it renders in the root stacking context above the whole wall regardless of leaf z-indices.
 
-## Baseboard
+## Workspaces
 
-**Why `showBaseboard={false}` is a seam.** The mobile Pocket composition — the obvious candidate — is a separate `MobileWall` (`docs/specs/mobile-terminal-ui.md`), not a baseboard-less Wall.
+**Why `visibility: hidden` in one grid cell rather than `display: none`.** A `display:none` Wall has no box, so every xterm in it would refit on the way back — including a resize that happened while it was hidden. Sharing one grid cell keeps every Wall's box identical, so a switch's reattach fit finds an unchanged grid (checked in the browser-dev harness by resizing with Workspace 2 visible and finding Workspace 1's screen already at the new size, 2026-09).
+
+**Why a hidden Workspace's terminals are detached rather than merely hidden.** xterm pauses rendering only when its screen element stops intersecting (`RenderService` in `@xterm/xterm`), and a `visibility: hidden` box still intersects, so a hidden pane kept rasterizing every output frame and holding a GL context. Reusing the minimize primitives pauses it and releases the context; the box stays laid out, so the reattach fit finds the same grid and sends no PTY resize (2026-09).
+
+**Why a move confirms for iframes but not for agent-browser Surfaces.** An agent-browser Surface's session lives in the host process; the target window reconnects its viewer and the page is as it was. A plain iframe is a document inside the source webview, and no API carries a document between webviews — the alternative, keeping every Workspace in its own native child webview and reparenting it, was prototyped on a vendored Tauri fork and rejected for the fork (2026-09). The confirmation is the kill's typed letter rather than a button because what is lost is as gone as a killed process, and the same gesture already means that.
+
+**Why `inert` is only defense in depth.** `visibility: hidden` already removes focusability, so the attribute exists for a future presentation that keeps the subtree visible.
+
+**Why the strip's reorder drag does not capture the pointer on press.** A captured pointer retargets the following `click` to the capture element, so capturing on `pointerdown` swallowed the activate button's click and no tab could be activated by mouse (found in the browser-dev harness, 2026-09). Capture is only useful once the gesture is a drag, which is where it now happens.
+
+**Why the close confirmation anchors to the Wall, not the tab.** `ModalOverlay` centers inside the target's box and does not clamp to the viewport, so a 24px tab at the top of the window left the dialog clipped. Every Wall shares one grid cell, so the anchor lands in the same place whether or not that Workspace is visible.
+
+**Why the modal hosts are gated rather than hoisted.** Each calls `useDialogKeyboardOwner`, which reads the *active* Wall's `DialogKeyboardContext`; hoisting them above `WorkspaceWindow` would leave them with no coordinator to suppress command-mode dispatch through. The cost is that a modal's React-local state resets on a switch — accepted, since every modal that matters keeps its state in a store.
+
+## Workspace names
+
+**Why the name holds while git is unanswered.** Naming by directory first would flash the folder name for one round trip, then flip to `repo @ branch`, on every new directory. The hold is bounded because a mount that stays hung is durable, not slow: its `realpath` never returns, so an unbounded hold froze the name for the life of the Window and drowned out the Workspace's healthy members (found in review, 2026-09).
+
+**Why a command finish re-asks git.** `git switch` changes the branch without moving the cwd, and there is no filesystem watcher; the prompt after it is the first boundary that can notice. An agent switching branches inside a long-running command is not seen until that command exits — accepted over watching every repository's `HEAD` (2026-09).
 
 ## Mode switching
 
@@ -32,7 +64,7 @@ The passthrough `solid` variant replaced an original `border: 1px solid ${color}
 
 **The inflate arithmetic.** With `SELECTION_RING_INFLATE_PX` at 4, the 1px passthrough border spans [3px, 4px] from the pane edge — dead centre of the 7px gutter, on whole pixels because the gutter is odd. That is the whole reason `PANE_GUTTER_PX` is odd.
 
-**Why marching is burst-bound.** An infinite SVG stroke animation kept Chrome's renderer active at 60 style recalculations per second while Dormouse was otherwise idle. Measured in Chrome for Testing 150 (2026-09): five focused minutes added 3.77 MB of reclaimable embedder heap and used 24.33 seconds of renderer CPU; pausing only that animation held embedder heap flat (-29 KB) and used 0.017 seconds across a three-minute control. Four cycles preserve the mode/selection cue without leaving a standing allocator after interaction stops.
+**What endless marching costs, and why it is accepted.** An infinite SVG stroke animation keeps Chrome's renderer at 60 style recalculations per second. Measured in Chrome for Testing 150 (2026-09): five focused minutes added 3.77 MB of reclaimable embedder heap and used 24.33 seconds of renderer CPU; pausing only that animation held embedder heap flat (-29 KB) and used 0.017 seconds across a three-minute control. A four-cycle burst (PR #542) avoided that, but the ring then went still about 1.6s after a click activated a Workspace, and a still ring reads as the command-mode cue having gone. Command mode is transient, and a blurred window or reduced motion pauses the ants, so the cost falls only on a focused window left sitting in command mode (2026-09).
 
 ## Ring travel
 

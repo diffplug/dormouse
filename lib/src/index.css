@@ -6,8 +6,8 @@ body {
   margin: 0;
   padding: 0;
   overflow: hidden;
-  font-size: var(--mt-font-size);
-  font-family: var(--mt-font-family);
+  font-size: var(--vscode-font-size);
+  font-family: var(--vscode-editor-font-family);
 }
 
 #root {
@@ -77,6 +77,11 @@ body {
 
 @keyframes marching-ants {
   to { stroke-dashoffset: var(--march-offset); }
+}
+
+/* A still dashed ring. `!important` because SelectionRing writes `animation` inline. */
+@media (prefers-reduced-motion: reduce) {
+  [data-ring='outline'] { animation: none !important; }
 }
 
 /* --- Kill-dialog confirm animation --- */

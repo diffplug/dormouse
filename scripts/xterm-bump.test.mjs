@@ -100,3 +100,75 @@ test('default dry-run preserves standalone drift', () => {
   assert.equal(result.packages.standalone[CORE], oldCore);
   assert.match(result.stdout, /no files written/);
 });
+
+// --- xterm-lint check 4: the hand-copied UpstreamVsFork triple ---------------
+//
+// A self-test, not a second lint: the rule's whole job is to catch a hand-copy
+// left behind by a rebase, and a finding check that never goes red is a claim
+// rather than a control (AGENTS.md -> Specs). Each case mutates one field of
+// the recorded triple and requires the lint to report it.
+
+const lintCore = '6.1.0-beta.304';
+const lintAddon = '0.20.0-beta.300';
+const lintFork = '0.20.0-sdf304.0';
+const lintCommit = 'c58ea363';
+const forkUrl = (v) =>
+  `https://github.com/diffplug/xterm.js/releases/download/sdf-v${v}/diffplug-xterm-addon-webgl-sdf-${v}.tgz`;
+
+/** Run xterm-lint against a fixture root holding only canopy. */
+function runLint({ addon = lintAddon, core = lintCore, commit = lintCommit, readmeCommit = lintCommit } = {}) {
+  const root = mkdtempSync(join(tmpdir(), 'xterm-lint-'));
+  try {
+    mkdirSync(join(root, 'scripts'));
+    mkdirSync(join(root, 'canopy/src'), { recursive: true });
+    copyFileSync(new URL('./xterm-lint.mjs', import.meta.url), join(root, 'scripts/xterm-lint.mjs'));
+    writeFileSync(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - canopy\n');
+    writeFileSync(join(root, 'pnpm-lock.yaml'), [
+      'packages:',
+      '',
+      `  '@xterm/addon-webgl@${lintAddon}':`,
+      '    peerDependencies:',
+      `      '@xterm/xterm': ^${lintCore}`,
+      '',
+      `  '@diffplug/xterm-addon-webgl-sdf@${forkUrl(lintFork)}':`,
+      '    peerDependencies:',
+      `      '@xterm/xterm': ^${lintCore}`,
+      '',
+      'snapshots:',
+      '',
+    ].join('\n'));
+    writeFileSync(join(root, 'canopy/package.json'), JSON.stringify({
+      dependencies: {
+        [FORK]: forkUrl(lintFork),
+        '@xterm/addon-webgl': lintAddon,
+        [CORE]: lintCore,
+      },
+    }, null, 2));
+    writeFileSync(
+      join(root, 'canopy/src/GlTerminal.stories.tsx'),
+      `// (addon ${addon} == core ${core} == commit ${commit}) — the regression baseline\n`,
+    );
+    writeFileSync(
+      join(root, 'canopy/README.md'),
+      `(addon \`${lintAddon}\` == core \`${lintCore}\` == commit \`${readmeCommit}\`)\n`,
+    );
+    return spawnSync(process.execPath, [join(root, 'scripts/xterm-lint.mjs')], { encoding: 'utf8' });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+test('xterm-lint accepts a canopy whose recorded triple matches its pins', () => {
+  const result = runLint();
+  assert.equal(result.status, 0, result.stderr);
+});
+for (const [label, mutation, expected] of [
+  ['a stale upstream addon', { addon: '0.20.0-beta.299' }, /records upstream addon 0\.20\.0-beta\.299/],
+  ['a stale core', { core: '6.1.0-beta.303' }, /records core 6\.1\.0-beta\.303/],
+  ['two disagreeing commits', { commit: 'deadbee' }, /records fork-base commit/],
+  ['a triple that is gone', { commit: 'not-a-sha' }, /no "addon <version> == core <version>/],
+]) test(`xterm-lint rejects ${label} in the recorded triple`, () => {
+  const result = runLint(mutation);
+  assert.notEqual(result.status, 0, result.stdout);
+  assert.match(result.stderr, expected);
+});

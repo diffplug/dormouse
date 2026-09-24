@@ -4,7 +4,7 @@
 // `localStorage`, or webview state. The one mirror is `syncVolatile`, host
 // memory that exists so a VS Code webview re-resolved over live PTYs can get its
 // notes back (docs/specs/notepad.md).
-import { hasTerminal, type SurfaceKind } from 'dor/commands/types';
+import { type SurfaceKind } from 'dor/commands/types';
 import { getPlatformOrNull } from '../platform';
 import type { CwdState } from '../terminal-state';
 import { toArchivedNote } from './archive-model';
@@ -19,7 +19,7 @@ import type {
 } from './types';
 
 /** What the volatile mirror needs about a Surface that the notes themselves do
- *  not carry. The Wall owns this; see `setNotepadSurfaceMetaResolver`. */
+ *  not carry. The Wall owns this; see `registerNotepadSurfaceMetaResolver`. */
 export interface NotepadSurfaceMeta {
   surfaceTitle: string;
   surfaceKind: SurfaceKind;
@@ -369,7 +369,7 @@ export function clearAllNotepads(): void {
   notesBySurface.clear();
   closingSurfaces.clear();
   pendingBatchIdBySurface.clear();
-  metaResolver = null;
+  metaResolvers.clear();
   stagedDeletions = {};
   setOpenNotepadId(null);
   notify();
@@ -378,7 +378,8 @@ export function clearAllNotepads(): void {
 
 // --- Open panel ---
 //
-// Only one Surface notepad is open per Wall, so this is a single id rather than
+// Only one Surface notepad is open per window — this module is per webview, so
+// the id is shared by every Wall in it — hence a single id rather than
 // per-Surface open state. Its own listener set: a note edit must not re-render
 // every header that only cares about which panel is open, and vice versa.
 
@@ -404,22 +405,32 @@ export function setOpenNotepadId(surfaceId: string | null): void {
 
 // --- Volatile mirror ---
 
-let metaResolver: NotepadSurfaceMetaResolver | null = null;
+const metaResolvers = new Set<NotepadSurfaceMetaResolver>();
 let stagedDeletions: Pick<NotepadArchiveMutation, 'deleteBatchIds' | 'deleteNotes'> = {};
 
-/** The Wall installs this; until it does, the mirror carries empty metadata
- *  rather than nothing, so notes still survive a live resume. */
-export function setNotepadSurfaceMetaResolver(resolver: NotepadSurfaceMetaResolver | null): void {
-  metaResolver = resolver;
+/** Each mounted Wall installs one; until any does, the mirror carries empty
+ *  metadata rather than nothing, so notes still survive a live resume. Returns
+ *  the disposer. */
+export function registerNotepadSurfaceMetaResolver(resolver: NotepadSurfaceMetaResolver): () => void {
+  metaResolvers.add(resolver);
   scheduleVolatileSync();
+  return () => {
+    if (!metaResolvers.delete(resolver)) return;
+    scheduleVolatileSync();
+  };
 }
 
-/** One Surface's metadata as the Wall sees it right now, or `null` when no
- *  resolver is installed. The volatile mirror and the close coordinator both
- *  read through here, so a mirrored batch and an archived one describe the
- *  Surface identically (docs/specs/notepad.md → "Closure"). */
+/** One Surface's metadata as its owning Wall sees it right now, or `null` when
+ *  no resolver claims it. A Wall answers null for a Surface it does not own, so
+ *  the first non-null answer is the owner's. The volatile mirror and the close
+ *  coordinator both read through here, so a mirrored batch and an archived one
+ *  describe the Surface identically (docs/specs/notepad.md → "Closure"). */
 export function getNotepadSurfaceMeta(surfaceId: string): NotepadSurfaceMeta | null {
-  return metaResolver?.(surfaceId) ?? null;
+  for (const resolver of metaResolvers) {
+    const meta = resolver(surfaceId);
+    if (meta) return meta;
+  }
+  return null;
 }
 
 /** Archive deletions staged in an open Archive view, mirrored so a host that
@@ -444,8 +455,27 @@ export function notepadSurfaceIds(): string[] {
 /** Everything a close would archive for every Surface holding notes, minus the
  *  markers (`toArchivedNote` strips them). */
 export function buildVolatileSnapshot(): VolatileNotepadSnapshot {
+  return collectVolatile(notepadSurfaceIds());
+}
+
+/**
+ * The notes riding along with a Workspace moving to another Window
+ * (`docs/specs/notepad.md` → "Closure"). **A transfer archives nothing**: a
+ * move is not a closure, so the notes travel in this snapshot and the target
+ * hydrates them with `hydrateNotepadFromVolatile`.
+ *
+ * Source pins do not travel: a pin is a marker in an xterm instance, and the
+ * source Window's instances are disposed by the release behind this. The
+ * projection drops them anyway (`toArchivedNote`).
+ */
+export function snapshotNotepadForTransfer(surfaceIds: Iterable<string>): VolatileNotepadSnapshot {
+  const wanted = new Set(surfaceIds);
+  return collectVolatile(notepadSurfaceIds().filter((id) => wanted.has(id)));
+}
+
+function collectVolatile(ids: readonly string[]): VolatileNotepadSnapshot {
   const surfaces: VolatileSurfaceNotes[] = [];
-  for (const surfaceId of notepadSurfaceIds()) {
+  for (const surfaceId of ids) {
     const notes = getNotes(surfaceId);
     const pendingBatchId = pendingBatchIdBySurface.get(surfaceId);
     const meta = getNotepadSurfaceMeta(surfaceId);
@@ -454,12 +484,6 @@ export function buildVolatileSnapshot(): VolatileNotepadSnapshot {
       surfaceTitle: meta?.surfaceTitle ?? '',
       surfaceKind: meta?.surfaceKind ?? 'terminal',
       cwd: meta?.cwd ?? null,
-      // Only a terminal Surface has a PTY to ask about; its Surface id is
-      // also its PTY id, so the mirror carries it straight through
-      // (docs/specs/notepad.md → "VS Code lifecycle").
-      ...(meta && hasTerminal(meta.surfaceKind)
-        ? { terminalId: surfaceId }
-        : {}),
       ...(pendingBatchId ? { pendingBatchId } : {}),
       notes: notes.map(toArchivedNote),
     });

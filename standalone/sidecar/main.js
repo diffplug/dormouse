@@ -15,6 +15,8 @@ const { createDorControlServer } = require('./dor-control-server');
 // Built from lib/src/host/iframe-proxy.ts (shared with the VS Code host) by
 // scripts/build-sidecar-proxy.mjs. See docs/specs/dor-browser.md.
 const { createIframeProxyUrl } = require('./iframe-proxy.cjs');
+const { createToolHost } = require('./tool-host.cjs');
+const { gitInfo } = require('./git-info.cjs');
 // Same pattern: lib/src/host/agent-browser-host.ts is the single source of truth
 // for the agent-browser host capabilities, run here exactly as the VS Code
 // extension host runs it. See docs/specs/dor-browser.md → "Agent-Browser Host Capabilities".
@@ -23,6 +25,15 @@ const { createAgentBrowserHost } = require('./agent-browser-host.cjs');
 // the relay socket, the enrollment, the ACL, and remote-api v1 — running next to
 // the PTYs it serves. See docs/specs/remote-api.md.
 const { createSidecarBurrow } = require('./burrow.cjs');
+// Same pattern again: lib/src/host/recovery.ts is the agent-recovery capture
+// machine (shared with the VS Code extension host) plus the single-use record
+// store. See docs/specs/standalone.md -> "Agent recovery".
+const { captureAgentRecovery, createRecoveryStore, sliceSince } = require('./recovery.cjs');
+// Same pattern again: lib/src/host/alert-store-host.ts holds the two
+// app-global alert stores — one WATCHING rule set and one alarm-settings blob
+// for every window — running the same classes the VS Code extension host runs.
+// See docs/specs/alert.md.
+const { createAlertStoreHost } = require('./alert-store.cjs');
 
 const agentBrowser = createAgentBrowserHost({
   writeClipboardText: (text) => clipboard.writeClipboardText(text),
@@ -37,6 +48,14 @@ function send(event, data) {
   process.stdout.write(JSON.stringify({ event, data }) + '\n');
 }
 
+// stdout is the JSON-lines protocol channel, so every log line goes to stderr.
+const recoveryLog = { info: (m) => console.error(m), error: (m) => console.error(m) };
+
+// The record lives beside the session snapshots, under the state root Rust
+// picks (dev and the installed app get different ones). Without a directory the
+// store is memory-only and says so once.
+const recovery = createRecoveryStore(process.env.DORMOUSE_RECOVERY_DIR || undefined, { log: recoveryLog });
+
 const mgr = create((event, data) => {
   // Output goes through the host's parser — one per PTY, feeding the webview
   // and every attached Client from the same pass (docs/specs/terminal-escapes.md
@@ -49,13 +68,20 @@ const mgr = create((event, data) => {
     console.error(`[sidecar] burrow ${event} tap failed:`, err && err.message || err);
   }
   if (event !== 'data') send(`pty:${event}`, data);
-}, nodePty, { replay: true });
+  // `sliceSince` comes from the shared bundle above rather than living in
+  // pty-core, so this host and the VS Code extension host read their replay
+  // buffers through one implementation.
+}, nodePty, { replay: true, sliceSince });
 
 const burrow = createSidecarBurrow({
   send,
   stateDir: process.env.DORMOUSE_STATE_DIR,
   mgr,
 });
+
+// Dor Tools. Shares the app's state directory, so an approved repo stays
+// approved across restarts (docs/specs/dor-tool.md -> Trust).
+const toolHost = createToolHost({ stateDir: process.env.DORMOUSE_STATE_DIR });
 
 // The control token arrives from Rust in our own environment, and `pty-core`
 // merges `process.env` into every shell it spawns — so it has to come out of
@@ -66,6 +92,10 @@ const burrow = createSidecarBurrow({
 const dorControlToken = process.env.DORMOUSE_CONTROL_TOKEN;
 delete process.env.DORMOUSE_CONTROL_TOKEN;
 delete process.env.DORMOUSE_CONTROL_SOCKET;
+
+// Broadcast, never addressed: both stores are one per machine, so every window
+// gets the same canonical snapshot (docs/specs/standalone.md -> "Windows").
+const alertStore = createAlertStoreHost({ send });
 
 const dorControl = createDorControlServer({
   token: dorControlToken,
@@ -125,26 +155,74 @@ function handleLine(line) {
       // Told before the spawn: the id may be a live PTY's, and the parser for
       // that generation must not carry a half-read sequence into the new one.
       case 'pty:spawn':   burrow.onPtySpawn(data.id); mgr.spawn(data.id, data.options); break;
-      case 'pty:input':   mgr.write(data.id, data.data); break;
+      case 'pty:input':   mgr.write(data.id, data.data, { paced: data.paced === true }); break;
       case 'pty:resize':  mgr.resize(data.id, data.cols, data.rows); break;
       case 'pty:kill':    mgr.kill(data.id); break;
-      case 'pty:requestInit': mgr.list(); break;
+      // One window's own PTYs, and the answer names it so the host can route
+      // the list and every replay behind it back (docs/specs/standalone.md).
+      case 'pty:requestInit': mgr.list(data?.ids, data?.forWindow, data?.requestId, data?.marks); break;
+      case 'pty:mark': mgr.mark(data?.ids, data?.requestId); break;
       case 'pty:context': mgr.context(data, data.requestId); break;
       case 'pty:getCwd':  mgr.getCwd(data.id, data.requestId); break;
+      case 'pty:getCwds': mgr.getCwds(data.ids, data.requestId); break;
       case 'pty:getOpenPorts': mgr.getOpenPorts(data.id, data.requestId); break;
+      case 'pty:getOpenPortsMany': mgr.getOpenPortsMany(data.ids, data.requestId); break;
       case 'pty:getShells':  mgr.getShells(data.requestId); break;
-      // Reserved: no standalone caller yet — recovery capture ships for VS Code
-      // only, which reaches the same `pty-core` through its own `pty-host.js`
-      // rather than this route (docs/specs/vscode.md -> "Capturing agent
-      // recovery").
       case 'pty:interrupt': mgr.interrupt(data.ids, data.requestId); break;
-      case 'pty:gracefulKillAll': mgr.gracefulKillAll(data.timeout, data.requestId); break;
+      // Quit teardown, first step: press ^C, detect each agent's resume
+      // invocation, and write the single-use record. Runs here rather than in
+      // Rust because the replay buffers the detection reads are here, this
+      // process's lifetime is exactly one activation, and the browser-dev
+      // harness gets the same answer for free.
+      case 'pty:captureRecovery':
+        respondAsync('recoveryDone', data.requestId, async () => {
+          recovery.beginCapture();
+          const count = await captureAgentRecovery({
+            liveIds: () => mgr.liveIds(),
+            // One press, and the caller decides about a second: `mgr.interrupt`
+            // writes synchronously, so the ack is immediate.
+            interrupt: async (ids) => { mgr.interrupt(ids); },
+            receivedChars: (id) => mgr.receivedChars(id),
+            outputSince: (id, mark) => mgr.outputSince(id, mark),
+            onCommand: (id, command) => recovery.record(id, command),
+            log: recoveryLog,
+          }, { ids: data.ids, maxWaitMs: data.timeout });
+          return { count };
+        });
+        break;
+      // Cold start: claim the invocations belonging to these panes. Destructive
+      // on the first call, so nothing can replay them.
+      case 'recovery:take':
+        respondAsync('recovery:commands', data.requestId, async () => ({
+          commands: recovery.take(Array.isArray(data.paneIds) ? data.paneIds : []),
+        }));
+        break;
+      case 'pty:gracefulKill': mgr.gracefulKill(data.ids, data.timeout, data.requestId); break;
       // The webview's resolved terminal theme, so the parser here can answer
       // OSC 10/11/12 (docs/specs/terminal-escapes.md → Supported OSCs).
+      // Which webviews will answer a Burrow ask (docs/specs/standalone.md
+      // -> "Burrow service").
+      case 'burrow:windows': burrow.setWindows(data?.labels); break;
+      // Which windows an ask actually reached. Only the host knows: one naming
+      // a Surface goes to its owner alone (docs/specs/standalone.md ->
+      // "Burrow service").
+      case 'burrow:askDelivered': burrow.setAskDelivery(data); break;
+      case 'alert:command': alertStore.handle(data); break;
       case 'pty:themeColors': burrow.setThemeColors(data); break;
       case 'sidecar:shutdown': shutdown(); break;
       case 'dor:controlResponse': dorControl?.respond(data); break;
       case 'burrow:command': burrow.handleCommand(data); break;
+      case 'tool:control':
+        respondAsync('tool:result', data.requestId, async () => ({
+          result: await toolHost.handle(data.request),
+        }));
+        break;
+      // Workspace auto-naming (docs/specs/layout.md -> "Workspace names").
+      case 'git:info':
+        respondAsync('git:infoResult', data.requestId, async () => ({
+          result: await gitInfo(data.paths),
+        }));
+        break;
       case 'iframe:createProxyUrl':
         // Log to stderr — stdout is the JSON-lines protocol channel.
         respondAsync('iframe:proxyUrl', data.requestId, async () => ({
@@ -238,6 +316,7 @@ async function shutdown() {
     ]);
   } catch {}
   dorControl?.close();
+  alertStore.dispose();
   burrow.dispose();
   mgr.killAll();
   process.exit(0);

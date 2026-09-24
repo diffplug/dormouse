@@ -1,4 +1,5 @@
 import { runPlaywrightRequest } from './agent-browser-host';
+import type { ToolAnnounce } from '../../lib/src/lib/tool-announce';
 import * as vscode from 'vscode';
 import * as ptyManager from './pty-manager';
 import { AlertManager, type AwaitHandle, type AwaitOutcome } from '../../lib/src/lib/alert-manager';
@@ -10,7 +11,9 @@ import {
   collectTerminalProtocolResponses,
   type TerminalColorProvider,
   type TerminalColors,
+  type TerminalProtocolEvent,
 } from '../../lib/src/lib/terminal-protocol';
+import { isProtocolCommandStart } from '../../lib/src/lib/tool-events';
 import {
   createProcessedPtyStream,
   type ProcessedPtyChunk,
@@ -24,8 +27,11 @@ import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
 import type { PersistedSession } from '../../lib/src/lib/session-types';
 import type { WebviewMessage, ExtensionMessage } from './message-types';
 import type { DorControlRequest } from './pty-manager';
+import { dorWorkspaceRefusal } from './dor-workspace-guard';
 import { createStreamRelayUrl, runAgentBrowserCommand, runAgentBrowserEdit, runAgentBrowserOpen, runAgentBrowserPopIn, runAgentBrowserPopOut, runAgentBrowserScreenshot, runAgentBrowserStreamStatus } from './agent-browser-host';
 import { createIframeProxyUrl } from './iframe-proxy-host';
+import { toolControl } from './tool-host';
+import type { ToolHostRequest } from '../../lib/src/lib/platform/types';
 import {
   archiveVolatileMirror,
   loadNotepadArchive,
@@ -207,6 +213,8 @@ type ProcessedExitListener = (id: string, exitCode: number) => void;
 const processedExitListeners = new Set<ProcessedExitListener>();
 type SemanticEventsListener = (id: string, events: TerminalSemanticEvent[]) => void;
 const semanticEventsListeners = new Set<SemanticEventsListener>();
+const toolStateListeners = new Set<(id: string, dirty: boolean | null) => void>();
+const toolAnnounceListeners = new Set<(id: string, announce: ToolAnnounce | null) => void>();
 
 export function onProcessedPtyData(listener: ProcessedDataListener): () => void {
   processedDataListeners.add(listener);
@@ -247,6 +255,14 @@ ptyManager.addCallbacks({
 });
 
 ptyManager.onDorControlRequest((request) => {
+  // Refused here rather than in the webview: only the extension host knows
+  // this window holds several Dormouse webviews, each its own Workspace
+  // (`dor-workspace-guard.ts`).
+  const refusal = dorWorkspaceRefusal(request.method, request.params);
+  if (refusal) {
+    ptyManager.respondDorControl({ requestId: request.requestId, ok: false, error: refusal });
+    return;
+  }
   const routers = [...activeRouters];
   const router = request.surfaceId
     ? routers.find((candidate) => candidate.ownsPty(request.surfaceId!))
@@ -277,7 +293,23 @@ function createOwnerPtyStream(id: string): ProcessedPtyStream {
   return createProcessedPtyStream({
     colorProvider: themeColorProvider,
     onEvents(events) {
-      applyTerminalProtocolEvents(alertManager, id, events);
+      // `applyTerminalProtocolEvents` records announcements into renderer state
+      // this process cannot reach, so the router withholds them and forwards
+      // them to the webviews instead — and only the rare chunk that carries one
+      // pays for the filtered copy.
+      const isToolEvent = (event: TerminalProtocolEvent) => event.kind === 'toolAnnounce' || event.kind === 'toolState';
+      applyTerminalProtocolEvents(alertManager, id, events.some(isToolEvent) ? events.filter(event => !isToolEvent(event)) : events);
+      // A start retires the previous command's announcement and state in the
+      // owning webview (null). Keep starts and reports in parse order, including one chunk.
+      for (const event of events) {
+        const start = isProtocolCommandStart(event);
+        if (event.kind === 'toolState' || start) {
+          for (const listener of toolStateListeners) listener(id, event.kind === 'toolState' ? event.state.dirty : null);
+        }
+        if (event.kind === 'toolAnnounce' || start) {
+          for (const listener of toolAnnounceListeners) listener(id, event.kind === 'toolAnnounce' ? event.announce : null);
+        }
+      }
       const semanticEvents = collectTerminalSemanticEvents(events);
       alertManager.applyTerminalSemanticEvents(id, semanticEvents);
       if (semanticEvents.length > 0) {
@@ -532,6 +564,14 @@ export function attachRouter(
       if (!ownedPtyIds.has(id)) return;
       post({ type: 'pty:data', id, data: visibleData, textData } satisfies ExtensionMessage);
     });
+    const onToolAnnounce = (id: string, announce: ToolAnnounce | null) => {
+      if (ownedPtyIds.has(id)) post({ type: 'terminal:toolAnnounce', id, announce } satisfies ExtensionMessage);
+    };
+    toolAnnounceListeners.add(onToolAnnounce);
+    const onToolState = (id: string, dirty: boolean | null) => {
+      if (ownedPtyIds.has(id)) post({ type: 'terminal:toolState', id, dirty } satisfies ExtensionMessage);
+    };
+    toolStateListeners.add(onToolState);
     const removeSemanticListener = onTerminalSemanticEvents((id, events) => {
       if (!ownedPtyIds.has(id)) return;
       post({ type: 'terminal:semanticEvents', id, events } satisfies ExtensionMessage);
@@ -550,6 +590,8 @@ export function attachRouter(
     return () => {
       removeProcessedListener();
       removeSemanticListener();
+      toolAnnounceListeners.delete(onToolAnnounce);
+      toolStateListeners.delete(onToolState);
       removeExitListener();
       removeAlertListener();
     };
@@ -587,7 +629,7 @@ export function attachRouter(
         break;
       }
       case 'pty:input':
-        ptyManager.write(msg.id, msg.data);
+        ptyManager.write(msg.id, msg.data, { paced: msg.paced });
         break;
       case 'pty:resize':
         ptyManager.resize(msg.id, msg.cols, msg.rows);
@@ -737,6 +779,15 @@ export function attachRouter(
         ).then((result) => {
           post({ type: 'agentBrowser:popResult', requestId: msg.requestId, ...result } satisfies ExtensionMessage);
         });
+        break;
+      case 'tool:control':
+        toolControl(msg.request as ToolHostRequest).then(
+          (result) => post({ type: 'tool:result', requestId: msg.requestId, result } satisfies ExtensionMessage),
+          (err) => post({
+            type: 'tool:result', requestId: msg.requestId,
+            result: { status: 'error', message: err?.message ?? String(err) },
+          } satisfies ExtensionMessage),
+        );
         break;
       case 'iframe:createProxyUrl':
         createIframeProxyUrl(

@@ -6,7 +6,7 @@ import {
   SCENARIO_LS_OUTPUT,
 } from '../lib/platform';
 import type { ActivityState } from '../lib/terminal-registry';
-import { requireElement, settleTerminals, waitForCondition } from './settle-terminals';
+import { requireElement, settleTerminalContext, settleTerminals, waitForCondition } from './settle-terminals';
 
 const meta: Meta<typeof Wall> = {
   title: 'App/Wall',
@@ -99,10 +99,9 @@ async function minimizeFirstVisiblePane() {
 }
 
 async function openAlertDialog() {
-  const alertButton = await requireElement<HTMLButtonElement>('[data-alert-button-for]', 'alert bell');
-  alertButton.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
-  await requireElement('[data-terminal-context]', 'terminal context');
-  await settleTerminals();
+  const header = await requireElement<HTMLElement>('[data-pane-header-for]', 'pane header');
+  header.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
+  await settleTerminalContext();
 }
 
 export const Default: Story = {
@@ -161,9 +160,8 @@ export const AlertModalOpen: Story = {
     }),
   },
   play: async () => {
-    // Settle first: the bell only offers the context once the primed ALERT_RINGING
-    // status has landed, so clicking it earlier is a no-op and the story
-    // snapshots a wall with no context.
+    // Settle first: the context reports the primed ALERT_RINGING status, so
+    // opening it earlier would snapshot a wall whose alert rows are still cold.
     await settleTerminals();
     await openAlertDialog();
   },
@@ -220,6 +218,6 @@ export const TerminalContext: Story = {
     await settleTerminals();
     const header = await requireElement('[data-pane-header-for="context-live"]', 'terminal header');
     header.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
-    await waitForCondition(() => !!document.querySelector('[data-helper-terminal]'));
+    await settleTerminalContext();
   },
 };

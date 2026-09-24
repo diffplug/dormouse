@@ -40,7 +40,7 @@ Source of truth: `oscDispositionAt` in `lib/src/lib/terminal-protocol.ts`, `boun
 
 Each chunk is also classified for the quiesce detector: **the activity monitor's `onData()` fires only when `visibleData` is non-empty**, so a chunk of nothing but notification/progress OSCs is not meaningful output, while one carrying visible output alongside them is.
 
-Replay (`pty:replay`) is the one raw stream and the one legitimate re-parse: **the webview runs a one-shot parser over the buffered bytes**, so semantic state repopulates and OSCs are stripped before xterm sees them. **Replay must not re-fire** alerts, quiesce events, protocol notifications, or query responses — it applies the semantic events and drops the rest (rationale). **Every parser in a realm holding the theme takes `themeColorProvider`**, one-shot replay parsers included: a *declined* query stays in `visibleData` for the receiving renderer to answer, and answering is the owner's alone (rationale).
+Replay (`pty:replay`) is the raw stream requiring re-parse: **the webview runs a one-shot parser over the buffered bytes**, so semantic state repopulates and OSCs are stripped before xterm sees them. **Historical replay must not re-fire** alerts, quiesce events, protocol notifications, or query responses — it applies the semantic events and drops the rest (rationale). Live since-mark alert replay follows `docs/specs/alert.md` → Live Workspace transfer. **Every parser in a realm holding the theme takes `themeColorProvider`**, one-shot replay parsers included: a *declined* query stays in `visibleData` for the receiving renderer to answer, and answering is the owner's alone (rationale).
 
 ## Supported OSCs
 
@@ -61,6 +61,9 @@ Replay (`pty:replay`) is the one raw stream and the one legitimate re-parse: **t
 | `OSC 633 ; E ; <commandline> [; <nonce>] ST` | VS Code command line | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 633 ; P ; Cwd=<cwd> ST` | CWD (VS Code) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 777 ; notify ; <title> ; <body> ST` | rxvt/WezTerm notification | [alert.md](alert.md#terminal-reports) |
+| `OSC 367 ; serve ; <json> ST` | Dor Tool announcement: selects a bound port and optional same-origin path, plus a reserved name and runtime re-key | [dor-tool.md](dor-tool.md#osc-367) |
+| `OSC 367 ; state ; <json> ST` | Tool-reported unsaved state | [dor-tool.md](dor-tool.md#unsaved-changes) |
+| `OSC 367 ; <any other verb> ST` | Includes the reserved `dehydrate` verb; consumed and ignored. | [dor-tool.md](dor-tool.md#osc-367) |
 | `OSC 1337 ; CurrentDir=<cwd> ST` | CWD (iTerm2 compatibility) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 1337 ; File=...:<data> ST` / `MultipartFile=...` / `FilePart=...` / `FileEnd` | iTerm2 inline image protocol (IIP); passed through to ImageAddon. | [Inline graphics](#inline-graphics) |
 | `OSC 1337 ; ReportCellSize ST` | iTerm2 cell-size query; passed through and answered by the owner's ImageAddon. | [Inline graphics](#inline-graphics) |
@@ -90,7 +93,7 @@ Neither `params` nor the URI is parsed at the PTY boundary.
 
 **Cancel/close is the safe default; long targets must wrap and scroll without truncation.** **The confirmation host must reject deceptive verdicts even if its callback runs.** **Every adapter must revalidate through `normalizeExternalUri` before opening** (VS Code before `vscode.env.openExternal`) — consent does not replace validation.
 
-Source of truth: `lib/src/lib/external-links.ts`, `lib/src/lib/external-link-confirmation.ts`, `lib/src/components/ExternalLinkModal.tsx`.
+Source of truth: `normalizeExternalUri` in `lib/src/lib/external-links.ts` (pinned by `lib/src/lib/external-links.test.ts`), `lib/src/lib/external-link-confirmation.ts`, `lib/src/components/ExternalLinkModal.tsx`, and the host's own verdict re-check in `lib/src/components/ExternalLinkModalHost.tsx`.
 
 ## Supported CSI
 
@@ -121,11 +124,11 @@ Source of truth: `getWebviewHtml` in `vscode-ext/src/webview-html.ts`, `app.secu
 
 ### Report filtering on the input side
 
-Everything xterm.js emits on `onData` is candidate PTY input, its own *replies* included. **The two classifiers below require every token of a chunk to match**, so a report glued onto real keystrokes is never mistaken for one.
+`onData` includes xterm.js *replies*. **Both classifiers require every chunk token to match**, so a report glued onto real keystrokes is never mistaken for one.
 
-- **`inputIsReplayTerminalReport`** — dropped outright while `isReplaying` (rationale). Shapes: cursor-position / device-status (`CSI [?]<params> R` / `n`), device attributes (`CSI [?>=]<params> c`), window-manipulation reports (`CSI <params> t` / `x`), DECRQSS and XTSMGRAPHICS reports (`CSI [?]<params> $y` / `S`), focus in/out (`CSI I` / `CSI O`), and OSC, DCS, or APC replies of any shape. It also gates the untouched-session flag ([layout.md](layout.md)).
-- **`inputIsSyntheticTerminalReport`** — the broader machine-generated check (any chunk built only of CSI, SS3 `ESC O <final>`, OSC, or APC tokens). **Not dropped** — it suppresses input recording and alert attention for that chunk.
-- **`stripMouseReportsFromInput`** — removes X10 (`CSI M <3 bytes>`), SGR (`CSI < b;x;y M/m`) and urxvt (`CSI b;x;y M`) mouse reports while a mouse-mode override is active, so a report slipping past the DOM-level intercept never reaches the PTY ([mouse-and-clipboard.md](mouse-and-clipboard.md)).
+- **`inputIsReplayTerminalReport`** — dropped outright while `isReplaying` (rationale). Shapes: cursor-position / device-status (`CSI [?]<params> R` / `n`), device attributes (`CSI [?>=]<params> c`), window-manipulation reports (`CSI <params> t` / `x`), DECRQSS and XTSMGRAPHICS reports (`CSI [?]<params> $y` and `CSI ? <params> S`), focus in/out (`CSI I` / `CSI O`), kitty keyboard-query replies (`CSI ? <flags> u`), and OSC, DCS, or APC replies of any shape. Also gates recording, attention ([alert.md](alert.md)), and untouched state ([layout.md](layout.md)).
+- **`inputIsSyntheticTerminalReport`** — the broader prompt-recording guard (any chunk built only of CSI, SS3 `ESC O <final>`, OSC, or APC tokens). **Never dropped, and must suppress input recording alone** — these sequences can encode real keys.
+- **`stripMouseReportsFromInput`** — removes X10 (`CSI M <3 bytes>`), SGR (`CSI < b;x;y M/m`) and urxvt (`CSI b;x;y M`) mouse reports during mouse-mode override, so reports bypassing DOM interception never reach the PTY ([mouse-and-clipboard.md](mouse-and-clipboard.md)). Keyboard-attention gating: `docs/specs/alert.md` → Attention.
 
 **No filter may swallow user keyboard escape sequences** — arrows, function keys, bracketed paste, kitty modified-key reports, win32-input-mode key records (`CSI …_`). Source of truth: `lib/src/lib/terminal-report-filter.ts`.
 
@@ -167,10 +170,10 @@ The identity provokes more iTerm2 escape codes than Dormouse implements, so **un
 
 | Shell | Mechanism | Channel | Notes |
 |---|---|---|---|
-| zsh | `ZDOTDIR` → our dotfiles chain to the user's, then install `precmd`/`preexec` hooks | env (as reliable as the `PATH` prepend) | **Nothing may be written into our directory when shipped** — signed macOS app bundle (rationale). The user's real `ZDOTDIR` rides in `USER_ZDOTDIR`; our `.zshrc` hands `ZDOTDIR` back so `.zlogin` and child shells are unaffected, and `.zshenv`/`.zprofile` re-pin `ZDOTDIR` to ours after sourcing the user's. **A `HISTFILE` set inside our directory is redirected to `USER_ZDOTDIR`** after sourcing the user's rc; a user-set one is never touched. |
-| bash | `--init-file` → our script installs a `DEBUG`-trap / `PROMPT_COMMAND` hook | shellArgs | Dormouse drops `-l` (mutually exclusive with `--init-file`); the script sources `/etc/profile` + the user's profile itself. **Injected only when the launch args are *purely* interactive/login flags** (`-i`/`-l`/`--login`), so Git Bash's `--login -i` is covered and a specific `-c <cmd>` is not (rationale). **Written for bash 3.2**: no `PS0`, no array `PROMPT_COMMAND`. **`E` is a pipeline's first simple command**; boundaries and exit codes stay exact. |
-| PowerShell | dot-source a script that wraps the user's `prompt` and PSReadLine's `PSConsoleHostReadLine`; covers `pwsh` and `powershell.exe` | shellArgs | **`-NoProfile` is never passed**, so the user's profile defines their prompt before we wrap it. Injected for any **interactive** launch — a bare REPL gets `-NoExit -Command ". '<script>'"`, one already carrying a startup command gets our dot-source *appended* (rationale); non-interactive one-offs (`-Command`/`-File`/`-EncodedCommand` without `-NoExit`) are left untouched. `E`/`C` come from that wrapper, `D` (`$?`/`$LASTEXITCODE`) from the next `prompt`. **Without PSReadLine the whole triple falls back to the next prompt**, boundaries and exit codes still exact (rationale). |
-| WSL | `wsl.exe -d <distro> -- sh -c <detector>` → the detector execs the distro's bash with our `--init-file`, referenced via its `/mnt/...` path | shellArgs (Windows-side injection cannot reach inside the distro) | The detector reads `/etc/passwd`: it steps aside for an explicit zsh/fish login shell, execs bash+integration whenever bash exists (also the empty-detection default), and falls back to the login shell only when bash is absent (rationale). **bash is the only integrated WSL shell**; assumes the default `/mnt` automount root. |
+| zsh | `ZDOTDIR` → our dotfiles chain to the user's, then install `precmd`/`preexec` hooks | env (as reliable as the `PATH` prepend) | **Nothing may be written into our directory when shipped** — signed macOS app bundle (rationale). **A `HISTFILE` set inside it is redirected to `USER_ZDOTDIR`**; a user-set one is never touched. |
+| bash | `--init-file` → our script installs a `DEBUG`-trap / `PROMPT_COMMAND` hook | shellArgs | **Injected only when the launch args are *purely* interactive/login flags** (`-i`/`-l`/`--login`), so Git Bash's `--login -i` is covered and a specific `-c <cmd>` is not (rationale). **The whole argv is replaced with `--init-file <script>`** — `-l` and `-i` go with it, and the script replicates login startup itself. **`E` is a pipeline's first simple command**; boundaries and exit codes stay exact. |
+| PowerShell | dot-source a script that wraps the user's `prompt` and PSReadLine's `PSConsoleHostReadLine`; covers `pwsh` and `powershell.exe` | shellArgs | Injected for any **interactive** launch — a bare REPL gets `-NoExit -Command ". '<script>'"`, one already carrying a startup command gets our dot-source *appended* (rationale); non-interactive one-offs (`-Command`/`-File`/`-EncodedCommand` without `-NoExit`) are left untouched. **`-NoProfile` is never passed.** **Without PSReadLine the whole triple falls back to the next prompt**, boundaries and exit codes still exact (rationale). |
+| WSL | `wsl.exe -d <distro> -- sh -c <detector>` → the detector execs the distro's bash with our `--init-file`, referenced via its `/mnt/...` path | shellArgs (Windows-side injection cannot reach inside the distro) | **Injected only for the exact two-argument `-d <distro>` launch** the shell picker emits. The detector reads `/etc/passwd` and prefers bash, stepping aside only for an explicitly configured zsh or fish login shell (rationale). **bash is the only integrated WSL shell**; assumes the default `/mnt` automount root. |
 | cmd.exe | no per-command hook exists | — | Never gets real OSC 633; always uses the keystroke fallback below. |
 
 Wired in `applyShellIntegration`, called from `resolveSpawnConfig` (`standalone/sidecar/pty-core.js`), so both distributions spawn through it. The scripts are static files under `standalone/sidecar/shell-integration/`, located via `DORMOUSE_SHELL_INTEGRATION_DIR` (set by the host, mirroring `DORMOUSE_CLI_BIN`) and falling back to the sidecar's own directory; standalone ships them through the Tauri `../sidecar/**/*` glob, the VS Code build into `dist/shell-integration`. **Injection is fail-safe** — missing scripts mean it is skipped and the shell spawns as before.
@@ -186,7 +189,7 @@ Source of truth: `__dormouse_633_escape` and `__dormouse_633_safe_cwd` in each o
 
 When injection isn't possible (cmd.exe, an unknown shell, missing scripts) or simply doesn't take, Dormouse falls back to its keystroke heuristic: the submitted command read off the rendered prompt line and synthesized as `commandStart{source:'user_input'}`, with no real exit codes. Its rules and the per-pane promotion that retires it on the first authentic OSC boundary belong to [terminal-state.md](terminal-state.md#keystroke-fallback).
 
-> **The VS Code `.vsix` must include zsh's dotfiles** (`dist/shell-integration/.z*`), or zsh silently degrades to the keystroke fallback.
+zsh's dotfiles reach the VS Code `.vsix` as `dist/shell-integration/.z*`, through `vscode-ext/.vscodeignore`'s `!dist/**`. Nothing asserts they are packaged; dropped, zsh silently degrades to the keystroke fallback.
 
 Two escape-aware consumers are **not** parse sites: `lib/src/lib/terminal-controls.ts` strips presentation controls ([transport.md](transport.md)) and `lib/src/lib/terminal-state-store.ts` elides alternate-screen spans ([terminal-state.md](terminal-state.md)). Both read already-stripped output; neither changes what reaches xterm.js.
 

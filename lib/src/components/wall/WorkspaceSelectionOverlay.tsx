@@ -1,4 +1,7 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
+import { getWorkspaceUiSnapshot, subscribeToWorkspaceUi } from '../../lib/workspace-ui-store';
+import { subscribeWorkspaceMotionFrames } from '../workspace-motion';
 import {
   FOCUS_MOTION_MS,
   PANE_GUTTER_PX,
@@ -21,8 +24,10 @@ import {
 } from '../../lib/rect-tween';
 import { useFocusRingColor } from '../../lib/themes/use-focus-ring-color';
 import { resolvePaneElement } from './resolve-pane-element';
-import type { WallMode, WallSelectionKind } from './wall-types';
-import { DoorElementsContext, PaneElementsContext, WindowFocusedContext } from './wall-context';
+import { isWorkspaceSelection, workspaceIdOfSelection, type WallMode, type WallSelectionKind } from './wall-types';
+import { DoorElementsContext, PaneElementsContext, RingHandoffContext, WindowFocusedContext } from './wall-context';
+import { workspaceTabElement } from '../workspace-tab-elements';
+import { getWorkspacesSnapshot, subscribeToWorkspaces } from '../../lib/workspace-store';
 import {
   CORNER_EDGES,
   cornerPath,
@@ -34,6 +39,8 @@ import {
   type RingEdge,
 } from '../../lib/ring-geometry';
 import { SelectionRing } from './SelectionRing';
+import { unionBounds, unionRingOutline } from '../../lib/rect-union-outline';
+import type { ContextHelper } from './lath-wall-engine';
 
 /** The subset of the Lath store the overlay needs — a revision that bumps on every
  *  commit, so the ring re-measures as leaves move / resize / restore. Kept
@@ -50,10 +57,13 @@ export interface LathOverlayStore {
  *  stroke centerline stays on the gutter's midline: the pane inset lands the
  *  centerline at PANE_GUTTER_PX / 2 from the pane edge (the same line the 1px
  *  passthrough border sits on); the door ring has no gutter, so it straddles the
- *  door edge (inset = strokeWidth / 2). Radii + inset ride the tween so a pane↔door
- *  selection morphs its shape instead of popping. */
-function ringShape(isDoor: boolean): RingShape {
-  if (isDoor) {
+ *  door edge (inset = strokeWidth / 2). Workspace tabs share that shape; the +
+ *  button keeps its 4px all-round corners. Radii + inset ride the tween. */
+function ringShape(kind: WallSelectionKind): RingShape {
+  if (kind === 'workspace-new') {
+    return { tl: 4, tr: 4, br: 4, bl: 4, inset: cfg.marchingAnts.strokeWidth / 2 };
+  }
+  if (kind !== 'pane') {
     const r = TERMINAL_BORDER_RADIUS_PX;
     return { tl: r, tr: r, br: 0, bl: 0, inset: cfg.marchingAnts.strokeWidth / 2 };
   }
@@ -61,9 +71,14 @@ function ringShape(isDoor: boolean): RingShape {
   return { tl: r, tr: r, br: r, bl: r, inset: SELECTION_RING_INFLATE_PX - PANE_GUTTER_PX / 2 };
 }
 
-function measureFrame(el: HTMLElement, isDoor: boolean): RingFrame {
+function measureFrame(el: HTMLElement, kind: WallSelectionKind): RingFrame | null {
+  if (!el.isConnected) return null;
   const r = el.getBoundingClientRect();
-  const inflate = isDoor ? 0 : SELECTION_RING_INFLATE_PX;
+  // A removed Door may still be in the element map until its effect cleans up;
+  // a restored leaf can likewise be mounted before it has a nonempty frame.
+  // Neither is a visible destination. Keep the last painted ring as the origin.
+  if (r.width <= 0 || r.height <= 0) return null;
+  const inflate = kind === 'pane' ? SELECTION_RING_INFLATE_PX : 0;
   return {
     rect: {
       top: r.top - inflate,
@@ -71,20 +86,22 @@ function measureFrame(el: HTMLElement, isDoor: boolean): RingFrame {
       width: r.width + inflate * 2,
       height: r.height + inflate * 2,
     },
-    shape: ringShape(isDoor),
+    shape: ringShape(kind),
   };
 }
 
-// The active selection's identity. One definition because two mechanisms key off
-// it: the travel tween restarts when it changes, and so does the marching burst.
+// The active selection's identity; the travel tween restarts when it changes.
 function ringIdentity(type: WallSelectionKind, id: string): string {
   return `${type}:${id}`;
 }
 
+const rectsEqual = (a: RingRect, b: RingRect) =>
+  a.top === b.top && a.left === b.left && a.width === b.width && a.height === b.height;
+
 function framesEqual(a: RingFrame, b: RingFrame): boolean {
   return (
-    a.rect.top === b.rect.top && a.rect.left === b.rect.left
-    && a.rect.width === b.rect.width && a.rect.height === b.rect.height
+    rectsEqual(a.rect, b.rect)
+    && (a.union === b.union || !!a.union && !!b.union && a.union.every((r, i) => rectsEqual(r, b.union![i])))
     && a.shape.tl === b.shape.tl && a.shape.tr === b.shape.tr
     && a.shape.br === b.shape.br && a.shape.bl === b.shape.bl
     && a.shape.inset === b.shape.inset
@@ -93,10 +110,10 @@ function framesEqual(a: RingFrame, b: RingFrame): boolean {
 
 /** The frame the ring currently shows: geometry plus the per-edge motion-smear
  *  `speeds`, populated only while a tween runs; a settled ring carries null speeds,
- *  so its render is clean. Held in a ref and written to the DOM imperatively. */
-interface DisplayedRing {
-  rect: RingRect;
-  shape: RingShape;
+ *  so its render is clean. `union` holds the source and helper rects while a terminal
+ *  context is open; `rect` is then their bounds, and both rectangles tween together.
+ *  Held in a ref and written to the DOM imperatively. */
+interface DisplayedRing extends RingFrame {
   speeds: RingEdgeSpeeds | null;
 }
 
@@ -176,7 +193,7 @@ function writeSmear(
   }
 }
 
-export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, selectedId, selectedType, mode }: {
+export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, selectedId, selectedType, mode, active = true, contextHelper }: {
   /** The Lath store — the overlay re-measures on every commit (`revision` via
    *  `useSyncExternalStore`), so the ring tracks leaves as they move / resize / restore. */
   lathStore: LathOverlayStore;
@@ -187,11 +204,20 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
   selectedId: string | null;
   selectedType: WallSelectionKind;
   mode: WallMode;
+  active?: boolean;
+  /** The open context's helper as last painted; LathHost notifies frames after placing it. */
+  contextHelper?: () => ContextHelper | null;
 }) {
   const { elements: paneElements, version: paneVersion } = useContext(PaneElementsContext);
   const { elements: doorElements, version: doorVersion } = useContext(DoorElementsContext);
   const selectionColor = useFocusRingColor();
   const windowFocused = useContext(WindowFocusedContext);
+  const handoff = useContext(RingHandoffContext);
+  const wasActiveRef = useRef(false);
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const workspaces = useSyncExternalStore(subscribeToWorkspaces, getWorkspacesSnapshot);
+  const { renamingId } = useSyncExternalStore(subscribeToWorkspaceUi, getWorkspaceUiSnapshot);
 
   // The ring shell mounts when there's a measured frame to show; per-frame geometry
   // is written imperatively (below), never via React state — so a travelling ring
@@ -211,6 +237,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
   // `modeRef` mirrors the current mode so any `applyRing` closure derives the right
   // variant without a stale capture.
   const frameRef = useRef<DisplayedRing | null>(null);
+  const opacityRef = useRef('');
   const modeRef = useRef(mode);
   modeRef.current = mode;
 
@@ -233,12 +260,13 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     const container = containerRef.current;
     const path = pathRef.current;
     if (!frame || !container || !path) return;
-    const { rect, shape, speeds } = frame;
+    const { rect, shape, speeds, union } = frame;
 
     container.style.top = `${rect.top}px`;
     container.style.left = `${rect.left}px`;
     container.style.width = `${rect.width}px`;
     container.style.height = `${rect.height}px`;
+    container.style.opacity = opacityRef.current;
 
     const isAnts = modeRef.current !== 'passthrough';
     const strokeWidth = isAnts ? cfg.marchingAnts.strokeWidth : 1;
@@ -247,14 +275,16 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     // Resolved once here so every path builder below sees a single inset.
     const effShape = isAnts ? shape : { ...shape, inset: strokeWidth / 2 };
 
-    path.setAttribute('d', roundedRectPath(rect, effShape));
+    const outline = union && unionRingOutline(union, rect, effShape);
+    path.setAttribute('d', outline ? outline.path : roundedRectPath(rect, effShape));
+    path.dataset.contextUnion = outline ? 'true' : 'false';
 
     if (isAnts) {
       // Dash sized to the perimeter so the segments stay even as the ring resizes.
       // Computed in closed form rather than via `path.getTotalLength()`, which
       // forces a synchronous style+layout flush on every frame of a travel at a
       // cost that scales with the whole document, not this one path.
-      const len = ringPerimeter(rect, effShape);
+      const len = outline ? outline.perimeter : ringPerimeter(rect, effShape);
       const count = Math.max(1, Math.round(len / cfg.marchingAnts.segLen));
       const adjusted = len / count;
       const dash = adjusted * cfg.marchingAnts.dashFraction;
@@ -282,7 +312,8 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     // the shell (the post-render layout effect applies it before paint).
     const show = (frame: DisplayedRing) => {
       frameRef.current = frame;
-      displayedFrameRef.current = { rect: frame.rect, shape: frame.shape };
+      displayedFrameRef.current = { rect: frame.rect, shape: frame.shape, union: frame.union };
+      if (handoff) handoff.current = displayedFrameRef.current;
       if (visibleRef.current) {
         applyRing();
       } else {
@@ -290,22 +321,22 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
         setVisible(true);
       }
     };
-    const showSettled = (frame: RingFrame) =>
-      show({ rect: frame.rect, shape: frame.shape, speeds: null });
+    const showSettled = (frame: RingFrame) => show({ ...frame, speeds: null });
 
     // Per-frame imperative loop: sample the tween's position and velocity, write
     // the DOM, and self-schedule — no React state, so a travelling ring never
     // reconciles.
     const tick = () => {
       rafRef.current = null;
+      if (!activeRef.current) return;
       const tween = tweenRef.current;
       if (!tween) return;
       const now = performance.now();
-      const { rect, shape, done } = sampleRingTween(tween, now);
+      const { rect, shape, union, done } = sampleRingTween(tween, now);
       if (done) {
         // Settled: drop the tween so the final render is clean.
         tweenRef.current = null;
-        showSettled({ rect, shape });
+        showSettled({ rect, shape, union });
         return;
       }
       // Velocity comes from the tween's analytic derivative, so it is exact on the
@@ -313,10 +344,11 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
       // smear should be strongest. Finite-differencing rendered positions cannot
       // do that: it has no previous sample to difference on frame one, and that
       // frame alone covers ~31% of a 220ms travel.
-      const speeds = sampleRingVelocity(tween, now);
+      const speeds = union ? null : sampleRingVelocity(tween, now);
 
-      frameRef.current = { rect, shape, speeds };
-      displayedFrameRef.current = { rect, shape };
+      frameRef.current = { rect, shape, speeds, union };
+      displayedFrameRef.current = { rect, shape, union };
+      if (handoff) handoff.current = displayedFrameRef.current;
       applyRing();
       rafRef.current = requestAnimationFrame(tick);
     };
@@ -336,6 +368,12 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
       showSettled(frame);
     };
 
+    if (!active) {
+      cancelTick();
+      wasActiveRef.current = false;
+      return;
+    }
+
     if (!selectedId) {
       tweenRef.current = null;
       cancelTick();
@@ -349,19 +387,45 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
       return;
     }
 
-    const isDoor = selectedType === 'door';
-    const identity = ringIdentity(selectedType, selectedId);
+    const selectionIdentity = ringIdentity(selectedType, selectedId);
     // Evaluated once per effect run, not per frame — the effect re-runs on every
     // Lath commit, which is plenty fresh for an OS-preference toggle.
     const instant = motionIsInstant();
 
+    const target = () => {
+      if (isWorkspaceSelection(selectedType)) return workspaceTabElement(workspaceIdOfSelection(selectedType, selectedId));
+      return selectedType === 'door' ? doorElements.get(selectedId) : resolvePaneElement(paneElements.get(selectedId));
+    };
     const update = () => {
-      const targetEl = isDoor
-        ? doorElements.get(selectedId)
-        : resolvePaneElement(paneElements.get(selectedId));
+      if (!activeRef.current) return;
+      const targetEl = target();
       if (!targetEl) return; // bail-and-hold: the leaf is momentarily absent
 
-      const next = measureFrame(targetEl, isDoor);
+      const next = measureFrame(targetEl, selectedType);
+      if (!next) return;
+      // An open helper's side joins the identity, so opening, closing and switching
+      // sides tween the union while same-side motion tracks like any other re-measure.
+      const helper = selectedType === 'pane' ? contextHelper?.() : null;
+      const helperFrame = helper?.sourceId === selectedId ? measureFrame(helper.element, 'pane') : null;
+      if (helperFrame) {
+        next.union = [next.rect, helperFrame.rect];
+        next.rect = unionBounds(...next.union);
+      }
+      const identity = helperFrame ? `${selectionIdentity}|context:${helper!.side}` : selectionIdentity;
+      const wall = targetEl.closest<HTMLElement>('[data-workspace-wall]');
+      opacityRef.current = wall?.style.opacity ?? '';
+
+      // A newly visible Wall continues from the other Wall's painted frame,
+      // never from its own stale selection history. Hidden Walls publish nothing.
+      if (!wasActiveRef.current) {
+        if (handoff?.current) {
+          displayedFrameRef.current = handoff.current;
+          displayedIdentityRef.current = null;
+          tweenRef.current = null;
+          showSettled(handoff.current);
+        }
+        wasActiveRef.current = true;
+      }
 
       // Snap gate: the same instant-motion predicate the Lath animator's
       // duration uses (motionIsInstant), so the ring and the leaves agree.
@@ -400,20 +464,27 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     update();
 
     const ro = new ResizeObserver(update);
-    const panelEl = resolvePaneElement(paneElements.get(selectedId));
-    if (panelEl) ro.observe(panelEl);
-    const doorEl = doorElements.get(selectedId);
-    if (doorEl) ro.observe(doorEl);
+    const targetEl = target();
+    if (targetEl) ro.observe(targetEl);
+    window.addEventListener('resize', update);
+    document.addEventListener('scroll', update, true);
 
     // While the wall streams animator frames the leaf divs carry the interpolated
     // inline geometry, so re-measuring each frame tracks the tween frame-accurately.
     const unsubFrames = subscribeLathFrames?.(() => update());
+    const unsubWorkspaceFrames = subscribeWorkspaceMotionFrames(update);
 
-    return () => { ro.disconnect(); unsubFrames?.(); };
+    return () => {
+      ro.disconnect();
+      unsubFrames?.();
+      unsubWorkspaceFrames();
+      window.removeEventListener('resize', update);
+      document.removeEventListener('scroll', update, true);
+    };
     // The rAF loop is intentionally NOT torn down here: it is keyed to the tween
     // (a ref), so a mid-glide re-run of this effect keeps the ring moving. It is
     // cancelled on selection-clear (above), on snap, and on unmount (below).
-  }, [subscribeLathFrames, lathRevision, selectedId, selectedType, paneVersion, doorVersion, paneElements, doorElements, applyRing]);
+  }, [active, contextHelper, handoff, workspaces, subscribeLathFrames, lathRevision, selectedId, selectedType, paneVersion, doorVersion, paneElements, doorElements, applyRing]);
 
   // After any structural render (mount, variant/color/focus change) re-apply the
   // current frame imperatively so the shell's DOM matches — runs pre-paint, so a
@@ -429,12 +500,12 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
   }, []);
 
-  if (!visible || !selectedId) return null;
+  if (!active || !visible || !selectedId) return null;
 
-  return (
+  const ring = (
     <SelectionRing
       variant={mode === 'passthrough' ? 'solid' : 'ants'}
-      animationKey={ringIdentity(selectedType, selectedId)}
+      paused={renamingId !== null}
       color={selectionColor}
       windowFocused={windowFocused}
       containerRef={containerRef}
@@ -442,4 +513,6 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
       smearRef={smearRef}
     />
   );
+  // Fixed coordinates must not inherit the workspace presentation transform.
+  return handoff ? createPortal(ring, document.body) : ring;
 }

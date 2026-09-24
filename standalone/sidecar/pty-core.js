@@ -138,8 +138,28 @@ function withPrependedPath(env, dir, platform = process.platform) {
 function withoutInternalDormouseEnv(env) {
   const next = { ...env };
   delete next.DORMOUSE_CLI_BIN;
+  delete next.DORMOUSE_GUI_NODE_DIR;
   delete next.DORMOUSE_SHELL_INTEGRATION_DIR;
   return next;
+}
+
+// Win32 only. The bundled node.exe is patched to the GUI subsystem
+// (docs/specs/standalone.md -> "Windows node subsystem"), and a GUI-subsystem
+// binary does not attach to an inherited console: run it inside a pane's
+// ConPTY and stdin is already at EOF, there is no `setRawMode`, and output is
+// dropped. `cargo run` leaves that node.exe's directory on the dev app's PATH
+// for DLL resolution and panes inherit the app's env, so a bare `node` in a
+// pane would find it. Never derive the directory from `process.execPath` —
+// this module is also the VS Code pty host, and the agent-browser harness runs
+// the sidecar under the developer's node (rationale).
+function withoutGuiNodeDir(env, platform = process.platform) {
+  const key = pathEnvKey(env);
+  if (platform !== 'win32' || !env.DORMOUSE_GUI_NODE_DIR || !env[key]) return env;
+  // Entries compare case-insensitively, `/` as `\`, trailing separators ignored.
+  const norm = (entry) => String(entry).replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
+  const target = norm(env.DORMOUSE_GUI_NODE_DIR);
+  const kept = env[key].split(';').filter((entry) => norm(entry) !== target);
+  return { ...env, [key]: kept.join(';') };
 }
 
 // Win32 only. Git Bash / MSYS `/etc/profile` reconstructs PATH from an
@@ -294,8 +314,9 @@ function resolveSpawnConfig(options, runtime = {}) {
   // Resolve the integration dir from the original env before the internal
   // DORMOUSE_* vars are stripped below.
   const integrationDir = resolveShellIntegrationDir(env, runtime);
+  const paneEnv = withoutGuiNodeDir(env, platform);
   const envWithCliPath = withoutInheritedMsysOriginalPath(
-    withoutInternalDormouseEnv(withPrependedPath(env, env.DORMOUSE_CLI_BIN, platform)),
+    withoutInternalDormouseEnv(withPrependedPath(paneEnv, env.DORMOUSE_CLI_BIN, platform)),
     platform,
   );
   const childEnv = {
@@ -503,19 +524,22 @@ function detectAvailableShells(runtime = {}) {
 
 module.exports.detectAvailableShells = detectAvailableShells;
 
-function parseCwdFromLsof(output, pid) {
-  const lines = output.split(/\r?\n/);
-  let inTargetProcess = false;
+/** Every `pid -> cwd` in `lsof -Fn` field output. Records are `p<pid>` blocks;
+ *  within one, the `n` line after `fcwd` is that process's cwd. */
+function parseCwdsFromLsof(output) {
+  const cwds = new Map();
+  let pid = null;
   let sawCwdFd = false;
 
-  for (const line of lines) {
+  for (const line of output.split(/\r?\n/)) {
     if (line.startsWith('p')) {
-      inTargetProcess = line === `p${pid}`;
+      const parsed = Number(line.slice(1));
+      pid = Number.isInteger(parsed) ? parsed : null;
       sawCwdFd = false;
       continue;
     }
 
-    if (!inTargetProcess) continue;
+    if (pid === null) continue;
 
     if (line === 'fcwd') {
       sawCwdFd = true;
@@ -523,39 +547,75 @@ function parseCwdFromLsof(output, pid) {
     }
 
     if (sawCwdFd && line.startsWith('n')) {
-      return line.slice(1) || null;
+      if (!cwds.has(pid)) cwds.set(pid, line.slice(1) || null);
+      sawCwdFd = false;
     }
   }
 
-  return null;
+  return cwds;
+}
+
+module.exports.parseCwdsFromLsof = parseCwdsFromLsof;
+
+function parseCwdFromLsof(output, pid) {
+  return parseCwdsFromLsof(output).get(Number(pid)) ?? null;
 }
 
 module.exports.parseCwdFromLsof = parseCwdFromLsof;
 
 function getCwdForPid(pid, runtime = {}) {
+  return getCwdsForPids([pid], runtime).get(pid) ?? null;
+}
+
+module.exports.getCwdForPid = getCwdForPid;
+
+/**
+ * `pid -> cwd` for every pid that could be resolved, in ONE pass.
+ *
+ * Batched at this layer because a save probes every terminal pane at once and
+ * the macOS branch is a synchronous subprocess on the sidecar's only event loop:
+ * one `lsof` for N pids instead of N spawns is the whole point
+ * (docs/specs/transport.md -> "Persisted session"). Linux is a readlink per pid
+ * with no subprocess to batch, and Windows resolves nothing either way.
+ */
+function getCwdsForPids(pids, runtime = {}) {
   const fsModule = runtime.fsModule || fs;
   const execFileSyncFn = runtime.execFileSync || execFileSync;
+  const found = new Map();
+  const unresolved = [];
 
-  // Linux: /proc/<pid>/cwd symlink
-  try {
-    return fsModule.readlinkSync(`/proc/${pid}/cwd`);
-  } catch { /* not Linux or proc unavailable */ }
+  // Linux: /proc/<pid>/cwd symlink.
+  for (const pid of pids) {
+    try {
+      found.set(pid, fsModule.readlinkSync(`/proc/${pid}/cwd`));
+    } catch { unresolved.push(pid); /* not Linux or proc unavailable */ }
+  }
+  if (unresolved.length === 0) return found;
 
   // macOS: lsof. `-a` is required so `-p` and `-d cwd` are combined instead
   // of OR'ed, which otherwise returns unrelated processes and often `/`.
+  let out = '';
   try {
-    const out = execFileSyncFn('lsof', ['-a', '-d', 'cwd', '-p', String(pid), '-Fn'], {
+    out = execFileSyncFn('lsof', ['-a', '-d', 'cwd', '-p', unresolved.join(','), '-Fn'], {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
       windowsHide: true, // see runPowerShell: avoid the console-allocation deadlock
     });
-    return parseCwdFromLsof(out, pid);
-  } catch { /* fallback */ }
+  } catch (err) {
+    // `lsof` exits non-zero when ANY requested pid is gone, and still prints the
+    // ones it did resolve. Throwing that stdout away is what turned one dead pid
+    // into every pane losing its cwd for that save — and a quit teardown, which
+    // kills and then flushes, is exactly when a pid goes missing mid-batch.
+    out = typeof err?.stdout === 'string' ? err.stdout : (err?.stdout?.toString('utf-8') ?? '');
+  }
+  for (const [pid, cwd] of parseCwdsFromLsof(out)) {
+    if (cwd) found.set(pid, cwd);
+  }
 
-  return null;
+  return found;
 }
 
-module.exports.getCwdForPid = getCwdForPid;
+module.exports.getCwdsForPids = getCwdsForPids;
 
 // ── Open-port discovery ──────────────────────────────────────────────────────
 //
@@ -580,6 +640,21 @@ module.exports.getCwdForPid = getCwdForPid;
 // cap inside the open-port pipeline.
 const OPEN_PORT_TIMEOUT_MS = 3000;
 module.exports.OPEN_PORT_TIMEOUT_MS = OPEN_PORT_TIMEOUT_MS;
+
+// Mirrors `OPEN_PORT_TIMEOUT_PER_ID_MS` in `lib/src/lib/platform/types.ts` and
+// `standalone/src-tauri/src/lib.rs` — pinned by
+// `lib/src/lib/mirrored-constants.test.ts`. A batched scan's socket
+// enumeration is capped at `openPortScanTimeoutMs(terminals)`, not the
+// per-terminal cap, because its `lsof` argument grows with the batch.
+const OPEN_PORT_TIMEOUT_PER_ID_MS = 100;
+module.exports.OPEN_PORT_TIMEOUT_PER_ID_MS = OPEN_PORT_TIMEOUT_PER_ID_MS;
+
+/** Socket-scan budget for one scan covering `count` terminals. The single-
+ *  terminal path (`count` = 1) keeps `OPEN_PORT_TIMEOUT_MS` plus one allowance. */
+function openPortScanTimeoutMs(count) {
+  return OPEN_PORT_TIMEOUT_MS + OPEN_PORT_TIMEOUT_PER_ID_MS * count;
+}
+module.exports.openPortScanTimeoutMs = openPortScanTimeoutMs;
 
 /**
  * Build the set of descendant PIDs (including rootPid) from a flat list of
@@ -873,17 +948,27 @@ function parseHostPort(token, wildcardFamily = 'IPv4') {
 function macListeningPorts(pids, runtime = {}) {
   const execFileSyncFn = runtime.execFileSync || execFileSync;
   if (pids.length === 0) return [];
+  let out = '';
   try {
-    const out = execFileSyncFn(
+    out = execFileSyncFn(
       'lsof',
       ['-nP', '-a', '-iTCP', '-sTCP:LISTEN', '-p', pids.join(','), '-Fpcnt'],
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: OPEN_PORT_TIMEOUT_MS, windowsHide: true },
+      {
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        timeout: runtime.scanTimeoutMs ?? OPEN_PORT_TIMEOUT_MS,
+        windowsHide: true,
+      },
     );
-    return parseLsofListening(out);
-  } catch {
-    // lsof exits non-zero when none of the pids have matching files.
-    return [];
+  } catch (err) {
+    // lsof exits non-zero when ANY requested pid is gone (or has no matching
+    // files) and still prints the ones it did resolve — the same trap
+    // `getCwdsForPids` documents. A batched scan covers every descendant of
+    // every terminal, so a child exiting between `ps` and `lsof` would
+    // otherwise empty the whole Window's listing.
+    out = typeof err?.stdout === 'string' ? err.stdout : (err?.stdout?.toString('utf-8') ?? '');
   }
+  return parseLsofListening(out);
 }
 
 /** ConvertTo-Json emits a bare object (not an array) for a single row. */
@@ -897,7 +982,7 @@ function normalizeJsonArray(parsed) {
  * Parse `Get-NetTCPConnection -State Listen | Select LocalAddress,LocalPort,
  * OwningProcess` JSON, keeping rows owned by a pid in `pidSet`.
  */
-function parseNetTcpConnections(json, pidSet, nameByPid = new Map()) {
+function parseNetTcpConnections(json, pidSet) {
   const rows = normalizeJsonArray(JSON.parse(json));
   const ports = [];
   for (const row of rows) {
@@ -912,7 +997,6 @@ function parseNetTcpConnections(json, pidSet, nameByPid = new Map()) {
       address,
       port,
       pid,
-      processName: nameByPid.get(pid),
     });
   }
   return ports;
@@ -921,7 +1005,7 @@ function parseNetTcpConnections(json, pidSet, nameByPid = new Map()) {
 module.exports.parseNetTcpConnections = parseNetTcpConnections;
 
 /** Parse `netstat -ano` LISTENING TCP rows (Windows fallback for older hosts). */
-function parseNetstatListening(output, pidSet, nameByPid = new Map()) {
+function parseNetstatListening(output, pidSet) {
   const ports = [];
   for (const line of output.split(/\r?\n/)) {
     const tokens = line.trim().split(/\s+/);
@@ -938,7 +1022,6 @@ function parseNetstatListening(output, pidSet, nameByPid = new Map()) {
       address: parsed.address,
       port: parsed.port,
       pid,
-      processName: nameByPid.get(pid),
     });
   }
   return ports;
@@ -962,42 +1045,46 @@ function runPowerShellJson(script, execFileSyncFn) {
 }
 
 function windowsListeningPorts(pids, runtime = {}) {
-  const execFileSyncFn = runtime.execFileSync || execFileSync;
+  const rawExecFileSync = runtime.execFileSync || execFileSync;
+  const now = runtime.now || (() => performance.now());
+  const deadline = now() + (runtime.scanTimeoutMs ?? OPEN_PORT_TIMEOUT_MS);
+  // Mandatory port enumeration gets the budget first; optional process names
+  // spend only what remains after the cmdlet or its netstat fallback.
+  const execFileSyncFn = (command, args, options) => {
+    const remaining = Math.ceil(deadline - now());
+    if (remaining <= 0) throw new Error('port scan deadline exhausted');
+    return rawExecFileSync(command, args, { ...options, timeout: remaining });
+  };
   const pidSet = new Set(pids);
+  let ports;
+  try {
+    const json = runPowerShell(
+      'Get-NetTCPConnection -State Listen | Select-Object LocalAddress,LocalPort,OwningProcess | ConvertTo-Json -Compress',
+      execFileSyncFn,
+    );
+    ports = parseNetTcpConnections(json, pidSet);
+  } catch {
+    try {
+      const out = execFileSyncFn('netstat', ['-ano', '-p', 'TCP'], {
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        windowsHide: true, // see runPowerShell: avoid the console-allocation deadlock
+      });
+      ports = parseNetstatListening(out, pidSet);
+    } catch { return []; }
+  }
+  if (!ports.length) return ports;
 
-  // Resolve pid -> process name once (best-effort; ports still returned without).
+  // Names are best-effort: exhaustion here must still return the ports.
   const nameByPid = new Map();
   try {
     const rows = runPowerShellJson(
       'Get-CimInstance Win32_Process | Select-Object ProcessId,Name | ConvertTo-Json -Compress',
       execFileSyncFn,
     );
-    for (const row of rows) {
-      nameByPid.set(Number(row.ProcessId), String(row.Name));
-    }
+    for (const row of rows) nameByPid.set(Number(row.ProcessId), String(row.Name));
   } catch { /* names are optional */ }
-
-  // Preferred: Get-NetTCPConnection (Windows 8+/Server 2012+).
-  try {
-    const json = runPowerShell(
-      'Get-NetTCPConnection -State Listen | Select-Object LocalAddress,LocalPort,OwningProcess | ConvertTo-Json -Compress',
-      execFileSyncFn,
-    );
-    return parseNetTcpConnections(json, pidSet, nameByPid);
-  } catch { /* fall through to netstat */ }
-
-  // Fallback: netstat -ano.
-  try {
-    const out = execFileSyncFn('netstat', ['-ano', '-p', 'TCP'], {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: OPEN_PORT_TIMEOUT_MS,
-      windowsHide: true, // see runPowerShell: avoid the console-allocation deadlock
-    });
-    return parseNetstatListening(out, pidSet, nameByPid);
-  } catch {
-    return [];
-  }
+  return ports.map((port) => ({ ...port, processName: nameByPid.get(port.pid) }));
 }
 
 function getListeningPortsForPids(pids, runtime = {}) {
@@ -1016,10 +1103,14 @@ module.exports.getListeningPortsForPids = getListeningPortsForPids;
  * any platform-specific failure rather than throwing.
  */
 function getOpenPortsForPid(rootPid, runtime = {}) {
-  if (!Number.isInteger(rootPid)) return [];
-  const pids = getDescendantPids(rootPid, runtime);
-  const ports = getListeningPortsForPids(pids, runtime);
+  return getOpenPortsForPids([rootPid], runtime).get(rootPid) ?? [];
+}
 
+module.exports.getOpenPortsForPid = getOpenPortsForPid;
+
+/** De-duplicated by (family, address, port) and sorted by port — the shape a
+ *  caller reads a Surface's ports in. */
+function dedupeListeningPorts(ports) {
   const seen = new Map();
   for (const entry of ports) {
     const key = `${entry.family}|${entry.address}|${entry.port}`;
@@ -1028,7 +1119,38 @@ function getOpenPortsForPid(rootPid, runtime = {}) {
   return [...seen.values()].sort((a, b) => a.port - b.port || a.address.localeCompare(b.address));
 }
 
-module.exports.getOpenPortsForPid = getOpenPortsForPid;
+/**
+ * `rootPid -> listening ports` for a whole set of terminals, in ONE process-table
+ * read and ONE socket scan.
+ *
+ * Batched at this layer for the same reason `getCwdsForPids` is: `dor list --all
+ * --ports` asks about every terminal of every Workspace at once, and each step is
+ * a synchronous subprocess on the sidecar's only event loop — two spawns for N
+ * terminals instead of 2N. Returns [] per pid on any platform failure rather than
+ * throwing.
+ */
+function getOpenPortsForPids(rootPids, runtime = {}) {
+  const byRoot = new Map();
+  const roots = [...new Set(rootPids.filter((pid) => Number.isInteger(pid)))];
+  if (roots.length === 0) return byRoot;
+
+  const pairs = readProcessTable(runtime);
+  // A failed scan is tolerated here (unlike helper-work inspection): each root
+  // then owns only itself, exactly as `getDescendantPids` falls back.
+  const owned = new Map(roots.map((root) => [root, pairs ? buildDescendantSet(pairs, root) : new Set([root])]));
+  const union = new Set();
+  for (const pids of owned.values()) for (const pid of pids) union.add(pid);
+
+  // The socket scan's budget scales with the batch; the process-table read
+  // above does not, its cost being the whole table either way.
+  const ports = getListeningPortsForPids([...union], { ...runtime, scanTimeoutMs: openPortScanTimeoutMs(roots.length) });
+  for (const [root, pids] of owned) {
+    byRoot.set(root, dedupeListeningPorts(ports.filter((entry) => pids.has(entry.pid))));
+  }
+  return byRoot;
+}
+
+module.exports.getOpenPortsForPids = getOpenPortsForPids;
 
 /** Directory validation belongs to context(); this only launches the native UI. */
 function openNativeDirectory(nativePath, done, runtime = {}) {
@@ -1047,6 +1169,63 @@ function openNativeDirectory(nativePath, done, runtime = {}) {
 }
 module.exports.openNativeDirectory = openNativeDirectory;
 
+// Paced input: docs/specs/transport.md -> "Paced input"; its rationale holds
+// the measurements behind these numbers.
+const PACED_CHUNK_BYTES = 256;
+const PACED_CHUNK_GAP_MS = 10;
+const PACED_KEY_SETTLE_MS = 100;
+
+// A key is one whole escape sequence, DEL, or a C0 control other than tab and
+// line feed, which stay text. Returns `i` when `data[i]` starts text.
+function keyTokenEnd(data, i) {
+  const code = data.charCodeAt(i);
+  if (code === 0x1b) {
+    const next = data[i + 1];
+    if (next === '[') {
+      // CSI: parameter and intermediate bytes (0x20-0x3F), then a final byte
+      // (0x40-0x7E); a sequence cut short ends where its valid bytes do.
+      let j = i + 2;
+      while (j < data.length && data.charCodeAt(j) >= 0x20 && data.charCodeAt(j) <= 0x3f) j += 1;
+      const final = data.charCodeAt(j);
+      return final >= 0x40 && final <= 0x7e ? j + 1 : j;
+    }
+    if (next === 'O') return Math.min(i + 3, data.length);
+    return Math.min(i + 2, data.length);
+  }
+  if (code === 0x7f || (code < 0x20 && code !== 0x09 && code !== 0x0a)) return i + 1;
+  return i;
+}
+
+/** Split input into text runs of at most PACED_CHUNK_BYTES UTF-8 bytes and
+ *  whole keys, never cutting a code point or an escape sequence. */
+function pacedInputSegments(data) {
+  const segments = [];
+  let start = 0;
+  let bytes = 0;
+  const flush = (end) => {
+    if (end > start) segments.push({ data: data.slice(start, end), key: false });
+    start = end;
+    bytes = 0;
+  };
+  for (let i = 0; i < data.length;) {
+    const keyEnd = keyTokenEnd(data, i);
+    if (keyEnd > i) {
+      flush(i);
+      segments.push({ data: data.slice(i, keyEnd), key: true });
+      start = i = keyEnd;
+      continue;
+    }
+    const codePoint = data.codePointAt(i);
+    const size = codePoint < 0x80 ? 1 : codePoint < 0x800 ? 2 : codePoint < 0x10000 ? 3 : 4;
+    if (bytes + size > PACED_CHUNK_BYTES) flush(i);
+    bytes += size;
+    i += codePoint > 0xffff ? 2 : 1;
+  }
+  flush(data.length);
+  return segments;
+}
+module.exports.pacedInputSegments = pacedInputSegments;
+
 /**
  * Shared PTY manager — the single place where node-pty processes are managed.
  *
@@ -1061,7 +1240,12 @@ module.exports.openNativeDirectory = openNativeDirectory;
  *   send('openPorts', { id, ports: [{ protocol, family, address, port, pid, processName }], requestId })
  */
 
-module.exports.create = function create(send, ptyModule, { replay = false } = {}) {
+// `sliceSince` is injected rather than imported: its implementation is shared
+// with the VS Code extension host and lives in `lib/src/host/replay-buffer.ts`,
+// which reaches this process only as the generated `recovery.cjs` bundle. Taking
+// it as an option keeps this file — and its `node --test` suite — free of any
+// build artifact. `main.js` supplies the real one.
+module.exports.create = function create(send, ptyModule, { replay = false, sliceSince = null } = {}) {
   if (!ptyModule || typeof ptyModule.spawn !== 'function') {
     throw new TypeError('create() requires a node-pty compatible module');
   }
@@ -1071,7 +1255,11 @@ module.exports.create = function create(send, ptyModule, { replay = false } = {}
   const helpers = new Map(); // id -> { parentId, command } for helper PTYs
   // Every spawned, unkilled PTY (exited ones included). Only the standalone host
   // asks for `replay`; VS Code's extension host keeps its own buffers.
-  const sessions = new Map(); // id -> { chunks: string[], chars: number }
+  // `chars` is what the buffer currently holds (a trim decrements it);
+  // `received` is everything ever received and is never decremented, so it is the
+  // only stable coordinate for marking a position in a pane's output
+  // (docs/specs/transport.md -> "Persisted session").
+  const sessions = new Map(); // id -> { chunks: string[], chars: number, received: number }
   const REPLAY_CHARS = 200000;
   const ptyShells = new Map(); // id -> resolved shell executable
   // Repaint restoration belongs to the PTY owner, where every local and remote
@@ -1083,6 +1271,50 @@ module.exports.create = function create(send, ptyModule, { replay = false } = {}
   function cancelRepaint(id) {
     clearTimeout(repaintTimers.get(id));
     repaintTimers.delete(id);
+  }
+
+  // Per-PTY paced input, kept after its steps drain: `at` / `textAt` time the
+  // last paced write and paced text, so a key sent by a later request still
+  // settles. While steps are pending, every write for the id joins them, so
+  // input keeps its order. Every path that retires a PTY cancels its input
+  // first, so the `p` a drain captured is still the live one.
+  const inputs = new Map(); // id -> { steps: [{ data, key, paced }], timer, at, textAt }
+
+  function cancelInput(id) {
+    clearTimeout(inputs.get(id)?.timer);
+    inputs.delete(id);
+  }
+
+  function drainInput(id, p, input) {
+    input.timer = undefined;
+    while (input.steps.length > 0) {
+      const step = input.steps[0];
+      if (step.paced) {
+        const dueAt = step.key
+          ? Math.max(input.at + PACED_CHUNK_GAP_MS, input.textAt + PACED_KEY_SETTLE_MS)
+          : input.at + PACED_CHUNK_GAP_MS;
+        const wait = dueAt - Date.now();
+        if (wait > 0) {
+          input.timer = setTimeout(() => drainInput(id, p, input), wait);
+          return;
+        }
+      }
+      input.steps.shift();
+      try {
+        p.write(step.data);
+      } catch {
+        // A PTY can die between its last write and the `onExit` that cancels
+        // its input. Drop the rest rather than throw from a timer, which has
+        // no caller to catch it and would take down every PTY in the process.
+        cancelInput(id);
+        return;
+      }
+      // Every write paces what follows it; only paced text settles a key. An
+      // unpaced step drains in the same millisecond as the paced one before
+      // it, so only a write straddling a millisecond can show the difference.
+      input.at = Date.now();
+      if (step.paced && !step.key) input.textAt = input.at;
+    }
   }
 
   function validHelperOwner(id, helper) {
@@ -1132,15 +1364,23 @@ module.exports.create = function create(send, ptyModule, { replay = false } = {}
     }
 
     cancelRepaint(id);
+    cancelInput(id);
     ptys.set(id, p);
-    const session = { chunks: [], chars: 0 };
+    const session = { chunks: [], chars: 0, received: 0, shell: config.shell };
     sessions.set(id, session);
     ptyShells.set(id, config.shell);
 
     p.onData((data) => {
+      // Appended BEFORE the send, and synchronously. Two consumers depend on
+      // that order: the replay a reconnecting webview reads, and a Workspace
+      // transfer, whose host suppresses this id's output the instant it
+      // reassigns ownership and then asks for `list([id])` — so the chunk it
+      // suppressed has to already be in the buffer the replay is built from,
+      // exactly once (docs/specs/transport.md -> "Transferring a Workspace").
       if (replay && ptys.get(id) === p) {
         session.chunks.push(data);
         session.chars += data.length;
+        session.received += data.length;
         // Drop whole chunks off the front, then trim the head: O(chunk) per write.
         while (session.chunks.length > 1 && session.chars - session.chunks[0].length >= REPLAY_CHARS) session.chars -= session.chunks.shift().length;
         if (session.chars > REPLAY_CHARS) { session.chunks[0] = session.chunks[0].slice(session.chars - REPLAY_CHARS); session.chars = REPLAY_CHARS; }
@@ -1149,9 +1389,11 @@ module.exports.create = function create(send, ptyModule, { replay = false } = {}
     });
 
     p.onExit(({ exitCode, signal }) => {
+      session.exitCode = exitCode;
       send('exit', { id, exitCode, signal });
       if (ptys.get(id) === p) {
         cancelRepaint(id);
+        cancelInput(id);
         ptys.delete(id);
         ptyShells.delete(id);
       }
@@ -1164,9 +1406,28 @@ module.exports.create = function create(send, ptyModule, { replay = false } = {}
     console.error(`[pty-core] spawned: ${id} (${config.shell}, ${config.cols}x${config.rows})`);
   }
 
-  function write(id, data) {
+  function write(id, data, { paced = false } = {}) {
     const p = ptys.get(id);
-    if (p) p.write(data);
+    if (!p) return;
+    // An interrupt skips the line and discards what waits in it, as the tty
+    // flushes its own input queue on one. `dor send --key ctrl-c` is paced and
+    // is the interrupt agents are taught, so this cannot test for unpaced.
+    if (data === '\x03') cancelInput(id);
+    let input = inputs.get(id);
+    if (!paced && !input?.steps.length) {
+      p.write(data);
+      return;
+    }
+    if (!input) {
+      input = { steps: [], timer: undefined, at: -Infinity, textAt: -Infinity };
+      inputs.set(id, input);
+    }
+    if (paced) {
+      for (const segment of pacedInputSegments(data)) input.steps.push({ ...segment, paced: true });
+    } else {
+      input.steps.push({ data, key: false, paced: false });
+    }
+    if (input.timer === undefined) drainInput(id, p, input);
   }
 
   function resize(id, cols, rows, repaint = false) {
@@ -1193,6 +1454,29 @@ module.exports.create = function create(send, ptyModule, { replay = false } = {}
     repaintTimers.set(id, timer);
   }
 
+  /** Ids that can still take input. An exited PTY leaves `ptys` in its `onExit`,
+   *  so this is exactly the live set the recovery capture must interrupt. */
+  function liveIds() {
+    return [...ptys.keys()];
+  }
+
+  /** A mark in the pane's output stream, cheap enough to take on every poll tick:
+   *  `received` is maintained exactly by the data handler, so a caller watching a
+   *  pane for growth pays nothing instead of a full `join()`. */
+  function receivedChars(id) {
+    const session = sessions.get(id);
+    return session ? session.received : 0;
+  }
+
+  /** The output received after a `receivedChars` mark. This is the buffer lookup;
+   *  the clamping arithmetic is the injected `sliceSince` (see `create`). Without
+   *  one there is no recovery capture in this process either, so nothing to read. */
+  function outputSince(id, mark) {
+    const session = sessions.get(id);
+    if (!session || !sliceSince) return '';
+    return sliceSince(session.chunks, session.chars, session.received, mark);
+  }
+
   // Synchronous lifetime observation for the Burrow's atomic
   // subscribe-then-check. Natural exits delete the generation from `ptys`, and
   // a spawn under the same id installs the new generation before it can emit.
@@ -1204,6 +1488,7 @@ module.exports.create = function create(send, ptyModule, { replay = false } = {}
     helpers.delete(id);
     sessions.delete(id);
     cancelRepaint(id);
+    cancelInput(id);
     const p = ptys.get(id);
     if (p) {
       p.kill();
@@ -1214,6 +1499,7 @@ module.exports.create = function create(send, ptyModule, { replay = false } = {}
 
   function killAll() {
     for (const id of repaintTimers.keys()) cancelRepaint(id);
+    for (const id of inputs.keys()) cancelInput(id);
     for (const [, p] of ptys) {
       p.kill();
     }
@@ -1223,13 +1509,56 @@ module.exports.create = function create(send, ptyModule, { replay = false } = {}
     sessions.clear();
   }
 
-  function list() {
-    const result = [];
-    for (const [id] of ptys) {
-      result.push({ id, alive: true, shell: ptyShells.get(id), ...(helpers.has(id) ? { helper: helpers.get(id) } : {}) });
+  /**
+   * List (and, where this host buffers, replay) live PTYs.
+   *
+   * `ids` omitted is every live PTY; an empty array is an empty list — the same
+   * "omitted is not empty" rule `interrupt` carries, and for the same reason: a
+   * caller forwarding a computed set that came out empty must get a no-op
+   * rather than everything. `forWindow` is echoed on the list and on each
+   * replay so the host can route both back to the window that asked
+   * (docs/specs/standalone.md -> "Windows"), and `requestId` so the asking
+   * collector can tell its own answer from a concurrent one's
+   * (docs/specs/transport.md -> "Reconnection").
+   */
+  function list(ids, forWindow, requestId, marks) {
+    // Explicit marked requests may resume a naturally exited buffer. Ordinary
+    // discovery still lists only live PTYs, and kill removes the retained buffer.
+    const targets = Array.isArray(ids)
+      ? ids.filter((id) => ptys.has(id) || (replay && typeof marks?.[id] === 'number' && sessions.has(id)))
+      : [...ptys.keys()];
+    const result = targets.map((id) => ({
+      id, alive: ptys.has(id), shell: sessions.get(id)?.shell,
+      ...(!ptys.has(id) ? { exitCode: sessions.get(id)?.exitCode } : {}), ...(helpers.has(id) ? { helper: helpers.get(id) } : {}),
+    }));
+    const addressed = {
+      ...(forWindow ? { forWindow } : {}),
+      ...(requestId === undefined || requestId === null ? {} : { requestId }),
+    };
+    send('list', { ptys: result, ...addressed });
+    if (!replay) return;
+    for (const { id } of result) {
+      // A marked id replays only what came after its mark: the window that
+      // asked already holds everything before it, serialized by the window
+      // that handed the PTY over (docs/specs/transport.md -> "Transferring a
+      // Workspace"). Without a shared `sliceSince` there is no mark arithmetic,
+      // and the whole buffer is the safe answer.
+      const mark = marks && typeof marks[id] === 'number' ? marks[id] : null;
+      const data = mark !== null && sliceSince ? outputSince(id, mark) : sessions.get(id).chunks.join('');
+      send('replay', { id, data, ...addressed });
     }
-    send('list', { ptys: result });
-    if (replay) for (const { id } of result) send('replay', { id, data: sessions.get(id).chunks.join('') });
+  }
+
+  /** Stamp each PTY's output position, **in the stream**: the `marked` line is
+   *  written behind every `data` line already sent for the id and ahead of every
+   *  one after it, so a reader that consumes in order holds exactly the bytes
+   *  before the mark when it sees it. Unknown ids answer 0, so a caller waiting
+   *  on a set never hangs on a PTY that exited meanwhile. */
+  function mark(ids, requestId) {
+    const addressed = requestId === undefined || requestId === null ? {} : { requestId };
+    for (const id of Array.isArray(ids) ? ids : []) {
+      send('marked', { id, mark: receivedChars(id), ...addressed });
+    }
   }
 
   // Only explicit settings edits write this installation-global preference. No
@@ -1287,10 +1616,57 @@ module.exports.create = function create(send, ptyModule, { replay = false } = {}
     send('cwd', { id, cwd: getCwdForPid(p.pid), requestId });
   }
 
+  /** One answer for every id a save asks about, so N panes cost one process
+   *  scan rather than N (docs/specs/transport.md -> "Persisted session"). An id
+   *  with no live PTY answers null, exactly as `getCwd` does. */
+  function getCwds(ids, requestId) {
+    const targets = Array.isArray(ids) ? ids : [];
+    const cwds = {};
+    const idsByPid = new Map();
+    for (const id of targets) {
+      cwds[id] = null;
+      const p = ptys.get(id);
+      if (!p) continue;
+      const sharing = idsByPid.get(p.pid);
+      if (sharing) sharing.push(id);
+      else idsByPid.set(p.pid, [id]);
+    }
+    const resolved = getCwdsForPids([...idsByPid.keys()]);
+    for (const [pid, sharing] of idsByPid) {
+      const cwd = resolved.get(pid) ?? null;
+      for (const id of sharing) cwds[id] = cwd;
+    }
+    send('cwds', { cwds, requestId });
+  }
+
   function getOpenPorts(id, requestId) {
     const p = ptys.get(id);
     // getOpenPortsForPid is fail-soft (returns [] on any platform error).
     send('openPorts', { id, ports: p ? getOpenPortsForPid(p.pid) : [], requestId });
+  }
+
+  /** One answer for every id a listing asks about, so N terminals cost one
+   *  process scan rather than N (`docs/specs/dor-cli.md` -> "Current Implemented
+   *  Commands"). An id with no live PTY answers `[]`, exactly as `getOpenPorts`
+   *  does. */
+  function getOpenPortsMany(ids, requestId) {
+    const targets = Array.isArray(ids) ? ids : [];
+    const ports = {};
+    const idsByPid = new Map();
+    for (const id of targets) {
+      ports[id] = [];
+      const p = ptys.get(id);
+      if (!p) continue;
+      const sharing = idsByPid.get(p.pid);
+      if (sharing) sharing.push(id);
+      else idsByPid.set(p.pid, [id]);
+    }
+    const resolved = getOpenPortsForPids([...idsByPid.keys()]);
+    for (const [pid, sharing] of idsByPid) {
+      const found = resolved.get(pid) ?? [];
+      for (const id of sharing) ports[id] = found;
+    }
+    send('openPortsMany', { ports, requestId });
   }
 
   // Send ONE ^C to the given PTYs (all live ones when `ids` is omitted), so an
@@ -1321,25 +1697,38 @@ module.exports.create = function create(send, ptyModule, { replay = false } = {}
       // Guarded per id: one already-dead pty must not abort the rest.
       try { write(id, '\x03'); } catch { /* already dead */ }
     }
-    send('interruptDone', { requestId });
+    // Only an actual request is acked. The recovery capture presses in-process
+    // and has nothing to correlate, so a blanket ack would put a stray
+    // `interruptDone {requestId: undefined}` on the protocol channel for every
+    // press it makes.
+    if (requestId !== undefined) send('interruptDone', { requestId });
   }
 
-  function gracefulKillAll(timeout = 2000, requestId) {
+  /**
+   * SIGTERM `ids` and resolve once they have exited.
+   *
+   * Always an explicit set, never a blanket kill: one window of several tears
+   * down alone, and killing a sibling's terminals is unrecoverable. The host
+   * names the window's own PTYs (`pty_graceful_kill` in
+   * standalone/src-tauri/src/lib.rs).
+   */
+  function gracefulKill(ids, timeout = 2000, requestId) {
     const done = () => send('gracefulKillDone', { requestId });
+    const targets = (Array.isArray(ids) ? ids : []).filter((id) => ptys.has(id));
     // Nothing live to SIGTERM, but a just-exited PTY can still deliver final
     // output shortly after onExit (notably under ConPTY). Keep the same single
     // grace tick used after the live map empties before the quit flush runs.
-    if (ptys.size === 0) { setTimeout(done, 50); return; }
-    for (const [, p] of ptys) {
-      try { p.kill('SIGTERM'); } catch { /* already dead */ }
+    if (targets.length === 0) { setTimeout(done, 50); return; }
+    for (const id of targets) {
+      try { ptys.get(id).kill('SIGTERM'); } catch { /* already dead */ }
     }
-    // Resolve early once every PTY has exited (onExit empties the map) instead
-    // of always sitting out the full timeout — but one grace tick after the map
-    // empties, since ConPTY can fire onExit before the final data flush and that
+    // Resolve early once every target has exited (onExit removes it) instead
+    // of always sitting out the full timeout — but one grace tick after the last
+    // one goes, since ConPTY can fire onExit before the final data flush and that
     // last output must reach the host first.
     const deadline = Date.now() + timeout;
     const tick = () => {
-      if (ptys.size === 0) setTimeout(done, 50);
+      if (!targets.some((id) => ptys.has(id))) setTimeout(done, 50);
       else if (Date.now() >= deadline) done();
       else setTimeout(tick, 50);
     };
@@ -1351,5 +1740,6 @@ module.exports.create = function create(send, ptyModule, { replay = false } = {}
   }
 
   return { spawn, write, resize, hasPty, kill, killAll, list, context,
-    getCwd, getOpenPorts, interrupt, gracefulKillAll, getShells };
+    getCwd, getCwds, getOpenPorts, getOpenPortsMany, interrupt, gracefulKill, getShells,
+    liveIds, receivedChars, outputSince, mark };
 };

@@ -46,7 +46,7 @@ export default function SecurityDocs() {
         <a href={sitePath("/supply-chain")} className={LINK_CLASS}>
           supply-chain disclosure
         </a>
-        . The five audited checklists behind all three live beside the spec, in{" "}
+        . The audited checklists behind all three live beside the spec, in{" "}
         <a href={SPECS_URL} className={LINK_CLASS} target="_blank" rel="noopener noreferrer">
           the specs directory on GitHub
         </a>

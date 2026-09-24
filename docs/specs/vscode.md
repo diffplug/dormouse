@@ -39,29 +39,16 @@ The webview is the shared `lib/` frontend, unmodified for this host (`docs/specs
 
 ### Extension manifest
 
-**Must activate on the contributed view, restored editor panels, or an invoked contributed command.** Command activation is implicit on the supported VS Code versions ([activation events](https://code.visualstudio.com/api/references/activation-events#oncommand)). The manifest owns contributed commands, views, and title actions: ids, titles, icons, and ordering.
+**Must activate on the contributed view, restored editor panels, or an invoked contributed command.** Command activation is implicit on the supported VS Code versions ([activation events](https://code.visualstudio.com/api/references/activation-events#oncommand)). The manifest owns contributed commands, views, and title actions: ids, titles, icons, and ordering. The shipped commands are `dormouse.focus`, `dormouse.open`, `dormouse.debugTheme`, `dormouse.newTerminal`, and `dormouse.selectShell`.
 
 **No `configuration`, no `keybindings`, no context key**: settings live in the in-webview Settings dialog rather than `settings.json`, chords are handled inside the webview, and nothing is `when`-gated on Dormouse state. Context keys are [Future](#context-keys). Source of truth: `vscode-ext/package.json`.
 
 ### Webview hosting
 
-VS Code-specific layout of the transport model:
-
-```
-Extension Host (always running while extension is active)
-├── pty-manager.ts (forks pty-host.js child process)
-│   ├── pty-1 (Process: Live)
-│   ├── pty-2 (Process: Live)
-│   └── pty-3 (Process: Exited)
-│
-├── WebviewView "Dormouse" (bottom panel)
-│   └── message-router: owns pty-1, pty-2
-│
-└── WebviewPanel "Dormouse" (editor tab, optional)
-    └── message-router: owns pty-3
-```
-
-Consequences:
+The extension host is the platform host of `docs/specs/transport.md` → "PTY
+lifecycle": `pty-manager.ts` forks the pty-host child, the bottom-panel
+`WebviewView` and each editor-tab `WebviewPanel` are the webviews, and each
+router owns its own PTY ids. Consequences:
 
 - Hiding or toggling the Dormouse panel neither kills its PTYs nor destroys sessions.
 - **Closing an editor-tab `WebviewPanel` is not hiding it.** `setupPanel` attaches
@@ -77,17 +64,19 @@ Consequences:
 
 > See `docs/specs/glossary.md` for the Workspace / Window containers and `docs/specs/alert.md` for the union status.
 >
-> Union reflection onto native chrome is always-on — the extension host has no `localStorage` for the standalone workspaces flag ([Future](#future)). The Window persistence container is standalone-only; VS Code keeps one bare `PersistedSession` per webview.
+> Union reflection onto native chrome is always-on. The Window persistence container is standalone-only; VS Code keeps one bare `PersistedSession` per webview.
 
-**One webview is one Workspace.** The bottom-panel `WebviewView` ("Dormouse") is the default Workspace; each `dormouse.open` editor-tab `WebviewPanel` is an independent Workspace. Several are visible at once, and VS Code — not Dormouse — owns their tabs, creation, and closing, so **Dormouse adds no create/rename/close affordances here**. A Workspace's Surfaces are the terminal Sessions whose PTYs its router tracks (`ownedPtyIds`, `docs/specs/transport.md`) plus the browser Surfaces rendered in it.
+**One webview is one Workspace.** The bottom-panel `WebviewView` ("Dormouse") is the default Workspace; each `dormouse.open` editor-tab `WebviewPanel` is an independent Workspace. Several are visible at once, and VS Code — not Dormouse — owns their tabs, creation, and closing, so **Dormouse adds no create/rename/close affordances here**: the webview mounts a bare `<Wall>`, which leaves the Workspace strip and its shortcuts to standalone (`docs/specs/layout.md` → Workspaces). A Workspace's Surfaces are the terminal Sessions whose PTYs its router tracks (`ownedPtyIds`, `docs/specs/transport.md`) plus the browser Surfaces rendered in it.
+
+**The extension host refuses every Workspace-spanning `dor` request** — the container verbs, `dor list --workspaces` / `--all`, and any `--workspace` but this webview's own — before it routes one to a webview, since no webview can answer for its siblings (`docs/specs/dor-cli.md` → "dor workspace"). **Its own Workspace is accepted by position *and* by name** (`DEFAULT_WORKSPACE_NAME`, what a bare Wall registers), so a ref read out of `dor list` can be handed straight back. Source of truth: `dorWorkspaceRefusal` in `vscode-ext/src/dor-workspace-guard.ts`.
 
 #### Surfacing union status on native chrome
 
 The host computes each webview's union (`ringing` / `todo`) from the module-level `AlertManager` scoped to that router's `ownedPtyIds`, delivered via `attachRouter`'s `onUnion` callback. `ownedPtyIds` are PTY-backed, so **VS Code chrome reflects terminal Session ring + TODO only** — a browser Surface's TODO stays webview-local, `alert:state` being keyed by PTY-backed Session ids (see [Future](#future)).
 
-Each hosting primitive uses the chrome it has, following the in-app `<title> <bell> [TODO]` pattern where possible:
+Each hosting primitive uses the chrome it has, following the in-app `<title> [TODO]` pattern plus the alarm ring where possible:
 
-- **Editor tab (`WebviewPanel`):** `panel.title` takes the suffix — `Dormouse` + ` 🔔` (ringing) + ` [TODO]` (todo), both when both apply; the bell is an emoji stand-in because a tab title is plain text. `panel.iconPath` stays the Dormouse mascot.
+- **Editor tab (`WebviewPanel`):** `panel.title` takes the suffix — `Dormouse` + ` 🔔` (ringing) + ` [TODO]` (todo), both when both apply; the bell emoji stands in for the Pane's alarm ring because a tab title is plain text. `panel.iconPath` stays the Dormouse mascot.
 - **Panel view (`WebviewView`):** a presence **badge** — `view.badge.value = 1` whenever anything owes attention, ring-vs-TODO in the tooltip. **Never use `view.title`** — this single-view bottom-panel container shows the static `viewsContainers[].title`, which has no runtime API (rationale). **Clear with `0`, never `undefined`** — VS Code hides a 0-value badge but does not clear an `undefined` one on a panel container. `view.description` stays the shell name.
 
 Reflection updates on every owned-PTY `AlertManager.onStateChange` and on `claim` / `release`. Source of truth: `computeWorkspaceUnion` in `lib/src/lib/workspace-union.ts`, `notifyUnion` in `vscode-ext/src/message-router.ts`, `workspaceTitle` / `workspaceBadge` in `vscode-ext/src/workspace-chrome.ts`, `setupPanel` in `vscode-ext/src/extension.ts`, `DormouseViewProvider` in `vscode-ext/src/webview-view-provider.ts`.
@@ -95,10 +84,9 @@ Reflection updates on every owned-PTY `AlertManager.onStateChange` and on `claim
 WATCHING rules and the alarm settings (`docs/specs/alert.md` → Alarm settings)
 are app-global rather than per-Workspace, so both ride the host-authoritative
 seed / mutate / broadcast channel `docs/specs/transport.md` → Message protocol
-specifies. Two things are this host's: **the seeding offer is the first one
-after extension-host startup**, and the host installs only
-`inactivityTimeoutMs` on the shared `AlertManager` while relaying the whole
-settings blob.
+specifies. One thing is this host's: **the seeding offer is the first one
+after extension-host startup**. The settings a shared `AlertManager` consumes
+are `AlertManager.applySettings`'s own list, not this host's choice.
 
 Source of truth: `WatchedCommandHost` in `lib/src/lib/watched-command-host.ts`,
 `AlertSettingsHost` in `lib/src/lib/alert-settings-host.ts`, the alert cases in
@@ -139,8 +127,8 @@ the kill, and the shutdown budget is not ours (rationale), so the one step whose
 data cannot be reconstructed afterwards runs before the ones that can (cwd
 re-reads, alert merges). `captureAgentRecoveryCommands` writes `^C` into every
 live PTY, waits bounded, scans those buffers, and records the invocation to
-`recovery.json` under `context.storageUri`, **written synchronously and replaced
-temp-then-rename**. **Never `workspaceState`**, whose SQLite flush is already
+`recovery.json` under `context.storageUri`, **written synchronously, owner-only,
+and replaced temp-then-rename**. **Never `workspaceState`**, whose SQLite flush is already
 tearing down (rationale), and **never `PersistedPane.resumeCommand`**, which the
 step-4 flush would overwrite with the webview's stale copy. **The record is
 rewritten the moment each command is found and every wait is bounded**, so being
@@ -163,51 +151,45 @@ needs no host-side per-panel store.
 
 #### Capturing agent recovery
 
-**Write `^C` into the pty; never signal it** — the agents print their resume
-invocation when interrupted, not when signalled, and the tty line discipline
-delivers the SIGINT to the foreground process group, so the hint comes back as
-ordinary `pty:data` (rationale).
-**Interrupt every live PTY, not just recognized agents** — `detectResumeCommand`
-filters the recovery invocations (rationale) — but
-**exclude exited PTYs**, which can yield no hint and would permanently defeat the
-"nothing left to wait for" early exit.
+**Both halves are shared with the Tauri sidecar.** The press-wait-press machine
+is `captureAgentRecovery` (`lib/src/host/recovery-capture.ts`), over four
+primitives each host supplies — the live id set, interrupt, a monotonic received
+count, and the output since a mark — and the record itself is
+`createRecoveryStore` (`docs/specs/standalone.md` → "Agent recovery"), so one
+format, one destructive read, and one set of file modes serve both. Its timings,
+its gates and the arguments for each are in that module's comments; the rules
+that constrain a host are:
 
-**Press-wait-press, gated per pane.** claude prints its hint only on a *second*
-press (after `Press Ctrl-C again to exit`); codex prints after the first, at a
-latency that is not a constant, and a second press arriving mid-print destroys
-its hint entirely. So: one `^C` to every live PTY, then poll on a 40 ms tick,
-sending one more `^C` to a pane that has yielded nothing either the moment it
-asks (`Press Ctrl-C again`) or once ~600 ms have passed with ~200 ms of silence
-— quiet is evidence that a print is not in flight, **not** that the pane is
-finished. **Both clocks start when the first press is *acked***, not at step
-entry (rationale); the poll's ~1.2 s wall-clock ceiling is the one timing
-anchored to entry, being a shutdown budget rather than an agent timing. **Never
-finish early on quiet** — the only sound early exit is having nothing left to
-wait for (rationale). **The ask gate keys on an English UI string on purpose**
-(rationale).
+- **Write `^C` into the pty; never signal it** — the agents print their resume
+  invocation when interrupted, not when signalled (rationale).
+- **Interrupt every live PTY, not just recognized agents** — `detectResumeCommand`
+  filters the recovery invocations (rationale) — but **exclude exited PTYs**,
+  which can yield no hint and would permanently defeat the "nothing left to wait
+  for" early exit.
+- **Never finish early on quiet**, and **never simplify to a single gesture**:
+  claude prints only on a second press, codex only on the first and at no
+  constant latency, so a blanket second press destroys codex's idle case and an
+  ask-gated one never fires for codex at all (rationale).
+- **Only post-interrupt bytes count, and never widen that scan.** Each pane's
+  received-count mark (`getScrollbackReceived`, `docs/specs/transport.md` →
+  Universal invariants) is taken before the first `^C` — a correctness boundary,
+  since the command auto-runs on the next restore without confirmation
+  (`docs/specs/transport.md` → "Consuming it") and only bytes produced in
+  response to Dormouse's own interrupt may become executable state (rationale).
+- **Clear any previous record before the first early return** — consumption
+  happens only when a container actually resolves, so a session where the
+  Dormouse view is never opened would otherwise auto-run a week-old invocation on
+  some much later restore. A missing hint is ordinary (rationale).
 
-**Never simplify to a single gesture**: a blanket second press destroys codex's
-idle case, an ask-gated one never fires for codex at all, and the constants are
-sized against real-pty measurements so codex's idle case leaves the retry set
-before the ~600 ms fallback (rationale).
+What stays this host's is which PTYs the extension host offers the machine and
+which directory the store writes into: `storageUri`, falling back to
+`globalStorageUri`. It is a plain file written synchronously because
+`workspaceState` batches its flush and `deactivate()` outruns it (rationale).
 
-**Only post-interrupt bytes count, and never widen that scan.** Each pane's
-received-count mark (`getScrollbackReceived`, `docs/specs/transport.md` →
-Universal invariants) is taken before the first `^C`, and detection reads only
-what arrived after it — a correctness boundary, since the command auto-runs on
-the next restore without confirmation (`docs/specs/transport.md` → "Consuming
-it") and only bytes produced in response to Dormouse's own interrupt may become
-executable state (rationale).
-
-**Clear any previous record before the first early return** — consumption happens
-only when a container actually resolves, so a session where the Dormouse view is
-never opened would otherwise auto-run a week-old invocation on some much later
-restore. A missing hint is ordinary: `CLAUDE_CODE_CHILD_SESSION` in a pane's env
-disables transcript saving in claude, which then prints none (rationale).
-
-Source of truth: `captureAgentRecoveryCommands` in
-`vscode-ext/src/session-state.ts`, `interrupt` in
-`vscode-ext/src/pty-manager.ts`.
+Source of truth: `captureAgentRecoveryCommands` and `takeRecoveryCommands` in
+`vscode-ext/src/session-state.ts`, `captureAgentRecovery` in
+`lib/src/host/recovery-capture.ts`, `createRecoveryStore` in
+`lib/src/host/recovery-store.ts`, `interrupt` in `vscode-ext/src/pty-manager.ts`.
 
 ### Theme integration
 
@@ -250,6 +232,8 @@ frame-src   http://127.0.0.1:* http://localhost:*
 
 `unsafe-inline` for styles covers the theme CSS variables VS Code injects as inline styles on the body element. Scripts stay nonce-gated on a fresh per-render nonce of 24 CSPRNG bytes (`node:crypto` `randomBytes`) base64url-encoded to 32 characters — **never `Math.random()`**. Vite builds the webview HTML from the `lib` package; at runtime `webview-html.ts` rewrites asset URLs to webview URIs, injects the CSP meta tag, swaps Vite's nonce placeholder for the real one, and appends a nonce-gated inline script carrying the boot globals (message token, initial state, selected shell, recovery commands).
 
+**`lib/index.html` keeps `<head>` and `</head>` bare**: both splices match a literal and **throw when it is absent**, an attribute otherwise yielding an unpoliced document. Pinned by "refuses a document whose splice marker was edited away".
+
 **A nonce alone does not survive code splitting.** Vite splits the webview bundle and `script-src` gates each way a chunk loads separately; both mechanisms below are required, since a nonce is **not** inherited through the module graph and `'strict-dynamic'` does not vouch for a parser-started fetch:
 
 - **Vite stamps the nonce** onto every tag it emits, via `html.cspNonce` in `vscode-ext/vite.config.ts` (placeholder `CSP_NONCE_PLACEHOLDER`, shared with `webview-html.ts`) — the entry `<script>`, the `<link rel="modulepreload">` tags for its static imports, and the `<meta property="csp-nonce">` its runtime preload helper reads before injecting a preload for a lazy chunk (rationale). `getWebviewHtml` swaps the placeholder for the document's real nonce and **throws if it is absent**, an unmarked build otherwise serving un-nonced scripts against a nonce-gated policy.
@@ -274,7 +258,7 @@ Source of truth: `getWebviewHtml` in `vscode-ext/src/webview-html.ts`, `CSP_NONC
 
 **Never swap the token for an `event.source` / `event.origin` check, and never reuse the CSP nonce as the token** (rationale). **The guard fails closed both ways**: a webview served without the global accepts nothing, a host send without a token delivers nothing, and framed content cannot read the parent's globals cross-origin.
 
-Messages from proxied iframes are guarded by origin instead (`docs/specs/dor-browser.md`) and are unaffected by the token, which covers only the adapter's host channel. **Scope is VS Code**: standalone receives equivalent events over Tauri's `listen()` IPC or the browser-dev HTTP/SSE bridge (`docs/specs/transport.md` → "Standalone browser-dev harness"), never `window.postMessage`.
+Messages from proxied iframes are guarded by origin instead (`docs/specs/dor-browser.md`) and are unaffected by the token, which covers only the adapter's host channel. **Scope is VS Code**: standalone receives equivalent events over Tauri's `listen()` IPC or the browser-dev HTTP/SSE bridge (`docs/specs/standalone.md` → "Standalone browser-dev harness"), never `window.postMessage`.
 
 Source of truth: `isHostMessage` in `lib/src/lib/vscode-message-token.ts`, `WebviewChannel` / `serveWebview` in `vscode-ext/src/webview-messaging.ts`, `getWebviewHtml` in `vscode-ext/src/webview-html.ts`, `VSCodeAdapter` in `lib/src/lib/platform/vscode-adapter.ts`; pinned by the `host message authentication` block in `lib/src/lib/platform/vscode-adapter.test.ts`.
 
@@ -292,22 +276,20 @@ The service reads both **in-process**, through the async `BurrowStateStore`. **T
 
 Source of truth: `VsCodeBurrowStateStore` in `vscode-ext/src/burrow-store.ts`, `BurrowStateStore` in `lib/src/host/remote/burrow-state-store.ts`.
 
-**Which window: bind-as-lease.** One extension host runs per window, so unarbitrated they would all start a Burrow against the same enrollment and fight endlessly over the one `/ws/burrow` socket (rationale). Arbitration is the socket itself: **the bind is the lease**. Every contending window tries to bind one fixed path — `<hash>.sock` inside a per-user `dormouse-peer-<uid>` directory in the temp dir, or `\\.\pipe\dormouse-peer-<hash>` on Windows — the hash derived from `context.globalStorageUri.fsPath`: **derived rather than random** because it must be *the same* in every window, **hashed rather than joined** because of the platform path cap (rationale). The winner is the broker and runs the service; everyone else connects to it as a client.
-
-The invariants:
+**Which window: bind-as-lease.** One extension host runs per window, so unarbitrated they would all start a Burrow against the same enrollment and fight endlessly over the one `/ws/burrow` socket (rationale). Arbitration is the socket itself: **the bind is the lease**. Every contending window tries to bind one fixed path — `<hash>.sock` inside a per-user `dormouse-peer-<uid>` directory in the temp dir, or `\\.\pipe\dormouse-peer-<hash>` on Windows — the hash derived from `context.globalStorageUri.fsPath`: **derived rather than random** because it must be *the same* in every window, **hashed rather than joined** because of the platform path cap (rationale). The winner is the broker and runs the service; everyone else connects to it as a client. The invariants, each with its mechanism at the code:
 
 - **Roles never flip downward.** There is no `onRole(false)` after a `true`, and a client only ever changes role *upward*, which makes a TTL lease's mid-transition races unrepresentable rather than handled (rationale).
 - **Contend on broker death, not on a timer.** When the broker exits, every client's socket closes and they all race to bind; exactly one wins, because `bind` is the arbiter. No TTL, no heartbeat file, no filesystem watcher.
-- **A corpse is cleared, then the bind is re-checked.** `EADDRINUSE` → dial it → `ECONNREFUSED`/`ENOENT` means the path exists but nothing listens. **Never unlink on the first refusal:** the unlink is jittered by up to `RECLAIM_JITTER_MS` and the path dialled **again** afterwards (rationale). **`stillOurs` then re-stats the path after `RECLAIM_VERIFY_MS` and compares full filesystem identity — device, inode, and nanosecond change timestamp, never inode alone** (rationale). A window whose socket identity was replaced, **or whose path has gone entirely**, stands down and the loop re-runs (per-platform reasoning at `stillOurs`).
+- **A corpse is cleared, then the bind is re-checked.** **Never unlink on the first refusal**, and **`stillOurs` compares full filesystem identity — device, inode, and nanosecond change timestamp, never inode alone, anchored at our own bind rather than a later read of the path**. A window whose socket identity was replaced, **or whose path has gone entirely**, stands down and the loop re-runs (jitter, re-dial and per-platform reasoning at `attempt` and `stillOurs`; rationale).
 - **A bind is not a role until it is believed.** Everything that answers "is this window the broker" — `ensurePeerNet`'s shortcut, `isPeerBroker`, `isPeerLinkSettled`, `remoteNotifyPeerChange` — reads `brokerConfirmed`, set only where `settle(true)` runs and cleared by `closeServer`. **Unverified reads as unsettled**, so a command landing in the `RECLAIM_VERIFY_MS` window (an `enroll`, a `secrets.onDidChange`) is held for the verdict rather than told "broker" (rationale).
 - **Attempts are spaced.** The loop waits `RETRY_MS` between rounds so a refused hello cannot spin, and a bind or connect landing after disposal is undone rather than left to outlive its window.
-- **Errors after `listen` are logged, not thrown** — a listening `net.Server` emits `'error'` for accept-time failures (EMFILE, a broken pipe), and an `EventEmitter` with no `'error'` listener rethrows out of a libuv callback and takes the extension host down, so `listenServer` installs a permanent logging listener the moment the bind succeeds (rationale).
+- **Errors after `listen` are logged, not thrown** — an `EventEmitter` with no `'error'` listener rethrows out of a libuv callback and takes the extension host down, so `listenServer` installs a permanent logging listener the moment the bind succeeds (rationale).
 
 **Trust.** The socket path is derived, not secret — any user on the machine can compute it — so two layers stand between it and this installation's terminals.
 
 *The directory.* On unix the sockets live in a `dormouse-peer-<uid>` directory created 0700 and held before every bind and every connect to `peerDirIsSafe()`, the same predicate the `dor` control socket uses (`docs/specs/dor-cli.md` → Control-channel security, which states its four checks). A loose directory we own is tightened; anything else is somebody else's and **the peer link stands down for good** rather than spinning against it, releasing the callers waiting on the contention. Windows named pipes carry their own ACL and skip this layer.
 
-*The handshake.* The shared secret is a mode-0600 `burrow.peer-token` in `globalStorageUri`, **created once with an exclusive `wx` write rather than a rename** so two windows starting together agree on one token. `wx` creates the file before it writes the bytes, so the loser's read can land on a zero-length file: **treat an empty read as *not yet written*, never as the token**, waiting it out (`TOKEN_WRITE_ATTEMPTS` × `TOKEN_WRITE_POLL_MS`) (rationale). **Exhausting the wait latches the same permanent stand-down as an unsafe socket directory**, neither remaining case being fixed by retrying; the throw re-derives which it was, that log line being the only diagnosis (rationale). The token itself **never crosses the socket**; instead three frames prove mutual knowledge of it:
+*The handshake.* The shared secret is a mode-0600 `burrow.peer-token` in `globalStorageUri`, **created once with an exclusive `wx` write rather than a rename** so two windows starting together agree on one token. **Treat an empty read as *not yet written*, never as the token**, waiting it out (`ensureToken`'s bounded retry; rationale). **Exhausting the wait latches the same permanent stand-down as an unsafe socket directory**, neither remaining case being fixed by retrying. The token itself **never crosses the socket**; instead three frames prove mutual knowledge of it:
 
 1. `challenge { nonce }` — the *server* speaks first, on accept. A client that has not yet seen proof of the token must not volunteer one into whatever bound the path.
 2. `hello { nonce, proof }` — the client answers with `HMAC-SHA256(token, "client:" + relayNonce)` and a fresh nonce of its own.
@@ -321,7 +303,7 @@ The invariants:
 
 Source of truth: `vscode-ext/src/burrow.ts` (service glue, provider, command routing), `ensurePeerNet` / `attempt` / `stillOurs` in `vscode-ext/src/peer-link.ts`; pinned by `vscode-ext/test/burrow.test.ts` and `vscode-ext/test/peer-link.test.ts`.
 
-**The webview bridge.** A webview reaches the service over `BurrowLink` (`lib/src/lib/platform/types.ts`), implemented in `vscode-adapter.ts` on three messages: `burrow:command { burrowRequestId, cmd, params }` out, `burrow:result { burrowRequestId, result | error }` and `burrow:event { name, … }` back. **Everything but those three `postMessage` shapes is the shared client** in `lib/src/host/remote/link-client.ts` (`docs/specs/transport.md` → Message protocol).
+**The webview bridge.** A webview reaches the service over `BurrowLink` (`lib/src/lib/platform/types.ts`), implemented in `vscode-adapter.ts` on three messages, each wrapping the shared client's shape in a `payload`: `burrow:command { payload: BurrowCommand }` out, `burrow:result { payload: BurrowResult }` and `burrow:event { payload }` back. **Everything but those three `postMessage` shapes is the shared client** in `lib/src/host/remote/link-client.ts` (`docs/specs/transport.md` → Message protocol).
 
 Results are **broadcast to every webview in the window** rather than replied to one (`docs/specs/transport.md`), and one correlation id serves both the in-window fan-out and the cross-window forward below.
 
@@ -343,7 +325,7 @@ The service owns the PTYs but not the *view* of them: each webview is its own JS
 | Operation schema | `(op, params) → zero or more results`; `op` opaque to the transport, the typed map only in `peer-surfaces.ts`. | Same seam; only a reserved `ptyId` is interpreted, for routing. |
 | Ownership / miss | Presence is ownership; every webview answers, including with no results. | Every peer answers; disconnect settles its pending asks empty. |
 | Fan-out order | All webviews in parallel. | `askBothTiers` runs local and all peers in parallel, local concatenated first. |
-| Budget | `ASK_BUDGET_MS` (1s); disposal removes that webview from the outstanding set. | `PEER_REPLY_BUDGET_MS` covers the inner ask plus socket hops and **must remain larger** (pinned by `peer-link-protocol.test.ts`). |
+| Budget | `ASK_BUDGET_MS` (1s); disposal removes that webview from the outstanding set. | `PEER_REPLY_BUDGET_MS` covers the inner ask plus socket hops, and **is defined as `ASK_BUDGET_MS + 2_000`** so it cannot fall under it. |
 | Invalidation | `peer:notify` carries no subject; pane/activity/focus bursts coalesce before crossing. | `notify`, webview membership, and peer membership each trigger a fresh directory collect. |
 | PTY stream | One window-wide keyed registry distributes already-processed data/exit. | Opaque routed handles select one peer; `subscribe` is reference-counted, streaming the same processed data/exit. |
 | Burrow command | This window calls its service, broadcasting the uniquely correlated result to its webviews. | `command` goes to the broker, `commandResult` returns only to its origin window, `uiEvent` broadcasts. |
@@ -396,7 +378,7 @@ One UI event *is* addressed: **when a window completes the handshake the broker 
 
 **Socket bind errors reject startup** and are handled as an unavailable peer link; they never leave the listen promise pending or surface as an uncaught extension host error.
 
-Source of truth: `vscode-ext/src/peer-link.ts` (sockets, arbitration); `vscode-ext/src/peer-link-protocol.ts` (frame shapes, framing, handshake, budget, PTY routing table), pinned by `vscode-ext/test/peer-link-protocol.test.ts`; `askBothTiers` in `vscode-ext/src/burrow.ts`; `brokerRequest` and the `peer:*` / `burrow:command` cases in `vscode-ext/src/message-router.ts`; `lib/src/remote/burrow/remote-api.ts`.
+Source of truth: `vscode-ext/src/peer-link.ts` (sockets, arbitration, `HANDSHAKE_BUDGET_MS`, and the `routes` / `routePtyIds` routing table); `vscode-ext/src/peer-link-protocol.ts` (frame shapes, framing, handshake helpers, `PEER_REPLY_BUDGET_MS`), pinned by `vscode-ext/test/peer-link-protocol.test.ts`; `askBothTiers` in `vscode-ext/src/burrow.ts`; `brokerRequest` and the `peer:*` / `burrow:command` cases in `vscode-ext/src/message-router.ts`; `lib/src/remote/burrow/remote-api.ts`.
 
 ### Testing the extension host
 
@@ -436,21 +418,11 @@ debugger can attach to.
 
 `vscode-ext/vite.config.ts` sets `root: ../lib` and `outDir: ./media`, building the shared React frontend directly into the extension's media folder.
 
-## Terminal context host operations
-
-The adapter forwards every `TerminalContextRequest` to the PTY host as a correlated request (`docs/specs/transport.md` → Auxiliary helper metadata); directory opening follows `docs/specs/security-local.md` → Terminal context directory actions, and inspection failure follows `docs/specs/terminal-context.md` → Helper lifecycle.
-
-Source of truth: `terminalContext` in `lib/src/lib/platform/vscode-adapter.ts`; `terminalContext` in `vscode-ext/src/pty-manager.ts`; `context` in `standalone/sidecar/pty-core.js`.
-
 ## Future
 
 ### Webview→host Surface-state channel
 
 A webview→host Surface-state message would let the native-chrome union count browser-Surface TODOs, which the PTY-keyed `alert:state` cannot carry (`docs/specs/alert.md`, `docs/specs/transport.md`).
-
-### Host-side workspaces flag gate
-
-Whether to gate the always-on union reflection on a host-side equivalent of the standalone `dormouse.flags.workspaces` localStorage flag is decided when the workspaces rollout reaches VS Code (`docs/specs/layout.md` `## Future`, workspaces-rollout).
 
 ### Context keys
 
@@ -469,7 +441,7 @@ vscode.commands.executeCommand('setContext', 'dormouse.mode', 'command');
 
 ### Commands
 
-Palette/keybinding entry points for what today is webview-only. Shipped commands are in the manifest table above.
+Palette/keybinding entry points for what today is webview-only; the shipped set is in "Extension manifest".
 
 | Command | Description |
 |---------|-------------|
@@ -479,11 +451,10 @@ Palette/keybinding entry points for what today is webview-only. Shipped commands
 | `dormouse.prevPane` | Focus previous pane |
 | `dormouse.enterPassthroughMode` | Switch to passthrough mode |
 | `dormouse.enterCommandMode` | Switch to command mode |
-| `dormouse.listSessions` | Show QuickPick of all live PTY sessions |
+| `dormouse.listSessions` | QuickPick of all live PTY sessions |
 | `dormouse.reattach` | Reattach a minimized PTY to a pane |
 
 ### Other host integrations
 
 - `TerminalProfileProvider` registration, so Dormouse appears in the terminal `+` dropdown
 - A status bar item showing active session count
-- A QuickPick for listing/reattaching PTY sessions

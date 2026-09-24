@@ -1,4 +1,5 @@
 import type { PlaywrightRequest, PlaywrightResult } from './browser-automation';
+import type { AlertRuntimeSnapshot } from '../alert-manager';
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
 import type { AlertState, AwaitHandle, AwaitOptions } from '../alert-manager';
 import type { AlertSettings } from '../alert-settings';
@@ -7,7 +8,13 @@ import type { ShellEntry } from '../shell-defaults';
 // Defined in its own dependency-free file so the Node proxy in lib/src/host can
 // share it without pulling this browser-typed module into a Node tsconfig.
 import type { IframeProxyResult } from './iframe-proxy-types';
+import type { ToolControlResult, ToolHostRequest } from './tool-types';
+import type { GitInfoResult } from './git-types';
+
+export type { ToolControlResult, ToolHostRequest, ToolLookupResult } from './tool-types';
+export type { GitDirInfo, GitInfoResult } from './git-types';
 import type { NotepadArchivePort } from '../notepad/types';
+import type { PersistedAlertState, PersistedWindow } from '../session-types';
 
 export interface PtyInfo {
   helper?: HelperIdentity;
@@ -17,6 +24,29 @@ export interface PtyInfo {
   /** Executable path of the shell this PTY launched. Carried on reconnect so
    *  shell-sensitive input remains Session-specific after the webview reloads. */
   shell?: string;
+}
+
+/** The host's answer to one `requestInit`, echoing the token it was asked with
+ *  where the host has one to echo (`PlatformAdapter.requestInit`). */
+export interface PtyListDetail {
+  ptys: PtyInfo[];
+  requestId?: string;
+}
+
+/** One PTY's buffered output, behind the list that named it. */
+export interface PtyReplayDetail {
+  id: string;
+  data: string;
+  requestId?: string;
+}
+
+/** A PTY's output position, stamped in the stream by the host for a transfer
+ *  (`docs/specs/transport.md` → "Transferring a Workspace"): every `pty:data`
+ *  delivered before it is at or before `mark`. */
+export interface PtyMarkedDetail {
+  id: string;
+  mark: number;
+  requestId?: string;
 }
 
 /**
@@ -33,17 +63,29 @@ export interface OpenPort {
   processName?: string;
 }
 
+/** Base scan budget. The macOS and Windows socket scans add a per-id allowance;
+ *  transport deadlines cover both serial scans plus a margin per IPC hop.
+ *  Rust and sidecar copies are pinned by `mirrored-constants.test.ts`. */
+export const OPEN_PORT_TIMEOUT_MS = 3000;
+
 /**
- * End-to-end budget for `getOpenPorts()` at every transport boundary
- * (webview → host adapter, host → pty-host child, Tauri command → sidecar) and
- * for the per-subprocess execs inside `getOpenPortsForPid()` (lsof, PowerShell,
- * `Get-NetTCPConnection`, `netstat`). Wider than the 1 s cwd query because
- * enumeration shells out on macOS/Windows; tight enough to fail visibly rather
- * than hang a pane header. Mirrored as `OPEN_PORT_TIMEOUT_MS` in
+ * What a batched scan (`getOpenPortsMany`) adds to `OPEN_PORT_TIMEOUT_MS` per
+ * terminal it covers: the sidecar's socket scan lists every descendant of every
+ * terminal in one `lsof`, so one terminal's budget cannot be the whole
+ * Window's. Mirrored as `OPEN_PORT_TIMEOUT_PER_ID_MS` in
  * `standalone/sidecar/pty-core.js` and `standalone/src-tauri/src/lib.rs`;
  * pinned by `mirrored-constants.test.ts`.
  */
-export const OPEN_PORT_TIMEOUT_MS = 3000;
+export const OPEN_PORT_TIMEOUT_PER_ID_MS = 100;
+
+/** Margin for each transport hop, mirrored in Rust and pinned by the constants test. */
+export const OPEN_PORT_ROUND_TRIP_MARGIN_MS = 1000;
+
+export function openPortRequestTimeoutMs(count: number, hops = 1): number {
+  return 2 * OPEN_PORT_TIMEOUT_MS + OPEN_PORT_TIMEOUT_PER_ID_MS * count
+    + OPEN_PORT_ROUND_TRIP_MARGIN_MS * hops;
+}
+
 
 export type AlertStateDetail = { id: string } & AlertState;
 
@@ -178,6 +220,22 @@ export interface PtyDataDetail {
   textData?: string;
 }
 
+/**
+ * One host request for an immediate session save. `probeCwd: false` says the
+ * answer must not re-read any cwd: after the PTYs are killed every probe answers
+ * null and the record keeps its previous value anyway, so the round trips are
+ * pure teardown budget (`docs/specs/standalone.md` → "Quit flow"). Absent probes.
+ */
+export interface SessionFlushRequest {
+  requestId: string;
+  probeCwd?: boolean;
+}
+
+export interface WritePtyOptions {
+  /** Deliver at typing pace (`docs/specs/transport.md` → "Paced input"). */
+  paced?: boolean;
+}
+
 export interface PlatformAdapter {
   playwright?(request: PlaywrightRequest): Promise<PlaywrightResult>;
   // Lifecycle
@@ -199,21 +257,9 @@ export interface PlatformAdapter {
 
   // PTY operations
   spawnPty(id: string, options?: { cols?: number; rows?: number; cwd?: string; shell?: string; args?: string[]; helper?: HelperIdentity }): void;
-  writePty(id: string, data: string): void;
+  writePty(id: string, data: string, options?: WritePtyOptions): void;
   resizePty(id: string, cols: number, rows: number): void;
   killPty(id: string): void;
-
-  /**
-   * Whether this host keeps a Session snapshot across a restart. `false` means
-   * `saveSession` does no work at all rather than building a record for a
-   * `saveState` that discards it — the gate belongs above the per-pane `getCwd`
-   * round trips, not below them.
-   *
-   * Absent reads as `true`. Standalone sets it `false`: quitting is a deliberate
-   * ending and a crash captured nothing, so every launch starts fresh
-   * (docs/specs/transport.md -> "The governing rule").
-   */
-  persistsSession?: boolean;
 
   /**
    * Whether the host owns the color theme, so Dormouse must not offer a theme
@@ -246,10 +292,59 @@ export interface PlatformAdapter {
    */
   getRecoveryCommands?(): Record<string, string>;
 
+  /**
+   * Resolves once `getRecoveryCommands` can be read. The claim is a host round
+   * trip, so an adapter starts it during `init()` and the boot awaits it only on
+   * the branch that cold-restores (`standalone/src/main.tsx`). Absent means
+   * `getRecoveryCommands` is already answerable.
+   */
+  recoveryReady?: Promise<void>;
+
+  /**
+   * Quit and relaunch; resolves whether the quit relaunches, and `requester`
+   * never counts as running work in its confirmation
+   * (`docs/specs/standalone.md` → "Restart"). Absent where a host cannot.
+   */
+  requestAppRestart?(requester?: string): Promise<boolean>;
+
+  /** Explicit live Workspace handoff, never a persistence reader. */
+  alertPauseForTransfer?(id: string): AlertRuntimeSnapshot | null;
+  /** `replayRequestId` names the one since-mark `pty:replay` whose notification
+   *  events and visible output count as live; every other replay stays silent. */
+  alertResumeFromTransfer?(id: string, snapshot: AlertRuntimeSnapshot, replayRequestId?: string): void;
+  /**
+   * Seed a cold-restored Surface's persisted TODO/alert into the host's
+   * `AlertManager`, so the freshly spawned PTY inherits the state its saved pane
+   * carried (`docs/specs/alert.md` -> "Persist only").
+   *
+   * Present only where the adapter owns the manager: standalone runs it in the
+   * webview, so the restore path is the only thing that can seed it. VS Code
+   * omits it — its extension host seeds its own manager while answering the
+   * webview's boot (`vscode-ext/src/message-router.ts`).
+   */
+  alertSeed?(id: string, state: PersistedAlertState): void;
+
   // PTY queries
   getCwd(id: string): Promise<string | null>;
+  /**
+   * One answer per id, for the whole set a save is about to persist. Present
+   * where a host can resolve many at once: standalone probes cwds with a
+   * synchronous process scan on the sidecar's only event loop, so N panes must
+   * cost one scan rather than N (`docs/specs/transport.md` -> "Persisted
+   * session"). Absent falls back to `getCwd` per id.
+   */
+  getCwds?(ids: string[]): Promise<Record<string, string | null>>;
   /** TCP listening ports opened by this terminal's process tree (shell + descendants). */
   getOpenPorts(id: string): Promise<OpenPort[]>;
+  /**
+   * One answer per id, for a whole listing at once (`dor list --ports`, and
+   * `--all` across every Workspace). Present where a host can resolve many in
+   * one scan, for the reason `getCwds` is: standalone walks the process table
+   * and the socket table synchronously on the sidecar's only event loop, so N
+   * terminals must cost one pass rather than N. Absent falls back to
+   * `getOpenPorts` per id.
+   */
+  getOpenPortsMany?(ids: string[]): Promise<Record<string, OpenPort[]>>;
 
   // Clipboard support for file references and raw images.
   readClipboardFilePaths(): Promise<string[] | null>;
@@ -303,6 +398,19 @@ export interface PlatformAdapter {
   // host), where the panel falls back to a raw, uninstrumented `<iframe>`.
   createIframeProxyUrl?(targetUrl: string): Promise<IframeProxyResult>;
 
+  // Dor Tools (see docs/specs/dor-tool.md). Two operations behind one method:
+  // resolve a tool name against the nearest dormouse.yml, and record a trust
+  // decision a human made in Dormouse's own chrome. Both need a filesystem, so
+  // this is absent on hosts with none (the web demo), where `dor tool <name>`
+  // reports that the host cannot read a tool file. `dor tool -- <command>`
+  // needs none of it and works everywhere.
+  toolControl?(request: ToolHostRequest): Promise<ToolControlResult>;
+
+  // The repository holding each local directory, for Workspace auto-naming
+  // (docs/specs/layout.md → "Workspace names"). Absent on a host with no local
+  // filesystem, which names every Workspace by directory.
+  gitInfo?(paths: string[]): Promise<GitInfoResult>;
+
   // Render-swap support (docs/specs/dor-browser.md → "Display Modal And Render Swaps";
   // docs/specs/dor-browser.md → "Pop-Out"). All optional
   // so hosts degrade: the modal hides whatever isn't backed by a capability.
@@ -322,8 +430,6 @@ export interface PlatformAdapter {
   // Relaunch headless (pop back in) reopening `url`, resuming the screencast;
   // returns the new stream port. Pairs with agentBrowserPopOut.
   agentBrowserPopIn?(session: string, opts: { url?: string }, binaryPath?: string): Promise<AgentBrowserPopResult>;
-  // Best-effort raise the session's headed window to the front.
-  agentBrowserBringToFront?(session: string, binaryPath?: string): Promise<void>;
 
   // PTY event listeners
   onPtyData(handler: (detail: PtyDataDetail) => void): void;
@@ -332,15 +438,30 @@ export interface PlatformAdapter {
   offPtyExit(handler: (detail: { id: string; exitCode: number }) => void): void;
 
   // Resume (live-PTY replay after webview hide/show)
-  requestInit(): void;
-  onPtyList(handler: (detail: { ptys: PtyInfo[] }) => void): void;
-  offPtyList(handler: (detail: { ptys: PtyInfo[] }) => void): void;
-  onPtyReplay(handler: (detail: { id: string; data: string }) => void): void;
-  offPtyReplay(handler: (detail: { id: string; data: string }) => void): void;
+  /** Ask for the live PTY list and each one's replay. `requestId` is the asking
+   *  collector's token: a host serving several windows echoes it on the answer
+   *  so two collections in one webview cannot finish on each other's list
+   *  (docs/specs/transport.md -> "Reconnection"). The hosts that do not echo it
+   *  (VS Code, Pocket, the website) run one collector per JS realm, so their
+   *  answers carry none and the collector takes them. */
+  requestInit(requestId?: string): void;
+  onPtyList(handler: (detail: PtyListDetail) => void): void;
+  offPtyList(handler: (detail: PtyListDetail) => void): void;
+  onPtyReplay(handler: (detail: PtyReplayDetail) => void): void;
+  offPtyReplay(handler: (detail: PtyReplayDetail) => void): void;
+  /** Hosts that hand Workspaces between windows stamp marks; returns the
+   *  unsubscribe. Absent on hosts with one window. */
+  onPtyMarked?(handler: (detail: PtyMarkedDetail) => void): () => void;
+  /** Hand a Workspace to another window — a label, or `'new'` for one torn out
+   *  — through the host's transfer (`docs/specs/standalone.md` → Transfer),
+   *  `index` naming its slot in the target's strip (appended without one).
+   *  Resolves once the target has adopted it; rejects when it was handed back.
+   *  Absent on hosts with one window. */
+  transferWorkspace?(workspaceId: string, toWindow: string, options?: { index?: number }): Promise<void>;
 
   // Host-initiated session persistence
-  onRequestSessionFlush(handler: (detail: { requestId: string }) => void): void;
-  offRequestSessionFlush(handler: (detail: { requestId: string }) => void): void;
+  onRequestSessionFlush(handler: (detail: SessionFlushRequest) => void): void;
+  offRequestSessionFlush(handler: (detail: SessionFlushRequest) => void): void;
   notifySessionFlushComplete(requestId: string): void;
 
   // Alert management
@@ -384,6 +505,16 @@ export interface PlatformAdapter {
   // State persistence
   saveState(state: unknown): void;
   getState(): unknown;
+
+  /**
+   * The Window slot, for the hosts that persist one (`docs/specs/transport.md` ->
+   * "Persisted session"). Separate from `saveState`/`getState` because the blob
+   * is a `PersistedWindow` and every shared reader of `getState` wants a bare
+   * `PersistedSession`. Both standalone adapters answer these; VS Code, which
+   * persists one Session per webview, omits them.
+   */
+  getWindowState?(): PersistedWindow | null;
+  saveWindowState?(snapshot: PersistedWindow): void;
 
   /**
    * The Surface notepad's archive store (docs/specs/notepad.md). Present on

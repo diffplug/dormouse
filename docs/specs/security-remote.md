@@ -30,11 +30,11 @@ no plaintext relay route, and no reader for any of the pre-cutover frames.
 
 | Compromise | Buys | What still stands |
 | --- | --- | --- |
-| Relay | account state, routing metadata | **no new authorization and no plaintext**. On an established session, availability only — drop, delay, reorder, or refuse, never read and never inject — and the first invalid ciphertext destroys the session. Web Push holds **confidentiality**, not **freshness**: a kept envelope re-delivers as current, accepted residual (rationale) |
+| Relay | account state, routing metadata | **no new authorization and no plaintext**. On an established session, availability only — drop, delay, reorder, or refuse, never read and never inject — and the first invalid ciphertext destroys the session. Web Push holds **confidentiality**, not **freshness**: a kept envelope re-delivers as current, accepted residual (rationale). A session switched to the [direct path](#direct-path) leaves it the lifecycle levers alone — it can still end that session by dropping a socket, but sees, delays, and reorders none of its traffic |
 | Setup password | one endpoint, `/api/burrow/enroll`, and thence a `burrowToken` | it registers **no** passkey — `/api/setup/*` takes a Burrow-minted setup token and nothing else — so it reaches an owner passkey only via the next row. `/api/burrow/enroll` accepts one other credential, the installer's enrollment offer: owner-only *at rest*, the whole of what the file mode protects, checked by possession over HTTPS rather than local identity, so a leaked token redeems remotely — bounded single-use, 24-hour expiry, permanently disabled by the first Burrow enrollment. Still **no Burrow access** |
-| `burrowToken` | the Burrow's own relay traffic and, transitively, **account takeover**: it mints setup tokens at `/api/burrow/setup-token`, the only thing that registers an owner passkey | bounded three ways — single-use and dead 5 minutes after minting; revoking the Burrow (deleting its row from `burrows.json`) stops minting immediately *and* kills already-minted tokens, re-checked at both setup gates; a signed-in phone retires an unused token at `/api/setup/retire`. Still **no Burrow access**: pairing runs Noise IK against an invitation keypair the Burrow never sent anywhere (rationale) |
+| `burrowToken` | the Burrow's own relay traffic and, transitively, **account takeover**: it mints setup tokens at `/api/burrow/setup-token`, the only thing that registers an owner passkey | bounded three ways — single-use and dead 5 minutes after minting; revoking the Burrow (deleting its row from `burrows.json`) stops minting immediately *and* kills already-minted tokens, re-checked at both setup gates; a signed-in phone retires an unused token at `/api/setup/retire`. Still **no Burrow access** (rationale) |
 | Synced or stolen passkey | sign-in, and the ability to *ask* | the paired Client static is missing, so `BurrowAcl` answers `client-not-paired` |
-| Client static | use of the key in place, and only through a compromised browser or OS, or XSS in the Pocket origin | the key is not extractable, connecting still needs a fresh passkey assertion, and it authorizes exactly one Burrow |
+| Client static | use in place; encrypted fallback also permits private-byte extraction by compromised same-origin code | connecting still needs the paired passkey's fresh assertion, and it authorizes exactly one Burrow |
 
 **The only path into a Burrow's ACL is a human typing, on that Burrow, two digits displayed
 on the phone that is asking**, and the Burrow gets the comparison exactly once. **The
@@ -91,8 +91,21 @@ are a silent no-op. Rows carry only what is additional.
 
 **Without explicit modes these files inherit the umask and end up world-readable**,
 handing live burrow tokens to any other local account on a shared machine. The Client's
-per-Burrow statics are the exception that needs no file protection: non-extractable
-`CryptoKey`s in IndexedDB, never exported.
+per-Burrow browser storage follows `docs/specs/remote-security-model.md` ->
+"Client statics".
+
+- **FAIL IF** Pocket persists plaintext Client private bytes, uses an extractable
+  AES wrapping key, selects encrypted storage without a failed native probe and
+  a passing encrypted reopen/use probe, or treats a corrupt encrypted record as
+  permission to generate a replacement identity. Read
+  `lib/src/remote/client/pocket-private-key.ts` and
+  `lib/src/remote/client/pocket-db.ts`; pinned by
+  `lib/src/remote/client/pocket-encrypted-storage.test.ts`.
+- **FAIL IF** AES-GCM appears in production source under `remote-lib-common/src/`,
+  `lib/src/`, or `relay/src/` outside the local at-rest
+  wrapper `lib/src/remote/client/pocket-private-key.ts`. The wire cipher is
+  unchanged; `scripts/e2e-lint.mjs` and `scripts/e2e-lint-selftest.mjs` pin
+  this exception.
 
 - **FAIL IF** `relay/src/state.ts` stops creating `$DORMOUSE_STATE_DIR` mode `0o700`, or stops writing every file through `writeAtomic` at mode `0o600`. The "every file" clause is a negative search over `relay/src/`: no `writeFile`, `appendFile`, or `createWriteStream` may target the state directory outside `writeAtomic`. A cheap default, not a cross-platform guarantee; the installer's directory permissions below protect the installed Relay's state (rationale).
 - **FAIL IF** `FileBurrowStateStore` (`lib/src/host/remote/burrow-state-store.ts`) stops creating its directory `0o700` and writing `0o600` on non-Windows platforms, or if `VsCodeBurrowStateStore` stops keeping the **enrollment** in `SecretStorage`. The ACL's home in `globalState` is deliberate and is not a finding; the enrollment's is what carries `burrowToken`.
@@ -100,7 +113,7 @@ per-Burrow statics are the exception that needs no file protection: non-extracta
 - **FAIL IF** `burrow_state_dir` in `standalone/src-tauri/src/lib.rs` stops calling `restrict_to_owner` on the state directory **before** spawning the sidecar — on Windows those Node modes are no-ops and Node cannot set an ACL, so the guarantee is held one layer down. That call carries both legs: a newly written enrollment file *inherits* the owner-only entry, and one a prior version already left under the `%LOCALAPPDATA%` ACL — with a live `burrowToken` in it — has that entry *propagated* onto it, the half `restrict_to_owner_leaves_one_owner_only_ace` covers with its pre-existing `before.json`.
 - **FAIL IF** `relay/src/start.ts` stops obtaining the setup password from `SetupPasswordStore.loadOrCreate(generateSetupPassword)`, `generateSetupPassword` stops using `crypto.randomBytes(32)`, `readConfig` reads `DORMOUSE_SETUP_PASSWORD` or any other setup-password input, or `SetupPasswordStore` stops refusing a persisted or generated value outside 64 lowercase hexadecimal characters. Pinned by `relay/test/config.test.mjs` and `relay/test/setup-password-store.test.mjs`.
 - **FAIL IF** `createApp` accepts anything but 64 lowercase hexadecimal characters as the setup password injected by the entrypoint; pinned by `relay/test/app.test.mjs`.
-- **FAIL IF** any installer stops making `config/`, `state/`, and `config/relay.env` reachable only by the installing user — the effective property `manage verify` tests: no principal other than that user may appear in the effective permissions. macOS and Linux achieve it with `0700`/`0600` under `umask 077`; Windows with a DACL protected from inheritance carrying exactly one ACE, which is how `Protect-Path` does it today but is not itself the invariant — a path that inherits that single ACE from an already-locked parent satisfies the property, and `Test-OwnerOnly` deliberately accepts it. The Windows and Linux installers create `relay.env` and lock it before writing its contents (rationale).
+- **FAIL IF** any installer stops making `config/`, `state/`, and `config/relay.env` reachable only by the installing user — the effective property `manage verify` tests: no principal other than that user may appear in the effective permissions. macOS and Linux achieve it with `0700`/`0600` under `umask 077`; Windows with a single owner-only ACE, whether the path carries it directly or inherits it from an already-locked parent. The Windows and Linux installers create `relay.env` and lock it before writing its contents (rationale).
 - **FAIL IF** `manage verify` stops checking mode **and** owner on `config/`, `state/`, `run/`, `config/relay.env`, and an unspent enrollment offer on macOS or Linux, or Windows `Test-OwnerOnly` stops checking the owner SID alongside the DACL, or accepts an empty access-rule set. A NULL DACL grants everyone access. `scripts/installer-verify-test.mjs` exercises the unix checks; `scripts/deploy-lint.mjs` and its self-test pin all three platforms (rationale).
 - **FAIL IF** `manage verify` stops walking the files inside `state/` on Windows, where `relay/src/state.ts`'s `0o600` is a no-op and they are covered by what they inherit from the directory. An enumeration that fails fails verify, because that walk is the only thing holding the property there (rationale).
 - **FAIL IF** any installer stops preserving an existing `config/relay.env` byte-for-byte across an update. Each installer names the installer-owned keys a preserved file lacks and stops; nothing is rewritten or regenerated over it (rationale).
@@ -143,7 +156,8 @@ a grant would widen the guessing surface and buy no compatibility (rationale).
 "Credentials at rest" deterministic**: every installer must still contain the control
 each `FAIL IF` names, so a control deleted from one of the three fails a build. It is
 textual and cannot tell whether a control is *correct* — the audit owns that — and on
-Windows, which nothing in CI can execute, it is the only automated signal at all.
+Windows, which nothing in CI can execute, it is the only automated signal about those
+controls; `scripts/ps1-cmdlet-lint.mjs` reads the same file for cmdlet syntax alone.
 `scripts/deploy-lint-selftest.mjs` deletes each matched control in turn and requires
 the lint to fail (rationale).
 
@@ -161,6 +175,15 @@ Funnel publishes the same TLS origin and stays inside this analysis: public admi
 is owned by [The setup password](#the-setup-password), and a Client still reaches no
 Burrow without the Burrow-local authorization above.
 
+**A direct path opens the one listener no loopback rule covers.** ICE gathering
+binds a UDP socket per local address, so while an attempt is live the machine
+answers UDP from anyone routing to it on any of those networks.
+`docs/specs/security-local.md` -> "Loopback Listeners" is about loopback TCP and
+`scripts/loopback-lint.mjs` reads bind spellings in our own source, so neither
+reaches a socket the browser or the addon binds. It exists only between an
+offer and that session's disposal, and what answers on it is
+`docs/specs/remote-security-model.md` -> "Direct path".
+
 **Must not make Funnel state an install or health verdict.** The installers configure
 Serve but neither inspect, warn about, enable, nor disable Funnel; `manage verify`
 checks the local TLS-to-loopback path, while CI and this audit check application
@@ -171,8 +194,8 @@ controls.
 - **FAIL IF** any installer stops refusing to rewrite a `DORMOUSE_ORIGIN` that no longer matches the node's DNS name.
 - **FAIL IF** any installer stops refusing to run with elevated privileges — `id -u` on macOS and Linux, the `Administrator` role check on Windows (rationale).
 - **FAIL IF** an installer or `manage` names `tailscale funnel` or `AllowFunnel` at all — invoking it, judging its state, or changing it all begin there, and public reachability must exercise the application controls rather than become a forbidden deployment state. Held by `scripts/deploy-lint.mjs` as its one `forbidden` rule (rationale).
-- **FAIL IF** any decision taken on Tailscale CLI or listener output is reached by piping that output into `grep -q`, or into a `head -1` that exits first; every such search is over text captured first. The `head -1` half binds every site whose 141 can still reach an `if` or an assignment — an inline substitution always, and a helper the moment the failing assignment is its last command or a caller invokes it outside `$( )` (rationale).
-- **FAIL IF** any decision about whether Serve maps `/` to us — the install-time conflict gate, `manage verify`, and the uninstall that turns Serve off — is not additionally scoped to the root line with the port right-bounded: `/api` on this port is not `/` on it, and `127.0.0.1:31000` contains `127.0.0.1:3100`. The post-mutation `SERVE_AFTER` assertion is the one deliberate exception, since it asserts our own `serve --bg` landed rather than auditing a foreign config (rationale).
+- **FAIL IF** any decision taken on Tailscale CLI or listener output is reached by piping that output into `grep -q`, or into a `head -1` that exits first; every such search is over text captured first, in a helper as much as inline (rationale).
+- **FAIL IF** any decision about whether Serve maps `/` to us — the install-time conflict gate, `manage verify`, and the uninstall that turns Serve off — is not additionally scoped to the root line with the port right-bounded. The post-mutation `SERVE_AFTER` assertion is the one deliberate exception (rationale).
 - **FAIL IF** `scripts/installer-verify-test.mjs` stops driving `has_off_loopback` and `serve_state` over inputs larger than the pipe buffer, or stops pinning `serve_proxies_root`'s root scoping and port bound. `scripts/deploy-lint.mjs` holds that helper's `<<<` pattern and counts its consumers; `serve_root_target` is held by neither on purpose (rationale).
 
 ### What crosses the boundary
@@ -198,8 +221,26 @@ a second unchecked resolution.
 - **FAIL IF** `/api/push/send` stops taking the `burrowId` from the Burrow's own token, begins selecting recipients when `recipients` is absent or empty, stops clamping them at `MAX_PUSH_QUERY_DELIVERY_IDS`, or if any read endpoint begins reporting on a delivery id the caller did not present. Possession of the 256-bit `deliveryId` is the whole authorization for the Client-facing push routes, so the Relay must never *list* one to a session.
 - **FAIL IF** the send route reads, rewrites, or logs notification text, or forwards anything but the sealed envelope plus the token's own `burrowId`. The Relay holds no key for it (`docs/specs/remote-security-model.md` -> "Push sealing"), so a route that could read a payload is one that was handed plaintext. The envelope's three fields must be copied individually rather than spread, since a spread would let a sending Burrow override its own token's `burrowId`.
 - **FAIL IF** a push stops being sealed per recipient, to that ACL record's own Client static, under a fresh salt — the construction is `docs/specs/remote-security-model.md` -> "Push sealing", `sealPush` / `openPush` in `remote-lib-common/src/security/push-seal.ts`, proven by `remote-lib-common/test/push-seal.test.mjs`. A Noise `CipherState`, a shared group key, or a reused salt each break it. `BurrowRuntime.sealPushForClient` hands `lib/src/remote/burrow/push-delivery.ts` a seal *capability* and never the Burrow's private key, and the worker in `lib/src/remote/pocket-app/sw.ts` is the only thing that opens one.
-- **FAIL IF** push text stops being bounded with the shared `boundedPushText` on the Burrow before sealing, or re-bounded with it in `lib/src/remote/pocket-app/sw.ts` before `showNotification`. The worker is the sanitization sink: a worker that renders what it decrypted without re-bounding it leaves the property with one enforcer instead of two (rationale).
+- **FAIL IF** push text stops being bounded with the shared `boundedPushText` on the Burrow before sealing, or re-bounded with it in `lib/src/remote/pocket-app/sw.ts` before `showNotification`. The worker is the sanitization sink (rationale).
 - **FAIL IF** the relay routes a Burrow-originated frame from a socket that is not the Client's current Burrow binding, or begins decoding, remembering, or acting on an `e2e` ciphertext. `relay/src/relay.ts` must route the `e2e` envelope and nothing else: it holds no gate, no challenge memory, and no notion of an authorized session (rationale). A Relay-side type import from the protocol-v1 half of `remote-lib-common/src/remote/wire.ts` is the leading indicator and fails the same way.
+
+### Direct path
+
+**An authorized session may leave the Relay for a WebRTC data channel, carrying
+what it already carried**: the same Noise session, the same counters, the same
+bounds. `docs/specs/remote-api.md` -> "Direct path" owns the design and
+`docs/specs/remote-security-model.md` -> "Direct path" owns why it adds no trust
+layer; neither is restated below.
+
+- **FAIL IF** a `direct-offer` is accepted or sent before promotion, or a session runs a second attempt. Both halves of `DirectEndpoint` in `lib/src/remote/direct/direct-endpoint.ts` must pass `DirectCutover.begin`, which answers `true` once per session, before their first `await`; and the endpoint holding it must be built only at promotion — `BurrowRuntime.#promoteConnection` in `lib/src/remote/burrow/burrow-runtime.ts`, the `ok: true` branch alone in `lib/src/remote/client/pocket-client.ts` — since a peer connection built earlier is one an unauthorized party steered.
+- **FAIL IF** a byte crosses the channel that is not a Noise transport message of the promoted session: one message per frame, raw bytes, no second handshake, no plaintext, and no framing of ours beside it. **Every inbound frame is bounded at `NOISE_MAX_MESSAGE_LENGTH` before it reaches a cipher** — `DirectPeer` in `lib/src/remote/direct/direct-peer.ts` must refuse an over-cap frame and a non-binary message as violations rather than parse either.
+- **FAIL IF** any signaling leaves the ciphertext. The four signals are `control` messages on the established session, so no relay route, frame type, or Relay-side guard may carry, name, or validate an SDP or a candidate: a negative search over `relay/src/` for `sdp`, the four signal names, and `RTCPeerConnection` must find nothing. `scripts/e2e-lint.mjs` holds it textually.
+- **FAIL IF** any ICE server reaches shipped source — a `stun:`, `stuns:`, `turn:`, or `turns:` URL, or a non-empty `iceServers` array, anywhere under `remote-lib-common/src/`, `lib/src/`, or `relay/src/`. Both factories pass `iceServers: []`; a public default hands a third party the user's address. `scripts/e2e-lint.mjs` holds it textually.
+- **FAIL IF** a peer connection can outlive its session. `DirectEndpoint.dispose` closes it and must run on every path that ends one: in `lib/src/remote/burrow/burrow-runtime.ts` `#disposeEstablished` — which `#disposeClient` reaches from `client-gone`, socket loss and `stop()` — and the session `#promoteConnection` replaces; in `lib/src/remote/client/pocket-client.ts` `#disposeCeremony`, on every teardown, an intentional `close()` and a dropped relay socket included.
+- **FAIL IF** the direct path stops bounding what it holds, or stops disposing on a violation. Held frames are capped by `MAX_DIRECT_PENDING_FRAMES` **and** `MAX_DIRECT_PENDING_BYTES`, and a sender's queue by that same pair — neither direction may hand the implementation unbounded data instead, and overflow disposes the session rather than dropping a frame; a relay `transport` frame arriving after inbound has switched disposes it before any decrypt; the channel closing or erroring after either direction has switched disposes it at both ends. `DirectCutover` in `remote-lib-common/src/security/direct-path.ts` decides all three, and through `onSwitchDecrypted` that a switch onto a channel this end abandoned ends the session; `DirectEndpoint`, which both ends run, must act on every outcome it returns, and must be both ends' only entry for a relay frame: `onRelayFrame` decodes the `ct` there, so an undecodable one ends the session rather than escaping a socket handler. Pinned by `remote-lib-common/test/direct-path.test.mjs`, `lib/src/remote/direct/direct-endpoint.test.ts`, and the direct cases in `lib/src/remote/burrow/burrow-bounds.test.ts` and `lib/src/remote/client/pocket-client.test.ts`.
+- **FAIL IF** the standalone Burrow's native peer addon is loaded at sidecar boot rather than at the first offer, or its absence changes anything but a decline. `createNativeDirectPeerFactory` in `lib/src/host/remote/` must reach `node-datachannel` — declared in `standalone/sidecar/package.json` — only through a bare `require` performed inside an authorized session's first offer, and a load failure must answer `direct-decline` and leave that session relayed rather than fail the Burrow's start.
+- **FAIL IF** a switched end waits on its peer without a deadline, or a channel this protocol did not ask for is adopted. `DirectPeer` in `lib/src/remote/direct/direct-peer.ts` must refuse a channel that is not `DIRECT_CHANNEL_LABEL`, one reported unordered or partially reliable, and one whose association reports a per-message limit below `NOISE_MAX_MESSAGE_LENGTH` — all before it reports the open, so each abandons the attempt while the relay still carries the session. **The reliability half is defence in depth against a paired Client, not a boundary control**, and reaches only as far as the implementation reports those flags: on the standalone Burrow it does not, which `lib/src/host/remote/native-direct-peer.test.ts` pins so a version that changes it is noticed (`docs/specs/remote-api.md` -> Transport -> "Direct path"). `DirectEndpoint` must arm `DIRECT_HANDOFF_TIMEOUT_MS` on its own switch, since from there it sends only on the channel. Pinned by `lib/src/remote/direct/direct-peer.test.ts` and `lib/src/remote/direct/direct-endpoint.test.ts`.
+- **FAIL IF** a direct path survives `client-gone`, `burrow-gone`, or a lost relay socket: the Relay stays the lifecycle authority on both paths. Every Burrow bound is path-agnostic, and the idle deadline still moves only on a decrypted Client→Burrow transport message, whichever path carried it (`docs/specs/remote-security-model.md` -> "Burrow bounds").
 
 ### Revocation and the audit trail
 
@@ -207,7 +248,9 @@ These are the two real gaps in the shipped model, and they are gaps rather than
 accepted risks — we intend to close them (rationale).
 
 **Revocation has no mechanism.** `BurrowAcl.revokeClient` / `revokePasskey` exist and
-have no callers; no relay frame carries a revocation; there is no management UI.
+have no production callers — only `remote-lib-common/test/acl.test.mjs` and
+`security-guarantees.test.mjs` reach them; no relay frame carries a revocation; there is
+no management UI.
 Revoking a lost phone means hand-editing JSON on the Burrow **and restarting it**:
 `BurrowService.#startBurrow` reads the store once and hands the `BurrowRuntime` a
 snapshot for its whole lifetime, so an edit alone changes nothing that is running. The

@@ -2,13 +2,14 @@ import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { ConfirmKill } from '../../KillConfirm';
 import type { DoorAfterRestoreAction, DooredItem, WallEvent, WallMode, WallSelectionKind } from '../wall-types';
 import type { WallActions } from '../wall-context';
+import type { WorkspaceId } from '../../../lib/session-types';
 
 /** The navigation/query seam the keyboard handlers read, backed by the Lath engine
  *  (docs/specs/tiling-engine.md). */
 export interface WallNav {
   /** Nearest pane id in the arrow's direction, or null. */
   findInDirection(id: string, dir: 'ArrowLeft' | 'ArrowRight' | 'ArrowUp' | 'ArrowDown'): string | null;
-  /** A visible pane's params (surface-type classification), or undefined. */
+  /** A Surface's params (including a Door's surface-type classification), or undefined. */
   paneParams(id: string): Record<string, unknown> | undefined;
   /** Whether `id` is a live visible pane. */
   hasPane(id: string): boolean;
@@ -20,6 +21,12 @@ export interface WallNav {
  *  signatures on each handler. */
 export interface WallKeyboardCtx {
   nav: WallNav;
+  /** Whether this Wall's Workspace is the visible one. Listeners stay per Wall;
+   *  only dispatch is gated, so a hidden Workspace sees no window input. */
+  activeRef: RefObject<boolean>;
+  /** This Wall's Workspace. Absent on a bare Wall, which leaves the Workspace
+   *  keys unbound. */
+  workspaceId?: WorkspaceId;
   /** Swap two panes' surfaces (Cmd-Arrow): swap leaf identities (meta follows ids,
    *  so no companion title swap). */
   swapWithNeighbor: (fromId: string, toId: string) => void;
@@ -34,9 +41,14 @@ export interface WallKeyboardCtx {
   handleReattachRef: RefObject<(item: DooredItem, options?: { enterPassthrough?: boolean; afterRestore?: DoorAfterRestoreAction }) => void>;
   selectPane: (id: string) => void;
   selectDoor: (id: string) => void;
+  selectWorkspace: (id: string | null) => void;
+  returnToPane: () => void;
   enterTerminalMode: (id: string) => void;
   exitTerminalMode: () => void;
   minimizePane: (id: string) => void;
+  /** Open the terminal context for a pane, revealed from `origin`
+   *  (`docs/specs/layout.md` -> Header context menu). */
+  openTerminalContext: (id: string, origin: { x: number; y: number }) => void;
   /** The kill gesture: `requestKill` in `lib/src/components/Wall.tsx` decides
    *  between reattach, immediate closure, and the confirm overlay. */
   requestKill: (id: string) => void;

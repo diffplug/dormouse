@@ -1,12 +1,13 @@
 /** Playwright's native CLI with Dormouse addressing and a shared browser pane. */
 import { buildCommand } from '@stricli/core';
 import type { BrowserBinding, CliOptions, CliResult, Command, DorCommandContext } from './types.js';
+import { sessionForKey } from 'dor-lib-common';
 import { extractSessionFlags, resolveOpenTargetArgs, resolveBinaryPath, browserBinaryIsMissing, execBrowserProcess, isMissingBinaryError } from './browser-cli.js';
-import { fail, requireControlClient, errorMessage, stringParser, callerWorkingDirectory } from './shared.js';
+import { fail, requireControlClient, errorMessage, stringParser, callerWorkingDirectory, workspaceFlag, workspaceParam } from './shared.js';
 
 export const playwrightCommand: Command = {
   name: 'playwright',
-  command: buildCommand<{ key?: string; session?: string; surface?: string }, string[], DorCommandContext>({
+  command: buildCommand<{ key?: string; session?: string; surface?: string; workspace?: string }, string[], DorCommandContext>({
     docs: {
       brief: 'Drive a browser surface via your Playwright CLI install (alias: dor pw).',
       fullDescription: `Forwards native playwright-cli commands to your installed @playwright/cli.
@@ -35,6 +36,7 @@ Examples:
         key: { kind: 'parsed', parse: stringParser, optional: true, brief: 'Workspace browser key (default "default").', placeholder: 'name' },
         session: { kind: 'parsed', parse: stringParser, optional: true, brief: 'Raw Playwright session name (alias: -s).', placeholder: 'name' },
         surface: { kind: 'parsed', parse: stringParser, optional: true, brief: 'Existing Playwright surface handle.', placeholder: 'handle' },
+        workspace: workspaceFlag,
       },
       positional: { kind: 'array', parameter: { parse: stringParser, brief: 'Native Playwright CLI arguments.', placeholder: 'args' }, minimum: 0 },
     },
@@ -54,20 +56,21 @@ export async function runPlaywrightCli(args: string[], options: CliOptions): Pro
   const informational = flags.rest.some(arg => ['--help', '-h', '--version', '-v'].includes(arg));
   const mayBind = !!nativeCommand && !NO_BIND.has(nativeCommand) && !informational;
   const env = options.env ?? {};
-  let binding: BrowserBinding = { session: flags.session ?? '', cwd: callerWorkingDirectory(undefined, env), binaryPath: resolveBinaryPath(env.DORMOUSE_PLAYWRIGHT_BIN ?? 'playwright-cli', env) };
+  const workspace = workspaceParam(flags.workspace);
+  let binding: BrowserBinding = { session: flags.session ?? (flags.key !== undefined ? sessionForKey(flags.key) : ''), cwd: callerWorkingDirectory(undefined, env), binaryPath: resolveBinaryPath(env.DORMOUSE_PLAYWRIGHT_BIN ?? 'playwright-cli', env) };
   if ((flags.surface !== undefined || flags.key !== undefined) && !informational) {
     if (client instanceof Error) {
       if (flags.surface !== undefined) return fail(client.message);
     } else {
       if (!client.resolveBrowser) return fail('This Dormouse host does not support Playwright. Update Dormouse and retry.');
       try {
-        const resolved = await client.resolveBrowser({ provider: 'playwright', ...(flags.surface ? { surface: flags.surface } : { key: flags.key, ...(mayBind ? { proposed: binding } : {}) }) });
+        const resolved = await client.resolveBrowser({ provider: 'playwright', ...workspace, ...(flags.surface ? { surface: flags.surface } : { key: flags.key, ...(mayBind ? { proposed: binding } : {}) }) });
         if (resolved.binding) binding = resolved.binding;
         else if (flags.surface) return fail('The surface has no Playwright session yet.');
       } catch (error) { return fail(errorMessage(error)); }
     }
   }
-  const resolved = await resolveOpenTargetArgs(flags.rest, options, new Set(['open', 'goto']));
+  const resolved = await resolveOpenTargetArgs(flags.rest, options, flags.workspace, new Set(['open', 'goto']));
   if (!resolved.ok) return fail(resolved.message);
   const rest = resolved.value;
   const binary = binding.binaryPath ?? env.DORMOUSE_PLAYWRIGHT_BIN ?? 'playwright-cli';
@@ -75,11 +78,13 @@ export async function runPlaywrightCli(args: string[], options: CliOptions): Pro
   if (!options.execPlaywright && browserBinaryIsMissing(binary, env, binaryPath)) return missing(binary);
   const exec = options.execPlaywright ?? execBrowserProcess;
   try {
-    const result = await exec(binary, [`--session=${binding.session}`, ...rest], binding.cwd);
+    // Spawn the resolved path, never the bare name (docs/specs/dor-cli.md ->
+    // "Spawning External Binaries"): the spawn's cwd is the project directory.
+    const result = await exec(binaryPath ?? binary, [`--session=${binding.session}`, ...rest], binding.cwd);
     if (result.exitCode === 0 && mayBind && !(client instanceof Error)) {
       try {
         if (!client.browserSurface) throw new Error('This Dormouse host does not support Playwright.');
-        await client.browserSurface({ provider: 'playwright', key: flags.key, session: binding.session, cwd: binding.cwd, ...(binaryPath ? { binaryPath } : {}) });
+        await client.browserSurface({ provider: 'playwright', key: flags.key, session: binding.session, cwd: binding.cwd, ...(binaryPath ? { binaryPath } : {}), ...workspace });
       } catch (error) { result.stderr += `Warning: could not open the Dormouse browser surface: ${errorMessage(error)}\n`; }
     }
     return result;

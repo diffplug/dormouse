@@ -57,6 +57,7 @@ import type { IframeProxyResult } from '../lib/platform/iframe-proxy-types';
 import { isForeignOrigin, isLoopbackHost, isOwnOrigin } from './loopback-guard';
 import {
   FRAMING_RESPONSE_HEADERS,
+  PRESERVE_CSP_HEADER,
   HOP_BY_HOP_RESPONSE_HEADERS,
   errorPageHtml,
   frameAncestorsCsp,
@@ -313,6 +314,7 @@ function streamHtml(
   upstreamRes: http.IncomingMessage,
   res: http.ServerResponse,
 ): void {
+  const preserveCsp = upstreamRes.headers[PRESERVE_CSP_HEADER] === '1';
   const outHeaders = sanitizeResponseHeaders(grant, upstreamRes.headers);
   outHeaders['content-type'] = 'text/html; charset=utf-8';
   delete outHeaders['content-length'];
@@ -329,7 +331,7 @@ function streamHtml(
     // prefix, then hand the remainder to a raw pipe (backpressure + end).
     handled = true;
     upstreamRes.off('data', onData);
-    res.write(Buffer.from(instrumentHtml(text, embedderOrigin), 'latin1'));
+    res.write(Buffer.from(instrumentHtml(text, embedderOrigin, preserveCsp), 'latin1'));
     pending = Buffer.alloc(0);
     upstreamRes.pipe(res);
   };
@@ -338,7 +340,7 @@ function streamHtml(
   upstreamRes.on('end', () => {
     if (handled) return; // the pipe ends `res`
     // Whole document arrived before any head marker — instrument and finish.
-    res.end(Buffer.from(instrumentHtml(pending.toString('latin1'), embedderOrigin), 'latin1'));
+    res.end(Buffer.from(instrumentHtml(pending.toString('latin1'), embedderOrigin, preserveCsp), 'latin1'));
   });
   upstreamRes.on('error', () => { if (!res.writableEnded) res.destroy(); });
 }
@@ -346,19 +348,27 @@ function streamHtml(
 function sanitizeResponseHeaders(grant: Grant, headers: http.IncomingHttpHeaders): http.OutgoingHttpHeaders {
   const out: http.OutgoingHttpHeaders = {};
   const replaceFraming = grant.embedderOrigins !== null;
+  const preserveCsp = headers[PRESERVE_CSP_HEADER] === '1';
   for (const [name, value] of Object.entries(headers)) {
     if (value === undefined) continue;
     const lower = name.toLowerCase();
+    if (lower === PRESERVE_CSP_HEADER) continue;
     if (HOP_BY_HOP_RESPONSE_HEADERS.has(lower) || lower === 'set-cookie') continue;
     // Replaced, never merely dropped: this proxy may only take the upstream's
     // "do not embed" away if it puts back one that names the exact allowed set:
     // this per-grant origin plus the app's validated ancestor chain
     // (`FRAMING_RESPONSE_HEADERS`).
-    if (replaceFraming && FRAMING_RESPONSE_HEADERS.has(lower)) continue;
+    if (replaceFraming && FRAMING_RESPONSE_HEADERS.has(lower)
+      && !(preserveCsp && lower.startsWith('content-security-policy'))) continue;
     out[name] = value;
   }
   if (grant.embedderOrigins !== null) {
-    out['content-security-policy'] = frameAncestorsCsp(grant.embedderOrigins);
+    const upstreamCsp = out['content-security-policy'];
+    // Comma-separated policies intersect: retain every upstream directive verbatim,
+    // including stricter frame-ancestors, and add our embedder boundary.
+    out['content-security-policy'] = upstreamCsp === undefined
+      ? frameAncestorsCsp(grant.embedderOrigins)
+      : [...(Array.isArray(upstreamCsp) ? upstreamCsp : [String(upstreamCsp)]), frameAncestorsCsp(grant.embedderOrigins)].join(', ');
   }
   // Keep upstream redirects on the proxy origin so they don't bounce the frame
   // straight at the un-instrumented upstream.

@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   archiveSurfaceNotes: vi.fn(async (_ids: readonly string[], _opts?: { signal?: AbortSignal }) => {}),
   notepadSurfaceIds: vi.fn(() => [] as string[]),
   removeSurface: vi.fn(),
+  flushWindowSession: vi.fn(async () => {}),
+  getWorkspacesSnapshot: vi.fn(() => ({ workspaces: [{ id: "w1", name: "Deploys" }], activeId: "w1" })),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
@@ -29,15 +31,28 @@ vi.mock("dormouse-lib/lib/terminal-registry", () => ({
 vi.mock("dormouse-lib/lib/notepad/close-coordinator", () => ({
   archiveSurfaceNotes: mocks.archiveSurfaceNotes,
 }));
+// The Rust command the close path removes a snapshot with; the quit path never
+// calls it (a quit keeps every window's blob, which is what a relaunch reads).
 vi.mock("dormouse-lib/lib/notepad/notepad-store", () => ({
   notepadSurfaceIds: mocks.notepadSurfaceIds,
   removeSurface: mocks.removeSurface,
+}));
+// The aggregator's write step. Mocked for the same reason as the registry: what
+// this file tests is where it sits in the order.
+vi.mock("dormouse-lib/lib/window-session-aggregator", () => ({
+  flushWindowSession: mocks.flushWindowSession,
+}));
+// The Workspaces the dialog names, which the quit-confirm store captures.
+vi.mock("dormouse-lib/lib/workspace-store", () => ({
+  subscribeToWorkspaces: () => () => {},
+  getWorkspacesSnapshot: mocks.getWorkspacesSnapshot,
 }));
 vi.mock("./updater", () => ({
   hasPendingUpdate: mocks.hasPendingUpdate,
   installPendingUpdate: mocks.installPendingUpdate,
 }));
 
+import { chromeKeyboardHeld } from '../../lib/src/components/wall/chrome-keyboard-lease';
 import { initQuitFlow, setQuitConfirmGate, _resetForTesting } from "./quit";
 // The quit-confirm store is the real one: the archive-failed phase is the
 // observable half of the gate's failure path.
@@ -46,18 +61,25 @@ import {
   confirmQuit,
   getQuitArchiveError,
   getQuitConfirmPhase,
+  openQuitConfirm,
   _resetQuitConfirmForTesting,
 } from "./quit-confirm-store";
 
 /** One Surface holding notes, as `notepadSurfaceIds` reports it. */
 const oneNotedSurface = () => ["pane-a"];
 
-// The captured `dormouse://quit-requested` listener; call it to simulate Rust
-// emitting a quit request.
-let quitRequested: (() => void) | null = null;
+// The captured Rust event listeners, keyed by event name. Rust asks every
+// window to vote (`quit-requested`), tells them all when someone declines
+// (`quit-cancelled`), and walks them one at a time (`quit-teardown`).
+const listeners = new Map<string, (event: { payload?: unknown }) => void>();
+const fire = (event: string, payload?: unknown) => listeners.get(event)?.({ payload });
+const quitRequested = () => fire("dormouse://quit-requested", { requester: null });
+const quitTeardown = (last = true) => fire("dormouse://quit-teardown", { last });
+const quitCancelled = () => fire("dormouse://quit-cancelled");
+const voted = () => mocks.invoke.mock.calls.some((call) => call[0] === "quit_vote");
 
 // Drain the microtask-driven teardown chain (no real timers on the happy path —
-// withTimeout's 8s guard is cleared when the work wins).
+// withTimeout's ceiling guard is cleared when the work wins).
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
 // A fake adapter whose teardown steps append their name to `order` so the call
@@ -69,16 +91,27 @@ function fakeAdapter(order: string[] = [], overrides: Partial<Record<string, () 
       order.push(name);
     });
   return {
+    captureAgentRecovery: step("captureRecovery"),
     requestSessionFlush: step("flush"),
-    gracefulKillAllPtys: step("gracefulKill"),
+    gracefulKillPtys: step("gracefulKill"),
     drainSessionSaves: step("drain"),
   } as unknown as TauriAdapter;
 }
 
-// Wire the orchestrator, fire Rust's quit-requested event, drain the chain.
-async function triggerQuit(adapter: TauriAdapter): Promise<void> {
+/**
+ * Wire the orchestrator, ask this window to vote, and — once it has — run the
+ * walk's teardown for it. `last` is what the walk hands the final window
+ * (`main`), which installs and exits; every other one is destroyed instead.
+ */
+async function triggerQuit(
+  adapter: TauriAdapter,
+  { last = true }: { last?: boolean } = {},
+): Promise<void> {
   initQuitFlow(adapter);
-  quitRequested!();
+  quitRequested();
+  await settle();
+  if (!voted()) return;
+  quitTeardown(last);
   await settle();
 }
 
@@ -87,9 +120,9 @@ describe("quit orchestrator", () => {
     vi.clearAllMocks();
     _resetForTesting();
     _resetQuitConfirmForTesting();
-    quitRequested = null;
-    mocks.listen.mockImplementation((event: string, cb: () => void) => {
-      if (event === "dormouse://quit-requested") quitRequested = cb;
+    listeners.clear();
+    mocks.listen.mockImplementation((event: string, cb: (e: { payload?: unknown }) => void) => {
+      listeners.set(event, cb);
       return Promise.resolve(() => {});
     });
     mocks.countRunningSessions.mockReturnValue(0);
@@ -98,9 +131,29 @@ describe("quit orchestrator", () => {
     mocks.invoke.mockResolvedValue(undefined);
     mocks.archiveSurfaceNotes.mockResolvedValue(undefined);
     mocks.notepadSurfaceIds.mockReturnValue([]);
+    mocks.flushWindowSession.mockResolvedValue(undefined);
   });
 
   afterEach(() => setQuitConfirmGate(null));
+
+  it('holds an all-idle window through archiving and voting until another window cancels', async () => {
+    let archived!: () => void;
+    mocks.notepadSurfaceIds.mockReturnValue(oneNotedSurface());
+    mocks.archiveSurfaceNotes.mockImplementationOnce(() => new Promise<void>((resolve) => { archived = resolve; }));
+    initQuitFlow(fakeAdapter());
+    quitRequested();
+    expect(getQuitConfirmPhase()).toBe('quitting');
+    expect(chromeKeyboardHeld()).toBe(true);
+    expect(voted()).toBe(false);
+    archived();
+    await settle();
+    expect(voted()).toBe(true);
+    expect(getQuitConfirmPhase()).toBe('quitting');
+    expect(chromeKeyboardHeld()).toBe(true);
+    quitCancelled();
+    expect(getQuitConfirmPhase()).toBeNull();
+    expect(chromeKeyboardHeld()).toBe(false);
+  });
 
   it("always acks the quit-requested event", async () => {
     await triggerQuit(fakeAdapter());
@@ -116,11 +169,14 @@ describe("quit orchestrator", () => {
     expect(mocks.invoke).toHaveBeenCalledWith("quit_proceed");
   });
 
-  it("runs teardown steps flush → kill → flush → drain → install → proceed in order", async () => {
+  it("runs teardown steps capture → flush → kill → flush → window → drain → install → proceed in order", async () => {
     const order: string[] = [];
     mocks.invoke.mockImplementation(async (cmd: string) => {
       order.push(cmd);
       return undefined;
+    });
+    mocks.flushWindowSession.mockImplementation(async () => {
+      order.push("flushWindow");
     });
     mocks.hasPendingUpdate.mockReturnValue(true);
     mocks.installPendingUpdate.mockImplementation(async () => {
@@ -129,19 +185,107 @@ describe("quit orchestrator", () => {
 
     await triggerQuit(fakeAdapter(order));
 
-    // `quit_progress` marks each phase boundary (teardown start, install start)
-    // so Rust's watchdog budgets teardown and install separately.
+    // The capture is first: an agent's resume invocation exists only between the
+    // interrupt and the kill. `quit_progress` marks each phase boundary (teardown
+    // start, install start) so Rust's watchdog budgets them separately.
     expect(order).toEqual([
       "quit_ack",
+      "quit_vote",
       "quit_progress",
+      "captureRecovery",
       "flush",
       "gracefulKill",
       "flush",
+      "flushWindow",
       "drain",
       "quit_progress",
       "install",
       "quit_proceed",
     ]);
+  });
+
+  it("finishes the final save when every step takes its worst-case time", async () => {
+    // The webview-observable worst case of each step: the two that reach the
+    // sidecar wait Rust's round-trip margin on top of their own budget. A
+    // ceiling below the sum of these aborts exactly the last steps — the final
+    // save — so `drain` must still land before the exit.
+    vi.useFakeTimers();
+    try {
+      const order: string[] = [];
+      mocks.invoke.mockImplementation(async (cmd: string) => {
+        order.push(cmd);
+        return undefined;
+      });
+      const slow = (name: string, ms: number) => () =>
+        new Promise<void>((resolve) => {
+          setTimeout(() => {
+            order.push(name);
+            resolve();
+          }, ms);
+        });
+      const adapter = fakeAdapter(order, {
+        captureRecovery: slow("captureRecovery", 1300 + 1500),
+        flush: slow("flush", 1500),
+        gracefulKill: slow("gracefulKill", 2000 + 1500),
+        drain: slow("drain", 2000),
+      });
+      mocks.flushWindowSession.mockImplementation(slow("flushWindow", 999));
+
+      initQuitFlow(adapter);
+      quitRequested();
+      await vi.advanceTimersByTimeAsync(0);
+      quitTeardown();
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      expect(order).toContain("flushWindow");
+      expect(order).toContain("drain");
+      expect(order.indexOf("drain")).toBeLessThan(order.indexOf("quit_proceed"));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("bounds a wedged Window write so the drain behind it still runs", async () => {
+    // Both standalone writers are synchronous today, so this step never waits;
+    // but it is bounded on what the writer may return, not on what it happens
+    // to be — a writer that never settles must cost its own budget, not the
+    // ceiling's slack and then the drain.
+    vi.useFakeTimers();
+    try {
+      const order: string[] = [];
+      mocks.invoke.mockImplementation(async (cmd: string) => {
+        order.push(cmd);
+        return undefined;
+      });
+      mocks.flushWindowSession.mockReturnValue(new Promise<void>(() => {})); // never settles
+      const adapter = fakeAdapter(order);
+
+      initQuitFlow(adapter);
+      quitRequested();
+      await vi.advanceTimersByTimeAsync(0);
+      // Voted; Rust walks this window, and the wedged write must not hold the
+      // drain behind it past its own budget.
+      quitTeardown();
+      await vi.advanceTimersByTimeAsync(1000);
+
+      expect(order.slice(-2)).toEqual(["drain", "quit_proceed"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still saves and exits when the recovery capture rejects", async () => {
+    // Recovery is the one step whose data cannot be reconstructed, but losing it
+    // must never cost the save behind it.
+    const order: string[] = [];
+    const adapter = fakeAdapter(order, {
+      captureRecovery: () => Promise.reject(new Error("sidecar gone")),
+    });
+    await triggerQuit(adapter);
+
+    expect(order).toEqual(["flush", "gracefulKill", "flush", "drain"]);
+    expect(mocks.flushWindowSession).toHaveBeenCalled();
+    expect(mocks.invoke).toHaveBeenCalledWith("quit_proceed");
   });
 
   it("skips install and its phase signal when no update is pending", async () => {
@@ -164,6 +308,9 @@ describe("quit orchestrator", () => {
 
     await triggerQuit(adapter);
 
+    // Not even a vote: a window parked on its dialog has not decided, and a
+    // vote is what would let the walk start destroying the others.
+    expect(mocks.invoke).not.toHaveBeenCalledWith("quit_vote");
     expect(mocks.invoke).not.toHaveBeenCalledWith("quit_progress");
     expect(mocks.invoke).toHaveBeenCalledWith("quit_ack");
   });
@@ -192,9 +339,11 @@ describe("quit orchestrator", () => {
     });
     initQuitFlow(adapter);
 
-    quitRequested!(); // starts teardown; parked at the first flush
+    quitRequested();
     await settle();
-    quitRequested!(); // repeat trigger — must not restart teardown
+    quitTeardown(); // starts teardown; parked at the first flush
+    await settle();
+    quitRequested(); // repeat trigger — must not restart teardown
     await settle();
 
     // Only one teardown ran: the first flush was entered exactly once.
@@ -222,6 +371,29 @@ describe("quit orchestrator", () => {
     expect(mocks.invoke).toHaveBeenCalledWith("quit_proceed");
   });
 
+  it("hands the gate the requester Rust sent, and leaves it out of the count", async () => {
+    mocks.countRunningSessions.mockReturnValue(1);
+    const gate = vi.fn();
+    setQuitConfirmGate(gate);
+    initQuitFlow(fakeAdapter());
+
+    fire("dormouse://quit-requested", { requester: "pane-7" });
+    expect(gate).toHaveBeenLastCalledWith(expect.anything(), { kind: "quit", requester: "pane-7" });
+    expect(mocks.countRunningSessions).toHaveBeenLastCalledWith("pane-7");
+
+    quitCancelled();
+    quitRequested();
+    expect(gate).toHaveBeenLastCalledWith(expect.anything(), { kind: "quit", requester: null });
+    expect(mocks.countRunningSessions).toHaveBeenLastCalledWith(null);
+
+    // The teardown itself does not change: the relaunch is Rust's.
+    gate.mock.lastCall![0].confirm();
+    await settle();
+    quitTeardown();
+    await settle();
+    expect(mocks.invoke).toHaveBeenCalledWith("quit_proceed");
+  });
+
   it("does not re-invoke the gate while a confirmation is pending", async () => {
     mocks.countRunningSessions.mockReturnValue(1);
     const adapter = fakeAdapter();
@@ -229,7 +401,7 @@ describe("quit orchestrator", () => {
     setQuitConfirmGate(gate);
 
     await triggerQuit(adapter);
-    quitRequested!(); // repeat trigger while confirming
+    quitRequested(); // repeat trigger while confirming
     await settle();
 
     expect(gate).toHaveBeenCalledTimes(1);
@@ -265,7 +437,7 @@ describe("quit orchestrator", () => {
 
     // The gate is a step before teardown, not inside it: nothing has told Rust
     // teardown began when the archive runs.
-    expect(order.slice(0, 3)).toEqual(["quit_ack", "archive", "quit_progress"]);
+    expect(order.slice(0, 4)).toEqual(["quit_ack", "archive", "quit_vote", "quit_progress"]);
     expect(mocks.archiveSurfaceNotes).toHaveBeenCalledWith(["pane-a"], expect.anything());
     expect(mocks.invoke).toHaveBeenCalledWith("quit_proceed");
   });
@@ -313,7 +485,7 @@ describe("quit orchestrator", () => {
     await triggerQuit(fakeAdapter());
     mocks.archiveSurfaceNotes.mockClear();
 
-    quitRequested!();
+    quitRequested();
     await settle();
 
     // Acked (Rust's watchdog stands down) but the flow does not restart.
@@ -328,6 +500,8 @@ describe("quit orchestrator", () => {
     await triggerQuit(adapter);
 
     confirmQuit();
+    await settle();
+    quitTeardown();
     await settle();
 
     expect(mocks.removeSurface).toHaveBeenCalledWith("pane-a");
@@ -352,7 +526,9 @@ describe("quit orchestrator", () => {
 
     // The flow returned to idle, so the next trigger runs the gate again.
     mocks.archiveSurfaceNotes.mockResolvedValue(undefined);
-    quitRequested!();
+    quitRequested();
+    await settle();
+    quitTeardown();
     await settle();
     expect(adapter.requestSessionFlush).toHaveBeenCalled();
     expect(mocks.invoke).toHaveBeenCalledWith("quit_proceed");
@@ -365,7 +541,7 @@ describe("quit orchestrator", () => {
       mocks.archiveSurfaceNotes.mockReturnValue(new Promise<void>(() => {})); // never settles
       const adapter = fakeAdapter();
       initQuitFlow(adapter);
-      quitRequested!();
+      quitRequested();
 
       await vi.advanceTimersByTimeAsync(3000);
 
@@ -390,7 +566,7 @@ describe("quit orchestrator", () => {
         return new Promise<void>(() => {}); // never settles
       });
       initQuitFlow(fakeAdapter());
-      quitRequested!();
+      quitRequested();
       await Promise.resolve();
       expect(signal?.aborted).toBe(false);
 
@@ -401,6 +577,49 @@ describe("quit orchestrator", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // --- Vote then walk (docs/specs/standalone.md §Quit flow) -------------------
+
+  it("votes and then waits: nothing is torn down until the walk reaches this window", async () => {
+    const adapter = fakeAdapter();
+    initQuitFlow(adapter);
+    quitRequested();
+    await settle();
+
+    expect(mocks.invoke).toHaveBeenCalledWith("quit_vote");
+    // A vote is not a teardown: another window may still decline, and nothing
+    // anywhere may be destroyed until every window has agreed.
+    expect(adapter.requestSessionFlush).not.toHaveBeenCalled();
+    expect(mocks.invoke).not.toHaveBeenCalledWith("quit_progress");
+    expect(mocks.invoke).not.toHaveBeenCalledWith("quit_proceed");
+  });
+
+  it("a window that is not last hands the walk on instead of exiting", async () => {
+    mocks.hasPendingUpdate.mockReturnValue(true);
+    const adapter = fakeAdapter();
+    await triggerQuit(adapter, { last: false });
+
+    expect(adapter.drainSessionSaves).toHaveBeenCalled();
+    expect(mocks.invoke).toHaveBeenCalledWith("quit_window_done");
+    expect(mocks.invoke).not.toHaveBeenCalledWith("quit_proceed");
+    // Only `main` holds `updater:*`, and it is the window the walk tears down
+    // last (docs/specs/auto-update.md).
+    expect(mocks.installPendingUpdate).not.toHaveBeenCalled();
+  });
+
+  it("another window's cancel drops this window's dialog without cancelling again", async () => {
+    mocks.countRunningSessions.mockReturnValue(1);
+    setQuitConfirmGate(openQuitConfirm);
+    await triggerQuit(fakeAdapter());
+    expect(getQuitConfirmPhase()).toBe("open");
+
+    quitCancelled();
+
+    expect(getQuitConfirmPhase()).toBeNull();
+    // The cancel already happened elsewhere; calling back would bounce it
+    // around the windows.
+    expect(mocks.invoke).not.toHaveBeenCalledWith("quit_cancel");
   });
 
   it("falls through to teardown when no gate is installed even with running sessions", async () => {

@@ -60,13 +60,18 @@
  *      spec.
  *  15. A spec of RATIONALE_REQUIRED_WORDS or more has a rationale file;
  *      without one every piece of evidence sits above the fold and the
- *      ratchet cannot see it.
+ *      ratchet cannot see it. Root-level specs ride this too: the rationale
+ *      sits beside its spec, so SELF_HOST.md pairs with SELF_HOST.rationale.md.
  *  16. Every security spec (docs/specs/security*.md) is claimed by exactly one
  *      audit domain: the bullet list under the `**Scope` line of a domain
  *      prompt in .github/audit/ names it, and names no file that does not
  *      exist. docs/specs/security-audit.md -> "Domains" states the rule; a
  *      spec claimed by nobody is unaudited, one claimed twice gets
  *      contradictory verdicts.
+ *  17. A `**FAIL IF**` rule leads a line only in a docs/specs/security*.md
+ *      spec. AGENTS.md -> "House form for rules" states it; check 16 proves
+ *      each security spec has an auditor, so an audited rule written anywhere
+ *      else is claimed by nobody and silently never run.
  *
  * scripts/spec-lint-selftest.mjs plants one defect per finding check and
  * requires this lint to go red.
@@ -79,7 +84,7 @@ import { countWords, proseLines as proseLinesOf, SOURCE_EXTENSIONS } from './spe
 const SPECS_DIR = 'docs/specs';
 
 const TOP_LEVEL_DIRS = [
-  'lib/', 'standalone/', 'vscode-ext/', 'website/', 'relay/',
+  'lib/', 'standalone/', 'vscode-ext/', 'website/', 'relay/', 'hosted/', 'vendor/',
   'remote-lib-common/', 'dor/', 'dor-lib-common/', 'canopy/', 'docs/',
   'scripts/', 'deploy/', '.github/', '.claude/', '.vscode/',
 ];
@@ -93,7 +98,7 @@ const SKIP_PATH_PREFIXES = [
 ];
 // Root files a spec may name without a directory; every other checkable path
 // starts with a top-level dir.
-const ROOT_FILES = ['AGENTS.md', 'DESIGN.md', 'PRODUCT.md', 'SECURITY.md', 'SELF_HOST.md', 'package.json', 'pnpm-workspace.yaml'];
+const ROOT_FILES = ['AGENTS.md', 'DESIGN.md', 'PRODUCT.md', 'SECURITY.md', 'SELF_HOST.md', 'SELF_HOST.rationale.md', 'package.json', 'pnpm-workspace.yaml'];
 
 /**
  * A backticked token check 4 verifies on disk: a listed root file, or a repo
@@ -113,15 +118,26 @@ const specDirFiles = readdirSync(join(ROOT, SPECS_DIR))
   // Keep repo-relative paths in POSIX form on every platform — they are
   // compared against forward-slash paths written in the markdown.
   .map((f) => `${SPECS_DIR}/${f}`);
-const rationaleFiles = specDirFiles.filter((f) => f.endsWith('.rationale.md'));
 const specFiles = specDirFiles.filter((f) => !f.endsWith('.rationale.md'));
 // SELF_HOST.md is a root-level spec (the self-host deployment: runbook +
-// installer contract); it rides checks 2-4 alongside the docs/specs files.
+// installer contract); it rides checks 2-4 alongside the docs/specs files, and
+// checks 11 and 15 through ROOT_SPECS below.
 // SECURITY.md is the GitHub security policy — a pointer at the security specs,
 // budgeted so it cannot regrow into the 17,000-word spec it once was; it rides
 // the link, path, and budget checks only.
+//
+// A rationale file sits beside its spec, so a root-level spec's lives at the
+// root too. Listing the spec rather than globbing the root keeps check 15 able
+// to report a missing rationale: the pair is declared, not discovered.
+const ROOT_SPECS = ['SELF_HOST.md'];
+const rationaleFiles = [
+  ...specDirFiles.filter((f) => f.endsWith('.rationale.md')),
+  ...ROOT_SPECS.map((f) => f.replace(/\.md$/, '.rationale.md')).filter((f) => existsSync(join(ROOT, f))),
+];
 const allFiles = ['AGENTS.md', 'SECURITY.md', 'SELF_HOST.md', ...specFiles, ...rationaleFiles];
 const foldCheckedFiles = ['SELF_HOST.md', ...specFiles];
+/** Specs that pair with a rationale file — checks 11 and 15. */
+const rationaleCheckedSpecs = [...ROOT_SPECS, ...specFiles];
 const problems = [];
 
 /** Memoize a one-argument pure function; the lint never writes, so nothing goes stale. */
@@ -374,7 +390,7 @@ for (const rel of Object.keys(budgets)) {
 // `(rationale)`, `(rationale; …)`, `(…; rationale)` — on whichever line the
 // wrap put it.
 const MARKER_RE = /(?:^|[(;])\s*rationale\s*[;)]/;
-for (const spec of specFiles) {
+for (const spec of rationaleCheckedSpecs) {
   const rat = spec.replace(/\.md$/, '.rationale.md');
   const keys = hasRationale.has(rat) ? rationaleKeys(rat) : null;
   const heads = headings(spec);
@@ -512,7 +528,7 @@ for (const rat of rationaleFiles) {
 
 // --- Check 15: a large spec has a rationale file -----------------------------
 const RATIONALE_REQUIRED_WORDS = 2500; // stated in AGENTS.md -> "What, not why"
-for (const spec of specFiles) {
+for (const spec of rationaleCheckedSpecs) {
   const rat = spec.replace(/\.md$/, '.rationale.md');
   const words = wordsOf.get(spec);
   if (!hasRationale.has(rat) && words >= RATIONALE_REQUIRED_WORDS) {
@@ -552,6 +568,23 @@ for (const rel of domainFiles) {
 for (const [spec, by] of claimants) {
   if (by.length === 0) problems.push(`${spec}: in no audit domain's scope (${AUDIT_DIR}) — unaudited`);
   else if (by.length > 1) problems.push(`${spec}: in the scope of ${by.join(' and ')} — one domain owns a spec, or their verdicts contradict`);
+}
+
+// --- Check 17: an audited rule lives only in a security spec -----------------
+// Check 16 gives every security spec exactly one auditor; nothing gives one to
+// any other file, so a `FAIL IF` written elsewhere is never executed. Matched
+// only where the bold LEADS the line — an inline `` `FAIL IF` `` pointer at the
+// specs that own them is the form this leaves alone.
+const FAIL_IF_RE = /^\s*(?:[-*]\s+)?\*\*FAIL IF\b/;
+for (const rel of allFiles) {
+  if (claimants.has(rel)) continue;
+  proseLines(rel).forEach((line, i) => {
+    if (!FAIL_IF_RE.test(line)) return;
+    problems.push(
+      `${rel}:${i + 1}: a "**FAIL IF**" rule outside docs/specs/security*.md — no audit domain ` +
+      'claims this file, so nothing runs it (AGENTS.md -> "House form for rules")',
+    );
+  });
 }
 
 // -----------------------------------------------------------------------------

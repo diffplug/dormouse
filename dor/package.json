@@ -17,6 +17,7 @@
     "test": "pnpm run build && node --test test/*.test.mjs"
   },
   "devDependencies": {
+    "@types/node": "^24.13.4",
     "esbuild": "^0.28.0",
     "typescript": "^6.0.3"
   },

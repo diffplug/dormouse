@@ -14,7 +14,9 @@ The standalone app checks for updates on launch and prompts in the Baseboard. **
 
 ### Quit-time install
 
-**The updater owns no quit interception** — install runs only when `hasPendingUpdate()` is true, after the quit orchestrator's teardown and save/drain steps (`docs/specs/standalone.md` §Quit flow) (rationale). `installPendingUpdate()` writes the success marker *before* `install()` (§localStorage), and on Windows first awaits bounded sidecar teardown (§Sidecar teardown on Windows). **It never closes the window itself** — exiting the process is `quit_proceed`'s job, after this returns.
+**The updater owns no quit interception** — install runs only when `hasPendingUpdate()` is true, after the quit orchestrator's teardown and save/drain steps (`docs/specs/standalone.md` §Quit flow) (rationale). **It runs in `main`, the window the quit walk tears down last and the only one holding `updater:default`** (`capabilities/main-only.json`); every other window has handed on by then, so nothing it could still be writing outlives the install.
+
+**Only `main` ever checks**, so it is the only window that can hold a download at all — and **closing `main` throws away an approved one**, which lives in that webview's memory. Its close confirmation says so, and is shown for that reason alone even with nothing running (`docs/specs/standalone.md` → "Per-window close"); a session that has closed `main` simply has no update to install until it relaunches (rationale). `installPendingUpdate()` writes the success marker *before* `install()` (§localStorage), and on Windows first awaits bounded sidecar teardown (§Sidecar teardown on Windows). **It never closes the window itself** — exiting the process is `quit_proceed`'s job, after this returns.
 
 **In Vite dev mode (`pnpm dev:standalone`) `installPendingUpdate()` drops the pending update and skips `install()`** (rationale), so install must be tested from a packaged app; **`MODE === 'test'` lifts the skip** for `standalone/src/updater.test.ts`.
 
@@ -30,19 +32,20 @@ Update status is a text notice in the Baseboard, the always-visible bottom strip
 |-------|---------|---------|--------------|
 | `available` | "Update available" | "Changelog", "Install when I quit" | No |
 | `downloading` | "Downloading update v0.5.0" | "Changelog" | No |
-| `downloaded` | "Update downloaded (v0.5.0) — will install when you quit" | "Changelog" | No |
+| `downloaded` | "Update downloaded (v0.5.0) — will install when you quit" | "Changelog", "Restart now" | No |
+| `restart-refused` | "Update downloaded (v0.5.0) — will install when you quit (couldn't restart: `<reason>`)" | "Changelog" | No |
 | `post-update-success` | "Updated to v0.5.0 — from v0.4.0" | "Changelog" | 10 seconds |
 | `post-update-failure` | "Update failed" | "Click here to debug" | No |
 
-"Install when I quit" is the approval; "Changelog" opens `https://dormouse.sh/changelog/after/<getVersion()>`. ` · ` separates the message from the action labels.
+"Install when I quit" is the approval; "Changelog" opens `https://dormouse.sh/changelog/after/<getVersion()>`. **"Restart now" calls `quit_restart`** (`docs/specs/standalone.md` → "Restart"): the quit installs on its way out, then relaunches. **A refusal turns a still-shown `downloaded` into `restart-refused`, carrying the host's reason and never "Restart now"**, since the refusal holds until relaunch; the update stays pending. ` · ` separates the message from the action labels.
 
-**Every state is dismissible via [×].** Dismissing an unapproved `available` notice means no download and no install that session; dismissing `downloading` or `downloaded` hides the notice only and **never cancels** an approved download/install.
+**Every state is dismissible via [×].** Dismissing an unapproved `available` notice means no download and no install that session; dismissing `downloading`, `downloaded`, or `restart-refused` hides the notice only and **never cancels** an approved download/install.
 
 **The notice carries the Baseboard's own text style (`text-sm font-mono text-muted`), in its single right-hand `ml-auto` cluster** — clear of doors and the shortcut hint.
 
 ### Debug report on failure
 
-**"Click here to debug" opens `UpdateDebugModal`, which snapshots the failure** (version + error string) so a later state change cannot alter it. Two steps (rationale): a GitHub issue *search* seeded with the error's first 80 characters **unquoted**, so GitHub can fuzzy-match; and a copyable markdown report from `buildDebugReport()` — app version, `PLATFORM_STRING`, the error, and the log tail. The tail is `read_update_log`'s last 10 KB of `dormouse.log`, sliced on a char boundary; **a failed read is embedded as a placeholder, never aborts the report**.
+**"Click here to debug" opens `UpdateDebugModal`, which snapshots the failure** (version + error string) so a later state change cannot alter it. Two steps (rationale): a GitHub issue *search* seeded with the error's first 80 characters **unquoted**, so GitHub can fuzzy-match; and a copyable markdown report from `buildDebugReport()` — app version, `PLATFORM_STRING`, the error, and the log tail. The tail is `read_update_log`'s last 10,000 bytes of `dormouse.log`, sliced on a char boundary; **a failed read is embedded as a placeholder, never aborts the report**.
 
 ### Threading
 
@@ -54,11 +57,13 @@ Update status is a text notice in the Baseboard, the always-visible bottom strip
 
 | Platform | Install step |
 |----------|--------------|
-| Windows | Awaits `kill_sidecar_now`, then `install()` runs the NSIS installer in passive mode (progress bar, no interaction), which force-kills the app before `quit_proceed` is reached |
+| Windows | Awaits `kill_sidecar_now`, then `install()` starts the NSIS installer in passive mode (progress bar, no interaction) and exits the process itself, before `quit_proceed` is reached |
 | macOS | `install()` replaces the `.app` bundle in place |
 | Linux | `install()` replaces the AppImage in place |
 | No pending update | — (`installPendingUpdate` not called) |
 | Vite dev mode | Skips `install()`, which would replace the dev executable directory |
+
+**The app relaunches only on a restart** (`docs/specs/standalone.md` → "Restart"), which a debug build refuses — except that a Windows install always relaunches, by NSIS (`/R`).
 
 ## localStorage
 
@@ -69,7 +74,7 @@ Single key: `dormouse:update-result`
 | Successful install | `{ "from": "0.4.0", "to": "0.5.0" }` | On next launch, after reading |
 | Failed install | `{ "failed": true, "version": "0.5.0", "error": "..." }` | On next launch, after reading |
 
-**Must write the success marker *before* `install()`** — Windows NSIS force-kills the process. **Must confirm its target against the running app version on next launch**; a mismatch becomes a failure notice and suppresses the update check. **A throwing `install()` overwrites it with a failure entry.** An unapproved update writes nothing. **Must ignore corrupt markers**, including invalid field types. `standalone/src/updater.test.ts` pins marker validation and confirmation.
+**Must write the success marker *before* `install()`** — on Windows `install()` never returns. **Must confirm its target against the running app version on next launch**; a mismatch becomes a failure notice and suppresses the update check. **A throwing `install()` overwrites it with a failure entry.** An unapproved update writes nothing. **Must ignore corrupt markers**, including invalid field types. `standalone/src/updater.test.ts` pins marker validation and confirmation.
 
 ## Files
 
@@ -79,11 +84,7 @@ Single key: `dormouse:update-result`
 | [`standalone/src/updater.test.ts`](../../standalone/src/updater.test.ts) | Pins the updater lifecycle and ordering |
 | [`standalone/src/UpdateBanner.tsx`](../../standalone/src/UpdateBanner.tsx) | Presentational notice content for the Baseboard |
 | [`standalone/src/UpdateDebugModal.tsx`](../../standalone/src/UpdateDebugModal.tsx) | Failure modal: issue search + copyable report |
-| [`standalone/src/quit.ts`](../../standalone/src/quit.ts) | Quit orchestrator (`docs/specs/standalone.md` §Quit flow); calls `installPendingUpdate()` last |
-| [`standalone/src/main.tsx`](../../standalone/src/main.tsx) | `<ConnectedUpdateBanner />` (banner + modal) as `<App />`'s `baseboardNotice`; `startUpdateCheck()` after restore |
 | [`standalone/src-tauri/tauri.conf.json`](../../standalone/src-tauri/tauri.conf.json) | Updater endpoint, public key, artifact mode, Windows install mode |
-| [`standalone/src-tauri/src/lib.rs`](../../standalone/src-tauri/src/lib.rs) | Plugin registration, sidecar teardown, update-log tail |
-| [`standalone/src-tauri/capabilities/default.json`](../../standalone/src-tauri/capabilities/default.json) | Updater, version, and shell permissions |
 
 ## Configuration
 

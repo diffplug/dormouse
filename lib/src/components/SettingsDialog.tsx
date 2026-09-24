@@ -1,11 +1,13 @@
+import { SecondsField, SwitchRow } from './AlarmSettingsControls';
+import { WorkspaceAlarmSettings } from './WorkspaceAlarmSettings';
+import type { AlertSink } from '../lib/alert-delivery-state';
+import { useWorkspaceAlertPolicy } from './wall/use-workspace-alert-policy';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
   MODAL_OVERLAY_INSET,
   ModalCloseButton,
   ModalFrame,
   OVERLAY_MAX_HEIGHT,
-  NumericInput,
-  OnOffSwitch,
   Shortcut,
   UNDER_SWITCH_INDENT,
   modalActionButton,
@@ -21,7 +23,6 @@ import { getPlatform } from '../lib/platform';
 import { hasNotepadArchive } from '../lib/notepad/archive-service';
 import { getShellsSnapshot, subscribeToShells } from '../lib/shell-store';
 import {
-  clampAlertDelayMs,
   getAlertSettings,
   getPushDevices,
   refreshPushDevicesNow,
@@ -82,10 +83,8 @@ function describePushTargets(push: PushDevicesState, remoteControlBelow: boolean
  * (`lib/src/lib/shell-store.ts`), then the alarm settings
  * (`docs/specs/alert.md` -> Alarm settings).
  *
- * Rules are removable here but not addable: WATCHING is keyed on a running
- * command's name, so a rule is created by pressing `a` in the tab running it.
- * This dialog and the bell popover are the two places a rule set on a
- * since-closed Pane can be found and removed.
+ * Rules are removable here but not addable (`docs/specs/alert.md` -> Settings
+ * dialog).
  */
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const watched = useSyncExternalStore(subscribeToWatchedCommands, getWatchedCommandsSnapshot);
@@ -176,8 +175,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           </div>
         ) : (
           <div className="mt-1.5 text-sm leading-relaxed text-muted">
-            Nothing yet. Start a command, then press <Shortcut>a</Shortcut> in its tab to
-            alert on every tab running it.
+            Nothing yet. Start a command, then press <Shortcut>a</Shortcut> in its tab and
+            turn on <em>Watch all …</em> to alert on every tab running it.
           </div>
         )}
         <div className="mt-3">
@@ -188,7 +187,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           />
           <div className={`${UNDER_SWITCH_INDENT} mt-1 text-sm leading-relaxed text-muted`}>
             When the animation watcher is fully armed, terminal notifications wait
-            for the pane to become quiet.
+            for the pane to become quiet, and a ring raised by silence goes away if
+            the watched command starts working again.
           </div>
         </div>
       </section>
@@ -204,8 +204,10 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         </div>
       </section>
 
+      <h3 className={`${SECTION} text-sm font-semibold text-foreground`}>Application defaults</h3>
       <AlarmSettingsSection sink="speech" />
       <AlarmSettingsSection sink="push" />
+      <WorkspaceAlarmSettings />
 
       {/* Directly under the push section that points at it: push is
           the feature that makes a reader care, and "no Burrow" is the reason it
@@ -234,11 +236,12 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-export type AlarmSink = 'speech' | 'push';
+export type AlarmSink = AlertSink;
 
 /** Shared by the full dialog and the brief, inert baseboard confirmation. */
 export function AlarmSettingsSection({ sink, preview = false }: { sink: AlarmSink; preview?: boolean }) {
-  const settings = useSyncExternalStore(subscribeToAlertSettings, getAlertSettings);
+  // The dialog edits application defaults; only the baseboard preview shows the Workspace's effective value.
+  const { policy: settings } = useWorkspaceAlertPolicy(preview);
   const push = useSyncExternalStore(subscribeToPushDevices, getPushDevices);
   const hasBurrowService = getPlatform().burrow !== undefined;
 
@@ -330,74 +333,5 @@ function AlarmSinkSection({
         {action ? <div className="mt-2">{action}</div> : null}
       </div>
     </section>
-  );
-}
-
-function SwitchRow({
-  label,
-  on,
-  onChange,
-}: {
-  label: string;
-  on: boolean;
-  /** Absent inside a disabled fieldset, where the switch can never fire. */
-  onChange?: (next: boolean) => void;
-}) {
-  return (
-    <div className="flex items-center gap-3">
-      <OnOffSwitch on={on} onEnable={() => onChange?.(true)} onDisable={() => onChange?.(false)} label={label} />
-      <span className="min-w-0 text-sm text-foreground">{label}</span>
-    </div>
-  );
-}
-
-/**
- * A delay expressed in seconds, committed on blur or Enter rather than per
- * keystroke: typing "3" on the way to "30" must not briefly install a 3s timer.
- *
- * `draft === null` means "show the stored value", so committing always clears
- * the draft and lets the store win. That covers the snap-back for an empty or
- * out-of-range entry — including the case where the clamp makes the store a
- * no-op and no change notification arrives.
- */
-function SecondsField({
-  label,
-  valueMs,
-  disabled,
-  onCommit,
-}: {
-  label: string;
-  valueMs: number;
-  disabled?: boolean;
-  /** Absent inside a disabled fieldset, where the field can never be edited. */
-  onCommit?: (ms: number) => void;
-}) {
-  const [draft, setDraft] = useState<string | null>(null);
-
-  const commit = (): void => {
-    const seconds = Number(draft ?? '');
-    setDraft(null);
-    if (draft === null || !Number.isFinite(seconds) || seconds <= 0) return;
-    onCommit?.(clampAlertDelayMs(seconds * 1000));
-  };
-
-  return (
-    <label className="flex items-center gap-1.5 text-sm text-foreground">
-      <span>{label}</span>
-      <NumericInput
-        value={draft ?? String(Math.round(valueMs / 1000))}
-        onChange={setDraft}
-        chars={3}
-        disabled={disabled}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            commit();
-          }
-        }}
-      />
-      <span className="text-muted">seconds</span>
-    </label>
   );
 }

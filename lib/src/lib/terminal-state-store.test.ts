@@ -378,6 +378,33 @@ describe('terminal command input via rendered buffer', () => {
     expect(getTerminalPaneState('pane').currentCommand?.rawCommandLine).toBe('claude');
   });
 
+  it('synthesizes nothing more while the command it started is still running', () => {
+    // The guard that keeps the fallback to one command at a time: typing into a
+    // running program is not a submission, and the program's own output is not a
+    // prompt line. Without it, the first Enter a TUI receives starts a second
+    // command over the top of the one that is running.
+    submit('pane', 'lazygit');
+    const started = getTerminalPaneState('pane').currentCommand;
+    expect(started?.rawCommandLine).toBe('lazygit');
+
+    recordTerminalUserInput('pane', 'q\r', lineReader(`${PROMPT}q`));
+
+    expect(getTerminalPaneState('pane').currentCommand).toBe(started);
+  });
+
+  it('stands down for good once a real boundary reports a command finishing', () => {
+    // Why the guard above needs no `finished` arm: that activity is only ever
+    // reached through `commandFinish`, which is itself an authentic boundary, so
+    // per-pane retirement has already taken the pane by the time it is set.
+    applyTerminalSemanticEvents('pane', [{ type: 'commandFinish', exitCode: 0 }]);
+    expect(getTerminalPaneState('pane').activity).toEqual({ kind: 'finished', exitCode: 0 });
+
+    recordTerminalOutput('pane', PROMPT);
+    recordTerminalUserInput('pane', 'pnpm build\r', lineReader(`${PROMPT}pnpm build`));
+
+    expect(getTerminalPaneState('pane').currentCommand).toBeNull();
+  });
+
   it('still treats a real trailing newline as "no prompt yet"', () => {
     // The distinction the trim rests on. A genuine line break means nothing is
     // painted on the current line, and that must keep reading as "no prompt" —
@@ -414,6 +441,14 @@ describe('countRunningSessions (quit-confirmation gate)', () => {
     // Finishing a command drops it back below the running threshold.
     applyTerminalSemanticEvents('run-a', [{ type: 'commandFinish', exitCode: 0 }]);
     expect(countRunningSessions()).toBe(1);
+  });
+
+  it('leaves out the excepted session and nothing else', () => {
+    applyTerminalSemanticEvents('run-a', [{ type: 'commandStart', source: 'osc633_boundaries' }]);
+    applyTerminalSemanticEvents('run-b', [{ type: 'commandStart', source: 'osc633_boundaries' }]);
+    expect(countRunningSessions('run-a')).toBe(1);
+    expect(countRunningSessions('idle')).toBe(2);
+    expect(countRunningSessions(null)).toBe(2);
   });
 });
 

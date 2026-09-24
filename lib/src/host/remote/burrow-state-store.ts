@@ -10,12 +10,12 @@
  * is the sidecar's: one file, 0600, under a directory the app passes in.
  */
 
-import { randomUUID } from 'node:crypto';
-import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { BurrowAclRecord } from 'remote-lib-common';
 import { filterAclRecords } from '../../remote/burrow/acl';
 import { isEnrollment, type BurrowEnrollment } from '../../remote/burrow/enrollment';
+import { writeJsonAtomic } from '../atomic-json-file';
 import { createSerialQueue } from './serial-queue';
 
 // Re-exported so an implementor can name the record type without depending on
@@ -193,43 +193,18 @@ export class FileBurrowStateStore implements BurrowStateStore {
     }
   }
 
-  async #write(state: BurrowStateFile): Promise<void> {
-    // 0700 dir + 0600 file: the enrollment is a bearer credential, and the app
-    // data directory is not otherwise private on a shared machine.
-    await mkdir(this.#dir, { recursive: true, mode: 0o700 });
-    // `mkdir` applies its mode only when it creates the final component. Tauri
-    // creates app_data_dir before spawning us, commonly under a 0755 umask, so
-    // tighten an existing directory too. Best-effort, like `peer-link.ts`'s:
-    // failing the whole save over the directory would lose the Burrow instead.
-    //
-    // Skipped on Windows because there is nothing here to skip *to* — a Unix
-    // mode is a silent no-op on that platform, and so is the 0600 on the file
-    // below, so neither call protects anything. What protects it there is the
-    // owner-only DACL that `burrow_state_dir` in
-    // `standalone/src-tauri/src/lib.rs` applies to this directory before
-    // spawning us; the files written below inherit it. Node cannot set an ACL,
-    // which is why the guarantee lives on the Rust side rather than here.
-    if (process.platform !== 'win32') await chmod(this.#dir, 0o700).catch(() => {});
-    // Temp-then-rename in the same directory, so a crash mid-write leaves the
-    // previous state intact rather than a truncated file that reads as "no Burrow".
-    // Unique per write rather than per process: `#mutate` already keeps this
-    // process's saves apart, and a second Dormouse sharing the state directory
-    // would otherwise rename a file the first one is still writing.
-    const tmp = `${this.#path}.${randomUUID()}.tmp`;
-    let renamed = false;
-    try {
-      await writeFile(tmp, JSON.stringify(state), { mode: 0o600 });
-      await rename(tmp, this.#path);
-      renamed = true;
-    } finally {
-      // A failed rename must not accumulate bearer-credential temp files.
-      if (!renamed) await rm(tmp, { force: true }).catch(() => {});
-    }
+  /** The enrollment is a bearer credential and a truncated file reads as "no
+   *  Burrow", so the write is the shared owner-only atomic one. `#mutate`
+   *  already keeps this process's saves apart. */
+  #write(state: BurrowStateFile): Promise<void> {
+    return writeJsonAtomic(this.#dir, this.#path, state);
   }
 }
 
 /**
- * The store for a run with no state directory (the browser dev harness).
+ * The store for a run whose host could not create a state directory — the
+ * browser dev harness is *not* this case, since it passes a per-run temp
+ * `DORMOUSE_STATE_DIR` (docs/specs/standalone.md -> "Burrow service").
  *
  * Held in memory rather than dropped: a Burrow enrolled here has to keep working
  * for the rest of the session — its ACL is what authorizes every pairing it

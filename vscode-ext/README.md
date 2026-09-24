@@ -34,14 +34,11 @@ Dormouse can owe you attention in three independent ways. Two of them need no se
 
 **A command finishes while you are away.** If a foreground command was running while you were watching, you left, and it exited after you had been gone a while, that pane is ringing when you come back. Also no configuration.
 
-**A watched command goes quiet.** This one is opt-in, and it is the one for coding agents. Click the bell in a pane running `claude` — or press `a` in command mode — and Dormouse watches *that command name*. Every pane running `claude` is then watched, the ones open now and the ones you open later. When a watched command's output goes busy and then falls quiet while you are not looking, it rings.
+**A watched command goes quiet.** This one is opt-in, and it is the one for coding agents. Right-click the header of a pane running `claude` — or press `a` in command mode — and turn on **Watch all claude commands**; Dormouse then watches *that command name*. Every pane running `claude` is then watched, the ones open now and the ones you open later. When a watched command's output goes busy and then falls quiet while you are not looking, it rings.
 
 Dormouse never guesses which commands deserve an alert. Watching is a rule you create on a command name, and turning it off anywhere removes it everywhere.
 
-- <img width="22" height="22" alt="Bell icon, alerts off" src="images/alert-disabled.gif" /> no watch rule for this pane's command
-- <img width="22" height="22" alt="Bell icon, command watched" src="images/alert-enabled.gif" /> this command is watched
-- <img width="22" height="22" alt="Bell icon, watched command running" src="images/alert-armed.gif" /> a watched command is running; it will alert when it goes quiet
-- <img width="22" height="22" alt="Bell icon, ringing for attention" src="images/alert-ringing.gif" /> finished, and it needs your attention
+A ringing pane is outlined and washed in the alarm color until you attend it, so one glance across a full wall finds it. Attending the pane — or pressing `a` — puts the alarm out.
 
 Whichever way a pane rings, the ring becomes a **TODO** — a marker beside the pane's title that outlives the alert, so a ring you dismissed does not disappear without a trace. Clear it by clicking it or pressing `t` in command mode.
 

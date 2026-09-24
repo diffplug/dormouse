@@ -21,6 +21,7 @@ import {
   openAgentBrowserScreenModal,
 } from './agent-browser-screen';
 import { hostPathDisplay, tabDisplayTitle } from './browser-url';
+import { isToolParams } from './browser-surface';
 import { clearAgentBrowserSessionClosed, isAgentBrowserSessionClosed } from './agent-browser-sessions';
 import {
   EDIT_OPS,
@@ -45,10 +46,10 @@ export const HIDDEN_PARK_DELAY_MS = 1000;
 export const PROVISIONAL_INPUT_WINDOW_MS = 250;
 
 // The high-rate `[ab-panel]` stream/screenshot diagnostics fire per frame
-// (~20Hz), so the flag is read ONCE at module load and cached: toggling needs a
-// reload, which is the right trade for a hot loop. The connection's always-on
-// debug ring is unaffected. `localStorage.setItem('dormouse.flags.abDebugLogs',
-// 'true')` + reload to enable.
+// (~20Hz), so the flag is read ONCE — lazily, on the first log — and memoized:
+// toggling needs a reload, which is the right trade for a hot loop. The
+// connection's always-on debug ring is unaffected.
+// `localStorage.setItem('dormouse.flags.abDebugLogs', 'true')` + reload to enable.
 let abDebugLogsEnabled: boolean | undefined;
 function abDebugLog(message: string): void {
   if (abDebugLogsEnabled === undefined) abDebugLogsEnabled = isAbDebugLogsEnabled();
@@ -185,6 +186,8 @@ export class AgentBrowserSurfaceController {
   private cwd?: string;
   private get platform() { return browserPlatform(automationMode(this.provider, this.poppedOut), this.cwd); }
   private sessionKey(session: string) { return browserSessionKey(session, automationMode(this.provider, false), this.cwd); }
+  /** Gates the pop-out affordance; see `ensureStarted`. */
+  private readonly isTool: boolean;
 
   // --- params (mirrors of the persisted blob) ---
   private session: string | undefined;
@@ -318,6 +321,9 @@ export class AgentBrowserSurfaceController {
     this.id = id;
     this.provider = automationProvider(params.renderMode);
     this.cwd = params.cwd;
+    // A Surface's kind never changes over its life (a tool's capabilities come
+    // and go, its identity does not), so this is safe to seed once.
+    this.isTool = isToolParams(params);
     this.session = params.session;
     this.binaryPath = allowedBinaryPath(params.binaryPath, this.provider);
     this.wsPort = params.wsPort;
@@ -437,7 +443,11 @@ export class AgentBrowserSurfaceController {
       chrome: this.chrome,
       chromeActions: this.chromeActions,
       hostCapable: !!this.platform.agentBrowserCommand,
-      canPopOut: !!this.platform.agentBrowserPopOut,
+      // Never for a tool, whose `render` is `iframe` or `ab-screencast`: the
+      // swap would tear the browser down and re-derive the same screencast, so
+      // asking for a native window would get a reload
+      // (`docs/specs/dor-tool.md` -> Declaring tools).
+      canPopOut: !this.isTool && !!this.platform.agentBrowserPopOut,
     });
     this.lastPublishedScreen = null;
     this.publishScreen();
@@ -807,6 +817,9 @@ export class AgentBrowserSurfaceController {
     } catch {
       return;
     }
+    // Latest-only, like the crisp loop: a newer pulse arriving while this decode
+    // is in flight bumps the sequence, and the stale bitmap is dropped rather
+    // than painted over the newer frame.
     const mySeq = ++this.frameDrawSeq;
     createImageBitmap(new Blob([bytes], { type: 'image/jpeg' })).then((bitmap) => {
       if (this.disposed || mySeq !== this.frameDrawSeq || this.sink !== sink) {
@@ -1283,7 +1296,7 @@ export class AgentBrowserSurfaceController {
     if (this.syncConfirmed) this.setSyncEngaged(false);
   }
 
-  // --- relaunch: pop-out / pop-in / bring-to-front + auto-revert ---
+  // --- relaunch: pop-out / pop-in + auto-revert ---
 
   private closeIfSessionMarkedClosed(targetSession: string | null | undefined = this.session): boolean {
     if (!targetSession || !isAgentBrowserSessionClosed(this.sessionKey(targetSession))) return false;
@@ -1369,12 +1382,6 @@ export class AgentBrowserSurfaceController {
       if (this.closeIfSessionMarkedClosed(session)) { this.setRelaunching(false); return; }
       void this.reconcileStreamPort().then(() => this.setRelaunching(false));
     });
-  }
-
-  bringToFront(): void {
-    const session = this.session;
-    if (!session) return;
-    this.platform.agentBrowserBringToFront?.(session, this.binaryPath)?.catch(() => {});
   }
 
   // Auto-revert: once the headed stream has connected, a later disconnect means
@@ -1476,11 +1483,12 @@ export class AgentBrowserSurfaceController {
       });
       return;
     }
-    // macOS native editing chords (select-all/copy/cut) don't fire over the
-    // stream input path (CDP commands field is dropped). Route the intent
-    // through the host's purpose-built edit channel instead. If the host lacks
-    // it (e.g. standalone), fall through so the page still gets the chord for
-    // its own JS shortcuts.
+    // Native editing chords (select-all/copy/cut) don't fire over the stream
+    // input path (CDP commands field is dropped), on any platform — Cmd on
+    // macOS, Ctrl elsewhere. Route the intent through the host's purpose-built
+    // edit channel instead. Every shipped host implements `agentBrowserEdit`;
+    // the fall-through covers a host that does not (the fake adapter), so the
+    // page still gets the chord for its own JS shortcuts.
     if (mod && !e.altKey && !e.shiftKey) {
       const op = EDIT_OPS[e.key.toLowerCase() as keyof typeof EDIT_OPS];
       // Call through the adapter instance — detaching the method drops `this`.

@@ -141,7 +141,7 @@ resolve_tag_sha() { echo abc; }
 verify_downloaded_artifacts() { :; }
 all_artifacts_downloaded() { return 0; }
 find_release_run_id() { echo 123; }
-gh() { if [[ "$2" == watch ]]; then return 1; else echo failure; fi; }
+gh() { if [[ "$2" == watch ]]; then return 1; elif [[ "$1 $2" == "release view" ]]; then return 1; else echo failure; fi; }
 main "$@"`, [command, '1.2.3']);
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /conclusion 'failure'|Workflow failed/);
@@ -172,13 +172,77 @@ create_release 1.2.3`));
   assert.equal(readFileSync(join(root, 'captured-notes'), 'utf8'), 'last release line\n');
 });
 
+for (const command of ['all', 'resume']) {
+  test(`${command} refuses a published release before downloading or signing anything`, t => {
+    const root = fixture(t);
+    put(root, 'release-signed/.version', '1.2.3');
+    put(root, 'release-signed/work/keep', 'signed');
+    const result = shell(root, `
+check_command() { :; }
+check_git_clean() { :; }
+download_artifacts() { error 'must refuse before downloading'; }
+resume_download() { error 'must refuse before downloading'; }
+prepare_sign_dir() { error 'must refuse before signing'; }
+gh() {
+  case "$1 $2" in
+    "release view") case "$*" in *isDraft*) echo false;; esac; return 0;;
+  esac
+  error 'must refuse before reaching any other gh call'
+}
+main "$@"`, [command, '1.2.3']);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /already published/);
+    assert.equal(readFileSync(join(root, 'release-signed/work/keep'), 'utf8'), 'signed');
+  });
+}
+
+test('a published release stops the retry path before it clobbers immutable assets', t => {
+  const root = fixture(t);
+  put(root, 'release-signed/work/.completed-sign-updates');
+  for (const file of ['Dormouse-macos-aarch64.tar.gz', 'Dormouse-windows-x64-setup.exe', 'Dormouse-linux-x86_64.AppImage']) put(root, `release-signed/release-assets/${file}`, 'bundle');
+  const result = shell(root, `
+gh() {
+  if [[ "$2" == view ]]; then
+    case "$*" in *isDraft*) echo false;; *assets*) ;; esac
+    return
+  fi
+  touch "$REPO_ROOT/published"
+}
+create_release 1.2.3`);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /already published/);
+  assert.equal(existsSync(join(root, 'published')), false);
+});
+
+test('a draft release is repaired and published with a verified tag', t => {
+  const root = fixture(t);
+  put(root, 'release-signed/work/.completed-sign-updates');
+  for (const file of ['Dormouse-macos-aarch64.tar.gz', 'Dormouse-windows-x64-setup.exe', 'Dormouse-linux-x86_64.AppImage']) put(root, `release-signed/release-assets/${file}`, 'bundle');
+  succeeds(shell(root, `
+gh() {
+  if [[ "$2" == view ]]; then
+    case "$*" in *isDraft*) echo true;; *assets*) echo Dormouse-macos-aarch64.tar.gz;; esac
+    return
+  fi
+  echo "$2 $*" >> "$REPO_ROOT/gh-calls"
+}
+create_release 1.2.3`));
+  const calls = readFileSync(join(root, 'gh-calls'), 'utf8').trim().split('\n');
+  assert.equal(calls.length, 2);
+  assert.match(calls[0], /^upload .*--clobber/);
+  assert.match(calls[1], /^edit .*--tag v1\.2\.3 --verify-tag --draft=false/);
+});
+
 test('existing unexpected GitHub assets block release updates', t => {
   const root = fixture(t);
   put(root, 'release-signed/work/.completed-sign-updates');
   for (const file of ['Dormouse-macos-aarch64.tar.gz', 'Dormouse-windows-x64-setup.exe', 'Dormouse-linux-x86_64.AppImage']) put(root, `release-signed/release-assets/${file}`, 'bundle');
   const result = shell(root, `
 gh() {
-  if [[ "$2" == view ]]; then echo extra.vsix; return; fi
+  if [[ "$2" == view ]]; then
+    case "$*" in *isDraft*) echo true;; *assets*) echo extra.vsix;; esac
+    return
+  fi
   touch "$REPO_ROOT/published"
 }
 create_release 1.2.3`);

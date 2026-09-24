@@ -71,6 +71,8 @@ dor list --command "npm run dev" --cwd .   # exact command + cwd match
 dor list --port 5173                       # which terminal owns port 5173
 dor list --kind terminal --view minimized  # filters AND together
 dor list --ports                           # add each terminal's listening ports
+dor list --workspaces                      # the Workspace overview
+dor list --all                             # every Workspace, grouped
 ```
 
 Lists every surface in the current workspace — terminals and browser surfaces,
@@ -130,7 +132,9 @@ Exactly one input mode per call: `--text`/`--key` (only in that order, text
 first), `--stdin`, or `--sequence` for anything more complex. Special keys go
 through `--key` (`enter`, `escape`, `tab`, `backspace`, `delete`, arrows,
 `ctrl-a`..`ctrl-z`) so they are never confused with literal text. `--text`
-interprets `\n` `\r` `\t` `\\` unless `--raw`.
+interprets `\n` `\r` `\t` `\\` unless `--raw`. Input arrives at typing pace,
+so a long prompt plus `--key enter` submits whole in one call, but `sent` means
+queued: the program may still be reading it.
 
 ### `dor read` — read a terminal's screen
 
@@ -163,6 +167,24 @@ dor kill surface:3 --confirm-dangerously          # only when already validated
 `--confirm-if-read <text>` kills only if the surface's visible screen contains
 the text (≥4 non-whitespace chars) — use it as a cheap guard that you are
 killing what you think you are.
+
+### `dor workspace` — the containers around surfaces
+
+```sh
+dor workspace new build                   # create one, in the background
+dor workspace switch workspace:build      # move the user to it
+dor workspace close workspace:2 --force   # close it and everything in it
+```
+
+A Window holds several Workspaces, each with its own surfaces and its own
+`surface:1`. You almost never need these: your commands land in the Workspace
+you were started in, and creating one is a change the user sees. When you do,
+name one as `workspace:<n>` (positional) or `workspace:<name>`, and pass
+`--workspace <ref>` to any command — `split`, `ensure`, `read`, `send`,
+`await`, `kill`, `iframe`, `ab` — to act in another one. A surface's stable id
+finds it in any Workspace without that flag; `surface:N` does not, since every
+Workspace has one. `close` refuses a Workspace holding your running work
+unless you pass `--force`.
 
 ### `dor ab` / `dor agent-browser` — agent-drivable browser pane
 
