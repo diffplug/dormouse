@@ -470,7 +470,7 @@ describe('agent-browser host screenshot transport', () => {
     enqueueSpawnResults([{}]);
     const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });
 
-    await host.command('sess', ['tab', 'list'], '/usr/bin/curl');
+    await host.command('sess', ['reload'], '/usr/bin/curl');
 
     expect(spawnMock).toHaveBeenCalledTimes(1);
     // Fell through to the host's own candidate rather than spawning curl.
@@ -482,9 +482,111 @@ describe('agent-browser host screenshot transport', () => {
       spawnMock.mockReset();
       enqueueSpawnResults([{}]);
       const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });
-      await host.command('sess', ['tab', 'list'], candidate);
+      await host.command('sess', ['reload'], candidate);
       expect(spawnMock.mock.calls[0][0]).toBe(candidate);
     }
+  });
+});
+
+// Every webview token lands on agent-browser's command line, and agent-browser
+// reads launch options anywhere on it (`open <url> --executable-path x` launches
+// x — checked against 0.31.1), so matching only the verb would let an
+// allowlisted command walk around the `binaryPath` gate.
+describe('agent-browser host webview argv', () => {
+  const originalSocketDir = process.env.AGENT_BROWSER_SOCKET_DIR;
+
+  beforeEach(() => {
+    spawnMock.mockReset();
+    process.env.AGENT_BROWSER_SOCKET_DIR = mkdtempSync(join(tmpdir(), 'dormouse-ab-argv-test-'));
+  });
+
+  afterEach(() => {
+    if (originalSocketDir === undefined) delete process.env.AGENT_BROWSER_SOCKET_DIR;
+    else process.env.AGENT_BROWSER_SOCKET_DIR = originalSocketDir;
+  });
+
+  it('runs exactly the argv shapes the webview sends', async () => {
+    const shapes = [
+      ['open', 'https://example.com/path?q=1'],
+      ['open', 'about:blank'],
+      ['back'],
+      ['forward'],
+      ['reload'],
+      ['close'],
+      ['get', 'cdp-url'],
+      ['tab', 't2'],
+      ['tab', 'close', 't2'],
+      ['set', 'viewport', '1280', '720', '2'],
+      ['set', 'viewport', '801', '599', '1.100000023841858'],
+      ['set', 'device', 'iPhone 16 Pro'],
+      ['set', 'device', 'iPad (gen 11)'],
+    ];
+    const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });
+    for (const args of shapes) {
+      spawnMock.mockReset();
+      enqueueSpawnResults([{}]);
+      expect(await host.command('dormouse.1.gui-abc', args)).toEqual({ exitCode: 0, stdout: '', stderr: '' });
+      expect(spawnMock.mock.calls[0][1]).toEqual(['--session', 'dormouse.1.gui-abc', ...args]);
+    }
+  });
+
+  it('refuses any other argv, including an allowlisted verb carrying options', async () => {
+    const refused: unknown[] = [
+      ['open', 'https://example.com/', '--executable-path', '/tmp/evil'],
+      ['open', '--executable-path=/tmp/evil'],
+      ['open', ' https://example.com/'],
+      ['close', '--all'],
+      ['back', '--profile', '/tmp/p'],
+      ['get', 'cdp-url', '--init-script', '/tmp/x.js'],
+      ['get', 'text', 'body'],
+      ['tab', 'new', 'https://example.com/'],
+      ['tab', '--extension', '/tmp/ext'],
+      ['tab', 'close', '--args=--disable-web-security'],
+      ['set', 'viewport', '100', '100', '--proxy=http://evil'],
+      ['set', 'viewport', '100', '100'],
+      ['set', 'device', '--state=/tmp/s.json'],
+      ['set', 'headers', '{"x":"y"}'],
+      ['screenshot', '/Users/someone/.zshrc'],
+      ['eval', 'document.cookie'],
+      ['constructor'],
+      [],
+      ['open', 42],
+      'open https://example.com/',
+    ];
+    const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });
+    for (const args of refused) {
+      const result = await host.command('dormouse.1.gui-abc', args as string[]);
+      expect(result.exitCode, JSON.stringify(args)).toBe(1);
+      expect(result.stderr).toMatch(/is not allowed from the webview/);
+    }
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses an option-shaped or path-shaped session on every entry point', async () => {
+    const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });
+    for (const session of ['--executable-path', '-x', '../../tmp/evil', 'a/b', 'a\\b', 'a\nb', '']) {
+      expect((await host.command(session, ['close'])).exitCode).toBe(1);
+      expect((await host.edit(session, 'copy')).ok).toBe(false);
+      expect((await host.screenshotToFile(session, {})).ok).toBe(false);
+      expect((await host.streamStatus(session)).ok).toBe(false);
+      expect((await host.popOut(session, { url: 'https://example.com/' })).ok).toBe(false);
+      expect((await host.popIn(session, { url: 'https://example.com/' })).ok).toBe(false);
+    }
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses a launch URL that is not an absolute URL, and relaunches at about:blank instead', async () => {
+    const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });
+    expect(await host.open('--executable-path=/tmp/evil', {})).toEqual({ ok: false, error: 'an absolute url is required' });
+    expect(spawnMock).not.toHaveBeenCalled();
+
+    const calls = mockSpawnByCommand({
+      close: () => ({}),
+      '--headed open': () => ({ code: 1, stderr: 'boom' }),
+    });
+    await host.popOut('dormouse.1.default', { url: '--executable-path=/tmp/evil' });
+    expect(calls).toContainEqual(['--session', 'dormouse.1.default', '--headed', 'open', 'about:blank']);
+    expect(calls.flat()).not.toContain('--executable-path=/tmp/evil');
   });
 });
 

@@ -15,8 +15,8 @@
  * Narrow capabilities, all on behalf of the webview:
  *
  * 1. `command` — runs the user's agent-browser binary against a session for tab
- *    actions, navigation, and teardown. Subcommands are allowlisted; not a
- *    general exec channel.
+ *    actions, navigation, and teardown. Only fixed argv shapes pass
+ *    (`WEBVIEW_COMMANDS`); not a general exec channel.
  * 2. `edit` — host-owned `eval` for the macOS editing chords
  *    (select-all/copy/cut) the stream input path can't dispatch; copy/cut land
  *    on the OS clipboard.
@@ -54,20 +54,75 @@ import {
 import { randomBytes } from 'crypto';
 import { isAllowedAgentBrowserBinary } from '../lib/agent-browser-binary';
 import { type AgentBrowserTab, parseAgentBrowserTabs } from '../lib/agent-browser-tab';
-import {
-  AGENT_BROWSER_ALLOWED_SUBCOMMANDS,
-  type AgentBrowserCommandResult,
-  type AgentBrowserEditOp,
-  type AgentBrowserEditResult,
-  type AgentBrowserOpenResult,
-  type AgentBrowserPopResult,
-  type AgentBrowserScreenshotResult,
-  type AgentBrowserStreamStatusResult,
+import type {
+  AgentBrowserCommandResult,
+  AgentBrowserEditOp,
+  AgentBrowserEditResult,
+  AgentBrowserOpenResult,
+  AgentBrowserPopResult,
+  AgentBrowserScreenshotResult,
+  AgentBrowserStreamStatusResult,
 } from '../lib/platform/types';
 import { privateCaptureDir } from './private-capture-dir';
 import { editScript, generateGuiSession, jpegQuality } from './browser-host-shared';
 
-const ALLOWED_SUBCOMMANDS = new Set<string>(AGENT_BROWSER_ALLOWED_SUBCOMMANDS);
+// Every token the webview hands this host — a session, a command's arguments, a
+// launch URL — lands on agent-browser's command line, and agent-browser reads
+// its launch options anywhere on that line (`open <url> --executable-path x`
+// launches x; `close --all` closes every session). So each token is checked
+// against the one shape its position takes, never the verb alone
+// (docs/specs/dor-browser.md → "Agent-Browser Host Capabilities").
+
+/** A session name the host will put after `--session` and into a state-file
+ *  path: never option-shaped, never a path separator or control character. */
+function isSessionName(value: unknown): value is string {
+  return typeof value === 'string' && /^(?!-)[^/\\\x00-\x1f\x7f]{1,200}$/.test(value);
+}
+
+/** An absolute URL, untrimmed — a scheme must start with a letter, so it can
+ *  never be read as an option. */
+function isAbsoluteUrl(value: unknown): value is string {
+  if (typeof value !== 'string' || value !== value.trim()) return false;
+  try {
+    new URL(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const TAB_REF = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+// `tab <ref>` selects; these words are the verb's own operations instead.
+const TAB_OPERATIONS = new Set(['list', 'new', 'close']);
+const DEVICE_NAME = /^[A-Za-z0-9][A-Za-z0-9 ()._-]{0,63}$/;
+const isPositiveNumber = (value: string) => /^\d{1,6}(\.\d{1,20})?$/.test(value) && Number(value) > 0;
+
+/** The argv the webview sends through `command`, one shape per verb: the
+ *  controller's chrome, tab, and Display actions, and a kill/swap `close`. */
+const WEBVIEW_COMMANDS: Record<string, (args: string[]) => boolean> = {
+  open: (args) => args.length === 1 && isAbsoluteUrl(args[0]),
+  back: (args) => args.length === 0,
+  forward: (args) => args.length === 0,
+  reload: (args) => args.length === 0,
+  close: (args) => args.length === 0,
+  // The popped-out pane's CDP observer.
+  get: (args) => args.length === 1 && args[0] === 'cdp-url',
+  tab: (args) => args.length === 1
+    ? TAB_REF.test(args[0]) && !TAB_OPERATIONS.has(args[0])
+    : args.length === 2 && args[0] === 'close' && TAB_REF.test(args[1]),
+  set: (args) => args[0] === 'viewport'
+    ? args.length === 4 && args.slice(1).every(isPositiveNumber)
+    : args[0] === 'device' && args.length === 2 && DEVICE_NAME.test(args[1]),
+};
+
+/** Whether `args` is exactly one of the `WEBVIEW_COMMANDS` shapes. `args` is
+ *  typed but arrives from webview IPC unvalidated. */
+function isWebviewCommand(args: unknown): args is string[] {
+  if (!Array.isArray(args) || !args.every((arg) => typeof arg === 'string')) return false;
+  const [verb, ...rest] = args as string[];
+  // Own keys only: a verb of `constructor` must not find the prototype's.
+  return Object.prototype.hasOwnProperty.call(WEBVIEW_COMMANDS, verb) && WEBVIEW_COMMANDS[verb](rest);
+}
 
 const STREAM_PORT_READ_ATTEMPTS = 4;
 const STREAM_PORT_READ_DELAY_MS = 150;
@@ -133,8 +188,8 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   // realm and from a pane's persisted Lath params, so an unchecked one is
   // arbitrary local execution in the extension host or the Tauri sidecar — the
   // exact escape the nonce CSP exists to prevent, and reachable without any user
-  // interaction on the next launch. The subcommand allowlist in `command()` does
-  // not cover it: `streamStatus`, `open` and `popOut` supply their own args and
+  // interaction on the next launch. The argv check in `command()` does not
+  // cover it: `streamStatus`, `open` and `popOut` supply their own args and
   // take a `binaryPath` of their own. A refused path is dropped, not fatal: the
   // host's own candidates still run, so a stale or hostile value degrades to
   // "resolve it yourself" rather than to a broken surface.
@@ -189,7 +244,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   function usableRelaunchUrl(value: unknown): string | undefined {
     if (typeof value !== 'string') return undefined;
     const trimmed = value.trim();
-    if (!trimmed || trimmed === 'about:blank') return undefined;
+    if (!isAbsoluteUrl(trimmed) || trimmed === 'about:blank') return undefined;
     return trimmed;
   }
 
@@ -383,21 +438,18 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   }
 
   async function command(session: string, args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult> {
-    if (typeof session !== 'string' || !session) {
-      return { exitCode: 1, stdout: '', stderr: 'session is required' };
+    if (!isSessionName(session)) {
+      return { exitCode: 1, stdout: '', stderr: 'a valid session name is required' };
     }
-    const subcommand = args[0];
-    if (!subcommand || !ALLOWED_SUBCOMMANDS.has(subcommand)) {
-      return { exitCode: 1, stdout: '', stderr: `agent-browser subcommand '${subcommand ?? ''}' is not allowed from the webview` };
-    }
-    if (subcommand === 'get' && args[1] !== 'cdp-url') {
-      return { exitCode: 1, stdout: '', stderr: `agent-browser get '${args[1] ?? ''}' is not allowed from the webview` };
+    if (!isWebviewCommand(args)) {
+      const shown = Array.isArray(args) ? args.map(String).join(' ') : String(args);
+      return { exitCode: 1, stdout: '', stderr: `agent-browser '${shown}' is not allowed from the webview` };
     }
     // An explicit close (kill / render-swap) tears the session down itself, so
     // it's no longer ours to clean up on shutdown. It also invalidates a
     // post-open sweep left by a fast-returning relaunch: once closed, no later
     // daemon command may recreate this otherwise-untracked session.
-    if (subcommand === 'close') {
+    if (args[0] === 'close') {
       poppedOutSessions.delete(session);
       relaunchGenerations.delete(session);
     }
@@ -405,8 +457,8 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   }
 
   async function edit(session: string, op: AgentBrowserEditOp, binaryPath?: string): Promise<AgentBrowserEditResult> {
-    if (typeof session !== 'string' || !session) {
-      return { ok: false, error: 'session is required' };
+    if (!isSessionName(session)) {
+      return { ok: false, error: 'a valid session name is required' };
     }
     const script = editScript(op);
     if (!script) {
@@ -460,8 +512,8 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     opts: { format?: 'jpeg' | 'png'; quality?: number },
     binaryPath?: string,
   ): Promise<AgentBrowserScreenshotFileResult> {
-    if (typeof session !== 'string' || !session) {
-      return { ok: false, error: 'session is required' };
+    if (!isSessionName(session)) {
+      return { ok: false, error: 'a valid session name is required' };
     }
     const format = opts.format === 'png' ? 'png' : 'jpeg';
     const ext = format === 'png' ? 'png' : 'jpg';
@@ -512,7 +564,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   }
 
   async function streamStatus(session: string, binaryPath?: string): Promise<AgentBrowserStreamStatusResult> {
-    if (typeof session !== 'string' || !session) return { ok: false, error: 'session is required' };
+    if (!isSessionName(session)) return { ok: false, error: 'a valid session name is required' };
     const wsPort = await readStreamPort(session, binaryPath);
     if (!wsPort) return { ok: false, error: 'stream port unavailable' };
     return { ok: true, wsPort };
@@ -523,7 +575,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   // the process launches headed in one shot so embed→popout doesn't open a
   // headless browser only to tear it down.
   async function open(url: string, opts: { headed?: boolean }, binaryPath?: string): Promise<AgentBrowserOpenResult> {
-    if (typeof url !== 'string' || !url) return { ok: false, error: 'url is required' };
+    if (!isAbsoluteUrl(url)) return { ok: false, error: 'an absolute url is required' };
     const session = generateGuiSession();
     const args = ['--session', session, ...(opts?.headed ? ['--headed'] : []), 'open', url];
     // A headed spawn is a real OS window — track it before the launch so a
@@ -554,7 +606,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     opts: { rect?: { x: number; y: number; width: number; height: number }; url?: string },
     binaryPath?: string,
   ): Promise<AgentBrowserPopResult> {
-    if (typeof session !== 'string' || !session) return { ok: false, error: 'session is required' };
+    if (!isSessionName(session)) return { ok: false, error: 'a valid session name is required' };
     const generation = beginRelaunch(session);
     const url = relaunchUrl(opts?.url);
     log(`[ab-relaunch] popOut session=${session} requestedUrl=${JSON.stringify(opts?.url)} -> open ${url}`);
@@ -606,7 +658,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     opts: { url?: string },
     binaryPath?: string,
   ): Promise<AgentBrowserPopResult> {
-    if (typeof session !== 'string' || !session) return { ok: false, error: 'session is required' };
+    if (!isSessionName(session)) return { ok: false, error: 'a valid session name is required' };
     const generation = beginRelaunch(session);
     const url = relaunchUrl(opts?.url);
     log(`[ab-relaunch] popIn session=${session} requestedUrl=${JSON.stringify(opts?.url)} -> open ${url}`);

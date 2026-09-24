@@ -387,7 +387,7 @@ sidecar/Rust adapter.
 
 | Method | Contract |
 | --- | --- |
-| `agentBrowserCommand` | Allowlisted CLI subcommands (`AGENT_BROWSER_ALLOWED_SUBCOMMANDS` in `lib/src/lib/platform/types.ts`); host-side `get` limited to `get cdp-url`. |
+| `agentBrowserCommand` | One fixed argv shape per verb: `open <absolute url>`, `back`/`forward`/`reload`, bare `close`, `get cdp-url`, `tab <ref>`, `tab close <ref>`, `set viewport <w> <h> <dpr>`, `set device <name>`. |
 | `agentBrowserScreenshot` | One device-resolution JPEG/PNG frame. VS Code structured-clones the bytes; standalone passes Rust the capture's temp-file **path** over the sidecar stdio, for Rust to read (rationale). |
 | `agentBrowserStreamStatus` | Current stream port, for stale-`wsPort` recovery. |
 | `agentBrowserEdit` | select-all/copy/cut via fixed host-owned JS plus an OS clipboard write. |
@@ -395,9 +395,12 @@ sidecar/Rust adapter.
 | `agentBrowserOpen` | Spawn a GUI-owned session for iframe -> agent-browser; resolves when the daemon is up, not when the page loads ([Pop-Out](#pop-out)). |
 | `agentBrowserPopOut` / `agentBrowserPopIn` | Headed/headless relaunch. |
 
-**Host-side validation is the security boundary:** every `agentBrowserCommand`
-implementation must enforce the shared allowlist; the CLI is not trusted to
-pre-filter arguments.
+**Host-side validation is the security boundary, and it checks every token,
+never only the verb** — agent-browser reads launch options anywhere on its
+command line (rationale). **Must refuse an argv that is not exactly one of those
+shapes, an option- or path-shaped session name, and a launch URL that is not
+absolute**, on every entry point; the webview is not trusted to pre-filter.
+Pinned by `lib/src/host/agent-browser-host.test.ts`.
 
 **`binaryPath` crosses from the webview realm, so it is checked at the spawn**
 (rationale) — the gate is `runWithBinaryFallback`, the one call every entry point
@@ -416,7 +419,8 @@ stream server rejects `vscode-webview://` origins. The relay grants one
 single-use, short-TTL token bound to one stream port and strips the Origin
 header; standalone connects directly.
 
-Source of truth: `lib/src/host/agent-browser-host.ts` (`runWithBinaryFallback`),
+Source of truth: `lib/src/host/agent-browser-host.ts` (`WEBVIEW_COMMANDS`,
+`isSessionName`, `runWithBinaryFallback`),
 `dor-lib-common/src/agent-browser.ts` (`isAllowedAgentBrowserBinary`),
 `lib/src/host/private-capture-dir.ts`, `lib/src/host/browser-host-shared.ts`, `lib/src/host/browser-stream-guard.ts`,
 `vscode-ext/src/agent-browser-host.ts`, `vscode-ext/src/webview-html.ts`,

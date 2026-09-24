@@ -396,8 +396,8 @@ export class AgentBrowserSurfaceController {
       },
     };
 
-    // Native history nav — issued like tab actions (allowlisted in
-    // agentBrowserCommand).
+    // Native history nav — issued like tab actions (fixed argv shapes the
+    // host's agentBrowserCommand accepts).
     this.chromeActions = {
       navigate: (url) => { if (url) this.runAgentBrowser(['open', url]); },
       back: () => this.runAgentBrowser(['back']),

@@ -95,14 +95,6 @@ export interface AgentBrowserCommandResult {
   stderr: string;
 }
 
-/** Subcommands the host will run on the webview's behalf — this is a narrow
- * channel for tab actions, screen-mode resizing (`set viewport` / `set
- * device`), HiDPI frame capture (`screenshot`), navigation (`open <url>`,
- * `reload` / `back` / `forward`), and session teardown, not a general exec
- * path. `get` is limited host-side to `get cdp-url` for CDP event
- * subscription while a browser is popped out. */
-export const AGENT_BROWSER_ALLOWED_SUBCOMMANDS = ['tab', 'set', 'screenshot', 'open', 'reload', 'back', 'forward', 'close', 'get'] as const;
-
 export interface AgentBrowserScreenshotResult {
   ok: boolean;
   /** Raw image bytes (transferred over the host↔webview channel via structured
@@ -366,8 +358,10 @@ export interface PlatformAdapter {
   runWorkbenchCommand?(command: VSCodeWorkbenchCommand): void;
 
   // agent-browser surface support (see docs/specs/dor-browser.md).
-  // Runs the user's agent-browser binary against a session; the host validates
-  // args[0] against AGENT_BROWSER_ALLOWED_SUBCOMMANDS. `binaryPath` is the
+  // Runs the user's agent-browser binary against a session — only the fixed
+  // argv shapes the host's `WEBVIEW_COMMANDS` table accepts (tab select/close,
+  // `set viewport`/`set device`, `open <url>`, back/forward/reload, `close`,
+  // `get cdp-url`), never a general exec path. `binaryPath` is the
   // absolute path resolved by `dor ab` in the invoking terminal — the host's
   // own PATH (e.g. a GUI-launched extension host) may not find the binary.
   agentBrowserCommand?(session: string, args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult>;
@@ -385,7 +379,7 @@ export interface PlatformAdapter {
   // changed stream frame as its final, lower-resolution image.
   agentBrowserScreenshot?(session: string, opts: { format?: 'jpeg' | 'png'; quality?: number }, binaryPath?: string): Promise<AgentBrowserScreenshotResult>;
   // Reads the current stream port for an already-running session. This is a
-  // purpose-built status channel, not part of agentBrowserCommand's allowlist,
+  // purpose-built status channel, not one of agentBrowserCommand's argv shapes,
   // so restored panels can recover from a stale persisted wsPort after reload.
   agentBrowserStreamStatus?(session: string, binaryPath?: string): Promise<AgentBrowserStreamStatusResult>;
   // The WebSocket URL for a session's stream port. Hosts whose webview origin
