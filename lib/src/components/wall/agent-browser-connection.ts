@@ -52,9 +52,7 @@ export interface AgentBrowserSnapshot {
   streamPort: number;
   tabs: AgentBrowserTab[];
   status: AgentBrowserStreamStatus | null;
-  connectionLost: boolean;
   lastError?: string;
-  livePortOpened: boolean;
 }
 
 export type AgentBrowserConnectionEvent =
@@ -131,8 +129,6 @@ export class AgentBrowserConnection {
       streamPort: deps.streamPort,
       tabs: [],
       status: null,
-      connectionLost: false,
-      livePortOpened: false,
     };
     this.connect();
   }
@@ -203,7 +199,7 @@ export class AgentBrowserConnection {
     this.socket = new WebSocket(wsUrl);
     this.socket.onopen = () => {
       this.failures = 0;
-      this.patch({ connection: 'open', connectionLost: false, livePortOpened: true });
+      this.patch({ connection: 'open' });
       this.log(`[ab-panel] stream open ${JSON.stringify({ wsPort: this.deps.streamPort })}`);
       this.debug('open');
       this.emit({ type: 'connection-open', port: this.deps.streamPort });
@@ -224,7 +220,7 @@ export class AgentBrowserConnection {
       this.lastTabsSig = '';
       if (this.disposed) return;
       this.failures += 1;
-      if (this.failures >= 3) this.patch({ connection: 'failed', connectionLost: true });
+      if (this.failures >= 3) this.patch({ connection: 'failed' });
       else this.patch({ connection: 'closed' });
       const data = { wsPort: this.deps.streamPort, failures: this.failures, code: ev.code, reason: ev.reason, wasClean: ev.wasClean };
       this.log(`[ab-panel] stream close ${JSON.stringify(data)}`);
@@ -315,7 +311,7 @@ export class AgentBrowserConnection {
         ...(typeof msg.viewportWidth === 'number' ? { viewportWidth: msg.viewportWidth } : {}),
         ...(typeof msg.viewportHeight === 'number' ? { viewportHeight: msg.viewportHeight } : {}),
       };
-      this.patch({ status, connectionLost: msg.connected === false });
+      this.patch({ status });
       this.emit({ type: 'status', status });
     } else if (msg.type === 'tabs' && Array.isArray(msg.tabs)) {
       this.handleTabs(parseAgentBrowserTabs(msg.tabs));
