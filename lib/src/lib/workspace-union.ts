@@ -17,8 +17,6 @@ export interface WorkspaceUnion {
   ringingSince: number | null;
 }
 
-export const EMPTY_WORKSPACE_UNION: WorkspaceUnion = { ringing: false, todo: false, count: 0, ringingSince: null };
-
 /**
  * Project the union over a Workspace's member Surfaces. `surfaceIds` are the
  * Workspace's panes + doors; `activity` is `getActivitySnapshot()`. Surfaces
@@ -48,4 +46,24 @@ export function computeWorkspaceUnion(
     }
   }
   return { ringing, todo, count, ringingSince };
+}
+
+/**
+ * The member a Workspace tab's TODO pill enters next: the first after
+ * `current` in `order` whose Activity has `todo === true`, wrapping, so
+ * `current` itself comes last; from the start when `current` is null or not a
+ * member; null when no member has a TODO. `order` is the Wall's member order
+ * (`WallHandle.surfaceIds`). Reads only — it never touches a TODO.
+ */
+export function nextTodoMember(
+  order: readonly string[],
+  current: string | null,
+  activity: Map<string, ActivityState>,
+): string | null {
+  const start = current === null ? -1 : order.indexOf(current);
+  for (let step = 1; step <= order.length; step++) {
+    const id = order[(start + step) % order.length];
+    if (activity.get(id)?.todo === true) return id;
+  }
+  return null;
 }

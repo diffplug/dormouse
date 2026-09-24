@@ -23,7 +23,6 @@ import { DoorNotepadPopover } from './DoorNotepadPopover';
 import { sourceNoticeFor, type SourceNotice } from './NoteList';
 import { DoorElementsContext, SelectedIdContext, useDialogKeyboardOwner } from './wall/wall-context';
 import type { DoorChip, DooredItem } from './wall/wall-types';
-import { hasTerminal } from 'dor/commands/types';
 import { IS_MAC } from '../lib/platform';
 import { hasNotepadArchive } from '../lib/notepad/archive-service';
 import {
@@ -43,7 +42,7 @@ import {
   subscribeToTerminalPaneState,
   updateAlertSettings,
 } from '../lib/terminal-registry';
-import { createTerminalPaneState, deriveSurfaceLabel } from '../lib/terminal-state';
+import { deriveDisplayedSurfaceLabel } from '../lib/session-label';
 
 /** Shared by every baseboard-level button (DESIGN.md -> Navigation). */
 const BASEBOARD_BUTTON_BASE_CLASS = 'h-6 shrink-0 justify-center pb-px text-sm font-medium font-mono';
@@ -315,11 +314,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   const doorProps = (item: DoorChip) => {
     const activity = activityOf(item);
     return {
-      // Only a terminal-backed Surface has shell state to derive a label from;
-      // anything else keeps the store-backed title it already carries.
-      title: hasTerminal(item.kind)
-        ? deriveSurfaceLabel(terminalStates.get(item.id) ?? createTerminalPaneState(), appTitleForPane, item.title)
-        : item.title,
+      title: deriveDisplayedSurfaceLabel(item.kind, item.id, item.title, terminalStates, appTitleForPane),
       browserDisplay: item.browserDisplay,
       toolDirty: item.kind === 'tool' && dirtyTools.get(item.id) === true,
       status: activity.status,

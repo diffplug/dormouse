@@ -1,6 +1,11 @@
 import { getActivitySnapshot, getTerminalInstance } from '../lib/terminal-registry';
 import type { Terminal } from '@xterm/xterm';
 
+/** A wrapper class holding a TODO landing spotlight (`TodoSpotlight`) at its
+ *  peak as a still, since the snapshot runner finishes every finite animation
+ *  before it captures (Playwright's `animations: "disabled"`). */
+export const TODO_SPOTLIGHT_HELD_CLASS = '[&_.todo-spotlight]:!animate-none [&_.todo-spotlight]:!opacity-100';
+
 /** How long each gate below waits before it gives up. */
 const DEFAULT_TIMEOUT_MS = 4000;
 

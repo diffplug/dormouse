@@ -53,8 +53,10 @@ export interface WallActions {
   /** DOM focus reached a pane with no gesture seen — a raw cross-origin frame:
    *  enter passthrough on it, acknowledging nothing. */
   onEnterPanel: (id: string) => void;
-  /** Jump to/focus an arbitrary pane by id (visible or minimized). Used by the
-   *  browser header's dev-server chip to surface the terminal serving a port. */
+  /** Jump to/focus an arbitrary pane by id (visible or minimized) as a click on
+   *  it would: passthrough, reattaching a Door, acknowledging its Session
+   *  without input. Used by the browser header's dev-server chip to surface the
+   *  terminal serving a port, and by a Workspace tab's TODO pill. */
   onFocusPane: (id: string) => void;
   onStartRename: (id: string) => void;
   onFinishRename: (id: string, value: string) => SetTerminalUserTitleResult;

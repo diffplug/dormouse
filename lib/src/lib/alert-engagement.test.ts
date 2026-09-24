@@ -92,19 +92,11 @@ function watchedTurn(id: string): void {
   vi.advanceTimersByTime(5_000);
 }
 
-/** A seen command that outlasted the minimum runtime, finished while engaged. */
-function longRunFinishedEngaged(id: string): void {
-  engage(manager, id);
-  runCommand(manager, id, 'pnpm build');
-  vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
-  finishCommand(manager, id, 2, { promptStart: true });
-}
-
 describe('held completions', () => {
   it.each([
     ['report', (id: string) => manager.notifyFromProtocol(id, PERMISSION)],
     ['settle', (id: string) => watchedTurn(id)],
-    ['exit', (id: string) => { runCommand(manager, id, 'pnpm build'); vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime); finishCommand(manager, id, 0, { promptStart: true }); }],
+    ['exit', (id: string) => { runCommand(manager, id, 'pnpm build'); finishCommand(manager, id, 0, { promptStart: true }); }],
   ] as const)('holds a %s while engaged and rings it once presence lapses from inactivity', (_kind, complete) => {
     manager.onData(PANE);
     engage(manager, PANE);
@@ -133,7 +125,9 @@ describe('held completions', () => {
   });
 
   it('rings a held exit with its exit code', () => {
-    longRunFinishedEngaged(PANE);
+    engage(manager, PANE);
+    runCommand(manager, PANE, 'pnpm build');
+    finishCommand(manager, PANE, 2, { promptStart: true });
     expect(ringing(PANE)).toBe(false);
     goIdle(manager, PANE);
     expect(manager.getState(PANE).notification).toEqual({
@@ -219,7 +213,6 @@ describe('viewers', () => {
     engage(manager, 'p2', 'webview-b');
     leave(manager, 'webview-a');
 
-    vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
     finishCommand(manager, 'p2', 0, { promptStart: true });
     expect(ringing('p2')).toBe(false);
   });
@@ -305,10 +298,10 @@ describe('echo window', () => {
   it.each([
     ['the exit Ctrl-C caused', () => { vi.advanceTimersByTime(20); finishCommand(manager, PANE, 130, { promptStart: true }); }],
     ['a bell answering Tab', () => { vi.advanceTimersByTime(5); manager.notifyFromProtocol(PANE, BELL); }],
+    ['a command that failed 600 ms after Enter', () => { vi.advanceTimersByTime(600); finishCommand(manager, PANE, 1, { promptStart: true }); }],
   ] as const)('neither rings nor holds %s', (_what, answer) => {
     engage(manager, PANE);
     runCommand(manager, PANE, 'pnpm build');
-    vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
     manager.acknowledge(PANE, { input: true });
     answer();
     goIdle(manager, PANE);

@@ -73,10 +73,10 @@ exports[`TutRunner snapshots > renders the alert section with all items incomple
    [2m·[0m  Type anything inside the pane to clear the TODO
    [2m·[0m  Add a TODO by hand
    [2m·[0m  A program can ring on its own
-   [2m·[0m  A long command that finished while you were away
+   [2m·[0m  A command that finished while you were away
 
   [2mThree different things can make a pane ring: a rule you set on a command name,[0m
-  [2ma notification the program sends, and a long command finishing while you were[0m
+  [2ma notification the program sends, and a command finishing while you were[0m
   [2melsewhere. None of them ring while you are looking at the pane — they wait[0m
   [2muntil you go idle.[0m
 

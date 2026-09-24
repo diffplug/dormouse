@@ -293,7 +293,6 @@ describe('AlertManager in isolation', () => {
       manager.notifyFromProtocol(id, REPORT);
     } else {
       armCommandExit(manager, id);
-      vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
       finishCommand(manager, id);
     }
     expect(manager.getState(id).status).toBe('ALERT_RINGING');
@@ -391,7 +390,6 @@ describe('AlertManager in isolation', () => {
     ] as const)('%s', (_label, first, joining, shown) => {
       const id = `detail-rank-${_label}`;
       armCommandExit(manager, id, 'make');
-      vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
       for (const detail of [first, joining]) {
         if (detail.source === 'COMMAND_EXIT') finishCommand(manager, id, 2);
         else manager.notifyFromProtocol(id, detail);
@@ -684,7 +682,6 @@ describe('AlertManager in isolation', () => {
     armCommandExit(manager, id);
     expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
 
-    vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
     finishCommand(manager, id);
     expect(manager.getState(id)).toMatchObject({
       status: 'ALERT_RINGING',
@@ -699,7 +696,6 @@ describe('AlertManager in isolation', () => {
     const episodes = collectEpisodes(manager, id);
 
     armCommandExit(manager, id);
-    vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
 
     applyTerminalEvents(manager, id, [
       { kind: 'notification', notification: { source: 'BEL', title: 'Terminal bell', body: null } },
@@ -745,7 +741,6 @@ describe('AlertManager in isolation', () => {
     const id = 'command-exit-pty-exit';
 
     armCommandExit(manager, id, 'exec pnpm build');
-    vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
     expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
 
     manager.onExit(id, 1);
@@ -756,14 +751,14 @@ describe('AlertManager in isolation', () => {
     });
   });
 
-  it('clears a command-exit watch whose quick PTY exit was engaged', () => {
+  it('clears a command-exit watch on an engaged PTY exit, leaving dropping the held exit', () => {
     const id = 'command-exit-pty-exit-unarmed';
 
     engage(manager, id);
     runCommand(manager, id, 'exec true');
 
     manager.onExit(id, 0);
-    goIdle(manager, id);
+    leave(manager);
 
     expect(manager.getState(id)).toMatchObject({
       status: 'WATCHING_DISABLED',
@@ -772,18 +767,42 @@ describe('AlertManager in isolation', () => {
     });
   });
 
-  it('does not ring the exit of a command shorter than the minimum runtime', () => {
-    const id = 'quick-command-exit';
+  // However short the run, engagement alone decides whether the user watched it end.
+  describe('a short seen command', () => {
+    function finishAfterTenSeconds(id: string): void {
+      vi.advanceTimersByTime(10_000);
+      finishCommand(manager, id);
+    }
 
-    armCommandExit(manager, id, 'git status');
-    vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime - 1);
-    expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
+    it('rings when it finishes after the user moved to another pane', () => {
+      const id = 'short-exit-away';
+      engage(manager, id);
+      runCommand(manager, id, 'sleep 10');
+      engage(manager, 'another-pane');
+      finishAfterTenSeconds(id);
+      expect(manager.getState(id)).toMatchObject({
+        status: 'ALERT_RINGING',
+        todo: false,
+        notification: { source: 'COMMAND_EXIT', title: 'Command finished', body: 'sleep 10 exited 0' },
+      });
+    });
 
-    finishCommand(manager, id);
-    expect(manager.getState(id)).toMatchObject({
-      status: 'WATCHING_DISABLED',
-      todo: false,
-      notification: null,
+    it.each([
+      ['presence lapses idle, ringing it', () => {}, true],
+      ['focus moves to another pane, dropping it', () => engage(manager, 'another-pane'), false],
+      ['the window leaves, dropping it', () => leave(manager), false],
+      ['the user types, dropping it', (id: string) => manager.acknowledge(id, { input: true }), false],
+    ] as const)('finished while engaged, is held until %s', (_how, end, rings) => {
+      const id = `short-exit-engaged-${_how}`;
+      engage(manager, id);
+      runCommand(manager, id, 'sleep 10');
+      finishAfterTenSeconds(id);
+      expect(manager.getState(id)).toMatchObject({ status: 'WATCHING_DISABLED', notification: null });
+
+      end(id);
+      // The lapse that rings a hold finds nothing once a hold is dropped.
+      goIdle(manager, id);
+      expect(manager.getState(id).status === 'ALERT_RINGING').toBe(rings);
     });
   });
 
@@ -791,13 +810,11 @@ describe('AlertManager in isolation', () => {
     const id = 'command-exit-return';
 
     armCommandExit(manager, id, 'pnpm test');
-    vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
     expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
 
     engage(manager, id);
     expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
 
-    vi.advanceTimersByTime(1_000);
     finishCommand(manager, id);
     expect(manager.getState(id)).toMatchObject({
       status: 'WATCHING_DISABLED',
@@ -1192,7 +1209,6 @@ describe('AlertManager in isolation', () => {
     it('does not defer an authoritative command-exit alert', () => {
       const id = 'immediate-command-exit';
       armCommandExit(manager, id);
-      vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
       driveToBusy(manager, id);
 
       finishCommand(manager, id);
@@ -1206,7 +1222,6 @@ describe('AlertManager in isolation', () => {
     it('folds a pending terminal notification into an immediate command-exit ring', () => {
       const id = 'command-exit-with-pending-notification';
       armCommandExit(manager, id);
-      vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
       driveToBusy(manager, id);
       manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Build done' });
 
@@ -1410,13 +1425,12 @@ describe('AlertManager in isolation', () => {
       expect(manager.getState(id).status).toBe('ALERT_RINGING');
     });
 
-    it('reports a short engaged command finish that could never ring', () => {
-      const id = 'observe-quick-command';
+    it('reports an engaged command finish the ring rule holds', () => {
+      const id = 'observe-engaged-command';
       const seen = recordingClaimant(id, false);
 
       engage(manager, id);
       runCommand(manager, id, 'npm test');
-      vi.advanceTimersByTime(1_000);
       finishCommand(manager, id);
 
       expect(seen).toEqual([{
@@ -1424,7 +1438,6 @@ describe('AlertManager in isolation', () => {
         displayCommand: 'npm test',
         watchKey: 'npm test',
         exitCode: 0,
-        ranMs: 1_000,
         seen: true,
       }]);
       expect(manager.getState(id)).toMatchObject({
@@ -1439,7 +1452,6 @@ describe('AlertManager in isolation', () => {
       const seen = recordingClaimant(id, true);
 
       armCommandExit(manager, id);
-      vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
       expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
 
       finishCommand(manager, id);
@@ -1449,7 +1461,6 @@ describe('AlertManager in isolation', () => {
         displayCommand: 'pnpm build',
         watchKey: 'pnpm build',
         exitCode: 0,
-        ranMs: cfg.alert.commandExitMinRuntime,
         seen: true,
       }]);
       expect(manager.getState(id)).toMatchObject({
@@ -1552,7 +1563,6 @@ describe('AlertManager in isolation', () => {
       });
 
       armCommandExit(manager, id);
-      vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
       expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
 
       manager.onExit(id, 1);
@@ -1563,7 +1573,6 @@ describe('AlertManager in isolation', () => {
           displayCommand: 'pnpm build',
           watchKey: 'pnpm build',
           exitCode: 1,
-          ranMs: cfg.alert.commandExitMinRuntime,
           seen: true,
         },
         ringing: false,

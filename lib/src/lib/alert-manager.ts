@@ -143,7 +143,6 @@ interface CommandExitWatch {
   /** `commandWatchKey` of the command line; null without one to key on. */
   watchKey: string | null;
   source: CommandRunSource;
-  startedAt: number;
   /** Engaged at its start, or engaged or acknowledged since: its exit may ring. */
   seen: boolean;
 }
@@ -191,8 +190,6 @@ export type CompletionEvent =
       displayCommand: string;
       watchKey: string | null;
       exitCode: number | undefined;
-      /** Wall time from commandStart to this finish. */
-      ranMs: number;
       /** The run was seen: engaged at its start, or engaged or acknowledged since. */
       seen: boolean;
     }
@@ -568,7 +565,7 @@ export class AlertManager {
         break;
       }
       case 'commandFinished':
-        if (!event.seen || event.ranMs < cfg.alert.commandExitMinRuntime) break;
+        if (!event.seen) break;
         // A shell-reported exit is authoritative, so recent animation never
         // delays it. The detector only gates in-band terminal notifications.
         this.holdOrDeliver(id, entry, 'exit', {
@@ -913,7 +910,6 @@ export class AlertManager {
       displayCommand: resolved.displayCommand,
       watchKey: resolved.rawCommandLine === null ? null : commandWatchKey(resolved.rawCommandLine),
       source: resolved.source,
-      startedAt: resolved.startedAt,
       seen: this.isEngaged(id),
     };
     // Every command boundary starts the detector over, so one command's output
@@ -934,15 +930,14 @@ export class AlertManager {
     const endedProgress = entry.progress !== null;
     entry.progress = null;
 
-    // Every finish is observable, including the short, unseen, and engaged
-    // ones that can never ring — the ring rule is what filters them.
+    // Every finish is observable, including the unseen ones that can never
+    // ring and the engaged ones it holds — the ring rule is what filters them.
     if (watch !== null) {
       this.dispatchCompletion(id, entry, {
         kind: 'commandFinished',
         displayCommand: watch.displayCommand,
         watchKey: watch.watchKey,
         exitCode,
-        ranMs: Date.now() - watch.startedAt,
         seen: watch.seen,
       });
     }

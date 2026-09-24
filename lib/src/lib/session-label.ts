@@ -1,5 +1,6 @@
+import { hasTerminal, type SurfaceKind } from 'dor/commands/types';
 import { getActivitySnapshot } from './session-activity-store';
-import { buildAppTitleResolver, deriveSurfaceLabel, DEFAULT_IDLE_TITLE, type TerminalPaneState } from './terminal-state';
+import { buildAppTitleResolver, createTerminalPaneState, deriveSurfaceLabel, DEFAULT_IDLE_TITLE, type TerminalPaneState } from './terminal-state';
 import { getTerminalPaneStateSnapshot } from './terminal-state-store';
 
 /**
@@ -18,6 +19,22 @@ import { getTerminalPaneStateSnapshot } from './terminal-state-store';
 export function deriveSessionLabel(id: string, fallbackTitle: string | null = null): string {
   const states = getTerminalPaneStateSnapshot();
   return labelOf(states.get(id), buildAppTitleResolver(states, getActivitySnapshot()), fallbackTitle);
+}
+
+/** The label a Surface's Door and pane header show for it, `<idle>` included:
+ *  only a terminal-backed Surface has shell state to derive one from, so
+ *  anything else keeps its stored `title`. The Baseboard passes the snapshots it
+ *  renders from; a caller naming what is on screen, such as a Workspace tab
+ *  pill's tooltip, reads the live stores. {@link deriveSessionLabel} is the
+ *  spoken form. */
+export function deriveDisplayedSurfaceLabel(
+  kind: SurfaceKind,
+  id: string,
+  title: string,
+  states = getTerminalPaneStateSnapshot(),
+  appTitleForPane = buildAppTitleResolver(states, getActivitySnapshot()),
+): string {
+  return hasTerminal(kind) ? deriveSurfaceLabel(states.get(id) ?? createTerminalPaneState(), appTitleForPane, title) : title;
 }
 
 /** {@link deriveSessionLabel} for many ids, reading the stores and building the

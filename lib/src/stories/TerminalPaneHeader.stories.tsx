@@ -17,7 +17,8 @@ import { flattenScenario, SCENARIO_SHELL_PROMPT } from '../lib/platform';
 import { removeMouseSelectionState, setMouseReporting, setOverride } from '../lib/mouse-selection';
 import { addPlainNote, clearAllNotepads } from '../lib/notepad/notepad-store';
 import { recordToolDirty, resetToolDirty } from '../lib/tool-dirty-store';
-import { requireElement, settleTerminalContext, waitForCondition, waitForPrimedState } from './settle-terminals';
+import { resetTodoSpotlight, spotlightTodo } from '../lib/todo-spotlight';
+import { requireElement, settleTerminalContext, TODO_SPOTLIGHT_HELD_CLASS, waitForCondition, waitForPrimedState } from './settle-terminals';
 
 const SESSION_ID = 'tab-story';
 
@@ -359,6 +360,8 @@ const NOTIFICATIONS = {
 const meta: Meta<typeof TabStory> = {
   title: 'Components/TerminalPaneHeader',
   component: TabStory,
+  // The spotlight signal is module state: no story inherits another's.
+  beforeEach: () => { resetTodoSpotlight(); },
   argTypes: {
     mode: { control: 'radio', options: ['command', 'passthrough'] },
     isSelected: { control: 'boolean' },
@@ -405,6 +408,18 @@ export const AlertDialogNoCommandRunning: Story = contextDialogStory({
 
 export const TodoOnly: Story = {
   parameters: primedPane({ status: 'WATCHING_DISABLED', todo: true }),
+};
+
+/** A Workspace tab's TODO pill entered this pane: its header pill takes the
+ *  landing spotlight (`docs/specs/alert.md` -> Pane Header), held at its peak. */
+export const TodoLandingSpotlight: Story = {
+  parameters: primedPane({ status: 'WATCHING_DISABLED', todo: true }),
+  decorators: [(Story) => <div className={TODO_SPOTLIGHT_HELD_CLASS}><Story /></div>],
+  play: async () => {
+    await waitForPrimedState();
+    spotlightTodo(SESSION_ID);
+    await requireElement(`[data-session-todo-for="${SESSION_ID}"] [data-todo-spotlight]`, 'landing spotlight');
+  },
 };
 
 // A program that rang was, by definition, running something — so the

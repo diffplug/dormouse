@@ -36,7 +36,7 @@ import { installBrowserHost, mountWallHarness, type WallHarness } from './wall/w
 import { DEFAULT_WORKSPACE_ID } from '../lib/session-types';
 import { clearTerminalActivity, setTerminalActivity } from '../lib/session-activity-store';
 import { createAlertEpisode } from '../lib/alert-episode';
-import { resetTerminalPaneState } from '../lib/terminal-state-store';
+import { resetTerminalPaneState, setTerminalUserTitle } from '../lib/terminal-state-store';
 import { setWindowLabel } from '../lib/workspace-store';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -87,6 +87,7 @@ afterEach(() => {
 });
 
 const flush = (): Promise<void> => harness.flush();
+const flushFrame = (): Promise<void> => harness.flushFrame();
 
 /** Wait out the host's own 100ms state polls (a tool taking over a pane, a
  *  split waiting on OSC 633), which no event can flush. Throws on timeout. */
@@ -116,10 +117,6 @@ const reportRunning = (id: string, line: string): void => terminalRegistry.apply
 
 /** The shell in `id` is back at its prompt. */
 const promptBack = (id: string): void => terminalRegistry.applyTerminalSemanticEvents(id, [{ type: 'promptStart' }]);
-
-async function flushFrame(): Promise<void> {
-  await act(async () => { await new Promise((r) => requestAnimationFrame(() => r(undefined))); });
-}
 
 /** `installBrowserHost`, on the adapter this file's tests read as `fake`. */
 function hostBrowsers(...args: Parameters<typeof installBrowserHost>): ReturnType<typeof installBrowserHost> {
@@ -4183,6 +4180,112 @@ describe('Wall on the Lath engine', () => {
     // The handle deregisters, so nothing addresses the gone Wall — but the
     // Sessions it held are untouched.
     expect(getWallHandle(DEFAULT_WORKSPACE_ID)).toBeNull();
+  });
+
+  /** docs/specs/layout.md -> "Workspace tabs": what a tab's TODO pill does, and
+   *  the destination its tooltip names before each click. */
+  it('enters each TODO member in turn as a click on it would, reattaching a Door, never clearing a TODO', async () => {
+    const onEvent = vi.fn();
+    await act(async () => root.render(<Wall
+      restoredLathLayout={{
+        version: 1,
+        tree: { root: { kind: 'split', dir: 'row', children: [
+          { node: { kind: 'leaf', id: 'pane-a' }, weight: 0.25 },
+          { node: { kind: 'leaf', id: 'pane-b' }, weight: 0.25 },
+          { node: { kind: 'leaf', id: 'browser-a' }, weight: 0.5 },
+        ] } },
+        leafMeta: {
+          'pane-a': { component: 'terminal', tabComponent: 'terminal', title: 'shell' },
+          'pane-b': { component: 'terminal', tabComponent: 'terminal', title: 'build' },
+          'browser-a': {
+            component: 'browser',
+            tabComponent: 'surface',
+            title: 'example.com',
+            params: { surfaceType: 'browser', renderMode: 'iframe', url: 'https://example.com' },
+          },
+        },
+      }}
+      initialDoors={[{ id: 'door-a', title: 'A' }]}
+      initialMode="command"
+      onEvent={onEvent}
+    />));
+    await flush();
+    const handle = getWallHandle(DEFAULT_WORKSPACE_ID)!;
+    expect(handle.peekNextTodo()).toBeNull();
+    expect(handle.surfaceIds()).toEqual(['pane-a', 'pane-b', 'browser-a', 'door-a']);
+    setTerminalActivity('pane-b', { todo: true });
+    setTerminalActivity('door-a', { todo: true });
+    // A browser Surface's TODO is the renderer's own.
+    terminalRegistry.toggleSessionTodo('browser-a');
+    // A terminal is named as its header or Door shows it, over the stored title.
+    await act(async () => { setTerminalUserTitle('pane-b', 'deploy watcher'); });
+    try {
+      const acknowledge = vi.spyOn(terminalRegistry, 'acknowledgeSession');
+      const clearing = [
+        vi.spyOn(fake, 'alertDismiss'), vi.spyOn(fake, 'alertClearTodo'), vi.spyOn(fake, 'alertToggleTodo'),
+        vi.spyOn(terminalRegistry, 'dismissSessionAlert'), vi.spyOn(terminalRegistry, 'clearSessionTodo'),
+        vi.spyOn(terminalRegistry, 'toggleSessionTodo'),
+      ];
+      const focus = vi.spyOn(terminalRegistry, 'focusSession');
+      const last = (type: string) => onEvent.mock.calls.filter(([event]) => event.type === type).at(-1)?.[0];
+      const selection = () => last('selectionChange');
+      const next = async () => {
+        let found: string | null = null;
+        await act(async () => { found = handle.enterNextTodo(); });
+        await flush();
+        await flushFrame();
+        return found;
+      };
+      /** Passthrough on `id` with DOM focus asked for, as its click leaves it. */
+      const entered = (id: string) => {
+        expect(selection()).toEqual({ type: 'selectionChange', id, kind: 'pane' });
+        expect(last('modeChange')).toEqual({ type: 'modeChange', mode: 'passthrough' });
+        expect(focus).toHaveBeenLastCalledWith(id, true);
+        expect(acknowledge).toHaveBeenLastCalledWith(id);
+      };
+
+      // The peek names what the click then enters, as its header or Door shows it.
+      expect(handle.peekNextTodo()).toBe('deploy watcher');
+      expect(container.querySelector('[data-pane-title-for="pane-b"]')!.textContent).toContain('deploy watcher');
+      expect(await next()).toBe('pane-b');
+      entered('pane-b');
+      expect(container.querySelector('[data-session-id="pane-b"][data-focused="true"]')).not.toBeNull();
+      // From a passthrough pane the next is the one after it.
+      expect(handle.peekNextTodo()).toBe('example.com');
+      expect(await next()).toBe('browser-a');
+      // Its acknowledgement has no host entry to reach: the TODO stays.
+      entered('browser-a');
+      // A Door is reattached into passthrough, as its click does.
+      // An idle terminal is `<idle>` on screen, so in the tooltip too.
+      expect(handle.peekNextTodo()).toBe('<idle>');
+      expect(container.querySelector('[data-door-id="door-a"]')!.textContent).toContain('<idle>');
+      expect(await next()).toBe('door-a');
+      entered('door-a');
+      expect(container.querySelector('[data-door-id="door-a"]')).toBeNull();
+      expect(container.querySelector('[data-session-id="door-a"][data-focused="true"]')).not.toBeNull();
+      // Now a pane beside the one it left, it cycles on from where it stands.
+      expect(handle.surfaceIds()).toEqual(['pane-a', 'pane-b', 'browser-a', 'door-a']);
+      expect(await next()).toBe('pane-b');
+      entered('pane-b');
+
+      for (const verb of clearing) expect(verb).not.toHaveBeenCalled();
+      const activity = terminalRegistry.getActivitySnapshot();
+      expect(['pane-b', 'browser-a', 'door-a'].map((id) => activity.get(id)?.todo)).toEqual([true, true, true]);
+
+      // With no TODO left it answers null and leaves mode and selection alone.
+      setTerminalActivity('pane-b', {});
+      setTerminalActivity('door-a', {});
+      terminalRegistry.clearLocalSurfaceActivity('browser-a');
+      const before = onEvent.mock.calls.length;
+      acknowledge.mockClear();
+      expect(handle.peekNextTodo()).toBeNull();
+      expect(await next()).toBeNull();
+      expect(onEvent.mock.calls.slice(before)).toEqual([]);
+      expect(acknowledge).not.toHaveBeenCalled();
+    } finally {
+      terminalRegistry.clearLocalSurfaceActivity('browser-a');
+      resetTerminalPaneState('pane-b');
+    }
   });
 
   it('names the command that drives a browser run by the other provider', async () => {

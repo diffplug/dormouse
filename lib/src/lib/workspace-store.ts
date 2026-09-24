@@ -164,14 +164,6 @@ export function setActiveWorkspace(id: WorkspaceId): void {
   emit({ ...state, activeId: id });
 }
 
-/** Activate the Workspace `delta` places from the active one, wrapping at both ends. */
-export function activateAdjacentWorkspace(delta: 1 | -1): void {
-  const index = state.workspaces.findIndex((ws) => ws.id === state.activeId);
-  if (index === -1) return;
-  const { workspaces } = state;
-  setActiveWorkspace(workspaces[(index + delta + workspaces.length) % workspaces.length].id);
-}
-
 /** Activate the nth Workspace in strip order (0-based); out of range does nothing. */
 export function activateWorkspaceAt(index: number): void {
   const target = state.workspaces[index];

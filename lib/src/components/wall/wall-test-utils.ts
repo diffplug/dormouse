@@ -115,6 +115,8 @@ export interface WallHarness {
   root: Root;
   /** Drain queued microtasks and 0ms timers inside `act`. */
   flush: () => Promise<void>;
+  /** Wait out one animation frame inside `act`, where deferred focus lands. */
+  flushFrame: () => Promise<void>;
   dispose: () => void;
 }
 
@@ -151,6 +153,7 @@ export function mountWallHarness(): WallHarness {
     container,
     root,
     flush: async () => { await act(async () => { await new Promise((r) => setTimeout(r, 0)); }); },
+    flushFrame: async () => { await act(async () => { await new Promise((r) => requestAnimationFrame(() => r(undefined))); }); },
     dispose: () => {
       act(() => root.unmount());
       container.remove();

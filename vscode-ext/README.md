@@ -32,7 +32,7 @@ Dormouse can owe you attention in three independent ways. Two of them need no se
 
 **A program asks for you.** Dormouse understands the standard terminal notification and progress protocols — `BEL`, `OSC 9`, `OSC 9;4`, `OSC 99`, and `OSC 777`. Any tool that already signals completion or progress rings its pane, with no configuration.
 
-**A command finishes while you are away.** If a foreground command was running while you were watching, you left, and it exited after you had been gone a while, that pane is ringing when you come back. Also no configuration.
+**A command finishes while you are away.** If a foreground command was running while you were watching and it exited after you left, that pane is ringing when you come back. Also no configuration.
 
 **A watched command goes quiet.** When no watch list has been saved, Dormouse watches [supported coding agents](https://dormouse.sh/docs/compatible-agents) by default, including after an upgrade; existing saved watch lists are preserved. To watch another command, right-click its pane header — or press `a` in command mode — and turn on **Watch all `<command>` commands**. Every pane running that command is then watched, now and later. For a script runner the rule names the script: **Watch all pnpm dev commands** leaves `pnpm test` alone. When a watched command's output goes busy and then falls quiet while you are not looking, it rings.
 

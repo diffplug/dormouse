@@ -1,5 +1,8 @@
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { clsx } from 'clsx';
 import type { TodoState } from '../lib/terminal-registry';
+import { getTodoSpotlight, subscribeToTodoSpotlight } from '../lib/todo-spotlight';
+import { animationClockStyle } from './alert-ring';
 
 const FLOURISH_MS = 500;
 
@@ -52,4 +55,30 @@ export function useTodoPillContent(todo: TodoState): {
   const visible = todo || flourishing;
 
   return { visible, flourishing, body: visible ? TODO_PILL_BODY : null };
+}
+
+/**
+ * The landing spotlight's overlay, for a `relative` pill shell: rendered only
+ * while the latest `spotlightTodo` signal names `surfaceId`, remounted per
+ * signal so a repeat replays it. The pulse runs on the signal's clock, so a pill
+ * that mounts long after lands past its end instead of replaying it; `className`
+ * carries the pill's own extent and corners. The CSS (`.todo-spotlight` in
+ * `theme.css`) animates it and drops it under reduced motion.
+ */
+export function TodoSpotlight({ surfaceId, className }: { surfaceId: string; className?: string }) {
+  const spotlight = useSyncExternalStore(subscribeToTodoSpotlight, getTodoSpotlight);
+  const mine = spotlight?.surfaceId === surfaceId ? spotlight : null;
+  // Anchored once per signal: recomputing the clock on a later render would
+  // shove a live pulse back to its start.
+  const style = useMemo(() => (mine ? animationClockStyle(mine.startedAt) : undefined), [mine]);
+  if (!mine) return null;
+  return (
+    <span
+      key={mine.seq}
+      data-todo-spotlight={mine.seq}
+      aria-hidden
+      style={style}
+      className={clsx('todo-spotlight pointer-events-none absolute bg-current/30', className)}
+    />
+  );
 }

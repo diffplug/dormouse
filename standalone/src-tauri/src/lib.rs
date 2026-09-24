@@ -2518,21 +2518,15 @@ fn restore_windows(app: &AppHandle, dir: &Path, labels: &[String]) {
 }
 
 
-/// Open a window cloned from `tauri.conf.json`'s first window config, so
-/// `titleBarStyle`, `hiddenTitle`, `dragDropEnabled` and the CSP carry across
-/// without a second copy of any of them.
-fn build_window(
-    app: &AppHandle,
+/// A later window's config: a clone of `tauri.conf.json`'s first window, so
+/// `titleBarStyle`, `hiddenTitle`, `dragDropEnabled`, `backgroundThrottling`
+/// and the CSP carry across without a second copy of any of them.
+fn window_config(
+    first: &tauri::utils::config::WindowConfig,
     label: &str,
     geometry: Option<WindowGeometry>,
-) -> Result<(), String> {
-    let mut config = app
-        .config()
-        .app
-        .windows
-        .first()
-        .cloned()
-        .ok_or_else(|| "no window config to clone".to_string())?;
+) -> tauri::utils::config::WindowConfig {
+    let mut config = first.clone();
     config.label = label.to_string();
     if let Some(geometry) = geometry {
         config.x = Some(geometry.x);
@@ -2542,6 +2536,22 @@ fn build_window(
         // An explicit position and a centering request are contradictory.
         config.center = false;
     }
+    config
+}
+
+/// Open a window from `window_config`.
+fn build_window(
+    app: &AppHandle,
+    label: &str,
+    geometry: Option<WindowGeometry>,
+) -> Result<(), String> {
+    let first = app
+        .config()
+        .app
+        .windows
+        .first()
+        .ok_or_else(|| "no window config to clone".to_string())?;
+    let config = window_config(first, label, geometry);
     let window = WebviewWindowBuilder::from_config(app, &config)
         .map_err(|err| format!("configure window {label}: {err}"))?
         .build()
@@ -4467,6 +4477,23 @@ mod tests {
         let twenty = open_ports_many_timeout(20).as_millis() as u64;
         assert_eq!(one, 2 * OPEN_PORT_TIMEOUT_MS + OPEN_PORT_TIMEOUT_PER_ID_MS + OPEN_PORT_ROUND_TRIP_MARGIN_MS);
         assert_eq!(twenty - one, 19 * OPEN_PORT_TIMEOUT_PER_ID_MS);
+    }
+
+    /// docs/specs/standalone.md -> "Windows": spoken alarms play in the
+    /// renderer, so no window's webview may be throttled or suspended while
+    /// minimized — neither `main` nor a later window cloned from it.
+    #[test]
+    fn every_window_disables_background_throttling() {
+        use tauri::utils::config::{BackgroundThrottlingPolicy, Config};
+        let conf: Config = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let first = conf.app.windows.first().unwrap();
+        assert_eq!(first.background_throttling, Some(BackgroundThrottlingPolicy::Disabled));
+        let geometry = super::WindowGeometry { x: 10.0, y: 20.0, width: 640.0, height: 480.0 };
+        for geometry in [None, Some(geometry)] {
+            let later = super::window_config(first, "ws-2", geometry);
+            assert_eq!(later.label, "ws-2");
+            assert_eq!(later.background_throttling, Some(BackgroundThrottlingPolicy::Disabled));
+        }
     }
 
     // RAII guard so a failing assert doesn't leak the temp dir.
