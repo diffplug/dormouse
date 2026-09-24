@@ -1,4 +1,3 @@
-import { createAlertEpisode } from './alert-episode';
 import { DEFAULT_ALERT_STATE, type AlertState } from './alert-manager';
 import type { AlertStateDetail } from './platform/types';
 import { applyAlertSettingsFromHost, publishAlertSettings } from './alert-settings';
@@ -65,13 +64,7 @@ export function getLivePersistedAlertState(id: string): PersistedAlertState | nu
 
 /** Install a host snapshot, including one received before xterm initialization. */
 export function setTerminalActivity(id: string, state: Partial<AlertState>): void {
-  const previous = terminalActivity.get(id);
-  // Older hosts and local fixtures have no episode field. Hydrate their status
-  // edges here, so the ring burst still keys on one.
-  const episode = state.status === 'ALERT_RINGING'
-    ? state.episode ?? (previous?.status === 'ALERT_RINGING' ? previous.episode : null) ?? createAlertEpisode()
-    : null;
-  terminalActivity.set(id, { ...DEFAULT_ACTIVITY_STATE, ...state, episode });
+  terminalActivity.set(id, { ...DEFAULT_ACTIVITY_STATE, ...state });
   notifyActivityListeners(id);
 }
 

@@ -12,6 +12,7 @@ import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
 import { setPlatform } from '../../lib/platform';
 import { setNativeFieldValue } from '../../lib/dom';
 import { clearTerminalActivity, removeTerminalPaneState, setTerminalActivity } from '../../lib/terminal-registry';
+import { createAlertEpisode } from '../../lib/alert-episode';
 import { removeMouseSelectionState, setMouseReporting } from '../../lib/mouse-selection';
 import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
 import {
@@ -73,7 +74,7 @@ describe('TerminalPaneHeader — alert state', () => {
     renderHeader(stubActions(), null);
     const quiet = container.querySelector<HTMLElement>('[data-pane-header-for="term-1"]')!.className;
 
-    act(() => { setTerminalActivity('term-1', { status: 'ALERT_RINGING' }); });
+    act(() => { setTerminalActivity('term-1', { status: 'ALERT_RINGING', episode: createAlertEpisode() }); });
 
     const header = container.querySelector<HTMLElement>('[data-pane-header-for="term-1"]')!;
     expect(header.className).toBe(quiet);

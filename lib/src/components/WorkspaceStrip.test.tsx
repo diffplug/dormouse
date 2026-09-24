@@ -11,6 +11,7 @@ import { ensureResizeObserver } from './wall/wall-test-utils';
 import { requestWorkspaceClose, requestWorkspaceRename } from './wall/workspace-lifecycle';
 import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { clearTerminalActivity, setTerminalActivity } from '../lib/terminal-registry';
+import { createAlertEpisode } from '../lib/alert-episode';
 import { resetWindowSessionAggregator, setWorkspaceTransferPending } from '../lib/window-session-aggregator';
 import {
   getWorkspaceUiSnapshot,
@@ -122,9 +123,9 @@ describe('WorkspaceStrip', () => {
     await act(async () => { createWorkspace({ id: 'ws-2' }); });
     setWorkspaceSurfaces(first, ['pane-a', 'pane-b']);
     setWorkspaceSurfaces('ws-2', ['pane-c']);
-    setTerminalActivity('pane-a', { status: 'ALERT_RINGING' });
+    setTerminalActivity('pane-a', { status: 'ALERT_RINGING', episode: createAlertEpisode() });
     setTerminalActivity('pane-b', { todo: true });
-    setTerminalActivity('pane-c', { status: 'ALERT_RINGING' });
+    setTerminalActivity('pane-c', { status: 'ALERT_RINGING', episode: createAlertEpisode() });
     await render();
 
     expect(activateButton(first).getAttribute('aria-label')).toBe('Workspace 1, 2 needing attention');

@@ -223,6 +223,7 @@ function bridgeLinkToBurrow(
     resizePty: local.resizePty,
     handleForwardedCommand: mod.handleForwardedCommand,
     dropForwardedCommands: mod.dropForwardedCommands,
+    handleForwardedPush: mod.handleForwardedPush,
     deliverCommandResult: mod.deliverCommandResult,
     deliverUiEvent: mod.deliverUiEvent,
     onClientAuthenticated: mod.greetPeerWindow,
@@ -1116,6 +1117,59 @@ describe('serving the other windows', () => {
     await waitFor(() => far.uiEvents.length > 0);
     // Addressed to the window that joined, and nothing else is invented for it.
     expect(far.uiEvents).toEqual([{ name: 'status', enrolled: false }]);
+  });
+
+  // A due alarm push is fire and forget: nothing waits on an answer, and a
+  // push late enough to wait for a broker is stale (docs/specs/alert.md).
+  it('sends a push another window forwarded on its own Burrow, answering nothing', async () => {
+    const mod = await freshBurrow();
+    const bound = fakeDeps();
+    mod.configureBurrow(bound.deps());
+    bridgeLinkToBurrow(mod, opened!, bound);
+    mod.initBurrow(fakeContext().context);
+    mod.handleBurrowCommand({
+      burrowRequestId: 'rh-0',
+      cmd: 'enroll',
+      params: { relayUrl: 'https://evil.example', password: 'p', label: 'Laptop' },
+    });
+    await waitFor(() => opened!.isPeerBroker());
+    const { BurrowService } = await import('../../lib/src/host/remote/service');
+    const push = vi.spyOn(BurrowService.prototype, 'push');
+
+    const far = fakeWindow();
+    const link = await openFarWindow(far);
+    link.forwardPush('pty-1', 'pnpm build');
+    await waitFor(() => push.mock.calls.length > 0);
+    expect(push).toHaveBeenCalledExactlyOnceWith('pty-1', 'pnpm build');
+
+    // This window's own alert host reaches the same service directly.
+    mod.pushAlert('pty-2', 'cargo test');
+    expect(push).toHaveBeenLastCalledWith('pty-2', 'cargo test');
+    expect(far.results).toEqual([]);
+    push.mockRestore();
+  });
+
+  it('hands a due push to the window that holds the Burrow, and drops it before there is one', async () => {
+    const squat = await otherWindowHoldsTheBurrow();
+    const mod = await freshBurrow();
+    const bound = fakeDeps();
+    mod.configureBurrow(bound.deps());
+    mod.initBurrow(fakeContext().context);
+    // Not contending yet: no service and no broker, and nothing is held for
+    // a role that may settle later.
+    mod.pushAlert('pty-1', 'stale');
+
+    mod.handleBurrowCommand({
+      burrowRequestId: 'rh-1',
+      cmd: 'enroll',
+      params: { relayUrl: 'https://relay.dormouse.sh', password: 'p', label: 'Laptop' },
+    });
+    await waitFor(() => squat.frames.some((frame) => frame.kind === 'command'));
+    mod.pushAlert('pty-1', 'pnpm build');
+    await waitFor(() => squat.frames.some((frame) => frame.kind === 'push'));
+    expect(squat.frames.filter((frame) => frame.kind === 'push'))
+      .toEqual([{ kind: 'push', sessionId: 'pty-1', title: 'pnpm build' }]);
+    expect(bound.posted).toEqual([]);
   });
 
   it('answers a forwarded command over the link and nowhere else', async () => {

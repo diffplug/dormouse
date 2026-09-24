@@ -51,6 +51,7 @@ import {
   subscribeToActivity,
   toggleSessionTodo,
 } from './terminal-registry';
+import { createAlertEpisode } from './alert-episode';
 import { doPaste, pasteFilePaths } from './clipboard';
 import { registry } from './terminal-store';
 import { commandWatchKey } from './terminal-state';
@@ -278,7 +279,7 @@ describe('terminal-registry alert behavior', () => {
 
   it('preserves pre-registration activity through terminal creation and orphaning', () => {
     const id = 'early-host-state';
-    setTerminalActivity(id, { status: 'ALERT_RINGING', todo: true, awaited: true });
+    setTerminalActivity(id, { status: 'ALERT_RINGING', episode: createAlertEpisode(), todo: true, awaited: true });
     const activity = getActivity(id);
     expect(getLivePersistedAlertState(id)).toBeNull();
 

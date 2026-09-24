@@ -12,6 +12,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform, type PlatformAdapter } from '../../lib/platform';
 import { setTerminalActivity, clearTerminalActivity } from '../../lib/session-activity-store';
+import { createAlertEpisode } from '../../lib/alert-episode';
 import { registry, type TerminalEntry } from '../../lib/terminal-store';
 import { installPeerSurfaceResponder } from './peer-surfaces';
 
@@ -159,7 +160,7 @@ describe('surface responder', () => {
     // The Burrow has no view of the activity store, so a ring that changes an
     // entry is only visible to it if this webview says so.
     await armed();
-    setTerminalActivity('pty-1', { status: 'ALERT_RINGING' });
+    setTerminalActivity('pty-1', { status: 'ALERT_RINGING', episode: createAlertEpisode() });
     await Promise.resolve();
     expect(platform.notified).toBe(1);
   });
@@ -169,15 +170,15 @@ describe('surface responder', () => {
     // with an activity change. The Burrow re-collects the whole directory either
     // way, so the burst is worth exactly one notify.
     await armed();
-    setTerminalActivity('pty-1', { status: 'ALERT_RINGING' });
-    setTerminalActivity('pty-2', { status: 'ALERT_RINGING' });
+    setTerminalActivity('pty-1', { status: 'ALERT_RINGING', episode: createAlertEpisode() });
+    setTerminalActivity('pty-2', { status: 'ALERT_RINGING', episode: createAlertEpisode() });
     expect(platform.notified).toBe(0);
 
     await Promise.resolve();
     expect(platform.notified).toBe(1);
 
     // And the next burst is announced on its own.
-    setTerminalActivity('pty-3', { status: 'ALERT_RINGING' });
+    setTerminalActivity('pty-3', { status: 'ALERT_RINGING', episode: createAlertEpisode() });
     await Promise.resolve();
     expect(platform.notified).toBe(2);
   });
@@ -191,7 +192,7 @@ describe('surface responder', () => {
     installPeerSurfaceResponder();
     await armed();
 
-    setTerminalActivity('pty-1', { status: 'ALERT_RINGING' });
+    setTerminalActivity('pty-1', { status: 'ALERT_RINGING', episode: createAlertEpisode() });
     await Promise.resolve();
     expect(platform.notified).toBe(1);
     // And answering still works after the extra calls.
@@ -209,7 +210,7 @@ describe('surface responder', () => {
     installPeerSurfaceResponder();
     await armed();
 
-    setTerminalActivity('pty-2', { status: 'ALERT_RINGING' });
+    setTerminalActivity('pty-2', { status: 'ALERT_RINGING', episode: createAlertEpisode() });
     await Promise.resolve();
     expect(quiet.notified).toBe(0);
     // Answering still works: it costs nothing until the Burrow asks.

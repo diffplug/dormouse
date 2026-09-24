@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('./platform', () => ({ getPlatform: () => ({ alertPublishSettings: vi.fn() }) }));
 import { normalizeAlertDeliveryOverrides, resolveAlertDeliveryPolicy } from './alert-delivery-model';
-import { collectDeliveryOverrides, getSessionAlertPolicy } from './alert-delivery-policy';
+import { getSessionAlertPolicy } from './alert-delivery-policy';
 import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS } from './alert-settings';
 import { createWorkspace, renameWorkspace, resetWorkspaces, setWorkspaceAlertDelivery } from './workspace-store';
 import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from './workspace-surfaces';
@@ -10,8 +10,8 @@ import { getWindowSnapshot, publishWorkspaceSession, resetWindowSessionAggregato
 
 /**
  * A Workspace's sparse delivery overrides (`docs/specs/alert.md` -> Alarm
- * settings): how they persist, how a Session resolves them, and what the
- * renderer publishes to the host's scheduler. The scheduling itself is
+ * settings): how they persist and how a Session resolves them in the renderer.
+ * What the host is told is `alert-delivery.test.ts`; the scheduling itself is
  * `alert-delivery-scheduler.test.ts`.
  */
 
@@ -48,15 +48,5 @@ describe('workspace delivery policy', () => {
     workspace();
     expect(getSessionAlertPolicy('pane')).toMatchObject({ speakEnabled: true, speakDelayMs: 1000, pushEnabled: false });
     expect(getSessionAlertPolicy('elsewhere')).toMatchObject({ speakEnabled: false, speakDelayMs: DEFAULT_ALERT_SETTINGS.speakDelayMs });
-  });
-  it('publishes every member Session with its Workspace\'s overrides, an empty one included', () => {
-    workspace();
-    createWorkspace({ id: 'plain' });
-    setWorkspaceSurfaces('plain', ['a', 'b']);
-    expect(collectDeliveryOverrides()).toEqual({
-      pane: { speakEnabled: true, speakDelayMs: 1000 },
-      a: {},
-      b: {},
-    });
   });
 });

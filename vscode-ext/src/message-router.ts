@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import * as ptyManager from './pty-manager';
 import { createAlertHost, type AlertRealm } from '../../lib/src/host/alert-host';
-import type { AlertDelivery } from '../../lib/src/lib/alert-delivery-scheduler';
 import { alertedPty, createOwnerPtyStream } from '../../lib/src/host/owner-pty';
 import type {
   TerminalColorProvider,
@@ -39,8 +38,10 @@ import {
   dropForwardedCommands,
   greetPeerWindow,
   handleForwardedCommand,
+  handleForwardedPush,
   handleBurrowCommand,
   notifyDirectoryChanged,
+  pushAlert,
 } from './burrow';
 import { log } from './log';
 import type { WebviewChannel } from './webview-messaging';
@@ -99,6 +100,7 @@ configurePeerLink({
   // window landed on, and the link is what knows that.
   handleForwardedCommand,
   dropForwardedCommands,
+  handleForwardedPush,
   deliverCommandResult,
   deliverUiEvent,
   onClientAuthenticated: greetPeerWindow,
@@ -189,29 +191,24 @@ const ALLOWED_WORKBENCH_COMMANDS = new Set<string>(VSCODE_WORKBENCH_COMMANDS);
 
 // This window's alerts, in the host role standalone's sidecar runs too
 // (`lib/src/host/alert-host.ts`). They survive router disposal, so alert state
-// persists across webview collapse/expand cycles; each router is one realm.
-const alertHost = createAlertHost({ deliver: deliverAlert });
+// persists across webview collapse/expand cycles; each router is one realm. A
+// due push goes from here, whether or not a webview shows its Session.
+const alertHost = createAlertHost({ push: pushAlert });
 const alertManager = alertHost.manager;
-let nextFallbackPushId = 0;
 
 /**
- * One due spoken alarm or push, to the webview that owns its Session. With
- * none — a disposed view whose PTYs live on — a push goes from here, titled by
- * the command, and speech is skipped: it needs a renderer
- * (`docs/specs/alert.md` -> Alarm settings).
+ * This VS Code window's state, as `activate` reports it. Focused and recently
+ * active, the window is one more viewer — with no focus, so it engages no
+ * Session — which holds back a push: the user may be working outside the
+ * Dormouse webview (`docs/specs/alert.md` -> Alarm
+ * settings). `WindowState.active` is finalized in 1.89, after the supported
+ * 1.85; an older VS Code never reports it, and focus alone must not count, or
+ * a focused window left behind would silence the walked-away channel.
  */
-function deliverAlert(delivery: AlertDelivery): void {
-  const owner = [...activeRouters].find((router) => router.ownsPty(delivery.id));
-  if (owner) {
-    owner.send({ type: 'alert:deliver', ...delivery });
-    return;
-  }
-  if (delivery.sink !== 'push') return;
-  handleBurrowCommand({
-    burrowRequestId: `alert-push-${++nextFallbackPushId}`,
-    cmd: 'push',
-    params: { sessionId: delivery.id, title: alertManager.lastCommand(delivery.id) ?? '' },
-  });
+const WINDOW_VIEWER = 'vscode-window';
+export function reportWindowPresence(state: vscode.WindowState): void {
+  const active = (state as { active?: unknown }).active === true;
+  alertManager.setViewer(WINDOW_VIEWER, { present: state.focused && active, focusId: null });
 }
 /** Every PTY write and resize, as the alerts must see it. */
 const alertedPtys = alertedPty(alertManager, ptyManager);
@@ -550,6 +547,11 @@ export function attachRouter(
       post({ type: 'alert:state', id, ...state } satisfies ExtensionMessage);
       notifyUnion();
     });
+    // Speech needs a renderer, so a Session no connected webview shows is not
+    // spoken (`docs/specs/alert.md` -> Alarm settings).
+    const removeSpeakListener = alertHost.onSpeak((speak) => {
+      if (ownedPtyIds.has(speak.id)) post({ type: 'alert:speak', ...speak } satisfies ExtensionMessage);
+    });
 
     return () => {
       removeProcessedListener();
@@ -557,6 +559,7 @@ export function attachRouter(
       toolEventsListeners.delete(onToolEvents);
       removeExitListener();
       removeAlertListener();
+      removeSpeakListener();
     };
   }
 

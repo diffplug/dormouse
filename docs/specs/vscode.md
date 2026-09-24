@@ -87,14 +87,19 @@ are app-global rather than per-Workspace, riding the seed / mutate / broadcast
 channel of `docs/specs/transport.md` → Message protocol; the settings the
 shared manager consumes are `AlertManager.applySettings`'s own list.
 
-**A due alarm goes to the router whose `ownedPtyIds` hold its Session**; the
-owner-less push goes through `handleBurrowCommand` (`docs/specs/alert.md` →
-Alarm settings).
+**`alert:speak` goes only to a connected router whose `ownedPtyIds` hold its
+Session**; a due push goes to `pushAlert`: this window's service, else the
+broker's as an unanswered `push` peer frame, else dropped, never held. **This
+window is one more alert viewer, with no focus, present while `WindowState`
+reports it `focused` and `active`**; one that never reports `active` adds none
+(rationale).
 
 Source of truth: `WatchedCommandHost` in `lib/src/lib/watched-command-host.ts`,
 `AlertSettingsHost` in `lib/src/lib/alert-settings-host.ts`, the `alert:command`
-case and `deliverAlert` in `vscode-ext/src/message-router.ts`. Pinned by
-`alarm delivery` in `vscode-ext/test/message-router.test.ts`.
+case, `connectWebview`, and `reportWindowPresence` in
+`vscode-ext/src/message-router.ts`; `pushAlert` in `vscode-ext/src/burrow.ts`.
+Pinned by `alarm delivery` in `vscode-ext/test/message-router.test.ts` and
+`vscode-ext/test/burrow.test.ts`.
 
 ### Shell selection
 

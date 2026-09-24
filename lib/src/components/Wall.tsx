@@ -1172,7 +1172,7 @@ export function Wall({
   // --- Dev-server port → pane correlation (browser header connection chip) ---
   useDevServerPortCorrelation({ lath, doorsRef });
 
-  // --- Spoken alarms and pushes (`docs/specs/alert.md` -> Alarm settings) ---
+  // --- Alarm delivery: this realm's Sessions and speech (`docs/specs/alert.md` -> Alarm settings) ---
   useAlertDelivery();
 
   // --- Reattach ---

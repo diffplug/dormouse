@@ -1,8 +1,8 @@
 /**
  * @vitest-environment jsdom
  *
- * Two hooks a Wall mounts that own WINDOW-level machinery — the alarm
- * delivery performer and the dynamic palette — so N mounted Walls must still run one each
+ * Two hooks a Wall mounts that own WINDOW-level machinery — alarm delivery
+ * and the dynamic palette — so N mounted Walls must still run one each
  * (docs/specs/layout.md → "Workspaces").
  */
 import { act } from 'react';
@@ -59,7 +59,7 @@ afterEach(() => {
 describe('window-singleton Wall hooks', () => {
   it('arms once for N Walls and disarms only when the last one goes', async () => {
     await act(async () => { root.render(<><Consumer /><Consumer /><Consumer /></>); });
-    // One delivery performer (it publishes every Workspace's policy and clears
+    // One alarm delivery (it publishes every Session to the host and clears
     // every Session's speech state) and one palette observer for the document.
     expect(startDelivery).toHaveBeenCalledTimes(1);
     expect(observers).toBe(1);

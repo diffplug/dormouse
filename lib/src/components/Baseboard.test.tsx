@@ -30,6 +30,7 @@ import { resetShellStore, seedShellStore } from '../lib/shell-store';
 import { addPlainNote, clearAllNotepads } from '../lib/notepad/notepad-store';
 import { resetPushDevices, setPushDevices, setPushDevicesRefresher } from '../lib/push-devices';
 import { clearTerminalActivity, setTerminalActivity } from '../lib/session-activity-store';
+import { createAlertEpisode } from '../lib/alert-episode';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -416,9 +417,9 @@ describe('Baseboard overflow alerts', () => {
 
   it('marks an overflow arrow for the ringing and TODO Doors it hides', () => {
     act(() => {
-      setTerminalActivity('b', { status: 'ALERT_RINGING' });
+      setTerminalActivity('b', { status: 'ALERT_RINGING', episode: createAlertEpisode() });
       setTerminalActivity('c', { todo: true });
-      setTerminalActivity('d', { status: 'ALERT_RINGING', todo: true });
+      setTerminalActivity('d', { status: 'ALERT_RINGING', episode: createAlertEpisode(), todo: true });
     });
     // The zero-width test viewport fits exactly one Door.
     renderBaseboard(items, 'a');
@@ -437,7 +438,7 @@ describe('Baseboard overflow alerts', () => {
   });
 
   it('leaves an arrow plain while the Doors it hides owe nothing', () => {
-    act(() => setTerminalActivity('a', { status: 'ALERT_RINGING', todo: true }));
+    act(() => setTerminalActivity('a', { status: 'ALERT_RINGING', episode: createAlertEpisode(), todo: true }));
     renderBaseboard(items, 'a');
     const right = arrow('right');
     expect(right?.getAttribute('aria-label')).toBe('3 more');

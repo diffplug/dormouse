@@ -107,14 +107,19 @@ export class FakePtyAdapter implements PlatformAdapter {
    *  and the selection-popup stories toggle it per story. */
   browserReservesNotepadChord?: boolean;
 
+  /** Where a due push goes. There is no Burrow here, so by default it reaches
+   *  no phone; a test sets this to see what would have been sent. */
+  onAlertPush?: (sessionId: string, title: string) => void;
+
   constructor() {
     Object.assign(this, this.alerts.methods);
     this.startAlertHost();
   }
 
   private startAlertHost(): void {
-    const host = createAlertHost({ deliver: (delivery) => void this.alerts.onEvent('alert:deliver', delivery) });
+    const host = createAlertHost({ push: (sessionId, title) => this.onAlertPush?.(sessionId, title) });
     const stops = [
+      host.onSpeak((speak) => void this.alerts.onEvent('alert:speak', speak)),
       host.manager.onStateChange((id, state) => void this.alerts.onEvent('alert:state', { id, ...state })),
       host.watched.subscribe((names) => void this.alerts.onEvent('alert:watchedCommands', { names })),
       host.settings.subscribe((settings) => void this.alerts.onEvent('alert:settings', { settings })),

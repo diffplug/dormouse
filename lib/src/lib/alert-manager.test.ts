@@ -411,6 +411,17 @@ describe('AlertManager in isolation', () => {
     expect(manager.getState(id).status).toBe('ALERT_RINGING');
   });
 
+  it('rings a report again once a command starts after the acknowledgement', () => {
+    // The user clears the ring and types a new command, whose echo falls in
+    // the echo window; the command stays silent until its report.
+    const id = 'acknowledged-then-command';
+    manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'first' });
+    manager.dismissAlert(id);
+    runCommand(manager, id, 'pnpm deploy');
+    manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'deployed' });
+    expect(manager.getState(id)).toMatchObject({ status: 'ALERT_RINGING', notification: { body: 'deployed' } });
+  });
+
   it('toggleTodo flips on and off', () => {
     const id = 'toggle-todo';
     expect(manager.getState(id).todo).toBe(false);

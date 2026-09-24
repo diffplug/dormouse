@@ -8,58 +8,26 @@ vi.mock('./platform', () => ({
 import { startAlertSpeech, toSpokenText, type AlertSpeaker } from './alert-speech';
 import { getAlertSpeechState } from './alert-speech-state';
 import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS } from './alert-settings';
+import { createAlertEpisode } from './alert-episode';
 import { clearTerminalActivity, getActivity, setTerminalActivity } from './session-activity-store';
-import type { SessionStatus } from './alert-manager';
+import type { AlertState, SessionStatus } from './alert-manager';
 import { removeTerminalPaneState, resetTerminalPaneState } from './terminal-state-store';
 import type { TerminalTitleSource } from './terminal-state';
+import { stubSpeechSynthesis, type SpeechSynthesisStub } from './speech-synthesis-test-utils';
 
-/** Utterances passed to the stubbed Web Speech API, in order. */
-let spoken: string[];
-let utterances: StubUtterance[];
-let cancelCount: number;
+/** The stubbed Web Speech engine this test drives. */
+let engine: SpeechSynthesisStub;
 let speaker: AlertSpeaker | null = null;
 
-interface StubUtterance {
-  text: string;
-  onstart: (() => void) | null;
-  onend: (() => void) | null;
-  onerror: (() => void) | null;
-}
-
-/** Extra engine behavior a single test wants from the stub's `speak`. */
-let onSpeak: ((utterance: StubUtterance) => void) | null = null;
-
-function stubSpeechSynthesis(): void {
-  spoken = [];
-  utterances = [];
-  cancelCount = 0;
-  onSpeak = null;
-  vi.stubGlobal('speechSynthesis', {
-    speak: (utterance: StubUtterance) => {
-      spoken.push(utterance.text);
-      utterances.push(utterance);
-      onSpeak?.(utterance);
-    },
-    cancel: () => { cancelCount++; },
-  });
-  vi.stubGlobal('SpeechSynthesisUtterance', class {
-    text: string;
-    onstart: (() => void) | null = null;
-    onend: (() => void) | null = null;
-    onerror: (() => void) | null = null;
-    constructor(text: string) { this.text = text; }
-  });
-}
-
-/** Drive one Session's projected status through the activity store. */
-function setStatus(id: string, status: SessionStatus): void {
+/** Move one Session to a status that is not ringing. */
+function setStatus(id: string, status: Exclude<SessionStatus, 'ALERT_RINGING'>): void {
   setTerminalActivity(id, { status });
 }
 
-/** Open a new ring, and with it a new episode. */
-function ring(id: string): void {
+/** Open a new ring, and with it a new episode, as the host publishes one. */
+function ring(id: string, state: Partial<AlertState> = {}): void {
   setStatus(id, 'NOTHING_TO_SHOW');
-  setStatus(id, 'ALERT_RINGING');
+  setTerminalActivity(id, { status: 'ALERT_RINGING', episode: createAlertEpisode(), ...state });
 }
 
 /** The host's speech deliveries come due for each Session's current episode. */
@@ -76,12 +44,12 @@ function ringTwoWithFirstSpeaking(): void {
   ring('pty-1');
   ring('pty-2');
   due('pty-1', 'pty-2');
-  utterances[0].onstart?.();
+  engine.utterances[0].onstart?.();
 }
 
 beforeEach(() => {
   vi.useFakeTimers();
-  stubSpeechSynthesis();
+  engine = stubSpeechSynthesis();
   clearTerminalActivity();
   applyAlertSettingsFromHost({ ...DEFAULT_ALERT_SETTINGS, speakEnabled: true });
 });
@@ -168,15 +136,6 @@ describe('toSpokenText', () => {
  * (`alert-delivery-scheduler.test.ts`).
  */
 describe('spoken alarms', () => {
-  it('speaks the pane label of the episode the host hands it', () => {
-    start();
-    ring('pty-1');
-    expect(spoken).toEqual([]);
-
-    due('pty-1');
-    expect(spoken).toEqual(['terminal']);
-  });
-
   it('speaks terminal-supplied OSC 0/2/9 titles when they are the pane label', () => {
     const sources: TerminalTitleSource[] = ['osc0', 'osc2', 'osc9'];
     for (const [index, source] of sources.entries()) {
@@ -201,22 +160,15 @@ describe('spoken alarms', () => {
 
     start();
     for (const source of sources) {
-      const id = `${source}-title`;
-      setStatus(id, 'NOTHING_TO_SHOW');
-      if (source === 'osc9') {
-        setTerminalActivity(id, {
-          status: 'ALERT_RINGING',
-          notification: { source: 'OSC 9', title: null, body: 'program title osc9' },
-        });
-      } else {
-        setStatus(id, 'ALERT_RINGING');
-      }
+      ring(`${source}-title`, source === 'osc9'
+        ? { notification: { source: 'OSC 9', title: null, body: 'program title osc9' } }
+        : {});
     }
     due(...sources.map((source) => `${source}-title`));
 
-    utterances[0].onend?.();
-    utterances[1].onend?.();
-    expect(spoken).toEqual([
+    engine.utterances[0].onend?.();
+    engine.utterances[1].onend?.();
+    expect(engine.spoken).toEqual([
       'program title osc0',
       'program title osc2',
       'program title osc9',
@@ -228,7 +180,7 @@ describe('spoken alarms', () => {
     start();
     ring('pty-1');
     due('pty-1');
-    expect(spoken).toEqual([]);
+    expect(engine.spoken).toEqual([]);
   });
 
   it('drops a delivery for an episode that already ended', () => {
@@ -237,7 +189,7 @@ describe('spoken alarms', () => {
     const stale = getActivity('pty-1').episode!.id;
     ring('pty-1');
     speaker!.speak('pty-1', stale);
-    expect(spoken).toEqual([]);
+    expect(engine.spoken).toEqual([]);
   });
 
   it('publishes SPEAKING on actual start, then SPOKEN on end', () => {
@@ -246,10 +198,10 @@ describe('spoken alarms', () => {
     due('pty-1');
 
     expect(getAlertSpeechState('pty-1')).toBeNull();
-    utterances[0].onstart?.();
+    engine.utterances[0].onstart?.();
     expect(getAlertSpeechState('pty-1')).toBe('speaking');
 
-    utterances[0].onend?.();
+    engine.utterances[0].onend?.();
     expect(getAlertSpeechState('pty-1')).toBe('spoken');
   });
 
@@ -257,10 +209,10 @@ describe('spoken alarms', () => {
     start();
     ring('pty-1');
     due('pty-1');
-    utterances[0].onstart?.();
-    utterances[0].onend?.();
+    engine.utterances[0].onstart?.();
+    engine.utterances[0].onend?.();
 
-    setTerminalActivity('pty-1', { status: 'ALERT_RINGING', todo: true });
+    setTerminalActivity('pty-1', { ...getActivity('pty-1'), todo: true });
     setStatus('another-pane', 'BUSY');
     expect(getAlertSpeechState('pty-1')).toBe('spoken');
   });
@@ -269,28 +221,28 @@ describe('spoken alarms', () => {
     start();
     ring('pty-1');
     due('pty-1');
-    utterances[0].onstart?.();
+    engine.utterances[0].onstart?.();
     expect(getAlertSpeechState('pty-1')).toBe('speaking');
 
     setStatus('pty-1', 'NOTHING_TO_SHOW');
     // The announcement exists to summon the user, who is now here — the engine
     // is silenced, not merely un-rendered.
-    expect(cancelCount).toBe(1);
+    expect(engine.cancels).toBe(1);
     expect(getAlertSpeechState('pty-1')).toBeNull();
 
     // The engine reports the cut, and can also finish an utterance after the
     // ring clears. Either stale callback must not resurrect HAS SPOKEN.
-    utterances[0].onend?.();
+    engine.utterances[0].onend?.();
     expect(getAlertSpeechState('pty-1')).toBeNull();
   });
 
   it('admits the next still-ringing Session when the active alarm is cut off', () => {
     ringTwoWithFirstSpeaking();
-    expect(spoken).toHaveLength(1);
+    expect(engine.spoken).toHaveLength(1);
     setStatus('pty-1', 'NOTHING_TO_SHOW');
-    expect(cancelCount).toBe(1);
-    expect(spoken).toHaveLength(2);
-    utterances[1].onstart?.();
+    expect(engine.cancels).toBe(1);
+    expect(engine.spoken).toHaveLength(2);
+    engine.utterances[1].onstart?.();
     expect(getAlertSpeechState('pty-2')).toBe('speaking');
   });
 
@@ -304,10 +256,10 @@ describe('spoken alarms', () => {
     ring('pty-2');
     setStatus('pty-1', 'NOTHING_TO_SHOW');
 
-    expect(cancelCount).toBe(1);
-    expect(spoken).toHaveLength(1);
+    expect(engine.cancels).toBe(1);
+    expect(engine.spoken).toHaveLength(1);
     due('pty-2');
-    expect(spoken).toHaveLength(2);
+    expect(engine.spoken).toHaveLength(2);
   });
 
   /** Turning delivery off discards pending work before native admission. */
@@ -317,8 +269,8 @@ describe('spoken alarms', () => {
 
     setStatus('pty-1', 'NOTHING_TO_SHOW');
 
-    expect(cancelCount).toBe(1);
-    expect(spoken).toHaveLength(1);
+    expect(engine.cancels).toBe(1);
+    expect(engine.spoken).toHaveLength(1);
   });
 
   /** Only the Session being read aloud is cut; a queued one has nothing to stop. */
@@ -327,7 +279,7 @@ describe('spoken alarms', () => {
 
     setStatus('pty-2', 'NOTHING_TO_SHOW');
 
-    expect(cancelCount).toBe(0);
+    expect(engine.cancels).toBe(0);
     expect(getAlertSpeechState('pty-1')).toBe('speaking');
   });
 
@@ -337,8 +289,8 @@ describe('spoken alarms', () => {
     due('pty-1');
 
     setStatus('pty-1', 'NOTHING_TO_SHOW');
-    utterances[0].onstart?.();
-    utterances[0].onend?.();
+    engine.utterances[0].onstart?.();
+    engine.utterances[0].onend?.();
     expect(getAlertSpeechState('pty-1')).toBeNull();
   });
 
@@ -346,8 +298,8 @@ describe('spoken alarms', () => {
     start();
     ring('pty-1');
     due('pty-1');
-    utterances[0].onstart?.();
-    utterances[0].onerror?.();
+    engine.utterances[0].onstart?.();
+    engine.utterances[0].onerror?.();
 
     expect(getAlertSpeechState('pty-1')).toBe('spoken');
   });
@@ -356,11 +308,11 @@ describe('spoken alarms', () => {
     start();
     ring('pty-1');
     due('pty-1');
-    const oldStart = utterances[0].onstart;
-    const oldEnd = utterances[0].onend;
+    const oldStart = engine.utterances[0].onstart;
+    const oldEnd = engine.utterances[0].onend;
     ring('pty-1');
     due('pty-1');
-    const current = utterances[1];
+    const current = engine.utterances[1];
     current.onstart?.();
     oldStart?.();
     oldEnd?.();
@@ -372,9 +324,9 @@ describe('spoken alarms', () => {
   it('never admits a resolved queued alarm to the speech engine', () => {
     ringTwoWithFirstSpeaking();
     setStatus('pty-2', 'NOTHING_TO_SHOW');
-    expect(cancelCount).toBe(0);
-    utterances[0].onend?.();
-    expect(spoken).toHaveLength(1);
+    expect(engine.cancels).toBe(0);
+    engine.utterances[0].onend?.();
+    expect(engine.spoken).toHaveLength(1);
     expect(getAlertSpeechState('pty-2')).toBeNull();
   });
 
@@ -395,7 +347,7 @@ describe('spoken alarms', () => {
    * SPEAKING for the life of the ring.
    */
   it('settles an utterance the engine resolves synchronously inside speak()', () => {
-    onSpeak = (utterance) => {
+    engine.onSpeak = (utterance) => {
       utterance.onstart?.();
       utterance.onerror?.();
     };
@@ -415,16 +367,16 @@ describe('spoken alarms', () => {
     start();
     ring('pty-1');
     due('pty-1');
-    utterances[0].onstart?.();
+    engine.utterances[0].onstart?.();
     expect(getAlertSpeechState('pty-1')).toBe('speaking');
 
     speaker?.stop();
     speaker = null;
 
-    expect(cancelCount).toBe(1);
+    expect(engine.cancels).toBe(1);
     expect(getAlertSpeechState('pty-1')).toBeNull();
     // A callback the engine still dispatches afterward finds nothing to touch.
-    utterances[0].onend?.();
+    engine.utterances[0].onend?.();
     expect(getAlertSpeechState('pty-1')).toBeNull();
   });
 
@@ -433,13 +385,13 @@ describe('spoken alarms', () => {
     ring('pty-1');
     ring('pty-2');
     due('pty-1', 'pty-2');
-    const lateStart = utterances[0].onstart;
-    const lateEnd = utterances[0].onend;
-    expect(spoken).toHaveLength(1);
+    const lateStart = engine.utterances[0].onstart;
+    const lateEnd = engine.utterances[0].onend;
+    expect(engine.spoken).toHaveLength(1);
     vi.advanceTimersByTime(SPEECH_ENGINE_TIMEOUT_MS);
-    expect(cancelCount).toBe(1);
-    expect(spoken).toHaveLength(2);
-    utterances[1].onstart?.();
+    expect(engine.cancels).toBe(1);
+    expect(engine.spoken).toHaveLength(2);
+    engine.utterances[1].onstart?.();
     lateStart?.();
     lateEnd?.();
     expect(getAlertSpeechState('pty-1')).toBeNull();
@@ -450,9 +402,9 @@ describe('spoken alarms', () => {
     start();
     for (let i = 0; i < 100; i++) ring(`pty-${i}`);
     for (let i = 0; i < 100; i++) due(`pty-${i}`);
-    expect(spoken).toHaveLength(1);
-    for (let i = 0; i < 65; i++) utterances[i].onend?.();
-    expect(spoken).toHaveLength(65);
-    expect(utterances.every(utterance => utterance.onend === null)).toBe(true);
+    expect(engine.spoken).toHaveLength(1);
+    for (let i = 0; i < 65; i++) engine.utterances[i].onend?.();
+    expect(engine.spoken).toHaveLength(65);
+    expect(engine.utterances.every(utterance => utterance.onend === null)).toBe(true);
   });
 });

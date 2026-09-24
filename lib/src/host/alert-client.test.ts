@@ -26,7 +26,7 @@ it('sends each alert verb as one command naming its op', () => {
   methods.alertClearTodo('p');
   methods.alertEngagement({ present: true, focusId: 'p' });
   methods.alertEngagement({ present: false, focusId: 'p' }, 'idle');
-  methods.alertPublishDeliveryPolicy({ p: { speakEnabled: true } });
+  methods.alertPublishSessions({ p: { label: 'pnpm build', overrides: { speakEnabled: true } } });
   methods.alertSetWatchedCommands(['cargo']);
   // A delta, never a replacement.
   methods.alertSetCommandWatched('cargo', true);
@@ -41,7 +41,7 @@ it('sends each alert verb as one command naming its op', () => {
     { op: 'clearTodo', id: 'p' },
     { op: 'engagement', state: { present: true, focusId: 'p' } },
     { op: 'engagement', state: { present: false, focusId: 'p' }, lapse: 'idle' },
-    { op: 'deliveryPolicy', overrides: { p: { speakEnabled: true } } },
+    { op: 'sessions', sessions: { p: { label: 'pnpm build', overrides: { speakEnabled: true } } } },
     { op: 'initializeWatchedCommands', names: ['cargo'] },
     { op: 'setCommandWatched', name: 'cargo', watched: true },
     { op: 'initializeSettings', settings: DEFAULT_ALERT_SETTINGS },
@@ -62,7 +62,7 @@ describe('events', () => {
     methods.onAlertState((detail) => void seen.push(['state', detail]));
     methods.onWatchedCommands((names) => void seen.push(['watched', names]));
     methods.onAlertSettings((settings) => void seen.push(['settings', settings]));
-    methods.onAlertDeliver((delivery) => void seen.push(['deliver', delivery]));
+    const stopSpeaking = methods.onAlertSpeak((speak) => void seen.push(['speak', speak]));
 
     const detail = { id: 'p', status: 'ALERT_RINGING', todo: true } as unknown as AlertStateDetail;
     alerts.onEvent('alert:state', detail);
@@ -70,15 +70,16 @@ describe('events', () => {
     alerts.onEvent('alert:settings', { settings: DEFAULT_ALERT_SETTINGS });
     // A snapshot with no blob is dropped, not applied as "no settings".
     alerts.onEvent('alert:settings', {});
-    // A delivery the renderer cannot perform is dropped, and only its fields cross.
-    alerts.onEvent('alert:deliver', { sink: 'push', id: 'p', episodeId: 'e-1', forWindow: 'main' });
-    alerts.onEvent('alert:deliver', { sink: 'bell', id: 'p', episodeId: 'e-1' });
-    alerts.onEvent('alert:deliver', { sink: 'speech', id: 'p' });
+    // Only a speak's own fields reach the handler; one missing either is dropped.
+    alerts.onEvent('alert:speak', { id: 'p', episodeId: 'e-1', forWindow: 'main' });
+    alerts.onEvent('alert:speak', { id: 'p' });
+    stopSpeaking();
+    alerts.onEvent('alert:speak', { id: 'p', episodeId: 'e-2' });
     expect(alerts.onEvent('pty:data', { id: 'p', data: 'x' })).toBe(false);
 
     expect(seen).toEqual([
       ['state', detail], ['watched', ['make']], ['settings', DEFAULT_ALERT_SETTINGS],
-      ['deliver', { sink: 'push', id: 'p', episodeId: 'e-1' }],
+      ['speak', { id: 'p', episodeId: 'e-1' }],
     ]);
   });
 });
@@ -132,7 +133,7 @@ describe('awaits', () => {
   });
 
   it('takes the host\'s answer through the real host, a claim included', async () => {
-    const host = createAlertHost({ deliver: () => {} });
+    const host = createAlertHost({ push: () => {} });
     const realm = createAlertClient((command) => host.handle('main', command, {
       answer: (result) => void realm.onEvent('alert:awaitResult', result),
       resendStates: () => {},

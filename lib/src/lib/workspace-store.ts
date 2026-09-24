@@ -1,4 +1,4 @@
-import { normalizeAlertDeliveryOverrides, type AlertDeliveryOverrides } from './alert-delivery-model';
+import { normalizeAlertDeliveryOverrides, sameAlertDeliveryOverrides, type AlertDeliveryOverrides } from './alert-delivery-model';
 import { parseWorkspaceRef } from 'dor/protocol';
 import { DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_NAME, isDefaultWorkspaceName, type WorkspaceId } from './session-types';
 
@@ -353,16 +353,10 @@ export function resetWorkspaces(): void {
 export function setWorkspaceAlertDelivery(id: WorkspaceId, value: AlertDeliveryOverrides): void {
   const alertDelivery = normalizeAlertDeliveryOverrides(value);
   const current = getWorkspace(id);
-  if (!current || sameOverrides(current.alertDelivery ?? {}, alertDelivery)) return;
+  if (!current || sameAlertDeliveryOverrides(current.alertDelivery ?? {}, alertDelivery)) return;
   emit({ ...state, workspaces: state.workspaces.map((workspace) => {
     if (workspace.id !== id) return workspace;
     const { alertDelivery: _old, ...rest } = workspace;
     return Object.keys(alertDelivery).length ? { ...rest, alertDelivery } : rest;
   }) });
-}
-
-function sameOverrides(a: AlertDeliveryOverrides, b: AlertDeliveryOverrides): boolean {
-  const keys = new Set([...Object.keys(a), ...Object.keys(b)]) as Set<keyof AlertDeliveryOverrides>;
-  for (const key of keys) if (a[key] !== b[key]) return false;
-  return true;
 }

@@ -6,9 +6,10 @@
  * The Burrow itself is a service in the process that owns the PTYs
  * (`lib/src/host/remote/service.ts`) — the Tauri sidecar, the VS Code extension
  * host. This module is its client: it forwards console commands, mirrors the
- * pairing queue, and keeps the push device list. It starts no Burrow, holds no relay socket,
- * and reads no ACL. A host with no service behind it (the website) gets nothing
- * at all, which is why every entry point here tolerates a missing link.
+ * pairing queue, and refreshes the push device list. It starts no Burrow, holds
+ * no relay socket, and reads no ACL. A host with no service behind it (the
+ * website) gets nothing at all, which is why every entry point here tolerates a
+ * missing link.
  *
  * Enroll from the devtools console:
  *
@@ -27,8 +28,7 @@ import type {
 } from '../../host/remote/service-protocol';
 import { getPlatform } from '../../lib/platform';
 import type { BurrowLink } from '../../lib/platform/types';
-import { clearPushDevices, setPushDevicesRefresher } from '../../lib/push-devices';
-import { commitPushDevices, invalidatePushDeviceRefreshes } from './alert-push';
+import { clearPushDevices, commitPushDevices, setPushDevicesRefresher } from '../../lib/push-devices';
 import { armWhileEnrolled } from './enrolled-gate';
 import {
   enqueuePairingApproval,
@@ -94,7 +94,6 @@ function installBridgeMode(link: BurrowLink): void {
       // them back the moment it lands. The refresher stays installed: the dialog
       // may still open on an un-enrolled machine, where asking is one command
       // that answers `no-burrow`.
-      invalidatePushDeviceRefreshes();
       clearPushDevices();
     };
   });

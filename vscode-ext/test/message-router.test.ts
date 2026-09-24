@@ -25,8 +25,8 @@ const wiring = vi.hoisted(() => ({
   burrow: null as BurrowDeps | null,
   /** Every `notifyDirectoryChanged()` the router made. */
   invalidations: 0,
-  /** Every Burrow command the router sent on its own account. */
-  burrowCommands: [] as unknown[],
+  /** Every due push the router's alert host sent. */
+  pushes: [] as Array<[string, string]>,
 }));
 
 vi.mock('../src/peer-link', () => ({
@@ -80,13 +80,18 @@ vi.mock('../src/burrow', () => ({
   dropForwardedCommands: () => {},
   greetPeerWindow: () => {},
   handleForwardedCommand: () => {},
-  handleBurrowCommand: (payload: unknown) => void wiring.burrowCommands.push(payload),
+  handleForwardedPush: () => {},
+  handleBurrowCommand: () => {},
+  pushAlert: (sessionId: string, title: string) => void wiring.pushes.push([sessionId, title]),
   notifyDirectoryChanged: () => {
     wiring.invalidations += 1;
   },
 }));
 
 type RouterModule = typeof import('../src/message-router');
+
+/** A terminal report asking for the human, as `OSC 9` carries it. */
+const REPORT = '\x1b]9;needs input\x07';
 type MirrorModule = typeof import('../src/notepad-volatile');
 
 /** One webview: what it was sent, and a way to make it say something back. */
@@ -129,7 +134,7 @@ beforeEach(async () => {
   wiring.peer = null;
   wiring.burrow = null;
   wiring.invalidations = 0;
-  wiring.burrowCommands = [];
+  wiring.pushes = [];
   ptys.cwd = null;
   ptys.cwdAsked = [];
   ptys.cwdWait = null;
@@ -607,8 +612,6 @@ describe('await requests', () => {
  * disengage a Session another one is showing.
  */
 describe('engagement viewers', () => {
-  const REPORT = '\x1b]9;needs input\x07';
-
   function status(id: string): string | undefined {
     return router.getAlertStates().get(id)?.status;
   }
@@ -707,11 +710,12 @@ describe('engagement viewers', () => {
 });
 
 /**
- * A due spoken alarm or push goes to the webview that owns its Session; with
- * none, a push goes from the host (docs/specs/alert.md → Alarm settings).
+ * The host decides when a ring is spoken or pushed (docs/specs/alert.md →
+ * Alarm settings): speech to the connected webview showing the Session, a push
+ * from here, held back while this VS Code window is in use.
  */
 describe('alarm delivery', () => {
-  const REPORT = '\x1b]9;needs input\x07';
+  const SESSIONS = { 'pty-1': { label: 'pnpm build', overrides: {} } };
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -721,42 +725,64 @@ describe('alarm delivery', () => {
     vi.useRealTimers();
   });
 
-  it('hands a due delivery to the webview that owns the Session, and no other', () => {
+  it('speaks a due alarm only in the connected webview that shows the Session', () => {
     const other = fakeWebview();
     const owner = fakeWebview();
     const first = router.attachRouter(other.channel);
     const second = router.attachRouter(owner.channel);
     try {
+      other.send({ type: 'dormouse:init' });
+      owner.send({ type: 'dormouse:init' });
       alert(owner, { op: 'initializeSettings', settings: { speakEnabled: true, speakDelayMs: 1_000 } as never });
-      owner.send({ type: 'pty:spawn', id: 'pty-owned', options: { cwd: '/repo' } });
-      ptys.callbacks!.onData('pty-owned', REPORT);
+      owner.send({ type: 'pty:spawn', id: 'pty-1', options: { cwd: '/repo' } });
+      ptys.callbacks!.onData('pty-1', REPORT);
       vi.advanceTimersByTime(1_000);
-      const episodeId = router.getAlertStates().get('pty-owned')!.episode!.id;
-      expect(owner.posted.filter((message) => message.type === 'alert:deliver'))
-        .toEqual([{ type: 'alert:deliver', sink: 'speech', id: 'pty-owned', episodeId }]);
-      expect(other.posted.filter((message) => message.type === 'alert:deliver')).toEqual([]);
+      const episodeId = router.getAlertStates().get('pty-1')!.episode!.id;
+      expect(owner.posted.filter((message) => message.type === 'alert:speak'))
+        .toEqual([{ type: 'alert:speak', id: 'pty-1', episodeId }]);
+      expect(other.posted.filter((message) => message.type === 'alert:speak')).toEqual([]);
     } finally {
       first.dispose();
       second.dispose();
     }
   });
 
-  it('pushes from the host, titled by the command, when no webview owns the Session', () => {
+  it('pushes from the host, titled by the label its view published, after the view is gone', () => {
     const webview = fakeWebview();
     const disposable = router.attachRouter(webview.channel);
-    alert(webview, { op: 'initializeSettings', settings: { speakEnabled: true, pushEnabled: true, pushDelayMs: 1_000 } as never });
-    webview.send({ type: 'pty:spawn', id: 'pty-orphan', options: { cwd: '/repo' } });
-    ptys.callbacks!.onData('pty-orphan', '\x1b]633;E;pnpm build\x07\x1b]633;C\x07');
+    alert(webview, { op: 'initializeSettings', settings: { pushEnabled: true, pushDelayMs: 1_000 } as never });
+    webview.send({ type: 'pty:spawn', id: 'pty-1', options: { cwd: '/repo' } });
+    alert(webview, { op: 'sessions', sessions: SESSIONS });
     // The view goes away; its PTYs live on.
     disposable.dispose();
-    ptys.callbacks!.onData('pty-orphan', REPORT);
-    vi.advanceTimersByTime(60_000);
-    expect(webview.posted.filter((message) => message.type === 'alert:deliver')).toEqual([]);
-    expect(wiring.burrowCommands).toEqual([{
-      burrowRequestId: expect.any(String),
-      cmd: 'push',
-      params: { sessionId: 'pty-orphan', title: 'pnpm build' },
-    }]);
+    ptys.callbacks!.onData('pty-1', REPORT);
+    vi.advanceTimersByTime(1_000);
+    expect(wiring.pushes).toEqual([['pty-1', 'pnpm build']]);
+  });
+
+  it('holds a push back while this VS Code window is focused and active', () => {
+    const moveWindow = (state: { focused: boolean; active?: boolean }) =>
+      router.reportWindowPresence(state as never);
+    const webview = fakeWebview();
+    const disposable = router.attachRouter(webview.channel);
+    try {
+      alert(webview, { op: 'initializeSettings', settings: { pushEnabled: true, pushDelayMs: 1_000 } as never });
+      webview.send({ type: 'pty:spawn', id: 'pty-1', options: { cwd: '/repo' } });
+      moveWindow({ focused: true, active: true });
+      ptys.callbacks!.onData('pty-1', REPORT);
+      vi.advanceTimersByTime(1_000);
+      expect(wiring.pushes).toEqual([]);
+
+      // Focus alone is not presence: an older VS Code reports no `active`.
+      alert(webview, { op: 'dismiss', id: 'pty-1' });
+      ptys.callbacks!.onData('pty-1', 'output');
+      moveWindow({ focused: true });
+      ptys.callbacks!.onData('pty-1', REPORT);
+      vi.advanceTimersByTime(1_000);
+      expect(wiring.pushes).toEqual([['pty-1', 'terminal']]);
+    } finally {
+      disposable.dispose();
+    }
   });
 });
 

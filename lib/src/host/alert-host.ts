@@ -1,9 +1,9 @@
 import { AlertManager, type AwaitHandle, type Engagement } from '../lib/alert-manager';
-import { createAlertDeliveryScheduler, type AlertDelivery } from '../lib/alert-delivery-scheduler';
+import { createAlertDeliveryScheduler } from '../lib/alert-delivery-scheduler';
 import { AlertSettingsHost } from '../lib/alert-settings-host';
 import { WatchedCommandHost } from '../lib/watched-command-host';
 import type { PersistedAlertState } from '../lib/session-types';
-import type { AlertAwaitResult } from './alert-protocol';
+import type { AlertAwaitResult, AlertSpeak } from './alert-protocol';
 
 /**
  * The host role of the alerts, run beside the PTYs by both hosts: VS Code's
@@ -12,7 +12,7 @@ import type { AlertAwaitResult } from './alert-protocol';
  * app-global stores bound to it, and every renderer realm one of its viewers,
  * driving it with `AlertCommand`s (`lib/src/host/alert-protocol.ts`), and the
  * scheduler that decides when a ring is spoken or pushed. How state,
- * snapshots and deliveries reach the realms is each host's own.
+ * snapshots and speech reach the realms is each host's own.
  */
 
 /** Where the host answers the realm a command came from. */
@@ -25,16 +25,18 @@ export interface AlertRealm {
 
 export interface AlertHostOptions {
   /**
-   * One due spoken alarm or push, for the realm showing its Session to
-   * perform (`docs/specs/alert.md` -> Alarm settings).
+   * Send one due push to the paired phones, through this process's Burrow:
+   * fire and forget, never retried (`docs/specs/alert.md` -> Alarm settings).
    */
-  deliver(delivery: AlertDelivery): void;
+  push(sessionId: string, title: string): void;
 }
 
 export interface AlertHost {
   readonly manager: AlertManager;
   readonly watched: WatchedCommandHost;
   readonly settings: AlertSettingsHost;
+  /** Each due spoken alarm, for the realm showing its Session to speak. */
+  onSpeak(listener: (speak: AlertSpeak) => void): () => void;
   /** One command from `realmId`, revalidated: nothing a renderer sends is trusted. */
   handle(realmId: string, command: unknown, realm: AlertRealm): void;
   /**
@@ -66,8 +68,13 @@ export function createAlertHost(options: AlertHostOptions): AlertHost {
   const manager = new AlertManager();
   const watched = new WatchedCommandHost(manager);
   const settings = new AlertSettingsHost(manager);
-  const delivery = createAlertDeliveryScheduler({ manager, defaults: () => settings.current, deliver: options.deliver });
-  const stopSettings = settings.subscribe(() => delivery.recheck());
+  const speakers = new Set<(speak: AlertSpeak) => void>();
+  const delivery = createAlertDeliveryScheduler({
+    manager,
+    speak: (id, episodeId) => { for (const speaker of speakers) speaker({ id, episodeId }); },
+    push: options.push,
+  });
+  const stopSettings = settings.subscribe((next) => delivery.setDefaults(next));
   /** Each realm's parked `dor await`s, by the id its client minted. */
   const parked = new Map<string, Map<string, Parked>>();
 
@@ -98,7 +105,6 @@ export function createAlertHost(options: AlertHostOptions): AlertHost {
 
   function endRealm(realmId: string): void {
     manager.removeViewer(realmId);
-    delivery.endRealm(realmId);
     const awaits = parked.get(realmId);
     if (!awaits) return;
     parked.delete(realmId);
@@ -116,6 +122,11 @@ export function createAlertHost(options: AlertHostOptions): AlertHost {
     manager,
     watched,
     settings,
+
+    onSpeak(listener) {
+      speakers.add(listener);
+      return () => void speakers.delete(listener);
+    },
 
     handle(realmId, command, realm) {
       if (!command || typeof command !== 'object') return;
@@ -154,9 +165,9 @@ export function createAlertHost(options: AlertHostOptions): AlertHost {
           manager.setViewer(realmId, message.state as Engagement, lapse);
           return;
         }
-        case 'deliveryPolicy':
+        case 'sessions':
           // Revalidated field by field, like the Workspace's persisted copy.
-          delivery.publish(realmId, message.overrides);
+          delivery.publish(realmId, message.sessions);
           return;
         case 'await':
           park(realmId, realm, message);
@@ -199,9 +210,10 @@ export function createAlertHost(options: AlertHostOptions): AlertHost {
     },
 
     dispose() {
-      // Cleared first: nothing is answered, or delivered, for a host that is
-      // going away.
+      // Cleared first: nothing is answered, spoken or pushed for a host that
+      // is going away.
       parked.clear();
+      speakers.clear();
       stopSettings();
       delivery.dispose();
       manager.dispose();

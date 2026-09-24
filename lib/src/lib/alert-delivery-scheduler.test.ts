@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AlertManager } from './alert-manager';
-import { createAlertDeliveryScheduler, type AlertDelivery, type AlertDeliveryScheduler } from './alert-delivery-scheduler';
+import { createAlertDeliveryScheduler, type AlertDeliveryScheduler } from './alert-delivery-scheduler';
 import { DEFAULT_ALERT_SETTINGS, type AlertSettings } from './alert-settings-model';
 import { engage, leave, REPORT } from './alert-manager-test-utils';
 
@@ -15,13 +15,16 @@ const PANE = 'pane';
 const OTHER = 'other';
 const SPEAK_MS = 10_000;
 const PUSH_MS = 20_000;
+const SETTINGS: AlertSettings = { ...DEFAULT_ALERT_SETTINGS, speakEnabled: true, speakDelayMs: SPEAK_MS, pushEnabled: true, pushDelayMs: PUSH_MS };
+
+type Delivered = { sink: 'speech'; id: string; episodeId: string } | { sink: 'push'; id: string; title: string };
 
 let manager: AlertManager;
 let scheduler: AlertDeliveryScheduler;
-let settings: AlertSettings;
-let delivered: AlertDelivery[];
+let delivered: Delivered[];
 
 const sinks = () => delivered.map((delivery) => delivery.sink);
+const episodeId = (id = PANE) => manager.getState(id).episode!.id;
 const ring = (id = PANE) => manager.notifyFromProtocol(id, REPORT);
 /** Clear the ring with a click, then ring again on fresh output. */
 const ringAgain = () => {
@@ -29,17 +32,18 @@ const ringAgain = () => {
   manager.onData(PANE);
   ring();
 };
+const session = (overrides: object, label = 'pnpm build') => ({ label, overrides });
 
 beforeEach(() => {
   vi.useFakeTimers();
   manager = new AlertManager();
-  settings = { ...DEFAULT_ALERT_SETTINGS, speakEnabled: true, speakDelayMs: SPEAK_MS, pushEnabled: true, pushDelayMs: PUSH_MS };
   delivered = [];
   scheduler = createAlertDeliveryScheduler({
     manager,
-    defaults: () => settings,
-    deliver: (delivery) => void delivered.push(delivery),
+    speak: (id, episode) => void delivered.push({ sink: 'speech', id, episodeId: episode }),
+    push: (id, title) => void delivered.push({ sink: 'push', id, title }),
   });
+  scheduler.setDefaults(SETTINGS);
 });
 
 afterEach(() => {
@@ -51,18 +55,19 @@ afterEach(() => {
 describe('the delivery scheduler', () => {
   it('delivers each sink once per episode, its delay after the episode started', () => {
     ring();
-    const episodeId = manager.getState(PANE).episode!.id;
+    const episode = episodeId();
     vi.advanceTimersByTime(SPEAK_MS - 1);
     expect(delivered).toEqual([]);
     vi.advanceTimersByTime(1);
-    expect(delivered).toEqual([{ sink: 'speech', id: PANE, episodeId }]);
+    expect(delivered).toEqual([{ sink: 'speech', id: PANE, episodeId: episode }]);
     vi.advanceTimersByTime(PUSH_MS - SPEAK_MS);
-    expect(delivered.at(-1)).toEqual({ sink: 'push', id: PANE, episodeId });
+    // Unpublished, the Session is called what its label falls back to.
+    expect(delivered.at(-1)).toEqual({ sink: 'push', id: PANE, title: 'terminal' });
 
     // A second report joining the episode publishes its detail, and delivers
     // nothing more.
     manager.notifyFromProtocol(PANE, { source: 'OSC 9', title: null, body: 'deploy failed' });
-    expect(manager.getState(PANE)).toMatchObject({ episode: { id: episodeId }, notification: { body: 'deploy failed' } });
+    expect(manager.getState(PANE)).toMatchObject({ episode: { id: episode }, notification: { body: 'deploy failed' } });
     vi.advanceTimersByTime(10 * PUSH_MS);
     expect(sinks()).toEqual(['speech', 'push']);
   });
@@ -100,17 +105,16 @@ describe('the delivery scheduler', () => {
     vi.advanceTimersByTime(SPEAK_MS - 1);
     expect(delivered).toEqual([]);
     vi.advanceTimersByTime(1);
-    expect(delivered).toEqual([{ sink: 'speech', id: PANE, episodeId: manager.getState(PANE).episode!.id }]);
+    expect(delivered).toEqual([{ sink: 'speech', id: PANE, episodeId: episodeId() }]);
   });
 
   it('consumes pending work when a sink turns off, and never replays it when it turns back on', () => {
     ring();
     vi.advanceTimersByTime(SPEAK_MS / 2);
-    scheduler.publish('main', { [PANE]: { speakEnabled: false } });
-    scheduler.publish('main', { [PANE]: { speakEnabled: true } });
-    settings = { ...settings, pushEnabled: false };
-    scheduler.recheck();
-    settings = { ...settings, pushEnabled: true };
+    scheduler.publish('main', { [PANE]: session({ speakEnabled: false }) });
+    scheduler.publish('main', { [PANE]: session({ speakEnabled: true }) });
+    scheduler.setDefaults({ ...SETTINGS, pushEnabled: false });
+    scheduler.setDefaults(SETTINGS);
     vi.advanceTimersByTime(10 * PUSH_MS);
     expect(delivered).toEqual([]);
   });
@@ -118,56 +122,77 @@ describe('the delivery scheduler', () => {
   it('keeps a deadline through a later delay edit', () => {
     ring();
     vi.advanceTimersByTime(SPEAK_MS / 2);
-    scheduler.publish('main', { [PANE]: { speakDelayMs: 60_000 } });
+    scheduler.publish('main', { [PANE]: session({ speakDelayMs: 60_000 }) });
     vi.advanceTimersByTime(SPEAK_MS / 2);
     expect(sinks()).toEqual(['speech']);
   });
 
   it('never delivers an episode that began with its sink off', () => {
-    settings = { ...settings, speakEnabled: false, pushEnabled: false };
+    scheduler.setDefaults({ ...SETTINGS, speakEnabled: false, pushEnabled: false });
     ring();
-    settings = { ...settings, speakEnabled: true, pushEnabled: true };
-    scheduler.recheck();
+    scheduler.setDefaults(SETTINGS);
     vi.advanceTimersByTime(10 * PUSH_MS);
     expect(delivered).toEqual([]);
   });
 });
 
-describe('published policy', () => {
-  it('resolves a Session\'s Workspace overrides over the defaults, delay included', () => {
-    settings = { ...settings, speakEnabled: false, pushEnabled: false };
-    scheduler.publish('main', { [PANE]: { speakEnabled: true, speakDelayMs: 2_000 }, [OTHER]: {} });
+describe('published Sessions', () => {
+  it('resolves a Session\'s Workspace overrides over the defaults, delay included, and titles its push', () => {
+    scheduler.setDefaults({ ...SETTINGS, speakEnabled: false, pushEnabled: false });
+    scheduler.publish('main', { [PANE]: session({ pushEnabled: true, pushDelayMs: 2_000 }), [OTHER]: session({}) });
     ring();
     ring(OTHER);
     vi.advanceTimersByTime(2_000);
-    expect(delivered).toEqual([{ sink: 'speech', id: PANE, episodeId: manager.getState(PANE).episode!.id }]);
+    expect(delivered).toEqual([{ sink: 'push', id: PANE, title: 'pnpm build' }]);
   });
 
   it('keeps the last realm to publish a Session, whichever of the two publishes next', () => {
-    scheduler.publish('source', { [PANE]: { speakEnabled: true } });
-    scheduler.publish('target', { [PANE]: { speakEnabled: false } });
+    scheduler.setDefaults({ ...SETTINGS, pushEnabled: false });
+    scheduler.publish('source', { [PANE]: session({ speakEnabled: false }) });
+    scheduler.publish('target', { [PANE]: session({}) });
     // The source lets it go after the target took it: the target's stands.
     scheduler.publish('source', {});
-    expect(scheduler.policy(PANE).speakEnabled).toBe(false);
+    ring();
+    vi.advanceTimersByTime(SPEAK_MS);
+    expect(sinks()).toEqual(['speech']);
+
     // A realm dropping a Session it last published returns it to the defaults.
+    scheduler.publish('target', { [PANE]: session({ speakEnabled: false }) });
     scheduler.publish('target', {});
-    expect(scheduler.policy(PANE).speakEnabled).toBe(true);
+    ringAgain();
+    vi.advanceTimersByTime(SPEAK_MS);
+    expect(sinks()).toEqual(['speech', 'speech']);
   });
 
-  it('keeps a live Session\'s overrides past its realm\'s end, and drops a gone one\'s', () => {
+  it('keeps a live Session\'s publication past its realm, and forgets a removed one\'s', () => {
+    scheduler.publish('main', { [PANE]: session({ pushEnabled: false }), [OTHER]: session({ pushEnabled: false }) });
+    ring(OTHER);
+    manager.remove(OTHER);
+    // The realm is gone, and never published again; a Session reusing the id
+    // is not the one it described.
     ring();
-    scheduler.publish('main', { [PANE]: { pushEnabled: false }, [OTHER]: { pushEnabled: false } });
-    scheduler.endRealm('main');
-    expect(scheduler.policy(PANE).pushEnabled).toBe(false);
-    expect(scheduler.policy(OTHER).pushEnabled).toBe(true);
+    ring(OTHER);
+    vi.advanceTimersByTime(PUSH_MS);
+    expect(delivered.filter((delivery) => delivery.sink === 'push')).toEqual([{ sink: 'push', id: OTHER, title: 'terminal' }]);
   });
 
   it('revalidates what a realm publishes', () => {
-    scheduler.publish('main', { [PANE]: { speakEnabled: false } });
+    scheduler.publish('main', { [PANE]: session({ speakEnabled: false }) });
     scheduler.publish('main', null);
-    scheduler.publish('main', [{ speakEnabled: true }]);
-    expect(scheduler.policy(PANE).speakEnabled).toBe(false);
-    scheduler.publish('main', { [PANE]: { speakEnabled: 'no', speakDelayMs: Number.NaN, pushDelayMs: -5 } });
-    expect(scheduler.policy(PANE)).toMatchObject({ speakEnabled: true, speakDelayMs: SPEAK_MS, pushDelayMs: 1_000 });
+    scheduler.publish('main', [session({ speakEnabled: true })]);
+    ring();
+    vi.advanceTimersByTime(SPEAK_MS);
+    expect(delivered).toEqual([]);
+
+    scheduler.publish('main', {
+      [PANE]: { label: 42, overrides: { speakEnabled: 'no', speakDelayMs: Number.NaN, pushDelayMs: -5 } },
+    });
+    ringAgain();
+    vi.advanceTimersByTime(SPEAK_MS);
+    // The push delay clamps to its floor; the rest fall back to the defaults.
+    expect(delivered).toEqual([
+      { sink: 'push', id: PANE, title: 'terminal' },
+      { sink: 'speech', id: PANE, episodeId: episodeId() },
+    ]);
   });
 });

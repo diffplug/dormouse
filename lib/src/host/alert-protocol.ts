@@ -1,6 +1,5 @@
 import type { AwaitOutcome, AwaitUntil, Engagement, EngagementLapse } from '../lib/alert-manager';
 import type { AlertDeliveryOverrides } from '../lib/alert-delivery-model';
-import type { AlertDelivery } from '../lib/alert-delivery-scheduler';
 import type { AlertSettings } from '../lib/alert-settings-model';
 import type { AlertStateDetail } from '../lib/platform/types';
 
@@ -20,12 +19,28 @@ export type AlertCommand =
   | { op: 'setCommandWatched'; name: string; watched: boolean }
   | { op: 'initializeSettings' | 'updateSettings'; settings: AlertSettings }
   | { op: 'engagement'; state: Engagement; lapse?: EngagementLapse }
-  /** Every Session this realm shows, each with its Workspace's sparse
-   *  overrides: what the host's delivery scheduler cannot know itself. */
-  | { op: 'deliveryPolicy'; overrides: Record<string, AlertDeliveryOverrides> }
+  /** Every Session this realm shows, by id: what the host's delivery
+   *  scheduler cannot know itself. Replaces what the realm published before. */
+  | { op: 'sessions'; sessions: Record<string, AlertSessionInfo> }
   | { op: 'acknowledge' | 'dismiss' | 'toggleTodo' | 'clearTodo'; id: string }
   | { op: 'await'; awaitId: string; id: string; until: AwaitUntil; timeoutMs: number }
   | { op: 'awaitCancel'; awaitId: string };
+
+/** One Session as the realm showing it publishes it (`docs/specs/alert.md` ->
+ *  Alarm settings). */
+export interface AlertSessionInfo {
+  /** The Pane label, which titles its push. */
+  label: string;
+  /** Its Workspace's sparse delivery overrides. */
+  overrides: AlertDeliveryOverrides;
+}
+
+/** A spoken alarm now due. `id` is the Session, so standalone routes it to the
+ *  window showing it. */
+export interface AlertSpeak {
+  id: string;
+  episodeId: string;
+}
 
 /** One await's outcome, to the realm that parked it, under the id it minted. */
 export interface AlertAwaitResult {
@@ -43,8 +58,8 @@ export interface AlertEvents {
   /** The app-global stores' canonical snapshots, to every realm. */
   'alert:watchedCommands': { names: string[] };
   'alert:settings': { settings: AlertSettings };
-  /** A spoken alarm or push now due, to the realm that shows its Session. */
-  'alert:deliver': AlertDelivery;
+  /** A spoken alarm now due, to the realm that shows its Session. */
+  'alert:speak': AlertSpeak;
 }
 
 export const ALERT_EVENTS = [
@@ -52,7 +67,7 @@ export const ALERT_EVENTS = [
   'alert:awaitResult',
   'alert:watchedCommands',
   'alert:settings',
-  'alert:deliver',
+  'alert:speak',
 ] as const satisfies ReadonlyArray<keyof AlertEvents>;
 
 export type AlertEventName = (typeof ALERT_EVENTS)[number];

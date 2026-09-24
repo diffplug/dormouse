@@ -1,55 +1,112 @@
-import type { AlertDelivery } from './alert-delivery-scheduler';
-import { collectDeliveryOverrides } from './alert-delivery-policy';
+import type { AlertSessionInfo } from '../host/alert-protocol';
+import { sameAlertDeliveryOverrides, type AlertDeliveryOverrides } from './alert-delivery-model';
+import { subscribeToAlertDeliveryPolicy } from './alert-delivery-policy';
 import { startAlertSpeech } from './alert-speech';
 import { getPlatform } from './platform';
-import { deriveSessionLabel } from './session-label';
-import { subscribeToWorkspaces } from './workspace-store';
-import { subscribeToWorkspaceSurfaces } from './workspace-surfaces';
+import { getActivitySnapshot, subscribeToActivity } from './session-activity-store';
+import { deriveSessionLabels } from './session-label';
+import { getTerminalPaneStateSnapshot, subscribeToTerminalPaneState } from './terminal-state-store';
+import { getWorkspace, getWorkspacesSnapshot } from './workspace-store';
+import { getWorkspaceSurfacesSnapshot } from './workspace-surfaces';
 
 /**
  * This realm's half of ring delivery (`docs/specs/alert.md` -> Alarm
- * settings). The host decides when a ring is spoken or pushed; the realm tells
- * it what only the renderer knows — which Workspace each Session is in, and
- * that Workspace's overrides — and performs what it is handed, which needs the
- * Pane's label and, for speech, `window.speechSynthesis`.
+ * settings). The host decides when a ring is spoken or pushed, and sends the
+ * push itself; the realm tells it what only the renderer knows — each
+ * Session's Pane label and its Workspace's overrides — and speaks what it is
+ * handed, which needs `window.speechSynthesis`.
  */
 
-/** The running performer, if any. The platform keeps its handlers for the
- *  renderer's lifetime, so this stable one is registered and never removed. */
-let perform: ((delivery: AlertDelivery) => void) | null = null;
-const onDeliver = (delivery: AlertDelivery): void => perform?.(delivery);
+/** How long a label change waits to be published: Claude Code animates its
+ *  title about ten times a second, and only a due push reads the label. */
+export const LABEL_PUBLISH_THROTTLE_MS = 2_000;
+
+const NO_OVERRIDES: AlertDeliveryOverrides = {};
 
 export function startAlertDelivery(): () => void {
   const platform = getPlatform();
   const speaker = startAlertSpeech();
-
-  let published: string | null = null;
-  const publish = (): void => {
-    const overrides = collectDeliveryOverrides();
-    // Every Lath commit and Workspace edit lands here; only a change is news.
-    const key = JSON.stringify(overrides);
-    if (key === published) return;
-    published = key;
-    platform.alertPublishDeliveryPolicy(overrides);
-  };
-  const stops = [subscribeToWorkspaces(publish), subscribeToWorkspaceSurfaces(publish)];
-  publish();
-
-  platform.onAlertDeliver(onDeliver);
-  perform = (delivery) => {
-    if (delivery.sink === 'speech') {
-      speaker.speak(delivery.id, delivery.episodeId);
-      return;
-    }
-    // The Burrow's service reads its own ACL at send time; a host with none
-    // has no link, and an un-enrolled one sends nothing.
-    void platform.burrow?.command('push', { sessionId: delivery.id, title: deriveSessionLabel(delivery.id) })
-      .catch(() => {});
-  };
-
+  const stopPublishing = publishAlertSessions((sessions) => platform.alertPublishSessions(sessions));
+  const stopSpeaking = platform.onAlertSpeak(({ id, episodeId }) => speaker.speak(id, episodeId));
   return () => {
-    perform = null;
-    stops.forEach((stop) => stop());
+    stopSpeaking();
+    stopPublishing();
     speaker.stop();
+  };
+}
+
+/**
+ * Publish every member Session whenever what the host reads of it changed: a
+ * membership or override change at the end of the task that made it, so
+ * disabling a sink consumes its pending work at once, and a label change on a
+ * trailing throttle.
+ */
+function publishAlertSessions(send: (sessions: Record<string, AlertSessionInfo>) => void): () => void {
+  let sent = new Map<string, AlertSessionInfo>();
+  /** The snapshots the last pass read; the same four mean nothing changed. */
+  let inputs: readonly unknown[] = [];
+  /** Sessions whose label may have changed since that pass; `null` for all. */
+  let stale: Set<string> | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let dueAt = 0;
+
+  function schedule(delayMs: number): void {
+    const at = Date.now() + delayMs;
+    if (timer !== null) {
+      if (dueAt <= at) return;
+      clearTimeout(timer);
+    }
+    dueAt = at;
+    timer = setTimeout(flush, delayMs);
+  }
+
+  function labelMayChange(changedId?: string): void {
+    if (changedId === undefined) stale = null;
+    else stale?.add(changedId);
+    schedule(LABEL_PUBLISH_THROTTLE_MS);
+  }
+
+  function flush(): void {
+    timer = null;
+    const surfaces = getWorkspaceSurfacesSnapshot();
+    const next = [surfaces, getWorkspacesSnapshot(), getTerminalPaneStateSnapshot(), getActivitySnapshot()];
+    if (next.every((input, index) => input === inputs[index])) return;
+    inputs = next;
+
+    const derive: string[] = [];
+    for (const ids of surfaces.values()) {
+      for (const id of ids) if (!stale || stale.has(id) || !sent.has(id)) derive.push(id);
+    }
+    const labels = deriveSessionLabels(derive);
+    stale = new Set();
+
+    const published = new Map<string, AlertSessionInfo>();
+    let changed = false;
+    for (const [workspaceId, ids] of surfaces) {
+      const overrides = getWorkspace(workspaceId)?.alertDelivery ?? NO_OVERRIDES;
+      for (const id of ids) {
+        const prior = sent.get(id);
+        const label = labels.get(id) ?? prior!.label;
+        const same = prior !== undefined && prior.label === label && sameAlertDeliveryOverrides(prior.overrides, overrides);
+        published.set(id, same ? prior : { label, overrides });
+        if (!same) changed = true;
+      }
+    }
+    if (!changed && published.size === sent.size) return;
+    sent = published;
+    send(Object.fromEntries(published));
+  }
+
+  const stops = [
+    subscribeToAlertDeliveryPolicy(() => schedule(0)),
+    subscribeToTerminalPaneState(labelMayChange),
+    subscribeToActivity(labelMayChange),
+  ];
+  // Folded into the first membership change when the Wall is still mounting.
+  schedule(0);
+  return () => {
+    stops.forEach((stop) => stop());
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
   };
 }

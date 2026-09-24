@@ -1,9 +1,7 @@
 import type { AwaitHandle, AwaitOptions, AwaitOutcome, Engagement, EngagementLapse } from '../lib/alert-manager';
-import { ALERT_SINKS } from '../lib/alert-delivery-model';
-import type { AlertDelivery } from '../lib/alert-delivery-scheduler';
 import type { AlertSettings } from '../lib/alert-settings-model';
 import type { AlertStateDetail, PlatformAdapter } from '../lib/platform/types';
-import { isAlertEvent, type AlertAwaitResult, type AlertCommand, type AlertEvents } from './alert-protocol';
+import { isAlertEvent, type AlertAwaitResult, type AlertCommand, type AlertEvents, type AlertSpeak } from './alert-protocol';
 
 /**
  * A renderer realm's end of its host's alerts (`lib/src/host/alert-host.ts`),
@@ -19,7 +17,7 @@ export type AlertClientMethods = Required<Pick<
   | 'alertPublishSettings'
   | 'alertDismiss'
   | 'alertEngagement'
-  | 'alertPublishDeliveryPolicy'
+  | 'alertPublishSessions'
   | 'alertAcknowledge'
   | 'alertToggleTodo'
   | 'alertClearTodo'
@@ -27,7 +25,7 @@ export type AlertClientMethods = Required<Pick<
   | 'onAlertState'
   | 'onWatchedCommands'
   | 'onAlertSettings'
-  | 'onAlertDeliver'
+  | 'onAlertSpeak'
 >>;
 
 export interface AlertClient {
@@ -61,7 +59,7 @@ export function createAlertClient(send: (command: AlertCommand) => void): AlertC
   const stateHandlers = new Set<(detail: AlertStateDetail) => void>();
   const watchedHandlers = new Set<(names: string[]) => void>();
   const settingsHandlers = new Set<(settings: AlertSettings) => void>();
-  const deliverHandlers = new Set<(delivery: AlertDelivery) => void>();
+  const speakHandlers = new Set<(speak: AlertSpeak) => void>();
   const awaits = new Map<string, { resolve: (outcome: AwaitOutcome) => void; startedAt: number }>();
   const tag = randomTag();
   let awaitSeq = 0;
@@ -76,7 +74,7 @@ export function createAlertClient(send: (command: AlertCommand) => void): AlertC
     alertDismiss: (id) => send({ op: 'dismiss', id }),
     alertEngagement: (state: Engagement, lapse?: EngagementLapse) =>
       send({ op: 'engagement', state, ...(lapse ? { lapse } : {}) }),
-    alertPublishDeliveryPolicy: (overrides) => send({ op: 'deliveryPolicy', overrides }),
+    alertPublishSessions: (sessions) => send({ op: 'sessions', sessions }),
     alertAcknowledge: (id) => send({ op: 'acknowledge', id }),
     alertToggleTodo: (id) => send({ op: 'toggleTodo', id }),
     alertClearTodo: (id) => send({ op: 'clearTodo', id }),
@@ -104,7 +102,11 @@ export function createAlertClient(send: (command: AlertCommand) => void): AlertC
     onAlertState: (handler) => void stateHandlers.add(handler),
     onWatchedCommands: (handler) => void watchedHandlers.add(handler),
     onAlertSettings: (handler) => void settingsHandlers.add(handler),
-    onAlertDeliver: (handler) => void deliverHandlers.add(handler),
+    // The one handler a realm drops before it goes: the speech performer's.
+    onAlertSpeak: (handler) => {
+      speakHandlers.add(handler);
+      return () => void speakHandlers.delete(handler);
+    },
   };
 
   return {
@@ -139,12 +141,12 @@ export function createAlertClient(send: (command: AlertCommand) => void): AlertC
           if (settings) for (const handler of settingsHandlers) handler(settings);
           break;
         }
-        case 'alert:deliver': {
-          const delivery = data as Partial<AlertDelivery> | null;
-          if (!delivery || !ALERT_SINKS.includes(delivery.sink as AlertDelivery['sink'])) break;
-          if (typeof delivery.id !== 'string' || typeof delivery.episodeId !== 'string') break;
-          const { sink, id, episodeId } = delivery as AlertDelivery;
-          for (const handler of deliverHandlers) handler({ sink, id, episodeId });
+        case 'alert:speak': {
+          const speak = data as Partial<AlertSpeak> | null;
+          if (typeof speak?.id !== 'string' || typeof speak.episodeId !== 'string') break;
+          // Only its own fields reach the handler, whatever else rode along.
+          const { id, episodeId } = speak;
+          for (const handler of speakHandlers) handler({ id, episodeId });
           break;
         }
         default:

@@ -431,12 +431,17 @@ const isString = (value: unknown): value is string => typeof value === 'string';
 export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
   const { send, mgr } = options;
   const sendAlert = <E extends keyof AlertEvents>(event: E, data: AlertEvents[E]) => send(event, data);
-  // A delivery names its Session, so Rust routes it to the window showing it.
-  const alertHost = createAlertHost({ deliver: (delivery) => sendAlert('alert:deliver', delivery) });
+  const alertHost = createAlertHost({
+    // Late-bound: the service below is built on this manager's bridge, and a
+    // push comes due only on a timer, once both exist.
+    push: (sessionId, title) => void service.push(sessionId, title),
+  });
   const alerts = alertHost.manager;
 
   const publishState = (id: string, state: AlertState) => sendAlert('alert:state', { id, ...state });
   const stops = [
+    // It names its Session, so Rust routes it to the window showing it.
+    alertHost.onSpeak((speak) => sendAlert('alert:speak', speak)),
     alertHost.watched.subscribe((names) => sendAlert('alert:watchedCommands', { names })),
     alertHost.settings.subscribe((settings) => sendAlert('alert:settings', { settings })),
     alerts.onStateChange(publishState),

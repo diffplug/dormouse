@@ -112,7 +112,7 @@
 
 **Why detail goes by richness.** The last writer used to win, with one special case keeping a report's text over an exit: an `OSC 9` reading `Build finished: 3 warnings` followed by a bell in the next PTY read showed `Terminal bell`, and `make; printf '\a'` showed `Terminal bell` over `make exited 2` (audit, 2026-09-23). One order covers every pair; equal ranks still take the newer text. A notification deferred behind animation used to be replaced by whatever came next, so the same bell in the next read replaced the message it followed; the deferral now keeps the richer of the two.
 
-**Why an acknowledged state is not summoned again.** Claude Code sends an idle notification about a minute after a turn ends unless it saw input (captured from Claude Code 2.1, 2026-09-23). A user who acknowledged the WATCHING ring with a click, `a`, or a Door was summoned a second time, in a second episode, for the same completion. Output since the acknowledgement is the evidence that something new happened; settles and command exits are fresh by construction, so only reports are held to it.
+**Why an acknowledged state is not summoned again.** Claude Code sends an idle notification about a minute after a turn ends unless it saw input (captured from Claude Code 2.1, 2026-09-23). A user who acknowledged the WATCHING ring with a click, `a`, or a Door was summoned a second time, in a second episode, for the same completion. Output since the acknowledgement is the evidence that something new happened; settles and command exits are fresh by construction, so only reports are held to it. A command start is evidence too: a new command's echo falls in the echo window, so one silent until its report produced no output, and its report only updated TODO (2026-09-23).
 
 ## Alarm settings
 
@@ -120,7 +120,11 @@
 
 **Why the settings ride the WATCHING rule set's seed/broadcast shape.** Each VS Code webview has its own origin and therefore its own `localStorage`, while the `AlertManager` is shared; without a host-authoritative copy, two webviews would each believe their own blob. The one difference is the whole-blob relay: an alarm setting is not a set of independent keys the way a rule list is.
 
-**Why the host schedules delivery.** Each renderer used to run its own watcher over its activity mirror, and every realm boundary cost an alarm (audit, 2026-09-23). A recreated VS Code webview saw a latched ring go quiet-then-ringing and fired it at once, while one still inside its delay was first-observed in the new realm, seeded consumed, and never delivered; a disposed view whose PTYs lived on delivered nothing; standalone's WKWebView throttles or suspends timers when hidden; and a Workspace transfer had to carry, pause and resume receipts. The host sees every episode from its start and outlives every renderer, so first-observation seeding and receipt transfer went away. Only speaking and naming the Pane need a renderer.
+**Why the host schedules delivery.** Each renderer used to run its own watcher over its activity mirror, and every realm boundary cost an alarm (audit, 2026-09-23). A recreated VS Code webview saw a latched ring go quiet-then-ringing and fired it at once, while one still inside its delay was first-observed in the new realm, seeded consumed, and never delivered; a disposed view whose PTYs lived on delivered nothing; standalone's WKWebView throttles or suspends timers when hidden; and a Workspace transfer had to carry, pause and resume receipts, and drop a refused arrival's Activity copy before releasing that pause. The host sees every episode from its start and outlives every renderer, so first-observation seeding and receipt transfer went away.
+
+**Why a push goes from the host, and only speech from a realm.** A push is the walked-away channel, yet performing it in the renderer made it depend on the realm the user had walked away from — suspended when hidden, or disposed, when a VS Code view fell back to titling the push by its command line (2026-09-23). Only `window.speechSynthesis` needs a renderer; a push needs only the Pane label, which the realm publishes ahead of time.
+
+**Why labels wait on a throttle and overrides do not.** Claude Code animates its terminal title about ten times a second (2026-09), and each frame changes the label: publishing every one would cross into the host ten times a second per Session for a value read only when a push comes due. An override change goes at once because disabling a sink must consume its pending push before it fires.
 
 **Why presence gates delivery.** The watcher rechecked only the episode and the setting, so a push went out while the user typed in the next pane, and speech named the pane they were reading (audit, 2026-09-23). Speech is heard in the room, so it only has to spare the pane being looked at; a push reaches a phone, so it waits until the user has left every viewer.
 
@@ -144,7 +148,7 @@ Guarding only completion leaves a stale `start` free to replace the active utter
 
 ## Push notifications
 
-**Why the device list lives under `remote/burrow/`.** It rides the lazily-imported `RemotePairingModalHost` chunk. Performing a push is one Burrow command beside speech in the common bundle, and the device store stays common too, since the settings dialog needs it everywhere.
+**Why the device-list fetch is lazy and its store is not.** The fetch is Burrow machinery and rides the lazily-imported `RemotePairingModalHost` chunk; the store and its refresh fence stay in the common bundle because the Settings dialog reads them in every host, so disarming is one call on the store.
 
 **Why `toPushText` is not `toSpokenText`.** The angle-bracket rule exists only because WebKit's synthesizer wedges on them (Spoken alarms); an OS notification has no such failure, and instead has bidi and zero-width formatting that can visually reorder or hide text.
 
@@ -172,7 +176,7 @@ Guarding only completion leaves a stale `start` free to replace the active utter
 
 ## Live Workspace transfer
 
-Nothing moves because the manager and the delivery scheduler left the standalone windows for the host process (`docs/specs/standalone.rationale.md` → Alerts; Alarm settings). Until the scheduler moved, per-sink receipts travelled in the transfer payload, paused on the source and resumed on the target's `adopt_done`, and a refused arrival had to drop its Activity copy before releasing that pause or its watcher re-armed on a Workspace the window never owned (2026-09).
+Nothing moves because the manager and the delivery scheduler left the standalone windows for the host process (`docs/specs/standalone.rationale.md` → Alerts; Alarm settings).
 
 ## Workspace union
 

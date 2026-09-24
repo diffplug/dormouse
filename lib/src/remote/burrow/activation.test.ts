@@ -1,33 +1,26 @@
 /**
  * The webview's end of the Burrow service (`lib/src/host/remote/service.ts`): it
- * forwards console commands, mirrors the pairing queue, and keeps the push
- * device list. It
- * starts no `BurrowRuntime` of its own and holds no Burrow state — there is no
- * webview-resident mode left to fall back to, so a host with no service behind
- * it gets nothing at all.
+ * forwards console commands, mirrors the pairing queue, and refreshes the push
+ * device list. It starts no `BurrowRuntime` of its own and holds no Burrow state
+ * — there is no webview-resident mode left to fall back to, so a host with no
+ * service behind it gets nothing at all.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BurrowLink } from '../../lib/platform/types';
 
-const pushWatch = vi.hoisted(() => ({
-  invalidated: 0,
-  loads: [] as Array<() => Promise<unknown>>,
+/** The dialog's device store, as this module drives it. */
+const devices = vi.hoisted(() => ({
+  /** Every refresher installed, latest last. */
+  refreshers: [] as Array<() => void>,
+  /** Every `clearPushDevices()`: the disarm's one call. */
+  cleared: 0,
 }));
-vi.mock('./alert-push', () => ({
-  commitPushDevices: async (load: () => Promise<unknown>) => {
-    pushWatch.loads.push(load);
-    await load();
-  },
-  invalidatePushDeviceRefreshes: () => {
-    pushWatch.invalidated += 1;
-  },
-}));
-const pushRefreshers = vi.hoisted(() => ({ current: [] as Array<() => void>, cleared: 0 }));
 vi.mock('../../lib/push-devices', () => ({
-  setPushDevicesRefresher: (refresh: () => void) => void pushRefreshers.current.push(refresh),
+  commitPushDevices: async (load: () => Promise<unknown>) => void (await load()),
+  setPushDevicesRefresher: (refresh: () => void) => void devices.refreshers.push(refresh),
   clearPushDevices: () => {
-    pushRefreshers.cleared += 1;
+    devices.cleared += 1;
   },
 }));
 
@@ -40,10 +33,8 @@ vi.mock('../../lib/platform', () => ({
 
 beforeEach(() => {
   burrowLink = undefined;
-  pushWatch.invalidated = 0;
-  pushWatch.loads.length = 0;
-  pushRefreshers.current.length = 0;
-  pushRefreshers.cleared = 0;
+  devices.refreshers.length = 0;
+  devices.cleared = 0;
   // The console hook lives on globalThis and outlives `vi.resetModules()`;
   // leaving it set would make the next test call the previous module's closure.
   delete (globalThis as { dormouseBurrow?: unknown }).dormouseBurrow;
@@ -308,7 +299,7 @@ describe('burrow bridge mode', () => {
     expect(link.commands.some((c) => c.cmd === 'pushDevices')).toBe(true);
     // And the dialog can ask again later.
     link.commands.length = 0;
-    pushRefreshers.current.at(-1)!();
+    devices.refreshers.at(-1)!();
     await Promise.resolve();
     expect(link.commands.map((c) => c.cmd)).toEqual(['pushDevices']);
   });
@@ -339,14 +330,13 @@ describe('burrow bridge mode', () => {
     link.emit('status', { name: 'status', enrolled: false });
     // The dialog must stop naming devices nothing can push to — including any
     // list still on the wire, which would otherwise put them back on arrival.
-    expect(pushWatch.invalidated).toBe(1);
-    expect(pushRefreshers.cleared).toBe(1);
+    expect(devices.cleared).toBe(1);
     // The refresher stays installed rather than being dropped and put back: the
     // dialog may still open on an un-enrolled machine, where asking is one
     // command that answers `no-burrow`.
-    expect(pushRefreshers.current).toHaveLength(1);
+    expect(devices.refreshers).toHaveLength(1);
     link.commands.length = 0;
-    pushRefreshers.current.at(-1)!();
+    devices.refreshers.at(-1)!();
     await settle();
     expect(link.commands.map((c) => c.cmd)).toEqual(['pushDevices']);
   });

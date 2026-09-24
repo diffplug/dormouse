@@ -72,6 +72,8 @@ export interface PeerLinkDeps {
   handleForwardedCommand(payload: BurrowCommand, from: PeerLinkClient): void;
   /** Broker side: that window is gone, so nothing it asked can be answered. */
   dropForwardedCommands(from: PeerLinkClient): void;
+  /** Broker side: a due alarm push another window's alert host forwarded. */
+  handleForwardedPush(sessionId: string, title: string): void;
   /** Client side: the broker answered a command this window forwarded. */
   deliverCommandResult(payload: BurrowResult): void;
   /** Client side: a Burrow UI event, for this window's webviews to render. */
@@ -723,6 +725,12 @@ function onServerFrame(client: PeerLinkClient, frame: unknown): void {
     deps?.handleForwardedCommand(response.payload, client);
     return;
   }
+  if (response.kind === 'push') {
+    if (typeof response.sessionId === 'string' && typeof response.title === 'string') {
+      deps?.handleForwardedPush(response.sessionId, response.title);
+    }
+    return;
+  }
   if ('id' in response) {
     // Only from the window it was put to: request ids are minted per broker, so
     // a window answering another's id would settle a collection it was never
@@ -862,6 +870,16 @@ export function forwardCommand(payload: BurrowCommand): boolean {
   if (!client || client.destroyed) return false;
   respond({ kind: 'command', payload });
   return true;
+}
+
+/**
+ * Hand one due alarm push to the broker's Burrow. Nothing answers it, and with
+ * no broker it is dropped rather than held: a push late enough to wait for one
+ * is stale (`docs/specs/alert.md` -> Push notifications).
+ */
+export function forwardPush(sessionId: string, title: string): void {
+  if (!client || client.destroyed) return;
+  respond({ kind: 'push', sessionId, title });
 }
 
 async function onClientFrame(socket: Socket, frame: unknown): Promise<void> {

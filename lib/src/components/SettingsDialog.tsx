@@ -237,10 +237,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-export type AlarmSink = AlertSink;
-
 /** Shared by the full dialog and the brief, inert baseboard confirmation. */
-export function AlarmSettingsSection({ sink, preview = false }: { sink: AlarmSink; preview?: boolean }) {
+export function AlarmSettingsSection({ sink, preview = false }: { sink: AlertSink; preview?: boolean }) {
   // The dialog edits application defaults; only the baseboard preview shows the Workspace's effective value.
   const { policy: settings } = useWorkspaceAlertPolicy(preview);
   const push = useSyncExternalStore(subscribeToPushDevices, getPushDevices);

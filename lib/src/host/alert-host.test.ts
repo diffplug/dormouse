@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAlertHost, type AlertHost, type AlertRealm } from './alert-host';
-import type { AlertAwaitResult } from './alert-protocol';
-import type { AlertDelivery } from '../lib/alert-delivery-scheduler';
+import type { AlertAwaitResult, AlertSpeak } from './alert-protocol';
 import { DEFAULT_ALERT_SETTINGS } from '../lib/alert-settings-model';
 import { REPORT } from '../lib/alert-manager-test-utils';
 
@@ -19,7 +18,8 @@ let answers: Array<{ realm: string } & AlertAwaitResult>;
 let resent: string[];
 let watched: string[][];
 let settings: Array<Record<string, unknown>>;
-let delivered: AlertDelivery[];
+let spoken: AlertSpeak[];
+let pushed: Array<[string, string]>;
 
 function realmFor(name: string): AlertRealm {
   return {
@@ -32,8 +32,10 @@ function realmFor(name: string): AlertRealm {
 const from = (name: string, command: unknown) => host.handle(name, command, realmFor(name));
 
 beforeEach(() => {
-  delivered = [];
-  host = createAlertHost({ deliver: (delivery) => void delivered.push(delivery) });
+  spoken = [];
+  pushed = [];
+  host = createAlertHost({ push: (sessionId, title) => void pushed.push([sessionId, title]) });
+  host.onSpeak((speak) => void spoken.push(speak));
   answers = [];
   resent = [];
   watched = [];
@@ -218,51 +220,54 @@ describe('realms', () => {
 
 /**
  * The scheduler runs in the host so that no realm's end can lose or repeat a
- * delivery (`docs/specs/alert.md` -> Alarm settings).
+ * delivery (`docs/specs/alert.md` -> Alarm settings); what it resolves is
+ * `alert-delivery-scheduler.test.ts`.
  */
 describe('delivery', () => {
-  const SPEECH_OFF = { ...DEFAULT_ALERT_SETTINGS, speakEnabled: false, speakDelayMs: 5_000 };
+  const OFF = { ...DEFAULT_ALERT_SETTINGS, speakEnabled: false, speakDelayMs: 5_000, pushEnabled: false, pushDelayMs: 5_000 };
+  const SPEAK_AND_PUSH = { 'pty-1': { label: 'pnpm build', overrides: { speakEnabled: true, pushEnabled: true } } };
 
   beforeEach(() => {
     vi.useFakeTimers();
-    from('main', { op: 'initializeSettings', settings: SPEECH_OFF });
+    from('main', { op: 'initializeSettings', settings: OFF });
   });
 
-  it('takes each realm\'s published overrides over the settings the host holds', () => {
-    from('main', { op: 'deliveryPolicy', overrides: { 'pty-1': { speakEnabled: true } } });
+  it('takes a realm\'s published Sessions, speaks to its listeners, and pushes through its capability', () => {
+    from('main', { op: 'sessions', sessions: SPEAK_AND_PUSH });
     host.manager.notifyFromProtocol('pty-1', REPORT);
-    host.manager.notifyFromProtocol('pty-2', REPORT);
     vi.advanceTimersByTime(5_000);
-    expect(delivered).toEqual([{ sink: 'speech', id: 'pty-1', episodeId: host.manager.getState('pty-1').episode!.id }]);
+    expect(spoken).toEqual([{ id: 'pty-1', episodeId: host.manager.getState('pty-1').episode!.id }]);
+    expect(pushed).toEqual([['pty-1', 'pnpm build']]);
   });
 
-  it('delivers once across its realm\'s reload, whose overrides outlive the gap', () => {
-    from('main', { op: 'deliveryPolicy', overrides: { 'pty-1': { speakEnabled: true } } });
+  it('delivers once across its realm\'s reload, whose publication outlives the gap', () => {
+    from('main', { op: 'sessions', sessions: SPEAK_AND_PUSH });
     host.manager.notifyFromProtocol('pty-1', REPORT);
     vi.advanceTimersByTime(4_000);
     // The reload: the old realm ends, and the new one publishes after the deadline.
     from('main', { op: 'hello' });
     vi.advanceTimersByTime(2_000);
-    from('main', { op: 'deliveryPolicy', overrides: { 'pty-1': { speakEnabled: true } } });
+    from('main', { op: 'sessions', sessions: SPEAK_AND_PUSH });
     vi.advanceTimersByTime(60_000);
-    expect(delivered.map((delivery) => delivery.sink)).toEqual(['speech']);
+    expect(spoken).toHaveLength(1);
+    expect(pushed).toHaveLength(1);
   });
 
   it('rechecks pending work when the settings change', () => {
-    from('main', { op: 'updateSettings', settings: { ...SPEECH_OFF, speakEnabled: true } });
+    from('main', { op: 'updateSettings', settings: { ...OFF, speakEnabled: true } });
     host.manager.notifyFromProtocol('pty-1', REPORT);
-    from('main', { op: 'updateSettings', settings: SPEECH_OFF });
-    from('main', { op: 'updateSettings', settings: { ...SPEECH_OFF, speakEnabled: true } });
+    from('main', { op: 'updateSettings', settings: OFF });
+    from('main', { op: 'updateSettings', settings: { ...OFF, speakEnabled: true } });
     vi.advanceTimersByTime(60_000);
-    expect(delivered).toEqual([]);
+    expect(spoken).toEqual([]);
   });
 
   it('leaves nothing pending once disposed', () => {
-    from('main', { op: 'updateSettings', settings: { ...SPEECH_OFF, speakEnabled: true } });
+    from('main', { op: 'updateSettings', settings: { ...OFF, speakEnabled: true } });
     host.manager.notifyFromProtocol('pty-1', REPORT);
     host.dispose();
     expect(vi.getTimerCount()).toBe(0);
-    host = createAlertHost({ deliver: () => {} });
+    host = createAlertHost({ push: () => {} });
   });
 });
 

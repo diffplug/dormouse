@@ -280,16 +280,13 @@ interface AlertEntry {
   /**
    * A user verb cleared a ring and no output has arrived since, so a report
    * describes the state the user already acknowledged (`dispatchCompletion`).
-   * Opening a ring forgets it.
+   * Opening a ring or starting a command forgets it.
    */
   ackedQuiet: boolean;
   /** The live `OSC 9;4` cycle. Never touches the ring, and the ring never touches it. */
   progress: ActiveProtocolProgress | null;
   commandExitWatch: CommandExitWatch | null;
   pendingCommandLine: string | null;
-  /** The running or last command's display text: all a host with no renderer
-   *  can call the Session (`docs/specs/alert.md` -> Alarm settings). */
-  lastCommand: string | null;
   todo: TodoState;
   notification: ActivityNotification | null;
   /**
@@ -893,7 +890,9 @@ export class AlertManager {
     // Every command boundary silently ends a progress cycle the program never
     // closed, so a later stray clear finds nothing to complete.
     entry.progress = null;
-    entry.lastCommand = resolved.displayCommand;
+    // A new command is news the acknowledgement never saw, even when it stays
+    // silent until its report: its echo fell in the echo window, not output.
+    entry.ackedQuiet = false;
     entry.commandExitWatch = {
       displayCommand: resolved.displayCommand,
       watchKey: resolved.rawCommandLine === null ? null : commandWatchKey(resolved.rawCommandLine),
@@ -1255,11 +1254,6 @@ export class AlertManager {
     };
   }
 
-  /** The running or last command's display text, else null. */
-  lastCommand(id: string): string | null {
-    return this.entries.get(id)?.lastCommand ?? null;
-  }
-
   /** Whether `id` has state to publish: an entry that is not a helper's.
    *  Exactly the ids {@link getAllStates} answers. */
   has(id: string): boolean {
@@ -1398,7 +1392,6 @@ export class AlertManager {
         progress: null,
         commandExitWatch: null,
         pendingCommandLine: null,
-        lastCommand: null,
         todo: false,
         notification: null,
         deferred: null,

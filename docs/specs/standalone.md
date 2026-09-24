@@ -252,8 +252,7 @@ that feeds it: one `AlertManager`, every window a realm under its label
 - **An await's answer carries `forWindow`**, the label that parked it, which
   Rust routes it to — **never a Session `id`**, which would route it to that
   Session's owner, **nor a `requestId`**, which Rust swallows (rationale).
-- **`alert:deliver` carries its Session's `id`**, so Rust routes a due alarm
-  to the window showing it (`docs/specs/alert.md` → Alarm settings).
+- **`alert:speak` carries its Session's `id`**, which Rust routes it by.
 - **Must re-send each listed Session's `alert:state` behind the answer to
   `pty:requestInit`**: a reloaded window and an arriving Workspace learn their
   rings and TODOs nowhere else. A `sync` re-sends every Session's, and Rust

@@ -2,7 +2,6 @@ import { clampAlertDelayMs, type AlertSettings } from './alert-settings-model';
 
 /** The two alarm sinks (`docs/specs/alert.md` -> Alarm settings). */
 export type AlertSink = 'speech' | 'push';
-export const ALERT_SINKS: readonly AlertSink[] = ['speech', 'push'];
 
 /** Missing fields inherit the application default; null voice selects the system voice. */
 export type AlertDeliveryOverrides = Partial<Pick<AlertSettings, 'speakEnabled' | 'speakDelayMs' | 'pushEnabled' | 'pushDelayMs'>> & {
@@ -35,12 +34,10 @@ export function resolveAlertDeliveryPolicy(defaults: AlertSettings, overrides: A
   };
 }
 
-/** Whether `policy` turns `sink` on. */
-export function sinkEnabled(policy: AlertDeliveryPolicy, sink: AlertSink): boolean {
-  return sink === 'speech' ? policy.speakEnabled : policy.pushEnabled;
-}
-
-/** How long after an episode starts `policy` delivers to `sink`. */
-export function sinkDelayMs(policy: AlertDeliveryPolicy, sink: AlertSink): number {
-  return sink === 'speech' ? policy.speakDelayMs : policy.pushDelayMs;
+/** Field by field: the realm's publish dedupe, the host's recheck, and a
+ *  Workspace edit that changes nothing all compare this way. */
+export function sameAlertDeliveryOverrides(a: AlertDeliveryOverrides, b: AlertDeliveryOverrides): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]) as Set<keyof AlertDeliveryOverrides>;
+  for (const key of keys) if (a[key] !== b[key]) return false;
+  return true;
 }

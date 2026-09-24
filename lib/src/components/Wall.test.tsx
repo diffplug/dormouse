@@ -30,6 +30,7 @@ import { getWallHandle, listWallHandles } from './wall/wall-handles';
 import { mountWallHarness, type WallHarness } from './wall/wall-test-utils';
 import { DEFAULT_WORKSPACE_ID } from '../lib/session-types';
 import { clearTerminalActivity, setTerminalActivity } from '../lib/session-activity-store';
+import { createAlertEpisode } from '../lib/alert-episode';
 import { resetTerminalPaneState } from '../lib/terminal-state-store';
 import { setWindowLabel } from '../lib/workspace-store';
 
@@ -119,7 +120,7 @@ describe('Wall on the Lath engine', () => {
     await flush();
     expect(container.querySelector('[data-alert-ring-state]')).toBeNull();
 
-    await act(async () => { setTerminalActivity('pane-a', { status: 'ALERT_RINGING' }); });
+    await act(async () => { setTerminalActivity('pane-a', { status: 'ALERT_RINGING', episode: createAlertEpisode() }); });
 
     const overlays = container.querySelectorAll('[data-alert-ring-state="ringing"]');
     expect(overlays).toHaveLength(1);

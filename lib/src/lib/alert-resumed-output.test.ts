@@ -22,12 +22,8 @@ beforeEach(() => {
   manager.setDeferAlertsUntilQuiet(true);
   manager.setWatchedCommands([WATCHED]);
   runCommand(manager, ID, WATCHED);
-  const settings = { ...DEFAULT_ALERT_SETTINGS, speakEnabled: true, speakDelayMs: DELAY, pushEnabled: true, pushDelayMs: DELAY };
-  scheduler = createAlertDeliveryScheduler({
-    manager,
-    defaults: () => settings,
-    deliver: ({ sink, id, episodeId }) => (sink === 'speech' ? spoken : pushed)(id, episodeId),
-  });
+  scheduler = createAlertDeliveryScheduler({ manager, speak: spoken, push: pushed });
+  scheduler.setDefaults({ ...DEFAULT_ALERT_SETTINGS, speakEnabled: true, speakDelayMs: DELAY, pushEnabled: true, pushDelayMs: DELAY });
 });
 
 afterEach(() => {
@@ -64,8 +60,8 @@ describe('WATCHING output resuming before alarm delivery', () => {
     expect(spoken).not.toHaveBeenCalled();
     expect(pushed).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
-    expect(spoken).toHaveBeenCalledOnce();
-    expect(pushed).toHaveBeenCalledExactlyOnceWith(ID, manager.getState(ID).episode!.id);
+    expect(spoken).toHaveBeenCalledExactlyOnceWith(ID, manager.getState(ID).episode!.id);
+    expect(pushed).toHaveBeenCalledOnce();
   });
 
   it('keeps an inferred ring through a short redraw that never confirms BUSY', () => {

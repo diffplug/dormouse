@@ -270,7 +270,7 @@ Source of truth: `dispatchCompletion` / `setViewer` / `formatCommandExitBody` in
 
 - **The user verbs acknowledge; a withdrawal never does.** Each also drops whatever was held or deferred, except a dismiss with nothing ringing. A ring a withdrawal empties restores the TODO and notification it found.
 - **Any keystroke into the pane clears TODO** (rationale).
-- **Never summon twice for an acknowledged state.** After a user verb clears a ring or drops a held completion, a report arriving before any output opens no ring: it sets `todo`, updates the notification, and publishes. Settles and exits ring as usual, and opening a ring forgets the acknowledgement (rationale). Pinned by `a report about a state acknowledged by %s updates the TODO without summoning again` in `lib/src/lib/alert-manager.test.ts`.
+- **Never summon twice for an acknowledged state.** After a user verb clears a ring or drops a held completion, a report arriving before any output opens no ring: it sets `todo`, updates the notification, and publishes. Settles and exits ring as usual, and opening a ring or starting a command forgets the acknowledgement (rationale). Pinned by `a report about a state acknowledged by %s updates the TODO without summoning again` and `rings a report again once a command starts after the acknowledgement` in `lib/src/lib/alert-manager.test.ts`.
 - Command-mode `Enter` that only enters passthrough does not clear TODO.
 - Removing a WATCHING rule turns watching off wherever it matched. It does not stop the detector, nor clear a progress cycle or a command-exit arm.
 - Destroying the Session clears all alert, TODO, notification, held, progress, and command-exit state.
@@ -279,18 +279,18 @@ Source of truth: `raiseRing` / `withdrawRingSource` / `clearRingForUser` in `lib
 
 ## Live Workspace transfer
 
-**A Session's alert state never moves**: the host's one manager and its delivery scheduler hold it (`docs/specs/standalone.md` → Alerts), and a transfer moves only where its `alert:state` and `alert:deliver` are routed — the source until the mark, then the target, whose collection is answered with every listed Session's state (rationale).
+**A Session's alert state never moves**: the host's one manager and its delivery scheduler hold it (`docs/specs/standalone.md` → Alerts), and a transfer moves only where its `alert:state` and `alert:speak` are routed — the source until the mark, then the target, whose collection is answered with every listed Session's state (rationale).
 
 - **Never spawn or kill over a departure, a refused arrival, or a hand-back**: a spawn starts the host's entry over and a kill or reap removes it, and releasing a Session is neither. Pinned by `never spawns or kills over an arrival's live Sessions` in `standalone/src/workspace-move.test.ts`.
 - **A replay never feeds the manager**, whose host parse already did.
-- **Awaits and pending deliveries survive a transfer**; a seen command stays seen, so it arrives armed; the destination's viewers establish their own engagement, and its Wall publishes the Workspace's overrides (Alarm settings).
+- **Awaits survive a transfer**; a seen command stays seen, so it arrives armed; the destination's viewers establish their own engagement.
 - **Must discard this window's Activity copy on any target failure**, mount or no mount: the source goes on showing the Session. Pinned by `discards this window's copy of the alert state when adopt_done is refused before the Wall mounts` in `standalone/src/workspace-move.test.ts`.
 
 Source of truth: `teardownSession` in `lib/src/lib/terminal-lifecycle.ts`; `planArrival` / `discardArrival` in `standalone/src/workspace-move.ts`. Pinned by `lib/src/lib/terminal-lifecycle.release.test.ts` and `standalone/src/workspace-move.test.ts`.
 
 ## Alarm settings
 
-Application alarm defaults live beside the WATCHING rule set, edited in **Settings** (below). **Every other store reached from Settings stays its own — never fold one into `AlertSettings`**, which is relayed wholesale to the host. **A host revalidates the blob before installing it** (`normalizeAlertSettings`): a webview must never be able to hand it a NaN or an absurd timer. Both stores run the same two classes in either host (`lib/src/lib/watched-command-host.ts`, `lib/src/lib/alert-settings-host.ts`), bound to its manager by `createAlertHost`; the shape, its defaults and its validation are the platform-free `lib/src/lib/alert-settings-model.ts`.
+Application alarm defaults live beside the WATCHING rule set, edited in **Settings** (below). **Every other store reached from Settings stays its own — never fold one into `AlertSettings`**, which is relayed wholesale to the host. Both stores run the same two classes in either host (`lib/src/lib/watched-command-host.ts`, `lib/src/lib/alert-settings-host.ts`), bound to its manager by `createAlertHost`; the shape, its defaults and its validation are the platform-free `lib/src/lib/alert-settings-model.ts`.
 
 | Field | Meaning |
 |---|---|
@@ -304,33 +304,34 @@ The speech row's managed-voice link follows
 
 Rules:
 
-- **Validate and clamp every field on read *and* on write** (`normalizeAlertSettings`), so a hand-edited `localStorage` blob or a hostile message can never install a `NaN` or absurd timer. Unknown keys are dropped and missing keys defaulted, so the blob evolves additively with no version field. `cfg.alert` owns the inactivity default; `DEFAULT_ALERT_SETTINGS` owns the sink and boolean defaults.
+- **Validate and clamp every field on read *and* on write, the host included** (`normalizeAlertSettings`), so a hand-edited `localStorage` blob or a hostile message can never install a `NaN` or absurd timer. Unknown keys are dropped and missing keys defaulted, so the blob evolves additively with no version field. `cfg.alert` owns the inactivity default; `DEFAULT_ALERT_SETTINGS` owns the sink and boolean defaults.
 - **Distribution follows the WATCHING rule set's seed/broadcast shape** (rationale), except that an edit **relays the whole blob** rather than a per-command delta, so every webview resolves workspace overrides against the same defaults. Wire contract and host revalidation: `docs/specs/transport.md`.
-- **Must keep detection settings application-wide**, applied to each host's one manager: the standalone sidecar's and the VS Code extension host's.
+- **Must keep detection settings application-wide**, applied to each host's one manager.
 
 **Must resolve delivery policy from application defaults, then sparse Workspace overrides.** Speech/push enable and delay can override independently; `speakVoice` selects a local engine voice URI, missing inherits the system-voice default, and explicit null selects the system voice. Missing or unavailable voices fall back to the engine default without erasing the saved choice. Unknown/invalid overrides are dropped; finite delays share the application clamp.
 
 **Must persist overrides in the Workspace's `PersistedSession.alertDelivery` in both hosts**, preserving them through rename, reorder, save, and live move. Reset removes overrides, restoring inheritance. A pane resolves its current parent Workspace; a pane without membership uses application defaults.
 
-**The host decides when to deliver, in `createAlertHost` beside the manager; the realm showing the Session performs it** (rationale):
+**The host decides when to deliver, in `createAlertHost` beside the manager** (rationale):
 
-- **Must deliver at most once per sink per episode**, independently per Session, due at the episode's start plus the Session's delay; a source joining the episode delivers nothing, and the ring clearing consumes what it had pending.
-- **Must recheck at the deadline, and consume a deadline that fails, never retrying it**: the sink still on; **speech only while the Session is not engaged** (Engagement); **push only while no viewer is present** (rationale).
-- **Disabling consumes pending work immediately; enabling never replays an episode**, one that began disabled included. Delay edits do not move existing deadlines; speech reads the current voice at engine admission.
-- **Each realm publishes every Session it shows with its Workspace's overrides** (`deliveryPolicy`) on each membership or override change. The host revalidates them, resolves them over its settings, and keeps each Session's last publisher's; an unpublished Session uses the defaults. **A realm's end keeps a live Session's overrides**, so a reload or a disposed VS Code view loses none.
-- **Must hand a due delivery to the realm showing its Session** as `alert:deliver { sink, id, episodeId }`, which speaks or pushes the Pane label (below). **With no such realm — a disposed VS Code view whose PTYs live on — the host pushes, titled by the Session's running or last command, and skips speech** (`docs/specs/vscode.md` → Workspaces); standalone reaps a PTY no window owns.
+- **Must deliver at most once per sink per episode**, due at the episode's start plus the Session's delay; a source joining the episode delivers nothing, and the ring clearing consumes what it had pending.
+- **Must recheck at the deadline, and consume a deadline that fails, never retrying it**: **speech only while the Session is not engaged** (Engagement); **push only while no viewer is present**, VS Code's focused, active window counting as one (`docs/specs/vscode.md` → Workspaces; rationale).
+- **Disabling consumes pending work immediately; enabling never replays an episode**, one that began disabled included. Delay edits never move a deadline; speech reads the current voice at engine admission.
+- **Each realm publishes every Session it shows** — Pane label and Workspace overrides — as one `sessions` op replacing its last: membership and override changes at the end of their task, label changes on a `LABEL_PUBLISH_THROTTLE_MS` trailing throttle (rationale), nothing unchanged resent. **The host keeps each Session's last publisher's entry until the Session is removed**, a realm's end included; an unpublished Session uses the defaults.
+- **A due push goes from the host's own Burrow** (Push notifications), titled by the published label, whether or not a realm still shows the Session; **a due spoken alarm goes to the realm showing it** as `alert:speak`, and with none is not spoken.
 
-Source of truth: `normalizeAlertDeliveryOverrides` / `resolveAlertDeliveryPolicy` in `lib/src/lib/alert-delivery-model.ts`; `createAlertDeliveryScheduler` in `lib/src/lib/alert-delivery-scheduler.ts`; `startAlertDelivery` in `lib/src/lib/alert-delivery.ts`; `getSessionAlertPolicy` / `collectDeliveryOverrides` in `lib/src/lib/alert-delivery-policy.ts`; `setWorkspaceAlertDelivery` in `lib/src/lib/workspace-store.ts`. Pinned by `lib/src/lib/alert-delivery-scheduler.test.ts`, `lib/src/lib/alert-delivery.test.ts`, and `delivery` in `lib/src/host/alert-host.test.ts`.
+Source of truth: `normalizeAlertDeliveryOverrides` / `resolveAlertDeliveryPolicy` in `lib/src/lib/alert-delivery-model.ts`; `createAlertDeliveryScheduler` in `lib/src/lib/alert-delivery-scheduler.ts`; `startAlertDelivery` / `LABEL_PUBLISH_THROTTLE_MS` in `lib/src/lib/alert-delivery.ts`; `getSessionAlertPolicy` in `lib/src/lib/alert-delivery-policy.ts`; `setWorkspaceAlertDelivery` in `lib/src/lib/workspace-store.ts`. Pinned by `lib/src/lib/alert-delivery-scheduler.test.ts`, `lib/src/lib/alert-delivery.test.ts`, and `delivery` in `lib/src/host/alert-host.test.ts`.
+
+Neither sink ever carries the ringing `ActivityNotification`.
 
 | Contract | Speech | Push |
 |---|---|---|
-| Gate | After `speakDelayMs`, the Session not engaged; a missing backend is a silent no-op. | After `pushDelayMs`, no viewer present; sent only by an enrolled Burrow. |
-| Payload | Pane label via `toSpokenText`; fallback `terminal`. | Same label via `toPushText`, plus a fixed body; fallback `terminal`. |
-| Never payload | The ringing `ActivityNotification`. | The ringing `ActivityNotification`. |
-| Delivery identity | The host's episode receipt plus native attempt identity; renderer-local `speaking` / `spoken`. | HTTP push tagged by Session id, so a newer ring replaces the prior notification. |
+| Performed by | The realm showing the Session; a missing backend is a silent no-op. | The host's own Burrow, only while enrolled. |
+| Payload | Pane label via `toSpokenText`; fallback `terminal`. | The label the realm last published, via `toPushText`, plus a fixed body; fallback `terminal`. |
+| Delivery identity | The episode the host named, rechecked at engine admission, plus native attempt identity; renderer-local `speaking` / `spoken`. | HTTP push tagged by Session id, so a newer ring replaces the prior notification. |
 | After delivery | Clearing the ring cuts off speech. | **Never recall** — another push would only replace one stale notice with another. |
 | Failure | A refused or unavailable engine produces no marker. | Warn on non-2xx, partial, or zero delivery; **never retry** stale alarms. |
-| Authority | The renderer invokes `window.speechSynthesis`. | The webview names Session/title; the Burrow selects active ACL devices, the Relay intersects subscriptions. |
+| Authority | The renderer invokes `window.speechSynthesis`. | The host names Session and title; the Burrow selects active ACL devices, the Relay intersects subscriptions. |
 
 Source of truth: `AlertSettings` in `lib/src/lib/alert-settings.ts` (renderer mirror, persisted at `dormouse:alert-settings`); `lib/src/lib/alert-settings-host.ts`.
 
@@ -349,14 +350,14 @@ Source of truth: `toSpokenText` / `startAlertSpeech` in `lib/src/lib/alert-speec
 
 ### Push notifications
 
-**A due push is one `push { sessionId, title }` command from the realm showing the Session to the Burrow service**, titled by the Pane label; *sending* needs the enrollment and the ACL, which only the Burrow holds, so `sendPush` runs in the service's process and touches no DOM or store. **A webview cannot choose recipients:** it names the Session and what to call it; the service reads its own active ACL at send time. A `push` arriving with no Burrow running is not sent. **Keep the device list under `remote/burrow/`**, inside the lazily-imported `RemotePairingModalHost` chunk, so a host without `enableBurrow` never fetches it (rationale).
+**A due push is one `BurrowService.push` call in the host's process** (VS Code: `docs/specs/vscode.md` → Workspaces). `sendPush` touches no DOM or store. **No webview sends a push or picks its recipients.** Without a Burrow nothing is sent; a failure is warned, never thrown. **The device-list fetch rides the lazily-imported `RemotePairingModalHost` chunk** (`activation.ts`); its store and refresh fence stay common (rationale).
 
-- **The label is sanitized by `toPushText` at send time, in the delivery half, and not by `toSpokenText`'s rule** (rationale). It keeps angle brackets and instead strips control characters and the Unicode bidi and zero-width format characters (including the Arabic letter mark); the cap counts code points, so a cut never ships half a surrogate pair. `toPushText` is only this sink's limit and fallback over `boundedPushText` in `remote-lib-common/src/security/push.ts`.
+- **The label is sanitized by `toPushText` at send time, in the Burrow, and not by `toSpokenText`'s rule** (rationale). It keeps angle brackets and instead strips control characters and the Unicode bidi and zero-width format characters (including the Arabic letter mark); the cap counts code points, so a cut never ships half a surrogate pair. `toPushText` is only this sink's limit and fallback over `boundedPushText` in `remote-lib-common/src/security/push.ts`.
 - **The Burrow bounds, then seals; the worker re-bounds at the render sink.** Title, body, and tag are sealed to each recipient's own Client static and the Relay forwards ciphertext, so the second pass runs in `lib/src/remote/pocket-app/sw.ts`, which imports the *same* `boundedPushText` rather than mirroring it (`docs/specs/remote-security-model.md` -> Push sealing).
 - **The Burrow names its targets; the Relay rejects a send that does not.** Targets are the Burrow's *active* ACL records, read at send time so a revocation during the delay takes effect, and the Relay intersects them with its own subscriptions (rationale). **One sealed envelope per recipient** — a Client static is not a group key — so a send names each `deliveryId` beside the ciphertext only that phone can open, **clamped to `MAX_PUSH_QUERY_DELIVERY_IDS`** because the route refuses the whole POST past it. The Burrow does **not** ask which devices are subscribed first (rationale).
 - **The settings dialog re-reads the device list when it opens; the transient preview never refreshes.** The list is the Burrow's join of the Relay's subscriptions against its own ACL labels. **A disarmed enrolled gate invalidates every in-flight refresh and clears the list**, so nothing already on the wire can repopulate the dialog with phones there is no longer anything to push to.
 
-Source of truth: `commitPushDevices` / `invalidatePushDeviceRefreshes` in `lib/src/remote/burrow/alert-push.ts`; `sendPush` / `toPushText` in `lib/src/remote/burrow/push-delivery.ts`; `refreshPushDevicesNow` / `clearPushDevices` / `resetPushDevices` in `lib/src/lib/push-devices.ts`.
+Source of truth: `push` in `lib/src/host/remote/service.ts`; `pushAlert` in `vscode-ext/src/burrow.ts`; `sendPush` / `toPushText` in `lib/src/remote/burrow/push-delivery.ts`; `commitPushDevices` / `refreshPushDevicesNow` / `clearPushDevices` / `resetPushDevices` in `lib/src/lib/push-devices.ts`.
 
 ### Settings dialog
 
@@ -448,3 +449,8 @@ Notification text is untrusted terminal output.
 - Wherever notification text appears in visible UI or accessible labels, it is plain text, and layout must tolerate long text, CJK, RTL, combining marks, and emoji without pushing fixed controls out of bounds. Sanitized terminal-supplied `OSC 0` / `OSC 2` / `OSC 9` text also participates in normal Pane-label derivation, and that label may reach the opt-in speech and push channels — **each after its own second pass**, since the two fail in different ways (`toSpokenText` under Spoken alarms, `toPushText` under Push notifications).
 
 Robustness: Sessions ring independently; an exited Session may keep ringing until acknowledged, dismissed, or destroyed; ringing must not rely on color alone.
+
+## Future
+
+- **Presence across VS Code windows.** A window's presence holds back only its own extension host's pushes; the peer link could share it.
+- **OS-level idle time.** A user working in another application counts as away; the machine's input idle time could hold a push until they leave the computer.

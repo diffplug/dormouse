@@ -12,6 +12,7 @@ import {
   type SidecarSurfaceBridge,
 } from './sidecar-entry';
 import { ASK_BUDGET_MS, type BurrowAsk } from './service-protocol';
+import { BurrowService } from './service';
 import { AlertManager, type AlertState } from '../../lib/alert-manager';
 import { REPORT } from '../../lib/alert-manager-test-utils';
 import { createAlertClient } from '../alert-client';
@@ -777,22 +778,19 @@ describe('the sidecar host', () => {
     expect(result).toEqual({ awaitId: 'await-1', forWindow: 'ws-2', outcome: expect.objectContaining({ cause: 'bell' }) });
   });
 
-  // A delivery carries its Session's `id`, so Rust routes it to the window
-  // showing that Session; the policy it was due under is each window's own.
-  it('sends a due delivery naming its Session, under the policy its window published', () => {
+  // A spoken alarm names its Session, so Rust routes it to the window showing
+  // it; a push goes to this process's Burrow, whichever window shows it.
+  it('sends a due spoken alarm naming its Session, and a due push to its own Burrow', () => {
     vi.useFakeTimers();
-    try {
-      command('main', { op: 'initializeSettings', settings: { speakDelayMs: 1_000 } });
-      command('main', { op: 'deliveryPolicy', overrides: { 'pty-1': { speakEnabled: true } } });
-      host.alerts.notifyFromProtocol('pty-1', REPORT);
-      host.alerts.notifyFromProtocol('pty-2', REPORT);
-      vi.advanceTimersByTime(1_000);
-      expect(out.filter((line) => line.event === 'alert:deliver').map((line) => line.data)).toEqual([
-        { sink: 'speech', id: 'pty-1', episodeId: host.alerts.getState('pty-1').episode!.id },
-      ]);
-    } finally {
-      vi.useRealTimers();
-    }
+    const push = vi.spyOn(BurrowService.prototype, 'push').mockResolvedValue();
+    command('main', { op: 'initializeSettings', settings: { speakEnabled: true, speakDelayMs: 1_000, pushEnabled: true, pushDelayMs: 1_000 } });
+    command('main', { op: 'sessions', sessions: { 'pty-1': { label: 'pnpm build', overrides: {} } } });
+    host.alerts.notifyFromProtocol('pty-1', REPORT);
+    vi.advanceTimersByTime(1_000);
+    expect(out.filter((line) => line.event === 'alert:speak').map((line) => line.data)).toEqual([
+      { id: 'pty-1', episodeId: host.alerts.getState('pty-1').episode!.id },
+    ]);
+    expect(push).toHaveBeenCalledExactlyOnceWith('pty-1', 'pnpm build');
   });
 
   it('ignores an alert command no host stamped', () => {

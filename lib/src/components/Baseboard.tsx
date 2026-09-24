@@ -15,7 +15,8 @@ import { clsx } from 'clsx';
 import { chromeButton, DOOR_TAB_CLASS, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from './design';
 import { AlertRingInset } from './alert-ring';
 import { TODO_PILL_BODY } from './TodoPillBody';
-import { SettingsDialog, type AlarmSink } from './SettingsDialog';
+import { SettingsDialog } from './SettingsDialog';
+import type { AlertSink } from '../lib/alert-delivery-model';
 import { SettingsPreview } from './SettingsPreview';
 import { Door } from './Door';
 import { DoorNotepadPopover } from './DoorNotepadPopover';
@@ -156,10 +157,10 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   const [doorNotepad, setDoorNotepad] = useState<
     { id: string; rect: DOMRect; sourceNotice: SourceNotice | null } | null
   >(null);
-  const [settingsPreview, setSettingsPreview] = useState<{ sink: AlarmSink; anchor: HTMLElement; sequence: number } | null>(null);
+  const [settingsPreview, setSettingsPreview] = useState<{ sink: AlertSink; anchor: HTMLElement; sequence: number } | null>(null);
   const previewSequence = useRef(0);
   const closeSettingsPreview = useCallback(() => setSettingsPreview(null), []);
-  const toggleAlarm = (sink: AlarmSink, anchor: HTMLElement) => {
+  const toggleAlarm = (sink: AlertSink, anchor: HTMLElement) => {
     const patch = sink === 'speech'
       ? { speakEnabled: !settings.speakEnabled }
       : { pushEnabled: !settings.pushEnabled };

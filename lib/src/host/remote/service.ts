@@ -56,7 +56,6 @@ import {
   type PairingQueueEvent,
   type PairingQueueItem,
   type PushDevicesResult,
-  type PushParams,
   type PushSendSummary,
   type BurrowConsoleStatus,
   type SetupQrResult,
@@ -272,8 +271,6 @@ export class BurrowService {
         return this.#serialize(() => this.#approve(params as ApproveParams));
       case 'deny':
         return this.#deny(params as DenyParams);
-      case 'push':
-        return this.#push(params as PushParams);
       case 'pushTest':
         return this.#pushTest();
       case 'pushDevices':
@@ -500,23 +497,25 @@ export class BurrowService {
     return pending;
   }
 
-  async #push(params: PushParams): Promise<Record<string, never>> {
+  /**
+   * One due alarm push, from the alert host in this same process — the
+   * sidecar's, or VS Code's through `pushAlert` in `vscode-ext/src/burrow.ts`
+   * (`docs/specs/alert.md` -> Push notifications). No Burrow means no ACL and
+   * no Relay to post to, so nothing is sent. Never rejects: a push that fails is
+   * logged, since a dead push must never break the alert path.
+   */
+  async push(sessionId: string, title: string): Promise<void> {
     const deps = this.#pushDeps();
-    // No Burrow means no ACL and no Relay to post to; the ring is simply not
-    // pushed. Nothing to report to the webview, which cannot act on it either.
-    if (deps) {
-      // A push that fails must never break the alert path.
-      await sendPush(deps, params.sessionId, params.title).catch((error: unknown) => {
-        console.warn('[burrow] push notification failed', error);
-      });
-    }
-    return {};
+    if (!deps) return;
+    await sendPush(deps, sessionId, title).catch((error: unknown) => {
+      console.warn('[burrow] push notification failed', error);
+    });
   }
 
   /**
    * The Settings dialog's "Send test push".
    *
-   * The inverse of {@link #push} in the one way that matters: nothing is
+   * The inverse of {@link push} in the one way that matters: nothing is
    * swallowed. A test whose whole purpose is to report an outcome must let the
    * failure through, so an unenrolled machine, an unreachable Relay, and a
    * fan-out that reached nobody all read differently at the button.
@@ -639,9 +638,9 @@ export class BurrowService {
   /**
    * Tell the webviews whether there is a Burrow at all. Everything they do *for*
    * one — announcing that the directory may have changed on every pane-state,
-   * activity, and focus change — costs a
-   * crossing per event on a machine that may never enroll, so they arm on this
-   * and idle without it (`lib/src/remote/burrow/enrolled-gate.ts`).
+   * activity, and focus change — costs a crossing per event on a machine that
+   * may never enroll, so they arm on this and idle without it
+   * (`lib/src/remote/burrow/enrolled-gate.ts`).
    *
    * `enrolled` means the same thing as the `status` command's field of that
    * name, which is how a webview seeds before any event arrives.

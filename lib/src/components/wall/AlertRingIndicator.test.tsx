@@ -9,7 +9,7 @@ import {
   clearAllAlertSpeechStates,
   setAlertSpeechState,
 } from '../../lib/alert-speech-state';
-import type { AlertEpisode } from '../../lib/alert-episode';
+import { createAlertEpisode, type AlertEpisode } from '../../lib/alert-episode';
 import { clearTerminalActivity, setTerminalActivity } from '../../lib/session-activity-store';
 import { AlertRingIndicator } from './AlertRingIndicator';
 
@@ -18,8 +18,8 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 let container: HTMLDivElement;
 let root: Root;
 
-/** The store hydrates a missing episode itself; a test that needs a stable id says so. */
-function ring(episode?: AlertEpisode): void {
+/** A new ring, as the host publishes it; a test that needs a stable id passes its episode. */
+function ring(episode: AlertEpisode = createAlertEpisode()): void {
   act(() => setTerminalActivity('pty-1', { status: 'ALERT_RINGING', episode }));
 }
 

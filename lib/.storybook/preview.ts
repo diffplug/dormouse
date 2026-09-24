@@ -25,6 +25,7 @@ import {
   type PushDevicesState,
   type TerminalPaneState,
 } from '../src/lib/terminal-registry';
+import { createAlertEpisode } from '../src/lib/alert-episode';
 import { computeDynamicPalette } from '../src/lib/themes/dynamic-palette';
 import {
   clearAllAlertSpeechStates,
@@ -224,6 +225,20 @@ function resolveStorybookTheme(requestedThemeName: string | undefined) {
   return DEFAULT_STORYBOOK_THEME;
 }
 
+/**
+ * Prime one Session's Activity as its host would publish it: ringing always
+ * carries an episode. An id already ringing keeps its own, so a re-prime does
+ * not restart the arrival burst.
+ */
+function primeActivity(id: string, state: Partial<ActivityState>): void {
+  const current = getActivity(id);
+  const next = { ...current, ...state };
+  const episode = next.status !== 'ALERT_RINGING'
+    ? null
+    : state.episode ?? (current.status === 'ALERT_RINGING' ? current.episode : null) ?? createAlertEpisode();
+  setTerminalActivity(id, { ...next, episode });
+}
+
 const preview: Preview = {
   parameters: {
     layout: 'fullscreen',
@@ -406,14 +421,14 @@ const preview: Preview = {
           }
 
           for (const [id, state] of Object.entries(primedSessionState?.byId ?? {})) {
-            setTerminalActivity(id, { ...getActivity(id), ...state });
+            primeActivity(id, state);
           }
 
           const sessionIds = [...getActivitySnapshot().keys()];
           primedSessionState?.byIndex?.forEach((state, index) => {
             const id = sessionIds[index];
             if (id) {
-              setTerminalActivity(id, { ...getActivity(id), ...state });
+              primeActivity(id, state);
             }
           });
 
