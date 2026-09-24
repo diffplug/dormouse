@@ -436,7 +436,7 @@ export interface ResolvedCommandStart {
 /**
  * Turn a `commandStart` event plus the command line staged by the preceding
  * `commandLine` event into the fields a command run needs. Shared by the
- * terminal-state reducer and the alert manager's command-exit track so the
+ * terminal-state reducer and the alert manager's command-exit alerting so the
  * source resolution and display summarization exist in one place.
  *
  * `fallbackTitle` supplies the display label when the shell reported no command

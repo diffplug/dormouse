@@ -3,7 +3,12 @@ import { isRecord } from './is-record';
 import { isToolKeyScope, type ToolKeyScope } from './platform/tool-types';
 import type { SessionStatus } from './alert-manager';
 import { hasShellInputControls } from 'dor/commands/shell-quote';
-import { ACTIVITY_NOTIFICATION_SOURCES, type ActivityNotification, type TodoState } from './alert-manager';
+import {
+  ACTIVITY_NOTIFICATION_SOURCES,
+  type ActivityNotification,
+  type ActivityNotificationSource,
+  type TodoState,
+} from './alert-manager';
 
 /** Only TODO/detail restore; `status` is diagnostic and never resurrects a ring. */
 export interface PersistedAlertState {
@@ -45,18 +50,29 @@ export interface PersistedPane {
 }
 
 /**
+ * The notification sources a build from before the tolerant reader knows. Such
+ * a build rejects a whole session that carries any other, so the writer keeps
+ * to these until no strict pre-tolerant build reads the file
+ * (`docs/specs/alert.md` -> Public State).
+ */
+const STRICT_READER_NOTIFICATION_SOURCES: readonly ActivityNotificationSource[] = Object.freeze([
+  'OSC 9', 'OSC 9;4', 'OSC 99', 'OSC 777', 'BEL', 'COMMAND_EXIT',
+]);
+
+/**
  * Narrow Activity down to what may reach disk. The parameter deliberately uses
  * the persisted shape: live `AlertState` is structurally assignable to it, and
  * this explicit projection keeps `JSON.stringify` from writing extra live or
  * stale fields (`docs/specs/alert.md` -> Public State, "Persist only").
  */
 export function toPersistedAlertState(state: PersistedAlertState): PersistedAlertState {
+  const notification = state.notification ?? null;
   return {
     status: state.status,
     todo: state.todo,
-    // Builds before the `WATCHING` source reject a whole session that carries
-    // it, so that detail stays live-only (`docs/specs/alert.md` -> Public State).
-    notification: state.notification?.source === 'WATCHING' ? null : state.notification ?? null,
+    notification: notification !== null && STRICT_READER_NOTIFICATION_SOURCES.includes(notification.source)
+      ? notification
+      : null,
   };
 }
 
@@ -149,12 +165,19 @@ interface PersistedSessionV3Input {
 
 // --- Validation guards (reject untrusted blobs) ---
 
+// `status` is diagnostic and `notification` optional detail: an unknown value
+// of either — a newer build's — never rejects the pane (`normalizePersistedAlert`).
 function isPersistedAlertShape(value: unknown): boolean {
   if (value === null) return true;
   if (!isRecord(value)) return false;
-  if (typeof value.status !== 'string') return false;
-  if (typeof value.todo !== 'boolean') return false;
-  return value.notification === undefined || value.notification === null || isActivityNotificationShape(value.notification);
+  return typeof value.status === 'string' && typeof value.todo === 'boolean';
+}
+
+/** Read a notification this build cannot validate as none, keeping the TODO. */
+function normalizePersistedAlert(alert: PersistedAlertState): PersistedAlertState {
+  const notification: unknown = alert.notification;
+  if (notification === undefined || notification === null || isActivityNotificationShape(notification)) return alert;
+  return { ...alert, notification: null };
 }
 
 function isActivityNotificationShape(value: unknown): boolean {
@@ -274,7 +297,11 @@ function normalizeSessionV3(session: PersistedSessionV3Input): PersistedSession 
       resumeCommand: _retiredResumeCommand,
       ...carried
     } = pane as PersistedPaneInput & { scrollback?: unknown; resumeCommand?: unknown };
-    return { ...carried, untouched: pane.untouched ?? false };
+    return {
+      ...carried,
+      untouched: pane.untouched ?? false,
+      ...(carried.alert ? { alert: normalizePersistedAlert(carried.alert) } : {}),
+    };
   });
   return {
     ...(rest as Omit<PersistedSession, 'panes' | 'surfaceRefs' | 'surfaceRefsNext'>),

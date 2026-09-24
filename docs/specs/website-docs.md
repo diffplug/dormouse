@@ -71,10 +71,10 @@ Content invariants, enforced by the public-doc lint where mechanically
 checkable and by review otherwise:
 
 - The alert explanation matches [alert.md](alert.md). Terminal notification
-  protocols and unattended command exit are independent, zero-configuration
-  tracks; WATCHING is opt-in per command name and needs `OSC 633` / `OSC 133`
-  shell integration. The guide must not promise that every quiet Pane is
-  automatically marked done after a fixed interval.
+  protocols and unattended command exit ring with zero configuration,
+  independent of WATCHING, which is opt-in per command name and needs
+  `OSC 633` / `OSC 133` shell integration. The guide must not promise that
+  every quiet Pane is automatically marked done after a fixed interval.
 - Pocket is described only as shipped or explicitly in development, and never
   presents WebRTC staged in [remote-api.md](remote-api.md) as available.
 - Browser Surfaces are explained to match [dor-browser.md](dor-browser.md)

@@ -5,7 +5,7 @@ import { AlertManager, type AwaitHandle, type AwaitOutcome } from '../../lib/src
 import { WatchedCommandHost } from '../../lib/src/lib/watched-command-host';
 import { AlertSettingsHost } from '../../lib/src/lib/alert-settings-host';
 import {
-  collectTerminalSemanticEvents,
+  applyTerminalEvents,
   collectTerminalProtocolResponses,
   type TerminalColorProvider,
   type TerminalColors,
@@ -236,12 +236,7 @@ alertManager.onStateChange((id, state) => {
 // This is module-level so it runs regardless of webview visibility.
 ptyManager.addCallbacks({
   onData(id: string, data: string) {
-    const before = alertManager.getState(id).status;
     getOwnerPtyStream(id).write(data);
-    const after = alertManager.getState(id).status;
-    if (before !== after) {
-      log.info(`[alert-feed] ${id}: ${before} → ${after}`);
-    }
   },
   onExit(id: string, exitCode: number) {
     log.info(`[alert-feed] ${id}: PTY exited`);
@@ -291,8 +286,9 @@ function createOwnerPtyStream(id: string): ProcessedPtyStream {
     colorProvider: themeColorProvider,
     onEvents(events) {
       // Reports and command boundaries in stream order, so a precmd
-      // notification is judged after the finish written before it.
-      alertManager.applyTerminalEvents(id, events);
+      // notification is judged after the finish written before it; the
+      // webviews get the same timestamped semantic events.
+      const semanticEvents = applyTerminalEvents(alertManager, id, events);
       // Tool announcements belong to renderer state this process cannot reach,
       // so the router forwards them to the webviews. A start retires the
       // previous command's announcement and state in the owning webview (null).
@@ -306,7 +302,6 @@ function createOwnerPtyStream(id: string): ProcessedPtyStream {
           for (const listener of toolAnnounceListeners) listener(id, event.kind === 'toolAnnounce' ? event.announce : null);
         }
       }
-      const semanticEvents = collectTerminalSemanticEvents(events);
       if (semanticEvents.length > 0) {
         for (const listener of semanticEventsListeners) listener(id, semanticEvents);
       }

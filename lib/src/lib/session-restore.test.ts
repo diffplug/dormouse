@@ -415,6 +415,27 @@ describe('restoreSession alert seeding', () => {
     expect(alertSeed.mock.calls).toEqual([['shell', alert]]);
   });
 
+  it('keeps a pane whose notification this build cannot read, seeding its TODO without the detail', () => {
+    const saved = {
+      version: 3,
+      panes: [
+        {
+          id: 'newer',
+          title: 'Newer',
+          cwd: '/tmp',
+          untouched: false,
+          alert: { status: 'ALERT_RINGING', todo: true, notification: { source: 'FROM_A_NEWER_BUILD', title: 'x', body: null } },
+        },
+      ],
+    } as unknown as PersistedSession;
+    const platform = createPlatform(saved);
+    const alertSeed = vi.fn();
+    platform.alertSeed = alertSeed;
+
+    expect(restoreSession(platform)?.paneIds).toEqual(['newer']);
+    expect(alertSeed.mock.calls).toEqual([['newer', { status: 'ALERT_RINGING', todo: true, notification: null }]]);
+  });
+
   it('restores without a seeding host', () => {
     const saved: PersistedSession = {
       version: 3,

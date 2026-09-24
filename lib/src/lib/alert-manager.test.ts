@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AlertManager, AWAIT_GRACE_MS, DEFAULT_ALERT_STATE, MAX_AWAIT_TIMEOUT_MS } from './alert-manager';
-import type { AwaitHandle, AwaitOutcome, CompletionEvent } from './alert-manager';
-import { applyTerminalProtocolEvents, collectTerminalSemanticEvents, TerminalProtocolParser } from './terminal-protocol';
+import type { ActivityNotification, AwaitHandle, AwaitOutcome, CompletionEvent } from './alert-manager';
+import {
+  applyTerminalEvents,
+  applyTerminalProtocolEvents,
+  collectTerminalSemanticEvents,
+  TerminalProtocolParser,
+} from './terminal-protocol';
 import { cfg } from '../cfg';
 import { toPersistedAlertState } from './session-types';
 
@@ -27,6 +32,18 @@ describe('AlertManager in isolation', () => {
       { type: 'commandLine', commandLine },
       { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
     ]);
+  }
+
+  /** Run `commandLine` seen and then left: armed, so its exit rings once it
+   *  has outlasted `cfg.alert.commandExitMinRuntime`. */
+  function armCommandExit(id: string, commandLine = 'pnpm build'): void {
+    manager.attend(id);
+    runCommand(id, commandLine);
+    manager.clearAttention(id);
+  }
+
+  function finishCommand(id: string, exitCode = 0): void {
+    manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode }]);
   }
 
   /**
@@ -56,7 +73,7 @@ describe('AlertManager in isolation', () => {
       manager.clearTodo(HELPER);
       manager.seed(HELPER, { todo: true });
       manager.onResize(HELPER);
-      manager.applyTerminalSemanticEvents(HELPER, [{ type: 'commandFinish', exitCode: 1 }]);
+      finishCommand(HELPER, 1);
       manager.onExit(HELPER, 0);
       vi.advanceTimersByTime(10_000);
 
@@ -111,7 +128,7 @@ describe('AlertManager in isolation', () => {
       runCommand(HELPER, 'npm run build');
       manager.setHelper(HELPER, false);
       vi.advanceTimersByTime(30_000);
-      manager.applyTerminalSemanticEvents(HELPER, [{ type: 'commandFinish', exitCode: 0 }]);
+      finishCommand(HELPER);
       expect(manager.getState(HELPER).status).toBe('WATCHING_DISABLED');
 
       // The ordinary seen rule applies from promotion on.
@@ -119,7 +136,7 @@ describe('AlertManager in isolation', () => {
       manager.attend(HELPER);
       manager.clearAttention(HELPER);
       vi.advanceTimersByTime(30_000);
-      manager.applyTerminalSemanticEvents(HELPER, [{ type: 'commandFinish', exitCode: 0 }]);
+      finishCommand(HELPER);
       expect(manager.getState(HELPER).status).toBe('ALERT_RINGING');
     });
 
@@ -261,6 +278,14 @@ describe('AlertManager in isolation', () => {
     vi.advanceTimersByTime(3_000);
   }
 
+  /** One output chunk a second for `ms`, which never lets the Session go quiet. */
+  function heartbeat(id: string, ms: number): void {
+    for (let elapsed = 0; elapsed < ms; elapsed += 1_000) {
+      vi.advanceTimersByTime(1_000);
+      manager.onData(id);
+    }
+  }
+
   /** Register a claimant that records every event it is offered and answers `claims`. */
   function recordingClaimant(id: string, claims: boolean): CompletionEvent[] {
     const seen: CompletionEvent[] = [];
@@ -288,25 +313,20 @@ describe('AlertManager in isolation', () => {
     } else if (source === 'report') {
       manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'needs input' });
     } else {
-      manager.attend(id);
-      runCommand(id);
-      manager.clearAttention(id);
+      armCommandExit(id);
       vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
-      manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+      finishCommand(id);
     }
     expect(manager.getState(id).status).toBe('ALERT_RINGING');
   }
 
-  it.each(['watching', 'report', 'exit'] as const)('a %s ring sets TODO the moment it opens', (source) => {
-    const id = `ring-sets-todo-${source}`;
-    ringFrom(id, source);
-    expect(manager.getState(id).todo).toBe(true);
-  });
-
-  it('a WATCHING ring carries its own detail', () => {
-    const id = 'watching-detail';
+  it('a WATCHING ring sets TODO the moment it opens, with its own detail', () => {
+    const id = 'watching-sets-todo';
     driveToRinging(id);
-    expect(manager.getState(id).notification).toEqual({ source: 'WATCHING', title: 'longtask went quiet', body: null });
+    expect(manager.getState(id)).toMatchObject({
+      todo: true,
+      notification: { source: 'WATCHING', title: 'longtask went quiet', body: null },
+    });
   });
 
   it.each(['watching', 'report', 'exit'] as const)('attending or dismissing a %s ring leaves its TODO', (source) => {
@@ -315,15 +335,19 @@ describe('AlertManager in isolation', () => {
       ringFrom(id, source);
       manager[verb](id);
       expect(manager.getState(id)).toMatchObject({ episode: null, todo: true });
+      expect(manager.getState(id).status).not.toBe('ALERT_RINGING');
       expect(manager.getState(id).notification).not.toBeNull();
     }
   });
 
-  it.each(['watching', 'report', 'exit'] as const)('toggling TODO on a %s ring turns it off with its detail', (source) => {
-    const id = `toggle-ringing-${source}`;
-    ringFrom(id, source);
-    manager.toggleTodo(id);
-    expect(manager.getState(id)).toMatchObject({ episode: null, todo: false, notification: null });
+  it.each(['watching', 'report', 'exit'] as const)('toggling or clearing TODO on a %s ring turns it off with its detail', (source) => {
+    for (const verb of ['toggleTodo', 'clearTodo'] as const) {
+      const id = `todo-off-ringing-${source}-${verb}`;
+      ringFrom(id, source);
+      manager[verb](id);
+      expect(manager.getState(id)).toMatchObject({ episode: null, todo: false, notification: null });
+      expect(manager.getState(id).status).not.toBe('ALERT_RINGING');
+    }
   });
 
   it('an unattended WATCHING ring leaves its TODO across a restart, without its live-only detail', () => {
@@ -341,29 +365,27 @@ describe('AlertManager in isolation', () => {
     }
   });
 
-  it('a later generic BEL never replaces richer detail on the ring', () => {
-    const id = 'bel-after-osc9';
-    manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Build finished: 3 warnings' });
-    manager.notifyFromProtocol(id, { source: 'BEL', title: 'Terminal bell', body: null });
-    expect(manager.getState(id).notification).toEqual({ source: 'OSC 9', title: null, body: 'Build finished: 3 warnings' });
-  });
+  describe('detail joining a ring', () => {
+    const text: ActivityNotification = { source: 'OSC 9', title: null, body: 'Build finished: 3 warnings' };
+    const otherText: ActivityNotification = { source: 'OSC 777', title: 'Second', body: null };
+    const bell: ActivityNotification = { source: 'BEL', title: 'Terminal bell', body: null };
+    const exit: ActivityNotification = { source: 'COMMAND_EXIT', title: 'Command finished', body: 'make exited 2' };
 
-  it('an exit joining a generic BEL shows the exit code', () => {
-    const id = 'exit-after-bel';
-    manager.attend(id);
-    runCommand(id, 'make');
-    manager.clearAttention(id);
-    vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
-    manager.notifyFromProtocol(id, { source: 'BEL', title: 'Terminal bell', body: null });
-    manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 2 }]);
-    expect(manager.getState(id).notification).toEqual({ source: 'COMMAND_EXIT', title: 'Command finished', body: 'make exited 2' });
-  });
-
-  it('equally rich detail joining a ring replaces what it shows', () => {
-    const id = 'latest-at-equal-rank';
-    manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'First' });
-    manager.notifyFromProtocol(id, { source: 'OSC 777', title: 'Second', body: null });
-    expect(manager.getState(id).notification).toEqual({ source: 'OSC 777', title: 'Second', body: null });
+    it.each([
+      ['a bell never replaces text', text, bell, text],
+      ['an exit code replaces a bell', bell, exit, exit],
+      ['an exit code never replaces text', text, exit, text],
+      ['equally rich text replaces the older', text, otherText, otherText],
+    ] as const)('%s', (_label, first, joining, shown) => {
+      const id = `detail-rank-${_label}`;
+      armCommandExit(id, 'make');
+      vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
+      for (const detail of [first, joining]) {
+        if (detail.source === 'COMMAND_EXIT') finishCommand(id, 2);
+        else manager.notifyFromProtocol(id, detail);
+      }
+      expect(manager.getState(id)).toMatchObject({ status: 'ALERT_RINGING', notification: shown });
+    });
   });
 
   it.each(['attend', 'dismissAlert'] as const)(
@@ -520,7 +542,7 @@ describe('AlertManager in isolation', () => {
 
   it.each([
     ['commandStart', (id: string) => runCommand(id, 'other-tool')],
-    ['commandFinish', (id: string) => manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 130 }])],
+    ['commandFinish', (id: string) => finishCommand(id, 130)],
     ['promptStart', (id: string) => manager.applyTerminalSemanticEvents(id, [{ type: 'promptStart' }])],
     ['PTY exit', (id: string) => manager.onExit(id, 137)],
   ] as const)('%s silently ends a progress cycle the program abandoned', (boundary, cross) => {
@@ -546,18 +568,6 @@ describe('AlertManager in isolation', () => {
     runCommand(id, 'cargo build --release');
     for (const update of updates) manager.updateProtocolProgress(id, update);
     expect(manager.getState(id).notification).toMatchObject({ source: 'OSC 9;4', title });
-  });
-
-  it('attending a ring clears it and leaves the TODO behind', () => {
-    const id = 'attention-clears-ring';
-
-    // A protocol ring needs no WATCHING, so status falls back to
-    // WATCHING_DISABLED once attention clears the latch.
-    manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Build finished' });
-    expect(manager.getState(id).status).toBe('ALERT_RINGING');
-
-    manager.attend(id);
-    expect(manager.getState(id)).toMatchObject({ status: 'WATCHING_DISABLED', todo: true });
   });
 
   it('dismissing a Session with nothing ringing changes nothing and notifies no one', () => {
@@ -652,16 +662,11 @@ describe('AlertManager in isolation', () => {
   it('arms and rings when an attended command loses attention before exiting', () => {
     const id = 'command-exit';
 
-    manager.attend(id);
-    manager.applyTerminalSemanticEvents(id, [
-      { type: 'commandLine', commandLine: 'pnpm build' },
-      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
-    ]);
-
-    vi.advanceTimersByTime(15_000);
+    armCommandExit(id);
     expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
 
-    manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+    vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
+    finishCommand(id);
     expect(manager.getState(id)).toMatchObject({
       status: 'ALERT_RINGING',
       todo: true,
@@ -677,12 +682,8 @@ describe('AlertManager in isolation', () => {
       if (_id === id && state.episode) seen.push(state.episode.id);
     });
 
-    manager.attend(id);
-    manager.applyTerminalSemanticEvents(id, [
-      { type: 'commandLine', commandLine: 'pnpm build' },
-      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
-    ]);
-    vi.advanceTimersByTime(15_000);
+    armCommandExit(id);
+    vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
 
     applyTerminalProtocolEvents(manager, id, [
       { kind: 'notification', notification: { source: 'BEL', title: 'Terminal bell', body: null } },
@@ -693,10 +694,9 @@ describe('AlertManager in isolation', () => {
 
     // The exit joins the ring the bell opened: one enriched summons, so no
     // consumer keyed on the episode may deliver a second time.
-    manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+    finishCommand(id);
     const again = manager.getState(id);
     expect(again.status).toBe(rung.status);
-    expect(again.notification).toMatchObject({ source: 'COMMAND_EXIT' });
     expect(again.episode?.id).toBe(rung.episode?.id);
     expect(new Set(seen)).toEqual(new Set([rung.episode!.id]));
   });
@@ -728,13 +728,8 @@ describe('AlertManager in isolation', () => {
   it('finishes an armed command-exit watch when the PTY exits without commandFinish', () => {
     const id = 'command-exit-pty-exit';
 
-    manager.attend(id);
-    manager.applyTerminalSemanticEvents(id, [
-      { type: 'commandLine', commandLine: 'exec pnpm build' },
-      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
-    ]);
-
-    vi.advanceTimersByTime(15_000);
+    armCommandExit(id, 'exec pnpm build');
+    vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
     expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
 
     manager.onExit(id, 1);
@@ -749,13 +744,10 @@ describe('AlertManager in isolation', () => {
     const id = 'command-exit-pty-exit-unarmed';
 
     manager.attend(id);
-    manager.applyTerminalSemanticEvents(id, [
-      { type: 'commandLine', commandLine: 'exec true' },
-      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
-    ]);
+    runCommand(id, 'exec true');
 
     manager.onExit(id, 0);
-    vi.advanceTimersByTime(15_000);
+    vi.advanceTimersByTime(cfg.alert.userAttention);
 
     expect(manager.getState(id)).toMatchObject({
       status: 'WATCHING_DISABLED',
@@ -764,20 +756,14 @@ describe('AlertManager in isolation', () => {
     });
   });
 
-  it('does not ring command-exit alerts for commands shorter than the attention window', () => {
+  it('does not ring the exit of a command shorter than the minimum runtime', () => {
     const id = 'quick-command-exit';
 
-    manager.attend(id);
-    manager.applyTerminalSemanticEvents(id, [
-      { type: 'commandLine', commandLine: 'git status' },
-      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
-    ]);
-    manager.clearAttention(id);
-
-    vi.advanceTimersByTime(1_000);
+    armCommandExit(id, 'git status');
+    vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime - 1);
     expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
 
-    manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+    finishCommand(id);
     expect(manager.getState(id)).toMatchObject({
       status: 'WATCHING_DISABLED',
       todo: false,
@@ -788,19 +774,15 @@ describe('AlertManager in isolation', () => {
   it('disarms command-exit alerts when the user returns before finish', () => {
     const id = 'command-exit-return';
 
-    manager.attend(id);
-    manager.applyTerminalSemanticEvents(id, [
-      { type: 'commandLine', commandLine: 'pnpm test' },
-      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
-    ]);
-    vi.advanceTimersByTime(15_000);
+    armCommandExit(id, 'pnpm test');
+    vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
     expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
 
     manager.attend(id);
     expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
 
     vi.advanceTimersByTime(1_000);
-    manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+    finishCommand(id);
     expect(manager.getState(id)).toMatchObject({
       status: 'WATCHING_DISABLED',
       todo: false,
@@ -815,13 +797,10 @@ describe('AlertManager in isolation', () => {
     manager.setWatchedCommands(['claude']);
     expect(manager.getState(id).watchingEnabled).toBe(false);
 
-    manager.applyTerminalSemanticEvents(id, [
-      { type: 'commandLine', commandLine: 'claude --print hello' },
-      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
-    ]);
+    runCommand(id, 'claude --print hello');
     expect(manager.getState(id).watchingEnabled).toBe(true);
 
-    manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+    finishCommand(id);
     expect(manager.getState(id).watchingEnabled).toBe(false);
   });
 
@@ -829,10 +808,7 @@ describe('AlertManager in isolation', () => {
     const id = 'rule-finish-notify';
     manager.setWatchedCommands(['claude']);
 
-    manager.applyTerminalSemanticEvents(id, [
-      { type: 'commandLine', commandLine: 'claude' },
-      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
-    ]);
+    runCommand(id, 'claude');
     expect(manager.getState(id).watchingEnabled).toBe(true);
 
     // Subscribe after the command has started so we only capture the finish.
@@ -841,7 +817,7 @@ describe('AlertManager in isolation', () => {
       if (_id === id) watching.push(state.watchingEnabled);
     });
 
-    manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+    finishCommand(id);
 
     expect(manager.getState(id).watchingEnabled).toBe(false);
     // The off-transition must reach subscribers, not just live getState reads.
@@ -852,10 +828,7 @@ describe('AlertManager in isolation', () => {
     const id = 'rule-watch-key';
     manager.setWatchedCommands(['claude']);
 
-    manager.applyTerminalSemanticEvents(id, [
-      { type: 'commandLine', commandLine: 'FOO=1 env BAR=2 /usr/local/bin/claude --resume' },
-      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
-    ]);
+    runCommand(id, 'FOO=1 env BAR=2 /usr/local/bin/claude --resume');
     expect(manager.getState(id).watchingEnabled).toBe(true);
   });
 
@@ -871,10 +844,7 @@ describe('AlertManager in isolation', () => {
     const id = 'rule-miss';
     manager.setWatchedCommands(['claude']);
 
-    manager.applyTerminalSemanticEvents(id, [
-      { type: 'commandLine', commandLine: 'git status' },
-      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
-    ]);
+    runCommand(id, 'git status');
     expect(manager.getState(id).watchingEnabled).toBe(false);
   });
 
@@ -890,12 +860,7 @@ describe('AlertManager in isolation', () => {
   it('applies a newly added rule to every session already running that command', () => {
     const a = 'rule-live-a';
     const b = 'rule-live-b';
-    for (const id of [a, b]) {
-      manager.applyTerminalSemanticEvents(id, [
-        { type: 'commandLine', commandLine: 'claude' },
-        { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
-      ]);
-    }
+    for (const id of [a, b]) runCommand(id, 'claude');
     expect(manager.getState(a).watchingEnabled).toBe(false);
     expect(manager.getState(b).watchingEnabled).toBe(false);
 
@@ -914,7 +879,7 @@ describe('AlertManager in isolation', () => {
 
     // The command exiting turns WATCHING off; the ring it already raised is
     // the whole point of watching, so it has to survive.
-    manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+    finishCommand(id);
     expect(manager.getState(id)).toMatchObject({
       status: 'ALERT_RINGING',
       watchingEnabled: false,
@@ -977,7 +942,7 @@ describe('AlertManager in isolation', () => {
   it('silences a latched WATCHING ring when its rule is removed after command exit', () => {
     const id = 'exited-ring-dies-with-rule';
     driveToRinging(id);
-    manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+    finishCommand(id);
 
     expect(manager.getState(id)).toMatchObject({
       status: 'ALERT_RINGING',
@@ -1012,27 +977,22 @@ describe('AlertManager in isolation', () => {
     expect(completions).toEqual([{ kind: 'settled' }]);
   });
 
-  it('clearing TODO clears a WATCHING ring with it', () => {
-    const id = 'clear-unattended-watching';
+  it('dismissing a WATCHING ring keeps the tail of its run from ringing again', () => {
+    const id = 'dismiss-resets-tail';
+    // Keep the ring through the tail's output: deferral would withdraw it.
+    manager.setDeferAlertsUntilQuiet(false);
     driveToRinging(id);
-    expect(manager.getState(id)).toMatchObject({ status: 'ALERT_RINGING', todo: true });
-
-    manager.clearTodo(id);
-    expect(manager.getState(id)).toMatchObject({
-      status: 'NOTHING_TO_SHOW', watchingEnabled: true, todo: false, notification: null,
-    });
     driveToBusy(id);
+
+    manager.dismissAlert(id);
     settle();
-    expect(manager.getState(id).status).toBe('ALERT_RINGING');
+    expect(manager.getState(id)).toMatchObject({ status: 'NOTHING_TO_SHOW', episode: null });
   });
 
   it('drives the detector on an unwatched Session without showing it or ringing', () => {
     const id = 'unwatched-detector';
     manager.setWatchedCommands(['claude']);
-    manager.applyTerminalSemanticEvents(id, [
-      { type: 'commandLine', commandLine: 'git log' },
-      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
-    ]);
+    runCommand(id, 'git log');
     manager.clearAttention(id);
 
     driveToBusy(id);
@@ -1053,10 +1013,7 @@ describe('AlertManager in isolation', () => {
 
   it('shows the live detector state when a rule is enabled mid-command', () => {
     const id = 'enable-rule-mid-busy';
-    manager.applyTerminalSemanticEvents(id, [
-      { type: 'commandLine', commandLine: 'claude' },
-      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
-    ]);
+    runCommand(id, 'claude');
     manager.clearAttention(id);
 
     driveToBusy(id);
@@ -1093,7 +1050,7 @@ describe('AlertManager in isolation', () => {
   it('keeps a latched ring through post-exit output and drops it with the rule', () => {
     const id = 'latched-ring-vs-live-detector';
     driveToRinging(id);
-    manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+    finishCommand(id);
 
     // The detector keeps running after the command ends, so shell-prompt output
     // can drive a whole extra busy/settle cycle. Neither the output nor the
@@ -1126,26 +1083,6 @@ describe('AlertManager in isolation', () => {
     expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
   });
 
-  it('keeps richer protocol detail when a command exit joins its ring', () => {
-    const id = 'command-exit-protocol-wins';
-
-    manager.attend(id);
-    manager.applyTerminalSemanticEvents(id, [
-      { type: 'commandLine', commandLine: 'pnpm build' },
-      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
-    ]);
-    vi.advanceTimersByTime(15_000);
-
-    manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Build finished' });
-    manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
-
-    expect(manager.getState(id)).toMatchObject({
-      status: 'ALERT_RINGING',
-      todo: true,
-      notification: { source: 'OSC 9', title: null, body: 'Build finished' },
-    });
-  });
-
   // --- Configurable inactivity timeout (`docs/specs/alert.md` -> Alarm settings) ---
 
   describe('setInactivityTimeoutMs', () => {
@@ -1154,10 +1091,7 @@ describe('AlertManager in isolation', () => {
       manager.setInactivityTimeoutMs(3_000);
 
       manager.attend(id);
-      manager.applyTerminalSemanticEvents(id, [
-        { type: 'commandLine', commandLine: 'pnpm build' },
-        { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
-      ]);
+      runCommand(id);
 
       vi.advanceTimersByTime(2_999);
       expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
@@ -1170,19 +1104,14 @@ describe('AlertManager in isolation', () => {
       const id = 'short-runtime-gate';
       manager.setInactivityTimeoutMs(3_000);
 
-      manager.attend(id);
-      runCommand(id, 'git status');
-      manager.clearAttention(id);
-
+      armCommandExit(id, 'git status');
       vi.advanceTimersByTime(4_000);
-      manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+      finishCommand(id);
       expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
 
-      runCommand(id, 'git status');
-      manager.attend(id);
-      manager.clearAttention(id);
+      armCommandExit(id, 'git status');
       vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
-      manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+      finishCommand(id);
       expect(manager.getState(id)).toMatchObject({
         status: 'ALERT_RINGING',
         notification: { source: 'COMMAND_EXIT', body: 'git status exited 0' },
@@ -1193,10 +1122,7 @@ describe('AlertManager in isolation', () => {
       const id = 're-arm';
 
       manager.attend(id);
-      manager.applyTerminalSemanticEvents(id, [
-        { type: 'commandLine', commandLine: 'pnpm build' },
-        { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
-      ]);
+      runCommand(id);
 
       vi.advanceTimersByTime(10_000);
       expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
@@ -1218,12 +1144,9 @@ describe('AlertManager in isolation', () => {
       manager.setInactivityTimeoutMs(-1);
 
       manager.attend(id);
-      manager.applyTerminalSemanticEvents(id, [
-        { type: 'commandLine', commandLine: 'pnpm build' },
-        { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
-      ]);
+      runCommand(id);
 
-      vi.advanceTimersByTime(14_999);
+      vi.advanceTimersByTime(cfg.alert.userAttention - 1);
       expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
       vi.advanceTimersByTime(1);
       expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
@@ -1324,15 +1247,11 @@ describe('AlertManager in isolation', () => {
 
     it('does not defer an authoritative command-exit alert', () => {
       const id = 'immediate-command-exit';
-      manager.attend(id);
-      manager.applyTerminalSemanticEvents(id, [
-        { type: 'commandLine', commandLine: 'pnpm build' },
-        { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
-      ]);
-      vi.advanceTimersByTime(15_000);
+      armCommandExit(id);
+      vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
       driveToBusy(id);
 
-      manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+      finishCommand(id);
       expect(manager.getState(id)).toMatchObject({
         status: 'ALERT_RINGING',
         todo: true,
@@ -1342,16 +1261,12 @@ describe('AlertManager in isolation', () => {
 
     it('folds a pending terminal notification into an immediate command-exit ring', () => {
       const id = 'command-exit-with-pending-notification';
-      manager.attend(id);
-      manager.applyTerminalSemanticEvents(id, [
-        { type: 'commandLine', commandLine: 'pnpm build' },
-        { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
-      ]);
-      vi.advanceTimersByTime(15_000);
+      armCommandExit(id);
+      vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
       driveToBusy(id);
       manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Build done' });
 
-      manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+      finishCommand(id);
 
       expect(manager.getState(id)).toMatchObject({
         status: 'ALERT_RINGING',
@@ -1363,16 +1278,13 @@ describe('AlertManager in isolation', () => {
 
     it('carries a deferred terminal notification across a command-boundary reset', () => {
       const id = 'defer-notification-across-finish';
-      manager.applyTerminalSemanticEvents(id, [
-        { type: 'commandLine', commandLine: 'pnpm build' },
-        { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
-      ]);
+      runCommand(id);
       driveToBusy(id);
       manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Done' });
 
       // This unarmed command finish resets the detector but is not itself an
       // alert; the pending terminal notification still owns its quiet deadline.
-      manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+      finishCommand(id);
       expect(manager.getState(id)).toMatchObject({
         status: 'WATCHING_DISABLED',
         todo: false,
@@ -1415,11 +1327,7 @@ describe('AlertManager in isolation', () => {
       driveToBusy(id);
       manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'build failed' });
 
-      // A heartbeat every second keeps moving the quiet deadline.
-      for (let t = 1_000; t < cfg.alert.deferCeiling; t += 1_000) {
-        vi.advanceTimersByTime(1_000);
-        manager.onData(id);
-      }
+      heartbeat(id, cfg.alert.deferCeiling - 1_000);
       vi.advanceTimersByTime(999);
       expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
       vi.advanceTimersByTime(1);
@@ -1433,40 +1341,14 @@ describe('AlertManager in isolation', () => {
       const id = 'defer-ceiling-latest';
       driveToBusy(id);
       manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'First' });
-      for (let t = 1_000; t < cfg.alert.deferCeiling; t += 1_000) {
-        vi.advanceTimersByTime(1_000);
-        manager.onData(id);
-        if (t === 20_000) manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Second' });
-      }
+      heartbeat(id, 20_000);
+      manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Second' });
+      heartbeat(id, cfg.alert.deferCeiling - 21_000);
       vi.advanceTimersByTime(1_000);
       expect(manager.getState(id)).toMatchObject({
         status: 'ALERT_RINGING',
         notification: { source: 'OSC 9', title: null, body: 'Second' },
       });
-    });
-
-    it('carries the deferral ceiling across a live transfer', () => {
-      const id = 'defer-ceiling-transfer';
-      driveToBusy(id);
-      manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Done' });
-      for (let t = 0; t < 20_000; t += 1_000) {
-        vi.advanceTimersByTime(1_000);
-        manager.onData(id);
-      }
-      const snapshot = manager.pauseForTransfer(id)!;
-      const target = new AlertManager();
-      try {
-        target.resumeFromTransfer(id, JSON.parse(JSON.stringify(snapshot)));
-        for (let t = 20_000; t < cfg.alert.deferCeiling - 1_000; t += 1_000) {
-          vi.advanceTimersByTime(1_000);
-          target.onData(id);
-        }
-        expect(target.getState(id).status).toBe('WATCHING_DISABLED');
-        vi.advanceTimersByTime(1_000);
-        expect(target.getState(id).status).toBe('ALERT_RINGING');
-      } finally {
-        target.dispose();
-      }
     });
 
     it('coalesces repeated protocol alerts to the latest detail', () => {
@@ -1480,6 +1362,20 @@ describe('AlertManager in isolation', () => {
         source: 'OSC 777',
         title: 'Second',
         body: null,
+      });
+    });
+
+    it('keeps richer deferred detail over a later bell', () => {
+      const id = 'defer-richer-protocol';
+      driveToBusy(id);
+      // An agent's message, then a bell in the next read while it still animates.
+      manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Build finished: 3 warnings' });
+      manager.notifyFromProtocol(id, { source: 'BEL', title: 'Terminal bell', body: null });
+
+      vi.advanceTimersByTime(5_000);
+      expect(manager.getState(id)).toMatchObject({
+        status: 'ALERT_RINGING',
+        notification: { source: 'OSC 9', title: null, body: 'Build finished: 3 warnings' },
       });
     });
 
@@ -1520,7 +1416,7 @@ describe('AlertManager in isolation', () => {
     const parser = new TerminalProtocolParser();
     const feed = (chunk: string): void => {
       const parsed = parser.process(chunk);
-      manager.applyTerminalEvents(id, parsed.events);
+      applyTerminalEvents(manager, id, parsed.events);
       if (parsed.visibleData.length > 0) manager.onData(id);
     };
     feed('\x1b]633;E;./build.sh\x07\x1b]633;C\x07');
@@ -1577,12 +1473,9 @@ describe('AlertManager in isolation', () => {
       const seen = recordingClaimant(id, false);
 
       manager.attend(id);
-      manager.applyTerminalSemanticEvents(id, [
-        { type: 'commandLine', commandLine: 'npm test' },
-        { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
-      ]);
+      runCommand(id, 'npm test');
       vi.advanceTimersByTime(1_000);
-      manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+      finishCommand(id);
 
       expect(seen).toEqual([{
         kind: 'commandFinished',
@@ -1603,22 +1496,18 @@ describe('AlertManager in isolation', () => {
       const id = 'claim-command-exit';
       const seen = recordingClaimant(id, true);
 
-      manager.attend(id);
-      manager.applyTerminalSemanticEvents(id, [
-        { type: 'commandLine', commandLine: 'pnpm build' },
-        { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
-      ]);
-      vi.advanceTimersByTime(15_000);
+      armCommandExit(id);
+      vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
       expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
 
-      manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+      finishCommand(id);
 
       expect(seen).toEqual([{
         kind: 'commandFinished',
         displayCommand: 'pnpm build',
         watchKey: 'pnpm build',
         exitCode: 0,
-        ranMs: 15_000,
+        ranMs: cfg.alert.commandExitMinRuntime,
         armed: true,
       }]);
       expect(manager.getState(id)).toMatchObject({
@@ -1720,12 +1609,8 @@ describe('AlertManager in isolation', () => {
         return false;
       });
 
-      manager.attend(id);
-      manager.applyTerminalSemanticEvents(id, [
-        { type: 'commandLine', commandLine: 'pnpm build' },
-        { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
-      ]);
-      vi.advanceTimersByTime(15_000);
+      armCommandExit(id);
+      vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
       expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
 
       manager.onExit(id, 1);
@@ -1736,7 +1621,7 @@ describe('AlertManager in isolation', () => {
           displayCommand: 'pnpm build',
           watchKey: 'pnpm build',
           exitCode: 1,
-          ranMs: 15_000,
+          ranMs: cfg.alert.commandExitMinRuntime,
           armed: true,
         },
         ringing: false,
@@ -1782,22 +1667,6 @@ describe('AlertManager in isolation', () => {
 
     // 1. Already ringing at call time.
 
-    it('resolves on a protocol ring already latched, withdrawing the TODO it set', async () => {
-      const id = 'await-standing-bell';
-      manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Build finished' });
-      expect(manager.getState(id)).toMatchObject({ status: 'ALERT_RINGING', todo: true });
-
-      const handle = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
-
-      expect(await handle.promise).toEqual({ kind: 'resolved', cause: 'bell', waitedMs: 0 });
-      expect(manager.getState(id)).toMatchObject({
-        status: 'WATCHING_DISABLED',
-        todo: false,
-        notification: null,
-        awaited: false,
-      });
-    });
-
     it('leaves a TODO the human already had when it consumes a ring', async () => {
       const id = 'await-keeps-earlier-todo';
       manager.notifyFromProtocol(id, { source: 'OSC 777', title: 'earlier', body: null });
@@ -1821,12 +1690,21 @@ describe('AlertManager in isolation', () => {
       manager.notifyFromProtocol('await-first', { source: 'OSC 9', title: null, body: 'done' });
       expect(await parked.promise).toMatchObject({ kind: 'resolved', cause: 'bell' });
 
+      // Already latched when the await arrives: it resolves on the spot and
+      // withdraws the ring with the TODO it set.
       manager.notifyFromProtocol('bell-first', { source: 'OSC 9', title: null, body: 'done' });
+      expect(manager.getState('bell-first')).toMatchObject({ status: 'ALERT_RINGING', todo: true });
       const consumed = manager.awaitCompletion('bell-first', { until: 'quiet', timeoutMs: NEVER });
-      expect(await consumed.promise).toMatchObject({ kind: 'resolved', cause: 'bell' });
+      expect(await consumed.promise).toEqual({ kind: 'resolved', cause: 'bell', waitedMs: 0 });
 
-      expect(manager.getState('await-first').todo).toBe(false);
-      expect(manager.getState('bell-first').todo).toBe(false);
+      for (const id of ['await-first', 'bell-first']) {
+        expect(manager.getState(id)).toMatchObject({
+          status: 'WATCHING_DISABLED',
+          todo: false,
+          notification: null,
+          awaited: false,
+        });
+      }
     });
 
     it('resolves on a latched WATCHING ring and withdraws its TODO', async () => {
@@ -1848,11 +1726,8 @@ describe('AlertManager in isolation', () => {
     it('resolves on a latched command-exit ring under either wake condition', async () => {
       for (const until of ['quiet', 'exit'] as const) {
         const id = `await-standing-exit-${until}`;
-        manager.attend(id);
-        runCommand(id);
-        vi.advanceTimersByTime(15_000);
-        manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
-        expect(manager.getState(id)).toMatchObject({ status: 'ALERT_RINGING', todo: true });
+        ringFrom(id, 'exit');
+        expect(manager.getState(id).todo).toBe(true);
 
         const handle = manager.awaitCompletion(id, { until, timeoutMs: NEVER });
 
@@ -1863,11 +1738,7 @@ describe('AlertManager in isolation', () => {
 
     it('leaves a stale command-exit ring alone while a new command is running', async () => {
       const id = 'await-stale-exit-ring';
-      manager.attend(id);
-      runCommand(id);
-      vi.advanceTimersByTime(15_000);
-      manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
-      expect(manager.getState(id).status).toBe('ALERT_RINGING');
+      ringFrom(id, 'exit');
 
       // A second command starts. The latched ring above belongs to the first —
       // `startCommandExitWatch` preserves `ALERT_RINGING` on purpose — so it
@@ -1880,7 +1751,7 @@ describe('AlertManager in isolation', () => {
       // Not consumed either: the ring is still the human's.
       expect(manager.getState(id).status).toBe('ALERT_RINGING');
 
-      manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+      finishCommand(id);
       expect(await outcome()).toMatchObject({ kind: 'resolved', cause: 'exit' });
     });
 
@@ -2018,7 +1889,7 @@ describe('AlertManager in isolation', () => {
 
       const handle = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
       vi.advanceTimersByTime(4_000);
-      manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 2 }]);
+      finishCommand(id, 2);
 
       expect(await handle.promise).toEqual({ kind: 'resolved', cause: 'exit', waitedMs: 4_000 });
     });
@@ -2068,7 +1939,7 @@ describe('AlertManager in isolation', () => {
       settle();
       expect(await outcome()).toBeNull();
 
-      manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+      finishCommand(id);
       expect(await outcome()).toMatchObject({ kind: 'resolved', cause: 'exit' });
     });
 
@@ -2112,7 +1983,7 @@ describe('AlertManager in isolation', () => {
       vi.advanceTimersByTime(AWAIT_GRACE_MS);
       expect(await outcome()).toBeNull();
 
-      manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+      finishCommand(id);
       expect(await outcome()).toMatchObject({ kind: 'resolved', cause: 'exit' });
     });
 
@@ -2128,7 +1999,7 @@ describe('AlertManager in isolation', () => {
       vi.advanceTimersByTime(AWAIT_GRACE_MS * 2);
       expect(await outcome()).toBeNull();
 
-      manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+      finishCommand(id);
       expect(await outcome()).toMatchObject({ kind: 'resolved', cause: 'exit' });
     });
 
@@ -2288,7 +2159,7 @@ describe('AlertManager in isolation', () => {
       expect(await secondOutcome()).toBeNull();
       expect(manager.getState(id).awaited).toBe(true);
 
-      manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+      finishCommand(id);
       expect(await secondOutcome()).toMatchObject({ kind: 'resolved', cause: 'exit' });
       expect(manager.getState(id).awaited).toBe(false);
     });

@@ -122,8 +122,8 @@ describe('AlertRingIndicator', () => {
 
   /**
    * The burst is the summons, and the episode is what the alert sinks already
-   * treat as one summons: a second track latching inside it enriches rather than
-   * re-summons, so only a fresh episode may replay.
+   * treat as one summons: a second source joining the ring inside it enriches
+   * rather than re-summons, so only a fresh episode may replay.
    */
   it('replays the burst for a new episode and not for a re-emit inside one', () => {
     const first: AlertEpisode = { id: 'episode-1', startedAt: Date.now() };

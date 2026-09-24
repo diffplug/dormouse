@@ -6,6 +6,14 @@ import { cfg } from '../cfg';
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
+/** One output chunk a second for `ms`, which never lets the pane go quiet. */
+function heartbeat(target: AlertManager, ms: number): void {
+  for (let elapsed = 0; elapsed < ms; elapsed += 1_000) {
+    vi.advanceTimersByTime(1_000);
+    target.onData('pane');
+  }
+}
+
 describe('live alert handoff', () => {
   it('preserves an episode across live handoff, while cold restore remains silent', () => {
     const source = new AlertManager();
@@ -27,6 +35,24 @@ describe('live alert handoff', () => {
     expect(target.getState('pane').episode?.id).not.toBe(first.episode?.id);
     target.seed('pane', snapshot);
     expect(target.getState('pane')).toMatchObject({ todo: true, episode: null });
+    source.dispose(); target.dispose();
+  });
+
+  it('carries the deferral ceiling across a live transfer', () => {
+    const source = new AlertManager();
+    source.onData('pane');
+    vi.advanceTimersByTime(cfg.alert.busyCandidateGap);
+    source.onData('pane'); source.onData('pane');
+    // Confirmed busy, so the report waits behind the animation.
+    source.notifyFromProtocol('pane', { source: 'OSC 9', title: null, body: 'Done' });
+    heartbeat(source, 20_000);
+    const snapshot = source.pauseForTransfer('pane')!;
+    const target = new AlertManager();
+    target.resumeFromTransfer('pane', JSON.parse(JSON.stringify(snapshot)));
+    heartbeat(target, cfg.alert.deferCeiling - 21_000);
+    expect(target.getState('pane').status).toBe('WATCHING_DISABLED');
+    vi.advanceTimersByTime(1_000);
+    expect(target.getState('pane').status).toBe('ALERT_RINGING');
     source.dispose(); target.dispose();
   });
 

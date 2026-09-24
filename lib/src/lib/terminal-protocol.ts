@@ -48,6 +48,11 @@ export interface TerminalProtocolAlertSink {
   updateProtocolProgress(id: string, progress: ProtocolProgressUpdate): void;
 }
 
+/** A sink that also takes a parse batch's semantic events, ordered among its reports. */
+export interface TerminalEventSink extends TerminalProtocolAlertSink {
+  applyTerminalSemanticEvents(id: string, events: TerminalSemanticEvent[]): void;
+}
+
 export interface TerminalProtocolParseResult {
   visibleData: string;
   events: TerminalProtocolEvent[];
@@ -474,19 +479,58 @@ export function textProjectionOf(
   return parsed.textData === parsed.visibleData ? undefined : parsed.textData;
 }
 
+/**
+ * Apply a batch's reports and Tool reports alone — standalone's protocol
+ * channel, whose semantic events arrive on a channel of their own. Everything
+ * else takes {@link applyTerminalEvents}.
+ */
 export function applyTerminalProtocolEvents(
   sink: TerminalProtocolAlertSink,
   id: string,
   events: TerminalProtocolEvent[],
 ): void {
   recordToolEvents(id, events);
+  for (const event of events) applyTerminalReport(sink, id, event);
+}
+
+/**
+ * Apply one parse batch in stream order, so a report written after a command
+ * boundary is judged after it (`docs/specs/alert.md` -> Terminal reports).
+ * Semantic events are timestamped once, handed to the sink in the runs between
+ * reports, and returned for the terminal-state store. `recordTools` also
+ * records the batch's Tool reports, for an owner whose renderer state is
+ * reachable from here.
+ */
+export function applyTerminalEvents(
+  sink: TerminalEventSink,
+  id: string,
+  events: readonly TerminalProtocolEvent[],
+  options: { recordTools?: boolean } = {},
+): TerminalSemanticEvent[] {
+  if (events.length === 0) return [];
+  if (options.recordTools) recordToolEvents(id, events);
+  const semanticEvents: TerminalSemanticEvent[] = [];
+  let applied = 0;
+  const applySemantic = (): void => {
+    if (applied === semanticEvents.length) return;
+    sink.applyTerminalSemanticEvents(id, semanticEvents.slice(applied));
+    applied = semanticEvents.length;
+  };
   for (const event of events) {
-    if (event.kind === 'notification') {
-      sink.notifyFromProtocol(id, event.notification);
-    } else if (event.kind === 'progress') {
-      sink.updateProtocolProgress(id, event.progress);
+    const semantic = semanticEventOf(event, nextSemanticTimestamp);
+    if (semantic) semanticEvents.push(semantic);
+    if (event.kind === 'notification' || event.kind === 'progress') {
+      applySemantic();
+      applyTerminalReport(sink, id, event);
     }
   }
+  applySemantic();
+  return semanticEvents;
+}
+
+function applyTerminalReport(sink: TerminalProtocolAlertSink, id: string, event: TerminalProtocolEvent): void {
+  if (event.kind === 'notification') sink.notifyFromProtocol(id, event.notification);
+  else if (event.kind === 'progress') sink.updateProtocolProgress(id, event.progress);
 }
 
 /**
@@ -517,19 +561,22 @@ export function collectTerminalSemanticEvents(
   const semanticEvents: TerminalSemanticEvent[] = [];
   const nextTimestamp = options.now ? createOrderedEventTimestamp(options.now) : nextSemanticTimestamp;
   for (const event of events) {
-    if (event.kind === 'semantic') {
-      semanticEvents.push(timestampSemanticEvent(event.event, nextTimestamp));
-      continue;
-    }
-    if (event.kind !== 'notification') continue;
-    const title = terminalTitleFromNotification(event.notification, nextTimestamp());
-    if (!title) continue;
-    semanticEvents.push({
-      type: 'title',
-      title,
-    });
+    const semantic = semanticEventOf(event, nextTimestamp);
+    if (semantic) semanticEvents.push(semantic);
   }
   return semanticEvents;
+}
+
+/** The timestamped semantic event a protocol event carries: its own, or a
+ *  notification's title candidate. */
+function semanticEventOf(
+  event: TerminalProtocolEvent,
+  nextTimestamp: () => number,
+): TerminalSemanticEvent | null {
+  if (event.kind === 'semantic') return timestampSemanticEvent(event.event, nextTimestamp);
+  if (event.kind !== 'notification') return null;
+  const title = terminalTitleFromNotification(event.notification, nextTimestamp());
+  return title ? { type: 'title', title } : null;
 }
 
 function createOrderedEventTimestamp(now: () => number): () => number {

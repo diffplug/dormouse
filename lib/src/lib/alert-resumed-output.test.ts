@@ -30,6 +30,22 @@ function settle(): void {
   vi.advanceTimersByTime(5_000);
 }
 
+/** Start the watched command the way shell integration reports it. */
+function runCommand(): void {
+  manager.applyTerminalSemanticEvents(ID, [
+    { type: 'commandLine', commandLine: 'longtask' },
+    { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
+  ]);
+}
+
+/** Run it seen and then left: armed, so its exit rings once it has outlasted
+ *  `cfg.alert.commandExitMinRuntime`. */
+function armCommandExit(): void {
+  manager.attend(ID);
+  runCommand();
+  manager.clearAttention(ID);
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   clearTerminalActivity();
@@ -44,10 +60,7 @@ beforeEach(() => {
   manager.setDeferAlertsUntilQuiet(true);
   manager.onStateChange(setTerminalActivity);
   manager.setWatchedCommands(['longtask']);
-  manager.applyTerminalSemanticEvents(ID, [
-    { type: 'commandLine', commandLine: 'longtask' },
-    { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
-  ]);
+  runCommand();
   stopSpeech = startAlertSpeech();
   // Push shares the ring watcher; exercise its delivery decision without a Relay.
   stopPush = watchUnattendedRings({ sink: 'push', subscribe: () => () => {}, enabled: () => true, delayMs: () => DELAY, fire: pushed });
@@ -127,21 +140,17 @@ describe('WATCHING output resuming before alarm delivery', () => {
     expect(manager.getState(ID)).toMatchObject({ status: 'BUSY', todo: true, notification: receipt.notification });
   });
 
-  it.each(['protocol', 'command-exit'] as const)('preserves an authoritative %s source behind WATCHING', (track) => {
-    manager.attend(ID);
-    manager.clearAttention(ID);
+  it.each(['report', 'exit'] as const)('preserves an authoritative %s source behind WATCHING', (source) => {
+    armCommandExit();
     vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
     busy();
     settle();
-    if (track === 'protocol') {
+    if (source === 'report') {
       manager.notifyFromProtocol(ID, { source: 'OSC 9', title: 'input needed', body: null });
     } else {
       manager.applyTerminalSemanticEvents(ID, [{ type: 'commandFinish', exitCode: 0 }]);
       expect(manager.getState(ID).notification?.source).toBe('COMMAND_EXIT');
-      manager.applyTerminalSemanticEvents(ID, [
-        { type: 'commandLine', commandLine: 'longtask' },
-        { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
-      ]);
+      runCommand();
     }
     const episode = manager.getState(ID).episode;
     busy();

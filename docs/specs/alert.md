@@ -40,11 +40,11 @@ Public `status` is a projection — first match wins:
 
 `awaited` sits beside `status`: true while at least one `dor await` is parked on the Session (Await). It is derived from live waiters and **never persisted**.
 
-**Persist only** `todo` and the sanitized `notification` (plus `status` for diagnostics); restore replays those two and **must not** recreate a ring, a progress cycle, or a command-exit arm. **Never persist a `WATCHING` notification** — its TODO persists without detail (rationale). **WATCHING is never persisted per Session** — it is re-derived from the rule set below at the next command start. Replay filtering in `docs/specs/terminal-escapes.md` keeps old terminal output from firing notification side effects again.
+**Persist only** `todo` and the sanitized `notification` (plus `status` for diagnostics); restore replays those two and **must not** recreate a ring, a progress cycle, or a command-exit arm. **Must read a notification this build cannot validate as none, keeping the pane** (pinned by `keeps a pane whose notification this build cannot read, seeding its TODO without the detail` in `lib/src/lib/session-restore.test.ts`), and **never write a source outside `STRICT_READER_NOTIFICATION_SOURCES`** until no strict pre-tolerant build reads the file (rationale). **WATCHING is never persisted per Session** — it is re-derived from the rule set below at the next command start. Replay filtering in `docs/specs/terminal-escapes.md` keeps old terminal output from firing notification side effects again.
 
 **Must retain host Activity before xterm initialization and clear it on Session disposal.** Test: `preserves pre-registration activity through terminal creation and orphaning` in `lib/src/lib/terminal-registry.alert.test.ts`.
 
-Source of truth: `AlertState` / `ActivityNotification` / `SessionStatus` in `lib/src/lib/alert-manager.ts`; `QuiesceStatus` in `lib/src/lib/quiesce-detector.ts`; `ActivityState` in `lib/src/lib/session-activity-store.ts`; `toPersistedAlertState` in `lib/src/lib/session-types.ts`.
+Source of truth: `AlertState` / `ActivityNotification` / `SessionStatus` in `lib/src/lib/alert-manager.ts`; `QuiesceStatus` in `lib/src/lib/quiesce-detector.ts`; `ActivityState` in `lib/src/lib/session-activity-store.ts`; `toPersistedAlertState` / `normalizePersistedAlert` in `lib/src/lib/session-types.ts`.
 
 ## Attention
 
@@ -60,7 +60,7 @@ Source of truth: `cfg.alert` in `lib/src/cfg.ts`; `setInactivityTimeoutMs` in `l
 
 ## Completion events
 
-Every completion — a detector settle, a command finish, a direct notification, and the end of a protocol progress cycle (completion or error) — is **dispatched as a `CompletionEvent` before any suppression runs**, so an observer sees even a completion that would never have rung anyone (rationale).
+Every completion — a detector settle, a command finish, a direct notification, and the end of a protocol progress cycle (completion or error) — is **dispatched as a `CompletionEvent` before any suppression runs** (rationale).
 
 Claimants get first refusal per Session in registration order; the first to return `true` claims the event and the rest are not offered it. **A claimed event never rings, never sets TODO, and never stores an `ActivityNotification`** — it stops before the ring rules, where attention suppression and the command-exit armed and minimum-runtime checks live.
 
@@ -70,9 +70,9 @@ With `deferAlertsUntilQuiet` enabled:
 - **Never defer `MIGHT_BE_BUSY`, a detector settle, or a command-finish ring** — unconfirmed, already quiet, and authoritative respectively (rationale).
 - **Must fold a pending terminal notification into an eligible command-finish ring immediately**, so protocol detail enriches that ring instead of publishing stale later.
 - **Must defer after claimants and ring eligibility, never redispatch the historical `CompletionEvent`** (rationale).
-- **Keep pending intent live-only and bounded** to the latest protocol notification. Meaningful output moves its quiet deadline; command-boundary detector resets do not drop it.
+- **Keep pending intent live-only and bounded** to one protocol notification, chosen by richness (Clearing And TODO). Meaningful output moves its quiet deadline; command-boundary detector resets do not drop it.
 - **Cancel pending delivery on attendance, a dismissal that clears a ring, TODO changes, removal, seeding, or teardown.** A dismiss on a quiet Session keeps it: a cancelled deferral was never visible to dismiss. Disabling the setting releases it immediately; otherwise confirmed quiet raises one fresh ring, after which speech/push begin their own delays.
-- **Must ring a deferral by `cfg.alert.deferCeiling` (30 s) after the first notification deferred**, quiet or not; a latest-wins replacement keeps that start, and a live transfer carries it (rationale).
+- **Must ring a deferral by `cfg.alert.deferCeiling` (30 s) after the first notification deferred**, quiet or not; a replacement keeps that start, and a live transfer carries it (rationale).
 
 Two ordering rules:
 
@@ -108,7 +108,7 @@ An **await** parks on one Session until it finishes what it is doing, then repor
 **Resolution consumes only the ring source it resolved on**, its `cause` from *that source*: `report` → `bell`, `exit` → `exit`, `watching` → `quiet`. An await arriving mid-ring resolves immediately; under `exit` only the `exit` source counts and the await keeps waiting on the others. Two are gated:
 
 - **Skip the `exit` source while a foreground command is running** (rationale).
-- **Skip the `watching` source once output has resumed since it joined the ring** (`outputSinceWatchingRing`), and **never stand the detector in for that flag** (rationale).
+- **Skip the `watching` source once output has resumed since it joined the ring** (`outputSince`), and **never stand the detector in for that flag** (rationale).
 - **Never skip a report** — an `OSC 9` stays true until it is answered.
 - **Consuming withdraws that one source and never sets `attentionId`**; a ring it leaves empty is withdrawn (Clearing And TODO).
 
@@ -158,9 +158,9 @@ Rules:
 - **The key is `commandWatchKey(rawCommandLine)`**: the last command of a list (`&&`, `||`, `;`, `&`, newline) and the first stage of its pipeline, grouping dropped, leading `VAR=value` words and transparent wrappers (`sudo`, `npx`, …) skipped, then argv[0]'s basename minus any launcher suffix (`docs/specs/terminal-state.md`). **An unknown wrapper flag stops the skip**, keying the wrapper itself. **A script runner keys as `<runner> <script>`**, a leading `run` dropped, so `cd web && pnpm run dev` keys on `pnpm dev`; a script that is no valid key (a path) keys the runner (rationale). Where bash's `E` falls back to a line's first simple command (`docs/specs/terminal-escapes.md` → Shell-integration injection), that command keys. Pinned by `WATCHING key` in `lib/src/lib/terminal-state.test.ts`.
 - **A rule covers a key it equals, and a bare runner rule covers every `<runner> <script>` key of that runner** (rationale). `watchRuleFor` is the one matcher, for WATCHING, rule-removal silencing, and the terminal context's row.
 - **Every command boundary resets the detector** — `commandStart`, `commandFinish`, `promptStart`, `promptEnd`, and PTY exit — even without a command watch. Pinned by `resets unwatched output history on %s without a command watch` in `lib/src/lib/alert-manager.test.ts`.
-- **Editing the rule set re-derives WATCHING across every live Session immediately**, so a mid-command enable shows what that command is doing *right now* rather than a fresh `NOTHING_TO_SHOW` (rationale).
-- **A WATCHING ring outlives the command that raised it.** Watching switches off when the watched command exits; the ring keeps its `watching` source and the originating key in `watchKey`.
-- **Removing a rule withdraws the `watching` source it raised**, even after the command has exited, unless another rule still covers `watchKey`; other clearing paths follow Clearing And TODO. A command merely ending never clears the ring.
+- **Editing the rule set re-derives WATCHING across every live Session immediately**, never restarting the detector (rationale).
+- **A WATCHING ring outlives the command that raised it.** Watching switches off when the watched command exits; the ring's `watching` source keeps the originating key.
+- **Removing a rule withdraws the `watching` source it raised**, even after the command has exited, unless another rule still covers that key; other clearing paths follow Clearing And TODO. A command merely ending never clears the ring.
 - **The rule set is app-global and persisted** (`dormouse:watched-commands`), starting empty, so WATCHING is off everywhere until the user turns it on. **The host is authoritative wherever one serves several webviews** — the VS Code extension host, and the standalone sidecar — so a stale webview can neither replace unrelated rules nor keep reporting an obsolete list: the first webview's persisted copy is taken as the seed, an edit is a delta, and the host broadcasts its canonical snapshot back. The seed/mutation/broadcast wire contract is `docs/specs/transport.md`.
 
 **Limitation:** WATCHING needs the shell to report its command line — `OSC 633 ; E`, or `cmdline_url` / `cmdline` on `OSC 133 ; C` (fish ≥ 4) — beside the boundaries. A shell reporting bare `OSC 133` boundaries, or none (`docs/specs/terminal-escapes.md`), never names a command, so WATCHING never engages and the terminal context reports `No command running`. Terminal reports still work; command-exit alerting also requires semantic command boundaries. **Never route the keystroke fallback in `docs/specs/terminal-state.md` into the `AlertManager`** (rationale).
@@ -191,7 +191,7 @@ Source of truth: `commandWatchKey` / `watchRuleFor` in `lib/src/lib/terminal-sta
 
 **Terminal notifications are independent of WATCHING** and follow the deferral policy in Completion events. **Never ring an attended Session**; suppression leaves a progress cycle alone. A report raises the ring's `report` source (Clearing And TODO).
 
-**Must apply a parse batch's reports and command boundaries in stream order** (`applyTerminalEvents`), as the VS Code host and fake adapter do; standalone, receiving them as two events, still applies reports first. Pinned by `judges a notification written after a command finish against the reset detector` in `lib/src/lib/alert-manager.test.ts`.
+**Must apply a parse batch's reports and command boundaries in stream order, timestamping its semantic events once** for both the `AlertManager` and the terminal-state store; standalone, receiving them as two events, still applies reports first. Pinned by `judges a notification written after a command finish against the reset detector` in `lib/src/lib/alert-manager.test.ts`.
 
 Sequence syntax lives in `docs/specs/terminal-escapes.md`; what each means here:
 
@@ -212,9 +212,9 @@ Sequence syntax lives in `docs/specs/terminal-escapes.md`; what each means here:
   | a command boundary — start, finish, prompt, PTY exit | ends the cycle silently |
   | completion or error while attended | ends the cycle, no TODO or ring |
 
-  **Titles name the running command** (watch key, else display command): `<command> finished`, `… finished with a warning`, `… reported an error`; with none running, `Progress complete`, `Progress warning`, `Progress error`. The body is `Progress <percent>%`, or none.
+  **Titles name the running command** — its watch key, else its display command — and fall back to a generic title with none running; the body is `Progress <percent>%`, or none.
 
-Source of truth: the OSC 777 and OSC 99 grammars, parsing, sanitization limits, and OSC 99 chunk state in `lib/src/lib/terminal-protocol.ts`; `updateProtocolProgress` / `finishProtocolProgressCycle` in `lib/src/lib/alert-manager.ts`. Pinned by `silently ends a progress cycle the program abandoned` and `names the running command in a progress %s title` in `lib/src/lib/alert-manager.test.ts`.
+Source of truth: the OSC 777 and OSC 99 grammars, parsing, sanitization limits, OSC 99 chunk state, and `applyTerminalEvents` in `lib/src/lib/terminal-protocol.ts`; `updateProtocolProgress` / `finishProtocolProgressCycle` / `PROGRESS_TITLES` in `lib/src/lib/alert-manager.ts`. Pinned by `silently ends a progress cycle the program abandoned` and `names the running command in a progress %s title` in `lib/src/lib/alert-manager.test.ts`.
 
 ## Command-exit Track
 
@@ -223,7 +223,7 @@ Command-exit alerting consumes normalized semantic command events from `docs/spe
 Rules:
 
 - A command start creates `commandExitWatch` for the current foreground command. **Mark the command as seen** if the Session has attention then, or if the user attends while it is already running.
-- If attention is later lost while that same seen command is still running, set `commandExitStatus = COMMAND_EXIT_ARMED`.
+- If attention is later lost while that same seen command is still running, arm it (`commandExitWatch.armed`; public `COMMAND_EXIT_ARMED`).
 - If the same command finishes, or the PTY exits before a finish event, **ring only when all three hold**: it was armed, the Session still lacks attention, and runtime is at least `cfg.alert.commandExitMinRuntime` (15 s). **Never tie that minimum to the inactivity timeout** (rationale).
 - The `exit` source carries the `COMMAND_EXIT` notification (title "Command finished", body = summarized command + exit code).
 - Returning to the Session before finish disarms the watch. A quick finish, a different command start, or Session destruction clears it without ringing.
@@ -235,9 +235,9 @@ Source of truth: `dispatchCompletion` / `formatCommandExitBody` in `lib/src/lib/
 
 ## Clearing And TODO
 
-`todo` is a boolean reminder. **Every ring sets it the moment it opens, whatever its source**, recording whether it did and which notification it replaced (rationale). Pinned by `a %s ring sets TODO the moment it opens` in `lib/src/lib/alert-manager.test.ts`.
+`todo` is a boolean reminder. **Every ring sets it the moment it opens, whatever its source**, recording the TODO and notification it found (rationale). Pinned by `a WATCHING ring sets TODO the moment it opens, with its own detail` in `lib/src/lib/alert-manager.test.ts`.
 
-**Detail follows one richness order:** a text report (`OSC 9`, `OSC 99`, `OSC 777`) > `COMMAND_EXIT` > `OSC 9;4` > `WATCHING` > `BEL`. A new ring shows its own detail; a source joining an active ring replaces the shown detail only at an equal or higher rank, so the latest wins among equals (rationale).
+**Detail follows one richness order:** a text report (`OSC 9`, `OSC 99`, `OSC 777`) > `COMMAND_EXIT` > `OSC 9;4` > `WATCHING` > `BEL`. A new ring shows its own detail; a source joining an active ring, a deferred notification, and an acknowledged receipt each replace the detail only at an equal or higher rank (rationale). Pinned by `detail joining a ring` in `lib/src/lib/alert-manager.test.ts`.
 
 | Verb | Effect |
 |---|---|
@@ -247,10 +247,10 @@ Source of truth: `dispatchCompletion` / `formatCommandExitBody` in `lib/src/lib/
 | clear TODO (pill click, passthrough `Enter`) | clears the ring and a deferred notification; `todo` off, notification dropped, even if already off |
 | an await consumes a source (Await) | withdraws that source |
 | watched work resumes (WATCHING Track) | withdraws `watching` |
-| a rule stops covering the ring's `watchKey` | withdraws `watching` |
+| a rule stops covering the `watching` key | withdraws `watching` |
 
-- **The four user verbs acknowledge; a withdrawal never does.** A ring a withdrawal empties takes back the TODO it set, never one it found, and the notification it replaced.
-- **Never summon twice for an acknowledged state.** After a user verb clears a ring, a report arriving before any output opens no ring: it sets `todo`, takes the notification by the richness order, and publishes. Settles and exits ring as usual, and opening a ring forgets the acknowledgement (rationale). Pinned by `a report about a state acknowledged by %s updates the TODO without summoning again` in `lib/src/lib/alert-manager.test.ts`.
+- **The four user verbs acknowledge; a withdrawal never does.** A ring a withdrawal empties restores the TODO and notification it found.
+- **Never summon twice for an acknowledged state.** After a user verb clears a ring, a report arriving before any output opens no ring: it sets `todo`, updates the notification, and publishes. Settles and exits ring as usual, and opening a ring forgets the acknowledgement (rationale). Pinned by `a report about a state acknowledged by %s updates the TODO without summoning again` in `lib/src/lib/alert-manager.test.ts`.
 - Command-mode `Enter` that only enters passthrough does not clear TODO.
 - Removing a WATCHING rule turns watching off wherever it matched. It does not stop the detector, nor clear a progress cycle or a command-exit arm.
 - Destroying the Session clears all alert, TODO, notification, attention, progress, and command-exit state.
@@ -315,7 +315,7 @@ Source of truth: `AlertSettings` in `lib/src/lib/alert-settings.ts` (renderer mi
 ### Spoken alarms
 
 - **Must replace high-entropy ASCII tokens with `REDACTED` locally before punctuation cleanup and truncation**, including trailing padding but preserving `=` separators (rationale). Hex candidates include embedded hyphen/underscore groups. False positives and negatives remain possible; word-passphrase detection is excluded. Pinned by `lib/src/lib/redact-high-entropy.test.ts` and `redacts whole tokens before punctuation cleanup and truncation` in `lib/src/lib/alert-speech.test.ts`.
-- **The label must be sanitized before it reaches the engine** (`toSpokenText`): all Unicode punctuation, symbols, and `Other` characters (including controls, bidi controls, and zero-width formats) become spaces, except apostrophes, which are elided so contractions survive; letters, numbers, and their combining marks from every script remain. Whitespace collapses, the result is capped in code points, and an empty result falls back to `terminal`. **Security, not tidiness:** WebKit wedges its synthesizer on angle brackets, and terminal-supplied text reaches Pane labels (rationale).
+- **The label must be sanitized before it reaches the engine** (`toSpokenText`): all Unicode punctuation, symbols, and `Other` characters (including controls, bidi controls, and zero-width formats) become spaces, except apostrophes, which are elided so contractions survive; letters, numbers, and their combining marks from every script remain. Whitespace collapses, the result is capped in code points, and an empty result falls back to `terminal`. **Security, not tidiness** (rationale).
 - **Delivery state follows actual engine callbacks, not queue admission.** `AlertSpeechState` is a renderer-local `speaking | spoken` map keyed by Session: `start` publishes `speaking`; `end`, or `error` after a real start, publishes `spoken`; an utterance that never starts publishes neither. **Must check delivery identity before accepting `start` or completion**, including after cancellation, timeout, or teardown. Pinned by `ignores an older ring starting after a newer ring has begun speaking` and `recovers from a callback-less engine without accepting its later callbacks` in `lib/src/lib/alert-speech.test.ts`.
 - **Nothing in the settle path may assume the callback arrives after `speak()` returns** — an engine may dispatch `start` then `end`/`error` *synchronously* inside `speechSynthesis.speak()` (rationale). Handlers therefore close over the utterance itself and registration happens before dispatch. A dispatch the engine refuses outright settles too.
 - **Attending mid-sentence cuts the utterance off** — silence the engine, not merely un-render the overlay. "Mid-sentence" is the sink's own record that an utterance started — its generation token — never the rendered `speaking` state.
@@ -420,7 +420,7 @@ Notification text is untrusted terminal output.
 
 - Treat all text as plain text: never interpret ANSI, OSC, HTML, Markdown, URLs, paths, or emoji shortcodes as markup.
 - **Sanitize at protocol-parse time** (`sanitizeText` in `lib/src/lib/terminal-protocol.ts`), bounded and control-stripped like every retained value (`docs/specs/terminal-escapes.md` → Parsing location); every notification stored from a live PTY has been through that pass, generated `WATCHING` and progress titles included via the sanitized command line. `normalizeActivityNotification` in `lib/src/lib/alert-manager.ts` is only a *shape* check on top — known `source`, string-or-null fields, trimmed, at least one non-empty — so the cold-restore path (`seed`) re-accepts a persisted blob without re-applying the cap or the control strip (rationale).
-- Keep only the latest `ActivityNotification` rather than unbounded history, and cap/expire incomplete OSC 99 parser state.
+- Keep only one `ActivityNotification` rather than unbounded history, and cap/expire incomplete OSC 99 parser state.
 - **Never** execute commands, open URLs, copy to clipboard, read files, focus outside Dormouse, or render protocol-supplied icons/buttons/actions.
 - Wherever notification text appears in visible UI or accessible labels, it is plain text, and layout must tolerate long text, CJK, RTL, combining marks, and emoji without pushing fixed controls out of bounds. Sanitized terminal-supplied `OSC 0` / `OSC 2` / `OSC 9` text also participates in normal Pane-label derivation, and that label may reach the opt-in speech and push channels — **each after its own second pass**, because a label safe to *render* is not automatically safe to hand a speech engine or an OS notification, and those two fail in different ways. See `toSpokenText` under Spoken alarms and `toPushText` under Push notifications.
 

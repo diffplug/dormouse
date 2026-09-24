@@ -1,3 +1,5 @@
+import { cfg } from "dormouse-lib/cfg";
+
 // Item ids are the persistence key — keep them stable across releases.
 const THEME_ITEM_IDS = ["th-theme"] as const;
 
@@ -233,7 +235,7 @@ export const DESKTOP_SECTIONS: readonly Section[] = [
         id: 'al-cmd-exit',
         title: 'A long command that finished while you were away',
         hint:
-          `Press \`x\` to start a slow build in another pane, click into that pane, then click back here and wait. Dormouse rings for any command that ran longer than 15 seconds and finished after you walked away — again, no rule needed.`,
+          `Press \`x\` to start a slow build in another pane, click into that pane, then click back here and wait. Dormouse rings for any command that ran longer than ${cfg.alert.commandExitMinRuntime / 1000} seconds and finished after you walked away — again, no rule needed.`,
       },
     ],
     prose: [

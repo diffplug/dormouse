@@ -10,7 +10,7 @@ import {
   type MemoryNotepadArchivePort,
 } from '../notepad/memory-archive-port';
 import {
-  collectTerminalSemanticEvents,
+  applyTerminalEvents,
   collectTerminalProtocolResponses,
   TerminalProtocolParser,
   textProjectionOf,
@@ -18,7 +18,6 @@ import {
 import {
   applyTerminalSemanticEvents,
 } from '../terminal-state-store';
-import { recordToolEvents } from '../tool-events';
 import { themeColorProvider } from '../terminal-theme';
 
 export interface FakeScenario {
@@ -459,9 +458,7 @@ export class FakePtyAdapter implements PlatformAdapter {
 
   private emitPtyData(id: string, data: string, options: { skipActivity?: boolean } = {}): void {
     const parsed = this.getProtocolParser(id).process(data);
-    recordToolEvents(id, parsed.events);
-    this.alertManager.applyTerminalEvents(id, parsed.events);
-    applyTerminalSemanticEvents(id, collectTerminalSemanticEvents(parsed.events));
+    applyTerminalSemanticEvents(id, applyTerminalEvents(this.alertManager, id, parsed.events, { recordTools: true }));
     const inputHandler = this.inputHandlers.get(id);
     for (const response of collectTerminalProtocolResponses(parsed.events)) {
       inputHandler?.(response);
