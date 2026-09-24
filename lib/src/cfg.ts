@@ -27,7 +27,7 @@ export const cfg = {
     /** ms — default inactivity timeout: presence lapses this long after the last typing, mouse, or scroll input. */
     inactivityTimeout: 15_000,
     /** ms — output and completions this soon after a keystroke into a Session answer that keystroke and are ignored. */
-    echoWindow: 250,
+    echoWindow: 750,
     /** ms — longest a terminal notification may wait behind animation before it rings anyway. */
     deferCeiling: 30_000,
     /** When true, the ALERT_RINGING alarm pulse animations are frozen at T=0 (for deterministic Chromatic snapshots). */

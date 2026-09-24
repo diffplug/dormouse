@@ -298,6 +298,7 @@ describe('echo window', () => {
   it.each([
     ['the exit Ctrl-C caused', () => { vi.advanceTimersByTime(20); finishCommand(manager, PANE, 130, { promptStart: true }); }],
     ['a bell answering Tab', () => { vi.advanceTimersByTime(5); manager.notifyFromProtocol(PANE, BELL); }],
+    ['a command that failed 600 ms after Enter', () => { vi.advanceTimersByTime(600); finishCommand(manager, PANE, 1, { promptStart: true }); }],
   ] as const)('neither rings nor holds %s', (_what, answer) => {
     engage(manager, PANE);
     runCommand(manager, PANE, 'pnpm build');
