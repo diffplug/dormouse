@@ -15,7 +15,7 @@ import { Wall } from './Wall';
 import * as helpers from '../lib/helper-terminal';
 import * as agentBrowserScreen from './wall/agent-browser-screen';
 import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
-import { getAgentBrowserSurfaceController } from './wall/agent-browser-surface-controller';
+import { disposeAllAgentBrowserSurfaceControllers, getAgentBrowserSurfaceController } from './wall/agent-browser-surface-controller';
 import * as browserAutomation from './wall/browser-automation';
 import { setDevServerResolution } from './wall/agent-browser-ports';
 import { setPlatform } from '../lib/platform';
@@ -78,6 +78,8 @@ afterEach(() => {
   // The activity store is Window-global, so a ring or TODO left on a pane id
   // would wear its alarm overlay in every later test that renders that id.
   clearTerminalActivity();
+  // Browser controllers outlive the Wall that mounted them, like the ring above.
+  disposeAllAgentBrowserSurfaceControllers();
 });
 
 const flush = (): Promise<void> => harness.flush();
@@ -831,6 +833,44 @@ describe('Wall on the Lath engine', () => {
       expect(leafCount()).toBe(2);
       expect(popOut).toHaveBeenCalledExactlyOnceWith('restored', expect.objectContaining({ url: 'http://localhost:5173/' }), undefined);
       expect(command).not.toHaveBeenCalledWith('restored', ['open', 'http://localhost:5173/'], undefined);
+    } finally {
+      helperSpy.mockRestore();
+      untouchedSpy.mockRestore();
+    }
+  });
+
+  it('pops out a restored context-port Door at the port', async () => {
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    const helperSpy = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'context-helper', parentId: 'pane-a', command: '', status: 'preserved' });
+    const popOut = vi.fn(() => new Promise<never>(() => {}));
+    Object.assign(fake, {
+      agentBrowserOpen: vi.fn(async () => ({ ok: true, session: 'second', wsPort: 1 })),
+      agentBrowserAttach: vi.fn(async () => ({ ok: true, wsPort: 4321 })),
+      agentBrowserCommand: vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' })),
+      agentBrowserPopOut: popOut,
+    });
+    try {
+      await act(async () => {
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" initialDoors={[{
+          id: 'restored-ab', title: 'localhost:5173', component: 'browser', tabComponent: 'surface',
+          params: { surfaceType: 'browser', renderMode: 'ab-screencast', session: 'restored', url: 'http://localhost:5173/elsewhere', contextPortKey: 'pane-a:5173:agent' },
+        }]} />);
+      });
+      await flush();
+      if (!fake.hasPty('pane-a')) fake.spawnPty('pane-a');
+      fake.setOpenPorts('pane-a', [{ protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port: 5173, pid: 100, processName: 'vite' }]);
+      await act(async () => {
+        container.querySelector<HTMLElement>('[data-pane-header-for="pane-a"]')!.dispatchEvent(new MouseEvent('contextmenu', {
+          bubbles: true, cancelable: true, clientX: 10, clientY: 10,
+        }));
+      });
+      await flush();
+      await act(async () => {
+        document.querySelector<HTMLButtonElement>('[data-terminal-context] button[aria-label="Open in agent-browser popout"]')!.click();
+      });
+      await flush();
+
+      expect(popOut).toHaveBeenCalledExactlyOnceWith('restored', expect.objectContaining({ url: 'http://localhost:5173/' }), undefined);
     } finally {
       helperSpy.mockRestore();
       untouchedSpy.mockRestore();

@@ -27,7 +27,7 @@ import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
 import { automationProvider, browserPlatform, LaunchBinaryPath, PROVIDER_LABEL } from './wall/browser-automation';
 import type { BrowserAutomationProvider } from '../lib/platform/browser-automation';
 import { isToolRender } from '../lib/platform/tool-types';
-import { closeBrowserSurface, whenBrowserLaunched } from './wall/agent-browser-surface-controller';
+import { closeBrowserSurface, requestBrowserRenderMode, whenBrowserLaunched } from './wall/agent-browser-surface-controller';
 import { KILL_CONFIRM_MS, KILL_SHAKE_MS, KillConfirmOverlay, randomKillChar, type ConfirmKill } from './KillConfirm';
 import { NotepadArchiveFailureModal, type NotepadArchiveFailure } from './NotepadArchiveFailure';
 import { messageOf } from '../lib/errors';
@@ -2134,8 +2134,9 @@ export function Wall({
       if (existing) {
         revealSurface(existing.id);
         // One intent: a pop-out/pop-in relaunch opens the URL rather than
-        // racing a navigation into its close/reopen gap.
-        if (mode !== 'iframe') getAgentBrowserScreenController(existing.id)?.actions.setRenderMode?.(mode, { url: entry.url });
+        // racing a navigation into its close/reopen gap — reaching the
+        // Surface's controller even before a revealed Door mounts it.
+        if (mode !== 'iframe') requestBrowserRenderMode(existing.id, lath.getMeta(existing.id)?.params ?? {}, mode, { url: entry.url });
         else updateSurfaceParams(existing.id, { url: entry.url });
         return;
       }
@@ -2156,7 +2157,7 @@ export function Wall({
     })();
     contextPortLaunches.current.set(key, operation);
     try { await operation; } finally { contextPortLaunches.current.delete(key); }
-  }, [buildDorSurfaces, findSurfaceByParams, createContentSurface, enterTerminalMode, closeSurface, launchBinaryParams, revealSurface, updateSurfaceParams]);
+  }, [buildDorSurfaces, findSurfaceByParams, createContentSurface, enterTerminalMode, closeSurface, launchBinaryParams, revealSurface, updateSurfaceParams, lath]);
   const contextActions = useMemo(() => ({
     id: contextSourceId,
     mounted: terminalContext,

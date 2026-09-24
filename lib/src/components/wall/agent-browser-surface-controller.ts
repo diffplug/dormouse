@@ -240,8 +240,15 @@ export class AgentBrowserSurfaceController {
   }
   /** Gates the render modes offered; see `ensureStarted`. */
   private readonly isTool: boolean;
-  /** What `setRenderMode` accepts, fixed at start with the host's capabilities. */
-  private renderModes: readonly RenderMode[] = [];
+  /** What `setRenderMode` accepts, fixed on first use with the host's
+   *  capabilities. Never a popout or another provider for a tool, whose
+   *  `render` is `iframe` or `ab-screencast`: the swap would tear the browser
+   *  down and re-derive the same screencast, so asking for a native window would
+   *  get a reload (`docs/specs/dor-tool.md` -> Declaring tools). */
+  private renderModesCache: readonly RenderMode[] | null = null;
+  private get renderModes(): readonly RenderMode[] {
+    return this.renderModesCache ??= offeredRenderModes(this.isTool, this.provider);
+  }
 
   private phase: Phase = { k: 'idle' };
   /** The presentation this Surface shows: a separate OS window, or in the pane.
@@ -283,9 +290,10 @@ export class AgentBrowserSurfaceController {
   private parkRequested = false;
   private parkTimer: ReturnType<typeof setTimeout> | undefined;
 
-  /** The latest navigation asked for while nothing could be driven, run once
-   *  the Surface is live: a relaunch or attach must not lose it. */
-  private pendingNavigation: string | undefined;
+  /** The latest presentation and page asked for while nothing could be
+   *  driven, applied once the Surface is live: a launch, attach or relaunch
+   *  must not lose them. */
+  private pendingIntent: { url?: string; headed?: boolean } = {};
 
   // --- sync-to-pane ---
   private syncEngaged: boolean;
@@ -416,18 +424,7 @@ export class AgentBrowserSurfaceController {
         this.runCommand(['set', 'viewport', String(w), String(h), String(dpr)]);
       },
       openModal: () => openAgentBrowserScreenModal(this.id),
-      setRenderMode: (mode, opts) => {
-        // Only what the modal could offer: the popout below never reaches the
-        // Wall's own tool guard.
-        if (!this.renderModes.includes(mode)) return;
-        // A swap to iframe or the other provider is a render swap handled by
-        // the Wall (the view owns the ≥2-tab confirm gate + onSwapRenderMode);
-        // screencast ↔ popout relaunches this same session, in-controller,
-        // carrying the page asked for rather than racing a navigation into it.
-        if (automationProvider(mode) !== this.provider) this.sink?.requestRenderSwap(mode);
-        else if (isPopout(mode) !== this.headed) this.relaunch(isPopout(mode), opts?.url);
-        else if (opts?.url) this.navigate(opts.url);
-      },
+      setRenderMode: (mode, opts) => this.setRenderMode(mode, opts),
     };
 
     // Native history nav — issued like tab actions, through the daemon gate.
@@ -480,6 +477,22 @@ export class AgentBrowserSurfaceController {
     for (const listener of this.viewListeners) listener();
   }
 
+  /**
+   * Swap this Surface's render mode, going to `url` too (docs/specs/dor-browser.md
+   * → "Display Modal And Render Swaps"). Only what the modal could offer: the
+   * popout below never reaches the Wall's own tool guard. A swap to iframe or
+   * the other provider is a render swap handled by the Wall (the view owns the
+   * ≥2-tab confirm gate + onSwapRenderMode); screencast ↔ popout relaunches
+   * this same session, in-controller, carrying the page asked for rather than
+   * racing a navigation into it.
+   */
+  setRenderMode(mode: RenderMode, opts?: { url?: string }): void {
+    if (!this.renderModes.includes(mode)) return;
+    if (automationProvider(mode) !== this.provider) this.sink?.requestRenderSwap(mode);
+    else if (isPopout(mode) !== this.headed) this.relaunch(isPopout(mode), opts?.url);
+    else if (opts?.url) this.navigate(opts.url);
+  }
+
   getDeviceSize(): { width: number; height: number } {
     return this.device;
   }
@@ -488,11 +501,6 @@ export class AgentBrowserSurfaceController {
 
   private ensureStarted(): void {
     if (this.phase.k !== 'idle') return;
-    // Never a popout or another provider for a tool, whose `render` is `iframe`
-    // or `ab-screencast`: the swap would tear the browser down and re-derive
-    // the same screencast, so asking for a native window would get a reload
-    // (`docs/specs/dor-tool.md` -> Declaring tools).
-    this.renderModes = offeredRenderModes(this.isTool, this.provider);
     this.watchDpr();
     this.registration = registerAgentBrowserScreen(this.id, {
       snapshot: this.computeScreenSnapshot(),
@@ -731,9 +739,10 @@ export class AgentBrowserSurfaceController {
     // a hidden tab, or across a relaunch — is pushed now (lastIssued makes this a
     // no-op when the pane size did not change).
     if (this.syncEngaged) this.issueSyncToPane();
-    const url = this.pendingNavigation;
-    this.pendingNavigation = undefined;
-    if (url) this.runCommand(['open', url]);
+    const { url, headed } = this.pendingIntent;
+    this.pendingIntent = {};
+    if (headed !== undefined && headed !== this.headed) this.relaunch(headed, url);
+    else if (url) this.runCommand(['open', url]);
   }
 
   /** (Re)bind the current params: no session launches one, a session without a
@@ -1416,8 +1425,11 @@ export class AgentBrowserSurfaceController {
     const platform = this.platform;
     const k = this.phase.k;
     const capable = headed ? !!platform.agentBrowserPopOut : !!platform.agentBrowserPopIn;
-    if (!session || !capable || (k !== 'live' && k !== 'parked' && k !== 'ended')) {
-      abDebugLog(`[ab-panel] ${headed ? 'popOut' : 'popIn'} ignored in ${k}`);
+    if (!capable || !session || (k !== 'live' && k !== 'parked' && k !== 'ended')) {
+      // Before the browser is bound, the request waits for it; one arriving
+      // mid-relaunch is dropped — one relaunch at a time.
+      if (capable && (k === 'idle' || k === 'launching' || k === 'attaching')) this.pendingIntent.headed = headed;
+      else abDebugLog(`[ab-panel] ${headed ? 'popOut' : 'popIn'} ignored in ${k}`);
       if (url) this.navigate(url);
       return;
     }
@@ -1516,7 +1528,7 @@ export class AgentBrowserSurfaceController {
       return;
     }
     if (this.phase.k === 'disposed') return;
-    this.pendingNavigation = url;
+    this.pendingIntent.url = url;
     if (this.phase.k !== 'ended') return;
     if (isBrowsableUrl(url)) this.latestRestorableUrl = url;
     this.bind();
@@ -1719,6 +1731,13 @@ export function handOverBrowserPort(id: string, params: AgentBrowserSurfaceParam
   const controller = acquireAgentBrowserSurfaceController(id, params);
   controller.updateParams(params);
   controller.handOver(port);
+}
+
+/** Ask `id`'s browser for a render mode and a page — acquired from `params`
+ *  if no view has mounted it yet (a Door a reveal is about to mount), so the
+ *  request waits for its first start rather than being dropped. */
+export function requestBrowserRenderMode(id: string, params: AgentBrowserSurfaceParams, mode: RenderMode, opts?: { url?: string }): void {
+  acquireAgentBrowserSurfaceController(id, params).setRenderMode(mode, opts);
 }
 
 /** Close `params`'s automation session, for a Surface no controller holds.

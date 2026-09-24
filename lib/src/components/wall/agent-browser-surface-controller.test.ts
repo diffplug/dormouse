@@ -1112,6 +1112,23 @@ describe('relaunch (pop-out / pop-in)', () => {
     expect(platform.agentBrowserCommand).not.toHaveBeenCalledWith('sess', ['open', 'http://localhost:5173/'], undefined);
   });
 
+  it('keeps a pop-out asked for before the browser is bound, and runs it with its page once live', async () => {
+    const platform = relaunchPlatform();
+    let attached!: (res: { ok: boolean; wsPort?: number }) => void;
+    platform.agentBrowserAttach = vi.fn(() => new Promise((resolve) => { attached = resolve; }));
+    const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', url: 'https://page.example/' });
+    // Before any view mounts it, as for a Door the context menu reveals.
+    controller.setRenderMode('ab-popout', { url: 'http://localhost:5173/' });
+    controller.attachView(makeSink());
+    await flushMicrotasks();
+    expect(platform.agentBrowserAttach).toHaveBeenCalled();
+    expect(platform.agentBrowserPopOut).not.toHaveBeenCalled();
+
+    attached({ ok: true, wsPort: 1111 });
+    await flushMicrotasks();
+    expect(platform.agentBrowserPopOut).toHaveBeenCalledExactlyOnceWith('sess', expect.objectContaining({ url: 'http://localhost:5173/' }), undefined);
+  });
+
   it('a failed pop-out comes back in the pane, relaunching headless at its page if no daemon came up', async () => {
     const platform = relaunchPlatform();
     const controller = withPort('id', { session: 'sess', url: 'https://page.example/' }, 1111);
