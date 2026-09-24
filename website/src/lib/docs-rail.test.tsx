@@ -20,6 +20,8 @@ import SelfHostDocs, { SELF_HOST_TOC } from "../pages/SelfHostDocs";
 import Hosted, { HOSTED_TOC } from "../pages/Hosted";
 import AgentSkillDocs from "../pages/AgentSkillDocs";
 import DorDocs from "../pages/DorDocs";
+import CompatibleAgentsDocs from "../pages/CompatibleAgentsDocs";
+import agents from "../data/docs.agents.json";
 import security from "../data/docs.security.json";
 import skill from "../data/docs.skill.json";
 import cli from "../data/docs.cli.json";
@@ -33,12 +35,17 @@ const PAGES: Record<string, { element: React.ReactElement; toc: TocEntry[] }> = 
   "/hosted": { element: <Hosted />, toc: HOSTED_TOC },
   "/docs/agent-skill": { element: <AgentSkillDocs />, toc: skill.toc },
   "/docs/dor": { element: <DorDocs />, toc: cli.toc },
+  "/docs/compatible-agents": { element: <CompatibleAgentsDocs />, toc: agents.toc },
 };
 
 const idsIn = (entries: TocEntry[]): string[] =>
   entries.flatMap((entry) => [entry.id, ...idsIn(entry.children)]);
 
 describe("every page in the rail", () => {
+  it("places compatible agents directly after the dor CLI reference", () => {
+    const index = DOCS_PAGES.findIndex((page) => page.path === "/docs/dor");
+    expect(DOCS_PAGES[index + 1]).toMatchObject({ path: "/docs/compatible-agents", label: "Compatible agents" });
+  });
   it("is covered by this test", () => {
     // A page added to the rail without an entry here would go unchecked, and
     // the loop below would pass by testing one fewer page.

@@ -195,6 +195,8 @@ it('opens the parent notepad from the Helper control and keeps edits on that par
 
 
 it('offers the rule covering the running script, else that script\'s own key', async () => {
+  const clearRules = () => act(() => { for (const name of terminalRegistry.getWatchedCommands()) terminalRegistry.setCommandWatched(name, false); });
+  clearRules();
   const open = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'helper', parentId: 'watch-row', command: '', status: 'off' });
   terminalRegistry.applyTerminalSemanticEvents('watch-row', [
     { type: 'commandLine', commandLine: 'cd web && pnpm run dev' },
@@ -213,7 +215,7 @@ it('offers the rule covering the running script, else that script\'s own key', a
     expect(terminalRegistry.getWatchedCommands()).toEqual(['pnpm dev']);
   } finally {
     open.mockRestore();
-    act(() => { for (const name of terminalRegistry.getWatchedCommands()) terminalRegistry.setCommandWatched(name, false); });
+    clearRules();
     terminalRegistry.removeTerminalPaneState('watch-row');
   }
 });
