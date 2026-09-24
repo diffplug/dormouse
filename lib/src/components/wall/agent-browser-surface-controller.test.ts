@@ -761,10 +761,12 @@ describe('a closed Surface and the next launch into its session', () => {
   // controller against the real one.
   const session = 'dormouse.1.tool.t';
   const page = 'http://localhost:6006/';
-  function realHost() {
+  /** `deliver` stands in for the transport: it hands a request to the host,
+   *  by default at once. */
+  function realHost(deliver: (request: BrowserRequest, send: () => Promise<BrowserResult>) => Promise<BrowserResult> = (_request, send) => send()) {
     const fake = fakeProvider();
     const host = createBrowserHost({ writeClipboardText: vi.fn(), providers: { 'agent-browser': () => fake.provider } });
-    const browser = vi.fn((request: BrowserRequest) => host.request(request));
+    const browser = vi.fn((request: BrowserRequest) => deliver(request, () => host.request(request)));
     setPlatform(Object.assign(new FakePtyAdapter(), { browserProviders: ['agent-browser'] as const, browser }));
     // What the host did to the session's browser: bring it up, or close it.
     const lifecycle = () => fake.calls.filter((call) => /^(stop|open|close) /.test(call));
@@ -784,6 +786,42 @@ describe('a closed Surface and the next launch into its session', () => {
     await vi.waitFor(() => expect(next.snapshot().phase).toBe('live'));
     expect(host.lifecycle()).toEqual([...work, `close ${session}`, `stop ${session}`, `open ${session} ${page}`]);
   }
+
+  it.each([
+    ['bound to the session', false],
+    ['still launching it', true],
+  ])('sends the next launch only once the close of a Surface %s is answered, on a transport that delivers the launch first', async (_name, launching) => {
+    // Tauri runs each command on a worker pool, so a close and a launch sent
+    // an instant apart can reach the host in either order.
+    let deliverClose!: () => void;
+    const closeHeld = new Promise<void>((resolve) => { deliverClose = resolve; });
+    const host = realHost((request, send) => (request.op === 'close' ? closeHeld.then(send) : send()));
+    if (launching) {
+      host.fake.gate(`stop ${session}`);
+      acquireAgentBrowserSurfaceController('first', { renderMode: 'ab-screencast', url: page, launchSession: session }).attachView(makeSink());
+    } else {
+      withPort('first', { session, url: page }, 1111).attachView(makeSink());
+    }
+    await flushMicrotasks();
+    const firstWork = launching ? [`stop ${session}`] : [];
+
+    void closeBrowserSurface('first', {});
+    const next = acquireAgentBrowserSurfaceController('next', { renderMode: 'ab-screencast', url: page, launchSession: session });
+    next.attachView(makeSink());
+    await flushMicrotasks();
+    // The close is still on its way, so the next launch has not been sent.
+    const sent = () => host.browser.mock.calls.map(([request]) => request.op).filter((op) => op === 'close' || op === 'launch');
+    expect(sent()).toEqual([...(launching ? ['launch'] : []), 'close']);
+    expect(host.lifecycle()).toEqual(firstWork);
+
+    deliverClose();
+    if (launching) host.fake.release(`stop ${session}`);
+    await vi.waitFor(() => expect(next.snapshot().phase).toBe('live'));
+    expect(host.lifecycle()).toEqual([
+      ...(launching ? [`stop ${session}`, `open ${session} ${page}`] : []),
+      `close ${session}`, `stop ${session}`, `open ${session} ${page}`,
+    ]);
+  });
 
   it('closes a launch that was opening it before the next launch', async () => {
     const host = realHost();

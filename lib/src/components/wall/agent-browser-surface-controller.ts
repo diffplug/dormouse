@@ -144,9 +144,9 @@ type Phase =
   /** Constructed; no view has started it yet. */
   | { k: 'idle' }
   /** No session yet: opening `url` in a browser whose session binds on
-   *  success — through `named` when the launch names one, which a close of
-   *  the Surface meanwhile closes too. */
-  | { k: 'launching'; named?: BrowserHandle }
+   *  success — `named` when the launch names one, which a close of the
+   *  Surface meanwhile closes too, through the launch's own binding. */
+  | { k: 'launching'; named?: { session: string; browser: BrowserHandle } }
   /** The session's stream port is being asked of the host (`attach`). */
   | { k: 'attaching' }
   /** Streaming from `port`. `seen`: the stream has reported its browser
@@ -783,19 +783,23 @@ export class AgentBrowserSurfaceController {
     const headed = this.headed;
     // No creation site has to remember the binary a `dor ab` surface resolved.
     const binaryPath = this.binaryPath ?? launchBinaryPath(this.provider);
-    // A named session's close still in flight — a failed swap reopening the
-    // previous provider's, a Tool re-run's — is one the host finishes first:
-    // it serializes a browser's launches and closes.
     const browser = browserHandle(this.provider, { session, cwd: this.cwd, binaryPath });
-    const phase: Phase = { k: 'launching', ...(session && browser ? { named: browser } : {}) };
+    const phase: Phase = { k: 'launching', ...(session && browser ? { named: { session, browser } } : {}) };
     this.setPhase(phase);
     // A launch that cannot start settles as late as one that fails, so whoever
-    // created this Surface is always listening by then.
+    // created this Surface is always listening by then. A named one is sent
+    // only once every close of its session this webview sent has been
+    // answered — a failed swap reopening the previous provider's, a Tool
+    // re-run's — so no transport can deliver it first; released meanwhile, it
+    // opens nothing for a closed Surface.
+    const closing = session === undefined ? undefined : closeInFlight(this.provider, session);
     const opened: Promise<BrowserResult> = !browser
       ? Promise.resolve({ ok: false, error: providerUnavailable(this.provider) })
       : !url
         ? Promise.resolve({ ok: false, error: 'no page to open' })
-        : browser.launch(url, headed);
+        : !closing
+          ? browser.launch(url, headed)
+          : closing.then(() => this.phase === phase ? browser.launch(url, headed) : { ok: false });
     opened
       .then((res) => {
         if (this.phase !== phase) {
@@ -1632,16 +1636,16 @@ export class AgentBrowserSurfaceController {
   /** Close this Surface's browser session — the one it is bound to, or the
    *  one its launch names — and release the controller. Sent at once: the host
    *  runs it after the session's launch, relaunch or attach still in flight,
-   *  closing what that brings up, and before any launch sent after it
-   *  (docs/specs/dor-browser.md → "Browser Host"). Returns the session
-   *  closed, if any, and when the host answered. */
+   *  closing what that brings up (docs/specs/dor-browser.md → "Browser Host"),
+   *  and a launch naming the session waits for its answer (`closeInFlight`).
+   *  Returns the session closed, if any, and when the host answered. */
   close(): { session?: string; done: Promise<void> } {
     const phase = this.phase;
     if (phase.k === 'disposed') return { done: Promise.resolve() };
     const session = this.session;
     this.release();
     const done = session ? this.closeSession(session)
-      : phase.k === 'launching' && phase.named ? phase.named.close().then(() => {})
+      : phase.k === 'launching' && phase.named ? trackClose(this.provider, phase.named.session, phase.named.browser.close())
       : Promise.resolve();
     return { session, done };
   }
@@ -1731,7 +1735,31 @@ export function disposeAgentBrowserSurfaceController(id: string): void {
  * (`lib/src/lib/agent-browser-binary.ts`).
  */
 function closeSessionOn(provider: BrowserAutomationProvider, cwd: string | undefined, session: string, binaryPath: unknown): Promise<void> {
-  return browserHandle(provider, { session, cwd, binaryPath })?.close().then(() => {}) ?? Promise.resolve();
+  const handle = browserHandle(provider, { session, cwd, binaryPath });
+  return handle ? trackClose(provider, session, handle.close()) : Promise.resolve();
+}
+
+// Closes of each session this webview has sent and the host has not answered,
+// which a launch naming the session waits out (`closeInFlight`): the host
+// serializes a browser's launches and closes in arrival order, and not every
+// transport delivers requests in the order sent.
+const closesInFlight = new Map<string, Promise<void>>();
+const closeKey = (provider: BrowserAutomationProvider, session: string) => `${provider}\0${session}`;
+
+/** Record `closing` as a close of `session` in flight until the host answers. */
+function trackClose(provider: BrowserAutomationProvider, session: string, closing: Promise<unknown>): Promise<void> {
+  const key = closeKey(provider, session);
+  const earlier = closesInFlight.get(key);
+  const tracked: Promise<void> = Promise.all([earlier, closing]).then(() => {}, () => {})
+    .finally(() => { if (closesInFlight.get(key) === tracked) closesInFlight.delete(key); });
+  closesInFlight.set(key, tracked);
+  return tracked;
+}
+
+/** What settles once every close of `session` this webview has sent has
+ *  been answered; undefined when none is in flight. */
+function closeInFlight(provider: BrowserAutomationProvider, session: string): Promise<void> | undefined {
+  return closesInFlight.get(closeKey(provider, session));
 }
 
 /** Hand `id`'s controller a port a `dor` command just learned, with the
@@ -1799,7 +1827,9 @@ function settleLaunch(id: string, error: string | null): void {
 }
 
 /** For tests: controllers now outlive panel unmount, so a suite reusing a
- *  surface id must release them between cases. */
+ *  surface id must release them between cases — and forget closes a case left
+ *  unanswered, which the next case's named launch would wait on. */
 export function disposeAllAgentBrowserSurfaceControllers(): void {
   for (const id of [...registry.keys()]) disposeAgentBrowserSurfaceController(id);
+  closesInFlight.clear();
 }

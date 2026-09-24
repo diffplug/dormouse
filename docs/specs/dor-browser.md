@@ -338,8 +338,10 @@ place of `live`; a `dor` handover moves any phase but `launching` and
   Surface's `launchFallback`**: `close` the pane, `embed` (a Tool's iframe), or
   `{ restore }` the params a swap replaced. A param cleared on success, it
   survives a restore mid-launch (rationale). **A launch into a named session is
-  sent at once, and so is a close of a Surface whose launch names one**: the
-  host orders them ([Browser Host](#browser-host)).
+  sent only once every close of that session this webview sent has been
+  answered**, whatever the transport's order; **a Surface's close is sent at
+  once**, for its bound session or the one its launch names
+  ([Browser Host](#browser-host)).
 - **Params predating the controller's own `session` or `renderMode` write are
   ignored until they show it back.**
 - **One relaunch at a time, only of a bound browser** (`live`, `parked`,
@@ -475,11 +477,10 @@ the primitives that differ (`BrowserProvider`: find, stop, open, probe, close,
 list tabs, act, evaluate, screenshot, stream URL):
 
 - **Must serialize a browser's launches, relaunching attaches and closes per
-  native identity**, in arrival order — a launch into a session waits out a
-  close of it still in flight, and two panes restoring one session relaunch it
-  once. **A close runs after the launch or attach already running, closing what
-  it brings up, and supersedes one sent before it that has not begun**, which
-  answers that the browser was closed (rationale).
+  native identity**, in arrival order, so two panes restoring one session
+  relaunch it once. **A close runs after the launch or attach already running,
+  closing what it brings up, and supersedes one sent before it that has not
+  begun**, which answers that the browser was closed (rationale).
 - **Must answer a launch inside `BROWSER_REQUEST_TIMEOUT_MS`**: startup,
   queueing included, gets 30 s from the request's arrival. A launch stops what
   runs a named session first, then resolves once the provider reports the
