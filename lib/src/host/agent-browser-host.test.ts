@@ -371,7 +371,7 @@ describe('agent-browser host screenshot transport', () => {
     expect(spawnMock).toHaveBeenCalledWith('/usr/local/bin/agent-browser', [
       '--session', 'shotfile', 'screenshot', shotPath,
       '--screenshot-format', 'jpeg', '--screenshot-quality', '85',
-    ]);
+    ], { timeoutMs: 30_000 });
   });
 
   // The frame is a picture of the user's authenticated browser, written by an
@@ -484,7 +484,7 @@ describe('agent-browser host screenshot transport', () => {
     await host.closePoppedOut();
   });
 
-  it('joins no capture from before a close or relaunch, nor one past the reply timeout', async () => {
+  it('joins no capture from before a close or relaunch, and bounds every capture', async () => {
     // Every screenshot hangs; closes and relaunch steps answer at once.
     const shots: string[] = [];
     spawnMock.mockImplementation(async (_binary: string, args: string[]) => {
@@ -515,13 +515,13 @@ describe('agent-browser host screenshot transport', () => {
     await capture();
     expect(shots).toHaveLength(3);
 
-    // Past the reply timeout a pending capture is wedged: the next asks afresh,
-    // into a file the wedged one cannot overwrite.
-    const now = Date.now();
-    vi.spyOn(Date, 'now').mockReturnValue(now + 31_000);
-    await capture();
-    expect(shots).toHaveLength(4);
-    expect(new Set(shots).size).toBe(4);
+    // Each replacement writes a file the capture it replaced cannot overwrite.
+    expect(new Set(shots).size).toBe(3);
+    // And no capture can pin the slot: the spawn itself is bounded past the
+    // CLI's 25s action timeout.
+    for (const call of spawnMock.mock.calls.filter((c) => (c[1] as string[]).includes('screenshot'))) {
+      expect(call[2]).toEqual({ timeoutMs: 30_000 });
+    }
     await host.closePoppedOut();
   });
 

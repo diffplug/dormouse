@@ -90,9 +90,10 @@ function webviewArgv(command: WebviewCommand): string[] {
   }
 }
 
-// A caller past this joins no pending capture: every adapter has stopped
-// waiting for it (vscode-adapter.ts, the standalone host's 30s forward).
-const CAPTURE_JOIN_MAX_MS = 30_000;
+// A capture can queue behind a page-loading `open` for the CLI's whole 25s
+// action timeout; past this it is wedged, and killed so it cannot pin
+// `oneCapture`. Every adapter has stopped waiting by then anyway.
+const CAPTURE_TIMEOUT_MS = 30_000;
 const STREAM_PORT_READ_ATTEMPTS = 4;
 const STREAM_PORT_READ_DELAY_MS = 150;
 // How often a launch re-reads the daemon's state files while `open` is still
@@ -164,7 +165,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   // take a `binaryPath` of their own. A refused path is dropped, not fatal: the
   // host's own candidates still run, so a stale or hostile value degrades to
   // "resolve it yourself" rather than to a broken surface.
-  async function runWithBinaryFallback(args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult> {
+  async function runWithBinaryFallback(args: string[], binaryPath?: string, timeoutMs?: number): Promise<AgentBrowserCommandResult> {
     const configured = process.env[AGENT_BROWSER_BIN_ENV];
     if (binaryPath !== undefined && !isAllowedAgentBrowserBinary(binaryPath, configured)) {
       log(`[agent-browser] refused a caller-supplied binary path that is not an agent-browser: ${JSON.stringify(binaryPath)}`);
@@ -178,7 +179,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
 
     let lastError = '';
     for (const binary of candidates) {
-      const result = await spawnAndCapture(binary, args);
+      const result = await (timeoutMs === undefined ? spawnAndCapture(binary, args) : spawnAndCapture(binary, args, { timeoutMs }));
       if (result.ok) {
         return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
       }
@@ -411,16 +412,15 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   // share a session, and a caller re-asks after its adapter's timeout. A second
   // spawn would only queue behind the first in the daemon, then race it for
   // the session's one capture file, so a caller asking mid-capture joins it —
-  // but never one older than an adapter's reply timeout, which is wedged, nor
-  // one from before the session's close or relaunch.
-  type PendingCapture = { session: string; started: number; promise: Promise<unknown> };
+  // never one from before the session's close or relaunch. The spawn's
+  // `CAPTURE_TIMEOUT_MS` bounds how long any capture stays joinable.
+  type PendingCapture = { session: string; promise: Promise<unknown> };
   const capturesInFlight = new Map<string, PendingCapture>();
   function oneCapture<T>(session: string, kind: string, capture: () => Promise<T>): Promise<T> {
     const key = `${kind}\0${session}`;
     const pending = capturesInFlight.get(key);
-    if (pending && Date.now() - pending.started < CAPTURE_JOIN_MAX_MS) return pending.promise as Promise<T>;
-    if (pending) forgetCaptures(session);
-    const entry: PendingCapture = { session, started: Date.now(), promise: Promise.resolve() };
+    if (pending) return pending.promise as Promise<T>;
+    const entry: PendingCapture = { session, promise: Promise.resolve() };
     const promise = capture().finally(() => {
       if (capturesInFlight.get(key) === entry) capturesInFlight.delete(key);
     });
@@ -430,7 +430,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   }
 
   /** Join none of `session`'s pending captures, and give its next one a fresh
-   *  file, so a capture that is still running can never overwrite it. */
+   *  file, so one still running cannot overwrite it. */
   function forgetCaptures(session: string): void {
     for (const [key, entry] of capturesInFlight) {
       if (entry.session === session) capturesInFlight.delete(key);
@@ -533,7 +533,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
       }
       const args = ['--session', session, 'screenshot', out, '--screenshot-format', format];
       if (format === 'jpeg') args.push('--screenshot-quality', String(jpegQuality(opts.quality)));
-      const result = await runWithBinaryFallback(args, binaryPath);
+      const result = await runWithBinaryFallback(args, binaryPath, CAPTURE_TIMEOUT_MS);
       if (result.exitCode !== 0) {
         log(`[agent-browser] screenshot failed (exit ${result.exitCode}): ${result.stderr.trim() || result.stdout.trim()}`);
         return { ok: false, error: result.stderr.trim() || `screenshot exited ${result.exitCode}` };

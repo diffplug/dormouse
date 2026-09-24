@@ -397,7 +397,7 @@ sidecar/Rust adapter.
 | Method | Contract |
 | --- | --- |
 | `agentBrowserCommand` | Navigation, tab, viewport/device, `get cdp-url` and `close` commands, one shape per verb. |
-| `agentBrowserScreenshot` | One device-resolution JPEG/PNG frame. VS Code structured-clones the bytes; standalone passes Rust the capture's temp-file **path** over the sidecar stdio, for Rust to read (rationale). **One capture per session in flight**: a request made meanwhile joins it — never one out past 30s, nor one from before the session's close or relaunch. |
+| `agentBrowserScreenshot` | One device-resolution JPEG/PNG frame. VS Code structured-clones the bytes; standalone passes Rust the capture's temp-file **path** over the sidecar stdio, for Rust to read (rationale). **One capture per session in flight**: a request made meanwhile joins it — never one from before the session's close or relaunch — and the capture's spawn is killed past 30s. |
 | `agentBrowserStreamStatus` | Current stream port, for stale-`wsPort` recovery. |
 | `agentBrowserEdit` | select-all/copy/cut via fixed host-owned JS plus an OS clipboard write. |
 | `getAgentBrowserStreamUrl` | Direct stream URL, or the VS Code relay URL. |
