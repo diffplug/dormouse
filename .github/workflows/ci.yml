@@ -305,7 +305,13 @@ jobs:
       # build never reads node_modules — build.rs needs only `node` on PATH (it
       # resolves the binary with `node -p process.execPath`) plus the root
       # package.json version pin. This job exists for the Rust the smoketest
-      # cannot see.
+      # cannot see, plus the dor launcher test below.
       - name: Cargo test
         run: cargo test
         working-directory: standalone/src-tauri
+
+      # `dor.cmd` is the one launcher only Windows can run. The test needs Node
+      # alone — no install, no build — so it rides this job rather than a
+      # Windows runner of its own.
+      - name: dor launcher test
+        run: node --test dor/test/launcher.test.mjs

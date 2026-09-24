@@ -27,6 +27,10 @@ does nothing and **exits 0** (rationale). **Dormouse-launched terminals must
 rely on injected env, never on a globally installed Node**; each launcher's
 `PATH`-`node` fallback is for developer/manual use.
 
+**Both launchers must exit with the CLI's own status**, which `dor await` and every
+script branching on `dor` depend on. `dor/test/launcher.test.mjs` pins it, running
+`dor.cmd` on the Windows leg of CI's `standalone-platform-check`.
+
 Public PTY env:
 
 - `DORMOUSE_NODE` — Node runtime the launcher execs; `process.execPath` under VS
