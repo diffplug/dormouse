@@ -14,8 +14,9 @@
  * that rots.
  *
  * The sources it reads: the canonical product guide, the root README, the
- * bundled agent skill, the self-host runbook, the security spec, the homepage,
- * and the route table, redirects, and head-tag plumbing that publish them.
+ * bundled agent skill, every routed Markdown page (`SITE_ROUTES`), the
+ * homepage, and the route table, redirects, and head-tag plumbing that publish
+ * them.
  *
  * Run by the root `pnpm test`.
  */
@@ -31,7 +32,7 @@ import {
   visit,
   UnsupportedMarkdownError,
 } from '../website/scripts/docs-parser.js';
-import { generateDocs, SITE_ORIGIN, SITE_IMAGE_BASE } from '../website/scripts/generate-docs.js';
+import { generateDocs, SITE_ORIGIN, SITE_IMAGE_BASE, SITE_ROUTES } from '../website/scripts/generate-docs.js';
 // Imported, not scraped: Node strips the types, so the lint reads the same
 // objects the browser bundle does. A regex over the source silently returned
 // fewer pages when a field was reordered or a flag renamed, and every check
@@ -46,8 +47,10 @@ const ROOT_README = 'README.md';
 const SKILL = 'dor/skill.md';
 const SELF_HOST = 'SELF_HOST.md';
 const SECURITY_SPEC = 'docs/specs/security.md';
-const COMPATIBLE_AGENTS = 'docs/compatible-agents.md';
 const HOMEPAGE = 'website/src/pages/Home.tsx';
+/** The authored Markdown published on dormouse.sh: the two READMEs and every
+ *  page the generator routes. */
+const PUBLIC_MARKDOWN = [GUIDE, ROOT_README, ...Object.keys(SITE_ROUTES)];
 /** The `/docs` redirect entrypoint `website/public/_redirects` owns; it names
  *  no page, so `sitePath` has nothing to point it at. */
 const DOCS_ENTRYPOINT_PATH = '/docs';
@@ -96,19 +99,13 @@ function docsSurfaces() {
 }
 
 /** Each source read once and parsed once, then shared by every check. */
-const src = {
-  [GUIDE]: readRepoFile(GUIDE),
-  [ROOT_README]: readRepoFile(ROOT_README),
-  [SKILL]: readRepoFile(SKILL),
-  [SELF_HOST]: readRepoFile(SELF_HOST),
-  [SECURITY_SPEC]: readRepoFile(SECURITY_SPEC),
-  [COMPATIBLE_AGENTS]: readRepoFile(COMPATIBLE_AGENTS),
-  [HOMEPAGE]: readRepoFile(HOMEPAGE),
-};
+const src = Object.fromEntries(
+  [...PUBLIC_MARKDOWN, SKILL, HOMEPAGE].map((rel) => [rel, readRepoFile(rel)]),
+);
 
 /** Parsed form, or null when the source is outside the supported subset. */
 const parsed = {};
-for (const rel of [GUIDE, ROOT_README, SKILL, SELF_HOST, SECURITY_SPEC, COMPATIBLE_AGENTS]) {
+for (const rel of [...PUBLIC_MARKDOWN, SKILL]) {
   try {
     parsed[rel] = parseMarkdown(src[rel]);
   } catch (error) {
@@ -131,7 +128,7 @@ function linksIn(rel) {
 }
 
 function checkNoPlaceholders() {
-  for (const rel of [GUIDE, ROOT_README, SELF_HOST, SECURITY_SPEC, COMPATIBLE_AGENTS]) {
+  for (const rel of PUBLIC_MARKDOWN) {
     if (/\bTODO:/.test(src[rel])) fail(`${rel}: contains a TODO: placeholder`);
   }
 }
@@ -225,7 +222,7 @@ function checkImageBaseUrl() {
  * than this check could say.
  */
 function checkLinks() {
-  for (const rel of [GUIDE, ROOT_README, SELF_HOST, SECURITY_SPEC, COMPATIBLE_AGENTS]) {
+  for (const rel of PUBLIC_MARKDOWN) {
     if (!parsed[rel]) continue;
     for (const href of linksIn(rel)) {
       if (href.startsWith('#')) continue;

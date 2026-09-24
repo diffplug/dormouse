@@ -187,9 +187,10 @@ export class TutDetector {
     if (changed) this.state.markComplete("th-theme");
   }
 
-  /** A rule exists at all — the user turned alerts on for a command name. */
+  /** The user watched the fake `longtask` the item names — never merely any
+   *  rule, since fresh installs start with the coding-agent defaults. */
   private processWatchedCommands(): void {
-    if (this.activityStore.getWatchedCommands().length > 0) {
+    if (this.activityStore.getWatchedCommands().includes("longtask")) {
       this.state.markComplete("al-watch-cmd");
     }
   }

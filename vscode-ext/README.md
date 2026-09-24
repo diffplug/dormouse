@@ -36,7 +36,7 @@ Dormouse can owe you attention in three independent ways. Two of them need no se
 
 **A watched command goes quiet.** Fresh installations watch [supported coding agents](https://dormouse.sh/docs/compatible-agents) by default; existing saved watch lists are preserved. To watch another command, right-click its pane header — or press `a` in command mode — and turn on **Watch all `<command>` commands**. Every pane running that command is then watched, now and later. For a script runner the rule names the script: **Watch all pnpm dev commands** leaves `pnpm test` alone. When a watched command's output goes busy and then falls quiet while you are not looking, it rings.
 
-Dormouse never guesses which commands deserve an alert. Watching is a rule you create on a command name, and turning it off anywhere removes it everywhere.
+Watching is a rule on a command name, and turning it off anywhere removes it everywhere.
 
 A ringing pane is outlined and washed in the alarm color until you answer it, so one glance across a full wall finds it. Clicking or typing into the pane — or pressing `a` — puts the alarm out. Nothing rings while you are working in that pane; if you walk away from it instead, it rings then.
 

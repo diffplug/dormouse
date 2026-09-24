@@ -44,7 +44,7 @@
 | unsent text in the input | `^C`, 800 ms, `^C` | yes | 1061 ms |
 | freshly launched, no conversation | one `^C` | no — correctly, nothing to resume | — |
 
-Rows 1–2 are why a blanket second press is wrong; `Press Ctrl-C again` was absent from every codex cell, so an ask-gated second press can only ever serve claude. The 262 ms idle case leaves the retry set before the ~600 ms fallback fires. Confirmed end to end in a real pane: fallback press at +625 ms, hint at +789 ms, applied on the next activation.
+Rows 1–2 are why a blanket second press is wrong; `Press Ctrl-C again` was absent from every codex cell, so an ask-gated second press can only ever serve the agents that ask (claude, and Cursor's `Ctrl+C` spelling). The 262 ms idle case leaves the retry set before the ~600 ms fallback fires. Confirmed end to end in a real pane: fallback press at +625 ms, hint at +789 ms, applied on the next activation.
 
 **Additional CLI probes** (macOS, 2026-09-24). The production capture function ran against native PTYs in disposable conversations, then launched each captured command in a fresh process. Copilot 1.0.88 captured at 659 ms while idle and 697 ms with unsent input; Antigravity 1.2.10 at 83/81 ms; Cursor 2026.09.23-86fc751 at 82/83 ms. Each restored the test reply and retained the same conversation ID through the second capture. These probes exercised shared capture and agent resume, not a complete app restart. Warp v0.2026.09.16.08.27.stable_02 stayed on its startup animation and yielded no hint; its fixture uses the supplied real exit excerpt, and its installed help confirms `--resume <RESUME>`.
 

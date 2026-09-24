@@ -6,13 +6,11 @@ export interface CodingAgent {
   commands: readonly string[];
   /** A positional subcommand (codex) or long option; the ID is always required. */
   resume: string;
-  /** Legacy exit hints which offer continuation without an explicit ID. */
-  continue?: string;
   watchByDefault: boolean;
 }
 
 export const CODING_AGENTS: readonly CodingAgent[] = [
-  { name: 'Claude Code', commands: ['claude'], resume: '--resume', continue: '--continue', watchByDefault: true },
+  { name: 'Claude Code', commands: ['claude'], resume: '--resume', watchByDefault: true },
   { name: 'Codex', commands: ['codex'], resume: 'resume', watchByDefault: true },
   { name: 'GitHub Copilot', commands: ['copilot'], resume: '--resume', watchByDefault: true },
   { name: 'Antigravity', commands: ['agy'], resume: '--conversation', watchByDefault: true },
@@ -20,7 +18,7 @@ export const CODING_AGENTS: readonly CodingAgent[] = [
   { name: 'Cursor', commands: ['agent', 'cursor-agent'], resume: '--resume', watchByDefault: true },
 ];
 
-export const DEFAULT_WATCHED_COMMANDS = CODING_AGENTS
+export const DEFAULT_WATCHED_COMMANDS: readonly string[] = CODING_AGENTS
   .filter((agent) => agent.watchByDefault)
   .flatMap((agent) => agent.commands)
   .sort();

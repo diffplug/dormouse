@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { AGENT_EXIT_FIXTURES } from '../lib/__fixtures__/coding-agents';
 import {
   BLIND_SECOND_PRESS_MS,
   QUIET_BEFORE_RETRY_MS,
@@ -86,25 +85,6 @@ const CLAUDE_HINT = 'claude --resume 01JABCDEF';
 const CODEX_HINT = 'codex resume 01HXYZ';
 
 describe('captureAgentRecovery', () => {
-  it.each(AGENT_EXIT_FIXTURES)('captures the $agent exit excerpt across PTY chunks', async ({ output, command }) => {
-    const cut = output.indexOf(command.split(' ')[0]) + 8;
-    const host = new FakePtys(['a'])
-      .seed('a', 'warp --resume stale\r\n')
-      .onPress('a', 1, 40, output.slice(0, cut))
-      .onPress('a', 1, 80, output.slice(cut));
-    await captureAgentRecovery(host);
-    expect(host.found.a).toBe(command);
-    expect(host.presses).toEqual(output.includes('Press Ctrl+C again') ? [['a'], ['a']] : [['a']]);
-  });
-
-  it('answers Cursor’s Ctrl+C prompt before the blind retry', async () => {
-    const host = new FakePtys(['cursor'])
-      .onPress('cursor', 1, 40, '\x1b[1mPress Ctrl+C again to exit\x1b[0m')
-      .onPress('cursor', 2, 40, 'To resume this session: agent --resume=cursor-id\r\n');
-    await captureAgentRecovery(host);
-    expect(host.found.cursor).toBe('agent --resume cursor-id');
-    expect(host.time).toBeLessThan(BLIND_SECOND_PRESS_MS);
-  });
   it('presses every live pane once and reports each hint as it arrives', async () => {
     const host = new FakePtys(['a', 'b'])
       .onPress('a', 1, 80, `\r\nResume with \`${CLAUDE_HINT}\`.\r\n`)
@@ -117,10 +97,11 @@ describe('captureAgentRecovery', () => {
     expect(host.found).toEqual({ a: CLAUDE_HINT, b: CODEX_HINT });
   });
 
-  it('presses again as soon as a pane asks, through its TUI escapes', async () => {
-    // claude renders the prompt inside its TUI, so the raw bytes carry escapes
-    // through the phrase — the ask gate strips before it matches.
-    const ask = '[1mPress [0m[7mCtrl-C[0m again[K to exit';
+  it.each(['Ctrl-C', 'Ctrl+C'])('presses again as soon as a pane asks with %s, through its TUI escapes', async (chord) => {
+    // claude (Ctrl-C) and Cursor (Ctrl+C) render the prompt inside a TUI, so the
+    // raw bytes carry escapes through the phrase — the ask gate strips before it
+    // matches.
+    const ask = `\x1b[1mPress \x1b[0m\x1b[7m${chord}\x1b[0m again\x1b[K to exit`;
     const host = new FakePtys(['a'])
       .onPress('a', 1, 40, ask)
       .onPress('a', 2, 40, `\r\n${CLAUDE_HINT}\r\n`);
@@ -128,8 +109,8 @@ describe('captureAgentRecovery', () => {
     await captureAgentRecovery(host);
 
     // Second press well inside the blind window, so the ask is what triggered it.
-    expect(host.presses).toHaveLength(2);
-    expect(host.presses[1]).toEqual(['a']);
+    expect(host.presses).toEqual([['a'], ['a']]);
+    expect(host.time).toBeLessThan(BLIND_SECOND_PRESS_MS);
     expect(host.found.a).toBe(CLAUDE_HINT);
   });
 

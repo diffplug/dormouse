@@ -195,11 +195,12 @@ describe("TutDetector", () => {
     expect(state.isComplete("al-todo-manual")).toBe(false);
   });
 
-  it("credits al-watch-cmd once a rule exists", () => {
+  it("credits al-watch-cmd once a longtask rule exists, not for the agent defaults", () => {
     const { state, setWatchedCommands } = makeDetectorHarness();
 
+    setWatchedCommands(["claude", "codex"]);
     expect(state.isComplete("al-watch-cmd")).toBe(false);
-    setWatchedCommands(["longtask"]);
+    setWatchedCommands(["claude", "codex", "longtask"]);
     expect(state.isComplete("al-watch-cmd")).toBe(true);
   });
 

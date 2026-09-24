@@ -195,7 +195,8 @@ it('opens the parent notepad from the Helper control and keeps edits on that par
 
 
 it('offers the rule covering the running script, else that script\'s own key', async () => {
-  const existingRules = terminalRegistry.getWatchedCommands();
+  const clearRules = () => act(() => { for (const name of terminalRegistry.getWatchedCommands()) terminalRegistry.setCommandWatched(name, false); });
+  clearRules();
   const open = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'helper', parentId: 'watch-row', command: '', status: 'off' });
   terminalRegistry.applyTerminalSemanticEvents('watch-row', [
     { type: 'commandLine', commandLine: 'cd web && pnpm run dev' },
@@ -208,13 +209,13 @@ it('offers the rule covering the running script, else that script\'s own key', a
     // A bare runner rule already covers `pnpm dev`, so the row names — and turns off — that rule.
     expect(watchSwitch()?.getAttribute('aria-label')).toBe('Watch all pnpm commands on');
     await act(async () => watchSwitch()!.click());
-    expect(terminalRegistry.getWatchedCommands()).toEqual(existingRules);
+    expect(terminalRegistry.getWatchedCommands()).toEqual([]);
     expect(watchSwitch()?.getAttribute('aria-label')).toBe('Watch all pnpm dev commands off');
     await act(async () => watchSwitch()!.click());
-    expect(terminalRegistry.getWatchedCommands()).toEqual([...existingRules, 'pnpm dev'].sort());
+    expect(terminalRegistry.getWatchedCommands()).toEqual(['pnpm dev']);
   } finally {
     open.mockRestore();
-    act(() => { for (const name of terminalRegistry.getWatchedCommands()) terminalRegistry.setCommandWatched(name, false); });
+    clearRules();
     terminalRegistry.removeTerminalPaneState('watch-row');
   }
 });

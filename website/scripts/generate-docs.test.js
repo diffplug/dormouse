@@ -38,7 +38,6 @@ function generatedHrefs() {
 describe('compatible agents', () => {
   it('publishes the complete authored guide with only its title removed', () => {
     expect(data.agents.delta.map((rule) => rule.id)).toEqual(['drop-document-title']);
-    expect(data.agents.headings.map((heading) => heading.id)).toContain('adding-an-agent');
     expect(data.agents.source).toBe('docs/compatible-agents.md');
   });
 

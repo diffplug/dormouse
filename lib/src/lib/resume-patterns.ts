@@ -30,25 +30,29 @@ const ENDS_INVOCATION = String.raw`(?![A-Za-z0-9_-])`;
 
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-function pattern(command: string, argument: string, withId: boolean): ResumePattern {
+function pattern(command: string, argument: string, takesId: boolean): ResumePattern {
   const label = `${command} ${argument}`;
-  const separator = argument.startsWith('--') ? '(?:=| )' : ' ';
-  const body = `${escapeRegex(label)}${withId ? `${separator}(${RESUME_ID})` : ''}${ENDS_INVOCATION}`;
+  // A long option's id may follow `=` or a space; the rebuild always uses a space.
+  const id = takesId ? `${argument.startsWith('--') ? '[= ]' : ' '}(${RESUME_ID})` : '';
+  const body = `${escapeRegex(label)}${id}`;
   return {
     label,
     // Do not read `agent` from the suffix of `cursor-agent` or an arbitrary
     // executable/path. Keeping the executable from the hint preserves aliases.
-    regex: new RegExp(String.raw`(?<![A-Za-z0-9_./\\-])${body}`, 'g'),
-    exact: new RegExp(`^(?:${body})$`),
+    regex: new RegExp(String.raw`(?<![A-Za-z0-9_./\\-])${body}${ENDS_INVOCATION}`, 'g'),
+    exact: new RegExp(`^${body}$`),
   };
 }
 
-const BUILTIN_PATTERNS: ResumePattern[] = CODING_AGENTS.flatMap((agent) =>
-  agent.commands.flatMap((command) => [
-    pattern(command, agent.resume, true),
-    ...(agent.continue ? [pattern(command, agent.continue, false)] : []),
-  ]),
-);
+const BUILTIN_PATTERNS: ResumePattern[] = [
+  ...CODING_AGENTS.flatMap((agent) => agent.commands.map((command) => pattern(command, agent.resume, true))),
+  // Claude's legacy exit hint, the one form without an id: registered agents
+  // must name the exact conversation.
+  pattern('claude', '--continue', false),
+];
+
+const rebuild = (label: string, match: RegExpMatchArray): string =>
+  match[1] ? `${label} ${match[1]}` : label;
 
 /** How far back a resume hint is still considered current. */
 const SCAN_LINES = 50;
@@ -61,10 +65,7 @@ function resumeCommandInVisible(visible: string): string | null {
     for (const match of visible.matchAll(regex)) {
       const index = match.index;
       if (latest && latest.index > index) continue;
-      latest = {
-        index,
-        command: match[1] ? `${label} ${match[1]}` : label,
-      };
+      latest = { index, command: rebuild(label, match) };
     }
   }
   return latest?.command ?? null;
@@ -80,7 +81,7 @@ export function normalizeResumeCommand(command: string): string | null {
   const visible = stripTerminalControls(command).trim();
   for (const { label, exact } of BUILTIN_PATTERNS) {
     const match = exact.exec(visible);
-    if (match) return match[1] ? `${label} ${match[1]}` : label;
+    if (match) return rebuild(label, match);
   }
   return null;
 }

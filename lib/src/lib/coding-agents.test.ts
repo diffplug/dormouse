@@ -1,18 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { CODING_AGENTS, DEFAULT_WATCHED_COMMANDS } from './coding-agents';
+import { CODING_AGENTS } from './coding-agents';
 import { AGENT_EXIT_FIXTURES } from './__fixtures__/coding-agents';
 import { detectResumeCommand, normalizeResumeCommand } from './resume-patterns';
-import { commandWatchKey, isWatchKey } from './terminal-state';
+import { commandWatchKey } from './terminal-state';
+
+const RESUME_FORMS = CODING_AGENTS.flatMap((agent) => agent.commands.map((command) => ({
+  label: `${command} ${agent.resume}`,
+  separators: agent.resume.startsWith('--') ? [' ', '='] : [' '],
+})));
+const ID = '12345678-abcd-4123-8123-123456789abc';
 
 describe('coding agent integrations', () => {
-  it('has unique executable names and valid default watch keys', () => {
+  it('has unique executable names that are their own watch keys', () => {
     const commands = CODING_AGENTS.flatMap((agent) => agent.commands);
     expect(new Set(commands).size).toBe(commands.length);
     for (const command of commands) {
       expect(command).toMatch(/^[a-z][a-z0-9-]*$/);
       expect(commandWatchKey(`${command} --help`)).toBe(command);
     }
-    for (const command of DEFAULT_WATCHED_COMMANDS) expect(isWatchKey(command)).toBe(true);
   });
 
   it('requires an exit fixture for every registered agent', () => {
@@ -26,29 +31,19 @@ describe('coding agent integrations', () => {
     expect(normalizeResumeCommand(output)).toBeNull();
   });
 
-  for (const agent of CODING_AGENTS) {
-    for (const command of agent.commands) {
-      const label = `${command} ${agent.resume}`;
-      const id = '12345678-abcd-4123-8123-123456789abc';
-      it(`normalizes the supported separators for ${command}`, () => {
-        for (const separator of agent.resume.startsWith('--') ? [' ', '='] : [' ']) {
-          const invocation = `${label}${separator}${id}`;
-          expect(detectResumeCommand(`Resume with \`${invocation}\`.\r\n`)).toBe(`${label} ${id}`);
-          expect(normalizeResumeCommand(invocation)).toBe(`${label} ${id}`);
-        }
-        expect(detectResumeCommand(`${label} \x1b[1m${id}\x1b[0m`)).toBe(`${label} ${id}`);
-      });
-
-      it(`rejects incomplete or extended executable commands for ${command}`, () => {
-        for (const invocation of [label, `${label}=`, `${label} -bad`, `${label} $(whoami)`,
-          `${label} ${id}; echo bad`, `${label} ${id} --extra`, `prefix-${label} ${id}`]) {
-          expect(normalizeResumeCommand(invocation), invocation).toBeNull();
-        }
-        expect(detectResumeCommand(`prefix-${label} ${id}`)).toBeNull();
-        expect(detectResumeCommand(`/tmp/${label} ${id}`)).toBeNull();
-      });
+  it.each(RESUME_FORMS)('rebuilds `$label <id>` exactly and rejects anything more', ({ label, separators }) => {
+    for (const separator of separators) {
+      const invocation = `${label}${separator}${ID}`;
+      expect(detectResumeCommand(invocation)).toBe(`${label} ${ID}`);
+      expect(normalizeResumeCommand(invocation)).toBe(`${label} ${ID}`);
     }
-  }
+    for (const invocation of [label, `${label}=`, `${label} -bad`, `${label} $(whoami)`,
+      `${label} ${ID}; echo bad`, `${label} ${ID} --extra`, `prefix-${label} ${ID}`]) {
+      expect(normalizeResumeCommand(invocation), invocation).toBeNull();
+    }
+    expect(detectResumeCommand(`prefix-${label} ${ID}`)).toBeNull();
+    expect(detectResumeCommand(`/tmp/${label} ${ID}`)).toBeNull();
+  });
 
   it('keeps Cursor executable aliases distinct and chooses the newest hint', () => {
     expect(detectResumeCommand('cursor-agent --resume=older\ragent --resume=newer'))

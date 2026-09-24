@@ -7,11 +7,11 @@ Dormouse publishes specialized references and a hosted-services preview
 on the marketing site. Each reference is generated from its canonical source.
 
 ```text
-/docs/dor           dor CLI reference
-/docs/compatible-agents supported agents and contribution guide
-/docs/agent-skill   exact bundled agent skill
-/docs/self-host     the SELF_HOST.md runbook, minus its withheld halves
-/docs/security      the security spec, every section of it
+/docs/dor                dor CLI reference
+/docs/compatible-agents  supported agents and contribution guide
+/docs/agent-skill        exact bundled agent skill
+/docs/self-host          the SELF_HOST.md runbook, minus its withheld halves
+/docs/security           the security spec, every section of it
 ```
 
 `/docs` is an entrypoint rather than a page: it redirects to the page
@@ -259,9 +259,8 @@ Exempt: `/` with its anchors, and the `/docs` entrypoint, which names no page.
 ## Reference page chrome
 
 `DOCS_PAGES` pages use `DocsLayout` for header, rail, `h1`, intro, and
-prev/next. `/hosted` follows `/docs/self-host`.
-
-**Must place “Compatible agents” immediately after “dor CLI reference”.** Publish `docs/compatible-agents.md` whole except its document title, through `buildDocument` in `website/scripts/generate-docs.js`. **Must keep its supported-agent table aligned with `CODING_AGENTS` in `lib/src/lib/coding-agents.ts`**, pinned by `compatible agents` in `website/scripts/generate-docs.test.js`. Its contributor instructions publish with its user guide.
+prev/next. `/hosted` follows `/docs/self-host`. **Must place “Compatible agents”
+immediately after “dor CLI reference”.**
 
 **Each page's `linkedFrom` names every document owing it a link** — the two
 READMEs and the homepage — so the obligation is registry-driven, never inferred
@@ -378,6 +377,15 @@ that for its long direction flag.
 Generation fails on a malformed snapshot envelope, duplicate command id, missing
 or extra snapshot, or root inventory mismatch. Semantic parsing may fall back to
 prose but never silently discards source text.
+
+## `/docs/compatible-agents` guide
+
+`docs/compatible-agents.md` publishes whole except its `#` title
+(`DROP_DOCUMENT_TITLE`). **Must keep its supported-agent table aligned with
+`CODING_AGENTS` in `lib/src/lib/coding-agents.ts`**, pinned by
+`compatible agents` in `website/scripts/generate-docs.test.js`.
+
+Source of truth: `generateDocs` in `website/scripts/generate-docs.js`.
 
 ## `/docs/agent-skill` guide
 
@@ -553,8 +561,8 @@ consumers.
 lint, checks the rules above mechanically; each rule names its own check, and
 the lint's header comment is the inventory. The rules with no other home:
 
-- **No public source carries a `TODO:` placeholder** — the two READMEs,
-  `SELF_HOST.md`, and `docs/specs/security.md`.
+- **No public source carries a `TODO:` placeholder** — the two READMEs and
+  every Markdown page `SITE_ROUTES` publishes.
 - **Public links use canonical HTTPS URLs, and a local link resolves** — read
   off the parsed tree, so a link-shaped string in a code span is not a link.
   `SELF_HOST.md` and the security spec get only the HTTPS half; spec-lint
@@ -584,6 +592,7 @@ spec.
 | `vscode-ext/README.md` | The canonical product guide; published off-site, parsed here |
 | `SELF_HOST.md` | The self-host runbook and Installer contract; the runbook half is published |
 | `docs/specs/security.md` | The security spec; every section publishes, its rows split across three pages |
+| `docs/compatible-agents.md` | The supported-agent guide, published whole at `/docs/compatible-agents` |
 | `vscode-ext/package.json` | Listing metadata and VS Code command inventory |
 | `README.md` | Repository and contributor entry point |
 | `vscode-ext/images/` | Guide media; the generator copies it to `public/guide/images/`, which the Marketplace listing loads from |
@@ -605,6 +614,7 @@ spec.
 | `website/src/components/DorCommandReference.tsx` | One CLI command section |
 | `website/src/pages/DorDocs.tsx` | `/docs/dor` |
 | `website/src/pages/AgentSkillDocs.tsx` | `/docs/agent-skill` |
+| `website/src/pages/CompatibleAgentsDocs.tsx` | `/docs/compatible-agents` |
 | `website/src/pages/SelfHostDocs.tsx`, `website/src/pages/Hosted.tsx`; `website/src/components/HostingRequirementNotice.tsx` | The two hosting choices and their shared server boundary |
 | `website/src/pages/SecurityDocs.tsx` | `/docs/security` |
 | `scripts/public-docs-lint.mjs` | Public-doc validation |

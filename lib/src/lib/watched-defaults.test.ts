@@ -1,20 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_WATCHED_COMMANDS } from './coding-agents';
+import { installLocalStorageStub } from './test-local-storage';
 
 vi.mock('./platform', () => ({
   getPlatform: () => ({ alertSetWatchedCommands: vi.fn(), alertSetCommandWatched: vi.fn() }),
 }));
 
 const KEY = 'dormouse:watched-commands';
-let saved: Map<string, string>;
 beforeEach(() => {
   vi.resetModules();
-  saved = new Map();
-  vi.stubGlobal('localStorage', {
-    getItem: (key: string) => saved.get(key) ?? null,
-    setItem: (key: string, value: string) => { saved.set(key, value); },
-    removeItem: (key: string) => { saved.delete(key); },
-  });
+  installLocalStorageStub();
 });
 afterEach(() => { vi.unstubAllGlobals(); });
 
@@ -24,10 +19,16 @@ describe('fresh watch preferences', () => {
     expect(store.getWatchedCommands()).toEqual(DEFAULT_WATCHED_COMMANDS);
   });
 
-  it.each(['[]', '["npm test"]', 'invalid', '{}', ''])('preserves saved preferences: %s', async (raw) => {
-    saved.set(KEY, raw);
+  it.each([
+    ['[]', []],
+    ['["npm test"]', ['npm test']],
+    ['invalid', []],
+    ['{}', []],
+    ['', []],
+  ])('preserves saved preferences: %s', async (raw, expected) => {
+    localStorage.setItem(KEY, raw);
     const store = await import('./watched-commands');
-    expect(store.getWatchedCommands()).toEqual(raw === '["npm test"]' ? ['npm test'] : []);
+    expect(store.getWatchedCommands()).toEqual(expected);
   });
 
   it('persists removing every default through a reload', async () => {

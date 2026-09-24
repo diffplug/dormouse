@@ -16,11 +16,7 @@ Install and sign in to the agent separately, then launch it from a Dormouse term
 | [Cursor](https://cursor.com/docs/cli/overview) | `agent` | `agent --resume <id>` | Yes |
 | [Cursor](https://cursor.com/docs/cli/overview) | `cursor-agent` | `cursor-agent --resume <id>` | Yes |
 
-Long options accept either a space or `=` before the ID. Copilot and Antigravity print forms such as `copilot --resume=<id>` and `agy --conversation=<id>`; Cursor prints `agent --resume=<id>`. Dormouse rebuilds these with a space and retains the executable name from the hint.
-
-Claude's older `claude --continue` exit hint is also recognized. The other integrations require an explicit ID so multiple conversations in the same directory can be restored separately. Warp's integration uses the `warp` agent CLI.
-
-Other agents and CLI programs can still run in Dormouse. Watching can be enabled for any running command, even when automatic conversation recovery is unavailable.
+Hints printed with `=`, such as `copilot --resume=<id>`, are recognized too. Claude's older `claude --continue` hint is also recognized; every other integration requires an explicit ID, so conversations that share a directory restore separately. Warp's integration uses the `warp` agent CLI.
 
 ## How recovery and watching work
 
@@ -36,13 +32,13 @@ Recovery requires a fresh exit hint. An empty conversation may produce none. A c
 
 On a fresh installation, Dormouse watches commands marked **Yes** in the table above. It observes terminal output becoming busy and then quiet, which can indicate a finished response or a request for input. This is an output heuristic; it does not read the agent's internal task state.
 
-An existing saved watch list is preserved, including an empty list. To enable watching, open the terminal context for a running agent and select **Watch all `<command>` commands**. Remove a rule there or in Settings. Rules apply to every pane running that command; Cursor's two executable names have separate rules.
+An existing saved watch list is preserved, including an empty list. To watch any running command, listed here or not, open its terminal context and select **Watch all `<command>` commands**. Remove a rule there or in Settings. Rules apply to every pane running that command; Cursor's two executable names have separate rules.
 
-Terminal notifications and command-exit alerts also work independently of watching. **Defer alerts until animation stops** is enabled by default and can be changed in Settings. Watching requires shell integration that reports the running command.
+Watching requires shell integration that reports the running command. Terminal notifications and command-exit alerts work independently of watching.
 
 ## Adding an agent
 
-An agent integration normally needs one registry entry, an exit fixture, and a row in the table above. Both the standalone app and VS Code use the same recovery implementation.
+An agent integration normally needs one registry entry, an exit fixture, and a row in the table above; the standalone app and VS Code share the recovery implementation.
 
 ### Add the definition and fixture
 
