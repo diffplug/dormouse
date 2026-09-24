@@ -7,6 +7,8 @@ export {
   resolveBinaryPath,
 } from './resolve-binary.js';
 export {
+  isAllowedAgentBrowserBinary,
+  isAllowedPlaywrightBinary,
   parseStreamPort,
   sessionForKey,
   streamStatusArgs,

@@ -2,6 +2,7 @@
 import { buildCommand } from '@stricli/core';
 import {
   browserBinaryIsMissing,
+  isAllowedPlaywrightBinary,
   resolveBinaryPath,
   sessionForKey,
   DEFAULT_PLAYWRIGHT_BIN,
@@ -116,9 +117,12 @@ export async function runPlaywrightCli(args: string[], options: CliOptions): Pro
   if (!resolvedRest.ok) return fail(resolvedRest.message);
   const rest = resolvedRest.value;
 
-  // A binding's pinned executable replaces the caller's; walk PATH only for
-  // one not resolved above.
-  const binary = binding.binaryPath ?? defaultBinary;
+  // A binding's pinned executable replaces the caller's, but it comes back from
+  // the host (and off a hand-editable session file), so it passes the same
+  // allowlist the host spawns under or the caller's own runs instead. Walk PATH
+  // only for one not resolved above.
+  const pinned = isAllowedPlaywrightBinary(binding.binaryPath, env[PLAYWRIGHT_BIN_ENV]) ? binding.binaryPath : undefined;
+  const binary = pinned ?? defaultBinary;
   const binaryPath = binary === defaultBinary ? defaultBinaryPath : resolveBinaryPath(binary, env);
   if (options.execPlaywright === undefined && browserBinaryIsMissing(binary, env, binaryPath)) {
     return missing(binary);

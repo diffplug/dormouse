@@ -410,7 +410,7 @@ single-use, short-TTL token bound to one stream port and strips the Origin
 header; standalone connects directly.
 
 Source of truth: `lib/src/host/agent-browser-host.ts` (`runWithBinaryFallback`),
-`lib/src/lib/agent-browser-binary.ts` (`isAllowedAgentBrowserBinary`),
+`dor-lib-common/src/agent-browser.ts` (`isAllowedAgentBrowserBinary`),
 `lib/src/host/private-capture-dir.ts`, `lib/src/host/browser-host-shared.ts`, `lib/src/host/browser-stream-guard.ts`,
 `vscode-ext/src/agent-browser-host.ts`, `vscode-ext/src/webview-html.ts`,
 `standalone/src/tauri-adapter.ts`, `standalone/src-tauri/src/lib.rs`,
@@ -426,7 +426,7 @@ Source of truth: `lib/src/host/agent-browser-host.ts` (`runWithBinaryFallback`),
 
 **Must discover the native session in its CLI project scope and connect using that installation's matching Playwright client.** Accept only a unique registry entry matching session, workspace and library, with a local pipe endpoint and Chromium engine. Never load modules from the registry's library path. The host derives the client from the validated CLI installation. Raw sessions reuse Surfaces by that native identity, including callers in different subdirectories of one project. Native CLI tabs and the pane share the selected tab; the host polls tab selection and metadata every 750ms while viewed, broadcasting only changes, and the current state to each connecting viewer. Screenshots reuse tab state for up to 750ms; explicit host controls refresh immediately. A native launch updates the pane's display mode and headed shutdown ownership.
 
-**Must expose only fixed host operations.** Navigation, tabs, viewport/device, screenshots, editing and close are validated host-side; arbitrary CLI arguments, JavaScript and CDP methods are unavailable through the webview channel. The trusted `dor pw` process retains native passthrough. Executable hints use the same filename/exact-host-override boundary as agent-browser, with `playwright-cli` as the accepted name.
+**Must expose only fixed host operations.** Navigation, tabs, viewport/device, screenshots, editing and close are validated host-side; arbitrary CLI arguments, JavaScript and CDP methods are unavailable through the webview channel. The trusted `dor pw` process retains native passthrough. Executable hints use the same filename/exact-host-override boundary as agent-browser, with `playwright-cli` as the accepted name; `dor pw` applies it to the executable a binding returns (`docs/specs/dor-cli.md` → Playwright Surface Addressing).
 
 **Must serialize GUI relaunches and closes per native session.** Close the previous CLI session before polling for its replacement; return when the browser endpoint is ready, without waiting for page load. Only a completed, still-current GUI launch may close startup blank tabs, and only while a real page exists. Shutdown cancels pending launches, disconnects viewers and closes tracked headed sessions. Viewer disconnect alone leaves the CLI browser alive. Concurrent input/captures share CDP attachments; disposal releases late attachments. Temporary screenshots follow the agent-browser private-directory contract.
 

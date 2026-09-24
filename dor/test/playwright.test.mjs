@@ -28,6 +28,14 @@ test('existing key pins executable, cwd and native session across terminal direc
   await runCli(['playwright', 'screenshot', 'relative.png'], options);
   assert.deepEqual(calls.find(c => c[0] === 'exec'), ['exec', '/first/playwright-cli', ['--session=gui-123', 'screenshot', 'relative.png'], '/first-project']);
 });
+test('a pinned executable outside the allowlist runs the caller\'s own instead', async () => {
+  // The binding comes back from the host, and off a hand-editable session file.
+  for (const binaryPath of ['/bin/sh', './playwright-cli', '/opt/../bin/playwright-cli']) {
+    const { calls, options } = fixture({ session: 'gui-123', cwd: '/first-project', binaryPath });
+    await runCli(['pw', 'snapshot'], options);
+    assert.deepEqual(calls.find(c => c[0] === 'exec'), ['exec', '/tools/playwright-cli', ['--session=gui-123', 'snapshot'], '/first-project'], binaryPath);
+  }
+});
 test('raw -s bypasses workspace addressing', async () => {
   const { calls, options } = fixture();
   await runCli(['pw', '-s=raw-session', 'goto', ':8080'], options);
