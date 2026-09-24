@@ -27,6 +27,7 @@ import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
 import { markAgentBrowserSessionClosed } from './wall/agent-browser-sessions';
 import { automationProvider, browserPlatform, browserSessionKey, isPopout, LaunchBinaryPath } from './wall/browser-automation';
 import { isAllowedBinaryFor } from '../lib/agent-browser-binary';
+import { isToolRender } from '../lib/platform/tool-types';
 import { disposeAgentBrowserSurfaceController } from './wall/agent-browser-surface-controller';
 import { KILL_CONFIRM_MS, KILL_SHAKE_MS, KillConfirmOverlay, randomKillChar, type ConfirmKill } from './KillConfirm';
 import { NotepadArchiveFailureModal, type NotepadArchiveFailure } from './NotepadArchiveFailure';
@@ -1982,9 +1983,11 @@ export function Wall({
       const params = nav.paneParams(id);
       const currentRenderMode = surfaceRenderModeFromParams(params);
 
-      // Tools keep their Session and current URL through renderer swaps.
+      // Tools keep their Session and current URL through renderer swaps, and
+      // take only their declarable renders: anything else would be written
+      // as `toolRender` and launch nothing (docs/specs/dor-tool.md).
       if (isToolParams(params)) {
-        if (mode === currentRenderMode || mode === 'ab-popout') return;
+        if (mode === currentRenderMode || !isToolRender(mode)) return;
         const url = browserUrlFromParams(params);
         const platform = getPlatform();
         if (!url || (mode === 'ab-screencast' && !platform.agentBrowserOpen)) return;

@@ -278,35 +278,47 @@ describe('IframePanel', () => {
   });
 });
 
-describe('the pop-out affordance on a tool (regression: PR #493 review)', () => {
+describe('the render modes a tool is offered (regression: PR #493 review)', () => {
   // A tool's `render` is `iframe` or `ab-screencast`, so pop-out has no
   // renderer to land in: offering it tears the browser down and re-derives the
-  // same screencast, so the user asks for a native window and gets a reload.
-  // `FakePtyAdapter` has no `agentBrowserPopOut`, so both cases would read
-  // `false` off the stock fake — attach one first, or the assertion is vacuous.
-  function withPopOutCapableHost() {
-    const platform = new FakePtyAdapter() as FakePtyAdapter & { agentBrowserPopOut: () => Promise<unknown> };
+  // same screencast, so the user asks for a native window and gets a reload;
+  // and a Playwright mode would be written as its render and launch nothing.
+  // `FakePtyAdapter` launches no browser, so every mode would be absent off the
+  // stock fake — make the host capable first, or the assertion is vacuous.
+  function withCapableHost() {
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserOpen' | 'agentBrowserPopOut' | 'playwright'>;
+    platform.agentBrowserOpen = async () => ({ ok: true });
     platform.agentBrowserPopOut = async () => ({ ok: true });
+    platform.playwright = async () => ({ ok: true });
     setPlatform(platform);
   }
 
-  it('offers pop-out on a plain browser surface', async () => {
-    withPopOutCapableHost();
+  it('offers every mode on a plain browser surface', async () => {
+    withCapableHost();
     await renderPanel(stubActions({}), {
       id: 'iframe-plain',
       title: 'Plain',
       params: { surfaceType: 'browser', url: 'http://example.test/app' },
     });
-    expect(getAgentBrowserScreenController('iframe-plain')?.canPopOut).toBe(true);
+    expect(getAgentBrowserScreenController('iframe-plain')?.renderModes)
+      .toEqual(['ab-screencast', 'ab-popout', 'pw-screencast', 'pw-popout', 'iframe']);
   });
 
-  it('never offers it on a tool', async () => {
-    withPopOutCapableHost();
-    await renderPanel(stubActions({}), {
+  it('offers a tool only its declarable renders, and swaps to nothing else', async () => {
+    withCapableHost();
+    const onSwapRenderMode = vi.fn();
+    await renderPanel(stubActions({ onSwapRenderMode }), {
       id: 'iframe-tool',
       title: 'storybook',
       params: { surfaceType: 'tool', url: 'http://localhost:6006/' },
     });
-    expect(getAgentBrowserScreenController('iframe-tool')?.canPopOut).toBe(false);
+    const controller = getAgentBrowserScreenController('iframe-tool')!;
+    expect(controller.renderModes).toEqual(['ab-screencast', 'iframe']);
+    await act(async () => {
+      controller.actions.setRenderMode?.('pw-screencast');
+      controller.actions.setRenderMode?.('ab-popout');
+      controller.actions.setRenderMode?.('ab-screencast');
+    });
+    expect(onSwapRenderMode).toHaveBeenCalledExactlyOnceWith('iframe-tool', 'ab-screencast');
   });
 });

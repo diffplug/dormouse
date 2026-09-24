@@ -15,6 +15,7 @@ import {
   type ScreenRegistration,
 } from './agent-browser-screen';
 import { isToolParams } from './browser-surface';
+import { offeredRenderModes } from './browser-automation';
 import { browserSurfaceUrl, hostPathDisplay } from './browser-url';
 
 // Sandbox every framed page, proxied or raw, so a tool's
@@ -217,22 +218,25 @@ export function IframePanel({ id, title, params }: PaneProps) {
 
   // Register a screen controller so the embed surface shows the unified
   // browser chrome (URL + the far-left chip → Display modal) and can swap back
-  // to a live screencast. Gated on the host being able to spawn an
-  // agent-browser (agentBrowserOpen) — without it there's no screencast to
-  // swap to, so the embed surface keeps its plain title (e.g. the web host).
-  const swapCapable = !!getPlatform().agentBrowserOpen;
+  // to a live screencast. Gated on the host being able to launch an automated
+  // browser — without one there's no screencast to swap to, so the embed
+  // surface keeps its plain title (e.g. the web host). A tool never pops out
+  // or changes provider (`docs/specs/dor-tool.md` -> Declaring tools); the
+  // other registration site is `agent-browser-surface-controller.ts`.
+  const renderModes = useMemo(() => offeredRenderModes(isTool, null), [isTool]);
+  const swapCapable = renderModes.some((mode) => mode !== 'iframe');
   const screenActions = useMemo<ScreenActions>(() => ({
     engageSync() {},
     applyDevice() {},
     applyViewport() {},
     openModal() { openAgentBrowserScreenModal(id); },
-    // iframe is the current backend; ab-screencast / ab-popout swap to
-    // agent-browser. Wired only when the host can spawn one — without it the
-    // modal hides its Render section, but the chrome (URL/nav) still shows.
+    // iframe is the current backend; every other offered mode swaps to an
+    // automated browser. Wired only when the host can launch one — without it
+    // the modal hides its Render section, but the chrome (URL/nav) still shows.
     setRenderMode: swapCapable
-      ? (mode) => { if (mode !== 'iframe') actionsRef.current.onSwapRenderMode(id, mode); }
+      ? (mode) => { if (mode !== 'iframe' && renderModes.includes(mode)) actionsRef.current.onSwapRenderMode(id, mode); }
       : undefined,
-  }), [id, swapCapable]);
+  }), [id, swapCapable, renderModes]);
   const chromeActions = useMemo<ChromeActions>(() => ({
     navigate(next) { commitUrl(next); },
     back() { goToHistoryIndex(historyIndexRef.current - 1); },
@@ -258,16 +262,11 @@ export function IframePanel({ id, title, params }: PaneProps) {
       chrome: { url: liveUrl, displayUrl: hostPathDisplay(liveUrl), title: title ?? null, key: null },
       chromeActions,
       hostCapable: false,
-      // embed→popout spawns the new agent-browser headed and mounts it
-      // popped-out, so it needs both spawn and pop-out host capabilities. Never
-      // for a tool, which has no third renderer to land in
-      // (docs/specs/dor-tool.md -> Declaring tools); the other registration
-      // site is `agent-browser-surface-controller.ts`.
-      canPopOut: !isTool && !!getPlatform().agentBrowserPopOut,
+      renderModes,
     });
     registrationRef.current = registration;
     return () => { registration.dispose(); registrationRef.current = null; };
-  }, [id, swapCapable, screenActions, chromeActions, isTool]);
+  }, [id, screenActions, chromeActions, renderModes]);
   // Keep the header's URL current as navigation and in-frame location changes
   // land. The iframe src is still driven only by sourceUrl.
   useEffect(() => {

@@ -10,17 +10,11 @@ import { parse as parseYaml } from 'yaml';
 import { BUILTIN_FILE_TOOL } from 'dor/file-viewer-format';
 import { isRecord } from '../lib/is-record';
 import { hasShellInputControls } from 'dor/commands/shell-quote';
+import { isToolRender, TOOL_RENDERS, type ToolRender } from '../lib/platform/tool-types';
 
 /** Where a tool file came from. `$PROJECT_ROOT` exists only for `repo`. */
 export type ToolScope = 'repo' | 'user';
 
-/** Where a tool's browser renders once it serves. `iframe` frames the page;
- *  `ab-screencast` drives a real browser, which is what makes a tool
- *  agent-drivable via `dor ab --surface` (`docs/specs/dor-tool.md`). The repo
- *  declares it rather than the tool: which renderer suits a tool is a Dormouse-
- *  side judgement, not something the tool knows about itself. */
-export type ToolRender = 'iframe' | 'ab-screencast';
-const TOOL_RENDERS: readonly ToolRender[] = ['iframe', 'ab-screencast'];
 
 /** How Dormouse learns which port to frame absent an announcement: `announced`
  *  frames nothing without OSC 367, `auto` autobinds a single bound port and
@@ -186,10 +180,10 @@ export function parseToolFile(
     }
 
     const rawRender = rawEntry.render;
-    if (rawRender !== undefined && !(TOOL_RENDERS as readonly unknown[]).includes(rawRender)) {
+    if (rawRender !== undefined && !isToolRender(rawRender)) {
       throw new ToolFileError(`${where}: 'render' must be one of ${TOOL_RENDERS.join(', ')}`);
     }
-    const render = (rawRender as ToolRender | undefined) ?? 'iframe';
+    const render: ToolRender = rawRender ?? 'iframe';
 
     const rawPort = rawEntry.port;
     if (rawPort !== undefined && !(TOOL_PORT_MODES as readonly unknown[]).includes(rawPort)) {

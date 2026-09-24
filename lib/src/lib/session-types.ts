@@ -1,6 +1,6 @@
 import { normalizeAlertDeliveryOverrides, type AlertDeliveryOverrides } from './alert-delivery-model';
 import { isRecord } from './is-record';
-import { isToolKeyScope, type ToolKeyScope } from './platform/tool-types';
+import { isToolKeyScope, isToolRender, type ToolKeyScope, type ToolRender } from './platform/tool-types';
 import type { SessionStatus } from './alert-manager';
 import { hasShellInputControls } from 'dor/commands/shell-quote';
 import { ACTIVITY_NOTIFICATION_SOURCES, type ActivityNotification, type TodoState } from './alert-manager';
@@ -23,7 +23,7 @@ export interface PersistedToolMetadata {
   argv?: string[];
   scope?: ToolKeyScope;
   name?: string;
-  render: 'iframe' | 'ab-screencast';
+  render: ToolRender;
   port: 'announced' | 'auto';
   key?: string[];
 }
@@ -187,7 +187,7 @@ function isPersistedToolMetadataShape(value: unknown): boolean {
     (value.argv === undefined || isToolCommandArgv(value.argv)) &&
     (value.name === undefined || typeof value.name === 'string') &&
     (value.scope === undefined || isToolKeyScope(value.scope)) &&
-    (value.render === 'iframe' || value.render === 'ab-screencast') &&
+    isToolRender(value.render) &&
     (value.port === 'announced' || value.port === 'auto') &&
     (value.key === undefined || (Array.isArray(value.key) && value.key.every((part) => typeof part === 'string')))
   );

@@ -95,9 +95,10 @@ export interface ScreenController {
   readonly chromeActions: ChromeActions;
   /** Whether the host can run `agentBrowserCommand` (false ⇒ resizes inert). */
   readonly hostCapable: boolean;
-  /** Whether this host/platform can pop the surface out to a headed OS window
-   *  (false/absent on web; gates the modal's `popout` render option). */
-  readonly canPopOut?: boolean;
+  /** The render modes this Surface can take — the Display modal offers these
+   *  (and the current mode) and nothing else. `offeredRenderModes` answers for
+   *  a host and Surface kind. */
+  readonly renderModes: readonly RenderMode[];
 }
 
 interface ScreenEntry {
@@ -138,7 +139,8 @@ export function registerAgentBrowserScreen(
     chrome: ChromeSnapshot;
     chromeActions: ChromeActions;
     hostCapable: boolean;
-    canPopOut?: boolean;
+    /** Absent: no render swap to offer. */
+    renderModes?: readonly RenderMode[];
   },
 ): ScreenRegistration {
   const entry: ScreenEntry = {
@@ -161,7 +163,7 @@ export function registerAgentBrowserScreen(
       chrome: () => entry.chrome,
       chromeActions: init.chromeActions,
       hostCapable: init.hostCapable,
-      canPopOut: init.canPopOut,
+      renderModes: init.renderModes ?? [],
     },
   };
   registry.set(id, entry);

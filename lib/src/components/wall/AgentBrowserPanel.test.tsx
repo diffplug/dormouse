@@ -825,27 +825,51 @@ describe('AgentBrowserPanel tab strip actions', () => {
   });
 });
 
-describe('the pop-out affordance on a tool (regression: PR #493 review)', () => {
+describe('the render modes a tool is offered (regression: PR #493 review)', () => {
   // The second of the two screen-registration sites (the other is
   // `IframePanel`): a tool declaring `render: ab-screencast` mounts this panel,
   // so the gate has to be here too. Why it exists is at the gate itself, in
-  // `agent-browser-surface-controller.ts`.
-  function withPopOutCapableHost() {
-    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserPopOut'>;
+  // `agent-browser-surface-controller.ts`. The host can do everything, so a
+  // refusal is the tool rule and not a missing capability.
+  function withCapableHost() {
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserOpen' | 'agentBrowserPopOut' | 'playwright'>;
     platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
+    platform.agentBrowserOpen = vi.fn(async () => ({ ok: true }));
     platform.agentBrowserPopOut = vi.fn(async (): Promise<AgentBrowserPopResult> => ({ ok: true, wsPort: 1 }));
+    platform.playwright = vi.fn(async () => ({ ok: true }));
     setPlatform(platform);
+    return platform;
   }
 
-  it('offers pop-out on a plain browser surface', async () => {
-    withPopOutCapableHost();
+  it('offers every mode on a plain browser surface', async () => {
+    withCapableHost();
     await renderPanel(paneProps('ab-plain', { surfaceType: 'browser', session: 's', renderMode: 'ab-screencast' }));
-    expect(getAgentBrowserScreenController('ab-plain')?.canPopOut).toBe(true);
+    expect(getAgentBrowserScreenController('ab-plain')?.renderModes)
+      .toEqual(['ab-screencast', 'ab-popout', 'pw-screencast', 'pw-popout', 'iframe']);
   });
 
-  it('never offers it on a tool', async () => {
-    withPopOutCapableHost();
-    await renderPanel(paneProps('ab-tool', { surfaceType: 'tool', session: 's', renderMode: 'ab-screencast' }));
-    expect(getAgentBrowserScreenController('ab-tool')?.canPopOut).toBe(false);
+  it('offers a tool only its declarable renders, and refuses the rest', async () => {
+    const platform = withCapableHost();
+    const onSwapRenderMode = vi.fn();
+    await act(async () => {
+      root.render(
+        <PaneWriteContext.Provider value={paneWriteFor(() => {})}>
+          <WallActionsContext.Provider value={stubActions({ onSwapRenderMode })}>
+            <AgentBrowserPanel {...paneProps('ab-tool', { surfaceType: 'tool', session: 's', renderMode: 'ab-screencast' })} />
+          </WallActionsContext.Provider>
+        </PaneWriteContext.Provider>,
+      );
+    });
+    const controller = getAgentBrowserScreenController('ab-tool')!;
+    expect(controller.renderModes).toEqual(['ab-screencast', 'iframe']);
+
+    // The popout relaunches in-controller, never reaching the Wall's guard.
+    await act(async () => { controller.actions.setRenderMode?.('ab-popout'); });
+    await act(async () => { controller.actions.setRenderMode?.('pw-screencast'); });
+    expect(platform.agentBrowserPopOut).not.toHaveBeenCalled();
+    expect(onSwapRenderMode).not.toHaveBeenCalled();
+
+    await act(async () => { controller.actions.setRenderMode?.('iframe'); });
+    expect(onSwapRenderMode).toHaveBeenCalledExactlyOnceWith('ab-tool', 'iframe');
   });
 });

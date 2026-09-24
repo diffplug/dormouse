@@ -2,6 +2,7 @@
 import { getPlatform } from '../../lib/platform';
 import type { PlatformAdapter } from '../../lib/platform/types';
 import type { BrowserAutomationProvider, PlaywrightRequest } from '../../lib/platform/browser-automation';
+import { isToolRender } from '../../lib/platform/tool-types';
 import type { RenderMode } from './agent-browser-screen';
 
 /** The automated render modes: which provider drives each, and whether its
@@ -38,6 +39,35 @@ export function isScreencast(mode: unknown): boolean {
 export function automationMode(provider: BrowserAutomationProvider, headed: boolean): AutomationRenderMode {
   if (provider === 'playwright') return headed ? 'pw-popout' : 'pw-screencast';
   return headed ? 'ab-popout' : 'ab-screencast';
+}
+
+/** Each provider's name in user-facing text. */
+export const PROVIDER_LABEL: Record<BrowserAutomationProvider, string> = {
+  'agent-browser': 'agent-browser',
+  playwright: 'Playwright',
+};
+
+/** Both providers, in the order the GUI lists them. */
+export const AUTOMATION_PROVIDERS = Object.keys(PROVIDER_LABEL) as BrowserAutomationProvider[];
+
+/**
+ * The render modes a browser Surface can take on this host — what its Display
+ * modal offers (docs/specs/dor-browser.md → "Display Modal And Render Swaps").
+ * A provider needs a host that can launch it, unless it is the one `current`
+ * already runs, which relaunches in place; its popout needs one that can also
+ * pop out. `iframe` is always available. A Tool takes only its declarable
+ * renders (docs/specs/dor-tool.md → Declaring tools).
+ */
+export function offeredRenderModes(isTool: boolean, current: BrowserAutomationProvider | null): RenderMode[] {
+  const modes: RenderMode[] = [];
+  for (const provider of AUTOMATION_PROVIDERS) {
+    const platform = browserPlatform(provider);
+    if (provider !== current && !platform.agentBrowserOpen) continue;
+    modes.push(automationMode(provider, false));
+    if (platform.agentBrowserPopOut) modes.push(automationMode(provider, true));
+  }
+  modes.push('iframe');
+  return isTool ? modes.filter(isToolRender) : modes;
 }
 
 export type BrowserPlatform = Pick<PlatformAdapter,

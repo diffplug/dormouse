@@ -168,7 +168,7 @@ Chrome icon pair across its nesting: the
 robot rides each provider’s screencast parent, each nested resolution row carrying only
 its presentation glyph.
 
-**Must hide the popout option where the host lacks `agentBrowserPopOut`.**
+**Must offer only the render modes the Surface's screen controller declares** (`renderModes`), never the host's global capabilities: a provider its host can launch, or the running one, which relaunches; that provider's popout where the host can also pop out; always `iframe`; for a Tool, only its declarable renders (`docs/specs/dor-tool.md` → Declaring tools). **`setRenderMode` refuses any other mode.**
 
 Resolution controls apply to both screencast providers, as GUI wrappers around native
 commands: **Resize with pane** is Dormouse-owned sync issuing
@@ -189,6 +189,7 @@ size landed**, so a resize transient is not read as an external override.
 | `ab-*` -> `iframe` | Uses canonical `params.url`; with multiple tabs, requires the user to press `c` in the warning overlay, because only the active tab survives. |
 
 Source of truth: `lib/src/components/wall/AgentBrowserScreenModal.tsx`,
+`offeredRenderModes` in `lib/src/components/wall/browser-automation.ts`,
 `lib/src/components/wall/agent-browser-surface-controller.ts` (`screenActions`, sync effects,
 pop-out/pop-in), `lib/src/components/Wall.tsx` (`onSwapRenderMode`), Storybook
 `lib/src/stories/AgentBrowserScreenModal.stories.tsx`.

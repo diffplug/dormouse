@@ -85,6 +85,25 @@ describe('AgentBrowserScreenModal', () => {
     registration.dispose();
   });
 
+  it('offers only the render modes the controller declares, whatever the host supports', () => {
+    // A tool on a host with every provider: Playwright and popout would strand it.
+    const platform: PlatformAdapter = new FakePtyAdapter();
+    platform.playwright = async () => ({ ok: true });
+    platform.agentBrowserPopOut = async () => ({ ok: true });
+    setPlatform(platform);
+    const registration = registerStubScreen('tool', {
+      snapshot: { ...STUB_SCREEN, renderMode: 'ab-screencast' },
+      renderModes: ['ab-screencast', 'iframe'],
+    });
+    act(() => root.render(
+      <AgentBrowserScreenModal controller={getAgentBrowserScreenController('tool')!} label="surface:5" onClose={() => {}} />,
+    ));
+    const options = [...document.body.querySelectorAll('input[name="render-mode"]')]
+      .map((input) => input.closest('label')?.textContent);
+    expect(options).toEqual(['agent-browser screencast', 'iframe embed']);
+    registration.dispose();
+  });
+
   it('keeps resize selected while an engaged sync is transiently scaled', () => {
     const registration = registerStubScreen('browser-transient', {
       snapshot: {

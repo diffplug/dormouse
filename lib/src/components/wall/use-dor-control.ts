@@ -18,7 +18,7 @@ import type {
 import { hasBrowser, hasTerminal } from 'dor/commands/types';
 import { MAX_AWAIT_TIMEOUT_MS } from '../../lib/alert-manager';
 import type { OpenPort } from '../../lib/platform/types';
-import type { ToolKeyScope } from '../../lib/platform/tool-types';
+import type { ToolKeyScope, ToolRender } from '../../lib/platform/tool-types';
 import { buildShellCommandForKind, hasShellInputControls, shellCommandKind } from 'dor/commands/shell-quote';
 import {
   UNNAMED_PANEL_TITLE,
@@ -968,7 +968,7 @@ export function useDorControl({
         let toolScope: ToolKeyScope | undefined;
         const toolArgs = stringArrayParam(params.args) ?? [];
         let warnings: string[] = [];
-        let render: 'iframe' | 'ab-screencast' = 'iframe';
+        let render: ToolRender = 'iframe';
         // `dor tool -- <command>` has nowhere to declare a strategy, so it
         // autobinds. Safe by construction now that `auto` refuses two ports
         // rather than tie-breaking; a declared tool opts in with one line.

@@ -1,4 +1,4 @@
-import { isToolKeyScope } from './platform/tool-types';
+import { isToolKeyScope, isToolRender } from './platform/tool-types';
 import { normalizeAlertDeliveryOverrides, type AlertDeliveryOverrides } from './alert-delivery-model';
 import type { PlatformAdapter } from './platform/types';
 import { browserPersistedPane, isToolCommandArgv, readPersistedSession, toPersistedAlertState, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceRefs, type PersistedToolMetadata, type PersistedSurfaceType } from './session-types';
@@ -178,7 +178,7 @@ export function toolCommandFromParams(params: Record<string, unknown> | undefine
 function toolMetadataFromParams(params: Record<string, unknown> | undefined): PersistedToolMetadata | null {
   if (!params) return null;
   const name = typeof params.toolName === 'string' && params.toolName ? params.toolName : undefined;
-  const render = params.toolRender === 'ab-screencast' ? 'ab-screencast' : 'iframe';
+  const render = isToolRender(params.toolRender) ? params.toolRender : 'iframe';
   const port = params.toolPort === 'auto' ? 'auto' : 'announced';
   const key = Array.isArray(params.toolKey) && params.toolKey.every((part) => typeof part === 'string')
     ? params.toolKey as string[]

@@ -14,6 +14,7 @@ import { sessionForKey } from 'dor-lib-common/agent-browser';
 import { Wall } from './Wall';
 import * as helpers from '../lib/helper-terminal';
 import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
+import * as browserAutomation from './wall/browser-automation';
 import { setPlatform } from '../lib/platform';
 import { FakePtyAdapter } from '../lib/platform/fake-adapter';
 import type { PlatformAdapter } from '../lib/platform/types';
@@ -919,6 +920,69 @@ describe('Wall on the Lath engine', () => {
       });
     } finally {
       untouchedSpy.mockRestore();
+    }
+  });
+
+  it('never swaps a Tool to a render it cannot declare, even when one is offered', async () => {
+    // The Display modal and both registration sites offer a Tool only `iframe`
+    // and `ab-screencast`; offer everything here so the Wall's own guard is
+    // what refuses. Written as `toolRender`, a Playwright mode launched nothing
+    // and stranded the pane.
+    const offered = vi.spyOn(browserAutomation, 'offeredRenderModes')
+      .mockReturnValue(['ab-screencast', 'ab-popout', 'pw-screencast', 'pw-popout', 'iframe']);
+    const playwright = vi.fn(async () => ({ ok: true, session: 'gui-pw', wsPort: 4321 }));
+    const open = vi.fn(async () => ({ ok: true, session: 'gui-ab', wsPort: 4322 }));
+    Object.assign(fake, { playwright, agentBrowserOpen: open, agentBrowserPopOut: vi.fn(async () => ({ ok: true })) });
+    // Serving: a Tool whose command is not running retires its browser.
+    terminalRegistry.applyTerminalSemanticEvents('tool-a', [
+      { type: 'commandLine', commandLine: 'pnpm storybook' },
+      { type: 'commandStart' },
+    ]);
+    try {
+      await act(async () => {
+        root.render(<Wall
+          restoredLathLayout={{
+            version: 1,
+            tree: { root: { kind: 'leaf', id: 'tool-a' } },
+            leafMeta: {
+              'tool-a': {
+                component: 'tool',
+                tabComponent: 'tool',
+                title: 'storybook',
+                params: {
+                  surfaceType: 'tool',
+                  command: 'pnpm storybook',
+                  cwd: '/repo',
+                  toolName: 'storybook',
+                  toolRender: 'iframe',
+                  toolPort: 'announced',
+                  renderMode: 'iframe',
+                  url: 'http://localhost:6006/',
+                },
+              },
+            },
+          }}
+          initialMode="command"
+        />);
+      });
+      await flush();
+      const controller = () => getAgentBrowserScreenController('tool-a');
+      expect(controller()?.snapshot().renderMode).toBe('iframe');
+
+      for (const mode of ['pw-screencast', 'pw-popout', 'ab-popout'] as const) {
+        await act(async () => { controller()?.actions.setRenderMode?.(mode); });
+        await flush();
+      }
+      expect(playwright).not.toHaveBeenCalled();
+      expect(open).not.toHaveBeenCalled();
+      expect(controller()?.snapshot().renderMode).toBe('iframe');
+
+      await act(async () => { controller()?.actions.setRenderMode?.('ab-screencast'); });
+      await flush();
+      expect(open).toHaveBeenCalledWith('http://localhost:6006/', {}, undefined);
+    } finally {
+      offered.mockRestore();
+      act(() => terminalRegistry.removeTerminalPaneState('tool-a'));
     }
   });
 

@@ -692,6 +692,8 @@ describe('Playwright provider', () => {
   it('uses the shared controller with provider-scoped host calls and cwd', async () => {
     const platform: PlatformAdapter = new FakePtyAdapter();
     platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
+    // The swap back to agent-browser is offered only where the host can launch one.
+    platform.agentBrowserOpen = vi.fn(async () => ({ ok: true }));
     platform.playwright = vi.fn(async request => request.op === 'streamUrl'
       ? { ok: true, url: `ws://127.0.0.1:${request.port}` }
       : { ok: true, exitCode: 0, stdout: '', stderr: '', wsPort: 4321 });

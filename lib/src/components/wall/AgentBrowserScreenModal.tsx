@@ -3,11 +3,11 @@
  * And Render Swaps"). Opened from the header's far-left chip, it is the
  * single place that owns *how* a surface renders:
  *
- *   - Render — swap the backend in place, preserving the target:
- *     `agent-browser screencast`, `agent-browser popout` (relaunch headed as a
- *     native OS window), or `iframe embed`. Each lists its agent/URL/feel
- *     trade-offs. Shown only when the controller wires `setRenderMode`; the
- *     popout option is gated on `canPopOut` (hidden on web).
+ *   - Render — swap the backend in place, preserving the target: each
+ *     provider's screencast and popout (relaunch headed as a native OS
+ *     window), or `iframe embed`. Each lists its agent/URL/feel trade-offs.
+ *     Shown only when the controller wires `setRenderMode`, offering only the
+ *     modes the controller declares in `renderModes`.
  *   - Resolution — the screencast viewport: *Resize with pane* (linked to the
  *     pane) or *Fixed* (a specific resolution chosen via Device or Custom).
  *     Specific to screencast, so it nests under that option and greys out
@@ -29,9 +29,7 @@ import {
 } from '../design';
 import type { RenderMode, ScreenController, ScreenSnapshot } from './agent-browser-screen';
 import { browserDisplayMode, useAgentBrowserScreenSnapshot } from './agent-browser-screen';
-import { automationMode, automationProvider, isScreencast } from './browser-automation';
-import type { BrowserAutomationProvider } from '../../lib/platform/browser-automation';
-import { getPlatformOrNull } from '../../lib/platform';
+import { AUTOMATION_PROVIDERS, automationMode, automationProvider, isScreencast, PROVIDER_LABEL } from './browser-automation';
 import {
   AgentRobotIcon,
   BROWSER_DISPLAY_LABEL,
@@ -53,11 +51,6 @@ const DEVICES = [
 ] as const;
 
 const PLAYWRIGHT_DEVICES = ['iPhone 15', 'iPhone 16', 'iPhone 16 Pro', 'iPhone 17', 'iPad (gen 11)', 'iPad Pro 11', 'Pixel 9', 'Galaxy S24'];
-
-const PROVIDER_LABEL: Record<BrowserAutomationProvider, string> = {
-  'agent-browser': 'agent-browser',
-  playwright: 'Playwright',
-};
 
 type Target = 'sync' | 'device' | 'custom';
 
@@ -96,8 +89,9 @@ export function AgentBrowserScreenModal({
   const currentMode: RenderMode = snapshot?.renderMode ?? 'ab-screencast';
   const canSwapRender = !!controller.actions.setRenderMode;
   const [renderMode, setRenderMode] = useState<RenderMode>(currentMode);
-  // Pop-out is a render mode, gated per host/platform (hidden on web).
-  const canPopOut = controller.canPopOut ?? false;
+  // The controller declares what this Surface can take (a tool never pops out
+  // or changes provider); the current mode always shows so it stays selected.
+  const offered = (mode: RenderMode) => mode === currentMode || controller.renderModes.includes(mode);
   // Only the screencast backend has a Dormouse-settable viewport; pop-out is a
   // native OS window and embed renders at the pane size, so both grey it out.
   const viewportDisabled = !isScreencast(renderMode);
@@ -231,26 +225,26 @@ export function AgentBrowserScreenModal({
       {canSwapRender ? (
         <div className="mt-4 flex flex-col gap-3">
           {/* Screencast owns the robot capability glyph; its nested resolution
-              modes append the presentation glyph. Playwright is offered only
-              on hosts that wire it, and its popout is not gated on
-              `canPopOut`. */}
-          {(['agent-browser', 'playwright'] as const).map((provider) => {
-            if (provider === 'playwright' && !getPlatformOrNull()?.playwright) return null;
+              modes append the presentation glyph. */}
+          {AUTOMATION_PROVIDERS.map((provider) => {
             const screencast = automationMode(provider, false);
             const popout = automationMode(provider, true);
+            if (!offered(screencast) && !offered(popout)) return null;
             const popoutDisplay = browserDisplayMode({ renderMode: popout, syncEngaged: false });
             return (
               <div key={provider} className="flex flex-col gap-3">
-                <RenderOption
-                  checked={renderMode === screencast}
-                  onSelect={() => setRenderMode(screencast)}
-                  icon={<AgentRobotIcon size={14} className="shrink-0 text-muted" />}
-                  label={`${PROVIDER_LABEL[provider]} screencast`}
-                  features={[[true, 'agents can read/write'], [true, 'any URL'], [false, 'laggy for humans']]}
-                >
-                  {renderMode === screencast && <div className="ml-6 mt-2">{viewportControls}</div>}
-                </RenderOption>
-                {(provider === 'playwright' || canPopOut) && (
+                {offered(screencast) && (
+                  <RenderOption
+                    checked={renderMode === screencast}
+                    onSelect={() => setRenderMode(screencast)}
+                    icon={<AgentRobotIcon size={14} className="shrink-0 text-muted" />}
+                    label={`${PROVIDER_LABEL[provider]} screencast`}
+                    features={[[true, 'agents can read/write'], [true, 'any URL'], [false, 'laggy for humans']]}
+                  >
+                    {renderMode === screencast && <div className="ml-6 mt-2">{viewportControls}</div>}
+                  </RenderOption>
+                )}
+                {offered(popout) && (
                   <RenderOption
                     checked={renderMode === popout}
                     onSelect={() => setRenderMode(popout)}
@@ -262,13 +256,15 @@ export function AgentBrowserScreenModal({
               </div>
             );
           })}
-          <RenderOption
-            checked={renderMode === 'iframe'}
-            onSelect={() => setRenderMode('iframe')}
-            icon={<BrowserDisplayIcon mode="iframe" size={14} className="text-muted" />}
-            label={BROWSER_DISPLAY_LABEL.iframe}
-            features={[[false, 'agents cannot read/write'], [false, 'http only'], [true, 'native human experience']]}
-          />
+          {offered('iframe') && (
+            <RenderOption
+              checked={renderMode === 'iframe'}
+              onSelect={() => setRenderMode('iframe')}
+              icon={<BrowserDisplayIcon mode="iframe" size={14} className="text-muted" />}
+              label={BROWSER_DISPLAY_LABEL.iframe}
+              features={[[false, 'agents cannot read/write'], [false, 'http only'], [true, 'native human experience']]}
+            />
+          )}
         </div>
       ) : (
         // No render swap wired: the legacy plain screencast resolution modal.

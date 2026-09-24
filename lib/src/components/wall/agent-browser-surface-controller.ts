@@ -27,6 +27,7 @@ import {
   browserPlatform,
   browserSessionKey,
   isPopout,
+  offeredRenderModes,
   type BrowserPlatform,
 } from './browser-automation';
 import { isToolParams } from './browser-surface';
@@ -199,8 +200,10 @@ export class AgentBrowserSurfaceController {
     return this.platformCache ??= browserPlatform(this.provider, this.cwd);
   }
   private sessionKey(session: string) { return browserSessionKey(session, this.provider, this.cwd); }
-  /** Gates the pop-out affordance; see `ensureStarted`. */
+  /** Gates the render modes offered; see `ensureStarted`. */
   private readonly isTool: boolean;
+  /** What `setRenderMode` accepts, fixed at start with the host's capabilities. */
+  private renderModes: readonly RenderMode[] = [];
 
   // --- params (mirrors of the persisted blob) ---
   private session: string | undefined;
@@ -377,6 +380,9 @@ export class AgentBrowserSurfaceController {
       },
       openModal: () => openAgentBrowserScreenModal(this.id),
       setRenderMode: (mode) => {
+        // Only what the modal could offer: the popout below never reaches the
+        // Wall's own tool guard.
+        if (!this.renderModes.includes(mode)) return;
         // A swap to iframe or the other provider is a render swap handled by
         // the Wall (the view owns the ≥2-tab confirm gate + onSwapRenderMode);
         // screencast ↔ popout relaunches this same session, in-controller.
@@ -445,6 +451,11 @@ export class AgentBrowserSurfaceController {
   private ensureStarted(): void {
     if (this.started || this.disposed) return;
     this.started = true;
+    // Never a popout or another provider for a tool, whose `render` is `iframe`
+    // or `ab-screencast`: the swap would tear the browser down and re-derive
+    // the same screencast, so asking for a native window would get a reload
+    // (`docs/specs/dor-tool.md` -> Declaring tools).
+    this.renderModes = offeredRenderModes(this.isTool, this.provider);
     // This surface owns its session again — clear any teardown mark a prior
     // surface (re-using the same managed name) left behind, so auto-revert works.
     if (this.session) clearAgentBrowserSessionClosed(this.sessionKey(this.session));
@@ -457,11 +468,7 @@ export class AgentBrowserSurfaceController {
       chrome: this.chrome,
       chromeActions: this.chromeActions,
       hostCapable: !!this.platform.agentBrowserCommand,
-      // Never for a tool, whose `render` is `iframe` or `ab-screencast`: the
-      // swap would tear the browser down and re-derive the same screencast, so
-      // asking for a native window would get a reload
-      // (`docs/specs/dor-tool.md` -> Declaring tools).
-      canPopOut: !this.isTool && !!this.platform.agentBrowserPopOut,
+      renderModes: this.renderModes,
     });
     this.lastPublishedScreen = null;
     this.publishScreen();

@@ -6,7 +6,7 @@ import type { RenderMode, ScreenController, ScreenSnapshot, ScreenState } from '
 interface StoryArgs {
   /** Render backend — `embed` greys out the Screen (viewport) section. */
   renderMode: RenderMode;
-  /** Whether the host can pop out (gates the "Pop out to window" button). */
+  /** Whether the host can pop out (adds `ab-popout` to the offered render modes). */
   canPopOut: boolean;
   state: ScreenState;
   /** Browser CSS viewport + inferred DPR. */
@@ -54,7 +54,7 @@ function useMockController(args: StoryArgs): ScreenController {
         reload: () => console.log('[story] reload'),
       },
       hostCapable: args.hostCapable,
-      canPopOut: args.canPopOut,
+      renderModes: ['ab-screencast', ...(args.canPopOut ? ['ab-popout' as const] : []), 'iframe'],
       actions: {
         engageSync: () => console.log('[story] engageSync'),
         applyDevice: (name) => console.log('[story] applyDevice', name),

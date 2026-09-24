@@ -23,11 +23,12 @@ Source of truth: `surface.tool` in `lib/src/components/wall/use-dor-control.ts`;
 
 - **Must retain the Session id, public Surface ref, terminal and notes across serving and renderer changes.** These are changes within one Surface.
 - **Must bypass browser `replaceSurface` for Tool renderer swaps**, mutating the Tool's params and releasing the retired browser resources.
+- **Never offer or apply a renderer swap outside a Tool's declarable `render` values** ([Declaring tools](#declaring-tools)): the Display modal lists no other, and `onSwapRenderMode` refuses one (rationale).
 - **Must run the terminal Activity model for a Tool**, including when its browser is visible. Watched-command defaults belong to `docs/specs/alert.md`.
 - **Never apply the untouched-shell kill or shell-replacement shortcut to a Tool**, which spawns touched.
 - **Must classify Tool params before browser params**, since a serving Tool carries `renderMode` too.
 
-Source of truth: `surfaceKindFromParams` / `isToolParams` in `lib/src/components/wall/browser-surface.ts`; `onSwapRenderMode` / `requestKill` / `isUntouchedShell` in `lib/src/components/Wall.tsx`; `lib/src/components/wall/tool-surface.test.ts`.
+Source of truth: `surfaceKindFromParams` / `isToolParams` in `lib/src/components/wall/browser-surface.ts`; `onSwapRenderMode` / `requestKill` / `isUntouchedShell` in `lib/src/components/Wall.tsx`; `isToolRender` in `lib/src/lib/platform/tool-types.ts`; `lib/src/components/wall/tool-surface.test.ts`; `never swaps a Tool to a render it cannot declare` in `lib/src/components/Wall.test.tsx`.
 
 ## Declaring tools
 

@@ -5,6 +5,7 @@ import type { WallActions } from './wall-context';
 import {
   registerAgentBrowserScreen,
   type ChromeSnapshot,
+  type RenderMode,
   type ScreenRegistration,
   type ScreenSnapshot,
 } from './agent-browser-screen';
@@ -152,7 +153,7 @@ export function registerStubScreen(
     snapshot?: ScreenSnapshot;
     chrome?: ChromeSnapshot;
     hostCapable?: boolean;
-    canPopOut?: boolean;
+    renderModes?: readonly RenderMode[];
   } = {},
 ): ScreenRegistration {
   return registerAgentBrowserScreen(id, {
@@ -167,6 +168,6 @@ export function registerStubScreen(
     chrome: init.chrome ?? STUB_CHROME,
     chromeActions: { navigate: vi.fn(), back: vi.fn(), forward: vi.fn(), reload: vi.fn() },
     hostCapable: init.hostCapable ?? true,
-    canPopOut: init.canPopOut ?? true,
+    renderModes: init.renderModes ?? ['ab-screencast', 'ab-popout', 'pw-screencast', 'pw-popout', 'iframe'],
   });
 }
