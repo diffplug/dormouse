@@ -623,6 +623,8 @@ export type ModalFrameProps = HTMLAttributes<HTMLDivElement> & ModalSurfaceVaria
   overlayClassName?: string;
   initialFocusRef?: RefObject<HTMLElement | null>;
   onEscape?: () => void;
+  /** Opt-in dismissal; clicks within the surface (including menus) stay inside. */
+  onOutsideClick?: () => void;
 };
 
 export function ModalFrame({
@@ -634,6 +636,7 @@ export function ModalFrame({
   overlayClassName,
   initialFocusRef,
   onEscape,
+  onOutsideClick,
   padding,
   align,
   elevation,
@@ -649,6 +652,9 @@ export function ModalFrame({
       layer={layer}
       backdrop={backdrop}
       className={overlayClassName}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onOutsideClick?.();
+      }}
     >
       <ModalSurface
         ref={surfaceRef}
@@ -746,7 +752,10 @@ function useModalFocusTrap<TModal extends HTMLElement, TInitial extends HTMLElem
 
       event.preventDefault();
       stepFocus(
-        Array.from(modal.querySelectorAll<HTMLElement>(MODAL_FOCUSABLE_SELECTOR)),
+        // Mounted but hidden controls and negative tab indices are not Tab stops.
+        Array.from(modal.querySelectorAll<HTMLElement>(MODAL_FOCUSABLE_SELECTOR)).filter(
+          (element) => element.tabIndex >= 0 && !element.closest('[hidden], [inert]'),
+        ),
         event.shiftKey ? -1 : 1,
       );
     };

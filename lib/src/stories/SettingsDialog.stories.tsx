@@ -1,7 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { userEvent, within } from 'storybook/test';
+import { useState } from 'react';
+import { expect, fireEvent, userEvent, waitFor, within } from 'storybook/test';
 import type { DormouseTheme } from '../lib/themes';
 import { SettingsDialog } from '../components/SettingsDialog';
+import { WorkspaceIdContext } from '../components/wall/wall-context';
 import { enrolledStatus, UNENROLLED_STATUS } from '../host/remote/test-burrow-link';
 
 /** The dialog renders into `document.body`, outside `canvasElement`
@@ -14,19 +16,45 @@ function dialog(canvasElement: HTMLElement) {
 /**
  * The app-global Settings dialog, normally opened from the far right of the
  * baseboard. Rendering the dialog directly keeps these stories about its own
- * content — the theme row, the rule list, and the three alarm groups — rather
+ * content — topics, search, and settings — rather
  * than about the button that opens it (`Baseboard.stories.tsx` covers that).
  * Everything below the theme row is driven by story `parameters`, since the
  * rule set, the settings, and the push-device list are app-global stores rather
  * than props.
  */
 function DialogStory() {
-  return <SettingsDialog onClose={() => {}} />;
+  const [open, setOpen] = useState(true);
+  return <>
+    <button type="button" onClick={() => setOpen(true)}>Open settings</button>
+    {open && <WorkspaceIdContext.Provider value="settings-story">
+      <SettingsDialog onClose={() => setOpen(false)} />
+    </WorkspaceIdContext.Provider>}
+  </>;
+}
+
+function selectTopic(name: string) {
+  return async ({ canvasElement }: { canvasElement: HTMLElement }) => {
+    const body = dialog(canvasElement);
+    await userEvent.click(within(body.getByRole('navigation', { name: 'Settings topics' })).getByRole('button', { name }));
+    await waitForTopicScroll(body.getByRole('region', { name }));
+  };
+}
+
+async function waitForTopicScroll(section: HTMLElement) {
+  const content = section.parentElement!;
+  await waitFor(() => {
+    const desired = content.scrollTop + section.getBoundingClientRect().top - content.getBoundingClientRect().top - 16;
+    const clamped = Math.max(0, Math.min(desired, content.scrollHeight - content.clientHeight));
+    expect(Math.abs(content.scrollTop - clamped)).toBeLessThan(2);
+  }, { timeout: 2000 });
 }
 
 const meta: Meta<typeof DialogStory> = {
   title: 'Modals/SettingsDialog',
   component: DialogStory,
+  parameters: {
+    primedWorkspaces: { workspaces: [{ id: 'settings-story', name: 'Development' }] },
+  },
 };
 
 export default meta;
@@ -46,6 +74,7 @@ export const Default: Story = {
 
 /** The mockup's case: rules accumulated, defaults otherwise. */
 export const WithRules: Story = {
+  play: selectTopic('Activity'),
   parameters: {
     primedWatchedCommands: ['claude', 'codex'],
     primedAlertSettings: {},
@@ -59,6 +88,7 @@ export const DeferralDisabled: Story = {
     primedAlertSettings: { deferAlertsUntilQuiet: false },
   },
   play: async ({ canvasElement }) => {
+    await selectTopic('Activity')({ canvasElement });
     await dialog(canvasElement).findByRole('switch', {
       name: 'Defer alerts until animation stops off',
     });
@@ -67,6 +97,7 @@ export const DeferralDisabled: Story = {
 
 /** Fan-out: several phones have turned push on, so all of them are named. */
 export const PushManyDevices: Story = {
+  play: selectTopic('Notifications'),
   parameters: {
     primedWatchedCommands: ['claude'],
     primedAlertSettings: { pushEnabled: true },
@@ -86,6 +117,7 @@ export const PushManyDevices: Story = {
  * Pocket to their Home Screen. It must say so rather than look broken.
  */
 export const PushNoDevices: Story = {
+  play: selectTopic('Notifications'),
   parameters: {
     primedWatchedCommands: ['claude'],
     primedAlertSettings: { pushEnabled: true },
@@ -96,6 +128,7 @@ export const PushNoDevices: Story = {
 /** No Burrow service in this build at all — the website. Nothing renders below,
  *  so the copy must not point there. Paired with `PushNotEnrolled`. */
 export const PushNoBurrow: Story = {
+  play: selectTopic('Notifications'),
   parameters: {
     primedWatchedCommands: ['claude'],
     primedAlertSettings: { pushEnabled: true },
@@ -117,6 +150,7 @@ export const PushNotEnrolled: Story = {
     primedBurrow: { status: UNENROLLED_STATUS },
   },
   play: async ({ canvasElement }) => {
+    await selectTopic('Notifications')({ canvasElement });
     await dialog(canvasElement).findByText(/Relay below to send push/);
   },
 };
@@ -126,6 +160,7 @@ export const PushNotEnrolled: Story = {
  * rather than a hardcoded one.
  */
 export const CustomTimings: Story = {
+  play: selectTopic('Notifications'),
   parameters: {
     primedWatchedCommands: ['claude'],
     primedAlertSettings: {
@@ -144,6 +179,7 @@ export const CustomTimings: Story = {
  * dialog.
  */
 export const ManyRules: Story = {
+  play: selectTopic('Activity'),
   parameters: {
     primedWatchedCommands: [
       'cargo',
@@ -160,9 +196,9 @@ export const ManyRules: Story = {
 };
 
 /**
- * The Notepad archive entry, last in the dialog. Every host but Pocket has an
+ * The Notepad archive topic. Every host but Pocket has an
  * archive port, so the entry is present in every story here — this one is the
- * one that scrolls to it and proves it opens the Archive view in place rather
+ * one that opens the Archive view in place rather
  * than stacking a second modal (`NotepadArchiveView.stories.tsx` covers the
  * view itself).
  */
@@ -173,6 +209,7 @@ export const NotepadArchiveEntry: Story = {
   },
   play: async ({ canvasElement }) => {
     const body = dialog(canvasElement);
+    await selectTopic('Notepad')({ canvasElement });
     const open = await body.findByRole('button', { name: 'Open archive' });
     open.scrollIntoView();
     await userEvent.click(open);
@@ -232,10 +269,8 @@ export const ThemeMenuOpenWithInstalledThemes: Story = {
 };
 
 /**
- * The VS Code host: it owns the theme and has its own picker, so the Theme row
- * is absent (`hostOwnsTheme`, docs/specs/theme.md). The rule list becomes the
- * first section again and must drop its divider — a stray top border here is
- * the visible symptom of that conditional going wrong.
+ * VS Code owns the theme; without a shell choice, General is omitted and
+ * Activity becomes the first topic.
  */
 export const HostOwnsTheme: Story = {
   parameters: {
@@ -294,7 +329,7 @@ export const HostOwnsShells: Story = {
 };
 
 /**
- * The Remote control section in place — last, and directly under the push
+ * The Remote control section directly under the push
  * settings whose `no-burrow` copy points at it. Every other story here leaves
  * `primedBurrow` unset, which is a build with no Burrow service behind the
  * webview: the section renders nothing at all rather than offering a form the
@@ -308,6 +343,133 @@ export const WithRemoteControl: Story = {
     primedAlertSettings: { pushEnabled: true },
   },
   play: async ({ canvasElement }) => {
+    await selectTopic('Notifications')({ canvasElement });
     await dialog(canvasElement).findByText('1 paired phone.');
+  },
+};
+
+export const Activity: Story = {
+  ...Default,
+  play: selectTopic('Activity'),
+};
+
+export const Notifications: Story = {
+  ...PushManyDevices,
+};
+
+export const Light: Story = {
+  ...WithRules,
+  globals: { theme: 'Light (Visual Studio)' },
+};
+
+export const Dark: Story = {
+  ...WithRules,
+  globals: { theme: 'Dark (Visual Studio)' },
+};
+
+export const Notepad: Story = {
+  ...Default,
+  play: selectTopic('Notepad'),
+};
+
+/** The same query finds settings in different topics, with their original copy. */
+export const SearchAcrossTopics: Story = {
+  ...WithRules,
+  play: async ({ canvasElement }) => {
+    const body = dialog(canvasElement);
+    fireEvent.change(body.getByRole('searchbox'), { target: { value: 'terminal' } });
+    await expect(body.getByRole('region', { name: 'Activity' })).toBeVisible();
+    await expect(body.getByRole('region', { name: 'Notepad' })).toBeVisible();
+    await expect(body.queryByRole('button', { name: /^Theme:/ })).not.toBeInTheDocument();
+  },
+};
+
+export const SearchDescription: Story = {
+  ...Default,
+  play: async ({ canvasElement }) => {
+    const body = dialog(canvasElement);
+    fireEvent.change(body.getByRole('searchbox'), { target: { value: 'walked away' } });
+    await expect(body.getByRole('textbox', { name: /Inactivity timeout:/ })).toBeVisible();
+  },
+};
+
+export const SearchNoResults: Story = {
+  ...Default,
+  play: async ({ canvasElement }) => {
+    const body = dialog(canvasElement);
+    fireEvent.change(body.getByRole('searchbox'), { target: { value: 'unfindable' } });
+    await expect(body.getByRole('status')).toHaveTextContent('No settings found.');
+  },
+};
+
+export const ClickOutsideToClose: Story = {
+  ...Default,
+  play: async ({ canvasElement }) => {
+    const body = dialog(canvasElement);
+    await userEvent.click(body.getByRole('dialog').parentElement!);
+    await expect(body.queryByRole('dialog')).not.toBeInTheDocument();
+    await userEvent.click(body.getByRole('button', { name: 'Open settings' }));
+    await expect(body.getByRole('searchbox')).toHaveFocus();
+  },
+};
+
+export const Narrow: Story = {
+  ...WithRules,
+  globals: { viewport: { value: 'mobile2', isRotated: false } },
+  parameters: { ...WithRules.parameters, chromatic: { viewports: [480] } },
+};
+
+export const ShortViewport: Story = {
+  ...PushManyDevices,
+  render: () => <>
+    <style>{'[aria-labelledby="settings-dialog-title"] { --overlay-max-h-modal: 20rem; }'}</style>
+    <DialogStory />
+  </>,
+};
+
+export const HoverContents: Story = {
+  ...WithRules,
+  play: async ({ canvasElement }) => {
+    const body = dialog(canvasElement);
+    const topic = within(body.getByRole('navigation')).getByRole('button', { name: 'Notifications' });
+    await userEvent.hover(topic);
+    await waitForTopicScroll(body.getByRole('region', { name: 'Notifications' }));
+    await expect(topic).toHaveAttribute('aria-current', 'location');
+    await expect(body.getAllByRole('region')).toHaveLength(4);
+  },
+};
+
+export const ScrollFollowsContents: Story = {
+  ...WithRules,
+  play: async ({ canvasElement }) => {
+    const body = dialog(canvasElement);
+    const notifications = within(body.getByRole('navigation')).getByRole('button', { name: 'Notifications' });
+    await userEvent.hover(notifications);
+    await waitForTopicScroll(body.getByRole('region', { name: 'Notifications' }));
+    await userEvent.unhover(notifications);
+    const section = body.getByRole('region', { name: 'Notepad' });
+    const content = section.parentElement!;
+    content.scrollTo({ top: content.scrollHeight, behavior: 'smooth' });
+    await waitForTopicScroll(section);
+    await expect(within(body.getByRole('navigation')).getByRole('button', { name: 'Notepad' }))
+      .toHaveAttribute('aria-current', 'location');
+  },
+};
+
+export const HoverSettingsOverridesScroll: Story = {
+  ...WithRules,
+  play: async ({ canvasElement }) => {
+    const body = dialog(canvasElement);
+    const contents = within(body.getByRole('navigation'));
+    const heading = body.getByRole('heading', { name: 'Activity' });
+    const content = body.getByRole('region', { name: 'Activity' }).parentElement!;
+    const scrollTop = content.scrollTop;
+    await expect(contents.getByRole('button', { name: 'General' })).toHaveAttribute('aria-current', 'location');
+    await userEvent.hover(heading);
+    await expect(contents.getByRole('button', { name: 'Activity' })).toHaveAttribute('aria-current', 'location');
+    await expect(content.scrollTop).toBe(scrollTop);
+    await userEvent.unhover(heading);
+    await expect(contents.getByRole('button', { name: 'General' })).toHaveAttribute('aria-current', 'location');
+    await userEvent.hover(heading);
   },
 };
