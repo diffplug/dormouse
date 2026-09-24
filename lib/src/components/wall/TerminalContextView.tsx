@@ -4,13 +4,14 @@ import { ELEVATED_PANE_SHADOW, OnOffSwitch, POPUP_SURFACE_CLASS, SUBTLE_ACTION_C
 import { stepFocus } from '../focus-step';
 import { AgentRobotIcon } from './BrowserDisplayIcon';
 import type { PortUrlEntry } from './port-url';
+import type { RenderMode } from './agent-browser-screen';
 import type { HelperStatus } from '../../lib/helper-terminal';
 import { WindowFocusedContext } from './wall-context';
 import { motionIsInstant } from '../../lib/ui-geometry';
 import type { ContextPlacement, ContextSide } from './terminal-context-placement';
 import { messageOf } from '../../lib/errors';
 
-export type PortMode = 'system' | 'iframe' | 'ab-screencast' | 'ab-popout' | 'pw-screencast' | 'pw-popout';
+export type PortMode = 'system' | RenderMode;
 export type ContextScan = { status: 'scanning' | 'failed' } | { status: 'loaded'; entries: PortUrlEntry[] };
 /** Every action may fail asynchronously; the view reports the failure. */
 type Action = () => void | Promise<void>;

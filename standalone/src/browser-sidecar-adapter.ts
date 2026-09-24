@@ -283,10 +283,12 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
 
   async playwright(request: PlaywrightRequest): Promise<PlaywrightResult> {
     try {
-      const result = await this.host.invoke<PlaywrightResult & { bytesBase64?: string }>('playwright_request', { request });
-      if (result.bytesBase64) result.bytes = Uint8Array.from(atob(result.bytesBase64), c => c.charCodeAt(0));
-      return result;
-    } catch (error) { return { ok: false, error: String(error) }; }
+      // A screenshot's bytes arrive as base64, like agent_browser_screenshot's.
+      const { bytesBase64, ...result } = await this.host.invoke<PlaywrightResult & { bytesBase64?: string }>("playwright_request", { request });
+      return bytesBase64 ? { ...result, bytes: decodeBase64Bytes(bytesBase64) } : result;
+    } catch (err) {
+      return { ok: false, error: errMessage(err) };
+    }
   }
 
   async agentBrowserCommand(session: string, args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult> {

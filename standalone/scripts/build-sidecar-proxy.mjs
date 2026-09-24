@@ -3,6 +3,7 @@
 // TypeScript source while the sidecar itself stays plain CJS.
 //   - lib/src/host/iframe-proxy.ts        → sidecar/iframe-proxy.cjs
 //   - lib/src/host/agent-browser-host.ts  → sidecar/agent-browser-host.cjs
+//   - lib/src/host/playwright-host.ts     → sidecar/playwright-host.cjs
 //   - lib/src/host/tool-host.ts           → sidecar/tool-host.cjs
 //   - lib/src/host/git-info.ts            → sidecar/git-info.cjs
 //   - lib/src/host/remote/sidecar-entry.ts → sidecar/burrow.cjs

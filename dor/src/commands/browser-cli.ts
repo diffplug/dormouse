@@ -1,20 +1,10 @@
 /** Shared CLI addressing, navigation and executable plumbing for browser providers. */
-import { accessSync, constants, existsSync, statSync } from 'node:fs';
 import { spawnAndCapture } from 'dor-lib-common';
-import type { CliEnv, CliOptions, ParseResult, AgentBrowserExecResult } from './types.js';
+import type { CliOptions, ParseResult, AgentBrowserExecResult } from './types.js';
 import { requireControlClient, workspaceParam } from './shared.js';
 import { inferredHttpUrl, isSpecialOpenTarget, isSurfaceOpenTarget, resolveSurfaceOpenTarget } from './open-target.js';
 
 const KEY_PATTERN = /^[A-Za-z0-9._-]+$/;
-
-// Extensions a bare command name can carry on Windows, and the order to try
-// them in. This is `which@2`'s own hardcoded fallback — npm's list, deliberately
-// NOT cmd.exe's `.COM;.EXE;.BAT;.CMD` — because `resolveBinaryPath` now picks
-// the file that gets spawned and has to choose the same one cross-spawn's
-// `which` would (docs/specs/dor-cli.md → "Spawning External Binaries").
-// Source: `getPathInfo` in `which/which.js`. Shared by resolveBinaryPath (PATH
-// walk) and existsCandidate (explicit path, where order only affects reporting).
-const WINDOWS_BIN_EXTS = ['.EXE', '.CMD', '.BAT', '.COM'];
 
 /** The three identity flags dor intercepts, in the order they are reported when
  *  more than one is given. */
@@ -36,13 +26,26 @@ export type ResolvedSessionFlags = { rest: string[]; workspace?: string } & (
   | { surface: string; session?: undefined; key?: undefined }
 );
 
-export function extractSessionFlags(args: string[]): ParseResult<ResolvedSessionFlags> {
+/** What differs between the providers sharing the identity flags. */
+export interface SessionFlagOptions {
+  /** How the `--key` charset error names the provider's sessions. */
+  sessionNoun?: string;
+  /** The provider CLI's own spellings of `--session` (Playwright's `-s`);
+   *  reported as `--session` in errors. */
+  sessionAliases?: readonly string[];
+}
+
+export function extractSessionFlags(
+  args: string[],
+  { sessionNoun = 'an agent-browser session name', sessionAliases = [] }: SessionFlagOptions = {},
+): ParseResult<ResolvedSessionFlags> {
   const values = new Map<InterceptedFlag, string>();
   const rest: string[] = [];
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index] ?? '';
-    const flag = INTERCEPTED_FLAGS.find((name) => arg === name || arg.startsWith(`${name}=`));
+    const spells = (name: string) => arg === name || arg.startsWith(`${name}=`);
+    const flag = INTERCEPTED_FLAGS.find(spells) ?? (sessionAliases.some(spells) ? '--session' : undefined);
     if (!flag) {
       rest.push(arg);
       continue;
@@ -73,7 +76,7 @@ export function extractSessionFlags(args: string[]): ParseResult<ResolvedSession
 
   const key = values.get('--key');
   if (key !== undefined && !KEY_PATTERN.test(key)) {
-    return { ok: false, message: `--key must match ${KEY_PATTERN} (it becomes part of an agent-browser session name)` };
+    return { ok: false, message: `--key must match ${KEY_PATTERN} (it becomes part of ${sessionNoun})` };
   }
 
   const workspace = workspaceParam(values.get('--workspace'));
@@ -143,99 +146,11 @@ export async function resolveOpenTargetArgs(
   return { ok: true, value: next };
 }
 
-/**
- * Whether `candidate` is a file this platform would actually run. `which` (and
- * so cross-spawn) skips a directory or a non-executable file and keeps walking;
- * since the walk's answer is now the spawn target, a laxer test here would turn
- * a `PATH` entry `which` ignored into an EACCES/EISDIR failure. On Windows the
- * extension decides executability, so being a regular file is the whole test —
- * taken as an argument, like `binaryCandidateNames`, so both branches are
- * reachable from a Linux-only CI.
- */
-export function isExecutableFile(candidate: string, isWindows: boolean): boolean {
-  try {
-    if (!statSync(candidate).isFile()) return false;
-    if (isWindows) return true;
-    accessSync(candidate, constants.X_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * The filenames to try for a bare `binary`, in order — `which`'s extension logic,
- * which the walk has to reproduce because its answer is what gets spawned. Takes
- * `isWindows` rather than reading `process.platform` so the Windows ordering is
- * testable off Windows: every rule here is Windows-only, and a Linux-only CI
- * that could not exercise them would be asserting an unenforced claim.
- *
- * Mirrors `getPathInfo` in `which/which.js` on three points a hand-rolled walk
- * gets wrong: `||` (not `??`), so an *empty* PATHEXT falls back rather than
- * yielding no candidates; the fallback list is npm's, not `cmd.exe`'s; and an
- * empty extension comes first when the name already carries one, so
- * `agent-browser.exe` is tried as itself and not only as `agent-browser.exe.EXE`.
- */
-export function binaryCandidateNames(binary: string, env: CliEnv, isWindows: boolean): string[] {
-  if (!isWindows) return [binary];
-  // No `.filter(Boolean)`: `getPathInfo` splits without one, so a trailing
-  // separator — ordinary on Windows — leaves a final empty extension that tries
-  // the name unsuffixed. Nothing runnable lives there, but dropping it would make
-  // the walk report missing where `which` returned a path.
-  const exts = (env.PATHEXT || WINDOWS_BIN_EXTS.join(';')).split(';');
-  if (binary.includes('.')) exts.unshift('');
-  return exts.map((ext) => `${binary}${ext}`);
-}
-
-export function resolveBinaryPath(binary: string, env: CliEnv): string | undefined {
-  if (binary.includes('/') || binary.includes('\\')) return binary;
-  const pathVar = env.PATH;
-  if (!pathVar) return undefined;
-  const isWindows = process.platform === 'win32';
-  const names = binaryCandidateNames(binary, env, isWindows);
-  for (const dir of pathVar.split(isWindows ? ';' : ':')) {
-    if (!dir) continue;
-    for (const name of names) {
-      const candidate = `${dir}${isWindows ? '\\' : '/'}${name}`;
-      if (isExecutableFile(candidate, isWindows)) return candidate;
-    }
-  }
-  return undefined;
-}
-
 // Narrow, now that an unresolvable name never reaches the spawn: this catches a
 // binary that disappeared between the PATH walk and the spawn, plus a stub exec's
 // injected ENOENT.
 export function isMissingBinaryError(error: unknown): boolean {
   return !!error && typeof error === 'object' && (error as { code?: unknown }).code === 'ENOENT';
-}
-
-/**
- * Whether the binary can be proven absent without spawning it, given the path
- * `resolveBinaryPath` already produced for it. Every "not found" answer ends the
- * call here rather than at the spawn, because the spawn's own fallback is the
- * bare name and cross-spawn resolves that against the cwd first on Windows.
- */
-export function browserBinaryIsMissing(binary: string, env: CliEnv, resolvedPath: string | undefined): boolean {
-  // Explicit path (e.g. a DORMOUSE_AGENT_BROWSER_BIN override): resolveBinaryPath
-  // hands such a path back verbatim without touching disk, so check it (and
-  // Windows launcher extensions) directly.
-  if (binary.includes('/') || binary.includes('\\')) {
-    return !existsCandidate(binary, process.platform === 'win32');
-  }
-  // Bare name: resolvedPath is the PATH walk's result. With no PATH to search
-  // there is nowhere the binary could legitimately be, and falling through to
-  // the spawn would hand cross-spawn a bare name — whose `which` searches the
-  // cwd first on Windows, the one thing spawning the resolved path exists to
-  // prevent. So an absent PATH is "missing", not "ambiguous".
-  if (!env.PATH) return true;
-  return resolvedPath === undefined;
-}
-
-function existsCandidate(path: string, isWindows: boolean): boolean {
-  if (existsSync(path)) return true;
-  if (!isWindows) return false;
-  return WINDOWS_BIN_EXTS.some((ext) => existsSync(`${path}${ext}`));
 }
 
 // The default exec: delegate the spawn/capture/Windows handling to

@@ -2,7 +2,7 @@
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { readFile } from 'node:fs/promises';
+import { readFile, unlink } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { sessionForKey } from 'dor-lib-common/agent-browser';
 // cross-spawn, not node:child_process: this script spawns `dor` and
@@ -118,16 +118,26 @@ const fireAndForget = {
   kill_sidecar_now: () => shutdown(),
 };
 
+// The sidecar answers a screenshot with a temp-file PATH (bytes stay off the
+// stdio pipe). Production reads that file in Rust; this dev bridge has no Rust,
+// so read it in Node and re-encode to the base64 the browser-sidecar adapter
+// expects — the base64 travels in the HTTP invoke response, outside the event
+// stream. `remove` mirrors Rust deleting Playwright's one-shot frame files;
+// agent-browser reuses one file per session.
+async function readCapture(result, { remove = false } = {}) {
+  if (!result?.ok || typeof result.path !== 'string') return result;
+  try {
+    return { ok: true, mime: result.mime, bytesBase64: (await readFile(result.path)).toString('base64') };
+  } finally {
+    if (remove) await unlink(result.path).catch(() => {});
+  }
+}
+
 const invokeMap = {
-  playwright_request: async ({ request }) => {
-    const result = await requestSidecar('playwright:request', { request }, 'agentBrowser:result', data => data.result, 40000);
-    if (result?.ok && result.path) {
-      const fs = await import('node:fs/promises');
-      try { return { ok: true, mime: result.mime, bytesBase64: (await fs.readFile(result.path)).toString('base64') }; }
-      finally { await fs.unlink(result.path).catch(() => {}); }
-    }
-    return result;
-  },
+  playwright_request: async ({ request }) => readCapture(
+    await requestSidecar('playwright:request', { request }, 'agentBrowser:result', (data) => data.result, 40000),
+    { remove: true },
+  ),
   get_available_shells: (_args) => requestSidecar('pty:getShells', {}, 'pty:shells', (data) => data.shells ?? []),
   pty_get_cwd: ({ id }) => requestSidecar('pty:getCwd', { id }, 'pty:cwd', (data) => data.cwd ?? null),
   pty_get_cwds: ({ ids }) => requestSidecar('pty:getCwds', { ids }, 'pty:cwds', (data) => data.cwds ?? {}),
@@ -140,18 +150,9 @@ const invokeMap = {
   iframe_create_proxy_url: ({ target, embedderOrigins }) => requestSidecar('iframe:createProxyUrl', { target, embedderOrigins }, 'iframe:proxyUrl', (data) => data.result),
   agent_browser_command: ({ session, args, binaryPath }) => requestSidecar('agentBrowser:command', { session, args, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
   agent_browser_edit: ({ session, op, binaryPath }) => requestSidecar('agentBrowser:edit', { session, op, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
-  agent_browser_screenshot: async ({ session, format, quality, binaryPath }) => {
-    const result = await requestSidecar('agentBrowser:screenshot', { session, format, quality, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000);
-    // The sidecar now returns a temp-file PATH (bytes stay off the stdio pipe).
-    // Production reads that file in Rust; this dev bridge has no Rust, so read it
-    // in Node and re-encode to the base64 the browser-sidecar adapter expects —
-    // the base64 travels in the HTTP invoke response, outside the event stream.
-    if (result && result.ok && typeof result.path === 'string') {
-      const bytes = await readFile(result.path);
-      return { ok: true, mime: result.mime, bytesBase64: bytes.toString('base64') };
-    }
-    return result;
-  },
+  agent_browser_screenshot: async ({ session, format, quality, binaryPath }) => readCapture(
+    await requestSidecar('agentBrowser:screenshot', { session, format, quality, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
+  ),
   agent_browser_stream_status: ({ session, binaryPath }) => requestSidecar('agentBrowser:streamStatus', { session, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
   tool_control: ({ request }) =>
     requestSidecar('tool:control', { request }, 'tool:result', (data) => data.result),

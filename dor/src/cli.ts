@@ -1,4 +1,3 @@
-import { playwrightCommand, runPlaywrightCli } from './commands/playwright.js';
 import {
   buildApplication,
   buildRouteMap,
@@ -21,6 +20,7 @@ import { skillCommand } from './commands/skill.js';
 import { splitCommand } from './commands/split.js';
 import { toolCommand } from './commands/tool.js';
 import { openCommand } from './commands/open.js';
+import { playwrightCommand, runPlaywrightCli } from './commands/playwright.js';
 import { versionCommand } from './commands/version.js';
 import { workspaceCommand } from './commands/workspace.js';
 import { errorLine, errorMessage, fail } from './commands/shared.js';
@@ -195,14 +195,17 @@ interface CaptureProcess extends StricliProcess {
 }
 
 export async function runCli(rawArgv: string[], options: CliOptions = {}): Promise<CliResult> {
-  const argv = normalizeAgentBrowserAlias(normalizeVersionAlias(rawArgv));
+  const argv = normalizePassthroughAlias(normalizeVersionAlias(rawArgv));
 
-  // `dor ab <args...>` forwards args verbatim to agent-browser, so they must
-  // never reach stricli's flag parser. Only a bare `--help`/`-h` (or
-  // `dor help agent-browser`, normalized above) falls through to stricli.
-  if (argv[0] === 'playwright' && !isAgentBrowserHelpInvocation(argv)) return runPlaywrightCli(argv.slice(1), options);
-  if (argv[0] === 'agent-browser' && !isAgentBrowserHelpInvocation(argv)) {
+  // `dor ab <args...>` and `dor pw <args...>` forward args verbatim to the
+  // provider's CLI, so they must never reach stricli's flag parser. Only a bare
+  // `--help`/`-h` (or `dor help agent-browser`, normalized above) falls through
+  // to stricli.
+  if (argv[0] === 'agent-browser' && !isPassthroughHelpInvocation(argv)) {
     return runAgentBrowserCli(argv.slice(1), options);
+  }
+  if (argv[0] === 'playwright' && !isPassthroughHelpInvocation(argv)) {
+    return runPlaywrightCli(argv.slice(1), options);
   }
   // `dor __view-file <file>` is the built-in viewer's private entry
   // (docs/specs/dor-tool.md -> Opening local files). Its server outlives this
@@ -252,16 +255,22 @@ function normalizeVersionAlias(argv: string[]): string[] {
   return argv;
 }
 
-/** `ab` is the documented short alias for `agent-browser`, in any help form. */
-function normalizeAgentBrowserAlias(argv: string[]): string[] {
-  if (argv[0] === 'pw') return ['playwright', ...argv.slice(1)];
-  if (argv[0] === 'help' && argv[1] === 'pw') return ['help', 'playwright', ...argv.slice(2)];
-  if (argv[0] === 'ab') return ['agent-browser', ...argv.slice(1)];
-  if (argv[0] === 'help' && argv[1] === 'ab') return ['help', 'agent-browser', ...argv.slice(2)];
+/** The documented short aliases of the browser passthroughs. */
+const PASSTHROUGH_ALIASES = new Map([
+  ['ab', 'agent-browser'],
+  ['pw', 'playwright'],
+]);
+
+/** Expand a passthrough's short alias, in any help form. */
+function normalizePassthroughAlias(argv: string[]): string[] {
+  const command = PASSTHROUGH_ALIASES.get(argv[0] ?? '');
+  if (command) return [command, ...argv.slice(1)];
+  const helpSubject = argv[0] === 'help' ? PASSTHROUGH_ALIASES.get(argv[1] ?? '') : undefined;
+  if (helpSubject) return ['help', helpSubject, ...argv.slice(2)];
   return argv;
 }
 
-function isAgentBrowserHelpInvocation(argv: string[]): boolean {
+function isPassthroughHelpInvocation(argv: string[]): boolean {
   return argv.length === 2 && (argv[1] === '--help' || argv[1] === '-h');
 }
 

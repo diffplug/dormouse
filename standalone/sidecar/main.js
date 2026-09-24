@@ -1,4 +1,3 @@
-const { createPlaywrightHost } = require('./playwright-host.cjs');
 /**
  * Tauri sidecar entry point — stdio JSON-lines transport over pty-core.
  *
@@ -39,10 +38,19 @@ const agentBrowser = createAgentBrowserHost({
   writeClipboardText: (text) => clipboard.writeClipboardText(text),
   log: (m) => console.error(m),
 });
-const playwright = createPlaywrightHost({
-  writeClipboardText: (text) => clipboard.writeClipboardText(text),
-  log: (m) => console.error(m),
-});
+
+// Same pattern again: lib/src/host/playwright-host.ts backs the Playwright
+// renderer (docs/specs/dor-browser.md → "Playwright Renderer"). Required on the
+// first request rather than at boot: the bundle carries `ws`, and most sessions
+// never open a Playwright pane. Shutdown skips it while it is still undefined.
+let playwright;
+function playwrightHost() {
+  playwright ??= require('./playwright-host.cjs').createPlaywrightHost({
+    writeClipboardText: (text) => clipboard.writeClipboardText(text),
+    log: (m) => console.error(m),
+  });
+  return playwright;
+}
 
 function send(event, data) {
   process.stdout.write(JSON.stringify({ event, data }) + '\n');
@@ -234,8 +242,11 @@ function handleLine(line) {
           }),
         }));
         break;
+      // Screenshots answer with a temp-file path, like agentBrowser:screenshot below.
       case 'playwright:request':
-        respondAsync('agentBrowser:result', data.requestId, async () => ({ result: await playwright.requestFile(data.request) }));
+        respondAsync('agentBrowser:result', data.requestId, async () => ({
+          result: await playwrightHost().requestFile(data.request),
+        }));
         break;
       case 'agentBrowser:command':
         respondAsync('agentBrowser:result', data.requestId, async () => ({
@@ -311,7 +322,7 @@ async function shutdown() {
   // can't wedge the exit; mirrors the VS Code host's deactivate().
   try {
     await Promise.race([
-      Promise.allSettled([agentBrowser.closePoppedOut(), playwright.close()]),
+      Promise.allSettled([agentBrowser.closePoppedOut(), playwright?.close()]),
       new Promise((resolve) => setTimeout(resolve, 1500).unref?.()),
     ]);
   } catch {}

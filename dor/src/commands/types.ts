@@ -435,9 +435,28 @@ export interface ResolveAgentBrowserSessionResponse {
 }
 
 export type BrowserAutomationProvider = 'agent-browser' | 'playwright';
-export interface BrowserBinding { session: string; cwd?: string; binaryPath?: string }
-export interface ResolveBrowserRequest extends WorkspaceScopedRequest { provider: BrowserAutomationProvider; key?: string; surface?: string; proposed?: BrowserBinding }
-export interface ResolveBrowserResponse { binding: BrowserBinding | null }
+
+/** What a provider's CLI command runs with: its native session, the project
+ *  directory it runs in, and the executable. */
+export interface BrowserBinding {
+  session: string;
+  cwd?: string;
+  binaryPath?: string;
+}
+
+export interface ResolveBrowserRequest extends WorkspaceScopedRequest {
+  provider: BrowserAutomationProvider;
+  key?: string;
+  surface?: string;
+  /** The caller's cwd and executable, offered for a key's first launch; the
+   *  host mints the session. */
+  proposed?: Omit<BrowserBinding, 'session'>;
+}
+
+export interface ResolveBrowserResponse {
+  /** null when the key or Surface has no binding yet. */
+  binding: BrowserBinding | null;
+}
 
 export interface AgentBrowserSurfaceRequest extends WorkspaceScopedRequest {
   provider?: BrowserAutomationProvider;
@@ -462,8 +481,8 @@ export interface AgentBrowserSurfaceResponse {
 }
 
 export interface ControlClient {
-  browserSurface?(request: AgentBrowserSurfaceRequest): Promise<AgentBrowserSurfaceResponse>;
-  resolveBrowser?(request: ResolveBrowserRequest): Promise<ResolveBrowserResponse>;
+  browserSurface(request: AgentBrowserSurfaceRequest): Promise<AgentBrowserSurfaceResponse>;
+  resolveBrowser(request: ResolveBrowserRequest): Promise<ResolveBrowserResponse>;
   listSurfaces(request: ListSurfacesRequest): Promise<ListSurfacesResponse>;
   splitSurface(request: SplitSurfaceRequest): Promise<SplitSurfaceResponse>;
   ensureSurface(request: EnsureSurfaceRequest): Promise<EnsureSurfaceResponse>;
@@ -493,8 +512,9 @@ export interface AgentBrowserExecResult {
   stderr: string;
 }
 
-/** Runs the user's agent-browser binary; injectable so CLI tests stay hermetic. */
-export type AgentBrowserExec = (binary: string, args: string[]) => Promise<AgentBrowserExecResult>;
+/** Runs the user's browser CLI binary, in `cwd` when given; injectable so CLI
+ *  tests stay hermetic. */
+export type AgentBrowserExec = (binary: string, args: string[], cwd?: string) => Promise<AgentBrowserExecResult>;
 
 export interface CliEnv {
   [key: string]: string | undefined;
@@ -506,7 +526,7 @@ export interface CliOptions {
   readStdin?: () => Promise<string>;
   versionMetadata?: VersionMetadata;
   execAgentBrowser?: AgentBrowserExec;
-  execPlaywright?: (binary: string, args: string[], cwd?: string) => Promise<AgentBrowserExecResult>;
+  execPlaywright?: AgentBrowserExec;
 }
 
 export interface CliResult {

@@ -3,23 +3,52 @@ import { getPlatform } from '../../lib/platform';
 import type { PlatformAdapter } from '../../lib/platform/types';
 import type { BrowserAutomationProvider, PlaywrightRequest } from '../../lib/platform/browser-automation';
 import type { RenderMode } from './agent-browser-screen';
-export function automationProvider(mode: unknown): BrowserAutomationProvider {
-  return mode === 'pw-screencast' || mode === 'pw-popout' ? 'playwright' : 'agent-browser';
+
+/** The automated render modes: which provider drives each, and whether its
+ *  browser runs headed (popped out). Every other mode — `iframe`, or an
+ *  unknown persisted string — is not automated. */
+const AUTOMATION_MODES: Record<Exclude<RenderMode, 'iframe'>, { provider: BrowserAutomationProvider; headed: boolean }> = {
+  'ab-screencast': { provider: 'agent-browser', headed: false },
+  'ab-popout': { provider: 'agent-browser', headed: true },
+  'pw-screencast': { provider: 'playwright', headed: false },
+  'pw-popout': { provider: 'playwright', headed: true },
+};
+
+export type AutomationRenderMode = keyof typeof AUTOMATION_MODES;
+
+/** Whether `mode` is one of the automated render modes. */
+export function isAutomationMode(mode: unknown): mode is AutomationRenderMode {
+  // Own keys only: a persisted `renderMode` of `constructor` must not match the prototype.
+  return typeof mode === 'string' && Object.prototype.hasOwnProperty.call(AUTOMATION_MODES, mode);
 }
-export function isPopout(mode: unknown): boolean { return mode === 'ab-popout' || mode === 'pw-popout'; }
-export function isScreencast(mode: unknown): boolean { return mode === 'ab-screencast' || mode === 'pw-screencast'; }
-export function automationMode(provider: BrowserAutomationProvider, headed: boolean): RenderMode {
-  return provider === 'playwright' ? headed ? 'pw-popout' : 'pw-screencast' : headed ? 'ab-popout' : 'ab-screencast';
+
+/** The provider driving `mode`, or null when it is not automated. */
+export function automationProvider(mode: unknown): BrowserAutomationProvider | null {
+  return isAutomationMode(mode) ? AUTOMATION_MODES[mode].provider : null;
 }
+
+export function isPopout(mode: unknown): boolean {
+  return isAutomationMode(mode) && AUTOMATION_MODES[mode].headed;
+}
+
+export function isScreencast(mode: unknown): boolean {
+  return isAutomationMode(mode) && !AUTOMATION_MODES[mode].headed;
+}
+
+export function automationMode(provider: BrowserAutomationProvider, headed: boolean): AutomationRenderMode {
+  if (provider === 'playwright') return headed ? 'pw-popout' : 'pw-screencast';
+  return headed ? 'ab-popout' : 'ab-screencast';
+}
+
 export type BrowserPlatform = Pick<PlatformAdapter,
   | 'agentBrowserCommand' | 'agentBrowserEdit' | 'agentBrowserScreenshot'
   | 'agentBrowserStreamStatus' | 'getAgentBrowserStreamUrl' | 'agentBrowserOpen'
   | 'agentBrowserPopOut' | 'agentBrowserPopIn'
 >;
 
-export function browserPlatform(mode: unknown, cwd?: string): BrowserPlatform {
+export function browserPlatform(provider: BrowserAutomationProvider, cwd?: string): BrowserPlatform {
   const platform = getPlatform();
-  if (automationProvider(mode) === 'agent-browser') return platform;
+  if (provider === 'agent-browser') return platform;
   const invoke = platform.playwright;
   if (!invoke) return {};
   const call = (request: PlaywrightRequest) => invoke.call(platform, { cwd, ...request });
@@ -32,7 +61,7 @@ export function browserPlatform(mode: unknown, cwd?: string): BrowserPlatform {
     agentBrowserScreenshot: async (session: string, opts: { format?: 'jpeg' | 'png'; quality?: number }, binaryPath?: string) => {
       const r = await call({ op: 'screenshot', session, ...opts, binaryPath });
       // JSON transports materialize Uint8Array as an ordinary array.
-      if (r.bytes) r.bytes = new Uint8Array(r.bytes);
+      if (r.bytes && !(r.bytes instanceof Uint8Array)) r.bytes = new Uint8Array(r.bytes);
       return r;
     },
     agentBrowserStreamStatus: (session: string, binaryPath?: string) => call({ op: 'streamStatus', session, binaryPath }),
@@ -47,6 +76,30 @@ export function browserPlatform(mode: unknown, cwd?: string): BrowserPlatform {
   };
 }
 
-export function browserSessionKey(session: string, mode: unknown, cwd?: string): string {
-  return automationProvider(mode) === 'playwright' ? JSON.stringify(['playwright', cwd ?? '', session]) : session;
+/** The key of a session's closed mark (`agent-browser-sessions.ts`). Playwright
+ *  session names are unique only within a CLI project scope, so they are keyed
+ *  with their cwd. */
+export function browserSessionKey(session: string, provider: BrowserAutomationProvider, cwd?: string): string {
+  return provider === 'playwright' ? JSON.stringify(['playwright', cwd ?? '', session]) : session;
+}
+
+/**
+ * The binary path a `dor ab` surface last resolved on a terminal's PATH,
+ * re-used to spawn an agent-browser for a GUI launch (an embed swapped up to a
+ * screencast, a port opened from the terminal context), since the webview/host
+ * PATH may not find the binary itself. Agent-browser only: the Playwright host
+ * resolves its own installation on every launch.
+ */
+export class LaunchBinaryPath {
+  private last: string | undefined;
+
+  /** The binary path a GUI launch of `provider` passes. */
+  get(provider: BrowserAutomationProvider): string | undefined {
+    return provider === 'agent-browser' ? this.last : undefined;
+  }
+
+  /** Record the binary path a `provider` session resolved. */
+  remember(provider: BrowserAutomationProvider, binaryPath: string | undefined): void {
+    if (binaryPath && provider === 'agent-browser') this.last = binaryPath;
+  }
 }

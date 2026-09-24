@@ -16,6 +16,11 @@ export const AGENT_BROWSER_BIN_ENV = 'DORMOUSE_AGENT_BROWSER_BIN';
 /** Default binary name, resolved on PATH when no override/explicit path is given. */
 export const DEFAULT_AGENT_BROWSER_BIN = 'agent-browser';
 
+/** The Playwright provider's counterparts: the `@playwright/cli` override env
+ * var and the binary name resolved on PATH. */
+export const PLAYWRIGHT_BIN_ENV = 'DORMOUSE_PLAYWRIGHT_BIN';
+export const DEFAULT_PLAYWRIGHT_BIN = 'playwright-cli';
+
 /** argv for `agent-browser stream status --json` against a session — the command
  * whose output {@link parseStreamPort} reads. */
 export function streamStatusArgs(session: string): string[] {

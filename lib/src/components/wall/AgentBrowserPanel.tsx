@@ -1,4 +1,3 @@
-import { automationProvider } from './browser-automation';
 /** React view for the surface-scoped lifecycle in
  * `agent-browser-surface-controller.ts`; see docs/specs/dor-browser.md. */
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -8,6 +7,7 @@ import { isEditableTarget } from '../../lib/dom';
 import type { RenderMode } from './agent-browser-screen';
 import { tabDisplayTitle } from './browser-url';
 import { resolveRenderMode } from './browser-surface';
+import { automationProvider } from './browser-automation';
 import { MOUSE_BUTTONS, MOUSE_BUTTON_MASKS, modifiers } from './agent-browser-input';
 import {
   acquireAgentBrowserSurfaceController,
@@ -52,8 +52,8 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   const syncEngaged = params?.syncEngaged;
   // poppedOut is derived from the canonical renderMode the shell passes; fall
   // back to resolving it from params for a direct mount (tests) / legacy blob.
-  const cli = automationProvider(renderModeProp ?? params?.renderMode) === 'playwright' ? 'dor pw' : 'dor ab';
   const seededMode = renderModeProp ?? resolveRenderMode(params);
+  const cli = automationProvider(seededMode) === 'playwright' ? 'dor pw' : 'dor ab';
 
   // The surface-scoped controller: get-or-create, keyed by surface id. Survives
   // this component's unmount (minimize, layout churn, StrictMode).

@@ -15,14 +15,13 @@
  * `PATH`. Everything else is refused and the host falls through to its own
  * candidates.
  *
- * Deliberately dependency-free (no `node:path`) so the same predicate runs in
+ * Free of Node dependencies (no `node:path`) so the same predicate runs in
  * the webview — which validates persisted params before they are ever sent —
  * and in the Node hosts, which validate again at the spawn.
  */
 
-/** The bare name resolved on `PATH`; mirrors `DEFAULT_AGENT_BROWSER_BIN`. */
-const AGENT_BROWSER_NAME = 'agent-browser';
-const PLAYWRIGHT_NAME = 'playwright-cli';
+import { DEFAULT_AGENT_BROWSER_BIN, DEFAULT_PLAYWRIGHT_BIN } from 'dor-lib-common/agent-browser';
+import type { BrowserAutomationProvider } from './platform/browser-automation';
 
 // The Windows PATH shims npm/vfox install alongside the POSIX executable.
 // `spawnAndCapture` routes `.cmd`/`.bat` through cmd.exe (docs/specs/dor-cli.md
@@ -46,12 +45,17 @@ export function isAllowedAgentBrowserBinary(
   candidate: unknown,
   configuredPath?: string,
 ): candidate is string {
-  return isAllowedBrowserBinary(candidate, configuredPath, AGENT_BROWSER_NAME, AGENT_BROWSER_FILENAME_RE);
+  return isAllowedBrowserBinary(candidate, configuredPath, DEFAULT_AGENT_BROWSER_BIN, AGENT_BROWSER_FILENAME_RE);
 }
 
 /** The same executable gate for the parallel Playwright provider. */
 export function isAllowedPlaywrightBinary(candidate: unknown, configuredPath?: string): candidate is string {
-  return isAllowedBrowserBinary(candidate, configuredPath, PLAYWRIGHT_NAME, PLAYWRIGHT_FILENAME_RE);
+  return isAllowedBrowserBinary(candidate, configuredPath, DEFAULT_PLAYWRIGHT_BIN, PLAYWRIGHT_FILENAME_RE);
+}
+
+/** The webview's gate for whichever provider will spawn `candidate`. */
+export function isAllowedBinaryFor(provider: BrowserAutomationProvider, candidate: unknown): candidate is string {
+  return provider === 'playwright' ? isAllowedPlaywrightBinary(candidate) : isAllowedAgentBrowserBinary(candidate);
 }
 
 function isAllowedBrowserBinary(candidate: unknown, configuredPath: string | undefined, name: string, filename: RegExp): candidate is string {

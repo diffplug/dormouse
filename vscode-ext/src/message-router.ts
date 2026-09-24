@@ -1,4 +1,3 @@
-import { runPlaywrightRequest } from './agent-browser-host';
 import type { ToolAnnounce } from '../../lib/src/lib/tool-announce';
 import * as vscode from 'vscode';
 import * as ptyManager from './pty-manager';
@@ -28,7 +27,7 @@ import type { PersistedSession } from '../../lib/src/lib/session-types';
 import type { WebviewMessage, ExtensionMessage } from './message-types';
 import type { DorControlRequest } from './pty-manager';
 import { dorWorkspaceRefusal } from './dor-workspace-guard';
-import { createStreamRelayUrl, runAgentBrowserCommand, runAgentBrowserEdit, runAgentBrowserOpen, runAgentBrowserPopIn, runAgentBrowserPopOut, runAgentBrowserScreenshot, runAgentBrowserStreamStatus } from './agent-browser-host';
+import { createStreamRelayUrl, runAgentBrowserCommand, runAgentBrowserEdit, runAgentBrowserOpen, runAgentBrowserPopIn, runAgentBrowserPopOut, runAgentBrowserScreenshot, runAgentBrowserStreamStatus, runPlaywrightRequest } from './agent-browser-host';
 import { createIframeProxyUrl } from './iframe-proxy-host';
 import { toolControl } from './tool-host';
 import type { ToolHostRequest } from '../../lib/src/lib/platform/types';

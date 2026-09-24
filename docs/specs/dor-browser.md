@@ -411,6 +411,7 @@ header; standalone connects directly.
 
 Source of truth: `lib/src/host/agent-browser-host.ts` (`runWithBinaryFallback`),
 `lib/src/lib/agent-browser-binary.ts` (`isAllowedAgentBrowserBinary`),
+`lib/src/host/private-capture-dir.ts`, `lib/src/host/browser-host-shared.ts`, `lib/src/host/browser-stream-guard.ts`,
 `vscode-ext/src/agent-browser-host.ts`, `vscode-ext/src/webview-html.ts`,
 `standalone/src/tauri-adapter.ts`, `standalone/src-tauri/src/lib.rs`,
 `standalone/sidecar/main.js`.
@@ -423,7 +424,7 @@ Source of truth: `lib/src/host/agent-browser-host.ts` (`runWithBinaryFallback`),
 
 **Must scope managed keys by provider and Dormouse workspace.** Managed bindings retain unique native session names. The first command reserves its cwd and executable for two minutes while binding the Surface; concurrent first commands share the reservation. Successful bindings remove reservations; Surfaces retain cwd/executable for later commands, including relative paths. `--session` bypasses managed-key addressing and uses the caller's native project scope. `--surface` requires a Playwright renderer. GUI Connect inherits the source terminal's cwd; a swap without one uses the host cwd.
 
-**Must discover the native session in its CLI project scope and connect using that installation's matching Playwright client.** Accept only a unique registry entry matching session, workspace and library, with a local pipe endpoint and Chromium engine. Never load modules from the registry's library path. The host derives the client from the validated CLI installation. Raw sessions reuse Surfaces by that native identity, including callers in different subdirectories of one project. Native CLI tabs and the pane share the selected tab; the host polls tab selection and metadata every 750ms while a viewer is connected. Screenshots reuse tab state for up to 750ms; explicit host controls refresh immediately. A native launch updates the pane's display mode and headed shutdown ownership.
+**Must discover the native session in its CLI project scope and connect using that installation's matching Playwright client.** Accept only a unique registry entry matching session, workspace and library, with a local pipe endpoint and Chromium engine. Never load modules from the registry's library path. The host derives the client from the validated CLI installation. Raw sessions reuse Surfaces by that native identity, including callers in different subdirectories of one project. Native CLI tabs and the pane share the selected tab; the host polls tab selection and metadata every 750ms while viewed, broadcasting only changes, and the current state to each connecting viewer. Screenshots reuse tab state for up to 750ms; explicit host controls refresh immediately. A native launch updates the pane's display mode and headed shutdown ownership.
 
 **Must expose only fixed host operations.** Navigation, tabs, viewport/device, screenshots, editing and close are validated host-side; arbitrary CLI arguments, JavaScript and CDP methods are unavailable through the webview channel. The trusted `dor pw` process retains native passthrough. Executable hints use the same filename/exact-host-override boundary as agent-browser, with `playwright-cli` as the accepted name.
 

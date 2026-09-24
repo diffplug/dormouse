@@ -9,13 +9,16 @@ import {
   type BrowserDisplayMode,
   type RenderMode,
 } from './agent-browser-screen';
-import type { SurfaceKind } from 'dor/commands/types';
+import { isAutomationMode } from './browser-automation';
+import type { BrowserBinding, SurfaceKind } from 'dor/commands/types';
 import { isToolKeyScope, type ToolKeyScope } from '../../lib/platform/tool-types';
 
 type BrowserParamsLike = {
   surfaceType?: unknown;
   renderMode?: unknown;
   session?: unknown;
+  cwd?: unknown;
+  binaryPath?: unknown;
   url?: unknown;
   /** Tool only: the ports found when autobind refused to choose. */
   toolPortConflict?: unknown;
@@ -32,14 +35,13 @@ function asParams(params: unknown): BrowserParamsLike {
 
 /** Resolve the canonical render mode; defaults to `iframe` when unset. */
 export function resolveRenderMode(params: unknown): RenderMode {
-  const p = asParams(params);
-  return p.renderMode === 'ab-screencast' || p.renderMode === 'ab-popout' || p.renderMode === 'pw-screencast' || p.renderMode === 'pw-popout' ? p.renderMode : 'iframe';
+  const { renderMode } = asParams(params);
+  return isAutomationMode(renderMode) ? renderMode : 'iframe';
 }
 
 /** Whether params describe either automated browser provider. */
 export function isAgentBrowserParams(params: unknown): boolean {
-  const p = asParams(params);
-  return p.renderMode === 'ab-screencast' || p.renderMode === 'ab-popout' || p.renderMode === 'pw-screencast' || p.renderMode === 'pw-popout';
+  return isAutomationMode(asParams(params).renderMode);
 }
 
 /** Whether params describe a `tool` Surface — one Session with a terminal and,
@@ -206,6 +208,19 @@ export function agentBrowserSessionFromParams(params: unknown): string | null {
   if (!isAgentBrowserParams(params)) return null;
   const session = asParams(params).session;
   return typeof session === 'string' && session ? session : null;
+}
+
+/** The native binding an automated browser surface's params carry — what its
+ *  provider's CLI runs with — or null before the session is named. */
+export function browserBindingFromParams(params: unknown): BrowserBinding | null {
+  const session = agentBrowserSessionFromParams(params);
+  if (!session) return null;
+  const { cwd, binaryPath } = asParams(params);
+  return {
+    session,
+    ...(typeof cwd === 'string' ? { cwd } : {}),
+    ...(typeof binaryPath === 'string' ? { binaryPath } : {}),
+  };
 }
 
 /** The target URL a browser surface carries in its params (`dor list`); null

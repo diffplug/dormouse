@@ -7,7 +7,7 @@ import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runCli } from '../dist/cli.js';
 import { buildShellCommandForKind, shellCommandKind } from '../dist/commands/shell-quote.js';
-import { browserBinaryIsMissing as agentBrowserIsMissing, binaryCandidateNames, isExecutableFile } from '../dist/commands/browser-cli.js';
+import { browserBinaryIsMissing as agentBrowserIsMissing, binaryCandidateNames, isExecutableFile } from 'dor-lib-common';
 import { msysToWindowsCwd } from '../dist/commands/shared.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

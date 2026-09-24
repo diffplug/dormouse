@@ -1,4 +1,3 @@
-import { automationProvider, automationMode, isPopout, browserPlatform, browserSessionKey } from './browser-automation';
 /**
  * Surface-scoped browser lifecycle; see docs/specs/dor-browser.md →
  * "Agent-Browser Connection". The registry survives panel unmount and is
@@ -6,7 +5,8 @@ import { automationProvider, automationMode, isPopout, browserPlatform, browserS
  * only; Wall owns daemon teardown.
  */
 import type { PlatformAdapter } from '../../lib/platform/types';
-import { isAllowedAgentBrowserBinary, isAllowedPlaywrightBinary } from '../../lib/agent-browser-binary';
+import type { BrowserAutomationProvider } from '../../lib/platform/browser-automation';
+import { isAllowedBinaryFor } from '../../lib/agent-browser-binary';
 import { readTextFromClipboard } from '../../lib/clipboard';
 import { isAbDebugLogsEnabled } from '../../lib/feature-flags';
 import {
@@ -21,6 +21,14 @@ import {
   openAgentBrowserScreenModal,
 } from './agent-browser-screen';
 import { hostPathDisplay, tabDisplayTitle } from './browser-url';
+import {
+  automationMode,
+  automationProvider,
+  browserPlatform,
+  browserSessionKey,
+  isPopout,
+  type BrowserPlatform,
+} from './browser-automation';
 import { isToolParams } from './browser-surface';
 import { clearAgentBrowserSessionClosed, isAgentBrowserSessionClosed } from './agent-browser-sessions';
 import {
@@ -139,8 +147,8 @@ export interface AgentBrowserSurfaceParams {
  * (`lib/src/host/agent-browser-host.ts`). A refused path simply falls back to
  * the host's own resolution.
  */
-function allowedBinaryPath(candidate: unknown, provider = 'agent-browser'): string | undefined {
-  return (provider === 'playwright' ? isAllowedPlaywrightBinary(candidate) : isAllowedAgentBrowserBinary(candidate)) ? candidate as string : undefined;
+function allowedBinaryPath(candidate: unknown, provider: BrowserAutomationProvider): string | undefined {
+  return isAllowedBinaryFor(provider, candidate) ? candidate : undefined;
 }
 
 /** The live DOM bindings a mounted view lends the controller. `attachView`
@@ -182,10 +190,15 @@ const EMPTY_TABS: StreamTab[] = [];
 
 export class AgentBrowserSurfaceController {
   readonly id: string;
-  private readonly provider: 'agent-browser' | 'playwright';
+  private readonly provider: BrowserAutomationProvider;
   private cwd?: string;
-  private get platform() { return browserPlatform(automationMode(this.provider, this.poppedOut), this.cwd); }
-  private sessionKey(session: string) { return browserSessionKey(session, automationMode(this.provider, false), this.cwd); }
+  /** Rebuilt only when `cwd` changes: the Playwright adapter closes over it,
+   *  and every stream frame reads it several times. */
+  private platformCache: BrowserPlatform | null = null;
+  private get platform(): BrowserPlatform {
+    return this.platformCache ??= browserPlatform(this.provider, this.cwd);
+  }
+  private sessionKey(session: string) { return browserSessionKey(session, this.provider, this.cwd); }
   /** Gates the pop-out affordance; see `ensureStarted`. */
   private readonly isTool: boolean;
 
@@ -319,7 +332,8 @@ export class AgentBrowserSurfaceController {
 
   constructor(id: string, params: AgentBrowserSurfaceParams) {
     this.id = id;
-    this.provider = automationProvider(params.renderMode);
+    // An unset mode (a direct mount in tests) is agent-browser.
+    this.provider = automationProvider(params.renderMode) ?? 'agent-browser';
     this.cwd = params.cwd;
     // A Surface's kind never changes over its life (a tool's capabilities come
     // and go, its identity does not), so this is safe to seed once.
@@ -363,12 +377,12 @@ export class AgentBrowserSurfaceController {
       },
       openModal: () => openAgentBrowserScreenModal(this.id),
       setRenderMode: (mode) => {
-        // agent-browser → iframe is a render swap handled by the Wall (the view
-        // owns the ≥2-tab confirm gate + onSwapRenderMode);
-        // ab-screencast ↔ ab-popout relaunches this same session, in-controller.
-        if (mode === 'iframe' || automationProvider(mode) !== this.provider) this.sink?.requestRenderSwap(mode);
+        // A swap to iframe or the other provider is a render swap handled by
+        // the Wall (the view owns the ≥2-tab confirm gate + onSwapRenderMode);
+        // screencast ↔ popout relaunches this same session, in-controller.
+        if (automationProvider(mode) !== this.provider) this.sink?.requestRenderSwap(mode);
         else if (isPopout(mode)) this.popOut();
-        else if (this.poppedOut) this.popIn(); // ab-popout → ab-screencast
+        else if (this.poppedOut) this.popIn(); // popout → screencast
       },
     };
 
@@ -576,7 +590,10 @@ export class AgentBrowserSurfaceController {
     let sessionChanged = false;
     let binaryPathChanged = false;
     let portChanged = false;
-    this.cwd = params.cwd ?? this.cwd;
+    if (params.cwd !== undefined && params.cwd !== this.cwd) {
+      this.cwd = params.cwd;
+      this.platformCache = null;
+    }
     if (params.session !== this.session) {
       this.session = params.session;
       if (params.session) clearAgentBrowserSessionClosed(this.sessionKey(params.session));

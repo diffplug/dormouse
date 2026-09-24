@@ -2,10 +2,11 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { Server } from 'node:http';
+import { WebSocket } from 'ws';
 import { createPlaywrightHost } from './playwright-host';
 
-const mocks = vi.hoisted(() => ({ cli: vi.fn(), connect: vi.fn() }));
-vi.mock('dor-lib-common', () => ({ spawnAndCapture: mocks.cli }));
+const mocks = vi.hoisted(() => ({ cli: vi.fn(), connect: vi.fn(), clipboard: vi.fn() }));
+vi.mock('dor-lib-common', async importOriginal => ({ ...await importOriginal<typeof import('dor-lib-common')>(), spawnAndCapture: mocks.cli }));
 vi.mock('./playwright-install', () => ({
   resolvePlaywrightInstall: () => ({ binary: '/tools/playwright-cli', libraryPath: process.cwd(), library: { chromium: { connect: mocks.connect } } }),
   playwrightWorkspace: () => process.cwd(),
@@ -14,13 +15,13 @@ vi.mock('./playwright-install', () => ({
 let host: ReturnType<typeof createPlaywrightHost>;
 let page: EventEmitter & Record<string, any>;
 let browser: EventEmitter & Record<string, any>;
-let cdp: { send: ReturnType<typeof vi.fn>; detach: ReturnType<typeof vi.fn> };
+let cdp: { send: ReturnType<typeof vi.fn>; detach: ReturnType<typeof vi.fn>; on: ReturnType<typeof vi.fn> };
 let attach: ReturnType<typeof vi.fn>;
 const binding = { cwd: process.cwd(), session: 'test' };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  cdp = { send: vi.fn().mockResolvedValue({ data: 'aGVsbG8=' }), detach: vi.fn().mockResolvedValue(undefined) };
+  cdp = { send: vi.fn().mockResolvedValue({ data: 'aGVsbG8=' }), detach: vi.fn().mockResolvedValue(undefined), on: vi.fn() };
   attach = vi.fn().mockResolvedValue(cdp);
   page = Object.assign(new EventEmitter(), {
     context: () => ({ newCDPSession: attach }), isClosed: () => false,
@@ -35,11 +36,11 @@ beforeEach(() => {
   mocks.cli.mockImplementation(async (_binary, args) => ({
     ok: true, exitCode: 0, stderr: '',
     stdout: JSON.stringify(args.includes('list') ? { servers: [{
-      title: 'test', workspaceDir: process.cwd(), playwrightLib: process.cwd(),
+      title: args[0].slice('--session='.length), workspaceDir: process.cwd(), playwrightLib: process.cwd(),
       endpoint: '/tmp/test-playwright.pipe', browser: { browserName: 'chromium' },
     }] } : { result: '- 0: (current) Test' }),
   }));
-  host = createPlaywrightHost({ writeClipboardText() {} });
+  host = createPlaywrightHost({ writeClipboardText: mocks.clipboard });
 });
 afterEach(async () => { await host.close(); vi.restoreAllMocks(); });
 
@@ -87,6 +88,7 @@ test('a viewer listener failure releases its browser connection', async () => {
 
 test('captures reuse recent tab state but refresh it when it expires', async () => {
   const now = vi.spyOn(Date, 'now').mockReturnValue(10000);
+  browser.contexts = () => [{ pages: () => [page, Object.assign(new EventEmitter(), page)] }];
   expect((await host.request({ ...binding, op: 'streamStatus' })).ok).toBe(true);
   mocks.cli.mockClear();
   for (let i = 0; i < 10; i++) expect((await host.request({ ...binding, op: 'screenshot' })).ok).toBe(true);
@@ -132,4 +134,58 @@ test('a native reopen in headless mode clears headed shutdown ownership', async 
   mocks.cli.mockClear();
   await host.close();
   expect(mocks.cli).not.toHaveBeenCalled();
+});
+
+test('a single-page browser refreshes without asking the CLI for its selection', async () => {
+  expect((await host.request({ ...binding, op: 'streamStatus' })).ok).toBe(true);
+  expect(mocks.cli.mock.calls.map(([, args]) => args[1])).toEqual(['list']);
+});
+
+test('a GUI open launches its fresh session without closing it first; a relaunch still does', async () => {
+  const opened = await host.request({ cwd: process.cwd(), op: 'open', url: 'http://localhost/' });
+  expect(opened.error).toBeUndefined();
+  expect(mocks.cli.mock.calls.map(([, args]) => args[1])).not.toContain('close');
+  mocks.cli.mockClear();
+  expect((await host.request({ ...binding, session: opened.session!, op: 'popIn', url: 'http://localhost/' })).ok).toBe(true);
+  expect(mocks.cli.mock.calls[0][1]).toEqual([`--session=${opened.session}`, 'close']);
+});
+
+test('copy runs the shared edit script and never overwrites the clipboard with an empty selection', async () => {
+  page.evaluate = vi.fn(async (script: unknown) => typeof script === 'string' ? '' : { width: 640, height: 480 });
+  expect(await host.request({ ...binding, op: 'edit', edit: 'copy' })).toMatchObject({ ok: true, text: '' });
+  expect(mocks.clipboard).not.toHaveBeenCalled();
+  page.evaluate = vi.fn(async (script: unknown) => typeof script === 'string' ? 'hello' : { width: 640, height: 480 });
+  expect(await host.request({ ...binding, op: 'edit', edit: 'copy' })).toMatchObject({ ok: true, text: 'hello' });
+  expect(mocks.clipboard).toHaveBeenCalledExactlyOnceWith('hello');
+  expect((await host.request({ ...binding, op: 'edit', edit: 'constructor' as never })).error).toBe('Invalid editing operation');
+});
+
+test('viewers get tabs, url and status only when they change, and the current state when they connect', async () => {
+  const { wsPort } = await host.request({ ...binding, op: 'streamStatus' });
+  const sockets: WebSocket[] = [];
+  const connectViewer = async () => {
+    const { url } = await host.request({ op: 'streamUrl', port: wsPort! });
+    const types: string[] = [];
+    const ws = new WebSocket(url!);
+    sockets.push(ws);
+    ws.on('error', () => {});
+    ws.on('message', raw => types.push(JSON.parse(String(raw)).type));
+    await new Promise(resolve => ws.once('open', resolve));
+    return types;
+  };
+  try {
+    const first = await connectViewer();
+    await vi.waitFor(() => expect(first).toEqual(['url', 'tabs', 'status']));
+    await host.request({ ...binding, op: 'streamStatus' });
+    await host.request({ ...binding, op: 'streamStatus' });
+    page.url = () => 'http://localhost/next';
+    await host.request({ ...binding, op: 'streamStatus' });
+    // A repeated state message would have arrived ahead of the navigation.
+    await vi.waitFor(() => expect(first).toEqual(['url', 'tabs', 'status', 'url', 'tabs']));
+    const second = await connectViewer();
+    await vi.waitFor(() => expect(second).toEqual(['url', 'tabs', 'status']));
+    expect(first).toHaveLength(5);
+  } finally {
+    for (const ws of sockets) ws.terminate();
+  }
 });

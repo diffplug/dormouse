@@ -6,13 +6,14 @@ const { runInNewContext } = require('node:vm');
 // Exercise the shipped shutdown function without starting PTYs or a sidecar.
 const source = readFileSync(require.resolve('./main.js'), 'utf8');
 const shutdownSource = source.slice(source.indexOf('let shuttingDown = false;'), source.indexOf("rl.on('close', shutdown)"));
-function fixture() {
+function fixture({ playwrightLoaded = true } = {}) {
   const calls = [];
   let closeAgent, closePlaywright, deadline;
   const shutdown = runInNewContext(`${shutdownSource}\nshutdown`, {
     Promise,
     agentBrowser: { closePoppedOut: () => new Promise(resolve => { closeAgent = resolve; }) },
-    playwright: { close: () => new Promise(resolve => { closePlaywright = resolve; }) },
+    // The sidecar requires the Playwright host lazily, on its first request.
+    playwright: playwrightLoaded ? { close: () => new Promise(resolve => { closePlaywright = resolve; }) } : undefined,
     setTimeout: callback => { deadline = callback; return { unref() {} }; },
     dorControl: { close: () => calls.push('control') },
     alertStore: { dispose: () => calls.push('alerts') },
@@ -41,6 +42,16 @@ test('the shared deadline still permits shutdown when a browser provider hangs',
   const done = f.shutdown();
   f.closePlaywright();
   f.deadline();
+  await done;
+  assert.deepEqual(f.calls, ['control', 'alerts', 'burrow', 'ptys', 'exit']);
+});
+
+test('shutdown still waits for agent-browser when the Playwright host was never loaded', async () => {
+  const f = fixture({ playwrightLoaded: false });
+  const done = f.shutdown();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(f.calls, []);
+  f.closeAgent();
   await done;
   assert.deepEqual(f.calls, ['control', 'alerts', 'burrow', 'ptys', 'exit']);
 });

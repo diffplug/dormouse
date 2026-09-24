@@ -1,26 +1,44 @@
 /** The installed Playwright CLI owns browsers; this host owns only their Dormouse viewers. */
 import { createServer, type Server } from 'node:http';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
-import { rmSync, realpathSync } from 'node:fs';
-import os from 'node:os';
+import { writeFile } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Browser, Page, CDPSession } from 'playwright-core';
-import { spawnAndCapture, sessionForKey } from 'dor-lib-common';
+import { spawnAndCapture } from 'dor-lib-common';
+import { messageOf } from '../lib/errors';
 import type { PlaywrightRequest, PlaywrightResult } from '../lib/platform/browser-automation';
+import { editScript, generateGuiSession, jpegQuality } from './browser-host-shared';
 import { resolvePlaywrightInstall, playwrightWorkspace, type PlaywrightInstall } from './playwright-install';
 import { isLoopbackHost } from './loopback-guard';
 import { BrowserStreamGrants } from './browser-stream-guard';
+import { privateCaptureDir } from './private-capture-dir';
 
 const TAB_REFRESH_INTERVAL_MS = 750;
-const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const validSession = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9._-]+$/.test(value) && value.length <= 200;
 const validUrl = (value: unknown): value is string => { try { return typeof value === 'string' && ['http:', 'https:'].includes(new URL(value).protocol); } catch { return false; } };
 const positive = (n: unknown) => typeof n === 'number' && Number.isFinite(n) && n > 0 && n <= 16384;
 
-type Binding = { session: string; cwd: string; install: PlaywrightInstall };
+function realpathOrUndefined(file: string): string | undefined {
+  try {
+    return realpathSync(file);
+  } catch {
+    return undefined;
+  }
+}
+
+/** `key` is the native identity: installation, CLI workspace and session. */
+type Binding = { session: string; cwd: string; install: PlaywrightInstall; workspace: string | undefined; key: string };
+function bind(session: string, cwd: string, install: PlaywrightInstall): Binding {
+  const workspace = playwrightWorkspace(cwd);
+  return { session, cwd, install, workspace, key: JSON.stringify([install.libraryPath, workspace ?? '', session]) };
+}
+type StateMessage =
+  | { type: 'url'; url: string }
+  | { type: 'tabs'; tabs: { tabId: string; url: string; title: string; active: boolean }[] }
+  | { type: 'status'; connected: true; screencasting: boolean; viewportWidth?: number; viewportHeight?: number };
 type Viewer = Binding & {
   browser: Browser;
   server: Server;
@@ -36,6 +54,8 @@ type Viewer = Binding & {
   queue: Promise<void>;
   queued: number;
   headed: boolean;
+  /** The last payload published per state message type, replayed to each viewer that connects. */
+  sent: Map<StateMessage['type'], string>;
 };
 const pagesOf = (v: Viewer) => v.browser.contexts().flatMap(context => context.pages());
 const tabsOf = (v: Viewer) => Promise.all(pagesOf(v).map(async (page, index) => ({
@@ -48,18 +68,28 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
   const lifecycle = new Map<string, Promise<unknown>>();
   const headed = new Map<string, Binding>();
   const grants = new BrowserStreamGrants();
-  let captureDir: Promise<string> | undefined;
+  const captures = privateCaptureDir('dormouse-playwright-');
   let closed = false;
-  const keyOf = (b: Binding) => JSON.stringify([b.install.libraryPath, playwrightWorkspace(b.cwd) ?? '', b.session]);
-  const log = (e: unknown) => deps.log?.(`[playwright] ${message(e)}`);
+  const log = (e: unknown) => deps.log?.(`[playwright] ${messageOf(e)}`);
   async function cli(b: Binding, args: string[]) {
     const r = await spawnAndCapture(b.install.binary, [`--session=${b.session}`, ...args], { cwd: b.cwd });
     if (!r.ok) throw new Error(r.error.message);
     return { exitCode: r.exitCode, stdout: r.stdout, stderr: r.stderr };
   }
-  function broadcast(v: Viewer, data: unknown) {
+  // A frame is superseded by the next one, so a socket backed up past 2 MB
+  // skips it. State is published only on change, so it is never skipped.
+  function broadcast(v: Viewer, payload: string, frame: boolean) {
+    for (const ws of v.sockets) {
+      if (ws.readyState === WebSocket.OPEN && (!frame || ws.bufferedAmount < 2_000_000)) ws.send(payload);
+    }
+  }
+  // Every state message re-renders the pane, so the poll publishes only
+  // changes; a connecting viewer is sent the latest state instead.
+  function publish(v: Viewer, data: StateMessage) {
     const payload = JSON.stringify(data);
-    for (const ws of v.sockets) if (ws.readyState === WebSocket.OPEN && ws.bufferedAmount < 2_000_000) ws.send(payload);
+    if (v.sent.get(data.type) === payload) return;
+    v.sent.set(data.type, payload);
+    broadcast(v, payload, false);
   }
   async function dispose(v: Viewer) {
     if (v.disposed) return;
@@ -74,25 +104,26 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
     await v.browser.close().catch(() => {});
   }
   async function invalidate(b: Binding) {
-    const key = keyOf(b);
-    generations.set(key, (generations.get(key) ?? 0) + 1);
-    const v = viewers.get(key);
-    viewers.delete(key);
+    generations.set(b.key, (generations.get(b.key) ?? 0) + 1);
+    const v = viewers.get(b.key);
+    viewers.delete(b.key);
     if (v) await dispose(v);
   }
   function serialize<T>(b: Binding, action: () => Promise<T>): Promise<T> {
-    const key = keyOf(b);
-    const operation = (lifecycle.get(key) ?? Promise.resolve()).catch(() => {}).then(action);
-    lifecycle.set(key, operation);
-    void operation.finally(() => { if (lifecycle.get(key) === operation) lifecycle.delete(key); }).catch(() => {});
+    const operation = (lifecycle.get(b.key) ?? Promise.resolve()).catch(() => {}).then(action);
+    lifecycle.set(b.key, operation);
+    void operation.finally(() => { if (lifecycle.get(b.key) === operation) lifecycle.delete(b.key); }).catch(() => {});
     return operation;
   }
   async function activeIndex(b: Binding): Promise<number> {
     const r = await cli(b, ['tab-list', '--json']);
     if (r.exitCode !== 0) return 0;
     // JSON CLI results contain the tool's text; tolerate the text formatter too.
-    const parsed = (() => { try { return JSON.parse(r.stdout); } catch { return r.stdout; } })();
-    const text = typeof parsed === 'string' ? parsed : parsed.result ?? '';
+    let text = r.stdout;
+    try {
+      const parsed = JSON.parse(r.stdout);
+      text = typeof parsed === 'string' ? parsed : parsed.result ?? '';
+    } catch { /* The text formatter. */ }
     const match = /(?:^|\\n|\n)\s*-?\s*(\d+):?\s*\(current\)/.exec(text);
     return match ? Number(match[1]) : 0;
   }
@@ -106,7 +137,8 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
   }
   async function refreshNow(v: Viewer) {
     try {
-      const index = await activeIndex(v);
+      // A lone page is the selected one; only a choice needs the CLI spawn.
+      const index = pagesOf(v).length > 1 ? await activeIndex(v) : 0;
       const pages = pagesOf(v);
       if (v.disposed) return;
       const page = pages[index] ?? pages[0];
@@ -118,11 +150,13 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
       }
       const tabs = await tabsOf(v);
       if (v.disposed) return;
-      broadcast(v, { type: 'tabs', tabs });
+      // `url` precedes `tabs`: the pane drops the active tab's title on a `url`
+      // until the next `tabs` restates it.
+      if (page) publish(v, { type: 'url', url: page.url() });
+      publish(v, { type: 'tabs', tabs });
       if (page) {
         const size = await page.evaluate(() => ({ width: innerWidth, height: innerHeight })).catch(() => page.viewportSize());
-        broadcast(v, { type: 'url', url: page.url() });
-        broadcast(v, { type: 'status', connected: true, screencasting: !v.headed, viewportWidth: size?.width, viewportHeight: size?.height });
+        publish(v, { type: 'status', connected: true, screencasting: !v.headed, viewportWidth: size?.width, viewportHeight: size?.height });
       }
       v.refreshedAt = Date.now();
     } catch (e) { log(e); }
@@ -136,7 +170,7 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
     v.cdp = cdp;
     cdp.on('Page.screencastFrame', event => {
       void cdp.send('Page.screencastFrameAck', { sessionId: event.sessionId }).catch(() => {});
-      if (!v.disposed && v.cdp === cdp) broadcast(v, { type: 'frame', data: event.data, metadata: event.metadata });
+      if (!v.disposed && v.cdp === cdp) broadcast(v, JSON.stringify({ type: 'frame', data: event.data, metadata: event.metadata }), true);
     });
     await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 70 });
   }
@@ -189,7 +223,7 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
     }
   }
   async function connect(b: Binding): Promise<Viewer> {
-    const key = keyOf(b);
+    const key = b.key;
     const cached = viewers.get(key);
     if (cached && cached.browser.isConnected()) return cached;
     const pending = connecting.get(key);
@@ -201,8 +235,11 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
       const parsed = JSON.parse(list.stdout);
       const servers: unknown = parsed.servers ?? parsed.data?.servers;
       if (!Array.isArray(servers)) throw new Error('Unsupported Playwright CLI registry. Install @playwright/cli 0.1.19 or newer.');
-      const scope = playwrightWorkspace(b.cwd);
-      const matches = servers.filter(s => s.title === b.session && (s.workspaceDir || undefined) === scope && typeof s.playwrightLib === 'string' && (() => { try { return realpathSync(s.playwrightLib) === b.install.libraryPath; } catch { return false; } })());
+      const matches = servers.filter(s =>
+        s.title === b.session
+        && (s.workspaceDir || undefined) === b.workspace
+        && typeof s.playwrightLib === 'string'
+        && realpathOrUndefined(s.playwrightLib) === b.install.libraryPath);
       if (matches.length !== 1) throw new Error(matches.length ? 'Ambiguous Playwright session' : 'Playwright session is not open or has no viewable endpoint');
       const descriptor = matches[0];
       if (descriptor.browser?.browserName !== 'chromium') throw new Error('Dormouse currently views Chromium Playwright sessions only. The native CLI command still ran.');
@@ -214,12 +251,26 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
       if (closed || gen !== (generations.get(key) ?? 0)) { await browser.close(); throw new Error('Browser launch superseded'); }
       const server = createServer((_req, res) => { res.writeHead(403); res.end(); });
       const wss = new WebSocketServer({ noServer: true, maxPayload: 65536 });
-      const v: Viewer = { ...b, browser, server, sockets: new Set(), port: 0, controls: new Map(), disposed: false, queue: Promise.resolve(), queued: 0, headed: descriptor.browser.launchOptions?.headless === false };
+      const v: Viewer = {
+        ...b,
+        browser,
+        server,
+        sockets: new Set(),
+        port: 0,
+        controls: new Map(),
+        disposed: false,
+        queue: Promise.resolve(),
+        queued: 0,
+        headed: descriptor.browser.launchOptions?.headless === false,
+        sent: new Map(),
+      };
       server.on('upgrade', (req, socket, head) => {
         const token = /^\/stream\/([a-f0-9]{64})$/.exec(req.url ?? '')?.[1];
         if (!isLoopbackHost(req.headers.host, v.port) || !token || !grants.consume(token, v.port)) { socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return; }
         wss.handleUpgrade(req, socket, head, ws => {
           v.sockets.add(ws);
+          // Earlier viewers already hold this state; the refresh below sends only what changed.
+          for (const payload of v.sent.values()) ws.send(payload);
           ws.on('error', log);
           ws.on('message', raw => {
             if (v.queued >= 256) { ws.close(1008, 'Input backlog exceeded'); return; }
@@ -256,18 +307,19 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
     connecting.set(key, operation);
     try { return await operation; } finally { if (connecting.get(key) === operation) connecting.delete(key); }
   }
-  async function launch(b: Binding, url: string, isHeaded: boolean) {
+  async function launch(b: Binding, url: string, isHeaded: boolean, fresh: boolean) {
     if (!validUrl(url)) throw new Error('Browser navigation requires an http(s) URL');
     if (closed) throw new Error('Playwright host is shutting down');
     await invalidate(b);
     // Finish the old CLI session before discovering the replacement endpoint.
-    await cli(b, ['close']);
-    const key = keyOf(b);
+    // A freshly minted session has none to finish.
+    if (!fresh) await cli(b, ['close']);
+    const key = b.key;
     if (isHeaded) headed.set(key, b); else headed.delete(key);
     const generation = generations.get(key);
     let result: Awaited<ReturnType<typeof cli>> | undefined;
     const opening = cli(b, ['open', url, '--browser=chromium', ...(isHeaded ? ['--headed'] : [])]);
-    void opening.then(r => { result = r; }, e => { result = { exitCode: 1, stdout: '', stderr: message(e) }; });
+    void opening.then(r => { result = r; }, e => { result = { exitCode: 1, stdout: '', stderr: messageOf(e) }; });
     // Endpoint readiness, not the page load, completes GUI launches.
     const deadline = Date.now() + 30_000;
     let last: unknown;
@@ -290,7 +342,7 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
       await wait(200);
     }
     await cli(b, ['close']).catch(log);
-    throw new Error(result?.stderr || message(last));
+    throw new Error(result?.stderr || messageOf(last));
   }
   async function execute(request: PlaywrightRequest): Promise<PlaywrightResult> {
     if (!request || typeof request !== 'object') throw new Error('Invalid Playwright request');
@@ -301,47 +353,47 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
     }
     const install = resolvePlaywrightInstall(request.binaryPath);
     const cwd = typeof request.cwd === 'string' && path.isAbsolute(request.cwd) ? request.cwd : process.cwd();
-    const session = request.op === 'open' ? sessionForKey(`gui-${randomBytes(8).toString('hex')}`) : request.session;
+    const session = request.op === 'open' ? generateGuiSession() : request.session;
     if (!validSession(session)) throw new Error('Invalid Playwright session name');
-    const b = { session, cwd, install };
+    const b = bind(session, cwd, install);
     if (request.op === 'open' || request.op === 'popOut' || request.op === 'popIn') {
-      const v = await serialize(b, () => launch(b, request.url ?? '', request.op === 'open' ? !!request.headed : request.op === 'popOut'));
-      return { ok: true, session, cwd, binaryPath: install.binary, wsPort: v.port, nativeIdentity: keyOf(b) };
+      const url = request.url ?? '';
+      const isHeaded = request.op === 'open' ? !!request.headed : request.op === 'popOut';
+      const fresh = request.op === 'open';
+      const v = await serialize(b, () => launch(b, url, isHeaded, fresh));
+      return { ok: true, session, cwd, binaryPath: install.binary, wsPort: v.port, nativeIdentity: b.key };
     }
     if (request.op === 'command' && request.args?.[0] === 'close') {
       return serialize(b, async () => {
-        await invalidate(b); headed.delete(keyOf(b));
-        const r = await cli(b, ['close']); return { ok: r.exitCode === 0, ...r };
+        await invalidate(b);
+        headed.delete(b.key);
+        const r = await cli(b, ['close']);
+        return { ok: r.exitCode === 0, ...r };
       });
     }
     const v = await connect(b);
-    if (request.op === 'streamStatus') { await refresh(v); return { ok: true, wsPort: v.port, headed: v.headed, nativeIdentity: keyOf(b) }; }
+    if (request.op === 'streamStatus') {
+      await refresh(v);
+      return { ok: true, wsPort: v.port, headed: v.headed, nativeIdentity: b.key };
+    }
     await refresh(v, request.op !== 'screenshot');
     const page = v.page;
     if (!page) throw new Error('No Playwright page is open');
     if (request.op === 'screenshot') {
       const format = request.format === 'png' ? 'png' : 'jpeg';
       const cdp = await control(v, page);
-      const { data } = await cdp.send('Page.captureScreenshot', { format, ...(format === 'jpeg' ? { quality: Math.min(100, Math.max(1, request.quality ?? 85)) } : {}), captureBeyondViewport: false });
+      const { data } = await cdp.send('Page.captureScreenshot', { format, ...(format === 'jpeg' ? { quality: jpegQuality(request.quality) } : {}), captureBeyondViewport: false });
       // Keep the cross-host contract a plain typed array, including VS Code's message transport.
       const bytes = new Uint8Array(Buffer.from(data, 'base64'));
       return { ok: true, bytes, mime: `image/${format}` };
     }
     if (request.op === 'edit') {
-      if (!['selectAll', 'copy', 'cut'].includes(request.edit)) throw new Error('Invalid editing operation');
-      const text = await page.evaluate(op => {
-        const el = document.activeElement;
-        if (op === 'selectAll') { if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) el.select(); else document.execCommand('selectAll'); return ''; }
-        if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-          const start = el.selectionStart ?? 0, end = el.selectionEnd ?? 0, value = el.value.slice(start, end);
-          if (op === 'cut') { el.setRangeText('', start, end, 'end'); el.dispatchEvent(new Event('input', { bubbles: true })); }
-          return value;
-        }
-        const value = String(window.getSelection() ?? '');
-        if (op === 'cut' && value) document.execCommand('delete');
-        return value;
-      }, request.edit);
-      if (request.edit !== 'selectAll') await deps.writeClipboardText(text);
+      const script = editScript(request.edit);
+      if (!script) throw new Error('Invalid editing operation');
+      const result: unknown = await page.evaluate(script);
+      const text = typeof result === 'string' ? result : '';
+      // Skip empty, so an empty selection doesn't clobber the clipboard.
+      if (request.edit !== 'selectAll' && text) await deps.writeClipboardText(text);
       return { ok: true, text };
     }
     if (request.op !== 'command' || !Array.isArray(request.args) || !request.args.every(a => typeof a === 'string')) throw new Error('Invalid browser operation');
@@ -352,13 +404,20 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
     else if (cmd === 'forward' && !sub) await page.goForward({ waitUntil: 'commit' });
     else if (cmd === 'tab') {
       if (sub === 'list') return { ok: true, exitCode: 0, stdout: JSON.stringify({ tabs: await tabsOf(v) }), stderr: '' };
-      const nativeArgs = sub === 'close' && args.length === 1 && /^\d+$/.test(args[0]) ? ['tab-close', args[0]] : request.args.length === 2 && /^\d+$/.test(sub ?? '') ? ['tab-select', sub] : null;
-      if (!nativeArgs) throw new Error('Unsupported tab operation');
-      const r = await cli(b, nativeArgs); await refresh(v); return { ok: r.exitCode === 0, ...r };
+      let nativeArgs: string[];
+      if (sub === 'close' && args.length === 1 && /^\d+$/.test(args[0])) nativeArgs = ['tab-close', args[0]];
+      else if (request.args.length === 2 && /^\d+$/.test(sub ?? '')) nativeArgs = ['tab-select', sub];
+      else throw new Error('Unsupported tab operation');
+      const r = await cli(b, nativeArgs);
+      await refresh(v);
+      return { ok: r.exitCode === 0, ...r };
     } else if (cmd === 'set') {
       const device = sub === 'device' && args.length === 1 ? install.library.devices[args[0]] : undefined;
-      const [width, height, dpr] = device ? [device.viewport.width, device.viewport.height, device.deviceScaleFactor] : args.map(Number);
-      if (!(sub === 'viewport' && args.length === 3 || device) || !positive(width) || !positive(height) || !positive(dpr) || dpr > 10) throw new Error('Invalid viewport/device');
+      if (!device && !(sub === 'viewport' && args.length === 3)) throw new Error('Invalid viewport/device');
+      const [width, height, dpr] = device
+        ? [device.viewport.width, device.viewport.height, device.deviceScaleFactor]
+        : args.map(Number);
+      if (!positive(width) || !positive(height) || !positive(dpr) || dpr > 10) throw new Error('Invalid viewport/device');
       await page.setViewportSize({ width, height });
       const cdp = await control(v, page);
       await cdp.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: dpr, mobile: device?.isMobile ?? false });
@@ -369,27 +428,42 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
     return { ok: true, exitCode: 0, stdout: '', stderr: '' };
   }
   async function request(r: PlaywrightRequest): Promise<PlaywrightResult> {
-    try { if (closed) throw new Error('Playwright host is shutting down'); return await execute(r); }
-    catch (e) { return { ok: false, error: message(e), exitCode: 1, stdout: '', stderr: message(e) }; }
+    try {
+      if (closed) throw new Error('Playwright host is shutting down');
+      return await execute(r);
+    } catch (e) {
+      const error = messageOf(e);
+      return { ok: false, error, exitCode: 1, stdout: '', stderr: error };
+    }
   }
   async function requestFile(r: PlaywrightRequest): Promise<PlaywrightResult> {
     try {
       const result = await request(r);
       if (!result.bytes) return result;
       if (closed) return { ok: false, error: 'Playwright host is shutting down' };
-      captureDir ??= mkdtemp(path.join(os.tmpdir(), 'dormouse-playwright-')).then(dir => { process.once('exit', () => rmSync(dir, { recursive: true, force: true })); return dir; }).catch(error => { captureDir = undefined; throw error; });
-      const file = path.join(await captureDir, `${randomBytes(16).toString('hex')}.frame`);
+      const file = path.join(await captures.get(), `${randomBytes(16).toString('hex')}.frame`);
       await writeFile(file, result.bytes, { mode: 0o600 });
-      if (closed) { await rm(path.dirname(file), { recursive: true, force: true }); return { ok: false, error: 'Playwright host is shutting down' }; }
+      // Shutdown may have begun while the frame was written.
+      if (closed) {
+        await captures.remove();
+        return { ok: false, error: 'Playwright host is shutting down' };
+      }
       return { ok: true, path: file, mime: result.mime };
-    } catch (error) { return { ok: false, error: message(error) }; }
+    } catch (error) {
+      return { ok: false, error: messageOf(error) };
+    }
   }
   async function close() {
     closed = true;
     await Promise.allSettled([...lifecycle.values(), ...connecting.values()]);
-    await Promise.all([...headed.values()].map(async b => { await invalidate(b); await cli(b, ['close']).catch(log); }));
-    await Promise.all([...viewers.values()].map(dispose)); viewers.clear(); headed.clear();
-    if (captureDir) await rm(await captureDir, { recursive: true, force: true });
+    await Promise.all([...headed.values()].map(async b => {
+      await invalidate(b);
+      await cli(b, ['close']).catch(log);
+    }));
+    await Promise.all([...viewers.values()].map(dispose));
+    viewers.clear();
+    headed.clear();
+    await captures.remove();
   }
   return { request, requestFile, close };
 }

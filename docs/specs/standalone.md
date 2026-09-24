@@ -270,8 +270,9 @@ Shutdown (`sidecar:shutdown` message, stdin EOF, or SIGTERM) is **idempotent and
 ordered**:
 
 1. **Must await both browser providers’ cleanup under one 1.5s deadline**
-   (`agentBrowser.closePoppedOut()` and `playwright.close()`);
-   `docs/specs/dor-browser.md` owns their teardown contracts.
+   (`agentBrowser.closePoppedOut()`, and `playwright.close()` once its
+   lazily required host exists); `docs/specs/dor-browser.md` owns their
+   teardown contracts.
 2. Close the dor control socket.
 3. `alertStore.dispose()`.
 4. Dispose the Burrow service, dropping the relay socket and settling every

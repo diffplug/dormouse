@@ -4,8 +4,8 @@ test('concurrent first commands share cwd; a failed launch reservation expires',
   vi.useFakeTimers();
   try {
     const registry = new BrowserBindingReservations();
-    const first = { session: 'app', cwd: '/project-a' };
-    const second = { session: 'app', cwd: '/project-b' };
+    const first = { cwd: '/project-a' };
+    const second = { cwd: '/project-b' };
     const binding = registry.resolve('app', first);
     expect(binding).toMatchObject({ cwd: first.cwd });
     expect(registry.resolve('app', second)).toEqual(binding);
@@ -21,7 +21,7 @@ test('concurrent first commands share cwd; a failed launch reservation expires',
 test('the same key in separate workspaces has independent native sessions', () => {
   const first = new BrowserBindingReservations();
   const second = new BrowserBindingReservations();
-  const proposed = { session: 'dormouse.1.app', cwd: '/project', binaryPath: '/tools/playwright-cli' };
+  const proposed = { cwd: '/project', binaryPath: '/tools/playwright-cli' };
   const binding = first.resolve('app', proposed)!;
   expect(binding.session).not.toBe(second.resolve('app', proposed)?.session);
   expect(first.resolve('app', { ...proposed, binaryPath: '/other/playwright-cli' })).toEqual(binding);

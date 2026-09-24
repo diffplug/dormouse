@@ -7,18 +7,18 @@ import { buildCommand } from '@stricli/core';
 // Windows recipe (cross-spawn for PATHEXT/.cmd, windowsHide, exit-vs-close).
 // See docs/specs/dor-cli.md → "Spawning External Binaries".
 import {
+  browserBinaryIsMissing,
   parseStreamPort,
+  resolveBinaryPath,
   sessionForKey,
   streamStatusArgs,
   AGENT_BROWSER_BIN_ENV,
   DEFAULT_AGENT_BROWSER_BIN,
 } from 'dor-lib-common';
 import {
-  browserBinaryIsMissing,
   execBrowserProcess,
   extractSessionFlags,
   isMissingBinaryError,
-  resolveBinaryPath,
   resolveOpenTargetArgs,
   type ResolvedSessionFlags,
 } from './browser-cli.js';

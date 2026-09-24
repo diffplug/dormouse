@@ -89,19 +89,19 @@ Source of truth: `dor/bin/dor`, `dor/bin/dor.cmd`, `scripts/stage-dor-cli.mjs`,
 **Every spawn of an external/user-installed binary must go through
 `spawnAndCapture` from `dor-lib-common`, never raw `node:child_process`
 `spawn`** — `dor ab` driving `agent-browser`, the agent-browser host running
-tab/eval/screenshot commands, and anything added later. It is the only code
-`dor` and the `lib` host share, and it owns the Windows recipe: cross-spawn
-rather than Node's own `spawn`, `windowsHide`, and resolution on `exit` with an
-exit-time output snapshot (rationale).
+tab/eval/screenshot commands, and anything added later. It owns the Windows
+recipe: cross-spawn rather than Node's own `spawn`, `windowsHide`, and
+resolution on `exit` with an exit-time output snapshot (rationale).
 
 **Never forward an argument containing a literal `%VAR%`** — `cmd.exe` expands
 it through a `.cmd` shim, an unavoidable batch limitation; today's forwarded
 arguments carry none.
 
-- **`dor ab` spawns the `PATH`-resolved absolute path, never the bare name** —
-  cross-spawn resolves a bare name through `which`, which searches the cwd
-  before `PATH` on Windows (rationale). The host's candidate list still ends in a
-  bare name (`## Future`).
+- **`dor ab`, `dor pw` and the Playwright host spawn the `PATH`-resolved
+  absolute path, never the bare name** — cross-spawn resolves a bare name
+  through `which`, which searches the cwd before `PATH` on Windows (rationale).
+  The agent-browser host's candidate list still ends in a bare name
+  (`## Future`).
 - **Within the `PATH` directories, and only those, the walk must select the file
   `which` would** — a divergence either runs a different binary or reports a
   present install as missing. **Never extend the search to the cwd**, which is
@@ -124,8 +124,8 @@ arguments carry none.
   `accessSync(X_OK)` reports every readable file as executable on Windows.
 
   Source of truth: `binaryCandidateNames`, `isExecutableFile`, `resolveBinaryPath`
-  and `browserBinaryIsMissing` in `dor/src/commands/browser-cli.ts`; `getPathInfo`
-  in `which/which.js` is what they mirror; pinned in
+  and `browserBinaryIsMissing` in `dor-lib-common/src/resolve-binary.ts`;
+  `getPathInfo` in `which/which.js` is what they mirror; pinned in
   `dor/test/cli-output.test.mjs`.
 
 **`spawnAndCapture` never throws:** a spawn-level failure resolves as
@@ -561,7 +561,7 @@ in `dor/src/protocol.ts`, the `surface.resolveOpen` handler in
 
 **Must pass the bound cwd through `spawnAndCapture`'s optional cwd argument.** Omission preserves inherited cwd for existing callers.
 
-Source of truth: `runPlaywrightCli` in `dor/src/commands/playwright.ts`; `BrowserBinding` in `dor/src/commands/types.ts`; `spawnAndCapture` in `dor-lib-common/src/spawn.ts`. Pinned by `dor/test/playwright.test.mjs`.
+Source of truth: `runPlaywrightCli` and `resolveBinding` in `dor/src/commands/playwright.ts`; `BrowserBinding` in `dor/src/commands/types.ts`; `spawnAndCapture` in `dor-lib-common/src/spawn.ts`. Pinned by `dor/test/playwright.test.mjs`.
 
 ## Agent-Browser Surface Addressing
 
@@ -681,8 +681,8 @@ Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `openCommand` in `
   `runWithBinaryFallback` still ends its list with the bare
   `DEFAULT_AGENT_BROWSER_BIN`, so on Windows the extension-host or Tauri-app
   working directory is searched first — narrower than `dor ab`'s case, since a
-  user does not clone into it. Sharing `resolveBinaryPath` means moving it to
-  `dor-lib-common` beside `spawnAndCapture`.
+  user does not clone into it. `resolvePlaywrightInstall` already walks its
+  candidates through `dor-lib-common`'s `resolveBinaryPath`.
 
 - **Surface a dead control channel in the UI.** A lost bind leaves one
   `[dor-control]` line on the host's stderr, and all a user sees is `dor`

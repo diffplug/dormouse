@@ -1,5 +1,3 @@
-import { BrowserBindingReservations } from './browser-binding-reservations';
-import { automationProvider, automationMode, browserPlatform } from './browser-automation';
 import { recordToolDirty } from '../../lib/tool-dirty-store';
 import { createSerialQueue } from '../../host/remote/serial-queue';
 import { useCallback, useRef, type MutableRefObject } from 'react';
@@ -10,7 +8,7 @@ import type { WorkspaceId } from '../../lib/session-types';
 import type { DorControlRequestPayload, DorControlResult } from 'dor/protocol';
 import { SURFACE_CONTROL_METHODS, unsupportedControlMethodMessage } from 'dor/protocol';
 import type {
-  BrowserBinding,
+  BrowserAutomationProvider,
   Surface as DorSurface,
   SplitDirection as DorSplitDirection,
   ResolvedSplitDirection as DorResolvedSplitDirection,
@@ -31,7 +29,7 @@ import {
   isPaneOscDriven,
 } from '../../lib/terminal-registry';
 import { cwdPathsEqual, surfaceRunsCommand, type TerminalPaneState } from '../../lib/terminal-state';
-import { isAllowedAgentBrowserBinary, isAllowedPlaywrightBinary } from '../../lib/agent-browser-binary';
+import { isAllowedBinaryFor } from '../../lib/agent-browser-binary';
 import { getHelper } from '../../lib/helper-terminal';
 import { isSurfaceClosing } from '../../lib/notepad/notepad-store';
 import { clearToolAnnounce } from '../../lib/tool-announce-store';
@@ -46,8 +44,11 @@ import {
 } from './tool-takeover';
 import { attachSurfacePorts } from './surface-ports';
 import { browserSurfaceUrl, hostPathDisplay } from './browser-url';
+import { automationMode, automationProvider, browserPlatform, type LaunchBinaryPath } from './browser-automation';
+import { BrowserBindingReservations } from './browser-binding-reservations';
 import {
   agentBrowserSessionFromParams,
+  browserBindingFromParams,
   namespacedToolKey,
   surfaceKindFromParams,
   toolKeysEqual,
@@ -130,7 +131,7 @@ type EnsureAgentBrowserSurfaceResult =
  *  Menu Connect). At least one of `key` / `session` is required (it names the
  *  surface). */
 type EnsureAgentBrowserSurface = (args: {
-  provider?: 'agent-browser' | 'playwright';
+  provider?: BrowserAutomationProvider;
   headed?: boolean;
   nativeIdentity?: string;
   cwd?: string;
@@ -543,7 +544,7 @@ export function useDorControl({
   isClosingWorkspace,
   closeSurface,
   revealSurface,
-  lastAgentBrowserBinaryPathRef,
+  launchBinaryPath,
   workspaceRef,
   workspaceScope,
 }: {
@@ -594,8 +595,8 @@ export function useDorControl({
   /** Reveal a Surface (reattaching a Door first) and report whether it ended up
    *  visible. `Wall.tsx` -> `revealSurface`. */
   revealSurface: (id: string) => boolean;
-  /** The last binary path a `dor ab` surface resolved on a terminal's PATH. */
-  lastAgentBrowserBinaryPathRef: MutableRefObject<string | undefined>;
+  /** The binary path a `dor ab` surface last resolved, for GUI launches. */
+  launchBinaryPath: LaunchBinaryPath;
   /** This Wall's own positional Workspace ref, reported by `dor list` so a caller
    *  learns which Workspace answered (docs/specs/dor-cli.md → "Handle Model").
    *  The Window's own ref rides beside it, so `dor list` says which Window
@@ -682,6 +683,35 @@ export function useDorControl({
     return target;
   }, [requireListedSurface]);
 
+  // Past the browser gate, web verbs stay renderMode-gated: an `iframe`
+  // renderer is a browser with nothing to drive (docs/specs/glossary.md →
+  // Panes and Surfaces). The session `target` is bound to, or null once the
+  // caller is answered.
+  const requireAutomationSession = useCallback((
+    target: DorSurface,
+    provider: BrowserAutomationProvider,
+    detail: DorControlRequest,
+  ): string | null => {
+    if (automationProvider(target.renderMode) !== provider) {
+      detail.respond({
+        ok: false,
+        error: `surface '${target.ref}' is not ${provider} rendered (render_mode: ${target.renderMode})`,
+      });
+      return null;
+    }
+    // The session is the one row field the projection deliberately withholds
+    // (it is an identifier, not a capability), so read it from the params —
+    // live metadata for panes and parked doors alike.
+    const session = agentBrowserSessionFromParams(lath.getMeta(target.id)?.params);
+    if (!session) {
+      // An eagerly-created connect pane whose daemon boot has not yet named
+      // it (docs/specs/dor-browser.md → Pane Context Menu Connect).
+      detail.respond({ ok: false, error: `surface '${target.ref}' has no ${provider} session yet` });
+      return null;
+    }
+    return session;
+  }, [lath]);
+
   /** A Surface a command may still target: not mid-fade, and not mid-closure
    *  (`closeSurface` archives before it tears down; a match made meanwhile
    *  would be acted on moments before it vanishes). */
@@ -711,8 +741,25 @@ export function useDorControl({
   /** The agent-browser session ↔ surface registry: the surface bound to
    *  `session`, or null if none exists. */
   const findAgentBrowserSurface = useCallback((session: string) => findSurfaceByParams(
-    (params) => automationProvider((params as { renderMode?: string })?.renderMode) === 'agent-browser' && agentBrowserSessionFromParams(params) === session,
+    (params) => automationProvider((params as { renderMode?: unknown } | undefined)?.renderMode) === 'agent-browser'
+      && agentBrowserSessionFromParams(params) === session,
   ), [findSurfaceByParams]);
+
+  /** The Playwright Surface a binding names: by managed key; else by the host's
+   *  native identity, which a raw `--session` shares across one project's
+   *  subdirectories; else by session and cwd. */
+  const findPlaywrightSurface = useCallback((binding: {
+    key?: string;
+    session: string;
+    nativeIdentity?: string;
+    cwd?: string;
+  }) => findSurfaceByParams((params) => {
+    const p = params as { renderMode?: unknown; key?: unknown; session?: unknown; cwd?: unknown; nativeIdentity?: unknown } | undefined;
+    if (automationProvider(p?.renderMode) !== 'playwright') return false;
+    if (binding.key) return p?.key === binding.key;
+    if (binding.nativeIdentity && p?.nativeIdentity) return p.nativeIdentity === binding.nativeIdentity;
+    return p?.session === binding.session && p?.cwd === binding.cwd;
+  }), [findSurfaceByParams]);
 
   // Fold a params patch onto a surface, pane or door alike — the store holds both,
   // so there is one write path. Shared by `ensureAgentBrowserSurface`'s reuse arm and
@@ -738,7 +785,7 @@ export function useDorControl({
     minimized = false,
   }) => {
     // Remember the resolved binary so an embed→screencast swap can spawn one.
-    if (binaryPath && provider === 'agent-browser') lastAgentBrowserBinaryPathRef.current = binaryPath;
+    launchBinaryPath.remember(provider, binaryPath);
     const refreshedParams = {
       ...(nativeIdentity ? { nativeIdentity } : {}),
       ...(provider === 'playwright' && headed !== undefined ? { renderMode: automationMode(provider, headed) } : {}),
@@ -746,16 +793,17 @@ export function useDorControl({
       ...(binaryPath !== undefined ? { binaryPath } : {}),
     };
 
-    const existing = session === undefined ? null : provider === 'agent-browser' ? findAgentBrowserSurface(session) : findSurfaceByParams(params => {
-      const p = params as { renderMode?: string; session?: string; cwd?: string; key?: string; nativeIdentity?: string };
-      return automationProvider(p?.renderMode) === provider && (key ? p.key === key : nativeIdentity && p.nativeIdentity ? nativeIdentity === p.nativeIdentity : p.session === session && p.cwd === cwd);
-    });
+    let existing: { id: string; minimized: boolean } | null = null;
+    if (session !== undefined) {
+      existing = provider === 'agent-browser'
+        ? findAgentBrowserSurface(session)
+        : findPlaywrightSurface({ key, session, nativeIdentity, cwd });
+    }
     if (existing) {
       // Reuse: refresh the stream port (OS-assigned, churns across session
       // restarts) so the panel reconnects to the live stream, and the
       // resolved binary path alongside it.
       updateSurfaceParams(existing.id, refreshedParams);
-      if (provider === 'playwright' && key) browserReservations.current.delete(key);
       return {
         ok: true,
         status: 'existing',
@@ -786,7 +834,6 @@ export function useDorControl({
       focusNeutral: true,
     });
     if (!result.ok) return { ok: false, message: result.message };
-    if (provider === 'playwright' && key) browserReservations.current.delete(key);
     return {
       ok: true,
       status: result.value.status,
@@ -794,7 +841,7 @@ export function useDorControl({
       surfaceRef: result.value.ref,
       minimized,
     };
-  }, [createContentSurface, findAgentBrowserSurface, findSurfaceByParams, updateSurfaceParams, surfaceRefForId]);
+  }, [createContentSurface, findAgentBrowserSurface, findPlaywrightSurface, updateSurfaceParams, surfaceRefForId]);
 
 
   // The request handler itself. The window listener that picks WHICH Wall runs it
@@ -1557,20 +1604,20 @@ export function useDorControl({
 
     if (detail.method === SURFACE_CONTROL_METHODS.resolveBrowser) {
       const provider = params.provider === 'playwright' ? 'playwright' : 'agent-browser';
-      const target = params.surface ? requireBrowserSurface(params.surface, detail) : null;
-      if (params.surface && !target) return;
-      const found = target ? { id: target.id } : findSurfaceByParams(raw => {
-        const p = raw as { key?: string; renderMode?: string };
-        return p?.key === params.key && automationProvider(p.renderMode) === provider;
+      // `--surface`: that Surface's binding, once it is this provider's and named.
+      if (params.surface) {
+        const target = requireBrowserSurface(params.surface, detail);
+        if (!target || !requireAutomationSession(target, provider, detail)) return;
+        detail.respond({ ok: true, result: { binding: browserBindingFromParams(lath.getMeta(target.id)?.params) } });
+        return;
+      }
+      // `--key`: the Surface bound to that key, else the reservation that pins
+      // a Playwright key's concurrent first commands to one binding.
+      const found = findSurfaceByParams((raw) => {
+        const p = raw as { key?: unknown; renderMode?: unknown } | undefined;
+        return p?.key === params.key && automationProvider(p?.renderMode) === provider;
       });
-      const p = found ? lath.getMeta(found.id)?.params as { renderMode?: string; session?: string; cwd?: string; binaryPath?: string } : undefined;
-      if (target && (p?.renderMode === 'iframe' || automationProvider(p?.renderMode) !== provider)) {
-        detail.respond({ ok: false, error: `surface '${target.ref}' is not ${provider} rendered (render_mode: ${p?.renderMode})` }); return;
-      }
-      if (target && !p?.session) {
-        detail.respond({ ok: false, error: `surface '${target.ref}' has no ${provider} session yet` }); return;
-      }
-      let binding: BrowserBinding | null = p?.session ? { session: p.session, cwd: p.cwd, binaryPath: p.binaryPath } : null;
+      let binding = found ? browserBindingFromParams(lath.getMeta(found.id)?.params) : null;
       if (!binding && provider === 'playwright' && typeof params.key === 'string') {
         binding = browserReservations.current.resolve(params.key, params.proposed);
       }
@@ -1578,24 +1625,10 @@ export function useDorControl({
       return;
     }
 
-    if (detail.method === SURFACE_CONTROL_METHODS.browser && params.provider === 'playwright') {
-      const session = stringParam(params.session);
-      if (!session) { detail.respond({ ok: false, error: 'session is required' }); return; }
-      const cwd = stringParam(params.cwd);
-      const requestedBinaryPath = stringParam(params.binaryPath);
-      const binaryPath = isAllowedPlaywrightBinary(requestedBinaryPath) ? requestedBinaryPath : undefined;
-      const platform = browserPlatform('pw-screencast', cwd);
-      if (!platform.agentBrowserStreamStatus) { detail.respond({ ok: false, error: 'Playwright is unavailable on this host' }); return; }
-      const status = await platform.agentBrowserStreamStatus(session, binaryPath);
-      if (!status.ok) { detail.respond({ ok: false, error: status.error ?? 'Playwright connection failed' }); return; }
-      const result = ensureAgentBrowserSurface({ provider: 'playwright', headed: status.headed, nativeIdentity: status.nativeIdentity, key: stringParam(params.key), session, cwd, wsPort: status.wsPort, binaryPath,
-        reference: () => resolveVisibleSurface(stringParam(params.surface), detail.surfaceId), minimized: false });
-      if (!result.ok) { detail.respond({ ok: false, error: result.message }); return; }
-      detail.respond({ ok: true, result: { status: result.status, surfaceId: result.surfaceId, surfaceRef: result.surfaceRef, session, minimized: result.minimized } });
-      return;
-    }
-
     if (detail.method === SURFACE_CONTROL_METHODS.agentBrowser || detail.method === SURFACE_CONTROL_METHODS.browser) {
+      const provider = detail.method === SURFACE_CONTROL_METHODS.browser && params.provider === 'playwright'
+        ? 'playwright'
+        : 'agent-browser';
       const session = stringParam(params.session);
       if (!session) {
         detail.respond({ ok: false, error: 'session is required' });
@@ -1613,21 +1646,44 @@ export function useDorControl({
       // request here would mean no browser surface at all for an operator who
       // set that variable to a differently-named wrapper.
       const requestedBinaryPath = stringParam(params.binaryPath);
-      const binaryPath = isAllowedAgentBrowserBinary(requestedBinaryPath)
+      const binaryPath = isAllowedBinaryFor(provider, requestedBinaryPath)
         ? requestedBinaryPath
         : undefined;
+      // `dor ab` reads the stream port itself; the Playwright host serves the
+      // stream, so it is asked here, along with the display mode and native
+      // identity of the session `dor pw` just drove.
+      let launch: { wsPort?: number; minimized: boolean; cwd?: string; headed?: boolean; nativeIdentity?: string };
+      if (provider === 'playwright') {
+        const cwd = stringParam(params.cwd);
+        const platform = browserPlatform(provider, cwd);
+        if (!platform.agentBrowserStreamStatus) {
+          detail.respond({ ok: false, error: 'Playwright is unavailable on this host' });
+          return;
+        }
+        const status = await platform.agentBrowserStreamStatus(session, binaryPath);
+        if (!status.ok) {
+          detail.respond({ ok: false, error: status.error ?? 'Playwright connection failed' });
+          return;
+        }
+        launch = { wsPort: status.wsPort, minimized: false, cwd, headed: status.headed, nativeIdentity: status.nativeIdentity };
+      } else {
+        launch = { wsPort: numberParam(params.wsPort), minimized: booleanParam(params.minimized) };
+      }
+      const key = stringParam(params.key);
       const result = ensureAgentBrowserSurface({
-        key: stringParam(params.key),
+        provider,
+        key,
         session,
-        wsPort: numberParam(params.wsPort),
         binaryPath,
+        ...launch,
         reference: () => resolveVisibleSurface(stringParam(params.surface), detail.surfaceId),
-        minimized: booleanParam(params.minimized),
       });
       if (!result.ok) {
         detail.respond({ ok: false, error: result.message });
         return;
       }
+      // Bound: later commands for the key resolve to this Surface.
+      if (provider === 'playwright' && key) browserReservations.current.delete(key);
       detail.respond({
         ok: true,
         result: {
@@ -1693,28 +1749,11 @@ export function useDorControl({
         return;
       }
       // Resolve a browser Surface handle to the agent-browser session bound to
-      // it, for `dor ab --surface <handle> <verb...>`. Past the browser gate,
-      // web verbs stay renderMode-gated: an `iframe` renderer is a browser
-      // with nothing to drive (docs/specs/glossary.md → Panes and Surfaces).
+      // it, for `dor ab --surface <handle> <verb...>`.
       const target = requireBrowserSurface(params.surface, detail);
       if (!target) return;
-      if (target.renderMode === 'iframe' || automationProvider(target.renderMode) !== 'agent-browser') {
-        detail.respond({
-          ok: false,
-          error: `surface '${target.ref}' is not agent-browser rendered (render_mode: ${target.renderMode})`,
-        });
-        return;
-      }
-      // The session is the one row field the projection deliberately withholds
-      // (it is an identifier, not a capability), so read it from the params —
-      // live metadata for panes and parked doors alike.
-      const session = agentBrowserSessionFromParams(lath.getMeta(target.id)?.params);
-      if (!session) {
-        // An eagerly-created connect pane whose daemon boot has not yet named
-        // it (docs/specs/dor-browser.md → Pane Context Menu Connect).
-        detail.respond({ ok: false, error: `surface '${target.ref}' has no agent-browser session yet` });
-        return;
-      }
+      const session = requireAutomationSession(target, 'agent-browser', detail);
+      if (!session) return;
       detail.respond({
         ok: true,
         result: { surfaceId: target.id, surfaceRef: target.ref, session },
@@ -1723,7 +1762,7 @@ export function useDorControl({
     }
 
     detail.respond({ ok: false, error: unsupportedControlMethodMessage(detail.method) });
-  }, [buildDorSurfaces, buildDorSurfaceList, closeSurface, createContentSurface, createSplitSurface, ensureAgentBrowserSurface, findSurfaceIdRunningCommand, findSurfaceByParams, revealSurface, isClosingWorkspace, requireBrowserSurface, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav, workspaceRef, workspaceScope]);
+  }, [buildDorSurfaces, buildDorSurfaceList, closeSurface, createContentSurface, createSplitSurface, ensureAgentBrowserSurface, findSurfaceIdRunningCommand, findSurfaceByParams, revealSurface, isClosingWorkspace, requireAutomationSession, requireBrowserSurface, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav, workspaceRef, workspaceScope]);
 
   return { findSurfaceByParams, updateSurfaceParams, handleDorControl };
 }

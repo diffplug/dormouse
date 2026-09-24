@@ -39,7 +39,7 @@
 import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
-import { promises as fs, rmSync } from 'fs';
+import { promises as fs } from 'fs';
 // All external spawns go through dor-lib-common's spawnAndCapture, which owns the
 // Windows recipe (cross-spawn for PATHEXT/.cmd, windowsHide, exit-vs-close). The
 // GUI host needs it even for the absolute `binaryPath` dor ab resolved.
@@ -47,7 +47,6 @@ import { promises as fs, rmSync } from 'fs';
 import {
   spawnAndCapture,
   parseStreamPort,
-  sessionForKey,
   streamStatusArgs,
   AGENT_BROWSER_BIN_ENV,
   DEFAULT_AGENT_BROWSER_BIN,
@@ -65,18 +64,10 @@ import {
   type AgentBrowserScreenshotResult,
   type AgentBrowserStreamStatusResult,
 } from '../lib/platform/types';
+import { privateCaptureDir } from './private-capture-dir';
+import { editScript, generateGuiSession, jpegQuality } from './browser-host-shared';
 
 const ALLOWED_SUBCOMMANDS = new Set<string>(AGENT_BROWSER_ALLOWED_SUBCOMMANDS);
-
-// The host owns the exact JS for each editing op — the webview only selects a
-// name, so this never becomes an arbitrary-eval channel. copy/cut return the
-// selected text; selectAll returns ''. Inputs/textareas use selection ranges;
-// everything else falls back to the Selection API + execCommand.
-const EDIT_SCRIPTS: Record<AgentBrowserEditOp, string> = {
-  selectAll: `(()=>{const el=document.activeElement;if(el&&'select'in el&&'value'in el){el.select();}else{document.execCommand('selectAll');}return'';})()`,
-  copy: `(()=>{const el=document.activeElement;if(el&&'selectionStart'in el&&el.selectionStart!=null){return el.value.slice(el.selectionStart,el.selectionEnd);}return String(window.getSelection()||'');})()`,
-  cut: `(()=>{const el=document.activeElement;if(el&&'selectionStart'in el&&el.selectionStart!=null){const s=el.selectionStart,e=el.selectionEnd,t=el.value.slice(s,e);el.setRangeText('',s,e,'end');el.dispatchEvent(new Event('input',{bubbles:true}));return t;}const sel=String(window.getSelection()||'');if(sel)document.execCommand('delete');return sel;})()`,
-};
 
 const STREAM_PORT_READ_ATTEMPTS = 4;
 const STREAM_PORT_READ_DELAY_MS = 150;
@@ -366,54 +357,15 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     }
   }
 
-  // A fresh managed session for a surface spawned from the GUI (no `--key`),
-  // using dor ab's workspace-scoped sessionForKey namespacing so it can't collide
-  // with a user's own agent-browser sessions.
-  function generateGuiSession(): string {
-    return sessionForKey(`gui-${randomBytes(6).toString('hex')}`);
-  }
-
   // Screenshots of the user's authenticated browser land here, written by an
-  // external process under the ambient umask, so the *directory* is the control:
-  // one `mkdtemp` per host process, which is `0700` and unguessable. A derivable
-  // path directly in `os.tmpdir()` let any other local account read every frame,
-  // or pre-create the name as a symlink and have agent-browser clobber whatever
-  // it pointed at. `standalone/sidecar/clipboard-ops.js` does the same for
-  // clipboard images; the two paths are meant to match, cleanup included — a
-  // frame of someone's authenticated browser is not something to leave in tmp
-  // for the OS to reap whenever it gets round to it.
-  let screenshotDirOnce: Promise<string> | null = null;
-  let screenshotDirPath: string | null = null;
-  function screenshotDir(): Promise<string> {
-    // mkdtemp creates at 0700 already; the chmod covers an inherited-mode
-    // filesystem and is a no-op on Windows, where %TEMP% is per-user.
-    screenshotDirOnce ??= fs.mkdtemp(path.join(os.tmpdir(), 'dormouse-ab-')).then(async (dir) => {
-      if (process.platform !== 'win32') await fs.chmod(dir, 0o700).catch(() => {});
-      screenshotDirPath = dir;
-      // Backstop for an exit that never reaches `closePoppedOut` — a crash, or
-      // a host that skips its shutdown hook. An `exit` handler cannot await,
-      // hence the sync removal.
-      process.once('exit', () => {
-        try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
-      });
-      return dir;
-    }).catch((err: unknown) => {
-      // Never memoize the failure. `??=` would otherwise cache the rejected
-      // promise, so one transient EACCES/ENOSPC on tmpdir would disable
-      // screenshots for the rest of this process's life with no retry.
-      screenshotDirOnce = null;
-      throw err;
-    });
-    return screenshotDirOnce;
-  }
+  // external process under the ambient umask — which is why the private
+  // directory, not the file mode, is the control.
+  const screenshotDir = privateCaptureDir('dormouse-ab-');
 
   /** Drop the whole capture directory. Called on shutdown; safe to repeat. */
   async function removeScreenshotDir(): Promise<void> {
-    const dir = screenshotDirPath;
-    screenshotDirOnce = null;
-    screenshotDirPath = null;
     screenshotNames.clear();
-    if (dir) await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+    await screenshotDir.remove();
   }
 
   // Reused per session so we don't litter with one file per frame; the panel
@@ -427,7 +379,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
       name = randomBytes(12).toString('hex');
       screenshotNames.set(session, name);
     }
-    return path.join(await screenshotDir(), `shot-${name}.${ext}`);
+    return path.join(await screenshotDir.get(), `shot-${name}.${ext}`);
   }
 
   async function command(session: string, args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult> {
@@ -456,13 +408,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     if (typeof session !== 'string' || !session) {
       return { ok: false, error: 'session is required' };
     }
-    // `op` is typed but arrives from webview IPC unvalidated, and a plain-object
-    // lookup answers for inherited keys too: `op: 'constructor'` yields `Object`,
-    // which is truthy and walks straight past the rejection below into the `eval`
-    // argument. `hasOwnProperty.call` keeps the table's own three names the only
-    // ones that select a script, which is what the comment on `EDIT_SCRIPTS`
-    // claims. Same guard, same reason as `own()` in `RemoteControlSection.tsx`.
-    const script = Object.prototype.hasOwnProperty.call(EDIT_SCRIPTS, op) ? EDIT_SCRIPTS[op] : undefined;
+    const script = editScript(op);
     if (!script) {
       return { ok: false, error: `unknown edit op '${op}'` };
     }
@@ -530,10 +476,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
       return { ok: false, error: `could not create a private screenshot directory: ${message}` };
     }
     const args = ['--session', session, 'screenshot', out, '--screenshot-format', format];
-    if (format === 'jpeg') {
-      const q = Number.isFinite(opts.quality) ? Math.min(100, Math.max(1, Math.round(opts.quality as number))) : 85;
-      args.push('--screenshot-quality', String(q));
-    }
+    if (format === 'jpeg') args.push('--screenshot-quality', String(jpegQuality(opts.quality)));
     const result = await runWithBinaryFallback(args, binaryPath);
     if (result.exitCode !== 0) {
       log(`[agent-browser] screenshot failed (exit ${result.exitCode}): ${result.stderr.trim() || result.stdout.trim()}`);

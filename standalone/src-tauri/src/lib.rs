@@ -1509,21 +1509,8 @@ fn playwright_screenshot(
         return Err("Expected screenshot operation".to_string());
     }
     let result = playwright_request(state, request)?;
-    let path = result
-        .get("path")
-        .and_then(JsonValue::as_str)
-        .ok_or_else(|| {
-            result
-                .get("error")
-                .and_then(JsonValue::as_str)
-                .unwrap_or("Screenshot failed")
-                .to_string()
-        })?;
-    let bytes = std::fs::read(path);
-    let _ = std::fs::remove_file(path);
-    Ok(tauri::ipc::Response::new(
-        bytes.map_err(|err| err.to_string())?,
-    ))
+    let path = capture_path(&result)?.ok_or("screenshot returned no path")?;
+    read_capture(path, true)
 }
 
 #[tauri::command(async)]
@@ -1610,12 +1597,38 @@ fn agent_browser_pop_in(
     )
 }
 
+/// A screenshot result's temp-file path, or its error. `None` is a success
+/// that carried no path (a stale sidecar bundle's base64 fallback).
+fn capture_path(result: &JsonValue) -> Result<Option<&str>, String> {
+    if result.get("ok").and_then(JsonValue::as_bool) != Some(true) {
+        return Err(result
+            .get("error")
+            .and_then(JsonValue::as_str)
+            .unwrap_or("screenshot failed")
+            .to_string());
+    }
+    Ok(result.get("path").and_then(JsonValue::as_str))
+}
+
+/// Read a screenshot's temp file into a raw response. `remove` deletes a
+/// one-shot Playwright frame; agent-browser reuses one file per session, which
+/// the next capture overwrites and shutdown removes.
+fn read_capture(path: &str, remove: bool) -> Result<tauri::ipc::Response, String> {
+    let bytes = std::fs::read(path);
+    if remove {
+        let _ = std::fs::remove_file(path);
+    }
+    bytes
+        .map(tauri::ipc::Response::new)
+        .map_err(|err| format!("could not read screenshot file '{path}': {err}"))
+}
+
 // The sidecar hands back the screenshot's temp-file PATH (bytes no longer ride
 // the JSON-lines stdio shared with PTY traffic). Read the file here and return a
 // raw tauri::ipc::Response so the webview gets an ArrayBuffer (the path the panel
 // decodes with createImageBitmap). A base64 `bytesBase64` field is kept as a
 // fallback for a stale sidecar bundle (dev-time version skew), but the path
-// branch is preferred.
+// branch is preferred. `playwright_screenshot` takes the same path branch.
 #[tauri::command(async)]
 fn agent_browser_screenshot(
     state: tauri::State<'_, SidecarState>,
@@ -1629,17 +1642,8 @@ fn agent_browser_screenshot(
         "agentBrowser:screenshot",
         serde_json::json!({ "session": session, "format": format, "quality": quality, "binaryPath": binary_path }),
     )?;
-    if result.get("ok").and_then(JsonValue::as_bool) != Some(true) {
-        return Err(result
-            .get("error")
-            .and_then(JsonValue::as_str)
-            .unwrap_or("screenshot failed")
-            .to_string());
-    }
-    if let Some(path) = result.get("path").and_then(JsonValue::as_str) {
-        let bytes = std::fs::read(path)
-            .map_err(|err| format!("could not read screenshot file '{path}': {err}"))?;
-        return Ok(tauri::ipc::Response::new(bytes));
+    if let Some(path) = capture_path(&result)? {
+        return read_capture(path, false);
     }
     // Fallback: an older sidecar bundle still base64s the bytes over stdio.
     let b64 = result

@@ -1,13 +1,12 @@
-import { createPlaywrightHost } from '../../lib/src/host/playwright-host';
 /**
  * Extension-host wiring for the agent-browser surface
  * (docs/specs/dor-browser.md → "Agent-Browser Host Capabilities").
  *
  * The capability logic itself is host-agnostic and lives in
- * `lib/src/host/agent-browser-host.ts` (shared verbatim with the standalone
- * Node sidecar). This file only:
- *   1. instantiates that shared host with the two VS-Code-specific bits —
- *      writing the OS clipboard and logging — and re-exports its methods; and
+ * `lib/src/host/agent-browser-host.ts` and `lib/src/host/playwright-host.ts`
+ * (shared verbatim with the standalone Node sidecar). This file only:
+ *   1. instantiates those shared hosts with the two VS-Code-specific bits —
+ *      writing the OS clipboard and logging — and re-exports their methods; and
  *   2. owns the **stream relay**, which is genuinely VS-Code-only: the
  *      agent-browser stream server returns 403 for `vscode-webview://` origins
  *      (only localhost or absent origins are accepted), so the webview cannot
@@ -18,9 +17,10 @@ import { createPlaywrightHost } from '../../lib/src/host/playwright-host';
  */
 import * as vscode from 'vscode';
 import * as net from 'net';
-import { randomBytes } from 'crypto';
 import { log } from './log';
 import { createAgentBrowserHost } from '../../lib/src/host/agent-browser-host';
+import { BrowserStreamGrants } from '../../lib/src/host/browser-stream-guard';
+import { createPlaywrightHost } from '../../lib/src/host/playwright-host';
 
 const host = createAgentBrowserHost({
   // Awaited rather than returned: `vscode.env.clipboard.writeText` yields a
@@ -36,28 +36,25 @@ export const runAgentBrowserStreamStatus = host.streamStatus;
 export const runAgentBrowserOpen = host.open;
 export const runAgentBrowserPopOut = host.popOut;
 export const runAgentBrowserPopIn = host.popIn;
-const playwright = createPlaywrightHost({
-  writeClipboardText: async text => { await vscode.env.clipboard.writeText(text); },
-  log: message => log.info(message),
-});
-export const runPlaywrightRequest = playwright.request;
-export const closePoppedOutSessions = async () => { await Promise.all([host.closePoppedOut(), playwright.close()]); };
 
-const STREAM_RELAY_TOKEN_BYTES = 32;
-const STREAM_RELAY_GRANT_TTL_MS = 60_000;
-const STREAM_RELAY_GRANT_SWEEP_MS = 30_000;
+const playwright = createPlaywrightHost({
+  writeClipboardText: async (text) => { await vscode.env.clipboard.writeText(text); },
+  log: (message) => log.info(message),
+});
+
+export const runPlaywrightRequest = playwright.request;
+
+export async function closePoppedOutSessions(): Promise<void> {
+  await Promise.all([host.closePoppedOut(), playwright.close()]);
+}
 
 let relayPortPromise: Promise<number> | null = null;
-const streamRelayGrants = new Map<string, { port: number; expiresAt: number }>();
-let lastStreamRelayGrantSweep = 0;
+// The same single-use, 60s, port-bound grants that guard the Playwright viewer.
+const streamRelayGrants = new BrowserStreamGrants();
 
 export async function createStreamRelayUrl(streamPort: number): Promise<string> {
   const relayPort = await ensureStreamRelayPort();
-  const token = randomBytes(STREAM_RELAY_TOKEN_BYTES).toString('hex');
-  const now = Date.now();
-  sweepStreamRelayGrants(now);
-  streamRelayGrants.set(token, { port: streamPort, expiresAt: now + STREAM_RELAY_GRANT_TTL_MS });
-  return `ws://127.0.0.1:${relayPort}/stream/${streamPort}/${token}`;
+  return `ws://127.0.0.1:${relayPort}/stream/${streamPort}/${streamRelayGrants.issue(streamPort)}`;
 }
 
 function ensureStreamRelayPort(): Promise<number> {
@@ -82,23 +79,6 @@ function ensureStreamRelayPort(): Promise<number> {
     });
   }
   return relayPortPromise;
-}
-
-function sweepStreamRelayGrants(now = Date.now()): void {
-  if (now - lastStreamRelayGrantSweep < STREAM_RELAY_GRANT_SWEEP_MS) return;
-  lastStreamRelayGrantSweep = now;
-  for (const [token, grant] of streamRelayGrants) {
-    if (grant.expiresAt <= now) streamRelayGrants.delete(token);
-  }
-}
-
-function consumeStreamRelayGrant(token: string, port: number): boolean {
-  const now = Date.now();
-  sweepStreamRelayGrants(now);
-  const grant = streamRelayGrants.get(token);
-  if (!grant) return false;
-  streamRelayGrants.delete(token);
-  return grant.expiresAt > now && grant.port === port;
 }
 
 // The relay is loopback-only on both sides: it accepts connections from
@@ -128,7 +108,7 @@ function handleRelayClient(client: net.Socket): void {
       return;
     }
     const token = requestMatch?.[2] ?? '';
-    if (!consumeStreamRelayGrant(token, targetPort)) {
+    if (!streamRelayGrants.consume(token, targetPort)) {
       client.end('HTTP/1.1 403 Forbidden\r\n\r\n');
       return;
     }

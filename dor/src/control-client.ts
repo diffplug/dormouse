@@ -1,4 +1,3 @@
-import type { ResolveBrowserRequest, ResolveBrowserResponse } from './commands/types.js';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createConnection } from 'node:net';
 import type {
@@ -28,6 +27,8 @@ import type {
   ReadSurfaceResponse,
   ResolveAgentBrowserSessionRequest,
   ResolveAgentBrowserSessionResponse,
+  ResolveBrowserRequest,
+  ResolveBrowserResponse,
   ResolveOpenTargetRequest,
   ResolveOpenTargetResponse,
   SendSurfaceRequest,
@@ -152,6 +153,7 @@ export class SocketControlClient implements ControlClient {
   browserSurface(request: AgentBrowserSurfaceRequest): Promise<AgentBrowserSurfaceResponse> {
     return this.request<AgentBrowserSurfaceResponse>(SURFACE_CONTROL_METHODS.browser, request);
   }
+
   resolveBrowser(request: ResolveBrowserRequest): Promise<ResolveBrowserResponse> {
     return this.request<ResolveBrowserResponse>(SURFACE_CONTROL_METHODS.resolveBrowser, request);
   }

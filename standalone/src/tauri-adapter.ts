@@ -508,12 +508,15 @@ export class TauriAdapter implements PlatformAdapter {
 
   async playwright(request: PlaywrightRequest): Promise<PlaywrightResult> {
     try {
-      if (request.op === 'screenshot') {
-        const buffer = await rawInvoke<ArrayBuffer>('playwright_screenshot', { request });
-        return { ok: true, bytes: new Uint8Array(buffer), mime: request.format === 'png' ? 'image/png' : 'image/jpeg' };
+      // Screenshots take agent_browser_screenshot's raw-Response path.
+      if (request.op === "screenshot") {
+        const buffer = await rawInvoke<ArrayBuffer>("playwright_screenshot", { request });
+        return { ok: true, bytes: new Uint8Array(buffer), mime: request.format === "png" ? "image/png" : "image/jpeg" };
       }
-      return await rawInvoke<PlaywrightResult>('playwright_request', { request });
-    } catch (error) { return { ok: false, error: String(error) }; }
+      return await rawInvoke<PlaywrightResult>("playwright_request", { request });
+    } catch (err) {
+      return { ok: false, error: errMessage(err) };
+    }
   }
 
   async agentBrowserCommand(session: string, args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult> {
