@@ -35,7 +35,7 @@ agent-browser --session <outer-session> close
 agent-browser --session <outer-session> open "http://localhost:<vite-port>/"
 ```
 
-Never use `close --all` or a global process-name kill: other worktrees may have live harnesses. If testing nested browser surfaces, give their `dor ab --key` a test-specific name and close only that session afterward.
+Never use `close --all` or a global process-name kill: other worktrees may have live harnesses. If testing nested browser surfaces, give their `dor agent-browser --key` a test-specific name and close only that session afterward.
 
 If the first `open` lands on `about:blank`, issue it again and poll until the URL sticks and the xterm input exists:
 
@@ -60,10 +60,10 @@ agent-browser --session <outer-session> screenshot /private/tmp/dormouse.png
 
 ### Run `dor` by typing into Dormouse — never from your own shell
 
-`dor` commands (`dor ab open`, `dor split`, …) must be **typed into the Dormouse terminal under test** (the xterm — see *Typing into xterm* and *Submitting (Enter)* below), exactly as a user would. Do **not** run the staged `dor` (or `node .../dor.js`) from your own shell, even if you point it at the harness's `DORMOUSE_CONTROL_SOCKET`/`DORMOUSE_CONTROL_TOKEN`. Two ways it breaks:
+`dor` commands (`dor agent-browser open`, `dor split`, …) must be **typed into the Dormouse terminal under test** (the xterm — see *Typing into xterm* and *Submitting (Enter)* below), exactly as a user would. Do **not** run the staged `dor` (or `node .../dor.js`) from your own shell, even if you point it at the harness's `DORMOUSE_CONTROL_SOCKET`/`DORMOUSE_CONTROL_TOKEN`. Two ways it breaks:
 
 - **Wrong instance.** Your dev shell is often itself running *inside the installed Dormouse*, so it inherits that app's `DORMOUSE_SURFACE_ID`, `DORMOUSE_CONTROL_SOCKET`, and `DORMOUSE_CONTROL_TOKEN`. A bare `dor` then drives (or errors against) the **installed** app, not the harness — e.g. `Warning: could not open the Dormouse browser surface: surface '<stale-id>' was not found`.
-- **Wrong / missing caller surface.** `dor` resolves its target from `DORMOUSE_SURFACE_ID` (the pane it runs in), then the focused surface. Typed into the xterm, that variable is the harness pane, so surface targeting *and the split-vs-replace behavior match real usage*: `dor ab open` **splits** next to a **touched** terminal but **replaces** an **untouched** one (`createContentSurface`'s `replaceUntouchedShell`). Any input into a terminal touches it, so a user who typed the command gets a split — but an externally-run `dor` leaves the terminal untouched (and has no caller pane), so you get a replace and the flow no longer matches what the user sees.
+- **Wrong / missing caller surface.** `dor` resolves its target from `DORMOUSE_SURFACE_ID` (the pane it runs in), then the focused surface. Typed into the xterm, that variable is the harness pane, so surface targeting *and the split-vs-replace behavior match real usage*: `dor agent-browser open` **splits** next to a **touched** terminal but **replaces** an **untouched** one (`createContentSurface`'s `replaceUntouchedShell`). Any input into a terminal touches it, so a user who typed the command gets a split — but an externally-run `dor` leaves the terminal untouched (and has no caller pane), so you get a replace and the flow no longer matches what the user sees.
 
 So to reproduce a user flow faithfully: `keyboard inserttext` the `dor …` line into the xterm, submit it with the synthetic Enter, then watch the harness log / DOM for the result.
 
@@ -74,11 +74,11 @@ So to reproduce a user flow faithfully: `keyboard inserttext` the `dor …` line
 
 ### Typing into xterm
 
-`keyboard type "..."` simulates per-keystroke events and **reorders characters under load** (you get `dor ab opne dormouse.sh`). Use `keyboard inserttext` (atomic) instead, and always read the input line back to verify before submitting:
+`keyboard type "..."` simulates per-keystroke events and **reorders characters under load** (you get `dor agent-browser opne dormouse.sh`). Use `keyboard inserttext` (atomic) instead, and always read the input line back to verify before submitting:
 
 ```sh
 agent-browser --session <outer-session> eval '(()=>{document.querySelector("textarea.xterm-helper-textarea")?.focus();return"f"})()'
-agent-browser --session <outer-session> keyboard inserttext "dor ab open dormouse.sh"
+agent-browser --session <outer-session> keyboard inserttext "dor agent-browser open dormouse.sh"
 # verify the line, then clear with raw Ctrl-U ($'\025') and retype if it is wrong
 agent-browser --session <outer-session> eval '(()=>{var r=document.querySelector(".xterm-rows");return r?r.innerText.split("\n").filter(l=>l.trim()).slice(-1)[0]:""})()'
 ```
@@ -122,7 +122,7 @@ Install a page-local timing probe with `agent-browser eval` before the action un
 
 Useful marks:
 
-- `command-enter-start`: immediately before submitting `dor ab open ...`
+- `command-enter-start`: immediately before submitting `dor agent-browser open ...`
 - `first-visible-canvas`: first visible non-zero canvas frame
 - `page-title-loaded`: a `[title]` attribute equals the page's real `<title>`
 - `github-click-start`: immediately before clicking the GitHub link
@@ -157,7 +157,7 @@ In the harness terminal, correlate (with the flag on):
 - `[browser log] [ab-panel] tabs msg ...`
 - `[browser log] [measure] ...`
 
-For a clean `dor ab open dormouse.sh`, the first tab snapshot should look like one active tab:
+For a clean `dor agent-browser open dormouse.sh`, the first tab snapshot should look like one active tab:
 
 ```text
 [ab-panel] tabs msg {"t":["t1:A:https://dormouse.sh/"]}

@@ -4,8 +4,8 @@ import { captureToolParams, restoreToolParams } from './tool-transfer';
 import type { RestoredSession } from '../../lib/session-restore';
 
 const params = {
-  surfaceType: 'tool', command: 'pnpm storybook', toolRender: 'ab-screencast',
-  url: 'http://localhost:6006/edited', renderMode: 'ab-screencast',
+  surfaceType: 'tool', command: 'pnpm storybook', toolRender: 'agent-browser-screencast',
+  url: 'http://localhost:6006/edited', renderMode: 'agent-browser-screencast',
   session: 'dormouse.1.tool-one', stream: 9222, toolAnnouncedPort: 6006, toolAnnouncedPath: '/token/view',
 };
 
@@ -42,6 +42,11 @@ describe('Tool Workspace transfer', () => {
     } });
     expect(() => captureToolParams(lath, ['tool'])).toThrow('Approve or decline');
     expect(lath.store.has('tool')).toBe(true);
+  });
+
+  it('waits for a playwright Tool browser to bind before transfer', () => {
+    const lath = engine({ ...params, renderMode: 'playwright-screencast', toolRender: 'playwright-screencast', session: undefined });
+    expect(() => captureToolParams(lath, ['tool'])).toThrow('connect');
   });
 
   it('never overlays a binding on a terminal or an absent Surface', () => {

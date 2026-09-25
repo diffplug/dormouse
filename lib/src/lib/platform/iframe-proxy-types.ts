@@ -18,7 +18,7 @@
  */
 /** Why a host with the iframe proxy refuses an `https://` page — the one
  *  wording the proxy, the panel, the Display modal and `surface.iframe` share.
- *  Every refusal names `dor ab open <url>` as the remedy. */
+ *  Every refusal names `dor agent-browser open <url>` as the remedy. */
 export const IFRAME_HTTP_ONLY = 'the embedded view frames http:// pages only';
 
 export type IframeProxyResult =

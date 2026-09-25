@@ -81,7 +81,7 @@ afterEach(() => {
   // would wear its alarm overlay in every later test that renders that id.
   clearTerminalActivity();
   // Browser controllers outlive the Wall that mounted them, like the ring
-  // above, and so does the binary path `dor ab` last resolved.
+  // above, and so does the binary path `dor agent-browser` last resolved.
   disposeAllAgentBrowserSurfaceControllers();
   forgetLaunchBinaryPaths();
 });
@@ -537,8 +537,8 @@ describe('Wall on the Lath engine', () => {
     await act(async () => {
       window.dispatchEvent(new CustomEvent('dormouse:control-request', {
         detail: {
-          method: SURFACE_CONTROL_METHODS.agentBrowser,
-          params: { session: 'dormouse.1.gate', binaryPath: '/usr/bin/curl' },
+          method: SURFACE_CONTROL_METHODS.browser,
+          params: { provider: 'agent-browser', session: 'dormouse.1.gate', binaryPath: '/usr/bin/curl' },
           respond: (r: typeof response) => { response = r; },
         },
       }));
@@ -552,7 +552,7 @@ describe('Wall on the Lath engine', () => {
     expect(requests('attach')[0]).toEqual({ provider: 'agent-browser', binding: { session: 'dormouse.1.gate' }, op: 'attach' });
   });
 
-  it('streams from a port `dor ab` read itself, asking the host nothing; a Playwright port is the host\'s to report', async () => {
+  it('streams from a port `dor agent-browser` read itself, asking the host nothing; a Playwright port is the host\'s to report', async () => {
     // An agent-browser that writes no state files, or keeps them in a socket
     // directory of its own, is one the host cannot find
     // (docs/specs/dor-browser.md → "agent-browser").
@@ -577,6 +577,35 @@ describe('Wall on the Lath engine', () => {
 
     expect((await bind({ provider: 'playwright', session: 'dormouse.pw.x', cwd: '/project', wsPort: 61219 }))?.ok).toBe(false);
     expect(requests('attach')).toEqual([{ provider: 'playwright', binding: { session: 'dormouse.pw.x', cwd: '/project' }, op: 'attach' }]);
+  });
+
+  it('reports the measured browser viewport and persists an explicit fixed size', async () => {
+    let actual = { width: 1440, height: 900, dpr: 1 };
+    const { requests } = hostBrowsers({
+      measure: async () => ({ ok: true, viewport: actual }),
+      viewport: async (request) => {
+        actual = { width: request.width, height: request.height, dpr: request.dpr ?? actual.dpr };
+        return { ok: true };
+      },
+    });
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />));
+    await flush();
+    const id = await dispatchAgentBrowser({ session: 'viewport-session', wsPort: 4321 });
+    const control = async (setting?: unknown) => {
+      let response: { ok: boolean; result?: { requested: unknown; actual: unknown }; error?: string } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+          method: SURFACE_CONTROL_METHODS.browserViewport,
+          params: { provider: 'agent-browser', surface: id, ...(setting ? { setting } : {}) },
+          respond: (value: typeof response) => { response = value; },
+        } }));
+      });
+      return response;
+    };
+    expect((await control())?.result?.actual).toEqual(actual);
+    const result = await control({ mode: 'fixed', width: 390, height: 844 });
+    expect(result).toMatchObject({ ok: true, result: { requested: { mode: 'fixed', width: 390, height: 844 }, actual: { width: 390, height: 844, dpr: 1 } } });
+    expect(requests('viewport')).toEqual([expect.objectContaining({ width: 390, height: 844 })]);
   });
 
   // The control socket is a wire protocol, not the CLI: `dor iframe` validates
@@ -806,7 +835,7 @@ describe('Wall on the Lath engine', () => {
       await flush();
       return response;
     };
-    // `dor pw --key app open --browser=firefox :5173`: resolve, run natively, bind.
+    // `dor playwright --key app open --browser=firefox :5173`: resolve, run natively, bind.
     const first = (await control(SURFACE_CONTROL_METHODS.resolveBrowser, { provider: 'playwright', key: 'app', proposed: { cwd: '/project' } }))?.result?.binding;
     expect(first).toMatchObject({ cwd: '/project' });
     expect((await control(SURFACE_CONTROL_METHODS.browser, { provider: 'playwright', key: 'app', session: first!.session, cwd: '/project' }))?.ok).toBe(false);
@@ -832,7 +861,7 @@ describe('Wall on the Lath engine', () => {
       await act(async () => {
         root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" initialDoors={[{
           id: 'restored-ab', title: 'localhost:5173', component: 'browser', tabComponent: 'surface',
-          params: { surfaceType: 'browser', renderMode: 'ab-screencast', session: 'restored', url: 'http://localhost:5173/', contextPortKey: 'pane-a:5173:agent' },
+          params: { surfaceType: 'browser', renderMode: 'agent-browser-screencast', session: 'restored', url: 'http://localhost:5173/', contextPortKey: 'pane-a:5173:agent' },
         }]} />);
       });
       await flush();
@@ -878,7 +907,7 @@ describe('Wall on the Lath engine', () => {
           leafMeta: {
             'pane-a': { component: 'terminal', tabComponent: 'terminal', title: 'shell' },
             'port-ab': { component: 'browser', tabComponent: 'surface', title: 'localhost:5173', params: {
-              surfaceType: 'browser', renderMode: 'ab-screencast', session: 'restored', url: 'http://localhost:5173/elsewhere', contextPortKey: 'pane-a:5173:agent',
+              surfaceType: 'browser', renderMode: 'agent-browser-screencast', session: 'restored', url: 'http://localhost:5173/elsewhere', contextPortKey: 'pane-a:5173:agent',
             } },
           },
         }} />);
@@ -923,7 +952,7 @@ describe('Wall on the Lath engine', () => {
       await act(async () => {
         root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" initialDoors={[{
           id: 'restored-ab', title: 'localhost:5173', component: 'browser', tabComponent: 'surface',
-          params: { surfaceType: 'browser', renderMode: 'ab-screencast', session: 'restored', url: 'http://localhost:5173/elsewhere', contextPortKey: 'pane-a:5173:agent' },
+          params: { surfaceType: 'browser', renderMode: 'agent-browser-screencast', session: 'restored', url: 'http://localhost:5173/elsewhere', contextPortKey: 'pane-a:5173:agent' },
         }]} />);
       });
       await flush();
@@ -972,12 +1001,12 @@ describe('Wall on the Lath engine', () => {
       });
       await flush();
       await act(async () => {
-        document.querySelector<HTMLButtonElement>('[data-terminal-context] button[aria-label="Open in Playwright screencast"]')!.click();
+        document.querySelector<HTMLButtonElement>('[data-terminal-context] button[aria-label="Open in playwright screencast"]')!.click();
       });
       await flush();
 
       expect(browser).toHaveBeenCalledWith(expect.objectContaining({ provider: 'playwright', op: 'launch', url: 'http://localhost:5173/' }));
-      expect(document.querySelector('[data-terminal-context] [role="alert"]')?.textContent).toBe('Could not open Playwright');
+      expect(document.querySelector('[data-terminal-context] [role="alert"]')?.textContent).toBe('Could not open playwright');
       // The pane made for it goes with the failure.
       expect(leafCount()).toBe(1);
     } finally {
@@ -1040,7 +1069,7 @@ describe('Wall on the Lath engine', () => {
       await flush();
       expect(container.querySelector(`[data-lath-leaf="${browserId}"]`)?.hasAttribute('data-lath-parked')).toBe(true);
 
-      // Until the boot names it, `dor ab --surface` has nothing to drive.
+      // Until the boot names it, `dor agent-browser --surface` has nothing to drive.
       expect(await dispatchResolveAgentBrowser(browserId)).toEqual({
         ok: false,
         error: `surface 'surface:2' has no agent-browser session yet`,
@@ -1058,8 +1087,8 @@ describe('Wall on the Lath engine', () => {
       await act(async () => {
         window.dispatchEvent(new CustomEvent('dormouse:control-request', {
           detail: {
-            method: SURFACE_CONTROL_METHODS.agentBrowser,
-            params: { session: defaultSession, surface: 'surface:1' },
+            method: SURFACE_CONTROL_METHODS.browser,
+            params: { provider: 'agent-browser', session: defaultSession, surface: 'surface:1' },
             respond: (r: typeof reused) => { reused = r; },
           },
         }));
@@ -1086,14 +1115,14 @@ describe('Wall on the Lath engine', () => {
         root.render(<Wall
           restoredLathLayout={{ version: 1, tree: { root: { kind: 'leaf', id: 'ab-pane' } }, leafMeta: {
             'ab-pane': { component: 'browser', tabComponent: 'surface', title: 'localhost:5173', params: {
-              surfaceType: 'browser', renderMode: 'ab-screencast', session: 'ab-live', url: 'http://localhost:5173/',
+              surfaceType: 'browser', renderMode: 'agent-browser-screencast', session: 'ab-live', url: 'http://localhost:5173/',
             } },
           } }}
           initialMode="command"
         />);
       });
       await flush();
-      await act(async () => { getAgentBrowserScreenController('ab-pane')?.actions.setRenderMode?.('pw-screencast'); });
+      await act(async () => { getAgentBrowserScreenController('ab-pane')?.actions.setRenderMode?.('playwright-screencast'); });
       await flush();
       const eagerLeaf = container.querySelector<HTMLElement>('[data-lath-leaf]')!;
       const eagerId = eagerLeaf.dataset.lathLeaf!;
@@ -1105,11 +1134,11 @@ describe('Wall on the Lath engine', () => {
       // the session it had.
       await act(async () => { pwOpen.resolve({ ok: false, error: 'playwright-cli is not installed' }); });
       await flush();
-      expect(requests('launch')).toContainEqual({
+      expect(requests('launch')).toContainEqual(expect.objectContaining({
         provider: 'agent-browser', binding: { session: 'ab-live' }, op: 'launch', url: 'http://localhost:5173/', headed: false,
-      });
+      }));
       expect(getAgentBrowserSurfaceController(eagerId)?.provider).toBe('agent-browser');
-      expect(getAgentBrowserScreenController(eagerId)?.snapshot().renderMode).toBe('ab-screencast');
+      expect(getAgentBrowserScreenController(eagerId)?.snapshot().renderMode).toBe('agent-browser-screencast');
     } finally {
       untouchedSpy.mockRestore();
     }
@@ -1128,10 +1157,10 @@ describe('Wall on the Lath engine', () => {
             { node: { kind: 'leaf', id: 'swapped' }, weight: 0.5 },
           ] } }, leafMeta: {
             'new-tab': { component: 'browser', tabComponent: 'surface', title: 'accounts.example', params: {
-              surfaceType: 'browser', renderMode: 'ab-screencast', url: 'https://accounts.example/', launchFallback: 'close',
+              surfaceType: 'browser', renderMode: 'agent-browser-screencast', url: 'https://accounts.example/', launchFallback: 'close',
             } },
             'swapped': { component: 'browser', tabComponent: 'surface', title: 'localhost:5173', params: {
-              surfaceType: 'browser', renderMode: 'ab-screencast', url: 'http://localhost:5173/',
+              surfaceType: 'browser', renderMode: 'agent-browser-screencast', url: 'http://localhost:5173/',
               launchFallback: { restore: { surfaceType: 'browser', renderMode: 'iframe', url: 'http://localhost:5173/' } },
             } },
           } }}
@@ -1165,7 +1194,7 @@ describe('Wall on the Lath engine', () => {
       const iframeId = (await dispatchIframe('http://localhost:5173/')).id;
 
       await act(async () => {
-        getAgentBrowserScreenController(iframeId)?.actions.setRenderMode?.('ab-screencast');
+        getAgentBrowserScreenController(iframeId)?.actions.setRenderMode?.('agent-browser-screencast');
       });
       await flush();
       const eagerLeaf = container.querySelector<HTMLElement>('[data-lath-leaf]')!;
@@ -1184,10 +1213,7 @@ describe('Wall on the Lath engine', () => {
       });
       await flush();
 
-      expect(await dispatchResolveAgentBrowser(eagerId)).toEqual({
-        ok: true,
-        result: { surfaceId: eagerId, surfaceRef: 'surface:1', session: 'dormouse.1.gui-minimized' },
-      });
+      expect(await dispatchResolveAgentBrowser(eagerId)).toMatchObject({ ok: true, result: { binding: { session: 'dormouse.1.gui-minimized' }, fresh: false } });
       expect(requests('close').filter((request) => request.binding.session === 'dormouse.1.gui-minimized')).toEqual([]);
     } finally {
       untouchedSpy.mockRestore();
@@ -1210,7 +1236,7 @@ describe('Wall on the Lath engine', () => {
       const iframeId = (await dispatchIframe('http://localhost:5173/')).id;
 
       await act(async () => {
-        getAgentBrowserScreenController(iframeId)?.actions.setRenderMode?.('ab-screencast');
+        getAgentBrowserScreenController(iframeId)?.actions.setRenderMode?.('agent-browser-screencast');
       });
       await flush();
       const eagerLeaf = container.querySelector<HTMLElement>('[data-lath-leaf]')!;
@@ -1230,7 +1256,7 @@ describe('Wall on the Lath engine', () => {
       expect(container.querySelector(`[data-door-id="${eagerId}"]`)).not.toBeNull();
       expect(await dispatchResolveAgentBrowser(eagerId)).toEqual({
         ok: false,
-        error: "surface 'surface:1' is not agent-browser rendered (render_mode: iframe) — an iframe cannot be driven; open its page with dor ab open http://localhost:5173/",
+        error: "surface 'surface:1' is not agent-browser rendered (render_mode: iframe) — an iframe cannot be driven; open its page with dor agent-browser open http://localhost:5173/",
       });
     } finally {
       untouchedSpy.mockRestore();
@@ -1274,14 +1300,14 @@ describe('Wall on the Lath engine', () => {
           leafMeta: {
             'pane-a': { component: 'terminal', tabComponent: 'terminal', title: 'shell' },
             'keyed-ab': { component: 'browser', tabComponent: 'surface', title: 'default', params: {
-              surfaceType: 'browser', renderMode: 'ab-screencast', session: defaultSession, key: 'default', url: 'http://localhost:5173/',
+              surfaceType: 'browser', renderMode: 'agent-browser-screencast', session: defaultSession, key: 'default', url: 'http://localhost:5173/',
             } },
           },
         }} />);
       });
       await flush();
 
-      await act(async () => { getAgentBrowserScreenController('keyed-ab')?.actions.setRenderMode?.('pw-screencast'); });
+      await act(async () => { getAgentBrowserScreenController('keyed-ab')?.actions.setRenderMode?.('playwright-screencast'); });
       await flush();
       const eagerId = Array.from(container.querySelectorAll<HTMLElement>('[data-lath-leaf]'))
         .map((leaf) => leaf.dataset.lathLeaf!).find((leafId) => leafId !== 'pane-a')!;
@@ -1302,14 +1328,14 @@ describe('Wall on the Lath engine', () => {
       await act(async () => { landClose(); });
       await flush();
       expect(events).toEqual([`close ${defaultSession}`, 'close landed', `launch ${defaultSession} http://localhost:5173/`]);
-      expect(await dispatchResolveAgentBrowser(eagerId)).toMatchObject({ ok: true, result: { session: defaultSession } });
-      // …so `dor ab --key default` drives it rather than opening a second pane.
+      expect(await dispatchResolveAgentBrowser(eagerId)).toMatchObject({ ok: true, result: { binding: { session: defaultSession } } });
+      // …so `dor agent-browser --key default` drives it rather than opening a second pane.
       let reused: { ok: boolean; result?: { status: string; surfaceId: string } } | undefined;
       await act(async () => {
         window.dispatchEvent(new CustomEvent('dormouse:control-request', {
           detail: {
-            method: SURFACE_CONTROL_METHODS.agentBrowser,
-            params: { key: 'default', session: defaultSession, wsPort: 5555, surface: 'surface:1' },
+            method: SURFACE_CONTROL_METHODS.browser,
+            params: { provider: 'agent-browser', key: 'default', session: defaultSession, wsPort: 5555, surface: 'surface:1' },
             respond: (r: typeof reused) => { reused = r; },
           },
         }));
@@ -1333,7 +1359,7 @@ describe('Wall on the Lath engine', () => {
       const iframeId = (await dispatchIframe('http://localhost:5173/')).id;
 
       await act(async () => {
-        getAgentBrowserScreenController(iframeId)?.actions.setRenderMode?.('ab-screencast');
+        getAgentBrowserScreenController(iframeId)?.actions.setRenderMode?.('agent-browser-screencast');
       });
       await flush();
 
@@ -1342,20 +1368,16 @@ describe('Wall on the Lath engine', () => {
       expect(getAgentBrowserScreenController(restoredId)?.snapshot().renderMode).toBe('iframe');
       expect(await dispatchResolveAgentBrowser('surface:1')).toEqual({
         ok: false,
-        error: "surface 'surface:1' is not agent-browser rendered (render_mode: iframe) — an iframe cannot be driven; open its page with dor ab open http://localhost:5173/",
+        error: "surface 'surface:1' is not agent-browser rendered (render_mode: iframe) — an iframe cannot be driven; open its page with dor agent-browser open http://localhost:5173/",
       });
     } finally {
       untouchedSpy.mockRestore();
     }
   });
 
-  it('never swaps a Tool to a render it cannot declare, even when one is offered', async () => {
-    // The Display modal and both registration sites offer a Tool only `iframe`
-    // and `ab-screencast`; offer everything here so the Wall's own guard is
-    // what refuses. Written as `toolRender`, a Playwright mode launched nothing
-    // and stranded the pane.
+  it('allows a Tool to use playwright screencast but refuses popouts', async () => {
     const offered = vi.spyOn(browserAutomation, 'offeredRenderModes')
-      .mockReturnValue(['ab-screencast', 'ab-popout', 'pw-screencast', 'pw-popout', 'iframe']);
+      .mockReturnValue(['agent-browser-screencast', 'agent-browser-popout', 'playwright-screencast', 'playwright-popout', 'iframe']);
     const { browser, requests } = hostBrowsers({
       launch: async (request) => request.provider === 'playwright'
         ? { ok: true, session: 'gui-pw', stream: 4321 }
@@ -1398,7 +1420,7 @@ describe('Wall on the Lath engine', () => {
       const controller = () => getAgentBrowserScreenController('tool-a');
       expect(controller()?.snapshot().renderMode).toBe('iframe');
 
-      for (const mode of ['pw-screencast', 'pw-popout', 'ab-popout'] as const) {
+      for (const mode of ['playwright-popout', 'agent-browser-popout'] as const) {
         await act(async () => { controller()?.actions.setRenderMode?.(mode); });
         await flush();
       }
@@ -1406,11 +1428,11 @@ describe('Wall on the Lath engine', () => {
       expect(requests('launch')).toEqual([]);
       expect(controller()?.snapshot().renderMode).toBe('iframe');
 
-      await act(async () => { controller()?.actions.setRenderMode?.('ab-screencast'); });
+      await act(async () => { controller()?.actions.setRenderMode?.('playwright-screencast'); });
       await flush();
-      expect(requests('launch')).toEqual([{
-        provider: 'agent-browser', binding: { session: 'dormouse.1.tool.tool-a', cwd: '/repo' }, op: 'launch', url: 'http://localhost:6006/', headed: false,
-      }]);
+      expect(requests('launch')).toEqual([expect.objectContaining({
+        provider: 'playwright', binding: { session: 'dormouse.1.tool.tool-a', cwd: '/repo' }, op: 'launch', url: 'http://localhost:6006/', headed: false,
+      })]);
     } finally {
       offered.mockRestore();
       act(() => terminalRegistry.removeTerminalPaneState('tool-a'));
@@ -1443,11 +1465,11 @@ describe('Wall on the Lath engine', () => {
         />);
       });
       await flush();
-      await act(async () => { getAgentBrowserScreenController('tool-a')?.actions.setRenderMode?.('ab-screencast'); });
+      await act(async () => { getAgentBrowserScreenController('tool-a')?.actions.setRenderMode?.('agent-browser-screencast'); });
       await flush();
-      expect(requests('launch')).toEqual([{
+      expect(requests('launch')).toEqual([expect.objectContaining({
         provider: 'agent-browser', binding: { session: 'dormouse.1.tool.tool-a', cwd: '/repo' }, op: 'launch', url: 'http://localhost:6006/', headed: false,
-      }]);
+      })]);
       expect(getAgentBrowserScreenController('tool-a')?.snapshot().renderMode).toBe('iframe');
     } finally {
       act(() => terminalRegistry.removeTerminalPaneState('tool-a'));
@@ -1455,8 +1477,8 @@ describe('Wall on the Lath engine', () => {
   });
 
   it.each([
-    ['ab-screencast', 'agent-browser'],
-    ['pw-screencast', 'Playwright'],
+    ['agent-browser-screencast', 'agent-browser'],
+    ['playwright-screencast', 'playwright'],
   ] as const)('refuses a render swap to %s away from an iframe surface holding a non-http(s) URL', async (mode, provider) => {
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(true);
     const { requests } = hostBrowsers({
@@ -1517,10 +1539,7 @@ describe('Wall on the Lath engine', () => {
       const abId = await dispatchAgentBrowser({ session: 'dormouse.1.gui-a1b2c3', surface: 'surface:1' });
       const iframeRef = (await dispatchIframe('http://localhost:5173/')).ref;
 
-      expect(await dispatchResolveAgentBrowser(abId)).toEqual({
-        ok: true,
-        result: { surfaceId: abId, surfaceRef: 'surface:2', session: 'dormouse.1.gui-a1b2c3' },
-      });
+      expect(await dispatchResolveAgentBrowser(abId)).toMatchObject({ ok: true, result: { binding: { session: 'dormouse.1.gui-a1b2c3' }, fresh: false } });
       // A parked ab surface keeps its daemon session, so a minimized target resolves.
       await act(async () => {
         container.querySelector<HTMLButtonElement>(`[data-lath-leaf="${abId}"] [aria-label="Minimize"]`)!.click();
@@ -1536,23 +1555,23 @@ describe('Wall on the Lath engine', () => {
       // Gate 2: an iframe renderer has a browser but no agent-browser session.
       expect(await dispatchResolveAgentBrowser(iframeRef)).toEqual({
         ok: false,
-        error: `surface '${iframeRef}' is not agent-browser rendered (render_mode: iframe) — an iframe cannot be driven; open its page with dor ab open http://localhost:5173/`,
+        error: `surface '${iframeRef}' is not agent-browser rendered (render_mode: iframe) — an iframe cannot be driven; open its page with dor agent-browser open http://localhost:5173/`,
       });
 
       // A managed `--key` no Surface holds is the key's own session. A bare
       // Wall — a VS Code webview, the website — has no Workspace id, so it
       // mints a scope of its own: two webviews' `--key default` are two
       // browsers, and a Wall mounted afresh is another scope again.
-      const keyed = await dispatchResolveAgentBrowserKey('storybook') as { ok: boolean; result: { session: string } };
-      expect(keyed.result.session).toMatch(/^dormouse\.w[0-9a-f]{8}\.storybook$/);
+      const keyed = await dispatchResolveAgentBrowserKey('storybook') as { ok: boolean; result: { binding: { session: string } } };
+      expect(keyed.result.binding.session).toMatch(/^dormouse\.w[0-9a-f]{8}\.storybook$/);
       expect(await dispatchResolveAgentBrowserKey('storybook')).toEqual(keyed);
       await act(async () => {
         root.render(<Wall key="remounted" initialPaneIds={['pane-a']} initialMode="command" />);
       });
       await flush();
-      const remounted = await dispatchResolveAgentBrowserKey('storybook') as { ok: boolean; result: { session: string } };
-      expect(remounted.result.session).toMatch(/^dormouse\.w[0-9a-f]{8}\.storybook$/);
-      expect(remounted.result.session).not.toBe(keyed.result.session);
+      const remounted = await dispatchResolveAgentBrowserKey('storybook') as { ok: boolean; result: { binding: { session: string } } };
+      expect(remounted.result.binding.session).toMatch(/^dormouse\.w[0-9a-f]{8}\.storybook$/);
+      expect(remounted.result.binding.session).not.toBe(keyed.result.binding.session);
 
       // A key a Surface holds keeps the session it was bound to — a pane saved
       // under the old bare-Wall name included — through the merged pair.
@@ -1568,7 +1587,7 @@ describe('Wall on the Lath engine', () => {
         }));
       });
       await flush();
-      expect(resolved).toEqual({ ok: true, result: { binding: { session: 'dormouse.1.app' } } });
+      expect(resolved).toEqual({ ok: true, result: { binding: { session: 'dormouse.1.app' }, fresh: false } });
     } finally {
       untouchedSpy.mockRestore();
     }
@@ -3536,8 +3555,8 @@ describe('Wall on the Lath engine', () => {
     await act(async () => {
       window.dispatchEvent(new CustomEvent('dormouse:control-request', {
         detail: {
-          method: SURFACE_CONTROL_METHODS.agentBrowser,
-          params,
+          method: SURFACE_CONTROL_METHODS.browser,
+          params: { provider: 'agent-browser', ...params },
           respond: (r: typeof response) => { response = r; },
         },
       }));
@@ -3564,15 +3583,15 @@ describe('Wall on the Lath engine', () => {
     return { id: response!.result!.surfaceId, ref: response!.result!.surfaceRef };
   }
 
-  /** `dor ab --surface <handle>`'s host half; returns the raw control response. */
-  /** `dor ab --key <name>` asking this Wall what that key's session is called. */
+  /** `dor agent-browser --surface <handle>`'s host half; returns the raw control response. */
+  /** `dor agent-browser --key <name>` asking this Wall what that key's session is called. */
   async function dispatchResolveAgentBrowserKey(key: string): Promise<unknown> {
     let response: unknown;
     await act(async () => {
       window.dispatchEvent(new CustomEvent('dormouse:control-request', {
         detail: {
-          method: SURFACE_CONTROL_METHODS.resolveAgentBrowser,
-          params: { key },
+          method: SURFACE_CONTROL_METHODS.resolveBrowser,
+          params: { provider: 'agent-browser', key },
           respond: (r: unknown) => { response = r; },
         },
       }));
@@ -3586,8 +3605,8 @@ describe('Wall on the Lath engine', () => {
     await act(async () => {
       window.dispatchEvent(new CustomEvent('dormouse:control-request', {
         detail: {
-          method: SURFACE_CONTROL_METHODS.resolveAgentBrowser,
-          params: { surface },
+          method: SURFACE_CONTROL_METHODS.resolveBrowser,
+          params: { provider: 'agent-browser', surface },
           respond: (r: unknown) => { response = r; },
         },
       }));
@@ -3697,9 +3716,9 @@ describe('Wall on the Lath engine', () => {
       expect(onEvent).toHaveBeenCalledWith({ type: 'selectionChange', id: expect.any(String), kind: 'pane' });
       expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
       expect(onEvent).toHaveBeenCalledWith({ type: 'modeChange', mode: 'passthrough' });
-      expect(requests('launch')).toContainEqual({
+      expect(requests('launch')).toContainEqual(expect.objectContaining({
         provider: 'agent-browser', binding: {}, op: 'launch', url: 'http://localhost:5173/', headed: false,
-      });
+      }));
     } finally {
       untouchedSpy.mockRestore();
     }
@@ -4308,7 +4327,7 @@ describe('Wall on the Lath engine', () => {
       const pwRef = created!.result!.surfaceRef;
       expect(await dispatchResolveAgentBrowser(pwRef)).toEqual({
         ok: false,
-        error: `surface '${pwRef}' is not agent-browser rendered (render_mode: pw-screencast) — drive it with dor pw --surface ${pwRef}`,
+        error: `surface '${pwRef}' is not agent-browser rendered (render_mode: playwright-screencast) — drive it with dor playwright --surface ${pwRef}`,
       });
 
       const abId = await dispatchAgentBrowser({ session: 'dormouse.1.default', wsPort: 4321 });
@@ -4325,14 +4344,14 @@ describe('Wall on the Lath engine', () => {
       await flush();
       expect(resolved).toEqual({
         ok: false,
-        error: expect.stringMatching(/^surface '(surface:\d+)' is not playwright rendered \(render_mode: ab-screencast\) — drive it with dor ab --surface \1$/),
+        error: expect.stringMatching(/^surface '(surface:\d+)' is not playwright rendered \(render_mode: agent-browser-screencast\) — drive it with dor agent-browser --surface \1$/),
       });
     } finally {
       untouchedSpy.mockRestore();
     }
   });
 
-  it('refuses an https:// surface.iframe on a host that proxies, naming dor ab open', async () => {
+  it('refuses an https:// surface.iframe on a host that proxies, naming dor agent-browser open', async () => {
     const respond = async (url: string) => {
       let response: { ok: boolean; error?: string } | undefined;
       await act(async () => {
@@ -4351,7 +4370,7 @@ describe('Wall on the Lath engine', () => {
     (fake as PlatformAdapter).createIframeProxyUrl = vi.fn(async () => ({ ok: true as const, url: 'http://127.0.0.1:61234/' }));
     expect(await respond('https://example.com/')).toEqual({
       ok: false,
-      error: 'the embedded view frames http:// pages only — open it with dor ab open https://example.com/',
+      error: 'the embedded view frames http:// pages only — open it with dor agent-browser open https://example.com/',
     });
     expect((await respond('http://localhost:5173/'))?.ok).toBe(true);
   });
@@ -4379,21 +4398,21 @@ describe('Wall on the Lath engine', () => {
       await openTab('https://accounts.example/login');
       const [tab] = leafIds().filter((id) => !before.includes(id));
       expect(tab).toBeTruthy();
-      expect(requests('launch')).toEqual([{
+      expect(requests('launch')).toEqual([expect.objectContaining({
         provider: 'agent-browser', binding: {}, op: 'launch', url: 'https://accounts.example/login', headed: false,
-      }]);
-      // The pane is there at once; `dor ab --surface` has nothing to drive until the launch names it.
+      })]);
+      // The pane is there at once; `dor agent-browser --surface` has nothing to drive until the launch names it.
       expect(await dispatchResolveAgentBrowser(tab)).toMatchObject({ ok: false });
       await act(async () => { launches[0]({ ok: true, session: 'dormouse.1.gui-abc', stream: 4321 }); });
       await flush();
-      expect(await dispatchResolveAgentBrowser(tab)).toMatchObject({ ok: true, result: { session: 'dormouse.1.gui-abc' } });
+      expect(await dispatchResolveAgentBrowser(tab)).toMatchObject({ ok: true, result: { binding: { session: 'dormouse.1.gui-abc' } } });
 
       // Nor can it be swapped back into an iframe that would refuse it.
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       await act(async () => { getAgentBrowserScreenController(tab)?.actions.setRenderMode?.('iframe'); });
       await flush();
       expect(leafIds()).toContain(tab);
-      expect(getAgentBrowserScreenController(tab)?.snapshot().renderMode).toBe('ab-screencast');
+      expect(getAgentBrowserScreenController(tab)?.snapshot().renderMode).toBe('agent-browser-screencast');
       expect(warn).toHaveBeenCalledWith(`[dormouse] cannot swap surface '${tab}' to iframe: the embedded view frames http:// pages only`);
 
       // The swap judges the page on screen, as the Display modal does — here a

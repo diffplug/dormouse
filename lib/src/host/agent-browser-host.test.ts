@@ -478,7 +478,7 @@ describe('agent-browser host launch directory', () => {
   useTempSocketDir('dormouse-ab-cwd-test-');
 
   // agent-browser reads `./agent-browser.json` from its working directory, so
-  // a GUI launch or relaunch must run where the `dor ab` that made the pane ran.
+  // a GUI launch or relaunch must run where the `dor agent-browser` that made the pane ran.
   it('opens in the binding\'s project directory, and in the host\'s once that is gone', async () => {
     const project = mkdtempSync(join(tmpdir(), 'dormouse-ab-project-'));
     const host = makeHost();
@@ -808,7 +808,7 @@ describe('agent-browser host viewer', () => {
     expect(await offRange.closed).toBe(1011);
   });
 
-  // `dor ab` hands over the port it read under its own environment; under
+  // `dor agent-browser` hands over the port it read under its own environment; under
   // the caller's own AGENT_BROWSER_SOCKET_DIR the host's state files know
   // nothing of it, or name another daemon of the same session.
   it.each([
@@ -1143,7 +1143,9 @@ describe('agent-browser host requests', () => {
       { op: 'navigate', url: 'file:///etc/passwd' },
       { op: 'navigate', url: 'javascript:alert(1)' },
       { op: 'viewport', width: 100, height: 100, dpr: 11 },
-      { op: 'viewport', width: 100, height: 100 },
+      { op: 'viewport', width: 100, height: 100, dpr: 0 },
+      { op: 'viewport', width: 100.5, height: 100 },
+      { op: 'viewport', width: 100, height: 100.5 },
       { op: 'viewport', width: '100', height: 100, dpr: 1 },
       { op: 'history', dir: '--profile' },
       { op: 'tab', action: 'select', tabId: 'new' },
@@ -1167,6 +1169,7 @@ describe('agent-browser host requests', () => {
     for (const op of refused) {
       const result = await host.request({ provider: 'agent-browser', binding: session, ...(op as object) });
       expect(result.ok, JSON.stringify(op)).toBe(false);
+      expect(spawnMock, JSON.stringify(op)).not.toHaveBeenCalled();
     }
     for (const raw of [null, 'navigate https://example.com/', { provider: 'lynx', binding: session, op: 'close' }]) {
       expect((await host.request(raw)).ok).toBe(false);
@@ -1245,4 +1248,3 @@ describe('agent-browser host edit ops', () => {
     }
   });
 });
-

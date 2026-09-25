@@ -41,8 +41,8 @@ COMMANDS
   await          Wait until a terminal surface finishes.
   kill           Kill a surface.
   iframe         Open a target in an iframe surface.
-  agent-browser  Drive a browser surface via your agent-browser install (alias: dor ab).
-  playwright     Drive a browser surface via your Playwright CLI install (alias: dor pw).
+  agent-browser  Drive a browser surface via your agent-browser install.
+  playwright     Drive a browser surface via your playwright CLI install.
   list           List Dormouse Surfaces.
   workspace      Create, rename, close, switch, or move Workspaces.
   app            Restart Dormouse Standalone, resuming supported agent sessions.

@@ -9,6 +9,7 @@
 import { realpathSync } from 'node:fs';
 import type { Browser, Page, CDPSession } from 'playwright-core';
 import { BROWSER_PROVIDERS, spawnAndCapture } from 'dor-lib-common';
+import type { BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import { messageOf } from '../lib/errors';
 import { CAPTURE_JPEG_QUALITY, type BrowserResult, type ViewerBrowserInput, type ViewerState } from '../lib/platform/browser-automation';
 import type { BrowserProvider, LiveBrowser } from './browser-host';
@@ -88,10 +89,11 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
   let closed = false;
   const log = (e: unknown) => deps.log?.(`[playwright] ${messageOf(e)}`);
   /** One CLI call, ended after `timeoutMs` (none for `null`); throws when it could not run or finish. */
-  async function cli(b: Binding, args: string[], timeoutMs: number | null = CLI_TIMEOUT_MS) {
+  async function cli(b: Binding, args: string[], timeoutMs: number | null = CLI_TIMEOUT_MS, initialViewport?: BrowserViewportSetting) {
     const r = await spawnAndCapture(b.install.binary, [...BROWSER_PROVIDERS.playwright.sessionArgs(b.session), ...args], {
       cwd: b.cwd,
       ...(timeoutMs === null ? {} : { timeoutMs: Math.max(0, timeoutMs) }),
+      ...(initialViewport?.mode === 'fixed' ? { env: { ...process.env, PLAYWRIGHT_MCP_VIEWPORT_SIZE: `${initialViewport.width}x${initialViewport.height}` } } : {}),
     });
     if (!r.ok) throw new Error(r.error.message);
     return { exitCode: r.exitCode, stdout: r.stdout, stderr: r.stderr };
@@ -267,27 +269,27 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
     const gen = generations.get(key) ?? 0;
     const operation = (async () => {
       const list = await cli(b, ['list', '--all', '--json'], Math.min(CLI_TIMEOUT_MS, deadline - Date.now()));
-      if (list.exitCode !== 0) throw new Error(list.stderr || 'Cannot discover Playwright browsers');
+      if (list.exitCode !== 0) throw new Error(list.stderr || 'Cannot discover playwright browsers');
       const parsed = JSON.parse(list.stdout);
       const servers: unknown = parsed.servers ?? parsed.data?.servers;
-      if (!Array.isArray(servers)) throw new Error('Unsupported Playwright CLI registry. Install @playwright/cli 0.1.19 or newer.');
+      if (!Array.isArray(servers)) throw new Error('Unsupported playwright CLI registry. Install @playwright/cli 0.1.19 or newer.');
       const matches = servers.filter(s =>
         s.title === b.session
         && (s.workspaceDir || undefined) === b.workspace
         && typeof s.playwrightLib === 'string'
         && realpathOrUndefined(s.playwrightLib) === b.install.libraryPath);
-      if (matches.length > 1) throw new Error('Ambiguous Playwright session');
+      if (matches.length > 1) throw new Error('Ambiguous playwright session');
       if (matches.length === 0) {
-        throw new SessionNotOpenError('Playwright session is not open or has no viewable endpoint', servers.some(s => s.title === b.session));
+        throw new SessionNotOpenError('playwright session is not open or has no viewable endpoint', servers.some(s => s.title === b.session));
       }
       const descriptor = matches[0];
-      if (descriptor.browser?.browserName !== 'chromium') throw new Error('Dormouse currently views Chromium Playwright sessions only. The native CLI command still ran.');
+      if (descriptor.browser?.browserName !== 'chromium') throw new Error('Dormouse currently views Chromium playwright sessions only. The native CLI command still ran.');
       const endpoint = descriptor.endpoint ?? descriptor.pipeName;
-      if (typeof endpoint !== 'string' || !endpoint) throw new Error('Playwright browser endpoint unavailable');
+      if (typeof endpoint !== 'string' || !endpoint) throw new Error('playwright browser endpoint unavailable');
       // CLI-created browsers publish private local pipes. Never dial an arbitrary network endpoint from saved data.
-      if (/^[a-z]+:\/\//i.test(endpoint)) throw new Error('Only local Playwright CLI browser pipes can be viewed');
+      if (/^[a-z]+:\/\//i.test(endpoint)) throw new Error('Only local playwright CLI browser pipes can be viewed');
       const remaining = deadline - Date.now();
-      if (remaining <= 0) throw new Error('Playwright browser connection timed out');
+      if (remaining <= 0) throw new Error('playwright browser connection timed out');
       const browser = await b.install.library.chromium.connect(endpoint, { timeout: Math.min(CONNECT_TIMEOUT_MS, remaining) });
       if (closed || gen !== (generations.get(key) ?? 0)) { await browser.close(); throw new Error('Browser launch superseded'); }
       const v: Viewer = {
@@ -320,7 +322,7 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
   async function livePage(b: Binding, force: boolean): Promise<{ v: Viewer; page: Page }> {
     const v = await connect(b);
     await refresh(v, force);
-    if (!v.page) throw new Error('No Playwright page is open');
+    if (!v.page) throw new Error('No playwright page is open');
     return { v, page: v.page };
   }
   const exited = (r: { exitCode: number; stderr: string }) => r.stderr.trim() || `playwright-cli exited ${r.exitCode}`;
@@ -352,8 +354,8 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
     // Finish the old CLI session before discovering the replacement endpoint.
     stop: (b, timeoutMs) => cli(b, ['close'], timeoutMs),
 
-    async open(b, url, isHeaded) {
-      const r = await cli(b, ['open', ...(url === undefined ? [] : [url]), '--browser=chromium', ...(isHeaded ? ['--headed'] : [])], null);
+    async open(b, url, isHeaded, initialViewport) {
+      const r = await cli(b, ['open', ...(url === undefined ? [] : [url]), '--browser=chromium', ...(isHeaded ? ['--headed'] : [])], null, initialViewport);
       return { exitCode: r.exitCode, stderr: r.stderr };
     },
 
@@ -409,6 +411,10 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
           const device = act.op === 'device' && Object.prototype.hasOwnProperty.call(devices, act.name) ? devices[act.name] : undefined;
           const size = act.op === 'viewport' ? act : device?.viewport;
           if (!size) throw new Error('Invalid viewport/device');
+          if (act.op === 'viewport' && act.dpr !== undefined) {
+            const measured = measuredViewport(await page.evaluate(() => ({ width: innerWidth, height: innerHeight, dpr: devicePixelRatio })));
+            if (!measured || Math.abs(measured.devicePixelRatio - act.dpr) > 0.001) throw new Error(`playwright cannot change DPR on an existing context (requested ${act.dpr}, effective ${measured?.devicePixelRatio ?? 'unknown'})`);
+          }
           // Playwright's own writer, alone, which keeps the browser context's
           // ratio: a CDP metrics override from this connection would be a
           // second writer Chrome re-applies on every navigation (rationale).
@@ -425,7 +431,7 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
           // Landed: the next poll measures it, begun after (`refreshNow`).
           return { ok: true };
         }
-        default: throw new Error('Unsupported Playwright host operation');
+        default: throw new Error('Unsupported playwright host operation');
       }
       await refresh(v);
       return { ok: true };
@@ -446,7 +452,7 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
 
     async view(b, stream, { headed }, sink) {
       const v = await connect(b);
-      if (v.instance !== stream || v.disposed) throw new Error('Playwright stream is no longer live');
+      if (v.instance !== stream || v.disposed) throw new Error('playwright stream is no longer live');
       const subscriber: Subscriber = { sink, headed };
       v.subscribers.add(subscriber);
       // Earlier viewers already hold this state; the refresh below sends only what changed.

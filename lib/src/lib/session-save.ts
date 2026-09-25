@@ -1,4 +1,5 @@
 import { isToolKeyScope, isToolRender } from './platform/tool-types';
+import { isBrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import { normalizeAlertDeliveryOverrides, type AlertDeliveryOverrides } from './alert-delivery-model';
 import type { PlatformAdapter } from './platform/types';
 import { browserPersistedPane, isToolCommandArgv, readPersistedSession, toPersistedAlertState, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceRefs, type PersistedToolMetadata, type PersistedSurfaceType } from './session-types';
@@ -184,7 +185,7 @@ function toolMetadataFromParams(params: Record<string, unknown> | undefined): Pe
     ? params.toolKey as string[]
     : undefined;
   const argv = isToolCommandArgv(params.toolArgv) ? [...params.toolArgv] : undefined;
-  return { ...(argv ? { argv } : {}), ...(name ? { name } : {}), ...(isToolKeyScope(params.toolScope) ? { scope: params.toolScope } : {}), render, port, ...(key ? { key } : {}) };
+  return { ...(argv ? { argv } : {}), ...(name ? { name } : {}), ...(isToolKeyScope(params.toolScope) ? { scope: params.toolScope } : {}), render, port, ...(key ? { key } : {}), ...(isBrowserViewportSetting(params.browserViewport) ? { viewport: params.browserViewport } : {}) };
 }
 
 function persistedVisiblePaneTitle(title: string): string {

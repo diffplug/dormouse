@@ -1,4 +1,4 @@
-/** `dor ab` passthrough and Surface binding; see docs/specs/dor-cli.md and
+/** `dor agent-browser` passthrough and Surface binding; see docs/specs/dor-cli.md and
  * docs/specs/dor-browser.md. `runCli` intercepts real invocations before
  * stricli so forwarded arguments are never parsed as dor flags. */
 
@@ -28,7 +28,7 @@ function missingBinaryMessage(binary: string): string {
   return [
     `agent-browser is not installed${lookedFor}.`,
     '',
-    'dor ab drives your own agent-browser binary, which Dormouse never bundles.',
+    'dor agent-browser drives your own agent-browser binary, which Dormouse never bundles.',
     'Install it, then re-run your command:',
     '',
     `    ${INSTALL_HINT}`,
@@ -52,7 +52,7 @@ export const agentBrowserCommand: Command = {
   ],
   command: buildCommand<{ key?: string; session?: string; surface?: string; workspace?: string }, [...args: string[]], DorCommandContext>({
     docs: {
-      brief: 'Drive a browser surface via your agent-browser install (alias: dor ab).',
+      brief: 'Drive a browser surface via your agent-browser install.',
       fullDescription: `Forwards all arguments verbatim to your own agent-browser binary and binds the session to a Dormouse browser surface.
 
 dor intercepts exactly three mutually exclusive identity flags:
@@ -74,9 +74,14 @@ command surface. The binary is resolved from PATH (override with
 DORMOUSE_AGENT_BROWSER_BIN) and is never bundled; install it with:
   ${INSTALL_HINT}
 
+Dormouse intercepts dor-embed-size to query or set the pane's browser viewport:
+  dor agent-browser dor-embed-size --json
+  dor agent-browser dor-embed-size 1440 900 --dpr 2
+  dor agent-browser dor-embed-size --preset pane-sync
+
 After a successful command, dor opens the browser surface bound to the session,
-or reuses the one it already has. A Playwright browser (render_mode pw-*) is
-driven with dor pw --surface instead.
+or reuses the one it already has. A playwright browser (render_mode playwright-*) is
+driven with dor playwright --surface instead.
 
 In an "open" command, dor also resolves a Dormouse target in place of a URL:
 a schemeless host:port (and the ":<port>" localhost shorthand) defaults to
@@ -85,14 +90,14 @@ http:// rather than agent-browser's https://, and a terminal Surface handle
 dev-server URL that terminal owns via the host port scan.
 
 Examples:
-  dor ab open http://localhost:5173        # key "default"
-  dor ab open localhost:5173                # → http://localhost:5173/
-  dor ab open :5173                         # → http://localhost:5173/
-  dor ab open surface:3                     # open the port terminal surface:3 owns
-  dor ab --key storybook open http://localhost:6006
-  dor ab click @e3                          # drives key "default"
-  dor ab --key storybook reload             # drives key "storybook"
-  dor ab --surface surface:4 click @e3      # drives whatever surface:4 is bound to`,
+  dor agent-browser open http://localhost:5173        # key "default"
+  dor agent-browser open localhost:5173                # → http://localhost:5173/
+  dor agent-browser open :5173                         # → http://localhost:5173/
+  dor agent-browser open surface:3                     # open the port terminal surface:3 owns
+  dor agent-browser --key storybook open http://localhost:6006
+  dor agent-browser click @e3                          # drives key "default"
+  dor agent-browser --key storybook reload             # drives key "storybook"
+  dor agent-browser --surface surface:4 click @e3      # drives whatever surface:4 is bound to`,
     },
     parameters: {
       flags: {

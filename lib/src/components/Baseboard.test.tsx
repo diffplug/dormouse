@@ -356,7 +356,7 @@ describe('Baseboard browser Doors', () => {
   it('keeps the browser display icon and page label instead of deriving a terminal idle title', () => {
     act(() => root.render(
       <Baseboard
-        items={[{ id: 'browser-1', kind: 'browser', title: 'localhost:5173/app', browserDisplay: 'ab-fixed' }]}
+        items={[{ id: 'browser-1', kind: 'browser', title: 'localhost:5173/app', browserDisplay: 'agent-browser-fixed' }]}
         onReattach={() => {}}
       />,
     ));
@@ -364,8 +364,8 @@ describe('Baseboard browser Doors', () => {
     const door = container.querySelector<HTMLButtonElement>('[data-door-id="browser-1"]');
     expect(door?.textContent).toContain('localhost:5173/app');
     expect(door?.textContent).not.toContain('<idle>');
-    expect(door?.querySelector('[data-browser-display-mode="ab-fixed"] svg')).not.toBeNull();
-    expect(door?.querySelectorAll('[data-browser-display-mode="ab-fixed"] svg')).toHaveLength(2);
+    expect(door?.querySelector('[data-browser-display-mode="agent-browser-fixed"] svg')).not.toBeNull();
+    expect(door?.querySelectorAll('[data-browser-display-mode="agent-browser-fixed"] svg')).toHaveLength(2);
     expect(door?.getAttribute('aria-label')).toBe(
       'localhost:5173/app, agent-browser fixed size',
     );

@@ -1,6 +1,7 @@
 import { normalizeAlertDeliveryOverrides, type AlertDeliveryOverrides } from './alert-delivery-model';
 import { isRecord } from './is-record';
 import { isToolKeyScope, isToolRender, type ToolKeyScope, type ToolRender } from './platform/tool-types';
+import { isBrowserViewportSetting, type BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import type { SessionStatus } from './alert-manager';
 import { hasShellInputControls } from 'dor/commands/shell-quote';
 import {
@@ -29,6 +30,7 @@ export interface PersistedToolMetadata {
   scope?: ToolKeyScope;
   name?: string;
   render: ToolRender;
+  viewport?: BrowserViewportSetting;
   port: 'announced' | 'auto';
   key?: string[];
 }
@@ -214,6 +216,7 @@ function isPersistedToolMetadataShape(value: unknown): boolean {
     (value.name === undefined || typeof value.name === 'string') &&
     (value.scope === undefined || isToolKeyScope(value.scope)) &&
     isToolRender(value.render) &&
+    (value.viewport === undefined || isBrowserViewportSetting(value.viewport)) &&
     (value.port === 'announced' || value.port === 'auto') &&
     (value.key === undefined || (Array.isArray(value.key) && value.key.every((part) => typeof part === 'string')))
   );

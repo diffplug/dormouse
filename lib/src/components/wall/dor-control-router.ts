@@ -108,7 +108,7 @@ function dispatchDorControl(detail: DorControlRequest, attempt: number): void {
     // The Workspace that would have answered says it is still mounting — the
     // one named, or the active one when nothing is mounted at all. Dropping
     // the request instead would hold the caller to its own deadline, and
-    // `dor ab` makes this round trip on every managed invocation
+    // `dor agent-browser` makes this round trip on every managed invocation
     // (`docs/specs/dor-browser.md` → "Managed identity").
     detail.respond({ ok: false, error: route.message });
     return;

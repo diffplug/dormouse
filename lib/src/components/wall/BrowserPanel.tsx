@@ -4,7 +4,7 @@
  *
  * One surface, swappable renderer: it reads the canonical `renderMode` and mounts
  * the matching child — `IframePanel` for `iframe`, `AgentBrowserPanel` for
- * `ab-screencast` / `ab-popout`. The two children stay separate components (their
+ * `agent-browser-screencast` / `agent-browser-popout`. The two children stay separate components (their
  * input models differ — CDP `input_*` messages vs native DOM); the shell only owns
  * the renderer choice. The browser chrome each child registers is keyed by
  * `api.id`, so the shared header/modal are unaffected by which child is mounted.

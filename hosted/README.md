@@ -170,7 +170,7 @@ accounts.
 
 Authenticate Wrangler to the intended Cloudflare account before provisioning.
 Inside Dormouse, run `dor ensure -- pnpm exec wrangler login --browser=false --use-keyring`
-from `hosted/`, then open the printed authorization link with `dor ab`. Review
+from `hosted/`, then open the printed authorization link with `dor agent-browser`. Review
 the account and requested access before granting it. Secrets remain in the OS
 keychain. Authenticate in your own terminal; account/provider sign-in is operator-owned.
 

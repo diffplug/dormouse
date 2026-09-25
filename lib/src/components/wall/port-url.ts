@@ -1,8 +1,8 @@
 /**
  * Port → dev-server URL selection, shared by the `surface.resolveOpen` control
- * method (`dor ab open <surface>` / `dor iframe <surface>`) and the pane
+ * method (`dor agent-browser open <surface>` / `dor iframe <surface>`) and the pane
  * context menu's port list. One entry per distinct TCP port a process tree
- * binds; the host/URL choice matches what `dor ab open` opens.
+ * binds; the host/URL choice matches what `dor agent-browser open` opens.
  */
 import type { OpenPort } from '../../lib/platform/types';
 

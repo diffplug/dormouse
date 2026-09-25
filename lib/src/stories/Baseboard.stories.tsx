@@ -74,9 +74,9 @@ const extremeTitleWithBothIndicatorsItems = [
   makeItem('p3', 'another'),
 ];
 const browserSurfaceItems: DoorChip[] = [
-  { id: 'browser-resize', kind: 'browser', title: 'localhost:5173/app', browserDisplay: 'ab-resize' },
-  { id: 'browser-fixed', kind: 'browser', title: 'mobile checkout', browserDisplay: 'ab-fixed' },
-  { id: 'browser-popout', kind: 'browser', title: 'docs.example.com', browserDisplay: 'ab-popout' },
+  { id: 'browser-resize', kind: 'browser', title: 'localhost:5173/app', browserDisplay: 'agent-browser-resize' },
+  { id: 'browser-fixed', kind: 'browser', title: 'mobile checkout', browserDisplay: 'agent-browser-fixed' },
+  { id: 'browser-popout', kind: 'browser', title: 'docs.example.com', browserDisplay: 'agent-browser-popout' },
   { id: 'browser-iframe', kind: 'browser', title: 'localhost:6006', browserDisplay: 'iframe' },
 ];
 

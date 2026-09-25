@@ -38,7 +38,7 @@ test('a command that cannot bind a Surface reserves nothing', () => {
 });
 
 test('a key whose command succeeded keeps its binding with no Surface to bind', () => {
-  // `dor pw --key app open --browser=firefox`: the native browser exists, but no
+  // `dor playwright --key app open --browser=firefox`: the native browser exists, but no
   // viewer can attach, so nothing but the reservation holds the key's cwd.
   vi.useFakeTimers();
   try {

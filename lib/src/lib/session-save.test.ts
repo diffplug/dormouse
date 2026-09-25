@@ -232,7 +232,7 @@ describe('saveSession', () => {
         surfaceType: 'tool',
         command: 'pnpm storybook',
         toolName: 'storybook',
-        toolRender: 'ab-screencast',
+        toolRender: 'agent-browser-screencast',
         toolPort: 'auto',
         toolKey: ['storybook', '/repo'],
         // Derived state must stay in the Lath projection, never this row.
@@ -247,7 +247,7 @@ describe('saveSession', () => {
       command: 'pnpm storybook',
       tool: {
         name: 'storybook',
-        render: 'ab-screencast',
+        render: 'agent-browser-screencast',
         port: 'auto',
         key: ['storybook', '/repo'],
       },

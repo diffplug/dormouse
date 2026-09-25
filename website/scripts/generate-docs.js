@@ -833,7 +833,7 @@ function linkSkillHeadings(skill, cli) {
   }
 
   for (const heading of headings) {
-    // A heading may name a command more than one way ("`dor ab` /
+    // A heading may name a command more than one way ("`dor agent-browser` /
     // `dor agent-browser`"). It is labelled by the spelling it leads with and
     // linked to the first that has a section.
     const named = headingCodeTokens(heading)

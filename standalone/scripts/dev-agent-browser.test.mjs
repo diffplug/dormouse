@@ -110,7 +110,7 @@ test('parallel worktrees own ports, browser identities and bridges; stopping one
   assert.notEqual(one.token, two.token);
   const key = one.args[2];
   assert.match(key, /^innerdogfood-[a-f0-9]{16}$/);
-  assert.deepEqual(one.args, ['ab', '--key', key, 'open', one.app]);
+  assert.deepEqual(one.args, ['agent-browser', '--key', key, 'open', one.app]);
   // Inside Dormouse the harness names the key, not a session: the Workspace that
   // takes the browser is what namespaces it, so `sessionForKey`'s bare-Wall scope
   // would be a session nothing ever created.
@@ -202,7 +202,7 @@ test('explicit ports and raw browser sessions are honored; occupied ports fail w
   }).ready();
   assert.equal(pinned.app, one.app);
   assert.equal(pinned.bridge, one.bridge);
-  assert.deepEqual(pinned.args, ['ab', '--session', 'explicit-session', 'open', pinned.app]);
+  assert.deepEqual(pinned.args, ['agent-browser', '--session', 'explicit-session', 'open', pinned.app]);
 });
 
 test('browser startup failure closes the harness listeners and sidecar', { timeout: 30000 }, async t => {

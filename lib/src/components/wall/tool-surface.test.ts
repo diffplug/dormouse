@@ -33,7 +33,7 @@ describe('tool params classification', () => {
     expect(surfaceKindFromParams(undefined)).toBe('terminal');
     expect(surfaceKindFromParams({ cwd: '/repo' })).toBe('terminal');
     expect(surfaceKindFromParams({ surfaceType: 'browser', url: 'https://x' })).toBe('browser');
-    expect(surfaceKindFromParams({ renderMode: 'ab-screencast' })).toBe('browser');
+    expect(surfaceKindFromParams({ renderMode: 'agent-browser-screencast' })).toBe('browser');
   });
 
   it('reports both capabilities, so row fields populate on both sides', () => {
@@ -128,11 +128,11 @@ describe('tool persistence (regression: review findings 4 and 11)', () => {
       command: 'pnpm storybook',
       cwd: '/repo',
       toolKey: ['storybook', 'storybook', '/repo'],
-      toolRender: 'ab-screencast',
+      toolRender: 'agent-browser-screencast',
       toolPort: 'auto',
       toolPortConflict: [6006, 6007],
       url: 'http://localhost:6006/',
-      renderMode: 'ab-screencast',
+      renderMode: 'agent-browser-screencast',
       session: 'dormouse.w.tool.p1',
       launchSession: 'dormouse.w.tool.p1',
       launchFallback: 'embed',
@@ -142,7 +142,7 @@ describe('tool persistence (regression: review findings 4 and 11)', () => {
       command: 'pnpm storybook',
       cwd: '/repo',
       toolKey: ['storybook', 'storybook', '/repo'],
-      toolRender: 'ab-screencast',
+      toolRender: 'agent-browser-screencast',
       toolPort: 'auto',
     });
   });

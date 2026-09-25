@@ -19,6 +19,7 @@ import {
   type BrowserAutomationProvider,
   type BrowserBinding,
 } from 'dor-lib-common/browser-providers';
+import { isBrowserViewportSetting, type BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import { messageOf } from '../lib/errors';
 import { settleAllWithin } from '../lib/settle-within';
 import {
@@ -37,7 +38,7 @@ import {
 import { createBrowserCaptures } from './browser-capture';
 import { createViewportSync } from './browser-sync';
 import type { WebSocket } from 'ws';
-import { BrowserView, WEBVIEW_ID, closeSocket, createViewerServer, type Upstream, type ViewerSink } from './browser-viewer';
+import { BrowserView, WEBVIEW_ID, closeSocket, createViewerServer, measuredViewport, type Upstream, type ViewerSink } from './browser-viewer';
 
 /** An operation on a live browser that each provider maps to its own call:
  *  a fixed agent-browser argv, or a Playwright client call. */
@@ -81,7 +82,7 @@ export interface BrowserProvider<B = unknown> {
   stop(b: B, timeoutMs: number): Promise<unknown>;
   /** Start the CLI's `open` — blank without a `url`. Settles when `open`
    *  returns, possibly long after the browser is up. */
-  open(b: B, url: string | undefined, headed: boolean): Promise<OpenOutcome>;
+  open(b: B, url: string | undefined, headed: boolean, initialViewport?: BrowserViewportSetting): Promise<OpenOutcome>;
   /** One readiness check during a launch: the browser once it is up, why the
    *  launch is lost, or `undefined` for not yet. `opened` is set once `open`
    *  returned; `replaced` is what `stop` answered. */
@@ -129,6 +130,7 @@ const EDIT_SCRIPTS: Record<BrowserEditOp, string> = {
   copy: `(()=>{const el=document.activeElement;if(el&&'selectionStart'in el&&el.selectionStart!=null){return el.value.slice(el.selectionStart,el.selectionEnd);}return String(window.getSelection()||'');})()`,
   cut: `(()=>{const el=document.activeElement;if(el&&'selectionStart'in el&&el.selectionStart!=null){const s=el.selectionStart,e=el.selectionEnd,t=el.value.slice(s,e);el.setRangeText('',s,e,'end');el.dispatchEvent(new Event('input',{bubbles:true}));return t;}const sel=String(window.getSelection()||'');if(sel)document.execCommand('delete');return sel;})()`,
 };
+const VIEWPORT_MEASURE_SCRIPT = '({width:innerWidth,height:innerHeight,dpr:devicePixelRatio})';
 
 /** The fixed script for an editing op; undefined for any other name.
  *
@@ -207,9 +209,11 @@ function parseOp(r: Record<string, unknown>): BrowserOp | string {
       const id = optionalRequestId(r.requestId);
       if (!id) return 'invalid request id';
       const url = isBrowsableUrl(r.url) ? { url: r.url } : {};
+      if (r.initialViewport !== undefined && !isBrowserViewportSetting(r.initialViewport)) return 'invalid initial viewport';
+      const initialViewport = r.initialViewport === undefined ? {} : { initialViewport: r.initialViewport };
       return r.op === 'launch'
-        ? { op: 'launch', ...url, headed: r.headed === true, ...id }
-        : { op: 'attach', ...url, ...(r.headed === true ? { headed: true } : {}), ...id };
+        ? { op: 'launch', ...url, headed: r.headed === true, ...initialViewport, ...id }
+        : { op: 'attach', ...url, ...(r.headed === true ? { headed: true } : {}), ...initialViewport, ...id };
     }
     case 'view': {
       const stream = r.stream;
@@ -228,9 +232,13 @@ function parseOp(r: Record<string, unknown>): BrowserOp | string {
       return { op: 'tab', action, tabId };
     }
     case 'viewport': {
-      const [width, height, dpr] = [dimension(r.width, VIEWPORT_MAX_SIDE), dimension(r.height, VIEWPORT_MAX_SIDE), dimension(r.dpr, VIEWPORT_MAX_DPR)];
-      return width && height && dpr ? { op: 'viewport', width, height, dpr, ...endsSync } : 'invalid viewport';
+      const [width, height, dpr] = [dimension(r.width, VIEWPORT_MAX_SIDE), dimension(r.height, VIEWPORT_MAX_SIDE), r.dpr === undefined ? undefined : dimension(r.dpr, VIEWPORT_MAX_DPR)];
+      if (dpr === null) return 'invalid viewport';
+      return width && Number.isInteger(width) && height && Number.isInteger(height) && (r.dpr === undefined || dpr)
+        ? { op: 'viewport', width, height, ...(dpr === undefined ? {} : { dpr }), ...endsSync }
+        : 'invalid viewport';
     }
+    case 'measure': return { op: 'measure' };
     case 'device':
       return typeof r.name === 'string' && DEVICE_NAME.test(r.name) ? { op: 'device', name: r.name, ...endsSync } : 'invalid device name';
     case 'close': {
@@ -364,12 +372,17 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   // running must leave the newer pane size last. Recheck lifecycle at execution,
   // since a queued write belongs to the browser that existed at arrival.
   const viewportWrites = new Map<string, Promise<BrowserResult>>();
-  function writeViewport({ p, b, id }: Bound, act: Extract<BrowserAct, { op: 'viewport' | 'device' }>): Promise<BrowserResult> {
+  function writeViewport({ p, b, id }: Bound, act: Extract<BrowserAct, { op: 'viewport' | 'device' }>, options: { isCurrent?: () => boolean; onSuccess?: () => void } = {}): Promise<BrowserResult> {
     const generation = generations.get(id);
-    const writing = (viewportWrites.get(id) ?? Promise.resolve()).catch(() => {}).then(() => {
+    const writing = (viewportWrites.get(id) ?? Promise.resolve()).catch(() => {}).then(async () => {
       if (closed) throw new Error('the browser host is shutting down');
       if (settling.has(id) || generations.get(id) !== generation) throw new Error('the browser is being relaunched or closed');
-      return p.act(b, act);
+      if (options.isCurrent && !options.isCurrent()) return { ok: false, error: 'pane sync engagement ended' };
+      const result = await p.act(b, act);
+      if (settling.has(id) || generations.get(id) !== generation) throw new Error('the browser is being relaunched or closed');
+      if (closed) throw new Error('the browser host is shutting down');
+      if (result.ok) options.onSuccess?.();
+      return result;
     });
     viewportWrites.set(id, writing);
     const forget = () => { if (viewportWrites.get(id) === writing) viewportWrites.delete(id); };
@@ -379,7 +392,10 @@ export function createBrowserHost(deps: BrowserHostDeps) {
 
   // Sync-to-pane coalesces pane sizes before they enter the viewport queue.
   const sync = createViewportSync<Bound>({
-    write: (bound, size) => writeViewport(bound, { op: 'viewport', ...size }),
+    // Pane sync carries the display's ratio for agent-browser, whose viewport
+    // writer can apply it. Playwright's context ratio is immutable here: sync
+    // means CSS dimensions only, not an explicit DPR request.
+    write: (bound, size, isCurrent) => writeViewport(bound, { op: 'viewport', ...size, ...(bound.p === providers.get('playwright') ? { dpr: undefined } : {}) }, { isCurrent }),
     report: (id, message) => { for (const view of views.get(id) ?? []) view.state(message); },
     blocked: (id) => closed || settling.has(id),
     log,
@@ -420,13 +436,14 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   /** Launch `bound`'s browser at `url`, or blank without one: headed or not,
    *  stopping what runs the session first unless it is `fresh`. Answers once
    *  the browser is up, never waiting for the page. */
-  function launch(bound: Bound, url: string | undefined, isHeaded: boolean, fresh: boolean, requestDeadline: number): Promise<LiveBrowser> {
-    return settle(bound.id, () => bringUpBrowser(bound, url, isHeaded, fresh, requestDeadline));
+  function launch(bound: Bound, url: string | undefined, isHeaded: boolean, fresh: boolean, requestDeadline: number, initialViewport?: BrowserViewportSetting): Promise<LiveBrowser> {
+    return settle(bound.id, () => bringUpBrowser(bound, url, isHeaded, fresh, requestDeadline, initialViewport));
   }
 
-  async function bringUpBrowser(bound: Bound, url: string | undefined, isHeaded: boolean, fresh: boolean, requestDeadline: number): Promise<LiveBrowser> {
+  async function bringUpBrowser(bound: Bound, url: string | undefined, isHeaded: boolean, fresh: boolean, requestDeadline: number, initialViewport?: BrowserViewportSetting): Promise<LiveBrowser> {
     const { p, b, id } = bound;
     if (closed) throw new Error('the browser host is shutting down');
+    const closesAtStart = closesArrived.get(id) ?? 0;
     const deadline = requestDeadline - LAUNCH_CLOSE_RESERVE_MS;
     if (Date.now() >= deadline) throw new Error('the browser launch timed out behind an earlier one');
     const generation = await invalidate(bound);
@@ -436,7 +453,13 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     // Before the launch, so a window whose page never loads is still closed.
     trackHeaded(bound, isHeaded);
     let opened: OpenOutcome | undefined;
-    const opening = p.open(b, url, isHeaded).then(
+    // A destination must never execute its first script at the provider's old
+    // viewport. Playwright sets the context size at launch; explicit DPR still
+    // needs a blank page to check the immutable context ratio first. agent-browser
+    // sizes its blank page through its sole native writer before navigation.
+    const agentBrowser = bound.p === providers.get('agent-browser');
+    const staged = initialViewport?.mode === 'fixed' && (agentBrowser || initialViewport.dpr !== undefined);
+    const opening = p.open(b, staged ? undefined : url, isHeaded, initialViewport).then(
       (outcome) => { opened = outcome; },
       (error: unknown) => { opened = { exitCode: 1, stderr: messageOf(error) }; },
     );
@@ -450,7 +473,35 @@ export function createBrowserHost(deps: BrowserHostDeps) {
         why = messageOf(error);
       }
       if (probe && 'stream' in probe) {
-        sweepAfter(opening, bound, generation);
+        if (staged && initialViewport?.mode === 'fixed') {
+          try {
+            if (initialViewport.dpr !== undefined && !agentBrowser) {
+              const measured = measuredViewport(await p.evaluate(b, VIEWPORT_MEASURE_SCRIPT));
+              if (!measured || Math.abs(measured.devicePixelRatio - initialViewport.dpr) > 0.001) {
+                throw new Error(`playwright cannot change DPR on an existing context (requested ${initialViewport.dpr}, effective ${measured?.devicePixelRatio ?? 'unknown'})`);
+              }
+            }
+            if (agentBrowser) {
+              const sized = await p.act(b, { op: 'viewport', width: initialViewport.width, height: initialViewport.height, ...(initialViewport.dpr === undefined ? {} : { dpr: initialViewport.dpr }) });
+              if (!sized.ok) throw new Error(sized.error ?? 'initial viewport could not be set');
+            }
+            // A close can arrive while initial sizing waits on the provider.
+            // It is serialized behind this launch, but the destination must
+            // not begin after that close has already cancelled the Surface.
+            if (closed || Date.now() >= deadline) throw new Error(closed ? 'the browser host is shutting down' : 'the browser launch timed out');
+            if ((closesArrived.get(id) ?? 0) !== closesAtStart || generations.get(id) !== generation) throw new Error('the browser was closed');
+          } catch (error) {
+            // A queued Surface close owns teardown. Shutdown/timeout has no
+            // queued close, so dispose the preparatory blank browser here.
+            if ((closesArrived.get(id) ?? 0) === closesAtStart) await shut(bound, requestDeadline - Date.now()).catch(log);
+            throw error;
+          }
+          if (isBrowsableUrl(url)) {
+            const navigating = p.act(b, { op: 'navigate', url });
+            void navigating.then((result) => { if (!result.ok) log(`navigating ${id} to ${url} failed: ${result.error ?? 'no reason given'}`); }, log);
+            sweepAfter(navigating.then(() => {}), bound, generation);
+          } else sweepAfter(opening, bound, generation);
+        } else sweepAfter(opening, bound, generation);
         return probe;
       }
       if (probe && 'failed' in probe) {
@@ -515,12 +566,12 @@ export function createBrowserHost(deps: BrowserHostDeps) {
    *  names a page — `relaunched`, so the caller has no navigation left to run
    *  there — and fails otherwise. Serialized with launches, so two panes
    *  restoring one session relaunch it once. */
-  function attach(bound: Bound, url: string | undefined, isHeaded: boolean, requestDeadline: number): Promise<LiveBrowser & { relaunched?: true }> {
+  function attach(bound: Bound, url: string | undefined, isHeaded: boolean, requestDeadline: number, initialViewport?: BrowserViewportSetting): Promise<LiveBrowser & { relaunched?: true }> {
     return bringUp(bound.id, async () => {
       const found = await bound.p.find(bound.b);
       if ('stream' in found) return found;
       if (!isBrowsableUrl(url)) throw new Error(found.gone);
-      return { ...await launch(bound, url, isHeaded, !found.named, requestDeadline), relaunched: true };
+      return { ...await launch(bound, url, isHeaded, !found.named, requestDeadline, initialViewport), relaunched: true };
     });
   }
 
@@ -625,11 +676,11 @@ export function createBrowserHost(deps: BrowserHostDeps) {
         case 'launch': {
           const fresh = r.binding.session === undefined;
           const live = await bringUp(bound.id, async () => (fresh ? undefined : await reuse(bound, r.url, r.headed))
-            ?? launch(bound, r.url, r.headed, fresh, requestDeadline));
+            ?? launch(bound, r.url, r.headed, fresh, requestDeadline, r.initialViewport));
           return answer({ headed: r.headed, ...live });
         }
         case 'attach': {
-          const { relaunched, ...live } = await attach(bound, r.url, r.headed === true, requestDeadline);
+          const { relaunched, ...live } = await attach(bound, r.url, r.headed === true, requestDeadline, r.initialViewport);
           return { ...answer(live), ...(relaunched ? { relaunched } : {}) };
         }
         case 'close':
@@ -643,10 +694,23 @@ export function createBrowserHost(deps: BrowserHostDeps) {
         }
         case 'edit':
           return await edit(bound, r.edit);
+        case 'measure': {
+          const generation = generations.get(bound.id) ?? 0;
+          // A query after a size mutation must observe that mutation, even if
+          // it was queued behind a prior writer when this request arrived.
+          await viewportWrites.get(bound.id)?.catch(() => {});
+          if (settling.has(bound.id) || generation !== (generations.get(bound.id) ?? 0)) throw new Error('the browser is being relaunched or closed');
+          const found = await p.find(b);
+          if (!('stream' in found)) throw new Error(found.gone);
+          const measured = measuredViewport(await p.evaluate(b, VIEWPORT_MEASURE_SCRIPT));
+          if (settling.has(bound.id) || generation !== (generations.get(bound.id) ?? 0)) throw new Error('the browser is being relaunched or closed');
+          if (!measured) throw new Error('the browser did not report a viewport');
+          return { ok: true, viewport: { width: measured.viewportWidth, height: measured.viewportHeight, dpr: measured.devicePixelRatio } };
+        }
         case 'viewport':
         case 'device': {
-          sync.fixed(bound.id, r.endsSync);
-          return await writeViewport(bound, r);
+          const engagement = r.endsSync ?? sync.current(bound.id);
+          return await writeViewport(bound, r, { onSuccess: () => sync.fixed(bound.id, engagement) });
         }
         default:
           return await p.act(b, r);

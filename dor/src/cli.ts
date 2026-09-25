@@ -7,7 +7,7 @@ import {
   type ApplicationText,
   type StricliProcess,
 } from '@stricli/core';
-import { BROWSER_PROVIDER_IDS, BROWSER_PROVIDERS, isBrowserProvider, type BrowserAutomationProvider } from 'dor-lib-common';
+import { isBrowserProvider, type BrowserAutomationProvider } from 'dor-lib-common';
 import { agentBrowserCommand, runAgentBrowserCli } from './commands/agent-browser.js';
 import { appCommand } from './commands/app.js';
 import { awaitCommand } from './commands/await.js';
@@ -196,9 +196,9 @@ interface CaptureProcess extends StricliProcess {
 }
 
 export async function runCli(rawArgv: string[], options: CliOptions = {}): Promise<CliResult> {
-  const argv = normalizePassthroughAlias(normalizeVersionAlias(rawArgv));
+  const argv = normalizeVersionAlias(rawArgv);
 
-  // `dor ab <args...>` and `dor pw <args...>` forward args verbatim to the
+  // `dor agent-browser <args...>` and `dor playwright <args...>` forward args verbatim to the
   // provider's CLI, so they must never reach stricli's flag parser. Only a bare
   // `--help`/`-h` (or `dor help agent-browser`, normalized above) falls through
   // to stricli.
@@ -258,18 +258,6 @@ const BROWSER_CLIS: Record<BrowserAutomationProvider, (args: string[], options: 
   'agent-browser': runAgentBrowserCli,
   playwright: runPlaywrightCli,
 };
-
-/** The documented short aliases of the browser passthroughs. */
-const PASSTHROUGH_ALIASES = new Map<string, string>(BROWSER_PROVIDER_IDS.map((provider) => [BROWSER_PROVIDERS[provider].alias, provider]));
-
-/** Expand a passthrough's short alias, in any help form. */
-function normalizePassthroughAlias(argv: string[]): string[] {
-  const command = PASSTHROUGH_ALIASES.get(argv[0] ?? '');
-  if (command) return [command, ...argv.slice(1)];
-  const helpSubject = argv[0] === 'help' ? PASSTHROUGH_ALIASES.get(argv[1] ?? '') : undefined;
-  if (helpSubject) return ['help', helpSubject, ...argv.slice(2)];
-  return argv;
-}
 
 function isPassthroughHelpInvocation(argv: string[]): boolean {
   return argv.length === 2 && (argv[1] === '--help' || argv[1] === '-h');

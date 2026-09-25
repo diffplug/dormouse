@@ -226,8 +226,8 @@ export function useToolServing({
         // -> "Browser Connection").
         const url = new URL(announcedPath, entry.url).href;
         lath.store.updateParams(leaf.id, {
-          ...(leaf.params.toolRender === 'ab-screencast'
-            ? toolBrowserLaunchParams(leaf.id, leaf.params, url)
+          ...(leaf.params.toolRender === 'agent-browser-screencast' || leaf.params.toolRender === 'playwright-screencast'
+            ? toolBrowserLaunchParams(leaf.id, leaf.params, url, leaf.params.toolRender === 'playwright-screencast' ? 'playwright' : 'agent-browser')
             : { url, renderMode: 'iframe' }),
           toolPortConflict: undefined,
           toolAnnouncedPort: announcedPort ?? undefined,

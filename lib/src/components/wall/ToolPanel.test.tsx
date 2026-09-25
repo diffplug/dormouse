@@ -58,7 +58,7 @@ describe('ToolPanel', () => {
   it.each([
     ['terminal', booting],
     ['iframe', serving],
-    ['agent-browser', { ...serving, renderMode: 'ab-screencast' }],
+    ['agent-browser', { ...serving, renderMode: 'agent-browser-screencast' }],
   ])('hides the %s face with its Workspace or parked leaf and restores only the foreground face', (_face, params) => {
     show(params);
     const terminal = half('terminal');

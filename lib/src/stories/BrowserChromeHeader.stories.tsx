@@ -180,7 +180,7 @@ const meta: Meta<typeof BrowserChromeStory> = {
   title: 'Components/BrowserChromeHeader',
   component: BrowserChromeStory,
   argTypes: {
-    renderMode: { control: 'inline-radio', options: ['ab-screencast', 'ab-popout', 'iframe'] },
+    renderMode: { control: 'inline-radio', options: ['agent-browser-screencast', 'agent-browser-popout', 'iframe'] },
     syncEngaged: { control: 'boolean' },
     state: { control: 'radio', options: ['SYNCED', 'SCALED'] },
     url: { control: 'text' },
@@ -194,7 +194,7 @@ const meta: Meta<typeof BrowserChromeStory> = {
     dirty: { control: 'inline-radio', options: ['unknown', 'clean', 'dirty'], if: { arg: 'tool' } },
   },
   args: {
-    renderMode: 'ab-screencast',
+    renderMode: 'agent-browser-screencast',
     syncEngaged: true,
     state: 'SYNCED',
     url: 'http://localhost:5173/app',
@@ -219,7 +219,7 @@ export const Playground: Story = {};
  *  the far-left chip becomes the open-window glyph. (The pane body is a stub
  *  while the window is up, but the header chrome stays live.) */
 export const Popout: Story = {
-  args: { renderMode: 'ab-popout' },
+  args: { renderMode: 'agent-browser-popout' },
 };
 
 /** Embed (iframe) render mode — the unified chrome is identical to screencast,

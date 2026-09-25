@@ -1,6 +1,6 @@
 /**
- * One runner for every browser provider's `dor` passthrough (`dor ab`,
- * `dor pw`): identity flags, the host's binding, open-target resolution, the
+ * One runner for every browser provider's `dor` passthrough (`dor agent-browser`,
+ * `dor playwright`): identity flags, the host's binding, open-target resolution, the
  * executable, the forwarded run, and the Surface it binds — each provider a
  * `BrowserCliDescriptor` of what genuinely differs (docs/specs/dor-cli.md →
  * "Browser Surface Addressing").
@@ -15,10 +15,13 @@ import {
   spawnAndCapture,
   type BrowserAutomationProvider,
 } from 'dor-lib-common';
+import { isFixedBrowserViewport, type BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import type {
   BrowserBinding,
   BrowserExec,
   BrowserExecResult,
+  BrowserViewportRequest,
+  ResolveBrowserResponse,
   CliOptions,
   CliResult,
   ControlClient,
@@ -126,10 +129,23 @@ export async function resolveOpenTargetArgs(
   workspace: string | undefined,
   verbs: ReadonlySet<string>,
 ): Promise<ParseResult<string[]>> {
-  const subcommand = rest.find((arg) => !arg.startsWith('-'));
+  const subcommand = rest.find((arg) => verbs.has(arg));
   if (subcommand === undefined || !verbs.has(subcommand)) return { ok: true, value: rest };
 
-  const index = rest.findIndex((arg) => isSpecialOpenTarget(arg));
+  const commandIndex = rest.findIndex((arg) => verbs.has(arg));
+  const valueFlags = verbs.has('navigate') ? AGENT_BROWSER_VALUE_FLAGS : PLAYWRIGHT_OPEN_VALUE_FLAGS;
+  const booleanFlags = verbs.has('navigate') ? AGENT_BROWSER_BOOLEAN_FLAGS : PLAYWRIGHT_OPEN_BOOLEAN_FLAGS;
+  let index = -1;
+  for (let i = commandIndex + 1; i < rest.length; i += 1) {
+    const arg = rest[i] ?? '';
+    if (arg.startsWith('-')) {
+      const [name] = arg.split('=', 1);
+      if (valueFlags.has(name)) { if (!arg.includes('=')) i += 1; continue; }
+      if (booleanFlags.has(name)) { if (rest[i + 1] === 'true' || rest[i + 1] === 'false') i += 1; continue; }
+      return { ok: true, value: rest };
+    }
+    if (isSpecialOpenTarget(arg)) { index = i; break; }
+  }
   if (index === -1) return { ok: true, value: rest };
 
   const raw = rest[index] ?? '';
@@ -166,8 +182,8 @@ export function isMissingBinaryError(error: unknown): boolean {
 // The default exec: delegate the spawn/capture/Windows handling to
 // spawnAndCapture, and adapt its never-throws result to this call site's
 // throw-on-spawn-failure contract (callers catch ENOENT via isMissingBinaryError).
-export async function execBrowserProcess(binary: string, args: string[], cwd?: string): Promise<BrowserExecResult> {
-  const result = await spawnAndCapture(binary, args, { cwd });
+export async function execBrowserProcess(binary: string, args: string[], cwd?: string, env?: Record<string, string>): Promise<BrowserExecResult> {
+  const result = await spawnAndCapture(binary, args, { cwd, env: env ? { ...process.env, ...env } : undefined });
   if (!result.ok) {
     const error: Error & { code?: string } = new Error(result.error.message);
     error.code = result.error.code;
@@ -207,6 +223,125 @@ export interface BrowserCliDescriptor {
   streamStatus?(session: string): string[];
 }
 
+const AGENT_BROWSER_VALUE_FLAGS = new Set([
+  '--headers', '--profile', '--restore-save', '--restore-check-url', '--restore-check-text', '--restore-check-fn',
+  '--session-name', '--state', '--namespace', '--executable-path', '--extension', '--init-script', '--enable',
+  '--args', '--user-agent', '--proxy', '--proxy-bypass', '--hide-scrollbars', '--provider', '-p', '--device',
+  '--screenshot-dir', '--screenshot-quality', '--screenshot-format', '--cdp', '--color-scheme', '--download-path',
+  '--max-output', '--allowed-domains', '--action-policy', '--confirm-actions', '--engine', '--model', '--config',
+]);
+const AGENT_BROWSER_BOOLEAN_FLAGS = new Set([
+  '--headed', '--ignore-https-errors', '--allow-file-access', '--json', '--annotate', '--auto-connect', '--content-boundaries',
+  '--confirm-interactive', '--no-auto-dialog', '--verbose', '-v', '--quiet', '-q', '--debug', '--restore',
+]);
+
+/** Build a blank navigation with every launch option preserved. Unknown flags
+ * are refused: guessing their arity could replace a flag value and let the
+ * destination page run before its viewport is ready. */
+function blankNavigationArgs(args: string[]): string[] | Error {
+  const result = [...args];
+  const verbIndex = result.findIndex((arg) => arg === 'open' || arg === 'goto' || arg === 'navigate');
+  if (verbIndex < 0) return new Error('No navigation command to prepare');
+  const positions: number[] = [];
+  for (let i = 0; i < result.length; i += 1) {
+    const arg = result[i] ?? '';
+    if (i === verbIndex) continue;
+    if (arg.startsWith('-')) {
+      const [name] = arg.split('=', 1);
+      if (AGENT_BROWSER_VALUE_FLAGS.has(name)) {
+        if (!arg.includes('=')) { if (i + 1 >= result.length) return new Error(`${name} requires a value`); i += 1; }
+      } else if (AGENT_BROWSER_BOOLEAN_FLAGS.has(name)) {
+        if (result[i + 1] === 'true' || result[i + 1] === 'false') i += 1;
+      } else return new Error(`Cannot prepare viewport with unknown agent-browser option '${arg}'`);
+    } else {
+      positions.push(i);
+    }
+  }
+  if (positions.length !== 1) return new Error('Cannot determine the agent-browser navigation URL for viewport preparation');
+  result[positions[0]!] = 'about:blank';
+  return result;
+}
+
+function hasExplicitAgentBrowserDevice(args: string[], env: Record<string, string | undefined>): boolean {
+  const special = ['--device', '--cdp', '--auto-connect', '--provider', '-p'];
+  return args.some((arg) => special.some((flag) => arg === flag || arg.startsWith(`${flag}=`)))
+    || args.some((arg, index) => arg === '--headed' && args[index + 1] !== 'false' || arg === '--headed=true')
+    || Boolean(env.AGENT_BROWSER_IOS_DEVICE || env.AGENT_BROWSER_CDP || env.AGENT_BROWSER_AUTO_CONNECT || env.AGENT_BROWSER_PROVIDER)
+    || env.AGENT_BROWSER_HEADED === 'true';
+}
+
+function hasExplicitPlaywrightLaunch(args: string[]): boolean {
+  const special = ['--device', '--mobile', '--headed'];
+  return args.some((arg) => special.some((flag) => arg === flag || arg.startsWith(`${flag}=`)));
+}
+
+function parseNativeDpr(output: string): number | undefined {
+  const value = output.trim();
+  let parsed: unknown;
+  try { parsed = JSON.parse(value); } catch { parsed = value; }
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (typeof parsed === 'number' || typeof parsed === 'string') {
+      const number = Number(parsed);
+      return Number.isFinite(number) && number > 0 && number <= 10 ? number : undefined;
+    }
+    if (!parsed || typeof parsed !== 'object') return undefined;
+    const object = parsed as Record<string, unknown>;
+    parsed = object.result ?? object.value ?? object.data;
+  }
+  return undefined;
+}
+
+const PLAYWRIGHT_OPEN_VALUE_FLAGS = new Set(['--browser', '--config', '--device', '--idle-timeout', '--profile']);
+const PLAYWRIGHT_OPEN_BOOLEAN_FLAGS = new Set(['--headed', '--mobile', '--persistent', '--json', '--raw']);
+
+function playwrightDestination(args: string[]): { blank: string[]; goto: string[] } | Error {
+  const openIndex = args.indexOf('open');
+  if (openIndex < 0) return new Error('No playwright open command to prepare');
+  const targetIndices: number[] = [];
+  for (let i = 0; i < args.length; i += 1) {
+    if (i === openIndex) continue;
+    const arg = args[i] ?? '';
+    if (arg.startsWith('-')) {
+      const [name] = arg.split('=', 1);
+      if (PLAYWRIGHT_OPEN_VALUE_FLAGS.has(name)) {
+        if (!arg.includes('=')) { if (i + 1 >= args.length) return new Error(`${name} requires a value`); i += 1; }
+      } else if (!PLAYWRIGHT_OPEN_BOOLEAN_FLAGS.has(name)) {
+        return new Error(`Cannot prepare playwright viewport with option '${arg}'`);
+      }
+    } else targetIndices.push(i);
+  }
+  if (targetIndices.length !== 1) return new Error('Cannot determine the playwright navigation URL for viewport preparation');
+  const blank = [...args];
+  blank[targetIndices[0]!] = 'about:blank';
+  const goto = ['goto', args[targetIndices[0]!]!, ...args.filter((arg) => arg === '--json' || arg === '--raw')];
+  return { blank, goto };
+}
+
+function nativeCommand(provider: BrowserAutomationProvider, args: string[]): string | undefined {
+  if (provider === 'playwright') {
+    for (let i = 0; i < args.length; i += 1) {
+      const arg = args[i] ?? '';
+      if (!arg.startsWith('-')) return arg;
+      const [name] = arg.split('=', 1);
+      if (PLAYWRIGHT_OPEN_VALUE_FLAGS.has(name)) { if (!arg.includes('=')) i += 1; continue; }
+      if (!PLAYWRIGHT_OPEN_BOOLEAN_FLAGS.has(name)) return undefined;
+    }
+    return undefined;
+  }
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i] ?? '';
+    if (!arg.startsWith('-')) return arg;
+    const [name] = arg.split('=', 1);
+    if (AGENT_BROWSER_VALUE_FLAGS.has(name)) { if (!arg.includes('=')) i += 1; continue; }
+    if (AGENT_BROWSER_BOOLEAN_FLAGS.has(name)) {
+      if (args[i + 1] === 'true' || args[i + 1] === 'false') i += 1;
+      continue;
+    }
+    return undefined;
+  }
+  return undefined;
+}
+
 /**
  * Forward `args` to the provider's CLI against the session the identity flags
  * name, then open or reuse the Surface bound to it (docs/specs/dor-browser.md
@@ -217,7 +352,9 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
   if (!parsed.ok) return fail(parsed.message);
   const flags = parsed.value;
 
-  const command = flags.rest.find((arg) => !arg.startsWith('-'));
+  if (flags.rest[0] === 'dor-embed-size') return runEmbedSize(d.provider, flags, options);
+
+  const command = nativeCommand(d.provider, flags.rest);
   const informational = flags.rest.some((arg) => d.informational.has(arg));
   const mayBind = command !== undefined && !d.noBind.has(command) && !informational;
 
@@ -236,11 +373,11 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
 
   // An informational command needs no binding: nothing binds, and a
   // `--surface` one names no session at all.
-  const resolved: ParseResult<Partial<BrowserBinding>> = informational
-    ? { ok: true, value: { session: flags.session ?? (flags.key === undefined ? undefined : sessionForKey(flags.key)) } }
+  const resolved: ParseResult<ResolveBrowserResponse> = informational
+    ? { ok: true, value: { binding: { session: flags.session ?? (flags.key === undefined ? '' : sessionForKey(flags.key)) } } }
     : await resolveBinding(d, flags, client, mayBind ? { cwd: callerCwd, ...(defaultBinaryPath ? { binaryPath: defaultBinaryPath } : {}) } : undefined);
   if (!resolved.ok) return fail(resolved.message);
-  const binding = resolved.value;
+  const { binding, fresh, initialViewport, launchViewport } = resolved.value;
   // A binding comes off saved pane params, so its directory can be gone (a
   // removed worktree). Say so, rather than let the spawn's ENOENT read as a
   // missing CLI on every later command.
@@ -285,11 +422,70 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
   // Windows, so an `agent-browser.cmd` sitting in a cloned repository would
   // win the race against the real install (docs/specs/dor-cli.md ->
   // "Spawning External Binaries"). `?? binary` is reached only by a stub.
-  const run = (argv: string[]) => (cwd === undefined ? exec(binaryPath ?? binary, argv) : exec(binaryPath ?? binary, argv, cwd));
+  const run = (argv: string[], envOverride?: Record<string, string>) => envOverride
+    ? exec(binaryPath ?? binary, argv, cwd, envOverride)
+    : cwd === undefined ? exec(binaryPath ?? binary, argv) : exec(binaryPath ?? binary, argv, cwd);
 
   let result: BrowserExecResult;
+  let prebound = false;
+  const explicitDevice = d.provider === 'agent-browser'
+    ? hasExplicitAgentBrowserDevice(rest, env)
+    : hasExplicitPlaywrightLaunch(rest);
   try {
-    result = await run([...(binding.session === undefined ? [] : spec.sessionArgs(binding.session)), ...rest]);
+    const sessionArgs = binding.session ? spec.sessionArgs(binding.session) : [];
+    const launching = fresh === true && d.provider === 'agent-browser' && d.navigationVerbs.has(command ?? '')
+      && launchViewport !== undefined && !explicitDevice;
+    if (launching) {
+      const blankArgs = blankNavigationArgs(rest);
+      if (blankArgs instanceof Error) return fail(blankArgs.message);
+      const blank = await run([...sessionArgs, ...blankArgs]);
+      if (blank.exitCode !== 0) return fail(`Could not prepare the agent-browser viewport before navigation: ${blank.stderr.trim() || `agent-browser exited ${blank.exitCode}`}`);
+      let dpr = launchViewport.dpr;
+      if (dpr === undefined) {
+        const ratio = await run([...sessionArgs, 'eval', 'window.devicePixelRatio']);
+        dpr = ratio.exitCode === 0 ? parseNativeDpr(ratio.stdout) : undefined;
+        if (dpr === undefined) return fail('Could not measure agent-browser DPR before navigation');
+      }
+      const viewport = await run([...sessionArgs, 'set', 'viewport', String(launchViewport.width), String(launchViewport.height), String(dpr)]);
+      if (viewport.exitCode !== 0) return fail(`Could not set the agent-browser viewport before navigation: ${viewport.stderr.trim() || `agent-browser exited ${viewport.exitCode}`}`);
+    }
+    const playwrightOpen = d.provider === 'playwright' && command === 'open' && launchViewport !== undefined && !explicitDevice;
+    const launchEnv = playwrightOpen
+      ? { PLAYWRIGHT_MCP_VIEWPORT_SIZE: `${launchViewport.width}x${launchViewport.height}` }
+      : undefined;
+    const requestedDpr = playwrightOpen && initialViewport?.mode === 'fixed' ? initialViewport.dpr : undefined;
+    if (requestedDpr !== undefined && client instanceof Error) return fail(client.message);
+    if (requestedDpr !== undefined && !(client instanceof Error)) {
+      const navigation = playwrightDestination(rest);
+      if (navigation instanceof Error) return fail(navigation.message);
+      const blank = await run([...sessionArgs, ...navigation.blank], launchEnv);
+      if (blank.exitCode !== 0) return fail(`Could not prepare the playwright viewport before navigation: ${blank.stderr.trim() || `playwright exited ${blank.exitCode}`}`);
+      const preparedSurface = await client.browserSurface({
+        provider: d.provider, key: flags.key, session: binding.session, cwd: cwd ?? callerCwd,
+        ...(binaryPath ? { binaryPath } : {}), ...(fresh && initialViewport ? { initialViewport } : {}),
+        ...workspaceParam(flags.workspace),
+      });
+      prebound = true;
+      const measured = await client.browserViewport({
+        provider: d.provider,
+        ...(flags.key === undefined ? flags.surface === undefined ? { session: flags.session! } : { surface: flags.surface } : { key: flags.key }),
+        ...workspaceParam(flags.workspace),
+      } as BrowserViewportRequest);
+      if (!measured.actual || Math.abs(measured.actual.dpr - requestedDpr) > 0.001) {
+        if (preparedSurface.status === 'created') {
+          try {
+            await client.killSurface({ surface: preparedSurface.surfaceId, confirmation: { mode: 'dangerously' }, ...workspaceParam(flags.workspace) });
+          } catch {
+            // The DPR refusal remains the useful error even if cleanup loses
+            // a race with the user closing the preparatory Surface.
+          }
+        }
+        return fail(`playwright context DPR is ${measured.actual?.dpr ?? 'unavailable'}; requested ${requestedDpr}. The destination was not opened.`);
+      }
+      result = await run([...sessionArgs, ...navigation.goto]);
+    } else {
+      result = await run([...sessionArgs, ...rest], launchEnv);
+    }
   } catch (error) {
     return isMissingBinaryError(error) ? fail(d.missingBinaryMessage(binary)) : fail(errorMessage(error));
   }
@@ -297,7 +493,7 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
 
   // Outside a Dormouse terminal there is no control endpoint; stay a pure
   // passthrough rather than nagging about the missing surface.
-  if (result.exitCode === 0 && mayBind && binding.session !== undefined && !(client instanceof Error)) {
+  if (result.exitCode === 0 && mayBind && binding.session !== undefined && !(client instanceof Error) && !prebound) {
     try {
       const statusArgs = d.streamStatus?.(binding.session);
       const wsPort = statusArgs === undefined ? undefined : parseStreamPort((await run(statusArgs)).stdout);
@@ -308,6 +504,7 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
         cwd: cwd ?? callerCwd,
         ...(binaryPath ? { binaryPath } : {}),
         ...(wsPort === undefined ? {} : { wsPort }),
+        ...(fresh && initialViewport && !explicitDevice ? { initialViewport } : {}),
         ...workspaceParam(flags.workspace),
       });
     } catch (error) {
@@ -315,6 +512,72 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
     }
   }
   return result;
+}
+
+function parseEmbedSize(rest: string[]): ParseResult<{ setting?: BrowserViewportRequest['setting']; json: boolean }> {
+  const positional: string[] = [];
+  let preset: string | undefined;
+  let dpr: number | undefined;
+  let json = false;
+  for (let i = 1; i < rest.length; i += 1) {
+    const arg = rest[i] ?? '';
+    if (arg === '--json') { json = true; continue; }
+    if (arg === '--preset' || arg.startsWith('--preset=')) {
+      if (preset !== undefined) return { ok: false, message: '--preset may be given only once' };
+      preset = arg === '--preset' ? rest[++i] : arg.slice('--preset='.length);
+      if (!preset || preset.startsWith('-')) return { ok: false, message: '--preset requires a name' };
+      continue;
+    }
+    if (arg === '--dpr' || arg.startsWith('--dpr=')) {
+      if (dpr !== undefined) return { ok: false, message: '--dpr may be given only once' };
+      const raw = arg === '--dpr' ? rest[++i] : arg.slice('--dpr='.length);
+      dpr = Number(raw);
+      if (!raw || !Number.isFinite(dpr) || dpr <= 0 || dpr > 10) return { ok: false, message: '--dpr must be greater than 0 and at most 10' };
+      continue;
+    }
+    if (arg.startsWith('-')) return { ok: false, message: `unknown dor-embed-size option '${arg}'` };
+    positional.push(arg);
+  }
+  if (preset !== undefined && positional.length) return { ok: false, message: 'dimensions and --preset are mutually exclusive' };
+  if (preset === 'pane-sync' && dpr !== undefined) return { ok: false, message: '--dpr cannot be used with pane-sync' };
+  if (preset !== undefined) return { ok: true, value: { setting: { preset, ...(dpr === undefined ? {} : { dpr }) }, json } };
+  if (positional.length === 0) return dpr === undefined
+    ? { ok: true, value: { json } }
+    : { ok: false, message: '--dpr requires dimensions or --preset' };
+  if (positional.length !== 2) return { ok: false, message: 'dor-embed-size requires width and height' };
+  if (!positional.every((v) => /^\d+$/.test(v))) return { ok: false, message: 'width and height must be whole CSS pixels' };
+  const setting: BrowserViewportSetting = { mode: 'fixed', width: Number(positional[0]), height: Number(positional[1]), ...(dpr === undefined ? {} : { dpr }) };
+  if (!isFixedBrowserViewport(setting)) return { ok: false, message: 'width and height must be 1–16384 CSS pixels' };
+  return { ok: true, value: { setting, json } };
+}
+
+async function runEmbedSize(provider: BrowserAutomationProvider, flags: ResolvedSessionFlags, options: CliOptions): Promise<CliResult> {
+  const parsed = parseEmbedSize(flags.rest);
+  if (!parsed.ok) return fail(parsed.message);
+  const client = requireControlClient(options);
+  if (client instanceof Error) return fail(client.message);
+  const request = {
+    provider,
+    ...(flags.key === undefined ? flags.surface === undefined ? { session: flags.session! } : { surface: flags.surface } : { key: flags.key }),
+    ...(flags.workspace === undefined ? {} : { workspace: flags.workspace }),
+    ...(parsed.value.setting === undefined ? {} : { setting: parsed.value.setting }),
+  } as BrowserViewportRequest;
+  try {
+    const result = await client.browserViewport(request);
+    if (parsed.value.json) return { exitCode: 0, stdout: `${JSON.stringify({
+      surface_id: result.surfaceId, surface_ref: result.surfaceRef, provider: result.provider,
+      render_mode: result.renderMode, requested: result.requested, actual: result.actual, ready: result.ready,
+    })}\n`, stderr: '' };
+    const setting = result.requested.mode === 'pane-sync'
+      ? 'pane-sync'
+      : `fixed ${result.requested.width} × ${result.requested.height} CSS px${result.requested.dpr === undefined ? '' : ` @ ${result.requested.dpr} DPR`}`;
+    const actual = result.actual
+      ? `${result.actual.width} × ${result.actual.height} CSS px @ ${result.actual.dpr} DPR`
+      : 'unavailable';
+    return { exitCode: 0, stdout: `${result.surfaceRef} ${provider} ${result.renderMode}: ${setting} (${result.ready ? 'ready' : 'not ready'}; actual ${actual})\n`, stderr: '' };
+  } catch (error) {
+    return fail(errorMessage(error));
+  }
 }
 
 /**
@@ -340,20 +603,20 @@ async function resolveBinding(
   flags: ResolvedSessionFlags,
   client: ControlClient | Error,
   proposed: Omit<BrowserBinding, 'session'> | undefined,
-): Promise<ParseResult<BrowserBinding>> {
-  if (flags.session !== undefined) return { ok: true, value: { session: flags.session } };
+): Promise<ParseResult<ResolveBrowserResponse>> {
+  if (flags.session !== undefined) return { ok: true, value: { binding: { session: flags.session } } };
   if (client instanceof Error) {
     return flags.key === undefined
       ? { ok: false, message: client.message }
-      : { ok: true, value: { session: sessionForKey(flags.key) } };
+      : { ok: true, value: { binding: { session: sessionForKey(flags.key) } } };
   }
   try {
-    const { binding } = await client.resolveBrowser({
+    const response = await client.resolveBrowser({
       provider: d.provider,
       ...(flags.key === undefined ? { surface: flags.surface } : { key: flags.key, ...(proposed ? { proposed } : {}) }),
       ...workspaceParam(flags.workspace),
     });
-    return { ok: true, value: binding };
+    return { ok: true, value: response };
   } catch (error) {
     return { ok: false, message: errorMessage(error) };
   }

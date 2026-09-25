@@ -16,7 +16,7 @@ import {
 
 const SNAPSHOT: ScreenSnapshot = {
   state: 'SCALED',
-  renderMode: 'ab-screencast',
+  renderMode: 'agent-browser-screencast',
   viewport: { w: 1280, h: 720, dpr: 1 },
   paneCss: { w: 980, h: 560 },
   displayDpr: 2,
@@ -50,11 +50,11 @@ function register(id: string, overrides?: { hostCapable?: boolean }) {
 
 describe('agent-browser screen registry', () => {
   it('derives display identity from agent visibility and presentation intent', () => {
-    expect(browserDisplayMode({ renderMode: 'ab-screencast', syncEngaged: true })).toBe('ab-resize');
+    expect(browserDisplayMode({ renderMode: 'agent-browser-screencast', syncEngaged: true })).toBe('agent-browser-resize');
     // A fixed viewport can happen to match the pane dimensions; intent, not the
     // transient dimension comparison, owns the icon.
-    expect(browserDisplayMode({ renderMode: 'ab-screencast', syncEngaged: false })).toBe('ab-fixed');
-    expect(browserDisplayMode({ renderMode: 'ab-popout', syncEngaged: false })).toBe('ab-popout');
+    expect(browserDisplayMode({ renderMode: 'agent-browser-screencast', syncEngaged: false })).toBe('agent-browser-fixed');
+    expect(browserDisplayMode({ renderMode: 'agent-browser-popout', syncEngaged: false })).toBe('agent-browser-popout');
     expect(browserDisplayMode({ renderMode: 'iframe', syncEngaged: false })).toBe('iframe');
   });
 

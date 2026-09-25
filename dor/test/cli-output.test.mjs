@@ -67,7 +67,7 @@ const fixtureSurfaces = [
     id: '33333333-3333-4333-8333-333333333333',
     ref: 'surface:3',
     kind: 'browser',
-    renderMode: 'ab-screencast',
+    renderMode: 'agent-browser-screencast',
     title: 'Dormouse',
     focused: false,
     view: 'paned',
@@ -119,14 +119,14 @@ function fixtureWorkspace(target) {
   )) ?? fixtureWorkspaces[0];
 }
 
-/** The `surface.browser` request a `dor ab` run made, if it opened one at
+/** The `surface.browser` request a `dor agent-browser` run made, if it opened one at
  *  all: every run now asks the host to name its session first, so the surface
  *  call is never the first entry. */
 function surfaceRequest(client) {
   return client.requests.find((entry) => entry.method === 'browserSurface')?.request;
 }
 
-/** What a `dor ab` run in this process offers for a key's first binding. */
+/** What a `dor agent-browser` run in this process offers for a key's first binding. */
 const proposedHere = { cwd: process.cwd() };
 
 function fixtureClient(surfacesFixture = fixtureSurfaces) {
@@ -1091,15 +1091,15 @@ test('agent-browser passthrough output', async () => {
   const ab = fakeAgentBrowser({ stdout: '✓ \n  http://localhost:5173\n' });
   await snapshot(
     'agent-browser-passthrough',
-    await runCli(['ab', 'open', 'http://localhost:5173'], { client: fixtureClient(), execAgentBrowser: ab.exec }),
+    await runCli(['agent-browser', 'open', 'http://localhost:5173'], { client: fixtureClient(), execAgentBrowser: ab.exec }),
   );
 });
 
 test('agent-browser resolves --key to a namespaced session and opens a surface', async () => {
   const ab = fakeAgentBrowser();
   const client = fixtureClient();
-  await runCli(['ab', '--key', 'storybook', 'open', 'http://localhost:6006'], { client, execAgentBrowser: ab.exec });
-  // The command made the daemon, so `dor ab` asks it for its stream port — under
+  await runCli(['agent-browser', '--key', 'storybook', 'open', 'http://localhost:6006'], { client, execAgentBrowser: ab.exec });
+  // The command made the daemon, so `dor agent-browser` asks it for its stream port — under
   // its own socket directory and CLI — and hands that over.
   assert.deepEqual(ab.calls, [
     ['agent-browser', '--session', 'dormouse.1.storybook', 'open', 'http://localhost:6006'],
@@ -1116,7 +1116,7 @@ test('agent-browser resolves --key to a namespaced session and opens a surface',
 test('agent-browser --key in another Workspace drives that Workspace own session', async () => {
   const ab = fakeAgentBrowser();
   const client = fixtureClient();
-  await runCli(['ab', '--workspace', 'build', '--key', 'default', 'open', 'http://localhost:6006'], { client, execAgentBrowser: ab.exec });
+  await runCli(['agent-browser', '--workspace', 'build', '--key', 'default', 'open', 'http://localhost:6006'], { client, execAgentBrowser: ab.exec });
   // The same key in another Workspace is another browser: the session name is
   // namespaced by the Workspace's stable id, so nothing here can reach the
   // first Workspace's `dormouse.1.default`.
@@ -1144,7 +1144,7 @@ test('agent-browser defaults to --key default', async () => {
 test('agent-browser raw --session skips key namespacing', async () => {
   const ab = fakeAgentBrowser();
   const client = fixtureClient();
-  await runCli(['ab', '--session', 'mine', 'snapshot'], { client, execAgentBrowser: ab.exec });
+  await runCli(['agent-browser', '--session', 'mine', 'snapshot'], { client, execAgentBrowser: ab.exec });
   assert.equal(ab.calls[0][2], 'mine');
   // A raw session is already the session: nothing is asked of the host but the
   // surface it binds to.
@@ -1156,7 +1156,7 @@ test('agent-browser raw --session skips key namespacing', async () => {
 test('agent-browser --workspace names the Workspace and never reaches the binary', async () => {
   const ab = fakeAgentBrowser();
   const client = fixtureClient();
-  await runCli(['ab', '--workspace', 'build', 'open', 'surface:1'], { client, execAgentBrowser: ab.exec });
+  await runCli(['agent-browser', '--workspace', 'build', 'open', 'surface:1'], { client, execAgentBrowser: ab.exec });
   // Intercepted like the identity flags: the browser opens in `build`, the
   // handle resolves there, and agent-browser sees neither the flag nor its value.
   assert.deepEqual(ab.calls, [
@@ -1175,7 +1175,7 @@ test('agent-browser --workspace names the Workspace and never reaches the binary
 test('agent-browser open resolves a surface handle to a URL before forwarding', async () => {
   const ab = fakeAgentBrowser();
   const client = fixtureClient();
-  await runCli(['ab', 'open', 'surface:1'], { client, execAgentBrowser: ab.exec });
+  await runCli(['agent-browser', 'open', 'surface:1'], { client, execAgentBrowser: ab.exec });
   // The surface handle is resolved via the host, then the URL is forwarded.
   assert.deepEqual(ab.calls, [
     ['agent-browser', '--session', 'dormouse.1.default', 'open', 'http://localhost:5173/'],
@@ -1187,7 +1187,7 @@ test('agent-browser open resolves a surface handle to a URL before forwarding', 
 test('agent-browser open sugars a bare :port without a host round trip', async () => {
   const ab = fakeAgentBrowser();
   const client = fixtureClient();
-  await runCli(['ab', 'open', ':5173'], { client, execAgentBrowser: ab.exec });
+  await runCli(['agent-browser', 'open', ':5173'], { client, execAgentBrowser: ab.exec });
   assert.equal(ab.calls[0][4], 'http://localhost:5173/');
   assert.equal(client.requests.some((entry) => entry.method === 'resolveOpenTarget'), false);
 });
@@ -1195,7 +1195,7 @@ test('agent-browser open sugars a bare :port without a host round trip', async (
 test('agent-browser open defaults a schemeless host:port to http, overriding agent-browser https', async () => {
   const ab = fakeAgentBrowser();
   const client = fixtureClient();
-  await runCli(['ab', 'open', 'localhost:5173'], { client, execAgentBrowser: ab.exec });
+  await runCli(['agent-browser', 'open', 'localhost:5173'], { client, execAgentBrowser: ab.exec });
   // agent-browser would prepend https:// itself; dor forces http for the dev server.
   assert.equal(ab.calls[0][4], 'http://localhost:5173/');
   assert.equal(client.requests.some((entry) => entry.method === 'resolveOpenTarget'), false);
@@ -1206,7 +1206,7 @@ test('agent-browser open does not treat a bare-integer n:n as a host:port target
   const client = fixtureClient();
   // `800:600` would otherwise be packed by new URL into http://0.0.3.32:600/; a
   // bare-integer host is not a real target, so it is forwarded verbatim.
-  await runCli(['ab', 'open', '800:600'], { client, execAgentBrowser: ab.exec });
+  await runCli(['agent-browser', 'open', '800:600'], { client, execAgentBrowser: ab.exec });
   assert.equal(ab.calls[0][4], '800:600');
   assert.equal(client.requests.some((entry) => entry.method === 'resolveOpenTarget'), false);
 });
@@ -1221,21 +1221,21 @@ test('iframe rejects a bare-integer n:n rather than packing it into an IPv4', as
 test('agent-browser open resolves a surface target behind a flag', async () => {
   const ab = fakeAgentBrowser();
   const client = fixtureClient();
-  await runCli(['ab', 'open', '--headed', 'surface:1'], { client, execAgentBrowser: ab.exec });
+  await runCli(['agent-browser', 'open', '--headed', 'surface:1'], { client, execAgentBrowser: ab.exec });
   assert.deepEqual(ab.calls[0], ['agent-browser', '--session', 'dormouse.1.default', 'open', '--headed', 'http://localhost:5173/']);
 });
 
 test('agent-browser leaves a plain open URL untouched', async () => {
   const ab = fakeAgentBrowser();
   const client = fixtureClient();
-  await runCli(['ab', 'open', 'http://localhost:5173'], { client, execAgentBrowser: ab.exec });
+  await runCli(['agent-browser', 'open', 'http://localhost:5173'], { client, execAgentBrowser: ab.exec });
   assert.equal(ab.calls[0][4], 'http://localhost:5173');
   assert.equal(client.requests.some((entry) => entry.method === 'resolveOpenTarget'), false);
 });
 
 test('agent-browser open of a surface handle needs a control endpoint', async () => {
   const ab = fakeAgentBrowser();
-  const result = await runCli(['ab', 'open', 'surface:1'], { execAgentBrowser: ab.exec });
+  const result = await runCli(['agent-browser', 'open', 'surface:1'], { execAgentBrowser: ab.exec });
   assert.equal(result.exitCode, 1);
   assert.match(result.stderr, /control endpoint is not available/);
   // Never forwards an unresolved handle to agent-browser.
@@ -1245,14 +1245,14 @@ test('agent-browser open of a surface handle needs a control endpoint', async ()
 test('agent-browser close skips surface management', async () => {
   const ab = fakeAgentBrowser();
   const client = fixtureClient();
-  await runCli(['ab', 'close'], { client, execAgentBrowser: ab.exec });
+  await runCli(['agent-browser', 'close'], { client, execAgentBrowser: ab.exec });
   assert.deepEqual(ab.calls, [['agent-browser', '--session', 'dormouse.1.default', 'close']]);
   assert.equal(surfaceRequest(client), undefined);
 });
 
 test('agent-browser without a control endpoint stays a pure passthrough', async () => {
   const ab = fakeAgentBrowser();
-  const result = await runCli(['ab', 'open', 'http://localhost:5173'], { execAgentBrowser: ab.exec });
+  const result = await runCli(['agent-browser', 'open', 'http://localhost:5173'], { execAgentBrowser: ab.exec });
   assert.equal(result.exitCode, 0);
   assert.equal(result.stderr, '');
   assert.deepEqual(ab.calls, [['agent-browser', '--session', 'dormouse.1.default', 'open', 'http://localhost:5173']]);
@@ -1261,7 +1261,7 @@ test('agent-browser without a control endpoint stays a pure passthrough', async 
 test('agent-browser forwards child exit code and skips surface on failure', async () => {
   const ab = fakeAgentBrowser({ exitCode: 1, stderr: '✗ boom\n' });
   const client = fixtureClient();
-  const result = await runCli(['ab', 'open', 'nope'], { client, execAgentBrowser: ab.exec });
+  const result = await runCli(['agent-browser', 'open', 'nope'], { client, execAgentBrowser: ab.exec });
   assert.equal(result.exitCode, 1);
   assert.equal(result.stderr, '✗ boom\n');
   assert.equal(surfaceRequest(client), undefined);
@@ -1270,7 +1270,7 @@ test('agent-browser forwards child exit code and skips surface on failure', asyn
 test('agent-browser --surface drives the session the host says the surface is bound to', async () => {
   const ab = fakeAgentBrowser();
   const client = fixtureClient();
-  await runCli(['ab', '--surface', 'surface:3', 'click', '@e3'], { client, execAgentBrowser: ab.exec });
+  await runCli(['agent-browser', '--surface', 'surface:3', 'click', '@e3'], { client, execAgentBrowser: ab.exec });
   // The handle is resolved first, then everything else is forwarded verbatim
   // against the resolved session — a GUI-minted name no `--key` can produce.
   assert.deepEqual(client.requests[0], {
@@ -1291,7 +1291,7 @@ test('agent-browser --surface drives the session the host says the surface is bo
 test('agent-browser --surface accepts --surface=handle and resolves an open target too', async () => {
   const ab = fakeAgentBrowser();
   const client = fixtureClient();
-  await runCli(['ab', '--surface=surface:3', 'open', ':5173'], { client, execAgentBrowser: ab.exec });
+  await runCli(['agent-browser', '--surface=surface:3', 'open', ':5173'], { client, execAgentBrowser: ab.exec });
   assert.deepEqual(ab.calls[0], [
     'agent-browser', '--session', 'dormouse.1.gui-a1b2c3', 'open', 'http://localhost:5173/',
   ]);
@@ -1299,7 +1299,7 @@ test('agent-browser --surface accepts --surface=handle and resolves an open targ
 
 test('agent-browser --surface prints the host gate error and never forwards', async () => {
   const ab = fakeAgentBrowser();
-  const result = await runCli(['ab', '--surface', 'surface:1', 'reload'], {
+  const result = await runCli(['agent-browser', '--surface', 'surface:1', 'reload'], {
     client: fixtureClient(),
     execAgentBrowser: ab.exec,
   });
@@ -1320,7 +1320,7 @@ test('agent-browser fails fast when the host refuses to name a managed key, neve
   client.resolveBrowser = async () => {
     throw new Error("workspace 'workspace:1' is still mounting");
   };
-  const result = await runCli(['ab', 'tab', 'list'], { client, execAgentBrowser: ab.exec });
+  const result = await runCli(['agent-browser', 'tab', 'list'], { client, execAgentBrowser: ab.exec });
   assert.equal(result.exitCode, 1);
   assert.equal(result.stdout, '');
   assert.equal(result.stderr, "Error: workspace 'workspace:1' is still mounting\n");
@@ -1329,7 +1329,7 @@ test('agent-browser fails fast when the host refuses to name a managed key, neve
 
 test('agent-browser --surface needs a control endpoint', async () => {
   const ab = fakeAgentBrowser();
-  const result = await runCli(['ab', '--surface', 'surface:3', 'reload'], { execAgentBrowser: ab.exec });
+  const result = await runCli(['agent-browser', '--surface', 'surface:3', 'reload'], { execAgentBrowser: ab.exec });
   assert.equal(result.exitCode, 1);
   assert.match(result.stderr, /control endpoint is not available/);
   assert.deepEqual(ab.calls, []);
@@ -1338,7 +1338,7 @@ test('agent-browser --surface needs a control endpoint', async () => {
 test('agent-browser rejects a valueless identity flag, whichever one it is', async () => {
   // The three flags share one parse loop; a trailing flag has no value and a
   // following flag is never one, so neither may be swallowed as the value.
-  for (const args of [['ab', 'reload', '--key'], ['ab', 'reload', '--session'], ['ab', 'reload', '--surface']]) {
+  for (const args of [['agent-browser', 'reload', '--key'], ['agent-browser', 'reload', '--session'], ['agent-browser', 'reload', '--surface']]) {
     const ab = fakeAgentBrowser();
     const result = await runCli(args, { client: fixtureClient(), execAgentBrowser: ab.exec });
     assert.equal(result.exitCode, 1);
@@ -1346,7 +1346,7 @@ test('agent-browser rejects a valueless identity flag, whichever one it is', asy
     assert.deepEqual(ab.calls, []);
   }
   const ab = fakeAgentBrowser();
-  const result = await runCli(['ab', '--surface', '--json', 'reload'], { client: fixtureClient(), execAgentBrowser: ab.exec });
+  const result = await runCli(['agent-browser', '--surface', '--json', 'reload'], { client: fixtureClient(), execAgentBrowser: ab.exec });
   assert.equal(result.exitCode, 1);
   assert.equal(result.stderr, 'Error: --surface requires a value\n');
   assert.deepEqual(ab.calls, []);
@@ -1356,7 +1356,7 @@ test('agent-browser key/session conflict output', async () => {
   const ab = fakeAgentBrowser();
   await snapshot(
     'agent-browser-key-session-conflict',
-    await runCli(['ab', '--key', 'a', '--session', 'b', 'open', 'x'], { client: fixtureClient(), execAgentBrowser: ab.exec }),
+    await runCli(['agent-browser', '--key', 'a', '--session', 'b', 'open', 'x'], { client: fixtureClient(), execAgentBrowser: ab.exec }),
   );
 });
 
@@ -1364,7 +1364,7 @@ test('agent-browser key/surface conflict reports in flag order, not argv order',
   const ab = fakeAgentBrowser();
   await snapshot(
     'agent-browser-key-surface-conflict',
-    await runCli(['ab', '--surface', 'surface:3', '--key', 'a', 'reload'], { client: fixtureClient(), execAgentBrowser: ab.exec }),
+    await runCli(['agent-browser', '--surface', 'surface:3', '--key', 'a', 'reload'], { client: fixtureClient(), execAgentBrowser: ab.exec }),
   );
 });
 
@@ -1372,7 +1372,7 @@ test('agent-browser three-way identity conflict output', async () => {
   const ab = fakeAgentBrowser();
   await snapshot(
     'agent-browser-identity-conflict',
-    await runCli(['ab', '--key', 'a', '--session', 'b', '--surface', 'surface:3', 'reload'], { client: fixtureClient(), execAgentBrowser: ab.exec }),
+    await runCli(['agent-browser', '--key', 'a', '--session', 'b', '--surface', 'surface:3', 'reload'], { client: fixtureClient(), execAgentBrowser: ab.exec }),
   );
 });
 
@@ -1380,7 +1380,7 @@ test('agent-browser missing binary output', async () => {
   const enoent = Object.assign(new Error("spawn agent-browser ENOENT"), { code: 'ENOENT' });
   await snapshot(
     'agent-browser-missing-binary',
-    await runCli(['ab', 'open', 'http://localhost:5173'], {
+    await runCli(['agent-browser', 'open', 'http://localhost:5173'], {
       client: fixtureClient(),
       execAgentBrowser: async () => { throw enoent; },
     }),
@@ -1390,7 +1390,7 @@ test('agent-browser missing binary output', async () => {
 test('agent-browser respects DORMOUSE_AGENT_BROWSER_BIN and forwards it as binaryPath', async () => {
   const ab = fakeAgentBrowser();
   const client = fixtureClient();
-  await runCli(['ab', 'snapshot'], {
+  await runCli(['agent-browser', 'snapshot'], {
     client,
     execAgentBrowser: ab.exec,
     env: { DORMOUSE_AGENT_BROWSER_BIN: '/opt/custom/agent-browser' },
@@ -1409,7 +1409,7 @@ test('agent-browser spawns the PATH-resolved absolute path, never the bare name'
     await writeFile(binPath, '#!/bin/sh\n', { mode: 0o755 });
     const ab = fakeAgentBrowser();
     const client = fixtureClient();
-    await runCli(['ab', 'snapshot'], {
+    await runCli(['agent-browser', 'snapshot'], {
       client,
       execAgentBrowser: ab.exec,
       // Join with the platform PATH delimiter (`;` on Windows, `:` elsewhere) —
@@ -1447,7 +1447,7 @@ test('agent-browser skips a PATH entry that is not an executable file', async ()
       await writeFile(realPath, '#!/bin/sh\n', { mode: 0o755 });
       const ab = fakeAgentBrowser();
       const client = fixtureClient();
-      await runCli(['ab', 'snapshot'], {
+      await runCli(['agent-browser', 'snapshot'], {
         client,
         execAgentBrowser: ab.exec,
         env: {
@@ -1473,7 +1473,7 @@ test('agent-browser tries a name that already carries an extension as itself', {
     // `which` unshifts an empty extension when the command contains a `.`;
     // without it the walk only ever looks for `agent-browser.exe.EXE` and
     // reports a present install as missing.
-    await runCli(['ab', 'snapshot'], {
+    await runCli(['agent-browser', 'snapshot'], {
       client,
       execAgentBrowser: ab.exec,
       env: { PATH: dir, DORMOUSE_AGENT_BROWSER_BIN: 'agent-browser.exe' },

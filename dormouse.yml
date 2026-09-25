@@ -3,6 +3,9 @@
 # `dor tool <name>` runs one of these in a pane that grows a browser once the
 # command starts serving. Repo-controlled, so Dormouse asks you to approve this
 # directory once before it will run anything here.
+browser:
+  default_viewport: desktop
+
 tools:
   storybook:
     run: pnpm storybook
@@ -18,8 +21,9 @@ tools:
   standalone-harness:
     run: pnpm innerdogfood
     # A real browser rather than an iframe, so an agent can drive the harness
-    # with `dor ab --surface surface:N <verb>`.
-    render: ab-screencast
+    # with `dor agent-browser --surface surface:N <verb>`.
+    render: agent-browser-screencast
+    viewport: desktop
     # The bridge and Vite each bind an OS-assigned port. Announce Vite's actual
     # port via OSC 367 so Dormouse selects the UI from that pair of listeners.
     port: announced
