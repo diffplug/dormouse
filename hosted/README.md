@@ -5,7 +5,7 @@ The marketing website is a separate application. Hosted voice and the managed
 Relay are not implemented. See [the spec](../docs/specs/hosted.md).
 
 This file is the whole operator runbook, in the order an operator works: run
-locally, refresh packages, set up GitHub, provision previews, provision
+locally, update packages, set up GitHub, provision previews, provision
 production, release, accept, recover. Marketing, desktop releases, Hosted
 production, and PR previews have separate deployment credentials. A passing
 local test implies no cloud resource and no real-provider acceptance.
@@ -35,29 +35,20 @@ Tests run the production composition in real workerd with disposable Postgres
 clones and a local OAuth simulator. The build includes a Wrangler dry-run; it
 does not deploy.
 
-## Refresh private packages
+## Update pgstencil
 
-```sh
-node scripts/sync-pgstencil.mjs /path/to/pgstencil [revision]
-```
+`hosted/package.json` installs released `pgstencil` and `@pgstencil/auth` from
+npm. They share a version and Hosted declares their peer dependencies. Approved
+pgstencil releases are exempt from the pnpm and Renovate cooldowns because the
+release workflow requires a passing security audit, stages the archives, and
+requires a maintainer's 2FA approval before publishing.
 
-This checks out the pgstencil revision (default `HEAD`) in a temporary clean
-worktree, runs `pnpm packages:pack` there, vendors core/auth, records the commit,
-`dirty: false` and SHA-256 hashes in `vendor/build.json`, and installs. Each
-archive carries its own `package/dist/provenance.json`, and the sync refuses one
-that is missing it, that reports a dirty pack, or that names a commit other than
-the one packed here. To try an unfinished pgstencil change, commit it to a local
-branch and sync that revision.
-The sync also warns when the vendored commit is not on pgstencil's
-`origin/main`: a Dormouse branch may vendor a pgstencil branch while a
-cross-repo change is in flight, but Dormouse `main` must vendor a pgstencil
-`main` commit, and the nightly audit fails until it does. The direct Node
-command also works before the archives exist (pnpm may otherwise auto-install
-first). See `docs/specs/hosted.md` -> "Application boundary" for what has to be
-committed together.
-
-Re-run integration tests after every refresh. Vendor an accepted pgstencil
-revision before a production release.
+Run `pnpm install` and re-run Hosted's integration tests after an update. The
+production preflight reads `dist/provenance.json` from the installed packages
+and requires matching clean commits. `docs/specs/security-hosted.md` ->
+"Deployment boundary" owns the upstream audit check. For an unreleased change,
+pack pgstencil in a clean checkout and use a temporary pnpm override on a
+branch.
 
 ## Resource inventory
 
@@ -142,8 +133,8 @@ Use dedicated Dormouse resources in the existing Cloudflare, Neon, and Postmark
 accounts.
 
 1. Create a dedicated Dormouse production Postgres database on Neon, on
-   PostgreSQL 17; the backup/restore tooling pins PostgreSQL
-   17.11. Keep development and previews separate. Enable backups and a
+   PostgreSQL 18; the backup/restore tooling pins PostgreSQL
+   18.6. Keep development and previews separate. Enable backups and a
    suitable PITR window, and verify a restore into a separate database before
    accepting real accounts.
 2. Create a Cloudflare Hyperdrive configuration for that database with **query

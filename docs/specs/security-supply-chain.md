@@ -70,9 +70,10 @@ Source of truth: `bundle_node_runtime` / `verify_node_version` in `standalone/sr
 
 ## Cooldown and alerts
 
-**Maturity gating runs in both the pnpm configuration and the Renovate configuration.**
+**Maturity gating runs in both the pnpm configuration and the Renovate configuration, except for pgstencil releases audited on their main commit, staged, and approved with 2FA.** (rationale)
 
 - **FAIL IF** `pnpm-workspace.yaml` is missing `minimumReleaseAge: 1440`.
+- **FAIL IF** `minimumReleaseAgeExclude` in `pnpm-workspace.yaml` contains anything except `pgstencil` and `@pgstencil/*`, or a Renovate package rule sets `minimumReleaseAge: null` for any package outside `pgstencil` and `@pgstencil/**`.
 - **FAIL IF** `.github/renovate.json` is missing `npm` or `cargo` from `enabledManagers` (npm covers `/`; cargo covers `/standalone/src-tauri`), or is missing `minimumReleaseAge` package rules for those managers (rationale).
 - **FAIL IF** `.github/renovate.json` has no `vulnerabilityAlerts` block, or that block does not set `minimumReleaseAge` **explicitly**. Renovate's built-in default for that block is `minimumReleaseAge: null`, force-applied before lookup, so *omitting* the key drops the cooldown rather than inheriting it from `packageRules`. Keeping it is deliberate (rationale).
 - **FAIL IF** secret scanning or its push protection is disabled on the repository (`gh api repos/diffplug/dormouse --jq .security_and_analysis`), or Dependabot alerts are off (`GET /repos/diffplug/dormouse/vulnerability-alerts` must answer 204, not 404). Push protection is the one control that acts *before* a credential lands, blocking a push whose diff carries a recognized provider token; it applies to `dormouse-bot` too (rationale).
