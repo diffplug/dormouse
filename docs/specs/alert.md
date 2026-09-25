@@ -361,14 +361,21 @@ Source of truth: `push` in `lib/src/host/remote/service.ts`; `pushAlert` in `vsc
 
 ### Settings dialog
 
-Reached from the baseboard sliders; `docs/specs/layout.md` owns placement. The alarm sections sit under the theme and shell rows; when both are hidden (VS Code owns the theme and the shells), the rule list is first and drops its section divider.
+Reached from the baseboard sliders; `docs/specs/layout.md` owns placement.
+
+- **Must show Settings as a continuous page beside left-side contents**, omitting unavailable topics: General without an editable theme or shell, Relay without a Burrow service, Notepad without an archive port. **Must place Remote control in Relay below Notifications**, preserving push's "below" copy.
+- **Must scroll to topics and search results over 700 ms**, using eased animation; new navigation replaces it, user scrolling cancels it. Contents click, mouse hover, or Up/Down/Home/End navigates. Highlight the mouse-hovered contents entry or settings section, otherwise the section at the scroll area's top, or last at the bottom. **Hovering settings never scrolls.** Contents remain visible.
+- **Must search available settings' labels, descriptions, rendered options, and live command/device names**, case-insensitively, each whitespace-separated term found in one group or its topic's label. Matching groups and contents entries show, or an empty state; each search change scrolls to the top. **Never unmount a filtered group**, so drafts and in-flight actions survive search and navigation.
+- **Must close on a backdrop click, the close button, or Escape**, Escape closing an open picker first. **Never dismiss a drag starting inside the dialog.** Title-bar search takes initial focus, and Tab skips hidden controls. Pinned by `lib/src/components/SettingsDialog.test.tsx` and `lib/src/stories/SettingsDialog.stories.tsx`.
 
 - **Must toggle only the clicked baseboard alarm setting**, as an override for that Workspace, showing the effective value. Components without a Workspace scope edit application defaults. **Must show its shared settings section for 2 seconds, then fade for 250ms**, anchored to the button and bounded by the viewport. The preview is inert, announces the resulting state, preserves keyboard focus and command dispatch, and omits test actions. Each click replaces the preview and restarts its lifetime; opening Settings or unmounting clears it. Reduced motion skips the fade. Pinned by `Baseboard.test.tsx`.
 - Lists every watched command with a remove control, and **cannot add one** — WATCHING is keyed on a running command's watch key, so creating a rule stays the terminal context of a Pane running it, and the empty state says so. **It is the only place a rule set on a since-closed Pane can be removed**, the terminal context reaching only the command its own Pane is running.
 - The watcher group carries the **Defer alerts until animation stops** switch and explains that a fully armed watcher delays terminal notifications and withdraws a ring once watched work resumes.
 - **Delays are committed on blur or `Enter`, never per keystroke** — typing `3` on the way to `30` must not briefly install a 3-second timer. They are shown in seconds; an out-of-range or empty entry snaps back to whatever the store clamped it to.
 - **The push group's device line names every device a push would reach**, and otherwise says why there is none — no Burrow enrolled, nothing subscribed yet, or the server could not be asked (rationale).
-- **Must separate application defaults from this Workspace’s overrides** and offer per-field inheritance plus reset-all. The local voice picker follows engine voice availability. Pinned by `lib/src/components/WorkspaceAlarmSettings.test.tsx`.
+- **Must show only application-wide settings**, excluding Workspace overrides.
+- **Must open a separate Workspace alert dialog from either baseboard alarm button's right-click or focused `Shift+F10`/`ContextMenu`**, only with a Workspace scope. Preserve per-field inheritance, reset-all, and local voice selection/testing; close on Escape, backdrop click, or close button and return focus to the invoking alarm button. Pinned by `lib/src/components/Baseboard.test.tsx` and `lib/src/components/WorkspaceAlarmSettings.test.tsx`.
+- **Must use the elevated-pane halo and theme-dropdown fades toward overflow.** **Must match Shell and Theme trigger sizing and inset borders**, without a Shell swatch.
 - Each alarm sink carries a **try it now** control outside the switch's dimming; both report inline and clear after a few seconds.
 
   | Control | Path and result |
@@ -376,7 +383,7 @@ Reached from the baseboard sliders; `docs/specs/layout.md` owns placement. The a
   | **Play test sound** | Fixed sanitized phrase through the shared speech queue and selected voice; reports queue admission or an unavailable backend, never Session delivery state. |
   | **Send test push** | Real Burrow→ACL→Relay path; does not swallow failures and distinguishes no targets, zero delivery, partial delivery, and success. Hidden without a Burrow service. |
 
-Source of truth: `lib/src/components/SettingsDialog.tsx`; `WorkspaceAlarmSettings` in `lib/src/components/WorkspaceAlarmSettings.tsx`; `SettingsPreview` in `lib/src/components/SettingsPreview.tsx`; `Baseboard` in `lib/src/components/Baseboard.tsx`; `lib/src/components/WatchedCommandList.tsx`; `lib/src/components/AlarmTestButtons.tsx`.
+Source of truth: `SettingsDialog` and `TOPICS` in `lib/src/components/SettingsDialog.tsx`; `WorkspaceAlarmSettingsDialog` in `lib/src/components/WorkspaceAlarmSettings.tsx`; `ScrollFades` in `lib/src/components/ScrollFades.tsx`; `ShellPicker` in `lib/src/components/ShellPicker.tsx`; `SettingsPreview` in `lib/src/components/SettingsPreview.tsx`; `Baseboard` in `lib/src/components/Baseboard.tsx`; `lib/src/components/WatchedCommandList.tsx`; `lib/src/components/AlarmTestButtons.tsx`.
 
 ## Workspace union
 

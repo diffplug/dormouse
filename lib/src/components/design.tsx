@@ -18,6 +18,9 @@ export const PANE_HEADER_HEIGHT_PX = 30;
 /** Soft app-ground halo separates zoomed panes and context popups from content below. */
 export const ELEVATED_PANE_SHADOW = '0 0 5px 5px var(--color-app-bg)';
 
+/** Theme and shell pickers share a hairline that follows their foreground. */
+export const PICKER_INSET_BORDER = 'inset 0 0 0 1px color-mix(in srgb, currentColor 25%, transparent)';
+
 // Pane headers/doors own the top corners; terminal bodies own the bottom.
 // All terminal-radius constants derive from this single source so the CSS
 // class, the SVG-friendly px value, and the inline-style rem string can't
@@ -623,6 +626,8 @@ export type ModalFrameProps = HTMLAttributes<HTMLDivElement> & ModalSurfaceVaria
   overlayClassName?: string;
   initialFocusRef?: RefObject<HTMLElement | null>;
   onEscape?: () => void;
+  /** Opt-in dismissal; clicks within the surface (including menus) stay inside. */
+  onOutsideClick?: () => void;
 };
 
 export function ModalFrame({
@@ -634,6 +639,7 @@ export function ModalFrame({
   overlayClassName,
   initialFocusRef,
   onEscape,
+  onOutsideClick,
   padding,
   align,
   elevation,
@@ -641,6 +647,7 @@ export function ModalFrame({
   ...props
 }: ModalFrameProps) {
   const surfaceRef = useRef<HTMLDivElement>(null);
+  const startedOnBackdrop = useRef(false);
   useModalFocusTrap(surfaceRef, { initialFocusRef, onEscape });
 
   return (
@@ -649,6 +656,16 @@ export function ModalFrame({
       layer={layer}
       backdrop={backdrop}
       className={overlayClassName}
+      onPointerDownCapture={(event) => {
+        startedOnBackdrop.current = event.target === event.currentTarget;
+      }}
+      onPointerCancel={() => { startedOnBackdrop.current = false; }}
+      onClick={(event) => {
+        // A drag out of the surface also produces a click on the overlay.
+        const outside = startedOnBackdrop.current && event.target === event.currentTarget;
+        startedOnBackdrop.current = false;
+        if (outside) onOutsideClick?.();
+      }}
     >
       <ModalSurface
         ref={surfaceRef}
@@ -700,7 +717,7 @@ const MODAL_FOCUSABLE_SELECTOR = [
   'input:not([disabled])',
   'select:not([disabled])',
   'textarea:not([disabled])',
-  '[tabindex]:not([tabindex="-1"])',
+  '[tabindex]',
 ].join(',');
 
 function useModalFocusTrap<TModal extends HTMLElement, TInitial extends HTMLElement>(
@@ -746,7 +763,10 @@ function useModalFocusTrap<TModal extends HTMLElement, TInitial extends HTMLElem
 
       event.preventDefault();
       stepFocus(
-        Array.from(modal.querySelectorAll<HTMLElement>(MODAL_FOCUSABLE_SELECTOR)),
+        // Mounted but hidden controls and negative tab indices are not Tab stops.
+        Array.from(modal.querySelectorAll<HTMLElement>(MODAL_FOCUSABLE_SELECTOR)).filter(
+          (element) => element.tabIndex >= 0 && !element.closest('[hidden], [inert]'),
+        ),
         event.shiftKey ? -1 : 1,
       );
     };

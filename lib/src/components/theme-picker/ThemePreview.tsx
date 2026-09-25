@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react';
+import { PICKER_INSET_BORDER } from '../design';
 import { resolveThemeVars, type DormouseTheme } from '../../lib/themes';
 import { getThemeSwatchColors, ThemeSwatch, type ThemeSwatchColors } from './ThemeSwatch';
 
@@ -17,7 +18,7 @@ export function getThemePreview(theme: DormouseTheme): ThemePreviewColors {
     style: {
       backgroundColor: vars['--vscode-terminal-background'],
       color: vars['--vscode-terminal-foreground'],
-      boxShadow: 'inset 0 0 0 1px color-mix(in srgb, currentColor 25%, transparent)',
+      boxShadow: PICKER_INSET_BORDER,
     },
     swatch: getThemeSwatchColors(vars),
   };

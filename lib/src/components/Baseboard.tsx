@@ -1,7 +1,7 @@
 import { getToolDirtySnapshot, subscribeToToolDirty } from '../lib/tool-dirty-store';
 import { setWorkspaceAlertDelivery } from '../lib/workspace-store';
 import { useWorkspaceAlertPolicy } from './wall/use-workspace-alert-policy';
-import { useCallback, useRef, useState, useMemo, useLayoutEffect, useContext, useSyncExternalStore, type ReactNode, type Ref } from 'react';
+import { useCallback, useRef, useState, useMemo, useLayoutEffect, useContext, useSyncExternalStore, type ReactNode, type Ref, type KeyboardEvent, type MouseEvent } from 'react';
 import {
   DeviceMobileSlashIcon,
   CaretLeftIcon,
@@ -16,6 +16,7 @@ import { chromeButton, DOOR_TAB_CLASS, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRAC
 import { AlertRingInset } from './alert-ring';
 import { TODO_PILL_BODY } from './TodoPillBody';
 import { SettingsDialog } from './SettingsDialog';
+import { WorkspaceAlarmSettingsDialog } from './WorkspaceAlarmSettings';
 import type { AlertSink } from '../lib/alert-delivery-model';
 import { SettingsPreview } from './SettingsPreview';
 import { Door } from './Door';
@@ -149,7 +150,8 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   const rightClusterEl = useRef<HTMLDivElement>(null);
   const [rightClusterWidth, setRightClusterWidth] = useState(0);
   const layoutMetrics = useRef({ doorGap: 0, arrowWidth: 0 });
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState<'application' | 'workspace' | null>(null);
+  const workspaceSettingsTrigger = useRef<HTMLButtonElement | null>(null);
   // Which Door's notepad popover is open, with the rect it was anchored on. The
   // rect is kept rather than re-read: a pin reattaches the Surface, so the Door
   // may be gone by the time the popover reopens to report a dead source.
@@ -170,7 +172,23 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
 
   // Suppress command-mode key dispatch while the Settings dialog owns the
   // keyboard, so typing a timeout doesn't trigger pane shortcuts.
-  useDialogKeyboardOwner(settingsOpen);
+  useDialogKeyboardOwner(settingsOpen !== null);
+  const openWorkspaceSettings = (event: MouseEvent<HTMLButtonElement> | KeyboardEvent<HTMLButtonElement>) => {
+    if (!workspaceId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    workspaceSettingsTrigger.current = event.currentTarget;
+    closeSettingsPreview();
+    setSettingsOpen('workspace');
+  };
+  const workspaceSettingsActions = {
+    onContextMenu: openWorkspaceSettings,
+    onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => {
+      if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) openWorkspaceSettings(event);
+    },
+    'aria-description': workspaceId ? 'Right-click or press Shift+F10 for workspace alert settings.' : undefined,
+  };
+  const workspaceSettingsHint = workspaceId ? '. Right-click for workspace alert settings.' : '';
 
   useLayoutEffect(() => {
     const el = containerRef.current;
@@ -410,7 +428,8 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
               className={`${SETTINGS_BUTTON_CLASS} ${settings.speakEnabled ? 'text-app-fg' : 'text-muted'}`}
               aria-label="Spoken alarms"
               aria-pressed={settings.speakEnabled}
-              title={`${settings.speakEnabled ? 'Disable' : 'Enable'} spoken alarms`}
+              title={`${settings.speakEnabled ? 'Disable' : 'Enable'} spoken alarms${workspaceSettingsHint}`}
+              {...workspaceSettingsActions}
               data-alarm-setting="speech"
               onMouseDown={(event) => event.preventDefault()}
               onClick={(event) => toggleAlarm('speech', event.currentTarget)}
@@ -424,7 +443,8 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
               className={`${SETTINGS_BUTTON_CLASS} ${settings.pushEnabled ? 'text-app-fg' : 'text-muted'}`}
               aria-label="Push notifications"
               aria-pressed={settings.pushEnabled}
-              title={`${settings.pushEnabled ? 'Disable' : 'Enable'} push notifications`}
+              title={`${settings.pushEnabled ? 'Disable' : 'Enable'} push notifications${workspaceSettingsHint}`}
+              {...workspaceSettingsActions}
               data-alarm-setting="push"
               onMouseDown={(event) => event.preventDefault()}
               onClick={(event) => toggleAlarm('push', event.currentTarget)}
@@ -442,7 +462,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
               data-open-settings="true"
               onClick={() => {
                 closeSettingsPreview();
-                setSettingsOpen(true);
+                setSettingsOpen('application');
               }}
             >
               <SlidersHorizontalIcon size={16} weight="bold" />
@@ -469,10 +489,16 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
         />
       )}
 
-      {settingsOpen && (
+      {settingsOpen === 'application' && (
         <SettingsDialog
-          onClose={() => setSettingsOpen(false)}
+          onClose={() => setSettingsOpen(null)}
         />
+      )}
+      {settingsOpen === 'workspace' && (
+        <WorkspaceAlarmSettingsDialog onClose={() => {
+          setSettingsOpen(null);
+          workspaceSettingsTrigger.current?.focus();
+        }} />
       )}
     </div>
   );
