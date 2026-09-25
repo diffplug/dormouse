@@ -4,7 +4,9 @@
  * end to end (`docs/specs/remote-security-model.md` -> Noise suite).
  *
  * ChaCha20-Poly1305 is `@noble/ciphers`, bundled because no interoperable
- * WebCrypto ChaChaPoly exists, and pinned to exactly **2.4.0**.
+ * WebCrypto ChaChaPoly exists, and pinned to exactly **2.4.0**. It has two
+ * import sites, this module and `push-seal.ts` (sealed Web Push); a version
+ * bump moves both, and `scripts/e2e-lint.mjs` pins the count at two.
  *
  * Audit: Cure53 audited `@noble/ciphers` **1.0.0** in **September 2024**,
  * funded by OpenSats (the report is linked from the package README). The
