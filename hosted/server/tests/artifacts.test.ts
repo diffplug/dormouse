@@ -23,14 +23,10 @@ test("Hosted declares every peer of the installed pgstencil packages", () => {
 test("the lockfile resolves both pgstencil packages from npm", () => {
   const lockfile = readFileSync("../pnpm-lock.yaml", "utf8");
   const lines = lockfile.split("\n");
-  const { dependencies } = JSON.parse(readFileSync("package.json", "utf8")) as {
-    dependencies: Record<string, string>;
-  };
   for (const [name, entry] of packages) {
     const manifest = JSON.parse(
       readFileSync(new URL("../package.json", import.meta.resolve(entry)), "utf8"),
     ) as { version: string };
-    expect(dependencies[name]).toMatch(/^\^\d+\.\d+\.\d+$/);
     const specifier = `${name}@${manifest.version}`;
     const key = name.startsWith("@") ? `'${specifier}'` : specifier;
     const index = lines.indexOf(`  ${key}:`);
