@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { expect, fireEvent, userEvent, waitFor, within } from 'storybook/test';
 import type { DormouseTheme } from '../lib/themes';
 import { OVERLAY_MAX_HEIGHT_VAR } from '../components/design';
-import { SettingsDialog, TOPIC_GAP_PX } from '../components/SettingsDialog';
+import { SettingsDialog, SETTINGS_SCROLL_MS, TOPIC_GAP_PX } from '../components/SettingsDialog';
 import { WorkspaceIdContext } from '../components/wall/wall-context';
 import { enrolledStatus, UNENROLLED_STATUS } from '../host/remote/test-burrow-link';
 
@@ -57,6 +57,8 @@ async function hoverTopic(body: Body, name: string) {
 
 async function waitForTopicScroll(section: HTMLElement) {
   const content = section.parentElement!;
+  // Rounded scrollTop can look settled just before the final animation frame.
+  await new Promise((resolve) => setTimeout(resolve, SETTINGS_SCROLL_MS));
   await waitFor(() => {
     const desired = content.scrollTop + section.getBoundingClientRect().top - content.getBoundingClientRect().top - TOPIC_GAP_PX;
     const clamped = Math.max(0, Math.min(desired, content.scrollHeight - content.clientHeight));
@@ -313,6 +315,19 @@ export const ShellRow: Story = {
     primedWatchedCommands: ['claude'],
     primedAlertSettings: {},
   },
+  play: async ({ canvasElement }) => {
+    const body = dialog(canvasElement);
+    const theme = body.getByRole('button', { name: /^Theme:/ });
+    const shell = body.getByRole('button', { name: /^Shell:/ });
+    await expect(shell.getBoundingClientRect().height).toBe(theme.getBoundingClientRect().height);
+    await expect(shell.style.boxShadow).toBe(theme.style.boxShadow);
+    await expect(shell.querySelector('[data-theme-swatch]')).toBeNull();
+  },
+};
+
+export const ShellRowDark: Story = {
+  ...ShellRow,
+  globals: { theme: 'Dark (Visual Studio)' },
 };
 
 /**
@@ -342,9 +357,9 @@ export const HostOwnsShells: Story = {
 };
 
 /**
- * The Remote control section directly under the push
- * settings whose `no-burrow` copy points at it. Every other story here leaves
- * `primedBurrow` unset, which is a build with no Burrow service behind the
+ * The Relay topic contains Remote control below the push
+ * settings whose `no-burrow` copy points at it. Stories without
+ * `primedBurrow` represent a build with no Burrow service behind the
  * webview: the section renders nothing at all rather than offering a form the
  * build cannot honor (`docs/specs/relay.md`). `RemoteControlSection.stories`
  * covers its own states.
@@ -356,8 +371,23 @@ export const WithRemoteControl: Story = {
     primedAlertSettings: { pushEnabled: true },
   },
   play: async ({ canvasElement }) => {
-    await selectTopic('Notifications')({ canvasElement });
+    await selectTopic('Relay')({ canvasElement });
     await dialog(canvasElement).findByText('1 paired phone.');
+  },
+};
+
+export const RelaySetup: Story = {
+  ...PushNotEnrolled,
+  play: selectTopic('Relay'),
+};
+
+export const SearchRelay: Story = {
+  ...WithRemoteControl,
+  play: async ({ canvasElement }) => {
+    const body = dialog(canvasElement);
+    fireEvent.change(body.getByRole('searchbox'), { target: { value: 'relay' } });
+    await expect(body.getByRole('region', { name: 'Relay' })).toHaveTextContent('Remote control');
+    await expect(contentsButton(body, 'Relay')).toBeVisible();
   },
 };
 
@@ -368,6 +398,12 @@ export const Activity: Story = {
 
 export const Notifications: Story = {
   ...PushManyDevices,
+  play: async ({ canvasElement }) => {
+    await selectTopic('Notifications')({ canvasElement });
+    const body = dialog(canvasElement);
+    await expect(body.queryByText(/This workspace:/)).not.toBeInTheDocument();
+    await expect(body.queryByRole('combobox', { name: /for this workspace/ })).not.toBeInTheDocument();
+  },
 };
 
 export const Light: Story = {
@@ -443,6 +479,25 @@ export const ShortViewport: Story = {
     <style>{`body { ${OVERLAY_MAX_HEIGHT_VAR.modal}: 20rem; }`}</style>
     <DialogStory />
   </>,
+};
+
+export const ScrollFades: Story = {
+  ...Default,
+  play: async ({ canvasElement }) => {
+    const body = dialog(canvasElement);
+    const content = body.getByRole('region', { name: 'General' }).parentElement!;
+    const edges = () => [...content.parentElement!.querySelectorAll<HTMLElement>('[data-scroll-fade]')]
+      .map((fade) => fade.dataset.scrollFade);
+    await waitFor(() => expect(edges()).toEqual(['below']));
+    content.scrollTo({ top: content.scrollHeight, behavior: 'instant' });
+    await waitFor(() => expect(edges()).toEqual(['above']));
+    content.scrollTo({ top: (content.scrollHeight - content.clientHeight) / 2, behavior: 'instant' });
+    await waitFor(() => expect(edges()).toEqual(['above', 'below']));
+    fireEvent.change(body.getByRole('searchbox'), { target: { value: 'walked away' } });
+    await waitFor(() => expect(edges()).toEqual([]));
+    fireEvent.change(body.getByRole('searchbox'), { target: { value: '' } });
+    await waitFor(() => expect(edges()).toEqual(['below']));
+  },
 };
 
 export const HoverContents: Story = {

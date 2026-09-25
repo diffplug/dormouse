@@ -8,7 +8,8 @@ import { setPlatform } from '../lib/platform';
 import { FakePtyAdapter } from '../lib/platform/fake-adapter';
 import { __resetArchiveServiceForTests } from '../lib/notepad/archive-service';
 import { clearAllNotepads } from '../lib/notepad/notepad-store';
-import { SettingsDialog } from './SettingsDialog';
+import { SettingsDialog, SETTINGS_SCROLL_MS } from './SettingsDialog';
+import { makeStubBurrowLink, UNENROLLED_STATUS } from '../host/remote/test-burrow-link';
 import { stubResizeObserver } from './wall/wall-test-utils';
 import { setNativeFieldValue } from '../lib/dom';
 import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS, getAlertSettings } from '../lib/alert-settings';
@@ -21,7 +22,16 @@ let root: Root;
 let platform: FakePtyAdapter;
 const scrollTo = vi.fn();
 let sectionOffsets: Record<string, number>;
-let resize: (width: number) => void;
+let frameTime: number;
+let nextFrame: number;
+let frames: Map<number, FrameRequestCallback>;
+
+async function advanceScroll(ms = SETTINGS_SCROLL_MS) {
+  frameTime += ms;
+  const pending = [...frames.values()];
+  frames.clear();
+  await act(async () => pending.forEach((callback) => callback(frameTime)));
+}
 
 function text(): string {
   return document.body.textContent ?? '';
@@ -71,8 +81,20 @@ async function key(target: Element, key: string) {
 
 beforeEach(() => {
   scrollTo.mockClear();
+  scrollTo.mockImplementation(function (this: HTMLElement, { top }: ScrollToOptions) {
+    this.scrollTop = top!;
+  });
+  frameTime = 0;
+  nextFrame = 0;
+  frames = new Map();
+  vi.spyOn(performance, 'now').mockImplementation(() => frameTime);
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+    frames.set(++nextFrame, callback);
+    return nextFrame;
+  });
+  vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
   sectionOffsets = { general: 16, activity: 116, notifications: 516, notepad: 1116 };
-  resize = stubResizeObserver(400);
+  stubResizeObserver(400);
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
     const top = this.dataset.settingsTopic
       ? sectionOffsets[this.dataset.settingsTopic] - (document.getElementById('settings-content')?.scrollTop ?? 0) : 0;
@@ -132,7 +154,8 @@ describe('SettingsDialog navigation and search', () => {
     byText('General').focus();
     await key(byText('General'), 'ArrowDown');
     expect(document.activeElement).toBe(byText('Activity'));
-    expect(scrollTo).toHaveBeenLastCalledWith({ top: 100, behavior: 'smooth' });
+    await advanceScroll();
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 100, behavior: 'instant' });
     expect(visible('[role="region"]')).toHaveLength(4);
     await key(byText('Activity'), 'End');
     expect(document.activeElement).toBe(byText('Notepad'));
@@ -155,14 +178,17 @@ describe('SettingsDialog navigation and search', () => {
   it('corrects a moving scroll target until the user takes over', async () => {
     await render();
     await act(async () => byText('Notifications').click());
-    expect(scrollTo).toHaveBeenLastCalledWith({ top: 500, behavior: 'smooth' });
+    await advanceScroll(SETTINGS_SCROLL_MS / 2);
+    expect(document.getElementById('settings-content')!.scrollTop).toBeCloseTo(250);
     sectionOffsets.notifications += 50;
-    await act(async () => resize(400));
-    expect(scrollTo).toHaveBeenLastCalledWith({ top: 550, behavior: 'smooth' });
+    await advanceScroll(SETTINGS_SCROLL_MS / 2);
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 550, behavior: 'instant' });
+    await act(async () => byText('Activity').click());
+    await advanceScroll(SETTINGS_SCROLL_MS / 2);
     await act(async () => document.getElementById('settings-content')!.dispatchEvent(new Event('wheel', { bubbles: true })));
     scrollTo.mockClear();
     sectionOffsets.notifications += 50;
-    await act(async () => resize(400));
+    await advanceScroll();
     expect(scrollTo).not.toHaveBeenCalled();
   });
 
@@ -187,12 +213,15 @@ describe('SettingsDialog navigation and search', () => {
     await render();
     scrollTo.mockClear();
     await pointerOver(byText('Notifications'), 'touch');
+    await advanceScroll();
     expect(scrollTo).not.toHaveBeenCalled();
     await pointerOver(byText('Notifications'), 'mouse');
-    expect(scrollTo).toHaveBeenLastCalledWith({ top: 500, behavior: 'smooth' });
+    await advanceScroll();
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 500, behavior: 'instant' });
     expect(byText('Notifications').getAttribute('aria-current')).toBe('location');
     await act(async () => byText('Activity').click());
-    expect(scrollTo).toHaveBeenLastCalledWith({ top: 100, behavior: 'smooth' });
+    await advanceScroll();
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 100, behavior: 'instant' });
     expect(visible('[role="region"]')).toHaveLength(4);
   });
 
@@ -216,14 +245,28 @@ describe('SettingsDialog navigation and search', () => {
     await search('  WALKED   away ');
     expect(visible('[data-setting]').map((node) => node.dataset.setting)).toEqual(['inactivity']);
     await search('');
+    await advanceScroll();
     expect(visible('[role="region"]')).toHaveLength(4);
-    expect(scrollTo).toHaveBeenLastCalledWith({ top: 0, behavior: 'smooth' });
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 0, behavior: 'instant' });
     await search('unknown setting');
     expect(visible('[role="region"]')).toHaveLength(0);
     expect(visible('nav button')).toHaveLength(0);
     await search('walked away');
     await act(async () => byText('Activity').click());
     expect(document.querySelector<HTMLInputElement>('input[type="search"]')!.value).toBe('walked away');
+  });
+
+  it('gives Relay its own searchable topic when remote control is supported', async () => {
+    platform.burrow = makeStubBurrowLink({ status: UNENROLLED_STATUS });
+    await render();
+    expect(visible('nav button').map((node) => node.textContent)).toEqual([
+      'General', 'Activity', 'Notifications', 'Relay', 'Notepad',
+    ]);
+    await search('relay');
+    expect(visible('[role="region"]').map((node) => node.id)).toContain('settings-topic-relay');
+    await search('remote control');
+    expect(visible('[role="region"]').map((node) => node.id)).toEqual(['settings-topic-relay']);
+    expect(visible('[data-setting="relay"]')[0].textContent).toContain('Remote control');
   });
 
   it('finds live command names and edits a setting directly in results', async () => {

@@ -1,10 +1,11 @@
-import { BellIcon, GearIcon, MagnifyingGlassIcon, NotebookIcon, PulseIcon } from '@phosphor-icons/react';
+import { BellIcon, BroadcastIcon, GearIcon, MagnifyingGlassIcon, NotebookIcon, PulseIcon } from '@phosphor-icons/react';
 import { SecondsField, SwitchRow } from './AlarmSettingsControls';
-import { WorkspaceAlarmSettings } from './WorkspaceAlarmSettings';
+import { ScrollFades } from './ScrollFades';
 import type { AlertSink } from '../lib/alert-delivery-model';
 import { useWorkspaceAlertPolicy } from './wall/use-workspace-alert-policy';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
+  ELEVATED_PANE_SHADOW,
   MODAL_OVERLAY_INSET,
   ModalCloseButton,
   ModalFrame,
@@ -84,7 +85,8 @@ function describePushTargets(push: PushDevicesState, remoteControlBelow: boolean
 const TOPICS = [
   { id: 'general', label: 'General', icon: GearIcon, groups: ['theme', 'shell'] },
   { id: 'activity', label: 'Activity', icon: PulseIcon, groups: ['watcher', 'inactivity'] },
-  { id: 'notifications', label: 'Notifications', icon: BellIcon, groups: ['speech', 'push', 'workspace'] },
+  { id: 'notifications', label: 'Notifications', icon: BellIcon, groups: ['speech', 'push'] },
+  { id: 'relay', label: 'Relay', icon: BroadcastIcon, groups: ['relay'] },
   { id: 'notepad', label: 'Notepad', icon: NotebookIcon, groups: ['archive'] },
 ] as const;
 type TopicId = typeof TOPICS[number]['id'];
@@ -96,8 +98,8 @@ const TOPIC_LABEL_OF = Object.fromEntries(
 
 /** Where a chosen topic's heading lands below the scroller's top: its `py-4`. */
 export const TOPIC_GAP_PX = 16;
-/** A chosen topic stops being corrected once scrolling pauses this long. */
-const SCROLL_IDLE_MS = 120;
+/** A slower, consistent pace than the browser's native smooth scrolling. */
+export const SETTINGS_SCROLL_MS = 700;
 
 /** Search the mounted controls themselves so descriptions, options, and live
  * command/device names have no second copy to drift. Hidden groups stay mounted
@@ -156,10 +158,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const shellState = useSyncExternalStore(subscribeToShells, getShellsSnapshot);
   const searchRef = useRef<HTMLInputElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const scrollTarget = useRef<TopicId | null>(null);
-  const scrollIdleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const scrollFrame = useRef<number | null>(null);
   const [topic, setTopic] = useState<TopicId>('general');
   const [hoveredTopic, setHoveredTopic] = useState<TopicId | null>(null);
+  const [above, setAbove] = useState(false);
+  const [below, setBelow] = useState(false);
   const [query, setQuery] = useState('');
   // One union rather than a boolean per picker, so two menus can never be open
   // at once and Escape has a single thing to close.
@@ -198,6 +201,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const followScroll = useCallback(() => {
     const content = contentRef.current;
     if (!content) return;
+    setAbove(content.scrollTop > 1);
+    setBelow(content.scrollHeight - content.clientHeight - content.scrollTop > 1);
     const sections = [...content.querySelectorAll<HTMLElement>('[data-settings-topic]:not([hidden])')];
     if (!sections.length) return;
     // Follow the heading at the reading edge. The final short section cannot
@@ -211,47 +216,50 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     setTopic(current.dataset.settingsTopic as TopicId);
   }, []);
 
-  const scrollToTopic = useCallback((id: TopicId) => {
-    const content = contentRef.current;
-    const section = content?.querySelector<HTMLElement>(`[data-settings-topic="${id}"]`);
-    if (!content || !section) return;
-    content.scrollTo({
-      top: content.scrollTop + section.getBoundingClientRect().top - content.getBoundingClientRect().top - TOPIC_GAP_PX,
-      behavior: 'smooth',
-    });
+  const cancelScroll = useCallback(() => {
+    if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
+    scrollFrame.current = null;
   }, []);
 
-  const releaseTarget = () => { scrollTarget.current = null; };
-  const releaseTargetWhenIdle = () => {
-    clearTimeout(scrollIdleTimer.current);
-    scrollIdleTimer.current = setTimeout(releaseTarget, SCROLL_IDLE_MS);
-  };
+  const scrollToTopic = useCallback((id: TopicId | null) => {
+    cancelScroll();
+    const content = contentRef.current;
+    const section = id ? content?.querySelector<HTMLElement>(`[data-settings-topic="${id}"]`) : null;
+    if (!content || (id && !section)) return;
+    const from = content.scrollTop;
+    const started = performance.now();
+    const step = (now: number) => {
+      // Re-read the destination while animating: fonts and live settings can
+      // move it. Once done, later layout changes must not pull the reader back.
+      const destination = section
+        ? content.scrollTop + section.getBoundingClientRect().top - content.getBoundingClientRect().top - TOPIC_GAP_PX
+        : 0;
+      const to = Math.max(0, Math.min(destination, content.scrollHeight - content.clientHeight));
+      const progress = Math.min((now - started) / SETTINGS_SCROLL_MS, 1);
+      const eased = (1 - Math.cos(Math.PI * progress)) / 2;
+      content.scrollTo({ top: from + (to - from) * eased, behavior: 'instant' });
+      scrollFrame.current = progress < 1 ? requestAnimationFrame(step) : null;
+    };
+    scrollFrame.current = requestAnimationFrame(step);
+  }, [cancelScroll]);
 
   const chooseTopic = (id: TopicId) => {
     setTopic(id);
     setOpenMenu(null);
-    scrollTarget.current = id;
     scrollToTopic(id);
-    releaseTargetWhenIdle();
   };
 
   useLayoutEffect(() => {
     followScroll();
     const content = contentRef.current;
     if (!content) return;
-    // A command list or font can settle during navigation. Correct the target
-    // while scrolling, but stop following it once scrolling settles or the
-    // user takes over, so later content changes never pull them back.
-    const observer = new ResizeObserver(() => {
-      if (scrollTarget.current) scrollToTopic(scrollTarget.current);
-      followScroll();
-    });
+    const observer = new ResizeObserver(followScroll);
     observer.observe(content);
     content.querySelectorAll('[data-settings-topic]').forEach((section) => observer.observe(section));
     return () => observer.disconnect();
-  }, [followScroll, scrollToTopic, view, visibleTopicIds]);
+  }, [followScroll, view, visibleTopicIds]);
 
-  useEffect(() => () => clearTimeout(scrollIdleTimer.current), []);
+  useEffect(() => cancelScroll, [cancelScroll, view]);
 
   if (view === 'archive') {
     return <NotepadArchiveView onBack={() => setView('settings')} onClose={onClose} />;
@@ -264,6 +272,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       padding="none"
       overlayClassName={MODAL_OVERLAY_INSET}
       className={`${OVERLAY_MAX_HEIGHT.modal} flex h-[36rem] w-full max-w-[48rem] flex-col overflow-hidden`}
+      style={{ boxShadow: ELEVATED_PANE_SHADOW }}
       initialFocusRef={searchRef}
       onOutsideClick={onClose}
       // ModalFrame's Escape handler is a capture-phase window listener that
@@ -273,13 +282,10 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       onEscape={() => (openMenu ? setOpenMenu(null) : onClose())}
     >
       <div className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3">
-        <h2 id={TITLE_ID} className="min-w-0 flex-1 text-sm font-semibold text-foreground">
+        <h2 id={TITLE_ID} className="shrink-0 text-sm font-semibold text-foreground">
           Settings
         </h2>
-        <ModalCloseButton onClick={onClose} />
-      </div>
-      <div className="shrink-0 border-b border-border px-3 py-2">
-        <label className="flex items-center gap-1.5 rounded border border-input-border bg-input-bg px-2 py-1.5 text-muted focus-within:outline focus-within:outline-focus-ring">
+        <label className="flex min-w-0 flex-1 items-center gap-1.5 rounded border border-input-border bg-input-bg px-2 py-1.5 text-muted focus-within:outline focus-within:outline-focus-ring">
           <MagnifyingGlassIcon size={14} className="shrink-0" aria-hidden />
           <input
             ref={searchRef}
@@ -291,12 +297,12 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               setQuery(event.target.value);
               setOpenMenu(null);
               setHoveredTopic(null);
-              releaseTarget();
-              contentRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+              scrollToTopic(null);
             }}
             className="min-w-0 w-full bg-transparent text-sm text-foreground outline-none"
           />
         </label>
+        <ModalCloseButton onClick={onClose} />
       </div>
       <div className="flex min-h-0 flex-1">
         <nav
@@ -338,125 +344,126 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             </button>
           ))}
         </nav>
-        <div
-          id="settings-content"
-          ref={contentRef}
-          onPointerOver={(event) => {
-            if (event.pointerType !== 'mouse') return;
-            const section = (event.target as Element).closest<HTMLElement>('[data-settings-topic]');
-            setHoveredTopic(section ? section.dataset.settingsTopic as TopicId : null);
-          }}
-          onPointerLeave={() => setHoveredTopic(null)}
-          onScroll={() => {
-            followScroll();
-            releaseTargetWhenIdle();
-          }}
-          // The user's own input takes over from a chosen topic.
-          onWheel={releaseTarget}
-          onPointerDown={releaseTarget}
-          onKeyDown={releaseTarget}
-          className="min-w-0 flex-1 overflow-y-auto overscroll-contain scroll-smooth px-3 py-4 break-words sm:px-6 [&_label]:flex-wrap"
-        >
-          {searching && (
-            <div role="status" className="mb-4 text-sm text-muted">
-              {visibleTopics.length ? 'Search results' : 'No settings found.'}
-            </div>
-          )}
-          <TopicSection id="general" hidden={!visible('general')}>
-            <div className="mt-4 flex flex-col gap-2">
-              {showTheme && (
-                <section data-setting="theme" hidden={!matches('theme')} className={PICKER_ROW}>
-                  <span>Theme:</span>
-                  <ThemePicker
-                    variant="settings-dialog"
-                    open={openMenu === 'theme'}
-                    onOpenChange={onThemeOpenChange}
-                  />
-                </section>
-              )}
-              {showShell && (
-                <section data-setting="shell" hidden={!matches('shell')} className={PICKER_ROW}>
-                  <span>Shell:</span>
-                  <ShellPicker
-                    open={openMenu === 'shell'}
-                    onOpenChange={onShellOpenChange}
-                    onSelect={onClose}
-                  />
-                </section>
-              )}
-            </div>
-          </TopicSection>
-          <TopicSection id="activity" hidden={!visible('activity')}>
-            <section data-setting="watcher" hidden={!matches('watcher')} className="mt-4">
-              <div className="text-sm text-foreground">
-                Animation watcher enabled for commands that start with:
+        <div className="relative flex min-w-0 flex-1 flex-col">
+          <div
+            id="settings-content"
+            ref={contentRef}
+            onPointerOver={(event) => {
+              if (event.pointerType !== 'mouse') return;
+              const section = (event.target as Element).closest<HTMLElement>('[data-settings-topic]');
+              setHoveredTopic(section ? section.dataset.settingsTopic as TopicId : null);
+            }}
+            onPointerLeave={() => setHoveredTopic(null)}
+            onScroll={followScroll}
+            // The user's own input takes over from a chosen topic.
+            onWheel={cancelScroll}
+            onPointerDown={cancelScroll}
+            onKeyDown={cancelScroll}
+            className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain scroll-smooth px-3 py-4 break-words sm:px-6 [&_label]:flex-wrap"
+          >
+            {searching && (
+              <div role="status" className="mb-4 text-sm text-muted">
+                {visibleTopics.length ? 'Search results' : 'No settings found.'}
               </div>
-              {watched.length > 0 ? (
-                <div className="mt-1.5">
-                  <WatchedCommandList />
-                </div>
-              ) : (
-                <div className="mt-1.5 text-sm leading-relaxed text-muted">
-                  Nothing yet. Start a command, then press <Shortcut>a</Shortcut> in its tab and
-                  turn on <em>Watch all …</em> to alert on every tab running it.
-                </div>
-              )}
-              <div className="mt-3">
-                <SwitchRow
-                  label="Defer alerts until animation stops"
-                  on={settings.deferAlertsUntilQuiet}
-                  onChange={(deferAlertsUntilQuiet) => updateAlertSettings({ deferAlertsUntilQuiet })}
-                />
-                <div className={`${UNDER_SWITCH_INDENT} mt-1 text-sm leading-relaxed text-muted`}>
-                  When the animation watcher is fully armed, terminal notifications wait
-                  for the pane to become quiet, and a ring raised by silence goes away if
-                  the watched command starts working again.
-                </div>
-              </div>
-            </section>
-            <section data-setting="inactivity" hidden={!matches('inactivity')} className={SECTION}>
-              <SecondsField
-                label="Inactivity timeout:"
-                valueMs={settings.inactivityTimeoutMs}
-                onCommit={(inactivityTimeoutMs) => updateAlertSettings({ inactivityTimeoutMs })}
-              />
-              <div className="mt-1 text-sm leading-relaxed text-muted">
-                User has walked away after this much inactivity.
-              </div>
-            </section>
-          </TopicSection>
-          <TopicSection id="notifications" hidden={!visible('notifications')}>
-            {(matches('speech') || matches('push')) && <h3 className="mt-4 text-sm font-semibold text-foreground">Application defaults</h3>}
-            <div data-setting="speech" hidden={!matches('speech')}>
-              <AlarmSettingsSection sink="speech" />
-            </div>
-            {/* Remote control sits under push, whose `no-burrow` copy says "below". */}
-            <div data-setting="push" hidden={!matches('push')}>
-              <AlarmSettingsSection sink="push" />
-              <RemoteControlSection />
-            </div>
-            <div data-setting="workspace" hidden={!matches('workspace')}>
-              <WorkspaceAlarmSettings />
-            </div>
-          </TopicSection>
-          <TopicSection id="notepad" hidden={!visible('notepad')}>
-            {showArchive && (
-              <section data-setting="archive" hidden={!matches('archive')} className={SECTION}>
-                <div className="text-sm text-foreground">Notepad archive</div>
-                <div className="mt-1 text-sm leading-relaxed text-muted">
-                  Notes kept from terminals and browsers that have closed. They stay
-                  until you delete them.
-                </div>
-                <button
-                  type="button"
-                  className={`${modalActionButton()} mt-2`}
-                  onClick={() => setView('archive')}
-                >
-                  Open archive
-                </button>
-              </section>
             )}
-          </TopicSection>
+            <TopicSection id="general" hidden={!visible('general')}>
+              <div className="mt-4 flex flex-col gap-2">
+                {showTheme && (
+                  <section data-setting="theme" hidden={!matches('theme')} className={PICKER_ROW}>
+                    <span>Theme:</span>
+                    <ThemePicker
+                      variant="settings-dialog"
+                      open={openMenu === 'theme'}
+                      onOpenChange={onThemeOpenChange}
+                    />
+                  </section>
+                )}
+                {showShell && (
+                  <section data-setting="shell" hidden={!matches('shell')} className={PICKER_ROW}>
+                    <span>Shell:</span>
+                    <ShellPicker
+                      open={openMenu === 'shell'}
+                      onOpenChange={onShellOpenChange}
+                      onSelect={onClose}
+                    />
+                  </section>
+                )}
+              </div>
+            </TopicSection>
+            <TopicSection id="activity" hidden={!visible('activity')}>
+              <section data-setting="watcher" hidden={!matches('watcher')} className="mt-4">
+                <div className="text-sm text-foreground">
+                  Animation watcher enabled for commands that start with:
+                </div>
+                {watched.length > 0 ? (
+                  <div className="mt-1.5">
+                    <WatchedCommandList />
+                  </div>
+                ) : (
+                  <div className="mt-1.5 text-sm leading-relaxed text-muted">
+                    Nothing yet. Start a command, then press <Shortcut>a</Shortcut> in its tab and
+                    turn on <em>Watch all …</em> to alert on every tab running it.
+                  </div>
+                )}
+                <div className="mt-3">
+                  <SwitchRow
+                    label="Defer alerts until animation stops"
+                    on={settings.deferAlertsUntilQuiet}
+                    onChange={(deferAlertsUntilQuiet) => updateAlertSettings({ deferAlertsUntilQuiet })}
+                  />
+                  <div className={`${UNDER_SWITCH_INDENT} mt-1 text-sm leading-relaxed text-muted`}>
+                    When the animation watcher is fully armed, terminal notifications wait
+                    for the pane to become quiet, and a ring raised by silence goes away if
+                    the watched command starts working again.
+                  </div>
+                </div>
+              </section>
+              <section data-setting="inactivity" hidden={!matches('inactivity')} className={SECTION}>
+                <SecondsField
+                  label="Inactivity timeout:"
+                  valueMs={settings.inactivityTimeoutMs}
+                  onCommit={(inactivityTimeoutMs) => updateAlertSettings({ inactivityTimeoutMs })}
+                />
+                <div className="mt-1 text-sm leading-relaxed text-muted">
+                  User has walked away after this much inactivity.
+                </div>
+              </section>
+            </TopicSection>
+            <TopicSection id="notifications" hidden={!visible('notifications')}>
+              {(matches('speech') || matches('push')) && <h3 className="mt-4 text-sm font-semibold text-foreground">Application defaults</h3>}
+              <div data-setting="speech" hidden={!matches('speech')}>
+                <AlarmSettingsSection sink="speech" />
+              </div>
+              <div data-setting="push" hidden={!matches('push')}>
+                <AlarmSettingsSection sink="push" />
+              </div>
+            </TopicSection>
+            {/* Relay stays below push, whose `no-burrow` copy says "below". */}
+            <TopicSection id="relay" hidden={!visible('relay')}>
+              <div data-setting="relay" hidden={!matches('relay')}>
+                <RemoteControlSection />
+              </div>
+            </TopicSection>
+            <TopicSection id="notepad" hidden={!visible('notepad')}>
+              {showArchive && (
+                <section data-setting="archive" hidden={!matches('archive')} className={SECTION}>
+                  <div className="text-sm text-foreground">Notepad archive</div>
+                  <div className="mt-1 text-sm leading-relaxed text-muted">
+                    Notes kept from terminals and browsers that have closed. They stay
+                    until you delete them.
+                  </div>
+                  <button
+                    type="button"
+                    className={`${modalActionButton()} mt-2`}
+                    onClick={() => setView('archive')}
+                  >
+                    Open archive
+                  </button>
+                </section>
+              )}
+            </TopicSection>
+          </div>
+          <ScrollFades above={above} below={below} />
         </div>
       </div>
     </ModalFrame>
