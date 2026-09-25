@@ -30,10 +30,10 @@ gh api repos/diffplug/pgstencil/commits/<commit>/check-runs \
   --jq '.check_runs[] | select(.name=="security-audit") | .conclusion'
 ```
 
-The first must be `ahead` or `identical`, the second `success`. A commit can
-carry several `security-audit` runs, and a `cancelled` one, from a manual
-dispatch that was stopped, is not a verdict: ignore it, and require that a
-completed run succeeded and none failed. The packed code
+The first must be `ahead` or `identical`. A commit can carry several
+`security-audit` runs, and a `cancelled` one, from a manual dispatch that was
+stopped, is not a verdict: ignore `cancelled`, then require at least one
+`success` and no other conclusion. The packed code
 itself is audited in `diffplug/pgstencil` by that repository's own
 `security-audit` workflow against its `SECURITY.md`; do not audit the tarballs'
 contents here — audit how `hosted/` configures the adapter. Distinguish tested
