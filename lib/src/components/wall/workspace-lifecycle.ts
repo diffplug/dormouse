@@ -10,7 +10,7 @@ import type { CloseSurfaceMode } from './wall-types';
 
 /**
  * The Workspace close and rename verbs, outside any component: the strip's
- * buttons, the command-mode keys, and `dor workspace` all take the same route
+ * buttons and `dor workspace` take the same route
  * (`docs/specs/layout.md` → "Workspaces"). The strip renders the confirmation
  * these open; it decides nothing.
  */
@@ -22,7 +22,7 @@ export function workspaceNeedsCloseConfirmation(id: WorkspaceId): boolean {
   return !!handle && (handle.hasTouchedSurfaces() || handle.runningCount() > 0);
 }
 
-/** Keyboard Enter on `+` waits for the fresh Wall just like close does. */
+/** A click on `+` waits for the fresh Wall before focusing its terminal. */
 export async function enterWorkspace(id: WorkspaceId): Promise<void> {
   setActiveWorkspace(id);
   const handle = await awaitWallHandle(id);
@@ -106,26 +106,26 @@ export async function closeWorkspaceWithSurfaces(
 }
 
 /**
- * Begin closing a Workspace. Reveal it first; work or forceConfirm raises the typed
+ * Begin closing a Workspace. Reveal it first; work raises the typed
  * confirmation, otherwise close immediately.
  */
-export function requestWorkspaceClose(id: WorkspaceId, options: { forceConfirm?: boolean } = {}): void {
+export function requestWorkspaceClose(id: WorkspaceId): void {
   if (closeInFlight || isWorkspaceTransferPending(id)) return;
-  void closeOnceWallRegisters(id, options.forceConfirm ?? false);
+  void closeOnceWallRegisters(id);
 }
 
 /**
  * The Wall is what says whether the Workspace holds work, so a gesture landing
- * in the registration gap — the strip's `×` or the `&` key right after a create
- * — waits it out, as `dor workspace close` does, rather than deciding on a
- * handle that is one effect away and having the close refused where nobody
- * reads the refusal (`docs/specs/layout.md` → "Workspaces").
+ * in the registration gap — the strip's `×` right after a create — waits it
+ * out, as `dor workspace close` does, rather than deciding on a handle that is
+ * one effect away and having the close refused where nobody reads the refusal
+ * (`docs/specs/layout.md` → "Workspaces").
  */
-async function closeOnceWallRegisters(id: WorkspaceId, forceConfirm: boolean): Promise<void> {
+async function closeOnceWallRegisters(id: WorkspaceId): Promise<void> {
   const handle = await awaitWallHandle(id);
   if (closeInFlight || isWorkspaceTransferPending(id)) return;
   if (!handle) return;
-  if (forceConfirm || workspaceNeedsCloseConfirmation(id)) {
+  if (workspaceNeedsCloseConfirmation(id)) {
     // An immediate close reveals the Workspace itself.
     setActiveWorkspace(id);
     handle.selectWorkspaceTab();

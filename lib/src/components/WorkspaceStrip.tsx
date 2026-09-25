@@ -20,10 +20,11 @@ import { createWorkspaceStripDrag, type StripDragHost } from './workspace-strip-
 import { acquireChromeKeyboardLease } from './wall/chrome-keyboard-lease';
 import { getWallHandle } from './wall/wall-handles';
 import { useDialogKeyboardOwner } from './wall/wall-context';
-import { closeWorkspaceWithSurfaces, requestWorkspaceClose, requestWorkspaceRename } from './wall/workspace-lifecycle';
+import { closeWorkspaceWithSurfaces, enterWorkspace, requestWorkspaceClose, requestWorkspaceRename } from './wall/workspace-lifecycle';
 import { getActivitySnapshot, subscribeToActivity } from '../lib/terminal-registry';
 import { getWorkspaceSurfacesSnapshot, subscribeToWorkspaceSurfaces } from '../lib/workspace-surfaces';
-import { computeWorkspaceUnion, EMPTY_WORKSPACE_UNION, type WorkspaceUnion } from '../lib/workspace-union';
+import { computeWorkspaceUnion, type WorkspaceUnion } from '../lib/workspace-union';
+import { spotlightTodo } from '../lib/todo-spotlight';
 import { isWorkspaceTransferPending } from '../lib/window-session-aggregator';
 import {
   getWorkspaceUiSnapshot,
@@ -48,9 +49,9 @@ import { revealWorkspaceTab } from './workspace-tab-elements';
 /**
  * The Window's Workspace tabs. Store-driven end to end (Workspaces, membership,
  * Activity, and the strip's own UI state), so it renders in the AppBar — outside
- * every Wall's React tree — and shows the same rename editor and confirmation
- * whether the gesture came from a tab or from a command-mode key
- * (`docs/specs/layout.md` → "Workspaces"; `docs/specs/standalone.md` → AppBar).
+ * every Wall's React tree — and shows the rename editor and confirmation the
+ * Workspace verbs open (`docs/specs/layout.md` → "Workspaces";
+ * `docs/specs/standalone.md` → AppBar).
  * The close verb itself lives in `wall/workspace-lifecycle.ts`; this renders it.
  */
 export function WorkspaceStrip({
@@ -85,6 +86,21 @@ export function WorkspaceStrip({
     getWallHandle(id)?.enterCommandMode();
     setActiveWorkspace(id);
   }, []);
+
+  // The TODO pill's click: activation entering the next member owing a TODO as
+  // a click on it would — or plain activation in command mode when none does
+  // any more, never a rename — and a spotlight on the pill it landed on
+  // (`docs/specs/layout.md` → "Workspace tabs").
+  const enterNextTodo = useCallback((id: WorkspaceId) => {
+    const target = getWallHandle(id)?.enterNextTodo() ?? null;
+    if (target === null) {
+      activate(id);
+      return;
+    }
+    setActiveWorkspace(id);
+    spotlightTodo(target);
+  }, [activate]);
+  const peekNextTodo = useCallback((id: WorkspaceId) => getWallHandle(id)?.peekNextTodo() ?? null, []);
 
   // Activation changes the close button and therefore the intrinsic tab width.
   // Reveal it after layout, including activation through a shortcut or create.
@@ -148,8 +164,8 @@ export function WorkspaceStrip({
     [pendingClose, pendingMove, moveError],
   );
 
-  // One union per tab, computed in the loop it is rendered in. The visible
-  // Workspace never shows indicators, so it skips the projection entirely.
+  // One union per tab, computed in the loop it is rendered in: every tab shows
+  // its TODO pill, the visible one included.
   const unionsRef = useRef(new Map<WorkspaceId, WorkspaceUnion>());
   // Closed Workspaces leave the strip and must leave this cache with them, or a
   // long session accumulates one entry per Workspace it ever had.
@@ -157,20 +173,14 @@ export function WorkspaceStrip({
     if (!workspaces.some((workspace) => workspace.id === id)) unionsRef.current.delete(id);
   }
   const unionFor = (id: WorkspaceId, active: boolean): WorkspaceUnion => {
-    // A visible Workspace shows no indicators, and its cached union must not
-    // outlive the ring it described: a ring that ends while the Workspace is
-    // active would otherwise carry its `ringingSince` into the next one.
-    if (active) {
-      unionsRef.current.delete(id);
-      return EMPTY_WORKSPACE_UNION;
-    }
     const projected = computeWorkspaceUnion(membership.get(id) ?? [], activity);
     const previous = unionsRef.current.get(id);
-    // One uninterrupted ringing interval per tab: while the Workspace stays
-    // ringing its summons is the first moment it did, so attending the member
-    // that set `ringingSince` must not advance it to a survivor's later start
-    // and re-burst the tab.
-    const next = previous?.ringing && projected.ringing
+    // One uninterrupted ringing interval per hidden tab: while the Workspace
+    // stays ringing its summons is the first moment it did, so attending the
+    // member that set `ringingSince` must not advance it to a survivor's later
+    // start and re-burst the tab. The visible tab wears no inset, so it carries
+    // nothing: leaving it clocks the summons from the rings still sounding.
+    const next = !active && previous?.ringing && projected.ringing
       ? { ...projected, ringingSince: previous.ringingSince }
       : projected;
     // Hand back the previous object when nothing in it changed, so a memoized
@@ -201,6 +211,8 @@ export function WorkspaceStrip({
             dragging={draggingId === workspace.id}
             registerElement={registerElement}
             onActivate={activate}
+            onEnterNextTodo={enterNextTodo}
+            onPeekNextTodo={peekNextTodo}
             onStartRename={requestWorkspaceRename}
             onFinishRename={finishRename}
             onCancelRename={cancelRename}
@@ -216,7 +228,7 @@ export function WorkspaceStrip({
         className={chromeButton({ kind: 'icon', class: 'mb-0.5 shrink-0' })}
         aria-label="New workspace"
         title="New workspace"
-        onClick={() => { createWorkspace(); }}
+        onClick={() => { void enterWorkspace(createWorkspace().id); }}
       >
         <PlusIcon size={12} weight="bold" aria-hidden="true" />
       </button>
@@ -276,6 +288,8 @@ const WorkspaceTab = memo(function WorkspaceTab({
   dragging,
   registerElement,
   onActivate,
+  onEnterNextTodo,
+  onPeekNextTodo,
   onStartRename,
   onFinishRename,
   onCancelRename,
@@ -292,6 +306,9 @@ const WorkspaceTab = memo(function WorkspaceTab({
   dragging: boolean;
   registerElement: (element: HTMLElement | null) => (() => void) | undefined;
   onActivate: (id: WorkspaceId) => void;
+  onEnterNextTodo: (id: WorkspaceId) => void;
+  /** The label of the Surface the pill's click would enter, or null. */
+  onPeekNextTodo: (id: WorkspaceId) => string | null;
   onStartRename: (id: WorkspaceId) => void;
   onFinishRename: (id: WorkspaceId, value: string) => void;
   onCancelRename: () => void;
@@ -300,16 +317,22 @@ const WorkspaceTab = memo(function WorkspaceTab({
   wasDragged: () => boolean;
 }) {
   const todoPill = useTodoPillContent(union.todo);
-  // The visible Workspace shows its Surfaces, so its indicators would say what
-  // the panes already say; only a hidden one needs them.
+  // The TODO pill shows whichever Workspace is visible, as a pane's does. The
+  // alarm inset is a hidden Workspace's summons: the visible one's panes ring.
   const showAlarmInset = !active && union.ringing;
-  const showTodoPill = !active && todoPill.visible;
+  const showTodoPill = todoPill.visible;
   const burst = useAlertRingBurst(
     showAlarmInset ? 'ringing' : null,
     union.ringingSince === null ? null : { startedAt: union.ringingSince },
   );
   const label = (showAlarmInset || showTodoPill) && union.count > 0
     ? `${name}, ${union.count} needing attention` : name;
+  // The pill's destination depends on the Wall's selection, which renders
+  // nothing here, so it is read as the pointer or focus arrives and after each
+  // click moves it on.
+  const [todoTarget, setTodoTarget] = useState<string | null>(null);
+  const peekTodoTarget = () => setTodoTarget(onPeekNextTodo(id));
+  const todoTitle = todoTarget === null ? `Next TODO in ${name}` : `Next TODO: ${todoTarget}`;
 
   return (
     <div
@@ -349,31 +372,56 @@ const WorkspaceTab = memo(function WorkspaceTab({
           onCancel={onCancelRename}
         />
       ) : (
-        <button
-          type="button"
-          className={clsx(
-            'flex h-full min-w-0 flex-1 items-center gap-2 overflow-hidden pl-2.5 text-left',
-            active ? 'pr-1' : 'pr-2.5',
-          )}
-          aria-label={label}
-          title={label}
-          aria-current={active ? 'true' : undefined}
-          onClick={() => {
-            if (wasDragged()) return;
-            if (active) onStartRename(id);
-            else onActivate(id);
-          }}
-        >
-          <span className={clsx('min-w-0 flex-1 truncate', nameIsAuto && AUTO_NAME_CLASS)}>{name}</span>
+        <>
+          <button
+            type="button"
+            className={clsx(
+              'flex h-full min-w-0 flex-1 items-center overflow-hidden pl-2.5 text-left',
+              showTodoPill || active ? 'pr-1' : 'pr-2.5',
+            )}
+            aria-label={label}
+            title={label}
+            aria-current={active ? 'true' : undefined}
+            onClick={() => {
+              if (wasDragged()) return;
+              if (active) onStartRename(id);
+              else onActivate(id);
+            }}
+          >
+            <span className={clsx('min-w-0 flex-1 truncate', nameIsAuto && AUTO_NAME_CLASS)}>{name}</span>
+          </button>
+          {/* A sibling of the tab's button, never inside it: its own click
+              target, reached by the keyboard as one. */}
           {showTodoPill && (
-            <span
-              className={`todo-pill-shell shrink-0 text-xs font-semibold ${TODO_PILL_TRACKING_CLASS}`}
+            <button
+              type="button"
+              data-workspace-tab-todo={id}
+              className={clsx(
+                // Borderless text, as a Door's pill, on a rounded hit area that
+                // takes the washes: 20px tall in the 24px tab, its text where
+                // the tab's padding put it.
+                'todo-pill-shell shrink-0 cursor-pointer rounded px-1 py-0.5 text-xs font-semibold',
+                TODO_PILL_TRACKING_CLASS,
+                'transition-colors hover:bg-current/10 active:bg-current/20',
+                // Current-coloured, as a theme's focus ring can match the active tab.
+                'focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-current',
+                !active && 'mr-1.5',
+              )}
               data-flourishing={todoPill.flourishing ? 'true' : 'false'}
+              aria-label={`Next TODO in ${name}`}
+              title={todoTitle}
+              onMouseEnter={peekTodoTarget}
+              onFocus={peekTodoTarget}
+              onClick={() => {
+                if (wasDragged()) return;
+                onEnterNextTodo(id);
+                peekTodoTarget();
+              }}
             >
               {todoPill.body}
-            </span>
+            </button>
           )}
-        </button>
+        </>
       )}
       {active && !renaming && (
         <button

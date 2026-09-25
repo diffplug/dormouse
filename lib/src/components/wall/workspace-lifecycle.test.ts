@@ -6,6 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   closeWorkspaceWithSurfaces,
+  enterWorkspace,
   requestWorkspaceClose,
 } from './workspace-lifecycle';
 import { registerWallHandle, resetWallHandles, stubWallHandle, type WallHandle } from './wall-handles';
@@ -16,6 +17,7 @@ import {
   getActiveWorkspaceId,
   getWorkspacesSnapshot,
   resetWorkspaces,
+  setActiveWorkspace,
 } from '../../lib/workspace-store';
 
 function handleFor(workspaceId: string, overrides: Partial<WallHandle> = {}): WallHandle {
@@ -180,4 +182,25 @@ it('preserves another Workspace’s rename and close confirmation when closing a
   const before = getWorkspaceUiSnapshot();
   expect(await closeWorkspaceWithSurfaces('ws-2')).toBeNull();
   expect(getWorkspaceUiSnapshot()).toBe(before);
+});
+
+
+describe('enterWorkspace', () => {
+  it.each([false, true])('waits for the new Wall and respects navigation away: %s', async navigatedAway => {
+    vi.useFakeTimers();
+    try {
+      const first = getActiveWorkspaceId();
+      createWorkspace({ id: 'ws-new' });
+      const entering = enterWorkspace('ws-new');
+      if (navigatedAway) setActiveWorkspace(first);
+      const enterSelectedPane = vi.fn();
+      handleFor('ws-new', { enterSelectedPane });
+      await vi.advanceTimersByTimeAsync(0);
+      await entering;
+      expect(enterSelectedPane).toHaveBeenCalledTimes(navigatedAway ? 0 : 1);
+      expect(getActiveWorkspaceId()).toBe(navigatedAway ? first : 'ws-new');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

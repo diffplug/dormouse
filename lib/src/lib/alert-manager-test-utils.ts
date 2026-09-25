@@ -61,8 +61,7 @@ export function collectEpisodes(manager: AlertManager, id: string): Set<string> 
   return episodes;
 }
 
-/** Run `commandLine` seen and then left: armed, so its exit rings once it has
- *  outlasted `cfg.alert.commandExitMinRuntime`. */
+/** Run `commandLine` seen and then left: armed, so its exit rings. */
 export function armCommandExit(manager: AlertManager, id: string, commandLine = 'pnpm build'): void {
   engage(manager, id);
   runCommand(manager, id, commandLine);

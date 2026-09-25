@@ -36,6 +36,15 @@ export interface WallHandle {
   enterSelectedPane(): void;
   enterCommandMode(): void;
   selectWorkspaceTab(): void;
+  /** Enter `nextTodoMember` after the current selection as a click on it
+   *  would — passthrough on a pane, a Door reattached into passthrough, both
+   *  acknowledging without input — answering the member it entered. Null,
+   *  changing nothing, when no member has a TODO. Never clears a TODO
+   *  (`docs/specs/layout.md` → "Workspace tabs"). */
+  enterNextTodo(): string | null;
+  /** The label, as its Door and pane header show it, of the member
+   *  `enterNextTodo` would enter now, for the tab pill's tooltip. Reads only. */
+  peekNextTodo(): string | null;
   /** Persist now. `probeCwd: false` skips the cwd re-read (`SessionFlushRequest`). */
   flushPersistence(options?: SaveOptions): Promise<void>;
   /** Build what another Window needs to take this Workspace, without touching
@@ -103,6 +112,8 @@ export function stubWallHandle(workspaceId: WorkspaceId, overrides: Partial<Wall
     enterSelectedPane: () => {},
     enterCommandMode: () => {},
     selectWorkspaceTab: () => {},
+    enterNextTodo: () => null,
+    peekNextTodo: () => null,
     flushPersistence: async () => {},
     prepareWorkspaceTransfer: async () => ({
       payload: {

@@ -201,19 +201,37 @@ its presentation glyph.
 The iframe option lists that the embed keeps no logins or cookies (for
 `https://`, see [Iframe Renderer](#iframe-renderer)).
 
-Resolution controls apply to both screencast providers, as GUI wrappers around native
-commands: **Resize with pane** is Dormouse-owned sync issuing
-`set viewport <paneW> <paneH> <displayDpr>` once a pane resize settles (200ms);
-**only a DPR change re-syncs at once**, off a `(resolution: <dpr>dppx)` media
-query `change` event. **Fixed** issues
+Resolution controls apply to both screencast providers. **Fixed** issues
 `set viewport <w> <h> <dpr>` or `set device <name>` from the modal's registry.
+**Resize with pane** is sync-to-pane, **owned by the host** (rationale).
+
+- **Must send the pane's laid-out CSS size — never `getBoundingClientRect()`,
+  which a Workspace presentation scales — and display ratio over the viewer
+  socket while engaged, never from a popped-out pane**: when the socket opens,
+  once a resize settles (200ms), and at once on a `(resolution: <dpr>dppx)`
+  media query `change`.
+- **Each choice of Resize with pane is a new engagement**, named in every size
+  sent, which reclaims the viewport even at the size last written.
+- **The host serializes all viewport and device writes per browser**, through the provider's
+  viewport primitive, never while a launch or close settles it; a write in
+  flight keeps only the latest pane size, so a drag coalesces.
+- **The host judges a write only by a viewport taken after it landed**, as the
+  provider vouches for it: agent-browser's changed frames, Playwright's poll
+  measurement tagged with when it began; never `status`, Playwright's
+  screencast metadata, or the ratio (rationale). **One still differing 250ms
+  later, with no write since, is another writer's**: the host stops that
+  browser's sync, reports `off`, and writes no later size of that engagement.
+  **A page shown anew (the active tab) is written, never judged.**
+- **A Fixed viewport or device ends the browser's sync**, after its write in
+  flight; **refused if a launch or close of that browser began meanwhile, or
+  the host shut down**. **Must carry the pane's ended engagement to the host,
+  which rejects its later socket intents even when none arrived before Fixed.**
 
 **Only `syncEngaged` persists** — device/custom viewport state lives in
-the browser itself. `SYNCED`/`SCALED` derives from viewport versus pane CSS
-dimensions, DPR issued but not compared because stream frames are CSS-resolution.
-Sync coexists with external `set viewport`/`set device` last-writer-wins:
-**disengage sync (→ `SCALED`) only after a frame confirms Dormouse's own issued
-size landed**, so a resize transient is not read as an external override.
+the browser itself. **The webview disengages only on the host's `off` for its
+engagement**; `SYNCED` only while the host reports it `synced`. **The modal shows
+the ratio the browser measures (a Playwright page, a popped-out window), else the
+one this Surface last fixed on this browser, else the display's.**
 
 | From -> To | Behavior |
 | --- | --- |
@@ -223,9 +241,13 @@ size landed**, so a resize transient is not read as an external override.
 
 Source of truth: `lib/src/components/wall/AgentBrowserScreenModal.tsx`,
 `offeredRenderModes` in `lib/src/components/wall/browser-automation.ts`,
-`lib/src/components/wall/agent-browser-surface-controller.ts` (`screenActions`, sync effects,
-pop-out/pop-in), `lib/src/components/Wall.tsx` (`onSwapRenderMode`), Storybook
-`lib/src/stories/AgentBrowserScreenModal.stories.tsx`. Pinned by `restores a failed provider swap minimized meanwhile in place` in `lib/src/components/Wall.test.tsx`.
+`lib/src/components/wall/agent-browser-surface-controller.ts` (`screenActions`, `syncToPane`,
+`applyHostSync`, pop-out/pop-in), `createViewportSync` and `SYNC_SETTLE_MS` in
+`lib/src/host/browser-sync.ts`, `lib/src/components/Wall.tsx` (`onSwapRenderMode`), Storybook
+`lib/src/stories/AgentBrowserScreenModal.stories.tsx`. Pinned by `restores a failed provider swap minimized meanwhile in place` in `lib/src/components/Wall.test.tsx`,
+and `sync-to-pane` in `lib/src/host/browser-host.test.ts`,
+`lib/src/host/playwright-host.lifecycle.test.ts` and
+`lib/src/components/wall/agent-browser-surface-controller.test.ts`.
 
 ## Automated Browser
 
@@ -327,12 +349,13 @@ a Playwright connection — and what `view` takes back.
 | `disposed` | Released | — |
 
 - **Every browser operation must pass one gate (`driver`), open only in
-  `live`** — chrome and Display modal actions, tabs, sync-to-pane, edit chords
-  (rationale). **An unpark catches up — sync, a pending intent — only once its
-  socket opens.** The gate orders the Surface's own intents; the host is what
+  `live`** — chrome and Display modal actions, tabs, edit chords (rationale);
+  sync-to-pane rides the viewer socket, which exists only there. **An unpark
+  catches up on a pending intent only once its socket opens.** The gate orders the Surface's own intents; the host is what
   keeps an operation off a browser mid-relaunch ([Browser Host](#browser-host)).
-- **A navigation asked for outside `live` is kept as the one latest intent**,
-  run on the next `live`; **so is a pop-out or pop-in asked before the browser
+- **A navigation or a Fixed viewport asked for outside `live` is kept as the
+  one latest intent**, run on the next `live` (a viewport never on a headed
+  window); **so is a pop-out or pop-in asked before the browser
   is bound** (`idle`, `launching`, `attaching`), run as a relaunch, and so is
   a new `url` in params while `launching` (rationale). **A launch or relaunch
   opens the pending page itself; one the host opened never loads again**
@@ -361,7 +384,6 @@ stopping on its own because clients trigger it.
 - **An unpark keeps the last good frame on screen**, re-priming from the
   stream's re-broadcast frame/tabs; a fresh reattach mounts a blank canvas and
   asks the host to `repaint`, showing the placeholder until a frame lands.
-- **A resize made while not `live` is pushed on the next `live`.**
 - **Never park a popped-out pane**: its viewer socket brings the window's page
   and its close, which auto-reverts, even while minimized.
 - **Never set `AGENT_BROWSER_IDLE_TIMEOUT_MS`** for Dormouse-managed sessions —
@@ -417,7 +439,9 @@ socket per Surface, onto the browser at the stream `view` names:
 | Message | Direction | Carries |
 | --- | --- | --- |
 | frame | host → webview, binary | A 12-byte header — kind (`provisional` / `crisp`), the viewport's CSS size — then the JPEG |
-| `status`, `tabs` | host → webview | Whether the browser is up, and its viewport size; the tab list |
+| `status`, `tabs` | host → webview | Whether the browser is up, its viewport size and, for a headed window or a Playwright page, device pixel ratio; the tab list |
+| `sync` | webview → host | The pane's CSS size and display ratio while Resize with pane is engaged, and its engagement |
+| `sync` | host → webview | That engagement's sync: `applying`, `synced`, or `off` ([Display Modal And Render Swaps](#display-modal-and-render-swaps)) |
 | `url` | host → webview | A navigation the active tab committed |
 | `page` | host → webview | A popped-out window's page URL and title |
 | `input_mouse`, `input_keyboard`, `input_text` | webview → host | Native input; a paste as text |
@@ -429,13 +453,16 @@ socket per Surface, onto the browser at the stream `view` names:
 - **Must rebuild every webview message field by field before a provider sees
   it** (`parseViewerInput`); inbound messages are capped at 64 KiB.
 - **Must send state only on change, and the current state to a socket that
-  connects — except `url`, a commit edge**: `tabs` refreshes only when the
-  driving command completes (rationale), so every commit clears the title
-  until `tabs` refreshes, even at the same URL.
+  connects — except `url`, a commit edge, and `sync`, which answers each size
+  sent**: `tabs` refreshes only when the driving command completes (rationale),
+  so every commit clears the title until `tabs` refreshes, even at the same URL.
 - **A browser that goes on its own is reported `status { connected: false }`
   before its socket closes**, ending a headless pane and auto-reverting a
   headed one seen connected. **A launch or close of the browser ends every
   socket on it**; a URL granted before one opens nothing.
+- **A headed browser with no page but DevTools for 1 s has gone**
+  (rationale); a tab closed and replaced inside that grace has not. One host
+  policy for both providers, which report only their page count.
 - **A headed socket carries no frames**; a socket with more than 2 MB queued
   skips a provisional one.
 
@@ -465,15 +492,19 @@ Pinned by `lib/src/host/browser-viewer.test.ts`.
 **the host must drop its ~20 Hz re-broadcast by raw comparison against the last
 frame and tab list**, decoding a changed frame once (rationale); **a tab list or
 URL is state at any size**, never taken for a frame; a paste goes as key pairs.
-**A headed window's page is followed over its browser's CDP, held host-side and
-dialed on loopback only** (rationale). **Every upstream dial ends by 5 s**, and
-`get cdp-url` by 10 s. Playwright: its CDP screencast ([Playwright](#playwright)).
+**A headed window is followed over its browser's CDP, held host-side and
+dialed on loopback only** (rationale): its page targets, and each second the
+shown page's viewport and ratio, which replace the daemon's own in `status`
+(rationale). **The CDP endpoint is asked of a daemon once** (rationale).
+**Every upstream dial ends by 5 s**, and `get cdp-url` by 10 s. Playwright: its
+CDP screencast ([Playwright](#playwright)).
 
-Source of truth: `createViewerServer`, `BrowserView` and `parseViewerInput` in
+Source of truth: `createViewerServer`, `BrowserView` (`pages`,
+`WINDOW_GONE_GRACE_MS`), `measuredViewport` and `parseViewerInput` in
 `lib/src/host/browser-viewer.ts`; `BrowserStreamGrants` in
 `lib/src/host/browser-stream-guard.ts`; `encodeViewerFrame` and `ViewerState` in
-`lib/src/lib/platform/browser-automation.ts`; `viewStream` and `observePage` in
-`lib/src/host/agent-browser-host.ts`. Pinned also by
+`lib/src/lib/platform/browser-automation.ts`; `viewStream`, `observeWindow` and
+`cdpEndpoint` in `lib/src/host/agent-browser-host.ts`. Pinned also by
 `lib/src/host/agent-browser-host.test.ts` and `lib/src/host/browser-host.test.ts`.
 
 ### Pop-Out
@@ -482,8 +513,8 @@ A popout (`ab-popout`, `pw-popout`) relaunches the same session headed, because
 Chrome fixes headed/headless at launch. The pane becomes a stub with Pop back in;
 while the window is still opening (a launch, attach or relaunch in flight) the
 stub offers nothing. **State carried in v1 is only the last
-http(s) active URL**: other tabs, DOM state, scroll, form inputs, session storage,
-cookies/logins do not survive.
+http(s) active URL**, and on a pop-in the window's resolution: other tabs, DOM
+state, scroll, form inputs, session storage, cookies/logins do not survive.
 
 A pop-out or pop-in is a `launch` of the bound session, under the host's
 lifecycle ([Browser Host](#browser-host)).
@@ -499,14 +530,21 @@ operation on a browser mid-launch ([Browser Host](#browser-host)) — so
 **Dormouse supplies the active-tab URL and the host trusts it**.
 
 While popped out, the pane's viewer socket carries no frames: **the host
-follows the window's page and reports the window going away** — agent-browser's
-daemon stream and its browser's CDP, Playwright's connection
-([Viewer Socket](#viewer-socket)) — and a window seen connected that goes
-auto-reverts to the pane.
+follows the window's page and resolution and reports it gone**
+([Viewer Socket](#viewer-socket)), and a window seen connected that goes
+auto-reverts to the pane. **Nothing but the pop-in's own `close` may run a CLI
+verb for a browser whose window closed** (rationale).
+
+**A pop-in, by the window closing or Pop back in, fixes the screencast at the
+window's last reported viewport and ratio**: sync disengages, and one
+`set viewport <w> <h> <dpr>` waits as the pending intent for the headless
+browser ([Browser Connection](#browser-connection)). A window that reported
+none leaves sync as it was.
 
 Source of truth: `lib/src/components/wall/agent-browser-surface-controller.ts` (pop-out state,
-auto-revert), `lib/src/host/agent-browser-host.ts` (`killDaemon`, `observePage`),
-VS Code/standalone shutdown wiring.
+auto-revert, `windowViewport`, `fixViewport`), `lib/src/host/agent-browser-host.ts` (`killDaemon`, `observeWindow`),
+VS Code/standalone shutdown wiring. Pinned by `relaunch (pop-out / pop-in)` in
+`lib/src/components/wall/agent-browser-surface-controller.test.ts`.
 
 ### Browser Host
 
@@ -560,10 +598,10 @@ list tabs, act, evaluate, screenshot, view):
 - **A launch that gives up must let its `open` land, for up to 4 s, before
   closing the session**, and close again when a later `open` lands unless a
   newer launch owns the session (rationale).
-- **Once `open` returns, only a still-current launch closes stray
-  `about:blank` tabs, last first, and only while a real page is open**, so it
-  never closes the sole tab (rationale). One policy for every launch of either
-  provider, fresh or relaunched.
+- **Once `open` returns, only a still-current launch closes stray blank and
+  new-tab pages (`isBlankUrl`), last first, and only while a real page is
+  open**, so it never closes the sole tab (rationale). One policy for every
+  launch of either provider, fresh or relaunched.
 - **Every provider call a browser's queue waits on must be bounded** — a
   launch's by its deadline, a close by 10 s — so one hung CLI holds that
   browser's later requests only that long; **shutdown waits on the queue at
@@ -642,8 +680,11 @@ relaunch changes the mode.
   session in a socket directory the host does not share are refused**, as the
   host sees no daemon for it; its viewer socket still sends every changed
   frame, and a close runs the CLI under the host's environment.
+- **The post-launch sweep lists and closes page targets over the browser's
+  CDP, never `tab list`** (rationale).
 
-Source of truth: `createAgentBrowserProvider` and `runWithBinaryFallback` in
+Source of truth: `createAgentBrowserProvider` (`listTabs`, `closeTab`,
+`browserCall`) and `runWithBinaryFallback` in
 `lib/src/host/agent-browser-host.ts`, `isAllowedAgentBrowserBinary` and
 `streamStatusArgs` in `dor-lib-common/src/browser-providers.ts`,
 `streamStatus` in `dor/src/commands/agent-browser.ts`. Pinned by
@@ -653,13 +694,15 @@ Source of truth: `createAgentBrowserProvider` and `runWithBinaryFallback` in
 
 **Must use the user's installed `@playwright/cli`, resolved from `DORMOUSE_PLAYWRIGHT_BIN` or `PATH`.** GUI launches use Chromium. Native commands retain Playwright semantics: `open` restarts, `goto` navigates; commands for unsupported engines still run, with a viewer warning. The viewer requires CLI 0.1.19’s local browser-binding endpoint; installation errors name this requirement. A Playwright session lives in its CLI project scope, so a binding's cwd and executable pin every later command, relative paths included; `--session` uses the caller's own scope. GUI Connect inherits the source terminal's cwd; a swap without one uses the host cwd.
 
-**Must discover the native session in its CLI project scope and connect using that installation's matching Playwright client.** Accept only a unique registry entry matching session, workspace and library, with a local pipe endpoint and Chromium engine. Never load modules from the registry's library path. The host derives the client from the validated CLI installation. **`attach` relaunches at the page only when the registry lists no browser for the session**, never one it cannot view; `dor pw`'s binding attaches with no page, and reports the browser's headedness. Native CLI tabs and the pane share the selected tab; the host polls tab selection and metadata every 750ms while viewed, broadcasting only changes, and the current state to each connecting viewer. Captures reuse tab state for up to 750ms; explicit host controls refresh immediately. **The controller must apply a host-reported mode before the new stream**, so sync never sizes a headed window, except mid-relaunch or as an echo ([Browser Connection](#browser-connection)).
+**Must discover the native session in its CLI project scope and connect using that installation's matching Playwright client.** Accept only a unique registry entry matching session, workspace and library, with a local pipe endpoint and Chromium engine. Never load modules from the registry's library path. The host derives the client from the validated CLI installation. **`attach` relaunches at the page only when the registry lists no browser for the session**, never one it cannot view; `dor pw`'s binding attaches with no page, and reports the browser's headedness. Native CLI tabs and the pane share the selected tab; the host polls tab selection and metadata every 750ms while viewed, broadcasting only changes, and the current state to each connecting viewer; each also reports the browser's page count ([Viewer Socket](#viewer-socket)) and the active page's viewport and ratio. Captures reuse tab state for up to 750ms; explicit host controls refresh immediately. **The controller must apply a host-reported mode before the new stream**, so sync never sizes a headed window, except mid-relaunch or as an echo ([Browser Connection](#browser-connection)).
 
 Arbitrary CLI arguments, JavaScript and CDP methods are unavailable through the webview channel; the trusted `dor pw` process retains native passthrough. Executable hints use the same filename/exact-host-override boundary as agent-browser, with `playwright-cli` as the accepted name; `dor pw` applies it to the executable a binding returns (`docs/specs/dor-cli.md` → Browser Surface Addressing).
 
 A relaunch closes the previous CLI session, and a launch completes when the browser endpoint is ready; its stream is the host's number for that connection. **Every CLI call a launch waits on is killed at its deadline; every other one at 10 s, except `open`**, which lasts as long as the page load and whose end could take its browser down; nothing waits on it past a launch's own bounds. Shutdown also disconnects viewers. Viewer disconnect alone leaves the CLI browser alive; **a browser that disconnects on its own is reported gone to its viewers**. Concurrent input/captures share CDP attachments; disposal releases late attachments. **A screencast that fails to start must forget its page**, so the next poll releases the attachment and retries.
 
-The viewer socket ([Viewer Socket](#viewer-socket)) takes its frames from the CDP screencast, **decoded once and acknowledged no faster than 20 a second** (rationale), and inserts a paste with CDP `Input.insertText`. **Input waiting on CDP past 256 messages closes the viewer socket.**
+The viewer socket ([Viewer Socket](#viewer-socket)) takes its frames from the CDP screencast, **decoded once and acknowledged no faster than 20 a second** (rationale), and inserts a paste with CDP `Input.insertText`. **Must drop a frame byte-identical to the last, still acknowledging it** (rationale). **Input waiting on CDP past 256 messages closes the viewer socket.**
+
+**Must write a page's viewport only through Playwright's own `setViewportSize`** — sync, a Fixed size and a device alike — **never a CDP metrics override from the host's session** (rationale). A page keeps its browser context's ratio (1 for a browser the CLI opened), whatever ratio a request names. **A device adds only its touch and user agent over the host's CDP session, which the next viewport write resets.**
 
 Source of truth: `followParamsHeadedness` in `lib/src/components/wall/agent-browser-surface-controller.ts`; `createPlaywrightProvider` in `lib/src/host/playwright-host.ts`; `resolvePlaywrightInstall` in `lib/src/host/playwright-install.ts`. Pinned by `lib/src/host/playwright-host.test.ts` (opt-in real CLI via `DORMOUSE_PLAYWRIGHT_TEST_BIN`), `lib/src/host/playwright-host.lifecycle.test.ts`, and `AgentBrowserPanel Playwright params` in `lib/src/components/wall/AgentBrowserPanel.test.tsx`.
 
@@ -888,7 +931,8 @@ Source of truth: `lib/src/lib/platform/iframe-proxy-types.ts`,
   frames at DPR>1 — this path's whole point — unless the client re-applies
   `Emulation.setDeviceMetricsOverride`, which Dormouse can do correctly only
   while sync-to-pane owns the values (an external `set device`/`set viewport` DPR
-  is unrecoverable from frames). `captureBeyondViewport:true` bypasses emulation
+  is unrecoverable from frames), and which from the host's own CDP session is a
+  second viewport writer ([Playwright](#playwright)). `captureBeyondViewport:true` bypasses emulation
   and crashed the headless daemon; `clip.scale` returns blank frames. Adopt only
   with a daemon-side answer — an upstream verb exposing current viewport+DPR, or
   a daemon-owned capture channel.

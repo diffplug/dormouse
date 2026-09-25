@@ -24,6 +24,8 @@ import { settleAllWithin } from '../lib/settle-within';
 import {
   BROWSER_CLOSE_MAX_CANCELS,
   BROWSER_REQUEST_TIMEOUT_MS,
+  VIEWPORT_MAX_DPR,
+  VIEWPORT_MAX_SIDE,
   isBlankUrl,
   isBrowsableUrl,
   type BrowserEditOp,
@@ -33,8 +35,9 @@ import {
   type BrowserResult,
 } from '../lib/platform/browser-automation';
 import { createBrowserCaptures } from './browser-capture';
+import { createViewportSync } from './browser-sync';
 import type { WebSocket } from 'ws';
-import { BrowserView, closeSocket, createViewerServer, type Upstream, type ViewerSink } from './browser-viewer';
+import { BrowserView, WEBVIEW_ID, closeSocket, createViewerServer, type Upstream, type ViewerSink } from './browser-viewer';
 
 /** An operation on a live browser that each provider maps to its own call:
  *  a fixed agent-browser argv, or a Playwright client call. */
@@ -149,13 +152,11 @@ function generateGuiSession(): string {
 
 const TAB_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const DEVICE_NAME = /^[A-Za-z0-9][A-Za-z0-9 ()._-]{0,63}$/;
-/** A webview-minted id of a request that can bring a browser up. */
-const REQUEST_ID = /^[A-Za-z0-9-]{1,64}$/;
 
 /** `value` as an optional request id: absent, valid, or `null` when invalid. */
 function optionalRequestId(value: unknown): { requestId?: string } | null {
   if (value === undefined) return {};
-  return typeof value === 'string' && REQUEST_ID.test(value) ? { requestId: value } : null;
+  return typeof value === 'string' && WEBVIEW_ID.test(value) ? { requestId: value } : null;
 }
 
 function dimension(value: unknown, max: number): number | null {
@@ -197,6 +198,9 @@ function parseBrowserRequest(raw: unknown): BrowserRequest | string {
 }
 
 function parseOp(r: Record<string, unknown>): BrowserOp | string {
+  if ((r.op === 'viewport' || r.op === 'device') && r.endsSync !== undefined
+    && (typeof r.endsSync !== 'string' || !WEBVIEW_ID.test(r.endsSync))) return 'invalid sync engagement';
+  const endsSync = typeof r.endsSync === 'string' ? { endsSync: r.endsSync } : {};
   switch (r.op) {
     case 'launch':
     case 'attach': {
@@ -224,16 +228,16 @@ function parseOp(r: Record<string, unknown>): BrowserOp | string {
       return { op: 'tab', action, tabId };
     }
     case 'viewport': {
-      const [width, height, dpr] = [dimension(r.width, 16384), dimension(r.height, 16384), dimension(r.dpr, 10)];
-      return width && height && dpr ? { op: 'viewport', width, height, dpr } : 'invalid viewport';
+      const [width, height, dpr] = [dimension(r.width, VIEWPORT_MAX_SIDE), dimension(r.height, VIEWPORT_MAX_SIDE), dimension(r.dpr, VIEWPORT_MAX_DPR)];
+      return width && height && dpr ? { op: 'viewport', width, height, dpr, ...endsSync } : 'invalid viewport';
     }
     case 'device':
-      return typeof r.name === 'string' && DEVICE_NAME.test(r.name) ? { op: 'device', name: r.name } : 'invalid device name';
+      return typeof r.name === 'string' && DEVICE_NAME.test(r.name) ? { op: 'device', name: r.name, ...endsSync } : 'invalid device name';
     case 'close': {
       const cancels = r.cancels;
       if (cancels === undefined) return { op: 'close' };
       const valid = Array.isArray(cancels) && cancels.length <= BROWSER_CLOSE_MAX_CANCELS
-        && cancels.every((id) => typeof id === 'string' && REQUEST_ID.test(id));
+        && cancels.every((id) => typeof id === 'string' && WEBVIEW_ID.test(id));
       return valid ? { op: 'close', cancels: [...cancels] as string[] } : 'invalid cancelled request ids';
     }
     default:
@@ -356,6 +360,31 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     }
   }
 
+  // Fixed and sync writes share a queue: choosing sync while a Fixed write is
+  // running must leave the newer pane size last. Recheck lifecycle at execution,
+  // since a queued write belongs to the browser that existed at arrival.
+  const viewportWrites = new Map<string, Promise<BrowserResult>>();
+  function writeViewport({ p, b, id }: Bound, act: Extract<BrowserAct, { op: 'viewport' | 'device' }>): Promise<BrowserResult> {
+    const generation = generations.get(id);
+    const writing = (viewportWrites.get(id) ?? Promise.resolve()).catch(() => {}).then(() => {
+      if (closed) throw new Error('the browser host is shutting down');
+      if (settling.has(id) || generations.get(id) !== generation) throw new Error('the browser is being relaunched or closed');
+      return p.act(b, act);
+    });
+    viewportWrites.set(id, writing);
+    const forget = () => { if (viewportWrites.get(id) === writing) viewportWrites.delete(id); };
+    void writing.then(forget, forget);
+    return writing;
+  }
+
+  // Sync-to-pane coalesces pane sizes before they enter the viewport queue.
+  const sync = createViewportSync<Bound>({
+    write: (bound, size) => writeViewport(bound, { op: 'viewport', ...size }),
+    report: (id, message) => { for (const view of views.get(id) ?? []) view.state(message); },
+    blocked: (id) => closed || settling.has(id),
+    log,
+  });
+
   // Bumped by every launch and close: work begun for an earlier browser (a
   // post-launch sweep, a capture to join) must not reach the one that
   // replaced it.
@@ -364,6 +393,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     const generation = (generations.get(id) ?? 0) + 1;
     generations.set(id, generation);
     captures.forget(id);
+    sync.forget(id);
     // Their browser is going: whoever still views it asks again.
     for (const view of views.get(id) ?? []) view.close(1001, 'the browser was relaunched or closed');
     await p.release?.(b);
@@ -525,6 +555,8 @@ export function createBrowserHost(deps: BrowserHostDeps) {
         open?.delete(view);
         if (open?.size === 0) views.delete(bound.id);
       },
+      // A popped-out window is never sized with a pane.
+      ...(isHeaded ? {} : { sync: sync.view(bound, stream) }),
       ...(debug && deps.log ? { log: deps.log } : {}),
     });
     let open = views.get(bound.id);
@@ -587,9 +619,8 @@ export function createBrowserHost(deps: BrowserHostDeps) {
         return { ok: true, ...p.describe(b), nativeIdentity: bound.id, stream: live.stream, ...(live.headed !== undefined ? { headed: live.headed } : {}) };
       };
       const requestDeadline = Date.now() + REQUEST_BUDGET_MS;
-      if (r.op !== 'launch' && r.op !== 'attach' && r.op !== 'close' && settling.has(bound.id)) {
-        return { ok: false, error: 'the browser is being relaunched or closed' };
-      }
+      const settlingAnswer = { ok: false, error: 'the browser is being relaunched or closed' };
+      if (r.op !== 'launch' && r.op !== 'attach' && r.op !== 'close' && settling.has(bound.id)) return settlingAnswer;
       switch (r.op) {
         case 'launch': {
           const fresh = r.binding.session === undefined;
@@ -612,6 +643,11 @@ export function createBrowserHost(deps: BrowserHostDeps) {
         }
         case 'edit':
           return await edit(bound, r.edit);
+        case 'viewport':
+        case 'device': {
+          sync.fixed(bound.id, r.endsSync);
+          return await writeViewport(bound, r);
+        }
         default:
           return await p.act(b, r);
       }
@@ -629,6 +665,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     close: async () => {
       // Every launch and sweep still pending now finds itself superseded.
       closed = true;
+      sync.close();
       const windows = [...headed.values()];
       headed.clear();
       await Promise.all([
@@ -641,4 +678,3 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     },
   };
 }
-

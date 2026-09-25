@@ -36,6 +36,16 @@ views without weakening that first signal.
 
 **Why a failed swap's restore reopens the previous session.** A fresh `gui-<hex>` session kept a `key` badge that `dor ab --key` no longer resolved to, and the next command opened a second pane.
 
+**Why the host owns sync-to-pane.** The webview judged it: once a frame confirmed the size it issued, any report of another size disengaged sync. Its reports came from frames and from `status`, and Playwright's `status` comes from a 750 ms poll that measures with an asynchronous `page.evaluate`. A poll begun before a write published the size from before it after a frame had confirmed the new one, and the pane flipped to Fixed on its own; Playwright panes did so often during resizes (reported 2026-09-24). Reproduced against playwright-cli 0.1.21 (Chromium 154, 2026-09-24): an evaluate begun 50 ms before a `setViewportSize` landed answered the old 950×650 about 240 ms after it. One begun after the write resolved never did (0 of 100; the write took 2 ms at p50, 5 ms at p95), so a measurement tagged with its start is authoritative. The webview has no view of when a write begins or lands; the host issues the writes and relays every report.
+
+**Why agent-browser's frames, and Playwright's measurements.** agent-browser 0.31.1's frames matched `set viewport 900 600 2` exactly, about 30 ms after the command returned (2026-09-24). Its headless `status` followed too, so it is not always 1280×720; only a headed window's `status` names the daemon's configured viewport (see [Viewer Socket](#viewer-socket)). Playwright's screencast metadata is no measure of the viewport. Under `setViewportSize` it reported the height 87 px short (900×513 for 900×600). After a tab switch it stayed at 1280×633, even through a repaint, while the page measured 950×650 (playwright-cli 0.1.21, 2026-09-24). Frames are CSS-resolution, so neither provider shows the ratio.
+
+**Why 250 ms.** A frame already in flight when a write lands still shows the old size. The next one follows within a frame or two: 20 Hz, with Playwright's acks paced at 50 ms.
+
+**Why a page shown anew is written, not judged.** A tab Playwright opens comes up at its context's viewport (1280×720 beside a synced 900×600 page, 2026-09-24), and the pane's own tab strip can select one, so the webview's heuristic read either as another writer. agent-browser gives a new tab the viewport's size (at ratio 1).
+
+**Why the pane's laid-out size.** A Workspace presentation scales the Wall's subtree while it moves. `getBoundingClientRect` read mid-scale, as a harness reload does, synced a Playwright page to 681×589 in a 689×596 pane (0.988, 2026-09-24). No resize followed to correct it.
+
 ## Automated Browser
 
 **Why one-session-one-surface is not an invariant.** `dor` forwards the user's command before it asks the host for a surface, so a surface killed or render-swapped inside that window is gone by the time the trailing request arrives — and the session behind it is still live and needs somewhere to render.
@@ -98,9 +108,17 @@ views without weakening that first signal.
 
 **Why a browser that goes is reported, not left to reconnects.** A socket whose browser had gone reconnected three times — immediately, +2 s, +4 s — before a headless pane read "ended" or a closed headed window reverted to the pane, and a Playwright browser's viewers learned of a disconnect only that way (static reading, 2026-09).
 
+**Why a headed browser with no page has gone.** Measured against agent-browser 0.31.1 on macOS (2026-09-24): closing every page of a headed window over CDP (`Target.closeTarget`), as its close button does, left Chrome running with no window, and the daemon's stream sent nothing — no `status`, no `tabs`, no close — for the 12 s watched, so the pane sat on its "separate window" stub. Quitting the browser (`Browser.close`) instead sends `status { connected: false }` and `tabs: []` at once, the path that already reverted. The page count is the only sign of the first; the grace keeps a tab closed and then replaced from reading as it. A Playwright browser outlives its pages the same way, and its `disconnected` fires only on exit.
+
+**Why a headed window's viewport is measured on its page.** The stream's `status` names the viewport the daemon was configured with, not the window's: it said 1280×720 while a fresh headed window's page measured 1200×736 at DPR 2, and resizing the window to 900×700 and then 1100×800 changed the page's `innerWidth`/`innerHeight` with no new `status` (0.31.1, 2026-09-24). A background tab kept its old size through a resize (1200×736 beside the shown page's 1000×557), so only the page shown is measured. The ratio follows the display the window is on, which no resize reports, so it is polled.
+
+**Why the CDP endpoint is asked of a daemon once.** In a browser whose window has closed, the next CLI verb — even `stream status` or `get cdp-url` — silently opened a new `about:blank` window (0.31.1, 2026-09-24). An observer that asked again on reconnecting would bring back the window it was about to report gone.
+
 ## Pop-Out
 
 **The symptom when the daemon is not killed first.** `agent-browser --headed open` against a live headless daemon reattaches to it and exits 0, so the host logs a successful headed open and the mode never changes. The user presses Pop out, gets the pane stub with no OS window anywhere, and nothing in the logs says why.
+
+**Why only the pop-in's `close` may reach a windowless browser.** Any other verb reopens a blank window (see [Viewer Socket](#viewer-socket)). `close` does not: in the windowless state it closed Chrome at once, creating no page, and the daemon exited after it (0.31.1, 2026-09-24), so the relaunch's own stop is the teardown. Checked end to end in the browser-dev harness the same day: closing a popped-out window's pages over CDP brought the pane back about a second later, headless at the window's last viewport and ratio (1000×557 at 2; 1100×657 at 1.5 through Pop back in), with no Chrome window left running; closing every page of a Playwright pop-out did the same (1050×633 at 2).
 
 **Why the host does not wait for `open`.** Measured against agent-browser 0.31.1 (2026-09): `open <url>` blocks until the page's `load` event, up to the CLI's 25s default action timeout, then exits 1 with "Operation timed out" — with the daemon up, the tab on the URL, and `stream status` answering. Every other daemon command queues behind it: a `stream status` issued mid-`open` returned after 22s. Meanwhile the daemon writes `<session>.pid` and `<session>.stream` within ~100ms of launch, and the stream serves status, tabs and frames from then on. Awaiting `open` therefore made a slow page cost the whole load before the pane showed anything, and turned the timeout into a "failed" relaunch — one whose headed window was never tracked for shutdown, because tracking followed a zero exit.
 
@@ -119,6 +137,8 @@ A post-open blank-tab sweep can become such a query when a later relaunch, expli
 **Why `binaryPath` needs a gate of its own.** The request validation covers arguments, not the executable: every operation takes a `binaryPath`, and the argv checks never saw one. And the value is persisted into the pane's params, so an unchecked one is not a one-shot — it is arbitrary local execution in the extension host or the Tauri sidecar on every subsequent launch. Dropping rather than failing degrades a stale or hostile value to "resolve it yourself".
 
 **Why the stray-`about:blank` sweep is guarded.** The close/reopen pair can leave an extra blank tab beside the navigated one, and Playwright's startup leaves one beside a fresh page. Sweeping blanks unconditionally is the obvious fix and is wrong: a session whose only tab is legitimately blank would lose it, leaving the pane with nothing to show. The sweep closes the last tab first because Playwright names tabs by index.
+
+**Why the sweep counts new-tab pages as blank.** Every Chrome agent-browser launches, headed or headless, carries a `chrome://newtab/` page beside the page it opens (0.31.1 with Chrome for Testing 150, 2026-09-24). In a pop-out it was a second "New Tab" tab in the window, and the window observer reported its URL last, so the popped-out header read "newtab".
 
 **Why a failed launch waits for its `open`.** `open` runs unawaited while the host polls for the browser. A `close` issued before the CLI has registered the session closes nothing, and the `open` then brings up a Chromium window nothing tracks. Before the launch had a deadline, its worst case (close, 30 s of polling, an 8 s connect, close) ran past the webview's 40 s wait, so a slow pop-out could finish after the webview had restored the previous renderer (review of #773, 2026-09).
 
@@ -142,9 +162,23 @@ A post-open blank-tab sweep can become such a query when a later relaunch, expli
 
 **Why a pid needs proof before a signal.** A relaunch reads the daemon's pid from `<session>.pid`, which nothing removes: after a reboot, or once that daemon died, the number can belong to any process, and SIGTERM then SIGKILL would reach it (review of #777, 2026-09). A file older than the boot is stale for certain; a live pid beside a stream port that accepts is the daemon as far as its state files can tell.
 
+**Why the sweep closes pages over CDP, not through `tab list`.** `tab list` names only the tabs agent-browser tracks, never the `chrome://newtab/` page a launch leaves, and no verb closes one it does not name. A tracked tab closed over CDP leaves `tab list` too, and later commands still run (0.31.1, 2026-09-24), so one path closes both.
+
 **Why `dor ab` reads the stream port itself.** The host's `attach` reads only the state files, which an older agent-browser does not write and a caller's own `AGENT_BROWSER_SOCKET_DIR` keeps where the host does not look; with either, `dor ab open` opened no pane (review of #777, 2026-09). The command has just made the daemon, so asking it starts none.
 
 ## Playwright
+
+**Why one viewport writer.** Chrome keeps one device-metrics override per CDP session. Against playwright-cli 0.1.21 (Chromium 154, 2026-09-24):
+- the latest call applies at once;
+- a navigation re-applies the later-attached session's override, the host's;
+- clearing the host's override leaves the page with no emulation (1280×633) until the next navigation re-applies Playwright's;
+- the CLI's `screenshot` re-applies Playwright's own emulation.
+
+The old double write, `setViewportSize` then a host override carrying the ratio, therefore lost its ratio to every agent `screenshot`. It also undid an agent's `resize` on the next navigation: 800×600@1 became 1000×700@2 again. An override alone was replaced outright by `screenshot` (900×600@2 to 1280×720@1). `setViewportSize` alone survived same-site, cross-site and CLI navigation, reload, a tab switch, `screenshot` and `snapshot`, and an agent's `resize` replaced it and stayed. A device's touch and user-agent overrides from the host's session reset cleanly (`userAgent: ''` restores Playwright's own).
+
+**What one writer costs.** Playwright has no API to change a context's ratio after launch, and the CLI reads it only from a config file, which as `--config` would displace the project's own. So a Playwright page renders at 1, and its crisp capture is CSS-resolution. A `clip.scale` capture renders at 2× but left the page at 900×513 afterward.
+
+**Why an identical frame is dropped.** Under Playwright's emulation alone, each `Page.captureScreenshot` over the host's session made Chrome send the last screencast frame again: 20 captures, 20 frames, 1 distinct. With the host's override in place it sent 1. Forwarded, each re-sent frame pulsed the next capture, so a static page captured about 20 times a second and sent nothing (browser-dev harness, 2026-09-24). A page Dormouse never sized looped the same way before.
 
 **Why screencast acks are paced.** Chrome sends the next screencast frame only once the last is acknowledged, and the host acknowledged each on receipt, so the rate was bounded only by how fast Chrome could encode — each frame then JSON-parsed, re-stringified and base64-decoded again in the webview (static reading, 2026-09). Acknowledging no sooner than 50 ms after the last caps it at the ~20 Hz agent-browser's daemon streams at.
 

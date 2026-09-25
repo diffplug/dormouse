@@ -380,8 +380,7 @@ prose but never silently discards source text.
 
 ## `/docs/compatible-agents` guide
 
-`docs/compatible-agents.md` publishes whole except its `#` title
-(`DROP_DOCUMENT_TITLE`). **Must keep its supported-agent table aligned with
+**Must publish `docs/compatible-agents.md` with `COMPATIBLE_AGENTS_DELTA` removing its title, spec front matter, “Recovery contract (maintainers)” section, and `## Future`.** Links into withheld sections resolve to the canonical file on GitHub. **Must keep its supported-agent table aligned with
 `CODING_AGENTS` in `lib/src/lib/coding-agents.ts`**, pinned by
 `compatible agents` in `website/scripts/generate-docs.test.js`.
 
@@ -592,7 +591,7 @@ spec.
 | `vscode-ext/README.md` | The canonical product guide; published off-site, parsed here |
 | `SELF_HOST.md` | The self-host runbook and Installer contract; the runbook half is published |
 | `docs/specs/security.md` | The security spec; every section publishes, its rows split across three pages |
-| `docs/compatible-agents.md` | The supported-agent guide, published whole at `/docs/compatible-agents` |
+| `docs/compatible-agents.md` | The agent guide and recovery contract; the public guide publishes at `/docs/compatible-agents` |
 | `vscode-ext/package.json` | Listing metadata and VS Code command inventory |
 | `README.md` | Repository and contributor entry point |
 | `vscode-ext/images/` | Guide media; the generator copies it to `public/guide/images/`, which the Marketplace listing loads from |

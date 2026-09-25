@@ -47,7 +47,7 @@ export function alarmPulseClass(bounded: boolean): string {
 /** Starts a CSS animation on a clock that began at `startedAt`, so an element
  *  mounted later lands where that animation already is — past its end when it
  *  has already finished. */
-function animationClockStyle(startedAt: number): CSSProperties {
+export function animationClockStyle(startedAt: number): CSSProperties {
   return { animationDelay: `${-Math.max(0, Date.now() - startedAt)}ms` };
 }
 

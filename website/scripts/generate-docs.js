@@ -123,6 +123,29 @@ const DOCS_DELTA = [DROP_DOCUMENT_TITLE];
 /** Match the one heading whose text is exactly `text`. */
 const headingNamed = (text) => (block) => block.type === 'heading' && block.text === text;
 
+/** The public guide and its recovery contract share one canonical file. */
+const COMPATIBLE_AGENTS_DELTA = [
+  DROP_DOCUMENT_TITLE,
+  {
+    id: 'drop-front-matter',
+    reason: 'Spec ownership and glossary references are for maintainers.',
+    match: (block) => block.type === 'blockquote',
+    operation: 'remove',
+  },
+  {
+    id: 'drop-recovery-contract',
+    reason: 'The shared recovery implementation contract is maintainer documentation.',
+    match: headingNamed('Recovery contract (maintainers)'),
+    operation: 'remove-section',
+  },
+  {
+    id: 'drop-future',
+    reason: 'Unbuilt behavior is not part of the public guide.',
+    match: headingNamed('Future'),
+    operation: 'remove-section',
+  },
+];
+
 /**
  * The complete self-host delta, per docs/specs/website-docs.md.
  *
@@ -835,7 +858,8 @@ export async function generateDocs() {
   const security = await buildSecurity();
   const agents = await buildDocument({
     file: 'docs/compatible-agents.md',
-    delta: [DROP_DOCUMENT_TITLE],
+    delta: COMPATIBLE_AGENTS_DELTA,
+    canonicalUrl: `${REPO_BLOB_BASE}/docs/compatible-agents.md`,
     label: '/docs/compatible-agents',
     fallbackTitle: 'Compatible agents',
   });

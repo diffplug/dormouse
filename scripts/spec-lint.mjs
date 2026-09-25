@@ -8,10 +8,10 @@
  *   1. Every docs/specs/*.md file is indexed in AGENTS.md.
  *   2. `## Future` (or `## N. Future`), when present, is the LAST section of
  *      its spec — the fold convention.
- *   3. Every relative markdown link in AGENTS.md + SELF_HOST.md + docs/specs
+ *   3. Every relative markdown link in AGENTS.md + external specs + docs/specs
  *      resolves: the target file exists, and a `#fragment` matches a real
  *      heading anchor.
- *   4. Every backticked repo path mentioned in AGENTS.md + SELF_HOST.md +
+ *   4. Every backticked repo path mentioned in AGENTS.md + external specs +
  *      docs/specs exists on disk — catches `Source of truth:` pointers
  *      rotting on renames.
  *      Conservative: only tokens that start with a known top-level directory
@@ -19,8 +19,8 @@
  *      exist after a build are skipped via SKIP_PATH_PREFIXES.
  *   5. Every spec that uses glossary vocabulary (Session / Pane / Door /
  *      baseboard / passthrough) leads with a `> See docs/specs/glossary.md`
- *      blockquote. Scoped to docs/specs (SELF_HOST.md is a deployment spec;
- *      its lone incidental "baseboard" doesn't warrant the callout).
+ *      blockquote. SELF_HOST.md is exempt: its deployment runbook uses
+ *      "baseboard" only incidentally.
  *   6. A named scope (`**Scope: X**` leading a line) is defined exactly once
  *      across the corpus, and every bold reference — `(**Scope: X**)` or the
  *      bare `the **x** scope` form — names a defined scope.
@@ -34,7 +34,7 @@
  *   9. Retired: navigation maps and section-local pointers may coexist.
  *      Maps are optional and need not cover every file; check 4 validates
  *      their repo paths, while check 12 validates targeted pointers.
- *  10. Word-budget ratchet: every spec (and AGENTS.md, SELF_HOST.md) stays
+ *  10. Word-budget ratchet: every spec, plus AGENTS.md and SECURITY.md, stays
  *      under its budget in scripts/spec-word-budgets.json. A budget is the
  *      file's size rounded up to the nearest BUDGET_STEP words. Growth past
  *      it fails; cut to fit, or add what is needed and re-baseline with
@@ -119,25 +119,18 @@ const specDirFiles = readdirSync(join(ROOT, SPECS_DIR))
   // compared against forward-slash paths written in the markdown.
   .map((f) => `${SPECS_DIR}/${f}`);
 const specFiles = specDirFiles.filter((f) => !f.endsWith('.rationale.md'));
-// SELF_HOST.md is a root-level spec (the self-host deployment: runbook +
-// installer contract); it rides checks 2-4 alongside the docs/specs files, and
-// checks 11 and 15 through ROOT_SPECS below.
-// SECURITY.md is the GitHub security policy — a pointer at the security specs,
-// budgeted so it cannot regrow into the 17,000-word spec it once was; it rides
-// the link, path, and budget checks only.
-//
-// A rationale file sits beside its spec, so a root-level spec's lives at the
-// root too. Listing the spec rather than globbing the root keeps check 15 able
-// to report a missing rationale: the pair is declared, not discovered.
-const ROOT_SPECS = ['SELF_HOST.md'];
+// Canonical specs outside docs/specs pair with a rationale beside the source.
+// Declare the specs, so a missing companion can still be diagnosed.
+const EXTERNAL_SPECS = ['SELF_HOST.md', 'docs/compatible-agents.md'];
 const rationaleFiles = [
   ...specDirFiles.filter((f) => f.endsWith('.rationale.md')),
-  ...ROOT_SPECS.map((f) => f.replace(/\.md$/, '.rationale.md')).filter((f) => existsSync(join(ROOT, f))),
+  ...EXTERNAL_SPECS.map((f) => f.replace(/\.md$/, '.rationale.md')).filter((f) => existsSync(join(ROOT, f))),
 ];
-const allFiles = ['AGENTS.md', 'SECURITY.md', 'SELF_HOST.md', ...specFiles, ...rationaleFiles];
-const foldCheckedFiles = ['SELF_HOST.md', ...specFiles];
+// SECURITY.md is a policy pointer; only link, path, and budget checks apply.
+const allFiles = ['AGENTS.md', 'SECURITY.md', ...EXTERNAL_SPECS, ...specFiles, ...rationaleFiles];
+const foldCheckedFiles = [...EXTERNAL_SPECS, ...specFiles];
 /** Specs that pair with a rationale file — checks 11 and 15. */
-const rationaleCheckedSpecs = [...ROOT_SPECS, ...specFiles];
+const rationaleCheckedSpecs = [...EXTERNAL_SPECS, ...specFiles];
 const problems = [];
 
 /** Memoize a one-argument pure function; the lint never writes, so nothing goes stale. */
@@ -256,8 +249,8 @@ for (const rel of allFiles) {
 // are dormouse-specific in any case. Lowercase "session"/"pane" prose and
 // compounds like `PersistedPane` do not trigger.
 const GLOSSARY_VOCAB = /\b(?:Pane|Door|Session|[Bb]aseboard|passthrough)\b/;
-for (const spec of specFiles) {
-  if (spec.endsWith('/glossary.md')) continue;
+for (const spec of foldCheckedFiles) {
+  if (spec === 'SELF_HOST.md' || spec.endsWith('/glossary.md')) continue;
   const lines = proseLines(spec);
   const firstH2 = lines.findIndex((l) => /^##\s/.test(l));
   const head = lines.slice(0, firstH2 === -1 ? lines.length : firstH2);
@@ -347,7 +340,7 @@ for (const rat of rationaleFiles) {
 // none. Rationale files carry none: evidence may grow without limit.
 const BUDGETS_FILE = 'scripts/spec-word-budgets.json';
 const BUDGET_STEP = 50;
-const budgetedFiles = ['AGENTS.md', 'SECURITY.md', 'SELF_HOST.md', ...specFiles];
+const budgetedFiles = ['AGENTS.md', 'SECURITY.md', ...EXTERNAL_SPECS, ...specFiles];
 const wordsOf = new Map(budgetedFiles.map((rel) => [rel, countWords(read(rel))]));
 const budgetFor = (rel) => Math.ceil(wordsOf.get(rel) / BUDGET_STEP) * BUDGET_STEP;
 let budgets = JSON.parse(read(BUDGETS_FILE));
@@ -458,7 +451,8 @@ for (const spec of foldCheckedFiles) {
 // unquoted one runs on into the sentence, so its prefixes are tried, and a
 // lone word must open a heading. A numbered `§` names the heading that carries
 // that number.
-const CITABLE = ROOT_FILES.filter((f) => f.endsWith('.md')).map((f) => f.replace('.', '\\.')).join('|');
+const CITABLE = [...new Set([...ROOT_FILES.filter((f) => f.endsWith('.md')), ...EXTERNAL_SPECS])]
+  .map((f) => f.replaceAll('.', '\\.')).join('|');
 const CITATION_RE = new RegExp(
   `(docs\\/specs\\/[a-z-]+\\.md|${CITABLE})[\`)\\]]*\\s*(?:` +
   '(?:->|→)\\s*(?:"([^"]+)"|`(#{1,6}\\s[^`]+)`|([A-Z][^"`.,;:()\\n]*))' +

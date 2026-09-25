@@ -1,5 +1,3 @@
-import { cfg } from "dormouse-lib/cfg";
-
 // Item ids are the persistence key — keep them stable across releases.
 const THEME_ITEM_IDS = ["th-theme"] as const;
 
@@ -233,13 +231,12 @@ export const DESKTOP_SECTIONS: readonly Section[] = [
       },
       {
         id: 'al-cmd-exit',
-        title: 'A long command that finished while you were away',
-        hint:
-          `Press \`x\` to start a slow build in another pane, click into that pane, then click back here and wait. Dormouse rings for any command that ran longer than ${cfg.alert.commandExitMinRuntime / 1000} seconds and finished after you walked away — again, no rule needed.`,
+        title: 'A command that finished while you were away',
+        hint: 'Press `x` to start a slow build in another pane, click into that pane, then click back here and wait. Dormouse rings for any command you looked at that finished after you walked away — again, no rule needed.',
       },
     ],
     prose: [
-      'Three different things can make a pane ring: a rule you set on a command name, a notification the program sends, and a long command finishing while you were elsewhere. None of them ring while you are looking at the pane — they wait until you go idle.',
+      'Three different things can make a pane ring: a rule you set on a command name, a notification the program sends, and a command finishing while you were elsewhere. None of them ring while you are looking at the pane — they wait until you go idle.',
     ],
   },
   COPY_PASTE_SECTION,

@@ -123,7 +123,7 @@ embedder, and the browser checks the whole chain (rationale).
 - **FAIL IF** the iframe proxy stops checking that `Host` names its own grant port, on either path. Its per-grant ephemeral port and one-fixed-upstream binding are real mitigations but neither is a secret, so the `Host` check is what makes DNS rebinding fail.
 - **FAIL IF** the iframe proxy drops upstream `X-Frame-Options` / CSP `frame-ancestors` without replacing them with exactly `frame-ancestors 'self' <validated embedder chain>`, admits another source, or targets the shim anywhere but its own proxy origin and that chain's innermost origin. With no usable chain it must preserve the headers and inject nothing (rationale).
 - **FAIL IF** a request bearing a *foreign* `Origin` refreshes a grant's idle timer: a grant holds a live upstream binding, and a stranger polling it keeps a closed pane's binding open. An *absent* `Origin` must keep refreshing it — that is what a live frame's own navigations and sub-resources send.
-- **FAIL IF** the browser viewer listener upgrades without both its own loopback `Host` and a single-use, 60-second grant for that one view, or passes a provider a webview message it has not rebuilt; or the host dials a viewer upstream (an agent-browser stream, a headed window's CDP) off loopback: `createViewerServer` and `parseViewerInput` in `lib/src/host/browser-viewer.ts`, `viewStream` and `observePage` in `lib/src/host/agent-browser-host.ts`. The webview holds no CDP and reaches no daemon (rationale). Pinned by `lib/src/host/browser-viewer.test.ts`.
+- **FAIL IF** the browser viewer listener upgrades without both its own loopback `Host` and a single-use, 60-second grant for that one view, or passes a provider a webview message it has not rebuilt; or the host dials an agent-browser stream or a browser's CDP off loopback: `createViewerServer` and `parseViewerInput` in `lib/src/host/browser-viewer.ts`, `viewStream` and `askCdpEndpoint` in `lib/src/host/agent-browser-host.ts`. The webview holds no CDP and reaches no daemon (rationale). Pinned by `lib/src/host/browser-viewer.test.ts`.
 - **FAIL IF** the browser-dev bridge drops any of its four gates — the per-run token, the loopback `Host` check, the `application/json` content-type required of every non-GET, and the exact-origin `access-control-allow-origin`. The first three live together in the gate that runs before routing, so a route that never reads a body is covered by all of them. It is dev-only and ships in nothing, but it dispatches `pty_spawn` with caller-supplied `shell`, `args`, `cwd` and `env` — arbitrary command execution on a maintainer or CI-agent machine (`docs/specs/security-ci.md` -> "Automated Maintainer (tend)"). The content-type rule is a security control, not tidiness (rationale).
 - **FAIL IF** the browser-dev Vite server permits cross-origin reads of token-bearing modules or disables its DNS-rebinding Host check. Pinned by `standalone/scripts/dev-agent-browser.test.mjs` (rationale).
 
@@ -168,7 +168,7 @@ behind do carry transcripts (rationale).
 
 **Standalone writes `recovery.json` beside its sessions directory**, under the
 state root, owner-only: one rebuilt agent-resume invocation per Surface, never a
-buffer, unlinked as it is read (`docs/specs/standalone.md` -> "Agent recovery").
+buffer, unlinked as it is read (`docs/compatible-agents.md` -> "Recovery record").
 
 **The notepad archive is the one store holding terminal text on purpose** —
 excerpts the user explicitly captured, their colors, the Surface title and kind,
@@ -184,7 +184,7 @@ so the modes there are VS Code's, not ours, and no transcript reaches either
 (`docs/specs/vscode.md` -> "Serialization and restore"). Dormouse also writes
 `recovery.json` under the extension's storage directory, owner-only and
 temp-then-rename: one rebuilt agent-resume invocation per Surface, no buffer,
-unlinked as it is read (`docs/specs/vscode.md` -> "Capturing agent recovery").
+unlinked as it is read (`docs/compatible-agents.md` -> "Recovery record").
 
 **The VS Code peer-link token is a local credential at rest** —
 `burrow.peer-token` in the extension's global storage, written mode `0600`

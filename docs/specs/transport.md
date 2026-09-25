@@ -238,21 +238,9 @@ Source of truth: `getWindowSnapshot` / `seedWindowSession` / `installWindowSessi
 
 **A corrupt save must never block startup.** Every read goes through `readPersistedSession()` / `readPersistedWindow()`, which accept the canonical parsed object *or* a JSON-stringified blob (host state APIs may hand back the inner serialized string) and log-and-discard anything present but unreadable. `readPersistedWindow` additionally drops Workspaces whose inner session is unreadable and repairs a dangling `activeWorkspaceId` to the first Workspace.
 
-**The recovery command.** **Must retain one agent resume invocation per Surface** alongside the persisted structure, in a form the shared recovery parser recognizes (*Detection* below).
+**Must keep recovery commands outside `PersistedPane`.** `normalizeSessionV3` strips legacy `resumeCommand` fields. Capture, records, and execution follow `docs/compatible-agents.md`.
 
-*It is not part of the persisted session.* `PersistedPane` carries no `resumeCommand`, and `normalizeSessionV3` strips one out of a pre-upgrade blob as it strips a transcript. **Host-owned and single-use, it travels out of band**: the host puts `surfaceId -> invocation` on the webview's boot payload, the renderer reads it through `PlatformAdapter.getRecoveryCommands()`, and an adapter whose host captures nothing omits the method (rationale).
-
-*One writer per host, exactly one read.* The writer is that host's teardown — the VS Code extension host's `deactivate()` (`docs/specs/vscode.md` → "Capturing agent recovery") and the Tauri sidecar's quit capture (`docs/specs/standalone.md` → "Agent recovery"); the renderer save path never derives one. Both run the same detection machine, `captureAgentRecovery` in `lib/src/host/recovery-capture.ts`, over their own PTY buffers, and keep the record through the same `createRecoveryStore`. **Cold restore is the one reader — resume never reads it**, the agent there still being Live. The record is read and unlinked on the first claim of a host process, **destructively even on a parse failure**, so the durable copy is gone before any webview is served; within that process **each container claims only the entries matching its own saved pane ids** (rationale). **A record older than 7 days is discarded unread.**
-
-*Detection.* Executable-string constraints; the grammars that implement them, and their edge cases, are in the comments at the two modules below.
-
-- **Only a known invocation plus an opaque id.** The command is *rebuilt* as label, space, captured id, never sliced from the buffer, keeping the hint's executable alias; a long option's id may follow a space or `=`, and only Claude's legacy `claude --continue` omits it. The id grammar is alphanumeric/hyphen/underscore only, so shell punctuation cannot enter executable state. The invocation must end on a word break but nothing stronger (rationale).
-- **Must observe a separator after the newest invocation before capturing it.** Buffer end is insufficient, even at the capture deadline; never fall back to an older hint while the newest is unterminated. Pinned by `waits through every ID split` in `lib/src/host/recovery-capture.test.ts` (rationale).
-- **The scan window is stripped as a whole, in one pass, and an unterminated control swallows the rest of it** — the string controls (OSC, DCS, SOS, PM, APC) **in either introducer form, `ESC` or bare C1**, and equally a CSI the window was cut off *inside* (rationale). **Match every escape by its full ECMA-48 shape**, never by the Fe range (rationale). **One implementation**: `stripTerminalControls` removes string controls by running `TerminalControlStreamFilter`, so the batch and streaming readers cannot disagree.
-- **Stripping runs in boundary mode, whose rule is inverted**: *every complete* control becomes a newline rather than vanishing, except SGR and charset designators, the two classes that neither move the cursor nor erase. **Must discard incomplete trailing presentation controls without creating a boundary** (rationale).
-- **Rightmost match in the last 50 lines wins**, newest *by position* and never by pattern order (rationale). **Must revalidate the complete invocation through `normalizeResumeCommand` before typing**, against a snapshot written by an older detector.
-
-Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `CODING_AGENTS` in `lib/src/lib/coding-agents.ts`; `surfaceRefs` in `lib/src/components/Wall.tsx`; `saveSession` in `lib/src/lib/session-save.ts`; `restoreSession` in `lib/src/lib/session-restore.ts`; the resume plan in `lib/src/lib/reconnect.ts`; `captureAgentRecovery` in `lib/src/host/recovery-capture.ts`; `createRecoveryStore` in `lib/src/host/recovery-store.ts`; `takeRecoveryCommands` in `vscode-ext/src/session-state.ts`; `getRecoveryCommands` in `lib/src/lib/platform/vscode-adapter.ts`; `detectResumeCommand` / `normalizeResumeCommand` in `lib/src/lib/resume-patterns.ts`; `stripTerminalControls` in `lib/src/lib/terminal-controls.ts`.
+Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `surfaceRefs` in `lib/src/components/Wall.tsx`; `saveSession` in `lib/src/lib/session-save.ts`; `restoreSession` in `lib/src/lib/session-restore.ts`; the resume plan in `lib/src/lib/reconnect.ts`.
 
 ## Persistence policy
 
@@ -293,30 +281,8 @@ Ending something deliberately is also what *keeps* its notes: **a deliberate clo
 **Standalone persists one `PersistedWindow` per window**, every Workspace in it, and
 restores them on the next launch (rationale). Quitting ends the processes, not the
 window: the layout, cwds, titles, doors, and TODO/alert blobs come back, and the
-agents that were running come back with them ("Consuming it"). Nothing else does —
+agents that were running come back with them (`docs/compatible-agents.md` → "Cold restore"). Nothing else does —
 scrollback is never persisted, so a cold-restored pane opens empty.
-
-### Consuming it
-
-**A pane carrying a recovery command runs it automatically on the next cold
-activation** — no prompt, no button. **Auto-run holds only while both guarantees
-above do**: a rebuilt label plus a fail-closed id (*Detection*), and provenance that
-is structural — only the bytes a pane emitted after Dormouse's own interrupt, never a
-scan of arbitrary saved history (`docs/specs/vscode.md` → "Capturing agent
-recovery"). Weaken either and the confirmation gate has to come back (rationale).
-
-Two consumption rules, shared with `dor split` launches. **Type the command only
-once the fresh shell reaches a prompt** — the platform write bypasses xterm's
-keystroke fallback, and shell startup swallows keystrokes. **Seed `commandLine` +
-`commandStart(user_input)` synchronously first** (`docs/specs/terminal-state.md`), so
-a restored Workspace immediately counts its agents in `countRunningSessions` — and
-the quit-confirmation dialog counts sessions the user did not start by hand. The pane
-shows a passive resumed-session notice (`docs/specs/layout.md` → "Agent resume on
-cold restore").
-
-Known cost: every cold activation spawns every agent that was running, and Reload
-Window is frequent. **If it becomes a complaint, the mitigation is a setting, not a
-prompt** (rationale).
 
 ## Universal invariants
 

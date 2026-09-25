@@ -127,10 +127,14 @@ if (visualSnapshot) {
   // `!important` outranks even inline transition declarations (the selection ring's
   // unfocus-saturate fade), so a snapshot showing such a fade already finished
   // is expected, not a regression.
-  const instantTransitions = document.createElement('style');
-  instantTransitions.textContent =
-    '*, *::before, *::after { transition-duration: 0s !important; transition-delay: 0s !important; }';
-  document.head.appendChild(instantTransitions);
+  const snapshotStyles = document.createElement('style');
+  snapshotStyles.textContent =
+    '*, *::before, *::after { transition-duration: 0s !important; transition-delay: 0s !important; }' +
+    // xterm's custom scrollbar auto-reveals after input, focus, or resize and
+    // fades on a timer. Its visibility at capture time says nothing about the
+    // story. Hide only its paint; retain the scrollable element and its layout.
+    '.xterm .xterm-scrollable-element > .xterm-scrollbar { visibility: hidden !important; }';
+  document.head.appendChild(snapshotStyles);
 }
 
 // Collect all CSS variable names across all themes for cleanup

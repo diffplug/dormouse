@@ -70,6 +70,8 @@ import type {
 import { hasBrowser, hasTerminal } from 'dor/commands/types';
 import { DEFAULT_WORKSPACE_ID, type PersistedSurfaceRefs, type WorkspaceId } from '../lib/session-types';
 import { clearWorkspaceSurfaces, setWorkspaceSurfaces } from '../lib/workspace-surfaces';
+import { nextTodoMember } from '../lib/workspace-union';
+import { deriveDisplayedSurfaceLabel } from '../lib/session-label';
 import { getWorkspace, getWorkspacesSnapshot, subscribeToWorkspaces, workspaceRefFor } from '../lib/workspace-store';
 import { awaitWallEmpty } from './wall/close-all';
 import { registerWallHandle, type WallHandle } from './wall/wall-handles';
@@ -1775,6 +1777,10 @@ export function Wall({
     focusSession(id, focused && modeRef.current === 'passthrough');
   }, [nav]);
 
+  /** What a tab's TODO pill enters next. A selected Workspace tab is no
+   *  member, so the search starts from the top. */
+  const nextTodo = () => nextTodoMember(memberSurfaceIds(), selectedIdRef.current, getActivitySnapshot());
+
   // The methods close over current state, so they are rebuilt each render and
   // assigned INTO one stable object: the registry holds that object, so a
   // re-render never replaces a registered entry.
@@ -1797,6 +1803,19 @@ export function Wall({
     },
     enterCommandMode: exitTerminalMode,
     selectWorkspaceTab: () => { exitTerminalMode(); selectWorkspace(effectiveWorkspaceId); },
+    enterNextTodo: () => {
+      const next = nextTodo();
+      // Exactly the gesture a click on it is — a pane body's or a Door's — so
+      // it acknowledges as that click does (`docs/specs/alert.md` -> Engagement).
+      if (next !== null) wallActionsRef.current.onFocusPane(next);
+      return next;
+    },
+    peekNextTodo: () => {
+      const next = nextTodo();
+      if (next === null) return null;
+      const meta = lath.getMeta(next);
+      return meta ? deriveDisplayedSurfaceLabel(surfaceKindFromParams(meta.params), next, persistedPanelTitle(meta.title)) : null;
+    },
     flushPersistence: (options) => persistence.flush(options),
     prepareWorkspaceTransfer: () => prepareWorkspaceTransfer({
       workspaceId: effectiveWorkspaceId,

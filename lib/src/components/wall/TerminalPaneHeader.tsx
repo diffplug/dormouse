@@ -11,7 +11,7 @@ import {
 import { ToolDirtyIndicator, useToolDirty } from '../ToolDirtyIndicator';
 import { HeaderActionButton } from '../HeaderActionButton';
 import { HEADER_PALETTE_TRANSITION_CLASS, POPUP_SURFACE_CLASS, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from '../design';
-import { useTodoPillContent } from '../TodoPillBody';
+import { TodoSpotlight, useTodoPillContent } from '../TodoPillBody';
 import { useHeaderTier } from './use-header-tier';
 import { NotepadHeaderButton } from './NotepadHeaderButton';
 import { PaneActionGroup } from './PaneActionButtons';
@@ -206,7 +206,7 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
             type="button"
             data-session-todo-for={id}
             data-flourishing={todoPill.flourishing ? 'true' : 'false'}
-            className={`todo-pill-shell shrink-0 rounded border border-current px-1.5 py-px text-xs font-semibold ${TODO_PILL_TRACKING_CLASS} transition-colors hover:bg-current/10 focus:outline-none`}
+            className={`todo-pill-shell relative shrink-0 rounded border border-current px-1.5 py-px text-xs font-semibold ${TODO_PILL_TRACKING_CLASS} transition-colors hover:bg-current/10 focus:outline-none`}
             aria-label={todoNotificationPreview ? `Dismiss TODO: ${todoNotificationPreview}` : 'Dismiss TODO'}
             aria-describedby={todoPreviewRect && activity.notification ? todoPreviewId : undefined}
             aria-hidden={todoPill.flourishing ? true : undefined}
@@ -222,6 +222,8 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
             }}
           >
             {todoPill.body}
+            {/* Over the border too, so the wash takes the pill's own outline. */}
+            <TodoSpotlight surfaceId={id} className="-inset-px rounded" />
           </button>
         )}
       </div>

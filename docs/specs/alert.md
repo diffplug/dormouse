@@ -14,13 +14,13 @@ Dormouse can owe the user attention in three ways. Each is a **source** of the S
 |---|---|---|
 | `watching` (WATCHING Track) | a watched command's output went busy, then quiet | `WATCHING`: `<watch key> went quiet` |
 | `report` (Terminal reports) | the PTY emitted `BEL`, `OSC 9`, `OSC 99`, or `OSC 777`, or ended an `OSC 9;4` cycle | the sanitized report |
-| `exit` (Command-exit Track) | a seen command exited after at least `cfg.alert.commandExitMinRuntime` | `COMMAND_EXIT` |
+| `exit` (Command-exit Track) | a seen command exited | `COMMAND_EXIT` |
 
 Only `watching` requires WATCHING. **Every source obeys one engagement rule — a completion on an engaged Session is held, never rung** (Engagement), applied at the single seam every completion passes through (Completion events). The output/silence detector (`QuiesceDetector`) is not a source: it is an always-on observer WATCHING reads.
 
 ## Non-goals
 
-- **No process heuristics.** WATCHING applies only to command names the user explicitly asked for — never a guess that `vim`, `npm dev`, agents, or test runners deserve alerts.
+- **Must derive WATCHING only from the configured command rule set**, under WATCHING Track; never infer it from a process category.
 - **No native OS notifications on the machine Dormouse runs on**, and no progress-bar widget. The one local audible channel is the opt-in spoken alarm below, which says a Pane name and nothing else; Dormouse plays no sound effects. Push is the exception and goes only to a *remote* paired phone.
 - **No process-tree introspection** for command-exit alerts; normalized terminal semantic events are the reliable input.
 - No HTML, Markdown, ANSI styling, clickable actions, custom icons, or remote-controlled buttons in notification previews.
@@ -64,7 +64,7 @@ Three separate signals, never one lease (rationale):
 | Gesture | Acknowledges |
 |---|---|
 | typing into the pane (CSI/SS3 key encodings included), a paste, a file drop, the mobile input bar or a gesture key, a remote Client's write | with input |
-| a Pane body or header click, zoom or unzoom, the dev-server chip, entering passthrough by keyboard, a Door click or `Enter`, a mobile tap | without input |
+| a Pane body or header click, zoom or unzoom, the dev-server chip, a Workspace tab's TODO pill on the member it enters, entering passthrough by keyboard, a Door click or `Enter`, a mobile tap | without input |
 | a terminal reply, a mouse-only report chunk, `d` reattach, a spawn, split, or promotion, a `dor` reveal, an embed focusing itself, DOM focus alone | nothing |
 
 - **Must acknowledge at each gesture's handler, never in the passthrough entry the silent paths share.**
@@ -79,7 +79,7 @@ Source of truth: `setViewer` / `acknowledge` in `lib/src/lib/alert-manager.ts`; 
 
 Every completion — a detector settle, a command finish, a direct notification, and the end of a protocol progress cycle (completion or error) — is **dispatched as a `CompletionEvent` before any suppression runs** (rationale).
 
-Claimants get first refusal per Session in registration order; the first to return `true` claims the event and the rest are not offered it. **A claimed event never rings, never sets TODO, and never stores an `ActivityNotification`** — it stops before the ring rules, where the echo window, holding, and the command-exit seen and minimum-runtime checks live.
+Claimants get first refusal per Session in registration order; the first to return `true` claims the event and the rest are not offered it. **A claimed event never rings, never sets TODO, and never stores an `ActivityNotification`** — it stops before the ring rules, where the echo window, holding, and the command-exit seen check live.
 
 **Must hold a completion that would ring an engaged Session**: the sources it would raise and the richest detail (Clearing And TODO), repeated holds merging, never public. A deferred report that comes due while engaged is held too, and **never deferred again on escalation** (rationale). **Presence lapsing `idle` with focus unchanged rings what was held**, each source by its unengaged path; any other end drops it — a user verb (Clearing And TODO), focus moving away, the viewer leaving, seeding, removal, or teardown (rationale). **Dropping on an explicit disengage may be a mistake** (rationale). Resumed watched work and rule removal withdraw a held `watching` source as they withdraw a ringing one (WATCHING Track).
 
@@ -96,7 +96,7 @@ With `deferAlertsUntilQuiet` enabled:
 Two ordering rules:
 
 - **Clear the progress cycle *before* dispatch**, so a completion or error ends the cycle whether or not the event is claimed and `OSC_NOTIF_BUSY` falls back either way.
-- **Dispatch a command finish for every watch that existed**, including the short, unseen, and engaged ones the ring rule then discards or holds.
+- **Dispatch a command finish for every watch that existed**, including the unseen and engaged ones the ring rule then discards or holds.
 
 Source of truth: `registerCompletionClaimant` / `dispatchCompletion` / `holdOrDeliver` / `deferOrDeliverNotification` / `scheduleDeferredNotification` / `flushDeferredNotification` / `escalateHeld` in `lib/src/lib/alert-manager.ts`; `quietAt` in `lib/src/lib/quiesce-detector.ts`. Pinned by `held completions` in `lib/src/lib/alert-engagement.test.ts`.
 
@@ -244,13 +244,13 @@ Rules:
 
 - A command start creates `commandExitWatch` for the current foreground command. **Mark it seen** when the Session is engaged at its start, becomes engaged, or is acknowledged while it runs.
 - **Armed is derived, never stored**: a seen command running while the Session is not engaged — public `COMMAND_EXIT_ARMED`, published on every engagement edge.
-- When the same command finishes, or the PTY exits before a finish event, **ring only when** it was seen, ran at least `cfg.alert.commandExitMinRuntime` (15 s), and the Session is not engaged; engaged, the exit is held (Completion events). **Never tie that minimum to the inactivity timeout** (rationale).
+- When the same command finishes, or the PTY exits before a finish event, **ring only when** it was seen and the Session is not engaged; engaged, the exit is held (Completion events). **Never gate the ring on how long the command ran** (rationale).
 - The `exit` source carries the `COMMAND_EXIT` notification (title "Command finished", body = summarized command + exit code).
-- A quick finish, a different command start, or Session destruction clears the watch without ringing.
+- A different command start or Session destruction clears the watch without ringing.
 
 Command starts and finishes also drive the WATCHING rule above, so both sources share one `commandExitWatch` record and one `resolveCommandStart` helper with the terminal-state reducer.
 
-Source of truth: `dispatchCompletion` / `setViewer` / `formatCommandExitBody` in `lib/src/lib/alert-manager.ts`; `resolveCommandStart` in `lib/src/lib/terminal-state.ts`.
+Source of truth: `dispatchCompletion` / `setViewer` / `formatCommandExitBody` in `lib/src/lib/alert-manager.ts`; `resolveCommandStart` in `lib/src/lib/terminal-state.ts`. Pinned by `a short seen command` in `lib/src/lib/alert-manager.test.ts`.
 
 ## Clearing And TODO
 
@@ -395,7 +395,7 @@ Source of truth: `SettingsDialog` and `TOPICS` in `lib/src/components/SettingsDi
 | `count` | Number of members ringing or TODO; each Surface counts once. |
 | `ringingSince` | The earliest ringing member's episode start, else `null`. |
 
-**Must key the hidden tab's arrival burst on `ringingSince`**, held only for that ringing interval, so no later member, acknowledged member, or Workspace switch replays it (rationale). Pinned by `keeps one burst while a Workspace stays ringing` and `clocks the burst from the ring that began while the Workspace was visible` in `lib/src/components/WorkspaceStrip.test.tsx`.
+**Must key the hidden tab's arrival burst on `ringingSince`**, held only for that ringing interval and only while the tab is hidden, so no later member, acknowledged member, or Workspace switch replays it (rationale). Pinned by `keeps one burst while a Workspace stays ringing`, `clocks the burst from the ring that began while the Workspace was visible`, and `clocks the burst on leaving from the rings still sounding` in `lib/src/components/WorkspaceStrip.test.tsx`.
 
 **Must keep the projection display-only:** it never enters the Activity machine or fires its own ring. A Surface with no activity entry contributes nothing. Callers **must include** minimized (`Doored`) Surfaces.
 
@@ -406,7 +406,7 @@ Source of truth: `computeWorkspaceUnion` in `lib/src/lib/workspace-union.ts`; `s
 Where it surfaces is host-specific:
 
 - **VS Code** reflects the terminal portion onto native chrome — `docs/specs/vscode.md`, which also owns why browser-surface TODO stays webview-local.
-- **Standalone** shows terminal rings/TODOs on panes and doors, and a browser Surface's `todo` on its own door. A **hidden** Workspace's tab additionally carries its union's TODO pill and, while ringing, the alarm inset, with `count` in the tab's accessible name; the visible Workspace's tab carries none, its panes and doors already saying it (`WorkspaceStrip` in `lib/src/components/WorkspaceStrip.tsx`).
+- **Standalone** shows terminal rings/TODOs on panes and doors, and a browser Surface's `todo` on its own door. **Every Workspace tab, the visible one included, carries its union's TODO pill** (rationale). **Only a hidden Workspace's tab wears the alarm inset while ringing**, the visible one's panes already ringing. Whenever a tab shows either, `count` joins its accessible name (`WorkspaceStrip` in `lib/src/components/WorkspaceStrip.tsx`; `keeps the TODO pill through activating and leaving its Workspace` in `lib/src/components/WorkspaceStrip.test.tsx`).
 
 **Must use `alarm-vs-header-inactive` for the hidden Workspace tab's inset**, matching its inactive-header background.
 
@@ -425,11 +425,11 @@ The header shows a fixed-text `TODO` pill when `todo === true`, a hover/focus no
 
 Source of truth: `TerminalContext` in `lib/src/components/wall/TerminalContext.tsx`; `setHelper` in `lib/src/lib/alert-manager.ts`, which every host calls at helper spawn and promotion.
 
-The TODO pill always displays `TODO`; remote notification text belongs in preview/detail surfaces, not inside the pill. Clicking the pill clears TODO, and on clear the pill briefly shows the success flourish before unmounting.
+The TODO pill always displays `TODO`; remote notification text belongs in preview/detail surfaces, not inside the pill. Clicking the pill clears TODO, and on clear the pill briefly shows the success flourish before unmounting. **A Workspace tab's TODO pill never clears a TODO**: its click enters the member as a click on it would, an acknowledgement without input (Engagement; `docs/specs/layout.md` → Workspace tabs). **The Surface it enters plays the landing spotlight on its header's pill**, a Door's once reattached: one wash of the pill's colour rising and fading within 480 ms, unlike the flourish or the alarm. Each click replays it, a later mount lands past its end, and reduced motion drops it. Pinned by `spotlights the header pill a tab TODO pill enters, reattaching a Door, replaying a repeat, never clearing a TODO` in `lib/src/components/WorkspaceWindow.test.tsx` and `lib/src/components/TodoPillBody.test.tsx`.
 
 **Must wear the alarm treatment on every ringing terminal Pane**, labelled only once the speech sink acts. **Must bound the unlabelled pulse to one finite burst per episode, never replayed by a remount; `SPEAKING` pulses for its utterance, `SPOKEN` never** (rationale). **`prefers-reduced-motion` keeps the strong static treatment and suppresses only the pulse**, as does `cfg.alert.ringingPaused` (rationale). The three rows, their layers, strengths, and sizing are inventoried by `docs/specs/layout.md` → Alarm overlay.
 
-Source of truth: `raiseRing` in `lib/src/lib/alert-manager.ts`; `dismissSessionAlert` in `lib/src/lib/session-activity-store.ts`; `TerminalContext` in `lib/src/components/wall/TerminalContext.tsx`; `lib/src/components/TodoPillBody.tsx`; `AlertRingIndicator` in `lib/src/components/wall/AlertRingIndicator.tsx`; `alertRingRow`, `useAlertRingBurst`, `AlertRingInset` in `lib/src/components/alert-ring.tsx`.
+Source of truth: `raiseRing` in `lib/src/lib/alert-manager.ts`; `dismissSessionAlert` in `lib/src/lib/session-activity-store.ts`; `TerminalContext` in `lib/src/components/wall/TerminalContext.tsx`; `lib/src/components/TodoPillBody.tsx`; `spotlightTodo` in `lib/src/lib/todo-spotlight.ts`; `AlertRingIndicator` in `lib/src/components/wall/AlertRingIndicator.tsx`; `alertRingRow`, `useAlertRingBurst`, `AlertRingInset` in `lib/src/components/alert-ring.tsx`.
 
 ### Door
 
@@ -441,7 +441,7 @@ A Door is display-only for alert state:
 - do not expose a Door-specific alert menu
 - scrolled out of view, its overflow arrow carries its ring and TODO (`docs/specs/layout.md` → Baseboard responsive sizing)
 
-Reattaching by click or `Enter` acknowledges; `d` does not (Engagement).
+Reattaching by click, `Enter`, or a Workspace tab's TODO pill acknowledges; `d` does not (Engagement).
 
 ## Text And Security
 

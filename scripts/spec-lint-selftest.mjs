@@ -50,7 +50,13 @@ const SOURCE = 'standalone/scripts/clean-dev-sidecar.mjs'; // a comment appended
 // the citation check, which scans every tracked source file, this one included.
 const spec = (name) => ['docs/specs', name].join('/');
 
+const EXTERNAL_SPEC = ['docs', 'compatible-agents.md'].join('/');
+const EXTERNAL_RATIONALE = EXTERNAL_SPEC.replace(/\.md$/, '.rationale.md');
+
 const CASES = [
+  ['check 4: a missing path in an external spec', EXTERNAL_SPEC, '\nSee `lib/src/no-such-file.ts`.\n'],
+  ['check 8: an external rationale key with no heading', EXTERNAL_RATIONALE, '\n## No matching heading\n'],
+  ['check 13: a missing heading in an external spec', SOURCE, `\n// ${EXTERNAL_SPEC} -> "No Such Heading"\n`],
   ['check 4: a repo path that does not exist', SPEC, '\nSee `lib/src/no-such-file.ts`.\n'],
   ['check 11: a (rationale) marker under a heading the rationale does not key', SPEC, '\n## Planted\n\nA rule (rationale).\n'],
   ['check 11: the marker as the last item of its parenthetical', SPEC, '\n## Planted\n\nA rule (see below; rationale).\n'],
@@ -91,6 +97,12 @@ console.log('spec-lint-selftest: OK (Files / Code Map coexist with pointers; par
 for (const [name, target, text] of CASES) {
   selftest.withAppended(target, text, `${name}\n      planting this in ${target} stays green — spec-lint cannot see it`);
 }
+
+selftest.withMutation(
+  EXTERNAL_SPEC,
+  (path) => writeFileSync(path, readRepoFile(EXTERNAL_SPEC).replace(/^> See.*glossary[^\n]*\n/m, '')),
+  'check 5: an external spec without its glossary front matter',
+);
 
 selftest.withMutation(
   ROOT_RATIONALE,

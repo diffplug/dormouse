@@ -30,11 +30,6 @@ function getDemoDurationMs(inactivityTimeoutMs: number): number {
   ) + 250;
 }
 
-/** A command-exit ring also needs the command to outlast the minimum runtime. */
-function getCommandExitDemoDurationMs(inactivityTimeoutMs: number): number {
-  return Math.max(getDemoDurationMs(inactivityTimeoutMs), cfg.alert.commandExitMinRuntime + 250);
-}
-
 /** Must stay below `busyCandidateGap` to form one activity burst. */
 export const BUSY_DEMO_INTERVAL_MS = Math.floor(cfg.alert.busyCandidateGap / 2);
 
@@ -615,7 +610,7 @@ export class TutRunner implements InteractiveProgram {
 
   private startCommandExitDemo(): void {
     this.commandExitDemoStart = Date.now();
-    this.commandExitDemoDurationMs = getCommandExitDemoDurationMs(this.getInactivityTimeoutMs());
+    this.commandExitDemoDurationMs = getDemoDurationMs(this.getInactivityTimeoutMs());
     this.onTriggerCommandExitDemo?.(this.commandExitDemoDurationMs);
     this.startSpinnerTicks();
     this.render();

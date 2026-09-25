@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AlertManager } from './alert-manager';
 import { createAlertDeliveryScheduler, type AlertDeliveryScheduler } from './alert-delivery-scheduler';
 import { DEFAULT_ALERT_SETTINGS } from './alert-settings-model';
-import { cfg } from '../cfg';
 import { armCommandExit, driveToBusy, finishCommand, runCommand, settle } from './alert-manager-test-utils';
 
 const ID = 'resumed-watched-work';
@@ -98,7 +97,6 @@ describe('WATCHING output resuming before alarm delivery', () => {
 
   it.each(['report', 'exit'] as const)('preserves an authoritative %s source behind WATCHING', (source) => {
     armCommandExit(manager, ID, WATCHED);
-    vi.advanceTimersByTime(cfg.alert.commandExitMinRuntime);
     driveToBusy(manager, ID);
     settle();
     if (source === 'report') {
