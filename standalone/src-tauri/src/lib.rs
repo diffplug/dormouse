@@ -1538,6 +1538,7 @@ fn managed_voice_speak(
     Ok(tauri::ipc::Response::new(bytes))
 }
 
+// ── Browser automation (docs/specs/dor-browser.md → "Browser Host").
 // Thin forwarders to the Node sidecar, which runs the shared
 // lib/src/host/browser-host.ts — the very same module the VS Code extension
 // host runs, and the one place a request is validated. Mirrors

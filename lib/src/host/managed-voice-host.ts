@@ -192,7 +192,9 @@ export function createManagedVoiceHost(options: {
 
   async function speak(speakId: string, text: string): Promise<ManagedVoiceHostSpeakResult> {
     const result = await request(speakId, text);
-    if (!result.ok && result.reason !== 'cancelled') log(`[managed-voice] speak failed: ${result.reason}`);
+    if (!result.ok && result.reason !== 'cancelled' && result.reason !== 'unconfigured') {
+      log(`[managed-voice] speak failed: ${result.reason}`);
+    }
     return result;
   }
 
