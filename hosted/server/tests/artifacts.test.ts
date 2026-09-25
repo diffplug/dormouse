@@ -22,6 +22,7 @@ test("Hosted declares every peer of the installed pgstencil packages", () => {
 
 test("the lockfile resolves both pgstencil packages from npm", () => {
   const lockfile = readFileSync("../pnpm-lock.yaml", "utf8");
+  const lines = lockfile.split("\n");
   const { dependencies } = JSON.parse(readFileSync("package.json", "utf8")) as {
     dependencies: Record<string, string>;
   };
@@ -32,8 +33,10 @@ test("the lockfile resolves both pgstencil packages from npm", () => {
     expect(dependencies[name]).toBe(`^${manifest.version}`);
     const specifier = `${name}@${manifest.version}`;
     const key = name.startsWith("@") ? `'${specifier}'` : specifier;
-    expect(lockfile).toContain(
-      `  ${key}:\n    resolution: {integrity: sha512-`,
+    const index = lines.indexOf(`  ${key}:`);
+    expect(index, `${name} has a registry resolution`).toBeGreaterThan(-1);
+    expect(lines[index + 1]).toMatch(
+      /^    resolution: \{integrity: sha512-[A-Za-z0-9+/=]+\}$/,
     );
   }
   expect(lockfile).not.toMatch(/file:[^\s]*pgstencil/);
