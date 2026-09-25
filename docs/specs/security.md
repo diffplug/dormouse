@@ -49,7 +49,7 @@ last column means nothing cheaper does.
 | **Push, when enabled, cannot be aimed back into the tailnet.** | [What crosses the boundary](./security-remote.md#what-crosses-the-boundary) | `relay/test/push-endpoint.test.mjs` |
 | **Every dependency that reaches a machine is disclosed** at [dormouse.sh/supply-chain](https://dormouse.sh/supply-chain), and a change without the disclosure fails CI. | [Disclosure](./security-supply-chain.md#disclosure) | `.github/workflows/ci.yml` |
 | **The bundled runtime is the version disclosed.** The build verifies the binary against the pin. | [Bundled runtime](./security-supply-chain.md#bundled-runtime) | `standalone/src-tauri/build.rs` |
-| **No newly published dependency is adopted for 24 hours**, security fixes included. | [Cooldown and alerts](./security-supply-chain.md#cooldown-and-alerts) | audit |
+| **Dependencies wait 24 hours**, except audited pgstencil releases approved with 2FA. | [Cooldown and alerts](./security-supply-chain.md#cooldown-and-alerts) | audit |
 | **Merging to `main` and creating a tag are admin-only**, and every workflow this repository authors pins its actions by commit. | [GitHub Actions Policies](./security-ci.md#github-actions-policies) | audit |
 | **The bot maintainer cannot merge, tag, or read a release secret**, and its token never enters its own environment. | [Automated Maintainer (tend)](./security-ci.md#automated-maintainer-tend) | `.github/workflows/workflow-audit.yaml`, nightly |
 | **Publishing the extension takes a second human's approval.** | [VS Code Extension Releases](./security-ci.md#vs-code-extension-releases) | audit |

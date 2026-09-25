@@ -25,9 +25,13 @@ test("the lockfile resolves both pgstencil packages from npm", () => {
   const { dependencies } = JSON.parse(readFileSync("package.json", "utf8")) as {
     dependencies: Record<string, string>;
   };
-  for (const [name] of packages) {
-    expect(dependencies[name]).toBe("^0.2.1");
-    const key = name.startsWith("@") ? `'${name}@0.2.1'` : `${name}@0.2.1`;
+  for (const [name, entry] of packages) {
+    const manifest = JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.resolve(entry)), "utf8"),
+    ) as { version: string };
+    expect(dependencies[name]).toBe(`^${manifest.version}`);
+    const specifier = `${name}@${manifest.version}`;
+    const key = name.startsWith("@") ? `'${specifier}'` : specifier;
     expect(lockfile).toContain(
       `  ${key}:\n    resolution: {integrity: sha512-`,
     );
