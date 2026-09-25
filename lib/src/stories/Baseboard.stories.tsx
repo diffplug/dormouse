@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
+import { expect, fireEvent, userEvent, within } from 'storybook/test';
 import { Baseboard } from '../components/Baseboard';
+import { WorkspaceIdContext } from '../components/wall/wall-context';
 import type { DoorChip } from '../components/Wall';
 import { createTerminalPaneState, type TerminalPaneState } from '../lib/terminal-state';
 
@@ -111,6 +113,23 @@ export const AlarmOutputsEnabled: Story = {
   },
   parameters: {
     primedAlertSettings: { speakEnabled: true, pushEnabled: true },
+  },
+};
+
+export const WorkspaceAlertSettings: Story = {
+  args: { items: [] },
+  parameters: {
+    primedWorkspaces: { workspaces: [{ id: 'workspace-alert-story', name: 'Builds', alertDelivery: { speakEnabled: true } }] },
+  },
+  decorators: [(Story) => <WorkspaceIdContext.Provider value="workspace-alert-story"><Story /></WorkspaceIdContext.Provider>],
+  play: async ({ canvasElement }) => {
+    const body = within(canvasElement.ownerDocument.body);
+    fireEvent.contextMenu(body.getByRole('button', { name: 'Spoken alarms' }));
+    const dialog = body.getByRole('dialog', { name: 'Workspace alert settings' });
+    await expect(within(dialog).getByRole('combobox', { name: 'Voice for this workspace' })).toBeVisible();
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Use application defaults' }));
+    await expect(within(dialog).getByRole('combobox', { name: 'Speech for this workspace' })).toHaveValue('inherit');
+    await expect(within(dialog).queryByRole('searchbox')).not.toBeInTheDocument();
   },
 };
 

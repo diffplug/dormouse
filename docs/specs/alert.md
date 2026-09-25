@@ -374,6 +374,7 @@ Reached from the baseboard sliders; `docs/specs/layout.md` owns placement.
 - **Delays are committed on blur or `Enter`, never per keystroke** — typing `3` on the way to `30` must not briefly install a 3-second timer. They are shown in seconds; an out-of-range or empty entry snaps back to whatever the store clamped it to.
 - **The push group's device line names every device a push would reach**, and otherwise says why there is none — no Burrow enrolled, nothing subscribed yet, or the server could not be asked (rationale).
 - **Must show only application-wide settings**, excluding Workspace overrides.
+- **Must open a separate Workspace alert dialog from either baseboard alarm button's right-click or focused `Shift+F10`/`ContextMenu`**, only with a Workspace scope. Preserve per-field inheritance, reset-all, and local voice selection/testing; close on Escape, backdrop click, or close button and return focus to the invoking alarm button. Pinned by `lib/src/components/Baseboard.test.tsx` and `lib/src/components/WorkspaceAlarmSettings.test.tsx`.
 - **Must use the elevated-pane halo and theme-dropdown fades toward overflow.** **Must match Shell and Theme trigger sizing and inset borders**, without a Shell swatch.
 - Each alarm sink carries a **try it now** control outside the switch's dimming; both report inline and clear after a few seconds.
 
@@ -382,7 +383,7 @@ Reached from the baseboard sliders; `docs/specs/layout.md` owns placement.
   | **Play test sound** | Fixed sanitized phrase through the shared speech queue and selected voice; reports queue admission or an unavailable backend, never Session delivery state. |
   | **Send test push** | Real Burrow→ACL→Relay path; does not swallow failures and distinguishes no targets, zero delivery, partial delivery, and success. Hidden without a Burrow service. |
 
-Source of truth: `SettingsDialog` and `TOPICS` in `lib/src/components/SettingsDialog.tsx`; `ScrollFades` in `lib/src/components/ScrollFades.tsx`; `ShellPicker` in `lib/src/components/ShellPicker.tsx`; `SettingsPreview` in `lib/src/components/SettingsPreview.tsx`; `Baseboard` in `lib/src/components/Baseboard.tsx`; `lib/src/components/WatchedCommandList.tsx`; `lib/src/components/AlarmTestButtons.tsx`.
+Source of truth: `SettingsDialog` and `TOPICS` in `lib/src/components/SettingsDialog.tsx`; `WorkspaceAlarmSettingsDialog` in `lib/src/components/WorkspaceAlarmSettings.tsx`; `ScrollFades` in `lib/src/components/ScrollFades.tsx`; `ShellPicker` in `lib/src/components/ShellPicker.tsx`; `SettingsPreview` in `lib/src/components/SettingsPreview.tsx`; `Baseboard` in `lib/src/components/Baseboard.tsx`; `lib/src/components/WatchedCommandList.tsx`; `lib/src/components/AlarmTestButtons.tsx`.
 
 ## Workspace union
 
