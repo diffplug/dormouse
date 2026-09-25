@@ -8,7 +8,7 @@ import {
   subscribeToShells,
 } from '../lib/shell-store';
 import { useAnchoredMenu, useCloseOnOutsideAndEscape } from './use-anchored-menu';
-import { chromeButton, OVERLAY_MAX_HEIGHT, PopupButtonRow } from './design';
+import { themePreviewButton, PICKER_INSET_BORDER, OVERLAY_MAX_HEIGHT, PopupButtonRow } from './design';
 
 /** Menu width. A shell name is a basename, so this is generous; the clamp below
  *  needs a number, not `w-max`. */
@@ -50,9 +50,10 @@ export function ShellPicker({ open, onOpenChange, onSelect }: ShellPickerProps) 
         aria-expanded={open}
         aria-label={`Shell: ${selected?.name ?? 'Select shell'}`}
         onClick={() => onOpenChange(!open)}
-        className={chromeButton({ kind: 'labeled' })}
+        className={`group/shell ${themePreviewButton({ kind: 'trigger' })} bg-terminal-bg text-terminal-fg`}
+        style={{ boxShadow: PICKER_INSET_BORDER }}
       >
-        <span className="min-w-0 truncate">{selected?.name ?? 'Select shell'}</span>
+        <span className="min-w-0 truncate decoration-1 underline-offset-2 group-hover/shell:underline">{selected?.name ?? 'Select shell'}</span>
         <CaretDownIcon size={10} weight="bold" className="shrink-0 opacity-65" aria-hidden="true" />
       </button>
 

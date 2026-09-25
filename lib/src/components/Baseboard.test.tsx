@@ -17,7 +17,8 @@ import { recordToolDirty, resetToolDirty } from '../lib/tool-dirty-store';
 import { Baseboard } from './Baseboard';
 import { installLocalStorageStub } from '../lib/test-local-storage';
 import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS, getAlertSettings } from '../lib/alert-settings';
-import { DialogKeyboardContext, SelectedIdContext } from './wall/wall-context';
+import { createDialogKeyboardCoordinator, DialogKeyboardContext, SelectedIdContext, WorkspaceIdContext } from './wall/wall-context';
+import { createWorkspace, getWorkspace, resetWorkspaces } from '../lib/workspace-store';
 import type { DoorChip } from './wall/wall-types';
 import {
   addInstalledTheme,
@@ -93,6 +94,7 @@ afterEach(() => {
   setDefaultThemeId(null);
   resetShellStore();
   act(() => root.unmount());
+  resetWorkspaces();
   resetPushDevices();
   container.remove();
   applyAlertSettingsFromHost(DEFAULT_ALERT_SETTINGS);
@@ -142,6 +144,38 @@ describe('Baseboard settings controls', () => {
     expect(dialog?.textContent).toContain('Settings');
     // Not a VS Code host, so the Theme row is offered (`hostOwnsTheme` absent).
     expect(dialog?.textContent).toContain('Theme:');
+  });
+
+  it.each(['speech', 'push'])('opens workspace controls from %s and restores inheritance', (sink) => {
+    createWorkspace({ id: 'alarms', name: 'Builds', alertDelivery: { speakEnabled: true, pushEnabled: true } });
+    const keyboardActive = { current: false };
+    const keyboardOwner = createDialogKeyboardCoordinator(keyboardActive);
+    act(() => root.render(
+      <WorkspaceIdContext.Provider value="alarms">
+        <DialogKeyboardContext.Provider value={keyboardOwner}>
+          <Baseboard items={[]} onReattach={() => {}} />
+        </DialogKeyboardContext.Provider>
+      </WorkspaceIdContext.Provider>,
+    ));
+    const trigger = container.querySelector<HTMLButtonElement>(`[data-alarm-setting="${sink}"]`)!;
+    act(() => trigger.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })));
+    const dialog = document.querySelector('[role="dialog"]')!;
+    expect(dialog.textContent).toContain('This workspace: Builds');
+    expect(dialog.querySelector('[aria-label="Voice for this workspace"]')).not.toBeNull();
+    expect(dialog.textContent).not.toContain('Theme:');
+    expect(keyboardActive.current).toBe(true);
+    const reset = [...dialog.querySelectorAll('button')].find(button => button.textContent === 'Use application defaults')!;
+    act(() => reset.click());
+    expect(getWorkspace('alarms')?.alertDelivery).toBeUndefined();
+    expect(getAlertSettings()).toEqual(DEFAULT_ALERT_SETTINGS);
+    act(() => applyAlertSettingsFromHost({ ...DEFAULT_ALERT_SETTINGS, speakEnabled: true }));
+    expect(container.querySelector('[data-alarm-setting="speech"]')?.getAttribute('aria-pressed')).toBe('true');
+    act(() => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    expect(keyboardActive.current).toBe(false);
+    act(() => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true })));
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('This workspace: Builds');
   });
 
   it.each([

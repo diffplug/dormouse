@@ -81,6 +81,7 @@ Every key not claimed above forwards to the embedded page while a screencast pan
 | `Esc` | Close / cancel | Dismiss a dialog or popover; cancel a rename or kill confirmation; abort an in-progress sash or pane drag. |
 | `Enter` | Confirm rename | Save the new name while renaming a pane; blur commits too. |
 | `Tab` / `Shift+Tab` | Focus cycle | Cycle popover/dialog controls. In terminal context, navigate controls into the helper; once helper xterm has focus, Tab belongs to its program. |
+| `Shift+F10` / `ContextMenu` | Workspace alert settings | On a focused baseboard alarm button (`docs/specs/alert.md` → Settings dialog). |
 | Prompted letter | Confirm kill | Type the letter shown to confirm; other keys reaching the prompt cancel (see layout's dispatch order). |
 
 ## VS Code host

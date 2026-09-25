@@ -1,14 +1,37 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useWorkspaceAlertPolicy } from './wall/use-workspace-alert-policy';
 import { getWorkspace, setWorkspaceAlertDelivery, subscribeToWorkspaces } from '../lib/workspace-store';
 import type { AlertDeliveryOverrides } from '../lib/alert-delivery-model';
-import { modalActionButton } from './design';
+import { ELEVATED_PANE_SHADOW, MODAL_OVERLAY_INSET, OVERLAY_MAX_HEIGHT, ModalCloseButton, ModalFrame, modalActionButton } from './design';
 import { SecondsField, SwitchRow } from './AlarmSettingsControls';
 import { SpeakTestButton } from './AlarmTestButtons';
 
 const SELECT = 'min-w-0 rounded border border-input-border bg-input-bg p-1 text-sm text-foreground';
 /** Option-value prefix for an engine voice URI, beside `inherit` and `system`. */
 const VOICE = 'voice:';
+
+/** Workspace controls belong to the baseboard alarms, outside app-wide Settings. */
+export function WorkspaceAlarmSettingsDialog({ onClose }: { onClose: () => void }) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  return (
+    <ModalFrame
+      titleId="workspace-alarm-settings-title"
+      layer="app"
+      overlayClassName={MODAL_OVERLAY_INSET}
+      className={`${OVERLAY_MAX_HEIGHT.modal} w-full max-w-lg overflow-y-auto`}
+      style={{ boxShadow: ELEVATED_PANE_SHADOW }}
+      initialFocusRef={closeRef}
+      onEscape={onClose}
+      onOutsideClick={onClose}
+    >
+      <div className="flex items-center gap-3">
+        <h2 id="workspace-alarm-settings-title" className="flex-1 text-sm font-semibold">Workspace alert settings</h2>
+        <ModalCloseButton ref={closeRef} onClick={onClose} />
+      </div>
+      <WorkspaceAlarmSettings />
+    </ModalFrame>
+  );
+}
 
 /** This Workspace's sparse overrides over the application defaults
  *  (`docs/specs/alert.md` → Alarm settings). Absent fields inherit. */
