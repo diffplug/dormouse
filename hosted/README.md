@@ -142,8 +142,8 @@ Use dedicated Dormouse resources in the existing Cloudflare, Neon, and Postmark
 accounts.
 
 1. Create a dedicated Dormouse production Postgres database on Neon, on
-   PostgreSQL 17; the backup/restore tooling pins PostgreSQL
-   17.11. Keep development and previews separate. Enable backups and a
+   PostgreSQL 18; the backup/restore tooling pins PostgreSQL
+   18.6. Keep development and previews separate. Enable backups and a
    suitable PITR window, and verify a restore into a separate database before
    accepting real accounts.
 2. Create a Cloudflare Hyperdrive configuration for that database with **query
