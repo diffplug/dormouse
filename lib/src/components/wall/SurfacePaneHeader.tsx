@@ -4,11 +4,9 @@ import { POPOVER_FOCUSABLE_SELECTOR, usePopoverFocusTrap } from '../use-popover-
 import { useDismissOverlay } from './use-dismiss-overlay';
 import { useHeaderTier } from './use-header-tier';
 import { useSurfaceVisibility } from './use-surface-visibility';
-import { noteCountPhrase, useNoteCount } from '../use-notepad';
 import { clampOverlayPosition, OVERLAY_VIEWPORT_MARGIN_PX } from '../../lib/ui-geometry';
 import {
   DotsThreeIcon,
-  NotepadIcon,
   ArrowClockwiseIcon,
   ArrowLeftIcon,
   ArrowRightIcon,
@@ -18,7 +16,6 @@ import {
 import { ToolDirtyIndicator, useToolDirty } from '../ToolDirtyIndicator';
 import { HeaderActionButton } from '../HeaderActionButton';
 import { chromeButton, HEADER_PALETTE_TRANSITION_CLASS, OVERLAY_MAX_HEIGHT, POPUP_SURFACE_CLASS, TERMINAL_TOP_RADIUS_CLASS } from '../design';
-import { NotepadHeaderButton } from './NotepadHeaderButton';
 import { MinimizeKillButtons, PaneActionGroup } from './PaneActionButtons';
 import {
   useAgentBrowserChromeSnapshot,
@@ -133,8 +130,7 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
     previousInlineMinimizeKill.current = inlineMinimizeKill;
   }, [inlineMinimizeKill, menuOpen, closeMenu]);
   const popoverOpen = visible && inline === null && menuOpen;
-  const noteCount = useNoteCount(id);
-  const overflowLabel = `Browser controls${noteCount ? `, ${noteCountPhrase(noteCount)}` : ''}`;
+  const overflowLabel = 'Browser controls';
   useEffect(() => {
     if (!visible) closeMenu(false);
   }, [visible, closeMenu]);
@@ -246,7 +242,6 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
         <span className="min-w-0 flex-1 truncate font-medium">{title ?? id}</span>
       )}
 
-      <NotepadHeaderButton surfaceId={id} />
       {(placement === 'popover' || placement === 'full') && <div className="ml-1 flex shrink-0 items-center gap-0.5">
         <HeaderActionButton
           className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
@@ -295,7 +290,7 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
           onPointerDown={event => event.stopPropagation()}
           onMouseDown={event => event.stopPropagation()}
           onClick={event => { event.stopPropagation(); if (menuOpen) closeMenu(); else setMenuOpen(true); }}>
-          {noteCount ? <NotepadIcon size={14} weight="fill" /> : <DotsThreeIcon size={14} />}
+          <DotsThreeIcon size={14} />
         </button>
       )}
       {paneActions}
@@ -339,7 +334,7 @@ function BrowserHeaderPopover({ anchorRef, onClose, children }: {
     positionPopover();
     const observer = new ResizeObserver(positionPopover);
     observer.observe(element, { box: 'border-box' });
-    // Content resizing (URL editing, notes, or connection labels) changes only
+    // Content resizing (URL editing or connection labels) changes only
     // geometry. Moving focus again would cancel the URL editor on its blur.
     element.querySelector<HTMLElement>(POPOVER_FOCUSABLE_SELECTOR)?.focus();
     return () => observer.disconnect();

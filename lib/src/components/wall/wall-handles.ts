@@ -2,7 +2,6 @@ import type { BrowserAutomationProvider } from 'dor-lib-common/browser-providers
 import type { WorkspaceId } from '../../lib/session-types';
 import type { SaveOptions } from '../../lib/session-save';
 import type { PreparedWorkspaceTransfer } from './workspace-transfer';
-import type { CloseSurfaceMode } from './wall-types';
 import type { DorControlRequest } from './use-dor-control';
 
 /**
@@ -55,7 +54,7 @@ export interface WallHandle {
   /** Close every member Surface through the closure coordinator. Resolves null
    *  once the Wall is empty, else the first refusal's message with the Workspace
    *  left as it was. */
-  closeAll(mode?: CloseSurfaceMode): Promise<string | null>;
+  closeAll(): Promise<string | null>;
   handleDorControl(detail: DorControlRequest): void;
 }
 
@@ -119,7 +118,6 @@ export function stubWallHandle(workspaceId: WorkspaceId, overrides: Partial<Wall
       payload: {
         workspaceId,
         workspace: { id: workspaceId, name: '', nameIsAuto: false, session: { version: 3, panes: [] } },
-        notepad: { surfaces: [], stagedDeletions: {} },
         terminalIds: [],
         allIds: [],
       },

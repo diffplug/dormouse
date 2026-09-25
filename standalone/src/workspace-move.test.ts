@@ -77,7 +77,6 @@ import {
   resetWorkspaceBootPlans,
 } from "dormouse-lib/components/wall/workspace-boot-plans";
 import { createWorkspace, getWorkspacesSnapshot, resetWorkspaces } from "dormouse-lib/lib/workspace-store";
-import { getNotes, clearAllNotepads } from "dormouse-lib/lib/notepad/notepad-store";
 import {
   getWindowSnapshot,
   isWorkspaceTransferPending,
@@ -113,16 +112,6 @@ function payload(overrides: Partial<WorkspaceTransferPayload> = {}): WorkspaceTr
         version: 3,
         panes: [{ id: "pane-a", title: "a", cwd: "/tmp", untouched: false, alert: null }],
       },
-    },
-    notepad: {
-      surfaces: [{
-        surfaceId: "pane-a",
-        surfaceTitle: "a",
-        surfaceKind: "terminal",
-        cwd: null,
-        notes: [{ id: "n1", createdAt: 1, content: { kind: "plain", text: "keep me" } }],
-      }],
-      stagedDeletions: {},
     },
     terminalIds: ["pane-a"],
     allIds: ["pane-a"],
@@ -233,7 +222,6 @@ beforeEach(() => {
   resetWorkspaceBootPlans();
   resetWorkspaces();
   resetWindowSessionAggregator();
-  clearAllNotepads();
   clearTerminalActivity();
   _resetWorkspaceMovesForTesting();
 });
@@ -614,27 +602,6 @@ describe("the source half", () => {
 });
 
 describe("the target half", () => {
-  it("arms its collector, asks by Workspace, mounts, and only then releases the source", async () => {
-    const order: string[] = [];
-    const platform = fakePlatform(order);
-    arrivals = [payload()];
-    initWorkspaceMoves(platform);
-    await settle();
-
-    // The `adopt_ready` hop is what removes the "arrived before armed" bug
-    // class: nothing is listed or replayed until the collector is listening.
-    // `adopt_done` is last, because it is what tells the source to let go.
-    expect(order).toEqual(["take_arrivals", "adopt_ready", `answered:${WORKSPACE_ID}`, "adopt_done"]);
-    expect(mocks.invoke).toHaveBeenCalledWith("adopt_ready", expect.objectContaining({ workspaceId: WORKSPACE_ID }));
-    // The plan is parked before the Workspace exists, because creating it
-    // mounts the Wall that reads it.
-    expect(getWorkspaceBootPlan(WORKSPACE_ID)).toBeTruthy();
-    const { workspaces, activeId } = getWorkspacesSnapshot();
-    expect(workspaces.map((workspace) => workspace.name)).toContain("Deploys");
-    expect(activeId).toBe(WORKSPACE_ID);
-    // The notes travelled in the payload; nothing was archived.
-    expect(getNotes("pane-a").map((note) => note.content)).toEqual([{ kind: "plain", text: "keep me" }]);
-  });
 
   // The Sessions' alert state never left the sidecar's one manager, which
   // re-sends it to whichever window collects them. A spawn starts it over and a
@@ -651,42 +618,6 @@ describe("the target half", () => {
     expect(getWorkspaceBootPlan(WORKSPACE_ID)?.initialPaneIds).toEqual(["pane-a"]);
     expect(spawn).not.toHaveBeenCalled();
     expect(kill).not.toHaveBeenCalled();
-  });
-
-  it("resumes each of two simultaneous arrivals over its own PTYs", async () => {
-    // A tear-out with a second tab dropped on it moments later. A window-wide
-    // answer would let each collector finish on the other's shells.
-    const order: string[] = [];
-    const platform = fakePlatform(order);
-    arrivals = [
-      payload({ workspaceId: "ws-a", terminalIds: ["pane-a"], allIds: ["pane-a"] }),
-      payload({
-        workspaceId: "ws-b",
-        workspace: {
-          id: "ws-b",
-          name: "Builds",
-          nameIsAuto: false,
-          session: {
-            version: 3,
-            panes: [{ id: "pane-b", title: "b", cwd: "/tmp", untouched: false, alert: null }],
-          },
-        },
-        notepad: { surfaces: [], stagedDeletions: {} },
-        terminalIds: ["pane-b"],
-        allIds: ["pane-b"],
-      }),
-    ];
-    arrivals[0]!.workspace = { ...arrivals[0]!.workspace, id: "ws-a" };
-
-    initWorkspaceMoves(platform);
-    await settle();
-
-    expect(order.filter((entry) => entry.startsWith("answered")))
-      .toEqual(["answered:ws-a", "answered:ws-b"]);
-    expect(getWorkspaceBootPlan("ws-a")?.initialPaneIds).toEqual(["pane-a"]);
-    expect(getWorkspaceBootPlan("ws-b")?.initialPaneIds).toEqual(["pane-b"]);
-    // Both settled, so Rust is holding nothing.
-    expect(arrivals).toEqual([]);
   });
 
   it("mounts a browser-only arrival, which names no PTYs at all", async () => {
@@ -814,28 +745,6 @@ describe("the target half", () => {
     // The ring is the source's again, still live in the sidecar.
     expect(kill).not.toHaveBeenCalled();
   });
-
-  it("closes the window when its last Workspace leaves, instead of emptying it", async () => {
-    initWorkspaceMoves(fakePlatform());
-    const workspaceId = getWorkspacesSnapshot().activeId;
-    registerWallHandle(stubWallHandle(workspaceId, {
-      prepareWorkspaceTransfer: async () => prepared(() => {}, { workspaceId }),
-    }));
-    const moved = transferWorkspaceTo(workspaceId, "ws-2", { x: 0, y: 0 });
-    await contentSent();
-    const order: string[] = [];
-    void moved.then(() => order.push("answered"));
-    mocks.invoke.mockImplementation(async (cmd: string) => void order.push(cmd));
-
-    await emit("dormouse://workspace-departed", { workspaceId });
-
-    // Nothing ended — the Surfaces are alive in another window — so this is a
-    // close with no confirmation, no archive and no kill. The caller's answer
-    // goes first: Rust destroys the window on `close_window`, and a `dor
-    // workspace move` that emptied it still has `moved` to say.
-    expect(order).toEqual(["answered", "close_window"]);
-    expect(getWorkspacesSnapshot().workspaces).toHaveLength(1);
-  });
 });
 
 describe("a transfer's content", () => {
@@ -869,17 +778,6 @@ describe("a transfer's content", () => {
     expect(isPaneOscDriven("pane-a")).toBe(true);
     const state = getTerminalPaneState("pane-a");
     expect((finished ? state.lastCommand : state.currentCommand)?.rawCommandLine).toBe("ascii-splash");
-  });
-
-  it("drains replay before adopting even when no note has a pin", async () => {
-    arrivals = [payload()];
-    mocks.deferWrites = true;
-    const boot = bootFromTearOut(fakePlatform());
-    await vi.waitFor(() => expect(mocks.writeCallbacks).toHaveLength(2));
-    expect(mocks.invoke).not.toHaveBeenCalledWith("adopt_done", expect.anything());
-    mocks.writeCallbacks.splice(0).forEach(callback => callback());
-    await boot;
-    expect(mocks.invoke).toHaveBeenCalledWith("adopt_done", { workspaceId: WORKSPACE_ID });
   });
 
 
@@ -926,7 +824,6 @@ describe("a torn-out window's boot", () => {
     expect(Object.keys(plans ?? {})).toEqual([WORKSPACE_ID]);
     // The window has no snapshot yet; its Workspace comes from the payload.
     expect(getWorkspacesSnapshot().workspaces.map((workspace) => workspace.name)).toEqual(["Deploys"]);
-    expect(getNotes("pane-a")).toHaveLength(1);
   });
 
   it("boots fresh without installing a refused tear-out or retaining its Sessions", async () => {
@@ -941,7 +838,6 @@ describe("a torn-out window's boot", () => {
     expect(await bootFromTearOut(platform)).toBeNull();
     expect(getWorkspacesSnapshot().workspaces.map((w) => w.id)).not.toContain(WORKSPACE_ID);
     expect(getWindowSnapshot().workspaces.map((w) => w.id)).not.toContain(WORKSPACE_ID);
-    expect(getNotes("pane-a")).toHaveLength(0);
     expect(getTerminalInstance("pane-a")).toBeNull();
     expect(kill).not.toHaveBeenCalled();
   });

@@ -22,12 +22,6 @@ vi.mock('./platform', async () => {
 import * as platformModule from './platform';
 import type { FakePtyAdapter } from './platform';
 import {
-  addPlainNote,
-  addTerminalNote,
-  getNotes,
-  removeSurface,
-} from './notepad/notepad-store';
-import {
   disposeSession,
   getOrCreateTerminal,
   getTerminalInstance,
@@ -38,20 +32,9 @@ const platform = (platformModule as unknown as { __fakePlatform: FakePtyAdapter 
 
 let killed: string[];
 
-/** A pin, without a real xterm buffer behind it: what the notepad holds is two
- *  markers it must be able to dispose. */
-function fakeSource(terminalId: string) {
-  return {
-    terminalId,
-    startMarker: { line: 0, dispose: vi.fn() },
-    endMarker: { line: 0, dispose: vi.fn() },
-  } as unknown as Parameters<typeof addTerminalNote>[2];
-}
-
 beforeEach(() => {
   killed = [];
   vi.spyOn(platform, 'killPty').mockImplementation((id: string) => void killed.push(id));
-  for (const id of ['pane-1', 'pane-2']) removeSurface(id);
 });
 
 describe('releaseSession', () => {
@@ -76,21 +59,6 @@ describe('releaseSession', () => {
     // The registry entry and the xterm instance are gone: the target Window
     // builds its own over the same, still-running PTY.
     expect(getTerminalInstance('pane-1')).toBeNull();
-  });
-
-  it('leaves the notes for the transfer payload but drops their pins', () => {
-    getOrCreateTerminal('pane-1');
-    addPlainNote('pane-1', 'keep me');
-    addTerminalNote('pane-1', [{ text: 'captured' }], fakeSource('pane-1'));
-
-    releaseSession('pane-1');
-
-    const notes = getNotes('pane-1');
-    expect(notes).toHaveLength(2);
-    expect(notes.map((note) => note.content.kind)).toEqual(['plain', 'terminal']);
-    // A pin is a marker in the xterm instance this release disposed, so it
-    // cannot survive the move; the note itself rides the payload.
-    expect(notes.every((note) => note.source === undefined)).toBe(true);
   });
 
   it('is a no-op for an id the registry does not hold', () => {

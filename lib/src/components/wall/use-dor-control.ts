@@ -30,7 +30,6 @@ import {
 import { cwdPathsEqual, surfaceRunsCommand, type TerminalPaneState } from '../../lib/terminal-state';
 import { isAllowedBinaryFor } from '../../lib/agent-browser-binary';
 import { getHelper } from '../../lib/helper-terminal';
-import { isSurfaceClosing } from '../../lib/notepad/notepad-store';
 import { clearToolAnnounce } from '../../lib/tool-announce-store';
 import { isWorkspaceTransferPending } from '../../lib/window-session-aggregator';
 import { stringParam } from './dor-control-shared';
@@ -68,7 +67,7 @@ import { dorDirectionForEdge, toolLeafMeta, type LathWallEngine } from './lath-w
 import type { WallNav } from './keyboard/types';
 import { toolCommandFromParams } from '../../lib/session-save';
 import type { LeafMeta } from '../../lib/lath/persistence';
-import type { CloseSurfaceMode, DooredItem } from './wall-types';
+import type { DooredItem } from './wall-types';
 
 /** The params a Wall reads. The Window-level params (`scope`, and the container
  *  verbs' own) are the router's, not a Wall's: `WindowControlParams` in
@@ -586,14 +585,13 @@ export function useDorControl({
     title: string;
     focusNeutral?: boolean;
   }) => ParseResult<{ id: string; ref: string; status: 'created' | 'replaced' }>;
-  /** A Wall closure in flight, independent of another caller freezing notes. */
+  /** A Wall closure in flight. */
   isClosingSurface: (id: string) => boolean;
   /** Whether this Wall's Workspace is being closed. */
   isClosingWorkspace: () => boolean;
-  /** The user-visible closure path: archive the Surface's notes, then tear it
-   *  down. A string means the closure was refused, and is why; the Surface is
-   *  still here. */
-  closeSurface: (id: string, mode?: CloseSurfaceMode) => Promise<string | null>;
+  /** The user-visible closure path: helper guard, then teardown. A string means
+   *  the closure was refused, and is why; the Surface is still here. */
+  closeSurface: (id: string) => Promise<string | null>;
   /** Reveal a Surface (reattaching a Door first) and report whether it ended up
    *  visible. `Wall.tsx` -> `revealSurface`. */
   revealSurface: (id: string) => boolean;
@@ -718,8 +716,8 @@ export function useDorControl({
   }, [lath]);
 
   /** A Surface a command may still target: not mid-fade, and not mid-closure
-   *  (`closeSurface` archives before it tears down; a match made meanwhile
-   *  would be acted on moments before it vanishes). */
+   *  (`closeSurface` awaits the helper guard before it tears down; a match made
+   *  meanwhile would be acted on moments before it vanishes). */
   const isTargetable = useCallback((id: string) => !lath.isDying(id) && !isClosingSurface(id), [lath, isClosingSurface]);
 
   const findSurfaceIdRunningCommand = useCallback((command: string, cwdPath: string): string | null => {
@@ -1012,7 +1010,7 @@ export function useDorControl({
             explicitSurface: stringParam(params.surface) !== undefined,
             minimized: booleanParam(params.minimized),
             workspaceActive: !scope || getActiveWorkspaceId() === scope,
-            visible: nav.hasPane(id) && !lath.isDying(id) && !isSurfaceClosing(id),
+            visible: nav.hasPane(id) && isTargetable(id),
             kind: surfaceKindFromParams(lath.getMeta(id)?.params),
             oscDriven: isPaneOscDriven(id),
             rawCommandLine: state.currentCommand?.rawCommandLine ?? null,
@@ -1310,7 +1308,7 @@ export function useDorControl({
           detail.signal,
         );
         if (detail.signal?.aborted || toolIntegrated !== 'ready') {
-          const refused = await closeSurface(created.value.id, 'silent');
+          const refused = await closeSurface(created.value.id);
           detail.respond({ ok: false, error: refused ?? (detail.signal?.aborted ? 'tool launch cancelled' : missingIntegrationError(toolShell)) });
           return;
         }
@@ -1416,11 +1414,10 @@ export function useDorControl({
         detail.signal,
       );
       if (detail.signal?.aborted || integrated !== 'ready') {
-        // The temporary pane is visible during integration detection and may
-        // have acquired notes. Preserve the ordinary closure contract even
-        // when the client has gone away (docs/specs/notepad.md → "Closure").
+        // The temporary pane is visible during integration detection; close
+        // it even when the client has gone away.
         const reason = detail.signal?.aborted || integrated === 'aborted' ? ENSURE_CANCELLED : missingIntegrationError(ensureShell);
-        const refused = await closeSurface(result.value.id, 'silent');
+        const refused = await closeSurface(result.value.id);
         detail.respond({ ok: false, error: refused ? `${reason}; temporary surface kept open: ${refused}` : reason });
         return;
       }
@@ -1547,12 +1544,8 @@ export function useDorControl({
           return;
         }
       }
-      // `dor kill` is a user-visible permanent closure, so it archives the
-      // Surface's notes first. A refused archive leaves the Surface running
-      // and answers with the error rather than silently dropping the notes —
-      // and raises no pane prompt, because the caller is a command, not
-      // someone looking at the Wall (docs/specs/notepad.md → "Closure").
-      const refused = await closeSurface(target.id, 'silent');
+      // The command receives a refusal directly, without raising a pane prompt.
+      const refused = await closeSurface(target.id);
       if (refused) {
         detail.respond({ ok: false, error: refused });
         return;
@@ -1916,7 +1909,7 @@ export function useDorControl({
     }
 
     detail.respond({ ok: false, error: unsupportedControlMethodMessage(detail.method) });
-  }, [browserKeyScope, buildDorSurfaces, buildDorSurfaceList, closeSurface, createContentSurface, createSplitSurface, ensureBrowserSurface, findBrowserSurface, findSurfaceIdRunningCommand, findSurfaceByParams, revealSurface, isClosingWorkspace, requireAutomationSession, requireBrowserSurface, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav, workspaceRef, workspaceScope]);
+  }, [browserKeyScope, buildDorSurfaces, buildDorSurfaceList, closeSurface, createContentSurface, createSplitSurface, ensureBrowserSurface, findBrowserSurface, findSurfaceIdRunningCommand, findSurfaceByParams, isTargetable, revealSurface, isClosingWorkspace, requireAutomationSession, requireBrowserSurface, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav, workspaceRef, workspaceScope]);
 
   return { findSurfaceByParams, updateSurfaceParams, handleDorControl };
 }

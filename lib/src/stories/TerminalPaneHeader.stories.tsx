@@ -15,7 +15,6 @@ import { summarizeCommandLine, type SetTerminalUserTitleResult } from '../lib/te
 import { commandWatchKey, cwdFromOsc633 } from '../lib/terminal-state';
 import { flattenScenario, SCENARIO_SHELL_PROMPT } from '../lib/platform';
 import { removeMouseSelectionState, setMouseReporting, setOverride } from '../lib/mouse-selection';
-import { addPlainNote, clearAllNotepads } from '../lib/notepad/notepad-store';
 import { recordToolDirty, resetToolDirty } from '../lib/tool-dirty-store';
 import { resetTodoSpotlight, spotlightTodo } from '../lib/todo-spotlight';
 import { requireElement, settleTerminalContext, TODO_SPOTLIGHT_HELD_CLASS, waitForCondition, waitForPrimedState } from './settle-terminals';
@@ -127,7 +126,6 @@ function TabStory({
   width = 360,
   reducedMotion = false,
   mouseCaptured = false,
-  noteCount = 0,
   dirty = false,
   actions = noopActions,
 }: {
@@ -138,8 +136,6 @@ function TabStory({
   reducedMotion?: boolean;
   /** Simulate a TUI capturing the mouse, which surfaces the mouse-override icon. */
   mouseCaptured?: boolean;
-  /** Notes on this Surface — the notepad icon fills, and survives the minimal tier. */
-  noteCount?: number;
   /** A Tool terminal face reporting unsaved changes — the dot takes its own
    *  12px at the header root, outside the region that clips. */
   dirty?: boolean;
@@ -151,11 +147,6 @@ function TabStory({
     setOverride(SESSION_ID, 'temporary');
     return () => removeMouseSelectionState(SESSION_ID);
   }, [mouseCaptured]);
-
-  useEffect(() => {
-    for (let i = 0; i < noteCount; i++) addPlainNote(SESSION_ID, `note ${i + 1}`);
-    return () => clearAllNotepads();
-  }, [noteCount]);
 
   useEffect(() => {
     if (!dirty) return;
@@ -370,7 +361,6 @@ const meta: Meta<typeof TabStory> = {
     dirty: { control: 'boolean' },
     reducedMotion: { control: 'boolean' },
     mouseCaptured: { control: 'boolean' },
-    noteCount: { control: 'number' },
   },
   args: {
     mode: 'command',
@@ -379,7 +369,6 @@ const meta: Meta<typeof TabStory> = {
     width: 360,
     reducedMotion: false,
     mouseCaptured: false,
-    noteCount: 0,
   },
 };
 
@@ -513,31 +502,6 @@ export const NarrowControlsVisible: Story = {
   play: assertPaneActions(PANE_ACTIONS),
 };
 
-// A Surface with notes at 100px: the notepad has to yield, or it pushes kill
-// past the header's right edge. Only a live-geometry check catches that — jsdom
-// has no layout, so the unit test can pin presence but not clipping.
-export const NarrowWithNotesControlsVisible: Story = {
-  args: {
-    width: 100,
-    noteCount: 2,
-  },
-  parameters: primedPane({ status: 'NOTHING_TO_SHOW' }),
-  play: assertPaneActions(PANE_ACTIONS),
-};
-
-// The unsaved-change dot sits at the header root, outside the clipping region,
-// so it costs the group 12px that the title cannot give back. 120px is inside
-// the `minimal-tight` band: with notes and a dot the notepad must yield.
-export const NarrowDirtyWithNotesControlsVisible: Story = {
-  args: {
-    width: 120,
-    noteCount: 2,
-    dirty: true,
-  },
-  parameters: primedPane({ status: 'NOTHING_TO_SHOW' }),
-  play: assertPaneActions(PANE_ACTIONS),
-};
-
 // 76px is the tiny tier: minimize and kill are gone and zoom carries the header.
 export const ExtremelyNarrowControlsVisible: Story = {
   args: {
@@ -554,23 +518,6 @@ export const NarrowWithMouseCaptureControlsVisible: Story = {
   },
   parameters: primedPane({ status: 'NOTHING_TO_SHOW' }),
   play: assertPaneActions(PANE_ACTIONS),
-};
-
-// Notepad icons with notes across the full, compact, and minimal tiers.
-// Default and MinimalWidth cover the empty notepad.
-export const NotepadWithNotes: Story = {
-  args: { noteCount: 3 },
-  parameters: primedPane({ status: 'NOTHING_TO_SHOW' }),
-};
-
-export const NotepadCompactWidth: Story = {
-  args: { width: 220, noteCount: 3 },
-  parameters: primedPane({ status: 'NOTHING_TO_SHOW' }),
-};
-
-export const NotepadMinimalWidthWithNotes: Story = {
-  args: { width: 150, noteCount: 2 },
-  parameters: primedPane({ status: 'NOTHING_TO_SHOW' }),
 };
 
 export const NarrowLongTitleControlsVisible: Story = {

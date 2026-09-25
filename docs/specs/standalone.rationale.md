@@ -219,7 +219,7 @@ stays the webview's throughout and no polling loop is needed.
 
 **Why the aggregator debounces on top of the Wall's own debounce.** Each Wall already coalesces its own record; the second stage coalesces *across* Walls, so one window-wide event (a store change, a theme push, a burst of output in two Workspaces) becomes one host write rather than one per Workspace.
 
-**Why debug keeps a state subtree as well as the wrapper identifier.** The native dev wrapper already selects a stable per-worktree Tauri identifier, including separate archive and Burrow stores. Raw Tauri dev bypasses that wrapper and can use the installed identifier; the subtree protects its session and recovery files without changing where that identifier’s archive and enrollment live. Older debug builds used the identifier root directly, so their snapshots need targeted transcript migration after the split. Deleting those snapshots could remove installed layouts for a raw-dev launch.
+**Why debug keeps a state subtree as well as the wrapper identifier.** The native dev wrapper already selects a stable per-worktree Tauri identifier, including a separate Burrow store. Raw Tauri dev bypasses that wrapper and can use the installed identifier; the subtree protects its session and recovery files without changing where that identifier’s enrollment lives. Older debug builds used the identifier root directly, so their snapshots need targeted transcript migration after the split. Deleting those snapshots could remove installed layouts for a raw-dev launch.
 
 ## Trigger interception
 
@@ -251,9 +251,7 @@ whichever dialog was open — including a close's — without telling its flow.
 
 Arbitrating fixed the dialog and left the vote: a quit meeting a *committed*
 close acked and stopped, which is the same unbounded wait reached by a different
-route. Voting is right because the window really is ending — and the one case
-where it is not, a committed close retreating to `archive-failed` and being
-declined, is why the intent is kept rather than dropped.
+route. Voting is right because the window really is ending.
 
 **Why the walk ends on `main`, and why the grant to every window was reverted.**
 Widening `updater:*` to every window was meant to cover a session whose `main`

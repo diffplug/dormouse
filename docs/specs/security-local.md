@@ -170,14 +170,6 @@ behind do carry transcripts (rationale).
 state root, owner-only: one rebuilt agent-resume invocation per Surface, never a
 buffer, unlinked as it is read (`docs/compatible-agents.md` -> "Recovery record").
 
-**The notepad archive is the one store holding terminal text on purpose** —
-excerpts the user explicitly captured, their colors, the Surface title and kind,
-and the CWD at closure, appended only by a Surface closing
-(`docs/specs/notepad.md` -> "Archive"). Standalone keeps it as
-`<app_data_dir>/notepad-archive-v1.json`, owner-only and shared by builds with the
-same Tauri identifier; the dev wrapper uses a per-worktree identifier. VS Code keeps it in
-`<globalStorageUri>/notepad-archive.json`, mode `0600` on Unix and inheriting VS Code's directory ACL on Windows. Migration and Settings Sync follow `docs/specs/notepad.md` -> "VS Code lifecycle". Its live half never reaches disk.
-
 **VS Code persists pane structure in VS Code's own storage** — `workspaceState`
 under `dormouse.session`, and `vscode.setState()`, a WebviewPanel's only store —
 so the modes there are VS Code's, not ours, and no transcript reaches either
@@ -199,7 +191,6 @@ shared (rationale). No log call carries PTY bytes; the `dor` control socket path
 does. A gap, not an accepted risk.
 
 - **FAIL IF** `write_file_atomically` in `standalone/src-tauri/src/lib.rs` stops restricting the directory and the file it writes to the owning user on **every** platform `restrict_to_owner` has an arm for — `0700`/`0600` on unix, and on Windows a DACL protected from inheritance carrying exactly one ACE for the current user, asserted by `restrict_to_owner_leaves_one_owner_only_ace` — or if **any** of its callers stops going through it. Enumerate them from the file rather than from this line: every writer under the state root is one, the legacy-transcript scrub and `arrivals.json` included. `session_write_tightens_directory_and_existing_temp_file` pins unix modes; `session_permission_failures_preserve_previous_snapshot_without_writing_bytes` pins both failure gates. The mode reaches the temp file *before* any bytes are written (rationale).
-- **FAIL IF** the VS Code notepad archive key — `NOTEPAD_ARCHIVE_KEY` in `vscode-ext/src/notepad-archive-store.ts` — is passed to `context.globalState.setKeysForSync`, directly or as part of any list. It holds captured terminal excerpts, their CWDs, and their Surface titles, and Settings Sync would copy them to every machine the account signs into. Pinned by `never opts any key into Settings Sync` in `vscode-ext/test/notepad-archive-store.test.ts`, which goes red on any `setKeysForSync(` call in `vscode-ext/src/`: a call added for another key is a deliberate edit to that test, and must still exclude this one.
 
 Source of truth: `SESSION_STATE_KEY` in `vscode-ext/src/session-state.ts`,
 `ensureToken` in `vscode-ext/src/peer-link.ts`, `default_log_path` in

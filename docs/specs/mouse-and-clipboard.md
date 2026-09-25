@@ -117,8 +117,6 @@ A finalized selection gets a popup of action buttons anchored where §3.3's drag
 
 Source of truth: `lib/src/components/SelectionPopup.tsx` (Copy Raw, Copy Rewrapped, platform-dependent shortcut labels).
 
-A third button, **Add to notepad**, follows the two copies on every host that has a notepad; it captures the selection, flashes in place, and dismisses the popup without opening the notepad (`docs/specs/notepad.md` → "Capture").
-
 #### 4.1.1 Copy Raw
 
 **Must preserve displayed row breaks and decorative characters**, trimming trailing whitespace on each selected row; soft-wrapped rows also get `\n`. Source of truth: `extractSelectionText` in `lib/src/lib/selection-text.ts`.
@@ -135,8 +133,6 @@ Copies with two transformations applied (`lib/src/lib/rewrap.ts`):
 ### 4.2 Keyboard Shortcuts
 
 With an active, finalized terminal selection, popup focused or not: **Cmd+C** (Ctrl+C on non-macOS) triggers Copy Raw, **Cmd+Shift+C** (Ctrl+Shift+C) triggers Copy Rewrapped.
-
-**Cmd+N** (Ctrl+N on non-macOS) adds the selection to the notepad, **gated exactly like Ctrl+C** — intercepted only with a finalized selection, otherwise reaching the program as readline's next-history — and shown only where the host binds it (`docs/specs/notepad.md` → "Notepad UI").
 
 **Intercept Ctrl+C as Copy Raw only while a terminal selection is active.** With none it is forwarded to the inside program as usual (SIGINT for shells, app-defined for TUIs). An in-program selection a TUI maintains itself (vim visual mode, less search highlight) is **not** a terminal selection and does not change that routing.
 

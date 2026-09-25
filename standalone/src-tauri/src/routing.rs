@@ -828,7 +828,6 @@ mod tests {
         let labels = restorable_labels([
             "ws-10.json",
             "main.json.tmp",
-            "notepad-archive-v1.json",
             "ws-2.json",
             "main.json",
             "ws-2.json.tmp",

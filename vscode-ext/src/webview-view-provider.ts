@@ -3,7 +3,6 @@ import * as path from 'path';
 import { attachRouter, getAlertStates } from './message-router';
 import { serveWebview, type WebviewChannel } from './webview-messaging';
 import { takeRecoveryCommands, getSavedSessionState, saveSessionState, mergeAlertStates } from './session-state';
-import { snapshotForLiveResume } from './notepad-volatile';
 import type { ExtensionMessage } from './message-types';
 import * as ptyManager from './pty-manager';
 import { resolveSelectedShell } from './shell-selection';
@@ -72,8 +71,7 @@ export class DormouseViewProvider implements vscode.WebviewViewProvider {
     }
 
     const savedSession = getSavedSessionState(this.context);
-    // The pane ids both boot globals below are claimed under. One list, because
-    // the recovery claim and the notepad mirror must scope to the same panes.
+    // Recovery commands are claimed by this view's pane ids.
     const savedPaneIds = (savedSession?.panes ?? []).map((pane) => pane.id);
     // Claimed by pane id, and deliberately separate from the session: the commands
     // ride their own boot global, so the webview cannot save them back and a
@@ -82,20 +80,13 @@ export class DormouseViewProvider implements vscode.WebviewViewProvider {
     // including any owned by an editor panel — taking the record whole would delete
     // their commands before the panel ever resolved.
     const recoveryCommands = takeRecoveryCommands(this.context, savedPaneIds);
-    // The one path that hydrates the notepad mirror: this view's `onDidDispose`
-    // leaves its PTYs alive, so a re-resolve (a move between panel containers) is
-    // a live resume and the notes for those panes are still in extension-host
-    // memory. A cold restore finds nothing mirrored and gets `null`
-    // (docs/specs/notepad.md).
-    const notepadVolatile = snapshotForLiveResume(savedPaneIds);
     this.channel = serveWebview(
-      view.webview, mediaPath, savedSession, this.selectedShell, recoveryCommands, notepadVolatile,
+      view.webview, mediaPath, savedSession, this.selectedShell, recoveryCommands,
     );
 
     this.routerDisposable?.dispose();
     this.routerDisposable = attachRouter(this.channel, {
       reconnect: true,
-      context: this.context,
       onSaveState: (state) => {
         return saveSessionState(this.context, mergeAlertStates(state, getAlertStates()));
       },

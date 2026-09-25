@@ -54,12 +54,9 @@ its static asset discovery, descriptor lifetime, and every request gate.
 For the rest of `docs/specs/security-local.md`, read each section's owner first
 — `docs/specs/terminal-escapes.md`, `docs/specs/dor-browser.md`,
 `docs/specs/dor-cli.md`, `docs/specs/vscode.md` -> "Webview message
-authentication", `docs/specs/standalone.md` -> "Persistence",
-`docs/specs/notepad.md` -> "Archive" — then the parser, the iframe shim, the
+authentication", `docs/specs/standalone.md` -> "Persistence" — then the parser, the iframe shim, the
 control-socket code, and the persistence paths they point at. `## Persisted
-state` now covers two stores that hold user text on purpose: the session
-snapshot and the notepad archive, both written through
-`write_file_atomically` on standalone, the archive in `globalState` on VS Code.
+state` covers session snapshots, written through `write_file_atomically` on standalone and through VS Code storage in the extension.
 The attacker there is a program printing to the terminal, a page in a browser
 pane, or another local account, never the network.
 

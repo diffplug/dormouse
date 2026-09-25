@@ -3,12 +3,10 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { expect, within } from 'storybook/test';
 import { FrameCornersIcon, XIcon } from '@phosphor-icons/react';
 import { PANE_HEADER_HEIGHT_PX } from '../components/design';
-import { NotepadHeaderButton } from '../components/wall/NotepadHeaderButton';
-import { NotepadPanel } from '../components/NotepadPanel';
 import { placeTerminalContext, type ContextSide } from '../components/wall/terminal-context-placement';
 import { TerminalContextView } from '../components/wall/TerminalContextView';
 
-// Sample terminal output with the shared context presentation and notepad UI.
+// Sample terminal output with the shared context presentation.
 // Local state switches fixtures and opens visual detail treatments.
 type Scenario = 'fresh' | 'noPorts' | 'running' | 'preserved' | 'editor' | 'differentDirectory' | 'multiplePorts' | 'notification' | 'autorunOff' | 'scanFailed';
 const SCENARIOS: { id: Scenario; label: string }[] = [
@@ -108,7 +106,6 @@ function ContextPrototype({ scenario, initialDetail = null, paneWidth, paneHeigh
         watchRule="pnpm" watching={watching} todo={todo} notification={scenario === 'notification' ? { title: 'Tests complete', body: '341 passed, 0 failed' } : null}
         status={preserved ? 'preserved' : scenario === 'running' ? 'running' : scenario === 'autorunOff' ? 'off' : 'completed'} command={command}
         explorerLabel="Open in Finder" canExplore browserProviders={['agent-browser']} canIframe initialDetail={initialDetail}
-        notepadAction={<NotepadHeaderButton surfaceId="context-gallery" />} notepadPanel={<NotepadPanel surfaceId="context-gallery" pins={false} />}
         onClose={() => {}} onCopyRef={() => {}} onCopyPath={() => {}} onExplore={() => {}} onPort={() => {}}
         onWatch={() => setWatching(!watching)} onTodo={() => setTodo(!todo)} onModify={async value => setCommand(value)} onReset={async () => {}} onPromote={async () => {}}>
         <div className="h-full overflow-auto px-3 py-2" style={{ fontSize: 13, lineHeight: '20px', whiteSpace: 'pre-wrap' }}><TerminalOutput scenario={scenario} /></div>

@@ -10,16 +10,16 @@ import { listenToWindow } from "./window-label";
 /**
  * Closing one window of several (`docs/specs/standalone.md` → "Per-window
  * close"). Rust prevents the close and emits
- * `dormouse://window-close-requested`; this acks, asks, archives, kills, and
- * calls back `close_window`. The last window's close is a quit instead, and
- * never reaches here.
+ * `dormouse://window-close-requested`; this acks, asks, kills, and calls back
+ * `close_window`. The last window's close is a quit instead, and never reaches
+ * here.
  *
- * A close is **deliberate**: unlike a quit it archives the notes AND takes the
- * window's snapshot off disk, so the next launch does not reopen it. It runs no
- * agent-recovery capture for the same reason — nothing is coming back.
+ * A close is **deliberate**: unlike a quit it takes the window's snapshot off
+ * disk, so the next launch does not reopen it. It runs no agent-recovery
+ * capture for the same reason — nothing is coming back.
  *
- * The ack / confirm / archive half is `createTeardownFlow`, shared with the
- * quit; what is close-specific is the teardown below.
+ * The ack / confirm half is `createTeardownFlow`, shared with the quit; what is
+ * close-specific is the teardown below.
  */
 
 const GRACEFUL_KILL_MS = 2000;

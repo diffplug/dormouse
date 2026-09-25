@@ -590,11 +590,10 @@ Source of truth: `CleanupGate` and `WindowEvent::Destroyed` in
 **Closing a window with siblings alive ends that window alone**; only the last
 window's close is the quit. Rust prevents the close and emits
 `dormouse://window-close-requested`; the webview acks (a ~2 s watchdog closes it
-anyway if that listener is dead), asks about *its own* running work, archives
-*its own* notes, removes its snapshot, kills the PTYs it owns, and calls back
+anyway if that listener is dead), asks about *its own* running work, removes its snapshot, kills the PTYs it owns, and calls back
 `close_window`.
 
-- **A close is deliberate, so it archives and it removes the blob** — geometry
+- **A close is deliberate, so it removes the blob** — geometry
   and temp sibling included — and the next launch does not reopen the window
   (`docs/specs/transport.md` → "The governing rule").
 - **It runs no agent-recovery capture**: nothing is coming back.
@@ -615,7 +614,7 @@ anyway if that listener is dead), asks about *its own* running work, archives
   separates them is entirely what the webview did before calling it.
 - **macOS keeps its rule**: closing the last window quits.
 
-**The ack, confirm and archive gates are one shared flow with the quit**
+**The ack and confirm gates are one shared flow with the quit**
 (`createTeardownFlow` in `standalone/src/teardown-flow.ts`); what differs is only
 the step past them — a quit votes and waits its turn in the walk, a close tears
 down at once.
@@ -630,15 +629,6 @@ parks its own flow and leaves its host waiting out a decision that cannot come.
 | quit | any committed flow | the quit acks and **votes** — this window is ending anyway, and a window that never votes holds the machine in `Voting` with no dialog to answer |
 | close | a quit, in any state | refused at once with `window_close_cancel`; the window stays |
 
-**A committed flow that retreats and is then cancelled re-drives the quit it
-took the vote for.** `archive-failed` is a committed close asking a human about
-notes it could not store, and declining there leaves the window standing with the
-quit's own question never asked. **The re-drive gates the intent once**: it
-re-enters the quit's `request` from inside the close's cancel, and the trigger
-that caused it returns without gating again. **A quit cancelled elsewhere
-forgets what it deferred**, so a later retreat cannot re-open a quit Rust has
-abandoned.
-
 **A quit cancelled elsewhere drops only a quit's dialog**, never this window's
 own close question. The confirm store cancels any context it cannot open, as the
 backstop. Both orderings are pinned by
@@ -649,13 +639,11 @@ Source of truth: `standalone/src/window-close.ts`; `request_window_close` /
 
 ### Transfer
 
-**A Workspace moves between windows without ending anything.** Nothing is
-archived and no process is killed: a move is not a closure.
+**A Workspace moves between windows without ending anything.** No process is killed: a move is not a closure.
 
 The protocol and every failure path are §Arrival queue; what a move *is*:
 
-- **A window whose last Workspace left closes itself**, with no confirmation, no
-  archive and no kill: nothing ended.
+- **A window whose last Workspace left closes itself**, with no confirmation and no kill: nothing ended.
 - **Must collapse the source only after `workspace-departed` confirms adoption, before committing its release and removing its tab or closing its Window.** The pending guard spans the animation; `workspace-move.test.ts` pins this order. Presentation is `docs/specs/layout.md` → Workspace motion.
 - **A pane's helper Session travels with it.** A helper is not a member Surface,
   so nothing else in the payload names it, and one left behind is a leaked shell
@@ -687,15 +675,14 @@ Everything else is the transfer above.
 ### Arrival queue
 
 **An arrival is one transaction keyed by `workspaceId`**, carrying the source's
-`{ workspaceId, workspace, notepad, terminalIds, allIds }` — `allIds` naming every
-member Surface, browser ones included, which is what the target hydrates notes
-against — under Rust's own `from` / `to`. Rust holds the record from the
+`{ workspaceId, workspace, terminalIds, allIds }` — `allIds` naming every
+member Surface, browser ones included — under Rust's own `from` / `to`. Rust holds the record from the
 source's invoke until the target adopts the Workspace or dies, and every step
 below reads that record rather than inferring itself from the suppression map.
 
 1. **Source** prepares the Workspace, touching nothing, and invokes
    `transfer_workspace` / `open_workspace_window`. **Must return preparation refusals as `{ moved: false, reason }` without changing ownership.** On `Ok` it marks the Workspace
-   **transferring**: the Wall stays mounted and the notes stay put, nothing is
+   **transferring**: the Wall stays mounted, nothing is
    released, and `getWindowSnapshot` omits it.
 2. **Rust** reassigns `terminalIds` to the target, keeps routing their output to
    the source, and asks the sidecar to stamp a `pty:marked` line per id; at that
@@ -712,7 +699,7 @@ below reads that record rather than inferring itself from the suppression map.
    "arrived before armed" class of bug (rationale). Rust answers
    `pty:requestInit` with **that arrival's ids and no others**; `pty:list` and
    each `pty:replay` echo the collector's token. The target resumes over them,
-   hydrates the notes and mounts the Workspace at the payload’s index, else the drop index.
+   mounts the Workspace at the payload’s index, else the drop index.
    **Never spawns or kills**: the Sessions' alert state never left the
    sidecar, whose answer to that `pty:requestInit` re-sends it (§Alerts;
    `docs/specs/alert.md` → Live Workspace transfer).
@@ -721,7 +708,7 @@ below reads that record rather than inferring itself from the suppression map.
    and emits `workspace-departed` for
    **that Workspace alone** to its own source.
 5. **Source** commits on `workspace-departed`: releases every Session (never
-   kills one), drops the notes and the helper, closes the Workspace, and closes
+   kills one), drops the helper, closes the Workspace, and closes
    the window if it was the last one (§Transfer).
 
 - **Nothing is released before the target has adopted it.** The target can refuse
@@ -735,10 +722,10 @@ below reads that record rather than inferring itself from the suppression map.
   otherwise persist the same Workspace in two windows, or kill it under the
   source.
 - **Must await `adopt_done` before installing a torn-out Window; refusal releases
-  its resumed Sessions and notes and boots fresh.**
+  its resumed Sessions and boots fresh.**
 - **A refused `adopt_done` unwinds the mount.** The `ARRIVAL_MAX` watchdog has
   already handed the shells back and the source kept the Workspace, so the
-  target releases its Sessions (never kills them), drops the notes, and closes
+  target releases its Sessions (never kills them) and closes
   the Workspace rather than leaving it live and persisted in two windows. **Must unwind from the received payload without preparing another move.**
 - **Must remove this window's unmounted semantic and Activity state when arrival
   collection times out**, and kill nothing: the source goes on showing those
@@ -961,8 +948,7 @@ written.
 release builds** (rationale). `app_data_dir()` follows the Tauri identifier;
 `pnpm dev:standalone` already supplies a distinct per-worktree identifier
 (§Build and development). The subtree also isolates session/recovery state when
-raw Tauri dev bypasses that wrapper. **Must keep the notepad archive and Burrow
-state directly under that identifier’s `app_data_dir`**.
+raw Tauri dev bypasses that wrapper. **Must keep Burrow state directly under that identifier’s `app_data_dir`**.
 Source of truth: `state_root_from` and `sweep_session_roots` in
 `standalone/src-tauri/src/lib.rs`.
 
@@ -973,12 +959,6 @@ owner-only first and each an empty string when it could not be:
 record cannot reach the installed app). The browser-dev harness sets both to its
 own per-run temp directory. Source of truth: `recovery_state_dir` in
 `standalone/src-tauri/src/lib.rs`.
-
-**Must keep the notepad archive outside `sessions/` and the debug subtree** —
-`<app_data_dir>/notepad-archive-v1.json`, its own compare-and-swap commands and
-its own lifetime, so the session sweep never reaches it
-(`docs/specs/notepad.md` -> "Standalone quit"). Both stores write through the one
-`write_file_atomically`.
 
 **Must restrict the session store to the owner before any bytes are written**
 (`docs/specs/security-local.md` -> "Persisted state"; rationale).
@@ -1039,7 +1019,7 @@ teardown at a time. Source of truth: `QuitMachine` in
 
 | Phase | What happens |
 |---|---|
-| Voting | every window acks, archives its own notes, asks about its own running work, and calls `quit_vote` — or `quit_cancel`, which tells every window and destroys nothing |
+| Voting | every window acks, asks about its own running work, and calls `quit_vote` — or `quit_cancel`, which tells every window and destroys nothing |
 | Walking | the `dormouse://quit-teardown` event reaches one window at a time, **`main` last**; each hands on with `quit_window_done`, and the last one installs and calls `quit_proceed` |
 
 - **A cancel is refused once the walk starts**: the first window is already gone.
@@ -1084,20 +1064,14 @@ Each window's orchestrator (registered by `initQuitFlow`, Tauri-only) responds:
 
 1. **Always `quit_ack`** first (fire-and-catch), so phase 1 stands down even if
    the orchestrator then dedupes the event out.
-2. **Archive the notepads**, bounded at 3 s, *before* the first `quit_progress` —
-   the last point at which a failure may still ask a question, since teardown may
-   not (`docs/specs/notepad.md` -> "Standalone quit"). Failure or timeout leaves
-   the quit **pending**: its dialog is another human decision, which phase 2 is
-   unbounded for.
-3. **`quit_vote`** when this window is ready — immediately on an all-idle quit,
-   or after the user confirms and the archive gate passes. **A vote is not a
+2. **`quit_vote`** when this window is ready — immediately on an all-idle quit,
+   or after the user confirms. **A vote is not a
    teardown**: nothing anywhere may be destroyed until every window has agreed.
-4. **`quit_progress`** when its own `quit-teardown` arrives, bumping a
+3. **`quit_progress`** when its own `quit-teardown` arrives, bumping a
    `progress` counter. Sent again at the install phase boundary.
-5. The teardown (below), then **`quit_window_done`** — or **`quit_proceed`** in
+4. The teardown (below), then **`quit_window_done`** — or **`quit_proceed`** in
    the last window, which sets `approved` and calls `app.exit(0)`.
-6. A confirmation-dialog cancel (below), or a **Cancel** on the archive-failure
-   dialog, calls **`quit_cancel`** — bumps `seq`, invalidating the live watchdog,
+5. A confirmation-dialog cancel (below) calls **`quit_cancel`** — bumps `seq`, invalidating the live watchdog,
    tells every window to drop its dialog, and leaves the app running. **Nothing
    else cancels**: a Quit anyway must reach teardown with the watchdog still armed.
 
@@ -1134,7 +1108,7 @@ asks before discarding a pending download (§Per-window close).
   reordering preserve it.
 - **Must clear competing Workspace close/move/rename prompts when opening the
   gate, preserving transfer guards.** A full-window overlay covers the strip;
-  its keyboard lease lasts through confirmation, archive failure, and teardown.
+  its keyboard lease lasts through confirmation and teardown.
 - **Must exclude transfers from host teardown.** Queue app quit while any arrival
   is pending, and native window close while that window is an arrival endpoint;
   automatically retry through normal confirmation once the relevant transfer
@@ -1150,15 +1124,13 @@ asks before discarding a pending download (§Per-window close).
   `standalone/src-tauri/src/lib.rs`.
 - **Must collect votes before killing any window's Sessions.** Confirmation
   consumes its callback once; a noninteractive full-window progress overlay
-  remains through voting, archive, recovery, persistence, and teardown. All-idle
-  requests acquire the same overlay and keyboard lease before archiving or voting.
-- **Must retain the separate note-loss decision on archive failure**, with Cancel
-  focused by default; process-kill approval never approves discarding notes.
+  remains through voting, recovery, persistence, and teardown. All-idle
+  requests acquire the same overlay and keyboard lease before voting.
 
 Source of truth: `openQuitConfirm` in `standalone/src/quit-confirm-store.ts`;
 `WorkspaceTeardownModalHost` in `standalone/src/WorkspaceTeardownModal.tsx`;
 `WorkspaceKillConfirm` in `lib/src/components/WorkspaceKillConfirm.tsx`.
-Pinned by `holds an all-idle window through archiving and voting until another window cancels`
+Pinned by `holds an all-idle window through voting until another window cancels`
 in `standalone/src/quit.test.ts`,
 `holds one keyboard lease through commitment and releases it on matching dismissal`
 in `standalone/src/quit-confirm-store.test.ts`,
@@ -1176,10 +1148,7 @@ bounded** so a stall cannot wedge quit, and the whole is wrapped in a ceiling
 aborts the final save of a slow teardown instead of guarding a wedged one. The two
 steps that reach the sidecar cost their own budget *plus* Rust's round-trip margin,
 so both terms count (`QUIT_TEARDOWN_CEILING_MS` in `standalone/src/quit.ts`; pinned by
-`lib/src/lib/mirrored-constants.test.ts`). The notepad
-archive is **not** a step here: it runs ahead of `quit_progress` precisely because
-teardown's rule below holds — no failing step prevents exit — and archiving must be
-able to stop the quit (`docs/specs/notepad.md` -> "Standalone quit"):
+`lib/src/lib/mirrored-constants.test.ts`). The steps are:
 
 1. `captureAgentRecovery` — **this window's PTYs**, and **first**, because an agent's resume invocation exists
    only between the interrupt and the kill and is the one thing here that cannot be

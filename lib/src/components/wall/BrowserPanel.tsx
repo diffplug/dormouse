@@ -14,7 +14,6 @@ import { resolveRenderMode } from './browser-surface';
 import type { PaneProps } from './pane-props';
 import { AgentBrowserPanel } from './AgentBrowserPanel';
 import { IframePanel } from './IframePanel';
-import { NotepadPanel } from '../NotepadPanel';
 
 /** Canonical persisted state for a browser surface. `renderMode` + `url` are the
  *  single source of truth across swaps; the agent-browser fields ride flat and are
@@ -43,16 +42,13 @@ export type BrowserPanelParams = {
   contextPortKey?: string;
 };
 
-export function BrowserPanel(props: PaneProps & { renderNotepad?: boolean }) {
+export function BrowserPanel(props: PaneProps) {
   const renderMode = resolveRenderMode(props.params);
-  // The wrapper is the notepad panel's containing block, and the one thing both
-  // renderers share; each child still fills it and owns its own chrome.
   return (
     <div className="relative h-full w-full">
       {renderMode === 'iframe'
         ? <IframePanel {...props} />
         : <AgentBrowserPanel {...props} renderMode={renderMode} />}
-      {props.renderNotepad !== false && <NotepadPanel surfaceId={props.id} />}
     </div>
   );
 }

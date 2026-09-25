@@ -253,8 +253,7 @@ describe('workspace.close', () => {
     expect(answer(forced)).toEqual({
       status: 'closed', workspaceId: second, workspaceRef: 'workspace:2', name: 'build',
     });
-    // A command close raises no pane prompt, exactly like `dor kill`.
-    expect(closeAll).toHaveBeenCalledWith('silent');
+    expect(closeAll).toHaveBeenCalled();
     expect(getWorkspacesSnapshot().workspaces).toHaveLength(1);
   });
 

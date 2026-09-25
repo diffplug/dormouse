@@ -1,4 +1,4 @@
-import { BellIcon, BroadcastIcon, GearIcon, MagnifyingGlassIcon, NotebookIcon, PulseIcon } from '@phosphor-icons/react';
+import { BellIcon, BroadcastIcon, GearIcon, MagnifyingGlassIcon, PulseIcon } from '@phosphor-icons/react';
 import { SecondsField, SwitchRow } from './AlarmSettingsControls';
 import { ScrollFades } from './ScrollFades';
 import type { AlertSink } from '../lib/alert-delivery-model';
@@ -12,17 +12,14 @@ import {
   OVERLAY_MAX_HEIGHT,
   Shortcut,
   UNDER_SWITCH_INDENT,
-  modalActionButton,
 } from './design';
 import { ExternalTextLink } from './ExternalTextLink';
-import { NotepadArchiveView } from './NotepadArchiveView';
 import { ThemePicker } from './ThemePicker';
 import { ShellPicker } from './ShellPicker';
 import { WatchedCommandList } from './WatchedCommandList';
 import { RemoteControlSection } from './RemoteControlSection';
 import { PushTestButton, SpeakTestButton } from './AlarmTestButtons';
 import { getPlatform } from '../lib/platform';
-import { hasNotepadArchive } from '../lib/notepad/archive-service';
 import { getShellsSnapshot, subscribeToShells } from '../lib/shell-store';
 import {
   getAlertSettings,
@@ -87,7 +84,6 @@ const TOPICS = [
   { id: 'activity', label: 'Activity', icon: PulseIcon, groups: ['watcher', 'inactivity'] },
   { id: 'notifications', label: 'Notifications', icon: BellIcon, groups: ['speech', 'push'] },
   { id: 'relay', label: 'Relay', icon: BroadcastIcon, groups: ['relay'] },
-  { id: 'notepad', label: 'Notepad', icon: NotebookIcon, groups: ['archive'] },
 ] as const;
 type TopicId = typeof TOPICS[number]['id'];
 type GroupId = typeof TOPICS[number]['groups'][number];
@@ -104,7 +100,7 @@ export const SETTINGS_SCROLL_MS = 700;
 /** Search the mounted controls themselves so descriptions, options, and live
  * command/device names have no second copy to drift. Hidden groups stay mounted
  * to preserve drafts and in-flight actions when navigating or searching. */
-function useSettingsSearch(content: React.RefObject<HTMLDivElement | null>, view: string) {
+function useSettingsSearch(content: React.RefObject<HTMLDivElement | null>) {
   const [index, setIndex] = useState<Record<string, string>>({});
   useLayoutEffect(() => {
     const element = content.current;
@@ -129,7 +125,7 @@ function useSettingsSearch(content: React.RefObject<HTMLDivElement | null>, view
       attributes: true, attributeFilter: ['aria-label', 'placeholder'],
     });
     return () => observer.disconnect();
-  }, [content, view]);
+  }, [content]);
   return index;
 }
 
@@ -151,7 +147,7 @@ function TopicSection({ id, hidden, children }: { id: TopicId; hidden: boolean; 
   );
 }
 
-/** App-global settings; the archive replaces this view rather than stacking. */
+/** App-global settings. */
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const watched = useSyncExternalStore(subscribeToWatchedCommands, getWatchedCommandsSnapshot);
   const settings = useSyncExternalStore(subscribeToAlertSettings, getAlertSettings);
@@ -167,10 +163,6 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   // One union rather than a boolean per picker, so two menus can never be open
   // at once and Escape has a single thing to close.
   const [openMenu, setOpenMenu] = useState<'theme' | 'shell' | null>(null);
-  // The archive replaces this dialog's content rather than stacking a second
-  // modal on it: one dialog, two views, so the baseboard button that opened it
-  // still owns exactly one thing (docs/specs/notepad.md -> Archive).
-  const [view, setView] = useState<'settings' | 'archive'>('settings');
   // Stable, because an open picker feeds this to `useCloseOnOutsideAndEscape`:
   // a fresh arrow each render would tear down and re-add its three window
   // listeners on every re-render of this dialog.
@@ -185,8 +177,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   // to offer. That also covers every host whose adapter detects no shells and
   // every burrow that never seeds the store (fake = 1, remote = 0).
   const showShell = !getPlatform().hostOwnsShells && shellState.shells.length >= 2;
-  const showArchive = hasNotepadArchive();
-  const index = useSettingsSearch(contentRef, view);
+  const index = useSettingsSearch(contentRef);
   const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
   const searching = terms.length > 0;
   const matches = (group: GroupId) =>
@@ -257,13 +248,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     observer.observe(content);
     content.querySelectorAll('[data-settings-topic]').forEach((section) => observer.observe(section));
     return () => observer.disconnect();
-  }, [followScroll, view, visibleTopicIds]);
+  }, [followScroll, visibleTopicIds]);
 
-  useEffect(() => cancelScroll, [cancelScroll, view]);
-
-  if (view === 'archive') {
-    return <NotepadArchiveView onBack={() => setView('settings')} onClose={onClose} />;
-  }
+  useEffect(() => cancelScroll, [cancelScroll]);
 
   return (
     <ModalFrame
@@ -443,24 +430,6 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               <div data-setting="relay" hidden={!matches('relay')}>
                 <RemoteControlSection />
               </div>
-            </TopicSection>
-            <TopicSection id="notepad" hidden={!visible('notepad')}>
-              {showArchive && (
-                <section data-setting="archive" hidden={!matches('archive')} className={SECTION}>
-                  <div className="text-sm text-foreground">Notepad archive</div>
-                  <div className="mt-1 text-sm leading-relaxed text-muted">
-                    Notes kept from terminals and browsers that have closed. They stay
-                    until you delete them.
-                  </div>
-                  <button
-                    type="button"
-                    className={`${modalActionButton()} mt-2`}
-                    onClick={() => setView('archive')}
-                  >
-                    Open archive
-                  </button>
-                </section>
-              )}
             </TopicSection>
           </div>
           <ScrollFades above={above} below={below} />

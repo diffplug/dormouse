@@ -22,7 +22,7 @@ worktree paths below are historical after merge:
 | 8 | #621 | `workspaces-fidelity` | `dormouse.workspaces-fidelity` | Marks and serialized xterm buffers; pin transfer superseded by #630 |
 | 9 | #622 | `workspaces-move-verb` | `dormouse.workspaces-move-verb` | `dor workspace move`, `dor list --window`, iframe move gate |
 | 10 | #623 | `workspaces-harness` | `dormouse.workspaces-harness` | Harness alert stores through the sidecar |
-| 11 | #630 | `workspaces-transfer-fixes` | `dormouse.workspaces-transfer-fixes` | Transfer mouse/grid/command state, notes without pins, shared Workspace kill confirmation, review fixes |
+| 11 | #630 | `workspaces-transfer-fixes` | `dormouse.workspaces-transfer-fixes` | Transfer mouse/grid/command state, shared Workspace kill confirmation, review fixes |
 
 **Work on the tip** (`dormouse.workspaces-transfer-fixes`) for testing and for any tweak,
 unless the tweak clearly belongs to an earlier stage and you want it reviewed
@@ -123,7 +123,7 @@ Tests that pin the stack's non-obvious rules, by concern:
 | Cross-window drag and iframe gate | `standalone/src/workspace-drag.test.ts` |
 | Registry, stable refs | Rust `workspaces::tests`, `standalone/src/workspace-registry.test.ts`, `lib/src/lib/workspace-store.test.ts` |
 | Sidecar marks and since-mark replay | `standalone/sidecar/pty-core.test.js` |
-| Notes across a move | `lib/src/components/wall/workspace-transfer.test.ts` |
+| Workspace transfer preparation | `lib/src/components/wall/workspace-transfer.test.ts` |
 | `dor workspace` verbs, move gate | `lib/src/components/wall/workspace-control.test.ts`, `dor-control-router.test.ts` |
 | Crash durability of a transfer | Rust `tests::an_arrival_record_round_trips_until_it_is_forgotten` and the `a_leftover_arrival_*` boot-merge tests |
 
@@ -148,7 +148,6 @@ User-run results are recorded under "Transfer findings" below. Items marked
 - Move a Workspace with a long-running TUI and 10k+ lines of scrollback to a
   second window: scrollback, cursor, and colors intact; output continues with
   nothing repeated or lost at the seam.
-- A captured note survives the move without its source pin.
 - Kill the app mid-drag (after the drop, before the target finishes): on
   relaunch the Workspace is in the target window with fresh shells, and not in
   the source.
@@ -206,7 +205,6 @@ the heading, and the rule gets a `(rationale)` marker.
 | Sidecar event routing | `standalone/src-tauri/src/routing.rs` (`route`, pure) and `dispatch_sidecar_event` in `lib.rs` | `standalone.md` → Routing (the table) |
 | Transfer protocol | Source and target halves in `standalone/src/workspace-move.ts`; lib half in `lib/src/components/wall/workspace-transfer.ts` (`prepareWorkspaceTransfer`, `captureTransferContent`); Rust `begin_arrival` / `transfer_workspace_content` / `adopt_ready` / `adopt_done` / `hand_back_arrival` in `lib.rs`, `Arrival` in `routing.rs` | `standalone.md` → Transfer, Tear-out, Arrival queue; `transport.md` → Transferring a Workspace |
 | Marks and since-mark replay | `mark` / `list` in `standalone/sidecar/pty-core.js`; `pty:marked` routing and bookkeeping in `routing.rs` / `lib.rs`; `serializeTerminal` / `flushTerminal` in `terminal-lifecycle.ts` | `transport.md` → Transferring a Workspace; `standalone.rationale.md` → Arrival queue |
-| Notes across a move | `lib/src/components/wall/workspace-transfer.ts` | `transport.md`, `notepad.md` |
 | Crash durability of a transfer | `record_arrival_on_disk` / `forget_arrival_on_disk` / `restore_arrivals` in `standalone/src-tauri/src/lib.rs` (`sessions/arrivals.json`, merged at boot) | `standalone.md` → Arrival queue |
 | Arrival deadline, held events, hand-back replay | `ARRIVAL_MAX`, `expire_arrival`, `hold_event` / `lift_suppression`, `hand_back_ids` in `standalone/src-tauri/src/routing.rs`; `spawn_arrival_watchdog`, `hand_back_arrival` in `standalone/src-tauri/src/lib.rs`; `acceptHandBackReplay` in `standalone/src/workspace-move.ts` | `standalone.md` → Arrival queue, Routing |
 | Cross-window drag | `standalone/src/workspace-drag.ts` (release gate in `onDropOnOtherWindow`), `window_at_cursor` in Rust | `standalone.md` → Dragging a Workspace between windows |
@@ -257,8 +255,6 @@ the heading, and the rule gets a `(rationale)` marker.
   Ordinary Workspace switching and window focus changes preserved mouse input.
 - Moving a window's last Workspace into another window left stale TUI drawing
   until a resize. Tear-out drawing appeared correct.
-- A source pin remained visible after moving, then reported unavailable and
-  disappeared on use. Pins are now intentionally dropped on transfer.
 - Earlier checks passed: switching, idle tear-out, stable cross-window refs,
   continuous numbered output without observed gaps, and identical retained
   scrollback before and after transfer.

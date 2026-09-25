@@ -2,7 +2,6 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { NOTEPAD_VOLATILE_GLOBAL } from '../../lib/src/lib/vscode-notepad-global';
 import { CSP_NONCE_PLACEHOLDER } from '../src/csp-nonce-placeholder';
 import { getWebviewHtml } from '../src/webview-html';
 import { removeDir, tempStorageDir } from './helpers';
@@ -179,32 +178,6 @@ describe('getWebviewHtml', () => {
     } finally {
       await removeDir(dollarMediaPath);
     }
-  });
-
-  it('boots with no notepad mirror unless one is handed to it', () => {
-    // Only a live resume gets one; every other document — a cold restore, an
-    // editor panel — must find `null` there (docs/specs/notepad.md).
-    const { html } = getWebviewHtml(webview, mediaPath);
-    expect(html).toContain(`globalThis.${NOTEPAD_VOLATILE_GLOBAL} = null;`);
-  });
-
-  it('cannot be broken out of by a captured note', () => {
-    // Notes carry arbitrary terminal output, and this payload is an inline
-    // script. `</script>` inside a note would otherwise end the tag early,
-    // leaving the rest of the archive as markup in the document.
-    const note = { id: 'n1', createdAt: 1, content: { kind: 'plain' as const, text: '</script><img src=x>' } };
-    const { html } = getWebviewHtml(webview, mediaPath, undefined, null, null, {
-      surfaces: [{
-        surfaceId: 'pane-1', surfaceTitle: 'zsh', surfaceKind: 'terminal', cwd: null, notes: [note],
-      }],
-      stagedDeletions: { deleteBatchIds: [], deleteNotes: [] },
-    });
-
-    const inline = /<script nonce="[^"]+">([\s\S]*?)<\/script>/.exec(html);
-    expect(inline, 'the boot payload script was cut short').not.toBeNull();
-    expect(inline![1]).toContain(NOTEPAD_VOLATILE_GLOBAL);
-    expect(inline![1]).toContain('\\u003c/script>');
-    expect(html).not.toContain('<img src=x>');
   });
 
   it('treats a `$` in serialized state as data, not a substitution pattern', () => {

@@ -24,7 +24,6 @@ import {
   removeMouseSelectionState,
   setSelection as setMouseSelection,
 } from './mouse-selection';
-import { dropSourcesForTerminal } from './notepad/notepad-store';
 import { extractSelectionText } from './selection-text';
 import { normalizeResumeCommand } from './resume-patterns';
 import {
@@ -298,7 +297,7 @@ function setupTerminalEntry(id: string, options: TerminalEntryOptions = {}): Ter
   const { terminal, fit, serialize, element } = createXtermHost(options.grid);
   const selectionBaselineRef = { current: null as string | null };
   // Every module that finalizes a selection arms the render handler through
-  // this one setter: the mouse router at drag end, a note's pin on reveal.
+  // this one setter at drag end.
   const setSelectionBaseline = (baseline: string | null) => {
     selectionBaselineRef.current = baseline;
   };
@@ -614,7 +613,7 @@ export function disposeAllSessions(): void {
 }
 
 /**
- * Tear this webview's half of a Session down: the notepad pins, the listeners,
+ * Tear this webview's half of a Session down: the listeners,
  * the element and the xterm instance, plus the registry, pane, selection and
  * activity state keyed to it.
  *
@@ -627,9 +626,6 @@ export function disposeAllSessions(): void {
 function teardownSession(id: string, { kill }: { kill: boolean }): void {
   const entry = registry.get(id);
   if (!entry) return;
-  // Before the xterm instance goes: its markers are what notepad pins hold, and
-  // a disposed marker cannot be dropped cleanly afterwards. The notes stay.
-  dropSourcesForTerminal(id);
   entry.cleanup();
   if (kill) getPlatform().killPty(id);
   // Detach before releasing: unlike a minimize, nothing here has to survive, so the

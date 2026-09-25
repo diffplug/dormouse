@@ -10,7 +10,6 @@ import { SurfacePaneHeader } from './SurfacePaneHeader';
 import { ToolPaneHeader } from './ToolPaneHeader';
 import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
 import { setPlatform } from '../../lib/platform';
-import { addPlainNote, clearAllNotepads, getOpenNotepadId } from '../../lib/notepad/notepad-store';
 import {
   registerAgentBrowserScreen,
   type ChromeSnapshot,
@@ -53,7 +52,6 @@ let resizeHeader: (width: number) => void;
 
 beforeEach(() => {
   setPlatform(new FakePtyAdapter());
-  clearAllNotepads();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -96,7 +94,7 @@ function renderHeader(
 
 /** The compact header's popover, portaled to `document.body`. */
 const popup = () => document.querySelector<HTMLElement>('[role="dialog"][aria-label="Browser controls"]');
-/** The compact header's trigger; its label grows a note count. */
+/** The compact header's trigger. */
 const overflowTrigger = () => container.querySelector<HTMLButtonElement>('[aria-label^="Browser controls"]')!;
 const inPopup = (selector: string) => popup()?.querySelector<HTMLElement>(selector) ?? null;
 /** Click, then let the popover's deferred dismissal (a 0ms task) run. */
@@ -124,37 +122,12 @@ describe('SurfacePaneHeader — browser chrome', () => {
       act(() => recordToolDirty(id, true));
       expect(indicator()).not.toBeNull();
       expect(container.querySelector('[aria-label="Kill"]')).not.toBeNull();
-      act(() => addPlainNote(id, 'Keep this note'));
-      expect(indicator()).not.toBeNull();
       act(() => recordToolDirty(id, false));
       expect(indicator()).toBeNull();
       act(() => recordToolDirty(id, true));
       expect(indicator()).not.toBeNull();
       act(() => recordToolDirty(id, null));
       expect(indicator()).toBeNull();
-    } finally {
-      registration.dispose();
-    }
-  });
-
-  it('keeps the dirty dot outside the browser overflow menu that Kill joins at the tight tier', () => {
-    // A 118px Tool has only 94px of browser chrome: the dot stays inline and
-    // essential controls join the menu before overflowing.
-    const id = 'dirty-tool-header-narrow';
-    const registration = register(id);
-    try {
-      recordToolDirty(id, true);
-      addPlainNote(id, 'Keep this note');
-      renderHeader({ ...headerProps(id, 'Tool'), params: { surfaceType: 'tool', url: CHROME.url } }, stubActions(), { tool: true });
-      act(() => resizeHeader(TIGHT_PX));
-      const indicator = () => container.querySelector('[role="img"][aria-label="Unsaved changes"]');
-      expect(indicator()).not.toBeNull();
-      expect(container.querySelector('[aria-label="Kill"]')).toBeNull();
-      // Zoom never joins the menu: it is the last control the header keeps.
-      expect(container.querySelector('[aria-label="Zoom"]')).not.toBeNull();
-      act(() => container.querySelector<HTMLButtonElement>('[aria-label="Browser controls, 1 note"]')!.click());
-      expect(document.querySelector('[role="dialog"] [aria-label="Kill"]')).not.toBeNull();
-      expect(container.contains(indicator())).toBe(true);
     } finally {
       registration.dispose();
     }
@@ -371,19 +344,6 @@ describe('SurfacePaneHeader — browser chrome', () => {
     } finally {
       registration.dispose();
     }
-  });
-
-  it('names notes on the trigger and opens the notepad from the popover', async () => {
-    const registration = register('pane-notes');
-    renderHeader(headerProps('pane-notes', 'Browser'), stubActions());
-    act(() => resizeHeader(OVERFLOW_PX));
-    act(() => addPlainNote('pane-notes', 'A saved note'));
-    expect(overflowTrigger().getAttribute('aria-label')).toBe('Browser controls, 1 note');
-    openPopup();
-    expect(inPopup('input')).toBeNull();
-    await clickAndSettle(inPopup('button[aria-label^="Notepad"]')!);
-    expect(getOpenNotepadId()).toBe('pane-notes');
-    registration.dispose();
   });
 
   it('closes the popover from Minimize and Kill wherever they render', async () => {

@@ -212,26 +212,6 @@ export const ManyRules: Story = {
   },
 };
 
-/**
- * The Notepad archive topic. Every host but Pocket has an
- * archive port, so the entry is present in every story here — this one is the
- * one that opens the Archive view in place rather
- * than stacking a second modal (`NotepadArchiveView.stories.tsx` covers the
- * view itself).
- */
-export const NotepadArchiveEntry: Story = {
-  parameters: {
-    primedWatchedCommands: ['claude'],
-    primedAlertSettings: {},
-  },
-  play: async ({ canvasElement }) => {
-    const body = dialog(canvasElement);
-    await selectTopic('Notepad')({ canvasElement });
-    await userEvent.click(await body.findByRole('button', { name: 'Open archive' }));
-    await body.findByRole('button', { name: /Back to Settings/ });
-  },
-};
-
 /** Opens the picker whose trigger matches `name`, inside the dialog.
  *
  *  Storybook's `play` runs before the snapshot, but the menu positions itself
@@ -416,11 +396,6 @@ export const Dark: Story = {
   globals: { theme: 'Dark (Visual Studio)' },
 };
 
-export const Notepad: Story = {
-  ...Default,
-  play: selectTopic('Notepad'),
-};
-
 /** The same query finds settings in different topics, with their original copy. */
 export const SearchAcrossTopics: Story = {
   ...WithRules,
@@ -428,7 +403,6 @@ export const SearchAcrossTopics: Story = {
     const body = dialog(canvasElement);
     fireEvent.change(body.getByRole('searchbox'), { target: { value: 'terminal' } });
     await expect(body.getByRole('region', { name: 'Activity' })).toBeVisible();
-    await expect(body.getByRole('region', { name: 'Notepad' })).toBeVisible();
     await expect(body.queryByRole('button', { name: /^Theme:/ })).not.toBeInTheDocument();
   },
 };
@@ -506,7 +480,7 @@ export const HoverContents: Story = {
     const body = dialog(canvasElement);
     const topic = await hoverTopic(body, 'Notifications');
     await expect(topic).toHaveAttribute('aria-current', 'location');
-    await expect(body.getAllByRole('region')).toHaveLength(4);
+    await expect(body.getAllByRole('region')).toHaveLength(3);
   },
 };
 
@@ -514,8 +488,8 @@ export const ScrollFollowsContents: Story = {
   ...WithRules,
   play: async ({ canvasElement }) => {
     const body = dialog(canvasElement);
-    await userEvent.unhover(await hoverTopic(body, 'Notifications'));
-    const section = body.getByRole('region', { name: 'Notepad' });
+    await userEvent.unhover(await hoverTopic(body, 'Activity'));
+    const section = body.getByRole('region', { name: 'Notifications' });
     const content = section.parentElement!;
     // Manual input cancels any remaining topic-animation frame. A bare
     // scrollTo can race that frame and have its smooth scroll stopped in WebKit.
@@ -523,7 +497,7 @@ export const ScrollFollowsContents: Story = {
     content.scrollTo({ top: content.scrollHeight, behavior: 'smooth' });
     await waitFor(() => {
       expect(Math.abs(content.scrollHeight - content.clientHeight - content.scrollTop)).toBeLessThan(2);
-      expect(contentsButton(body, 'Notepad')).toHaveAttribute('aria-current', 'location');
+      expect(contentsButton(body, 'Notifications')).toHaveAttribute('aria-current', 'location');
     });
   },
 };

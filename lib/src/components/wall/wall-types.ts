@@ -39,10 +39,9 @@ export const isWorkspaceSelection = (kind: WallSelectionKind): boolean => kind =
 export const workspaceIdOfSelection = (kind: WallSelectionKind, id: string | null): string | null =>
   kind === 'workspace-new' ? null : id;
 
-/** How a Surface closure answers the archive: `prompt` raises the Keep open /
- *  Close anyway prompt on refusal, `silent` only returns the refusal, `discard`
- *  drops the notes instead of archiving them (docs/specs/notepad.md → "Closure"). */
-export type CloseSurfaceMode = 'prompt' | 'silent' | 'discard';
+/** How a Workspace close was started: `prompt` for a user gesture, `silent` for
+ *  `dor workspace close`. */
+export type WorkspaceCloseMode = 'prompt' | 'silent';
 
 export type DoorAfterRestoreAction =
   | 'confirm-kill'
