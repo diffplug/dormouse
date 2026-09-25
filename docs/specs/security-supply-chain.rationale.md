@@ -30,7 +30,7 @@ Why alternate version declarations are excluded: in the pinned [setup-node imple
 
 What the `minimumReleaseAge` package rules are: the Renovate equivalent of the pnpm dependency cooldown window, applied per manager.
 
-The pgstencil exception has a different gate: its release workflow stages a version only after a passing `security-audit` on the packaged commit, and a human approves the staged package with npm 2FA before it becomes public. The package carries that commit in `dist/provenance.json`; Hosted verifies matching clean commits for core and auth. The exclusion list is deliberately narrow so other dependencies retain the withdrawal window.
+The pgstencil exception has a different gate: its release workflow stages a version only after a passing `security-audit` on the packaged commit, and a human approves the staged package with npm 2FA before it becomes public. The package carries that commit in `dist/provenance.json`; Hosted verifies matching clean commits for core and auth, and its audit checks npm-signed workflow attestations bind those bytes to that commit. The exclusion list is deliberately narrow so other dependencies retain the withdrawal window.
 
 Why the `vulnerabilityAlerts` cooldown is kept rather than dropped for speed: it guards the opposite threat from the alert itself — a compromised release that gets yanked within a day, which a reviewer reading a dependency diff cannot detect the way the ecosystem's own yank process can. Nothing here auto-merges, and the Dependabot alert already makes the vulnerability visible the moment it is published, so what the cooldown costs is a day before the remediation PR appears, not a day before anyone knows.
 

@@ -21,8 +21,19 @@ live in those scripts and workflows rather than in the Worker.
 Verify the installed `pgstencil` and `@pgstencil/auth` packages by reading each
 `dist/provenance.json`, without auditing package code. Require a 40-hex commit,
 no `dirty: true`, and the same commit in both packages. Confirm `pnpm-lock.yaml`
-resolves both through the npm registry with integrity hashes. Then check the
-commit against pgstencil `main` and its audit:
+resolves both through the npm registry with integrity hashes. Inspect Hosted's
+runtime imports for references to a sibling pgstencil checkout.
+
+Verify npm's signed SLSA provenance for each installed package/version. Use a
+temporary npm consumer of the exact locked versions and `npm audit signatures
+--json --include-attestations` (npm does not audit a pnpm-only install). Require
+that neither is in `invalid` or `missing`, then decode its verified SLSA DSSE
+payload. The signed subject must identify the installed package/version and
+its digest; `predicate.buildDefinition.externalParameters.workflow` must name
+`https://github.com/diffplug/pgstencil`, `.github/workflows/release.yml`, and
+`refs/heads/main`; `resolvedDependencies` must name the same commit as the
+installed `dist/provenance.json`. A registry field or unsigned package file
+alone is insufficient. Then check the commit against pgstencil `main` and its audit:
 
 ```sh
 gh api repos/diffplug/pgstencil/compare/<commit>...main --jq .status
