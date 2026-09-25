@@ -8,7 +8,6 @@ import { TerminalPanel } from './TerminalPanel';
 import { ToolApproval } from './ToolApproval';
 import { ToolPortConflict } from './ToolPortConflict';
 import { toolFace } from './browser-surface';
-import { NotepadPanel } from '../NotepadPanel';
 import { TerminalContextContext, WallActionsContext } from './wall-context';
 import type { PaneProps } from './pane-props';
 
@@ -34,7 +33,6 @@ export function ToolPanel(props: PaneProps) {
   const face = toolFace(props.params);
   const actions = useContext(WallActionsContext);
   const context = useContext(TerminalContextContext);
-  const notepad = context.mounted?.id !== props.id && <NotepadPanel surfaceId={props.id} />;
 
   // Rendered alone, not as one of two halves: mounting TerminalPanel would spawn
   // a shell in a repo the user has not approved yet. Nothing runs until they do.
@@ -43,7 +41,7 @@ export function ToolPanel(props: PaneProps) {
       <div className="relative h-full w-full"><ToolApproval
         {...props}
         onResolve={(id, choice) => actions.onResolveToolApproval(id, choice)}
-      />{notepad}</div>
+      /></div>
     );
   }
 
@@ -51,7 +49,7 @@ export function ToolPanel(props: PaneProps) {
   return (
     <div className="relative h-full w-full">
       <Half shown={!showSecond}>
-        <TerminalPanel {...props} renderTerminal={context.mounted?.id !== props.id} renderNotepad={false} parked={props.parked || showSecond} />
+        <TerminalPanel {...props} renderTerminal={context.mounted?.id !== props.id} parked={props.parked || showSecond} />
       </Half>
       <Half shown={showSecond}>
         {/* A conflict and a browser are mutually exclusive by construction —
@@ -62,10 +60,9 @@ export function ToolPanel(props: PaneProps) {
         ) : (
           /* Parked while hidden, so a screencast idles instead of decoding
              frames nobody is looking at (`useSurfaceVisibility`). */
-          <BrowserPanel {...props} renderNotepad={false} parked={props.parked || !showSecond} />
+          <BrowserPanel {...props} parked={props.parked || !showSecond} />
         )}
       </Half>
-      {notepad}
     </div>
   );
 }

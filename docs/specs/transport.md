@@ -109,8 +109,6 @@ nothing holds first paint for 500 ms, not the whole budget. Source of truth:
 
 **Seeded titles reject the sentinels.** Saved pane and door titles come back through `setTerminalUserTitle()`, which rejects the reserved `<idle>` prefix (`docs/specs/terminal-state.md` → Supported OSC Inputs), and the seed callers in `terminal-lifecycle.ts` additionally skip `<unnamed>`, the default panel placeholder (rationale).
 
-**Must follow `docs/specs/notepad.md` → "Live resume" for browser-only resumes.**
-
 #### Transferring a Workspace
 
 A Workspace can move from one webview to another with its Sessions still
@@ -154,12 +152,11 @@ with these transfer rules:
   the target Wall**, then fit the target pane. **Must preserve mouse encoding
   as well as tracking**, including SGR and SGR-pixel encoding omitted by xterm's
   serializer. Pinned by `preserves mouse tracking and encoding %i through real xterm parsing`
-  in `lib/src/lib/terminal-transfer.test.ts` and `drains replay before adopting even when no note has a pin`
+  in `lib/src/lib/terminal-transfer.test.ts` and `drains replay before adopting`
   in `standalone/src/workspace-move.test.ts`.
 - Tool browser bindings and announcements follow `docs/specs/dor-tool.md` → Persistence and hosts.
 - Alert state and alarm delivery follow `docs/specs/alert.md` → Live Workspace transfer.
 - Semantic-state transfer follows `docs/specs/terminal-state.md` → Core Model.
-- Source-pin limitations belong to `docs/specs/notepad.md` → Source links.
 
 Source of truth: `captureTransferContent` in
 `lib/src/components/wall/workspace-transfer.ts`; `serializeTransferTerminal` in
@@ -246,7 +243,7 @@ Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `surfaceR
 
 ### What is persisted
 
-Structure only: panes (id, cwd, title, `untouched`, `surfaceType`, TODO/alert blob), doors and their Lath restore tokens, the Lath layout, and the Workspace's `dor` surface refs and delivery overrides. **Scrollback is never persisted by any writer**, and neither is the recovery command (above). **Live notepad notes are never persisted here either** — the notepad archive is a separate per-host store written only by a closure (`docs/specs/notepad.md` → "Live resume").
+Structure only: panes (id, cwd, title, `untouched`, `surfaceType`, TODO/alert blob), doors and their Lath restore tokens, the Lath layout, and the Workspace's `dor` surface refs and delivery overrides. **Scrollback is never persisted by any writer**, and neither is the recovery command (above).
 
 ### Retiring the transcripts already on disk
 
@@ -267,7 +264,7 @@ something ends it:
 | --- | --- | --- |
 | Standalone quit or restart — idle, confirmed, or update-install | No — window state is the app's contract | Restore structure + auto-resume agents |
 | Standalone window reload | No | Live resume over sidecar PTYs, per Workspace |
-| Standalone per-window close, one of several | Yes | Fresh: that window's notes archived, its PTYs killed, its snapshot removed |
+| Standalone per-window close, one of several | Yes | Fresh: its PTYs killed, its snapshot removed |
 | Standalone Workspace transfer between windows | Neither — nothing ended | The same Sessions, resumed in the other window |
 | Standalone crash / force-kill | No, and the last save stands | Restore structure, no agent resume |
 | VS Code panel hide/show | No | Live resume over host PTYs, unchanged |
@@ -275,8 +272,6 @@ something ends it:
 | VS Code window close / application quit | No — window state is the host's contract | Restore structure + auto-resume agents |
 | VS Code editor-tab close (`killOnDispose: true`) | Yes | Fresh for that panel |
 | VS Code extension-host crash | No, and the last periodic save stands | Restore structure, no agent resume — `deactivate()` never ran |
-
-Ending something deliberately is also what *keeps* its notes: **a deliberate closure archives the Surface's notepad before teardown** (`docs/specs/notepad.md` → "Closure"), so the one thing a user asked to hold on to survives the boundary that discards everything else.
 
 **Standalone persists one `PersistedWindow` per window**, every Workspace in it, and
 restores them on the next launch (rationale). Quitting ends the processes, not the

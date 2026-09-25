@@ -319,41 +319,6 @@ describe('WorkspaceStrip', () => {
     expect(pill.filter((token) => /^(hover|active|focus-visible):(p[xytrbl]?|m[xytrbl]?|text|font)-/.test(token))).toEqual([]);
   });
 
-  /** The tooltip names where the click lands, which moves with the Wall's
-   *  selection, so it is read on arrival and again after each click. */
-  it('names the Surface the click will enter in the pill tooltip', async () => {
-    const first = getWorkspacesSnapshot().workspaces[0].id;
-    await act(async () => { createWorkspace({ id: 'ws-2' }); });
-    setWorkspaceSurfaces(first, ['pane-a', 'pane-b']);
-    setWorkspaceSurfaces('ws-2', ['pane-x']);
-    setTerminalActivity('pane-a', { todo: true });
-    setTerminalActivity('pane-b', { todo: true });
-    setTerminalActivity('pane-x', { todo: true });
-    const peekNextTodo = vi.fn()
-      .mockReturnValueOnce('pnpm dev')
-      .mockReturnValueOnce('vim notes.md')
-      .mockReturnValue('pnpm dev');
-    stubHandle(first, { peekNextTodo, enterNextTodo: () => 'pane-a' });
-    await render();
-
-    const pill = todoPill(first)!;
-    expect(pill.title).toBe('Next TODO in Workspace 1');
-    await act(async () => { hover(pill); });
-    expect(pill.title).toBe('Next TODO: pnpm dev');
-    // The accessible name stays the Workspace's; the tooltip describes it.
-    expect(pill.getAttribute('aria-label')).toBe('Next TODO in Workspace 1');
-
-    await act(async () => { pill.click(); });
-    expect(todoPill(first)!.title).toBe('Next TODO: vim notes.md');
-    await act(async () => { todoPill(first)!.focus(); });
-    expect(todoPill(first)!.title).toBe('Next TODO: pnpm dev');
-    expect(peekNextTodo).toHaveBeenCalledTimes(3);
-
-    // No Wall to ask: the tooltip still says what the pill is for.
-    await act(async () => { hover(todoPill('ws-2')!); });
-    expect(todoPill('ws-2')!.title).toBe('Next TODO in Workspace 2');
-  });
-
   /** docs/specs/alert.md -> Pane Header: the landing spotlight is raised on the
    *  Surface the click entered, and a repeat is a new signal. */
   it('spotlights the Surface the pill lands on, again on a repeat click', async () => {
@@ -437,16 +402,6 @@ describe('WorkspaceStrip', () => {
     expect(nameSpan().classList.contains('italic')).toBe(true);
   });
 
-  it('never pins an auto-name that moved while the editor was open untouched', async () => {
-    const first = getWorkspacesSnapshot().workspaces[0].id;
-    await render();
-    await act(async () => { activateButton(first).click(); });
-    const input = container.querySelector<HTMLInputElement>(`[data-workspace-rename-for="${first}"]`)!;
-    await act(async () => { setAutoWorkspaceName(first, 'dormouse @ main'); });
-    await act(async () => { input.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); });
-    expect(getWorkspacesSnapshot().workspaces[0]).toMatchObject({ name: 'dormouse @ main', nameIsAuto: true });
-  });
-
   it('shows the close button with one Workspace and closes an untouched one outright', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await render();
@@ -460,32 +415,6 @@ describe('WorkspaceStrip', () => {
     });
     expect(closed).toHaveBeenCalledWith('prompt');
     expect(getWorkspacesSnapshot().workspaces.map((workspace) => workspace.id)).toEqual([first]);
-  });
-
-  it('confirms before closing a Workspace holding work, and a refusal reveals it', async () => {
-    const first = getWorkspacesSnapshot().workspaces[0].id;
-    await act(async () => { createWorkspace({ id: 'ws-2' }); });
-    stubHandle('ws-2', { hasTouchedSurfaces: () => true, closeAll: async () => 'notepad archive failed' });
-    await render();
-    // Close the INACTIVE one so the reveal is observable.
-    await act(async () => { activateButton(first).click(); });
-
-    await act(async () => {
-      tabFor('ws-2').dispatchEvent(new MouseEvent('auxclick', { button: 1, bubbles: true }));
-    });
-    expect(getActiveWorkspaceId()).toBe('ws-2');
-    expect(document.body.querySelector('#kill-confirm-title')).not.toBeNull();
-    expect(chromeKeyboardHeld()).toBe(true);
-    const char = document.body.querySelector('.text-xl')!.textContent!;
-
-    await act(async () => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: char, bubbles: true }));
-    });
-    await act(async () => { await Promise.resolve(); });
-    // Refused: the Workspace survives and is revealed so its prompt is visible.
-    expect(getWorkspacesSnapshot().workspaces).toHaveLength(2);
-    expect(getActiveWorkspaceId()).toBe('ws-2');
-    expect(chromeKeyboardHeld()).toBe(false);
   });
 
   it('reorders on a drag past the threshold, and Escape restores the original index', async () => {

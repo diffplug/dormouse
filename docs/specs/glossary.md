@@ -200,7 +200,7 @@ A user verb is an intentional action that produces a single observable change.
 | `closeWorkspace` | `kill` each member Surface, then remove the Workspace; closing the last Workspace atomically creates a fresh replacement. |
 | `renameWorkspace` | Update a Workspace's `name`; touches no Session |
 | `moveWorkspace` | Reorder a Workspace within its Window; a minted ref renames nothing (a host with no registry still numbers by position) and touches no Session |
-| `transferWorkspace` | Move a Workspace to another Window, Surfaces and Sessions intact: `release` each member Session (detached, Process still Live) and resume it there. Kills nothing and archives nothing — not a `closeWorkspace`. |
+| `transferWorkspace` | Move a Workspace to another Window, Surfaces and Sessions intact: `release` each member Session (detached, Process still Live) and resume it there. Kills nothing — not a `closeWorkspace`. |
 | `tearOut` | `transferWorkspace` into a Window created for it. A Window whose last Workspace leaves closes itself. |
 
 Source of truth: `setActiveWorkspace` / `createWorkspace` / `closeWorkspace` / `renameWorkspace` / `moveWorkspace` in `lib/src/lib/workspace-store.ts`; `closeAll` in `lib/src/components/Wall.tsx`; `prepareWorkspaceTransfer` in `lib/src/components/wall/workspace-transfer.ts`.

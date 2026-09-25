@@ -8,7 +8,6 @@ import { TerminalPanel } from './TerminalPanel';
 import { TerminalContext } from './TerminalContext';
 import * as terminalRegistry from '../../lib/terminal-registry';
 import * as helpers from '../../lib/helper-terminal';
-import { addPlainNote, clearAllNotepads, getNotes, getOpenNotepadId } from '../../lib/notepad/notepad-store';
 import { TerminalContextContext } from './wall-context';
 import { ensureResizeObserver } from './wall-test-utils';
 import { setMouseReporting, removeMouseSelectionState } from '../../lib/mouse-selection';
@@ -170,27 +169,6 @@ it('shares header and uncaptured body entry points; captured mouse has no Shift 
   act(() => setMouseReporting('parent', 'vt200'));
   rightClick(body); rightClick(body, true); expect(open).toHaveBeenCalledTimes(2);
   rightClick(header); expect(open).toHaveBeenCalledTimes(3);
-});
-
-it('opens the parent notepad from the Helper control and keeps edits on that parent', async () => {
-  const helper: helpers.HelperTerminal = { id: 'helper', parentId: 'parent', command: '', status: 'off' };
-  const get = vi.spyOn(helpers, 'getHelper').mockReturnValue(helper);
-  const open = vi.spyOn(helpers, 'openHelper').mockResolvedValue(helper);
-  try {
-    addPlainNote('parent', 'shared note');
-    await act(async () => root.render(<TerminalContext id="parent" />));
-    const toggle = container.querySelector<HTMLButtonElement>('[aria-label="Notepad · 1 note"]');
-    expect(toggle).not.toBeNull();
-    await act(async () => toggle!.click());
-    expect(getOpenNotepadId()).toBe('parent');
-    expect(container.querySelector('[role="dialog"]')?.textContent).toContain('shared note');
-    await click('Delete note');
-    expect(getNotes('parent')).toEqual([]);
-    expect(getNotes('helper')).toEqual([]);
-  } finally {
-    get.mockRestore(); open.mockRestore();
-    act(() => clearAllNotepads());
-  }
 });
 
 

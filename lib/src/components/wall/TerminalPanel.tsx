@@ -1,6 +1,5 @@
 import { useContext, useRef } from 'react';
 import { TerminalPane } from '../TerminalPane';
-import { NotepadPanel } from '../NotepadPanel';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
 import { getMouseSelectionState } from '../../lib/mouse-selection';
 import type { PaneProps } from './pane-props';
@@ -11,7 +10,7 @@ import {
   WallActionsContext,
 } from './wall-context';
 
-export function TerminalPanel(props: PaneProps & { renderNotepad?: boolean; renderTerminal?: boolean }) {
+export function TerminalPanel(props: PaneProps & { renderTerminal?: boolean }) {
   const context = useContext(TerminalContextContext);
   const passthroughPaneId = useContext(PassthroughPaneIdContext);
   const actions = useContext(WallActionsContext);
@@ -29,7 +28,6 @@ export function TerminalPanel(props: PaneProps & { renderNotepad?: boolean; rend
       context.open(props.id, { origin: { x: event.clientX, y: event.clientY } });
     }}>
       {props.renderTerminal !== false && <TerminalPane id={props.id} isFocused={isFocused} />}
-      {props.renderNotepad !== false && context.mounted?.id !== props.id && <NotepadPanel surfaceId={props.id} />}
     </div>
   );
 }

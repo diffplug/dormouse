@@ -2,7 +2,6 @@ import type { TerminalGrid } from './terminal-transfer';
 import { adoptOrphanedHelper, restoreHelper } from './helper-terminal';
 import type { LathPersistedLayout } from './lath/persistence';
 import type { PlatformAdapter, PtyInfo } from './platform/types';
-import { hydrateNotepadFromVolatile } from './notepad/notepad-store';
 import { restoreBrowserSurfaceTodo, resumeTerminal } from './terminal-registry';
 import type { TerminalResumeInfo } from './terminal-lifecycle';
 import { carrySurfaceRefs, readPersistedSession, type PersistedDoor, type PersistedSession, type PersistedSurfaceRefs } from './session-types';
@@ -201,16 +200,10 @@ export function resumeOrRestoreFrom(
   const mine = live.ptys.filter((pty) =>
     opts.ptyIds === undefined || opts.ptyIds.has(pty.id) || opts.claimUnowned?.has(pty.id));
   const resumed = mine.length > 0 ? resumeLivePtys(mine, live.replay, saved, opts.terminalGrids) : null;
-  if (resumed) return hydrateNotepad(platform, resumed);
+  if (resumed) return resumed;
 
   const restored = restoreSession(platform, { savedSession: saved });
   if (restored) {
-    // Browser-only views have no PTY with which to prove a live resume. Their
-    // host-memory mirror is that proof; an extension restart supplies null.
-    // Rebuild their layout first, then hydrate only those surviving Surfaces.
-    if (saved?.panes.length && saved.panes.every((pane) => pane.surfaceType === 'browser')) {
-      return hydrateNotepad(platform, restored);
-    }
     return restored;
   }
 
@@ -259,22 +252,6 @@ function resumeLivePtys(
     doors: [],
     ...carrySurfaceRefs(saved),
   };
-}
-
-/**
- * Give a resumed webview back the notes the host mirrored for it
- * (docs/specs/notepad.md → "Live resume"). Only reachable from the live-PTY
- * branch or a browser-only view with a same-host mirror: a cold restore is
- * a different Session over a different set of PTYs,
- * and mirrored notes must never surface there. Live Surfaces are the resume
- * plan's panes plus its doors — a minimized Surface keeps its notes.
- */
-function hydrateNotepad(platform: PlatformAdapter, result: ReconnectResult): ReconnectResult {
-  const snapshot = platform.notepadArchive?.loadVolatile?.();
-  if (snapshot) {
-    hydrateNotepadFromVolatile(snapshot, [...result.paneIds, ...(result.doors ?? []).map((door) => door.id)]);
-  }
-  return result;
 }
 
 function getSavedPaneResumeInfo(saved: PersistedSession | null, liveIds: string[]): Map<string, { title: string; untouched: boolean }> {

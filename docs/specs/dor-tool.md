@@ -1,7 +1,7 @@
 # Dor Tools
 
 > See `docs/specs/glossary.md` for Surface / Session / Pane / Door vocabulary.
-> Owns tool designation, configuration, trust workflow, serving, and command lifecycle. Browser chrome belongs to `docs/specs/dor-browser.md`; notes and closure belong to `docs/specs/notepad.md`; helpers belong to `docs/specs/terminal-context.md`.
+> Owns tool designation, configuration, trust workflow, serving, and command lifecycle. Browser chrome belongs to `docs/specs/dor-browser.md`; helpers belong to `docs/specs/terminal-context.md`.
 
 ## Files
 
@@ -86,7 +86,7 @@ Source of truth: `queueToolSpawn` / the `surface.tool` handler in `lib/src/compo
 3. **Must grant only through the approval controls in Dormouse chrome**, never through a `dor` verb or terminal output. The prompt names the proposed command; it is not itself executable terminal content. (rationale)
 4. **Must require `trust-recorded` before re-resolving the named entry**, then stage the command, renderer, port strategy, and key before exposing its terminal. Rejected grants or failed re-resolution retain approval and display an error until retry; blank reasons use a fallback. Closed Surfaces must not start later or show stale errors.
 5. **Must recheck the resolved key before launching an approved Tool**, honoring its original `--fresh` intent. Close a redundant approval through the ordinary close coordinator before revealing or restarting the match; a failed closure retains the approval and sends no command.
-6. **Must close a declined approval through the ordinary close coordinator and record no denial.** Archive failure may retain the pane. (rationale)
+6. **Must close a declined approval through the ordinary close coordinator and record no denial.** A helper refusal may retain the pane. (rationale)
 7. **Must record each grant as its own atomically written file** under the host's state directory, so hosts sharing one never lock or merge. **A host that supplies no state directory keeps grants in memory for that process only**, rather than inventing a location the user cannot find to revoke.
 8. **Never content-hash grants or re-prompt solely because the config changed.** (rationale)
 
@@ -125,7 +125,7 @@ Source of truth: `useToolServing` in `lib/src/components/wall/use-tool-serving.t
 
 **Must return keyboard focus directly to the primary terminal when it becomes the selected passthrough face**, even while the retiring browser still owns a Surface focus handle.
 
-**Must create a shell-hosted PTY and type the command only after integration readiness.** An unsupported shell fails before launch; integration timeout or cancellation closes the temporary Surface through the notepad close coordinator, retaining it if closure fails.
+**Must create a shell-hosted PTY and type the command only after integration readiness.** An unsupported shell fails before launch; integration timeout or cancellation closes the temporary Surface.
 
 | Transition | Result |
 | --- | --- |
@@ -134,13 +134,13 @@ Source of truth: `useToolServing` in `lib/src/components/wall/use-tool-serving.t
 | Port conflict | Explanation occupies the browser half; terminal remains available |
 | Command exit or different command | Browser resources retire and terminal becomes visible |
 | Re-run stored command | Same Surface may serve again |
-| Kill | Notes archive and helper guards settle before PTY/browser teardown |
+| Kill | Helper guard settles before PTY/browser teardown |
 
 **Must show the full terminal before serving and after command exit.** A serving Tool shows its browser, and Terminal Context reveals the same primary terminal (`docs/specs/terminal-context.md` → Tool context). Keep the browser mounted behind context, and keep the hidden terminal sized with `visibility` and `inert`, never `display: none`. Pending approval mounts neither capability.
 
 **Must hide Tools in inactive Workspaces and minimized leaves without unmounting.**
 
-Notepad follows `docs/specs/notepad.md` → Notepad UI. Tool context follows `docs/specs/terminal-context.md` → Tool context.
+Tool context follows `docs/specs/terminal-context.md` → Tool context.
 
 Source of truth: `TerminalPane` in `lib/src/components/TerminalPane.tsx`; `focusSession` in `lib/src/lib/terminal-lifecycle.ts`; `ToolPanel` in `lib/src/components/wall/ToolPanel.tsx`; `ToolPaneHeader` in `lib/src/components/wall/ToolPaneHeader.tsx`; `toolLeafMeta` / `shouldParkOnMinimize` in `lib/src/components/wall/lath-wall-engine.ts`; `closeSurface` in `lib/src/components/Wall.tsx`. Tests: `lib/src/components/wall/ToolPanel.test.tsx`, `lib/src/components/Wall.test.tsx`, `lib/src/components/TerminalPane.test.tsx`, `lib/src/lib/terminal-registry.alert.test.ts`.
 
@@ -194,7 +194,7 @@ Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` 
 **Must answer `takeover` before waiting for the calling shell's prompt**, then transform and type the command. The answer promises placement, not successful command startup.
 
 - **Must leave the caller unchanged on prompt timeout or cancellation**, and recheck transfer/closing state, pane membership, CWD, kind, and helper presence after the wait. A helper opened during the handshake prevents transformation. **Must complete an accepted takeover after switching Workspaces** without changing the active Workspace. (rationale)
-- **Must change components and params in one metadata commit**, retaining the Session id, Surface ref, scrollback, notes, source pins, and any user rename.
+- **Must change components and params in one metadata commit**, retaining the Session id, Surface ref, scrollback and any user rename.
 - **Must clear previous OSC 367 hints before typing the new command.**
 - **Must retain the spawn lock until the typed command is observed running or newly completed in its requested CWD**, or the wait ends. (rationale)
 - **Must rerun a keyed match in the caller through the same answer/prompt handshake**, reporting `adopted`, when its line is standalone and integrated. Never interrupt the waiting `dor` process. Placement flags do not relocate an existing match; run in its current directory.
@@ -243,7 +243,7 @@ The Tool-specific local boundaries are `docs/specs/security-local.md` → Dor To
 
 ## Persistence and hosts
 
-**Must persist the command and stable Tool metadata with `surfaceType: 'tool'`**, retaining the ordinary CWD field. Never persist a derived URL, browser session binding, conflict, or pending approval as runnable Tool state. Live notes follow `docs/specs/notepad.md` → Live resume.
+**Must persist the command and stable Tool metadata with `surfaceType: 'tool'`**, retaining the ordinary CWD field. Never persist a derived URL, browser session binding, conflict, or pending approval as runnable Tool state.
 
 **Must retain resolved browser viewport settings with Tool metadata**, including cold restore and Workspace transfer; sizing behavior belongs to `docs/specs/dor-browser.md` → Viewport presets.
 

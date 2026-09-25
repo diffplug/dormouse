@@ -1,7 +1,6 @@
 import { useContext, useLayoutEffect, useState, useEffect, useSyncExternalStore, type CSSProperties } from 'react';
 import {
   DEFAULT_MOUSE_SELECTION_STATE,
-  flashCopy,
   getMouseSelectionSnapshot,
   getRenderTick,
   setSelection,
@@ -11,8 +10,6 @@ import {
 } from '../lib/mouse-selection';
 import { copySelection } from '../lib/copy-selection';
 import { CheckIcon } from '@phosphor-icons/react';
-import { hasNotepadArchive } from '../lib/notepad/archive-service';
-import { addSelectionToNotepad, isNotepadChordBound } from '../lib/notepad/capture';
 import { IS_MAC } from '../lib/platform';
 import { getTerminalOverlayDims } from '../lib/terminal-registry';
 import { PopupButtonRow, popupButton, Shortcut } from './design';
@@ -30,7 +27,7 @@ interface Props {
 }
 
 // The left clamp has to know how wide the popup will be before it exists, and
-// the row is three variable-length labels wide (or two, with no notepad). Mono
+// the row is two variable-length labels wide. Mono
 // `text-sm` is 12px with a ~0.6em advance; each button adds `px-1.5` either
 // side and the row itself a 1px border either side.
 const CHAR_PX = 7.2;
@@ -43,8 +40,7 @@ function estimatePopupWidth(labels: readonly string[]): number {
 
 /**
  * Popup shown after a selection is finalized (mouse-up). Offers Copy Raw,
- * Copy Rewrapped, and — where the host has a notepad — Add to notepad.
- * Dismissed on Esc, click-outside, or a successful copy or capture.
+ * Copy Rewrapped. Dismissed on Esc, click-outside, or a successful copy.
  */
 export function SelectionPopup({ terminalId }: Props) {
   const touchUi = useContext(TouchUiContext);
@@ -62,13 +58,10 @@ export function SelectionPopup({ terminalId }: Props) {
 
   const [anchor, setAnchor] = useState<Anchor | null>(null);
 
-  const showNotepad = hasNotepadArchive();
-  // The touch UI has no keyboard, and the website demo's browser has already
-  // claimed the chord, so both keep the button and drop the label.
+  // The touch UI has no keyboard.
   const showShortcuts = !touchUi;
   const copyShortcut = IS_MAC ? 'Cmd+C' : 'Ctrl+C';
   const rewrapShortcut = IS_MAC ? 'Cmd+Shift+C' : 'Ctrl+Shift+C';
-  const notepadShortcut = isNotepadChordBound() ? (IS_MAC ? 'Cmd+N' : 'Ctrl+N') : null;
 
   const label = (text: string, shortcut: string | null) =>
     showShortcuts && shortcut ? `[${shortcut}] ${text}` : text;
@@ -85,7 +78,6 @@ export function SelectionPopup({ terminalId }: Props) {
     const popupWidth = estimatePopupWidth([
       label('Copy Raw', copyShortcut),
       label('Copy Rewrapped', rewrapShortcut),
-      ...(showNotepad ? [label('Add to notepad', notepadShortcut)] : []),
     ]);
     // Use the measured cell grid so the anchor aligns with the border
     // outline (the overlay pulls from the same dims).
@@ -129,7 +121,7 @@ export function SelectionPopup({ terminalId }: Props) {
     setAnchor((prev) => (prev && prev.left === next.left && prev.top === next.top && prev.bottom === next.bottom)
       ? prev
       : next);
-  }, [terminalId, shouldRender, selection, touchUi, renderTick, showNotepad, showShortcuts, copyShortcut, rewrapShortcut, notepadShortcut]);
+  }, [terminalId, shouldRender, selection, touchUi, renderTick, showShortcuts, copyShortcut, rewrapShortcut]);
 
   useEffect(() => {
     if (!shouldRender) return;
@@ -169,12 +161,6 @@ export function SelectionPopup({ terminalId }: Props) {
   };
 
   const onCopy = (rewrapped: boolean) => copySelection(terminalId, rewrapped);
-
-  // The flash is the whole confirmation: it clears the selection when it ends,
-  // which dismisses the popup without ever showing the notepad.
-  const onAddToNotepad = () => {
-    if (addSelectionToNotepad(terminalId)) flashCopy(terminalId, 'notepad');
-  };
 
   const flashed = (kind: CopyFlashKind) => state.copyFlash === kind;
   const buttonClass = (kind: CopyFlashKind) => popupButton({ flashed: flashed(kind) });
@@ -226,16 +212,6 @@ export function SelectionPopup({ terminalId }: Props) {
         {leadingIndicator('rewrapped', rewrapShortcut)}
         Copy Rewrapped
       </button>
-      {showNotepad && (
-        <button
-          type="button"
-          className={buttonClass('notepad')}
-          onClick={onAddToNotepad}
-        >
-          {leadingIndicator('notepad', notepadShortcut)}
-          Add to notepad
-        </button>
-      )}
     </PopupButtonRow>
   );
 }

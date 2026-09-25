@@ -23,8 +23,6 @@
 
 Source of truth: `openHelper` / `helperHasWork` / `disposeHelper` / `closeHelperParent` in `lib/src/lib/helper-terminal.ts`; `markSessionTouched` / `parkElement` in `lib/src/lib/terminal-lifecycle.ts`; `HELPER_STATUS` — the state, its status line, and whether it offers Reset — in `lib/src/components/wall/TerminalContextView.tsx`. Tests: `lib/src/lib/helper-terminal.test.ts`.
 
-Notepad sharing and pin restrictions follow `docs/specs/notepad.md` → "Helper terminals".
-
 ## Promotion and source closure
 
 **Must promote the actual Session into a regular split beside its source**, preserving the PTY, xterm, scrollback, directory, partial input, and identity. Cancel pending autorun, close context, assign the public Surface ref, and focus the promoted terminal. Failed placement restores auxiliary host ownership. The source's next opening creates a new helper.
@@ -61,15 +59,13 @@ Source of truth: `TerminalContextView` in `lib/src/components/wall/TerminalConte
 
 ## Tool context
 
-**Must show a Tool's primary Session in Terminal Context instead of creating an auxiliary helper.** Reuse the title, directory, port, alert, and notepad presentation, showing Tool command status without helper Modify, Reset, or Promote controls. Pending approval cannot open context.
-
-**Must preflight a note source pin before opening Tool context, then mount and refit context before resolving its displayed selection.** Failed refit resolution follows `docs/specs/notepad.md` → Source links.
+**Must show a Tool's primary Session in Terminal Context instead of creating an auxiliary helper.** Reuse the title, directory, port, and alert presentation, showing Tool command status without helper Modify, Reset, or Promote controls. Pending approval cannot open context.
 
 **Must focus the Tool terminal instance directly**, bypassing its browser Surface focus handle.
 
 **Must mount only one terminal view for the Tool at a time**, moving its retained xterm between the full pane and context without disposing the Session. Context keystrokes, including terminal clipboard chords, belong to that terminal and never reach the browser underneath. Closing context preserves both processes and browser state.
 
-Source of truth: `revealNoteSource` in `lib/src/lib/notepad/pin.ts`; the `dormouse:reveal-note-source` listener in `lib/src/components/Wall.tsx`; `TerminalContext` in `lib/src/components/wall/TerminalContext.tsx`; `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`; `ToolPanel` in `lib/src/components/wall/ToolPanel.tsx`. Tests: `lib/src/components/wall/TerminalContext.test.tsx`, `lib/src/components/Wall.test.tsx`.
+Source of truth: `TerminalContext` in `lib/src/components/wall/TerminalContext.tsx`; `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`; `ToolPanel` in `lib/src/components/wall/ToolPanel.tsx`. Tests: `lib/src/components/wall/TerminalContext.test.tsx`, `lib/src/components/Wall.test.tsx`.
 
 ## Future
 

@@ -1,15 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
-import { notepadSurfaceIds, removeSurface } from "dormouse-lib/lib/notepad/notepad-store";
 import {
   beginQuitProgress,
   dismissQuitConfirm,
-  openQuitArchiveFailure,
   type QuitConfirmIntent,
 } from "./quit-confirm-store";
-import { archiveNotesBeforeTeardown } from "./teardown-archive";
 
 /**
- * The shape a quit and a per-window close share: **ack, ask, archive, act**.
+ * The shape a quit and a per-window close share: **ack, ask, act**.
  *
  * Both are the host preventing an ending, this window deciding whether to take
  * it, and the host being called back. What differs is only the last step — a
@@ -64,26 +61,9 @@ interface TeardownClaim {
 }
 let holder: TeardownClaim | null = null;
 
-/**
- * A quit that voted on behalf of a committed holder, kept until that holder is
- * done with the window.
- *
- * **A committed flow can still retreat**: `archive-failed` puts the notes it
- * could not store to the user, and a decline there cancels the close and leaves
- * the window standing — with a quit already voted for it and its own question
- * never asked. Re-driving the quit intent is what puts that question back.
- *
- * `by` is the quit flow that registered it, `against` the holder it waits on.
- * A quit cancelled elsewhere resets `by` and must forget the entry — Rust has
- * abandoned that quit, and re-driving it later would open a dialog whose vote
- * goes into an idle machine.
- */
-let deferredQuit: { by: TeardownClaim; against: TeardownClaim; rerun: () => void } | null = null;
-
 /** @internal Forget the window-wide claim (tests). */
 export function _resetTeardownArbiterForTesting(): void {
   holder = null;
-  deferredQuit = null;
 }
 
 export function createTeardownFlow(options: {
@@ -102,13 +82,12 @@ export function createTeardownFlow(options: {
   proceed: () => void | Promise<void>;
 }): TeardownFlow {
   // One flow at a time in this window: repeated triggers are ignored while a
-  // confirmation is outstanding, the archive gate is asking about notes it could
-  // not store, or this window has committed.
-  let phase: "idle" | "confirming" | "archive-failed" | "committed" = "idle";
+  // confirmation is outstanding or this window has committed.
+  let phase: "idle" | "confirming" | "committed" = "idle";
 
   const claim: TeardownClaim = {
     kind: options.kind,
-    undecided: () => phase === "confirming" || phase === "archive-failed",
+    undecided: () => phase === "confirming",
     abandon: () => {
       // The dialog is this flow's — the arbiter allows no other — and it is
       // dropped rather than cancelled through the store, because `cancel` below
@@ -118,7 +97,7 @@ export function createTeardownFlow(options: {
     },
   };
 
-  function enter(next: "confirming" | "archive-failed" | "committed"): void {
+  function enter(next: "confirming" | "committed"): void {
     phase = next;
     holder = claim;
   }
@@ -127,44 +106,11 @@ export function createTeardownFlow(options: {
     phase = "idle";
     if (holder === claim) holder = null;
     void invoke(options.cancelCommand).catch(() => {});
-    // This window is not ending after all, and a quit deferred to it never got
-    // to ask its own question. Ask it now.
-    if (deferredQuit?.against === claim) {
-      const { rerun } = deferredQuit;
-      deferredQuit = null;
-      rerun();
-    }
   };
 
-  async function archiveThenProceed(intent: QuitConfirmIntent): Promise<void> {
-    // Committed from here: the archive is an await, so without this a second
-    // trigger arriving mid-archive would start a parallel flow.
+  async function proceed(intent: QuitConfirmIntent): Promise<void> {
     enter("committed");
     beginQuitProgress(intent);
-    try {
-      await archiveNotesBeforeTeardown();
-    } catch (err) {
-      // The host's wait past the ack is unbounded precisely because it waits on
-      // a human, and cancelling here would retire the watchdog that a later
-      // "anyway" still needs. Hold in `archive-failed`, which dedupes a repeat
-      // trigger exactly as a pending confirmation does.
-      enter("archive-failed");
-      openQuitArchiveFailure(
-        err instanceof Error ? err.message : String(err),
-        {
-          confirm: () => {
-            // The user accepts losing these notes: forget them and take the
-            // teardown that now has nothing left to archive.
-            for (const id of notepadSurfaceIds()) removeSurface(id);
-            enter("committed");
-            void options.proceed();
-          },
-          cancel,
-        },
-        intent,
-      );
-      return;
-    }
     await options.proceed();
   }
 
@@ -185,35 +131,26 @@ export function createTeardownFlow(options: {
           // The holder has committed: this window is being torn down whatever
           // the quit decides, so the quit takes it as a yes rather than saying
           // nothing — a window that never votes holds the whole app in `Voting`
-          // with no dialog for the user to answer. Kept, in case that holder
-          // retreats and is cancelled (`deferredQuit`).
-          deferredQuit = { by: claim, against: holder, rerun: () => flow.request(intent) };
+          // with no dialog for the user to answer.
           void options.proceed();
           return;
         }
         holder.abandon();
-        // Abandoning a holder that retreated re-drives the quit deferred to it —
-        // re-entering this `request` from inside the holder's `cancel`, with
-        // the intent already gated by the time control returns here. Gating it
-        // again would open a second dialog into the store's refusal, whose
-        // `cancel` aborts the whole quit under the dialog the rerun opened.
-        if (phase !== "idle") return;
       }
 
       // The registry is per webview, so this is already this window's own work.
       const gate = options.gate();
       if (options.mustConfirm(intent) && gate) {
         enter("confirming");
-        gate({ confirm: () => void archiveThenProceed(intent), cancel }, intent);
+        gate({ confirm: () => void proceed(intent), cancel }, intent);
         return;
       }
-      void archiveThenProceed(intent);
+      void proceed(intent);
     },
     cancel,
     reset() {
       phase = "idle";
       if (holder === claim) holder = null;
-      if (deferredQuit?.by === claim || deferredQuit?.against === claim) deferredQuit = null;
     },
   };
   return flow;

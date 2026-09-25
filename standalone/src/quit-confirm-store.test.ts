@@ -7,9 +7,7 @@ import {
   getQuitConfirmChar,
   getQuitConfirmWorkspaceNames,
   confirmQuit,
-  getQuitArchiveError,
   getQuitConfirmPhase,
-  openQuitArchiveFailure,
   openQuitConfirm,
   subscribeQuitConfirm,
   _resetQuitConfirmForTesting,
@@ -72,36 +70,6 @@ describe("quit-confirm store", () => {
     expect(getQuitConfirmPhase()).toBe("quitting");
   });
 
-  // The archive gate's phase (docs/specs/notepad.md → "Standalone quit").
-  it("takes the archive-failed phase over a decision already made", () => {
-    const first = makeCtx();
-    openQuitConfirm(first);
-    confirmQuit(); // the user said quit; the gate then refused
-
-    const retry = makeCtx();
-    openQuitArchiveFailure("disk is full", retry);
-
-    expect(getQuitConfirmPhase()).toBe("archive-failed");
-    expect(getQuitArchiveError()).toBe("disk is full");
-
-    // Quit anyway reaches the gate's context, not the spent confirmation one.
-    confirmQuit();
-    expect(retry.confirm).toHaveBeenCalledTimes(1);
-    expect(first.confirm).toHaveBeenCalledTimes(1);
-    expect(getQuitConfirmPhase()).toBe("quitting");
-    expect(getQuitArchiveError()).toBeNull();
-  });
-
-  it("opens the archive-failed phase from no dialog at all (an all-idle quit)", () => {
-    const ctx = makeCtx();
-    openQuitArchiveFailure("disk is full", ctx);
-
-    cancelQuit();
-    expect(ctx.cancel).toHaveBeenCalledTimes(1);
-    expect(getQuitConfirmPhase()).toBeNull();
-    expect(getQuitArchiveError()).toBeNull();
-  });
-
   it("ignores a redundant open while a dialog is already up", () => {
     const first = makeCtx();
     const second = makeCtx();
@@ -143,31 +111,13 @@ describe("quit-confirm store", () => {
     expect(ctx.cancel).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps a committed or archive-failed decision through membership changes', () => {
-    const ctx = makeCtx();
-    openQuitConfirm(ctx);
-    confirmQuit();
-    createWorkspace({ id: 'second' });
-    expect(ctx.cancel).not.toHaveBeenCalled();
-    const archiveCtx = makeCtx();
-    openQuitArchiveFailure('disk full', archiveCtx);
-    closeWorkspace('second');
-    expect(getQuitConfirmPhase()).toBe('archive-failed');
-    expect(archiveCtx.cancel).not.toHaveBeenCalled();
-    expect(chromeKeyboardHeld()).toBe(true);
-    cancelQuit();
-    expect(archiveCtx.cancel).toHaveBeenCalledOnce();
-    expect(chromeKeyboardHeld()).toBe(false);
-  });
-
-  it.each(['confirm', 'archive'])('clears competing chrome when opening %s without dropping transfer guards', (kind) => {
+  it('clears competing chrome without dropping transfer guards', () => {
     setPendingWorkspaceClose({ id: 'workspace-1', char: 'a' });
     setPendingWorkspaceMove({ id: 'workspace-1', char: 'b', iframeCount: 1, proceed: vi.fn() });
     setRenamingWorkspace('workspace-1');
     setWorkspaceMoveError({ id: 'workspace-1', reason: 'Wait for the Tool browser to connect' });
     setWorkspaceTransferPending('workspace-1', true);
-    if (kind === 'confirm') openQuitConfirm(makeCtx());
-    else openQuitArchiveFailure('disk full', makeCtx());
+    openQuitConfirm(makeCtx());
     expect(getWorkspaceUiSnapshot()).toEqual({ pendingClose: null, pendingMove: null, renamingId: null, moveError: null });
     expect(isWorkspaceTransferPending('workspace-1')).toBe(true);
     expect(chromeKeyboardHeld()).toBe(true);

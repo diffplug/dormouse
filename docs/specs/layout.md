@@ -52,7 +52,7 @@ A 30px header doubling as a drag handle: **a `pointerdown` past a 5px threshold 
 
 **Must use browser chrome for a serving Tool, with a Terminal Context disclosure for its serving terminal.** Tool composition belongs to `docs/specs/dor-tool.md` → Lifecycle.
 
-Elements left to right: derived label; TODO pill (compact+); flexible gap; mouse-reporting override icon (compact+, only while the inside program requests mouse reporting); notepad icon (`docs/specs/notepad.md` → "Notepad UI"); split left/right, split top/bottom (full only); then the pane-action group: zoom/unzoom, minimize, kill (hover turns error-red).
+Elements left to right: derived label; TODO pill (compact+); flexible gap; mouse-reporting override icon (compact+, only while the inside program requests mouse reporting); split left/right, split top/bottom (full only); then the pane-action group: zoom/unzoom, minimize, kill (hover turns error-red).
 
 The label is the `DerivedHeader` from `deriveHeader(...)`; `docs/specs/terminal-state.md` owns the priority chain and disambiguator. Layout renders it: primary truncates with ellipsis, secondary muted beside it, a failed last command appends an error-colored glyph. Click renames/pins; right-click — or `>` in command mode — opens the header context menu.
 
@@ -89,8 +89,6 @@ Popups share the zoomed pane’s app-background halo.
 | Helper | Remaining space; one-line status, Modify/Reset and Promote; hide its name below 48rem container width |
 
 **Must focus context controls on opening.** Explicit entry into helper xterm gives it terminal keys; Escape there belongs to its program. Escape from controls closes the innermost disclosure, then context. Terminal clipboard routing uses the focused helper rather than the selected source. Actions use subdued link color and shared compact `OnOffSwitch` controls.
-
-**Must place the shared notepad button beside Promote in the Helper status row**, opening the parent's panel over the context; `docs/specs/notepad.md` → "Helper terminals" owns its behavior.
 
 **Must tint the copyable Surface ref as an action and confirm each successful context copy in its button** with a checkmark and “Copied” for 1.4 seconds, preserving button width and keeping the context open. Failed copies show the action error without success feedback.
 
@@ -137,8 +135,7 @@ Both layers wear the leaf's own rounding (header radius on top, terminal radius 
 
 - **Full** (>293px): everything.
 - **Compact** (>173px): split hidden.
-- **Minimal** (>116px): also hides the TODO pill and the mouse-override icon. **The notepad icon survives this tier only while the Surface has notes** (`docs/specs/notepad.md` → "Notepad UI"). The label truncates with ellipsis. **Between 117 and 128px it additionally needs the Surface to be clean**, the unsaved-change dot costing the same 12px at the header root.
-- **Bare** (>98px): the notepad goes unconditionally — it is the last element that could push the group off the right edge.
+- **Minimal** (>98px): also hides the TODO pill and the mouse-override icon. The label truncates with ellipsis.
 - **Tiny** (≤98px): minimize and kill go too.
 
 A browser header, including a Tool's (Terminal Context sits outside the measured width), collapses by border-box width:
@@ -150,7 +147,7 @@ A browser header, including a Tool's (Terminal Context sits outside the measured
 | 180px | Chrome moves into a viewport-clamped popover behind one trigger. |
 | 94px (102px with an unsaved-change dot) | Minimize and kill join the popover. |
 
-**Must reclamp the popover on content resize and keep it keyboard reachable** (focus enters on open, Tab stays inside, Escape returns it to the trigger) **and dismiss it on resize, when a dirty report moves minimize/kill controls (restoring trigger focus), or when its Surface is hidden (without restoring focus)**; `lib/src/components/wall/use-dismiss-overlay.ts` handles other dismissal, and controls dismiss only after acting. With notes, the trigger shows a filled notepad glyph and count; keys and connection labels truncate before controls.
+**Must reclamp the popover on content resize and keep it keyboard reachable** (focus enters on open, Tab stays inside, Escape returns it to the trigger) **and dismiss it on resize, when a dirty report moves minimize/kill controls (restoring trigger focus), or when its Surface is hidden (without restoring focus)**; `lib/src/components/wall/use-dismiss-overlay.ts` handles other dismissal, and controls dismiss only after acting. Keys and connection labels truncate before controls.
 
 Source of truth: `SurfacePaneHeader` in `lib/src/components/wall/SurfacePaneHeader.tsx`; `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHeader.tsx`; `PaneActionGroup` in `lib/src/components/wall/PaneActionButtons.tsx`; `useHeaderTier` in `lib/src/components/wall/use-header-tier.ts`; `lib/src/components/wall/SurfacePaneHeader.test.tsx`; `lib/src/components/wall/TerminalPaneHeader.test.tsx`; `lib/src/stories/BrowserChromeHeader.stories.tsx`.
 
@@ -168,7 +165,6 @@ A minimized session becomes a **door**, showing its label plus the alert/TODO/sp
 - **m** / **d** (command mode): restore into a pane but stay in command mode — the inverse of `m`/`d` on a pane, making them toggles.
 - **x** / **k** (command mode): restore into a pane, then show the kill confirmation (an untouched Surface is killed outright — [Kill confirmation](#kill-confirmation)).
 - **Arrow keys** navigate to and between doors ([Spatial navigation](#spatial-navigation)).
-- **A Door holding notes carries a second button**, the notepad, which neither reattaches nor drags (`docs/specs/notepad.md` → "Notepad UI").
 
 **A reattach that stays in command mode defers its follow-up** (focus, kill, replace) to `requestAnimationFrame` and skips it if the pane vanished in between.
 
@@ -234,7 +230,7 @@ Each Wall renders one Workspace's Content and Baseboard (doors). Standalone moun
 - **Must mount every Workspace's Wall in one grid cell**, inactive Walls `inert`, then `visibility:hidden` after their fade and never `display:none` (rationale).
 - **Must preserve mounted leaves across switches**: no re-seed, no re-parent, no leaf unmount, and no `resumeTerminal` / `restoreTerminal`; the only mount work is the terminal reattach below, which replays nothing, so I8 holds by construction (`lib/src/components/WorkspaceWindow.test.tsx`).
 - **A hidden Wall's terminals hold no element and no GL context**: completion of the outgoing fade runs `unmountElement` on every terminal pane, exactly as minimize does ([Renderer](#renderer)); activation runs `mountElement` and fits through the [Animations](#animations) gate, so an unchanged grid sends no PTY resize (`lib/src/components/TerminalPane.test.tsx`). Browser Surfaces keep their live documents (rationale).
-- **A hidden Wall consumes no window input**: every listener that dispatches, forwards, or `preventDefault`s window input is gated on `active`, keyboard and custom events alike, so a hidden Wall neither mounts chrome nor refits a detached element in answer to one (`leaves a reveal for a hidden Workspace unanswered` in `lib/src/components/Wall.test.tsx`). **Only the active Wall renders the modal hosts and the overlays that trap keys** — the kill confirmation, the refused-archive prompt, a terminal's selection popup (rationale): a staged prompt survives the switch and is answered only where the user can see it.
+- **A hidden Wall consumes no window input**: every listener that dispatches, forwards, or `preventDefault`s window input is gated on `active`, keyboard and custom events alike, so a hidden Wall neither mounts chrome nor refits a detached element in answer to one. **Only the active Wall renders the modal hosts and the overlays that trap keys** — the kill confirmation and a terminal's selection popup (rationale): a staged prompt survives the switch and is answered only where the user can see it.
 - **Exactly one Wall answers a `dor` request**, chosen by `docs/specs/dor-cli.md` → "Handle Model". Every Wall registers a handle, a bare one under `DEFAULT_WORKSPACE_ID`, so the router always finds one.
 - **Never unmount a Wall before its Surfaces are disposed** — `closeAll` waits for the kill fade to commit, bounded by the engine's exit duration, since unmounting mid-fade would leave `Orphaned` Registry entries (`docs/specs/glossary.md` → "Invariants" I4). **The deadline refuses rather than reporting clean**, and the walk re-reads membership until nothing is left, so a Surface born behind it is closed too.
 - **A closing Workspace takes no new Surfaces**: while `closeAll` walks, this Wall answers every Surface-creating `dor` verb with an error (`docs/specs/dor-cli.md` → "Handle Model"), **rechecked after any host round trip the verb makes before creating** (`CREATING_CONTROL_METHODS` in `lib/src/components/wall/use-dor-control.ts`; `lib/src/components/WorkspaceWindow.test.tsx`).
@@ -243,7 +239,7 @@ Each Wall renders one Workspace's Content and Baseboard (doors). Standalone moun
 
 **A Workspace may leave the Window and arrive in another one** — torn out into
 its own window, or dropped onto an existing one — carrying its Surfaces, its
-Sessions and its notes with it, and killing nothing on the way
+Sessions with it, and killing nothing on the way
 (`docs/specs/standalone.md` → Transfer). Leaving is not a close and arriving is
 not a create: a Workspace that arrives mounts from the record it brought.
 **Must confirm before a move that would destroy an iframe's page state**: a
@@ -255,9 +251,8 @@ nothing (`iframeSurfaceRefs` on the Wall handle; `standalone/src/workspace-drag.
 **Must show drag refusals over Window content in a dialog** until dismissal, retry, or Workspace departure. Source of truth: `onDropOnOtherWindow` in `standalone/src/workspace-drag.ts`; `lib/src/components/WorkspaceStrip.test.tsx`.
 
 - **Create** adds an auto-named Workspace, `Workspace N` until its terminals name it ([Workspace names](#workspace-names)), makes it active, and gives its Wall no restored record, so Lath's fresh branch spawns one default-shell pane.
-- **Close** confirms first when the Workspace holds touched Surfaces or running work, with a kill-confirm letter over the Window's content area, then routes every member Surface through the closure coordinator. **Must atomically replace the last closed Workspace with a fresh one and select its tab**, after disposing the old Surfaces (`lib/src/components/WorkspaceWindow.test.tsx`). **Must serialize closes across the Window.**
-- **A refused close reveals its Workspace only in `prompt` mode**, activating it so the prompt behind the refusal is on screen rather than inside a hidden Wall; a `silent` close (`dor workspace close`) has no prompt to show and leaves the user where they were (`docs/specs/notepad.md` → "Closure").
-- **A Workspace whose Wall has not registered is refused** (`workspace '<ref>' is still mounting`, one wording for every caller), never closed past — the Wall walks the member Surfaces, so dropping it would leave its Sessions running unheld (`docs/specs/glossary.md` → "Invariants" I4). **A gesture waits out the registration gap first**, as `dor workspace close` does, so `×` right after a create closes rather than silently doing nothing.
+- **Close** confirms first when the Workspace holds touched Surfaces or running work, with a kill-confirm letter over the Window's content area, then closes every member Surface. **Must atomically replace the last closed Workspace with a fresh one and select its tab**, after disposing the old Surfaces (`lib/src/components/WorkspaceWindow.test.tsx`). **Must serialize closes across the Window.**
+- - **A Workspace whose Wall has not registered is refused** (`workspace '<ref>' is still mounting`, one wording for every caller), never closed past — the Wall walks the member Surfaces, so dropping it would leave its Sessions running unheld (`docs/specs/glossary.md` → "Invariants" I4). **A gesture waits out the registration gap first**, as `dor workspace close` does, so `×` right after a create closes rather than silently doing nothing.
 - **Rename** edits the Workspace `name` only — no Surface title, and not the per-pane inline rename — and pins it ([Workspace names](#workspace-names)).
 - **Reorder** moves a tab in the strip and renumbers `workspace:<n>` refs with it only where they are positional (`docs/specs/dor-cli.md` → "Handle Model"); **a press inside the open rename editor never starts a reorder**.
 - **Must drop the closing Workspace’s rename editor and pending confirmation, and no other’s** (`releases the rename lease when the tab being renamed is middle-clicked closed` in `lib/src/components/WorkspaceStrip.test.tsx`; `preserves another Workspace’s rename and close confirmation when closing a sibling` in `lib/src/components/wall/workspace-lifecycle.test.ts`).
@@ -343,8 +338,6 @@ The source cwd is read from `getInheritableCwd(sourceId)`. **Never inherit a rem
 **Confirmation must be staged in a ref synchronously, not only in React state** — a second confirm keydown arriving before React flushes would otherwise pass the guard and kill twice (`lath.isDying` is the second line of defense).
 
 **Must return keyboard selection to the next surviving Door after killing a revealed Door**, falling back to previous Doors, then a pane only if no Doors remain. Apply this to confirmed and untouched kills only while the revealed pane is still selected in command mode; cancellation, refusal, or navigating away discards the return target. Pinned by `returns keyboard focus from deleted Door %s to %s (confirm: %s)` in `lib/src/components/Wall.test.tsx`.
-
-**Every kill routes through the notepad close coordinator**, confirmed and untouched-fast-path alike, which archives the Surface's notes before teardown and can refuse the close (`docs/specs/notepad.md` → "Closure"; that spec also names who may still tear a Surface down immediately).
 
 **Untouched plain terminal sessions skip this confirmation; Tools still require it.** A newly spawned shell starts `untouched: true`; the first user-originated PTY input flips it to false. Counted: printable keys, Enter, control keys, keyboard CSI such as arrows/history, paste, file-drop path insertion, forwarded mouse reports. Not counted: replay-shaped terminal reports and mouse reports removed by an override. Killing an untouched pane runs the normal kill animation/dispose path immediately; killing an untouched door first reattaches it only far enough to reuse that removal path, then kills it with no overlay.
 
@@ -470,7 +463,7 @@ Source of truth: `lib/src/components/wall/IllegalRenameWarning.tsx`, `lib/src/co
 | **Swap** | Registry entries follow the traded leaf ids ([Spatial navigation](#spatial-navigation)). |
 
 - **Untouched**: new `getOrCreateTerminal` sessions start untouched; `isUntouched(id)` exposes the flag, user-originated PTY input clears it, and resume/restore seed the persisted one. **Missing legacy snapshot data defaults to touched (`false`)**, keeping close confirmation conservative.
-- **Shell selection replacement**: the standalone Settings dialog's Shell row and the VS Code shell picker send `dormouse:new-terminal` with `replaceUntouched` when the selected shell type changes. **A shell is identified by executable path plus ordered arguments**, so WSL distributions and Windows Developer shells sharing an executable stay distinct. **`Wall` always mints a new session id and a fresh `surface:N` ref.** An untouched selected plain terminal pane or door has the new terminal take over its leaf via a Lath `replace` op (an atomic identity swap; doors reattach through the normal restore path first), the old session disposed and its ref retired; a touched selection, or none, spawns a new pane beside it. Announced spawns show a transient pane-anchored notice (`Switched to zsh`, `Opened bash`). **A replacement migrates the Surface's notepad to the new id rather than archiving it** (`docs/specs/notepad.md` → "Closure").
+- **Shell selection replacement**: the standalone Settings dialog's Shell row and the VS Code shell picker send `dormouse:new-terminal` with `replaceUntouched` when the selected shell type changes. **A shell is identified by executable path plus ordered arguments**, so WSL distributions and Windows Developer shells sharing an executable stay distinct. **`Wall` always mints a new session id and a fresh `surface:N` ref.** An untouched selected plain terminal pane or door has the new terminal take over its leaf via a Lath `replace` op (an atomic identity swap; doors reattach through the normal restore path first), the old session disposed and its ref retired; a touched selection, or none, spawns a new pane beside it. Announced spawns show a transient pane-anchored notice (`Switched to zsh`, `Opened bash`).
 - **Replay-time terminal reports must be dropped; user input must not be** — during **resume** replay the registry drops the replies xterm.js emits to queries embedded in buffered output, before they reach the retained PTY (`docs/specs/terminal-escapes.md` → "Report filtering on the input side").
 
 Source of truth: `lib/src/lib/terminal-store.ts` (registry maps and pending shell opts, imported directly, including by `lib/src/remote/burrow/`), `lib/src/lib/terminal-lifecycle.ts` (the ops), `lib/src/lib/terminal-registry.ts` (the facade).
@@ -568,7 +561,7 @@ A store commit that empties the tree (last pane killed or minimized) triggers th
 > Numbered for cross-spec reference; the numbers are stable, so append rather than renumber and leave a retired one retired.
 
 - **#2 — A focused iframe surface is not a window blur**: it blurs the window while `document.hasFocus()` stays true, so **presence ends only on a *real* blur** (`docs/specs/alert.md` → Engagement) — otherwise focusing an embed would end it across the window. Source of truth: `subscribeWindowFocus` in `lib/src/lib/window-focus.ts`.
-- **#6 — Focus-neutral surface creation (`dor ensure` / `dor iframe` / `dor agent-browser`)**: unlike `dor split`, these open in the background without moving focus off the caller (`docs/specs/dor-cli.md`, `docs/specs/dor-browser.md`). An add never re-parents the caller's subtree or steals activation, and the create does not call `selectPane` (`settleAddSelection` returns false for a focus-neutral, non-selection-replacing add). **The one exception**: `dor iframe` / `dor agent-browser` replacing the pane the user is *currently selected on* moves selection to the replacement, else it would dangle on the removed leaf; any other pane, or a door selection, is left untouched. Cleanup of a `dor ensure` temporary Surface follows `docs/specs/notepad.md` → "Closure"; any completed teardown preserves the caller's live selection.
+- **#6 — Focus-neutral surface creation (`dor ensure` / `dor iframe` / `dor agent-browser`)**: unlike `dor split`, these open in the background without moving focus off the caller (`docs/specs/dor-cli.md`, `docs/specs/dor-browser.md`). An add never re-parents the caller's subtree or steals activation, and the create does not call `selectPane` (`settleAddSelection` returns false for a focus-neutral, non-selection-replacing add). **The one exception**: `dor iframe` / `dor agent-browser` replacing the pane the user is *currently selected on* moves selection to the replacement, else it would dangle on the removed leaf; any other pane, or a door selection, is left untouched. Any completed teardown preserves the caller's live selection.
 
 ## Future
 

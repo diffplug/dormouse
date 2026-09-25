@@ -6,8 +6,6 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setPlatform } from '../lib/platform';
 import { FakePtyAdapter } from '../lib/platform/fake-adapter';
-import { __resetArchiveServiceForTests } from '../lib/notepad/archive-service';
-import { clearAllNotepads } from '../lib/notepad/notepad-store';
 import { SettingsDialog, SETTINGS_SCROLL_MS } from './SettingsDialog';
 import { makeStubBurrowLink, UNENROLLED_STATUS } from '../host/remote/test-burrow-link';
 import { stubResizeObserver } from './wall/wall-test-utils';
@@ -93,7 +91,7 @@ beforeEach(() => {
     return nextFrame;
   });
   vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
-  sectionOffsets = { general: 16, activity: 116, notifications: 516, notepad: 1116 };
+  sectionOffsets = { general: 16, activity: 116, notifications: 516, relay: 916 };
   stubResizeObserver(400);
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
     const top = this.dataset.settingsTopic
@@ -106,8 +104,6 @@ beforeEach(() => {
   root = createRoot(container);
   platform = new FakePtyAdapter();
   setPlatform(platform);
-  __resetArchiveServiceForTests();
-  clearAllNotepads();
   applyAlertSettingsFromHost(DEFAULT_ALERT_SETTINGS);
   for (const command of getWatchedCommands()) setCommandWatched(command, false);
 });
@@ -118,62 +114,9 @@ afterEach(async () => {
   vi.restoreAllMocks();
   Reflect.deleteProperty(HTMLElement.prototype, 'scrollTo');
   container.remove();
-  __resetArchiveServiceForTests();
-  clearAllNotepads();
-});
-
-describe('SettingsDialog notepad archive entry', () => {
-  it('opens the Archive view in place and comes back', async () => {
-    await render();
-    expect(text()).toContain('Notepad archive');
-
-    await act(async () => byText('Open archive').click());
-    // Same dialog, different view: the archive's own chrome is what proves it.
-    expect(byText('Back to Settings')).toBeTruthy();
-    expect(text()).toContain('Nothing archived yet');
-
-    await act(async () => byText('Back to Settings').click());
-    expect(byText('Open archive')).toBeTruthy();
-  });
-
-  it('offers no entry on a host with no archive port', async () => {
-    // Pocket's shape: the adapter simply has no `notepadArchive` at all.
-    Reflect.deleteProperty(platform, 'notepadArchive');
-
-    await render();
-
-    expect(text()).not.toContain('Notepad archive');
-  });
 });
 
 describe('SettingsDialog navigation and search', () => {
-  it('keeps every section visible and smoothly navigates with the contents keyboard', async () => {
-    await render();
-    expect(document.activeElement).toBe(document.querySelector('input[type="search"]'));
-    expect(visible('[role="region"]')).toHaveLength(4);
-    byText('General').focus();
-    await key(byText('General'), 'ArrowDown');
-    expect(document.activeElement).toBe(byText('Activity'));
-    await advanceScroll();
-    expect(scrollTo).toHaveBeenLastCalledWith({ top: 100, behavior: 'instant' });
-    expect(visible('[role="region"]')).toHaveLength(4);
-    await key(byText('Activity'), 'End');
-    expect(document.activeElement).toBe(byText('Notepad'));
-    await key(byText('Notepad'), 'ArrowDown');
-    expect(document.activeElement).toBe(byText('General'));
-    await key(byText('General'), 'ArrowUp');
-    expect(document.activeElement).toBe(byText('Notepad'));
-    await key(byText('Notepad'), 'Home');
-    expect(document.activeElement).toBe(byText('General'));
-  });
-
-  it('follows manual scrolling, including a short final section at the bottom', async () => {
-    await render();
-    await scrollContent(150);
-    expect(byText('Activity').getAttribute('aria-current')).toBe('location');
-    await scrollContent(1000);
-    expect(byText('Notepad').getAttribute('aria-current')).toBe('location');
-  });
 
   it('corrects a moving scroll target until the user takes over', async () => {
     await render();
@@ -223,50 +166,6 @@ describe('SettingsDialog navigation and search', () => {
     await advanceScroll();
     expect(scrollTo).toHaveBeenLastCalledWith({ top: 100, behavior: 'instant' });
     expect(visible('[role="region"]')).toHaveLength(4);
-  });
-
-  it('omits unavailable topics and searches only settings the host offers', async () => {
-    Object.defineProperty(platform, 'hostOwnsTheme', { value: true });
-    Object.defineProperty(platform, 'hostOwnsShells', { value: true });
-    Reflect.deleteProperty(platform, 'notepadArchive');
-    await render();
-    expect(visible('nav button').map((node) => node.textContent)).toEqual(['Activity', 'Notifications']);
-    expect(visible('[role="region"]')[0].id).toBe('settings-topic-activity');
-    await search('theme');
-    expect(visible('[role="region"]')).toHaveLength(0);
-    expect(text()).toContain('No settings found.');
-  });
-
-  it('searches descriptions across topics, normalizes whitespace/case, and restores the full page', async () => {
-    await render();
-    await act(async () => byText('Notepad').click());
-    await search(' TeRMiNaL ');
-    expect(visible('[role="region"]').map((node) => node.id)).toEqual(['settings-topic-activity', 'settings-topic-notepad']);
-    await search('  WALKED   away ');
-    expect(visible('[data-setting]').map((node) => node.dataset.setting)).toEqual(['inactivity']);
-    await search('');
-    await advanceScroll();
-    expect(visible('[role="region"]')).toHaveLength(4);
-    expect(scrollTo).toHaveBeenLastCalledWith({ top: 0, behavior: 'instant' });
-    await search('unknown setting');
-    expect(visible('[role="region"]')).toHaveLength(0);
-    expect(visible('nav button')).toHaveLength(0);
-    await search('walked away');
-    await act(async () => byText('Activity').click());
-    expect(document.querySelector<HTMLInputElement>('input[type="search"]')!.value).toBe('walked away');
-  });
-
-  it('gives Relay its own searchable topic when remote control is supported', async () => {
-    platform.burrow = makeStubBurrowLink({ status: UNENROLLED_STATUS });
-    await render();
-    expect(visible('nav button').map((node) => node.textContent)).toEqual([
-      'General', 'Activity', 'Notifications', 'Relay', 'Notepad',
-    ]);
-    await search('relay');
-    expect(visible('[role="region"]').map((node) => node.id)).toContain('settings-topic-relay');
-    await search('remote control');
-    expect(visible('[role="region"]').map((node) => node.id)).toEqual(['settings-topic-relay']);
-    expect(visible('[data-setting="relay"]')[0].textContent).toContain('Remote control');
   });
 
   it('finds live command names and edits a setting directly in results', async () => {

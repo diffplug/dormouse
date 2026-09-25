@@ -17,7 +17,7 @@ import { listenToWindow } from "./window-label";
  * been destroyed yet. Protocol, teardown ordering, and rationale:
  * docs/specs/standalone.md §Quit flow.
  *
- * The ack / confirm / archive half is `createTeardownFlow`, shared with the
+ * The ack / confirm half is `createTeardownFlow`, shared with the
  * per-window close; what is quit-specific is voting, and the teardown below.
  */
 

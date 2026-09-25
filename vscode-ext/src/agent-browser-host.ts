@@ -29,7 +29,7 @@ export const runBrowserRequest = host.request;
 
 // Every provider's cleanup shares one deadline, as in the standalone sidecar's
 // shutdown: the Playwright host first waits out in-flight launches and connects,
-// and `deactivate` joins this ahead of the notepad archive and session flush,
+// and `deactivate` joins this ahead of the session flush,
 // which VS Code's unknown kill budget must still reach.
 const CLOSE_DEADLINE_MS = 1500;
 

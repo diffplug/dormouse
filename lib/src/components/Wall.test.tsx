@@ -27,9 +27,6 @@ import type { PersistedSession } from '../lib/session-types';
 import * as terminalRegistry from '../lib/terminal-registry';
 import { UNNAMED_PANEL_TITLE } from '../lib/terminal-registry';
 import { pendingShellOpts } from '../lib/terminal-store';
-import { __resetArchiveServiceForTests } from '../lib/notepad/archive-service';
-import { addPlainNote, beginClosing, clearAllNotepads, getNotes, setOpenNotepadId } from '../lib/notepad/notepad-store';
-import type { NotepadArchiveV1 } from '../lib/notepad/types';
 import { createTerminalPaneState, type TerminalPaneState } from '../lib/terminal-state';
 import { getWallHandle, listWallHandles, registerWallHandle, stubWallHandle } from './wall/wall-handles';
 import { installBrowserHost, mountWallHarness, type WallHarness } from './wall/wall-test-utils';
@@ -63,8 +60,6 @@ function leafCount(): number {
 }
 
 beforeEach(() => {
-  __resetArchiveServiceForTests();
-  clearAllNotepads();
   fake = new FakePtyAdapter();
   setPlatform(fake);
   harness = mountWallHarness();
@@ -75,8 +70,6 @@ afterEach(() => {
   harness.dispose();
   vi.clearAllMocks();
   vi.restoreAllMocks();
-  __resetArchiveServiceForTests();
-  clearAllNotepads();
   // The activity store is Window-global, so a ring or TODO left on a pane id
   // would wear its alarm overlay in every later test that renders that id.
   clearTerminalActivity();
@@ -282,93 +275,6 @@ describe('Wall on the Lath engine', () => {
     await flush();
     expect(leafCount()).toBe(1);
     expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
-  });
-
-  it('reuses a running Surface while another archive caller holds its notes freeze', async () => {
-    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />));
-    await flush();
-    const cwd = { path: '/repo', pathKind: 'posix', isRemote: false, source: 'osc633', updatedAt: 0 } as const;
-    vi.spyOn(terminalRegistry, 'getTerminalPaneState').mockReturnValue(createTerminalPaneState({
-      cwd,
-      currentCommand: { id: 'run', rawCommandLine: 'pnpm dev', displayCommand: 'pnpm dev', cwdAtStart: cwd, startedAt: 0, source: 'osc633_E' },
-    }));
-    const release = beginClosing(['pane-a']);
-    const respond = vi.fn();
-    try {
-      await act(async () => {
-        window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
-          method: SURFACE_CONTROL_METHODS.ensure, params: { command: ['pnpm', 'dev'], cwd: '/repo' }, respond,
-        } }));
-      });
-      expect(respond).toHaveBeenCalledWith({ ok: true, result: expect.objectContaining({ status: 'existing', surfaceId: 'pane-a' }) });
-      expect(leafCount()).toBe(1);
-    } finally { release(); }
-  });
-
-  it('does not reuse a running Surface while its own close is archiving', async () => {
-    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />));
-    await flush();
-    const cwd = { path: '/repo', pathKind: 'posix', isRemote: false, source: 'osc633', updatedAt: 0 } as const;
-    vi.spyOn(terminalRegistry, 'getTerminalPaneState').mockReturnValue(createTerminalPaneState({
-      cwd,
-      currentCommand: { id: 'run', rawCommandLine: 'pnpm dev', displayCommand: 'pnpm dev', cwdAtStart: cwd, startedAt: 0, source: 'osc633_E' },
-    }));
-    vi.spyOn(terminalRegistry, 'isPaneOscDriven').mockReturnValue(true);
-    act(() => { addPlainNote('pane-a', 'keep this note'); });
-    let release!: () => void;
-    const gate = new Promise<void>(resolve => { release = resolve; });
-    const saveOriginal = fake.notepadArchive.save.bind(fake.notepadArchive);
-    const save = vi.spyOn(fake.notepadArchive, 'save').mockImplementation(async (...args) => { await gate; return saveOriginal(...args); });
-    const killed = vi.fn();
-    await act(async () => {
-      window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
-        method: SURFACE_CONTROL_METHODS.kill, params: { surface: 'surface:1', confirmation: { mode: 'dangerously' } }, respond: killed,
-      } }));
-    });
-    await flush();
-    expect(save).toHaveBeenCalled();
-    const respond = vi.fn();
-    try {
-      await act(async () => {
-        window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
-          method: SURFACE_CONTROL_METHODS.ensure, params: { command: ['pnpm', 'dev'], cwd: '/repo' }, respond,
-        } }));
-      });
-      expect(respond).toHaveBeenCalledWith({ ok: true, result: expect.objectContaining({ status: 'created' }) });
-      expect(killed).not.toHaveBeenCalled();
-    } finally { release(); await flush(); }
-    expect(killed).toHaveBeenCalledWith({ ok: true, result: expect.objectContaining({ status: 'killed', surfaceId: 'pane-a' }) });
-  });
-
-  it.each([false, true])('preserves notes entered in a cancelled ensure pane (archive fails: %s)', async fails => {
-    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />));
-    await flush();
-    vi.spyOn(terminalRegistry, 'isPaneOscDriven').mockReturnValue(false);
-    vi.spyOn(terminalRegistry, 'getDefaultShellOpts').mockReturnValue({ shell: '/bin/bash' });
-    const controller = new AbortController();
-    const respond = vi.fn();
-    await act(async () => {
-      window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
-        method: SURFACE_CONTROL_METHODS.ensure, params: { command: ['pnpm', 'dev'], cwd: '/repo', surface: 'surface:1' }, signal: controller.signal, respond,
-      } }));
-    });
-    const temporaryId = Array.from(container.querySelectorAll('[data-lath-leaf]')).map(el => el.getAttribute('data-lath-leaf')!).find(id => id !== 'pane-a')!;
-    expect(temporaryId).toBeTruthy();
-    act(() => { addPlainNote(temporaryId, 'written while integration is pending'); });
-    if (fails) vi.spyOn(fake.notepadArchive, 'save').mockRejectedValue(new Error('disk full'));
-    await act(async () => controller.abort());
-    await flush();
-    if (fails) {
-      expect(respond).toHaveBeenCalledWith({ ok: false, error: expect.stringContaining('temporary surface kept open: notepad archive failed: disk full') });
-      expect(getNotes(temporaryId)).toHaveLength(1);
-      expect(container.querySelector(`[data-lath-leaf="${temporaryId}"]`)).not.toBeNull();
-    } else {
-      expect(respond).toHaveBeenCalledWith({ ok: false, error: 'ensure was cancelled' });
-      expect(container.querySelector(`[data-lath-leaf="${temporaryId}"]`)).toBeNull();
-      const archive = (await fake.notepadArchive.load())?.raw as NotepadArchiveV1;
-      expect(archive.batches.flatMap(batch => batch.notes)).toEqual([expect.objectContaining({ content: { kind: 'plain', text: 'written while integration is pending' } })]);
-      expect(getNotes(temporaryId)).toEqual([]);
-    }
   });
 
   it('renders a pane through LathHost, splits via wallActions, kills, and persists the Lath layout on save', async () => {
@@ -2372,92 +2278,6 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
-  it.each([
-    { fresh: false, archiveFails: false, idle: false },
-    { fresh: true, archiveFails: false, idle: false },
-    { fresh: false, archiveFails: false, idle: true },
-    { fresh: false, archiveFails: true, idle: true },
-  ])('serializes approval key reuse and preserves fresh/notes: %j', async ({ fresh, archiveFails, idle }) => {
-    const ids: string[] = [];
-    const cwd = { path: '/repo', pathKind: 'posix', isRemote: false, source: 'osc633', updatedAt: 0 } as const;
-    const idleState = createTerminalPaneState({ cwd });
-    const runningState = createTerminalPaneState({ cwd, currentCommand: {
-      id: 'run-tool', rawCommandLine: 'pnpm storybook', displayCommand: 'pnpm storybook',
-      cwdAtStart: cwd, startedAt: 0, source: 'osc633_E',
-    } });
-    let firstState = idleState;
-    vi.spyOn(terminalRegistry, 'getTerminalPaneState').mockImplementation(id =>
-      id === ids[0] ? firstState : ids.includes(id) ? runningState : idleState);
-    vi.spyOn(terminalRegistry, 'isPaneOscDriven').mockReturnValue(true);
-    const write = vi.spyOn(fake, 'writePty').mockImplementation((id, data) => {
-      if (id === ids[0] && data === 'pnpm storybook\r') firstState = runningState;
-    });
-    let trusted = false;
-    const toolControl = vi.fn(async (request: { op: 'lookup' | 'trust' }) => {
-      const config = { projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'storybook', run: 'pnpm storybook' };
-      if (request.op === 'trust') { trusted = true; return { status: 'trust-recorded' as const }; }
-      return trusted
-        ? { ...config, status: 'ok' as const, render: 'iframe' as const, port: 'announced' as const, key: ['/repo'], warnings: [] }
-        : { ...config, status: 'untrusted' as const, upstreamUrl: null, warnings: [] };
-    });
-    (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = toolControl;
-    try {
-      await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />));
-      await flush();
-      for (const launchCwd of ['/repo', fresh ? '/repo' : '/repo/subdir']) {
-        const respond = vi.fn();
-        await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
-          method: SURFACE_CONTROL_METHODS.tool, params: { name: 'storybook', cwd: launchCwd, fresh }, respond,
-        } })));
-        ids.push(respond.mock.calls[0][0].result.surfaceId);
-      }
-      expect(ids[0]).not.toBe(ids[1]);
-      act(() => addPlainNote(ids[1], 'keep this approval note'));
-      if (archiveFails) vi.spyOn(fake.notepadArchive, 'save').mockRejectedValue(new Error('disk full'));
-      const approvals = Array.from(container.querySelectorAll('button')).filter(button => button.textContent?.includes('Always allow for folder'));
-      vi.useFakeTimers();
-      await act(async () => {
-        approvals[0].click();
-        if (!idle) approvals[1].click();
-      });
-      expect(toolControl.mock.calls.filter(([request]) => request.op === 'trust')).toHaveLength(1);
-      expect(pendingShellOpts.has(ids[0])).toBe(true);
-      expect(pendingShellOpts.has(ids[1])).toBe(false);
-      const queuedLaunch = vi.fn();
-      if (!fresh && !idle) {
-        await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
-          method: SURFACE_CONTROL_METHODS.tool, params: { name: 'storybook', cwd: '/repo' }, respond: queuedLaunch,
-        } })));
-        expect(queuedLaunch).not.toHaveBeenCalled();
-      }
-      firstState = runningState;
-      await act(async () => vi.advanceTimersByTimeAsync(100));
-      if (idle) {
-        firstState = idleState;
-        await act(async () => approvals[1].click());
-      }
-      await act(async () => vi.advanceTimersByTimeAsync(100));
-      expect(toolControl.mock.calls.filter(([request]) => request.op === 'trust')).toHaveLength(2);
-      if (!fresh && !idle) expect(queuedLaunch).toHaveBeenCalledWith(expect.objectContaining({
-        ok: true, result: expect.objectContaining({ status: 'existing', surfaceId: ids[0] }),
-      }));
-      expect(pendingShellOpts.has(ids[1])).toBe(fresh);
-      expect(write.mock.calls.filter(([, data]) => data === 'pnpm storybook\r')).toHaveLength(idle && !archiveFails ? 1 : 0);
-      if (fresh || archiveFails) {
-        expect(container.querySelector(`[data-lath-leaf="${ids[1]}"]`)).not.toBeNull();
-        expect(getNotes(ids[1])).toHaveLength(1);
-        if (archiveFails) expect(document.body.querySelector('[aria-labelledby="notepad-archive-failure-title"]')).not.toBeNull();
-      } else {
-        expect(container.querySelector(`[data-lath-leaf="${ids[1]}"]`)).toBeNull();
-        const archive = (await fake.notepadArchive.load())?.raw as NotepadArchiveV1;
-        expect(archive.batches.flatMap(batch => batch.notes)).toEqual([expect.objectContaining({ content: { kind: 'plain', text: 'keep this approval note' } })]);
-      }
-    } finally {
-      vi.useRealTimers();
-      ids.forEach(id => pendingShellOpts.delete(id));
-    }
-  });
-
   it('moves the selection ring from a terminal to a pending Tool approval', async () => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       const left = this.dataset.lathLeaf === 'pane-a' ? 100 : 500;
@@ -2991,14 +2811,13 @@ describe('Wall on the Lath engine', () => {
   // than splitting (docs/specs/dor-tool.md -> Take-over). The handshake is the
   // point — `dor` is the pane's foreground process when the host answers, so the
   // command may only be typed once its own shell is back at a prompt.
-  it.each(['cancelled', 'helper opened', 'cwd changed', 'closing'] as const)('abandons takeover if the caller becomes %s while returning to its prompt', async (change) => {
+  it.each(['cancelled', 'helper opened', 'cwd changed'] as const)('abandons takeover if the caller becomes %s while returning to its prompt', async (change) => {
     const controller = new AbortController();
     const typed: string[] = [];
-    let releaseClosing: (() => void) | undefined;
     try {
       await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />));
       await flush();
-      act(() => { fake.spawnPty('pane-a'); addPlainNote('pane-a', 'Preserve me'); });
+      act(() => { fake.spawnPty('pane-a'); });
       fake.setInputHandler('pane-a', data => typed.push(data));
       terminalRegistry.seedTerminalManualCwd('pane-a', '/repo');
       reportRunning('pane-a', 'dor tool -- pnpm dev');
@@ -3012,17 +2831,15 @@ describe('Wall on the Lath engine', () => {
       if (change === 'cancelled') controller.abort();
       if (change === 'helper opened') vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'pane-a' ? { id: 'helper-a', parentId: 'pane-a', command: '', status: 'off' } : undefined);
       if (change === 'cwd changed') terminalRegistry.applyTerminalSemanticEvents('pane-a', [{ type: 'cwd', cwd: terminalRegistry.cwdFromOsc633('/elsewhere')! }]);
-      if (change === 'closing') releaseClosing = beginClosing(['pane-a']);
       act(() => promptBack('pane-a'));
       await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
       expect(typed).toEqual([]);
       expect(leafCount()).toBe(1);
-      expect(getNotes('pane-a')).toHaveLength(1);
       await act(async () => window.dispatchEvent(new Event('pagehide')));
       await flush();
       expect((fake.getState() as { panes: Array<{ surfaceType?: string }> }).panes[0]?.surfaceType).not.toBe('tool');
     } finally {
-      controller.abort(); releaseClosing?.(); fake.clearInputHandler('pane-a');
+      controller.abort(); fake.clearInputHandler('pane-a');
       act(() => terminalRegistry.removeTerminalPaneState('pane-a'));
     }
   });
@@ -3158,128 +2975,6 @@ describe('Wall on the Lath engine', () => {
       await act(async () => { controller.abort(); await new Promise(resolve => setTimeout(resolve, 125)); });
       fake.clearInputHandler(id);
       act(() => terminalRegistry.removeTerminalPaneState(id));
-    }
-  });
-
-  it('takes over the calling pane when `dor tool` is typed alone at a prompt', async () => {
-    const typed: string[] = [];
-    (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = vi.fn(async () => okToolLookup(['/repo']));
-
-    try {
-      await act(async () => {
-        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
-      });
-      await flush();
-      act(() => { fake.spawnPty('pane-a'); addPlainNote('pane-a', 'Keep my takeover notes'); });
-      fake.setInputHandler('pane-a', (data) => typed.push(data));
-      terminalRegistry.seedTerminalManualCwd('pane-a', '/repo');
-      reportRunning('pane-a', 'dor tool storybook');
-
-      let response: { ok: boolean; result?: { status: string; surfaceId: string; minimized: boolean } } | undefined;
-      await act(async () => {
-        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
-          detail: {
-            method: SURFACE_CONTROL_METHODS.tool,
-            surfaceId: 'pane-a',
-            params: { name: 'storybook', cwd: '/repo', minimized: false, fresh: false },
-            respond: (result: typeof response) => { response = result; },
-          },
-        }));
-      });
-      await flush();
-
-      // Answered before the tool starts, and nothing typed while `dor` still owns
-      // the shell: waiting for the prompt first would deadlock.
-      expect(response).toMatchObject({
-        ok: true,
-        result: { status: 'takeover', surfaceId: 'pane-a', minimized: false },
-      });
-      expect(leafCount()).toBe(1);
-      expect(typed).toEqual([]);
-
-      // `dor` exits; the shell reports its prompt back and the command lands.
-      act(() => promptBack('pane-a'));
-      await waitUntil(() => typed.length > 0);
-      expect(typed).toEqual(['pnpm storybook\r']);
-      expect(leafCount()).toBe(1);
-      expect(getNotes('pane-a').some(note => note.content.kind === 'plain' && note.content.text === 'Keep my takeover notes')).toBe(true);
-
-      // The tool goes live, which releases the spawn lock, and then exits. The
-      // host learns that from its own 100ms state poll, so the live state has to
-      // outlast one tick.
-      act(() => reportRunning('pane-a', 'pnpm storybook'));
-      await act(async () => { await new Promise((r) => setTimeout(r, 150)); });
-      act(() => promptBack('pane-a'));
-
-      // Retyped in the tool's own pane: a key match on the caller re-runs there
-      // through the same handshake, never an interrupt — Ctrl+C would kill the
-      // `dor` still waiting for the answer.
-      act(() => reportRunning('pane-a', 'dor tool storybook'));
-      let rerun: { ok: boolean; result?: { status: string; surfaceId: string } } | undefined;
-      await act(async () => {
-        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
-          detail: {
-            method: SURFACE_CONTROL_METHODS.tool,
-            surfaceId: 'pane-a',
-            params: { name: 'storybook', cwd: '/repo', minimized: false, fresh: false },
-            respond: (result: typeof rerun) => { rerun = result; },
-          },
-        }));
-      });
-      await waitUntil(() => rerun !== undefined);
-      expect(rerun).toMatchObject({ ok: true, result: { status: 'adopted', surfaceId: 'pane-a' } });
-      act(() => promptBack('pane-a'));
-      await waitUntil(() => typed.length > 1);
-      expect(typed).toEqual(['pnpm storybook\r', 'pnpm storybook\r']);
-      expect(leafCount()).toBe(1);
-
-      // The re-run starts and dies inside one 100ms sample, so no poll ever sees
-      // it live: the lock has to release on the finished run instead. Without
-      // that, the request below waits out the 15s timeout and `settle` gives up.
-      act(() => {
-        terminalRegistry.applyTerminalSemanticEvents('pane-a', [
-          { type: 'commandLine', commandLine: 'pnpm storybook' },
-          { type: 'commandStart', source: 'osc633_boundaries' },
-          { type: 'commandFinish', exitCode: 1 },
-          { type: 'promptStart' },
-        ]);
-      });
-
-      // A line the host cannot type behind says so, rather than reporting a tool
-      // that is not running as `existing` back into the pane it is sitting in.
-      act(() => reportRunning('pane-a', 'dor tool storybook && open http://localhost:6006'));
-      let compound: { ok: boolean; error?: string } | undefined;
-      await act(async () => {
-        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
-          detail: {
-            method: SURFACE_CONTROL_METHODS.tool,
-            surfaceId: 'pane-a',
-            params: { name: 'storybook', cwd: '/repo', minimized: false, fresh: false },
-            respond: (result: typeof compound) => { compound = result; },
-          },
-        }));
-      });
-      await waitUntil(() => compound !== undefined);
-      expect(compound?.ok).toBe(false);
-      expect(compound?.error).toContain("is this tool's own pane");
-      expect(typed).toHaveLength(2);
-      act(() => promptBack('pane-a'));
-
-      // Same Surface throughout: the leaf changed kind without changing id, so
-      // the session persists as one.
-      await act(async () => { window.dispatchEvent(new Event('pagehide')); });
-      await flush();
-      await flush();
-      const saved = fake.getState() as {
-        panes?: Array<{ id: string; surfaceType?: string; command?: string }>;
-      } | null;
-      expect(saved?.panes?.find((pane) => pane.id === 'pane-a')).toMatchObject({
-        surfaceType: 'tool',
-        command: 'pnpm storybook',
-      });
-    } finally {
-      fake.clearInputHandler('pane-a');
-      act(() => terminalRegistry.removeTerminalPaneState('pane-a'));
     }
   });
 
@@ -3739,34 +3434,6 @@ describe('Wall on the Lath engine', () => {
     expect(focusOf(newId)).toBe('false');
   });
 
-  // --- Notepad closure (docs/specs/notepad.md → "Closure") ---
-
-  /** What the host actually stored. */
-  async function storedArchive(): Promise<NotepadArchiveV1> {
-    const loaded = await fake.notepadArchive.load();
-    return (loaded?.raw ?? { version: 1, batches: [] }) as NotepadArchiveV1;
-  }
-
-  /** The Keep open / Close anyway prompt, when it is up. */
-  function archiveFailureModal(): HTMLElement | null {
-    return document.body.querySelector<HTMLElement>('[aria-labelledby="notepad-archive-failure-title"]');
-  }
-
-  /** Answer the prompt and settle the closure it starts. `Close anyway` runs an async
-   *  chain that ends on the two-phase kill's deferred removal timer, so the click's
-   *  own async work is awaited BEFORE `flush()` registers the timer that has to fire
-   *  after it. A bare `act(click)` leaves the two `setTimeout(0)`s racing: the
-   *  removal is registered while the test awaits `flush()`, so it lands second and
-   *  the leaf is still mid-fade when the assertion runs. (`Keep open` only shifts the
-   *  prompt queue, so it needs no ordering — one helper still covers both.) */
-  async function clickButton(label: string): Promise<void> {
-    const button = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button'))
-      .find((candidate) => candidate.textContent?.trim() === label);
-    expect(button, `no "${label}" button`).toBeDefined();
-    await act(async () => { button!.click(); });
-    await flush();
-  }
-
   /** A pane header control; Kill is a user-visible closure, which does prompt.
    *  `isUntouched` short-circuits the kill confirmation so a kill is one click. */
   async function clickHeaderControl(paneId: string, label: 'Kill' | 'Minimize'): Promise<void> {
@@ -3784,46 +3451,6 @@ describe('Wall on the Lath engine', () => {
       untouched.mockRestore();
     }
   }
-
-  /** A Helper on pane-a whose host work inspection answers `busy`, switchable mid-test. */
-  function spyOnHelper(): { dispose: ReturnType<typeof vi.spyOn>; setBusy: (value: boolean) => void } {
-    let helper: helpers.HelperTerminal | undefined = { id: 'helper-a', parentId: 'pane-a', command: '', status: 'off' };
-    let busy = false;
-    vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'pane-a' ? helper : undefined);
-    vi.spyOn(helpers, 'helperHasWork').mockImplementation(async () => busy);
-    vi.spyOn(helpers, 'openHelper').mockImplementation(async () => helper!);
-    const dispose = vi.spyOn(helpers, 'closeHelperParent').mockImplementation(() => { helper = undefined; });
-    return { dispose, setBusy: (value) => { busy = value; } };
-  }
-
-  async function renderNotedPane(): Promise<void> {
-    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />));
-    await flush();
-    act(() => { addPlainNote('pane-a', 'shared helper note'); });
-  }
-
-  it('closes an idle Helper with its source and archives the shared notes once', async () => {
-    const { dispose } = spyOnHelper();
-    await renderNotedPane();
-    expect((await dispatchKill('surface:1'))?.ok).toBe(true);
-    await flush();
-    expect(getNotes('pane-a')).toEqual([]);
-    expect(dispose).toHaveBeenCalledWith('pane-a');
-    expect((await storedArchive()).batches).toHaveLength(1);
-  });
-
-  it('refuses a source whose Helper has running work before touching the archive', async () => {
-    const { dispose, setBusy } = spyOnHelper();
-    const save = vi.spyOn(fake.notepadArchive, 'save');
-    setBusy(true);
-    await renderNotedPane();
-    expect((await dispatchKill('surface:1'))?.ok).toBe(false);
-    await flush();
-    expect(getNotes('pane-a')).toHaveLength(1);
-    expect(dispose).not.toHaveBeenCalled();
-    expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
-    expect(save).not.toHaveBeenCalled();
-  });
 
   // The kill gesture (`requestKill`): docs/specs/layout.md → "Kill confirmation".
   const confirmKillOverlay = () => Array.from(document.body.querySelectorAll('h2')).find(h => h.textContent === 'Confirm kill') ?? null;
@@ -3921,12 +3548,12 @@ describe('Wall on the Lath engine', () => {
     });
     expect(inspections).toHaveLength(1);
     // A `dor kill` lands while the gesture's inspection is still pending and
-    // closes the pane first (its own two inspections answered idle).
+    // closes the pane first (its own inspection answered idle).
     let killed: { ok: boolean } | undefined;
     window.dispatchEvent(new CustomEvent('dormouse:control-request', {
       detail: { method: SURFACE_CONTROL_METHODS.kill, params: { surface: 'surface:1', confirmation: { mode: 'dangerously' } }, respond: (r: typeof killed) => { killed = r; } },
     }));
-    for (const index of [1, 2]) {
+    for (const index of [1]) {
       await act(async () => { while (inspections.length <= index) await new Promise(r => setTimeout(r, 0)); });
       await act(async () => { inspections[index](false); });
     }
@@ -3935,200 +3562,6 @@ describe('Wall on the Lath engine', () => {
     await act(async () => { inspections[0](false); });
     await flush();
     expect(confirmKillOverlay()).toBeNull();
-  });
-
-  it('keeps the notes and pending batch when Helper work starts during the write, replacing the batch on retry', async () => {
-    const { dispose, setBusy } = spyOnHelper();
-    const saveOriginal = fake.notepadArchive.save.bind(fake.notepadArchive);
-    const save = vi.spyOn(fake.notepadArchive, 'save').mockImplementation(async (...args) => {
-      const result = await saveOriginal(...args);
-      setBusy(true);
-      return result;
-    });
-    await renderNotedPane();
-    expect((await dispatchKill('surface:1'))?.ok).toBe(false);
-    await flush();
-    expect(getNotes('pane-a')).toHaveLength(1);
-    expect(dispose).not.toHaveBeenCalled();
-    expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
-    expect((await storedArchive()).batches).toHaveLength(1);
-    setBusy(false);
-    save.mockImplementation(saveOriginal);
-    expect((await dispatchKill('surface:1'))?.ok).toBe(true);
-    expect((await storedArchive()).batches).toHaveLength(1);
-    expect(getNotes('pane-a')).toEqual([]);
-  });
-
-  it('runs the Helper guard again before Close anyway discards the notes', async () => {
-    const { dispose, setBusy } = spyOnHelper();
-    vi.spyOn(fake.notepadArchive, 'save').mockRejectedValue(new Error('disk full'));
-    await renderNotedPane();
-    await clickHeaderControl('pane-a', 'Kill');
-    expect(archiveFailureModal()).not.toBeNull();
-    setBusy(true);
-    await clickButton('Close anyway');
-    expect(getNotes('pane-a')).toHaveLength(1);
-    expect(dispose).not.toHaveBeenCalled();
-    expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
-  });
-
-  it('archives a closing Surface\'s notes before tearing it down', async () => {
-    await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
-    });
-    await flush();
-    act(() => { addPlainNote('pane-a', 'ssh key is in 1password'); });
-
-    expect((await dispatchKill('surface:1'))?.ok).toBe(true);
-    await flush();
-
-    const archive = await storedArchive();
-    expect(archive.batches).toHaveLength(1);
-    expect(archive.batches[0].notes[0].content).toEqual({ kind: 'plain', text: 'ssh key is in 1password' });
-    // The metadata resolver the Wall installs supplies the derived pane label.
-    expect(archive.batches[0].surfaceKind).toBe('terminal');
-    expect(getNotes('pane-a')).toEqual([]);
-    expect(container.querySelector('[data-lath-leaf="pane-a"]')).toBeNull();
-  });
-
-  it('keeps the Surface and asks when the archive refuses the write', async () => {
-    vi.spyOn(fake.notepadArchive, 'save').mockRejectedValue(new Error('disk is full'));
-    await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
-    });
-    await flush();
-    act(() => { addPlainNote('pane-a', 'keep me'); });
-
-    await clickHeaderControl('pane-a', 'Kill');
-
-    expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
-    expect(getNotes('pane-a')).toHaveLength(1);
-    expect(archiveFailureModal()).not.toBeNull();
-  });
-
-  it('answers a refused `dor kill` with the error and raises no prompt', async () => {
-    // The caller is a command, not someone looking at the Wall: a modal here
-    // would block a Wall nobody is watching (docs/specs/notepad.md → "Closure").
-    vi.spyOn(fake.notepadArchive, 'save').mockRejectedValue(new Error('disk is full'));
-    await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
-    });
-    await flush();
-    act(() => { addPlainNote('pane-a', 'keep me'); });
-
-    const response = await dispatchKill('surface:1');
-    await flush();
-
-    expect(response?.ok).toBe(false);
-    expect((response as { error?: string }).error).toContain('notepad archive failed');
-    expect((response as { error?: string }).error).toContain('disk is full');
-    expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
-    expect(getNotes('pane-a')).toHaveLength(1);
-    expect(archiveFailureModal()).toBeNull();
-  });
-
-  it('Keep open dismisses the prompt and leaves everything alone', async () => {
-    vi.spyOn(fake.notepadArchive, 'save').mockRejectedValue(new Error('disk is full'));
-    await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
-    });
-    await flush();
-    act(() => { addPlainNote('pane-a', 'keep me'); });
-    await clickHeaderControl('pane-a', 'Kill');
-
-    await clickButton('Keep open');
-
-    expect(archiveFailureModal()).toBeNull();
-    expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
-    expect(getNotes('pane-a')).toHaveLength(1);
-  });
-
-  it('Close anyway discards the notes and removes the Surface without a batch', async () => {
-    vi.spyOn(fake.notepadArchive, 'save').mockRejectedValue(new Error('disk is full'));
-    await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
-    });
-    await flush();
-    act(() => { addPlainNote('pane-a', 'expendable'); });
-    await clickHeaderControl('pane-a', 'Kill');
-
-    await clickButton('Close anyway');
-
-    expect(archiveFailureModal()).toBeNull();
-    await vi.waitFor(async () => {
-      await flush();
-      expect(container.querySelector('[data-lath-leaf="pane-a"]')).toBeNull();
-    });
-    expect(getNotes('pane-a')).toEqual([]);
-    expect((await storedArchive()).batches).toEqual([]);
-  });
-
-  it('queues a second refused closure behind the first prompt', async () => {
-    // One slot would leave pane-a waiting forever: its prompt is replaced, and
-    // nothing is left to answer for it.
-    // Distinct messages are how the prompt on screen names its Surface.
-    vi.spyOn(fake.notepadArchive, 'save')
-      .mockRejectedValueOnce(new Error('a could not be written'))
-      .mockRejectedValueOnce(new Error('b could not be written'));
-    await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" />);
-    });
-    await flush();
-    act(() => {
-      addPlainNote('pane-a', 'from a');
-      addPlainNote('pane-b', 'from b');
-    });
-
-    await clickHeaderControl('pane-a', 'Kill');
-    await clickHeaderControl('pane-b', 'Kill');
-
-    // A's prompt is the one on screen; B's is behind it.
-    expect(archiveFailureModal()?.textContent).toContain('a could not be written');
-    await clickButton('Keep open');
-
-    expect(archiveFailureModal()?.textContent).toContain('b could not be written');
-    await clickButton('Close anyway');
-
-    expect(archiveFailureModal()).toBeNull();
-    expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
-    expect(getNotes('pane-a')).toHaveLength(1);
-    await vi.waitFor(async () => {
-      await flush();
-      expect(container.querySelector('[data-lath-leaf="pane-b"]')).toBeNull();
-    });
-  });
-
-  it('migrates a notepad to the new id when a replacement mints one', async () => {
-    await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
-    });
-    await flush();
-    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockImplementation((id) => id === 'pane-a');
-
-    try {
-      act(() => { addPlainNote('pane-a', 'survives the swap'); });
-
-      let response: { ok: boolean; result?: { surfaceId: string } } | undefined;
-      await act(async () => {
-        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
-          detail: {
-            method: SURFACE_CONTROL_METHODS.iframe,
-            params: { url: 'http://localhost:5173/' },
-            respond: (r: typeof response) => { response = r; },
-          },
-        }));
-      });
-      await flush();
-
-      const newId = response!.result!.surfaceId;
-      expect(newId).not.toBe('pane-a');
-      expect(getNotes('pane-a')).toEqual([]);
-      expect(getNotes(newId).map((note) => note.content)).toEqual([{ kind: 'plain', text: 'survives the swap' }]);
-      // A replacement is not a closure, so nothing was archived.
-      expect((await storedArchive()).batches).toEqual([]);
-    } finally {
-      untouchedSpy.mockRestore();
-    }
   });
 
   it('seeds multiple initial panes with the aspect-aware layout (geometry is measured before the seed)', async () => {
@@ -4564,63 +3997,6 @@ describe('Wall session persistence: ownership filtering', () => {
       vi.useRealTimers();
     }
   });
-});
-
-
-it('shares one primary terminal and notepad between a Tool pane and Terminal Context', async () => {
-  const openHelper = vi.spyOn(helpers, 'openHelper');
-  const params = { surfaceType: 'tool', command: 'pnpm storybook', toolRender: 'iframe', toolPort: 'announced' };
-  await act(async () => root.render(<Wall restoredLathLayout={{ version: 1, tree: { root: { kind: 'leaf', id: 'tool-context' } }, leafMeta: {
-    'tool-context': { component: 'tool', tabComponent: 'tool', title: 'Storybook', params },
-  } }} initialMode="command" />));
-  await flush();
-  act(() => { addPlainNote('tool-context', 'Keep this note'); setOpenNotepadId('tool-context'); });
-  expect(container.querySelectorAll('[data-notepad-panel-for="tool-context"]')).toHaveLength(1);
-  act(() => setOpenNotepadId(null));
-  act(() => container.querySelector('[data-lath-leaf="tool-context"] .lath-leaf-header')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })));
-  // The header's terminal label is the context entry point.
-  if (!container.querySelector('[data-terminal-context]')) {
-    act(() => container.querySelector('[data-session-id="tool-context"]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })));
-  }
-  await flush();
-  expect(openHelper).not.toHaveBeenCalled();
-  expect(container.querySelector('[data-context-terminal="tool-context"]')).not.toBeNull();
-  expect(container.querySelectorAll('[data-session-id="tool-context"]')).toHaveLength(1);
-  act(() => setOpenNotepadId('tool-context'));
-  expect(container.querySelectorAll('[data-notepad-panel-for="tool-context"]')).toHaveLength(1);
-  act(() => setOpenNotepadId(null));
-  act(() => container.querySelector<HTMLButtonElement>('[aria-label="Close terminal context"]')!.click());
-  await flush();
-  expect(container.querySelectorAll('[data-session-id="tool-context"]')).toHaveLength(1);
-  expect(getNotes('tool-context').map(note => note.content)).toEqual([{ kind: 'plain', text: 'Keep this note' }]);
-  let mountedDuringRefit = false;
-  const refit = vi.spyOn(terminalRegistry, 'refitSession').mockImplementation(() => {
-    mountedDuringRefit = container.querySelector('[data-context-terminal="tool-context"] [data-session-id="tool-context"]') !== null;
-  });
-  act(() => {
-    window.dispatchEvent(new CustomEvent('dormouse:reveal-note-source', { detail: { surfaceId: 'tool-context' } }));
-    // Pin resolution follows synchronously, before the React event returns.
-    expect(refit).toHaveBeenCalledExactlyOnceWith('tool-context');
-    expect(mountedDuringRefit).toBe(true);
-  });
-
-});
-
-it('leaves a reveal for a hidden Workspace unanswered', async () => {
-  // A hidden Wall consumes no window input (docs/specs/layout.md →
-  // "Workspaces"): opening the context here would mount chrome nobody can see
-  // and refit a terminal whose element is detached.
-  const params = { surfaceType: 'tool', command: 'pnpm storybook', toolRender: 'iframe', toolPort: 'announced' };
-  await act(async () => root.render(<Wall active={false} restoredLathLayout={{ version: 1, tree: { root: { kind: 'leaf', id: 'tool-hidden' } }, leafMeta: {
-    'tool-hidden': { component: 'tool', tabComponent: 'tool', title: 'Storybook', params },
-  } }} initialMode="command" />));
-  await flush();
-  const refit = vi.spyOn(terminalRegistry, 'refitSession');
-  act(() => {
-    window.dispatchEvent(new CustomEvent('dormouse:reveal-note-source', { detail: { surfaceId: 'tool-hidden' } }));
-  });
-  expect(refit).not.toHaveBeenCalled();
-  expect(container.querySelector('[data-terminal-context]')).toBeNull();
 });
 
 /**

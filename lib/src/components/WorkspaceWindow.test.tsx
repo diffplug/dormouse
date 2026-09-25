@@ -20,8 +20,6 @@ import { closeWorkspaceWithSurfaces, requestWorkspaceClose } from './wall/worksp
 import * as terminalRegistry from '../lib/terminal-registry';
 import { setPlatform } from '../lib/platform';
 import { FakePtyAdapter } from '../lib/platform/fake-adapter';
-import { clearAllNotepads, addPlainNote } from '../lib/notepad/notepad-store';
-import { __resetArchiveServiceForTests } from '../lib/notepad/archive-service';
 import { getActivitySnapshot, setTerminalActivity } from '../lib/terminal-registry';
 import { createAlertEpisode } from '../lib/alert-episode';
 import { getWallHandle, listWallHandles, resetWallHandles } from './wall/wall-handles';
@@ -54,8 +52,6 @@ let root: Root;
 let fake: FakePtyAdapter;
 
 beforeEach(() => {
-  __resetArchiveServiceForTests();
-  clearAllNotepads();
   resetWallHandles();
   resetWorkspaces();
   resetWorkspaceSurfaces();
@@ -73,8 +69,6 @@ afterEach(() => {
   harness.dispose();
   vi.clearAllMocks();
   vi.restoreAllMocks();
-  __resetArchiveServiceForTests();
-  clearAllNotepads();
 });
 
 const flush = (): Promise<void> => harness.flush();
@@ -611,36 +605,10 @@ describe('WorkspaceWindow', () => {
 
     const handle = getWallHandle('ws-2')!;
     expect(handle.surfaceIds()).toHaveLength(1);
-    await act(async () => { expect(await handle.closeAll('silent')).toBeNull(); });
+    await act(async () => { expect(await handle.closeAll()).toBeNull(); });
     await flush();
     expect(handle.surfaceIds()).toEqual([]);
     expect(leafIdsIn('ws-2')).toEqual([]);
-  });
-
-  it.each([true, false])('a refused closure preserves Workspace visibility (active: %s) and re-arms its auto-spawn', async (activate) => {
-    const first = getActiveWorkspaceId();
-    await render();
-    await act(async () => { createWorkspace({ id: 'ws-2', activate }); });
-    await flush();
-    const handle = getWallHandle('ws-2')!;
-    const [paneId] = handle.surfaceIds();
-    addPlainNote(paneId, 'unsaved');
-    vi.spyOn(fake.notepadArchive, 'save').mockRejectedValue(new Error('disk is full'));
-
-    let refusal: string | null = null;
-    await act(async () => { refusal = await handle.closeAll('silent'); });
-    await flush();
-    expect(refusal).toContain('notepad archive failed');
-    expect(handle.surfaceIds()).toEqual([paneId]);
-    expect(workspaceMotion.workspaceIsCollapsed('ws-2')).toBe(false);
-    expect(getActiveWorkspaceId()).toBe(activate ? 'ws-2' : first);
-    expect(wallFor('ws-2').classList.contains('invisible')).toBe(!activate);
-
-    // The flag is cleared, so the Wall's "always one pane" rule works again.
-    vi.mocked(fake.notepadArchive.save).mockResolvedValue(undefined);
-    await act(async () => { await handle.closeAll('discard'); });
-    await flush();
-    expect(handle.surfaceIds()).toEqual([]);
   });
 
   it('keeps a dead PTY\'s retained cwd and alert across a restored Workspace\'s first save', async () => {
@@ -727,7 +695,7 @@ describe('WorkspaceWindow', () => {
     await act(async () => {
       // Dispatched INSIDE the walk: `dor split` from a member pane still routes
       // here, and a Surface born behind the walk would ride the unmount out.
-      const closing = handle.closeAll('silent');
+      const closing = handle.closeAll();
       handle.handleDorControl({
         requestId: 'r1',
         method,
@@ -769,7 +737,7 @@ describe('WorkspaceWindow', () => {
     });
     await flush();
     expect(browser).toHaveBeenCalledWith(expect.objectContaining({ provider: 'playwright', op: 'attach', binding: expect.objectContaining({ session: 'late' }) }));
-    await act(async () => { expect(await handle.closeAll('silent')).toBeNull(); });
+    await act(async () => { expect(await handle.closeAll()).toBeNull(); });
     await act(async () => status.resolve({ ok: true, stream: 4321, headed: false }));
     await flush();
 
@@ -953,7 +921,7 @@ it('routes Tools to the requested Workspace and never launches after lookup race
   act(() => handle.handleDorControl({ requestId: 'late-tool', method: SURFACE_CONTROL_METHODS.tool,
     params: { name: 'storybook', cwd: '/repo' }, respond: late }));
   await flush();
-  await act(async () => { await handle.closeAll('discard'); });
+  await act(async () => { await handle.closeAll(); });
   await act(async () => gate.resolve(lookup));
   await flush();
   expect(late).toHaveBeenCalledWith({ ok: false, error: 'this workspace is closing' });

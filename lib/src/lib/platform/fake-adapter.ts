@@ -5,10 +5,6 @@ import { createAlertHost, type AlertHost, type AlertRealm } from '../../host/ale
 import { createAlertClient, type AlertClientMethods } from '../../host/alert-client';
 import { normalizeExternalUri } from '../external-links';
 import {
-  createMemoryNotepadArchivePort,
-  type MemoryNotepadArchivePort,
-} from '../notepad/memory-archive-port';
-import {
   applyTerminalEvents,
   collectTerminalProtocolResponses,
   TerminalProtocolParser,
@@ -99,17 +95,6 @@ export class FakePtyAdapter implements PlatformAdapter {
   // for the stories that are *about* that section.
   burrow?: BurrowLink;
 
-  /**
-   * The notepad archive as memory — the website demo's real implementation and
-   * what tests and stories archive into. Public and concrete (not the narrower
-   * port type) so a caller can `seed`, `corrupt`, or `clear` it directly.
-   */
-  notepadArchive: MemoryNotepadArchivePort = createMemoryNotepadArchivePort();
-
-  /** Mutable and public for the same reason as the capability flags above: the
-   *  website playground sets it because a browser tab cannot take Cmd/Ctrl+N,
-   *  and the selection-popup stories toggle it per story. */
-  browserReservesNotepadChord?: boolean;
 
   /** Where a due push goes. There is no Burrow here, so by default it reaches
    *  no phone; a test sets this to see what would have been sent. */

@@ -1,7 +1,4 @@
 import { useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { NotepadPanel } from '../NotepadPanel';
-import { NotepadHeaderButton } from './NotepadHeaderButton';
-import { isSurfaceClosing } from '../../lib/notepad/notepad-store';
 import { messageOf } from '../../lib/errors';
 import { TerminalPane } from '../TerminalPane';
 import { TerminalContextView, type ContextScan, type TerminalContextViewProps } from './TerminalContextView';
@@ -66,9 +63,7 @@ export function TerminalContext({ id, title, closing, origin, warning: openWarni
     onWatch={() => { if (offeredRule) setCommandWatched(offeredRule, watchRule === null); }} onTodo={() => toggleSessionTodo(id)}
     onPort={(entry, mode) => context.openPort(id, entry, mode)}
     onModify={async command => { await platform.terminalContext?.({ op: 'settings', command }); setDefaultCommand(command); }}
-    notepadAction={<NotepadHeaderButton surfaceId={id} />}
-    notepadPanel={<NotepadPanel surfaceId={id} pins={tool} />}
-    onReset={async () => { if (isSurfaceClosing(id)) throw new Error('This terminal is closing'); disposeHelper(id); await openHelper(id); }} onPromote={() => context.promote(id)}>
+    onReset={async () => { disposeHelper(id); await openHelper(id); }} onPromote={() => context.promote(id)}>
     {tool && <div data-context-terminal={id} className="h-full px-3 py-2" onMouseDown={() => getTerminalInstance(id)?.focus()}><TerminalPane id={id} isFocused={false} /></div>}
     {helper && <div data-helper-terminal={helper.id} className="h-full px-3 py-2" onMouseDown={() => focusSession(helper.id, true)}><TerminalPane key={helper.id} id={helper.id} isFocused={false} /></div>}
   </TerminalContextView>;
