@@ -43,5 +43,5 @@ peerDependencyRules:
     "@hono/node-ws>@hono/node-server": ^2.0.0
 minimumReleaseAge: 1440
 overrides:
-  pgstencil: file:vendor/pgstencil-0.1.0.tgz
-  '@pgstencil/auth': file:vendor/pgstencil-auth-0.1.0.tgz
+  pgstencil: file:vendor/pgstencil-0.2.0.tgz
+  '@pgstencil/auth': file:vendor/pgstencil-auth-0.2.0.tgz

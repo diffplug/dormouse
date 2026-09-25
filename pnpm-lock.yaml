@@ -5,8 +5,8 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  pgstencil: file:vendor/pgstencil-0.1.0.tgz
-  '@pgstencil/auth': file:vendor/pgstencil-auth-0.1.0.tgz
+  pgstencil: file:vendor/pgstencil-0.2.0.tgz
+  '@pgstencil/auth': file:vendor/pgstencil-auth-0.2.0.tgz
 
 importers:
 
@@ -97,8 +97,8 @@ importers:
         specifier: ^2.0.10
         version: 2.1.1(hono@4.13.8)
       '@pgstencil/auth':
-        specifier: file:../vendor/pgstencil-auth-0.1.0.tgz
-        version: file:vendor/pgstencil-auth-0.1.0.tgz(hono@4.13.8)(kysely@0.29.5)(pg@8.23.0)(pgstencil@file:vendor/pgstencil-0.1.0.tgz(kysely@0.29.5)(supports-color@10.2.2))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@4.1.11)
+        specifier: file:../vendor/pgstencil-auth-0.2.0.tgz
+        version: file:vendor/pgstencil-auth-0.2.0.tgz(hono@4.13.8)(kysely@0.29.5)(pg@8.23.0)(pgstencil@file:vendor/pgstencil-0.2.0.tgz(kysely@0.29.5)(supports-color@10.2.2))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@4.1.11)
       hono:
         specifier: ^4.13.8
         version: 4.13.8
@@ -106,8 +106,8 @@ importers:
         specifier: ^0.29.5
         version: 0.29.5
       pgstencil:
-        specifier: file:../vendor/pgstencil-0.1.0.tgz
-        version: file:vendor/pgstencil-0.1.0.tgz(kysely@0.29.5)(supports-color@10.2.2)
+        specifier: file:../vendor/pgstencil-0.2.0.tgz
+        version: file:vendor/pgstencil-0.2.0.tgz(kysely@0.29.5)(supports-color@10.2.2)
       react:
         specifier: ^19.2.6
         version: 19.3.0
@@ -2455,14 +2455,14 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@pgstencil/auth@file:vendor/pgstencil-auth-0.1.0.tgz':
-    resolution: {integrity: sha512-uSTdJg6o55DELcvTfeDJTJClsupe/z1NJJw0RFVdAOZIu+DexsSb/Xx5kY5Bcpyq7V51DKhu5rQzZ2BC14yUGw==, tarball: file:vendor/pgstencil-auth-0.1.0.tgz}
-    version: 0.1.0
+  '@pgstencil/auth@file:vendor/pgstencil-auth-0.2.0.tgz':
+    resolution: {integrity: sha512-hrYW0KoGSAOiLxrr4sashv5ImR7DmgzshbcXCol2gaNdA7kw243F+xe7vyuFXjI2l2NC5Th5Di4/gExm1pTqvQ==, tarball: file:vendor/pgstencil-auth-0.2.0.tgz}
+    version: 0.2.0
     engines: {node: '>=24'}
     peerDependencies:
       hono: ^4.13.7
       kysely: ^0.29.5
-      pgstencil: ^0.1.0
+      pgstencil: ^0.2.0
 
   '@phosphor-icons/react@2.1.10':
     resolution: {integrity: sha512-vt8Tvq8GLjheAZZYa+YG/pW7HDbov8El/MANW8pOAz4eGxrwhnbfrQZq0Cp4q8zBEu8NIhHdnr+r8thnfRSNYA==}
@@ -5389,9 +5389,9 @@ packages:
   pgpass@1.0.5:
     resolution: {integrity: sha512-FdW9r/jQZhSeohs1Z3sI1yxFQNFvMcnmfuj4WBMUTxOrAyLMaTcE1aAMBiTlbMNaXvBCQuVi0R7hd8udDSP7ug==}
 
-  pgstencil@file:vendor/pgstencil-0.1.0.tgz:
-    resolution: {integrity: sha512-XKNjf7opuYcQU1+zK0YCFb3eXvMGsjIrHIXyUANpZoBVWd1XV8c4i4u6S0d3rqjOw9LHeTu/2kdA+Z9wSrCSPw==, tarball: file:vendor/pgstencil-0.1.0.tgz}
-    version: 0.1.0
+  pgstencil@file:vendor/pgstencil-0.2.0.tgz:
+    resolution: {integrity: sha512-YizN4tswKpHODDQymqiW+TbN+Khe4snCJDy0C/PPbPXrP6/NUpEaSybaMnwP97z8bb2N/oa3TQA5hixqkk3lAQ==, tarball: file:vendor/pgstencil-0.2.0.tgz}
+    version: 0.2.0
     engines: {node: '>=24'}
     peerDependencies:
       kysely: ^0.29.5
@@ -7952,14 +7952,14 @@ snapshots:
   '@oxc-resolver/binding-win32-x64-msvc@11.21.2':
     optional: true
 
-  '@pgstencil/auth@file:vendor/pgstencil-auth-0.1.0.tgz(hono@4.13.8)(kysely@0.29.5)(pg@8.23.0)(pgstencil@file:vendor/pgstencil-0.1.0.tgz(kysely@0.29.5)(supports-color@10.2.2))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@4.1.11)':
+  '@pgstencil/auth@file:vendor/pgstencil-auth-0.2.0.tgz(hono@4.13.8)(kysely@0.29.5)(pg@8.23.0)(pgstencil@file:vendor/pgstencil-0.2.0.tgz(kysely@0.29.5)(supports-color@10.2.2))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@4.1.11)':
     dependencies:
       better-auth: 1.7.3(pg@8.23.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@4.1.11)
       hono: 4.13.8
       jose: 6.2.12
       kysely: 0.29.5
       openid-client: 6.8.8
-      pgstencil: file:vendor/pgstencil-0.1.0.tgz(kysely@0.29.5)(supports-color@10.2.2)
+      pgstencil: file:vendor/pgstencil-0.2.0.tgz(kysely@0.29.5)(supports-color@10.2.2)
     transitivePeerDependencies:
       - '@cloudflare/workers-types'
       - '@lynx-js/react'
@@ -10911,7 +10911,7 @@ snapshots:
     dependencies:
       split2: 4.2.0
 
-  pgstencil@file:vendor/pgstencil-0.1.0.tgz(kysely@0.29.5)(supports-color@10.2.2):
+  pgstencil@file:vendor/pgstencil-0.2.0.tgz(kysely@0.29.5)(supports-color@10.2.2):
     dependencies:
       cheerio: 1.2.0
       kysely: 0.29.5

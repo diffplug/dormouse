@@ -42,7 +42,7 @@ export async function verifyPackages() {
   );
   assert.deepEqual(
     manifest.files.map((entry) => entry.filename).sort(),
-    ["pgstencil-0.1.0.tgz", "pgstencil-auth-0.1.0.tgz"],
+    ["pgstencil-0.2.0.tgz", "pgstencil-auth-0.2.0.tgz"],
     "Expected both pinned pgstencil archives",
   );
   for (const entry of manifest.files) {

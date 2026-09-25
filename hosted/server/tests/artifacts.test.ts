@@ -14,8 +14,8 @@ test("consumed package bytes match the recorded source snapshot", () => {
   // The sync only packs committed revisions; production preflight requires this.
   expect(build.dirty).toBe(false);
   expect(build.files.map((file) => file.filename).sort()).toEqual([
-    "pgstencil-0.1.0.tgz",
-    "pgstencil-auth-0.1.0.tgz",
+    "pgstencil-0.2.0.tgz",
+    "pgstencil-auth-0.2.0.tgz",
   ]);
   for (const file of build.files) {
     expect(
@@ -37,8 +37,8 @@ test("consumed package bytes match the recorded source snapshot", () => {
   }
   // Same-version tarball refreshes must update installed code as well as metadata.
   for (const [archive, entry] of [
-    ["pgstencil-0.1.0.tgz", "pgstencil"],
-    ["pgstencil-auth-0.1.0.tgz", "@pgstencil/auth/better-auth"],
+    ["pgstencil-0.2.0.tgz", "pgstencil"],
+    ["pgstencil-auth-0.2.0.tgz", "@pgstencil/auth/better-auth"],
   ]) {
     const file = fileURLToPath(import.meta.resolve(entry));
     const archivePath = `package/dist/${file.split("/").at(-1)}`;
@@ -59,8 +59,8 @@ test("both pinned specifiers name the recorded archives", () => {
   ) as { dependencies: Record<string, string> };
   const workspace = readFileSync("../pnpm-workspace.yaml", "utf8");
   for (const [name, filename] of [
-    ["pgstencil", "pgstencil-0.1.0.tgz"],
-    ["@pgstencil/auth", "pgstencil-auth-0.1.0.tgz"],
+    ["pgstencil", "pgstencil-0.2.0.tgz"],
+    ["@pgstencil/auth", "pgstencil-auth-0.2.0.tgz"],
   ]) {
     expect(dependencies[name]).toBe(`file:../vendor/${filename}`);
     const override = workspace.match(
@@ -77,7 +77,7 @@ test("Hosted declares every peer of the pinned archives", () => {
   const { dependencies } = JSON.parse(
     readFileSync("package.json", "utf8"),
   ) as { dependencies: Record<string, string> };
-  for (const archive of ["pgstencil-0.1.0.tgz", "pgstencil-auth-0.1.0.tgz"]) {
+  for (const archive of ["pgstencil-0.2.0.tgz", "pgstencil-auth-0.2.0.tgz"]) {
     const manifest = execFileSync(
       "tar",
       ["-xOf", "../vendor/" + archive, "package/package.json"],
