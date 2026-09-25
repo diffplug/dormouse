@@ -6,6 +6,7 @@ import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import type { PlatformAdapter } from '../../lib/platform/types';
 import { VIEWER_TEXT_INPUT_MAX, encodeViewerFrame, type BrowserRequest, type BrowserResult, type ViewerInput, type ViewerSyncIntent } from '../../lib/platform/browser-automation';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
+import { viewportFromMeasurement } from './browser-surface';
 import { forgetLaunchBinaryPaths, launchBinaryPath, rememberLaunchBinaryPath } from './browser-automation';
 import {
   HIDDEN_PARK_DELAY_MS,
@@ -1653,17 +1654,68 @@ describe('relaunch (pop-out / pop-in)', () => {
   });
 });
 
+it('persists an agent-browser DPR-only change after measuring the native browser', async () => {
+  const host = installBrowserHost({ measure: () => ({ ok: true, viewport: { width: 1024, height: 768, dpr: 2 } }) });
+  const controller = withPort('ab', {
+    session: 's', browserViewport: { mode: 'fixed', width: 1024, height: 768 },
+  }, 4321);
+  const sink = makeSink();
+  controller.attachView(sink);
+  await flushMicrotasks();
+  streamSocket(4321)!.emitMessage(JSON.stringify({
+    type: 'status', connected: true, screencasting: true,
+    viewportWidth: 1024, viewportHeight: 768, devicePixelRatio: 2,
+  }));
+  await flushMicrotasks();
+
+  expect(host.requests('measure')).toHaveLength(1);
+  expect(sink.updateParameters).toHaveBeenCalledWith({
+    browserViewport: { mode: 'fixed', width: 1024, height: 768, dpr: 2 },
+  });
+});
+
 describe('Playwright provider', () => {
-  it('persists an external DPR-only change when the fixed choice omitted DPR', async () => {
-    const host = installBrowserHost({ measure: () => ({ ok: true, viewport: { width: 1024, height: 768, dpr: 2 } }) });
+  it('keeps native DPR separate from the viewport replayed after an unmounted Surface binds', () => {
+    const native = viewportFromMeasurement('playwright', { mode: 'fixed', width: 1440, height: 900 },
+      { width: 390, height: 844, dpr: 3 });
+    expect(native).toEqual({ mode: 'fixed', width: 390, height: 844 });
+    expect(viewportFromMeasurement('playwright', native, { width: 390, height: 844, dpr: 3 })).toEqual(native);
+    expect(viewportFromMeasurement('playwright', { mode: 'fixed', width: 390, height: 844, dpr: 2 },
+      { width: 390, height: 844, dpr: 2 })).toEqual({ mode: 'fixed', width: 390, height: 844, dpr: 2 });
+  });
+
+  it('keeps a native measured DPR out of the next Playwright open setting', async () => {
+    const host = installBrowserHost({ measure: () => ({ ok: true, viewport: { width: 1024, height: 768, dpr: 3 } }) });
     const controller = withPort('pw', {
       renderMode: 'playwright-screencast', session: 's',
-      browserViewport: { mode: 'fixed', width: 1024, height: 768 },
+      browserViewport: { mode: 'fixed', width: 900, height: 700 },
     }, 4321);
     const sink = makeSink();
     controller.attachView(sink);
     await flushMicrotasks();
 
+    streamSocket(4321)!.emitMessage(JSON.stringify({
+      type: 'status', connected: true, screencasting: true,
+      viewportWidth: 1024, viewportHeight: 768, devicePixelRatio: 3,
+    }));
+    await flushMicrotasks();
+
+    expect(host.requests('measure')).toHaveLength(1);
+    expect(sink.updateParameters).toHaveBeenCalledWith({
+      browserViewport: { mode: 'fixed', width: 1024, height: 768 },
+    });
+    expect(getAgentBrowserScreenController('pw')!.snapshot().viewport.dpr).toBe(3);
+  });
+
+  it('retains an explicit DPR when Playwright still measures that ratio', async () => {
+    const host = installBrowserHost({ measure: () => ({ ok: true, viewport: { width: 1024, height: 768, dpr: 2 } }) });
+    const controller = withPort('pw', {
+      renderMode: 'playwright-screencast', session: 's',
+      browserViewport: { mode: 'fixed', width: 900, height: 700, dpr: 2 },
+    }, 4321);
+    const sink = makeSink();
+    controller.attachView(sink);
+    await flushMicrotasks();
     streamSocket(4321)!.emitMessage(JSON.stringify({
       type: 'status', connected: true, screencasting: true,
       viewportWidth: 1024, viewportHeight: 768, devicePixelRatio: 2,

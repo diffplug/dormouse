@@ -2,9 +2,9 @@ import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import type { ToolLookupResult } from '../lib/platform/tool-types';
 import { resolveToolInput } from './tool-input';
-import { parseToolFile, type ToolEntry, type ToolFile } from './tool-registry';
+import { parseBrowserSection, parseToolFile, type ToolEntry, type ToolFile } from './tool-registry';
 import { readToolFile } from './tool-trust';
-import { mergeBrowserConfig, toolViewport } from './browser-config';
+import { mergeBrowserConfig, toolViewport, type BrowserConfigLayer } from './browser-config';
 import type { BrowserViewportConfig } from 'dor-lib-common/browser-viewports';
 
 export function userToolConfigPath(): string {
@@ -17,6 +17,17 @@ export async function readUserToolFile(path: string): Promise<ToolFile | null> {
     return parseToolFile(await readToolFile(path, { followSymlink: true }), { path, dir: dirname(path), scope: 'user' });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+/** Browser preferences share the user's bounded read, but malformed Tool
+ * entries must not prevent an automated browser from opening. */
+export async function readUserBrowserConfig(path: string): Promise<BrowserConfigLayer | undefined> {
+  try {
+    return parseBrowserSection(await readToolFile(path, { followSymlink: true }), path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw error;
   }
 }

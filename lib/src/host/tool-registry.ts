@@ -57,6 +57,36 @@ export interface ToolFile {
 
 export class ToolFileError extends Error {}
 
+/** Parse the shared YAML document before choosing which section to validate.
+ * A malformed document is always an error; browser-only reads deliberately do
+ * not inspect `tools` or `open` fields. */
+function parseDocument(text: string, path: string): Record<string, unknown> | undefined {
+  let doc: unknown;
+  try {
+    doc = parseYaml(text);
+  } catch (error) {
+    throw new ToolFileError(`${path}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (doc === null || doc === undefined) return undefined;
+  if (!isRecord(doc)) throw new ToolFileError(`${path}: expected a mapping at the top level`);
+  return doc;
+}
+
+/** Read only browser preferences from a bounded `dormouse.yml` text. Tool
+ * execution still goes through the full Tool parser and trust gate. */
+function browserFromDocument(doc: Record<string, unknown> | undefined, path: string): BrowserConfigLayer | undefined {
+  if (doc?.browser === undefined) return undefined;
+  try {
+    return parseBrowserConfig(doc.browser, `${path}: browser`);
+  } catch (error) {
+    throw new ToolFileError(error instanceof Error ? error.message : String(error));
+  }
+}
+
+export function parseBrowserSection(text: string, path: string): BrowserConfigLayer | undefined {
+  return browserFromDocument(parseDocument(text, path), path);
+}
+
 /** Substitutions a `prespawn_dedupe` element may use. Closed set: an
  *  unrecognized `$NAME` is a parse error, never a literal, because a typo kept
  *  as a constant string dedupes across every worktree on the machine. */
@@ -120,23 +150,12 @@ export function parseToolFile(
   opts: { path: string; dir: string; scope: ToolScope },
 ): ToolFile {
   const { path, dir, scope } = opts;
-  let doc: unknown;
-  try {
-    doc = parseYaml(text);
-  } catch (error) {
-    throw new ToolFileError(`${path}: ${error instanceof Error ? error.message : String(error)}`);
-  }
+  const doc = parseDocument(text, path);
   // An empty file is a valid file with no tools, not a broken one.
-  if (doc === null || doc === undefined) {
+  if (doc === undefined) {
     return { scope, dir, tools: new Map(), warnings: [], open: [] };
   }
-  if (!isRecord(doc)) throw new ToolFileError(`${path}: expected a mapping at the top level`);
-  let browser: BrowserConfigLayer | undefined;
-  try {
-    if (doc.browser !== undefined) browser = parseBrowserConfig(doc.browser, `${path}: browser`);
-  } catch (error) {
-    throw new ToolFileError(error instanceof Error ? error.message : String(error));
-  }
+  const browser = browserFromDocument(doc, path);
 
   const toolsNode = doc.tools === undefined ? {} : doc.tools;
   if (!isRecord(toolsNode)) throw new ToolFileError(`${path}: 'tools' must be a mapping of name to entry`);

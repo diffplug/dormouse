@@ -8,6 +8,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/). Release checklist in [deploy.md](docs/specs/deploy.md).
 
+## [Unreleased]
+### Changed
+- Automated browser panes default to a fixed 1440×900 viewport. Shared `dormouse.yml` presets, `dor-embed-size`, and Dor Tool viewport declarations support explicit sizing or `pane-sync` ([#791](https://github.com/diffplug/dormouse/pull/791)).
+- **BREAKING** Browser commands and renderer identifiers use full lowercase provider names. `dor ab`, `dor pw`, and saved `ab-*` / `pw-*` renderer values have no compatibility mapping. Old saved automated panes fall back to iframe rendering; reopen them with `dor agent-browser` or `dor playwright`. Update Tool declarations to `agent-browser-screencast` or `playwright-screencast` ([#791](https://github.com/diffplug/dormouse/pull/791)).
+
 ## [1.1.0] - 2026-07-16
 ### Changed
 - Zooming a pane (`z`) now elevates and animates it above the tiled layout and couples it to focus: pressing `z` zooms the pane **and** enters passthrough, and the zoom ends the moment you leave passthrough or focus another pane (rather than staying maximized until you toggle it back). Manual splits (`|` `%` `-` `"`, header split buttons) and Host New Terminal actions now immediately select the new pane and enter passthrough, so building a layout with several splits in a row means re-entering command mode between them; background control-plane creation (`dor split`, `dor ensure`, `dor agent-browser`, `dor iframe`) is unchanged ([#265](https://github.com/diffplug/dormouse/pull/265)).

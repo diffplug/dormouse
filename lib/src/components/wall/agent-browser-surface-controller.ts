@@ -46,7 +46,7 @@ import {
   surfaceProvider,
   type BrowserHandle,
 } from './browser-automation';
-import { agentBrowserSessionFromParams, isToolParams } from './browser-surface';
+import { agentBrowserSessionFromParams, isToolParams, viewportFromMeasurement } from './browser-surface';
 import {
   EDIT_OPS,
   SPECIAL_KEYS,
@@ -1033,7 +1033,8 @@ export class AgentBrowserSurfaceController {
         if (!this.headed && !this.syncEngaged && this.browserViewport.mode === 'fixed'
           && typeof width === 'number' && typeof height === 'number'
           && (width !== this.browserViewport.width || height !== this.browserViewport.height
-            || (typeof dpr === 'number' && dpr !== this.browserViewport.dpr))) {
+            || (typeof dpr === 'number' && (this.provider === 'agent-browser' || this.browserViewport.dpr !== undefined)
+              && dpr !== this.browserViewport.dpr))) {
           this.checkExternalViewportChange();
         }
         // A status without a ratio sizes the daemon's viewport, not the window.
@@ -1190,7 +1191,7 @@ export class AgentBrowserSurfaceController {
   adoptMeasuredViewport(actual: { width: number; height: number; dpr: number }): void {
     if (this.syncEngaged || this.headed) return;
     this.fixedDpr = actual.dpr;
-    this.setBrowserViewport({ mode: 'fixed', ...actual });
+    this.setBrowserViewport(viewportFromMeasurement(this.provider, this.browserViewport, actual));
     this.publishScreen();
   }
 

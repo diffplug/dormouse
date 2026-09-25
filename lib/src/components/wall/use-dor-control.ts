@@ -59,6 +59,7 @@ import {
   toolKeysEqual,
   toolPendingFromParams,
   toolScopeFromParams,
+  viewportFromMeasurement,
   type ToolPending,
 } from './browser-surface';
 
@@ -1767,7 +1768,7 @@ export function useDorControl({
           const stored = (lath.getMeta(target.id)?.params as { browserViewport?: unknown } | undefined)?.browserViewport;
           if (!isBrowserViewportSetting(stored) || stored.mode !== 'pane-sync') {
             if (controller) controller.adoptMeasuredViewport(measured.viewport);
-            else updateSurfaceParams(target.id, { browserViewport: { mode: 'fixed', ...measured.viewport }, syncEngaged: false });
+            else updateSurfaceParams(target.id, { browserViewport: viewportFromMeasurement(provider, isBrowserViewportSetting(stored) ? stored : undefined, measured.viewport), syncEngaged: false });
           }
         }
         const stored = (lath.getMeta(target.id)?.params as { browserViewport?: unknown } | undefined)?.browserViewport;
@@ -1856,7 +1857,7 @@ export function useDorControl({
         if (observed.ok && observed.viewport && (!isBrowserViewportSetting(stored) || stored.mode !== 'pane-sync')) {
           const controller = getAgentBrowserSurfaceController(result.surfaceId);
           if (controller) controller.adoptMeasuredViewport(observed.viewport);
-          else updateSurfaceParams(result.surfaceId, { browserViewport: { mode: 'fixed', ...observed.viewport }, syncEngaged: false });
+          else updateSurfaceParams(result.surfaceId, { browserViewport: viewportFromMeasurement(provider, isBrowserViewportSetting(stored) ? stored : undefined, observed.viewport), syncEngaged: false });
         }
       }
       // Bound: later commands for the key resolve to this Surface.

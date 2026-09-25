@@ -13,6 +13,19 @@ import type { BrowserBinding, SurfaceKind } from 'dor/commands/types';
 import { isToolKeyScope, type ToolKeyScope } from '../../lib/platform/tool-types';
 import { parseRenderMode, renderModeFor, sessionForKey } from 'dor-lib-common/browser-providers';
 import { isBrowserViewportSetting, type BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
+import type { BrowserAutomationProvider } from '../../lib/platform/browser-automation';
+
+/** A measured Playwright ratio belongs to its native context; only a ratio
+ * explicitly requested for this Surface may be replayed on its next open. */
+export function viewportFromMeasurement(
+  provider: BrowserAutomationProvider,
+  previous: BrowserViewportSetting | undefined,
+  actual: { width: number; height: number; dpr: number },
+): BrowserViewportSetting {
+  const dpr = provider === 'agent-browser' ? actual.dpr
+    : previous?.mode === 'fixed' && previous.dpr === actual.dpr ? previous.dpr : undefined;
+  return { mode: 'fixed', width: actual.width, height: actual.height, ...(dpr === undefined ? {} : { dpr }) };
+}
 
 type BrowserParamsLike = {
   surfaceType?: unknown;

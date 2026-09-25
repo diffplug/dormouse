@@ -13,10 +13,10 @@ import type { ToolControlResult, ToolHostRequest } from '../lib/platform/tool-ty
 import { resolveUpstreamUrl } from './git-upstream';
 import { resolveOpenTool } from './tool-open';
 import type { ToolInput } from './tool-input';
-import { parseToolFile, type ToolEntry } from './tool-registry';
+import { parseBrowserSection, type ToolEntry } from './tool-registry';
 import { mergeBrowserConfig, toolViewport } from './browser-config';
 import type { BrowserViewportConfig } from 'dor-lib-common/browser-viewports';
-import { readUserToolFile, resolveUserTool, userToolConfigPath } from './tool-user-config';
+import { readUserBrowserConfig, readUserToolFile, resolveUserTool, userToolConfigPath } from './tool-user-config';
 import {
   FileToolTrustStore,
   MemoryToolTrustStore,
@@ -109,8 +109,8 @@ export function createToolHost(options: { stateDir?: string; userConfigPath?: st
 
 /** Same bounded discovery and parsing as Tools, without their execution gate. */
 async function readBrowserConfig(cwd: string, userPath: string): Promise<BrowserViewportConfig> {
-  const user = await readUserToolFile(userPath);
+  const user = await readUserBrowserConfig(userPath);
   const found = await findToolFile(cwd);
-  const project = found ? parseToolFile(found.text, { path: found.path, dir: found.dir, scope: 'repo' }) : undefined;
-  return mergeBrowserConfig(user?.browser, project?.browser);
+  const project = found ? parseBrowserSection(found.text, found.path) : undefined;
+  return mergeBrowserConfig(user, project);
 }
