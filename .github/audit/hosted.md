@@ -26,14 +26,18 @@ runtime imports for references to a sibling pgstencil checkout.
 
 Verify npm's signed SLSA provenance for each installed package/version. Use a
 temporary npm consumer of the exact locked versions and `npm audit signatures
---json --include-attestations` (npm does not audit a pnpm-only install). Require
-that neither is in `invalid` or `missing`, then decode its verified SLSA DSSE
-payload. The signed subject must identify the installed package/version and
-its digest; `predicate.buildDefinition.externalParameters.workflow` must name
-`https://github.com/diffplug/pgstencil`, `.github/workflows/release.yml`, and
-`refs/heads/main`; `resolvedDependencies` must name the same commit as the
-installed `dist/provenance.json`. A registry field or unsigned package file
-alone is insufficient. Then check the commit against pgstencil `main` and its audit:
+--json --include-attestations` (npm does not audit a pnpm-only install). Each
+package **must appear in `verified`** with a SLSA provenance bundle; reject
+`invalid` and `missing` entries too. Decode the verified SLSA DSSE payload and
+the Fulcio certificate in that bundle. The certificate SAN must be
+`https://github.com/diffplug/pgstencil/.github/workflows/release.yml@refs/heads/main`;
+its source-repository digest extension `1.3.6.1.4.1.57264.1.13` must equal
+the installed `dist/provenance.json` commit. The signed subject must identify
+the installed package/version and digest; the payload's
+`externalParameters.workflow` and `resolvedDependencies` must agree with the
+certificate and commit. npm verifies the signature and subject digest, but
+the payload's workflow claim alone is not the signer identity. Then check the
+commit against pgstencil `main` and its audit:
 
 ```sh
 gh api repos/diffplug/pgstencil/compare/<commit>...main --jq .status
