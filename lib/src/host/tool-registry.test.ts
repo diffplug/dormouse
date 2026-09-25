@@ -39,9 +39,9 @@ tools:
     });
   });
 
-  it('reads an ab-screencast renderer, the one that makes a tool agent-drivable', () => {
-    const file = parse('tools:\n  harness:\n    run: pnpm dev\n    render: ab-screencast\n');
-    expect(file.tools.get('harness')?.render).toBe('ab-screencast');
+  it('reads an agent-browser-screencast renderer, the one that makes a tool agent-drivable', () => {
+    const file = parse('tools:\n  harness:\n    run: pnpm dev\n    render: agent-browser-screencast\n');
+    expect(file.tools.get('harness')?.render).toBe('agent-browser-screencast');
   });
 
   it('defaults port selection to announced, so nothing guesses unless asked', () => {
@@ -196,7 +196,7 @@ describe("this repo's own dormouse.yml", () => {
     expect(file.tools.get('storybook')?.run).toBe('pnpm storybook');
     expect(file.tools.get('standalone-harness')?.run).toBe('pnpm innerdogfood');
     // The harness is the agent-drivable one; storybook only needs framing.
-    expect(file.tools.get('standalone-harness')?.render).toBe('ab-screencast');
+    expect(file.tools.get('standalone-harness')?.render).toBe('agent-browser-screencast');
     expect(file.tools.get('storybook')?.render).toBe('iframe');
     // storybook autobinds (it never announces); the harness announces, because
     // its dev bridge binds before vite.

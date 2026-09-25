@@ -4,6 +4,7 @@ import type {
   StricliProcess,
 } from '@stricli/core';
 import type { BrowserAutomationProvider, BrowserBinding, SurfaceRenderMode } from 'dor-lib-common/browser-providers';
+import type { BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 
 export type { BrowserAutomationProvider, BrowserBinding, SurfaceRenderMode };
 
@@ -432,6 +433,10 @@ export interface ResolveBrowserResponse {
   /** The key's or Surface's binding; a key no Surface holds yet gets the
    *  session the host minted for it. */
   binding: BrowserBinding;
+  /** A new managed session that needs viewport preparation before navigation. */
+  fresh?: boolean;
+  initialViewport?: BrowserViewportSetting;
+  launchViewport?: { width: number; height: number; dpr?: number };
 }
 
 /** After a browser command succeeds: open or reuse the Surface bound to its
@@ -446,10 +451,27 @@ export interface BrowserSurfaceRequest extends WorkspaceScopedRequest {
   /** Absolute path of the provider's binary, resolved with the invoking
    * terminal's PATH so the host (which may lack it) can drive the browser. */
   binaryPath?: string;
-  /** agent-browser only: the stream port `dor ab` read itself after the
+  /** agent-browser only: the stream port `dor agent-browser` read itself after the
    * command; the Surface streams from it instead of asking the host. */
   wsPort?: number;
   minimized?: boolean;
+  initialViewport?: BrowserViewportSetting;
+}
+
+export type BrowserViewportRequest = WorkspaceScopedRequest & { provider: BrowserAutomationProvider; setting?: BrowserViewportSetting | { preset: string; dpr?: number } } & (
+  | { key: string; surface?: undefined; session?: undefined }
+  | { surface: string; key?: undefined; session?: undefined }
+  | { session: string; key?: undefined; surface?: undefined }
+);
+
+export interface BrowserViewportResponse {
+  surfaceId: string;
+  surfaceRef: string;
+  provider: BrowserAutomationProvider;
+  renderMode: SurfaceRenderMode;
+  requested: BrowserViewportSetting;
+  actual?: { width: number; height: number; dpr: number };
+  ready: boolean;
 }
 
 export interface BrowserSurfaceResponse {
@@ -462,6 +484,7 @@ export interface BrowserSurfaceResponse {
 
 export interface ControlClient {
   browserSurface(request: BrowserSurfaceRequest): Promise<BrowserSurfaceResponse>;
+  browserViewport(request: BrowserViewportRequest): Promise<BrowserViewportResponse>;
   resolveBrowser(request: ResolveBrowserRequest): Promise<ResolveBrowserResponse>;
   listSurfaces(request: ListSurfacesRequest): Promise<ListSurfacesResponse>;
   splitSurface(request: SplitSurfaceRequest): Promise<SplitSurfaceResponse>;
@@ -490,7 +513,7 @@ export interface BrowserExecResult {
 
 /** Runs the user's browser CLI binary, in `cwd` when given; injectable so CLI
  *  tests stay hermetic. */
-export type BrowserExec = (binary: string, args: string[], cwd?: string) => Promise<BrowserExecResult>;
+export type BrowserExec = (binary: string, args: string[], cwd?: string, env?: Record<string, string>) => Promise<BrowserExecResult>;
 
 export interface CliEnv {
   [key: string]: string | undefined;

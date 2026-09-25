@@ -350,7 +350,7 @@ snapshot equals real help output.
 
 Stable anchors: `#targeting`, `#surface-handles`, `#dor`, one per canonical
 command snapshot filename, and `#agent-browser` for both `dor agent-browser` and
-the `dor ab` alias.
+the `dor agent-browser` alias.
 
 The targeting and Surface-handle introduction is extracted from the matching
 sections of `dor/skill.md`; it is not re-authored in the website.
@@ -529,7 +529,7 @@ so it can drift from real output with nothing to catch it (rationale). Two
 mitigations bound that drift: command *syntax* matches
 `dor/test/snapshots/help/`, which is tested against the real CLI, and output
 uses notation the CLI itself documents — `created surface:N  "<command>"` from
-`dor ensure`'s text output, the resolution arrow from `dor ab`'s own examples —
+`dor ensure`'s text output, the resolution arrow from `dor agent-browser`'s own examples —
 rather than invented formatting. **Must mark the block authored and untested in
 a source comment.**
 

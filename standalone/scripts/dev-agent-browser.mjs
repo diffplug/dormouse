@@ -358,7 +358,7 @@ async function openAgentBrowser() {
   const identity = insideDormouse && !process.env.DORMOUSE_BROWSER_DEV_AB_SESSION
     ? ['--key', worktreeKey]
     : ['--session', browserSession];
-  const args = insideDormouse ? ['ab', ...identity] : identity;
+  const args = insideDormouse ? ['agent-browser', ...identity] : identity;
   const command = `${binary} ${args.join(' ')}`;
   if (process.env.DORMOUSE_BROWSER_DEV_HEADED === '1') args.push('--headed');
   args.push('open', viteOrigin);
@@ -371,7 +371,7 @@ async function openAgentBrowser() {
       ? resolve()
       : reject(new Error(`${binary} exited code=${code} signal=${signal}`)));
   });
-  // Name what was actually passed. `dor ab --key` is namespaced by the Workspace
+  // Name what was actually passed. `dor agent-browser --key` is namespaced by the Workspace
   // that will hold the browser, which only the host can resolve
   // (docs/specs/dor-browser.md -> "Managed identity"), so printing a
   // `sessionForKey` guess here would name a bare-Wall session nothing created.

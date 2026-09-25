@@ -28,9 +28,14 @@ command surface. The binary is resolved from PATH (override with
 DORMOUSE_AGENT_BROWSER_BIN) and is never bundled; install it with:
   npm i -g agent-browser
 
+Dormouse intercepts dor-embed-size to query or set the pane's browser viewport:
+  dor agent-browser dor-embed-size --json
+  dor agent-browser dor-embed-size 1440 900 --dpr 2
+  dor agent-browser dor-embed-size --preset pane-sync
+
 After a successful command, dor opens the browser surface bound to the session,
-or reuses the one it already has. A Playwright browser (render_mode pw-*) is
-driven with dor pw --surface instead.
+or reuses the one it already has. A playwright browser (render_mode playwright-*) is
+driven with dor playwright --surface instead.
 
 In an "open" command, dor also resolves a Dormouse target in place of a URL:
 a schemeless host:port (and the ":<port>" localhost shorthand) defaults to
@@ -39,14 +44,14 @@ http:// rather than agent-browser's https://, and a terminal Surface handle
 dev-server URL that terminal owns via the host port scan.
 
 Examples:
-  dor ab open http://localhost:5173        # key "default"
-  dor ab open localhost:5173                # → http://localhost:5173/
-  dor ab open :5173                         # → http://localhost:5173/
-  dor ab open surface:3                     # open the port terminal surface:3 owns
-  dor ab --key storybook open http://localhost:6006
-  dor ab click @e3                          # drives key "default"
-  dor ab --key storybook reload             # drives key "storybook"
-  dor ab --surface surface:4 click @e3      # drives whatever surface:4 is bound to
+  dor agent-browser open http://localhost:5173        # key "default"
+  dor agent-browser open localhost:5173                # → http://localhost:5173/
+  dor agent-browser open :5173                         # → http://localhost:5173/
+  dor agent-browser open surface:3                     # open the port terminal surface:3 owns
+  dor agent-browser --key storybook open http://localhost:6006
+  dor agent-browser click @e3                          # drives key "default"
+  dor agent-browser --key storybook reload             # drives key "storybook"
+  dor agent-browser --surface surface:4 click @e3      # drives whatever surface:4 is bound to
 
 FLAGS
      [--key]        Workspace-scoped browser key (default "default").

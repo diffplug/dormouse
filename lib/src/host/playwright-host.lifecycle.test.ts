@@ -88,6 +88,14 @@ test('concurrent captures join one, a concurrent control shares its CDP attachme
   expect(browser.close).toHaveBeenCalledTimes(1);
 });
 
+test('an explicit different DPR is refused before resizing or changing device emulation', async () => {
+  page.setViewportSize = vi.fn(async () => {});
+  const result = await pw({ op: 'viewport', width: 390, height: 844, dpr: 2 });
+  expect(result).toMatchObject({ ok: false, error: expect.stringContaining('cannot change DPR') });
+  expect(page.setViewportSize).not.toHaveBeenCalled();
+  expect(cdp.send).not.toHaveBeenCalled();
+});
+
 test('closing during a CDP attachment releases it without capturing', async () => {
   let complete!: (value: typeof cdp) => void;
   attach.mockImplementation(() => new Promise(resolve => { complete = resolve; }));
@@ -190,7 +198,7 @@ test('a GUI open launches its fresh session without closing it first; a named la
 });
 
 test('a relaunch without an http(s) page reopens blank; a GUI open still needs one', async () => {
-  // A bare `dor pw open` pane sits on about:blank; a headed window can be left
+  // A bare `dor playwright open` pane sits on about:blank; a headed window can be left
   // on a file, data or error page when the user closes it. Each is a pop-out
   // of the headless browser up, so a relaunch.
   for (const url of [undefined, 'about:blank', 'file:///etc/passwd', 'data:text/html,hi', 'chrome-error://chromewebdata/']) {
@@ -252,7 +260,7 @@ describe('attach', () => {
   });
 
   test('a gone session relaunches at the page named, and fails without one', async () => {
-    expect((await pw({ op: 'attach' })).error).toBe('Playwright session is not open or has no viewable endpoint');
+    expect((await pw({ op: 'attach' })).error).toBe('playwright session is not open or has no viewable endpoint');
     expect(verbs()).not.toContain('open');
 
     const attached = await pw({ op: 'attach', url: 'http://localhost/', headed: true });
@@ -606,16 +614,35 @@ describe('sync-to-pane', () => {
       return { ...seen, dpr: 1 };
     });
   });
-  /** The poll's next measurement, as a `dor pw` command's attach runs it. */
+  /** The poll's next measurement, as a `dor playwright` command's attach runs it. */
   const poll = () => pw({ op: 'attach' });
 
+  test('rejected DPR and device requests leave pane sync engaged and its size unchanged', async () => {
+    const viewer = await viewSession();
+    try {
+      viewer.send({ type: 'sync', width: 800, height: 600, dpr: 2, engagement: 'e1' });
+      await vi.waitFor(() => expect(emulated).toEqual({ width: 800, height: 600 }));
+      await poll();
+      await vi.waitFor(() => expect(syncStates(viewer).at(-1)).toBe('synced'));
+      const writes = vi.mocked(page.setViewportSize).mock.calls.length;
+      expect((await pw({ op: 'viewport', width: 390, height: 844, dpr: 2, endsSync: 'e1' })).ok).toBe(false);
+      expect((await pw({ op: 'device', name: 'Unknown Device', endsSync: 'e1' })).ok).toBe(false);
+      expect(vi.mocked(page.setViewportSize).mock.calls).toHaveLength(writes);
+      expect(syncStates(viewer)).not.toContain('off');
+      viewer.send({ type: 'sync', width: 820, height: 600, dpr: 2, engagement: 'e1' });
+      await vi.waitFor(() => expect(emulated).toEqual({ width: 820, height: 600 }));
+      await poll();
+      await vi.waitFor(() => expect(syncStates(viewer).at(-1)).toBe('synced'));
+    } finally { viewer.socket.terminate(); }
+  });
+
   test('sizes a page only through Playwright\'s own setViewportSize; a device adds only its touch and user agent', async () => {
-    expect((await pw({ op: 'viewport', width: 900, height: 600, dpr: 2 })).ok).toBe(true);
+    expect((await pw({ op: 'viewport', width: 900, height: 600 })).ok).toBe(true);
     expect(page.setViewportSize).toHaveBeenLastCalledWith({ width: 900, height: 600 });
     expect((await pw({ op: 'device', name: 'iPhone 15' })).ok).toBe(true);
     expect(page.setViewportSize).toHaveBeenLastCalledWith({ width: 393, height: 659 });
-    expect((await pw({ op: 'viewport', width: 800, height: 600, dpr: 2 })).ok).toBe(true);
-    expect((await pw({ op: 'viewport', width: 820, height: 600, dpr: 2 })).ok).toBe(true);
+    expect((await pw({ op: 'viewport', width: 800, height: 600 })).ok).toBe(true);
+    expect((await pw({ op: 'viewport', width: 820, height: 600 })).ok).toBe(true);
     // No metrics override: a second writer Chrome re-applies on navigation.
     expect(cdp.send.mock.calls.filter(([method]) => method.startsWith('Emulation.'))).toEqual([
       ['Emulation.setTouchEmulationEnabled', { enabled: true }],
@@ -678,4 +705,3 @@ describe('sync-to-pane', () => {
     }
   });
 });
-

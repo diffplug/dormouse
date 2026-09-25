@@ -9,6 +9,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./browser-viewports": {
+      "types": "./dist/browser-viewports.d.ts",
+      "default": "./dist/browser-viewports.js"
+    },
     "./browser-providers": {
       "types": "./dist/browser-providers.d.ts",
       "default": "./dist/browser-providers.js"

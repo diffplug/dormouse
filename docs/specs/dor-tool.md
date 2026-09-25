@@ -39,7 +39,8 @@ Source of truth: `surfaceKindFromParams` / `isToolParams` in `lib/src/components
 | Field | Behavior |
 | --- | --- |
 | `run` | Required shell command string or argument list, typed into the configured shell after integration readiness |
-| `render` | `iframe` by default, or `ab-screencast` |
+| `render` | `iframe` by default, `agent-browser-screencast`, or `playwright-screencast` |
+| `viewport` | Initial browser sizing; `docs/specs/dor-browser.md` → Viewport presets owns resolution and defaults |
 | `port` | `announced` by default, or `auto`; [Serving](#serving) owns selection |
 | `prespawn_dedupe` | Optional scalar or list of literal key elements with substitutions |
 
@@ -55,6 +56,10 @@ Source of truth: `surfaceKindFromParams` / `isToolParams` in `lib/src/components
 **Must require exactly one existing regular local file when `$TARGET` appears in the run list or dedupe key.** Resolve relative paths against the invocation CWD and follow symlinks to a canonical absolute path before substitution and reuse. Reject URLs, directories, and missing files. Validate run and key inputs before showing approval. Pending approval distinguishes the original arguments and invocation CWD; [Trust](#trust) owns re-resolution and recovery. Input control-character restrictions belong to `docs/specs/security-local.md` → Dor Tool configuration.
 
 Source of truth: `lookupTool` in `lib/src/host/tool-trust.ts`; `parseToolFile` / `resolveDedupeKey` in `lib/src/host/tool-registry.ts`; `resolveToolInput` in `lib/src/host/tool-input.ts`; `readUserToolFile` in `lib/src/host/tool-user-config.ts`; `toolRunCommand` in `lib/src/components/wall/use-dor-control.ts`; `lib/src/host/tool-host.test.ts`, `lib/src/host/tool-trust.test.ts`, `lib/src/host/tool-open.test.ts`, `lib/src/components/Wall.test.tsx`.
+
+**Must resolve a Tool's initial viewport host-side with its declaration, including after approval.** Iframe Tools accept only `pane-sync`; automated Tools accept a preset or inline dimensions. **Must preserve live user/agent sizing when reusing a Tool**, rather than reapplying its declaration.
+
+Source of truth: `toolViewport` in `lib/src/host/browser-config.ts`; `createToolHost` in `lib/src/host/tool-host.ts`; `lib/src/host/browser-config.test.ts` and `lib/src/host/tool-host.test.ts`.
 
 ## Identity and dedupe
 
@@ -239,6 +244,8 @@ The Tool-specific local boundaries are `docs/specs/security-local.md` → Dor To
 ## Persistence and hosts
 
 **Must persist the command and stable Tool metadata with `surfaceType: 'tool'`**, retaining the ordinary CWD field. Never persist a derived URL, browser session binding, conflict, or pending approval as runnable Tool state. Live notes follow `docs/specs/notepad.md` → Live resume.
+
+**Must retain resolved browser viewport settings with Tool metadata**, including cold restore and Workspace transfer; sizing behavior belongs to `docs/specs/dor-browser.md` → Viewport presets.
 
 **Must retain resolved argv for argument-list Tools and re-quote it for the shell selected at cold restore.** Update the restored command in terminal options and Tool pane/door metadata. Literal shell-string commands retain their saved text. Reject persisted argv containing terminal controls before restoring any PTY.
 

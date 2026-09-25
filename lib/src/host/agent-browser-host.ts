@@ -16,7 +16,7 @@ import * as path from 'path';
 import { promises as fs } from 'fs';
 // All external spawns go through dor-lib-common's spawnAndCapture, which owns the
 // Windows recipe (cross-spawn for PATHEXT/.cmd, windowsHide, exit-vs-close). The
-// GUI host needs it even for the absolute `binaryPath` dor ab resolved.
+// GUI host needs it even for the absolute `binaryPath` dor agent-browser resolved.
 // See docs/specs/dor-cli.md → "Spawning External Binaries".
 import {
   BROWSER_PROVIDERS,
@@ -50,7 +50,7 @@ function actArgv(act: BrowserAct): string[] | null {
     case 'tab':
       if (TAB_VERBS.has(act.tabId)) return null;
       return act.action === 'select' ? ['tab', act.tabId] : ['tab', 'close', act.tabId];
-    case 'viewport': return ['set', 'viewport', String(act.width), String(act.height), String(act.dpr)];
+    case 'viewport': return ['set', 'viewport', String(act.width), String(act.height), ...(act.dpr === undefined ? [] : [String(act.dpr)])];
     case 'device': return ['set', 'device', act.name];
   }
 }
@@ -179,7 +179,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
   const log = deps.log ?? (() => {});
 
   // The host's PATH is often the GUI login PATH (no nvm/volta shims), so prefer
-  // the absolute path `dor ab` resolved in the user's terminal; fall through on
+  // the absolute path `dor agent-browser` resolved in the user's terminal; fall through on
   // ENOENT (binary missing) to the next candidate in case it has gone stale.
   //
   // The one gate every spawn shares. `binaryPath` arrives from the webview
@@ -403,6 +403,19 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
   }
 
 
+  async function evaluatePage(b: ProviderBinding, script: string): Promise<unknown> {
+    const result = await drive(b, ['eval', script, '--json']);
+    if (result.exitCode !== 0) throw new Error(result.stderr.trim() || `eval exited ${result.exitCode}`);
+    let envelope: { success?: boolean; data?: { result?: unknown }; error?: unknown };
+    try {
+      envelope = JSON.parse(result.stdout);
+    } catch {
+      throw new Error('could not parse eval output');
+    }
+    if (envelope.success === false) throw new Error(typeof envelope.error === 'string' ? envelope.error : 'eval failed');
+    return envelope.data?.result;
+  }
+
   return {
     pollMs: 100,
 
@@ -442,7 +455,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
     // `open` returns when the page's `load` event fires — up to the CLI's
     // action timeout (25s in 0.31.1), after which it exits non-zero with the
     // browser live on the page — and every other daemon command queues behind
-    // it. Run in the project directory, for the config a `dor ab` there read.
+    // it. Run in the project directory, for the config a `dor agent-browser` there read.
     async open(b, url, headed) {
       // The project's directory, so agent-browser reads its
       // `./agent-browser.json`, while that directory still exists.
@@ -490,25 +503,19 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
     },
 
     async act(b, act): Promise<BrowserResult> {
-      const argv = actArgv(act);
+      // agent-browser's omitted scale defaults to 1, so read and pass the
+      // current ratio when a size-only request promises to preserve it.
+      const measured = act.op === 'viewport' && act.dpr === undefined
+        ? await evaluatePage(b, 'devicePixelRatio') : undefined;
+      if (measured !== undefined && (typeof measured !== 'number' || !Number.isFinite(measured) || measured <= 0)) throw new Error('the browser did not report a DPR');
+      const argv = actArgv(act.op === 'viewport' && act.dpr === undefined && typeof measured === 'number' ? { ...act, dpr: measured } : act);
       if (!argv) return { ok: false, error: 'invalid tab operation' };
       const result = await drive(b, argv);
       return result.exitCode === 0 ? { ok: true } : { ok: false, error: cliError(result) };
     },
 
     // eval --json envelope: { success, data: { result }, error }.
-    async evaluate(b, script) {
-      const result = await drive(b, ['eval', script, '--json']);
-      if (result.exitCode !== 0) throw new Error(result.stderr.trim() || `eval exited ${result.exitCode}`);
-      let envelope: { success?: boolean; data?: { result?: unknown }; error?: unknown };
-      try {
-        envelope = JSON.parse(result.stdout);
-      } catch {
-        throw new Error('could not parse eval output');
-      }
-      if (envelope.success === false) throw new Error(typeof envelope.error === 'string' ? envelope.error : 'eval failed');
-      return envelope.data?.result;
-    },
+    evaluate: evaluatePage,
 
     // agent-browser's `screenshot` honors the session's viewport/DPR, unlike
     // the CSS-resolution screencast, and writes the frame where it is told.
@@ -535,7 +542,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
    * CDP (`observeWindow`) — navigations made in the window itself, which the
    * stream does not report, its pages, and its viewport.
    *
-   * `port` is the one `dor ab` read after its command, or a launch or attach
+   * `port` is the one `dor agent-browser` read after its command, or a launch or attach
    * answered: it is only ever dialed on loopback, only the stream's own
    * messages come back from it, and only validated input goes to it. The
    * host captures the browser only when its own state files prove that port

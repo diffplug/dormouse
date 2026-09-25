@@ -16,6 +16,8 @@ import {
   type ViewerSyncState,
 } from '../../lib/platform/browser-automation';
 import { isAllowedBinaryFor } from '../../lib/agent-browser-binary';
+import { getPlatform } from '../../lib/platform';
+import { defaultBrowserViewportConfig, isBrowserViewportSetting, resolveBrowserViewport, type BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import { readTextFromClipboard } from '../../lib/clipboard';
 import { isAbDebugLogsEnabled } from '../../lib/feature-flags';
 import {
@@ -44,7 +46,7 @@ import {
   surfaceProvider,
   type BrowserHandle,
 } from './browser-automation';
-import { agentBrowserSessionFromParams, isToolParams } from './browser-surface';
+import { agentBrowserSessionFromParams, isToolParams, viewportFromMeasurement } from './browser-surface';
 import {
   EDIT_OPS,
   SPECIAL_KEYS,
@@ -78,7 +80,7 @@ function abDebugLog(message: string): void {
 }
 
 /** A viewport the screencast is fixed at: CSS size and device pixel ratio. */
-type FixedViewport = { width: number; height: number; dpr: number };
+type FixedViewport = { width: number; height: number; dpr?: number };
 
 /** The pane's CSS size as laid out — never `getBoundingClientRect()`, which a
  *  Workspace presentation scaling the Wall's subtree shrinks while it moves
@@ -122,6 +124,7 @@ export interface AgentBrowserSurfaceParams {
   binaryPath?: string;
   url?: string;
   syncEngaged?: boolean;
+  browserViewport?: BrowserViewportSetting;
 }
 
 /**
@@ -184,7 +187,7 @@ export interface AgentBrowserViewSink {
   /** Ask the view to swap to iframe or the other automation provider. The ≥2-tab
    *  typed-confirm gate and the Wall's `onSwapRenderMode` are view concerns; the
    *  view reads tabs from the snapshot and decides. */
-  requestRenderSwap(mode?: RenderMode): void;
+  requestRenderSwap(mode?: RenderMode, viewport?: BrowserViewportSetting): void;
   /** The first launch failed: the Wall applies the Surface's `launchFallback`. */
   launchFailed(error: string): void;
 }
@@ -219,7 +222,7 @@ export class AgentBrowserSurfaceController {
   private readonly isTool: boolean;
   /** What `setRenderMode` accepts, fixed on first use with the host's
    *  capabilities. Never a popout or another provider for a tool, whose
-   *  `render` is `iframe` or `ab-screencast`: the swap would tear the browser
+   *  `render` is `iframe` or `agent-browser-screencast`: the swap would tear the browser
    *  down and re-derive the same screencast, so asking for a native window would
    *  get a reload (`docs/specs/dor-tool.md` -> Declaring tools). */
   private renderModesCache: readonly RenderMode[] | null = null;
@@ -243,6 +246,8 @@ export class AgentBrowserSurfaceController {
   private paramsUrl: string | undefined;
   private paramsKey: string | null;
   private paramsSyncEngaged: boolean | undefined;
+  private browserViewport: BrowserViewportSetting;
+  private paramsViewportExplicit: boolean;
 
   // --- viewer socket (exists only while live) ---
   private connection: AgentBrowserConnection | null = null;
@@ -297,6 +302,8 @@ export class AgentBrowserSurfaceController {
   // The DPR of the fixed viewport last issued to this browser, which frames
   // cannot tell; undefined once anything else may have set it.
   private fixedDpr: number | undefined;
+  private viewportIntentEpoch = 0;
+  private pendingViewportWrites = 0;
   private lastPublishedScreen: ScreenSnapshot | null = null;
   // Debounce for sending the host a settled pane size (armed by the pane-size
   // observer below).
@@ -311,6 +318,7 @@ export class AgentBrowserSurfaceController {
   // The same observer also drives sync-to-pane (debounced), so there is one
   // observer on the pane, not two.
   private paneSize: { w: number; h: number } | null = null;
+  private lastPaneSize: { w: number; h: number } | null = null;
   private paneSizeObserver: ResizeObserver | null = null;
   private dprQuery: MediaQueryList | null = null;
 
@@ -370,15 +378,19 @@ export class AgentBrowserSurfaceController {
     // Headedness is derived from the canonical renderMode; an unset mode (a
     // direct mount in tests) is not popped out.
     this.headed = isHeadedMode(params.renderMode);
-    // A fresh surface auto-engages sync (no persisted flag); a re-attached one
-    // restores whatever was persisted into the layout blob.
-    this.syncEngaged = params.syncEngaged ?? true;
+    // A fresh Surface starts fixed; explicit pane-sync survives restoration.
+    this.browserViewport = isBrowserViewportSetting(params.browserViewport)
+      ? params.browserViewport
+      : params.syncEngaged === true ? { mode: 'pane-sync' } : { mode: 'fixed', width: 1440, height: 900 };
+    this.paramsViewportExplicit = isBrowserViewportSetting(params.browserViewport) || params.syncEngaged === true;
+    this.syncEngaged = this.browserViewport.mode === 'pane-sync';
     this.chrome = { url: '', displayUrl: '', title: null, key: this.paramsKey };
 
     // Stable across the controller's life (reads `this`), so the registered
     // screen controller never goes stale.
     this.screenActions = {
       engageSync: () => {
+        this.viewportIntentEpoch += 1;
         // A new engagement, even while engaged: the host reclaims the
         // viewport at the size it last wrote too (an agent's `set` may have
         // taken it), and re-engages a sync it stopped.
@@ -386,14 +398,24 @@ export class AgentBrowserSurfaceController {
         this.hostSynced = false;
         this.forgetFixedViewport();
         this.setSyncEngaged(true);
+        this.setBrowserViewport({ mode: 'pane-sync' });
         this.syncToPane();
       },
       applyDevice: (name) => {
-        this.forgetFixedViewport();
-        this.setSyncEngaged(false);
-        this.drive(`set device ${name}`, (browser) => browser.device(name, this.syncEngagement));
+        const browser = this.driver();
+        if (!browser) return;
+        this.viewportIntentEpoch += 1;
+        this.pendingViewportWrites += 1;
+        void browser.device(name, this.syncEngagement).then(async (result) => {
+          if (!result.ok) { console.warn(`[${this.provider}] set device ${name} failed:`, result.error); return; }
+          this.forgetFixedViewport();
+          this.setSyncEngaged(false);
+          const measured = await browser.measure();
+          if (measured.ok && measured.viewport) this.adoptMeasuredViewport(measured.viewport);
+        }).finally(() => { this.pendingViewportWrites -= 1; });
       },
       applyViewport: (width, height, dpr) => this.fixViewport({ width, height, dpr }),
+      applyViewportSetting: (setting) => this.applyViewportSetting(setting),
       openModal: () => openAgentBrowserScreenModal(this.id),
       setRenderMode: (mode, opts) => this.setRenderMode(mode, opts),
     };
@@ -457,12 +479,18 @@ export class AgentBrowserSurfaceController {
    * this same session, in-controller, carrying the page asked for rather than
    * racing a navigation into it.
    */
-  setRenderMode(mode: RenderMode, opts?: { url?: string }): void {
+  setRenderMode(mode: RenderMode, opts?: { url?: string; viewport?: BrowserViewportSetting }): void {
     if (!this.renderModes.includes(mode)) return;
     const { provider, presentation } = parseRenderMode(mode);
     const headed = presentation === 'popout';
-    if (provider !== this.provider) this.sink?.requestRenderSwap(mode);
-    else if (headed !== this.headed) this.relaunch(headed, opts?.url);
+    if (provider !== this.provider) this.sink?.requestRenderSwap(mode, opts?.viewport);
+    else if (headed !== this.headed) {
+      if (!headed && opts?.viewport) {
+        this.setBrowserViewport(opts.viewport);
+        this.setSyncEngaged(opts.viewport.mode === 'pane-sync');
+      }
+      this.relaunch(headed, opts?.url, !!opts?.viewport);
+    }
     else if (opts?.url) this.navigate(opts.url);
   }
 
@@ -491,6 +519,8 @@ export class AgentBrowserSurfaceController {
       chromeActions: this.chromeActions,
       hostCapable: this.hosted,
       renderModes: this.renderModes,
+      cwd: this.cwd,
+      viewportSetting: () => this.browserViewport,
     });
     this.lastPublishedScreen = null;
     this.publishScreen();
@@ -520,6 +550,7 @@ export class AgentBrowserSurfaceController {
   private refreshPaneSize(): void {
     const el = this.sink?.viewport;
     this.paneSize = el ? laidOutSize(el) : null;
+    if (this.paneSize?.w && this.paneSize.h) this.lastPaneSize = this.paneSize;
   }
 
   private setupPaneSizeObserver(): void {
@@ -633,12 +664,16 @@ export class AgentBrowserSurfaceController {
       this.recomputeChrome();
     }
     if (params.syncEngaged !== undefined) this.paramsSyncEngaged = params.syncEngaged;
+    if (isBrowserViewportSetting(params.browserViewport)) {
+      this.browserViewport = params.browserViewport;
+      this.paramsViewportExplicit = true;
+    }
     // Before the first attach, `ensureStarted` binds whatever has arrived.
     if (this.phase.k !== 'idle' && sessionChanged) this.bind();
   }
 
   /**
-   * A stream a `dor ab` / `dor pw` command just learned for this Surface's
+   * A stream a `dor agent-browser` / `dor playwright` command just learned for this Surface's
    * session — the same one again included — to view, leaving `ended` too.
    */
   handOver(stream: number): void {
@@ -753,7 +788,7 @@ export class AgentBrowserSurfaceController {
     const url = this.launchUrl();
     const session = this.launchSession;
     const headed = this.headed;
-    // No creation site has to remember the binary a `dor ab` surface resolved.
+    // No creation site has to remember the binary a `dor agent-browser` surface resolved.
     const binaryPath = this.binaryPath ?? launchBinaryPath(this.provider);
     const browser = browserHandle(this.provider, { session, cwd: this.cwd, binaryPath });
     const phase: Phase = { k: 'launching', ...(session && browser ? { named: { session, browser } } : {}) };
@@ -770,9 +805,9 @@ export class AgentBrowserSurfaceController {
       : !url
         ? Promise.resolve({ ok: false, error: 'no page to open' })
         : !closing
-          ? this.bringUp((requestId) => browser.launch(url, headed, requestId))
-          : closing.then(() => this.phase === phase ? this.bringUp((requestId) => browser.launch(url, headed, requestId)) : { ok: false });
-    opened
+          ? this.withInitialViewport((initialViewport) => this.phase === phase ? this.bringUp((requestId) => browser.launch(url, headed, requestId, initialViewport)) : Promise.resolve({ ok: false }))
+          : closing.then(() => this.phase === phase ? this.withInitialViewport((initialViewport) => this.phase === phase ? this.bringUp((requestId) => browser.launch(url, headed, requestId, initialViewport)) : Promise.resolve({ ok: false })) : { ok: false });
+    opened.catch((error: unknown): BrowserResult => ({ ok: false, error: error instanceof Error ? error.message : String(error) }))
       .then((res) => {
         if (this.phase !== phase) {
           // The browser that came up belongs to nobody: close a session the
@@ -809,6 +844,31 @@ export class AgentBrowserSurfaceController {
         else this.attach(false);
         settleLaunch(this.id, null);
       });
+  }
+
+  /** Resolve config before the host opens the destination, so its first script sees the selected size. */
+  private resolveLaunchViewport(): BrowserViewportSetting | undefined | Promise<BrowserViewportSetting | undefined> {
+    if (this.headed) return undefined;
+    const concrete = (): BrowserViewportSetting => this.browserViewport.mode === 'fixed'
+      ? this.browserViewport
+      : { mode: 'fixed', width: this.paneSize?.w || 1440, height: this.paneSize?.h || 900 };
+    if (this.paramsViewportExplicit) return concrete();
+    const configRequest = getPlatform().toolControl?.({ op: 'browser-config', cwd: this.cwd ?? '' });
+    if (!configRequest) {
+      this.setBrowserViewport(resolveBrowserViewport(defaultBrowserViewportConfig()));
+      return concrete();
+    }
+    return configRequest.then((response) => {
+      if (response?.status === 'error') throw new Error(response.message);
+      const config = response?.status === 'browser-config' ? response.config : defaultBrowserViewportConfig();
+      this.setBrowserViewport(resolveBrowserViewport(config));
+      return concrete();
+    });
+  }
+
+  private withInitialViewport(send: (viewport: BrowserViewportSetting | undefined) => Promise<BrowserResult>): Promise<BrowserResult> {
+    const resolved = this.resolveLaunchViewport();
+    return resolved instanceof Promise ? resolved.then(send) : send(resolved);
   }
 
   /** Tell the Wall this Surface's first launch failed: it applies the
@@ -852,7 +912,10 @@ export class AgentBrowserSurfaceController {
     const url = relaunch ? this.launchUrl() : undefined;
     // A browser this relaunches for a Surface closed meanwhile is closed by
     // the host: it runs the close after this attach, or cancels it (`close`).
-    (url ? this.bringUp((requestId) => browser.attach({ url, headed: this.headed, requestId })) : browser.attach({ headed: this.headed }))
+    (url ? this.withInitialViewport((initialViewport) => this.phase === phase
+      ? this.bringUp((requestId) => browser.attach({ url, headed: this.headed, requestId, initialViewport }))
+      : Promise.resolve({ ok: false })) : browser.attach({ headed: this.headed }))
+      .catch((error: unknown): BrowserResult => ({ ok: false, error: error instanceof Error ? error.message : String(error) }))
       .then((res) => {
         if (this.phase !== phase) return;
         // Only a gone daemon is relaunched at the page; a live one was only
@@ -967,6 +1030,13 @@ export class AgentBrowserSurfaceController {
         if (event.status.connected) phase.seen = true;
         const { viewportWidth: width, viewportHeight: height, devicePixelRatio: dpr } = event.status;
         if (typeof width === 'number' && typeof height === 'number') this.setDeviceSize(width, height);
+        if (!this.headed && !this.syncEngaged && this.browserViewport.mode === 'fixed'
+          && typeof width === 'number' && typeof height === 'number'
+          && (width !== this.browserViewport.width || height !== this.browserViewport.height
+            || (typeof dpr === 'number' && (this.provider === 'agent-browser' || this.browserViewport.dpr !== undefined)
+              && dpr !== this.browserViewport.dpr))) {
+          this.checkExternalViewportChange();
+        }
         // A status without a ratio sizes the daemon's viewport, not the window.
         if (this.headed && typeof width === 'number' && typeof height === 'number' && typeof dpr === 'number') {
           this.windowViewport = { width, height, dpr };
@@ -1095,13 +1165,90 @@ export class AgentBrowserSurfaceController {
     this.publishScreen();
   }
 
+  private setBrowserViewport(setting: BrowserViewportSetting): void {
+    if (this.paramsViewportExplicit && JSON.stringify(this.browserViewport) === JSON.stringify(setting)) return;
+    this.browserViewport = setting;
+    this.paramsViewportExplicit = true;
+    this.writeParams({ browserViewport: setting });
+  }
+
+  /** Query the active page, keeping requested settings distinct from what the browser reports. */
+  async measureViewport(): Promise<{ width: number; height: number; dpr: number } | undefined> {
+    const browser = this.driver();
+    if (!browser) return undefined;
+    const result = await browser.measure();
+    if (!result.ok) throw new Error(result.error ?? 'Could not measure browser viewport');
+    return result.viewport;
+  }
+
+  getViewportSetting(): BrowserViewportSetting { return this.browserViewport; }
+
+  getMeasuredPaneSize(): { width: number; height: number } | undefined {
+    const size = this.paneSize ?? this.lastPaneSize;
+    return size?.w && size.h ? { width: size.w, height: size.h } : undefined;
+  }
+
+  adoptMeasuredViewport(actual: { width: number; height: number; dpr: number }): void {
+    if (this.syncEngaged || this.headed) return;
+    this.fixedDpr = actual.dpr;
+    this.setBrowserViewport(viewportFromMeasurement(this.provider, this.browserViewport, actual));
+    this.publishScreen();
+  }
+
+  private checkExternalViewportChange(): void {
+    if (this.pendingViewportWrites > 0) return;
+    const phase = this.phase;
+    const epoch = this.viewportIntentEpoch;
+    const browser = this.driver();
+    if (!browser) return;
+    void browser.measure().then((result) => {
+      if (this.phase === phase && this.viewportIntentEpoch === epoch && this.pendingViewportWrites === 0
+        && result.ok && result.viewport) this.adoptMeasuredViewport(result.viewport);
+    });
+  }
+
+  async applyViewportSetting(setting: BrowserViewportSetting): Promise<void> {
+    if (this.headed) throw new Error('Viewport sizing requires a screencast');
+    const browser = this.driver();
+    if (!browser) throw new Error('Browser is not ready');
+    if (setting.mode === 'pane-sync') {
+      this.viewportIntentEpoch += 1;
+      const width = this.paneSize?.w || 1440;
+      const height = this.paneSize?.h || 900;
+      const applied = await browser.viewport(width, height, undefined, this.syncEngagement);
+      if (!applied.ok) throw new Error(applied.error ?? 'Could not size browser to pane');
+      this.syncEngagement = crypto.randomUUID();
+      this.hostSynced = false;
+      this.forgetFixedViewport();
+      this.setSyncEngaged(true);
+      this.setBrowserViewport(setting);
+      this.syncToPane();
+      return;
+    }
+    this.viewportIntentEpoch += 1;
+    this.pendingViewportWrites += 1;
+    try {
+      const result = await browser.viewport(setting.width, setting.height, setting.dpr, this.syncEngagement);
+      if (!result.ok) throw new Error(result.error ?? 'Could not resize browser viewport');
+      this.fixedDpr = setting.dpr;
+      this.setSyncEngaged(false);
+      this.setBrowserViewport(setting);
+      this.publishScreen();
+    } finally {
+      this.pendingViewportWrites -= 1;
+    }
+  }
+
   /** The host's word on this pane's sync. Only the host decides another
    *  writer took the viewport (`off`), which disengages Resize with pane; a
    *  report on an engagement this pane has since replaced is stale. */
   private applyHostSync(state: ViewerSyncState, engagement: string): void {
     if (engagement !== this.syncEngagement) return;
     this.hostSynced = state === 'synced';
-    if (state === 'off') this.setSyncEngaged(false);
+    if (state === 'off') {
+      this.setSyncEngaged(false);
+      this.checkExternalViewportChange();
+    }
     this.publishScreen();
   }
 
@@ -1263,7 +1410,14 @@ export class AgentBrowserSurfaceController {
   /** Fix the screencast at `viewport`, disengaging sync: at once while live,
    *  else once the browser is (the pending intent). */
   private fixViewport(viewport: FixedViewport): void {
+    if (this.driver()) {
+      void this.applyViewportSetting({ mode: 'fixed', ...viewport }).catch((error: unknown) => {
+        console.warn(`[${this.provider}] set viewport failed:`, error);
+      });
+      return;
+    }
     this.setSyncEngaged(false);
+    this.setBrowserViewport({ mode: 'fixed', ...viewport });
     if (this.driver()) this.issueFixedViewport(viewport);
     else this.pendingIntent.viewport = viewport;
   }
@@ -1297,7 +1451,7 @@ export class AgentBrowserSurfaceController {
    * relaunch at a time, of a bound browser: anything else keeps only the
    * navigation asked for.
    */
-  private relaunch(headed: boolean, url?: string): void {
+  private relaunch(headed: boolean, url?: string, explicitViewport = false): void {
     const session = this.session;
     const k = this.phase.k;
     const capable = this.hosted;
@@ -1323,11 +1477,15 @@ export class AgentBrowserSurfaceController {
     // once the headless browser is live.
     const windowViewport = this.windowViewport;
     this.windowViewport = undefined;
-    if (!headed && this.headed && windowViewport) this.fixViewport(windowViewport);
+    if (!headed && this.headed && windowViewport && !explicitViewport) this.fixViewport(windowViewport);
     this.setHeaded(headed);
     this.writeParams({ renderMode: this.renderMode() });
     abDebugLog(`[ab-panel] ${headed ? 'popOut' : 'popIn'} -> ${JSON.stringify({ session, url: target })}`);
-    this.bringUp((requestId) => this.handle()!.launch(target, headed, requestId)).then((res) => {
+    this.withInitialViewport((initialViewport) => this.phase === phase
+      ? this.bringUp((requestId) => this.handle()!.launch(target, headed, requestId, initialViewport))
+      : Promise.resolve({ ok: false }))
+      .catch((error: unknown): BrowserResult => ({ ok: false, error: error instanceof Error ? error.message : String(error) }))
+      .then((res) => {
       abDebugLog(`[ab-panel] relaunch result ${JSON.stringify(res)}`);
       // Closed meanwhile, the host closes what this brought up after it.
       if (this.phase !== phase) return;

@@ -78,7 +78,8 @@ export function restoreSession(platform: PlatformAdapter, sources: RestoreSource
         params: { surfaceType: 'tool', command: pane.command, cwd: pane.cwd,
           ...(pane.tool?.argv ? { toolArgv: pane.tool.argv } : {}),
           toolScope: pane.tool?.scope, toolName: pane.tool?.name, toolRender: pane.tool?.render ?? 'iframe',
-          toolPort: pane.tool?.port ?? 'announced', toolKey: pane.tool?.key },
+          toolPort: pane.tool?.port ?? 'announced', toolKey: pane.tool?.key,
+          browserViewport: pane.tool?.viewport },
       } : { component: 'terminal', tabComponent: 'terminal', title: pane.title }])),
     };
   }

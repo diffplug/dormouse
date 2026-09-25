@@ -271,7 +271,7 @@ describe('dor control routing', () => {
       window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail }));
       expect(detail.respond).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(10);
-      // Answered promptly, not left to the client's own deadline: `dor ab`
+      // Answered promptly, not left to the client's own deadline: `dor agent-browser`
       // makes this round trip on every managed invocation and must fail fast.
       expect(detail.respond).toHaveBeenCalledTimes(1);
       expect(detail.respond).toHaveBeenCalledWith({ ok: false, error: "workspace 'workspace:1' is still mounting" });

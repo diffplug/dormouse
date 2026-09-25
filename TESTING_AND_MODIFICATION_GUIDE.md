@@ -245,7 +245,7 @@ the heading, and the rule gets a `(rationale)` marker.
 - The alert stores in the sidecar are memory-only; a sidecar respawn loses them
   until a window re-seeds (the harness re-seeds on stream reconnect).
 - `dor workspace move` reports `moved` only once the target adopted the
-  Workspace; a hand-back is an error with its reason. `dor ab` fails fast when
+  Workspace; a hand-back is an error with its reason. `dor agent-browser` fails fast when
   no Wall answers; there is no CLI-side key fallback.
 - The one-frame blank on switch-back and WKWebView context release are unverified
   (§5).

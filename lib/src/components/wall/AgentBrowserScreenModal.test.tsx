@@ -3,7 +3,7 @@
  */
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import type { PlatformAdapter } from '../../lib/platform/types';
 import { AgentBrowserScreenModal } from './AgentBrowserScreenModal';
@@ -29,9 +29,34 @@ afterEach(() => {
 });
 
 describe('AgentBrowserScreenModal', () => {
+  it('applies a fixed preset without linking the browser to pane size', () => {
+    installBrowserHost();
+    const registration = registerStubScreen('preset', { snapshot: { ...STUB_SCREEN, syncEngaged: false } });
+    const controller = getAgentBrowserScreenController('preset')!;
+    act(() => root.render(<AgentBrowserScreenModal controller={controller} label="surface:3" onClose={() => {}} />));
+    const select = document.body.querySelector<HTMLSelectElement>('select')!;
+    act(() => { select.value = 'phone'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+    act(() => [...document.body.querySelectorAll('button')].find((button) => button.textContent === 'Apply')!.click());
+    expect(vi.mocked(controller.actions.applyViewportSetting)).toHaveBeenCalledWith({ mode: 'fixed', width: 390, height: 844 });
+    registration.dispose();
+  });
+
+  it('reopens at the saved phone size without selecting desktop', () => {
+    installBrowserHost();
+    const registration = registerStubScreen('phone', {
+      snapshot: { ...STUB_SCREEN, syncEngaged: false, viewport: { w: 390, h: 844, dpr: 1 } },
+      viewportSetting: () => ({ mode: 'fixed', width: 390, height: 844 }),
+    });
+    const controller = getAgentBrowserScreenController('phone')!;
+    act(() => root.render(<AgentBrowserScreenModal controller={controller} label="surface:4" onClose={() => {}} />));
+    expect(document.body.querySelector<HTMLSelectElement>('select')?.value).toBe('phone');
+    expect(document.body.querySelector<HTMLInputElement>('input[name="screen-target"]:checked')?.closest('label')?.textContent).toContain('Preset');
+    registration.dispose();
+  });
+
   it('composes compact capability and presentation glyphs through the modal hierarchy', () => {
     const registration = registerStubScreen('browser-1', {
-      snapshot: { ...STUB_SCREEN, renderMode: 'ab-screencast' },
+      snapshot: { ...STUB_SCREEN, renderMode: 'agent-browser-screencast' },
     });
     const controller = getAgentBrowserScreenController('browser-1');
     expect(controller).not.toBeNull();
@@ -70,16 +95,16 @@ describe('AgentBrowserScreenModal', () => {
 
   it('offers Playwright with its own device registry and dispatches the selected provider', () => {
     installBrowserHost();
-    const registration = registerStubScreen('playwright', { snapshot: { ...STUB_SCREEN, renderMode: 'pw-screencast' } });
+    const registration = registerStubScreen('playwright', { snapshot: { ...STUB_SCREEN, renderMode: 'playwright-screencast' } });
     const controller = getAgentBrowserScreenController('playwright')!;
     act(() => root.render(<AgentBrowserScreenModal controller={controller} label="surface:4" onClose={() => {}} />));
-    expect(document.body.textContent).toContain('Playwright screencast');
+    expect(document.body.textContent).toContain('playwright screencast');
     expect(document.body.textContent).toContain('iPad Pro 11');
     expect(document.body.textContent).not.toContain('Galaxy S25');
-    const popout = [...document.body.querySelectorAll('label')].find(label => label.textContent === 'Playwright popout')!;
+    const popout = [...document.body.querySelectorAll('label')].find(label => label.textContent === 'playwright popout')!;
     act(() => popout.querySelector<HTMLInputElement>('input')!.click());
     act(() => [...document.body.querySelectorAll('button')].find(button => button.textContent === 'Apply')!.click());
-    expect(controller.actions.setRenderMode).toHaveBeenCalledWith('pw-popout');
+    expect(controller.actions.setRenderMode).toHaveBeenCalledWith('playwright-popout');
     registration.dispose();
   });
 
@@ -87,8 +112,8 @@ describe('AgentBrowserScreenModal', () => {
     // A tool on a host with every provider: Playwright and popout would strand it.
     installBrowserHost();
     const registration = registerStubScreen('tool', {
-      snapshot: { ...STUB_SCREEN, renderMode: 'ab-screencast' },
-      renderModes: ['ab-screencast', 'iframe'],
+      snapshot: { ...STUB_SCREEN, renderMode: 'agent-browser-screencast' },
+      renderModes: ['agent-browser-screencast', 'iframe'],
     });
     act(() => root.render(
       <AgentBrowserScreenModal controller={getAgentBrowserScreenController('tool')!} label="surface:5" onClose={() => {}} />,
@@ -106,7 +131,7 @@ describe('AgentBrowserScreenModal', () => {
     const iframeRow = () => [...document.body.querySelectorAll('label')].find((label) => label.textContent?.includes('iframe embed'))!;
 
     const secure = registerStubScreen('secure', {
-      snapshot: { ...STUB_SCREEN, renderMode: 'ab-screencast' },
+      snapshot: { ...STUB_SCREEN, renderMode: 'agent-browser-screencast' },
       chrome: { url: 'https://example.com/account', displayUrl: 'example.com/account', title: null, key: null },
     });
     act(() => root.render(<AgentBrowserScreenModal controller={getAgentBrowserScreenController('secure')!} label="surface:5" onClose={() => {}} />));
@@ -117,7 +142,7 @@ describe('AgentBrowserScreenModal', () => {
 
     // Nothing but http(s) is framed at all.
     const file = registerStubScreen('file', {
-      snapshot: { ...STUB_SCREEN, renderMode: 'ab-screencast' },
+      snapshot: { ...STUB_SCREEN, renderMode: 'agent-browser-screencast' },
       chrome: { url: 'file:///tmp/report.html', displayUrl: 'report.html', title: null, key: null },
     });
     act(() => root.render(<AgentBrowserScreenModal controller={getAgentBrowserScreenController('file')!} label="surface:7" onClose={() => {}} />));
@@ -125,7 +150,7 @@ describe('AgentBrowserScreenModal', () => {
     file.dispose();
 
     const local = registerStubScreen('local', {
-      snapshot: { ...STUB_SCREEN, renderMode: 'ab-screencast' },
+      snapshot: { ...STUB_SCREEN, renderMode: 'agent-browser-screencast' },
       chrome: { url: 'http://localhost:5173/', displayUrl: 'localhost:5173/', title: null, key: null },
     });
     act(() => root.render(<AgentBrowserScreenModal controller={getAgentBrowserScreenController('local')!} label="surface:6" onClose={() => {}} />));
@@ -144,7 +169,7 @@ describe('AgentBrowserScreenModal', () => {
       snapshot: {
         ...STUB_SCREEN,
         state: 'SCALED',
-        renderMode: 'ab-screencast',
+        renderMode: 'agent-browser-screencast',
         syncEngaged: true,
       },
     });

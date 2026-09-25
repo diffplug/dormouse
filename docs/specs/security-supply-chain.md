@@ -32,7 +32,7 @@ The roots are `productDependencyFilters` in `website/scripts/generate-deps.js`. 
 - `dormouse-website` — runs in a visitor's browser rather than being installed anywhere (rationale).
 - `dormouse-hosted` — runs on Workers and in the browser; no installed desktop or selfhost artifact imports it.
 
-**External binaries are outside this graph by construction** — the user's shell, and the `agent-browser` CLI `dor ab` forwards to (`npm i -g agent-browser`, a dependency of nothing here, resolved off `PATH`). **Dormouse instead ships nothing that pulls them in silently** (rationale).
+**External binaries are outside this graph by construction** — the user's shell, and the `agent-browser` CLI `dor agent-browser` forwards to (`npm i -g agent-browser`, a dependency of nothing here, resolved off `PATH`). **Dormouse instead ships nothing that pulls them in silently** (rationale).
 
 **Regenerate and commit the dependency lists whenever a production dependency is added, removed, or upgraded** (rationale).
 

@@ -20,7 +20,8 @@
       "dor/*": ["../dor/src/*"],
       "remote-lib-common": ["../remote-lib-common/src/index.ts"],
       "dor-lib-common": ["../dor-lib-common/src/index.ts"],
-      "dor-lib-common/browser-providers": ["../dor-lib-common/src/browser-providers.ts"]
+      "dor-lib-common/browser-providers": ["../dor-lib-common/src/browser-providers.ts"],
+      "dor-lib-common/browser-viewports": ["../dor-lib-common/src/browser-viewports.ts"]
     }
   },
   "include": ["src"]

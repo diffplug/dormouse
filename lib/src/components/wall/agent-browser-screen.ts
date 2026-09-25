@@ -1,7 +1,8 @@
 /** Per-surface bridge from browser bodies to their separate header and modal;
  * see docs/specs/dor-browser.md → "Browser Chrome". */
 import { useSyncExternalStore } from 'react';
-import { BROWSER_PROVIDERS, parseRenderMode, type BrowserAutomationProvider, type SurfaceRenderMode } from 'dor-lib-common/browser-providers';
+import { parseRenderMode, type BrowserAutomationProvider, type SurfaceRenderMode } from 'dor-lib-common/browser-providers';
+import type { BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 
 export type ScreenState = 'SYNCED' | 'SCALED';
 
@@ -10,7 +11,7 @@ export type ScreenState = 'SYNCED' | 'SCALED';
  *  `resolveRenderMode`. */
 export type RenderMode = SurfaceRenderMode;
 
-type ProviderAlias = (typeof BROWSER_PROVIDERS)[keyof typeof BROWSER_PROVIDERS]['alias'];
+type ProviderAlias = BrowserAutomationProvider;
 
 /** How an automated browser's human view is presented: resizing with the
  *  pane, at a fixed size, or popped out. */
@@ -24,7 +25,7 @@ export type BrowserDisplayMode = 'iframe' | `${ProviderAlias}-${BrowserView}`;
 
 /** `provider`'s display mode for `view`. */
 export function displayModeFor(provider: BrowserAutomationProvider, view: BrowserView): BrowserDisplayMode {
-  return `${BROWSER_PROVIDERS[provider].alias}-${view}`;
+  return `${provider}-${view}`;
 }
 
 /** The view a display mode presents, or the embed. */
@@ -63,6 +64,7 @@ export interface ScreenActions {
   applyDevice(name: string): void;
   /** Issue native `set viewport <w> <h> <dpr>`. */
   applyViewport(w: number, h: number, dpr: number): void;
+  applyViewportSetting?(setting: BrowserViewportSetting): Promise<void>;
   /** Open the screen modal for this surface. */
   openModal(): void;
   /** Swap this surface's render backend in place, preserving the target
@@ -72,7 +74,7 @@ export interface ScreenActions {
    *  goes there — a relaunch opens it, so no navigation races the relaunch.
    *  Absent until the swap is wired; the modal hides its Render section
    *  without it. */
-  setRenderMode?(mode: RenderMode, opts?: { url?: string }): void;
+  setRenderMode?(mode: RenderMode, opts?: { url?: string; viewport?: BrowserViewportSetting }): void;
 }
 
 /** What the browser-chrome header reads about the active tab
@@ -123,6 +125,8 @@ export interface ScreenController {
    *  (and the current mode) and nothing else. `offeredRenderModes` answers for
    *  a host and Surface kind. */
   readonly renderModes: readonly RenderMode[];
+  readonly cwd?: string;
+  readonly viewportSetting?: () => BrowserViewportSetting;
 }
 
 interface ScreenEntry {
@@ -165,6 +169,8 @@ export function registerAgentBrowserScreen(
     hostCapable: boolean;
     /** Absent: no render swap to offer. */
     renderModes?: readonly RenderMode[];
+    cwd?: string;
+    viewportSetting?: () => BrowserViewportSetting;
   },
 ): ScreenRegistration {
   const entry: ScreenEntry = {
@@ -188,6 +194,8 @@ export function registerAgentBrowserScreen(
       chromeActions: init.chromeActions,
       hostCapable: init.hostCapable,
       renderModes: init.renderModes ?? [],
+      cwd: init.cwd,
+      viewportSetting: init.viewportSetting,
     },
   };
   registry.set(id, entry);

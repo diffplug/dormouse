@@ -23,12 +23,12 @@ describe('automation render modes', () => {
 
   it('derives each display mode and its label from the provider registry', () => {
     const display = (renderMode: Parameters<typeof browserDisplayMode>[0]['renderMode'], syncEngaged: boolean) => browserDisplayMode({ renderMode, syncEngaged });
-    expect(display('ab-screencast', true)).toBe('ab-resize');
-    expect(display('ab-screencast', false)).toBe('ab-fixed');
-    expect(display('pw-popout', true)).toBe('pw-popout');
+    expect(display('agent-browser-screencast', true)).toBe('agent-browser-resize');
+    expect(display('agent-browser-screencast', false)).toBe('agent-browser-fixed');
+    expect(display('playwright-popout', true)).toBe('playwright-popout');
     expect(display('iframe', true)).toBe('iframe');
-    expect(BROWSER_DISPLAY_LABEL['pw-resize']).toBe('Playwright resizes with pane');
-    expect(BROWSER_DISPLAY_LABEL['ab-popout']).toBe('agent-browser popout');
+    expect(BROWSER_DISPLAY_LABEL['playwright-resize']).toBe('playwright resizes with pane');
+    expect(BROWSER_DISPLAY_LABEL['agent-browser-popout']).toBe('agent-browser popout');
     expect(BROWSER_DISPLAY_LABEL.iframe).toBe('iframe embed');
   });
 });
@@ -51,23 +51,23 @@ describe('offeredRenderModes', () => {
 
   it('offers a provider\'s screencast and popout only where the host drives it', () => {
     installBrowserHost({}, ['agent-browser']);
-    expect(offeredRenderModes(false, null)).toEqual(['ab-screencast', 'ab-popout', 'iframe']);
+    expect(offeredRenderModes(false, null)).toEqual(['agent-browser-screencast', 'agent-browser-popout', 'iframe']);
     installBrowserHost({}, ['agent-browser', 'playwright']);
-    expect(offeredRenderModes(false, null)).toEqual(['ab-screencast', 'ab-popout', 'pw-screencast', 'pw-popout', 'iframe']);
+    expect(offeredRenderModes(false, null)).toEqual(['agent-browser-screencast', 'agent-browser-popout', 'playwright-screencast', 'playwright-popout', 'iframe']);
   });
 
   it('keeps the running provider\'s screencast on a host that cannot drive it', () => {
     installBrowserHost({}, ['playwright']);
-    expect(offeredRenderModes(false, 'agent-browser')).toEqual(['ab-screencast', 'pw-screencast', 'pw-popout', 'iframe']);
+    expect(offeredRenderModes(false, 'agent-browser')).toEqual(['agent-browser-screencast', 'playwright-screencast', 'playwright-popout', 'iframe']);
     // A host with no browser request at all offers no automated renderer but that one.
     setPlatform(Object.assign(new FakePtyAdapter(), { browserProviders: ['agent-browser'] } satisfies Partial<PlatformAdapter>));
-    expect(offeredRenderModes(false, 'agent-browser')).toEqual(['ab-screencast', 'iframe']);
+    expect(offeredRenderModes(false, 'agent-browser')).toEqual(['agent-browser-screencast', 'iframe']);
     expect(offeredRenderModes(false, null)).toEqual(['iframe']);
   });
 
   it('offers a Tool only its declarable renders', () => {
     installBrowserHost();
-    expect(offeredRenderModes(true, null)).toEqual(['ab-screencast', 'iframe']);
-    expect(offeredRenderModes(true, 'agent-browser')).toEqual(['ab-screencast', 'iframe']);
+    expect(offeredRenderModes(true, null)).toEqual(['agent-browser-screencast', 'playwright-screencast', 'iframe']);
+    expect(offeredRenderModes(true, 'agent-browser')).toEqual(['agent-browser-screencast', 'playwright-screencast', 'iframe']);
   });
 });

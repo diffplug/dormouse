@@ -12,6 +12,20 @@ import {
 import type { BrowserBinding, SurfaceKind } from 'dor/commands/types';
 import { isToolKeyScope, type ToolKeyScope } from '../../lib/platform/tool-types';
 import { parseRenderMode, renderModeFor, sessionForKey } from 'dor-lib-common/browser-providers';
+import { isBrowserViewportSetting, type BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
+import type { BrowserAutomationProvider } from '../../lib/platform/browser-automation';
+
+/** A measured Playwright ratio belongs to its native context; only a ratio
+ * explicitly requested for this Surface may be replayed on its next open. */
+export function viewportFromMeasurement(
+  provider: BrowserAutomationProvider,
+  previous: BrowserViewportSetting | undefined,
+  actual: { width: number; height: number; dpr: number },
+): BrowserViewportSetting {
+  const dpr = provider === 'agent-browser' ? actual.dpr
+    : previous?.mode === 'fixed' && previous.dpr === actual.dpr ? previous.dpr : undefined;
+  return { mode: 'fixed', width: actual.width, height: actual.height, ...(dpr === undefined ? {} : { dpr }) };
+}
 
 type BrowserParamsLike = {
   surfaceType?: unknown;
@@ -27,6 +41,7 @@ type BrowserParamsLike = {
   /** Tool only: the approval this Surface is waiting on before it runs. */
   toolPending?: unknown;
   syncEngaged?: unknown;
+  browserViewport?: unknown;
 };
 
 function asParams(params: unknown): BrowserParamsLike {
@@ -174,15 +189,13 @@ export function isBrowserParams(params: unknown): boolean {
   return p.surfaceType === 'browser' || typeof p.renderMode === 'string';
 }
 
-/** Browser display identity projected from canonical persisted params. An old
- *  agent-browser row with no `syncEngaged` keeps the controller's default:
- *  resize with pane. */
+/** Browser display identity projected from canonical persisted params. */
 export function browserDisplayModeFromParams(params: unknown): BrowserDisplayMode | undefined {
   if (!isBrowserParams(params)) return undefined;
   const p = asParams(params);
   return browserDisplayMode({
     renderMode: resolveRenderMode(p),
-    syncEngaged: p.syncEngaged !== false,
+    syncEngaged: p.syncEngaged === true || (isBrowserViewportSetting(p.browserViewport) && p.browserViewport.mode === 'pane-sync'),
   });
 }
 
@@ -239,10 +252,11 @@ export function launchFallbackFromParams(params: unknown): LaunchFallback | null
 /** The params that launch a Tool's agent-drivable browser at `url`, in the
  *  session it had or else its own (`tool.<leafId>`), falling back to the embed
  *  when it cannot come up (docs/specs/dor-tool.md → Serving). */
-export function toolBrowserLaunchParams(leafId: string, params: Record<string, unknown>, url: string): Record<string, unknown> {
+export function toolBrowserLaunchParams(leafId: string, params: Record<string, unknown>, url: string, provider: 'agent-browser' | 'playwright' = 'agent-browser'): Record<string, unknown> {
   return {
     url,
-    renderMode: renderModeFor('agent-browser', 'screencast'),
+    renderMode: renderModeFor(provider, 'screencast'),
+    ...(isBrowserViewportSetting(params.browserViewport) ? { browserViewport: params.browserViewport as BrowserViewportSetting } : {}),
     session: undefined,
     launchSession: typeof params.session === 'string' ? params.session : sessionForKey(`tool.${leafId}`),
     launchFallback: 'embed' satisfies LaunchFallback,

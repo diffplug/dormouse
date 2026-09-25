@@ -17,7 +17,9 @@
  * live snapshot tracks the current render mode so Apply can detect a backend
  * swap.
  */
-import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { getPlatform } from '../../lib/platform';
+import { defaultBrowserViewportConfig, resolveBrowserViewport, type BrowserViewportConfig, type BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import { CheckIcon, XIcon } from '@phosphor-icons/react';
 import {
   MODAL_OVERLAY_INSET,
@@ -39,7 +41,13 @@ import {
   BrowserPresentationIcon,
 } from './BrowserDisplayIcon';
 
-type Target = 'sync' | 'device' | 'custom';
+type Target = 'sync' | 'preset' | 'device' | 'custom';
+
+function matchingPreset(config: BrowserViewportConfig, setting: BrowserViewportSetting | undefined): string | undefined {
+  if (setting?.mode !== 'fixed') return undefined;
+  return Object.entries(config.viewports).find(([, size]) => size.width === setting.width
+    && size.height === setting.height && size.dpr === setting.dpr)?.[0];
+}
 
 export function AgentBrowserScreenModal({
   controller,
@@ -64,17 +72,45 @@ export function AgentBrowserScreenModal({
   // Pre-select from intent, not the transient dimension comparison: while a
   // resize is landing, sync stays engaged even though the live state is SCALED.
   // A fixed device can't be pre-matched — the CLI exposes no dims map.
-  const initialTarget: Target = initial?.syncEngaged ? 'sync' : 'custom';
+  const initialSetting = controller.viewportSetting?.();
+  const builtins = defaultBrowserViewportConfig();
+  const initialPreset = matchingPreset(builtins, initialSetting);
+  const initialTarget: Target = initialSetting?.mode === 'pane-sync' || initial?.syncEngaged ? 'sync'
+    : initialPreset ? 'preset' : 'custom';
   const [target, setTarget] = useState<Target>(initialTarget);
+  const [config, setConfig] = useState<BrowserViewportConfig>(builtins);
+  const [configError, setConfigError] = useState<string | null>(null);
+  const [applyError, setApplyError] = useState<string | null>(null);
+  const [preset, setPreset] = useState(initialPreset ?? 'desktop');
+  const userEdited = useRef(false);
+  const chooseTarget = (value: Target) => { userEdited.current = true; setTarget(value); };
+  useEffect(() => {
+    let active = true;
+    const request = getPlatform().toolControl?.({ op: 'browser-config', cwd: controller.cwd ?? '' });
+    if (request) void request.then((result) => {
+      if (active && result.status === 'browser-config') {
+        setConfig(result.config);
+        if (!userEdited.current) {
+          const match = matchingPreset(result.config, initialSetting);
+          if (match) { setPreset(match); setTarget('preset'); }
+          else if (initialSetting?.mode === 'fixed') setTarget('custom');
+        }
+      }
+      if (active && result.status === 'error') setConfigError(result.message);
+    }).catch((error: unknown) => {
+      if (active) setConfigError(error instanceof Error ? error.message : String(error));
+    });
+    return () => { active = false; };
+  }, [controller.cwd]);
   const [device, setDevice] = useState<string>('iPhone 16');
-  const [customW, setCustomW] = useState(String(initial?.viewport.w ?? 1280));
-  const [customH, setCustomH] = useState(String(initial?.viewport.h ?? 720));
-  const [customDpi, setCustomDpi] = useState(String(initial?.viewport.dpr ?? 1));
+  const [customW, setCustomW] = useState(String(initialSetting?.mode === 'fixed' ? initialSetting.width : initial?.viewport.w ?? 1440));
+  const [customH, setCustomH] = useState(String(initialSetting?.mode === 'fixed' ? initialSetting.height : initial?.viewport.h ?? 900));
+  const [customDpi, setCustomDpi] = useState(String(initialSetting?.mode === 'fixed' ? initialSetting.dpr ?? initial?.viewport.dpr ?? 1 : initial?.viewport.dpr ?? 1));
 
   // Render backend (Path 1 + Pop-Out). The Render section only appears
   // when the surface wires `setRenderMode` (the swap is wired); otherwise the
   // modal is the plain screencast viewport modal it has always been.
-  const currentMode: RenderMode = snapshot?.renderMode ?? 'ab-screencast';
+  const currentMode: RenderMode = snapshot?.renderMode ?? 'agent-browser-screencast';
   const canSwapRender = !!controller.actions.setRenderMode;
   const [renderMode, setRenderMode] = useState<RenderMode>(currentMode);
   // The controller declares what this Surface can take (a tool never pops out
@@ -93,7 +129,11 @@ export function AgentBrowserScreenModal({
   const switchingMode = renderMode !== currentMode;
   // Within screencast, the resolution is either linked to the pane (resize with
   // pane) or fixed — Device/Custom are the two ways to pick the fixed size.
-  const isFixed = target === 'device' || target === 'custom';
+  const isFixed = target === 'custom' || target === 'device';
+  const selectedViewport = (): BrowserViewportSetting => target === 'sync'
+    ? { mode: 'pane-sync' }
+    : target === 'preset' ? resolveBrowserViewport(config, preset)
+      : { mode: 'fixed', width: Number(customW), height: Number(customH), dpr: Number(customDpi) };
 
   const customValid = useMemo(() => {
     const w = Number(customW);
@@ -112,21 +152,26 @@ export function AgentBrowserScreenModal({
   //     Apply even though switching needs only the spawn capability.)
   //   - staying on screencast (tweaking the viewport): needs the host to drive
   //     `set viewport`, and a valid custom size.
-  const applyDisabled =
-    viewportDisabled || switchingMode
-      // The page may have changed since iframe was picked.
-      ? renderMode === 'iframe' && embedRefusal !== null
-      : (!hostCapable || (target === 'custom' && !customValid));
+  const applyDisabled = (renderMode === 'iframe' && embedRefusal !== null)
+    || (!viewportDisabled && ((target === 'custom' && !customValid)
+      || (target === 'preset' && configError !== null)
+      || (target === 'device' && switchingMode)))
+    || (!switchingMode && !viewportDisabled && !hostCapable);
 
   const apply = () => {
     if (applyDisabled) return;
     if (switchingMode) {
       // A mode swap; the viewport sub-controls don't apply to the outgoing
       // surface (and are inert on embed/popout controllers anyway).
-      controller.actions.setRenderMode?.(renderMode);
+      if (viewportDisabled) controller.actions.setRenderMode?.(renderMode);
+      else controller.actions.setRenderMode?.(renderMode, { viewport: selectedViewport() });
     } else if (!viewportDisabled) {
       if (target === 'sync') controller.actions.engageSync();
       else if (target === 'device') controller.actions.applyDevice(device);
+      else if (controller.actions.applyViewportSetting) {
+        void controller.actions.applyViewportSetting(selectedViewport()).then(onClose, (error: unknown) => setApplyError(error instanceof Error ? error.message : String(error)));
+        return;
+      }
       else controller.actions.applyViewport(Number(customW), Number(customH), Number(customDpi));
     }
     onClose();
@@ -145,10 +190,18 @@ export function AgentBrowserScreenModal({
             type="radio"
             name="screen-target"
             checked={target === 'sync'}
-            onChange={() => setTarget('sync')}
+            onChange={() => chooseTarget('sync')}
           />
-          <BrowserPresentationIcon mode="ab-resize" size={14} className="shrink-0 text-muted" />
+          <BrowserPresentationIcon mode="agent-browser-resize" size={14} className="shrink-0 text-muted" />
           <span className="text-foreground">Resize with pane</span>
+        </label>
+
+        <label className="flex cursor-pointer items-center gap-2">
+          <input type="radio" name="screen-target" checked={target === 'preset'} onChange={() => chooseTarget('preset')} />
+          <span className="text-foreground">Preset</span>
+          <select value={preset} onChange={(event) => { chooseTarget('preset'); setPreset(event.target.value); }} className="rounded border border-border bg-app-bg px-1.5 py-1 text-foreground">
+            {Object.entries(config.viewports).map(([name, size]) => <option key={name} value={name}>{name} · {size.width} × {size.height}</option>)}
+          </select>
         </label>
 
         <div className="flex flex-col gap-2">
@@ -158,17 +211,17 @@ export function AgentBrowserScreenModal({
                 type="radio"
                 name="screen-target"
                 checked={isFixed}
-                onChange={() => setTarget('custom')}
+                onChange={() => chooseTarget('custom')}
               />
-              <BrowserPresentationIcon mode="ab-fixed" size={14} className="shrink-0 text-muted" />
+              <BrowserPresentationIcon mode="agent-browser-fixed" size={14} className="shrink-0 text-muted" />
               <span className="text-foreground">Fixed size</span>
             </label>
             {/* Dimensions inline; or pick a device via Emulate below (emulating
                 disables the dims — they fill in from the next frames). */}
             <div className="flex items-center gap-2">
-              <DimInput label="W" chars={4} value={customW} disabled={target === 'device'} onChange={setCustomW} onFocus={() => setTarget('custom')} />
-              <DimInput label="H" chars={4} value={customH} disabled={target === 'device'} onChange={setCustomH} onFocus={() => setTarget('custom')} />
-              <DimInput label="DPI" chars={1} value={customDpi} disabled={target === 'device'} onChange={setCustomDpi} onFocus={() => setTarget('custom')} />
+              <DimInput label="W" chars={4} value={customW} disabled={target === 'device'} onChange={(v) => { userEdited.current = true; setCustomW(v); }} onFocus={() => chooseTarget('custom')} />
+              <DimInput label="H" chars={4} value={customH} disabled={target === 'device'} onChange={(v) => { userEdited.current = true; setCustomH(v); }} onFocus={() => chooseTarget('custom')} />
+              <DimInput label="DPR" chars={1} value={customDpi} disabled={target === 'device'} onChange={(v) => { userEdited.current = true; setCustomDpi(v); }} onFocus={() => chooseTarget('custom')} />
             </div>
           </div>
           <label className="ml-6 flex items-center gap-2 text-xs text-muted">
@@ -177,8 +230,8 @@ export function AgentBrowserScreenModal({
               value={target === 'device' ? device : ''}
               onChange={(e) => {
                 const name = e.target.value;
-                if (name) { setTarget('device'); setDevice(name); }
-                else setTarget('custom');
+                if (name) { chooseTarget('device'); setDevice(name); }
+                else chooseTarget('custom');
               }}
               title="touch + mobile UA"
               className="rounded border border-border bg-app-bg px-1.5 py-1 font-mono text-foreground outline-none focus:border-focus-ring"
@@ -271,6 +324,9 @@ export function AgentBrowserScreenModal({
           terminal instead.
         </p>
       )}
+      {configError && target === 'preset' && <p className="mt-3 text-xs text-muted">{configError}</p>}
+      {applyError && <p role="alert" className="mt-3 text-xs text-muted">{applyError}</p>}
+      {switchingMode && target === 'device' && !viewportDisabled && <p className="mt-3 text-xs text-muted">Choose a viewport for the new renderer, then apply device emulation after it opens.</p>}
 
       <div className="mt-4 flex justify-end gap-2 text-xs">
         <button

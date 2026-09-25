@@ -107,7 +107,7 @@ describe('port: announced', () => {
 
   it('reopens an existing browser in its own session, deferring Workspace transfer until it binds', async () => {
     const { lath, state } = toolEngine({
-      ...announced, toolRender: 'ab-screencast', renderMode: 'ab-screencast',
+      ...announced, toolRender: 'agent-browser-screencast', renderMode: 'agent-browser-screencast',
       session: 'existing-browser', url: 'http://localhost:6006/', toolAnnouncedPort: 6006,
       binaryPath: '/opt/custom-agent-browser',
     });
@@ -128,8 +128,8 @@ describe('port: announced', () => {
 
   it('launches a first browser in the Tool\'s own session', async () => {
     recordToolAnnounce('tool-1', { port: 6006, name: null, key: null, dehydrate: false, persist: null });
-    const { state } = await run({ ...announced, toolRender: 'ab-screencast' }, [[tcp(6006)]]);
-    expect(state.params).toMatchObject({ url: 'http://localhost:6006/', renderMode: 'ab-screencast', launchSession: 'dormouse.1.tool.tool-1' });
+    const { state } = await run({ ...announced, toolRender: 'agent-browser-screencast' }, [[tcp(6006)]]);
+    expect(state.params).toMatchObject({ url: 'http://localhost:6006/', renderMode: 'agent-browser-screencast', launchSession: 'dormouse.1.tool.tool-1' });
     expect(state.params.session).toBeUndefined();
   });
 
@@ -295,7 +295,7 @@ describe('agent-browser retirement on command exit', () => {
       surfaceType: 'tool',
       command: 'pnpm storybook',
       url: 'http://localhost:6006/',
-      renderMode: 'ab-screencast',
+      renderMode: 'agent-browser-screencast',
       session: 'dormouse.1.tool-1',
       syncEngaged: true,
       binaryPath: '/opt/agent-browser',
@@ -347,8 +347,8 @@ it('ignores a scan that finishes after the command has changed', async () => {
 it('keeps the destination and browser binding after a Workspace transfer', async () => {
   recordToolAnnounce('tool-1', { port: 6006, name: null, key: null, dehydrate: false, persist: null });
   const { state, platform } = await run({
-    surfaceType: 'tool', command: 'x', toolRender: 'ab-screencast',
-    renderMode: 'ab-screencast', session: 'existing-browser',
+    surfaceType: 'tool', command: 'x', toolRender: 'agent-browser-screencast',
+    renderMode: 'agent-browser-screencast', session: 'existing-browser',
     url: 'http://localhost:6006/edited', toolAnnouncedPort: 6006,
   }, [[tcp(6006)], [tcp(6006)]]);
   expect(platform.getOpenPorts).not.toHaveBeenCalled();

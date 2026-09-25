@@ -16,23 +16,23 @@ These override your usual defaults. They matter more than anything else here:
    with your shell. ALWAYS run it with `dor ensure -- <command>`, which puts it
    in a visible pane that outlives you and gets reused instead of duplicated.
 2. **NEVER use a built-in, native, or bundled browser tool to open, view, or
-   drive a web page.** ALWAYS use `dor ab` (agent-browser), so the page renders
+   drive a web page.** ALWAYS use `dor agent-browser` (agent-browser), so the page renders
    in a Dormouse pane the user can watch and you can drive.
 
 The rest of this guide is how to do everything well.
 
 ## Which browser command
 
-- **`dor ab`** — the default: a browser you read and drive, in a pane the user
+- **`dor agent-browser`** — the default: a browser you read and drive, in a pane the user
   watches.
-- **`dor pw`** — when the user or the project uses Playwright, or the browser
-  you are handed already runs it (`render_mode` `pw-*`).
+- **`dor playwright`** — when the user or the project uses playwright, or the browser
+  you are handed already runs it (`render_mode` `playwright-*`).
 - **`dor iframe`** — only to show the human a local `http://` page. You cannot
   read or drive it, it keeps no logins, and it refuses `https://`.
 
-`dor list` shows each browser's `render_mode`: drive an `ab-*` browser with
-`dor ab --surface <ref>`, a `pw-*` one with `dor pw --surface <ref>`, and an
-`iframe` one with neither — open its page with `dor ab open <url>`.
+`dor list` shows each browser's `render_mode`: drive an `agent-browser-*` browser with
+`dor agent-browser --surface <ref>`, a `playwright-*` one with `dor playwright --surface <ref>`, and an
+`iframe` one with neither — open its page with `dor agent-browser open <url>`.
 
 ## Targeting: three ways to name a surface
 
@@ -46,15 +46,15 @@ three ways:
 2. **Address by identity key.** Surfaces with a natural identity skip handle
    bookkeeping: `dor ensure -- <command>` uses its exact command + cwd as an
    implicit key (match-or-create in one idempotent call), and browser
-   surfaces are addressed by an explicit key (`dor ab --key <name>`). A browser
-   you did not create has no key you know — hold its ref and use `dor ab
+   surfaces are addressed by an explicit key (`dor agent-browser --key <name>`). A browser
+   you did not create has no key you know — hold its ref and use `dor agent-browser
    --surface <ref>`.
 3. **Rediscover.** When you hold nothing — a fresh session, or a process the
    user started by hand — `dor list` (filtered) turns a description
    (`--command`, `--cwd`, `--port`) into a handle.
 
 Text output is designed for you to read: it is terse and carries the same
-refs. Reach for `--json` (every command except `dor ab` and `dor pw` supports
+refs. Reach for `--json` (every command except `dor agent-browser` and `dor playwright` supports
 it) only when a shell script or pipeline using `jq` consumes the output.
 
 ## Surface handles
@@ -194,24 +194,24 @@ A Window holds several Workspaces, each with its own surfaces and its own
 you were started in, and creating one is a change the user sees. When you do,
 name one as `workspace:<n>` (positional) or `workspace:<name>`, and pass
 `--workspace <ref>` to any command — `split`, `ensure`, `read`, `send`,
-`await`, `kill`, `iframe`, `ab`, `pw` — to act in another one. A surface's
+`await`, `kill`, `iframe`, `agent-browser`, `playwright` — to act in another one. A surface's
 stable id finds it in any Workspace without that flag; `surface:N` does not,
 since every Workspace has one. `close` refuses a Workspace holding your running work
 unless you pass `--force`.
 
-### `dor ab` / `dor agent-browser` — agent-drivable browser pane
+### `dor agent-browser` — agent-drivable browser pane
 
 Forwards everything to your installed `agent-browser` CLI (not bundled —
 `npm i -g agent-browser`) and binds the session to a Dormouse browser surface
 so the user watches what you drive.
 
 ```sh
-dor ab open http://localhost:5173         # key "default"
-dor ab open surface:3                     # auto-detect that terminal's port
-dor ab --key server open http://localhost:3000
-dor ab click @e3                          # further args are agent-browser's own
-dor ab --key server reload
-dor ab --surface surface:4 click @e3      # drive the browser a ref names
+dor agent-browser open http://localhost:5173         # key "default"
+dor agent-browser open surface:3                     # auto-detect that terminal's port
+dor agent-browser --key server open http://localhost:3000
+dor agent-browser click @e3                          # further args are agent-browser's own
+dor agent-browser --key server reload
+dor agent-browser --surface surface:4 click @e3      # drive the browser a ref names
 ```
 
 `--key <name>` is a workspace-scoped browser identity: one key = one session =
@@ -223,32 +223,33 @@ independent browsers at once.
 Prefer it whenever you hold a ref rather than a key — it is the only way to
 reach a browser the *user* opened from the GUI, which has no key. It fails on a
 terminal (no browser), and on an `iframe`-rendered surface (nothing to drive —
-open it with `dor ab` instead). The three identity flags are mutually exclusive.
+open it with `dor agent-browser` instead). The three identity flags are mutually exclusive.
 
-`dor ab` has no `--json` of its own; any JSON flags belong to `agent-browser`.
+Native `dor agent-browser` commands forward `--json` to agent-browser. Dormouse's
+`dor-embed-size` subcommand uses `--json` for its own measured viewport report.
 
-### `dor pw` / `dor playwright` — Playwright browser pane
+### `dor playwright` — playwright browser pane
 
 Forwards to your installed `@playwright/cli` (`npm i -g @playwright/cli`;
 override its path with `DORMOUSE_PLAYWRIGHT_BIN`).
 
-**Launch once with `open`, then navigate with `goto`.** Playwright's `open`
-restarts the browser, dropping every tab and cookie, where `dor ab open` only
+**Launch once with `open`, then navigate with `goto`.** playwright's `open`
+restarts the browser, dropping every tab and cookie, where `dor agent-browser open` only
 navigates.
 
 ```sh
-dor pw --key app open :5173
-dor pw --key app goto http://localhost:5173/settings
-dor pw --key app snapshot
-dor pw --key app click e15
-dor pw --surface surface:4 goto :8080
+dor playwright --key app open :5173
+dor playwright --key app goto http://localhost:5173/settings
+dor playwright --key app snapshot
+dor playwright --key app click e15
+dor playwright --surface surface:4 goto :8080
 ```
 
 `--key` defaults to `default` and is separate from agent-browser keys. The first
 command fixes the native project cwd; later commands and relative paths use it.
 `--session` (or `-s`) uses a raw native session in the caller's project instead.
 These identities and `--surface` are mutually exclusive. Other arguments
-belong to `playwright-cli`; `dor pw --help` describes the wrapper.
+belong to `playwright-cli`; `dor playwright --help` describes the wrapper.
 
 ## Recipes
 
@@ -258,7 +259,7 @@ belong to `playwright-cli`; `dor pw --help` describes the wrapper.
 ```sh
 $ dor ensure -- npm run dev
 created surface:3  "npm run dev"
-$ dor ab open surface:3
+$ dor agent-browser open surface:3
 ```
 
 **Launch and drive a sub-agent** (another CLI agent in a sibling pane):
@@ -277,8 +278,8 @@ Awaiting absorbs the bell, so the human is not summoned for news you received.
 **Client/server browser testing.** Two keys, two independent browsers:
 
 ```sh
-dor ab --key server open http://localhost:3000/admin
-dor ab --key client open http://localhost:5173
+dor agent-browser --key server open http://localhost:3000/admin
+dor agent-browser --key client open http://localhost:5173
 ```
 
 **Same command in multiple worktrees.** cwd keeps them distinct:

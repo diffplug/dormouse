@@ -1032,13 +1032,13 @@ describe("workspaceDropTarget", () => {
 it.each([true, false])('restores volatile Tool browser/dirty state (%s) without publishing it in the durable Workspace', async dirty => {
   resetToolAnnounces();
   const move = payload();
-  const stable = { surfaceType: 'tool', command: 'pnpm storybook', toolRender: 'ab-screencast', toolPort: 'announced' };
+  const stable = { surfaceType: 'tool', command: 'pnpm storybook', toolRender: 'agent-browser-screencast', toolPort: 'announced' };
   move.workspace.session.panes[0] = { ...move.workspace.session.panes[0], surfaceType: 'tool', command: 'pnpm storybook' };
   move.workspace.session.lathLayout = {
     version: 1, tree: { root: { kind: 'leaf', id: 'pane-a' } },
     leafMeta: { 'pane-a': { component: 'tool', tabComponent: 'tool', title: 'Storybook', params: stable } },
   };
-  const browser = { ...stable, url: 'http://localhost:6006/edited', session: 'browser-to-keep', renderMode: 'ab-screencast', toolAnnouncedPort: 6006 };
+  const browser = { ...stable, url: 'http://localhost:6006/edited', session: 'browser-to-keep', renderMode: 'agent-browser-screencast', toolAnnouncedPort: 6006 };
   const announce = { port: 6006, name: null, key: null, dehydrate: false, persist: null };
   arrivals = [Object.assign(move, { tools: { 'pane-a': browser }, terminals: { 'pane-a': { serialized: '', toolAnnounce: announce, toolDirty: dirty } } })];
   const plans = await bootFromTearOut(fakePlatform());

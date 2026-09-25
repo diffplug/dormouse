@@ -141,12 +141,12 @@ async function renderPanel(
 }
 
 describe('AgentBrowserPanel placeholders', () => {
-  // A bare `dor ab open` drives the caller's default key, which for a keyed or
+  // A bare `dor agent-browser open` drives the caller's default key, which for a keyed or
   // GUI-launched pane is a different browser; the internal session name means
   // nothing to the person reading it.
   it.each([
-    ['ab-screencast', 'dor ab'],
-    ['pw-screencast', 'dor pw'],
+    ['agent-browser-screencast', 'dor agent-browser'],
+    ['playwright-screencast', 'dor playwright'],
   ])('names this pane in its command, never the raw session (%s)', async (renderMode, cli) => {
     setPlatform(new FakePtyAdapter());
     await act(async () => {
@@ -175,12 +175,12 @@ describe('AgentBrowserPanel render mode controller', () => {
     await renderPanel(paneProps('ab-panel'), updateParameters);
 
     await act(async () => {
-      getAgentBrowserScreenController('ab-panel')?.actions.setRenderMode?.('ab-popout');
+      getAgentBrowserScreenController('ab-panel')?.actions.setRenderMode?.('agent-browser-popout');
     });
 
     expect(host.requests('launch')).toEqual([{ provider: 'agent-browser', binding: { session: 'browser-session' }, op: 'launch', headed: true }]);
-    expect(updateParameters).toHaveBeenCalledWith({ renderMode: 'ab-popout' });
-    expect(getAgentBrowserScreenController('ab-panel')?.snapshot().renderMode).toBe('ab-popout');
+    expect(updateParameters).toHaveBeenCalledWith({ renderMode: 'agent-browser-popout' });
+    expect(getAgentBrowserScreenController('ab-panel')?.snapshot().renderMode).toBe('agent-browser-popout');
     expect(container.textContent).toContain('This browser is running in a separate window.');
     expect(WebSocketMock.instances.some((ws) => ws.url === 'ws://127.0.0.1:3456')).toBe(true);
   });
@@ -193,19 +193,19 @@ describe('AgentBrowserPanel render mode controller', () => {
     });
 
     await renderPanel(
-      paneProps('ab-panel', { surfaceType: 'browser', renderMode: 'ab-popout', session: 'browser-session' }),
+      paneProps('ab-panel', { surfaceType: 'browser', renderMode: 'agent-browser-popout', session: 'browser-session' }),
       updateParameters,
     );
 
-    expect(getAgentBrowserScreenController('ab-panel')?.snapshot().renderMode).toBe('ab-popout');
+    expect(getAgentBrowserScreenController('ab-panel')?.snapshot().renderMode).toBe('agent-browser-popout');
 
     await act(async () => {
-      getAgentBrowserScreenController('ab-panel')?.actions.setRenderMode?.('ab-screencast');
+      getAgentBrowserScreenController('ab-panel')?.actions.setRenderMode?.('agent-browser-screencast');
     });
 
-    expect(host.requests('launch')).toEqual([{ provider: 'agent-browser', binding: { session: 'browser-session' }, op: 'launch', headed: false }]);
-    expect(updateParameters).toHaveBeenCalledWith({ renderMode: 'ab-screencast' });
-    expect(getAgentBrowserScreenController('ab-panel')?.snapshot().renderMode).toBe('ab-screencast');
+    expect(host.requests('launch')).toEqual([expect.objectContaining({ provider: 'agent-browser', binding: { session: 'browser-session' }, op: 'launch', headed: false })]);
+    expect(updateParameters).toHaveBeenCalledWith({ renderMode: 'agent-browser-screencast' });
+    expect(getAgentBrowserScreenController('ab-panel')?.snapshot().renderMode).toBe('agent-browser-screencast');
   });
 
   it('pop-in uses the latest observed headed-window tab URL over stale params', async () => {
@@ -218,7 +218,7 @@ describe('AgentBrowserPanel render mode controller', () => {
     await renderPanel(
       paneProps('ab-panel', {
         surfaceType: 'browser',
-        renderMode: 'ab-popout',
+        renderMode: 'agent-browser-popout',
         session: 'browser-session',
         stream: 1111,
         url: 'https://google.com/',
@@ -236,12 +236,12 @@ describe('AgentBrowserPanel render mode controller', () => {
     expect(updateParameters).toHaveBeenCalledWith({ url: 'https://example.com/' });
 
     await act(async () => {
-      getAgentBrowserScreenController('ab-panel')?.actions.setRenderMode?.('ab-screencast');
+      getAgentBrowserScreenController('ab-panel')?.actions.setRenderMode?.('agent-browser-screencast');
     });
 
-    expect(host.requests('launch')).toEqual([{
+    expect(host.requests('launch')).toEqual([expect.objectContaining({
       provider: 'agent-browser', binding: { session: 'browser-session' }, op: 'launch', url: 'https://example.com/', headed: false,
-    }]);
+    })]);
   });
 
   it('mirrors popped-out stream tab URL updates when the stream reports id instead of tabId', async () => {
@@ -251,7 +251,7 @@ describe('AgentBrowserPanel render mode controller', () => {
     await renderPanel(
       paneProps('ab-panel', {
         surfaceType: 'browser',
-        renderMode: 'ab-popout',
+        renderMode: 'agent-browser-popout',
         session: 'browser-session',
         stream: 1111,
         url: 'https://google.com/',
@@ -276,7 +276,7 @@ describe('AgentBrowserPanel render mode controller', () => {
     await renderPanel(
       paneProps('ab-panel', {
         surfaceType: 'browser',
-        renderMode: 'ab-popout',
+        renderMode: 'agent-browser-popout',
         session: 'browser-session',
         stream: 1111,
         url: 'https://google.com/',
@@ -437,7 +437,7 @@ describe('AgentBrowserPanel render mode controller', () => {
 });
 
 describe('AgentBrowserPanel Playwright params', () => {
-  // `dor pw open --headed` relaunches the native browser outside Dormouse; the
+  // `dor playwright open --headed` relaunches the native browser outside Dormouse; the
   // Wall records the host-reported mode (and a fresh viewer port) in params,
   // which reach the controller only through this panel.
   it('follows a native headed relaunch and its cwd, and never sizes the headed window', async () => {
@@ -450,15 +450,15 @@ describe('AgentBrowserPanel Playwright params', () => {
     // The pane sizes the host was asked to sync each stream's browser to.
     const synced = (port: number) => stream(port).sent.map((raw) => JSON.parse(raw))
       .filter((message) => message.type === 'sync').map(({ width, height, dpr }) => `${width}x${height}@${dpr}`);
-    const params = { surfaceType: 'browser', renderMode: 'pw-screencast', session: 'app', cwd: '/first', stream: 4321 };
+    const params = { surfaceType: 'browser', renderMode: 'playwright-screencast', session: 'app', cwd: '/first', stream: 4321, browserViewport: { mode: 'pane-sync' }, syncEngaged: true } as const;
 
     await renderPanel(paneProps('pw-panel', params));
     await vi.waitFor(() => expect(synced(4321)).toContain('800x600@1'));
     await act(async () => { stream(4321).emitMessage(JSON.stringify({ type: 'status', connected: true, screencasting: true })); });
     host.browser.mockClear();
 
-    await renderPanel(paneProps('pw-panel', { ...params, renderMode: 'pw-popout', stream: 4322 }));
-    expect(getAgentBrowserScreenController('pw-panel')?.snapshot().renderMode).toBe('pw-popout');
+    await renderPanel(paneProps('pw-panel', { ...params, renderMode: 'playwright-popout', stream: 4322 }));
+    expect(getAgentBrowserScreenController('pw-panel')?.snapshot().renderMode).toBe('playwright-popout');
     expect(container.textContent).toContain('This browser is running in a separate window.');
     expect(commands()).toEqual([]);
     expect(synced(4322)).toEqual([]);
@@ -468,7 +468,7 @@ describe('AgentBrowserPanel Playwright params', () => {
     expect(host.requests('launch')).toEqual([]);
 
     await renderPanel(paneProps('pw-panel', { ...params, cwd: '/second', stream: 4323 }));
-    expect(getAgentBrowserScreenController('pw-panel')?.snapshot().renderMode).toBe('pw-screencast');
+    expect(getAgentBrowserScreenController('pw-panel')?.snapshot().renderMode).toBe('playwright-screencast');
     await vi.waitFor(() => expect(synced(4323)).toContain('800x600@1'));
     // The browser it views runs in the new directory.
     expect(host.requests('view').at(-1)).toMatchObject({ binding: { cwd: '/second' }, stream: 4323 });
@@ -477,7 +477,7 @@ describe('AgentBrowserPanel Playwright params', () => {
   it('keeps its own mode write over params that predate it', async () => {
     const host = installBrowserHost({ launch: async () => ({ ok: true, stream: 4330 }) });
     const updateParameters = vi.fn();
-    const popped = { surfaceType: 'browser', renderMode: 'pw-popout', session: 'app', cwd: '/p', stream: 4321 };
+    const popped = { surfaceType: 'browser', renderMode: 'playwright-popout', session: 'app', cwd: '/p', stream: 4321 };
     await renderPanel(paneProps('pw-panel', popped), updateParameters);
     const stream = WebSocketMock.instances.findLast((ws) => ws.url === 'ws://127.0.0.1:4321')!;
     await act(async () => { stream.emitMessage(JSON.stringify({ type: 'status', connected: true, screencasting: false })); });
@@ -489,17 +489,17 @@ describe('AgentBrowserPanel Playwright params', () => {
     expect(host.requests('launch')).toEqual([expect.objectContaining({
       provider: 'playwright', binding: expect.objectContaining({ session: 'app' }), op: 'launch', headed: false,
     })]);
-    expect(updateParameters).not.toHaveBeenCalledWith(expect.objectContaining({ renderMode: 'pw-screencast' }));
+    expect(updateParameters).not.toHaveBeenCalledWith(expect.objectContaining({ renderMode: 'playwright-screencast' }));
 
     // Reattached with the params the store still held: they predate the write.
     await renderPanel(paneProps('pw-panel', popped), updateParameters);
-    expect(updateParameters).toHaveBeenCalledWith(expect.objectContaining({ renderMode: 'pw-screencast' }));
-    expect(getAgentBrowserScreenController('pw-panel')?.snapshot().renderMode).toBe('pw-screencast');
+    expect(updateParameters).toHaveBeenCalledWith(expect.objectContaining({ renderMode: 'playwright-screencast' }));
+    expect(getAgentBrowserScreenController('pw-panel')?.snapshot().renderMode).toBe('playwright-screencast');
 
     // Once params show it, a later host report is followed again.
-    await renderPanel(paneProps('pw-panel', { ...popped, renderMode: 'pw-screencast', stream: 4330 }), updateParameters);
+    await renderPanel(paneProps('pw-panel', { ...popped, renderMode: 'playwright-screencast', stream: 4330 }), updateParameters);
     await renderPanel(paneProps('pw-panel', { ...popped, stream: 4331 }), updateParameters);
-    expect(getAgentBrowserScreenController('pw-panel')?.snapshot().renderMode).toBe('pw-popout');
+    expect(getAgentBrowserScreenController('pw-panel')?.snapshot().renderMode).toBe('playwright-popout');
   });
 });
 
@@ -509,8 +509,8 @@ describe('AgentBrowserPanel across a provider change', () => {
   function withBothProviders() {
     installBrowserHost();
   }
-  const pw = { surfaceType: 'browser', renderMode: 'pw-screencast', session: 'failed-swap', stream: 4400 };
-  const ab = { surfaceType: 'browser', renderMode: 'ab-screencast', session: 'relaunched', stream: 4401 };
+  const pw = { surfaceType: 'browser', renderMode: 'playwright-screencast', session: 'failed-swap', stream: 4400 };
+  const ab = { surfaceType: 'browser', renderMode: 'agent-browser-screencast', session: 'relaunched', stream: 4401 };
 
   it('takes a fresh controller when the Wall disposes the old one and restores the other provider', async () => {
     withBothProviders();
@@ -522,7 +522,7 @@ describe('AgentBrowserPanel across a provider change', () => {
     const restored = getAgentBrowserSurfaceController('swap-panel');
     expect(restored).not.toBeNull();
     expect(restored).not.toBe(failed);
-    expect(getAgentBrowserScreenController('swap-panel')?.snapshot().renderMode).toBe('ab-screencast');
+    expect(getAgentBrowserScreenController('swap-panel')?.snapshot().renderMode).toBe('agent-browser-screencast');
     // The relaunched session's binding reaches the live controller.
     await act(async () => { await Promise.resolve(); });
     expect(WebSocketMock.instances.some((ws) => ws.url.includes('4401'))).toBe(true);
@@ -536,7 +536,7 @@ describe('AgentBrowserPanel across a provider change', () => {
     await renderPanel(paneProps('swap-panel', { ...ab, stream: undefined }));
     await act(async () => { await Promise.resolve(); });
     expect(getAgentBrowserSurfaceController('swap-panel')).not.toBe(failed);
-    expect(getAgentBrowserScreenController('swap-panel')?.snapshot().renderMode).toBe('ab-screencast');
+    expect(getAgentBrowserScreenController('swap-panel')?.snapshot().renderMode).toBe('agent-browser-screencast');
     // The replaced one is released, its stream with it.
     expect(WebSocketMock.instances.filter((ws) => ws.url.includes('4400')).every((ws) => ws.readyState === 3)).toBe(true);
   });
@@ -545,7 +545,7 @@ describe('AgentBrowserPanel across a provider change', () => {
 describe('AgentBrowserPanel after its controller is released', () => {
   it('takes a fresh controller for the params that follow, and none for the release alone', async () => {
     const host = installBrowserHost({ attach: async () => ({ ok: true, stream: 4402 }) });
-    const first = { surfaceType: 'browser', renderMode: 'ab-screencast', session: 'first-run', stream: 4400 };
+    const first = { surfaceType: 'browser', renderMode: 'agent-browser-screencast', session: 'first-run', stream: 4400 };
     await renderPanel(paneProps('released-panel', first));
     const released = getAgentBrowserSurfaceController('released-panel');
 
@@ -554,7 +554,7 @@ describe('AgentBrowserPanel after its controller is released', () => {
     expect(getAgentBrowserSurfaceController('released-panel')).toBeNull();
 
     // A Tool's next run names a new session on the same Surface.
-    await renderPanel(paneProps('released-panel', { surfaceType: 'browser', renderMode: 'ab-screencast', session: 'next-run' }));
+    await renderPanel(paneProps('released-panel', { surfaceType: 'browser', renderMode: 'agent-browser-screencast', session: 'next-run' }));
     await act(async () => { await Promise.resolve(); });
     const next = getAgentBrowserSurfaceController('released-panel');
     expect(next).not.toBeNull();
@@ -708,7 +708,7 @@ describe('AgentBrowserPanel visibility parking', () => {
 
   it('does not park a popped-out panel while it is hidden', async () => {
     const { setVisible } = await renderVisibilityPanel({
-      surfaceType: 'browser', renderMode: 'ab-popout', session: 'browser-session', stream: 1111,
+      surfaceType: 'browser', renderMode: 'agent-browser-popout', session: 'browser-session', stream: 1111,
     });
 
     const socket = liveStreamSocket(1111);
@@ -754,7 +754,7 @@ describe('AgentBrowserPanel visibility parking', () => {
 });
 
 describe('AgentBrowserPanel canvas input forwarding', () => {
-  // The pane that `dor ab open` creates is not the selected pane (the terminal
+  // The pane that `dor agent-browser open` creates is not the selected pane (the terminal
   // is), so the FIRST click on the browser surface must still reach the page —
   // it is the click that selects the pane. Mouse-down/up therefore gate on
   // passthrough mode alone, not full `interactive` (mode && selected).
@@ -890,7 +890,7 @@ describe('AgentBrowserPanel tab strip actions', () => {
 
 describe('the render modes a tool is offered (regression: PR #493 review)', () => {
   // The second of the two screen-registration sites (the other is
-  // `IframePanel`): a tool declaring `render: ab-screencast` mounts this panel,
+  // `IframePanel`): a tool declaring `render: agent-browser-screencast` mounts this panel,
   // so the gate has to be here too. Why it exists is at the gate itself, in
   // `agent-browser-surface-controller.ts`. The host can do everything, so a
   // refusal is the tool rule and not a missing capability.
@@ -900,9 +900,9 @@ describe('the render modes a tool is offered (regression: PR #493 review)', () =
 
   it('offers every mode on a plain browser surface', async () => {
     withCapableHost();
-    await renderPanel(paneProps('ab-plain', { surfaceType: 'browser', session: 's', renderMode: 'ab-screencast' }));
+    await renderPanel(paneProps('ab-plain', { surfaceType: 'browser', session: 's', renderMode: 'agent-browser-screencast' }));
     expect(getAgentBrowserScreenController('ab-plain')?.renderModes)
-      .toEqual(['ab-screencast', 'ab-popout', 'pw-screencast', 'pw-popout', 'iframe']);
+      .toEqual(['agent-browser-screencast', 'agent-browser-popout', 'playwright-screencast', 'playwright-popout', 'iframe']);
   });
 
   it('offers a tool only its declarable renders, and refuses the rest', async () => {
@@ -912,17 +912,16 @@ describe('the render modes a tool is offered (regression: PR #493 review)', () =
       root.render(
         <PaneWriteContext.Provider value={paneWriteFor(() => {})}>
           <WallActionsContext.Provider value={stubActions({ onSwapRenderMode })}>
-            <AgentBrowserPanel {...paneProps('ab-tool', { surfaceType: 'tool', session: 's', renderMode: 'ab-screencast' })} />
+            <AgentBrowserPanel {...paneProps('ab-tool', { surfaceType: 'tool', session: 's', renderMode: 'agent-browser-screencast' })} />
           </WallActionsContext.Provider>
         </PaneWriteContext.Provider>,
       );
     });
     const controller = getAgentBrowserScreenController('ab-tool')!;
-    expect(controller.renderModes).toEqual(['ab-screencast', 'iframe']);
+    expect(controller.renderModes).toEqual(['agent-browser-screencast', 'playwright-screencast', 'iframe']);
 
     // The popout relaunches in-controller, never reaching the Wall's guard.
-    await act(async () => { controller.actions.setRenderMode?.('ab-popout'); });
-    await act(async () => { controller.actions.setRenderMode?.('pw-screencast'); });
+    await act(async () => { controller.actions.setRenderMode?.('agent-browser-popout'); });
     expect(host.requests('launch')).toEqual([]);
     expect(onSwapRenderMode).not.toHaveBeenCalled();
 

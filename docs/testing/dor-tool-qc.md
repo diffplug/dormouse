@@ -9,7 +9,7 @@ live in `docs/specs/dor-tool.rationale.md` → Lifecycle; header findings live i
 
 1. Run source-mutating root self-tests before starting the live harness. Start
    `dor ensure -- pnpm innerdogfood` from the checkout under test. Use the
-   printed browser command through `dor ab`; the harness provides real sidecar
+   printed browser command through `dor agent-browser`; the harness provides real sidecar
    PTYs, a staged CLI, and the iframe proxy.
 2. Keep generated files and a separate XDG user configuration under the ignored
    `standalone/src-tauri/target/dor-tool-qc/` directory. Use that configuration

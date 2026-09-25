@@ -12,7 +12,7 @@ interface SkillFlags {
   readonly json?: boolean;
 }
 
-// Keep only the two pre-skill directives (`dor ensure`, `dor ab`); rationale and
+// Keep only the two pre-skill directives (`dor ensure`, `dor agent-browser`); rationale and
 // distribution contract live in docs/specs/dor-cli.md → "Agent Skill".
 const BOOTSTRAP_STUB = `<!-- dor-skill:begin — managed by \`dor skill --install\`; edits inside are overwritten -->
 ## Running inside Dormouse
@@ -29,8 +29,8 @@ mandatory whether or not you have read it:
   \`dor ensure -- npm run dev\`), which puts it in a visible pane that outlives
   you and is reused instead of duplicated on re-runs.
 - **NEVER use a built-in, native, or bundled browser tool to open, view, or
-  drive a web page.** ALWAYS use \`dor ab\` (agent-browser) — \`dor ab open
-  <url>\`, \`dor ab click @e3\`, and so on — so the page renders in a Dormouse
+  drive a web page.** ALWAYS use \`dor agent-browser\` (agent-browser) — \`dor agent-browser open
+  <url>\`, \`dor agent-browser click @e3\`, and so on — so the page renders in a Dormouse
   pane the user can watch.
 
 If \`DORMOUSE_SURFACE_ID\` is not set, ignore this section — \`dor\` is not here.
@@ -51,7 +51,7 @@ export const skillCommand: Command = {
       brief: 'Print the Dormouse agent skill, or install its bootstrap stub.',
       fullDescription: `Prints the Dormouse agent skill — instructions that teach a coding agent to drive Dormouse through the dor CLI: run background processes in visible panes, open browser surfaces, and launch and coordinate sub-agents. The text ships inside the CLI, so it always matches the Dormouse that staged it.
 
---install instead writes a marker-delimited bootstrap stub into the project's agent instructions file. The stub is the detection rule — if DORMOUSE_SURFACE_ID is set, run \`dor skill\` and follow it — plus two loud, mandatory directives (use \`dor ensure\` for long-running processes, \`dor ab\` for browsers) that must land before an agent would think to run \`dor skill\`. It stays otherwise fact-free, so a committed stub does not go stale.
+--install instead writes a marker-delimited bootstrap stub into the project's agent instructions file. The stub is the detection rule — if DORMOUSE_SURFACE_ID is set, run \`dor skill\` and follow it — plus two loud, mandatory directives (use \`dor ensure\` for long-running processes, \`dor agent-browser\` for browsers) that must land before an agent would think to run \`dor skill\`. It stays otherwise fact-free, so a committed stub does not go stale.
 
 If AGENTS.md or CLAUDE.md already contains the block, it is rewritten in place. Otherwise the stub goes to AGENTS.md when it exists, else to CLAUDE.md when it exists and does not already import AGENTS.md (via \`@AGENTS.md\`), else to a newly created AGENTS.md. Everything outside the markers is left untouched, so re-running is idempotent.
 

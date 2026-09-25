@@ -29,6 +29,47 @@ afterEach(async () => {
 });
 
 describe('createToolHost', () => {
+  it('reads browser settings before any Tool execution grant and merges user presets', async () => {
+    const userConfigPath = join(repo, 'user.yml');
+    await writeFile(userConfigPath, 'browser:\n  viewports:\n    custom: { width: 1100, height: 800, dpr: 2 }\n');
+    await writeFile(join(repo, 'dormouse.yml'), 'browser:\n  default_viewport: custom\n');
+    const host = createToolHost({ userConfigPath });
+    expect(await host.handle({ op: 'browser-config', cwd: repo })).toMatchObject({
+      status: 'browser-config', config: { defaultViewport: 'custom', viewports: { custom: { width: 1100, height: 800, dpr: 2 } } },
+    });
+  });
+
+  it('reads browser preferences despite invalid unrelated Tool entries in either file', async () => {
+    const userConfigPath = join(repo, 'user.yml');
+    await writeFile(userConfigPath, 'browser:\n  viewports:\n    custom: { width: 1600, height: 1000 }\ntools:\n  broken:\n    render: ab-screencast\n');
+    await writeFile(join(repo, 'dormouse.yml'), 'browser:\n  default_viewport: custom\ntools:\n  broken:\n    run: pnpm dev\n    render: ab-screencast\n');
+    const host = createToolHost({ userConfigPath });
+    expect(await host.handle({ op: 'browser-config', cwd: repo })).toMatchObject({
+      status: 'browser-config', config: { defaultViewport: 'custom', viewports: { custom: { width: 1600, height: 1000 } } },
+    });
+    expect(await host.handle({ op: 'lookup', name: 'broken', cwd: repo })).toMatchObject({ status: 'error', message: expect.stringContaining("'render' must be one of") });
+    expect(await host.handle({ op: 'lookup', name: 'broken', cwd: repo, global: true })).toMatchObject({ status: 'error', message: expect.stringContaining("'run' is required") });
+  });
+
+  it('still reports invalid browser sections and malformed YAML explicitly', async () => {
+    const host = createToolHost({ userConfigPath: join(repo, 'missing-user.yml') });
+    await writeFile(join(repo, 'dormouse.yml'), 'browser:\n  viewports:\n    broken: { width: 0, height: 900 }\ntools:\n  valid:\n    run: echo ok\n');
+    expect(await host.handle({ op: 'browser-config', cwd: repo })).toMatchObject({ status: 'error', message: expect.stringContaining('browser.viewports.broken') });
+    await writeFile(join(repo, 'dormouse.yml'), 'browser: [invalid\n');
+    expect(await host.handle({ op: 'browser-config', cwd: repo })).toMatchObject({ status: 'error', message: expect.stringContaining('dormouse.yml') });
+  });
+
+  it('resolves a trusted Tool viewport from project and user configuration', async () => {
+    const userConfigPath = join(repo, 'user.yml');
+    await writeFile(userConfigPath, 'browser:\n  viewports:\n    custom: { width: 1100, height: 800 }\n');
+    await writeFile(join(repo, 'dormouse.yml'), 'tools:\n  app:\n    run: pnpm dev\n    render: playwright-screencast\n    viewport: custom\n');
+    const host = createToolHost({ userConfigPath });
+    await host.handle({ op: 'trust', kind: 'folder', projectRoot: repo });
+    expect(await host.handle({ op: 'lookup', name: 'app', cwd: repo })).toMatchObject({
+      status: 'ok', render: 'playwright-screencast', viewport: { mode: 'fixed', width: 1100, height: 800 },
+    });
+  });
+
   it('asks for trust before resolving anything runnable', async () => {
     const host = createToolHost({ stateDir });
     expect(await host.handle({ op: 'lookup', name: 'storybook', cwd: repo })).toMatchObject({

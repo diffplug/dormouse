@@ -332,7 +332,7 @@ Source of truth: `isComposingKey` in `lib/src/lib/dom.ts`; `usePopoverFocusTrap`
 
 ### Split cwd inheritance
 
-A split from an existing pane (`|`/`%`/`-`/`"` or the header split buttons) spawns the new pane with its source pane's last-known cwd, then selects it and enters passthrough; host New Terminal actions share that focus tail (rationale). Focus-neutral control-plane creation (`dor split -- …`, `dor ensure`, `dor iframe`, `dor ab`) keeps its documented background behavior.
+A split from an existing pane (`|`/`%`/`-`/`"` or the header split buttons) spawns the new pane with its source pane's last-known cwd, then selects it and enters passthrough; host New Terminal actions share that focus tail (rationale). Focus-neutral control-plane creation (`dor split -- …`, `dor ensure`, `dor iframe`, `dor agent-browser`) keeps its documented background behavior.
 
 The source cwd is read from `getInheritableCwd(sourceId)`. **Never inherit a remote cwd** (`isRemote === true`, e.g. an OSC 7 path reported over ssh) — it is not a usable local spawn cwd. The host default applies when the source cwd is unknown, remote, or absent (initial pane creation). The inherited cwd rides `setPendingShellOpts` alongside the inherited shell selection, consumed by `getOrCreateTerminal` on the next `platform.spawnPty`.
 
@@ -568,7 +568,7 @@ A store commit that empties the tree (last pane killed or minimized) triggers th
 > Numbered for cross-spec reference; the numbers are stable, so append rather than renumber and leave a retired one retired.
 
 - **#2 — A focused iframe surface is not a window blur**: it blurs the window while `document.hasFocus()` stays true, so **presence ends only on a *real* blur** (`docs/specs/alert.md` → Engagement) — otherwise focusing an embed would end it across the window. Source of truth: `subscribeWindowFocus` in `lib/src/lib/window-focus.ts`.
-- **#6 — Focus-neutral surface creation (`dor ensure` / `dor iframe` / `dor ab`)**: unlike `dor split`, these open in the background without moving focus off the caller (`docs/specs/dor-cli.md`, `docs/specs/dor-browser.md`). An add never re-parents the caller's subtree or steals activation, and the create does not call `selectPane` (`settleAddSelection` returns false for a focus-neutral, non-selection-replacing add). **The one exception**: `dor iframe` / `dor ab` replacing the pane the user is *currently selected on* moves selection to the replacement, else it would dangle on the removed leaf; any other pane, or a door selection, is left untouched. Cleanup of a `dor ensure` temporary Surface follows `docs/specs/notepad.md` → "Closure"; any completed teardown preserves the caller's live selection.
+- **#6 — Focus-neutral surface creation (`dor ensure` / `dor iframe` / `dor agent-browser`)**: unlike `dor split`, these open in the background without moving focus off the caller (`docs/specs/dor-cli.md`, `docs/specs/dor-browser.md`). An add never re-parents the caller's subtree or steals activation, and the create does not call `selectPane` (`settleAddSelection` returns false for a focus-neutral, non-selection-replacing add). **The one exception**: `dor iframe` / `dor agent-browser` replacing the pane the user is *currently selected on* moves selection to the replacement, else it would dangle on the removed leaf; any other pane, or a door selection, is left untouched. Cleanup of a `dor ensure` temporary Surface follows `docs/specs/notepad.md` → "Closure"; any completed teardown preserves the caller's live selection.
 
 ## Future
 

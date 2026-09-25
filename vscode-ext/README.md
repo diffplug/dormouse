@@ -51,7 +51,7 @@ Watching a command's output requires shell integration (`OSC 633` / `OSC 133`) s
 A browser is just another pane. Put your dev server next to the terminal running it, in the same tiling layout.
 
 ```
-dor ab open surface:2
+dor agent-browser open surface:2
 ```
 
 That aims a browser pane at the port a terminal surface is serving. Your agents run the same command, so when an agent wants to look at what it just built, it opens a pane you are already watching.
@@ -128,7 +128,7 @@ Every terminal Dormouse launches has `dor` on its `PATH` — a small CLI that ta
 dor list                      # what surfaces exist
 dor ensure -- pnpm dev        # make sure this is running, exactly once
 dor split -- pnpm test        # open a new terminal pane
-dor ab open surface:2         # open a browser on that terminal's port
+dor agent-browser open surface:2         # open a browser on that terminal's port
 ```
 
 `dor ensure` is idempotent: run it twice and the second call reuses the pane already running that command in that directory instead of starting a second copy.

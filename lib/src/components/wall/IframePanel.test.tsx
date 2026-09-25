@@ -123,8 +123,8 @@ describe('IframePanel', () => {
 
     expect(container.querySelector('iframe')).toBeNull();
     expect(container.textContent).toContain('frames http:// pages only');
-    // `dor ab open` refuses a non-http(s) target too, so it is not the remedy here.
-    expect(container.textContent).not.toContain('dor ab open');
+    // `dor agent-browser open` refuses a non-http(s) target too, so it is not the remedy here.
+    expect(container.textContent).not.toContain('dor agent-browser open');
     expect(container.textContent).not.toContain('Open in agent-browser');
   });
 
@@ -318,7 +318,7 @@ describe('iframe failures offer a way out', () => {
       expect(banner()?.textContent).toContain('Dormouse can’t follow this page');
 
       await act(async () => { button('Open in agent-browser')!.click(); });
-      expect(onSwapRenderMode).toHaveBeenCalledWith('iframe-uninstrumented', 'ab-screencast');
+      expect(onSwapRenderMode).toHaveBeenCalledWith('iframe-uninstrumented', 'agent-browser-screencast');
 
       const resolved = vi.mocked(platform.createIframeProxyUrl).mock.calls.length;
       await act(async () => { button('Reload')!.click(); });
@@ -405,9 +405,9 @@ describe('iframe failures offer a way out', () => {
     });
 
     expect(container.textContent).toContain('Can’t frame this URL — the embedded view frames http:// pages only.');
-    expect(container.textContent).toContain('dor ab open https://example.com/');
+    expect(container.textContent).toContain('dor agent-browser open https://example.com/');
     await act(async () => { button('Open in agent-browser')!.click(); });
-    expect(onSwapRenderMode).toHaveBeenCalledWith('iframe-https', 'ab-screencast');
+    expect(onSwapRenderMode).toHaveBeenCalledWith('iframe-https', 'agent-browser-screencast');
 
     // A host that cannot launch one keeps only the command.
     proxyPlatform({ ok: false, reason: 'scheme' }, false);
@@ -422,7 +422,7 @@ describe('iframe failures offer a way out', () => {
       );
     });
     expect(button('Open in agent-browser')).toBeUndefined();
-    expect(container.textContent).toContain('dor ab open https://example.com/');
+    expect(container.textContent).toContain('dor agent-browser open https://example.com/');
   });
 
   it('opens a new https:// tab in agent-browser instead of an iframe that would refuse it', async () => {
@@ -447,7 +447,7 @@ describe('iframe failures offer a way out', () => {
 });
 
 describe('the render modes a tool is offered (regression: PR #493 review)', () => {
-  // A tool's `render` is `iframe` or `ab-screencast`, so pop-out has no
+  // A tool's `render` is `iframe` or `agent-browser-screencast`, so pop-out has no
   // renderer to land in: offering it tears the browser down and re-derives the
   // same screencast, so the user asks for a native window and gets a reload;
   // and a Playwright mode would be written as its render and launch nothing.
@@ -465,7 +465,7 @@ describe('the render modes a tool is offered (regression: PR #493 review)', () =
       params: { surfaceType: 'browser', url: 'http://example.test/app' },
     });
     expect(getAgentBrowserScreenController('iframe-plain')?.renderModes)
-      .toEqual(['ab-screencast', 'ab-popout', 'pw-screencast', 'pw-popout', 'iframe']);
+      .toEqual(['agent-browser-screencast', 'agent-browser-popout', 'playwright-screencast', 'playwright-popout', 'iframe']);
   });
 
   it('offers a tool only its declarable renders, and swaps to nothing else', async () => {
@@ -477,12 +477,11 @@ describe('the render modes a tool is offered (regression: PR #493 review)', () =
       params: { surfaceType: 'tool', url: 'http://localhost:6006/' },
     });
     const controller = getAgentBrowserScreenController('iframe-tool')!;
-    expect(controller.renderModes).toEqual(['ab-screencast', 'iframe']);
+    expect(controller.renderModes).toEqual(['agent-browser-screencast', 'playwright-screencast', 'iframe']);
     await act(async () => {
-      controller.actions.setRenderMode?.('pw-screencast');
-      controller.actions.setRenderMode?.('ab-popout');
-      controller.actions.setRenderMode?.('ab-screencast');
+      controller.actions.setRenderMode?.('agent-browser-popout');
+      controller.actions.setRenderMode?.('agent-browser-screencast');
     });
-    expect(onSwapRenderMode).toHaveBeenCalledExactlyOnceWith('iframe-tool', 'ab-screencast');
+    expect(onSwapRenderMode).toHaveBeenCalledExactlyOnceWith('iframe-tool', 'agent-browser-screencast');
   });
 });

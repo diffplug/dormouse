@@ -163,7 +163,7 @@ export function mountWallHarness(): WallHarness {
 
 export const STUB_SCREEN: ScreenSnapshot = {
   state: 'SYNCED',
-  renderMode: 'ab-screencast',
+  renderMode: 'agent-browser-screencast',
   viewport: { w: 1280, h: 720, dpr: 1 },
   paneCss: { w: 1280, h: 720 },
   displayDpr: 1,
@@ -187,6 +187,7 @@ export function registerStubScreen(
     chrome?: ChromeSnapshot;
     hostCapable?: boolean;
     renderModes?: readonly RenderMode[];
+    viewportSetting?: () => import('dor-lib-common/browser-viewports').BrowserViewportSetting;
   } = {},
 ): ScreenRegistration {
   return registerAgentBrowserScreen(id, {
@@ -195,13 +196,15 @@ export function registerStubScreen(
       engageSync: vi.fn(),
       applyDevice: vi.fn(),
       applyViewport: vi.fn(),
+      applyViewportSetting: vi.fn(async () => {}),
       openModal: vi.fn(),
       setRenderMode: vi.fn(),
     },
     chrome: init.chrome ?? STUB_CHROME,
     chromeActions: { navigate: vi.fn(), back: vi.fn(), forward: vi.fn(), reload: vi.fn() },
     hostCapable: init.hostCapable ?? true,
-    renderModes: init.renderModes ?? ['ab-screencast', 'ab-popout', 'pw-screencast', 'pw-popout', 'iframe'],
+    renderModes: init.renderModes ?? ['agent-browser-screencast', 'agent-browser-popout', 'playwright-screencast', 'playwright-popout', 'iframe'],
+    viewportSetting: init.viewportSetting,
   });
 }
 
