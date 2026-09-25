@@ -297,7 +297,7 @@ function setupTerminalEntry(id: string, options: TerminalEntryOptions = {}): Ter
   const { terminal, fit, serialize, element } = createXtermHost(options.grid);
   const selectionBaselineRef = { current: null as string | null };
   // Every module that finalizes a selection arms the render handler through
-  // this one setter: the mouse router at drag end, a note's pin on reveal.
+  // this one setter at drag end.
   const setSelectionBaseline = (baseline: string | null) => {
     selectionBaselineRef.current = baseline;
   };

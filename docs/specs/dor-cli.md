@@ -253,7 +253,7 @@ before an interrupted command returns to its prompt prevents relaunch;
 cancellation during initial integration detection closes the temporary Surface.
 `lib/src/components/Wall.test.tsx` pins both paths.
 
-**Must exclude Surfaces with a Wall closure in progress from reuse.** An unrelated notes freeze permits reuse.
+**Must exclude Surfaces with a Wall closure in progress from reuse.**
 
 Source of truth: `standalone/sidecar/dor-control-server.js`,
 `dor/src/control-client.ts`, `dor/src/protocol.ts`, `peerDirIsSafe` in

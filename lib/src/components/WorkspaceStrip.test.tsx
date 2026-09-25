@@ -413,7 +413,7 @@ describe('WorkspaceStrip', () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-workspace-tab-close="ws-2"]')!.click();
     });
-    expect(closed).toHaveBeenCalledWith('prompt');
+    expect(closed).toHaveBeenCalledWith();
     expect(getWorkspacesSnapshot().workspaces.map((workspace) => workspace.id)).toEqual([first]);
   });
 

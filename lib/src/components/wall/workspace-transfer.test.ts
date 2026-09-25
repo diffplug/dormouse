@@ -5,8 +5,7 @@ import type { PersistedSession } from '../../lib/session-types';
 
 /**
  * The source half of a Workspace transfer. What matters is the order — a record
- * built while the Sessions are still live, notes taken before they are
- * forgotten, and the detach last — that the prepare touches nothing until the
+ * built while the Sessions are still live, and the detach last — that the prepare touches nothing until the
  * host has accepted, and that nothing here is a closure
  * (`docs/specs/standalone.md` → "Transfer").
  */

@@ -165,7 +165,7 @@ describe('SettingsDialog navigation and search', () => {
     await act(async () => byText('Activity').click());
     await advanceScroll();
     expect(scrollTo).toHaveBeenLastCalledWith({ top: 100, behavior: 'instant' });
-    expect(visible('[role="region"]')).toHaveLength(4);
+    expect(visible('[role="region"]')).toHaveLength(3);
   });
 
   it('finds live command names and edits a setting directly in results', async () => {

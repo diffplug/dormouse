@@ -682,7 +682,7 @@ below reads that record rather than inferring itself from the suppression map.
 
 1. **Source** prepares the Workspace, touching nothing, and invokes
    `transfer_workspace` / `open_workspace_window`. **Must return preparation refusals as `{ moved: false, reason }` without changing ownership.** On `Ok` it marks the Workspace
-   **transferring**: the Wall stays mounted and the notes stay put, nothing is
+   **transferring**: the Wall stays mounted, nothing is
    released, and `getWindowSnapshot` omits it.
 2. **Rust** reassigns `terminalIds` to the target, keeps routing their output to
    the source, and asks the sidecar to stamp a `pty:marked` line per id; at that
@@ -699,7 +699,7 @@ below reads that record rather than inferring itself from the suppression map.
    "arrived before armed" class of bug (rationale). Rust answers
    `pty:requestInit` with **that arrival's ids and no others**; `pty:list` and
    each `pty:replay` echo the collector's token. The target resumes over them,
-   hydrates the notes and mounts the Workspace at the payload’s index, else the drop index.
+   mounts the Workspace at the payload’s index, else the drop index.
    **Never spawns or kills**: the Sessions' alert state never left the
    sidecar, whose answer to that `pty:requestInit` re-sends it (§Alerts;
    `docs/specs/alert.md` → Live Workspace transfer).
@@ -708,7 +708,7 @@ below reads that record rather than inferring itself from the suppression map.
    and emits `workspace-departed` for
    **that Workspace alone** to its own source.
 5. **Source** commits on `workspace-departed`: releases every Session (never
-   kills one), drops the notes and the helper, closes the Workspace, and closes
+   kills one), drops the helper, closes the Workspace, and closes
    the window if it was the last one (§Transfer).
 
 - **Nothing is released before the target has adopted it.** The target can refuse
@@ -722,10 +722,10 @@ below reads that record rather than inferring itself from the suppression map.
   otherwise persist the same Workspace in two windows, or kill it under the
   source.
 - **Must await `adopt_done` before installing a torn-out Window; refusal releases
-  its resumed Sessions and notes and boots fresh.**
+  its resumed Sessions and boots fresh.**
 - **A refused `adopt_done` unwinds the mount.** The `ARRIVAL_MAX` watchdog has
   already handed the shells back and the source kept the Workspace, so the
-  target releases its Sessions (never kills them), drops the notes, and closes
+  target releases its Sessions (never kills them) and closes
   the Workspace rather than leaving it live and persisted in two windows. **Must unwind from the received payload without preparing another move.**
 - **Must remove this window's unmounted semantic and Activity state when arrival
   collection times out**, and kill nothing: the source goes on showing those

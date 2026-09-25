@@ -94,7 +94,7 @@ function renderHeader(
 
 /** The compact header's popover, portaled to `document.body`. */
 const popup = () => document.querySelector<HTMLElement>('[role="dialog"][aria-label="Browser controls"]');
-/** The compact header's trigger; its label grows a note count. */
+/** The compact header's trigger. */
 const overflowTrigger = () => container.querySelector<HTMLButtonElement>('[aria-label^="Browser controls"]')!;
 const inPopup = (selector: string) => popup()?.querySelector<HTMLElement>(selector) ?? null;
 /** Click, then let the popover's deferred dismissal (a 0ms task) run. */
@@ -122,8 +122,6 @@ describe('SurfacePaneHeader — browser chrome', () => {
       act(() => recordToolDirty(id, true));
       expect(indicator()).not.toBeNull();
       expect(container.querySelector('[aria-label="Kill"]')).not.toBeNull();
-      act(() => addPlainNote(id, 'Keep this note'));
-      expect(indicator()).not.toBeNull();
       act(() => recordToolDirty(id, false));
       expect(indicator()).toBeNull();
       act(() => recordToolDirty(id, true));

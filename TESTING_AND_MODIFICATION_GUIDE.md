@@ -123,7 +123,7 @@ Tests that pin the stack's non-obvious rules, by concern:
 | Cross-window drag and iframe gate | `standalone/src/workspace-drag.test.ts` |
 | Registry, stable refs | Rust `workspaces::tests`, `standalone/src/workspace-registry.test.ts`, `lib/src/lib/workspace-store.test.ts` |
 | Sidecar marks and since-mark replay | `standalone/sidecar/pty-core.test.js` |
-| Notes across a move | `lib/src/components/wall/workspace-transfer.test.ts` |
+| Workspace transfer preparation | `lib/src/components/wall/workspace-transfer.test.ts` |
 | `dor workspace` verbs, move gate | `lib/src/components/wall/workspace-control.test.ts`, `dor-control-router.test.ts` |
 | Crash durability of a transfer | Rust `tests::an_arrival_record_round_trips_until_it_is_forgotten` and the `a_leftover_arrival_*` boot-merge tests |
 
