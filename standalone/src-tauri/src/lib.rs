@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value as JsonValue};
 mod log_tail;
@@ -1484,7 +1485,59 @@ fn tool_control(
     Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
 }
 
-// ── Browser automation (docs/specs/dor-browser.md → "Browser Host").
+// ── Managed voice (docs/specs/alert.md -> "Managed voice"). Bridge only; the
+// host half is lib/src/host/managed-voice-host.ts in the sidecar. ────────────
+
+// Above the sidecar's `MANAGED_VOICE_REQUEST_TIMEOUT_MS`
+// (lib/src/lib/platform/managed-voice-types.ts), so its `timeout` answer
+// arrives before this bridge gives up.
+const MANAGED_VOICE_SPEAK_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// `status` / `configure` / `cancel`; speaking has its own command for raw bytes.
+#[tauri::command(async)]
+fn managed_voice_command(
+    state: tauri::State<'_, SidecarState>,
+    payload: JsonValue,
+) -> Result<JsonValue, String> {
+    match payload.get("op").and_then(JsonValue::as_str) {
+        Some("status" | "configure" | "cancel") => {}
+        _ => return Err("unsupported managed voice op".to_string()),
+    }
+    let mut response =
+        request_from_sidecar_timeout(&state, "voice:command", payload, Duration::from_secs(5))?;
+    Ok(response.get_mut("result").map(JsonValue::take).unwrap_or(JsonValue::Null))
+}
+
+/// Audio as a raw `tauri::ipc::Response` (an ArrayBuffer in the webview); a
+/// failure rejects with the sidecar's diagnostic reason.
+#[tauri::command(async)]
+fn managed_voice_speak(
+    state: tauri::State<'_, SidecarState>,
+    text: String,
+    speak_id: String,
+) -> Result<tauri::ipc::Response, String> {
+    let mut response = request_from_sidecar_timeout(
+        &state,
+        "voice:command",
+        serde_json::json!({ "op": "speak", "speakId": speak_id, "text": text }),
+        MANAGED_VOICE_SPEAK_TIMEOUT,
+    )?;
+    let result = response.get_mut("result").map(JsonValue::take).unwrap_or(JsonValue::Null);
+    if result.get("ok").and_then(JsonValue::as_bool) != Some(true) {
+        return Err(result
+            .get("reason")
+            .and_then(JsonValue::as_str)
+            .unwrap_or("unavailable")
+            .to_string());
+    }
+    let b64 = result
+        .get("audioBase64")
+        .and_then(JsonValue::as_str)
+        .ok_or("speak returned no audio")?;
+    let bytes = BASE64.decode(b64).map_err(|err| format!("bad audio base64: {err}"))?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 // Thin forwarders to the Node sidecar, which runs the shared
 // lib/src/host/browser-host.ts — the very same module the VS Code extension
 // host runs, and the one place a request is validated. Mirrors
@@ -3944,6 +3997,17 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        // docs/specs/security-local.md -> "Persisted state": only a debug
+        // build's sidecar sees the managed-voice dev override. The spawn
+        // inherits the whole environment, so release removes it explicitly.
+        match env::var("DORMOUSE_HOSTED_ORIGIN") {
+            Ok(origin) if cfg!(debug_assertions) => {
+                c.env("DORMOUSE_HOSTED_ORIGIN", origin);
+            }
+            _ => {
+                c.env_remove("DORMOUSE_HOSTED_ORIGIN");
+            }
+        }
     });
     #[cfg(windows)]
     {
@@ -4368,6 +4432,8 @@ pub fn run() {
             take_recovery_commands,
             iframe_create_proxy_url,
             tool_control,
+            managed_voice_command,
+            managed_voice_speak,
             git_info,
             pty_request_init,
             dor_control_response,

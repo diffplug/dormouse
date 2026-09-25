@@ -36,6 +36,8 @@ import { createAlertClient, type AlertClientMethods } from "dormouse-lib/host/al
 import type { AlertCommand } from "dormouse-lib/host/alert-protocol";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
 import { createMemoryNotepadArchivePort } from "dormouse-lib/lib/notepad/memory-archive-port";
+import type { ManagedVoicePort } from "dormouse-lib/lib/platform/managed-voice-types";
+import { createManagedVoicePort } from "./managed-voice-port";
 import type { PersistedWindow } from "dormouse-lib/lib/session-types";
 import { claimRecoveryCommands, windowStateSlot } from "./window-recovery";
 import { coalesceCwds } from "./coalesce-cwds";
@@ -52,6 +54,13 @@ import {
 import { BrowserSidecarHost } from "./browser-sidecar-host";
 
 const errMessage = (err: unknown): string => err instanceof Error ? err.message : String(err);
+
+function decodeBase64Bytes(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
 
 /** The `alert*` platform methods, taken from the shared client in the constructor. */
 export interface BrowserSidecarAdapter extends AlertClientMethods {}
@@ -312,6 +321,13 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   // the installed app's archive. Notes last as long as the page
   // (docs/specs/notepad.md).
   readonly notepadArchive = createMemoryNotepadArchivePort();
+
+  // The harness answers `managed_voice_speak` with base64 where Rust sends raw bytes.
+  readonly managedVoice: ManagedVoicePort = createManagedVoicePort({
+    invoke: (cmd, args) => this.host.invoke(cmd, args),
+    decodeSpeak: (raw) => decodeBase64Bytes((raw as { audioBase64: string }).audioBase64),
+    offerSetup: import.meta.env.DEV,
+  });
 
   // Cmd/Ctrl+N opens a browser window before any listener sees it, so the
   // harness shows no chord and binds none — the same reason the website's demo

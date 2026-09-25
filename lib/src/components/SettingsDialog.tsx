@@ -19,6 +19,7 @@ import { ShellPicker } from './ShellPicker';
 import { WatchedCommandList } from './WatchedCommandList';
 import { RemoteControlSection } from './RemoteControlSection';
 import { PushTestButton, SpeakTestButton } from './AlarmTestButtons';
+import { ManagedVoiceSection } from './ManagedVoiceSection';
 import { getPlatform } from '../lib/platform';
 import { hasNotepadArchive } from '../lib/notepad/archive-service';
 import { getShellsSnapshot, subscribeToShells } from '../lib/shell-store';
@@ -258,7 +259,7 @@ export function AlarmSettingsSection({ sink, preview = false }: { sink: AlertSin
       delayMs={settings.speakDelayMs}
       onToggle={(speakEnabled) => updateAlertSettings({ speakEnabled })}
       onCommitDelay={(speakDelayMs) => updateAlertSettings({ speakDelayMs })}
-      action={preview ? null : <SpeakTestButton />}
+      action={preview ? null : <><SpeakTestButton /><ManagedVoiceSection /></>}
     >
       Uses your browser or system voice.{' '}
       <ExternalTextLink href={HOSTED_VOICE_URL}>

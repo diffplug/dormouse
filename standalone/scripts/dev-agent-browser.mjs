@@ -10,6 +10,7 @@ import { sessionForKey } from 'dor-lib-common/browser-providers';
 // handles both and is a no-op on POSIX. See docs/specs/dor-cli.md.
 import spawn from 'cross-spawn';
 import { createInterface } from 'node:readline';
+import { createRequire } from 'node:module';
 // The bridge's security boundary, in its own module so it is testable —
 // see standalone/scripts/dev-host-guard.test.mjs.
 import { corsHeaders, isAuthorized } from './dev-host-guard.mjs';
@@ -136,6 +137,20 @@ const invokeMap = {
   read_clipboard_image_as_file_path: () => requestSidecar('clipboard:readImage', {}, 'clipboard:image', (data) => data.path ?? null),
   read_clipboard_text: () => requestSidecar('clipboard:readText', {}, 'clipboard:text', (data) => data.text ?? null),
   iframe_create_proxy_url: ({ target, embedderOrigins }) => requestSidecar('iframe:createProxyUrl', { target, embedderOrigins }, 'iframe:proxyUrl', (data) => data.result),
+  // Managed voice, mirroring the Rust bridge (`managed_voice_command` /
+  // `managed_voice_speak` in src-tauri/src/lib.rs); the speak answer stays base64.
+  managed_voice_command: ({ payload }) => {
+    if (!['status', 'configure', 'cancel'].includes(payload?.op)) throw new Error('unsupported managed voice op');
+    return requestSidecar('voice:command', payload, 'voice:result', (data) => data.result, 5000);
+  },
+  managed_voice_speak: async ({ text, speakId }) => {
+    // The host's own ceiling, from the bundle `pnpm run stage` built.
+    const { MANAGED_VOICE_REQUEST_TIMEOUT_MS } = createRequire(import.meta.url)(path.join(sidecarDir, 'managed-voice.cjs'));
+    const result = await requestSidecar('voice:command', { op: 'speak', speakId, text }, 'voice:result',
+      (data) => data.result, MANAGED_VOICE_REQUEST_TIMEOUT_MS + 5000);
+    if (!result?.ok) throw new Error(result?.reason ?? 'unavailable');
+    return { audioBase64: result.audioBase64 };
+  },
   tool_control: ({ request }) =>
     requestSidecar('tool:control', { request }, 'tool:result', (data) => data.result),
   git_info: ({ paths }) =>

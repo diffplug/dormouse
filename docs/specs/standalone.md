@@ -90,6 +90,8 @@ are *not* forwarded:
 | `load_session` / `save_session` | Rust | the per-window session file is Rust's store (§Persistence) |
 | the `clipboard` readers (Windows only) | Rust (`clipboard_win.rs`) | native Win32 reads (`docs/specs/mouse-and-clipboard.md` §8.6) |
 
+**Managed-voice audio is the one byte payload that rides the pipe**: the sidecar base64s one utterance's audio, bounded by `MAX_AUDIO_BYTES`, into its `voice:result` line, and `managed_voice_speak` decodes it into a raw `tauri::ipc::Response` (rationale; messages in `docs/specs/transport.md` → "Managed voice").
+
 Request/response commands block on the sidecar's reply under a timeout.
 `OPEN_PORT_TIMEOUT_MS` and `OPEN_PORT_TIMEOUT_PER_ID_MS` in `lib.rs` mirror the
 constants in `lib/src/lib/platform/types.ts` (and `standalone/sidecar/pty-core.js`);
@@ -1316,6 +1318,9 @@ Source of truth: `standalone/package.json` (package scripts),
   sources.** Frontend edits hot-reload; Tauri watches Rust.
 - `pnpm innerdogfood` runs the sidecar + webview in a normal browser via the
   browser-dev harness instead of the Tauri WebView (below).
+- **May set `DORMOUSE_HOSTED_ORIGIN=http://127.0.0.1:<port>`** to speak managed
+  voice through a local `pnpm dev:hosted`, which answers no other `Host`
+  (`docs/specs/security-local.md` -> "Persisted state").
 
 ### Standalone browser-dev harness
 

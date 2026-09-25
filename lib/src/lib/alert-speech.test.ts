@@ -1,8 +1,10 @@
-import { speechQueue, SPEECH_ENGINE_TIMEOUT_MS } from './speech-queue';
+import { SPEECH_ENGINE_TIMEOUT_MS } from './speech-queue';
+import { speechQueue } from './alert-speech-queue';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('./platform', () => ({
   getPlatform: () => ({ alertPublishSettings: vi.fn() }),
+  getPlatformOrNull: () => null,
 }));
 
 import { startAlertSpeech, toSpokenText, type AlertSpeaker } from './alert-speech';
