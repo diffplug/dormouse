@@ -517,9 +517,14 @@ export const ScrollFollowsContents: Story = {
     await userEvent.unhover(await hoverTopic(body, 'Notifications'));
     const section = body.getByRole('region', { name: 'Notepad' });
     const content = section.parentElement!;
+    // Manual input cancels any remaining topic-animation frame. A bare
+    // scrollTo can race that frame and have its smooth scroll stopped in WebKit.
+    fireEvent.wheel(content, { deltaY: content.scrollHeight });
     content.scrollTo({ top: content.scrollHeight, behavior: 'smooth' });
-    await waitForTopicScroll(section);
-    await expect(contentsButton(body, 'Notepad')).toHaveAttribute('aria-current', 'location');
+    await waitFor(() => {
+      expect(Math.abs(content.scrollHeight - content.clientHeight - content.scrollTop)).toBeLessThan(2);
+      expect(contentsButton(body, 'Notepad')).toHaveAttribute('aria-current', 'location');
+    });
   },
 };
 
