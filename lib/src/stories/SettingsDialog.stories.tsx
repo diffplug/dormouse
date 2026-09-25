@@ -480,7 +480,7 @@ export const HoverContents: Story = {
     const body = dialog(canvasElement);
     const topic = await hoverTopic(body, 'Notifications');
     await expect(topic).toHaveAttribute('aria-current', 'location');
-    await expect(body.getAllByRole('region')).toHaveLength(4);
+    await expect(body.getAllByRole('region')).toHaveLength(3);
   },
 };
 
@@ -488,8 +488,8 @@ export const ScrollFollowsContents: Story = {
   ...WithRules,
   play: async ({ canvasElement }) => {
     const body = dialog(canvasElement);
-    await userEvent.unhover(await hoverTopic(body, 'Notifications'));
-    const section = body.getByRole('region', { name: 'Relay' });
+    await userEvent.unhover(await hoverTopic(body, 'Activity'));
+    const section = body.getByRole('region', { name: 'Notifications' });
     const content = section.parentElement!;
     // Manual input cancels any remaining topic-animation frame. A bare
     // scrollTo can race that frame and have its smooth scroll stopped in WebKit.
@@ -497,7 +497,7 @@ export const ScrollFollowsContents: Story = {
     content.scrollTo({ top: content.scrollHeight, behavior: 'smooth' });
     await waitFor(() => {
       expect(Math.abs(content.scrollHeight - content.clientHeight - content.scrollTop)).toBeLessThan(2);
-      expect(contentsButton(body, 'Relay')).toHaveAttribute('aria-current', 'location');
+      expect(contentsButton(body, 'Notifications')).toHaveAttribute('aria-current', 'location');
     });
   },
 };
