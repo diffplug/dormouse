@@ -23,11 +23,11 @@ Pinned by `hosted/server/tests/workers.test.ts` and `hosted/server/tests/policy.
 
 ## Deployment boundary
 
-**Must vendor pgstencil from a commit on its `main`.** A Dormouse branch may vendor a pgstencil branch while a cross-repo change is in flight; `main` must not merge it until pgstencil has.
+**Must depend on a released pgstencil** whose installed `dist/provenance.json` names a commit on pgstencil `main` with a passing `security-audit`. The core and auth packages must name the same clean commit.
 
 - **FAIL IF** a production Worker exposes the captured-email inbox or deterministic clock controls, or imports the testing injection module; inspect `hosted/server/worker.ts`, the build configuration, and `hosted/server/tests/worker-entry.ts`.
-- **FAIL IF** an archive's SHA-256 differs from `vendor/build.json`, `build.json` records `dirty`, either archive's `package/dist/provenance.json` is missing, records `dirty`, or names a commit other than `build.json`'s, the core/auth pnpm overrides cease resolving to those archives, or a runtime import depends on a sibling source checkout.
-- **FAIL IF** `vendor/build.json`'s commit is not on pgstencil `main` (`gh api repos/diffplug/pgstencil/compare/<commit>...main`, status `ahead` or `identical`), or that commit's `security-audit` check runs (`gh api repos/diffplug/pgstencil/commits/<commit>/check-runs`) include no `success`, or any conclusion other than `success` and `cancelled`. pgstencil's own audit is the evidence for the packed code; Dormouse audits only how Hosted configures it.
+- **FAIL IF** either installed pgstencil package lacks `dist/provenance.json`, records `dirty`, or names a different commit; or `pnpm-lock.yaml` resolves either package from anything but the npm registry. Inspect `verifyPackages` in `hosted/scripts/production.mjs` and `hosted/server/tests/artifacts.test.ts`.
+- **FAIL IF** that commit is not on pgstencil `main` (`gh api repos/diffplug/pgstencil/compare/<commit>...main`, status `ahead` or `identical`), or its `security-audit` check runs (`gh api repos/diffplug/pgstencil/commits/<commit>/check-runs`) include no `success`, or any conclusion other than `success` and `cancelled`. pgstencil audits the released code; Dormouse audits only how Hosted configures it.
 - **FAIL IF** the local email inbox accepts a foreign Host or Origin or cross-site Fetch Metadata; inspect `allowedDevRequest` in `hosted/server/dev-host-guard.ts`, including the upgrade guard in `hosted/server/dev.ts`.
 
 - **FAIL IF** the production deploy can proceed without `preflight` establishing an uncached Hyperdrive, a matching migration/runtime database, and distinct runtime and migration roles; inspect `preflight` in `hosted/scripts/production.mjs` and its ordering ahead of the deploy step in `.github/workflows/hosted-production.yml`.

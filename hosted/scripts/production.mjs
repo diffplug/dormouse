@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { readFile, writeFile, mkdir, rm } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { required, cloudflare, hyperdriveOrigin } from "./preview.mjs";
@@ -31,54 +29,30 @@ export function productionConfig(base, env) {
   };
 }
 export async function verifyPackages() {
-  const manifest = JSON.parse(
-    await readFile(new URL("../../vendor/build.json", import.meta.url), "utf8"),
-  );
-  assert.match(manifest.commit, /^[a-f0-9]{40}$/);
-  assert.equal(
-    manifest.dirty,
-    false,
-    "Production requires a clean sync of a committed pgstencil revision; refresh the vendored packages first",
-  );
-  assert.deepEqual(
-    manifest.files.map((entry) => entry.filename).sort(),
-    ["pgstencil-0.2.0.tgz", "pgstencil-auth-0.2.0.tgz"],
-    "Expected both pinned pgstencil archives",
-  );
-  for (const entry of manifest.files) {
-    assert.match(entry.filename, /^pgstencil(?:-auth)?-[\w.-]+\.tgz$/);
-    const archive = new URL(`../../vendor/${entry.filename}`, import.meta.url);
-    assert.equal(
-      createHash("sha256")
-        .update(await readFile(archive))
-        .digest("hex"),
-      entry.sha256,
-      "Vendored archive checksum mismatch",
+  const commits = [];
+  for (const name of ["pgstencil", "@pgstencil/auth/better-auth"]) {
+    // Resolve the installed entrypoint, then read the provenance beside it.
+    const entry = import.meta.resolve(name);
+    const provenance = JSON.parse(
+      await readFile(new URL("./provenance.json", entry), "utf8"),
     );
-    // The archive's own provenance is what pgstencil's audit is keyed to —
-    // docs/specs/security-hosted.md -> "Deployment boundary".
-    const packed = spawnSync(
-      "tar",
-      ["-xOf", fileURLToPath(archive), "package/dist/provenance.json"],
-      { encoding: "utf8" },
+    assert.match(
+      provenance.commit,
+      /^[a-f0-9]{40}$/,
+      "Production requires accepted, clean pgstencil provenance",
     );
-    assert.equal(
-      packed.status,
-      0,
-      `${entry.filename} carries no package/dist/provenance.json; refresh the vendored packages first`,
-    );
-    const provenance = JSON.parse(packed.stdout);
     assert.notEqual(
       provenance.dirty,
       true,
-      "Production requires accepted, clean pgstencil provenance; refresh the vendored packages first",
+      "Production requires accepted, clean pgstencil provenance",
     );
-    assert.equal(
-      provenance.commit,
-      manifest.commit,
-      `${entry.filename} was packed from a commit other than the one vendor/build.json records`,
-    );
+    commits.push(provenance.commit);
   }
+  assert.equal(
+    commits[0],
+    commits[1],
+    "Production requires accepted, clean pgstencil provenance",
+  );
 }
 export async function preflight(env, config, api = cloudflare(env)) {
   const origin = hyperdriveOrigin(required(env, "DATABASE_URL"));

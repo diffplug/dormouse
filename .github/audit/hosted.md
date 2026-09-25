@@ -18,11 +18,11 @@ Read `docs/specs/hosted.md`, `hosted/server/`, `hosted/src/`, `hosted/scripts/`,
 Deployment boundary quantifies over the preview and production paths, which
 live in those scripts and workflows rather than in the Worker.
 
-Verify the vendored packages by their provenance rather than by reading them:
-hash each archive in `vendor/` against `vendor/build.json`; read each archive's
-own claim with `tar -xOf vendor/<archive>.tgz package/dist/provenance.json` and
-check that it names `build.json`'s commit and does not record `dirty`; then
-check that commit against pgstencil `main` and its audit:
+Verify the installed `pgstencil` and `@pgstencil/auth` packages by reading each
+`dist/provenance.json`, without auditing package code. Require a 40-hex commit,
+no `dirty: true`, and the same commit in both packages. Confirm `pnpm-lock.yaml`
+resolves both through the npm registry with integrity hashes. Then check the
+commit against pgstencil `main` and its audit:
 
 ```sh
 gh api repos/diffplug/pgstencil/compare/<commit>...main --jq .status
@@ -33,9 +33,9 @@ gh api repos/diffplug/pgstencil/commits/<commit>/check-runs \
 The first must be `ahead` or `identical`. A commit can carry several
 `security-audit` runs, and a `cancelled` one, from a manual dispatch that was
 stopped, is not a verdict: ignore `cancelled`, then require at least one
-`success` and no other conclusion. The packed code
+`success` and no other conclusion. The released code
 itself is audited in `diffplug/pgstencil` by that repository's own
-`security-audit` workflow against its `SECURITY.md`; do not audit the tarballs'
+`security-audit` workflow against its `SECURITY.md`; do not audit the installed packages'
 contents here — audit how `hosted/` configures the adapter. Distinguish tested
 code from pending production configuration; do not treat local provider
 simulations as live OAuth acceptance, and treat a checked-in placeholder as no
@@ -45,7 +45,7 @@ report its state as INFO under `### Qualitative findings`.
 
 ## Qualitative pass
 
-You own `hosted/` and `vendor/`. You **read** `.github/workflows/hosted-preview.yml`
+You own `hosted/` and the installed pgstencil boundary. You **read** `.github/workflows/hosted-preview.yml`
 and `.github/workflows/hosted-production.yml` for the Deployment boundary above,
 but you do not own them: `ci-and-secrets` owns those workflows' credentials,
 environments, reviewers, and token placement
