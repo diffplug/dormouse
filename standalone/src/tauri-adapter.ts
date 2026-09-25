@@ -22,6 +22,8 @@ import type {
   SpawnPtyOptions,
   WritePtyOptions,
 } from "dormouse-lib/lib/platform/types";
+import type { ManagedVoicePort } from "dormouse-lib/lib/platform/managed-voice-types";
+import { createManagedVoicePort } from "./managed-voice-port";
 import type {
   NotepadArchiveLoadResult,
   NotepadArchivePort,
@@ -629,6 +631,12 @@ export class TauriAdapter implements PlatformAdapter {
   getWindowState(): PersistedWindow | null {
     return this.windowSlot.read();
   }
+
+  readonly managedVoice: ManagedVoicePort = createManagedVoicePort({
+    invoke: rawInvoke,
+    decodeSpeak: (raw) => new Uint8Array(raw as ArrayBuffer),
+    offerSetup: import.meta.env.DEV,
+  });
 
   // --- Notepad archive (docs/specs/notepad.md) ---
   //

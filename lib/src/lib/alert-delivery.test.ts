@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from './platform';
 import { LABEL_PUBLISH_THROTTLE_MS, startAlertDelivery } from './alert-delivery';
-import { speechQueue } from './speech-queue';
+import { speechQueue } from './alert-speech-queue';
 import { DEFAULT_ALERT_SETTINGS, updateAlertSettings } from './alert-settings';
 import { clearTerminalActivity, initAlertStateReceiver } from './session-activity-store';
 import { removeTerminalPaneState, setTerminalUserTitle } from './terminal-state-store';

@@ -33,6 +33,7 @@ const { createSidecarHost } = require('./burrow.cjs');
 // machine (shared with the VS Code extension host) plus the single-use record
 // store. See docs/specs/standalone.md -> "Agent recovery".
 const { captureAgentRecovery, createRecoveryStore, sliceSince } = require('./recovery.cjs');
+const { createManagedVoiceHost } = require('./managed-voice.cjs');
 
 const browserLog = (m) => console.error(m);
 const browserHost = createBrowserHost({
@@ -80,6 +81,15 @@ const host = createSidecarHost({
   send,
   stateDir: process.env.DORMOUSE_STATE_DIR,
   mgr,
+});
+
+// Keep the development Hosted override out of every PTY's inherited environment.
+const hostedOrigin = process.env.DORMOUSE_HOSTED_ORIGIN;
+delete process.env.DORMOUSE_HOSTED_ORIGIN;
+const managedVoice = createManagedVoiceHost({
+  stateDir: process.env.DORMOUSE_STATE_DIR,
+  speakOrigin: hostedOrigin,
+  log: (message) => console.error(message),
 });
 
 // Dor Tools. Shares the app's state directory, so an approved repo stays
@@ -190,6 +200,9 @@ function handleLine(line) {
         }));
         break;
       case 'pty:gracefulKill': mgr.gracefulKill(data.ids, data.timeout, data.requestId); break;
+      case 'voice:command':
+        respondAsync('voice:result', data.requestId, async () => ({ result: await managedVoice.handle(data) }));
+        break;
       case 'sidecar:shutdown': shutdown(); break;
       case 'dor:controlResponse': dorControl?.respond(data); break;
       case 'tool:control':
@@ -258,6 +271,7 @@ async function shutdown() {
     ]);
   } catch {}
   dorControl?.close();
+  managedVoice.dispose();
   host.dispose();
   mgr.killAll();
   process.exit(0);

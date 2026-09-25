@@ -1,6 +1,14 @@
 {
   "direct": [
     {
+      "name": "base64",
+      "version": "0.23.1",
+      "license": "MIT OR Apache-2.0",
+      "author": "Marshall Pierce <marshall@mpierce.org>",
+      "homepage": "https://github.com/marshallpierce/rust-base64",
+      "declaredName": "base64"
+    },
+    {
       "name": "getrandom",
       "version": "0.4.3",
       "license": "MIT OR Apache-2.0",

@@ -1,5 +1,5 @@
 import { getSessionAlertPolicy, subscribeToAlertDeliveryPolicy } from './alert-delivery-policy';
-import { speechQueue } from './speech-queue';
+import { speechQueue } from './alert-speech-queue';
 import {
   clearAlertSpeechState,
   clearAllAlertSpeechStates,
