@@ -19,6 +19,8 @@ const configDir = path.join(import.meta.dirname, '.storybook');
 function storybookProject(browser: 'chromium' | 'webkit'): TestProjectInlineConfiguration {
   return {
     extends: true,
+    // Only Chromium changed its implicit symbol fallback across Vitest versions.
+    define: { __ARGOS_CHROMIUM_SNAPSHOT__: JSON.stringify(browser === 'chromium') },
     plugins: [
       storybookTest({ configDir }),
       argosVitestPlugin({

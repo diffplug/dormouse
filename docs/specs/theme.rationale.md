@@ -73,5 +73,6 @@ to DejaVu Sans Mono (7.828125px). The computed font stack was unchanged.
 Storybook 11 with Vitest 4 retained the baseline glyph; Vitest 5 with the
 same Vite version reproduced the change. Argos reported 25 Chromium changes
 across terminal-context prompts and mobile gesture labels; WebKit stayed clean.
-An explicit snapshot fallback preserves the established glyphs without making
-application typography depend on the visual-test runner's fallback choice.
+An explicit Chromium snapshot fallback restores all 295 baseline images.
+Applying it to WebKit changed 27 previously stable images, so the override is
+selected by the Argos project rather than shared with other browsers or the app.

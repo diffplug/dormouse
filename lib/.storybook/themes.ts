@@ -13,7 +13,7 @@ const bundled = _bundled as unknown as DormouseTheme[];
 const EDITOR_FONT_FAMILIES = "'SF Mono', Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New'";
 
 // Liberation Mono lacks symbols such as ❯ and ⬆︎. Name their Linux fallback
-// before the generic family so browser-runner changes cannot select a different
+// before the generic family in Argos Chromium so runner changes cannot select a different
 // glyph with different metrics. The Argos job installs fonts-dejavu-core.
 export const SNAPSHOT_EDITOR_FONT_FAMILY = `${EDITOR_FONT_FAMILIES}, 'DejaVu Sans', monospace`;
 
