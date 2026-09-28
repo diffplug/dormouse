@@ -11,7 +11,7 @@ intend to do about it; there is no bounty.
 
 **What Dormouse guarantees, what it does not, and how that is checked** is the
 security spec, [`docs/specs/security.md`](docs/specs/security.md), published at
-<https://dormouse.sh/docs/security> — whole, but with the guarantees table and
+<https://dormouse.sh/security> — whole, but with the guarantees table and
 the two lists narrowed there to that page's audience, so the spec itself is
 where every row appears together. Its
 [Domains table](docs/specs/security.md#how-the-guarantees-are-checked) names

@@ -34,7 +34,7 @@ Dormouse can owe you attention in three independent ways. Two of them need no se
 
 **A command finishes while you are away.** If a foreground command was running while you were watching and it exited after you left, that pane is ringing when you come back. Also no configuration.
 
-**A watched command goes quiet.** When no watch list has been saved, Dormouse watches [supported coding agents](https://dormouse.sh/docs/compatible-agents) by default, including after an upgrade; existing saved watch lists are preserved. To watch another command, right-click its pane header — or press `a` in command mode — and turn on **Watch all `<command>` commands**. Every pane running that command is then watched, now and later. For a script runner the rule names the script: **Watch all pnpm dev commands** leaves `pnpm test` alone. When a watched command's output goes busy and then falls quiet while you are not looking, it rings.
+**A watched command goes quiet.** When no watch list has been saved, Dormouse watches [supported coding agents](https://dormouse.sh/compatible-agents) by default, including after an upgrade; existing saved watch lists are preserved. To watch another command, right-click its pane header — or press `a` in command mode — and turn on **Watch all `<command>` commands**. Every pane running that command is then watched, now and later. For a script runner the rule names the script: **Watch all pnpm dev commands** leaves `pnpm test` alone. When a watched command's output goes busy and then falls quiet while you are not looking, it rings.
 
 Watching is a rule on a command name, and turning it off anywhere removes it everywhere.
 
@@ -58,7 +58,7 @@ That aims a browser pane at the port a terminal surface is serving. Your agents 
 
 Browser panes render three ways: a live Chromium stream inside the pane, popped out to a real OS window when you need the genuine article, or a lightweight proxied iframe. Dormouse is a client for the `agent-browser` you already have installed — it does not ship a browser of its own.
 
-See [`/docs/dor#agent-browser`](https://dormouse.sh/docs/dor#agent-browser) for the full command reference.
+See [`/dor#agent-browser`](https://dormouse.sh/dor#agent-browser) for the full command reference.
 
 ## Mouse, selection, and copy/paste
 
@@ -135,8 +135,8 @@ dor agent-browser open surface:2         # open a browser on that terminal's por
 
 Dormouse also bundles an agent skill describing all of this in the form agents expect. Run `dor skill` to print it, or `dor skill --install` to install it for the agent in your current project.
 
-- [Complete CLI reference](https://dormouse.sh/docs/dor)
-- [The bundled agent skill](https://dormouse.sh/docs/agent-skill)
+- [Complete CLI reference](https://dormouse.sh/dor)
+- [The bundled agent skill](https://dormouse.sh/agent-skill)
 
 ## Help and project links
 

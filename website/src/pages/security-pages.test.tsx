@@ -2,7 +2,7 @@
  * The three security-adjacent pages: each links the other two in its own
  * prose, and the two specialized pages render their audience's rows and
  * bullets from the security spec's data rather than restating them
- * (docs/specs/website-docs.md -> `/docs/security` spec).
+ * (docs/specs/website-docs.md -> `/security` spec).
  */
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
@@ -44,26 +44,26 @@ function repoHrefsIn(tree: unknown): string[] {
 
 const PAGES = [
   {
-    route: "/docs/security",
+    route: "/security",
     element: <SecurityDocs />,
     audience: "security",
-    links: [sitePath("/supply-chain"), sitePath("/docs/self-host")],
+    links: [sitePath("/supply-chain"), sitePath("/self-host")],
   },
   {
     route: "/supply-chain",
     element: <SupplyChain />,
     audience: "supply-chain",
     links: [
-      `${sitePath("/docs/security")}#how-the-guarantees-are-checked`,
-      `${sitePath("/docs/self-host")}#what-the-installer-does`,
+      `${sitePath("/security")}#how-the-guarantees-are-checked`,
+      `${sitePath("/self-host")}#what-the-installer-does`,
     ],
   },
   {
-    route: "/docs/self-host",
+    route: "/self-host",
     element: <SelfHostDocs />,
     audience: "self-host",
     links: [
-      `${sitePath("/docs/security")}#how-the-guarantees-are-checked`,
+      `${sitePath("/security")}#how-the-guarantees-are-checked`,
       sitePath("/supply-chain"),
     ],
   },
@@ -132,10 +132,10 @@ describe("audience pages", () => {
 
   for (const page of PAGES.filter((page) => page.audience !== "security")) {
     it(`${page.route} links the audit method the guarantees rest on`, () => {
-      const securityLinks = [...renderMain(page.element).matchAll(/href="(\/docs\/security[^"]*)"/g)].map(
+      const securityLinks = [...renderMain(page.element).matchAll(/href="(\/security[^"]*)"/g)].map(
         ([, href]) => href,
       );
-      expect(securityLinks).toContain(`${sitePath("/docs/security")}#how-the-guarantees-are-checked`);
+      expect(securityLinks).toContain(`${sitePath("/security")}#how-the-guarantees-are-checked`);
     });
   }
 });

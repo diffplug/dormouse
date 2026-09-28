@@ -79,7 +79,7 @@ const TONE_CLASS = {
 const FIELD_LABEL = 'text-xs text-muted';
 const FIELD_HINT = `${FIELD_LABEL} mt-1 block`;
 const HOSTED_REMOTE_URL = 'https://dormouse.sh/hosted/#remote-control';
-const SELF_HOST_URL = 'https://dormouse.sh/docs/self-host/';
+const SELF_HOST_URL = 'https://dormouse.sh/self-host/';
 
 /**
  * How far ahead of `expiresAt` the phone-setup panel mints a replacement code.

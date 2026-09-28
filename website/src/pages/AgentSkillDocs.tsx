@@ -1,5 +1,5 @@
 /**
- * `/docs/agent-skill` — renders `dor/skill.md` exactly.
+ * `/agent-skill` — renders `dor/skill.md` exactly.
  *
  * Page chrome adds a table of contents, heading ids, copy buttons, and
  * contextual links into the CLI reference. Those links live in the page, never
@@ -49,7 +49,7 @@ const references: Record<string, Reference> = skill.references;
 export default function AgentSkillDocs() {
   return (
     <DocsLayout
-      activePath="/docs/agent-skill"
+      activePath="/agent-skill"
       title="Agent skill"
       intro="The operating guide Dormouse bundles for coding agents, rendered exactly as the CLI prints it."
       toc={skill.toc}

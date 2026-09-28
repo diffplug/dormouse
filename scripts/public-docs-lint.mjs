@@ -246,14 +246,14 @@ function checkLinks() {
  * constrains present code `Reserved:`. This one has no fold: `SECURITY_DELTA`
  * withholds the title and the front matter and nothing else, so anything
  * staged in the file ships to dormouse.sh as a promise
- * (docs/specs/website-docs.md -> `/docs/security` spec).
+ * (docs/specs/website-docs.md -> `/security` spec).
  *
  * Read off the parsed tree, so `## Future` inside a fenced example and a code
  * span reading `Reserved:` are not findings.
  */
 function checkSecurityFold() {
   if (!parsed[SECURITY_SPEC]) return;
-  const where = `${SPEC} -> "/docs/security"`;
+  const where = `${SPEC} -> "/security"`;
   const remedy = 'staged material must be withheld by a delta rule before it can exist there';
   for (const heading of parsed[SECURITY_SPEC].headings) {
     // Any depth, numbered or not: the fold is a fold wherever it is written.
@@ -335,8 +335,8 @@ function checkRoutesToReferences() {
   }
 
   // Which pages the homepage owes a link to is the registry's call, not a
-  // guess from the path: `/hosted` and `/supply-chain` are owed one and do not
-  // sit under `/docs`, while `/changelog` sits in the rail on purpose.
+  // guess from the path: `/hosted` and `/supply-chain` are owed one, while
+  // `/changelog` sits in the rail on purpose.
   const owed = DOCS_PAGES.filter((page) => page.linkedFrom?.includes(HOMEPAGE_SOURCE));
   if (owed.length === 0) {
     fail(`docs-pages.ts: no page names the homepage; ${HOMEPAGE} enforces nothing`);
@@ -355,18 +355,6 @@ function checkRoutesToReferences() {
   for (const page of owed) {
     if (!homeHrefs.some((href) => satisfies(href, page.path))) {
       fail(`${HOMEPAGE}: does not link to ${page.path}`);
-    }
-  }
-
-  // A homepage link *shaped* like a reference must be one. Scoped to `/docs`
-  // because that namespace is only ever references, so a typo there is
-  // detectable; a mistyped top-level path is just a broken link, which no
-  // prefix rule can tell from a real page. Exact paths, because `/docs` is an
-  // entrypoint rather than a page and a prefix test would accept a link to it.
-  const docsPaths = DOCS_PAGES.map((page) => page.path).filter((path) => path.startsWith('/docs/'));
-  for (const href of homeHrefs.filter((href) => href.startsWith('/docs'))) {
-    if (!docsPaths.some((path) => satisfies(href, path))) {
-      fail(`${HOMEPAGE}: links to ${href}, which is not a published reference`);
     }
   }
 }
