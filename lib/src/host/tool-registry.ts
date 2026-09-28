@@ -6,7 +6,7 @@
  * `tool-trust.ts`. Node-side so the YAML dependency stays out of the webview
  * bundle.
  */
-import { parse as parseYaml } from 'yaml';
+import { isMap, isScalar, parse as parseYaml, parseDocument as parseYamlDocument } from 'yaml';
 import { BUILTIN_FILE_TOOL } from 'dor/file-viewer-format';
 import { isRecord } from '../lib/is-record';
 import { hasShellInputControls } from 'dor/commands/shell-quote';
@@ -70,6 +70,38 @@ function parseDocument(text: string, path: string): Record<string, unknown> | un
   if (doc === null || doc === undefined) return undefined;
   if (!isRecord(doc)) throw new ToolFileError(`${path}: expected a mapping at the top level`);
   return doc;
+}
+
+/** Longest description `dor tool --list` reports, in UTF-16 code units. */
+export const TOOL_DESCRIPTION_LIMIT = 2_000;
+
+/**
+ * Each Tool's documentation: the comment block directly above its entry, `#`
+ * markers stripped (`docs/specs/dor-tool.md` -> CLI). Comments are not data to
+ * `parseToolFile`, so this re-reads a text that parser already accepted. `yaml`
+ * hangs the first entry's comment on the `tools` map itself and every later
+ * one on the entry's key.
+ */
+export function toolDescriptions(text: string): Map<string, string> {
+  const descriptions = new Map<string, string>();
+  const tools = parseYamlDocument(text).get('tools', true);
+  if (!isMap(tools)) return descriptions;
+  tools.items.forEach((pair, index) => {
+    if (!isScalar(pair.key)) return;
+    const comment = pair.key.commentBefore ?? (index === 0 ? tools.commentBefore : undefined);
+    const description = comment ? cleanDescription(comment) : '';
+    if (description) descriptions.set(String(pair.key.value), description);
+  });
+  return descriptions;
+}
+
+/** Repo text headed for a terminal: no C0, DEL, or C1 controls survive. */
+function cleanDescription(comment: string): string {
+  const text = comment.split('\n')
+    .map(line => line.replace(/^ /, '').replace(/\t/g, ' ').replace(/[\x00-\x1f\x7f-\x9f]/g, '').trimEnd())
+    .join('\n')
+    .trim();
+  return text.length > TOOL_DESCRIPTION_LIMIT ? `${text.slice(0, TOOL_DESCRIPTION_LIMIT - 1)}…` : text;
 }
 
 /** Read only browser preferences from a bounded `dormouse.yml` text. Tool

@@ -1035,7 +1035,8 @@ export function useDorControl({
           switch (lookup.status) {
             case 'trust-recorded':
             case 'browser-config':
-              // Only a `trust` op can produce this; a lookup never does.
+            case 'list':
+              // Only the ops that ask for these produce them; a lookup never does.
               detail.respond({ ok: false, error: 'unexpected tool host response' });
               return;
             case 'ok':
@@ -1865,6 +1866,25 @@ export function useDorControl({
           minimized: result.minimized,
         },
       });
+      return;
+    }
+
+    if (detail.method === SURFACE_CONTROL_METHODS.toolList) {
+      // A read of the same files `dor tool <name>` resolves; nothing executes,
+      // so no Workspace gate or launch queue applies.
+      const cwd = stringParam(params.cwd)?.trim();
+      if (!cwd) {
+        detail.respond({ ok: false, error: 'cwd is required' });
+        return;
+      }
+      const toolControl = getPlatform().toolControl;
+      if (!toolControl) {
+        detail.respond({ ok: false, error: 'this host cannot read a dormouse.yml' });
+        return;
+      }
+      const result = await toolControl({ op: 'list', cwd, global: booleanParam(params.global) });
+      if (result.status === 'list') detail.respond({ ok: true, result: result.listing });
+      else detail.respond({ ok: false, error: result.status === 'error' ? result.message : 'unexpected tool host response' });
       return;
     }
 

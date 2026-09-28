@@ -1,0 +1,15 @@
+exitCode: 0
+stdout:
+project  /work/site/dormouse.yml  [approved]
+  storybook  "pnpm storybook"  [iframe]  [port auto]  [keyed]
+      The component catalog.
+
+      View only.
+  harness  "pnpm harness"  [agent-browser-screencast]  [port announced]  [keyed]
+user  /home/me/.config/dormouse/dormouse.yml
+  storybook  "npx storybook"  [iframe]  [port auto]  [shadowed]
+  md  ["glow","$TARGET"]  [iframe]  [port announced]  [keyed]
+      Render Markdown.
+
+stderr:
+/work/site/dormouse.yml: tools.harness: ignoring unknown field 'colour'

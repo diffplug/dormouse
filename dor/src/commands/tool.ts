@@ -5,6 +5,7 @@ import type {
   Command,
   DorCommandContext,
   ParseResult,
+  ToolListResponse,
   ToolSurfaceRequest,
   ToolSurfaceResponse,
 } from './types.js';
@@ -22,6 +23,7 @@ import {
 } from './shared.js';
 
 interface ToolFlags {
+  readonly list?: boolean;
   readonly json?: boolean;
   readonly global?: boolean;
   readonly minimize?: boolean;
@@ -37,7 +39,9 @@ const TOOL_TIMEOUT_MS = 20_000;
 
 // Keep in sync with `parameters.flags`.
 const FLAGS_WITH_VALUES = new Set(['--cwd', '--surface', '--workspace']);
-const BOOLEAN_FLAGS = new Set(['--json', '--minimize', '--fresh', '--global']);
+const BOOLEAN_FLAGS = new Set(['--list', '--json', '--minimize', '--fresh', '--global']);
+// What `--list` combines with: it resolves like a launch but places nothing.
+const LIST_FLAGS = new Set(['--list', '--json', '--global', '--cwd']);
 
 /**
  * `dor tool` takes a registered name with inputs, or a nameless `--` command tail.
@@ -49,6 +53,14 @@ export function validateToolArgs(args: readonly string[]): ParseResult<void> {
   const head = headPositionals(args);
   if (!head.ok) return head;
   const { value: positionals } = head;
+
+  const flags = (delimiterIndex === -1 ? args : args.slice(0, delimiterIndex))
+    .filter(arg => arg.startsWith('--')).map(arg => arg.split('=')[0]);
+  if (flags.includes('--list')) {
+    if (delimiterIndex !== -1 || positionals.length > 0) return { ok: false, message: '--list takes no tool name or command' };
+    if (flags.some(flag => !LIST_FLAGS.has(flag))) return { ok: false, message: '--list takes only --global, --cwd, and --json' };
+    return { ok: true, value: undefined };
+  }
 
   if (delimiterIndex === -1) {
     if (positionals.length === 0) {
@@ -83,14 +95,14 @@ export const toolCommand: Command = {
       scope: 'root',
       findReplace: [
         '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface id|ref] [--workspace ref] [--cwd path]<TO-EOL>',
-        '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface id|ref] [--cwd path] [--workspace ref] <name> [args...]\n  dor tool [--json] [--minimize] [--surface id|ref] [--cwd path] [--workspace ref] -- <command>...\n',
+        '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface id|ref] [--cwd path] [--workspace ref] <name> [args...]\n  dor tool [--json] [--minimize] [--surface id|ref] [--cwd path] [--workspace ref] -- <command>...\n  dor tool --list [--global] [--cwd path] [--json]\n',
       ],
     },
     {
       scope: 'command-usage',
       findReplace: [
         '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface id|ref] [--workspace ref] [--cwd path]<TO-EOL>',
-        '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface id|ref] [--cwd path] [--workspace ref] <name> [args...]\n  dor tool [--json] [--minimize] [--surface id|ref] [--cwd path] [--workspace ref] -- <command>...\n',
+        '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface id|ref] [--cwd path] [--workspace ref] <name> [args...]\n  dor tool [--json] [--minimize] [--surface id|ref] [--cwd path] [--workspace ref] -- <command>...\n  dor tool --list [--global] [--cwd path] [--json]\n',
       ],
     },
     {
@@ -117,10 +129,17 @@ Where the tool lands: typed alone at a prompt in a visible, integrated plain ter
 
 --cwd sets the working directory used to find dormouse.yml and to run the command; it defaults to the directory dor was invoked from.
 
+--list runs nothing: it prints the Tools \`dor tool <name>\` would find from the working directory — the nearest project dormouse.yml and whether you have approved it, then the user file. Each Tool shows its command, render, port strategy, and whether it has a key, then the comment block directly above its entry, which is where a Tool is documented. A user Tool that a project Tool of the same name hides is marked shadowed. --global lists only user Tools.
+
 Text output:
   created surface:3  "pnpm storybook"
   existing surface:3  "pnpm storybook"
   takeover surface:1  "pnpm storybook"
+
+  project  /Users/me/projects/site/dormouse.yml  [approved]
+    storybook  "pnpm storybook"  [iframe]  [port auto]  [keyed]
+        The component catalog, for a human to look at.
+  user  /Users/me/.config/dormouse/dormouse.yml  [not found]
 
 JSON output:
   {
@@ -131,6 +150,23 @@ JSON output:
     "cwd": "/Users/me/projects/site",
     "minimized": false,
     "key": ["storybook", "/Users/me/projects/site"]
+  }
+
+  {
+    "project": { "path": "/Users/me/projects/site/dormouse.yml", "approved": true },
+    "user": { "path": "/Users/me/.config/dormouse/dormouse.yml", "found": false },
+    "tools": [
+      {
+        "name": "storybook",
+        "scope": "project",
+        "run": "pnpm storybook",
+        "render": "iframe",
+        "port": "auto",
+        "keyed": true,
+        "description": "The component catalog, for a human to look at.",
+        "shadowed": false
+      }
+    ]
   }`,
     },
     parameters: {
@@ -142,6 +178,7 @@ JSON output:
         surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'id|ref' },
         workspace: workspaceFlag,
         cwd: { kind: 'parsed', parse: stringParser, brief: 'Working directory for the tool file and the command.', optional: true, placeholder: 'path' },
+        list: { kind: 'boolean', brief: 'List the declared Tools instead of running one.', optional: true, withNegated: false },
       },
       positional: {
         kind: 'array',
@@ -154,6 +191,7 @@ JSON output:
 };
 
 async function runToolCommand(this: DorCommandContext, flags: ToolFlags, ...rest: string[]): Promise<void | Error> {
+  if (flags.list === true) return listTools(this, flags);
   // `validateToolArgs` already accepted this argv, so the walk cannot fail.
   const head = headPositionals(this.commandArgs);
   const named = head.ok && head.value.length > 0;
@@ -202,4 +240,48 @@ function renderToolResponse(response: ToolSurfaceResponse, json: boolean): strin
     });
   }
   return `${response.status} ${response.surfaceRef}  ${JSON.stringify(response.command)}\n`;
+}
+
+async function listTools(context: DorCommandContext, flags: ToolFlags): Promise<void | Error> {
+  const client = requireControlClient(context.options, TOOL_TIMEOUT_MS);
+  if (client instanceof Error) return client;
+  try {
+    const listing = await client.toolList({ cwd: callerWorkingDirectory(flags.cwd, context.options.env), global: flags.global === true });
+    for (const warning of listing.warnings) writeStderr(context, `${warning}\n`);
+    writeStdout(context, flags.json === true
+      ? renderJson({ project: listing.project, user: listing.user, tools: listing.tools })
+      : renderToolList(listing, flags.global === true));
+    return undefined;
+  } catch (error) {
+    return new Error(errorMessage(error));
+  }
+}
+
+/** Grouped by file, each Tool's description indented beneath it. Every field is
+ *  repo text bound for a terminal, so each passes `printable`. `--global` never
+ *  looked for a project, so it reports none. */
+function renderToolList(listing: ToolListResponse, global: boolean): string {
+  const lines: string[] = [];
+  if (listing.project) lines.push(`project  ${printable(listing.project.path)}  [${listing.project.approved ? 'approved' : 'not approved'}]`);
+  else if (!global) lines.push('project  [no dormouse.yml found]');
+  const tool = (entry: ToolListResponse['tools'][number]) => {
+    lines.push(`  ${[
+      printable(entry.name),
+      printable(JSON.stringify(entry.run)),
+      `[${entry.render}]`,
+      `[port ${entry.port}]`,
+      ...(entry.keyed ? ['[keyed]'] : []),
+      ...(entry.shadowed ? ['[shadowed]'] : []),
+    ].join('  ')}`);
+    for (const line of entry.description?.split('\n') ?? []) lines.push(line ? `      ${printable(line)}` : '');
+  };
+  listing.tools.filter(entry => entry.scope === 'project').forEach(tool);
+  lines.push(`user  ${printable(listing.user.path)}${listing.user.found ? '' : '  [not found]'}`);
+  listing.tools.filter(entry => entry.scope === 'user').forEach(tool);
+  return `${lines.join('\n')}\n`;
+}
+
+/** C0, DEL, and C1 controls as `\u` escapes, so repo text cannot drive the terminal. */
+function printable(text: string): string {
+  return text.replace(/[\x00-\x1f\x7f-\x9f]/g, (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`);
 }

@@ -3,9 +3,11 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
+  TOOL_DESCRIPTION_LIMIT,
   ToolFileError,
   parseToolFile,
   resolveDedupeKey,
+  toolDescriptions,
 } from './tool-registry';
 
 const REPO = { path: '/repo/dormouse.yml', dir: '/repo', scope: 'repo' as const };
@@ -14,6 +16,42 @@ const USER = { path: '/home/me/.config/dormouse/tools.yml', dir: '/home/me/.conf
 function parse(text: string, opts = REPO) {
   return parseToolFile(text, opts);
 }
+
+describe('toolDescriptions', () => {
+  const TEXT = `# About this file, not a Tool.
+tools:
+  # The first entry's comment, which yaml hangs on the map.
+  # Second line.
+  first:
+    run: echo 1
+    # A field comment describes the field, not the Tool.
+    port: auto
+
+  # A later entry's, on its key.
+  second:
+    run: echo 2
+  third:
+    run: echo 3
+`;
+
+  it('takes the comment block directly above each entry', () => {
+    expect(Object.fromEntries(toolDescriptions(TEXT))).toEqual({
+      first: "The first entry's comment, which yaml hangs on the map.\nSecond line.",
+      second: "A later entry's, on its key.",
+    });
+  });
+
+  it('removes control characters and bounds the length', () => {
+    const descriptions = toolDescriptions(`tools:\n  # a\tb \u009b31m c\n  x:\n    run: echo\n  # ${'y'.repeat(TOOL_DESCRIPTION_LIMIT + 10)}\n  z:\n    run: echo\n`);
+    expect(descriptions.get('x')).toBe('a b 31m c');
+    expect(descriptions.get('z')).toHaveLength(TOOL_DESCRIPTION_LIMIT);
+    expect(descriptions.get('z')!.endsWith('…')).toBe(true);
+  });
+
+  it('describes nothing in a file without Tools', () => {
+    expect(toolDescriptions('# nothing\nbrowser:\n  default_viewport: desktop\n').size).toBe(0);
+  });
+});
 
 describe('parseToolFile', () => {
   it.each([REPO, USER])('reserves builtin: tool names in $scope configuration', opts => {
@@ -207,6 +245,11 @@ describe("this repo's own dormouse.yml", () => {
     for (const name of ['storybook', 'website', 'relay', 'hosted']) {
       expect(file.tools.get(name)?.port).toBe('auto');
     }
+  });
+
+  it('documents every Tool with the comment `dor tool --list` shows', () => {
+    const descriptions = toolDescriptions(readFileSync(join(repoRoot, 'dormouse.yml'), 'utf-8'));
+    expect([...descriptions.keys()].sort()).toEqual([...file.tools.keys()].sort());
   });
 
   it('scopes every key to the checkout, so parallel worktrees stay distinct', () => {

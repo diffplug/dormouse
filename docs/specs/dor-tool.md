@@ -150,7 +150,9 @@ Source of truth: `TerminalPane` in `lib/src/components/TerminalPane.tsx`; `focus
 
 **Must retain `dor tool` and `dor open` as Surface-producing commands on every supported host**, never route them to a native editor. Generated help owns syntax and response types own shape.
 
-Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `dor/test/snapshots/help/tool.md`; `ToolSurfaceResponse` in `dor/src/commands/types.ts`.
+**Must answer `dor tool --list` from the files `dor tool <name>` resolves from the same directory, executing nothing.** A project lists without a grant and reports whether it has one. Each entry carries the comment block directly above it as its description, and a user Tool hidden by a same-named project Tool is `shadowed`. A malformed file fails the listing as it fails lookup.
+
+Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `listTools` in `lib/src/host/tool-list.ts`; `toolDescriptions` in `lib/src/host/tool-registry.ts`; `dor/test/snapshots/help/tool.md`; `ToolSurfaceResponse` / `ToolListResponse` in `dor/src/commands/types.ts`. Tests: `list` in `lib/src/host/tool-host.test.ts`, `toolDescriptions` in `lib/src/host/tool-registry.test.ts`.
 
 ## Opening local files
 

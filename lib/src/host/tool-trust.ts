@@ -299,24 +299,32 @@ export async function lookupTool(
     return { status: 'error', message: error instanceof Error ? error.message : String(error) };
   }
 
-  // Either grant covers this project: this folder alone, or the upstream every
-  // worktree shares. The folder key is free, so it is checked first — a granted
-  // folder answers without spawning git at all.
-  const ok = { status: 'ok', projectRoot: found.dir, path: found.path, file, entry, input } as const;
-  if (await trust.isTrusted([folderGrantKey(found.dir)])) return ok;
-
-  // Only now pay for git, which the untrusted answer needs anyway so the
-  // approval UI can offer the upstream grant.
-  const upstreamUrl = await resolveUpstream(found.dir);
-  if (upstreamUrl && await trust.isTrusted([upstreamGrantKey(upstreamUrl)])) return ok;
-
+  const grant = await projectGrant(found.dir, trust, resolveUpstream);
+  if (grant.trusted) return { status: 'ok', projectRoot: found.dir, path: found.path, file, entry, input };
   return {
     status: 'untrusted',
     projectRoot: found.dir,
     path: found.path,
     name: entry.name,
     run: input.run,
-    upstreamUrl,
+    upstreamUrl: grant.upstreamUrl,
     warnings: [...file.warnings],
   };
+}
+
+/**
+ * Whether a recorded grant covers the project rooted at `dir`: this folder
+ * alone, or the upstream every worktree shares. The folder key is free, so it
+ * is checked first — a granted folder answers without spawning git at all. An
+ * untrusted answer carries the upstream so the approval UI can offer it.
+ */
+export async function projectGrant(
+  dir: string,
+  trust: ToolTrustStore,
+  resolveUpstream: (dir: string) => Promise<string | null> = resolveUpstreamUrl,
+): Promise<{ trusted: true } | { trusted: false; upstreamUrl: string | null }> {
+  if (await trust.isTrusted([folderGrantKey(dir)])) return { trusted: true };
+  const upstreamUrl = await resolveUpstream(dir);
+  if (upstreamUrl && await trust.isTrusted([upstreamGrantKey(upstreamUrl)])) return { trusted: true };
+  return { trusted: false, upstreamUrl };
 }

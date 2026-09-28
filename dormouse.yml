@@ -3,10 +3,15 @@
 # `dor tool <name>` runs one of these in a pane that grows a browser once the
 # command starts serving. Repo-controlled, so Dormouse asks you to approve this
 # directory once before it will run anything here.
+#
+# The comment directly above each entry is its description in
+# `dor tool --list`: say what the Tool is for and anything its fields do not.
 browser:
   default_viewport: desktop
 
 tools:
+  # The lib component catalog (Storybook), for a human to look at: an iframe
+  # agents cannot drive.
   storybook:
     run: pnpm storybook
     # Storybook never announces, so autobind: frame the one port it opens. If it
@@ -18,6 +23,8 @@ tools:
     # reveal the first instead of starting.
     prespawn_dedupe: [storybook, $PROJECT_ROOT]
 
+  # Dormouse Standalone running in a browser against a real sidecar, for
+  # debugging the app itself. Drive the page with the command it prints.
   innerdogfood:
     run: pnpm innerdogfood
     # A real browser rather than an iframe, so an agent can drive the harness
@@ -29,6 +36,7 @@ tools:
     port: announced
     prespawn_dedupe: [innerdogfood, $PROJECT_ROOT]
 
+  # The marketing site and public docs (dormouse.sh), with hot reload.
   website:
     run: pnpm dev:website
     # Agents check docs pages here, so a browser they can drive.
@@ -37,6 +45,8 @@ tools:
     port: auto
     prespawn_dedupe: [website, $PROJECT_ROOT]
 
+  # A selfhost Relay serving Pocket, for testing remote control locally.
+  # Enroll a Burrow with the URL it prints.
   relay:
     run: pnpm dev:relay
     # Pocket signs in with passkeys and a session cookie, which an iframe drops.
@@ -45,6 +55,8 @@ tools:
     port: auto
     prespawn_dedupe: [relay, $PROJECT_ROOT]
 
+  # The Hosted accounts frontend with email sign-in; read the codes at
+  # /api/dev/emails on the printed origin. Needs Docker running.
   hosted:
     run: pnpm dev:hosted
     # Email sign-in sets a session cookie, which an iframe drops.

@@ -7,12 +7,14 @@
  */
 
 import type { BrowserViewportConfig, BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
+import type { ToolListResponse } from 'dor/commands/types';
 
 export type ToolHostRequest =
   | { op: 'open'; target: string; cwd: string; tool?: string }
   | { op: 'lookup'; name: string; cwd: string; args?: string[]; global?: boolean }
   | { op: 'trust'; kind: 'upstream' | 'folder'; projectRoot: string }
-  | { op: 'browser-config'; cwd: string };
+  | { op: 'browser-config'; cwd: string }
+  | { op: 'list'; cwd: string; global?: boolean };
 
 /** Which authority declared a Tool, namespacing its dedupe key and persisted
  *  `scope`. Project Tools carry none. `docs/specs/dor-tool.md` -> Identity and
@@ -69,4 +71,8 @@ export type ToolLookupResult =
       warnings: string[];
     };
 
-export type ToolControlResult = ToolLookupResult | { status: 'trust-recorded' } | { status: 'browser-config'; config: BrowserViewportConfig };
+export type ToolControlResult =
+  | ToolLookupResult
+  | { status: 'trust-recorded' }
+  | { status: 'browser-config'; config: BrowserViewportConfig }
+  | { status: 'list'; listing: ToolListResponse };

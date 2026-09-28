@@ -181,6 +181,27 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
         ...(command ? { command } : {}),
       };
     },
+    // An approved project and a user file; the user `storybook` is hidden by
+    // the project's. `--global` answers the user file alone, as the host does.
+    async toolList(request) {
+      this.requests.push({ method: 'toolList', request });
+      const user = [
+        { name: 'storybook', scope: 'user', run: 'npx storybook', render: 'iframe', port: 'auto', keyed: false, description: null, shadowed: !request.global },
+        { name: 'md', scope: 'user', run: ['glow', '$TARGET'], render: 'iframe', port: 'announced', keyed: true, description: 'Render Markdown.', shadowed: false },
+      ];
+      return {
+        project: request.global ? null : { path: '/work/site/dormouse.yml', approved: true },
+        user: { path: '/home/me/.config/dormouse/dormouse.yml', found: true },
+        tools: [
+          ...(request.global ? [] : [
+            { name: 'storybook', scope: 'project', run: 'pnpm storybook', render: 'iframe', port: 'auto', keyed: true, description: 'The component catalog.\n\nView only.', shadowed: false },
+            { name: 'harness', scope: 'project', run: 'pnpm harness', render: 'agent-browser-screencast', port: 'announced', keyed: true, description: null, shadowed: false },
+          ]),
+          ...user,
+        ],
+        warnings: request.global ? [] : ['/work/site/dormouse.yml: tools.harness: ignoring unknown field \'colour\''],
+      };
+    },
     async toolSurface(request) {
       this.requests.push({ method: 'toolSurface', request });
       // Mirror the host: a named tool renders from the (fixture) registry, a
@@ -1966,6 +1987,50 @@ test('tool keeps escaped named arguments separate from anonymous commands', asyn
 
 test('tool rejects an empty command tail', async () => {
   await snapshot('tool-empty-tail', await runCli(['tool', '--'], { client: fixtureClient() }));
+});
+
+test('tool --list text output groups Tools under their file with descriptions', async () => {
+  await snapshot('tool-list', await runCli(['tool', '--list'], { client: fixtureClient(), env: { PWD: '/work/site' } }));
+});
+
+test('tool --list --json keeps warnings on stderr', async () => {
+  await snapshot('tool-list-json', await runCli(['tool', '--list', '--json'], { client: fixtureClient(), env: { PWD: '/work/site' } }));
+});
+
+test('tool --list --global reports no project', async () => {
+  await snapshot('tool-list-global', await runCli(['tool', '--list', '--global'], { client: fixtureClient(), env: { PWD: '/work/site' } }));
+});
+
+test('tool --list asks for the caller directory, or --cwd', async () => {
+  const client = fixtureClient();
+  await runCli(['tool', '--list', '--cwd', 'sub'], { client, env: { PWD: '/work/site' } });
+  client.requests[0].request.cwd = smudgeWindowsPaths(client.requests[0].request.cwd);
+  assert.deepEqual(client.requests, [{ method: 'toolList', request: { cwd: '/work/site/sub', global: false } }]);
+});
+
+test('tool --list takes no name, command, or placement flag', async () => {
+  for (const argv of [['--list', 'storybook'], ['--list', '--', 'pnpm', 'dev'], ['--list', '--minimize'], ['--list', '--workspace', 'workspace:2']]) {
+    const client = fixtureClient();
+    const result = await runCli(['tool', ...argv], { client });
+    assert.equal(result.exitCode, 1, argv.join(' '));
+    assert.match(result.stderr, /--list takes (no tool name or command|only --global, --cwd, and --json)/);
+    assert.deepEqual(client.requests, []);
+  }
+});
+
+test('tool --list escapes control characters in repo text', async () => {
+  const client = fixtureClient();
+  client.toolList = async () => ({
+    project: { path: '/work/site/dormouse.yml', approved: false },
+    user: { path: '/home/me/.config/dormouse/dormouse.yml', found: false },
+    tools: [{ name: 'evil\u001b]52;c;x\u0007', scope: 'project', run: 'echo \u009b31m', render: 'iframe', port: 'auto', keyed: false, description: 'fine\u001b[2Jtext', shadowed: false }],
+    warnings: [],
+  });
+  const result = await runCli(['tool', '--list'], { client });
+  assert.doesNotMatch(result.stdout, /[\x00-\x09\x0b-\x1f\x7f-\x9f]/);
+  assert.match(result.stdout, /evil\\u001b\]52;c;x\\u0007/);
+  assert.match(result.stdout, /\\u009b31m/);
+  assert.match(result.stdout, /fine\\u001b\[2Jtext/);
 });
 
 test('tool rejects an unknown option', async () => {
