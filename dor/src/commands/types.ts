@@ -325,8 +325,9 @@ export interface ToolListEntry {
   port: 'announced' | 'auto';
   /** Declares `prespawn_dedupe`, so a rerun reveals the running Tool. */
   keyed: boolean;
-  /** The comment block directly above the entry, control characters removed;
-   *  null when there is none. Repo text: it describes, it never authorizes. */
+  /** The comment block directly above the entry, raw: control characters are
+   *  escaped by whatever prints it. Null when there is none. Repo text: it
+   *  describes, it never authorizes. */
   description: string | null;
   /** A user Tool hidden from `dor tool <name>` by a project Tool of that name. */
   shadowed: boolean;
