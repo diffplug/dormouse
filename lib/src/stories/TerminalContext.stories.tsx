@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
-import { expect, within } from 'storybook/test';
+import { expect, within, userEvent } from 'storybook/test';
 import { FrameCornersIcon, XIcon } from '@phosphor-icons/react';
 import { PANE_HEADER_HEIGHT_PX } from '../components/design';
 import { placeTerminalContext, type ContextSide } from '../components/wall/terminal-context-placement';
@@ -8,7 +8,7 @@ import { TerminalContextView } from '../components/wall/TerminalContextView';
 
 // Sample terminal output with the shared context presentation.
 // Local state switches fixtures and opens visual detail treatments.
-type Scenario = 'fresh' | 'noPorts' | 'running' | 'preserved' | 'editor' | 'differentDirectory' | 'multiplePorts' | 'notification' | 'autorunOff' | 'scanFailed';
+type Scenario = 'fresh' | 'noPorts' | 'running' | 'preserved' | 'editor' | 'differentDirectory' | 'multiplePorts' | 'notification' | 'autorunOff' | 'scanFailed' | 'launchPending' | 'launchFailed';
 const SCENARIOS: { id: Scenario; label: string }[] = [
   { id: 'fresh', label: 'Common case' },
   { id: 'noPorts', label: 'No ports' },
@@ -20,6 +20,8 @@ const SCENARIOS: { id: Scenario; label: string }[] = [
   { id: 'notification', label: 'Notification' },
   { id: 'autorunOff', label: 'Autorun off' },
   { id: 'scanFailed', label: 'Scan failed' },
+  { id: 'launchPending', label: 'Opening browser' },
+  { id: 'launchFailed', label: 'Browser launch failed' },
 ];
 const PARENT_DIR = '~/projects/dormouse';
 const HELPER_DIR = '~/projects/dormouse-fix';
@@ -106,7 +108,10 @@ function ContextPrototype({ scenario, initialDetail = null, paneWidth, paneHeigh
         watchRule="pnpm" watching={watching} todo={todo} notification={scenario === 'notification' ? { title: 'Tests complete', body: '341 passed, 0 failed' } : null}
         status={preserved ? 'preserved' : scenario === 'running' ? 'running' : scenario === 'autorunOff' ? 'off' : 'completed'} command={command}
         explorerLabel="Open in Finder" canExplore browserProviders={['agent-browser']} canIframe initialDetail={initialDetail}
-        onClose={() => {}} onCopyRef={() => {}} onCopyPath={() => {}} onExplore={() => {}} onPort={() => {}}
+        onClose={() => {}} onCopyRef={() => {}} onCopyPath={() => {}} onExplore={() => {}} onPort={() => {
+          if (scenario === 'launchPending') return new Promise<void>(() => {});
+          if (scenario === 'launchFailed') throw new Error("agent-browser binary not found ('agent-browser' was not found)");
+        }}
         onWatch={() => setWatching(!watching)} onTodo={() => setTodo(!todo)} onModify={async value => setCommand(value)} onReset={async () => {}} onPromote={async () => {}}>
         <div className="h-full overflow-auto px-3 py-2" style={{ fontSize: 13, lineHeight: '20px', whiteSpace: 'pre-wrap' }}><TerminalOutput scenario={scenario} /></div>
       </TerminalContextView>
@@ -133,6 +138,24 @@ const meta = {
   parameters: { layout: 'fullscreen' },
   args: { initialScenario: 'fresh' },
   play: async ({ args, canvasElement }) => {
+    if (args.initialScenario === 'launchPending' || args.initialScenario === 'launchFailed') {
+      const canvas = within(canvasElement);
+      await userEvent.click(canvas.getByRole('button', { name: 'Open in agent-browser screencast' }));
+      if (args.initialScenario === 'launchPending') {
+        await expect(canvas.getByRole('button', { name: 'Open in agent-browser screencast' })).toHaveAttribute('aria-busy', 'true');
+      } else {
+        const diagnostic = canvas.getByRole('alert');
+        await expect(diagnostic).toHaveTextContent('agent-browser binary not found');
+        expect(getComputedStyle(diagnostic).userSelect).toBe('text');
+        await userEvent.pointer([
+          { keys: '[MouseLeft>]', target: diagnostic, offset: 0 },
+          { target: diagnostic, offset: 13 },
+          { keys: '[/MouseLeft]' },
+        ]);
+        await expect(diagnostic).toHaveFocus();
+        expect(window.getSelection()?.toString()).toBe('agent-browser');
+      }
+    }
     // These snapshots must actually expose the state named in the story.
     if (['noPorts', 'multiplePorts', 'notification', 'scanFailed'].includes(args.initialScenario ?? 'fresh')) {
       const canvas = within(canvasElement);
@@ -180,3 +203,6 @@ export const ShortWindow: Story = { args: { paneWidth: 480, paneHeight: 280 } };
 export const NarrowDetails: Story = { args: { initialScenario: 'multiplePorts', paneWidth: 380, paneHeight: 520 } };
 export const NarrowDirectoryWarning: Story = { args: { initialScenario: 'differentDirectory', paneWidth: 380, paneHeight: 520 } };
 export const NarrowResetConfirmation: Story = { args: { initialScenario: 'editor', initialDetail: 'reset', paneWidth: 380, paneHeight: 520 } };
+
+export const OpeningBrowser: Story = { args: { initialScenario: 'launchPending', paneWidth: 380, paneHeight: 520 } };
+export const BrowserLaunchFailed: Story = { args: { initialScenario: 'launchFailed', paneWidth: 480, paneHeight: 520 } };

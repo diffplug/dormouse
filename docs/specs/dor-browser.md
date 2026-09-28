@@ -184,9 +184,11 @@ Source of truth: `lib/src/components/wall/use-dev-server-ports.ts`,
 
 **Must reuse targets per source, port, and provider**: each provider’s screencast and popout share a browser session and switch display modes. **A reuse is one intent, `setRenderMode(mode, { url })`, reaching the Surface's controller by id** (`requestBrowserRenderMode`), so a mode switch relaunches at the port's page rather than racing a navigation into it, even in an unmounted Door. Reattach minimized targets and recreate closed ones. System browser follows the OS opener's behavior.
 
-**Must create automated browser Surfaces at once with the URL and no session**, their controller launching ([Browser Connection](#browser-connection)); a failure is reported in context and closes the pane (`launchFallback: 'close'`). Concurrent requests for the same target are serialized.
+**Must acknowledge a port click with `Opening…` and suppress repeat activation while pending.** For a new automated target, start its controller before creating a Pane; split and focus only after the host confirms startup, without waiting for page load. Failure reports in context without changing layout or focus. Concurrent requests for the same target are serialized. (rationale)
 
-Source of truth: `openContextPort` in `lib/src/components/Wall.tsx`; `listenerUrlsByPort` in `lib/src/components/wall/port-url.ts`; `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`.
+**Must cancel pending placement when its context closes or is replaced, its source disappears or minimizes, or its Workspace deactivates or closes.** Close a browser that arrives after cancellation or cannot be placed. A successful placement adopts the prepared controller and binding without launching or navigating again.
+
+Source of truth: `openContextPort` in `lib/src/components/Wall.tsx`; `prepareForPlacement` in `lib/src/components/wall/agent-browser-surface-controller.ts`; tests in `lib/src/components/Wall.test.tsx`; `listenerUrlsByPort` in `lib/src/components/wall/port-url.ts`; `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`.
 
 ## Display Modal And Render Swaps
 
@@ -263,7 +265,7 @@ and `sync-to-pane` in `lib/src/host/browser-host.test.ts`,
 
 **Must preserve the current device-pixel ratio when DPR is omitted.** A requested ratio unsupported by the provider fails before changing dimensions; playwright can accept only its current context ratio. **Never turn an observed playwright DPR into an explicit request for future contexts.** Presets describe viewport geometry, not devices. **Must keep device emulation separate in the Display modal and label pixel density DPR.**
 
-**Must apply initial dimensions before the destination page's first script runs**, for managed CLI, GUI and Tool launches. Agent-browser launches blank, sets the viewport and then navigates; playwright uses its context viewport configuration. A failed initialization never navigates at a silently substituted size. **Must apply a renderer and viewport chosen together to the new renderer**, not discard sizing during a swap.
+**Must apply initial dimensions before the destination page's first script runs**, for managed CLI, GUI and Tool launches. Agent-browser launches blank, sets the viewport and then navigates; playwright uses its context viewport configuration. Deferred `pane-sync` launches start at 1440 × 900 until placement; **must engage sync when resolving that preset and send the actual pane dimensions on first attach**. A failed initialization never navigates at a silently substituted size. **Must apply a renderer and viewport chosen together to the new renderer**, not discard sizing during a swap.
 
 **Must query the active page's measured CSS dimensions and DPR**, never infer them from the pane or screenshot. Dormouse sizing commands require an existing bound Surface, do not create a browser, and use the same serialized writes as the Display modal. The command contract belongs to `docs/specs/dor-cli.md` → Browser viewport control.
 
@@ -443,7 +445,7 @@ mid-relaunch` in `lib/src/components/wall/agent-browser-surface-controller.test.
 
 Source of truth: `lib/src/components/wall/AgentBrowserPanel.tsx` (`toDevice`, the
 tab strip, placeholders), `lib/src/components/wall/agent-browser-surface-controller.ts`
-(`Phase`, `driver`, `launch`, `attach`, `paintFrame`, `paintBitmap`, `whenBrowserLaunched`), `onBrowserLaunchFailed` in `lib/src/components/Wall.tsx`,
+(`Phase`, `driver`, `launch`, `attach`, `paintFrame`, `paintBitmap`), `onBrowserLaunchFailed` in `lib/src/components/Wall.tsx`,
 `lib/src/components/wall/agent-browser-connection.ts`, `lib/src/components/wall/agent-browser-input.ts`,
 `viewerTextInputs` in `lib/src/lib/platform/browser-automation.ts`,
 `lib/src/components/wall/use-surface-visibility.ts`, `lib/src/lib/agent-browser-tab.ts` (the tab record

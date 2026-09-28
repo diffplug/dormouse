@@ -295,7 +295,9 @@ Dormouse's own `<input>`s — pane rename, the browser URL editor, dialog fields
 
 **Must route clipboard chords and selection operations to the focused helper**, while leaving its Escape, Tab, arrows, and digits with xterm. Which of those disarm autorun follows `docs/specs/terminal-context.md` → "Helper lifecycle".
 
-Source of truth: `TerminalPanel` in `lib/src/components/wall/TerminalPanel.tsx`; `useWallKeyboard` in `lib/src/components/wall/use-wall-keyboard.ts`; `markSessionTouched` in `lib/src/lib/terminal-lifecycle.ts`.
+**Must copy selected context diagnostic text with Cmd+C on macOS and Ctrl+C elsewhere**, including the menu-less standalone host. Copy only a selection contained in the focused diagnostic, retaining it on clipboard failure; helper and editable-field chords keep their own routing. Pinned by `lib/src/components/wall/keyboard/handle-context-copy.test.ts`.
+
+Source of truth: `handleContextCopy` in `lib/src/components/wall/keyboard/handle-context-copy.ts`; `TerminalPanel` in `lib/src/components/wall/TerminalPanel.tsx`; `useWallKeyboard` in `lib/src/components/wall/use-wall-keyboard.ts`; `markSessionTouched` in `lib/src/lib/terminal-lifecycle.ts`.
 
 
 ## 9. Future

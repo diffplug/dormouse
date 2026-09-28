@@ -19,10 +19,10 @@ import { disposeAllAgentBrowserSurfaceControllers, getAgentBrowserSurfaceControl
 import { forgetLaunchBinaryPaths } from './wall/browser-automation';
 import * as browserAutomation from './wall/browser-automation';
 import { setDevServerResolution } from './wall/agent-browser-ports';
-import { setPlatform } from '../lib/platform';
+import { IS_MAC, setPlatform } from '../lib/platform';
 import { FakePtyAdapter } from '../lib/platform/fake-adapter';
 import type { PlatformAdapter } from '../lib/platform/types';
-import type { BrowserRequest } from '../lib/platform/browser-automation';
+import type { BrowserRequest, BrowserResult } from '../lib/platform/browser-automation';
 import type { PersistedSession } from '../lib/session-types';
 import * as terminalRegistry from '../lib/terminal-registry';
 import { UNNAMED_PANEL_TITLE } from '../lib/terminal-registry';
@@ -758,9 +758,23 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  async function openPortContext() {
+    // The mocked TerminalPane registers no terminal, so a real helper would
+    // report its parent closed — an alert the context shows ahead of a port error.
+    vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'context-helper', parentId: 'pane-a', command: '', status: 'preserved' });
+    if (!fake.hasPty('pane-a')) fake.spawnPty('pane-a');
+    fake.setOpenPorts('pane-a', [{ protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port: 5173, pid: 100, processName: 'vite' }]);
+    await act(async () => {
+      container.querySelector<HTMLElement>('[data-pane-header-for="pane-a"]')!.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true, cancelable: true, clientX: 10, clientY: 10,
+      }));
+    });
+    await flush();
+  }
+  const contextButton = (label: string) => document.querySelector<HTMLButtonElement>(`[data-terminal-context] button[aria-label="${label}"]`)!;
+
   it('reveals a restored context-port browser instead of opening a second', async () => {
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
-    const helperSpy = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'context-helper', parentId: 'pane-a', command: '', status: 'preserved' });
     const { requests } = hostBrowsers({ launch: async () => ({ ok: true, session: 'second', stream: 1 }) });
     try {
       // The key a pre-Playwright build persisted for this port's agent-browser pane.
@@ -771,31 +785,20 @@ describe('Wall on the Lath engine', () => {
         }]} />);
       });
       await flush();
-      if (!fake.hasPty('pane-a')) fake.spawnPty('pane-a');
-      fake.setOpenPorts('pane-a', [{ protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port: 5173, pid: 100, processName: 'vite' }]);
-      await act(async () => {
-        container.querySelector<HTMLElement>('[data-pane-header-for="pane-a"]')!.dispatchEvent(new MouseEvent('contextmenu', {
-          bubbles: true, cancelable: true, clientX: 10, clientY: 10,
-        }));
-      });
-      await flush();
-      await act(async () => {
-        document.querySelector<HTMLButtonElement>('[data-terminal-context] button[aria-label="Open in agent-browser screencast"]')!.click();
-      });
+      await openPortContext();
+      await act(async () => contextButton('Open in agent-browser screencast').click());
       await flush();
 
       expect(requests('launch')).toEqual([]);
       expect(container.querySelector('[data-lath-leaf="restored-ab"]')).not.toBeNull();
       expect(leafCount()).toBe(2);
     } finally {
-      helperSpy.mockRestore();
       untouchedSpy.mockRestore();
     }
   });
 
   it('pops out a reused context-port browser at the port, never navigating into the relaunch', async () => {
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
-    const helperSpy = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'context-helper', parentId: 'pane-a', command: '', status: 'preserved' });
     // A relaunch of the named session hangs; a mint answers at once.
     const { browser, requests } = hostBrowsers({
       launch: (request) => request.binding.session ? new Promise<never>(() => {}) : Promise.resolve({ ok: true, session: 'second', stream: 1 }),
@@ -819,18 +822,9 @@ describe('Wall on the Lath engine', () => {
         }} />);
       });
       await flush();
-      if (!fake.hasPty('pane-a')) fake.spawnPty('pane-a');
-      fake.setOpenPorts('pane-a', [{ protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port: 5173, pid: 100, processName: 'vite' }]);
-      await act(async () => {
-        container.querySelector<HTMLElement>('[data-pane-header-for="pane-a"]')!.dispatchEvent(new MouseEvent('contextmenu', {
-          bubbles: true, cancelable: true, clientX: 10, clientY: 10,
-        }));
-      });
-      await flush();
+      await openPortContext();
       browser.mockClear();
-      await act(async () => {
-        document.querySelector<HTMLButtonElement>('[data-terminal-context] button[aria-label="Open in agent-browser popout"]')!.click();
-      });
+      await act(async () => contextButton('Open in agent-browser popout').click());
       await flush();
 
       // One relaunch, at the port — not at the page it was on, with the port's
@@ -841,14 +835,12 @@ describe('Wall on the Lath engine', () => {
       }]);
       expect(requests('navigate')).toEqual([]);
     } finally {
-      helperSpy.mockRestore();
       untouchedSpy.mockRestore();
     }
   });
 
   it('pops out a restored context-port Door at the port', async () => {
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
-    const helperSpy = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'context-helper', parentId: 'pane-a', command: '', status: 'preserved' });
     // A relaunch of the named session hangs; a mint answers at once.
     const { requests } = hostBrowsers({
       launch: (request) => request.binding.session ? new Promise<never>(() => {}) : Promise.resolve({ ok: true, session: 'second', stream: 1 }),
@@ -862,33 +854,20 @@ describe('Wall on the Lath engine', () => {
         }]} />);
       });
       await flush();
-      if (!fake.hasPty('pane-a')) fake.spawnPty('pane-a');
-      fake.setOpenPorts('pane-a', [{ protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port: 5173, pid: 100, processName: 'vite' }]);
-      await act(async () => {
-        container.querySelector<HTMLElement>('[data-pane-header-for="pane-a"]')!.dispatchEvent(new MouseEvent('contextmenu', {
-          bubbles: true, cancelable: true, clientX: 10, clientY: 10,
-        }));
-      });
-      await flush();
-      await act(async () => {
-        document.querySelector<HTMLButtonElement>('[data-terminal-context] button[aria-label="Open in agent-browser popout"]')!.click();
-      });
+      await openPortContext();
+      await act(async () => contextButton('Open in agent-browser popout').click());
       await flush();
 
       expect(requests('launch')).toEqual([{
         provider: 'agent-browser', binding: { session: 'restored' }, op: 'launch', url: 'http://localhost:5173/', headed: true,
       }]);
     } finally {
-      helperSpy.mockRestore();
       untouchedSpy.mockRestore();
     }
   });
 
   it('names Playwright when a context-menu Playwright launch fails', async () => {
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
-    // The mocked TerminalPane registers no terminal, so the helper would report
-    // its parent closed — the one alert the context shows ahead of a port error.
-    const helperSpy = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'context-helper', parentId: 'pane-a', command: '', status: 'preserved' });
     // A launch the host answers without a session or a reason of its own.
     const { browser } = hostBrowsers({
       launch: async (request) => request.provider === 'playwright' ? { ok: false } : { ok: true, session: 'ab', stream: 1 },
@@ -898,27 +877,155 @@ describe('Wall on the Lath engine', () => {
         root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
       });
       await flush();
-      if (!fake.hasPty('pane-a')) fake.spawnPty('pane-a');
-      fake.setOpenPorts('pane-a', [{ protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port: 5173, pid: 100, processName: 'vite' }]);
-      await act(async () => {
-        container.querySelector<HTMLElement>('[data-pane-header-for="pane-a"]')!.dispatchEvent(new MouseEvent('contextmenu', {
-          bubbles: true, cancelable: true, clientX: 10, clientY: 10,
-        }));
-      });
-      await flush();
-      await act(async () => {
-        document.querySelector<HTMLButtonElement>('[data-terminal-context] button[aria-label="Open in playwright screencast"]')!.click();
-      });
+      await openPortContext();
+      await act(async () => contextButton('Open in playwright screencast').click());
       await flush();
 
       expect(browser).toHaveBeenCalledWith(expect.objectContaining({ provider: 'playwright', op: 'launch', url: 'http://localhost:5173/' }));
       expect(document.querySelector('[data-terminal-context] [role="alert"]')?.textContent).toBe('Could not open playwright');
-      // The pane made for it goes with the failure.
+      // No pane is created for a failed startup.
       expect(leafCount()).toBe(1);
     } finally {
-      helperSpy.mockRestore();
       untouchedSpy.mockRestore();
     }
+  });
+
+  it.each([
+    ['agent-browser', 'screencast'], ['agent-browser', 'popout'], ['playwright', 'screencast'], ['playwright', 'popout'],
+  ] as const)('defers %s %s port placement until startup succeeds', async (provider, presentation) => {
+    const launch = Promise.withResolvers<BrowserResult>();
+    const { requests } = hostBrowsers({ launch: () => launch.promise });
+    const events = vi.fn();
+    await act(async () => { root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" onEvent={events} />); });
+    await flush();
+    await openPortContext();
+    const button = contextButton(`Open in ${provider} ${presentation}`);
+    events.mockClear();
+    await act(async () => { button.focus(); button.click(); });
+    await flush();
+    expect(button.textContent).toContain('Opening…');
+    expect(button.getAttribute('aria-busy')).toBe('true');
+    expect(document.activeElement).toBe(button);
+    expect(leafCount()).toBe(1);
+    expect(container.querySelectorAll('[data-door-id]')).toHaveLength(0);
+    expect(events).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'split' }));
+    await act(async () => button.click());
+    expect(requests('launch')).toHaveLength(1);
+    expect(requests('launch')[0]).toMatchObject({ provider, headed: presentation === 'popout' });
+    await act(async () => launch.resolve({ ok: true, session: `${provider}-${presentation}`, stream: 4321 }));
+    await flush();
+    expect(leafCount()).toBe(2);
+    expect(events.mock.calls.filter(([event]) => event.type === 'split')).toHaveLength(1);
+    expect(requests('launch')).toHaveLength(1);
+    expect(requests('navigate')).toHaveLength(0);
+    const browser = Array.from(container.querySelectorAll<HTMLElement>('[data-lath-leaf]')).find(leaf => leaf.dataset.lathLeaf !== 'pane-a')!;
+    expect(getAgentBrowserSurfaceController(browser.dataset.lathLeaf!)?.snapshot().phase).toBe('live');
+  });
+
+  it.each(['agent-browser', 'playwright'] as const)('keeps a failed %s launch in context without any split, and retries', async provider => {
+    const launch = Promise.withResolvers<BrowserResult>();
+    const { requests } = hostBrowsers({ launch: () => launch.promise });
+    const events = vi.fn();
+    await act(async () => { root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" onEvent={events} />); });
+    await flush();
+    await openPortContext();
+    const button = contextButton(`Open in ${provider} screencast`);
+    events.mockClear();
+    await act(async () => { button.focus(); button.click(); });
+    await flush();
+    expect(leafCount()).toBe(1);
+    await act(async () => launch.resolve({ ok: false, error: 'binary not found' }));
+    await flush();
+    expect(leafCount()).toBe(1);
+    expect(events).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'split' }));
+    expect(document.activeElement).toBe(button);
+    expect(document.querySelector('[data-context-diagnostic]')?.textContent).toBe('binary not found');
+    expect(button.hasAttribute('aria-busy')).toBe(false);
+    await act(async () => button.click());
+    await flush();
+    expect(requests('launch')).toHaveLength(2);
+  });
+
+  it.each(['dismiss', 'minimize', 'kill', 'closeWorkspace', 'deactivate', 'unmount'] as const)('cancels pending placement on %s and closes a late browser', async action => {
+    const launch = Promise.withResolvers<BrowserResult>();
+    const { requests } = hostBrowsers({ launch: () => launch.promise });
+    const events = vi.fn();
+    await act(async () => { root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" onEvent={events} />); });
+    await flush();
+    await openPortContext();
+    await act(async () => contextButton('Open in agent-browser screencast').click());
+    await flush();
+    events.mockClear();
+    await act(async () => {
+      if (action === 'dismiss') contextButton('Close terminal context').click();
+      else if (action === 'minimize') container.querySelector<HTMLButtonElement>('[data-lath-leaf="pane-a"] [aria-label="Minimize"]')!.click();
+      else if (action === 'kill') await dispatchKill('pane-a');
+      else if (action === 'closeWorkspace') await getWallHandle(DEFAULT_WORKSPACE_ID)!.closeAll();
+      else if (action === 'deactivate') root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" onEvent={events} active={false} />);
+      else root.render(null);
+    });
+    await flush();
+    await act(async () => launch.resolve({ ok: true, session: 'late-browser', stream: 4321 }));
+    await flush();
+    expect(events).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'split' }));
+    expect(requests('close')).toEqual([expect.objectContaining({ binding: { session: 'late-browser' } })]);
+  });
+
+  it('routes diagnostic DOM copy through the Wall without sending terminal input', async () => {
+    hostBrowsers({ launch: async () => ({ ok: false, error: 'agent-browser binary not found' }) });
+    await act(async () => { root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />); });
+    await flush();
+    await openPortContext();
+    await act(async () => contextButton('Open in agent-browser screencast').click());
+    await flush();
+    const diagnostic = document.querySelector<HTMLElement>('[data-context-diagnostic]')!;
+    const write = vi.fn(async () => {});
+    const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: write } });
+    const input = vi.spyOn(fake, 'writePty');
+    try {
+      diagnostic.focus();
+      const range = document.createRange();
+      range.selectNodeContents(diagnostic);
+      window.getSelection()!.removeAllRanges();
+      window.getSelection()!.addRange(range);
+      expect(document.activeElement).toBe(diagnostic);
+      expect(window.getSelection()!.toString()).toBe('agent-browser binary not found');
+      const key = new KeyboardEvent('keydown', { key: 'c', metaKey: IS_MAC, ctrlKey: !IS_MAC, bubbles: true, cancelable: true });
+      await act(async () => diagnostic.dispatchEvent(key));
+      expect(key.defaultPrevented).toBe(true);
+      expect(write).toHaveBeenCalledExactlyOnceWith('agent-browser binary not found');
+      expect(input).not.toHaveBeenCalled();
+    } finally {
+      window.getSelection()!.removeAllRanges();
+      if (originalClipboard) Object.defineProperty(navigator, 'clipboard', originalClipboard);
+      else delete (navigator as Partial<Navigator>).clipboard;
+    }
+  });
+
+  it('ignores an old launch after the context is closed and reopened', async () => {
+    const old = Promise.withResolvers<BrowserResult>();
+    const fresh = Promise.withResolvers<BrowserResult>();
+    let attempts = 0;
+    const { requests } = hostBrowsers({ launch: () => ++attempts === 1 ? old.promise : fresh.promise });
+    await act(async () => { root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />); });
+    await flush();
+    await openPortContext();
+    await act(async () => contextButton('Open in agent-browser screencast').click());
+    await flush();
+    await act(async () => contextButton('Close terminal context').click());
+    await openPortContext();
+    await act(async () => contextButton('Open in agent-browser screencast').click());
+    await flush();
+    expect(requests('launch')).toHaveLength(2);
+    await act(async () => old.resolve({ ok: true, session: 'old', stream: 4321 }));
+    await flush();
+    expect(leafCount()).toBe(1);
+    expect(contextButton('Open in agent-browser screencast').getAttribute('aria-busy')).toBe('true');
+    await act(async () => fresh.resolve({ ok: true, session: 'fresh', stream: 4321 }));
+    await flush();
+    expect(leafCount()).toBe(2);
+    expect(requests('close')).toEqual([expect.objectContaining({ binding: { session: 'old' } })]);
   });
 
   it('reuses and closes a parked browser that gains its session after minimization', async () => {
@@ -948,22 +1055,10 @@ describe('Wall on the Lath engine', () => {
         processName: 'vite',
       }]);
 
-      // The context-menu path creates an eager, session-less browser before its
-      // asynchronous daemon boot completes.
-      const header = container.querySelector<HTMLElement>('[data-pane-header-for="pane-a"]')!;
-      await act(async () => {
-        header.dispatchEvent(new MouseEvent('contextmenu', {
-          bubbles: true,
-          cancelable: true,
-          clientX: 10,
-          clientY: 10,
-        }));
-      });
-      await flush();
-      const portRow = document.querySelector<HTMLButtonElement>(
-        '[data-terminal-context] button[aria-label="Open in agent-browser screencast"]',
-      )!;
-      await act(async () => { portRow.click(); });
+      // Renderer swaps still create their replacement before launch. Exercise
+      // parking during startup through that entry point, not context Connect.
+      const iframe = await dispatchIframe('http://localhost:5173/');
+      await act(async () => { getAgentBrowserScreenController(iframe.id)?.actions.setRenderMode?.('agent-browser-screencast'); });
       await flush();
 
       const browserLeaf = Array.from(container.querySelectorAll<HTMLElement>('[data-lath-leaf]'))

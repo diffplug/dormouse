@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { handleDualTap } from './keyboard/handle-dual-tap';
+import { handleContextCopy } from './keyboard/handle-context-copy';
 import { handleEditableClipboard } from './keyboard/handle-editable-clipboard';
 import { handleMouseSelectionKeys } from './keyboard/handle-mouse-selection-keys';
 import { handleKillConfirm } from './keyboard/handle-kill-confirm';
@@ -45,6 +46,7 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
       if (e.key !== 'Meta' && e.key !== 'Shift') lastCmdSide.current = lastShiftSide.current = null;
       const context = (e.target as HTMLElement | null)?.closest?.('[data-terminal-context]');
       if (context) {
+        if (handleContextCopy(e)) return;
         if (handleEditableClipboard(e)) return;
         const terminalElement = (e.target as HTMLElement).closest<HTMLElement>('[data-helper-terminal], [data-context-terminal]');
         const helperId = terminalElement?.dataset.helperTerminal ?? terminalElement?.dataset.contextTerminal;

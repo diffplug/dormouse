@@ -51,6 +51,8 @@ Source of truth: `context` in `standalone/sidecar/pty-core.js`; `terminalContext
 
 **Must share the context presentation between the live menu and its state gallery.**
 
+**Must make diagnostic text drag-selectable**, including detail-dialog errors, without focusing the helper. Copy routing follows `docs/specs/mouse-and-clipboard.md` → "Terminal context input".
+
 **Must suppress xterm's auto-revealed scrollbar in visual snapshots**, while retaining terminal scrolling and layout.
 
 **Must fit every control inside the panel at its minimum width, label included.** The port launch actions, whose set grows with the host's browser providers, shrink and truncate their text, keeping the full label as the tooltip. The gallery's play check measures each button against the panel and against its own box.

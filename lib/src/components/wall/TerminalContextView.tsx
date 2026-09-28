@@ -110,7 +110,14 @@ function ContextCopyAction({ children, label, onCopy }: { children: ReactNode; l
   </ContextAction>;
 }
 
-function ContextOpenAction({ children, label, disabled, onOpen }: { children: ReactNode; label: string; disabled: boolean; onOpen: () => Promise<boolean> }) {
+/** Drag-selectable diagnostic text. A press focuses it, so Cmd/Ctrl+C reaches
+ *  `handleContextCopy` rather than the helper terminal. */
+function ContextDiagnostic({ className, children }: { className: string; children: ReactNode }) {
+  return <div role="alert" data-context-diagnostic tabIndex={-1} onPointerDown={event => event.currentTarget.focus({ preventScroll: true })}
+    className={`select-text cursor-text outline-none ${className}`}>{children}</div>;
+}
+
+function ContextOpenAction({ children, label, disabled, onOpen, fit = false }: { children: ReactNode; label: string; disabled: boolean; onOpen: () => Promise<boolean>; fit?: boolean }) {
   const [pending, setPending] = useState(false);
   const [feedback, setFeedback] = useState(false);
   const opening = pending || feedback;
@@ -119,13 +126,13 @@ function ContextOpenAction({ children, label, disabled, onOpen }: { children: Re
     const timer = setTimeout(() => setFeedback(false), 750);
     return () => clearTimeout(timer);
   }, [feedback]);
-  return <ContextAction label={label} disabled={disabled} busy={opening} onClick={() => {
+  return <ContextAction label={label} disabled={disabled} busy={opening} fit={fit} onClick={() => {
     setPending(true);
     setFeedback(true);
     void onOpen().then(success => { setPending(false); if (!success) setFeedback(false); });
   }}>
-    <span className="grid">
-      <span className={`col-start-1 row-start-1 inline-flex items-center justify-center gap-1.5 ${opening ? 'invisible' : ''}`}>{children}</span>
+    <span className="grid min-w-0">
+      <span className={`col-start-1 row-start-1 inline-flex min-w-0 items-center justify-center gap-1.5 ${opening ? 'invisible' : ''}`}>{children}</span>
       <span role="status" className="col-start-1 row-start-1 inline-flex items-center justify-center gap-1.5">
         {opening ? <><CircleNotchIcon size={15} className="animate-spin motion-reduce:animate-none" />Opening…</> : null}
       </span>
@@ -194,7 +201,14 @@ export function TerminalContextView(p: TerminalContextViewProps) {
   const [error, setError] = useState('');
   const entries = p.scan.status === 'loaded' ? p.scan.entries : [];
   const selected = entries.find(entry => entry.port === port) ?? entries[0];
-  const attempt = async (action: Action) => { setError(''); try { await action(); return true; } catch (e) { setError(messageOf(e)); return false; } };
+  const attempt = async (action: Action) => {
+    setError('');
+    try { await action(); return true; }
+    catch (e) {
+      if (!(e instanceof DOMException && e.name === 'AbortError')) setError(messageOf(e));
+      return false;
+    }
+  };
   /** A detail-dialog action: closes the dialog on success and holds the buttons meanwhile. */
   const submit = async (action: Action) => { setBusy(true); if (await attempt(action)) setDetail(null); setBusy(false); };
   const status = HELPER_STATUS[p.status];
@@ -236,7 +250,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
                 {PORT_ACTIONS.map(action => {
                   const offered = action.needs === 'iframe' ? p.canIframe : !action.needs || p.browserProviders.includes(action.needs);
                   const unavailable = action.needs && !offered ? action.unavailable : null;
-                  return <ContextAction key={action.mode} label={unavailable ?? action.label} disabled={!!unavailable} fit onClick={() => void attempt(() => p.onPort(selected, action.mode))}>{action.icon}<span className="truncate">{action.text}</span></ContextAction>;
+                  return <ContextOpenAction key={action.mode} label={unavailable ?? action.label} disabled={!!unavailable} fit onOpen={() => attempt(() => p.onPort(selected, action.mode))}>{action.icon}<span className="truncate">{action.text}</span></ContextOpenAction>;
                 })}
               </div>
             </>}
@@ -253,14 +267,14 @@ export function TerminalContextView(p: TerminalContextViewProps) {
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-2">{!isTool && <ContextAction label="Move this terminal into a new pane" busy={busy} onClick={() => void submit(p.onPromote)}><ArrowLineUpIcon size={15} />Promote</ContextAction>}</div>
         </div>
-        {p.mismatch && <div role="alert" className="mx-3 mb-2 flex max-h-[40%] min-h-0 shrink items-start gap-2 overflow-auto border-l-4 border-error bg-error/10 px-3 py-2"><WarningIcon size={18} weight="fill" className="shrink-0 text-error" /><div className="min-w-0 break-words"><div className="font-semibold">Helper directory differs from parent</div><div className="mt-1 grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2"><span className="text-muted">Helper</span><strong>{p.helperCwd}</strong><span className="text-muted">Parent</span><span>{p.cwd}</span></div></div></div>}
-        {(p.warning || (!detail && error)) && <div role="alert" className="mx-3 mb-2 max-h-[40%] min-h-0 shrink overflow-auto break-words border-l-4 border-error bg-error/10 px-3 py-2">{p.warning || error}</div>}
+        {p.mismatch && <ContextDiagnostic className="mx-3 mb-2 flex max-h-[40%] min-h-0 shrink items-start gap-2 overflow-auto border-l-4 border-error bg-error/10 px-3 py-2"><WarningIcon size={18} weight="fill" className="shrink-0 text-error" /><div className="min-w-0 break-words"><div className="font-semibold">Helper directory differs from parent</div><div className="mt-1 grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2"><span className="text-muted">Helper</span><strong>{p.helperCwd}</strong><span className="text-muted">Parent</span><span>{p.cwd}</span></div></div></ContextDiagnostic>}
+        {(p.warning || (!detail && error)) && <ContextDiagnostic className="mx-3 mb-2 max-h-[40%] min-h-0 shrink overflow-auto break-words border-l-4 border-error bg-error/10 px-3 py-2">{p.warning || error}</ContextDiagnostic>}
         <div className="min-h-16 flex-1 bg-terminal-bg text-terminal-fg">{p.children}</div>
       </div>
     {detail && <div className="absolute inset-0 z-10 bg-app-bg/35" onClick={() => setDetail(null)}><div ref={detailRoot} role="dialog" aria-modal="true" aria-label={DETAILS[detail].label} className={`${POPUP_SURFACE_CLASS} absolute inset-x-3 top-3 max-h-[calc(100%-1.5rem)] overflow-auto p-4`} onClick={e => e.stopPropagation()}>
       <div className="mb-3 flex items-center justify-between font-semibold"><span>{DETAILS[detail].heading}</span><ContextAction label="Close details" onClick={() => setDetail(null)} muted><XIcon size={14} /></ContextAction></div>
       {detail === 'title' ? <div className="grid grid-cols-[8rem_1fr_auto] gap-x-3 gap-y-2">{p.titleSources.map((source, index) => <div className="contents" key={index}><span className="text-muted">{source.source}</span><span>{source.value}</span><span className="text-muted">{source.note}</span></div>)}</div> : detail === 'modify' ? <><input autoFocus aria-label="Default helper autorun command" value={command} onChange={e => setCommand(e.target.value)} maxLength={4096} placeholder="Leave empty to turn autorun off" className="w-full border-b border-input-border bg-input-bg px-2 py-1.5 outline-focus-ring" /><p className="mb-4 mt-2 text-muted">Global default. Applies to new and reset helpers. Leave empty to turn autorun off.</p><div className="flex justify-end gap-2"><ContextAction label="Reset helper terminal" onClick={() => setDetail('reset')}>Reset helper…</ContextAction><ContextAction label="Save default" busy={busy} onClick={() => void submit(() => p.onModify(command))}>Save default</ContextAction></div></> : <><p>Discard this helper, including scrollback, unfinished input, and any running program? Unsaved edits will be lost.</p><p className="mb-4 mt-2 text-muted">A fresh helper starts in the parent's current directory using the global autorun default.</p><div className="flex justify-end gap-2"><ContextAction label="Keep helper" onClick={() => setDetail(null)}>Keep helper</ContextAction><ContextAction label="Discard and reset" busy={busy} onClick={() => void submit(p.onReset)}>Discard and reset</ContextAction></div></>}
-      {error && <p role="alert" className="mt-2 text-error">{error}</p>}
+      {error && <ContextDiagnostic className="mt-2 text-error">{error}</ContextDiagnostic>}
     </div></div>}
     </div>
   </section>;
