@@ -105,6 +105,6 @@ for (const { entry, out, define, assertBaked, external } of bundles) {
     ...(external ? { metafile: true } : {}),
   });
   if (assertBaked) assertConnectSrcBaked(outfile, remoteSrc);
-  if (external) assertNothingInlined(result.metafile, outfile, SIDECAR_RUNTIME_DEPS, 'sidecar');
+  if (external) assertNothingInlined(result.metafile, SIDECAR_RUNTIME_DEPS, `sidecar ${out}`);
   console.log(`[sidecar] built ${path.relative(process.cwd(), outfile)}`);
 }

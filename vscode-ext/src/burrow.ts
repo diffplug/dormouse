@@ -547,9 +547,7 @@ export function initBurrow(ctx: vscode.ExtensionContext): vscode.Disposable {
     dispose() {
       service?.dispose();
       service = null;
-      // After the service, so no session still holds a channel. Only here, at
-      // deactivation: teardown is terminal for the process, and a window that
-      // later wins the lease again still needs a factory that loads.
+      // After the service; only here (`docs/specs/vscode.md` → "The direct path").
       disposeNativeDirectPeers();
       askProvider = null;
       contending = false;

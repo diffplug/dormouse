@@ -58,15 +58,11 @@ vi.mock('../../lib/src/host/remote/enroll-offer', async (importOriginal) => ({
  * a teardown; loading the native library itself is
  * `lib/src/host/remote/native-direct-peer.test.ts`'s concern.
  */
-const nativeDirect = vi.hoisted(() => ({
-  factory: () => null,
-  created: 0,
-  disposed: 0,
-}));
+const nativeDirect = vi.hoisted(() => ({ created: 0, disposed: 0 }));
 vi.mock('../../lib/src/host/remote/native-direct-peer', () => ({
   createNativeDirectPeerFactory: () => {
     nativeDirect.created += 1;
-    return nativeDirect.factory;
+    return () => null;
   },
   disposeNativeDirectPeers: () => {
     nativeDirect.disposed += 1;

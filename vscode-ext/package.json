@@ -110,7 +110,7 @@
     "test": "pnpm typecheck && vitest run",
     "test:smoke": "vitest run --config vitest.smoketest.config.mts",
     "prebuild": "pnpm --filter remote-lib-common build",
-    "build": "pnpm stage:dor-cli && node scripts/esbuild.mjs && cp -RL node_modules/node-pty dist/node-pty && node scripts/stage-native-direct.mjs && rm -rf dist/shell-integration && cp -RL ../standalone/sidecar/shell-integration dist/shell-integration",
+    "build": "pnpm stage:dor-cli && node scripts/esbuild.mjs && rm -rf dist/node-pty && cp -RL node_modules/node-pty dist/node-pty && node scripts/stage-native-direct.mjs && rm -rf dist/shell-integration && cp -RL ../standalone/sidecar/shell-integration dist/shell-integration",
     "stage:dor-cli": "pnpm --filter dor build && node ../scripts/stage-dor-cli.mjs vscode-ext/dor-cli",
     "watch": "pnpm --filter remote-lib-common build && pnpm stage:dor-cli && node scripts/esbuild.mjs --watch",
     "package": "vsce package --no-dependencies --baseImagesUrl https://dormouse.sh/guide --out dormouse.vsix",

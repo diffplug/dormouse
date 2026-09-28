@@ -28,10 +28,13 @@ const remoteSrc = resolveRemoteConnectSrc(process.env, 'esbuild');
 
 const watch = process.argv.includes('--watch');
 
-// The direct path's addon, required lazily by `native-direct-peer.ts` and
-// staged into `dist/node_modules` by `stage-native-direct.mjs`. It resolves its
-// platform package from its own `__dirname`, so it must stay a bare `require`.
-const NATIVE_DIRECT = ['node-datachannel', 'node-datachannel/*'];
+// Staged into `dist/node_modules` by `stage-native-direct.mjs`, so it must stay
+// a runtime `require` (`requireNative` in `native-direct-peer.ts`).
+const NATIVE_DIRECT = ['node-datachannel'];
+const assertBuilt = ({ metafile }) => {
+  assertConnectSrcBaked('dist/extension.js', remoteSrc);
+  assertNothingInlined(metafile, NATIVE_DIRECT, 'esbuild dist/extension.js');
+};
 
 const common = {
   bundle: true,
@@ -41,7 +44,7 @@ const common = {
   // They are not installed and must not be — a `.node` addon cannot be bundled
   // and would have to be shipped per platform — so they stay as runtime
   // `require`s that `ws` already catches and falls back from.
-  external: ['vscode', 'node-pty', 'bufferutil', 'utf-8-validate', ...NATIVE_DIRECT],
+  external: ['vscode', 'node-pty', 'bufferutil', 'utf-8-validate', ...NATIVE_DIRECT.flatMap((name) => [name, `${name}/*`])],
   alias: {
     // Shared `lib/` modules the extension host bundles reach the `dor` CLI's
     // types through the `dor/*` tsconfig path. esbuild picks the tsconfig
@@ -74,13 +77,13 @@ if (watch) {
     // lost `define` compiles green, and a watch loop (`pnpm dogfood:vscode`)
     // is exactly where one plausibly goes missing — skipping it here left the
     // check absent from the build people actually iterate in.
-    await ctx.rebuild();
+    const result = await ctx.rebuild();
+    // Only the extension build asks for a metafile.
+    if (options.metafile) assertBuilt(result);
     await ctx.watch();
   }
-  assertConnectSrcBaked('dist/extension.js', remoteSrc);
   console.error('[esbuild] watching');
 } else {
   const [extension] = await Promise.all(builds.map((options) => esbuild.build(options)));
-  assertConnectSrcBaked('dist/extension.js', remoteSrc);
-  assertNothingInlined(extension.metafile, 'dist/extension.js', ['node-datachannel'], 'esbuild');
+  assertBuilt(extension);
 }

@@ -80,6 +80,15 @@ two in-process peers complete a data-channel round trip, both from the
 installed package and from the staged `dist/node_modules` tree (measured on
 VS Code with Electron 42.10.0, macOS arm64, 2026-09).
 
+The platform packages come from a scoped `pnpm deploy` because the wider
+switches reach too far: `supportedArchitectures` in `pnpm-workspace.yaml` is
+workspace-wide, and `pnpm install --os/--cpu` in the release job would fetch
+every platform's esbuild, lightningcss, workerd, and sharp as well. A first
+version fetched the tarballs from the registry itself and checked them against
+a regex over `pnpm-lock.yaml`; it ignored the configured registry, which pnpm 12
+does not export to scripts. `--libc glibc` did not drop the musl packages on a
+macOS host, hence copying only the declared platform packages.
+
 ## Peer surfaces
 
 **Why installing the responder is keyed by the link.** Each install adds a `status` subscription, and each arming under it adds pane-state, activity, and focus listeners with no handle left to remove them. A flag would be wrong because the platform adapter, not the module, is what owns a link.
