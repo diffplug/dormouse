@@ -51,21 +51,24 @@ The generator still parses it on every build, and the lint's guide checks still
 run, because both constrain the guide as a *Marketplace listing* rather than as
 a website page (rationale).
 
-The guide is host-neutral at the top level; VS Code and standalone instructions
-live under explicit subsections rather than relying on the website to rewrite
-host-specific prose. Its sections are:
+The guide is written for a VS Code user, because every channel that publishes
+it is an extension listing or the extension's folder on GitHub; the standalone
+app gets one section pointing at its download. Its sections are:
 
 ```text
-## Get Dormouse
-## Layout and panes
-## Alerts and TODOs
-## Browsers for you and your agents
-## Mouse, selection, and copy/paste
+## Getting started
+## Layout
+## Alerts
+## Coding agents
+## Browser panes
+## Terminal context
+## Mouse, selection, and clipboard
 ## Keyboard shortcuts
-## Themes and host integration
-## Getting started  (### VS Code, ### Standalone)
-## Automation and agents
-## Help and project links
+## Scripting with dor
+## What survives a reload
+## Phone control (in development)
+## Standalone app
+## Links
 ```
 
 Content invariants, enforced by the public-doc lint where mechanically

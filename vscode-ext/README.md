@@ -1,148 +1,197 @@
 # Dormouse
 
-A multitasking terminal for VS Code and the desktop — a real tiling layout, tmux keybindings, full mouse support, browser panes your agents can drive, and alerts that tell you when something needs you.
+**So many terminals. Which one needs you?**
 
-![Dormouse running a tiling terminal layout](images/hero.jpg)
+Dormouse is a tiling terminal for VS Code, built for running several coding agents, dev servers, and builds at once. It tiles them side by side in one panel, lights up the pane that needs you, and brings your agent conversations back after VS Code restarts.
 
-[dormouse.sh/playground](https://dormouse.sh/playground) — try the real thing in your browser, nothing to install.
+TODO: image of the Dormouse panel with three coding agents and a dev server tiled side by side, one pane ringing
 
-## Get Dormouse
+- **A real tiling layout.** Split, drag, zoom, and minimize panes with the mouse, or drive it all from the keyboard with tmux-style keys.
+- **Alerts that find you.** A pane lights up when its program asks for you, when a command finishes while you're elsewhere, or when a coding agent goes quiet — on the pane itself and on the VS Code tab.
+- **Agents that survive a reload.** Claude Code, Codex, GitHub Copilot, Antigravity, Warp, and Cursor reopen their conversations after Reload Window.
+- **Browsers in the layout.** Open the page your dev server is serving right beside it, and let your agent drive that browser while you watch.
+- **A mouse that works.** Select text even inside TUIs that grab the mouse, copy it with or without the hard wraps, and paste screenshots straight into your agent.
 
-- **VS Code** — install from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=diffplug.dormouse) or [Open VSX](https://open-vsx.org/extension/diffplug/dormouse). Also works in Cursor, Windsurf, and other VS Code forks.
-- **Standalone** — self-updating installers for macOS, Windows, and Linux at [dormouse.sh](https://dormouse.sh/#download).
-- **Playground** — [dormouse.sh/playground](https://dormouse.sh/playground) runs the real interface in your browser.
-
-Both hosts run the same terminal, the same layout engine, and the same alerts.
-
-## Layout and panes
-
-Run builds, agents, servers, and scripts side by side. Split, resize, swap, and zoom panes with the mouse or the keyboard.
-
-Minimize the panes you aren't watching down to a compact status indicator on the baseboard — a **door**. A minimized pane keeps running and keeps reporting, so a door still shows you when its task needs attention. Reattach it and you are back where you left off.
-
-You can spawn and rearrange everything using any of:
-
-- default tmux shortcuts
-- Dormouse's own shortcuts
-- the mouse
-
-## Alerts and TODOs
-
-Dormouse can owe you attention in three independent ways. Two of them need no setup at all.
-
-**A program asks for you.** Dormouse understands the standard terminal notification and progress protocols — `BEL`, `OSC 9`, `OSC 9;4`, `OSC 99`, and `OSC 777`. Any tool that already signals completion or progress rings its pane, with no configuration.
-
-**A command finishes while you are away.** If a foreground command was running while you were watching and it exited after you left, that pane is ringing when you come back. Also no configuration.
-
-**A watched command goes quiet.** When no watch list has been saved, Dormouse watches [supported coding agents](https://dormouse.sh/docs/compatible-agents) by default, including after an upgrade; existing saved watch lists are preserved. To watch another command, right-click its pane header — or press `a` in command mode — and turn on **Watch all `<command>` commands**. Every pane running that command is then watched, now and later. For a script runner the rule names the script: **Watch all pnpm dev commands** leaves `pnpm test` alone. When a watched command's output goes busy and then falls quiet while you are not looking, it rings.
-
-Watching is a rule on a command name, and turning it off anywhere removes it everywhere.
-
-A ringing pane is outlined and washed in the alarm color until you answer it, so one glance across a full wall finds it. Clicking or typing into the pane — or pressing `a` — puts the alarm out. Nothing rings while you are working in that pane; if you walk away from it instead, it rings then.
-
-An alarm you look at without typing — a click, `a` — becomes a **TODO**, a marker beside the pane's title, so a ring you dismissed does not disappear without a trace. Typing into the pane deals with it, clearing both. Clear a TODO by typing into the pane, clicking the marker, or pressing `t` in command mode. An alarm nobody looked at comes back after a restart as a TODO.
-
-Spoken alarms use your browser or system voice today. An optional [managed ElevenLabs voice](https://dormouse.sh/hosted/#voice) is coming for people who want something more natural without managing a separate voice account.
-
-Watching a command's output requires shell integration (`OSC 633` / `OSC 133`) so Dormouse can tell where one command ends and the next begins. Shells that do not report their commands — `cmd.exe`, fish before 4, or any shell where the integration did not take — never engage watching. The protocol and command-exit alerts above work regardless.
-
-## Browsers for you and your agents
-
-A browser is just another pane. Put your dev server next to the terminal running it, in the same tiling layout.
-
-```
-dor agent-browser open surface:2
-```
-
-That aims a browser pane at the port a terminal surface is serving. Your agents run the same command, so when an agent wants to look at what it just built, it opens a pane you are already watching.
-
-Browser panes render three ways: a live Chromium stream inside the pane, popped out to a real OS window when you need the genuine article, or a lightweight proxied iframe. Dormouse is a client for the `agent-browser` you already have installed — it does not ship a browser of its own.
-
-See [`/docs/dor#agent-browser`](https://dormouse.sh/docs/dor#agent-browser) for the full command reference.
-
-## Mouse, selection, and copy/paste
-
-Click and drag in most terminals does not select text — it fires a mouse escape sequence at whatever is running. Dormouse notices when a TUI such as `htop` or `neovim` has grabbed the mouse and gives you a one-click override, so you can select the thing.
-
-Then copy it the way you meant it:
-
-- **Copy Raw** keeps the hard wraps exactly as the terminal drew them.
-- **Copy Rewrapped** joins those wrapped lines back into the line the program actually printed.
-
-
-Hold `Alt` while dragging to toggle between block and linewise selection, and press `e` mid-drag to extend the selection out to the whole URL or file path.
-
-## Keyboard shortcuts
-
-Dormouse starts in **passthrough** mode, where every keypress goes to the selected terminal. Tap **left Shift then right Shift** within half a second to enter **command** mode, where keys drive the layout instead. Left Cmd then right Cmd works too (left Win / left Super on Windows and Linux).
-
-| Key | Action |
-|-----|--------|
-| `Enter` | Return to passthrough mode |
-| `\|` or tmux `%` | Split left/right |
-| `-` or tmux `"` | Split top/bottom |
-| Arrow keys | Move selection between panes |
-| `Cmd`/`Ctrl` + arrows | Swap terminals between two panes |
-| `z` | Zoom / unzoom the selected pane |
-| `m` or tmux `d` | Minimize pane to a door, or reattach one |
-| `k` or tmux `x` | Kill pane (asks you to confirm) |
-| `,` | Rename pane |
-| `a` | Toggle the alert rule for the running command |
-| `t` | Toggle the TODO marker |
-| `>` | Open the pane header menu, including bound ports |
-
-Copy and paste keep their usual bindings in both modes: `Cmd+C` / `Ctrl+C` copies raw, `Cmd+Shift+C` / `Ctrl+Shift+C` copies rewrapped, and `Cmd+V` / `Ctrl+V` pastes. On macOS, `Ctrl+C` still passes through to the running program.
-
-The complete table lives in [the keyboard shortcut reference](https://github.com/diffplug/dormouse/blob/main/docs/specs/shortcuts.md).
-
-## Themes and host integration
-
-Inside VS Code, Dormouse uses your VS Code theme — colors, styling, everything. Switch themes and Dormouse switches with you. No separate configuration and no mismatched colors.
-
-The standalone app ships the same theme system with its own picker, so a layout you like looks the same in both places.
+Try it in your browser first, nothing to install: [dormouse.sh/playground](https://dormouse.sh/playground).
 
 ## Getting started
 
-### VS Code
+1. Install Dormouse from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=diffplug.dormouse) or [Open VSX](https://open-vsx.org/extension/diffplug/dormouse). It also works in Cursor, Windsurf, Antigravity, and other VS Code forks.
+2. Open the **Dormouse** tab in the Panel, next to Terminal — or run **Dormouse: Focus** from the Command Palette.
+3. Click the terminal and start typing.
 
-1. Install the extension.
-2. Open the command palette (`Cmd+Shift+P` / `Ctrl+Shift+P`).
-3. Run one of:
-   - **Dormouse: Focus** — open Dormouse in the Panel area, next to the built-in terminal.
-   - **Dormouse: Open in Editor** — open Dormouse as an editor tab. You can open several.
-   - **Dormouse: New Terminal** — add a terminal to the active Dormouse.
-   - **Dormouse: Select Shell** — pick which shell new terminals launch.
+| Command | What it does |
+| --- | --- |
+| **Dormouse: Focus** | Show Dormouse in the Panel. |
+| **Dormouse: Open in Editor** | Open another Dormouse as an editor tab. Open as many as you like. |
+| **Dormouse: New Terminal** | Add a terminal to the Panel's Dormouse. |
+| **Dormouse: Select Shell** | Choose the shell new terminals launch, everywhere or for this VS Code workspace only. |
 
-Dormouse works in the Panel area, the Editor area, or both at once.
+Each Dormouse — the Panel and every editor tab — has its own terminals and its own layout. All of them follow your VS Code color theme as you switch it, and use your editor font.
 
-### Standalone
+## Layout
 
-1. Download an installer for your platform from [dormouse.sh](https://dormouse.sh/#download).
-2. Launch it. The app updates itself, so there is nothing further to wire up.
+TODO: GIF of splitting a pane, dragging one pane beside another, zooming one, and minimizing one to a door
 
-## Automation and agents
+- **Split** with the buttons in a pane's header, or with `|` and `-` in [command mode](#keyboard-shortcuts). The new pane opens in the same directory as the one you split.
+- **Resize** by dragging the gap between panes.
+- **Rearrange** by dragging a pane by its header. Drop it on the middle of another pane to swap the two, or on an edge to split beside it. Scroll while dragging to drop beside a whole row or column instead.
+- **Zoom** a pane to lift it above the layout while you work in it. It settles back as soon as you move to another pane.
+- **Minimize** a pane to a **door** on the baseboard, the strip along the bottom. It keeps running and keeps showing its alerts. Click the door to put the pane back where it was, or drag the door anywhere in the layout.
+- **Titles name themselves** after the running command, or when the shell is idle, the last command, marked `✗` if it failed. Click a title to rename it.
 
-Every terminal Dormouse launches has `dor` on its `PATH` — a small CLI that talks to the Dormouse hosting it. It lets a script, or an agent, drive the layout:
+## Alerts
 
+TODO: image of a ringing pane with its alarm outline, beside a pane showing a TODO pill in its header
+
+A pane **rings** — outlined and washed in the alarm color — when it needs you:
+
+- **A program asks for you.** Any tool that sends a terminal bell or a standard notification (`BEL`, `OSC 9`, `OSC 99`, `OSC 777`, or the end of an `OSC 9;4` progress bar) rings its pane. No setup.
+- **A command you started finishes while you're elsewhere.** No setup, and no minimum runtime.
+- **A watched command goes quiet.** When its output goes busy and then falls quiet, it has probably finished or is waiting on you. Supported coding agents are watched by default.
+
+Nothing rings in the pane you're actively working in.
+
+**Answering a ring.** Type into the pane and the ring is gone. If you only look — click the pane, or click its door — the ring becomes a **TODO** pill in the pane's header, so an alert you glanced at doesn't vanish without a trace. Typing into the pane, clicking the pill, or pressing `t` in command mode clears it. A ring nobody saw comes back as a TODO after a restart.
+
+**Watching other commands.** Watching is a rule on a command name. Right-click a pane's header and switch on **Watch all `<command>` commands**, and every pane running that command is watched, now and later. Script runners are keyed by script, so watching `pnpm dev` leaves `pnpm test` alone. Remove a rule the same way, or in Settings.
+
+**Shell integration.** Command-exit alerts and watching need to know where each command starts and ends (`OSC 633` / `OSC 133`). Dormouse sets this up automatically for zsh, bash, Git Bash, PowerShell, and WSL, and fish 4 and later report it on their own. In `cmd.exe`, only a program asking for you rings.
+
+**Outside the panel.** While Dormouse is out of view, a ring or TODO still shows on VS Code's own chrome: a badge on the Panel's Dormouse tab, and `🔔` or `[TODO]` on a Dormouse editor tab's title.
+
+**Spoken alarms.** Dormouse can say a ringing pane's name out loud, after a delay, if you haven't answered it. It uses your system voice. Turn it on for everything in **Settings** (the sliders at the right end of the baseboard), or for one Dormouse with the speaker button beside them; right-click that button to choose a voice. A more natural managed voice is planned for [Dormouse Hosted](https://dormouse.sh/hosted).
+
+## Coding agents
+
+Dormouse is built for running several agents at once. For [Claude Code, Codex, GitHub Copilot, Antigravity, Warp, and Cursor](https://dormouse.sh/docs/compatible-agents):
+
+- **They're watched by default**, so a pane rings when its agent stops to wait for you.
+- **Their conversations come back.** When VS Code reloads or quits, Dormouse catches the resume command each agent prints as it exits. Next time, each pane reopens in its directory and resumes its conversation. A prompt that was mid-flight isn't resubmitted. Closing a Dormouse editor tab kills its terminals outright, and a crash leaves nothing to resume.
+- **Shift+Enter inserts a newline**, the way the agents expect.
+- **Pasting a screenshot** saves it to a temporary PNG and pastes the path, so your agent can read the image.
+- **They can use Dormouse too.** With [`dor`](#scripting-with-dor), an agent can open panes, keep a dev server running exactly once, and drive a browser pane you're watching.
+
+## Browser panes
+
+TODO: image of a dev server's page in a browser pane, next to the terminal running `pnpm dev`
+
+A browser is just another pane. Right-click a terminal that's serving something, and Dormouse lists the ports its processes are listening on — no `lsof`, no scrolling back to find the URL. Pick a port and choose how to open it:
+
+| Open as | Good for |
+| --- | --- |
+| **Iframe** | You. Feels native with no lag. `http://` pages only, no logins, and agents can't see it. |
+| **agent-browser** or **playwright** | You and your agent. A real Chromium streamed into the pane: any URL, and your agent can read and drive it while you watch. |
+| **agent-browser popout** or **playwright popout** | The same browser in a real window, when you need the genuine article. |
+| **System browser** | Handing off to your usual browser. |
+
+Dormouse doesn't ship a browser. The streamed panes use the automation CLI you install: `npm i -g agent-browser` or `npm i -g @playwright/cli`.
+
+Every browser pane has a URL bar, back, forward, and reload, and a chip that jumps to the terminal serving a local page. A streamed page renders at a desktop-sized 1440×900 by default, so a narrow pane doesn't squash the layout; switch it to a laptop, tablet, or phone preset, an emulated device, a custom size, or resize-with-pane from its display settings.
+
+Agents open and drive the same panes from the command line:
+
+```sh
+dor ensure -- pnpm dev              # created surface:3  "pnpm dev"
+dor agent-browser open surface:3    # open whatever port surface:3 is serving
+dor agent-browser snapshot          # read the page...
+dor agent-browser click @e3         # ...and click through it
 ```
-dor list                      # what surfaces exist
-dor ensure -- pnpm dev        # make sure this is running, exactly once
-dor split -- pnpm test        # open a new terminal pane
-dor agent-browser open surface:2         # open a browser on that terminal's port
+
+## Terminal context
+
+TODO: image of the terminal context panel open beside a pane, showing its ports and helper terminal
+
+Right-click a pane's header, or press `>` in command mode, to see everything about that terminal in one panel:
+
+- **Why its title says what it says**, and its `surface:N` handle for `dor`.
+- **Its directory**, to open in Finder or Explorer, or to copy.
+- **The ports it's listening on**, each one click from a browser pane.
+- **Its Watch and TODO switches.**
+- **A helper terminal**: a scratch shell in the same directory that runs `git status` as it opens. Change or turn off that command with **Modify**, or **Promote** the helper into a pane of its own.
+
+## Mouse, selection, and clipboard
+
+TODO: GIF of overriding a TUI's mouse capture, selecting wrapped text, and choosing Copy Rewrapped
+
+- **Select inside TUIs.** When a program such as `htop` or `vim` grabs the mouse, a mouse icon appears in the pane's header. Click it to take the mouse back for one drag, or make the override sticky.
+- **Copy what you meant.** After a selection, **Copy Raw** keeps the lines exactly as drawn. **Copy Rewrapped** strips box-drawing borders and joins wrapped lines back into the text the program printed.
+- **Block selection**: hold `Alt` (`Option` on a Mac) while dragging.
+- **Grab a whole URL or path**: press `e` mid-drag.
+- **Paste safely.** Pasted text can't break out of a program's bracketed paste. Copied files paste as paths quoted for the pane's shell, and images paste as the path to a temporary PNG.
+- **Follow links with care.** Hyperlinks printed by programs (`OSC 8`) are clickable. A confirmation shows where each one really goes, and a link whose text names a different site gets no open button at all.
+
+Dormouse also renders inline images (Sixel, iTerm2 inline images, and partial Kitty graphics), draws on the GPU with WebGL, and answers color queries so TUIs pick the right palette for a light or dark theme.
+
+## Keyboard shortcuts
+
+Dormouse has two modes. In **passthrough**, keys go to the terminal. In **command** mode, keys drive the layout, and the selected pane is outlined in marching ants. Tap **Left Shift, then Right Shift** (or Left ⌘, then Right ⌘ on a Mac) to enter command mode. Press `Enter` or click a pane to go back to typing.
+
+| Key | Action |
+| --- | --- |
+| `\|` or `%` | Split left/right |
+| `-` or `"` | Split top/bottom |
+| Arrows | Move between panes; down from the bottom row reaches the doors |
+| `⌘` or `Ctrl` + arrows | Swap with the neighboring pane |
+| `z` | Zoom the pane and start typing in it |
+| `m` or `d` | Minimize to a door, or reattach the selected door |
+| `k` or `x` | Kill (type the letter shown to confirm) |
+| `,` | Rename |
+| `t` | Toggle the TODO |
+| `a` | Dismiss the ring and open terminal context |
+| `>` | Open terminal context |
+| `Enter` | Start typing in the selected pane, or reattach the selected door |
+
+For tmux hands, `%`, `"`, `x`, `d`, `z`, `,`, and the arrows do what they do in tmux, with the Shift tap in place of the prefix key.
+
+Copy and paste work in both modes: `⌘C` / `Ctrl+C` copies raw, `⌘⇧C` / `Ctrl+Shift+C` copies rewrapped, and `⌘V` / `Ctrl+V` pastes, with or without Shift. With nothing selected, `Ctrl+C` still interrupts the running program. VS Code's own `⌘P` / `Ctrl+P`, `⌘⇧P` / `Ctrl+Shift+P`, `F1`, and `⌘B` / `Ctrl+B` keep working from inside a terminal.
+
+The complete table is the [keyboard shortcut reference](https://github.com/diffplug/dormouse/blob/main/docs/specs/shortcuts.md).
+
+## Scripting with dor
+
+Every terminal Dormouse opens has `dor` on its `PATH`, a small CLI that lets scripts and agents drive the layout:
+
+```sh
+dor list                                          # every pane, with its surface:N handle
+dor ensure -- pnpm dev                            # start it once; reuse the pane if it's already running
+dor split -- codex                                # open a new pane running a command
+dor send surface:4 --text "/review" --key enter   # type into a pane
+dor await surface:4 --until quiet                 # wait until it finishes...
+dor read surface:4                                # ...then read its screen
 ```
 
-`dor ensure` is idempotent: run it twice and the second call reuses the pane already running that command in that directory instead of starting a second copy.
+`dor ensure` and `dor split -- <command>` work in the background and never steal your focus.
 
-Dormouse also bundles an agent skill describing all of this in the form agents expect. Run `dor skill` to print it, or `dor skill --install` to install it for the agent in your current project.
+`dor skill --install` adds a short block to your project's `AGENTS.md` or `CLAUDE.md` that teaches your agent to use Dormouse. It does nothing when the agent runs outside Dormouse, so it's safe to commit.
 
-- [Complete CLI reference](https://dormouse.sh/docs/dor)
+- [The `dor` CLI reference](https://dormouse.sh/docs/dor)
 - [The bundled agent skill](https://dormouse.sh/docs/agent-skill)
 
-## Help and project links
+## What survives a reload
 
-- [Browser playground](https://dormouse.sh/playground) — no install required
-- [Dormouse Hosted](https://dormouse.sh/hosted/) — upcoming managed remote control and voice
+| When you… | Your terminals | Your layout |
+| --- | --- | --- |
+| Hide the Panel or switch editor tabs | Keep running | Unchanged |
+| Close the Dormouse view | Keep running, and their output replays when you reopen it | Unchanged |
+| Reload Window or quit VS Code | Shells start fresh in their old directories, supported agents resume their conversations, and other programs end | Restored, with doors, titles, TODOs, and browser panes |
+| Close a Dormouse editor tab | Killed | Gone |
+
+Scrollback isn't saved.
+
+## Phone control (in development)
+
+Dormouse Pocket puts your terminals on your phone: pick a pane, read it, type into it, and get a push notification when one needs you while you're away. Sessions are end-to-end encrypted between your phone and your computer. Today Pocket needs a self-hosted Relay and a Dormouse built from source; [Dormouse Hosted](https://dormouse.sh/hosted) will run the Relay for you. You can try the phone interface in your browser at [dormouse.sh/playground/pocket](https://dormouse.sh/playground/pocket).
+
+## Standalone app
+
+The same terminal is also a desktop app for macOS, Windows, and Linux, with workspace tabs named after their repo and branch, a theme picker, and automatic updates. Download it from [dormouse.sh](https://dormouse.sh/#download).
+
+## Links
+
+- [Playground](https://dormouse.sh/playground) — the real interface in your browser
+- [Changelog](https://dormouse.sh/changelog)
 - [Report an issue](https://github.com/diffplug/dormouse/issues)
 - [Source on GitHub](https://github.com/diffplug/dormouse)
-- [Supply chain](https://dormouse.sh/supply-chain)
+- [Security](https://dormouse.sh/docs/security) and [supply chain](https://dormouse.sh/supply-chain)
 - Brought to you by [DiffPlug](https://www.diffplug.com/)
