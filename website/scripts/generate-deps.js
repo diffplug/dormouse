@@ -2,6 +2,7 @@ import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { getCargoGitRepository, getShippedCargoGraph } from "./cargo-dependencies.js";
 import { assertWorkspaceCoverage, getDependencyNames } from "./dependency-workspaces.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -371,7 +372,7 @@ const cargoMissingHomepage = {
 };
 
 function getCargoHomepage(pkg) {
-  return pkg.homepage || pkg.repository || pkg.documentation || null;
+  return getCargoGitRepository(pkg.source) || pkg.homepage || pkg.repository || pkg.documentation || null;
 }
 
 function formatCargoAuthor(authors) {
@@ -417,15 +418,14 @@ function getManifestDependencyByName(manifestDependencies, name) {
 function getCargoDependencies() {
   const metadata = getCargoMetadata();
   const rootPackage = metadata.packages.find((pkg) => pkg.id === metadata.resolve.root);
-  const rootNode = metadata.resolve.nodes.find((node) => node.id === metadata.resolve.root);
-  if (!rootPackage || !rootNode) {
+  if (!rootPackage) {
     throw new Error("Could not find root package in Cargo metadata");
   }
-
+  const { directDeps, shippedIds } = getShippedCargoGraph(metadata);
   const packagesById = new Map(metadata.packages.map((pkg) => [pkg.id, pkg]));
-  const directIds = new Set(rootNode.deps.map((dep) => dep.pkg));
+  const directIds = new Set(directDeps.map((dep) => dep.pkg));
 
-  const direct = rootNode.deps.map((dep) => {
+  const direct = directDeps.map((dep) => {
     const pkg = packagesById.get(dep.pkg);
     if (!pkg) throw new Error(`Could not find Cargo package ${dep.pkg}`);
 
@@ -437,7 +437,7 @@ function getCargoDependencies() {
   }).sort(compareDependencyEntries);
 
   const transitive = metadata.packages
-    .filter((pkg) => pkg.id !== metadata.resolve.root && !directIds.has(pkg.id))
+    .filter((pkg) => shippedIds.has(pkg.id) && !directIds.has(pkg.id))
     .map(cargoPackageEntry)
     .sort(compareDependencyEntries);
 

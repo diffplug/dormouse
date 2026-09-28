@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value as JsonValue};
 mod log_tail;
+mod panic_policy;
 mod quit_state;
 mod routing;
 mod workspaces;
@@ -3846,6 +3847,7 @@ const QUIT_MENU_ITEM_ID: &str = "dormouse-quit";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    panic_policy::abort_on_panic();
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())

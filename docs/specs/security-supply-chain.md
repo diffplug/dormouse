@@ -38,6 +38,8 @@ The roots are `productDependencyFilters` in `website/scripts/generate-deps.js`. 
 
 **Must reject unclassified workspaces and exclusions reachable from a product root before generating disclosure.** Runtime and optional edges count; development edges do not. `website/scripts/dependency-workspaces.test.js` pins coverage.
 
+**Cargo discloses build edges but not dev edges, and a git-patched crate at its fork.** `website/scripts/cargo-dependencies.test.js` pins both.
+
 **An unresolvable dependency throws unless an optional-edge rule covers it.** `node-datachannel` publishes one prebuilt package per platform, and pnpm installs only the host's.
 
 - **Optional, declared by an external package: skipped.** The bundle copies `standalone/sidecar/node_modules`, so a prebuild the addon alone declares (android, musl) reaches nobody.
@@ -49,7 +51,7 @@ The roots are `productDependencyFilters` in `website/scripts/generate-deps.js`. 
 - **FAIL IF** `.github/workflows/ci.yml` stops running that generator under that same install precondition, or stops failing on a diff (rationale).
 - **FAIL IF** the disclosure omits a shipped workspace's graph or excludes a shipped package. Derive shipping routes from `pnpm-workspace.yaml` and the builds, not the enumeration above; the generator enforces classification, but cannot establish whether an exclusion is justified (rationale).
 
-Source of truth: `productDependencyFilters` / `excludedWorkspacePackages` / `optionalSiblingsAtSameVersion` in `website/scripts/generate-deps.js`; `assertWorkspaceCoverage` in `website/scripts/dependency-workspaces.js`.
+Source of truth: `productDependencyFilters` / `excludedWorkspacePackages` / `optionalSiblingsAtSameVersion` in `website/scripts/generate-deps.js`; `assertWorkspaceCoverage` in `website/scripts/dependency-workspaces.js`; `getShippedCargoGraph` / `getCargoGitRepository` in `website/scripts/cargo-dependencies.js`.
 
 ## Bundled runtime
 

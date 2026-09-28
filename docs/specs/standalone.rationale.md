@@ -286,6 +286,16 @@ when `current_binary` fails — on macOS, for a path through a symlink
 (`tauri-utils-2.9.3/src/platform/starting_binary.rs`) — so the check turns a
 silent quit into an answer.
 
+## Objective-C exceptions
+
+**The crash.** Six aborts of installed 1.1.0 builds, 2026-09-21 to 2026-09-28 on macOS 27.0 (26A428), all `EXC_CRASH (SIGABRT)` on the main thread with one stack shape. The binary is stripped, so the frame was matched by disassembly: tao's `sendEvent:` override (the `NSKeyUp` + Command test), whose LSDA maps the landing pad taken to its `objc_msgSendSuper(sendEvent:)` call, the pad calling `panic_cannot_unwind`. For each crash still in log retention (three), the unified log shows `[com.apple.AppKit:CampoLightweightUI] Mouse entered.` then `*** Assertion failure in NSCampoLightweightUIController.m:1429` about 1 ms before the abort: an AppKit race in the Siri affordance for selected text, raised beneath `[super sendEvent:]`. An abort in the landing pad, rather than an uncaught-exception report, means the unwinder's search phase had found a handler above the frame, so AppKit would have caught it.
+
+**Why both halves.** Measured 2026-09-28 (rustc 1.96, tao 0.35.2) with an `NSException` raised beneath `[super sendEvent:]`: stock tao aborts under both strategies; patched tao aborts under `abort` and survives under `unwind`; with the abort hook the exception is survived and a Rust panic still exits by SIGABRT. The rustc rule is `fn_can_unwind`: under `panic=abort` every Rust-defined function is non-unwinding, whatever its ABI. The hook keeps today's fail-fast, so no Rust panic unwinds past a lock. End to end on the same day: a release build of the change, with a dylib swizzling `-[NSApplication sendEvent:]` to raise on an injected application-defined event, logged the raise beneath `TaoApp`'s override and was still running 3 s later. Cost: the arm64 release binary grew from 8.4 MB (the installed 1.1.0 `abort` build) to 10.4 MB.
+
+**Dead approach.** `objc2::exception::catch` around the super call: the closure it runs is a Rust frame, so under `abort` the unwind dies before reaching its `@catch`.
+
+**Not patched.** wry's `define_class!` callbacks are already `C-unwind`. Its URL-scheme `start_task` / `stop_task` are `extern "C"`, but they are outside the AppKit event path and nothing catches above them.
+
 ## Standalone browser-dev harness
 
 **Why the bridge token is not the `dor` control token.** The `dor` control-API `controlToken` is handed to every shell Dormouse spawns; the bridge's circle is smaller than "every terminal on the machine", so it mints its own per-run credential.
