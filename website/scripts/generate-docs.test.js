@@ -81,8 +81,8 @@ describe('product guide', () => {
   it('has unique, stable heading ids', () => {
     const ids = data.guide.headings.map((h) => h.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids).toContain('alerts-and-todos');
-    expect(ids).toContain('browsers-for-you-and-your-agents');
+    expect(ids).toContain('mouse-selection-and-clipboard');
+    expect(ids).toContain('phone-control-in-development');
   });
 });
 

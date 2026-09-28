@@ -98,6 +98,8 @@ dor agent-browser snapshot          # read the page...
 dor agent-browser click @e3         # ...and click through it
 ```
 
+Every other argument goes to your agent-browser; the [`dor agent-browser` reference](https://dormouse.sh/docs/dor#agent-browser) covers `--key`, `--surface`, and viewport sizing.
+
 ## Terminal context
 
 TODO: image of the terminal context panel open beside a pane, showing its ports and helper terminal
