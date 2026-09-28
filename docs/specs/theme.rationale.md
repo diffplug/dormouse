@@ -64,3 +64,16 @@ enclosing entry takes the Settings controls' 4px corners: a 16px circle inset
 8px from an entry edge shares no corner with it, so the concentric derivation
 has nothing to match, and the entry keeps the radius every other Settings
 control has.
+
+## Storybook simulation
+
+In Linux Chromium 153 (measured 2026-09), upgrading Vitest 4.1.11 to 5.0.2
+changed the implicit fallback for `❯` from DejaVu Sans (10.90625px at 13px)
+to DejaVu Sans Mono (7.828125px). The computed font stack was unchanged.
+Storybook 11 with Vitest 4 retained the baseline glyph; Vitest 5 with the
+same Vite version reproduced the change. Argos reported 25 Chromium changes
+across terminal-context prompts and mobile gesture labels; WebKit stayed clean.
+Naming the same fallback in both snapshot browsers restores all 295 Chromium
+baseline images and intentionally changes 27 WebKit images. Sharing symbol
+shapes and metrics across browsers is preferable to preserving different
+implicit fallbacks. Application and interactive Storybook fonts remain native.
