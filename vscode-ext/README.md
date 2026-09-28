@@ -21,7 +21,7 @@ TODO: GIF of splitting, dragging, zooming, and minimizing panes (the homepage's 
 
 Soft as a mouse, sharp as a tmux. Terminals and browsers tile side by side in VS Code's Panel or in editor tabs. Do it all with the mouse, or keep your hands on the keyboard with [tmux keybinds](#keyboard-shortcuts). Dormouse follows your VS Code theme exactly, so it's hard to tell it isn't built in.
 
-- **Split** with the buttons in a pane's header, or with `|` and `-`. The new pane opens in the same directory as the one you split.
+- **Split** with the buttons in a pane's header, or with `|` and `-` in [command mode](#keyboard-shortcuts). The new pane opens in the same directory as the one you split.
 - **Resize** by dragging the gap between panes.
 - **Rearrange** by dragging a pane by its header. Drop it on the middle of another pane to swap the two, or on an edge to split beside it. Scroll while dragging to drop beside a whole row or column instead.
 - **Zoom** a pane to lift it above the layout while you work in it. It settles back as soon as you move to another pane.
