@@ -16,15 +16,15 @@ From the repository root, with Docker running:
 
 ```sh
 pnpm install
-dor ensure -- pnpm dev:hosted
+dor tool hosted
 ```
 
-Outside Dormouse, use `pnpm dev:hosted`. Open `http://127.0.0.1:5188`.
-Request a code for a test address and read it at `/api/dev/emails` on that
-same origin. No real mail is sent, and the development database is isolated by
+Outside Dormouse, use `pnpm dev:hosted` and open the `http://localhost:<port>`
+URL it prints. Request a code for a test address and read it at
+`/api/dev/emails` on that same origin. No real mail is sent, and the development database is isolated by
 the worktree path; `docs/specs/hosted.md` -> "Development and release" owns what
-the local entry serves and what production omits. Use another `PORT` if 5188 is
-occupied. Do not share this local inbox publicly.
+the local entry serves and what production omits. The port is OS-assigned
+unless you set `PORT`. Do not share this local inbox publicly.
 
 ```sh
 pnpm test:hosted
