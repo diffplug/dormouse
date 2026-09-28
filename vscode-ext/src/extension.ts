@@ -104,7 +104,7 @@ export function activate(context: vscode.ExtensionContext) {
   // default-shell slot that split-spawns read from, and the shell a GUI
   // browser launch resolves its environment in.
   const applyShell = (shell: { name: string; path: string; args: string[] } | undefined) => {
-    setBrowserShellRuntime({ ...browserShellRuntime, shell: shell?.path });
+    setBrowserShellRuntime({ ...browserShellRuntime, shell: shell?.path, args: shell?.args });
     provider.setDescription(shell?.name);
     provider.setSelectedShell(shell ? { shell: shell.path, args: shell.args } : null);
   };

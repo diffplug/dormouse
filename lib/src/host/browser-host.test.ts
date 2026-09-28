@@ -681,9 +681,10 @@ describe('launch environment', () => {
     try {
       const opening = host.request({ ...envRequest, ...(withId ? { requestId: 'shell-opening' } : {}) });
       const closing = host.request({ ...envRequest, op: 'close', ...(withId ? { cancels: ['shell-opening'] } : {}) });
+      // Close must finish even while startup remains pending indefinitely.
+      expect(await closing).toMatchObject({ ok: true });
       resolve({ PATH: '/shell/bin' });
       expect(await opening).toMatchObject({ ok: false, error: 'the browser was closed' });
-      expect(await closing).toMatchObject({ ok: true });
       expect(fake.calls.some(c => c.startsWith('open '))).toBe(false);
     } finally { await host.close(); }
   });
@@ -700,8 +701,18 @@ describe('launch environment', () => {
       fake.release('close shell-test');
       expect(await closing).toMatchObject({ ok: true });
       expect(await relaunch).toMatchObject({ ok: true });
-      expect(launchEnv).toHaveBeenCalledTimes(2);
+      expect(launchEnv).toHaveBeenCalledTimes(1);
       expect(fake.calls.indexOf('close shell-test')).toBeLessThan(fake.calls.findIndex(c => c.startsWith('open shell-test')));
+    } finally { await host.close(); }
+  });
+  it('closes a restored binding without starting a potentially broken shell', async () => {
+    const fake = fakeProvider();
+    const launchEnv = vi.fn(async () => { throw new Error('broken startup'); });
+    const host = createBrowserHost({ launchEnv, writeClipboardText() {}, providers: { 'agent-browser': () => fake.provider } });
+    try {
+      expect(await host.request({ ...envRequest, op: 'close' })).toEqual({ ok: true });
+      expect(launchEnv).not.toHaveBeenCalled();
+      expect(fake.calls).toContain('close shell-test');
     } finally { await host.close(); }
   });
   it('retries shell initialization after failure', async () => {

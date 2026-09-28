@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { resolveBinaryPath, spawnAndCapture } from 'dor-lib-common';
-import { browserLaunchEnv } from './browser-launch-env';
+import { browserLaunchEnv, browserShellInvocation } from './browser-launch-env';
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(p => rm(p, { recursive: true, force: true }))); });
 describe.skipIf(!existsSync('/bin/zsh'))('fresh browser shell', () => {
@@ -38,5 +38,29 @@ describe.skipIf(!existsSync('/bin/zsh'))('fresh browser shell', () => {
   it('rejects a shell which exits without running the helper', async () => {
     const f = await fixture('exit 0\n');
     await expect(browserLaunchEnv(f.dir, f.runtime, f.env)).rejects.toThrow('did not return its environment');
+  });
+});
+
+describe('configured browser launch shells', () => {
+  const runtime = { node: 'C:\\node.exe', cli: 'C:\\dor.js' };
+  const argv = [runtime.node, runtime.cli, '__launch-env', 'marker'];
+  it('uses a native Windows shell for a WSL selection', () => {
+    const result = browserShellInvocation({ ...runtime, shell: 'C:\\Windows\\System32\\wsl.exe', args: ['-d', 'Ubuntu'] }, argv, { COMSPEC: 'C:\\Windows\\System32\\cmd.exe' }, 'win32');
+    expect(result.shell).toBe('C:\\Windows\\System32\\cmd.exe');
+    expect(result.args).not.toContain('Ubuntu');
+    expect(result.args.slice(0, 2)).toEqual(['/s', '/c']);
+  });
+  it('runs Developer Command Prompt initialization before the helper and exits', () => {
+    const result = browserShellInvocation({ ...runtime, shell: 'cmd.exe', args: ['/k', 'C:\\Program Files\\VS\\VsDevCmd.bat'] }, argv, {}, 'win32');
+    expect(result.args).toEqual(['/s', '/c', '"call "C:\\Program Files\\VS\\VsDevCmd.bat" && "C:\\node.exe" "C:\\dor.js" "__launch-env" "marker""']);
+  });
+  it('preserves Developer PowerShell initialization without NoExit', () => {
+    const setup = '& { Import-Module "C:\\Program Files\\VS\\Launch-VsDevShell.ps1" }';
+    const result = browserShellInvocation({ ...runtime, shell: 'pwsh.exe', args: ['-NoExit', '-Command', setup] }, argv, {}, 'win32');
+    expect(result.args).toEqual(['-NonInteractive', '-Command', `${setup}; if ($?) { C:\\node.exe C:\\dor.js __launch-env marker }`]);
+  });
+  it('preserves POSIX initialization flags', () => {
+    const result = browserShellInvocation({ ...runtime, shell: '/bin/bash', args: ['--login', '-i'] }, ['/node', '/dor.js', '__launch-env', 'marker'], {}, 'linux');
+    expect(result.args).toEqual(['--login', '-i', '-c', '/node /dor.js __launch-env marker']);
   });
 });

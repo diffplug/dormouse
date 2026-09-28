@@ -661,7 +661,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
 
   // One environment per live session, including concurrent first requests.
   // Restored sessions resolve afresh; no environment is saved with the layout.
-  type LaunchEnv = { promise: Promise<NodeJS.ProcessEnv>; closing: boolean };
+  type LaunchEnv = { promise: Promise<NodeJS.ProcessEnv>; closing: boolean; env?: NodeJS.ProcessEnv };
   const launchEnvs = new Map<string, LaunchEnv>();
   const forgetEnv = (key: string, entry: LaunchEnv) => { if (launchEnvs.get(key) === entry) launchEnvs.delete(key); };
   async function run(raw: unknown): Promise<BrowserResult> {
@@ -683,15 +683,21 @@ export function createBrowserHost(deps: BrowserHostDeps) {
         // finds the same environment.
         envKey = JSON.stringify([r.provider, binding.session, binding.cwd ?? process.cwd()]);
         let entry = launchEnvs.get(envKey);
-        if (!entry) launchEnvs.set(envKey, entry = created = { promise: deps.launchEnv(binding.cwd), closing: false });
-        if (r.op === 'close') entry.closing = true;
-        binding.env = await entry.promise;
-        // A close discards it now, so a launch arriving after runs after it
-        // on a fresh one; those it overtook are refused.
-        if (r.op === 'close') forgetEnv(envKey, entry);
-        if (closed || ((r.op === 'launch' || r.op === 'attach') && (entry.closing || wasCancelled(r.requestId)))) {
-          forgetEnv(envKey, entry);
-          throw new Error('the browser was closed');
+        if (r.op === 'close') {
+          // Cleanup never starts or waits for a shell. A restored binding can
+          // still close with its validated executable and the host environment.
+          if (entry) {
+            entry.closing = true;
+            binding.env = entry.env;
+            forgetEnv(envKey, entry);
+          }
+        } else {
+          if (!entry) launchEnvs.set(envKey, entry = created = { promise: deps.launchEnv(binding.cwd), closing: false });
+          binding.env = entry.env = await entry.promise;
+          if (closed || ((r.op === 'launch' || r.op === 'attach') && (entry.closing || wasCancelled(r.requestId)))) {
+            forgetEnv(envKey, entry);
+            throw new Error('the browser was closed');
+          }
         }
       }
       const b = p.bind(binding);

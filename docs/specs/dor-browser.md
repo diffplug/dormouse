@@ -284,20 +284,22 @@ Dormouse does not model still pass through.
 cwd while it exists (rationale). The host runs the staged `dor __launch-env`
 helper through a short-lived, pipe-backed shell, creating no terminal Surface;
 it captures exported startup settings, not an already-running terminal's
-mutations or prompt hooks. The shell is VS Code's selected one, else:
+mutations or prompt hooks. **Must preserve the selected shell's initialization arguments**, replacing stay-open flags with the helper command. The shell is VS Code's selected native one, else:
 
 - **POSIX:** `SHELL`, then the account shell, as an interactive login shell
   (csh and tcsh interactive only).
-- **Windows:** ComSpec; PowerShell loads profiles.
+- **Windows:** ComSpec; PowerShell loads profiles. A WSL selection uses ComSpec: browser providers and their Playwright library run on the native host, not in a WSL distribution.
 
 **Must retain that environment only for the browser session's lifetime**, sharing
 concurrent initialization and using it for provider discovery, CLI commands,
-and daemon state paths. A close discards it once resolved, refusing the launches
-it overtook; failed initialization and host shutdown discard it too, and any
-later request initializes afresh. **Never send this environment to the
+and daemon state paths. **Must close without starting or waiting for a shell**:
+use the resolved session environment when available, otherwise the host environment
+and validated binding; provider cleanup errors still surface. A close discards the
+environment and refuses launches it overtook. Failed initialization and host
+shutdown discard it too; the next non-close request initializes afresh. **Never send this environment to the
 webview, persist it, or include helper output in diagnostics.** Startup is
 bounded to 15 seconds and 2 MiB combined output within the launch deadline;
-failure is reported without falling back to the GUI environment.
+Launch initialization failure is reported without falling back to the GUI environment.
 
 **Must resolve each new GUI browser independently**, without borrowing another
 session's executable. Existing bindings retain their validated executable hint;
