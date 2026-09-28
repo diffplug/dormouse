@@ -88,7 +88,9 @@ function xtermPins(dir) {
  * the lockfile's top-level `packages:` block, for both `@xterm/*` and the
  * `@diffplug/*` fork tarball (whose "version" is its URL). Entries there carry
  * only metadata (resolution/engines/peerDependencies/…); the resolved
- * dependency graph lives in `snapshots:`, which this deliberately stops before.
+ * dependency graph lives in `snapshots:`, which this deliberately skips.
+ * pnpm 12 prepends a `---` document pinning pnpm itself, with its own
+ * `packages:` block, so every document's block is scanned rather than the first.
  */
 function peerRanges() {
   const out = new Map();
@@ -97,8 +99,8 @@ function peerRanges() {
   let inPeers = false;
   for (const line of read('pnpm-lock.yaml').split('\n')) {
     if (/^packages:\s*$/.test(line)) { inPackages = true; continue; }
+    if (/^\S/.test(line)) { inPackages = false; key = null; continue; } // any other top-level key ends the block
     if (!inPackages) continue;
-    if (/^\S/.test(line)) break; // next top-level key (`snapshots:`) ends the block
     const entry = /^ {2}'?(@(?:xterm|diffplug)\/[a-z0-9-]+)@(.+?)'?:\s*$/.exec(line);
     if (entry) { key = `${entry[1]}@${entry[2]}`; inPeers = false; continue; }
     if (!key) continue;
