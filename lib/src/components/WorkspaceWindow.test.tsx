@@ -136,7 +136,7 @@ describe('WorkspaceWindow', () => {
     expect(wallFor('ws-2').classList.contains('invisible')).toBe(false);
   });
 
-  it('reveals and confirms a requested workspace close, then selects the next tab', async () => {
+  it.each(['x', 'k'])('reveals and confirms a requested workspace close, then selects the next tab (%s)', async (killKey) => {
     // Every Workspace holds running work, so every close confirms.
     vi.spyOn(terminalRegistry, 'countRunningSessionsIn').mockReturnValue(1);
     const first = getActiveWorkspaceId();
@@ -148,11 +148,12 @@ describe('WorkspaceWindow', () => {
       await flush();
     };
     const close = async () => {
-      await act(async () => { requestWorkspaceClose(getActiveWorkspaceId()); });
-      await flush();
+      await press(killKey);
     };
-    await act(async () => { requestWorkspaceClose('ws-2'); });
-    await flush();
+    await press('ArrowUp');
+    await press('ArrowRight');
+    expect(getActiveWorkspaceId()).toBe(first);
+    await press(killKey);
     expect(getActiveWorkspaceId()).toBe('ws-2');
     expect(getWorkspaceUiSnapshot().pendingClose?.id).toBe('ws-2');
     expect(leafIdsIn('ws-2')).toHaveLength(1);
@@ -284,7 +285,7 @@ describe('WorkspaceWindow', () => {
     createWorkspace({ id: 'ws-2', activate: false });
     await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
     await act(async () => { getWallHandle(first)!.selectWorkspaceTab(); });
-    for (const key of ['n', 'p', '$', '&', 'x']) {
+    for (const key of ['n', 'p', '$', '&']) {
       await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); });
       await flush();
       expect(getActiveWorkspaceId()).toBe(first);
