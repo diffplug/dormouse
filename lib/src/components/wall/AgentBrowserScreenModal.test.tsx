@@ -41,6 +41,37 @@ describe('AgentBrowserScreenModal', () => {
     registration.dispose();
   });
 
+  it('fills preset dimensions, then edits them as Custom without pinning measured DPR', () => {
+    installBrowserHost();
+    const registration = registerStubScreen('editable', {
+      snapshot: { ...STUB_SCREEN, syncEngaged: false, viewport: { w: 1440, h: 900, dpr: 2 } },
+    });
+    const controller = getAgentBrowserScreenController('editable')!;
+    act(() => root.render(<AgentBrowserScreenModal controller={controller} label="surface:3" onClose={() => {}} />));
+    const select = document.body.querySelector<HTMLSelectElement>('select')!;
+    const field = (name: string) => document.body.querySelector<HTMLInputElement>(`input[aria-label="${name}"]`)!;
+    const edit = (name: string, value: string) => act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field(name), value);
+      field(name).dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const apply = () => act(() => [...document.body.querySelectorAll('button')].find(button => button.textContent === 'Apply')!.click());
+    act(() => { select.value = 'phone'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+    expect(field('W').value).toBe('390');
+    expect(field('H').value).toBe('844');
+    expect(field('DPR').value).toBe('2');
+    act(() => field('W').focus());
+    expect(select.value).toBe('phone');
+    edit('W', '400');
+    expect(select.value).toBe('');
+    expect(document.body.querySelector('input[name="screen-target"]:checked')?.closest('label')?.textContent).toContain('Fixed size');
+    apply();
+    expect(controller.actions.applyViewportSetting).toHaveBeenLastCalledWith({ mode: 'fixed', width: 400, height: 844 });
+    edit('DPR', '3');
+    apply();
+    expect(controller.actions.applyViewportSetting).toHaveBeenLastCalledWith({ mode: 'fixed', width: 400, height: 844, dpr: 3 });
+    registration.dispose();
+  });
+
   it('reopens at the saved phone size without selecting desktop', () => {
     installBrowserHost();
     const registration = registerStubScreen('phone', {
@@ -50,7 +81,7 @@ describe('AgentBrowserScreenModal', () => {
     const controller = getAgentBrowserScreenController('phone')!;
     act(() => root.render(<AgentBrowserScreenModal controller={controller} label="surface:4" onClose={() => {}} />));
     expect(document.body.querySelector<HTMLSelectElement>('select')?.value).toBe('phone');
-    expect(document.body.querySelector<HTMLInputElement>('input[name="screen-target"]:checked')?.closest('label')?.textContent).toContain('Preset');
+    expect(document.body.querySelector<HTMLInputElement>('input[name="screen-target"]:checked')?.closest('label')?.textContent).toContain('Fixed size');
     registration.dispose();
   });
 
@@ -93,13 +124,14 @@ describe('AgentBrowserScreenModal', () => {
     registration.dispose();
   });
 
-  it('offers Playwright with its own device registry and dispatches the selected provider', () => {
+  it('offers Playwright sizing without emulation and dispatches the selected provider', () => {
     installBrowserHost();
     const registration = registerStubScreen('playwright', { snapshot: { ...STUB_SCREEN, renderMode: 'playwright-screencast' } });
     const controller = getAgentBrowserScreenController('playwright')!;
     act(() => root.render(<AgentBrowserScreenModal controller={controller} label="surface:4" onClose={() => {}} />));
     expect(document.body.textContent).toContain('playwright screencast');
-    expect(document.body.textContent).toContain('iPad Pro 11');
+    expect(document.body.querySelectorAll('input[name="screen-target"]')).toHaveLength(2);
+    expect(document.body.textContent).not.toContain('Emulate');
     expect(document.body.textContent).not.toContain('Galaxy S25');
     const popout = [...document.body.querySelectorAll('label')].find(label => label.textContent === 'playwright popout')!;
     act(() => popout.querySelector<HTMLInputElement>('input')!.click());

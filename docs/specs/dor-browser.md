@@ -35,7 +35,7 @@ Source of truth: `lib/src/components/wall/BrowserPanel.tsx`,
 
 An automated renderer belongs to one **provider**, the CLI that drives its
 browser. **Must read every per-provider fact from the one registry** — render
-modes, CLI, binary for `dor`, the hosts and the webview; label, device presets
+modes, CLI, binary for `dor`, the hosts and the webview; label
 and viewport hint for the GUI — never a ternary on the provider or a mode
 prefix. **Must spell provider names in full and lowercase in UI, commands and renderer identifiers**, including public `render_mode` and `dormouse.yml` `render` values; abbreviated modes are not aliases. `parseRenderMode` decodes one
 to its provider and presentation (`screencast` / `popout`), reading anything
@@ -204,9 +204,7 @@ its presentation glyph.
 The iframe option lists that the embed keeps no logins or cookies (for
 `https://`, see [Iframe Renderer](#iframe-renderer)).
 
-Resolution controls apply to both screencast providers. **Fixed** issues
-`set viewport <w> <h> <dpr>` or `set device <name>` from the modal's registry.
-**Resize with pane** is sync-to-pane, **owned by the host** (rationale).
+**Must offer only Resize with pane and Fixed size for screencast resolution.** Fixed size nests a preset selector including Custom and editable width, height, and DPR. Choosing a preset fills the fields; editing a field selects Custom. Preset selection preserves omitted DPR until explicitly edited. Device emulation is CLI-only. **Resize with pane is owned by the host** (rationale).
 
 - **Must send the pane's laid-out CSS size — never `getBoundingClientRect()`,
   which a Workspace presentation scales — and display ratio over the viewer
@@ -265,7 +263,7 @@ and `sync-to-pane` in `lib/src/host/browser-host.test.ts`,
 | `phone` | 390 × 844 |
 | `pane-sync` | Follow the pane |
 
-**Must preserve the current device-pixel ratio when DPR is omitted.** A requested ratio unsupported by the provider fails before changing dimensions; playwright can accept only its current context ratio. **Never turn an observed playwright DPR into an explicit request for future contexts.** Presets describe viewport geometry, not devices. **Must keep device emulation separate in the Display modal and label pixel density DPR.**
+**Must preserve the current device-pixel ratio when DPR is omitted.** A requested ratio unsupported by the provider fails before changing dimensions; playwright can accept only its current context ratio. **Never turn an observed playwright DPR into an explicit request for future contexts.** Presets describe viewport geometry, not devices. **Must label pixel density DPR.**
 
 **Must apply initial dimensions before the destination page's first script runs**, for managed CLI, GUI and Tool launches. Agent-browser launches blank, sets the viewport and then navigates; playwright uses its context viewport configuration. Deferred `pane-sync` launches start at 1440 × 900 until placement; **must engage sync when resolving that preset and send the actual pane dimensions on first attach**. A failed initialization never navigates at a silently substituted size. **Must apply a renderer and viewport chosen together to the new renderer**, not discard sizing during a swap.
 

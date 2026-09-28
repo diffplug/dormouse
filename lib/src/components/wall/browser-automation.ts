@@ -29,27 +29,18 @@ interface BrowserProviderGui {
   label: string;
   /** The `dor` command that drives it. */
   cli: string;
-  /** The device presets its `set device` accepts, as the Display modal lists
-   *  them — the CLI's own registry, no custom descriptors. */
-  devices: readonly string[];
   /** What to run from a terminal to size the viewport on a host that cannot. */
   viewportHint: string;
 }
 
-function gui(provider: BrowserAutomationProvider, fields: { devices: readonly string[] }): BrowserProviderGui {
+function gui(provider: BrowserAutomationProvider): BrowserProviderGui {
   const cli = `dor ${provider}`;
-  return { label: provider, cli, devices: fields.devices, viewportHint: `${cli} dor-embed-size …` };
+  return { label: provider, cli, viewportHint: `${cli} dor-embed-size …` };
 }
 
 export const BROWSER_PROVIDER_GUI: Record<BrowserAutomationProvider, BrowserProviderGui> = {
-  'agent-browser': gui('agent-browser', {
-    // Touch and the mobile UA come only bundled inside `set device` (verified
-    // against 0.27.0).
-    devices: ['iPhone 15', 'iPhone 16', 'iPhone 16 Pro', 'iPhone 17', 'iPad', 'iPad Pro', 'Pixel 9', 'Galaxy S25'],
-  }),
-  playwright: gui('playwright', {
-    devices: ['iPhone 15', 'iPhone 16', 'iPhone 16 Pro', 'iPhone 17', 'iPad (gen 11)', 'iPad Pro 11', 'Pixel 9', 'Galaxy S24'],
-  }),
+  'agent-browser': gui('agent-browser'),
+  playwright: gui('playwright'),
 };
 
 /** Why a GUI entry point cannot open `provider`'s browser here. */
