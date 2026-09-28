@@ -56,6 +56,14 @@
       "separateMajorMinor": false
     },
     {
+      "description": "Keep Playwright browser testing and the host's playwright-core types on the same release in every workspace",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["playwright", "playwright-core"],
+      "groupName": "playwright",
+      "groupSlug": "playwright",
+      "separateMajorMinor": false
+    },
+    {
       "description": "Tailwind core and first-party tooling should be tested together",
       "matchManagers": ["npm"],
       "matchPackageNames": ["tailwindcss", "@tailwindcss/**"],

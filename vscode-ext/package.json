@@ -131,7 +131,7 @@
     "@vscode/vsce": "^3.9.1",
     "esbuild": "^0.28.0",
     "ovsx": "^1.0.0",
-    "playwright-core": "^1.62.1",
+    "playwright-core": "^1.63.0",
     "tailwindcss": "^4.3.0",
     "typescript": "^6.0.3",
     "vite": "^8.0.14",
