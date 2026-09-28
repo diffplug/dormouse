@@ -64,16 +64,19 @@ const CLOSE_GRACE_MS = 250;
  * `SPAWN_TIMEOUT_CODE`, without waiting for the kill. Past `maxOutputBytes` of
  * combined stdout/stderr it is killed the same way and resolves `{ ok: false }`
  * with `ENOBUFS` and none of the output, which may hold secrets.
+ *
+ * Explicit cmd.exe /s /c callers must set windowsVerbatimArguments: Node's
+ * default MSVCRT escaping inserts backslashes that cmd.exe does not decode.
  */
 export function spawnAndCapture(
   binary: string,
   args: readonly string[],
-  options: { cwd?: string; timeoutMs?: number; env?: NodeJS.ProcessEnv; maxOutputBytes?: number } = {},
+  options: { cwd?: string; timeoutMs?: number; env?: NodeJS.ProcessEnv; maxOutputBytes?: number; windowsVerbatimArguments?: boolean } = {},
 ): Promise<SpawnCaptureResult> {
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, cwd: options.cwd, env: options.env });
+      child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, cwd: options.cwd, env: options.env, windowsVerbatimArguments: options.windowsVerbatimArguments });
     } catch (error) {
       // Invalid argv (for example a NUL in an eval string) throws before a child
       // exists; preserve the same result contract as an asynchronous ENOENT.

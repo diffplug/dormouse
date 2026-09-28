@@ -288,7 +288,7 @@ mutations or prompt hooks. **Must preserve the selected shell's initialization a
 
 - **POSIX:** `SHELL`, then the account shell, as an interactive login shell
   (csh and tcsh interactive only).
-- **Windows:** ComSpec; PowerShell loads profiles. A WSL selection uses ComSpec: browser providers and their Playwright library run on the native host, not in a WSL distribution.
+- **Windows:** ComSpec; PowerShell loads profiles. **Must pass explicit cmd.exe command strings verbatim**, without MSVCRT quote escaping. A WSL selection uses ComSpec: browser providers and their Playwright library run on the native host, not in a WSL distribution.
 
 **Must retain that environment only for the browser session's lifetime**, sharing
 concurrent initialization and using it for provider discovery, CLI commands,
@@ -309,7 +309,7 @@ session's executable. Existing bindings retain their validated executable hint;
 
 Source of truth: `browserLaunchEnv` in `lib/src/host/browser-launch-env.ts`,
 `createBrowserHost` in `lib/src/host/browser-host.ts`, `runCli` in
-`dor/src/cli.ts`. Pinned by `lib/src/host/browser-launch-env.test.ts`,
+`dor/src/cli.ts`. Pinned by `lib/src/host/browser-launch-env.test.ts` (executed on native Windows and macOS in `.github/workflows/ci.yml`),
 `lib/src/host/browser-host.test.ts` ("launch environment") and
 `dor/test/launch-env.test.mjs`.
 

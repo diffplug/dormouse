@@ -64,3 +64,32 @@ describe('configured browser launch shells', () => {
     expect(result.args).toEqual(['--login', '-i', '-c', '/node /dor.js __launch-env marker']);
   });
 });
+
+describe.skipIf(process.platform !== 'win32')('native Windows browser shell', () => {
+  async function fixture() {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'dor launch spaces & '));
+    roots.push(dir);
+    const cli = path.join(dir, 'helper.cjs');
+    await writeFile(cli, `delete process.env.ELECTRON_RUN_AS_NODE; process.stdout.write('\\n' + process.argv[3] + ':' + Buffer.from(JSON.stringify(process.env)).toString('base64') + '\\n');`);
+    return { dir, runtime: { node: process.execPath, cli } };
+  }
+  it('runs the helper through actual cmd.exe with quoted paths', async () => {
+    const f = await fixture();
+    const env = await browserLaunchEnv(f.dir, f.runtime, { ...process.env, DOR_SHELL_TEST: 'native-cmd' });
+    expect(env.DOR_SHELL_TEST).toBe('native-cmd');
+    expect(env.ELECTRON_RUN_AS_NODE).toBeUndefined();
+  });
+  it('runs Developer Command Prompt initialization before the helper', async () => {
+    const f = await fixture();
+    const setup = path.join(f.dir, 'developer setup.cmd');
+    await writeFile(setup, '@echo off\r\necho startup chatter\r\nset "DOR_SHELL_TEST=developer-cmd"\r\n');
+    const env = await browserLaunchEnv(f.dir, { ...f.runtime, args: ['/k', setup] });
+    expect(env.DOR_SHELL_TEST).toBe('developer-cmd');
+  });
+  it('runs native PowerShell startup code and exits', async () => {
+    const f = await fixture();
+    const shell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+    const env = await browserLaunchEnv(f.dir, { ...f.runtime, shell, args: ['-NoProfile', '-NoExit', '-Command', "$env:DOR_SHELL_TEST = 'developer-powershell'"] });
+    expect(env.DOR_SHELL_TEST).toBe('developer-powershell');
+  });
+});

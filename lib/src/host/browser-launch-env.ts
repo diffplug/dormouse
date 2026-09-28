@@ -64,6 +64,8 @@ export async function browserLaunchEnv(cwd: string | undefined, runtime: Browser
   const { shell, args } = browserShellInvocation(runtime, [runtime.node, runtime.cli, '__launch-env', marker], env);
   // A removed project directory must not strand a restored session's close.
   const result = await spawnAndCapture(shell, args, {
+    // Unlike a .cmd shim, explicit cmd.exe bypasses cross-spawn's shell wrapper.
+    windowsVerbatimArguments: shellCommandKind(shell, process.platform) === 'cmd',
     cwd: cwd !== undefined && isDirectory(cwd) ? cwd : undefined, env: { ...env, ELECTRON_RUN_AS_NODE: '1' }, timeoutMs: 15_000, maxOutputBytes: 2 * 1024 * 1024,
   });
   if (!result.ok || result.exitCode !== 0) throw new Error(`Browser launch shell failed (${shell}); check its startup configuration${!result.ok && result.error.code ? ` [${result.error.code}]` : ''}`);
