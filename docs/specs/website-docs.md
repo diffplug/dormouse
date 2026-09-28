@@ -65,8 +65,6 @@ app gets one section pointing at its download. Its sections are:
 ## Getting started
 ## Keyboard shortcuts
 ## Coding agents
-## Scripting with dor
-## What survives a reload
 ## Dormouse Hosted
 ## Standalone app
 ## Links
