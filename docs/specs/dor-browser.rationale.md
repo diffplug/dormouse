@@ -46,6 +46,14 @@ views without weakening that first signal.
 
 ## Automated Browser
 
+**Why GUI launches resolve in a fresh shell.** The installed macOS sidecar had
+`/usr/bin:/bin:/usr/sbin:/sbin` while both provider CLIs were installed under
+`/opt/homebrew/bin` (measured 2026-09-28). Remembering an executable alone also
+misses the Node runtime needed by its shebang. A fresh shell exports both
+without shell-integration state publication or a global cache. Calling the
+public `dor … open` command would duplicate the host's pane-binding lifecycle,
+so the private helper only supplies environment.
+
 **Why one-session-one-surface is not an invariant.** `dor` forwards the user's command before it asks the host for a surface, so a surface killed or render-swapped inside that window is gone by the time the trailing request arrives — and the session behind it is still live and needs somewhere to render.
 
 **Why a bare Wall mints its own key scope.** Every VS Code webview is a bare Wall, and each named `--key default` `dormouse.1.default`: two webviews' default browsers were one browser behind two Surfaces, and killing either closed it under the other. Playwright had avoided it with random session names and a reservation; one deterministic scheme with a scope unique per bare Wall covers both, and needs no migration because a key finds its Surface's stored session first (review of the browser stack, 2026-09).

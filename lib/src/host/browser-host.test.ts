@@ -651,3 +651,78 @@ describe('sync-to-pane', () => {
     expect(pane.state()).toBeUndefined();
   });
 });
+
+describe('launch environment', () => {
+  const envRequest = { provider: 'agent-browser', binding: { session: 'shell-test' }, op: 'launch', headed: false, url: 'https://example.com' } as const;
+  it('retains one host-only environment per session and refreshes after close', async () => {
+    const fake = fakeProvider();
+    const env = { PATH: '/shell/bin', SECRET: 'private' };
+    const launchEnv = vi.fn(async () => env);
+    const bind = vi.spyOn(fake.provider, 'bind');
+    // A provider may describe its whole binding; the host still answers without the environment.
+    vi.spyOn(fake.provider, 'describe').mockImplementation((b) => b as never);
+    const host = createBrowserHost({ launchEnv, writeClipboardText() {}, providers: { 'agent-browser': () => fake.provider } });
+    try {
+      const results = await Promise.all([host.request(envRequest), host.request(envRequest)]);
+      expect(results.every(r => r.ok)).toBe(true);
+      expect(JSON.stringify(results)).not.toContain('private');
+      expect(launchEnv).toHaveBeenCalledTimes(1);
+      expect(bind.mock.calls.every(([b]) => b.env === env)).toBe(true);
+      await host.request({ ...envRequest, op: 'close' });
+      await host.request(envRequest);
+      expect(launchEnv).toHaveBeenCalledTimes(2);
+    } finally { await host.close(); }
+  });
+  it.each([true, false])('cancels startup before opening (request ids: %s)', async (withId) => {
+    const fake = fakeProvider();
+    let resolve!: (env: NodeJS.ProcessEnv) => void;
+    const launchEnv = vi.fn(() => new Promise<NodeJS.ProcessEnv>(r => { resolve = r; }));
+    const host = createBrowserHost({ launchEnv, writeClipboardText() {}, providers: { 'agent-browser': () => fake.provider } });
+    try {
+      const opening = host.request({ ...envRequest, ...(withId ? { requestId: 'shell-opening' } : {}) });
+      const closing = host.request({ ...envRequest, op: 'close', ...(withId ? { cancels: ['shell-opening'] } : {}) });
+      // Close must finish even while startup remains pending indefinitely.
+      expect(await closing).toMatchObject({ ok: true });
+      resolve({ PATH: '/shell/bin' });
+      expect(await opening).toMatchObject({ ok: false, error: 'the browser was closed' });
+      expect(fake.calls.some(c => c.startsWith('open '))).toBe(false);
+    } finally { await host.close(); }
+  });
+  it('runs a launch arriving during a close after it, on a fresh environment', async () => {
+    const fake = fakeProvider();
+    const launchEnv = vi.fn(async () => ({ PATH: '/shell/bin' }));
+    const host = createBrowserHost({ launchEnv, writeClipboardText() {}, providers: { 'agent-browser': () => fake.provider } });
+    try {
+      fake.gate('close shell-test');
+      const closing = host.request({ ...envRequest, op: 'close' });
+      await flush();
+      const relaunch = host.request(envRequest);
+      await flush();
+      fake.release('close shell-test');
+      expect(await closing).toMatchObject({ ok: true });
+      expect(await relaunch).toMatchObject({ ok: true });
+      expect(launchEnv).toHaveBeenCalledTimes(1);
+      expect(fake.calls.indexOf('close shell-test')).toBeLessThan(fake.calls.findIndex(c => c.startsWith('open shell-test')));
+    } finally { await host.close(); }
+  });
+  it('closes a restored binding without starting a potentially broken shell', async () => {
+    const fake = fakeProvider();
+    const launchEnv = vi.fn(async () => { throw new Error('broken startup'); });
+    const host = createBrowserHost({ launchEnv, writeClipboardText() {}, providers: { 'agent-browser': () => fake.provider } });
+    try {
+      expect(await host.request({ ...envRequest, op: 'close' })).toEqual({ ok: true });
+      expect(launchEnv).not.toHaveBeenCalled();
+      expect(fake.calls).toContain('close shell-test');
+    } finally { await host.close(); }
+  });
+  it('retries shell initialization after failure', async () => {
+    const fake = fakeProvider();
+    const launchEnv = vi.fn().mockRejectedValueOnce(new Error('shell failed')).mockResolvedValue({ PATH: '/shell/bin' });
+    const host = createBrowserHost({ launchEnv, writeClipboardText() {}, providers: { 'agent-browser': () => fake.provider } });
+    try {
+      expect(await host.request(envRequest)).toMatchObject({ ok: false, error: 'shell failed' });
+      expect(await host.request(envRequest)).toMatchObject({ ok: true });
+      expect(launchEnv).toHaveBeenCalledTimes(2);
+    } finally { await host.close(); }
+  });
+});

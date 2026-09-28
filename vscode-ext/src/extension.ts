@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as ptyManager from './pty-manager';
 import { DormouseViewProvider } from './webview-view-provider';
 import { attachRouter, flushAllSessions, getAlertStates, reportWindowPresence } from './message-router';
-import { closeBrowserSessions } from './agent-browser-host';
+import { closeBrowserSessions, setBrowserShellRuntime } from './agent-browser-host';
 import { serveWebview } from './webview-messaging';
 import { log } from './log';
 import { initToolHost } from './tool-host';
@@ -93,13 +93,18 @@ export function activate(context: vscode.ExtensionContext) {
   log.init();
   extensionContext = context;
   ptyManager.setExtensionPath(context.extensionPath);
+  const dorRuntime = ptyManager.getDorRuntimeEnv(context.extensionPath);
+  const browserShellRuntime = { node: dorRuntime.DORMOUSE_NODE, cli: dorRuntime.DORMOUSE_CLI_JS };
+  setBrowserShellRuntime(browserShellRuntime);
 
   const provider = new DormouseViewProvider(context);
 
   // Updates the shell-derived state in one place: the view header (shell
-  // name appears next to the title via description) and the webview's
-  // default-shell slot that split-spawns read from.
+  // name appears next to the title via description), the webview's
+  // default-shell slot that split-spawns read from, and the shell a GUI
+  // browser launch resolves its environment in.
   const applyShell = (shell: { name: string; path: string; args: string[] } | undefined) => {
+    setBrowserShellRuntime({ ...browserShellRuntime, shell: shell?.path, args: shell?.args });
     provider.setDescription(shell?.name);
     provider.setSelectedShell(shell ? { shell: shell.path, args: shell.args } : null);
   };

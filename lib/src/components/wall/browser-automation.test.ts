@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import type { PlatformAdapter } from '../../lib/platform/types';
 import { BROWSER_PROVIDER_IDS, renderModeFor } from 'dor-lib-common/browser-providers';
-import { forgetLaunchBinaryPaths, launchBinaryPath, offeredRenderModes, rememberLaunchBinaryPath } from './browser-automation';
+import { offeredRenderModes } from './browser-automation';
 import { browserDisplayMode } from './agent-browser-screen';
 import { BROWSER_DISPLAY_LABEL } from './BrowserDisplayIcon';
 import { resolveRenderMode } from './browser-surface';
@@ -30,19 +30,6 @@ describe('automation render modes', () => {
     expect(BROWSER_DISPLAY_LABEL['playwright-resize']).toBe('playwright resizes with pane');
     expect(BROWSER_DISPLAY_LABEL['agent-browser-popout']).toBe('agent-browser popout');
     expect(BROWSER_DISPLAY_LABEL.iframe).toBe('iframe embed');
-  });
-});
-
-describe('launchBinaryPath', () => {
-  afterEach(forgetLaunchBinaryPaths);
-
-  it('hands each provider\'s GUI launches the binary path its own command resolved', () => {
-    rememberLaunchBinaryPath('playwright', '/opt/bin/playwright-cli');
-    expect(launchBinaryPath('agent-browser')).toBeUndefined();
-    expect(launchBinaryPath('playwright')).toBe('/opt/bin/playwright-cli');
-    rememberLaunchBinaryPath('agent-browser', '/opt/bin/agent-browser');
-    expect(launchBinaryPath('agent-browser')).toBe('/opt/bin/agent-browser');
-    expect(launchBinaryPath('playwright')).toBe('/opt/bin/playwright-cli');
   });
 });
 

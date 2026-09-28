@@ -300,12 +300,8 @@ jobs:
         with:
           workspaces: standalone/src-tauri
 
-      # No pnpm install and no TypeScript check here. The TS check is
-      # platform-independent and the smoketest above already runs it; and the Rust
-      # build never reads node_modules — build.rs needs only `node` on PATH (it
-      # resolves the binary with `node -p process.execPath`) plus the root
-      # package.json version pin. This job exists for the Rust the smoketest
-      # cannot see, plus the dor launcher test below.
+      # The full TypeScript check stays on Linux. This job covers native Rust,
+      # the dor launchers, and actual shell execution for browser initialization.
       - name: Cargo test
         run: cargo test
         working-directory: standalone/src-tauri
@@ -315,3 +311,12 @@ jobs:
       # Windows runner of its own.
       - name: dor launcher test
         run: node --test dor/test/launcher.test.mjs
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      # This small host-only suite needs no native addon builds.
+      - name: Install browser shell test dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Browser launch shell tests
+        run: pnpm --dir lib exec vitest run src/host/browser-launch-env.test.ts

@@ -186,6 +186,8 @@ Source of truth: `lib/src/components/wall/use-dev-server-ports.ts`,
 
 **Must acknowledge a port click with `Opening…` and suppress repeat activation while pending.** For a new automated target, start its controller before creating a Pane; split and focus only after the host confirms startup, without waiting for page load. Failure reports in context without changing layout or focus. Concurrent requests for the same target are serialized. (rationale)
 
+**Must dismiss context after a successful browser placement or reuse, preserving browser focus.** System browser dismisses after dispatch to the OS opener; failed or cancelled launches keep context open. A completed launch must not dismiss a replacement context.
+
 **Must cancel pending placement when its context closes or is replaced, its source disappears or minimizes, or its Workspace deactivates or closes.** Close a browser that arrives after cancellation or cannot be placed. A successful placement adopts the prepared controller and binding without launching or navigating again.
 
 Source of truth: `openContextPort` in `lib/src/components/Wall.tsx`; `prepareForPlacement` in `lib/src/components/wall/agent-browser-surface-controller.ts`; tests in `lib/src/components/Wall.test.tsx`; `listenerUrlsByPort` in `lib/src/components/wall/port-url.ts`; `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`.
@@ -280,13 +282,38 @@ navigation verb's Dormouse target (`surface:N`, `:port`, `host:port`) is resolve
 to a URL first (`docs/specs/dor-cli.md` → Browser Surface Addressing). Flags
 Dormouse does not model still pass through.
 
-The binary comes from the provider's override variable or `PATH`; `dor`
-resolves an absolute `binaryPath` for the host, which may not share the
-terminal's shell PATH; **a GUI launch passes the one that provider's `dor`
-command last resolved, and remembers the one it ran**. **Both `dor` and the host
-must spawn a provider CLI through `spawnAndCapture`** (`dor-lib-common`), never
-raw `child_process` — the Windows `.cmd`-shim recipe applies even to that
-absolute path (`docs/specs/dor-cli.md` → Spawning External Binaries).
+**Must resolve new GUI launches in a fresh shell environment**, in the browser's
+cwd while it exists (rationale). The host runs the staged `dor __launch-env`
+helper through a short-lived, pipe-backed shell, creating no terminal Surface;
+it captures exported startup settings, not an already-running terminal's
+mutations or prompt hooks. **Must preserve the selected shell's initialization arguments**, replacing stay-open flags with the helper command. The shell is VS Code's selected native one, else:
+
+- **POSIX:** `SHELL`, then the account shell, as an interactive login shell
+  (csh and tcsh interactive only).
+- **Windows:** ComSpec; PowerShell loads profiles. **Must pass explicit cmd.exe command strings verbatim**, without MSVCRT quote escaping. A WSL selection uses ComSpec: browser providers and their Playwright library run on the native host, not in a WSL distribution.
+
+**Must retain that environment only for the browser session's lifetime**, sharing
+concurrent initialization and using it for provider discovery, CLI commands,
+and daemon state paths. **Must close without starting or waiting for a shell**:
+use the resolved session environment when available, otherwise the host environment
+and validated binding; provider cleanup errors still surface. A close discards the
+environment and refuses launches it overtook. Failed initialization and host
+shutdown discard it too; the next non-close request initializes afresh. **Never send this environment to the
+webview, persist it, or include helper output in diagnostics.** Startup is
+bounded to 15 seconds and 2 MiB combined output within the launch deadline;
+Launch initialization failure is reported without falling back to the GUI environment.
+
+**Must resolve each new GUI browser independently**, without borrowing another
+session's executable. Existing bindings retain their validated executable hint;
+`dor` resolves from its calling terminal. **Must spawn provider CLIs through
+`spawnAndCapture`** (`dor-lib-common`), including absolute executables
+(`docs/specs/dor-cli.md` → Spawning External Binaries).
+
+Source of truth: `browserLaunchEnv` in `lib/src/host/browser-launch-env.ts`,
+`createBrowserHost` in `lib/src/host/browser-host.ts`, `runCli` in
+`dor/src/cli.ts`. Pinned by `lib/src/host/browser-launch-env.test.ts` (executed on native Windows and macOS in `.github/workflows/ci.yml`),
+`lib/src/host/browser-host.test.ts` ("launch environment") and
+`dor/test/launch-env.test.mjs`.
 
 ### Managed identity
 
@@ -701,7 +728,7 @@ relaunch changes the mode.
   kills the pid it reads there. **Host-side operations and captures for a
   session in a socket directory the host does not share are refused**, as the
   host sees no daemon for it; its viewer socket still sends every changed
-  frame, and a close runs the CLI under the host's environment.
+  frame, and a close runs the CLI under the session's shell environment.
 - **The post-launch sweep lists and closes page targets over the browser's
   CDP, never `tab list`** (rationale).
 
