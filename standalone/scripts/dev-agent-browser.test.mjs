@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
@@ -19,6 +19,7 @@ async function fixture(t) {
   await Promise.all(['dev-agent-browser.mjs', 'dev-host-guard.mjs', 'dev-run.mjs'].map(name =>
     copyFile(path.join(scripts, name), path.join(standalone, 'scripts', name))));
   await writeFile(path.join(standalone, 'sidecar/main.js'), `
+    console.error('SIDECAR_AB_DIR ' + process.env.AGENT_BROWSER_SOCKET_DIR);
     const { createInterface } = require('node:readline');
     createInterface({ input: process.stdin }).on('line', line => {
       const { event, data } = JSON.parse(line);
@@ -35,6 +36,7 @@ async function fixture(t) {
       process.exit(0);
     }
     console.log('BROWSER_ARGS ' + JSON.stringify(process.argv.slice(2)));
+    console.log('BROWSER_AB_DIR ' + (process.env.AGENT_BROWSER_SOCKET_DIR || ''));
     if (process.env.TEST_BROWSER_HANG) {
       process.on('SIGTERM', () => {});
       setInterval(() => {}, 1000);
@@ -207,6 +209,15 @@ test('explicit ports and raw browser sessions are honored; occupied ports fail w
   assert.equal(pinned.app, one.app);
   assert.equal(pinned.bridge, one.bridge);
   assert.deepEqual(pinned.args, ['agent-browser', '--session', 'explicit-session', 'open', pinned.app]);
+});
+
+test('the inner app gets its own agent-browser socket dir; the harness browser keeps the caller\'s', { timeout: 60000 }, async t => {
+  const harness = await fixture(t);
+  const run = await harness.start({ AGENT_BROWSER_SOCKET_DIR: '/outer/agent-browser' }).ready();
+  const inner = (await run.wait(/SIDECAR_AB_DIR (\S+)/))[1];
+  assert.notEqual(inner, '/outer/agent-browser');
+  await access(inner);
+  assert.equal((await run.wait(/BROWSER_AB_DIR (\S+)/))[1], '/outer/agent-browser');
 });
 
 test('run as a Tool, leaves the browser to the Tool instead of opening a second', { timeout: 60000 }, async t => {

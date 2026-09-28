@@ -3,7 +3,8 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { sessionForKey } from 'dor-lib-common/browser-providers';
+import { mkdtempSync } from 'node:fs';
+import { AGENT_BROWSER_SOCKET_DIR_ENV, sessionForKey } from 'dor-lib-common/browser-providers';
 // cross-spawn, not node:child_process: this script spawns `dor` and
 // `agent-browser`, which are `.cmd` shims on Windows that a bare-name spawn
 // can't resolve (ENOENT) and Node >=22 won't run directly (EINVAL). cross-spawn
@@ -48,6 +49,12 @@ let viteOrigin;
 // The Burrow persists its enrollment + ACL here, under the harness's own
 // temp dir so a dev run never touches the installed app's state.
 const stateDir = path.join(os.tmpdir(), `dormouse-${process.pid}-browser-state`);
+// The inner app's own agent-browser daemons. It names managed sessions
+// `dormouse.<workspace>.<key>` exactly as the installed app does, and every
+// agent-browser shares one socket directory by default, so without this the
+// inner app's workspace-1 `default` browser is the installed app's. Under the
+// short `/tmp`, not macOS's long `os.tmpdir()`: socket paths cap near 104 bytes.
+const agentBrowserDir = mkdtempSync(path.join(process.platform === 'win32' ? os.tmpdir() : '/tmp', 'dab-'));
 
 const pending = new Map();
 const sseClients = new Set();
@@ -288,11 +295,15 @@ function startSidecar() {
       // the same agent-recovery record the app's quit writes — under this run's
       // own temp state, never the installed app's.
       DORMOUSE_RECOVERY_DIR: stateDir,
+      // Reaches the inner host and, through it, every inner terminal's `dor`;
+      // this harness's own browser keeps the caller's directory.
+      [AGENT_BROWSER_SOCKET_DIR_ENV]: agentBrowserDir,
     },
   });
   log(`sidecar pid=${sidecar.pid}`);
   log(`burrow state dir: ${stateDir}`);
   log(`recovery state dir: ${stateDir}`);
+  log(`inner agent-browser socket dir: ${agentBrowserDir}`);
 
   createInterface({ input: sidecar.stdout }).on('line', (line) => {
     let msg;

@@ -953,8 +953,9 @@ Configuration governs production unchanged.
   **May pin `PORT`; an occupied port fails without stopping its owner.**
 - **Must default dev state to `<worktree>/relay/data` regardless of cwd**, so
   enrollment and passkeys survive a restart from anywhere.
-  `DORMOUSE_STATE_DIR` overrides it — point it at a fresh directory to repeat
-  first boot.
+  `DORMOUSE_STATE_DIR` overrides it (a fresh directory repeats first boot)
+  **unless it equals `DORMOUSE_RECOVERY_DIR`**: an older Dormouse leaks its
+  state root as both.
 - **Must preserve explicit dev origin and bind-host overrides**, with blank bind
   hosts defaulting to loopback.
 - **Must use the printed origin for Burrow staging, enrollment, and Pocket.**

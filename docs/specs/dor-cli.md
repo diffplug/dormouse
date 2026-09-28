@@ -57,7 +57,10 @@ the user's own binary overrides that no host sets (`docs/specs/dor-browser.md`).
 **`DORMOUSE_CLI_BIN` is host-internal spawn configuration, never
 terminal-facing:** `pty-core` prepends its *value* to the child's `PATH`, then
 deletes the variable (with `DORMOUSE_SHELL_INTEGRATION_DIR`) from the child env,
-so a terminal sees `dor` on `PATH` and nothing else.
+so a terminal sees `dor` on `PATH` and nothing else. **Must delete the sidecar's
+storage roots, `DORMOUSE_STATE_DIR` and `DORMOUSE_RECOVERY_DIR`, from the child
+env too**, so a dev server run in a pane never writes into the running app's
+state.
 
 **On Windows, `DORMOUSE_CLI_BIN` and `DORMOUSE_CLI_JS` must be plain paths,
 never `\\?\` verbatim paths** — cmd.exe cannot execute `dor.cmd` through one,
