@@ -292,6 +292,8 @@ silent quit into an answer.
 
 **Why both halves.** Measured 2026-09-28 (rustc 1.96, tao 0.35.2) with an `NSException` raised beneath `[super sendEvent:]`: stock tao aborts under both strategies; patched tao aborts under `abort` and survives under `unwind`; with the abort hook the exception is survived and a Rust panic still exits by SIGABRT. The rustc rule is `fn_can_unwind`: under `panic=abort` every Rust-defined function is non-unwinding, whatever its ABI. The hook keeps today's fail-fast, so no Rust panic unwinds past a lock. End to end on the same day: a release build of the change, with a dylib swizzling `-[NSApplication sendEvent:]` to raise on an injected application-defined event, logged the raise beneath `TaoApp`'s override and was still running 3 s later. Cost: the arm64 release binary grew from 8.4 MB (the installed 1.1.0 `abort` build) to 10.4 MB.
 
+**Handler path.** Measured the same day, under the fork and `unwind`: an `NSException` raised inside the tao event handler aborts with "Rust cannot catch foreign exceptions" at `stop_app_on_panic`'s `catch_unwind`. Calling the handler without `catch_unwind` kept the process alive but wedged the loop, so the handler never ran again: tao's loop state is not exception-safe, and a clean abort beats a hung window.
+
 **Dead approach.** `objc2::exception::catch` around the super call: the closure it runs is a Rust frame, so under `abort` the unwind dies before reaching its `@catch`.
 
 **Not patched.** wry's `define_class!` callbacks are already `C-unwind`. Its URL-scheme `start_task` / `stop_task` are `extern "C"`, but they are outside the AppKit event path and nothing catches above them.

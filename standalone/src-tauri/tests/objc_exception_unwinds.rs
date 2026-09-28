@@ -1,8 +1,9 @@
 //! An Objective-C exception raised beneath tao's `sendEvent:` override must
 //! reach AppKit's handler and leave the event loop running
 //! (docs/specs/standalone.md -> "Objective-C exceptions"). Tests always
-//! unwind, so this pins tao's half; `panic_policy`'s tests pin the release
-//! profile's half. `harness = false`: AppKit needs the main thread.
+//! unwind, so this pins tao's half on the tao tauri resolves; `panic_policy`
+//! pins the release profile's half. `harness = false`: AppKit needs the main
+//! thread.
 
 #[cfg(not(target_os = "macos"))]
 fn main() {}
@@ -18,17 +19,16 @@ mod macos {
     use std::sync::OnceLock;
     use std::time::{Duration, Instant};
 
-    use objc2::runtime::{AnyClass, AnyObject, Bool, Imp, Sel};
-    use objc2::{class, msg_send, sel};
+    use objc2::runtime::{Imp, Sel};
+    use objc2::{sel, ClassType, MainThreadMarker};
+    use objc2_app_kit::{NSApplication, NSEvent, NSEventModifierFlags, NSEventType};
     use objc2_foundation::{ns_string, NSException, NSPoint};
-    use tao::event::{Event, StartCause};
-    use tao::event_loop::{ControlFlow, EventLoop};
-    use tao::platform::macos::{ActivationPolicy, EventLoopExtMacOS};
+    use tauri_runtime_wry::tao::event::{Event, StartCause};
+    use tauri_runtime_wry::tao::event_loop::{ControlFlow, EventLoop};
+    use tauri_runtime_wry::tao::platform::macos::{ActivationPolicy, EventLoopExtMacOS};
 
-    type SendEvent = unsafe extern "C-unwind" fn(&AnyObject, Sel, &AnyObject);
+    type SendEvent = unsafe extern "C-unwind" fn(&NSApplication, Sel, &NSEvent);
 
-    /// `NSEventTypeApplicationDefined`.
-    const APPLICATION_DEFINED: usize = 15;
     const SUBTYPE: i16 = 0x0d0e;
 
     static ORIGINAL: OnceLock<Imp> = OnceLock::new();
@@ -36,46 +36,44 @@ mod macos {
 
     /// Stands in for AppKit code under `-[NSApplication sendEvent:]` that
     /// raises, as `NSCampoLightweightUIController` does on macOS 27.
-    unsafe extern "C-unwind" fn raising_send_event(this: &AnyObject, cmd: Sel, event: &AnyObject) {
-        let ty: usize = msg_send![event, type];
+    unsafe extern "C-unwind" fn raising_send_event(
+        this: &NSApplication,
+        cmd: Sel,
+        event: &NSEvent,
+    ) {
         // `subtype` itself raises on most event types, so check the type first.
-        if ty == APPLICATION_DEFINED {
-            let subtype: i16 = msg_send![event, subtype];
-            if subtype == SUBTYPE {
-                RAISED.store(true, Ordering::SeqCst);
-                let reason = ns_string!("raised beneath tao's sendEvent: override");
-                NSException::new(ns_string!("DormouseTestException"), Some(reason), None)
-                    .unwrap()
-                    .raise();
-            }
+        if event.r#type() == NSEventType::ApplicationDefined && event.subtype().0 == SUBTYPE {
+            RAISED.store(true, Ordering::SeqCst);
+            let reason = ns_string!("raised beneath tao's sendEvent: override");
+            NSException::new(ns_string!("DormouseTestException"), Some(reason), None)
+                .unwrap()
+                .raise();
         }
         let original: SendEvent = std::mem::transmute(*ORIGINAL.get().unwrap());
         original(this, cmd, event);
     }
 
-    unsafe fn raise_on_next_event() {
-        let method = AnyClass::get(c"NSApplication")
-            .unwrap()
+    fn raise_on_next_event(mtm: MainThreadMarker) {
+        let method = NSApplication::class()
             .instance_method(sel!(sendEvent:))
             .unwrap();
         let raising: SendEvent = raising_send_event;
-        ORIGINAL
-            .set(method.set_implementation(std::mem::transmute::<SendEvent, Imp>(raising)))
-            .unwrap();
-        let event: *mut AnyObject = msg_send![
-            class!(NSEvent),
-            otherEventWithType: APPLICATION_DEFINED,
-            location: NSPoint::new(0.0, 0.0),
-            modifierFlags: 0usize,
-            timestamp: 0.0f64,
-            windowNumber: 0isize,
-            context: std::ptr::null_mut::<AnyObject>(),
-            subtype: SUBTYPE,
-            data1: 0isize,
-            data2: 0isize,
-        ];
-        let app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
-        let _: () = msg_send![app, postEvent: event, atStart: Bool::NO];
+        let original =
+            unsafe { method.set_implementation(std::mem::transmute::<SendEvent, Imp>(raising)) };
+        ORIGINAL.set(original).unwrap();
+        let event = NSEvent::otherEventWithType_location_modifierFlags_timestamp_windowNumber_context_subtype_data1_data2(
+            NSEventType::ApplicationDefined,
+            NSPoint::new(0.0, 0.0),
+            NSEventModifierFlags::empty(),
+            0.0,
+            0,
+            None,
+            SUBTYPE,
+            0,
+            0,
+        )
+        .unwrap();
+        NSApplication::sharedApplication(mtm).postEvent_atStart(&event, false);
     }
 
     pub fn run() {
@@ -84,15 +82,15 @@ mod macos {
         event_loop.set_activation_policy(ActivationPolicy::Prohibited);
         event_loop.run(|event, _, control_flow| match event {
             Event::NewEvents(StartCause::Init) => {
-                unsafe { raise_on_next_event() };
-                *control_flow = ControlFlow::WaitUntil(Instant::now() + Duration::from_secs(1));
+                raise_on_next_event(MainThreadMarker::new().unwrap());
+                *control_flow = ControlFlow::WaitUntil(Instant::now() + Duration::from_secs(10));
+            }
+            // Any iteration after the raise proves the loop survived it.
+            Event::MainEventsCleared if RAISED.load(Ordering::SeqCst) => {
+                *control_flow = ControlFlow::Exit;
             }
             Event::NewEvents(StartCause::ResumeTimeReached { .. }) => {
-                assert!(
-                    RAISED.load(Ordering::SeqCst),
-                    "the exception was never raised"
-                );
-                *control_flow = ControlFlow::Exit;
+                panic!("the exception was never raised");
             }
             _ => {}
         });

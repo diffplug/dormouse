@@ -1245,13 +1245,13 @@ Source of truth: `init_log` / `read_update_log` in `standalone/src-tauri/src/lib
 
 ## Objective-C exceptions
 
-**Must let an Objective-C exception raised beneath a Rust frame unwind to
-AppKit**, whose event loop reports it and keeps running. Each half below is
+**Must let an Objective-C exception that AppKit raises beneath a tao callback,
+such as the `sendEvent:` override, unwind to AppKit**, whose event loop reports
+it and keeps running. Both halves are
 required; either alone still aborts with "panic in a function that cannot
-unwind" (rationale).
+unwind" (rationale):
 
-- **Must build release with `panic = "unwind"`.** Under `abort`, rustc treats
-  every Rust frame as non-unwinding, `extern "C-unwind"` included.
+- **Must build release with `panic = "unwind"`.**
 - **Must take tao from the `diffplug/tao` fork** through `[patch.crates-io]`:
   its Apple callbacks are `extern "C-unwind"` where upstream's are
   `extern "C"`. One fork branch per patched release (`dormouse-0.35` is
@@ -1259,14 +1259,16 @@ unwind" (rationale).
   copy resolves. **Must rebase the commit onto the new release when tauri moves
   tao**, since an unused `[patch]` only warns; drop the patch once tauri depends
   on a tao carrying tauri-apps/tao#1354.
-- **Rust panics still abort**: `abort_on_panic`, installed first in `run`, runs
-  the default hook, then `std::process::abort`.
+
+**Rust panics still abort**: `abort_on_panic`, installed first in `run`, runs
+the default hook, then `std::process::abort`. **An exception raised inside the
+Tauri event handler still aborts**, at the `catch_unwind` tao runs it under
+(rationale).
 
 Source of truth: `abort_on_panic` in `standalone/src-tauri/src/panic_policy.rs`;
 `[profile.release]` and `[patch.crates-io]` in `standalone/src-tauri/Cargo.toml`.
-Pinned by `standalone/src-tauri/tests/objc_exception_unwinds.rs` (tao's half)
-and the `panic_policy` tests (the profile, the lockfile's one tao, a Rust panic
-aborting).
+Pinned by `standalone/src-tauri/tests/objc_exception_unwinds.rs` and the
+`panic_policy` tests.
 
 ## Build and development
 

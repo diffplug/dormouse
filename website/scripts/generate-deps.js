@@ -417,12 +417,12 @@ function getManifestDependencyByName(manifestDependencies, name) {
 
 function getCargoDependencies() {
   const metadata = getCargoMetadata();
-  const rootPackage = metadata.packages.find((pkg) => pkg.id === metadata.resolve.root);
+  const packagesById = new Map(metadata.packages.map((pkg) => [pkg.id, pkg]));
+  const rootPackage = packagesById.get(metadata.resolve.root);
   if (!rootPackage) {
     throw new Error("Could not find root package in Cargo metadata");
   }
   const { directDeps, shippedIds } = getShippedCargoGraph(metadata);
-  const packagesById = new Map(metadata.packages.map((pkg) => [pkg.id, pkg]));
   const directIds = new Set(directDeps.map((dep) => dep.pkg));
 
   const direct = directDeps.map((dep) => {

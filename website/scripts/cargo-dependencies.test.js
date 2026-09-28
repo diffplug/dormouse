@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { getCargoGitRepository, getShippedCargoGraph } from './cargo-dependencies.js';
 
-const edge = (pkg, ...kinds) => ({ name: pkg, pkg, dep_kinds: kinds.map((kind) => ({ kind, target: null })) });
+const edge = (pkg, ...kinds) => ({ pkg, dep_kinds: kinds.map((kind) => ({ kind, target: null })) });
 const metadata = (nodes) => ({ resolve: { root: 'app', nodes: Object.entries(nodes).map(([id, deps]) => ({ id, deps })) } });
 
 describe('shipped Cargo graph', () => {

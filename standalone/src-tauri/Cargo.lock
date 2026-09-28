@@ -672,17 +672,18 @@ name = "dormouse"
 version = "1.1.0"
 dependencies = [
  "getrandom 0.4.3",
+ "libc",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",
  "process-wrap",
  "serde",
  "serde_json",
- "tao",
  "tauri",
  "tauri-build",
  "tauri-plugin-shell",
  "tauri-plugin-updater",
+ "tauri-runtime-wry",
  "windows 0.62.2",
 ]
 

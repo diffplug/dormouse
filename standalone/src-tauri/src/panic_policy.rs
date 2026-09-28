@@ -1,5 +1,10 @@
-//! Rust panics abort; Objective-C exceptions unwind through Rust frames to
-//! AppKit (docs/specs/standalone.md -> "Objective-C exceptions").
+//! The panic half of docs/specs/standalone.md -> "Objective-C exceptions".
+
+// Catches a `panic = "abort"` from any source (profile, env, `--config`) in
+// the build that ships; tests always unwind, so `release_builds_unwind` is
+// the check CI sees.
+#[cfg(panic = "abort")]
+compile_error!("Dormouse must unwind: docs/specs/standalone.md -> \"Objective-C exceptions\"");
 
 /// Abort on every Rust panic once the default hook has reported it — what
 /// `panic = "abort"` did before the release profile had to unwind.
@@ -20,11 +25,8 @@ mod tests {
     const ABORTED: i32 = 134;
 
     #[cfg(unix)]
-    extern "C" fn exit_on_sigabrt(_: i32) {
-        extern "C" {
-            fn _exit(code: i32) -> !;
-        }
-        unsafe { _exit(ABORTED) }
+    extern "C" fn exit_on_sigabrt(_: libc::c_int) {
+        unsafe { libc::_exit(ABORTED) }
     }
 
     #[test]
@@ -34,10 +36,8 @@ mod tests {
             // this test binary; only `abort` raises SIGABRT here.
             #[cfg(unix)]
             unsafe {
-                extern "C" {
-                    fn signal(signum: i32, handler: extern "C" fn(i32)) -> usize;
-                }
-                signal(6, exit_on_sigabrt);
+                let handler: extern "C" fn(libc::c_int) = exit_on_sigabrt;
+                libc::signal(libc::SIGABRT, handler as libc::sighandler_t);
             }
             abort_on_panic();
             panic!("synthetic panic");
@@ -73,24 +73,5 @@ mod tests {
             .filter(|line| line.starts_with("panic"))
             .collect();
         assert_eq!(panic, ["panic = \"unwind\""]);
-    }
-
-    #[test]
-    fn tao_is_the_unwind_fork() {
-        let sources: Vec<Option<&str>> = include_str!("../Cargo.lock")
-            .split("[[package]]")
-            .filter(|package| package.lines().any(|line| line == "name = \"tao\""))
-            .map(|package| {
-                package
-                    .lines()
-                    .find_map(|line| line.strip_prefix("source = "))
-            })
-            .collect();
-        assert_eq!(sources.len(), 1, "one tao, not {sources:?}");
-        assert!(
-            sources[0]
-                .is_some_and(|source| source.starts_with("\"git+https://github.com/diffplug/tao?")),
-            "{sources:?}"
-        );
     }
 }
