@@ -471,7 +471,7 @@ Wall (Handle Model), and each takes a `workspace:<n|name>` target except `new`:
 
 **Each verb ships as one action of one command**, not a route map: the published
 CLI reference renders one help page per top-level command
-(`docs/specs/website-docs.md` → /docs/dor), and a nested command would have
+(`docs/specs/website-docs.md` → /dor), and a nested command would have
 none.
 
 **VS Code refuses every Workspace-spanning request at the extension host** —

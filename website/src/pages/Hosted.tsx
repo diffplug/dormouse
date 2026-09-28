@@ -132,7 +132,7 @@ export default function Hosted() {
           The Relay remains available in the repository under
           FSL-1.1-MIT and free for internal use. Hosted will be a paid convenience option,
           not a replacement. If you would rather operate it, the{" "}
-          <a href={sitePath("/docs/self-host")} className={LINK_CLASS}>
+          <a href={sitePath("/self-host")} className={LINK_CLASS}>
             self-hosting guide
           </a>{" "}
           is ready now.

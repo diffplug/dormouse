@@ -47,7 +47,7 @@ dor ensure -- pnpm dev              # created surface:3
 dor agent-browser open surface:3    # open the port surface:3 is serving
 ```
 
-Dormouse drives the agent-browser or Playwright CLI you already have rather than shipping a browser. See the [`dor agent-browser` reference](https://dormouse.sh/docs/dor#agent-browser).
+Dormouse drives the agent-browser or Playwright CLI you already have rather than shipping a browser. See the [`dor agent-browser` reference](https://dormouse.sh/dor#agent-browser).
 
 ## Select and copy-paste like you meant
 
@@ -78,7 +78,7 @@ The [shortcut reference](https://github.com/diffplug/dormouse/blob/main/docs/spe
 
 ## Coding agents
 
-[Claude Code, Codex, GitHub Copilot, Antigravity, Warp, and Cursor](https://dormouse.sh/docs/compatible-agents) are watched by default, and resume their conversations after VS Code reloads. Every terminal has the `dor` CLI on its `PATH`, so agents can open panes, run a dev server exactly once, and drive browser panes: see the [`dor` reference](https://dormouse.sh/docs/dor) and the [agent skill](https://dormouse.sh/docs/agent-skill).
+[Claude Code, Codex, GitHub Copilot, Antigravity, Warp, and Cursor](https://dormouse.sh/compatible-agents) are watched by default, and resume their conversations after VS Code reloads. Every terminal has the `dor` CLI on its `PATH`, so agents can open panes, run a dev server exactly once, and drive browser panes: see the [`dor` reference](https://dormouse.sh/dor) and the [agent skill](https://dormouse.sh/agent-skill).
 
 ## Dormouse Hosted
 
@@ -90,4 +90,4 @@ Don't settle for your operating system's built-in terminal: Dormouse is also a d
 
 ## Links
 
-[Changelog](https://dormouse.sh/changelog) · [Issues](https://github.com/diffplug/dormouse/issues) · [Source](https://github.com/diffplug/dormouse) · [Security](https://dormouse.sh/docs/security) · [Supply chain](https://dormouse.sh/supply-chain) · by [DiffPlug](https://www.diffplug.com/)
+[Changelog](https://dormouse.sh/changelog) · [Issues](https://github.com/diffplug/dormouse/issues) · [Source](https://github.com/diffplug/dormouse) · [Security](https://dormouse.sh/security) · [Supply chain](https://dormouse.sh/supply-chain) · by [DiffPlug](https://www.diffplug.com/)

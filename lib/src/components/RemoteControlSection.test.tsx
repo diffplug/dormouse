@@ -217,7 +217,7 @@ describe('RemoteControlSection', () => {
     expect(text()).toContain('Needs a Dormouse build that allows your Relay’s address.');
     expect(text()).toContain('Or a self-hosted Relay you run');
     await act(async () => buttonLabelled('self-hosted Relay')!.click());
-    expect(openExternal).toHaveBeenCalledWith('https://dormouse.sh/docs/self-host/');
+    expect(openExternal).toHaveBeenCalledWith('https://dormouse.sh/self-host/');
     expect(buttonLabelled('Connect')).toBeTruthy();
   });
 
