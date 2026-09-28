@@ -56,17 +56,18 @@ it is an extension listing or the extension's folder on GitHub; the standalone
 app gets one section pointing at its download. Its sections are:
 
 ```text
-## Getting started
-## Layout
+## Tmux with browsers
 ## Alerts
-## Coding agents
-## Browser panes
-## Terminal context
-## Mouse, selection, and clipboard
+## Push notifications you can self-host
+## Terminals that know their ports
+## Browsers for you (and your agents)
+## Select and copy-paste like you meant
+## Getting started
 ## Keyboard shortcuts
+## Coding agents
 ## Scripting with dor
 ## What survives a reload
-## Phone control (in development)
+## Dormouse Hosted
 ## Standalone app
 ## Links
 ```
