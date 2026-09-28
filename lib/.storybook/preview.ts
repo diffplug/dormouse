@@ -84,7 +84,6 @@ const fakePlatform = initPlatform('fake');
 
 /** Defined only by `lib/vitest.argos.config.ts`; absent in the real Storybook. */
 declare const __ARGOS_SNAPSHOT__: true | undefined;
-declare const __ARGOS_CHROMIUM_SNAPSHOT__: boolean | undefined;
 
 /** A visual-snapshot run — Chromatic or Argos — that must render deterministically.
  *
@@ -211,8 +210,7 @@ function applyStorybookTheme(themeName: string) {
 
   if (theme) {
     for (const [key, value] of Object.entries(theme)) {
-      const resolvedValue = typeof __ARGOS_CHROMIUM_SNAPSHOT__ !== 'undefined'
-        && __ARGOS_CHROMIUM_SNAPSHOT__ && key === '--vscode-editor-font-family'
+      const resolvedValue = visualSnapshot && key === '--vscode-editor-font-family'
         ? SNAPSHOT_EDITOR_FONT_FAMILY
         : value;
       root.style.setProperty(key, resolvedValue);
