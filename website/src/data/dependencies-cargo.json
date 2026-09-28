@@ -1297,9 +1297,9 @@
     },
     {
       "name": "libc",
-      "version": "0.2.186",
+      "version": "0.2.189",
       "license": "MIT OR Apache-2.0",
-      "author": "The Rust Project Developers",
+      "author": null,
       "homepage": "https://github.com/rust-lang/libc"
     },
     {
