@@ -10,7 +10,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
  * whole section hangs off. Mutable so a test can present a build with no Burrow
  * service behind it, which is a rendering decision rather than an error.
  */
-let platform: { burrow?: unknown } = {};
+let platform: { burrow?: unknown; openExternal?: (url: string) => void } = {};
 
 vi.mock('../lib/platform', () => ({
   IS_MAC: false,
@@ -141,10 +141,22 @@ function disclosure(): HTMLButtonElement | undefined {
  */
 function typedForm(): HTMLFormElement {
   const form = [...container.querySelectorAll('form')].find((candidate) =>
-    candidate.textContent?.includes('Connect this machine to a Dormouse Relay'),
+    candidate.textContent?.includes('Needs a Dormouse build that allows your Relay’s address'),
   );
   if (!form) throw new Error('the typed enroll form is not mounted');
   return form;
+}
+
+/** Unfold Persistent Relay the way a user does; un-enrolled with no offer, it starts folded. */
+async function openPersistent() {
+  await act(async () => buttonLabelled('Persistent Relay')!.click());
+}
+
+/** The panel Persistent Relay unfolds, which is what `hidden` toggles. */
+function persistentPanel(): HTMLElement {
+  const panel = typedForm().closest<HTMLElement>('div.rounded');
+  if (!panel) throw new Error('the Persistent Relay panel is not mounted');
+  return panel;
 }
 
 async function type(selector: string, value: string) {
@@ -189,21 +201,93 @@ describe('RemoteControlSection', () => {
     expect(container.innerHTML).toBe('');
   });
 
-  it('offers the enroll form when the machine is not enrolled', async () => {
+  it('offers a one-time connection and a folded Persistent Relay', async () => {
+    const openExternal = vi.fn();
+    platform = { burrow: makeLink(async () => NOT_ENROLLED), openExternal };
+    await render();
+    // Not built yet, so it says so rather than doing nothing on a click.
+    expect(buttonLabelled('One-time connection')!.disabled).toBe(true);
+    expect(text()).toContain('Coming soon · Generate a link to open on your phone');
+    expect(buttonLabelled('Persistent Relay')!.getAttribute('aria-expanded')).toBe('false');
+    expect(persistentPanel().hidden).toBe(true);
+
+    await openPersistent();
+    expect(buttonLabelled('Persistent Relay')!.getAttribute('aria-expanded')).toBe('true');
+    expect(persistentPanel().hidden).toBe(false);
+    expect(text()).toContain('Needs a Dormouse build that allows your Relay’s address.');
+    expect(text()).toContain('Or a self-hosted Relay you run');
+    await act(async () => buttonLabelled('self-hosted Relay')!.click());
+    expect(openExternal).toHaveBeenCalledWith('https://dormouse.sh/docs/self-host/');
+    expect(buttonLabelled('Connect')).toBeTruthy();
+  });
+
+  it('offers hosted.dormouse.sh as coming soon, linking the Hosted preview', async () => {
+    const openExternal = vi.fn();
+    platform = { burrow: makeLink(async () => NOT_ENROLLED), openExternal };
+    await render();
+    await openPersistent();
+    expect(buttonLabelled('Use hosted.dormouse.sh')!.disabled).toBe(true);
+    await act(async () => buttonLabelled('Get updates on Hosted.')!.click());
+    expect(openExternal).toHaveBeenCalledWith('https://dormouse.sh/hosted/#remote-control');
+  });
+
+  it('keeps Persistent Relay folded until clicked, even with an offer waiting', async () => {
+    platform = { burrow: makeLink(async () => OFFER_STATUS) };
+    await render();
+    expect(buttonLabelled('Persistent Relay')!.getAttribute('aria-expanded')).toBe('false');
+    expect(persistentPanel().hidden).toBe(true);
+
+    await openPersistent();
+    expect(persistentPanel().hidden).toBe(false);
+    expect(buttonLabelled('Enroll')).toBeTruthy();
+  });
+
+  it('shows the enrolled Relay without a click, still offering a one-time connection', async () => {
+    platform = { burrow: makeLink(async () => enrolled()) };
+    await render();
+    expect(buttonLabelled('Persistent Relay')).toBeUndefined();
+    expect(text()).toContain('Persistent Relay');
+    expect(text()).not.toContain('Enroll this Dormouse');
+    expect(buttonLabelled('Set up a phone')).toBeTruthy();
+    expect(buttonLabelled('One-time connection')).toBeTruthy();
+  });
+
+  it('keeps what was typed through folding Persistent Relay', async () => {
     platform = { burrow: makeLink(async () => NOT_ENROLLED) };
     await render();
-    expect(text()).toContain('Connect this machine to a Dormouse Relay');
-    expect(text()).toContain('Prefer not to run one? Hosted is coming soon.');
-    expect(buttonLabelled('Connect')).toBeTruthy();
+    await openPersistent();
+    await type('input[type="url"]', 'https://elsewhere.example');
+    await openPersistent();
+    expect(persistentPanel().hidden).toBe(true);
+    await openPersistent();
+    expect(container.querySelector<HTMLInputElement>('input[type="url"]')!.value).toBe(
+      'https://elsewhere.example',
+    );
+  });
+
+  it('folds Persistent Relay after a Disconnect', async () => {
+    let status: unknown = enrolled();
+    const link = makeLink(async (cmd) => {
+      if (cmd === 'clearEnrollment') status = NOT_ENROLLED;
+      return status;
+    });
+    platform = { burrow: link };
+    await render();
+    await act(async () => buttonLabelled('Disconnect')!.click());
+    await act(async () => buttonLabelled('Disconnect')!.click());
+
+    expect(buttonLabelled('Persistent Relay')!.getAttribute('aria-expanded')).toBe('false');
+    expect(persistentPanel().hidden).toBe(true);
   });
 
   it('keeps Connect disabled until every field is filled', async () => {
     platform = { burrow: makeLink(async () => NOT_ENROLLED) };
     await render();
+    await openPersistent();
 
     // The name arrives prefilled from the service's suggestion — the same one
     // the offer card uses, so the two paths cannot diverge on it.
-    const name = 'input:not([type="url"]):not([type="password"])';
+    const name = 'input:not([type])';
     expect(container.querySelector<HTMLInputElement>(name)!.value).toBe('ned-mac');
     expect(buttonLabelled('Connect')!.disabled).toBe(true);
     await type('input[type="url"]', 'https://laptop.tailnet.ts.net');
@@ -226,10 +310,11 @@ describe('RemoteControlSection', () => {
     });
     platform = { burrow: link };
     await render();
+    await openPersistent();
 
     await type('input[type="url"]', '  https://laptop.tailnet.ts.net  ');
     await type('input[type="password"]', TEST_SETUP_PASSWORD);
-    await type('input:not([type="url"]):not([type="password"])', '  Work laptop  ');
+    await type('input:not([type])', '  Work laptop  ');
     await act(async () => buttonLabelled('Connect')!.click());
 
     expect(link.command).toHaveBeenCalledWith('enroll', {
@@ -249,10 +334,11 @@ describe('RemoteControlSection', () => {
     });
     platform = { burrow: link };
     await render();
+    await openPersistent();
 
     await type('input[type="url"]', 'https://evil.example.com');
     await type('input[type="password"]', TEST_SETUP_PASSWORD);
-    await type('input:not([type="url"]):not([type="password"])', 'Work laptop');
+    await type('input:not([type])', 'Work laptop');
     await act(async () => buttonLabelled('Connect')!.click());
 
     expect(text()).toContain('relay origin is not allowed by this build');
@@ -263,6 +349,7 @@ describe('RemoteControlSection', () => {
   it('leads with the installer’s offer and folds the typed form away', async () => {
     platform = { burrow: makeLink(async () => OFFER_STATUS) };
     await render();
+    await openPersistent();
 
     expect(text()).toContain('A Dormouse Relay is installed on this machine.');
     expect(text()).toContain('https://ned-mac.tail9c2f1.ts.net');
@@ -286,6 +373,7 @@ describe('RemoteControlSection', () => {
     });
     platform = { burrow: link };
     await render();
+    await openPersistent();
 
     // Prefilled from the service's suggestion, and the user overrode it.
     const input = container.querySelector<HTMLInputElement>('input:not([type])')!;
@@ -312,6 +400,7 @@ describe('RemoteControlSection', () => {
       let status: unknown = NOT_ENROLLED;
       platform = { burrow: makeLink(async () => status) };
       await render();
+      await openPersistent();
 
       await type('input[type="url"]', 'https://elsewhere.example');
       status = OFFER_STATUS;
@@ -349,6 +438,7 @@ describe('RemoteControlSection', () => {
       });
       platform = { burrow: link };
       await render();
+      await openPersistent();
 
       await act(async () => buttonLabelled('Enroll')!.click());
       await act(async () => {
@@ -374,6 +464,7 @@ describe('RemoteControlSection', () => {
     });
     platform = { burrow: link };
     await render();
+    await openPersistent();
 
     await act(async () => buttonLabelled('Enroll')!.click());
     expect(text()).toContain('relay origin is not allowed by this build');
@@ -385,6 +476,7 @@ describe('RemoteControlSection', () => {
   it('unfolds the typed form for a Relay that is somewhere else', async () => {
     platform = { burrow: makeLink(async () => OFFER_STATUS) };
     await render();
+    await openPersistent();
 
     await act(async () => disclosure()!.click());
     expect(typedForm().hidden).toBe(false);
@@ -416,6 +508,7 @@ describe('RemoteControlSection', () => {
     });
     platform = { burrow: link };
     await render();
+    await openPersistent();
 
     await act(async () => disclosure()!.click());
     await type('input[type="url"]', 'https://elsewhere.example');
@@ -1196,7 +1289,8 @@ describe('RemoteControlSection', () => {
     const link = makeLink(async () => status);
     platform = { burrow: link };
     await render();
-    expect(text()).toContain('Connect this machine to a Dormouse Relay');
+    await openPersistent();
+    expect(text()).toContain('Needs a Dormouse build that allows your Relay’s address');
 
     // Another window enrolled: the event carries only `{ enrolled }`, so the
     // section must re-read rather than patch a field.
@@ -1205,5 +1299,6 @@ describe('RemoteControlSection', () => {
       link.emit('status', { name: 'status', enrolled: true });
     });
     expect(text()).toContain('https://laptop.tailnet.ts.net');
+    expect(buttonLabelled('Persistent Relay')).toBeUndefined();
   });
 });

@@ -79,6 +79,7 @@ const TONE_CLASS = {
 const FIELD_LABEL = 'text-xs text-muted';
 const FIELD_HINT = `${FIELD_LABEL} mt-1 block`;
 const HOSTED_REMOTE_URL = 'https://dormouse.sh/hosted/#remote-control';
+const SELF_HOST_URL = 'https://dormouse.sh/docs/self-host/';
 
 /**
  * How far ahead of `expiresAt` the phone-setup panel mints a replacement code.
@@ -516,8 +517,9 @@ function BurrowNameField({
 }
 
 /**
- * Connect this machine to a coordinating Relay, so a phone running Dormouse
- * Pocket can pair with it.
+ * The two ways a phone can reach this machine — a one-time connection, or a
+ * persistent Relay this machine enrolls with so a phone running Dormouse Pocket
+ * can pair with it.
  *
  * Renders nothing at all on a build with no Burrow service behind it (the
  * website, the lib dev server): there is no Burrow to enroll, and offering the
@@ -547,20 +549,90 @@ export function RemoteControlSection() {
         <div className="mt-1.5 text-sm leading-relaxed text-muted">
           Could not reach this machine’s remote-control service: {state.message}
         </div>
-      ) : state.status.enrolled ? (
-        // Keyed by which enrollment this is: a swap to another Relay — the
-        // console hook can do one under an open dialog — must not leave a setup
-        // code, or an error, belonging to the machine we just left.
-        <EnrolledView
-          key={state.status.burrowId ?? state.status.relayUrl ?? 'enrolled'}
-          relayUrl={state.status.relayUrl}
-          connection={state.status.connection}
-          pairedClients={state.status.pairedClients}
-        />
       ) : (
-        <EnrollView offer={state.status.offer} suggestedLabel={state.status.suggestedLabel} />
+        <RelayChoices status={state.status} />
       )}
     </section>
+  );
+}
+
+/**
+ * One-time connection and Persistent Relay, as two buttons. Only the Relay is
+ * built; the one-time button stays disabled until it is.
+ *
+ * **Enrolled, the Relay's view is always shown.** Un-enrolled, Persistent Relay
+ * is a disclosure that **stays folded until clicked**, installer's offer or not.
+ * **Folding hides the enroll view, never unmounts it**, for the same reason
+ * {@link EnrollView} folds its own.
+ */
+function RelayChoices({ status }: { status: BurrowConsoleStatus }) {
+  const [unfolded, setUnfolded] = useState(false);
+
+  return (
+    <div className="mt-1.5 text-sm leading-relaxed">
+      <div className="text-muted">Control this Dormouse from your phone.</div>
+
+      <div className="mt-2">
+        <button type="button" disabled className={modalActionButton({ tone: 'primary' })}>
+          One-time connection
+        </button>
+        <div className={FIELD_HINT}>
+          Coming soon · Generate a link to open on your phone for a one-off connection. No
+          account needed.
+        </div>
+      </div>
+
+      <div className="mt-3">
+        {status.enrolled ? (
+          <div className="text-foreground">Persistent Relay</div>
+        ) : (
+          <button
+            type="button"
+            aria-expanded={unfolded}
+            className={modalActionButton({ tone: unfolded ? 'secondary' : 'primary' })}
+            onClick={() => setUnfolded((was) => !was)}
+          >
+            Persistent Relay
+          </button>
+        )}
+        {status.enrolled ? null : (
+          <div className={FIELD_HINT}>
+            Enroll this Dormouse with hosted.dormouse.sh or a Relay you run, so paired phones
+            can reconnect any time.
+          </div>
+        )}
+
+        {status.enrolled ? (
+          // Keyed by which enrollment this is: a swap to another Relay — the
+          // console hook can do one under an open dialog — must not leave a setup
+          // code, or an error, belonging to the machine we just left.
+          <EnrolledView
+            key={status.burrowId ?? status.relayUrl ?? 'enrolled'}
+            relayUrl={status.relayUrl}
+            connection={status.connection}
+            pairedClients={status.pairedClients}
+          />
+        ) : (
+          // The same framed panel as "Set up a phone", the other disclosure here.
+          <div className="mt-2 rounded border border-border p-2" hidden={!unfolded}>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <button type="button" disabled className={modalActionButton()}>
+                Use hosted.dormouse.sh
+              </button>
+              <span className="text-xs text-muted">
+                Coming soon.{' '}
+                <ExternalTextLink href={HOSTED_REMOTE_URL}>Get updates on Hosted.</ExternalTextLink>
+              </span>
+            </div>
+            <div className={`${FIELD_LABEL} mt-3`}>
+              Or a <ExternalTextLink href={SELF_HOST_URL}>self-hosted Relay</ExternalTextLink> you
+              run
+            </div>
+            <EnrollView offer={status.offer} suggestedLabel={status.suggestedLabel} />
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -1036,11 +1108,7 @@ function EnrollForm({
       }}
     >
       <div className="text-sm leading-relaxed text-muted">
-        Connect this machine to a Dormouse Relay to control it from your phone.
-        {' '}
-        <ExternalTextLink href={HOSTED_REMOTE_URL}>
-          Prefer not to run one? Hosted is coming soon.
-        </ExternalTextLink>
+        Needs a Dormouse build that allows your Relay’s address.
       </div>
 
       <label className="mt-2 block">
