@@ -317,6 +317,47 @@ describe('dor control routing', () => {
   });
 });
 
+describe('dor tool reads', () => {
+  const previous = getPlatformOrNull();
+  afterEach(() => setPlatform(previous as PlatformAdapter));
+
+  it('answers at the Window before resolving any Workspace or Surface', () => {
+    const handle = handleFor(getWorkspacesSnapshot().workspaces[0].id, ['pane-a']);
+    for (const params of [{}, { workspace: 'workspace:9' }, { surface: 'pane-a' }]) {
+      expect(resolveDorControlRoute(request({ method: 'tool.list', surfaceId: 'pane-a', params: params as never })))
+        .toEqual({ kind: 'tool' });
+    }
+    expect(handle.handleDorControl).not.toHaveBeenCalled();
+  });
+
+  it('relays the host listing, its error, and a missing cwd', async () => {
+    const listing = { project: null, user: { path: '/config/dormouse.yml', found: true }, tools: [], warnings: [] };
+    const adapter = {
+      async toolControl(this: unknown, request: { op: string; cwd: string }) {
+        // Called as a method: an adapter may need `this` (VSCodeAdapter does).
+        if (this !== adapter) throw new Error('toolControl called detached');
+        return request.cwd === '/broken'
+          ? { status: 'error' as const, message: '/broken/dormouse.yml: bad' }
+          : { status: 'list' as const, listing };
+      },
+    };
+    const toolControl = vi.spyOn(adapter, 'toolControl');
+    setPlatform(adapter as unknown as PlatformAdapter);
+    const release = installDorControlRouter();
+    const ask = async (params: Record<string, unknown>) => {
+      const detail = request({ method: 'tool.list', params: params as never });
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail }));
+      await vi.waitFor(() => expect(detail.respond).toHaveBeenCalled());
+      return detail.respond.mock.calls[0][0];
+    };
+    expect(await ask({ cwd: '/repo', global: true })).toEqual({ ok: true, result: listing });
+    expect(toolControl).toHaveBeenCalledWith({ op: 'list', cwd: '/repo', global: true });
+    expect(await ask({ cwd: '/broken' })).toEqual({ ok: false, error: '/broken/dormouse.yml: bad' });
+    expect(await ask({})).toEqual({ ok: false, error: 'cwd is required' });
+    release();
+  });
+});
+
 describe('dor app verbs', () => {
   const previous = getPlatformOrNull();
   afterEach(() => setPlatform(previous as PlatformAdapter));

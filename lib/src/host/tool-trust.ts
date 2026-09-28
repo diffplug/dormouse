@@ -225,6 +225,17 @@ export async function findToolFile(
   }
 }
 
+/** The nearest project `dormouse.yml`, parsed; throws `ToolFileError` for an
+ *  oversized or malformed file. */
+export async function loadProjectToolFile(
+  cwd: string,
+  readTextFile?: (path: string) => Promise<string>,
+): Promise<{ path: string; dir: string; file: ToolFile } | null> {
+  const found = await findToolFile(cwd, readTextFile);
+  if (!found) return null;
+  return { path: found.path, dir: found.dir, file: parseToolFile(found.text, { path: found.path, dir: found.dir, scope: 'repo' }) };
+}
+
 export type ToolLookup =
   | { status: 'no-file' }
   | { status: 'unknown-tool'; projectRoot: string; path: string; names: string[] }
@@ -266,21 +277,14 @@ export async function lookupTool(
   const { args = [], readTextFile, resolveUpstream = resolveUpstreamUrl } = options;
   let found;
   try {
-    found = await findToolFile(cwd, readTextFile);
+    found = await loadProjectToolFile(cwd, readTextFile);
   } catch (error) {
-    // An oversized file: report it rather than letting it reach the parser.
+    // Oversized or malformed: report it, as the file's own problem.
     if (error instanceof ToolFileError) return { status: 'error', message: error.message };
     throw error;
   }
   if (!found) return { status: 'no-file' };
-
-  let file: ToolFile;
-  try {
-    file = parseToolFile(found.text, { path: found.path, dir: found.dir, scope: 'repo' });
-  } catch (error) {
-    if (error instanceof ToolFileError) return { status: 'error', message: error.message };
-    throw error;
-  }
+  const { file } = found;
 
   const entry = file.tools.get(name);
   if (!entry) {

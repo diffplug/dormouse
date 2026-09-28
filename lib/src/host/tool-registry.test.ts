@@ -7,7 +7,6 @@ import {
   ToolFileError,
   parseToolFile,
   resolveDedupeKey,
-  toolDescriptions,
 } from './tool-registry';
 
 const REPO = { path: '/repo/dormouse.yml', dir: '/repo', scope: 'repo' as const };
@@ -17,7 +16,9 @@ function parse(text: string, opts = REPO) {
   return parseToolFile(text, opts);
 }
 
-describe('toolDescriptions', () => {
+describe('Tool descriptions', () => {
+  const descriptions = (text: string) => new Map([...parse(text).tools.values()].map(entry => [entry.name, entry.description]));
+
   const TEXT = `# About this file, not a Tool.
 tools:
   # The first entry's comment, which yaml hangs on the map.
@@ -35,21 +36,18 @@ tools:
 `;
 
   it('takes the comment block directly above each entry', () => {
-    expect(Object.fromEntries(toolDescriptions(TEXT))).toEqual({
+    expect(Object.fromEntries(descriptions(TEXT))).toEqual({
       first: "The first entry's comment, which yaml hangs on the map.\nSecond line.",
       second: "A later entry's, on its key.",
+      third: null,
     });
   });
 
-  it('removes control characters and bounds the length', () => {
-    const descriptions = toolDescriptions(`tools:\n  # a\tb \u009b31m c\n  x:\n    run: echo\n  # ${'y'.repeat(TOOL_DESCRIPTION_LIMIT + 10)}\n  z:\n    run: echo\n`);
-    expect(descriptions.get('x')).toBe('a b 31m c');
-    expect(descriptions.get('z')).toHaveLength(TOOL_DESCRIPTION_LIMIT);
-    expect(descriptions.get('z')!.endsWith('…')).toBe(true);
-  });
-
-  it('describes nothing in a file without Tools', () => {
-    expect(toolDescriptions('# nothing\nbrowser:\n  default_viewport: desktop\n').size).toBe(0);
+  it('turns tabs into spaces and bounds the length, leaving escaping to the printer', () => {
+    const found = descriptions(`tools:\n  # a\tb \u009b31m c\n  x:\n    run: echo\n  # ${'y'.repeat(TOOL_DESCRIPTION_LIMIT + 10)}\n  z:\n    run: echo\n`);
+    expect(found.get('x')).toBe('a b \u009b31m c');
+    expect(found.get('z')).toHaveLength(TOOL_DESCRIPTION_LIMIT);
+    expect(found.get('z')!.endsWith('…')).toBe(true);
   });
 });
 
@@ -74,6 +72,7 @@ tools:
       render: 'iframe',
       port: 'announced',
       dedupeTemplate: ['storybook', '$PROJECT_ROOT'],
+      description: null,
     });
   });
 
@@ -248,8 +247,7 @@ describe("this repo's own dormouse.yml", () => {
   });
 
   it('documents every Tool with the comment `dor tool --list` shows', () => {
-    const descriptions = toolDescriptions(readFileSync(join(repoRoot, 'dormouse.yml'), 'utf-8'));
-    expect([...descriptions.keys()].sort()).toEqual([...file.tools.keys()].sort());
+    for (const entry of file.tools.values()) expect(entry.description, entry.name).toBeTruthy();
   });
 
   it('scopes every key to the checkout, so parallel worktrees stay distinct', () => {

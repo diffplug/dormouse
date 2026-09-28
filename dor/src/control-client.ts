@@ -43,6 +43,7 @@ import type {
 import {
   APP_CONTROL_METHODS,
   SURFACE_CONTROL_METHODS,
+  TOOL_CONTROL_METHODS,
   WORKSPACE_CONTROL_METHODS,
   type DorControlMethod,
 } from './protocol.js';
@@ -124,7 +125,7 @@ export class SocketControlClient implements ControlClient {
   }
 
   toolList(request: ToolListRequest): Promise<ToolListResponse> {
-    return this.request<ToolListResponse>(SURFACE_CONTROL_METHODS.toolList, request);
+    return this.request<ToolListResponse>(TOOL_CONTROL_METHODS.list, request);
   }
 
   sendSurface(request: SendSurfaceRequest): Promise<SendSurfaceResponse> {

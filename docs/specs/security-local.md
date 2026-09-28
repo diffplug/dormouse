@@ -210,7 +210,7 @@ Approval workflow, declaration and resolution belong to `docs/specs/dor-tool.md`
 
 **Must keep named-tool inputs as argv until the renderer quotes them for the target shell.** User configuration is the local user's authority; a project name cannot replace a user Tool during user-only lookup.
 
-**Must strip C0, DEL, and C1 characters from `dor tool --list` descriptions, and escape them in every field its text output prints**, since each is repo text bound for a terminal. Source of truth: `toolDescriptions` in `lib/src/host/tool-registry.ts`; `toolCommand` in `dor/src/commands/tool.ts`. Test: `tool --list escapes control characters in repo text` in `dor/test/cli-output.test.mjs`.
+**Must escape C0, DEL, and C1 characters in every repo-sourced field `dor tool` prints, its warnings and `--list --json` included**, since each is bound for a terminal. Source of truth: `printable` / `renderPrintableJson` in `dor/src/commands/shared.ts`. Test: `tool --list escapes control characters in repo text, in every output` in `dor/test/cli-output.test.mjs`.
 
 **Must reject C0 and DEL characters in Tool argv, substituted argv, and local-file targets before launch**, including controls exposed by canonicalizing symlinks. Shell quotes do not protect terminal editing keys. String `run` remains explicit shell code. Source of truth: `hasShellInputControls` in `dor/src/commands/shell-quote.ts`; `resolveToolInput` in `lib/src/host/tool-input.ts`; `useDorControl` in `lib/src/components/wall/use-dor-control.ts`. Tests: `lib/src/host/tool-input.test.ts`, `lib/src/components/Wall.test.tsx`.
 

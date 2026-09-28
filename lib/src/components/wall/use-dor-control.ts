@@ -1869,25 +1869,6 @@ export function useDorControl({
       return;
     }
 
-    if (detail.method === SURFACE_CONTROL_METHODS.toolList) {
-      // A read of the same files `dor tool <name>` resolves; nothing executes,
-      // so no Workspace gate or launch queue applies.
-      const cwd = stringParam(params.cwd)?.trim();
-      if (!cwd) {
-        detail.respond({ ok: false, error: 'cwd is required' });
-        return;
-      }
-      const toolControl = getPlatform().toolControl;
-      if (!toolControl) {
-        detail.respond({ ok: false, error: 'this host cannot read a dormouse.yml' });
-        return;
-      }
-      const result = await toolControl({ op: 'list', cwd, global: booleanParam(params.global) });
-      if (result.status === 'list') detail.respond({ ok: true, result: result.listing });
-      else detail.respond({ ok: false, error: result.status === 'error' ? result.message : 'unexpected tool host response' });
-      return;
-    }
-
     if (detail.method === SURFACE_CONTROL_METHODS.resolveOpen) {
       // Resolve a terminal Surface handle to the dev-server URL it owns, for
       // `dor agent-browser open <surface>` / `dor iframe <surface>`. Same port scan as

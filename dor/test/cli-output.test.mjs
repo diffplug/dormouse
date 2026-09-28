@@ -2018,19 +2018,25 @@ test('tool --list takes no name, command, or placement flag', async () => {
   }
 });
 
-test('tool --list escapes control characters in repo text', async () => {
-  const client = fixtureClient();
-  client.toolList = async () => ({
+test('tool --list escapes control characters in repo text, in every output', async () => {
+  const listing = {
     project: { path: '/work/site/dormouse.yml', approved: false },
     user: { path: '/home/me/.config/dormouse/dormouse.yml', found: false },
     tools: [{ name: 'evil\u001b]52;c;x\u0007', scope: 'project', run: 'echo \u009b31m', render: 'iframe', port: 'auto', keyed: false, description: 'fine\u001b[2Jtext', shadowed: false }],
-    warnings: [],
-  });
-  const result = await runCli(['tool', '--list'], { client });
-  assert.doesNotMatch(result.stdout, /[\x00-\x09\x0b-\x1f\x7f-\x9f]/);
-  assert.match(result.stdout, /evil\\u001b\]52;c;x\\u0007/);
-  assert.match(result.stdout, /\\u009b31m/);
-  assert.match(result.stdout, /fine\\u001b\[2Jtext/);
+    warnings: ['/work/site/dormouse.yml: tools.evil\u001b[2J: ignoring unknown field \'x\''],
+  };
+  const client = fixtureClient();
+  client.toolList = async () => listing;
+  const controls = /[\x00-\x09\x0b-\x1f\x7f-\x9f]/;
+  const text = await runCli(['tool', '--list'], { client });
+  assert.doesNotMatch(text.stdout, controls);
+  assert.doesNotMatch(text.stderr, controls);
+  assert.match(text.stdout, /evil\\u001b\]52;c;x\\u0007/);
+  assert.match(text.stdout, /\\u009b31m/);
+  assert.match(text.stdout, /fine\\u001b\[2Jtext/);
+  const json = await runCli(['tool', '--list', '--json'], { client });
+  assert.doesNotMatch(json.stdout, controls);
+  assert.deepEqual(JSON.parse(json.stdout).tools, listing.tools);
 });
 
 test('tool rejects an unknown option', async () => {

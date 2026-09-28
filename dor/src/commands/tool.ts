@@ -12,7 +12,9 @@ import type {
 import {
   callerWorkingDirectory,
   errorMessage,
+  printable,
   renderJson,
+  renderPrintableJson,
   requireControlClient,
   scanPreDelimiterArgs,
   stringParser,
@@ -40,8 +42,6 @@ const TOOL_TIMEOUT_MS = 20_000;
 // Keep in sync with `parameters.flags`.
 const FLAGS_WITH_VALUES = new Set(['--cwd', '--surface', '--workspace']);
 const BOOLEAN_FLAGS = new Set(['--list', '--json', '--minimize', '--fresh', '--global']);
-// What `--list` combines with: it resolves like a launch but places nothing.
-const LIST_FLAGS = new Set(['--list', '--json', '--global', '--cwd']);
 
 /**
  * `dor tool` takes a registered name with inputs, or a nameless `--` command tail.
@@ -54,11 +54,8 @@ export function validateToolArgs(args: readonly string[]): ParseResult<void> {
   if (!head.ok) return head;
   const { value: positionals } = head;
 
-  const flags = (delimiterIndex === -1 ? args : args.slice(0, delimiterIndex))
-    .filter(arg => arg.startsWith('--')).map(arg => arg.split('=')[0]);
-  if (flags.includes('--list')) {
+  if ((delimiterIndex === -1 ? args : args.slice(0, delimiterIndex)).includes('--list')) {
     if (delimiterIndex !== -1 || positionals.length > 0) return { ok: false, message: '--list takes no tool name or command' };
-    if (flags.some(flag => !LIST_FLAGS.has(flag))) return { ok: false, message: '--list takes only --global, --cwd, and --json' };
     return { ok: true, value: undefined };
   }
 
@@ -191,7 +188,13 @@ JSON output:
 };
 
 async function runToolCommand(this: DorCommandContext, flags: ToolFlags, ...rest: string[]): Promise<void | Error> {
-  if (flags.list === true) return listTools(this, flags);
+  if (flags.list === true) {
+    // It resolves like a launch but places nothing.
+    if (flags.minimize || flags.fresh || flags.surface !== undefined || flags.workspace !== undefined) {
+      return new Error('--list takes only --global, --cwd, and --json');
+    }
+    return listTools(this, flags);
+  }
   // `validateToolArgs` already accepted this argv, so the walk cannot fail.
   const head = headPositionals(this.commandArgs);
   const named = head.ok && head.value.length > 0;
@@ -219,7 +222,7 @@ export async function dispatchToolSurface(
   try {
     const response = await client.toolSurface(request);
     // Lint output is advisory and must not pollute a `--json` parse.
-    for (const warning of response.warnings ?? []) writeStderr(context, `${warning}\n`);
+    for (const warning of response.warnings ?? []) writeStderr(context, `${printable(warning)}\n`);
     writeStdout(context, renderToolResponse(response, json));
     return undefined;
   } catch (error) {
@@ -247,10 +250,9 @@ async function listTools(context: DorCommandContext, flags: ToolFlags): Promise<
   if (client instanceof Error) return client;
   try {
     const listing = await client.toolList({ cwd: callerWorkingDirectory(flags.cwd, context.options.env), global: flags.global === true });
-    for (const warning of listing.warnings) writeStderr(context, `${warning}\n`);
-    writeStdout(context, flags.json === true
-      ? renderJson({ project: listing.project, user: listing.user, tools: listing.tools })
-      : renderToolList(listing, flags.global === true));
+    const { warnings, ...shown } = listing;
+    for (const warning of warnings) writeStderr(context, `${printable(warning)}\n`);
+    writeStdout(context, flags.json === true ? renderPrintableJson(shown) : renderToolList(listing, flags.global === true));
     return undefined;
   } catch (error) {
     return new Error(errorMessage(error));
@@ -279,9 +281,4 @@ function renderToolList(listing: ToolListResponse, global: boolean): string {
   lines.push(`user  ${printable(listing.user.path)}${listing.user.found ? '' : '  [not found]'}`);
   listing.tools.filter(entry => entry.scope === 'user').forEach(tool);
   return `${lines.join('\n')}\n`;
-}
-
-/** C0, DEL, and C1 controls as `\u` escapes, so repo text cannot drive the terminal. */
-function printable(text: string): string {
-  return text.replace(/[\x00-\x1f\x7f-\x9f]/g, (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`);
 }

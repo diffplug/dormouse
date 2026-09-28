@@ -10,8 +10,7 @@ browser:
   default_viewport: desktop
 
 tools:
-  # The lib component catalog (Storybook), for a human to look at: an iframe
-  # agents cannot drive.
+  # The lib component catalog (Storybook), for a human to look at.
   storybook:
     run: pnpm storybook
     # Storybook never announces, so autobind: frame the one port it opens. If it

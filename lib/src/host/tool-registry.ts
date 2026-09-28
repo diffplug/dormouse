@@ -6,9 +6,10 @@
  * `tool-trust.ts`. Node-side so the YAML dependency stays out of the webview
  * bundle.
  */
-import { isMap, isScalar, parse as parseYaml, parseDocument as parseYamlDocument } from 'yaml';
+import { isMap, isScalar, parseDocument as parseYamlDocument, type Document } from 'yaml';
 import { BUILTIN_FILE_TOOL } from 'dor/file-viewer-format';
 import { isRecord } from '../lib/is-record';
+import { truncateText } from '../lib/osc-sanitize';
 import { hasShellInputControls } from 'dor/commands/shell-quote';
 import { isToolRender, TOOL_RENDERS, type ToolRender } from '../lib/platform/tool-types';
 import type { BrowserViewportSelection } from 'dor-lib-common/browser-viewports';
@@ -40,6 +41,9 @@ export interface ToolEntry {
    * derived from the command or cwd (`docs/specs/dor-tool.md`).
    */
   readonly dedupeTemplate: readonly string[] | null;
+  /** The comment block directly above the entry, `#` markers stripped; null
+   *  when there is none. `dor tool --list` reports it; nothing executes it. */
+  readonly description: string | null;
 }
 
 export interface OpenRule { readonly match: string; readonly tool: string }
@@ -59,32 +63,28 @@ export class ToolFileError extends Error {}
 
 /** Parse the shared YAML document before choosing which section to validate.
  * A malformed document is always an error; browser-only reads deliberately do
- * not inspect `tools` or `open` fields. */
-function parseDocument(text: string, path: string): Record<string, unknown> | undefined {
-  let doc: unknown;
-  try {
-    doc = parseYaml(text);
-  } catch (error) {
-    throw new ToolFileError(`${path}: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  if (doc === null || doc === undefined) return undefined;
-  if (!isRecord(doc)) throw new ToolFileError(`${path}: expected a mapping at the top level`);
-  return doc;
+ * not inspect `tools` or `open` fields. The document is kept for its comments,
+ * which `parseToolFile` reads as descriptions. */
+function parseDocument(text: string, path: string): { data: Record<string, unknown> | undefined; document: Document } {
+  const document = parseYamlDocument(text);
+  if (document.errors.length > 0) throw new ToolFileError(`${path}: ${document.errors[0].message}`);
+  const data: unknown = document.toJS();
+  if (data === null || data === undefined) return { data: undefined, document };
+  if (!isRecord(data)) throw new ToolFileError(`${path}: expected a mapping at the top level`);
+  return { data, document };
 }
 
-/** Longest description `dor tool --list` reports, in UTF-16 code units. */
+/** Longest description `dor tool --list` reports, in code points. */
 export const TOOL_DESCRIPTION_LIMIT = 2_000;
 
 /**
- * Each Tool's documentation: the comment block directly above its entry, `#`
- * markers stripped (`docs/specs/dor-tool.md` -> CLI). Comments are not data to
- * `parseToolFile`, so this re-reads a text that parser already accepted. `yaml`
- * hangs the first entry's comment on the `tools` map itself and every later
- * one on the entry's key.
+ * Each Tool's documentation: the comment block directly above its entry
+ * (`docs/specs/dor-tool.md` -> CLI). `yaml` hangs the first entry's comment on
+ * the `tools` map itself and every later one on the entry's key.
  */
-export function toolDescriptions(text: string): Map<string, string> {
+function entryDescriptions(document: Document): Map<string, string> {
   const descriptions = new Map<string, string>();
-  const tools = parseYamlDocument(text).get('tools', true);
+  const tools = document.get('tools', true);
   if (!isMap(tools)) return descriptions;
   tools.items.forEach((pair, index) => {
     if (!isScalar(pair.key)) return;
@@ -95,13 +95,13 @@ export function toolDescriptions(text: string): Map<string, string> {
   return descriptions;
 }
 
-/** Repo text headed for a terminal: no C0, DEL, or C1 controls survive. */
+/** Formatting only: control characters are escaped by whatever prints it. */
 function cleanDescription(comment: string): string {
   const text = comment.split('\n')
-    .map(line => line.replace(/^ /, '').replace(/\t/g, ' ').replace(/[\x00-\x1f\x7f-\x9f]/g, '').trimEnd())
+    .map(line => line.replace(/^ /, '').replace(/\t/g, ' ').trimEnd())
     .join('\n')
     .trim();
-  return text.length > TOOL_DESCRIPTION_LIMIT ? `${text.slice(0, TOOL_DESCRIPTION_LIMIT - 1)}…` : text;
+  return text.length > TOOL_DESCRIPTION_LIMIT ? `${truncateText(text, TOOL_DESCRIPTION_LIMIT - 1)}…` : text;
 }
 
 /** Read only browser preferences from a bounded `dormouse.yml` text. Tool
@@ -116,7 +116,7 @@ function browserFromDocument(doc: Record<string, unknown> | undefined, path: str
 }
 
 export function parseBrowserSection(text: string, path: string): BrowserConfigLayer | undefined {
-  return browserFromDocument(parseDocument(text, path), path);
+  return browserFromDocument(parseDocument(text, path).data, path);
 }
 
 /** Substitutions a `prespawn_dedupe` element may use. Closed set: an
@@ -182,7 +182,7 @@ export function parseToolFile(
   opts: { path: string; dir: string; scope: ToolScope },
 ): ToolFile {
   const { path, dir, scope } = opts;
-  const doc = parseDocument(text, path);
+  const { data: doc, document } = parseDocument(text, path);
   // An empty file is a valid file with no tools, not a broken one.
   if (doc === undefined) {
     return { scope, dir, tools: new Map(), warnings: [], open: [] };
@@ -194,6 +194,7 @@ export function parseToolFile(
 
   const tools = new Map<string, ToolEntry>();
   const warnings: string[] = [];
+  const descriptions = entryDescriptions(document);
 
   for (const [name, rawEntry] of Object.entries(toolsNode)) {
     const where = `${path}: tools.${name}`;
@@ -259,7 +260,10 @@ export function parseToolFile(
     }
     const port = (rawPort as ToolPortMode | undefined) ?? 'announced';
 
-    tools.set(name, { name, run: typeof run === 'string' ? run.trim() : run, render, port, dedupeTemplate, ...(viewport !== undefined ? { viewport } : {}) });
+    tools.set(name, {
+      name, run: typeof run === 'string' ? run.trim() : run, render, port, dedupeTemplate,
+      description: descriptions.get(name) ?? null, ...(viewport !== undefined ? { viewport } : {}),
+    });
   }
 
   // Associations are user-only (`docs/specs/dor-tool.md` -> Opening local files).

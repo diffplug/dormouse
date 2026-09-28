@@ -2203,29 +2203,6 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
-  it('answers surface.toolList from the host listing, creating nothing', async () => {
-    const listing = { project: null, user: { path: '/config/dormouse.yml', found: true }, tools: [], warnings: [] };
-    const toolControl = vi.fn(async (request: { op: string; cwd: string }) => request.cwd === '/broken'
-      ? { status: 'error' as const, message: '/broken/dormouse.yml: bad' }
-      : { status: 'list' as const, listing });
-    Object.assign(fake, { toolControl });
-    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
-    await flush();
-    const ask = async (params: Record<string, unknown>) => {
-      const respond = vi.fn();
-      await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
-        method: SURFACE_CONTROL_METHODS.toolList, surfaceId: 'pane-a', params, respond,
-      } })));
-      await waitUntil(() => respond.mock.calls.length > 0);
-      return respond.mock.calls[0][0];
-    };
-    expect(await ask({ cwd: '/repo', global: true })).toEqual({ ok: true, result: listing });
-    expect(toolControl).toHaveBeenCalledWith({ op: 'list', cwd: '/repo', global: true });
-    expect(await ask({ cwd: '/broken' })).toEqual({ ok: false, error: '/broken/dormouse.yml: bad' });
-    expect(await ask({})).toEqual({ ok: false, error: 'cwd is required' });
-    expect(leafCount()).toBe(1);
-  });
-
   it('retries failed post-grant lookup without recording permission again', async () => {
     let calls = 0;
     const toolControl = vi.fn(async (request: { op: string }) => {
