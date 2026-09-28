@@ -51,21 +51,23 @@ The generator still parses it on every build, and the lint's guide checks still
 run, because both constrain the guide as a *Marketplace listing* rather than as
 a website page (rationale).
 
-The guide is host-neutral at the top level; VS Code and standalone instructions
-live under explicit subsections rather than relying on the website to rewrite
-host-specific prose. Its sections are:
+The guide is written for a VS Code user, because every channel that publishes
+it is an extension listing or the extension's folder on GitHub; the standalone
+app gets one section pointing at its download. Its sections are:
 
 ```text
-## Get Dormouse
-## Layout and panes
-## Alerts and TODOs
-## Browsers for you and your agents
-## Mouse, selection, and copy/paste
+## Tmux with browsers
+## Alerts
+## Push notifications you can self-host
+## Terminals that know their ports
+## Browsers for you (and your agents)
+## Select and copy-paste like you meant
+## Getting started
 ## Keyboard shortcuts
-## Themes and host integration
-## Getting started  (### VS Code, ### Standalone)
-## Automation and agents
-## Help and project links
+## Coding agents
+## Dormouse Hosted
+## Standalone app
+## Links
 ```
 
 Content invariants, enforced by the public-doc lint where mechanically
@@ -84,7 +86,7 @@ checkable and by review otherwise:
 - VS Code command names in getting started exist in `vscode-ext/package.json`.
 - Detailed CLI behavior links to `/docs/dor`; the complete agent operating guide
   links to `/docs/agent-skill`; the hosted-services preview links to `/hosted`.
-- The guide contains no `TODO:` placeholders and no copied internal future
+- The guide renders no `TODO:` placeholders and no copied internal future
   design.
 
 ### Marketplace and Open VSX constraints
@@ -158,7 +160,9 @@ Raw HTML is disabled except for a narrow `<img>` allowlist carrying only `src`,
 `alt`, `width`, `height`, and `title`, with a relative or `https:` source. Every other tag,
 and every other attribute on `<img>`, is rejected outright. The exception exists
 because the guide's inline 22px alert-state icons need sizing and portable
-Markdown has no syntax for it; it is not a general licence for HTML.
+Markdown has no syntax for it; it is not a general licence for HTML. An HTML
+comment on its own lines is dropped, as GitHub drops it; one sharing a line is
+rejected.
 
 **Must assign unique heading ids**, reserving authored and generated numeric
 suffixes alike. Heading ids come from one GitHub-style slugger, including
@@ -560,8 +564,9 @@ consumers.
 lint, checks the rules above mechanically; each rule names its own check, and
 the lint's header comment is the inventory. The rules with no other home:
 
-- **No public source carries a `TODO:` placeholder** — the two READMEs and
-  every Markdown page `SITE_ROUTES` publishes.
+- **No public source renders a `TODO:` placeholder** — the two READMEs and
+  every Markdown page `SITE_ROUTES` publishes. A pending image may wait in an
+  HTML comment.
 - **Public links use canonical HTTPS URLs, and a local link resolves** — read
   off the parsed tree, so a link-shaped string in a code span is not a link.
   `SELF_HOST.md` and the security spec get only the HTTPS half; spec-lint

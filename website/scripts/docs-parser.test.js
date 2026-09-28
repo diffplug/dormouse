@@ -168,6 +168,17 @@ describe('blocks', () => {
     expect(() => parseMarkdown('> quoted\n<div>\n')).toThrow(/raw HTML <div>/);
   });
 
+  it('drops an HTML comment block, even one that interrupts a paragraph', () => {
+    const { blocks } = parseMarkdown('text\n<!-- TODO: an image\nof two lines -->\n\nafter\n');
+    expect(blocks.map((b) => inlineToText(b.children))).toEqual(['text', 'after']);
+  });
+
+  it('rejects an HTML comment that shares a line with content', () => {
+    expect(() => parseMarkdown('<!-- note --> text\n')).toThrow(/stand on its own lines/);
+    expect(() => parseMarkdown('text <!-- note -->\n')).toThrow(/stand on its own lines/);
+    expect(() => parseMarkdown('<!-- never closed\n')).toThrow(/unterminated HTML comment/);
+  });
+
   it('keeps a standalone <img> line inside the paragraph it follows', () => {
     const { blocks } = parseMarkdown('text\n<img src="a.png" alt="a">\n');
     expect(blocks).toHaveLength(1);

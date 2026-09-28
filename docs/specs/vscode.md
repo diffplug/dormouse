@@ -268,6 +268,14 @@ Two events are pushed rather than answered: `pairing-queue` (the complete snapsh
 
 **Lifetime.** Hiding a panel keeps its terminals answerable (`retainContextWhenHidden`), and closing every Dormouse view does not take the Burrow offline.
 
+#### The direct path
+
+**The broker's extension host answers a `direct-offer`** (`docs/specs/remote-api.md` → Transport → "Direct path") over the same lazily loaded `node-datachannel` polyfill as the sidecar, in-process (rationale), so a native crash there takes down that window's extension host and every extension in it. **Tear the addon down only at deactivation**: the teardown is terminal for the process, and a window that later wins the lease again still needs a factory that loads.
+
+**One universal VSIX carries every platform's addon.** pnpm installs only the host's platform package, so the build has `pnpm deploy` the extension's production closure for every os and cpu, fetched and verified against `pnpm-lock.yaml` by pnpm (rationale), and stages the addon, its dependencies, and the platform packages `vscode-ext/package.json` declares under `optionalDependencies` into `dist/node_modules`. `node-pty` needs no staging: its one package carries every platform's prebuild. **Keep the addon `external` to `dist/extension.js`**, which the build asserts.
+
+Source of truth: `vscode-ext/scripts/stage-native-direct.mjs`; `startService` and `initBurrow` in `vscode-ext/src/burrow.ts`, pinned by `vscode-ext/test/burrow.test.ts`; `createNativeDirectPeerFactory` in `lib/src/host/remote/native-direct-peer.ts`; `assertNothingInlined` in `scripts/assert-not-inlined.mjs`.
+
 ### Peer surfaces
 
 The service owns the PTYs but not the *view* of them: each webview is its own JS realm with its own xterm registry (`lib/src/lib/terminal-store.ts`), and only a webview knows what a pane is called, whether it is focused, and how big its xterm is. So the service asks, and every webview answers for its own.
