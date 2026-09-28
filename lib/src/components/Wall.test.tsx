@@ -2200,6 +2200,23 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('calls the host toolControl as a method, which an adapter may need for `this`', async () => {
+    Object.assign(fake, {
+      async toolControl(this: unknown) {
+        if (this !== fake) throw new Error('toolControl called detached');
+        return { status: 'no-file' as const };
+      },
+    });
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
+    await flush();
+    const respond = vi.fn();
+    await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+      method: SURFACE_CONTROL_METHODS.tool, params: { name: 'viewer', cwd: '/repo' }, respond,
+    } })));
+    await waitUntil(() => respond.mock.calls.length > 0);
+    expect(respond).toHaveBeenCalledWith({ ok: false, error: "no dormouse.yml found in '/repo' or any parent directory" });
+  });
+
   it('retries failed post-grant lookup without recording permission again', async () => {
     let calls = 0;
     const toolControl = vi.fn(async (request: { op: string }) => {

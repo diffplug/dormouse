@@ -57,7 +57,10 @@ the user's own binary overrides that no host sets (`docs/specs/dor-browser.md`).
 **`DORMOUSE_CLI_BIN` is host-internal spawn configuration, never
 terminal-facing:** `pty-core` prepends its *value* to the child's `PATH`, then
 deletes the variable (with `DORMOUSE_SHELL_INTEGRATION_DIR`) from the child env,
-so a terminal sees `dor` on `PATH` and nothing else.
+so a terminal sees `dor` on `PATH` and nothing else. **Must delete the sidecar's
+storage roots, `DORMOUSE_STATE_DIR` and `DORMOUSE_RECOVERY_DIR`, from the child
+env too**, so a dev server run in a pane never writes into the running app's
+state.
 
 **On Windows, `DORMOUSE_CLI_BIN` and `DORMOUSE_CLI_JS` must be plain paths,
 never `\\?\` verbatim paths** — cmd.exe cannot execute `dor.cmd` through one,
@@ -656,10 +659,8 @@ hand. Only browser Surfaces carry an explicit join key (`dor agent-browser --key
 `dor playwright --key <name>`), because their session is held externally by the browser
 CLI.
 
-The worked examples — dev-server sharing, sub-agent launch and await, paired
-browser keys, multi-worktree, minimized watchers, port-owner handoff, safe
-cleanup — are `dor/skill.md`'s "## Recipes", which ships with the CLI
-([Agent Skill](#agent-skill)).
+The worked examples are `dor/skill.md`'s "## Recipes", which ships with the
+CLI ([Agent Skill](#agent-skill)).
 
 ## Agent Skill
 
@@ -712,7 +713,9 @@ Source of truth: `buildDorSurfacesInternal` in `lib/src/components/Wall.tsx`; `d
 
 **Must route `dor tool` and `dor open` through the Tool launch contract**, including approval, explicit-key reuse, and placement (`docs/specs/dor-tool.md` → CLI). Generated help owns syntax.
 
-Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `openCommand` in `dor/src/commands/open.ts`; `ToolSurfaceResponse` in `dor/src/commands/types.ts`.
+**The router answers `tool.list` (`dor tool --list`) before resolving any Workspace or Surface**, like `app.*`.
+
+Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `openCommand` in `dor/src/commands/open.ts`; `ToolSurfaceResponse` in `dor/src/commands/types.ts`; `handleToolControl` in `lib/src/components/wall/tool-control.ts`. Pinned by `dor tool reads` in `lib/src/components/wall/dor-control-router.test.ts`.
 
 ## Future
 

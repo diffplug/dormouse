@@ -84,4 +84,4 @@ Unbounded parking preserves unsaved iframe state; a ninth minimized browser prev
 
 Row 8's counterpart guard — a background `dor` command never yanks cross-frame
 focus out of the host editor — is checked against VS Code rather than the
-standalone harness.
+innerdogfood harness.

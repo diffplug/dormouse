@@ -1021,19 +1021,22 @@ export function useDorControl({
           // The registry, the closed substitution set, and the trust gate all
           // live behind this one host call (`dor/commands/types` ->
           // ToolSurfaceRequest).
-          const toolControl = getPlatform().toolControl;
-          if (!toolControl) {
+          // Called as a method: VSCodeAdapter's reaches its message channel
+          // through `this`.
+          const platform = getPlatform();
+          if (!platform.toolControl) {
             detail.respond({ ok: false, error: 'this host cannot read a dormouse.yml; use `dor tool -- <command>`' });
             return;
           }
-          const lookup = await toolControl(opening
+          const lookup = await platform.toolControl(opening
             ? { op: 'open', target: openFile, cwd, tool: stringParam(params.tool) }
             : { op: 'lookup', name: toolName!, cwd, args: toolArgs, global: booleanParam(params.global) });
           if (unavailable()) return;
           switch (lookup.status) {
             case 'trust-recorded':
             case 'browser-config':
-              // Only a `trust` op can produce this; a lookup never does.
+            case 'list':
+              // Only the ops that ask for these produce them; a lookup never does.
               detail.respond({ ok: false, error: 'unexpected tool host response' });
               return;
             case 'ok':

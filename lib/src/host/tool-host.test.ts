@@ -229,4 +229,72 @@ describe('createToolHost', () => {
     const result = await createToolHost({ userConfigPath: path }).handle({ op: 'lookup', name: 'scratch', cwd: repo, global: true });
     expect(result).toMatchObject({ status: 'ok', scope: 'user', run: 'echo hi' });
   });
+
+  describe('list', () => {
+    const PROJECT = `tools:
+  # The component catalog.
+  storybook:
+    run: pnpm storybook
+    port: auto
+    prespawn_dedupe: [storybook, $PROJECT_ROOT]
+  harness:
+    run: [pnpm, harness, $ARGS]
+    render: agent-browser-screencast
+    colour: blue
+`;
+    const USER = `tools:
+  # Mine, hidden here by the project's.
+  storybook:
+    run: npx storybook
+  # Render Markdown.
+  md:
+    run: [glow, $TARGET]
+`;
+
+    it('lists project then user Tools with comments, approval, and shadowing, running nothing', async () => {
+      await writeFile(join(repo, 'dormouse.yml'), PROJECT);
+      const userConfigPath = join(repo, 'user.yml');
+      await writeFile(userConfigPath, USER);
+      const host = createToolHost({ stateDir, userConfigPath });
+      const before = await host.handle({ op: 'list', cwd: join(repo) });
+      expect(before).toEqual({ status: 'list', listing: {
+        project: { path: join(repo, 'dormouse.yml'), approved: false },
+        user: { path: userConfigPath, found: true },
+        tools: [
+          { name: 'storybook', scope: 'project', run: 'pnpm storybook', render: 'iframe', port: 'auto', keyed: true, description: 'The component catalog.', shadowed: false },
+          { name: 'harness', scope: 'project', run: ['pnpm', 'harness', '$ARGS'], render: 'agent-browser-screencast', port: 'announced', keyed: false, description: null, shadowed: false },
+          { name: 'storybook', scope: 'user', run: 'npx storybook', render: 'iframe', port: 'announced', keyed: false, description: "Mine, hidden here by the project's.", shadowed: true },
+          { name: 'md', scope: 'user', run: ['glow', '$TARGET'], render: 'iframe', port: 'announced', keyed: false, description: 'Render Markdown.', shadowed: false },
+        ],
+        warnings: [`${join(repo, 'dormouse.yml')}: tools.harness: ignoring unknown field 'colour'`],
+      } });
+      await host.handle({ op: 'trust', kind: 'folder', projectRoot: repo });
+      expect(await host.handle({ op: 'list', cwd: repo })).toMatchObject({ listing: { project: { approved: true } } });
+    });
+
+    it('--global lists only user Tools, none shadowed', async () => {
+      await writeFile(join(repo, 'dormouse.yml'), PROJECT);
+      const userConfigPath = join(repo, 'user.yml');
+      await writeFile(userConfigPath, USER);
+      const result = await createToolHost({ userConfigPath }).handle({ op: 'list', cwd: repo, global: true });
+      expect(result).toMatchObject({ status: 'list', listing: { project: null, warnings: [] } });
+      expect(result.status === 'list' && result.listing.tools.map(tool => [tool.name, tool.scope, tool.shadowed])).toEqual([
+        ['storybook', 'user', false], ['md', 'user', false],
+      ]);
+    });
+
+    it('answers an empty listing when neither file exists', async () => {
+      await rm(join(repo, 'dormouse.yml'));
+      const userConfigPath = join(repo, 'missing-user.yml');
+      expect(await createToolHost({ userConfigPath }).handle({ op: 'list', cwd: repo })).toEqual({ status: 'list', listing: {
+        project: null, user: { path: userConfigPath, found: false }, tools: [], warnings: [],
+      } });
+    });
+
+    it('fails on a malformed file, as lookup does', async () => {
+      await writeFile(join(repo, 'dormouse.yml'), 'tools:\n  broken:\n    render: iframe\n');
+      expect(await createToolHost({ userConfigPath: join(repo, 'missing-user.yml') }).handle({ op: 'list', cwd: repo }))
+        .toMatchObject({ status: 'error', message: expect.stringContaining("'run' is required") });
+    });
+  });
 });

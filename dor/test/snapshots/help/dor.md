@@ -8,6 +8,7 @@ USAGE
   dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] [--workspace ref] -- <command>...
   dor tool [--global] [--json] [--minimize] [--fresh] [--surface id|ref] [--cwd path] [--workspace ref] <name> [args...]
   dor tool [--json] [--minimize] [--surface id|ref] [--cwd path] [--workspace ref] -- <command>...
+  dor tool --list [--global] [--cwd path] [--json]
   dor open [--json] [--minimize] [--fresh] [--surface id|ref] [--workspace ref] [--cwd path] [--tool name] <file>
   dor version [--json]
   dor skill [--install] [--json]
