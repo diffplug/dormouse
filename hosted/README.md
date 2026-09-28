@@ -57,7 +57,7 @@ branch.
 | Preview | Dedicated test Cloudflare account with a registered workers.dev subdomain; dedicated empty Neon project and parent branch; GitHub `hosted-preview` environment |
 | Each PR | `dormouse-hosted-pr-N` Worker, uncached Hyperdrive, and Neon branch, all reused until close |
 | Production | Dedicated Dormouse Postgres database, separate runtime/migration roles, uncached Hyperdrive, `dormouse-hosted` Worker and `hosted.dormouse.sh` custom domain; GitHub `hosted-production` environment |
-| Email | Dedicated Postmark server, verified `signin@hosted.dormouse.sh`, SPF/DKIM/DMARC, Apple Private Email Relay registration |
+| Email | Dedicated Postmark server, verified `signin@dormouse.sh`, SPF/DKIM/DMARC, Apple Private Email Relay registration |
 | OAuth | Separate Dormouse GitHub, Google, Microsoft, and Apple registrations; exact callbacks below |
 | Release history | `hosted-release-tag` GitHub environment, an admin identity's repository-scoped Contents-write fine-grained PAT, immutable annotated `hosted/` tags |
 | Recovery | Neon backups/PITR enabled, encrypted pre-migration dumps retained as GitHub artifacts for 30 days, age identity also retained independently in a password manager |
@@ -151,7 +151,7 @@ accounts.
    `pnpm --filter dormouse-hosted db:migrate` and `db:validate`. These commands
    never reset or drop an existing database.
 4. Set up a dedicated Postmark server/token and verify the sending address
-   `signin@hosted.dormouse.sh` (or update `EMAIL_FROM`). Configure SPF/DKIM and
+   `signin@dormouse.sh` (or update `EMAIL_FROM`). Configure SPF/DKIM and
    DMARC. Register the sender with Apple Private Email Relay for relay-address
    delivery.
 5. Configure `hosted.dormouse.sh` as the Worker's custom domain. Exclude this
