@@ -19,7 +19,7 @@
   "devDependencies": {
     "@types/node": "^24.13.4",
     "esbuild": "^0.28.0",
-    "typescript": "^6.0.3"
+    "typescript": "^7.0.0"
   },
   "dependencies": {
     "@stricli/core": "^1.2.7",
