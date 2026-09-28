@@ -36,6 +36,7 @@ Standalone only — a bare Wall (VS Code, the website playground) leaves these k
 |-----|--------|-------------|
 | `1`–`9` | Select by position | The nth Workspace in strip order; out of range is a consumed no-op. |
 | `,` | Rename selected item | Edit the highlighted Workspace tab, without activating it. |
+| `k` or `x` | Close Workspace | Close the highlighted tab through its `×` action, including its confirmation. |
 | `Enter` (Workspace tab) | Activate / focus | An inactive tab activates in command mode; an active tab enters its terminal in passthrough. |
 | `Enter` (`+`) | New Workspace | Creates and focuses its terminal in passthrough after mount. |
 
