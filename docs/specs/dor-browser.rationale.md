@@ -22,15 +22,13 @@ views without weakening that first signal.
 
 **Why activation moves focus at all.** A repeat activation on an already-connected port only re-navigates to the current URL; without the reveal, the click has no visible feedback.
 
-**Why the eager pane is created before `agent-browser open` runs.** A cold daemon boot is 1–3s, and a menu that closes on a pane appearing three seconds later reads as a click that did nothing.
-
-**Why the eager pane shows its own placeholder.** The idle placeholder asks for `dor agent-browser open <url>`, telling the user to repeat the action they just took instead of naming the pane's actual state.
+**Why Connect acknowledges before placing.** Creating a pane before startup made a missing executable briefly split and then collapse the terminal (reported 2026-09). The button’s `Opening…` state acknowledges the click during daemon startup without layout churn. Preparing the Surface's own controller, rather than a Wall-side launch, retains its launch configuration, binding, and late-result cleanup.
 
 **Why a reuse is one intent.** Revealing the target and then asking for its mode and its URL separately sent `open <url>` in the same tick as a pop-out began its close/reopen, deterministically: the navigation raced the relaunch, which had already captured the old URL.
 
 ## Display Modal And Render Swaps
 
-**Why the iframe swap is eager.** The same 1–3s daemon boot as the context-menu connect, behind a modal that has already closed; and while the swap awaited `open`, a slow page held the iframe on screen for the whole load and a timed-out `open` dropped the swap silently — leaving an orphan `gui-<hex>` browser nobody could see or close.
+**Why the iframe swap is eager.** A 1–3s daemon boot behind a modal that has already closed; and while the swap awaited `open`, a slow page held the iframe on screen for the whole load and a timed-out `open` dropped the swap silently — leaving an orphan `gui-<hex>` browser nobody could see or close.
 
 **Why the Surface's controller launches, not the Wall.** The launch-and-bind existed four times — Tool swap, iframe/cross-provider swap, context-menu port, Tool serving — each with its own "still wanted?" predicate and failure rule, racing the controller it handed a session to. Because the launch lived in a Wall closure rather than on the Surface, a session-less pane that was persisted, or whose webview reloaded mid-launch, restored session-less forever, and Tool serving still blocked on the page load (static reading, 2026-09).
 

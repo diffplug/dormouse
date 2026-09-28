@@ -26,7 +26,7 @@ import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
 import { BROWSER_PROVIDER_GUI, hostSupportsBrowser, providerUnavailable } from './wall/browser-automation';
 import { parseRenderMode, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
 import { isToolRender } from '../lib/platform/tool-types';
-import { closeBrowserSurface, requestBrowserRenderMode, whenBrowserLaunched } from './wall/agent-browser-surface-controller';
+import { acquireAgentBrowserSurfaceController, closeBrowserSurface, requestBrowserRenderMode } from './wall/agent-browser-surface-controller';
 import { KILL_CONFIRM_MS, KILL_SHAKE_MS, KillConfirmOverlay, randomKillChar, type ConfirmKill } from './KillConfirm';
 import { messageOf } from '../lib/errors';
 import {
@@ -291,6 +291,17 @@ export function Wall({
   const activeRef = useRef(active);
   activeRef.current = active;
   const [terminalContext, setTerminalContext] = useState<TerminalContextState | null>(null);
+  const terminalContextRef = useRef(terminalContext);
+  terminalContextRef.current = terminalContext;
+  const contextLaunchGeneration = useRef(0);
+  const contextPortLaunches = useRef(new Map<string, { done: Promise<void>; cancel(): void }>());
+  const cancelContextPortLaunches = useCallback(() => {
+    contextLaunchGeneration.current += 1;
+    for (const launch of contextPortLaunches.current.values()) launch.cancel();
+    contextPortLaunches.current.clear();
+  }, []);
+  // An opening owns its pending launches, including while its exit animates.
+  useEffect(() => () => cancelContextPortLaunches(), [terminalContext, active, cancelContextPortLaunches]);
   // Remove a closing context once its exit has played. A reopen or replacement
   // changes the state object, so the cleanup cancels the stale removal; the
   // identity check covers a timer that fires before that cleanup is flushed.
@@ -1047,6 +1058,7 @@ export function Wall({
    */
   const closeAll = useCallback(async (): Promise<string | null> => {
     closingWorkspaceRef.current = true;
+    cancelContextPortLaunches();
     await collapseWorkspace(effectiveWorkspaceId);
     // Walked until nothing new turns up rather than over one snapshot: a member
     // pane's `dor` request can create a Surface during the awaits, and one
@@ -1082,7 +1094,7 @@ export function Wall({
     });
     if (refusal) cancelClose();
     return refusal;
-  }, [lath, memberSurfaceIds, ownsSurface, cancelClose]);
+  }, [lath, memberSurfaceIds, ownsSurface, cancelClose, cancelContextPortLaunches]);
 
   // --- Dev-server port → pane correlation (browser header connection chip) ---
   useDevServerPortCorrelation({ lath, doorsRef });
@@ -1382,6 +1394,7 @@ export function Wall({
     title,
     focusNeutral,
     preserveSource,
+    preparedId,
   }: {
     minimized: boolean;
     params: Record<string, unknown>;
@@ -1391,6 +1404,8 @@ export function Wall({
     // without moving focus off the caller, matching `dor ensure`.
     focusNeutral?: boolean;
     preserveSource?: boolean;
+    /** Adopt a browser controller that launched before placement. */
+    preparedId?: string;
   }): ParseResult<{
     id: string;
     ref: string;
@@ -1399,7 +1414,7 @@ export function Wall({
     const referenceVisible = nav.hasPane(reference.id);
     if (!referenceVisible) return { ok: false, message: `surface '${reference.ref}' is not visible` };
 
-    const newId = generatePaneId();
+    const newId = preparedId ?? generatePaneId();
     const browserMeta = browserLeafMeta(title, params);
     // Replace-in-place is reserved for a reference with no browser — a blank
     // untouched shell. Anything holding web content (a browser surface today, a
@@ -1428,7 +1443,8 @@ export function Wall({
     // direction derives from it.
     const lathEdge = lath.store.autoEdgeFor(reference.id);
     const horizontal = lathEdge === 'right';
-    lath.store.addLeaf(newId, browserMeta, { refId: reference.id, edge: lathEdge });
+    const placed = lath.store.addLeaf(newId, browserMeta, { refId: reference.id, edge: lathEdge });
+    if (!placed.ok) return { ok: false, message: 'Could not split the source pane' };
     const selectedNew = settleAddSelection(!!focusNeutral, false, newId);
     onEventRef.current?.({
       type: 'split',
@@ -2018,53 +2034,74 @@ export function Wall({
       void resolveToolApproval(id, choice);
     },
   }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, requestKill, replaceSurface, buildDorSurfaces, createContentSurface, surfaceRefForId, resolveToolApproval, lath, nav]);
-  const contextPortLaunches = useRef(new Map<string, Promise<void>>());
   const openContextPort = useCallback(async (id: string, entry: PortUrlEntry, mode: PortMode): Promise<void> => {
     if (mode === 'system') { getPlatform().openExternal?.(entry.url); return; }
+    const opening = terminalContextRef.current;
+    const generation = contextLaunchGeneration.current;
+    const current = () => generation === contextLaunchGeneration.current && activeRef.current && !closingWorkspaceRef.current
+      && opening === terminalContextRef.current && opening?.id === id && !opening.closing
+      && nav.hasPane(id) && !lath.isDying(id) && !isClosingSurface(id);
+    const cancelledLaunch = () => new DOMException('Browser launch cancelled', 'AbortError');
+    if (!current()) throw cancelledLaunch();
     const cwd = getTerminalPaneState(id)?.cwd?.path;
-    // Null for the iframe embed, which launches no browser.
     const provider = parseRenderMode(mode).provider;
-    // Persisted as `contextPortKey`: agent-browser keeps the `agent` it had
-    // before Playwright, so a restored pane is still found and revealed.
+    // Keep the persisted agent-browser suffix from before multiple providers.
     const key = `${id}:${entry.port}:${provider === 'agent-browser' ? 'agent' : provider ?? 'iframe'}`;
     const pending = contextPortLaunches.current.get(key);
-    if (pending) { await pending; return openContextPort(id, entry, mode); }
+    if (pending) {
+      await pending.done;
+      if (current()) return openContextPort(id, entry, mode);
+      throw cancelledLaunch();
+    }
+    let preparedId: string | undefined;
+    let committed = false;
+    let params: Record<string, unknown> = {
+      surfaceType: 'browser', renderMode: mode, url: entry.url, cwd, syncEngaged: false, contextPortKey: key,
+    };
+    // A prepared browser that never became a Pane closes, at once on cancel.
+    // Cancelling bumps the generation first, so `current()` sees it too.
+    const discard = () => { if (preparedId && !committed) void closeBrowserSurface(preparedId, params); };
     const operation = (async () => {
-      const reference = buildDorSurfaces().find(surface => surface.id === id);
-      if (!reference) throw new Error('The parent terminal is no longer available');
       const existing = findSurfaceByParams(params => (params as { contextPortKey?: unknown } | undefined)?.contextPortKey === key);
       if (existing) {
         revealSurface(existing.id);
-        // One intent: a pop-out/pop-in relaunch opens the URL rather than
-        // racing a navigation into its close/reopen gap — reaching the
-        // Surface's controller even before a revealed Door mounts it.
         if (mode !== 'iframe') requestBrowserRenderMode(existing.id, lath.getMeta(existing.id)?.params ?? {}, mode, { url: entry.url });
         else updateSurfaceParams(existing.id, { url: entry.url });
         return;
       }
       if (provider && !hostSupportsBrowser(provider)) throw new Error(providerUnavailable(provider));
-      const created = createContentSurface({ minimized: false, reference, preserveSource: true,
-        params: {
-          surfaceType: 'browser', renderMode: mode, url: entry.url, cwd, syncEngaged: false, contextPortKey: key,
-          // The pane launches its own browser; a failure takes it along.
-          ...(provider ? { launchFallback: 'close' satisfies LaunchFallback } : {}),
-        },
-        title: hostPathDisplay(entry.url, true) });
-      if (!created.ok) throw new Error(created.message);
-      const launched = mode === 'iframe' ? null : whenBrowserLaunched(created.value.id);
-      enterTerminalMode(created.value.id);
-      // Reported in context.
-      const failure = await launched;
-      if (failure) throw new Error(failure);
+      try {
+        if (provider) {
+          preparedId = generatePaneId();
+          const controller = acquireAgentBrowserSurfaceController(preparedId, { ...params, renderMode: mode });
+          const result = await controller.prepareForPlacement();
+          if (result.status === 'cancelled' || !current()) throw cancelledLaunch();
+          if (result.status === 'failed') throw new Error(result.error);
+          params = { ...params, ...result.params };
+        }
+        const reference = buildDorSurfaces().find(surface => surface.id === id);
+        if (!reference) throw new Error('The parent terminal is no longer available');
+        const created = createContentSurface({ minimized: false, reference, preserveSource: true,
+          preparedId, params, title: hostPathDisplay(entry.url, true) });
+        if (!created.ok) throw new Error(created.message);
+        committed = true;
+        enterTerminalMode(created.value.id);
+      } finally {
+        discard();
+      }
     })();
-    contextPortLaunches.current.set(key, operation);
-    try { await operation; } finally { contextPortLaunches.current.delete(key); }
-  }, [buildDorSurfaces, findSurfaceByParams, createContentSurface, enterTerminalMode, revealSurface, updateSurfaceParams, lath]);
+    const launch = { done: operation, cancel: discard };
+    contextPortLaunches.current.set(key, launch);
+    try { await operation; } finally {
+      if (contextPortLaunches.current.get(key) === launch) contextPortLaunches.current.delete(key);
+    }
+  }, [buildDorSurfaces, findSurfaceByParams, createContentSurface, enterTerminalMode, revealSurface, updateSurfaceParams, generatePaneId, lath, nav]);
   const contextActions = useMemo(() => ({
     id: contextSourceId,
     mounted: terminalContext,
-    open: (id: string, options?: TerminalContextOpenOptions) => { if (toolPendingFromParams(lath.getMeta(id)?.params) || isHelperSession(id) || isClosingSurface(id) || lath.isDying(id)) return; setTerminalContext({ id, ...options }); },
+    open: (id: string, options?: TerminalContextOpenOptions) => { if (toolPendingFromParams(lath.getMeta(id)?.params) || isHelperSession(id) || isClosingSurface(id) || lath.isDying(id)) return; cancelContextPortLaunches(); setTerminalContext({ id, ...options }); },
     close: () => {
+      cancelContextPortLaunches();
       const instant = motionIsInstant();
       setTerminalContext(current => {
         if (!current || instant) return null;
@@ -2087,7 +2124,7 @@ export function Wall({
       enterTerminalMode(helper.id);
     },
     openPort: openContextPort,
-  }), [contextSourceId, terminalContext, lath, nav, surfaceRefForId, enterTerminalMode, openContextPort]);
+  }), [contextSourceId, terminalContext, lath, nav, surfaceRefForId, enterTerminalMode, openContextPort, cancelContextPortLaunches]);
 
   const wallActionsRef = useRef(wallActions);
   wallActionsRef.current = wallActions;

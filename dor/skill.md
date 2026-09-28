@@ -21,6 +21,32 @@ These override your usual defaults. They matter more than anything else here:
 
 The rest of this guide is how to do everything well.
 
+## When `dor` cannot connect
+
+Run `dor list` before creating or driving surfaces; verify the `(you)` row is
+this agent's terminal. A successful `dor skill` only prints bundled text and
+does not prove the control connection works.
+
+- **`EPERM` / `EACCES`:** the tool sandbox may block the local socket. Retry
+  `dor list` through the tool's normal approval mechanism outside the sandbox.
+- **`ENOENT`, refused connections, or authentication failures:** the host may
+  have restarted, or the agent's tool runner may have inherited another host's
+  environment. If the user's `dor list` works, compare the non-secret
+  `DORMOUSE_HOST`, `DORMOUSE_SURFACE_ID`, and `DORMOUSE_CONTROL_SOCKET` values.
+  Never print the control token, guess another socket, or retarget only the
+  socket: endpoint, credentials, and caller identity belong together.
+
+**Codex's shared daemon can retain stale terminal context.** Tool commands can
+inherit an old host's environment even while the Codex UI is in a current
+Dormouse terminal. When this mismatch is confirmed, ask the user to exit Codex
+and resume from the working terminal with `codex --no-daemon resume`.
+`codex features disable daemon_auto_start` persists the preference; an
+existing daemon also needs `codex app-server daemon stop` before restarting
+normally. Stopping it can interrupt other Codex sessions: coordinate with the
+user first. Check the installed CLI's help before prescribing these options,
+then verify `dor list` after reconnecting. Do not switch to Computer Use or
+bypass authentication to work around stale context.
+
 ## Which browser command
 
 - **`dor agent-browser`** — the default: a browser you read and drive, in a pane the user

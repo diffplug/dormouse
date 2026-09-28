@@ -67,6 +67,24 @@ it('keeps the opening action focused and Escape available while suppressing repe
   expect(document.activeElement).toBe(launch);
 });
 
+it('keeps a pending port action focused, blocks repeats, and clears feedback on failure', async () => {
+  const launch = Promise.withResolvers<void>();
+  props.onPort = vi.fn(() => launch.promise);
+  render();
+  const open = button('Open in agent-browser screencast');
+  act(() => open.focus());
+  await click('Open in agent-browser screencast');
+  expect(open.textContent).toContain('Opening…');
+  expect(open.getAttribute('aria-busy')).toBe('true');
+  expect(open.disabled).toBe(false);
+  expect(document.activeElement).toBe(open);
+  await click('Open in agent-browser screencast');
+  expect(props.onPort).toHaveBeenCalledOnce();
+  await act(async () => launch.reject(new Error('Launch failed')));
+  expect(open.hasAttribute('aria-busy')).toBe(false);
+  expect(container.querySelector('[data-context-diagnostic]')?.textContent).toBe('Launch failed');
+});
+
 it('uses labeled title, directory and port actions without a redundant heading', () => {
   render(); expect(container.querySelector('h1,h2,h3')).toBeNull();
   for (const label of ['Explain this title', 'Copy absolute path', 'Open in Finder', 'Open in system browser', 'Open in iframe embed', 'Open in agent-browser screencast', 'Open in agent-browser popout']) expect(button(label)).not.toBeNull();

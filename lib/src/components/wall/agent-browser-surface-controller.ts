@@ -350,6 +350,9 @@ export class AgentBrowserSurfaceController {
   private pendingParams = new Map<string, unknown>();
   private pendingTitle: string | null = null;
   private pendingLaunchFailure: string | null = null;
+  // `prepareForPlacement`'s waiter: why the first launch failed, else null
+  // (up, or released).
+  private launchSettled: ((error: string | null) => void) | null = null;
   // The value this controller last wrote to each field it also takes from
   // params, until params show it back. Params predating the write — buffered
   // while detached, then fed by a remounted view before the flush, or a render
@@ -508,6 +511,31 @@ export class AgentBrowserSurfaceController {
   }
 
   // --- one-time start (from the first attach; keeps side effects out of render) ---
+
+  /** Start a context launch without a leaf or view. Buffered params become the
+   * initial leaf metadata on success; mounting adopts this same controller. */
+  async prepareForPlacement(): Promise<
+    | { status: 'ready'; params: Record<string, unknown> }
+    | { status: 'failed'; error: string }
+    | { status: 'cancelled' }
+  > {
+    const error = await new Promise<string | null>((resolve) => {
+      this.launchSettled = resolve;
+      this.ensureStarted();
+    });
+    if (this.released) return { status: 'cancelled' };
+    if (error) return { status: 'failed', error };
+    // Handed to the leaf, so the first attach has nothing to flush.
+    const params = Object.fromEntries(this.pendingParams);
+    this.pendingParams.clear();
+    return { status: 'ready', params };
+  }
+
+  private settleLaunch(error: string | null): void {
+    const settle = this.launchSettled;
+    this.launchSettled = null;
+    settle?.(error);
+  }
 
   private ensureStarted(): void {
     if (this.phase.k !== 'idle') return;
@@ -781,8 +809,8 @@ export class AgentBrowserSurfaceController {
    * Open this Surface's page in a new browser — in `launchSession` when params
    * name one — and bind the session the host answers with. Every GUI-created
    * browser Surface starts here, and so does one restored before its launch
-   * landed. Resolves once the browser is up, never waiting for the page; the
-   * Wall's `whenBrowserLaunched` hears the outcome.
+   * landed. Resolves once the browser is up, never waiting for the page;
+   * `prepareForPlacement` hears the outcome.
    */
   private launch(): void {
     const url = this.launchUrl();
@@ -821,7 +849,7 @@ export class AgentBrowserSurfaceController {
         if (!res.ok || !res.session) {
           const error = res.error ?? `Could not open ${this.label}`;
           this.setPhase({ k: 'ended', error });
-          settleLaunch(this.id, error);
+          this.settleLaunch(error);
           this.reportLaunchFailure(error);
           return;
         }
@@ -842,7 +870,7 @@ export class AgentBrowserSurfaceController {
         this.openedByHost(url);
         if (res.stream) this.goLive(res.stream);
         else this.attach(false);
-        settleLaunch(this.id, null);
+        this.settleLaunch(null);
       });
   }
 
@@ -1687,7 +1715,7 @@ export class AgentBrowserSurfaceController {
     // A launch in flight lands on a released controller, which closes a
     // session the host minted for it; whoever awaited one hears that the
     // Surface is gone.
-    settleLaunch(this.id, null);
+    this.settleLaunch(null);
     if (this.parkTimer) { clearTimeout(this.parkTimer); this.parkTimer = undefined; }
     this.teardownPaneSizeObserver();
     this.paneSize = null;
@@ -1742,8 +1770,7 @@ export function getAgentBrowserSurfaceController(id: string): AgentBrowserSurfac
 export function disposeAgentBrowserSurfaceController(id: string): void {
   const controller = registry.get(id);
   registry.delete(id);
-  if (controller) controller.dispose();
-  else settleLaunch(id, null);
+  controller?.dispose();
 }
 
 /**
@@ -1819,30 +1846,10 @@ function closeBrowserSessionFromParams(params: unknown): Promise<void> {
 export function closeBrowserSurface(id: string, params: unknown): Promise<void> {
   const controller = registry.get(id);
   registry.delete(id);
-  if (!controller) settleLaunch(id, null);
   const closed = controller?.close();
   const closing = [closed?.done ?? Promise.resolve()];
   if (agentBrowserSessionFromParams(params) !== (closed?.session ?? null)) closing.push(closeBrowserSessionFromParams(params));
   return Promise.all(closing).then(() => {});
-}
-
-// --- first-launch outcomes (the Wall's side of a controller-owned launch) ---
-
-const launchWaiters = new Map<string, (error: string | null) => void>();
-
-/**
- * The outcome of the first launch of the session-less Surface `id` the caller
- * just created: `null` once it streams — or once the Surface is gone — else why
- * it failed. Register before the Surface can mount, and at most once per id.
- */
-export function whenBrowserLaunched(id: string): Promise<string | null> {
-  return new Promise((resolve) => launchWaiters.set(id, resolve));
-}
-
-function settleLaunch(id: string, error: string | null): void {
-  const settle = launchWaiters.get(id);
-  launchWaiters.delete(id);
-  settle?.(error);
 }
 
 /** For tests: controllers now outlive panel unmount, so a suite reusing a

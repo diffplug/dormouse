@@ -675,7 +675,10 @@ bootstrap so each is exactly as stable as it needs to be:
   gitignored `generated-skill.ts`, so `dor skill` prints text version-locked to
   the CLI that staged it and the staged package stays launchers + bundle. **The
   skill body must carry no environment detection:** if `dor skill` ran, `dor` is
-  available — detection lives only in the stub.
+  available — detection lives only in the stub. **Its connection
+  troubleshooting must distinguish sandbox socket denial from stale caller
+  context**, directing agents to sandbox approval or a fresh caller environment,
+  never socket discovery or authentication bypass.
 - **Bootstrap is a loud stub that barely drifts.** `dor skill --install` writes
   a marker-delimited block (`<!-- dor-skill:begin` … `dor-skill:end -->`) into
   the project's agent instructions file, resolved against the invoking shell's
