@@ -51,21 +51,23 @@ The generator still parses it on every build, and the lint's guide checks still
 run, because both constrain the guide as a *Marketplace listing* rather than as
 a website page (rationale).
 
-The guide is host-neutral at the top level; VS Code and standalone instructions
-live under explicit subsections rather than relying on the website to rewrite
-host-specific prose. Its sections are:
+The guide is written for a VS Code user, because every channel that publishes
+it is an extension listing or the extension's folder on GitHub; the standalone
+app gets one section pointing at its download. Its sections are:
 
 ```text
-## Get Dormouse
-## Layout and panes
-## Alerts and TODOs
-## Browsers for you and your agents
-## Mouse, selection, and copy/paste
+## Tmux with browsers
+## Alerts
+## Push notifications you can self-host
+## Terminals that know their ports
+## Browsers for you (and your agents)
+## Select and copy-paste like you meant
+## Getting started
 ## Keyboard shortcuts
-## Themes and host integration
-## Getting started  (### VS Code, ### Standalone)
-## Automation and agents
-## Help and project links
+## Coding agents
+## Dormouse Hosted
+## Standalone app
+## Links
 ```
 
 Content invariants, enforced by the public-doc lint where mechanically
@@ -84,7 +86,7 @@ checkable and by review otherwise:
 - VS Code command names in getting started exist in `vscode-ext/package.json`.
 - Detailed CLI behavior links to `/dor`; the complete agent operating guide
   links to `/agent-skill`; the hosted-services preview links to `/hosted`.
-- The guide contains no `TODO:` placeholders and no copied internal future
+- The guide renders no `TODO:` placeholders and no copied internal future
   design.
 
 ### Marketplace and Open VSX constraints
@@ -158,7 +160,9 @@ Raw HTML is disabled except for a narrow `<img>` allowlist carrying only `src`,
 `alt`, `width`, `height`, and `title`, with a relative or `https:` source. Every other tag,
 and every other attribute on `<img>`, is rejected outright. The exception exists
 because the guide's inline 22px alert-state icons need sizing and portable
-Markdown has no syntax for it; it is not a general licence for HTML.
+Markdown has no syntax for it; it is not a general licence for HTML. An HTML
+comment on its own lines is dropped, as GitHub drops it; one sharing a line is
+rejected.
 
 **Must assign unique heading ids**, reserving authored and generated numeric
 suffixes alike. Heading ids come from one GitHub-style slugger, including
@@ -286,10 +290,10 @@ below them again (`website/src/pages/DorDocs.test.tsx`).
 `DOCS_DEFAULT_PATH` names — a 302, because the target is a judgement call we
 expect to revisit and a 301 outlives it in readers' caches. There is no page at
 `/docs` itself, and `checkDocsEntrypoint` keeps the redirect and the constant
-saying the same thing. **Never serve a page under `/docs`**: reference pages
-live at the top level (`/dor`, `/security`), and each old `/docs/<page>` URL keeps
-a 301 in `_redirects` because it is in READMEs and external links. Never give a
-page a slug that collides with `/api`, `/ws`, or another route. `Docs` joins the marketing nav on desktop only; on a
+saying the same thing. Reference pages live at the top level (`/dor`,
+`/security`), and each old `/docs/<page>` URL keeps a 301 in `_redirects` because
+it is in READMEs and external links. **Never give a page a slug that
+`website/src/routes.ts` or `website/public/` already serves.** `Docs` joins the marketing nav on desktop only; on a
 phone the docs are reached from the homepage's own links.
 
 **These pages follow the reader's theme; the rest of the site does not.** They
@@ -563,8 +567,9 @@ consumers.
 lint, checks the rules above mechanically; each rule names its own check, and
 the lint's header comment is the inventory. The rules with no other home:
 
-- **No public source carries a `TODO:` placeholder** — the two READMEs and
-  every Markdown page `SITE_ROUTES` publishes.
+- **No public source renders a `TODO:` placeholder** — the two READMEs and
+  every Markdown page `SITE_ROUTES` publishes. A pending image may wait in an
+  HTML comment.
 - **Public links use canonical HTTPS URLs, and a local link resolves** — read
   off the parsed tree, so a link-shaped string in a code span is not a link.
   `SELF_HOST.md` and the security spec get only the HTTPS half; spec-lint
@@ -576,6 +581,9 @@ the lint's header comment is the inventory. The rules with no other home:
   Relay nor auditing the repository is part of installing one.
 - **The homepage links every page whose `linkedFrom` names it**, root-relatively,
   because a rewritten section can strand a page's only link.
+- **No page is served under `/docs`, and the homepage links none there**:
+  `checkNoDocsPrefixPages` fails on a `DOCS_PAGES` path or a homepage href
+  starting with `/docs`, which can only be the entrypoint or a legacy 301.
 - **Public copy does not present staged WebRTC as shipped**, for as long as
   WebRTC is still under `## Future` in [remote-api.md](remote-api.md).
 

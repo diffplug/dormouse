@@ -110,7 +110,7 @@
     "test": "pnpm typecheck && vitest run",
     "test:smoke": "vitest run --config vitest.smoketest.config.mts",
     "prebuild": "pnpm --filter remote-lib-common build",
-    "build": "pnpm stage:dor-cli && node scripts/esbuild.mjs && cp -RL node_modules/node-pty dist/node-pty && rm -rf dist/shell-integration && cp -RL ../standalone/sidecar/shell-integration dist/shell-integration",
+    "build": "pnpm stage:dor-cli && node scripts/esbuild.mjs && rm -rf dist/node-pty && cp -RL node_modules/node-pty dist/node-pty && node scripts/stage-native-direct.mjs && rm -rf dist/shell-integration && cp -RL ../standalone/sidecar/shell-integration dist/shell-integration",
     "stage:dor-cli": "pnpm --filter dor build && node ../scripts/stage-dor-cli.mjs vscode-ext/dor-cli",
     "watch": "pnpm --filter remote-lib-common build && pnpm stage:dor-cli && node scripts/esbuild.mjs --watch",
     "package": "vsce package --no-dependencies --baseImagesUrl https://dormouse.sh/guide --out dormouse.vsix",
@@ -119,8 +119,17 @@
     "publish:openvsx": "ovsx publish --no-dependencies --baseImagesUrl https://dormouse.sh/guide"
   },
   "dependencies": {
+    "node-datachannel": "0.33.4",
     "node-pty": "1.2.0-beta.15",
     "ws": "^8.18.0"
+  },
+  "optionalDependencies": {
+    "@node-datachannel/darwin-arm64": "0.33.4",
+    "@node-datachannel/darwin-x64": "0.33.4",
+    "@node-datachannel/linux-arm64-gnu": "0.33.4",
+    "@node-datachannel/linux-x64-gnu": "0.33.4",
+    "@node-datachannel/win32-arm64-msvc": "0.33.4",
+    "@node-datachannel/win32-x64-msvc": "0.33.4"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.0",

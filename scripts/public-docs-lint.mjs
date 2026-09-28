@@ -129,7 +129,8 @@ function linksIn(rel) {
 
 function checkNoPlaceholders() {
   for (const rel of PUBLIC_MARKDOWN) {
-    if (/\bTODO:/.test(src[rel])) fail(`${rel}: contains a TODO: placeholder`);
+    // An HTML comment renders nowhere, so a pending image may wait in one.
+    if (/\bTODO:/.test(src[rel].replace(/<!--[\s\S]*?-->/g, ''))) fail(`${rel}: contains a TODO: placeholder`);
   }
 }
 
@@ -459,6 +460,24 @@ function checkDocsEntrypoint() {
   if (status !== '302') fail(`${REDIRECTS}: /docs must redirect with 302, not ${status ?? '(none)'}`);
 }
 
+/**
+ * No page is served under `/docs`: the prefix survives only as the entrypoint
+ * and as legacy 301s (docs/specs/website-docs.md -> Reference page chrome), so
+ * a registry path or homepage href there is a page added back under it.
+ */
+function checkNoDocsPrefixPages() {
+  for (const page of DOCS_PAGES) {
+    if (page.path === DOCS_ENTRYPOINT_PATH || page.path.startsWith(`${DOCS_ENTRYPOINT_PATH}/`)) {
+      fail(`docs-pages.ts: ${page.path} is under ${DOCS_ENTRYPOINT_PATH}; reference pages live at the top level`);
+    }
+  }
+  for (const [, href] of (src[HOMEPAGE] ?? '').matchAll(/sitePath\("(\/[^"]*)"\)/g)) {
+    if (href === DOCS_ENTRYPOINT_PATH || href.startsWith(`${DOCS_ENTRYPOINT_PATH}/`)) {
+      fail(`${HOMEPAGE}: links to ${href}, which can only be the entrypoint or a legacy redirect`);
+    }
+  }
+}
+
 /** Generated data must be internally consistent. */
 async function checkGenerated() {
   let data;
@@ -622,6 +641,7 @@ const checks = [
   checkSiteOrigin,
   checkDocsEntrypoint,
   checkRoutesToReferences,
+  checkNoDocsPrefixPages,
   checkGenerated,
   checkNoStagedClaims,
   checkNoDimmedDocsText,
