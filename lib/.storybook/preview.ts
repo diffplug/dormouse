@@ -32,7 +32,7 @@ import {
   setAlertSpeechState,
   type AlertSpeechState,
 } from '../src/lib/alert-speech-state';
-import { VSCODE_THEMES, VSCODE_THEME_TYPES } from './themes';
+import { SNAPSHOT_EDITOR_FONT_FAMILY, VSCODE_THEMES, VSCODE_THEME_TYPES } from './themes';
 import {
   makeStubBurrowLink,
   type PrimedBurrow,
@@ -210,8 +210,11 @@ function applyStorybookTheme(themeName: string) {
 
   if (theme) {
     for (const [key, value] of Object.entries(theme)) {
-      root.style.setProperty(key, value);
-      body.style.setProperty(key, value);
+      const resolvedValue = visualSnapshot && key === '--vscode-editor-font-family'
+        ? SNAPSHOT_EDITOR_FONT_FAMILY
+        : value;
+      root.style.setProperty(key, resolvedValue);
+      body.style.setProperty(key, resolvedValue);
     }
   }
 

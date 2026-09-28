@@ -284,6 +284,14 @@ picks. `PREFERRED_STORYBOOK_THEME` in `lib/.storybook/preview.ts` names
 the default simulated host theme, **falling back to the first bundled theme** so
 a renamed or removed bundle cannot leave stories without theme vars.
 
+**Must name `DejaVu Sans` before generic `monospace` as the symbol fallback in
+visual snapshots, and install `fonts-dejavu-core` in the Argos job** (rationale).
+Primary host font families retain precedence. The `TerminalContext` and
+`MobileTerminalUi` stories pin prompt and gesture-label glyphs.
+
+Source of truth: `SNAPSHOT_EDITOR_FONT_FAMILY` in `lib/.storybook/themes.ts`;
+`applyStorybookTheme` in `lib/.storybook/preview.ts`; `.github/workflows/argos.yml`.
+
 ## Theme debugger
 
 The Theme Debugger serves VSCode, standalone, and the website
