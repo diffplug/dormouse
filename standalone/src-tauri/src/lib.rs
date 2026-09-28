@@ -10,6 +10,8 @@ mod workspaces;
 // interception).
 #[cfg(target_os = "macos")]
 mod macos_terminate;
+#[cfg(target_os = "macos")]
+mod macos_siri_affordance;
 use quit_state::{ArrivalQueue, CleanupGate, CloseMachine, QuitAction, QuitIntent, QuitMachine};
 use routing::{Route, RouteView};
 use std::{
@@ -4169,6 +4171,7 @@ pub fn run() {
                 set_macos_dock_icon();
                 // The delegate exists by now, which is what this splices onto.
                 macos_terminate::install(app);
+                macos_siri_affordance::install(app);
             }
             // A window-level exit request (§Trigger interception). The flow's own
             // app.exit(0) re-enters here with approved=true and passes; `code`
