@@ -658,10 +658,8 @@ hand. Only browser Surfaces carry an explicit join key (`dor agent-browser --key
 `dor playwright --key <name>`), because their session is held externally by the browser
 CLI.
 
-The worked examples — dev-server sharing, sub-agent launch and await, paired
-browser keys, multi-worktree, minimized watchers, port-owner handoff, safe
-cleanup — are `dor/skill.md`'s "## Recipes", which ships with the CLI
-([Agent Skill](#agent-skill)).
+The worked examples are `dor/skill.md`'s "## Recipes", which ships with the
+CLI ([Agent Skill](#agent-skill)).
 
 ## Agent Skill
 
