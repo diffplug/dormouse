@@ -21,7 +21,7 @@ The harness:
 - starts the standalone Node sidecar directly
 - starts a localhost HTTP/SSE bridge for browser-side `PlatformAdapter` calls, gated by a per-run token it bakes into the bridge URL the page is built against (`VITE_DORMOUSE_BROWSER_DEV_HOST`) — not into the page's own address, so there is no `?t=` in the address bar to look for. Nothing to pass yourself, but the bridge answers `404` to anything without it, so drive the app through `agent-browser` at the Vite port and not the bridge port. To poke the bridge by hand, use the `bridge token:` and ready-made `curl` the harness prints at startup.
 - starts Vite with `VITE_DORMOUSE_BROWSER_DEV_HOST`
-- opens the app in `agent-browser`
+- opens the app in `agent-browser`, or, run as `dor tool innerdogfood`, leaves it to the Tool's own browser
 - mirrors browser console logs as `[browser log] ...` in the harness terminal
 
 Port and session overrides are documented in `docs/specs/standalone.md` → "Standalone browser-dev harness".
@@ -46,11 +46,11 @@ agent-browser --session <outer-session> eval '(()=>(!!document.querySelector("te
 
 Browser console mirroring (`[browser log] ...`) keeps working after a manual re-open, so you don't lose log visibility.
 
-Parallel worktrees are isolated automatically (`docs/specs/standalone.md` → "Standalone browser-dev harness"). Inside Dormouse, use `dor ensure -- pnpm innerdogfood`; the harness opens its browser pane. Stop only your own harness with Ctrl-C after a timing run.
+Parallel worktrees are isolated automatically (`docs/specs/standalone.md` → "Standalone browser-dev harness"). Inside Dormouse, use `dor tool innerdogfood`; the Tool shows the harness in its own pane. Stop only your own harness with Ctrl-C after a timing run.
 
 ## Driving Dormouse
 
-Use the outer harness session printed by `innerdogfood`:
+Use the browser command printed by `innerdogfood` — `dor agent-browser --surface surface:N` under `dor tool innerdogfood`, or the outer harness session otherwise:
 
 ```sh
 agent-browser --session <outer-session> snapshot -i

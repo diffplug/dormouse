@@ -81,7 +81,7 @@ DORMOUSE_NODE_BINARY="$DORMOUSE_MAIN_CHECKOUT/standalone/src-tauri/binaries/node
   root of the worktree. Dev builds use a separate state root
   (`<app_data_dir>/dev`), so dev and installed app never share snapshots.
 - **Browser harness (one window only):** inside Dormouse,
-  `dor ensure -- pnpm innerdogfood`; outside, `pnpm innerdogfood`. It prints the
+  `dor tool innerdogfood`; outside, `pnpm innerdogfood`. It prints the
   URL and an `agent-browser` command. The skill
   `.claude/skills/debug-standalone-agent-browser/SKILL.md` covers driving it.
   The harness simulates **one** window: transfer, tear-out, quit voting, and

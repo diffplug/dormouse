@@ -364,6 +364,29 @@ async function openAgentBrowser() {
   log(`try: ${command} snapshot -i`);
 }
 
+/**
+ * The caller's ref when this harness runs as a Dor Tool, else undefined. The
+ * Tool frames the announced port in its own pane (docs/specs/dor-tool.md ->
+ * Serving), so a keyed browser opened on top would split off a second copy of
+ * the app. `--kind tool` leaves the caller in the list only when it is a Tool.
+ */
+async function callerToolRef() {
+  if (!insideDormouse || process.env.DORMOUSE_BROWSER_DEV_AB_SESSION) return undefined;
+  const list = spawn('dor', ['list', '--kind', 'tool', '--json'], { cwd: repoRoot, stdio: ['ignore', 'pipe', 'ignore'] });
+  let stdout = '';
+  list.stdout.on('data', (chunk) => { stdout += chunk; });
+  const code = await new Promise((resolve) => {
+    list.once('error', () => resolve(-1));
+    list.once('close', resolve);
+  });
+  if (code !== 0) return undefined;
+  try {
+    return JSON.parse(stdout).caller_surface_ref ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function shutdown(code = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
@@ -406,7 +429,9 @@ try {
   process.stdout.write(
     `\u001b]367;serve;${JSON.stringify({ port: vitePort, name: 'Dormouse dev', v: 1 })}\u001b\\`,
   );
-  await openAgentBrowser();
+  const toolRef = await callerToolRef();
+  if (toolRef) log(`Tool ${toolRef} shows the app; try: dor agent-browser --surface ${toolRef} snapshot -i`);
+  else await openAgentBrowser();
   log('running; Ctrl-C to stop');
 } catch (err) {
   console.error(err);

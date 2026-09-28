@@ -204,7 +204,7 @@ describe('port: auto (autobind)', () => {
   });
 
   it('does not frame the bridge when vite binds a tick later', async () => {
-    // The standalone harness: the dev bridge (1422) binds before vite (1420).
+    // The innerdogfood harness: the dev bridge (1422) binds before vite (1420).
     // Committing on first sighting would frame the JSON bridge permanently,
     // since a framed leaf is never scanned again. This is the regression that
     // motivates the settle window.

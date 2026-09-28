@@ -18,7 +18,7 @@ tools:
     # reveal the first instead of starting.
     prespawn_dedupe: [storybook, $PROJECT_ROOT]
 
-  standalone-harness:
+  innerdogfood:
     run: pnpm innerdogfood
     # A real browser rather than an iframe, so an agent can drive the harness
     # with `dor agent-browser --surface surface:N <verb>`.
@@ -27,4 +27,29 @@ tools:
     # The bridge and Vite each bind an OS-assigned port. Announce Vite's actual
     # port via OSC 367 so Dormouse selects the UI from that pair of listeners.
     port: announced
-    prespawn_dedupe: [standalone-harness, $PROJECT_ROOT]
+    prespawn_dedupe: [innerdogfood, $PROJECT_ROOT]
+
+  website:
+    run: pnpm dev:website
+    # Agents check docs pages here, so a browser they can drive.
+    render: agent-browser-screencast
+    # Vite moves to the next free port when 5173 is taken.
+    port: auto
+    prespawn_dedupe: [website, $PROJECT_ROOT]
+
+  relay:
+    run: pnpm dev:relay
+    # Pocket signs in with passkeys and a session cookie, which an iframe drops.
+    render: agent-browser-screencast
+    # The dev Relay binds an OS-assigned port and derives its origin from it.
+    port: auto
+    prespawn_dedupe: [relay, $PROJECT_ROOT]
+
+  hosted:
+    run: pnpm dev:hosted
+    # Email sign-in sets a session cookie, which an iframe drops.
+    render: agent-browser-screencast
+    # One listener serves Vite and auth on an OS-assigned port; Postgres runs in
+    # Docker, outside this process tree.
+    port: auto
+    prespawn_dedupe: [hosted, $PROJECT_ROOT]

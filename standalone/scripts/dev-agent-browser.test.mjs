@@ -30,6 +30,10 @@ async function fixture(t) {
   `);
   const cli = path.join(bin, 'cli.cjs');
   await writeFile(cli, `
+    if (process.argv[2] === 'list' && process.env.TEST_DOR_LIST) {
+      console.log(process.env.TEST_DOR_LIST);
+      process.exit(0);
+    }
     console.log('BROWSER_ARGS ' + JSON.stringify(process.argv.slice(2)));
     if (process.env.TEST_BROWSER_HANG) {
       process.on('SIGTERM', () => {});
@@ -203,6 +207,17 @@ test('explicit ports and raw browser sessions are honored; occupied ports fail w
   assert.equal(pinned.app, one.app);
   assert.equal(pinned.bridge, one.bridge);
   assert.deepEqual(pinned.args, ['agent-browser', '--session', 'explicit-session', 'open', pinned.app]);
+});
+
+test('run as a Tool, leaves the browser to the Tool instead of opening a second', { timeout: 60000 }, async t => {
+  const harness = await fixture(t);
+  const run = harness.start({
+    DORMOUSE_SURFACE_ID: 'outer-pane',
+    TEST_DOR_LIST: JSON.stringify({ caller_surface_ref: 'surface:4', surfaces: [] }),
+  });
+  await run.wait(/running; Ctrl-C to stop/);
+  assert.match(run.output, /Tool surface:4 shows the app; try: dor agent-browser --surface surface:4 snapshot -i/);
+  assert.doesNotMatch(run.output, /BROWSER_ARGS/);
 });
 
 test('browser startup failure closes the harness listeners and sidecar', { timeout: 30000 }, async t => {

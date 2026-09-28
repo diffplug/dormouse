@@ -9,8 +9,8 @@ pnpm install     # install deps
 pnpm build       # build lib, vscode extension, Pocket, and website
 ```
 
-**Inside Dormouse, run `innerdogfood`** — `dor ensure -- pnpm innerdogfood`.
-The harness opens its browser pane and prints its URL and browser command
+**Inside Dormouse, run `innerdogfood`** — `dor tool innerdogfood`.
+The Tool shows the harness in its own pane and prints the command to drive it
 (`docs/specs/standalone.md` → "Standalone browser-dev harness").
 
 ## Worktrees
