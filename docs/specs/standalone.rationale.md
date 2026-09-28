@@ -47,7 +47,7 @@
 | `WKWebViewConfiguration.writingToolsBehavior = none` | 12 |
 | `allowsWritingToolsAffordance` answering NO on a `WKWebView` subclass | 0 |
 
-In a real build the same day, with the xterm textarea focused and typed into, a build without `suppress` built the affordance, and a build with it answered NO and built none. The live webview's `object_getClass` there is KVO's `NSKVONotifying_` subclass, which is why `suppress` asks the object for `class`.
+In a real build the same day, with the xterm textarea focused and typed into, a build without the override built the affordance, and a build with it answered NO and built none. The live webview's `object_getClass` there is KVO's `NSKVONotifying_` subclass, which is why the override asks the object for `class`.
 
 ## Windows
 

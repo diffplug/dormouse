@@ -395,16 +395,12 @@ chord the webview already handles.**
 
 ## Siri affordance
 
-**Never show macOS's Siri affordance in a Dormouse webview.** It is AppKit's
-Writing Tools affordance, which appears whenever an editable field's caret sits
-still; xterm keeps a focused, empty textarea at the terminal cursor, so it fired
-after every typing pause (rationale). `suppress` answers NO to
-`allowsWritingToolsAffordance` on the class of each window's `WKWebView`, which
-is wry's subclass and never `WKWebView` itself, at `RunEvent::Ready` for open
-windows and in `build_window` for later ones. The override is class-wide, so it
-covers every Dormouse text field and browser pane, not only the terminal.
+**Never show macOS's Siri affordance in a Dormouse webview** (rationale).
+`install` answers NO to `allowsWritingToolsAffordance` on wry's `WKWebView`
+subclass, never on `WKWebView` itself, once at `RunEvent::Ready`; the override
+is class-wide, so it covers every window, text field, and browser pane.
 
-Source of truth: `suppress` in `standalone/src-tauri/src/macos_siri_affordance.rs`,
+Source of truth: `install` in `standalone/src-tauri/src/macos_siri_affordance.rs`,
 pinned by `suppresses_the_webview_subclass_only`.
 
 ## Windows
@@ -1324,6 +1320,6 @@ Source of truth: `standalone/scripts/dev-agent-browser.mjs`, `standalone/scripts
 ## Future
 
 - **A setting to allow the Siri affordance**, for users who want Siri in
-  Dormouse. `suppress` would run only while the setting is off; turning it on
-  at runtime restores the method `class_replaceMethod` returned, since the
-  override is per class rather than per window.
+  Dormouse. The override stays installed and `disallow` reads the setting,
+  answering from `WKWebView`'s own implementation when it allows Siri: the
+  runtime cannot remove a method, so toggling is a flag, not a second swap.

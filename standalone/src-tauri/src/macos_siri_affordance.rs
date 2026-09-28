@@ -1,29 +1,22 @@
-//! Keeps macOS's Siri affordance off Dormouse's webviews
-//! (docs/specs/standalone.md -> "Siri affordance").
-//!
-//! AppKit asks the focused text view `allowsWritingToolsAffordance` before it
-//! builds the affordance. This answers NO for the class of each window's
-//! `WKWebView`, which is wry's subclass, so `WKWebView` itself is untouched.
+//! docs/specs/standalone.md -> "Siri affordance".
 
 use objc2::runtime::{AnyClass, AnyObject, Bool, Imp, Sel};
 use objc2::{ffi, msg_send, sel};
-use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::WebviewWindow;
+use tauri::{AppHandle, Manager};
 
 use crate::append_log;
 
 /// `BOOL (*)(id, SEL)`.
 const BOOL_GETTER_TYPES: &[u8] = b"B@:\0";
 
-static LOGGED: AtomicBool = AtomicBool::new(false);
-
 unsafe extern "C-unwind" fn disallow(_this: *mut AnyObject, _cmd: Sel) -> Bool {
     Bool::NO
 }
 
 /// Answer NO to `allowsWritingToolsAffordance` for every instance of
-/// `object`'s class. Replaces rather than adds, so it holds if wry ever
-/// implements the selector itself.
+/// `object`'s class: wry's `WKWebView` subclass, so `WKWebView` itself is
+/// untouched. Replaces rather than adds, so it holds if wry ever implements
+/// the selector itself.
 unsafe fn disallow_for_class_of(object: *mut AnyObject) {
     // `class`, not `object_getClass`: KVO would hand back its private subclass.
     let class: *const AnyClass = msg_send![object, class];
@@ -37,14 +30,16 @@ unsafe fn disallow_for_class_of(object: *mut AnyObject) {
     );
 }
 
-/// Suppress the affordance for `window`'s webview class. Idempotent, so every
-/// window may call it.
-pub fn suppress(window: &WebviewWindow) {
+/// Install the override. Call once, from `RunEvent::Ready`: wry has one webview
+/// class, so any open window's webview covers every later window too.
+pub fn install(app: &AppHandle) {
+    let Some(window) = app.webview_windows().into_values().next() else {
+        append_log("[siri] WARNING no webview to suppress the Writing Tools affordance on");
+        return;
+    };
     let result = window.with_webview(|webview| unsafe {
         disallow_for_class_of(webview.inner().cast());
-        if !LOGGED.swap(true, Ordering::SeqCst) {
-            append_log("[siri] Writing Tools affordance suppressed for Dormouse webviews");
-        }
+        append_log("[siri] Writing Tools affordance suppressed for Dormouse webviews");
     });
     if let Err(err) = result {
         append_log(&format!(

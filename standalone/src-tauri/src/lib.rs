@@ -9,8 +9,6 @@ mod workspaces;
 // interception).
 #[cfg(target_os = "macos")]
 mod macos_terminate;
-// macOS 27 shows a Siri button after every typing pause in the terminal's
-// textarea (docs/specs/standalone.md §Siri affordance).
 #[cfg(target_os = "macos")]
 mod macos_siri_affordance;
 use quit_state::{ArrivalQueue, CleanupGate, CloseMachine, QuitAction, QuitIntent, QuitMachine};
@@ -2328,7 +2326,7 @@ fn build_window(
         let _ = window.set_decorations(false);
     }
     #[cfg(target_os = "macos")]
-    macos_siri_affordance::suppress(&window);
+    let _ = &window;
     // The only platform read of this window's box: from here the `Moved` /
     // `Resized` payloads keep the cache current (§Boot and geometry).
     seed_geometry(app, label);
@@ -4171,10 +4169,7 @@ pub fn run() {
                 set_macos_dock_icon();
                 // The delegate exists by now, which is what this splices onto.
                 macos_terminate::install(app);
-                // Windows `build_window` opens suppress their own.
-                for window in app.webview_windows().values() {
-                    macos_siri_affordance::suppress(window);
-                }
+                macos_siri_affordance::install(app);
             }
             // A window-level exit request (§Trigger interception). The flow's own
             // app.exit(0) re-enters here with approved=true and passes; `code`
