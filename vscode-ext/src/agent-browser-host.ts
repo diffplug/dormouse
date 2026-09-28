@@ -5,16 +5,22 @@
  * The host itself is host-agnostic and lives in `lib/src/host/browser-host.ts`
  * (shared verbatim with the standalone Node sidecar), viewer sockets included;
  * this file only instantiates it with the VS-Code-specific bits — writing the
- * OS clipboard, and logging.
+ * OS clipboard, the staged `dor` and selected shell a GUI launch resolves its
+ * environment through, and logging.
  */
 import * as vscode from 'vscode';
 import { log } from './log';
 import { createAgentBrowserProvider } from '../../lib/src/host/agent-browser-host';
+import { browserLaunchEnv, type BrowserShellRuntime } from '../../lib/src/host/browser-launch-env';
 import { createBrowserHost } from '../../lib/src/host/browser-host';
 import { createPlaywrightProvider } from '../../lib/src/host/playwright-host';
 
+let runtime: BrowserShellRuntime;
+export function setBrowserShellRuntime(value: BrowserShellRuntime): void { runtime = value; }
+
 const logInfo = (message: string) => log.info(message);
 const host = createBrowserHost({
+  launchEnv: (cwd) => browserLaunchEnv(cwd, runtime),
   // Awaited rather than returned: `vscode.env.clipboard.writeText` yields a
   // `Thenable`, VS Code's minimal promise interface, which is not a `Promise`.
   writeClipboardText: async (text) => { await vscode.env.clipboard.writeText(text); },

@@ -210,7 +210,7 @@ function resolveHostWorkspace(): string | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 }
 
-function getDorRuntimeEnv(extensionPath: string): Record<string, string> {
+export function getDorRuntimeEnv(extensionPath: string): Record<string, string> {
   if (dorRuntimeEnvCache?.path === extensionPath) return dorRuntimeEnvCache.env;
   const dorCliRoot = path.join(extensionPath, 'dor-cli');
   const hostWorkspace = resolveHostWorkspace();

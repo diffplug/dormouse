@@ -2035,8 +2035,14 @@ export function Wall({
     },
   }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, requestKill, replaceSurface, buildDorSurfaces, createContentSurface, surfaceRefForId, resolveToolApproval, lath, nav]);
   const openContextPort = useCallback(async (id: string, entry: PortUrlEntry, mode: PortMode): Promise<void> => {
-    if (mode === 'system') { getPlatform().openExternal?.(entry.url); return; }
     const opening = terminalContextRef.current;
+    const dismiss = () => {
+      if (terminalContextRef.current !== opening) return;
+      cancelContextPortLaunches();
+      setTerminalContext(current => current !== opening || !current ? current
+        : motionIsInstant() ? null : { ...current, closing: true });
+    };
+    if (mode === 'system') { getPlatform().openExternal?.(entry.url); dismiss(); return; }
     const generation = contextLaunchGeneration.current;
     const current = () => generation === contextLaunchGeneration.current && activeRef.current && !closingWorkspaceRef.current
       && opening === terminalContextRef.current && opening?.id === id && !opening.closing
@@ -2092,10 +2098,10 @@ export function Wall({
     })();
     const launch = { done: operation, cancel: discard };
     contextPortLaunches.current.set(key, launch);
-    try { await operation; } finally {
+    try { await operation; dismiss(); } finally {
       if (contextPortLaunches.current.get(key) === launch) contextPortLaunches.current.delete(key);
     }
-  }, [buildDorSurfaces, findSurfaceByParams, createContentSurface, enterTerminalMode, revealSurface, updateSurfaceParams, generatePaneId, lath, nav]);
+  }, [buildDorSurfaces, findSurfaceByParams, createContentSurface, enterTerminalMode, revealSurface, updateSurfaceParams, generatePaneId, lath, nav, cancelContextPortLaunches]);
   const contextActions = useMemo(() => ({
     id: contextSourceId,
     mounted: terminalContext,

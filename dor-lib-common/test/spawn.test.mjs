@@ -165,3 +165,8 @@ test('Windows ends a timed-out child\'s whole tree with taskkill by absolute pat
   });
   assert.equal(treeKillCommand(42, {}, true).binary, 'C:\\Windows\\System32\\taskkill.exe');
 });
+
+test('bounds combined output without returning captured secrets', async () => {
+  const result = await spawnAndCapture(node, ['-e', 'process.stdout.write("secret".repeat(1000)); setInterval(() => {}, 1000)'], { maxOutputBytes: 100, timeoutMs: 2000 });
+  assert.deepEqual(result, { ok: false, error: { code: 'ENOBUFS', message: 'Child output exceeded the capture limit' } });
+});

@@ -169,26 +169,3 @@ export function browserHandle(provider: BrowserAutomationProvider, binding: Omit
     close: (cancels = []) => send({ op: 'close', ...(cancels.length ? { cancels: [...cancels] } : {}) }),
   };
 }
-
-// The binary path each provider's `dor` command last resolved on a terminal's
-// PATH, one per webview (its Walls share one host).
-const lastBinaryPaths = new Map<BrowserAutomationProvider, string>();
-
-/**
- * The binary path a GUI launch of `provider` passes: the one its `dor` command
- * last resolved on a terminal's PATH, since the webview/host PATH may not find
- * the binary itself.
- */
-export function launchBinaryPath(provider: BrowserAutomationProvider): string | undefined {
-  return lastBinaryPaths.get(provider);
-}
-
-/** Record the binary path a `provider` session resolved or launched with. */
-export function rememberLaunchBinaryPath(provider: BrowserAutomationProvider, binaryPath: string | undefined): void {
-  if (binaryPath) lastBinaryPaths.set(provider, binaryPath);
-}
-
-/** For tests: the memo outlives the Wall that filled it. */
-export function forgetLaunchBinaryPaths(): void {
-  lastBinaryPaths.clear();
-}

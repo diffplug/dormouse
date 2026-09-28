@@ -16,7 +16,6 @@ import * as helpers from '../lib/helper-terminal';
 import * as agentBrowserScreen from './wall/agent-browser-screen';
 import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
 import { disposeAllAgentBrowserSurfaceControllers, getAgentBrowserSurfaceController } from './wall/agent-browser-surface-controller';
-import { forgetLaunchBinaryPaths } from './wall/browser-automation';
 import * as browserAutomation from './wall/browser-automation';
 import { setDevServerResolution } from './wall/agent-browser-ports';
 import { IS_MAC, setPlatform } from '../lib/platform';
@@ -73,10 +72,8 @@ afterEach(() => {
   // The activity store is Window-global, so a ring or TODO left on a pane id
   // would wear its alarm overlay in every later test that renders that id.
   clearTerminalActivity();
-  // Browser controllers outlive the Wall that mounted them, like the ring
-  // above, and so does the binary path `dor agent-browser` last resolved.
+  // Browser controllers outlive the Wall that mounted them, like the ring above.
   disposeAllAgentBrowserSurfaceControllers();
-  forgetLaunchBinaryPaths();
 });
 
 const flush = (): Promise<void> => harness.flush();
@@ -3467,7 +3464,8 @@ describe('Wall on the Lath engine', () => {
       });
       await flush();
 
-      const { requests } = hostBrowsers({ launch: async () => ({ ok: true, session: 'context-browser', stream: 4321 }) });
+      let launch = Promise.withResolvers<{ ok: true; session: string; stream: number }>();
+      const { requests } = hostBrowsers({ launch: () => launch.promise });
       if (!fake.hasPty('pane-a')) fake.spawnPty('pane-a');
       fake.setOpenPorts('pane-a', [{
         protocol: 'tcp',
@@ -3503,12 +3501,23 @@ describe('Wall on the Lath engine', () => {
       });
       await flush();
 
+      expect(document.querySelector('[data-terminal-context]:not([aria-hidden="true"])')).not.toBeNull();
+      await act(async () => launch.reject(new Error('Browser unavailable')));
+      await flush();
+      expect(document.querySelector('[data-terminal-context]:not([aria-hidden="true"])')).not.toBeNull();
+      launch = Promise.withResolvers<{ ok: true; session: string; stream: number }>();
+      await act(async () => portRow!.click());
+      await act(async () => launch.resolve({ ok: true, session: 'context-browser', stream: 4321 }));
+      await flush();
+
       expect(onEvent).toHaveBeenCalledWith({ type: 'selectionChange', id: expect.any(String), kind: 'pane' });
       expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
       expect(onEvent).toHaveBeenCalledWith({ type: 'modeChange', mode: 'passthrough' });
       expect(requests('launch')).toContainEqual(expect.objectContaining({
         provider: 'agent-browser', binding: {}, op: 'launch', url: 'http://localhost:5173/', headed: false,
       }));
+      expect(document.querySelector('[data-terminal-context]:not([aria-hidden="true"])')).toBeNull();
+      expect(focusOf('pane-a')).toBe('false');
     } finally {
       untouchedSpy.mockRestore();
     }
