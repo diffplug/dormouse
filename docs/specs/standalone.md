@@ -393,6 +393,20 @@ own text fields too; JS supplies their clipboard
 (`docs/specs/mouse-and-clipboard.md` §8.9). **A new menu item must not claim a
 chord the webview already handles.**
 
+## Siri affordance
+
+**Never show macOS's Siri affordance in a Dormouse webview.** It is AppKit's
+Writing Tools affordance, which appears whenever an editable field's caret sits
+still; xterm keeps a focused, empty textarea at the terminal cursor, so it fired
+after every typing pause (rationale). `suppress` answers NO to
+`allowsWritingToolsAffordance` on the class of each window's `WKWebView`, which
+is wry's subclass and never `WKWebView` itself, at `RunEvent::Ready` for open
+windows and in `build_window` for later ones. The override is class-wide, so it
+covers every Dormouse text field and browser pane, not only the terminal.
+
+Source of truth: `suppress` in `standalone/src-tauri/src/macos_siri_affordance.rs`,
+pinned by `suppresses_the_webview_subclass_only`.
+
 ## Windows
 
 **Several windows, each with several Workspaces, over one sidecar**
@@ -1306,3 +1320,10 @@ The bridge is a transport shim over the same sidecar protocol, not a second PTY 
 The harness **may omit** native-only desktop chrome (window controls, update checks) but **must preserve** every `PlatformAdapter` contract the app uses — PTY, control-request, clipboard, iframe-proxy, Burrow, agent-browser, Playwright, and the sidecar's alerts (`alert_command` in, stamped with the one window label the harness simulates, `main`; their events back; §Alerts) — so a rule that only holds across the host boundary is exercised rather than answered by a private copy. **`BrowserSidecarHost.init()` resolves on the SSE stream being open, not on its construction**, so a seed cannot precede the stream that carries its reply; **must let retryable connection failures reconnect within the open timeout**; after a reconnect the adapter sends `sync`, since whatever the sidecar sent while the stream was down is gone (`resolves on the stream's open event, not on construction` in `standalone/src/browser-sidecar-host.test.ts`; `asks the sidecar to sync when the event stream reconnects` in `standalone/src/browser-sidecar-adapter.test.ts`). Fatal startup handling follows §Boot sequence. It **must mirror** standalone's Session-persistence answer (`docs/specs/transport.md` → "The governing rule"): one `PersistedWindow` per window, in `localStorage` rather than the Rust file store, and the same agent-recovery *claim* against a per-run temp state directory. **The harness must never capture**: a reload there is a live resume over PTYs that survive it, and capture is a quit-only step (§Agent recovery). **Tauri APIs must not be required at static module-evaluation time** when `VITE_DORMOUSE_BROWSER_DEV_HOST` is set — a normal browser loads the page, not the Tauri WebView.
 
 Source of truth: `standalone/scripts/dev-agent-browser.mjs`, `standalone/scripts/dev-run.mjs`, `standalone/scripts/dev-host-guard.mjs`, `standalone/src/browser-sidecar-host.ts`, `standalone/src/browser-sidecar-adapter.ts`; `stepBurrow` in `scripts/pairing-walkthrough/steps.mjs`; `sessionForKey` in `dor-lib-common/src/browser-providers.ts`.
+
+## Future
+
+- **A setting to allow the Siri affordance**, for users who want Siri in
+  Dormouse. `suppress` would run only while the setting is off; turning it on
+  at runtime restores the method `class_replaceMethod` returned, since the
+  override is per class rather than per window.

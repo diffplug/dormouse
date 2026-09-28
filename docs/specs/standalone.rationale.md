@@ -34,6 +34,21 @@
 
 **Why a failed read must not be memoized.** The read errors that are neither `ENOENT` nor a parse failure — EACCES, EIO, a handle held open on Windows — say nothing about what the file holds; answering them empty, or caching that emptiness, lets the next save overwrite unseen state with nothing, since every change is a read-modify-write of the whole file.
 
+## Siri affordance
+
+**What it cost.** On 2026-09-28 the unified log showed Dormouse dwelling 707 times and building the affordance's host window 478 times in one day; no other app did either more than once. The same `NSCampoLightweightUIController` raised the assertion behind that week's macOS 27.0 crashes: a mouse-entered event reaching a tracking area it had just torn down.
+
+**Why a per-view override.** Eligibility is process-wide: `+[NSCampoLightweightUIController isEligible]` is the `WritingTools/LightweightUI_macOS` feature flag, `isEnhancedSiriAvailable`, and a bundle identifier outside Apple's own services, so no Info.plist or bundle setting opts out. Its "zero-to-one" mode targets a caret with no selection, which is all xterm's textarea ever holds. The per-view gate is `allowsWritingToolsAffordance`, which WebKit answers YES for any editable focus. Measured with a `WKWebView` probe holding an xterm-shaped textarea through 20 s of synthetic typing (macOS 27.0, 2026-09-28):
+
+| Variant | Affordance built |
+|---|---|
+| Baseline | 11 |
+| `writingsuggestions="false"` on the textarea | 11 |
+| `WKWebViewConfiguration.writingToolsBehavior = none` | 12 |
+| `allowsWritingToolsAffordance` answering NO on a `WKWebView` subclass | 0 |
+
+In a real build the same day, with the xterm textarea focused and typed into, a build without `suppress` built the affordance, and a build with it answered NO and built none. The live webview's `object_getClass` there is KVO's `NSKVONotifying_` subclass, which is why `suppress` asks the object for `class`.
+
 ## Windows
 
 **Why no window is throttled in the background.** The alert host moved into the sidecar (§Alerts), but a due spoken alarm still plays in the renderer of the window showing its Session (`docs/specs/alert.md` → Spoken alarms), on that window's timers and Web Speech engine. Tauri's default leaves WebKit's policy in force: a minimized or hidden window's timers are throttled and the view may be suspended after roughly five minutes, pausing everything until it is visible again (tauri-utils 2.9.3, `BackgroundThrottlingPolicy`). That delayed the speech for exactly the window a spoken alarm exists to reach — the one the user minimized. The policy cannot be set per state, so every window pays a hidden window's timer cost for it (2026-09).
