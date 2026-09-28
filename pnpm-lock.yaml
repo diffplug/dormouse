@@ -266,8 +266,8 @@ importers:
         specifier: ^1.63.0
         version: 1.63.0
       playwright-core:
-        specifier: 1.63.0-alpha-2026-08-31
-        version: 1.63.0-alpha-2026-08-31
+        specifier: 1.63.0
+        version: 1.63.0
       remark-gfm:
         specifier: ^4.0.1
         version: 4.0.1(supports-color@10.2.2)
@@ -5406,11 +5406,6 @@ packages:
 
   playwright-core@1.63.0:
     resolution: {integrity: sha512-rYCsBF/M5HjUch52bbtVONEFjv6Xu8sm8h72dNlR5bzIE1fvC/bxgspzkjSfU+MweEMmPM8KJebG6nnyxo5mCg==}
-    engines: {node: '>=20'}
-    hasBin: true
-
-  playwright-core@1.63.0-alpha-2026-08-31:
-    resolution: {integrity: sha512-1ek0Lyr12h6jcs/WTcNoVtzZkQp7D/90PsMuBW/Rm6h3AsWAbzpqj0geMv8+8Tzzr9CSUYvg9kznrVZINQMXXw==}
     engines: {node: '>=20'}
     hasBin: true
 
@@ -10930,8 +10925,6 @@ snapshots:
       pathe: 2.0.3
 
   playwright-core@1.63.0: {}
-
-  playwright-core@1.63.0-alpha-2026-08-31: {}
 
   playwright@1.63.0:
     dependencies:
