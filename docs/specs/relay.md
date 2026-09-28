@@ -820,10 +820,15 @@ a build with no Burrow service at all ([alert.md](./alert.md) -> Push
 notifications). Only the first has a section beneath it, so only the first says
 "below"; the `PushNoBurrow` / `PushNotEnrolled` story pair holds the two apart.
 
-Un-enrolled it is a three-field form (Relay, setup password, Burrow name —
-prefilled with the `suggestedLabel` `status` carries) calling the service's
-`enroll`;
-enrolled it shows the Relay URL, relay connection state, and paired-device
+**Two buttons: One-time connection (disabled until built) and Persistent
+Relay**, which un-enrolled discloses a disabled "Use hosted.dormouse.sh" and
+the enroll view, **folded until clicked, offer or not — hidden, never
+unmounted**.
+
+The enroll view is a three-field form (Relay, setup password,
+Burrow name — prefilled with the `suggestedLabel` `status` carries) calling the
+service's `enroll`;
+enrolled, it shows unclicked the Relay URL, relay connection state, and paired-device
 count, with `Disconnect` and — only on `displaced` — `Reconnect`. Rules the UI
 exists to honor:
 
@@ -882,7 +887,7 @@ exists to honor:
   answer** — `enroll`, `reconnect`, `clearEnrollment` and losing the last
   subscriber each drop the read in flight (rationale).
 
-Source of truth: `useSetupQr` and `ScannableCode` in
+Source of truth: `RelayChoices`, `useSetupQr` and `ScannableCode` in
 `lib/src/components/RemoteControlSection.tsx` over `lib/src/components/QrCode.tsx`
 (`uqr` encodes; that draws, lazily, so the encoder stays out of every main
 bundle); `describePushTargets` in `lib/src/components/SettingsDialog.tsx`;
