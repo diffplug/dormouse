@@ -1,7 +1,7 @@
 import { mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createToolHost } from './tool-host';
 
 const YML = `
@@ -23,8 +23,12 @@ beforeEach(async () => {
   repo = await realpath(await mkdtemp(join(tmpdir(), 'dor-tool-host-')));
   stateDir = join(repo, '.state');
   await writeFile(join(repo, 'dormouse.yml'), YML);
+  // A host built without `userConfigPath` reads the real user file; point it
+  // into the fixture so a developer's own Tools can't change these results.
+  vi.stubEnv('XDG_CONFIG_HOME', join(repo, '.config'));
 });
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await rm(repo, { recursive: true, force: true });
 });
 
