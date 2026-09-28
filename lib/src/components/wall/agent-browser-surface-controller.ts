@@ -814,7 +814,6 @@ export class AgentBrowserSurfaceController {
     const url = this.launchUrl();
     const session = this.launchSession;
     const headed = this.headed;
-    // No creation site has to remember the binary a `dor agent-browser` surface resolved.
     const binaryPath = this.binaryPath;
     const browser = browserHandle(this.provider, { session, cwd: this.cwd, binaryPath });
     const phase: Phase = { k: 'launching', ...(session && browser ? { named: { session, browser } } : {}) };

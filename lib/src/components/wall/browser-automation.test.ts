@@ -33,7 +33,6 @@ describe('automation render modes', () => {
   });
 });
 
-
 describe('offeredRenderModes', () => {
   afterEach(() => setPlatform(new FakePtyAdapter()));
 

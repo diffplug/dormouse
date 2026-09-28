@@ -786,7 +786,6 @@ export function useDorControl({
     reference,
     minimized = false,
   }) => {
-    // Remember the resolved binary so a GUI launch can spawn one.
     const refreshedParams = {
       nativeIdentity,
       // The host reports headedness a native launch changed; the controller

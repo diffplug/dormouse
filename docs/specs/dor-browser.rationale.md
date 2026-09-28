@@ -46,13 +46,13 @@ views without weakening that first signal.
 
 ## Automated Browser
 
-The installed macOS sidecar had `/usr/bin:/bin:/usr/sbin:/sbin` while both
-provider CLIs were installed under `/opt/homebrew/bin` (measured 2026-09-28).
-Remembering an executable alone also misses the Node runtime needed by its
-shebang. A fresh shell exports both without shell-integration state publication
-or a global cache. Calling the public `dor … open` command would duplicate the
-host's pane-binding lifecycle, so the private helper only supplies environment.
-
+**Why GUI launches resolve in a fresh shell.** The installed macOS sidecar had
+`/usr/bin:/bin:/usr/sbin:/sbin` while both provider CLIs were installed under
+`/opt/homebrew/bin` (measured 2026-09-28). Remembering an executable alone also
+misses the Node runtime needed by its shebang. A fresh shell exports both
+without shell-integration state publication or a global cache. Calling the
+public `dor … open` command would duplicate the host's pane-binding lifecycle,
+so the private helper only supplies environment.
 
 **Why one-session-one-surface is not an invariant.** `dor` forwards the user's command before it asks the host for a surface, so a surface killed or render-swapped inside that window is gone by the time the trailing request arrives — and the session behind it is still live and needs somewhere to render.
 

@@ -191,11 +191,13 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
   // not fatal: the host's own candidates still run, so a stale or hostile value
   // degrades to "resolve it yourself" rather than to a broken surface.
   async function runWithBinaryFallback(
+    b: ProviderBinding,
     args: string[],
-    binaryPath?: string,
-    options: { timeoutMs?: number; cwd?: string; env?: NodeJS.ProcessEnv } = {},
+    options: { timeoutMs?: number; cwd?: string } = {},
   ): Promise<CliResult> {
-    const configured = (options.env ?? process.env)[AGENT_BROWSER_BIN_ENV];
+    const env = b.env ?? process.env;
+    const configured = env[AGENT_BROWSER_BIN_ENV];
+    let binaryPath = b.binaryPath;
     if (binaryPath !== undefined && !isAllowedAgentBrowserBinary(binaryPath, configured)) {
       log(`[agent-browser] refused a caller-supplied binary path that is not an agent-browser: ${JSON.stringify(binaryPath)}`);
       binaryPath = undefined;
@@ -206,30 +208,30 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
       DEFAULT_AGENT_BROWSER_BIN,
     ].filter((c): c is string => !!c))];
 
-    // Omit unset options so direct provider callers retain spawn defaults.
-    const given = Object.fromEntries(Object.entries(options).filter(([, value]) => value !== undefined));
+    // Only what is set, so an unbounded run in the host's cwd spawns as a bare one.
+    const given = Object.fromEntries(Object.entries({ ...options, env: b.env }).filter(([, value]) => value !== undefined));
     let lastError = '';
     for (const candidate of candidates) {
-      const binary = resolveBinaryPath(candidate, options.env ?? process.env);
-      if (!binary) { lastError = `'${candidate}' was not found`; continue; }
-      const result = await (Object.keys(given).length ? spawnAndCapture(binary, args, given) : spawnAndCapture(binary, args));
-      if (result.ok) {
+      const binary = resolveBinaryPath(candidate, env);
+      const result = binary === undefined ? undefined
+        : await (Object.keys(given).length ? spawnAndCapture(binary, args, given) : spawnAndCapture(binary, args));
+      if (result?.ok) {
         return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
       }
       // Missing binary: record it and try the next candidate. Any other spawn
       // failure is real — surface it rather than masking it behind a fallback.
-      if (result.error.code !== 'ENOENT') {
+      if (result && result.error.code !== 'ENOENT') {
         log(`[agent-browser] spawn failed: ${result.error.message}`);
         return { exitCode: 1, stdout: '', stderr: result.error.message };
       }
-      lastError = `'${binary}' was not found`;
+      lastError = `'${binary ?? candidate}' was not found`;
       log(`[agent-browser] ${lastError}; trying next candidate`);
     }
     return { exitCode: 1, stdout: '', stderr: `agent-browser binary not found (${lastError})` };
   }
 
   function run(b: ProviderBinding, args: string[], options?: { timeoutMs?: number; cwd?: string }): Promise<CliResult> {
-    return runWithBinaryFallback([...SESSION_ARGS(b.session), ...args], b.binaryPath, { cwd: b.cwd, env: b.env, ...options });
+    return runWithBinaryFallback(b, [...SESSION_ARGS(b.session), ...args], options);
   }
 
   // Read a session's stream WebSocket port via `stream status --json` — only
@@ -239,7 +241,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
   // port. Retry briefly to close that window.
   async function readStreamPort(b: ProviderBinding, deadline: number): Promise<number | undefined> {
     for (let attempt = 0; attempt < STREAM_PORT_READ_ATTEMPTS; attempt++) {
-      const result = await runWithBinaryFallback(streamStatusArgs(b.session), b.binaryPath, { cwd: b.cwd, env: b.env, timeoutMs: Math.max(0, deadline - Date.now()) });
+      const result = await runWithBinaryFallback(b, streamStatusArgs(b.session), { timeoutMs: Math.max(0, deadline - Date.now()) });
       if (result.exitCode === 0) {
         const port = parseStreamPort(result.stdout);
         if (port !== undefined) return port;
@@ -260,7 +262,8 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
   // (process.kill works on win/mac/linux).
   function agentBrowserStateDir(b: ProviderBinding): string {
     const env = b.env ?? process.env;
-    return env[AGENT_BROWSER_SOCKET_DIR_ENV] || path.join(env.HOME || env.USERPROFILE || os.homedir(), '.agent-browser');
+    // The home `os.homedir()` reads, from the CLI's own environment.
+    return env[AGENT_BROWSER_SOCKET_DIR_ENV] || path.join((process.platform === 'win32' ? env.USERPROFILE : env.HOME) || os.homedir(), '.agent-browser');
   }
 
   // The daemon's state files beside its socket: `<session>.pid` and
@@ -427,7 +430,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
     // One socket directory per host, so the session names the daemon.
     identity: (b) => b.session,
 
-    describe: (b) => ({ session: b.session, cwd: b.cwd, binaryPath: b.binaryPath }),
+    describe: (b) => b,
 
     // The daemon as its state files describe it — a CLI verb would start one
     // to answer. One up but not streaming is left alone: relaunching would

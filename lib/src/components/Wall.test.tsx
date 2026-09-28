@@ -72,8 +72,7 @@ afterEach(() => {
   // The activity store is Window-global, so a ring or TODO left on a pane id
   // would wear its alarm overlay in every later test that renders that id.
   clearTerminalActivity();
-  // Browser controllers outlive the Wall that mounted them, like the ring
-  // above, and so does the binary path `dor agent-browser` last resolved.
+  // Browser controllers outlive the Wall that mounted them, like the ring above.
   disposeAllAgentBrowserSurfaceControllers();
 });
 

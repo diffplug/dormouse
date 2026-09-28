@@ -93,16 +93,18 @@ export function activate(context: vscode.ExtensionContext) {
   log.init();
   extensionContext = context;
   ptyManager.setExtensionPath(context.extensionPath);
-  const browserRuntime = ptyManager.getDorRuntimeEnv(context.extensionPath);
-  setBrowserShellRuntime({ node: browserRuntime.DORMOUSE_NODE, cli: browserRuntime.DORMOUSE_CLI_JS });
+  const dorRuntime = ptyManager.getDorRuntimeEnv(context.extensionPath);
+  const browserShellRuntime = { node: dorRuntime.DORMOUSE_NODE, cli: dorRuntime.DORMOUSE_CLI_JS };
+  setBrowserShellRuntime(browserShellRuntime);
 
   const provider = new DormouseViewProvider(context);
 
   // Updates the shell-derived state in one place: the view header (shell
-  // name appears next to the title via description) and the webview's
-  // default-shell slot that split-spawns read from.
+  // name appears next to the title via description), the webview's
+  // default-shell slot that split-spawns read from, and the shell a GUI
+  // browser launch resolves its environment in.
   const applyShell = (shell: { name: string; path: string; args: string[] } | undefined) => {
-    setBrowserShellRuntime({ node: browserRuntime.DORMOUSE_NODE, cli: browserRuntime.DORMOUSE_CLI_JS, shell: shell?.path });
+    setBrowserShellRuntime({ ...browserShellRuntime, shell: shell?.path });
     provider.setDescription(shell?.name);
     provider.setSelectedShell(shell ? { shell: shell.path, args: shell.args } : null);
   };

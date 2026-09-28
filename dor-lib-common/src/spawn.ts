@@ -61,7 +61,9 @@ const CLOSE_GRACE_MS = 250;
  *
  * `timeoutMs` bounds the whole call: past it the child is killed (its tree on
  * Windows, `treeKillCommand`) and the call resolves `{ ok: false }` with
- * `SPAWN_TIMEOUT_CODE`, without waiting for the kill.
+ * `SPAWN_TIMEOUT_CODE`, without waiting for the kill. Past `maxOutputBytes` of
+ * combined stdout/stderr it is killed the same way and resolves `{ ok: false }`
+ * with `ENOBUFS` and none of the output, which may hold secrets.
  */
 export function spawnAndCapture(
   binary: string,
@@ -111,11 +113,10 @@ export function spawnAndCapture(
     // Decode across pipe chunks so a split UTF-8 sequence stays one character.
     child.stdout?.setEncoding('utf8');
     child.stderr?.setEncoding('utf8');
-    let capturedBytes = 0;
+    let outputBudget = options.maxOutputBytes;
     const capture = (chunk: string, stderrChunk: boolean) => {
       if (settled) return;
-      capturedBytes += Buffer.byteLength(chunk);
-      if (options.maxOutputBytes !== undefined && capturedBytes > options.maxOutputBytes) {
+      if (outputBudget !== undefined && (outputBudget -= Buffer.byteLength(chunk)) < 0) {
         settle(() => resolve({ ok: false, error: { code: 'ENOBUFS', message: 'Child output exceeded the capture limit' } }));
         killChild();
       } else if (stderrChunk) stderr += chunk;

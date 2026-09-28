@@ -92,9 +92,8 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
   async function cli(b: Binding, args: string[], timeoutMs: number | null = CLI_TIMEOUT_MS, initialViewport?: BrowserViewportSetting) {
     const r = await spawnAndCapture(b.install.binary, [...BROWSER_PROVIDERS.playwright.sessionArgs(b.session), ...args], {
       cwd: b.cwd,
-      env: b.env,
+      env: initialViewport?.mode === 'fixed' ? { ...(b.env ?? process.env), PLAYWRIGHT_MCP_VIEWPORT_SIZE: `${initialViewport.width}x${initialViewport.height}` } : b.env,
       ...(timeoutMs === null ? {} : { timeoutMs: Math.max(0, timeoutMs) }),
-      ...(initialViewport?.mode === 'fixed' ? { env: { ...(b.env ?? process.env), PLAYWRIGHT_MCP_VIEWPORT_SIZE: `${initialViewport.width}x${initialViewport.height}` } } : {}),
     });
     if (!r.ok) throw new Error(r.error.message);
     return { exitCode: r.exitCode, stdout: r.stdout, stderr: r.stderr };

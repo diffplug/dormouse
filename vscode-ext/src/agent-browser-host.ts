@@ -5,7 +5,8 @@
  * The host itself is host-agnostic and lives in `lib/src/host/browser-host.ts`
  * (shared verbatim with the standalone Node sidecar), viewer sockets included;
  * this file only instantiates it with the VS-Code-specific bits — writing the
- * OS clipboard, and logging.
+ * OS clipboard, the staged `dor` and selected shell a GUI launch resolves its
+ * environment through, and logging.
  */
 import * as vscode from 'vscode';
 import { log } from './log';

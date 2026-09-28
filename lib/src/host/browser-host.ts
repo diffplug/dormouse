@@ -44,11 +44,11 @@ import { BrowserView, WEBVIEW_ID, closeSocket, createViewerServer, measuredViewp
  *  a fixed agent-browser argv, or a Playwright client call. */
 export type BrowserAct = Extract<BrowserOp, { op: 'navigate' | 'history' | 'tab' | 'viewport' | 'device' }>;
 
+// For the sidecar, which loads each host module as its own bundle.
 export { browserLaunchEnv } from './browser-launch-env';
 
 /** The binding a provider runs one request with: the session named, or minted
  *  for a new launch. Its environment stays inside the host. */
-
 export type ProviderBinding = BrowserBinding & { env?: NodeJS.ProcessEnv };
 
 /** A browser that is up: its stream — what `view` subscribes to — and
@@ -663,11 +663,13 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   // Restored sessions resolve afresh; no environment is saved with the layout.
   type LaunchEnv = { promise: Promise<NodeJS.ProcessEnv>; closing: boolean };
   const launchEnvs = new Map<string, LaunchEnv>();
+  const forgetEnv = (key: string, entry: LaunchEnv) => { if (launchEnvs.get(key) === entry) launchEnvs.delete(key); };
   async function run(raw: unknown): Promise<BrowserResult> {
     const r = parseBrowserRequest(raw);
     if (typeof r === 'string') return { ok: false, error: r };
     const requestDeadline = Date.now() + REQUEST_BUDGET_MS;
-    let newEnv: { key: string; entry: LaunchEnv } | undefined;
+    let envKey = '';
+    let created: LaunchEnv | undefined;
     try {
       if (closed) throw new Error('the browser host is shutting down');
       // Sent before a close that cancelled it, delivered after: it opens
@@ -675,20 +677,20 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       if ((r.op === 'launch' || r.op === 'attach') && wasCancelled(r.requestId)) throw new Error('the browser was closed');
       if (r.op === 'close') cancelRequests(r.cancels);
       const p = providerFor(r.provider);
-      const binding: ProviderBinding = { ...r.binding, ...(deps.launchEnv ? { cwd: r.binding.cwd ?? process.cwd() } : {}), session: r.binding.session ?? generateGuiSession() };
-      const envKey = JSON.stringify([r.provider, binding.session, binding.cwd]);
+      const binding: ProviderBinding = { ...r.binding, session: r.binding.session ?? generateGuiSession() };
       if (deps.launchEnv) {
+        // Keyed on the cwd a provider defaults to, so the one it answers with
+        // finds the same environment.
+        envKey = JSON.stringify([r.provider, binding.session, binding.cwd ?? process.cwd()]);
         let entry = launchEnvs.get(envKey);
-        if (!entry) {
-          entry = { promise: deps.launchEnv(binding.cwd), closing: false };
-          launchEnvs.set(envKey, entry);
-          newEnv = { key: envKey, entry };
-          entry.promise.catch(() => { if (launchEnvs.get(envKey) === entry) launchEnvs.delete(envKey); });
-        }
+        if (!entry) launchEnvs.set(envKey, entry = created = { promise: deps.launchEnv(binding.cwd), closing: false });
         if (r.op === 'close') entry.closing = true;
         binding.env = await entry.promise;
+        // A close discards it now, so a launch arriving after runs after it
+        // on a fresh one; those it overtook are refused.
+        if (r.op === 'close') forgetEnv(envKey, entry);
         if (closed || ((r.op === 'launch' || r.op === 'attach') && (entry.closing || wasCancelled(r.requestId)))) {
-          launchEnvs.delete(envKey);
+          forgetEnv(envKey, entry);
           throw new Error('the browser was closed');
         }
       }
@@ -696,7 +698,9 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       const bound: Bound = { p, b, id: p.identity(b) };
       const answer = (live: LiveBrowser): BrowserResult => {
         trackHeaded(bound, live.headed);
-        return { ok: true, ...p.describe(b), nativeIdentity: bound.id, stream: live.stream, ...(live.headed !== undefined ? { headed: live.headed } : {}) };
+        // Picked, so no provider's binding (its environment) reaches the webview.
+        const { session, cwd, binaryPath } = p.describe(b);
+        return { ok: true, session, cwd, binaryPath, nativeIdentity: bound.id, stream: live.stream, ...(live.headed !== undefined ? { headed: live.headed } : {}) };
       };
       const settlingAnswer = { ok: false, error: 'the browser is being relaunched or closed' };
       if (r.op !== 'launch' && r.op !== 'attach' && r.op !== 'close' && settling.has(bound.id)) return settlingAnswer;
@@ -712,8 +716,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
           return { ...answer(live), ...(relaunched ? { relaunched } : {}) };
         }
         case 'close':
-          try { await closeSession(bound); }
-          finally { launchEnvs.delete(envKey); }
+          await closeSession(bound);
           return { ok: true };
         case 'view': {
           const { stream, headed: viewHeaded = false, debug = false } = r;
@@ -744,7 +747,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
           return await p.act(b, r);
       }
     } catch (error) {
-      if (newEnv && launchEnvs.get(newEnv.key) === newEnv.entry) launchEnvs.delete(newEnv.key);
+      if (created) forgetEnv(envKey, created);
       return { ok: false, error: messageOf(error) };
     }
   }

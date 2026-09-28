@@ -281,20 +281,23 @@ to a URL first (`docs/specs/dor-cli.md` → Browser Surface Addressing). Flags
 Dormouse does not model still pass through.
 
 **Must resolve new GUI launches in a fresh shell environment**, in the browser's
-cwd. The host runs the staged `dor __launch-env` helper through a short-lived,
-pipe-backed shell; no terminal Surface is created. POSIX uses an interactive
-login shell (`SHELL`, then the account shell); VS Code uses its selected shell.
-Windows defaults to ComSpec; PowerShell loads profiles. This captures exported
-startup settings, not mutations in an already-running terminal or prompt hooks.
+cwd while it exists (rationale). The host runs the staged `dor __launch-env`
+helper through a short-lived, pipe-backed shell, creating no terminal Surface;
+it captures exported startup settings, not an already-running terminal's
+mutations or prompt hooks. The shell is VS Code's selected one, else:
+
+- **POSIX:** `SHELL`, then the account shell, as an interactive login shell
+  (csh and tcsh interactive only).
+- **Windows:** ComSpec; PowerShell loads profiles.
 
 **Must retain that environment only for the browser session's lifetime**, sharing
 concurrent initialization and using it for provider discovery, CLI commands,
-and daemon state paths. Close, failed initialization and host shutdown discard
-it; restoration initializes afresh. **Never send this environment to the
+and daemon state paths. A close discards it once resolved, refusing the launches
+it overtook; failed initialization and host shutdown discard it too, and any
+later request initializes afresh. **Never send this environment to the
 webview, persist it, or include helper output in diagnostics.** Startup is
 bounded to 15 seconds and 2 MiB combined output within the launch deadline;
-failure is reported without falling back to the GUI environment. Closing a
-pending launch cancels it before browser startup.
+failure is reported without falling back to the GUI environment.
 
 **Must resolve each new GUI browser independently**, without borrowing another
 session's executable. Existing bindings retain their validated executable hint;
@@ -305,7 +308,8 @@ session's executable. Existing bindings retain their validated executable hint;
 Source of truth: `browserLaunchEnv` in `lib/src/host/browser-launch-env.ts`,
 `createBrowserHost` in `lib/src/host/browser-host.ts`, `runCli` in
 `dor/src/cli.ts`. Pinned by `lib/src/host/browser-launch-env.test.ts`,
-`lib/src/host/browser-host-env.test.ts` and `dor/test/launch-env.test.mjs`.
+`lib/src/host/browser-host.test.ts` ("launch environment") and
+`dor/test/launch-env.test.mjs`.
 
 ### Managed identity
 
@@ -720,7 +724,7 @@ relaunch changes the mode.
   kills the pid it reads there. **Host-side operations and captures for a
   session in a socket directory the host does not share are refused**, as the
   host sees no daemon for it; its viewer socket still sends every changed
-  frame, and a close runs the CLI under the host's environment.
+  frame, and a close runs the CLI under the session's shell environment.
 - **The post-launch sweep lists and closes page targets over the browser's
   CDP, never `tab list`** (rationale).
 

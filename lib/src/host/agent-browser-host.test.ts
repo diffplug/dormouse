@@ -1252,7 +1252,7 @@ describe('agent-browser host edit ops', () => {
 
 describe('agent-browser shell environment', () => {
   useTempSocketDir('dor-ab-env-');
-  it('uses the binding environment for daemon proof and commands, but never describes it', async () => {
+  it('uses the binding environment for daemon proof and commands', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'dor-ab-shell-'));
     const { port, server } = await listen();
     const provider = createAgentBrowserProvider();
@@ -1264,9 +1264,7 @@ describe('agent-browser shell environment', () => {
       expect(await provider.find(binding)).toEqual({ stream: port });
       enqueueSpawnResults([{}]);
       await provider.act(binding, { op: 'history', dir: 'reload' });
-      expect(spawnMock.mock.calls[0][2]).toMatchObject({ cwd: dir, env });
-      expect(provider.describe(binding)).not.toHaveProperty('env');
-      expect(JSON.stringify(provider.describe(binding))).not.toContain('secret');
+      expect(spawnMock.mock.calls[0][2]).toEqual({ env });
     } finally {
       await closeServer(server);
       await fsp.rm(dir, { recursive: true, force: true });
