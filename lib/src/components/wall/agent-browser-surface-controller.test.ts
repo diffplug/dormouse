@@ -23,6 +23,7 @@ import {
 import { installBrowserHost, type BrowserAnswers } from './wall-test-utils';
 import { createBrowserHost } from '../../host/browser-host';
 import { fakeProvider } from '../../host/browser-host-test-utils';
+import { defaultBrowserViewportConfig } from 'dor-lib-common/browser-viewports';
 
 // These tests drive the controller directly, with NO React — it owns the whole
 // non-React lifecycle, so it can be exercised in isolation.
@@ -622,6 +623,25 @@ describe('launch', () => {
     expect(sink.updateParameters).not.toHaveBeenCalled();
     expect(host.requests('launch')).toHaveLength(1);
     expect(host.requests('attach')).toHaveLength(0);
+    expect(opens(host)).toHaveLength(0);
+  });
+
+  it.each(['agent-browser', 'playwright'] as const)('adopts configured pane-sync on first placement for %s', async (provider) => {
+    const host = launchHost(async () => ({ ok: true, session: 'prepared', stream: 4321 }));
+    host.platform.toolControl = vi.fn(async () => ({ status: 'browser-config' as const,
+      config: { ...defaultBrowserViewportConfig(), defaultViewport: 'pane-sync' } }));
+    const params = { renderMode: `${provider}-screencast` as const, url: 'http://localhost:5173/', syncEngaged: false };
+    const controller = acquireAgentBrowserSurfaceController('prepared', params);
+    const ready = await controller.prepareForPlacement();
+    await flushMicrotasks();
+    expect(syncs(4321)).toEqual([]);
+    if (ready.status !== 'ready') throw new Error('Expected prepared browser');
+    controller.updateParams({ ...params, ...ready.params });
+    controller.attachView(resizablePane(640, 480).sink);
+    await flushMicrotasks();
+    expect(syncs(4321).at(-1)).toEqual([640, 480, window.devicePixelRatio || 1]);
+    expect(ready.params).toMatchObject({ browserViewport: { mode: 'pane-sync' }, syncEngaged: true });
+    expect(host.requests('launch')).toHaveLength(1);
     expect(opens(host)).toHaveLength(0);
   });
 

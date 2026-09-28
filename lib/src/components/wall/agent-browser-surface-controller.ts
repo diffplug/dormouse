@@ -890,6 +890,9 @@ export class AgentBrowserSurfaceController {
       if (response?.status === 'error') throw new Error(response.message);
       const config = response?.status === 'browser-config' ? response.config : defaultBrowserViewportConfig();
       this.setBrowserViewport(resolveBrowserViewport(config));
+      // Configured pane-sync must follow the first attached view too, when a
+      // deferred launch resolved its initial dimensions without a pane.
+      this.setSyncEngaged(this.browserViewport.mode === 'pane-sync');
       return concrete();
     });
   }
