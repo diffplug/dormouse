@@ -9,6 +9,10 @@ import {
 import { bakedConnectSrc } from '../../lib/src/host/remote/connect-src';
 import { readEnrollmentOffer } from '../../lib/src/host/remote/enroll-offer';
 import { BURROW_COMMAND_TIMEOUT_MS } from '../../lib/src/host/remote/link-client';
+import {
+  createNativeDirectPeerFactory,
+  disposeNativeDirectPeers,
+} from '../../lib/src/host/remote/native-direct-peer';
 import { BurrowService, unenrolledStatus } from '../../lib/src/host/remote/service';
 import {
   BURROW_EVENT_EVENT,
@@ -236,6 +240,9 @@ function startService(): void {
       }
     },
     connectSrc: bakedConnectSrc(),
+    // Building the factory loads nothing: the addon is opened inside the first
+    // offer, if one ever comes (`native-direct-peer.ts`).
+    createDirectPeer: createNativeDirectPeerFactory(),
   });
   void service.start().catch((error: unknown) => {
     log.error(`[burrow] failed to start: ${String(error)}`);
@@ -540,6 +547,10 @@ export function initBurrow(ctx: vscode.ExtensionContext): vscode.Disposable {
     dispose() {
       service?.dispose();
       service = null;
+      // After the service, so no session still holds a channel. Only here, at
+      // deactivation: teardown is terminal for the process, and a window that
+      // later wins the lease again still needs a factory that loads.
+      disposeNativeDirectPeers();
       askProvider = null;
       contending = false;
       commandRoutes.clear();

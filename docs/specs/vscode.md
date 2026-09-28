@@ -268,6 +268,14 @@ Two events are pushed rather than answered: `pairing-queue` (the complete snapsh
 
 **Lifetime.** Hiding a panel keeps its terminals answerable (`retainContextWhenHidden`), and closing every Dormouse view does not take the Burrow offline.
 
+#### The direct path
+
+**The broker's extension host answers a `direct-offer`** (`docs/specs/remote-api.md` → Transport → "Direct path") over the same lazily loaded `node-datachannel` polyfill the sidecar uses. **Tear the addon down only at deactivation**: the teardown is terminal for the process, and a window that later wins the lease again still needs a factory that loads. Extension hosts can load the addon because VS Code runs them in a helper entitled to load natives another team signed (rationale).
+
+**One universal VSIX carries every platform's addon.** pnpm installs only the host's `@node-datachannel/<platform>` package, so the build stages the addon, its runtime dependencies, and every platform package `vscode-ext/package.json` declares under `optionalDependencies` into `dist/node_modules`, fetching the ones not installed and **refusing any whose bytes miss the integrity `pnpm-lock.yaml` pins**. `node-pty` needs no staging: its one package carries every platform's prebuild. **Keep the addon `external` to `dist/extension.js`**, which the build asserts from esbuild's metafile, because the addon resolves its platform package from its own `__dirname`.
+
+Source of truth: `vscode-ext/scripts/stage-native-direct.mjs`; `startService` and `initBurrow` in `vscode-ext/src/burrow.ts`, pinned by `vscode-ext/test/burrow.test.ts`; `createNativeDirectPeerFactory` in `lib/src/host/remote/native-direct-peer.ts`; `assertNothingInlined` in `scripts/assert-not-inlined.mjs`.
+
 ### Peer surfaces
 
 The service owns the PTYs but not the *view* of them: each webview is its own JS realm with its own xterm registry (`lib/src/lib/terminal-store.ts`), and only a webview knows what a pane is called, whether it is focused, and how big its xterm is. So the service asks, and every webview answers for its own.

@@ -153,9 +153,10 @@ realm**. Against the shared store contract (`docs/specs/relay.md` → "Burrow si
   browser dev harness is *not* this case: its per-run temp directory makes a dev
   enrollment live and die with the run.
 
-**The direct path.** The sidecar is the one Burrow that answers a `direct-offer`
-(`docs/specs/remote-api.md` → Transport → "Direct path"), over
-`node-datachannel`'s W3C polyfill. **A sidecar package's transitive dependencies
+**The direct path.** The sidecar answers a `direct-offer`
+(`docs/specs/remote-api.md` → Transport → "Direct path") over
+`node-datachannel`'s W3C polyfill, as the VS Code extension host does
+(`docs/specs/vscode.md` → "The direct path"). **A sidecar package's transitive dependencies
 do not ship** — the Tauri bundle copies `standalone/sidecar/node_modules` and
 nothing else — so the addon's platform package and `detect-libc` are declared in
 `standalone/sidecar/package.json` directly — the addon's six platform packages

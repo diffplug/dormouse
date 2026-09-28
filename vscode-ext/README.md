@@ -181,7 +181,7 @@ Scrollback isn't saved.
 
 ## Phone control (in development)
 
-Dormouse Pocket puts your terminals on your phone: pick a pane, read it, type into it, and get a push notification when one needs you while you're away. Sessions are end-to-end encrypted between your phone and your computer. Today Pocket needs a self-hosted Relay and a Dormouse built from source; [Dormouse Hosted](https://dormouse.sh/hosted) will run the Relay for you. You can try the phone interface in your browser at [dormouse.sh/playground/pocket](https://dormouse.sh/playground/pocket).
+Dormouse Pocket puts your terminals on your phone: pick a pane, read it, type into it, and get a push notification when one needs you while you're away. Sessions are end-to-end encrypted between your phone and your computer, and move off the Relay onto a direct connection whenever the two can reach each other on your network or tailnet. Today Pocket needs a self-hosted Relay and a Dormouse built from source; [Dormouse Hosted](https://dormouse.sh/hosted) will run the Relay for you. You can try the phone interface in your browser at [dormouse.sh/playground/pocket](https://dormouse.sh/playground/pocket).
 
 ## Standalone app
 

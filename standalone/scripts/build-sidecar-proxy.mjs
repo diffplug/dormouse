@@ -21,6 +21,7 @@ import {
   CONNECT_SRC_PLACEHOLDER,
   resolveRemoteConnectSrc,
 } from '../../scripts/csp-defaults.mjs';
+import { assertNothingInlined } from '../../scripts/assert-not-inlined.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const libHost = path.resolve(here, '../../lib/src/host');
@@ -76,41 +77,6 @@ const bundles = [
   },
 ];
 
-/**
- * Fail the build if esbuild inlined a package the sidecar installs at runtime.
- *
- * `native-direct-peer.ts` calls `require('<specifier>')` by literal, so an
- * external specifier stays a `require-call` edge out of the bundle while a
- * bundled one becomes an input of it. That difference is the whole check: an
- * inlined addon produces a `burrow.cjs` that loads and then cannot find the
- * addon's `.node` file, which nothing before the first `direct-offer` on a real
- * machine would notice.
- */
-function assertNothingInlined(metafile, outfile, names) {
-  // esbuild keys `metafile.outputs` by path relative to the process cwd, with
-  // `/` separators on every platform.
-  const outputKey = path.relative(process.cwd(), outfile).split(path.sep).join('/');
-  const output = metafile.outputs[outputKey];
-  if (!output) {
-    throw new Error(
-      `sidecar: esbuild metafile has no output for "${outputKey}" — cannot check what it bundled.`,
-    );
-  }
-  for (const name of names) {
-    // Every layout a package manager resolves through ends in this segment,
-    // pnpm's content-addressed store included.
-    const inlined = Object.keys(output.inputs).find((input) =>
-      input.includes(`node_modules/${name}/`),
-    );
-    if (!inlined) continue;
-    throw new Error(
-      `sidecar: ${outputKey} inlined "${inlined}" — "${name}" is a sidecar runtime dependency, and ` +
-        'the addon would look for its platform package beside the bundle instead of inside ' +
-        'sidecar/node_modules.',
-    );
-  }
-}
-
 // `tauri.conf.json`'s `bundle.resources` globs this whole directory, so a
 // pre-rename `remote-host.cjs` left in an older checkout would ship inside the
 // app — a dead Burrow with its own baked connect-src allowlist — and so would
@@ -139,6 +105,6 @@ for (const { entry, out, define, assertBaked, external } of bundles) {
     ...(external ? { metafile: true } : {}),
   });
   if (assertBaked) assertConnectSrcBaked(outfile, remoteSrc);
-  if (external) assertNothingInlined(result.metafile, outfile, SIDECAR_RUNTIME_DEPS);
+  if (external) assertNothingInlined(result.metafile, outfile, SIDECAR_RUNTIME_DEPS, 'sidecar');
   console.log(`[sidecar] built ${path.relative(process.cwd(), outfile)}`);
 }

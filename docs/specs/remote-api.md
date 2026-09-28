@@ -63,11 +63,12 @@ Source of truth: `BurrowRuntime.#promoteConnection` in `lib/src/remote/burrow/bu
 
 After authorization the same Noise session moves off the Relay onto a WebRTC
 data channel. **The presence protocol is inherited unchanged and the Relay is
-never trusted with authorization.** **The standalone Burrow answers**, over
-`node-datachannel`'s W3C polyfill in the sidecar — **loaded at the first offer,
-never at boot**, a load failure declining from then on
-([standalone.md](./standalone.md) → "Burrow service"). **VS Code declines**: it
-carries no addon ([Future](#future)).
+never trusted with authorization.** **Both Burrows answer**, over
+`node-datachannel`'s W3C polyfill — the standalone app in its sidecar
+([standalone.md](./standalone.md) → "Burrow service"), VS Code in the broker
+window's extension host ([vscode.md](./vscode.md) → "The direct path") —
+**loaded at the first offer, never at boot**, a load failure declining from then
+on.
 
 **Every signal rides inside the session**, as one of four control messages
 ([relay.md](./relay.md) → E2E framing) on the established session over the relay
@@ -411,12 +412,9 @@ These are the methods the dor CLI speaks today; the remote API reuses their requ
 
 **Window lease.** A VR session may request `window.lease { windowRef }`, declaring itself that Window's primary display. Sizing needs no lease — last-attach-wins already hands VR the panes it displays — so the lease is presentational: that Window tethers wholesale instead of pane by pane, and panes created in it while the lease is held open tethered to the leaseholder. One lease per Window; the Burrow user can always reclaim it locally. Phones never need it.
 
-### 8. Direct path (WebRTC)
+### 8. Direct path
 
-**Scope: direct-path** — latency. The shipped half is [Transport → Direct path](#direct-path), which Pocket and the standalone Burrow speak today. What remains, in staged order:
-
-1. **VS Code Burrow** — platform-targeted VSIX builds carrying the addon per target (`docs/specs/deploy.md`).
-2. **Dogfood** across a tailnet, keystroke round-trip measured relayed and direct into the rationale.
+**Scope: direct-path** — latency. The shipped half is [Transport → Direct path](#direct-path), which Pocket and both Burrows speak today. What remains is to **dogfood** it across a tailnet, keystroke round-trip measured relayed and direct into the rationale.
 
 Relay-supplied ICE servers are unstaged (SaaS), as is a session surviving relay loss.
 
@@ -431,4 +429,4 @@ Browser surfaces can produce audio; VR will want it (spatial, per-panel).
 
 ### Open questions
 
-* **Browser media**: screencast frames over the WebSocket first; once the direct path ships, a video track would be smoother for VR. Possibly phone=frames, VR=track, negotiated in the hello.
+* **Browser media**: screencast frames over the WebSocket first; on the direct path, a video track would be smoother for VR. Possibly phone=frames, VR=track, negotiated in the hello.

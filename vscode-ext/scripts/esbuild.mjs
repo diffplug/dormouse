@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 
 import * as esbuild from 'esbuild';
 
+import { assertNothingInlined } from '../../scripts/assert-not-inlined.mjs';
 import {
   assertConnectSrcBaked,
   CONNECT_SRC_PLACEHOLDER,
@@ -27,6 +28,11 @@ const remoteSrc = resolveRemoteConnectSrc(process.env, 'esbuild');
 
 const watch = process.argv.includes('--watch');
 
+// The direct path's addon, required lazily by `native-direct-peer.ts` and
+// staged into `dist/node_modules` by `stage-native-direct.mjs`. It resolves its
+// platform package from its own `__dirname`, so it must stay a bare `require`.
+const NATIVE_DIRECT = ['node-datachannel', 'node-datachannel/*'];
+
 const common = {
   bundle: true,
   format: 'cjs',
@@ -35,7 +41,7 @@ const common = {
   // They are not installed and must not be — a `.node` addon cannot be bundled
   // and would have to be shipped per platform — so they stay as runtime
   // `require`s that `ws` already catches and falls back from.
-  external: ['vscode', 'node-pty', 'bufferutil', 'utf-8-validate'],
+  external: ['vscode', 'node-pty', 'bufferutil', 'utf-8-validate', ...NATIVE_DIRECT],
   alias: {
     // Shared `lib/` modules the extension host bundles reach the `dor` CLI's
     // types through the `dor/*` tsconfig path. esbuild picks the tsconfig
@@ -52,6 +58,7 @@ const builds = [
     entryPoints: ['src/extension.ts'],
     outdir: 'dist',
     define: { [CONNECT_SRC_PLACEHOLDER]: JSON.stringify(remoteSrc) },
+    metafile: true,
   },
   {
     ...common,
@@ -73,6 +80,7 @@ if (watch) {
   assertConnectSrcBaked('dist/extension.js', remoteSrc);
   console.error('[esbuild] watching');
 } else {
-  await Promise.all(builds.map((options) => esbuild.build(options)));
+  const [extension] = await Promise.all(builds.map((options) => esbuild.build(options)));
   assertConnectSrcBaked('dist/extension.js', remoteSrc);
+  assertNothingInlined(extension.metafile, 'dist/extension.js', ['node-datachannel'], 'esbuild');
 }

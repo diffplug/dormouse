@@ -1,7 +1,8 @@
 /**
- * The standalone Burrow's direct-path peer: `node-datachannel`'s W3C polyfill,
- * running next to the PTYs (`docs/specs/remote-api.md` → Transport → "Direct
- * path", `docs/specs/standalone.md` → "Burrow service").
+ * Both Burrows' direct-path peer: `node-datachannel`'s W3C polyfill, running
+ * next to the PTYs (`docs/specs/remote-api.md` → Transport → "Direct path",
+ * `docs/specs/standalone.md` → "Burrow service", `docs/specs/vscode.md` → "The
+ * direct path").
  *
  * Host code, so nothing here imports the webview library — only the structural
  * `DirectPeerLike` seam, as a type. The polyfill satisfies that seam without
@@ -49,10 +50,11 @@ let declined = false;
  *
  * **The specifiers must survive bundling as bare `require` calls.** The addon's
  * loader resolves its platform package and `detect-libc` relative to its own
- * `__dirname`, so inlining the library into `burrow.cjs` would move that
+ * `__dirname`, so inlining the library into the bundle would move that
  * `__dirname` out of the installed package and leave nothing to find. The
- * esbuild `external` entries in `standalone/scripts/build-sidecar-proxy.mjs`
- * are what keeps them bare, and that build asserts it.
+ * esbuild `external` entries in `standalone/scripts/build-sidecar-proxy.mjs` and
+ * `vscode-ext/scripts/esbuild.mjs` are what keep them bare, and both builds
+ * assert it.
  */
 function requireNative(): NativeDirect {
   return {
