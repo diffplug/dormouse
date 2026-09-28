@@ -40,8 +40,27 @@ objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSImage"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["NSData"] }
 
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+# Re-exports the tao the app ships, for tests/objc_exception_unwinds.rs.
+tauri-runtime-wry = { version = "2", default-features = false }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSEvent", "NSGraphicsContext"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["NSDictionary", "NSException", "NSGeometry", "NSString"] }
+
+[target.'cfg(unix)'.dev-dependencies]
+libc = "0.2"
+
+[[test]]
+name = "objc_exception_unwinds"
+harness = false
+
 [profile.release]
 strip = true
 lto = true
 codegen-units = 1
-panic = "abort"
+# Never "abort" (docs/specs/standalone.md -> "Objective-C exceptions").
+panic = "unwind"
+
+[patch.crates-io]
+# docs/specs/standalone.md -> "Objective-C exceptions".
+tao = { git = "https://github.com/diffplug/tao", rev = "397f6789285412024892579aff0897aade11d832" }
+tao-macros = { git = "https://github.com/diffplug/tao", rev = "397f6789285412024892579aff0897aade11d832" }

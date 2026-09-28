@@ -1243,6 +1243,33 @@ Source of truth: `init_log` / `read_update_log` in `standalone/src-tauri/src/lib
 `read_utf8_tail` in `standalone/src-tauri/src/log_tail.rs`, pinned by
 `reads_only_the_budget_even_when_the_log_grows`.
 
+## Objective-C exceptions
+
+**Must let an Objective-C exception that AppKit raises beneath a tao callback,
+such as the `sendEvent:` override, unwind to AppKit**, whose event loop reports
+it and keeps running. Both halves are
+required; either alone still aborts with "panic in a function that cannot
+unwind" (rationale):
+
+- **Must build release with `panic = "unwind"`.**
+- **Must take tao from the `diffplug/tao` fork** through `[patch.crates-io]`:
+  its Apple callbacks are `extern "C-unwind"` where upstream's are
+  `extern "C"`. One fork branch per patched release (`dormouse-0.35` is
+  `tao-v0.35.2` plus that commit); `tao-macros` comes from the same rev so one
+  copy resolves. **Must rebase the commit onto the new release when tauri moves
+  tao**, since an unused `[patch]` only warns; drop the patch once tauri depends
+  on a tao carrying tauri-apps/tao#1354.
+
+**Rust panics still abort**: `abort_on_panic`, installed first in `run`, runs
+the default hook, then `std::process::abort`. **An exception raised inside the
+Tauri event handler still aborts**, at the `catch_unwind` tao runs it under
+(rationale).
+
+Source of truth: `abort_on_panic` in `standalone/src-tauri/src/panic_policy.rs`;
+`[profile.release]` and `[patch.crates-io]` in `standalone/src-tauri/Cargo.toml`.
+Pinned by `standalone/src-tauri/tests/objc_exception_unwinds.rs` and the
+`panic_policy` tests.
+
 ## Build and development
 
 Source of truth: `standalone/package.json` (package scripts),

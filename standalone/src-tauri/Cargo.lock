@@ -672,6 +672,7 @@ name = "dormouse"
 version = "1.1.0"
 dependencies = [
  "getrandom 0.4.3",
+ "libc",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",
@@ -682,6 +683,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-shell",
  "tauri-plugin-updater",
+ "tauri-runtime-wry",
  "windows 0.62.2",
 ]
 
@@ -3354,8 +3356,7 @@ dependencies = [
 [[package]]
 name = "tao"
 version = "0.35.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a33f7f9e486ade65fcf1e45c440f9236c904f5c1002cdc7fc6ae582777345ce4"
+source = "git+https://github.com/diffplug/tao?rev=397f6789285412024892579aff0897aade11d832#397f6789285412024892579aff0897aade11d832"
 dependencies = [
  "bitflags 2.11.1",
  "block2",
@@ -3394,8 +3395,7 @@ dependencies = [
 [[package]]
 name = "tao-macros"
 version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4e16beb8b2ac17db28eab8bca40e62dbfbb34c0fcdc6d9826b11b7b5d047dfd"
+source = "git+https://github.com/diffplug/tao?rev=397f6789285412024892579aff0897aade11d832#397f6789285412024892579aff0897aade11d832"
 dependencies = [
  "proc-macro2",
  "quote",
