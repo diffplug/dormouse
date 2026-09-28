@@ -4,19 +4,21 @@
 
 A multitasking terminal for mice and thumbs (and hotkey wizards too): your terminals and browsers tiled side by side inside VS Code, and the one that needs you lights up.
 
-TODO: hero image of the Dormouse panel with a few coding agents and a dev server tiled side by side, one pane ringing
+![Dormouse, the multitasking terminal for mice](images/hero.jpg)
+
+<!-- TODO: replace the hero with the Dormouse panel: a few coding agents and a dev server tiled side by side, one pane ringing -->
 
 Try it in your browser first: [dormouse.sh/playground](https://dormouse.sh/playground).
 
 ## Tmux with browsers
 
-TODO: GIF of splitting, dragging, zooming, and minimizing panes (the homepage's tmux video would do)
+<!-- TODO: GIF of splitting, dragging, zooming, and minimizing panes (the homepage's tmux video would do) -->
 
 Soft as a mouse, sharp as a tmux. Split, drag, zoom, and minimize panes with the mouse, or keep your hands on [tmux keybinds](#keyboard-shortcuts). A minimized pane becomes a **door** on the baseboard and keeps running. Dormouse follows your VS Code theme exactly, so it's hard to tell it isn't built in.
 
 ## Alerts
 
-TODO: image of a ringing pane beside a pane showing a TODO pill
+<!-- TODO: image of a ringing pane beside a pane showing a TODO pill -->
 
 A pane rings when its program asks for you (`BEL`, `OSC 9`, `OSC 99`, `OSC 777`), or when a command you started finishes while you're away — no setup. Coding agents are watched by default, so their pane rings when they go quiet; right-click any pane to watch its command too.
 
@@ -24,7 +26,7 @@ Look at a ring without typing and it becomes a **TODO**; type into the pane to c
 
 ## Push notifications you can self-host
 
-TODO: image of Dormouse Pocket on a phone with the radial menu open (the homepage's phone mockup would do)
+<!-- TODO: image of Dormouse Pocket on a phone with the radial menu open (the homepage's phone mockup would do) -->
 
 Your agent hits a permission prompt after you leave. Dormouse Pocket buzzes your phone, and one drag on its radial menu sends `y`, `n`, Esc, or Ctrl+C. The Relay is yours — one Node process behind `tailscale serve` — and sessions are end-to-end encrypted.
 
@@ -36,7 +38,7 @@ Six panes running and something's serving `:3000`. Which one? Right-click a pane
 
 ## Browsers for you (and your agents)
 
-TODO: image of a dev server's page in a browser pane next to the terminal running `pnpm dev`
+<!-- TODO: image of a dev server's page in a browser pane next to the terminal running `pnpm dev` -->
 
 A browser is just another pane, and your agent drives the same one you're watching:
 
@@ -49,7 +51,7 @@ Dormouse drives the agent-browser or Playwright CLI you already have rather than
 
 ## Select and copy-paste like you meant
 
-TODO: GIF of overriding a TUI's mouse capture and choosing Copy Rewrapped (the homepage's copy-paste video would do)
+<!-- TODO: GIF of overriding a TUI's mouse capture and choosing Copy Rewrapped (the homepage's copy-paste video would do) -->
 
 When a TUI grabs the mouse, one click in the pane header takes it back. **Copy Raw** keeps the hard wraps; **Copy Rewrapped** joins them back into the line the program printed. Press `e` mid-drag to grab a whole URL or path, and paste a screenshot to hand your agent its path.
 
