@@ -197,6 +197,23 @@ interface CaptureProcess extends StricliProcess {
 
 export async function runCli(rawArgv: string[], options: CliOptions = {}): Promise<CliResult> {
   const argv = normalizeVersionAlias(rawArgv);
+  // Private host helper: stdout stays on a host-owned pipe, never a terminal
+  // or control-socket response. The marker separates shell startup chatter.
+  if (argv[0] === '__launch-env' && argv.length === 2 && /^[a-f0-9]{32}$/.test(argv[1])) {
+    const env = { ...(options.env ?? process.env) };
+    delete env.ELECTRON_RUN_AS_NODE;
+    // A JSON copy loses process.env's case-insensitive Windows lookup.
+    if (process.platform === 'win32') {
+      for (const key of Object.keys(env)) {
+        const canonical = key.toUpperCase();
+        if ((canonical === 'PATH' || canonical === 'PATHEXT') && key !== canonical) {
+          env[canonical] = env[key];
+          delete env[key];
+        }
+      }
+    }
+    return { stdout: `\n${argv[1]}:${Buffer.from(JSON.stringify(env)).toString('base64')}\n`, stderr: '', exitCode: 0 };
+  }
 
   // `dor agent-browser <args...>` and `dor playwright <args...>` forward args verbatim to the
   // provider's CLI, so they must never reach stricli's flag parser. Only a bare

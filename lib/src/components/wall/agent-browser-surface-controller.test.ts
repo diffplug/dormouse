@@ -7,7 +7,6 @@ import type { PlatformAdapter } from '../../lib/platform/types';
 import { VIEWER_TEXT_INPUT_MAX, encodeViewerFrame, type BrowserRequest, type BrowserResult, type ViewerInput, type ViewerSyncIntent } from '../../lib/platform/browser-automation';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
 import { viewportFromMeasurement } from './browser-surface';
-import { forgetLaunchBinaryPaths, launchBinaryPath, rememberLaunchBinaryPath } from './browser-automation';
 import {
   HIDDEN_PARK_DELAY_MS,
   acquireAgentBrowserSurfaceController,
@@ -137,7 +136,6 @@ beforeEach(() => {
 
 afterEach(() => {
   disposeAllAgentBrowserSurfaceControllers();
-  forgetLaunchBinaryPaths();
   vi.restoreAllMocks();
   setPlatform(new FakePtyAdapter());
 });
@@ -757,15 +755,14 @@ describe('launch', () => {
     expect(streamSocket(4321)?.readyState).toBe(1);
   });
 
-  it('launches with the binary `dor agent-browser` last resolved, and remembers the one it ran', async () => {
+  it('lets a fresh GUI launch resolve its own binary and retains the returned binding', async () => {
     const host = launchHost(async () => ({ ok: true, session: 'dormouse.1.gui-b', stream: 4321, binaryPath: '/opt/ab/agent-browser' }));
-    rememberLaunchBinaryPath('agent-browser', '/usr/local/bin/agent-browser');
     acquireAgentBrowserSurfaceController('id', { renderMode: 'agent-browser-screencast', url: 'https://page.example/' }).attachView(makeSink());
     await flushMicrotasks();
     expect(host.requests('launch')).toEqual([expect.objectContaining({
-      provider: 'agent-browser', binding: { binaryPath: '/usr/local/bin/agent-browser' }, op: 'launch', url: 'https://page.example/', headed: false,
+      provider: 'agent-browser', binding: {}, op: 'launch', url: 'https://page.example/', headed: false,
     })]);
-    expect(launchBinaryPath('agent-browser')).toBe('/opt/ab/agent-browser');
+    expect(host.requests('view')[0].binding).toMatchObject({ binaryPath: '/opt/ab/agent-browser' });
   });
 
   it('tells the Wall about a failed launch, once a view is attached to hear it', async () => {

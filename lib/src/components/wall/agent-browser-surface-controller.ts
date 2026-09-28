@@ -40,9 +40,7 @@ import {
   hostSupportsBrowser,
   isHeadedMode,
   offeredRenderModes,
-  launchBinaryPath,
   providerUnavailable,
-  rememberLaunchBinaryPath,
   surfaceProvider,
   type BrowserHandle,
 } from './browser-automation';
@@ -817,7 +815,7 @@ export class AgentBrowserSurfaceController {
     const session = this.launchSession;
     const headed = this.headed;
     // No creation site has to remember the binary a `dor agent-browser` surface resolved.
-    const binaryPath = this.binaryPath ?? launchBinaryPath(this.provider);
+    const binaryPath = this.binaryPath;
     const browser = browserHandle(this.provider, { session, cwd: this.cwd, binaryPath });
     const phase: Phase = { k: 'launching', ...(session && browser ? { named: { session, browser } } : {}) };
     this.setPhase(phase);
@@ -853,7 +851,6 @@ export class AgentBrowserSurfaceController {
           this.reportLaunchFailure(error);
           return;
         }
-        rememberLaunchBinaryPath(this.provider, res.binaryPath);
         this.session = res.session;
         if (res.cwd !== undefined) this.cwd = res.cwd;
         this.binaryPath = allowedBinaryPath(res.binaryPath, this.provider) ?? allowedBinaryPath(binaryPath, this.provider);

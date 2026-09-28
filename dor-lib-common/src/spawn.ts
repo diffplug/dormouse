@@ -66,7 +66,7 @@ const CLOSE_GRACE_MS = 250;
 export function spawnAndCapture(
   binary: string,
   args: readonly string[],
-  options: { cwd?: string; timeoutMs?: number; env?: NodeJS.ProcessEnv } = {},
+  options: { cwd?: string; timeoutMs?: number; env?: NodeJS.ProcessEnv; maxOutputBytes?: number } = {},
 ): Promise<SpawnCaptureResult> {
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
@@ -98,11 +98,31 @@ export function spawnAndCapture(
       child.stderr?.destroy();
       apply();
     };
+    const killChild = () => {
+      const killer = child.pid === undefined ? null : treeKillCommand(child.pid, options.env ?? process.env, process.platform === 'win32');
+      if (!killer) {
+        child.kill('SIGKILL');
+        return;
+      }
+      const taskkill = spawn(killer.binary, killer.args, { stdio: 'ignore', windowsHide: true });
+      // Best effort: a failed tree kill still leaves the shell to end.
+      taskkill.on('error', () => child.kill('SIGKILL'));
+    };
     // Decode across pipe chunks so a split UTF-8 sequence stays one character.
     child.stdout?.setEncoding('utf8');
     child.stderr?.setEncoding('utf8');
-    child.stdout?.on('data', (chunk: string) => { stdout += chunk; });
-    child.stderr?.on('data', (chunk: string) => { stderr += chunk; });
+    let capturedBytes = 0;
+    const capture = (chunk: string, stderrChunk: boolean) => {
+      if (settled) return;
+      capturedBytes += Buffer.byteLength(chunk);
+      if (options.maxOutputBytes !== undefined && capturedBytes > options.maxOutputBytes) {
+        settle(() => resolve({ ok: false, error: { code: 'ENOBUFS', message: 'Child output exceeded the capture limit' } }));
+        killChild();
+      } else if (stderrChunk) stderr += chunk;
+      else stdout += chunk;
+    };
+    child.stdout?.on('data', (chunk: string) => capture(chunk, false));
+    child.stderr?.on('data', (chunk: string) => capture(chunk, true));
     child.on('error', (error: NodeJS.ErrnoException) =>
       settle(() => resolve({ ok: false, error: { code: error.code, message: error.message } })));
     const finish = (code: number | null, out: string, err: string): void =>
@@ -117,14 +137,7 @@ export function spawnAndCapture(
           ok: false,
           error: { code: SPAWN_TIMEOUT_CODE, message: `${binary} did not finish within ${options.timeoutMs} ms` },
         }));
-        const killer = child.pid === undefined ? null : treeKillCommand(child.pid, process.env, process.platform === 'win32');
-        if (!killer) {
-          child.kill('SIGKILL');
-          return;
-        }
-        const taskkill = spawn(killer.binary, killer.args, { stdio: 'ignore', windowsHide: true });
-        // Best effort: a failed tree kill still leaves the shell to end.
-        taskkill.on('error', () => child.kill('SIGKILL'));
+        killChild();
       }, Math.max(0, options.timeoutMs));
     }
     child.on('close', (code: number | null) => finish(code, stdout, stderr));

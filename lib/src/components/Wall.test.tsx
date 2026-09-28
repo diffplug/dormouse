@@ -16,7 +16,6 @@ import * as helpers from '../lib/helper-terminal';
 import * as agentBrowserScreen from './wall/agent-browser-screen';
 import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
 import { disposeAllAgentBrowserSurfaceControllers, getAgentBrowserSurfaceController } from './wall/agent-browser-surface-controller';
-import { forgetLaunchBinaryPaths } from './wall/browser-automation';
 import * as browserAutomation from './wall/browser-automation';
 import { setDevServerResolution } from './wall/agent-browser-ports';
 import { IS_MAC, setPlatform } from '../lib/platform';
@@ -76,7 +75,6 @@ afterEach(() => {
   // Browser controllers outlive the Wall that mounted them, like the ring
   // above, and so does the binary path `dor agent-browser` last resolved.
   disposeAllAgentBrowserSurfaceControllers();
-  forgetLaunchBinaryPaths();
 });
 
 const flush = (): Promise<void> => harness.flush();

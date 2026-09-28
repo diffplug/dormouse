@@ -13,25 +13,25 @@ export interface PlaywrightInstall { binary: string; libraryPath: string; librar
 // realpaths, package reads and a `require`.
 const installs = new Map<string, PlaywrightInstall>();
 
-export function resolvePlaywrightInstall(hint?: string): PlaywrightInstall {
-  const configured = process.env[PLAYWRIGHT_BIN_ENV];
-  const cacheKey = JSON.stringify([hint ?? null, configured ?? null, process.env.PATH ?? null]);
+export function resolvePlaywrightInstall(hint?: string, env: NodeJS.ProcessEnv = process.env): PlaywrightInstall {
+  const configured = env[PLAYWRIGHT_BIN_ENV];
+  const cacheKey = JSON.stringify([hint ?? null, configured ?? null, env.PATH ?? null, env.PATHEXT ?? null]);
   const cached = installs.get(cacheKey);
   // A cached install is good while its launcher exists; an uninstall re-searches.
   if (cached && existsSync(cached.binary)) return cached;
   installs.delete(cacheKey);
-  const install = findPlaywrightInstall(hint, configured);
+  const install = findPlaywrightInstall(hint, configured, env);
   installs.set(cacheKey, install);
   return install;
 }
 
-function findPlaywrightInstall(hint: string | undefined, configured: string | undefined): PlaywrightInstall {
+function findPlaywrightInstall(hint: string | undefined, configured: string | undefined, env: NodeJS.ProcessEnv): PlaywrightInstall {
   const candidates = [isAllowedPlaywrightBinary(hint, configured) ? hint : undefined, configured, DEFAULT_PLAYWRIGHT_BIN];
   for (const candidate of candidates) {
     if (!candidate) continue;
     // The file `dor playwright` spawns for this name (docs/specs/dor-cli.md → "Spawning
     // External Binaries"); an explicit path comes back verbatim, unchecked.
-    const binary = resolveBinaryPath(candidate, process.env);
+    const binary = resolveBinaryPath(candidate, env);
     if (binary === undefined || !existsSync(binary)) continue;
     let dir = path.dirname(realpathSync(binary));
     // npm symlinks, pnpm .bin shims, and Windows npm .cmd launchers.

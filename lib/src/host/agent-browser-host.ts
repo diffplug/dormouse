@@ -21,6 +21,7 @@ import { promises as fs } from 'fs';
 import {
   BROWSER_PROVIDERS,
   isDirectory,
+  resolveBinaryPath,
   parseStreamPort,
   spawnAndCapture,
   streamStatusArgs,
@@ -178,9 +179,8 @@ const MEASURE_INTERVAL_MS = 1000;
 export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}): BrowserProvider<ProviderBinding> {
   const log = deps.log ?? (() => {});
 
-  // The host's PATH is often the GUI login PATH (no nvm/volta shims), so prefer
-  // the absolute path `dor agent-browser` resolved in the user's terminal; fall through on
-  // ENOENT (binary missing) to the next candidate in case it has gone stale.
+  // Preserve a bound executable, falling through on ENOENT if it went stale.
+  // The host supplies the session's fresh-shell environment for every call.
   //
   // The one gate every spawn shares. `binaryPath` arrives from the webview
   // realm and from a pane's persisted Lath params, so an unchecked one is
@@ -193,9 +193,9 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
   async function runWithBinaryFallback(
     args: string[],
     binaryPath?: string,
-    options: { timeoutMs?: number; cwd?: string } = {},
+    options: { timeoutMs?: number; cwd?: string; env?: NodeJS.ProcessEnv } = {},
   ): Promise<CliResult> {
-    const configured = process.env[AGENT_BROWSER_BIN_ENV];
+    const configured = (options.env ?? process.env)[AGENT_BROWSER_BIN_ENV];
     if (binaryPath !== undefined && !isAllowedAgentBrowserBinary(binaryPath, configured)) {
       log(`[agent-browser] refused a caller-supplied binary path that is not an agent-browser: ${JSON.stringify(binaryPath)}`);
       binaryPath = undefined;
@@ -206,10 +206,12 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
       DEFAULT_AGENT_BROWSER_BIN,
     ].filter((c): c is string => !!c))];
 
-    // Only what is set, so an unbounded run in the host's cwd spawns as a bare one.
+    // Omit unset options so direct provider callers retain spawn defaults.
     const given = Object.fromEntries(Object.entries(options).filter(([, value]) => value !== undefined));
     let lastError = '';
-    for (const binary of candidates) {
+    for (const candidate of candidates) {
+      const binary = resolveBinaryPath(candidate, options.env ?? process.env);
+      if (!binary) { lastError = `'${candidate}' was not found`; continue; }
       const result = await (Object.keys(given).length ? spawnAndCapture(binary, args, given) : spawnAndCapture(binary, args));
       if (result.ok) {
         return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
@@ -227,7 +229,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
   }
 
   function run(b: ProviderBinding, args: string[], options?: { timeoutMs?: number; cwd?: string }): Promise<CliResult> {
-    return runWithBinaryFallback([...SESSION_ARGS(b.session), ...args], b.binaryPath, options);
+    return runWithBinaryFallback([...SESSION_ARGS(b.session), ...args], b.binaryPath, { cwd: b.cwd, env: b.env, ...options });
   }
 
   // Read a session's stream WebSocket port via `stream status --json` — only
@@ -237,7 +239,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
   // port. Retry briefly to close that window.
   async function readStreamPort(b: ProviderBinding, deadline: number): Promise<number | undefined> {
     for (let attempt = 0; attempt < STREAM_PORT_READ_ATTEMPTS; attempt++) {
-      const result = await runWithBinaryFallback(streamStatusArgs(b.session), b.binaryPath, { timeoutMs: Math.max(0, deadline - Date.now()) });
+      const result = await runWithBinaryFallback(streamStatusArgs(b.session), b.binaryPath, { cwd: b.cwd, env: b.env, timeoutMs: Math.max(0, deadline - Date.now()) });
       if (result.exitCode === 0) {
         const port = parseStreamPort(result.stdout);
         if (port !== undefined) return port;
@@ -256,8 +258,9 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
   // terminate it and wait for the process to exit so the next `open` spawns a
   // fresh daemon in the mode we ask for. Best-effort and cross-platform
   // (process.kill works on win/mac/linux).
-  function agentBrowserStateDir(): string {
-    return process.env[AGENT_BROWSER_SOCKET_DIR_ENV] || path.join(os.homedir(), '.agent-browser');
+  function agentBrowserStateDir(b: ProviderBinding): string {
+    const env = b.env ?? process.env;
+    return env[AGENT_BROWSER_SOCKET_DIR_ENV] || path.join(env.HOME || env.USERPROFILE || os.homedir(), '.agent-browser');
   }
 
   // The daemon's state files beside its socket: `<session>.pid` and
@@ -266,9 +269,9 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
   // up when the daemon is killed, so a reader must know which daemon wrote it.
   // One written before this boot describes no process now running: its pid
   // is whatever process has that number since, so it reads as absent.
-  async function readStateNumber(session: string, ext: 'pid' | 'stream'): Promise<number | undefined> {
+  async function readStateNumber(b: ProviderBinding, ext: 'pid' | 'stream'): Promise<number | undefined> {
     try {
-      const file = path.join(agentBrowserStateDir(), `${session}.${ext}`);
+      const file = path.join(agentBrowserStateDir(b), `${b.session}.${ext}`);
       const [stat, text] = await Promise.all([fs.stat(file), fs.readFile(file, 'utf8')]);
       // `os.uptime` is whole seconds on some platforms: a second's slack.
       if (stat.mtimeMs < Date.now() - os.uptime() * 1000 - 1000) return undefined;
@@ -299,8 +302,8 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
   }
 
   /** The port `<session>.stream` names, when something accepts on it. */
-  async function acceptingStreamPort(session: string): Promise<number | undefined> {
-    const port = await readStateNumber(session, 'stream');
+  async function acceptingStreamPort(b: ProviderBinding): Promise<number | undefined> {
+    const port = await readStateNumber(b, 'stream');
     return port !== undefined && await portAccepts(port) ? port : undefined;
   }
 
@@ -311,10 +314,10 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
    * a pid file alone may name any process, and any verb run with no daemon up
    * starts one to answer.
    */
-  async function liveDaemon(session: string): Promise<{ pid: number; stream: number } | undefined> {
-    const pid = await readStateNumber(session, 'pid');
+  async function liveDaemon(b: ProviderBinding): Promise<{ pid: number; stream: number } | undefined> {
+    const pid = await readStateNumber(b, 'pid');
     if (pid === undefined || !processAlive(pid)) return undefined;
-    const stream = await acceptingStreamPort(session);
+    const stream = await acceptingStreamPort(b);
     return stream === undefined ? undefined : { pid, stream };
   }
 
@@ -326,7 +329,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
    * refused too.
    */
   async function drive(b: ProviderBinding, args: string[], options?: { timeoutMs?: number }): Promise<CliResult> {
-    if (!await liveDaemon(b.session)) throw new Error(`agent-browser session '${b.session}' is not running`);
+    if (!await liveDaemon(b)) throw new Error(`agent-browser session '${b.session}' is not running`);
     return run(b, args, options);
   }
 
@@ -424,15 +427,15 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
     // One socket directory per host, so the session names the daemon.
     identity: (b) => b.session,
 
-    describe: (b) => b,
+    describe: (b) => ({ session: b.session, cwd: b.cwd, binaryPath: b.binaryPath }),
 
     // The daemon as its state files describe it — a CLI verb would start one
     // to answer. One up but not streaming is left alone: relaunching would
     // compete with it.
     async find(b) {
-      const live = await liveDaemon(b.session);
+      const live = await liveDaemon(b);
       if (live) return { stream: live.stream };
-      const pid = await readStateNumber(b.session, 'pid');
+      const pid = await readStateNumber(b, 'pid');
       if (pid !== undefined && processAlive(pid)) throw new Error(`agent-browser session '${b.session}' is not streaming`);
       return { gone: `agent-browser session '${b.session}' is not running`, named: pid !== undefined };
     },
@@ -445,8 +448,8 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
     // that pid, live or not, so `probe` tells the replacement from the state
     // files the old daemon left.
     async stop(b, timeoutMs) {
-      const pid = await readStateNumber(b.session, 'pid');
-      const proven = await liveDaemon(b.session);
+      const pid = await readStateNumber(b, 'pid');
+      const proven = await liveDaemon(b);
       await run(b, ['close'], { timeoutMs });
       if (proven) await killDaemon(b.session, proven.pid);
       return pid;
@@ -472,7 +475,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
     // loading, not a failed launch — without a pid file (an older CLI) the exit
     // code is all there is.
     async probe(b, { replaced, opened, deadline }): Promise<LiveBrowser | { failed: string } | undefined> {
-      const pid = await readStateNumber(b.session, 'pid');
+      const pid = await readStateNumber(b, 'pid');
       const daemonUp = pid !== undefined && pid !== replaced;
       if (opened) {
         if (opened.exitCode !== 0 && !daemonUp) return { failed: opened.stderr.trim() || `agent-browser open exited ${opened.exitCode}` };
@@ -480,7 +483,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
         return port !== undefined ? { stream: port } : { failed: 'agent-browser published no stream port' };
       }
       if (!daemonUp) return undefined;
-      const port = await acceptingStreamPort(b.session);
+      const port = await acceptingStreamPort(b);
       return port !== undefined ? { stream: port } : undefined;
     },
 
@@ -551,7 +554,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
    * read.
    */
   async function viewStream(b: ProviderBinding, port: number, headed: boolean, sink: ViewerSink): Promise<Upstream> {
-    const capturable = (await liveDaemon(b.session))?.stream === port;
+    const capturable = (await liveDaemon(b))?.stream === port;
     const socket = new WebSocket(`ws://127.0.0.1:${port}`, { handshakeTimeout: STREAM_CONNECT_TIMEOUT_MS, perMessageDeflate: false });
     let opened = false;
     let closing = false;

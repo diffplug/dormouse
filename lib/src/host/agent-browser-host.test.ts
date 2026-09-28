@@ -138,6 +138,7 @@ function running(...sessions: string[]): void {
 vi.mock('dor-lib-common', async (importOriginal) => ({
   ...(await importOriginal<typeof import('dor-lib-common')>()),
   spawnAndCapture: spawnMock,
+  resolveBinaryPath: (binary: string) => binary === 'agent-browser' ? '/test/bin/agent-browser' : binary,
 }));
 
 type Host = ReturnType<typeof createBrowserHost>;
@@ -443,7 +444,7 @@ describe('agent-browser host daemon stop', () => {
   it('bounds the CLI a close runs, which a hung daemon would otherwise hold forever', async () => {
     enqueueSpawnResults([{}]);
     await ab(makeHost(), { op: 'close' }, { session });
-    expect(spawnMock).toHaveBeenCalledExactlyOnceWith('agent-browser', ['--session', session, 'close'], { timeoutMs: 10_000 });
+    expect(spawnMock).toHaveBeenCalledExactlyOnceWith('/test/bin/agent-browser', ['--session', session, 'close'], { timeoutMs: 10_000 });
   });
 
   it('terminates a daemon its state files prove live before relaunching it in the other mode', async () => {
@@ -1092,7 +1093,7 @@ describe('agent-browser host binary', () => {
 
     expect(spawnMock).toHaveBeenCalledTimes(1);
     // Fell through to the host's own candidate rather than spawning curl.
-    expect(spawnMock.mock.calls[0][0]).toBe('agent-browser');
+    expect(spawnMock.mock.calls[0][0]).toBe('/test/bin/agent-browser');
   });
 
   it('accepts an absolute path to an agent-browser, including its Windows shims', async () => {
@@ -1245,6 +1246,30 @@ describe('agent-browser host edit ops', () => {
       expect(args.slice(0, 3)).toEqual(['--session', 'sess', 'eval']);
       expect(typeof args[3]).toBe('string');
       expect(args[3]).toContain('document');
+    }
+  });
+});
+
+describe('agent-browser shell environment', () => {
+  useTempSocketDir('dor-ab-env-');
+  it('uses the binding environment for daemon proof and commands, but never describes it', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dor-ab-shell-'));
+    const { port, server } = await listen();
+    const provider = createAgentBrowserProvider();
+    const env = { PATH: '/shell/bin', AGENT_BROWSER_SOCKET_DIR: dir, PRIVATE: 'secret' };
+    const binding = provider.bind({ session: 'shell-env', cwd: dir, binaryPath: '/shell/bin/agent-browser', env });
+    writeFileSync(join(dir, 'shell-env.pid'), String(process.pid));
+    writeFileSync(join(dir, 'shell-env.stream'), String(port));
+    try {
+      expect(await provider.find(binding)).toEqual({ stream: port });
+      enqueueSpawnResults([{}]);
+      await provider.act(binding, { op: 'history', dir: 'reload' });
+      expect(spawnMock.mock.calls[0][2]).toMatchObject({ cwd: dir, env });
+      expect(provider.describe(binding)).not.toHaveProperty('env');
+      expect(JSON.stringify(provider.describe(binding))).not.toContain('secret');
+    } finally {
+      await closeServer(server);
+      await fsp.rm(dir, { recursive: true, force: true });
     }
   });
 });

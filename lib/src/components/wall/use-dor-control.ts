@@ -45,7 +45,7 @@ import { attachSurfacePorts } from './surface-ports';
 import { browserSurfaceUrl, hostPathDisplay, iframeRefusal } from './browser-url';
 import { isBrowserProvider, isTcpPort, parseRenderMode, renderModeFor } from 'dor-lib-common/browser-providers';
 import type { BrowserResult } from '../../lib/platform/browser-automation';
-import { BROWSER_PROVIDER_GUI, browserHandle, headedRenderMode, providerUnavailable, rememberLaunchBinaryPath } from './browser-automation';
+import { BROWSER_PROVIDER_GUI, browserHandle, headedRenderMode, providerUnavailable } from './browser-automation';
 import { defaultBrowserViewportConfig, isBrowserViewportSetting, resolveBrowserViewport, type BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import { BrowserBindingReservations } from './browser-binding-reservations';
 import { listWallHandles } from './wall-handles';
@@ -787,7 +787,6 @@ export function useDorControl({
     minimized = false,
   }) => {
     // Remember the resolved binary so a GUI launch can spawn one.
-    rememberLaunchBinaryPath(provider, binaryPath);
     const refreshedParams = {
       nativeIdentity,
       // The host reports headedness a native launch changed; the controller

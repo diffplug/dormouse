@@ -90,6 +90,11 @@ Source of truth: `dor/bin/dor`, `dor/bin/dor.cmd`, `scripts/stage-dor-cli.mjs`,
 
 ## Spawning External Binaries
 
+**Must bound private shell-helper output with `spawnAndCapture.maxOutputBytes`**;
+exceeding the combined stdout/stderr limit kills the child and returns `ENOBUFS`
+without captured output. Pinned by `dor-lib-common/test/spawn.test.mjs`.
+Browser shell initialization is owned by `docs/specs/dor-browser.md` → Automated Browser.
+
 **Every spawn of an external/user-installed binary must go through
 `spawnAndCapture` from `dor-lib-common`, never raw `node:child_process`
 `spawn`** — `dor agent-browser` driving `agent-browser`, the agent-browser host running
@@ -101,11 +106,10 @@ resolution on `exit` with an exit-time output snapshot (rationale).
 it through a `.cmd` shim, an unavoidable batch limitation; today's forwarded
 arguments carry none.
 
-- **`dor agent-browser`, `dor playwright` and the Playwright host spawn the `PATH`-resolved
+- **`dor agent-browser`, `dor playwright` and both browser hosts spawn the `PATH`-resolved
   absolute path, never the bare name** — cross-spawn resolves a bare name
   through `which`, which searches the cwd before `PATH` on Windows (rationale).
-  The agent-browser host's candidate list still ends in a bare name
-  (`## Future`).
+
 - **Within the `PATH` directories, and only those, the walk must select the file
   `which` would** — a divergence either runs a different binary or reports a
   present install as missing. **Never extend the search to the cwd**, which is
@@ -717,13 +721,6 @@ Source of truth: `buildDorSurfacesInternal` in `lib/src/components/Wall.tsx`; `d
 Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `openCommand` in `dor/src/commands/open.ts`; `ToolSurfaceResponse` in `dor/src/commands/types.ts`.
 
 ## Future
-
-- **Resolve the host's agent-browser candidates on `PATH` too.**
-  `runWithBinaryFallback` still ends its list with the bare
-  `DEFAULT_AGENT_BROWSER_BIN`, so on Windows the extension-host or Tauri-app
-  working directory is searched first — narrower than `dor agent-browser`'s case, since a
-  user does not clone into it. `resolvePlaywrightInstall` already walks its
-  candidates through `dor-lib-common`'s `resolveBinaryPath`.
 
 - **Surface a dead control channel in the UI.** A lost bind leaves one
   `[dor-control]` line on the host's stderr, and all a user sees is `dor`

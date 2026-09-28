@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as ptyManager from './pty-manager';
 import { DormouseViewProvider } from './webview-view-provider';
 import { attachRouter, flushAllSessions, getAlertStates, reportWindowPresence } from './message-router';
-import { closeBrowserSessions } from './agent-browser-host';
+import { closeBrowserSessions, setBrowserShellRuntime } from './agent-browser-host';
 import { serveWebview } from './webview-messaging';
 import { log } from './log';
 import { initToolHost } from './tool-host';
@@ -93,6 +93,8 @@ export function activate(context: vscode.ExtensionContext) {
   log.init();
   extensionContext = context;
   ptyManager.setExtensionPath(context.extensionPath);
+  const browserRuntime = ptyManager.getDorRuntimeEnv(context.extensionPath);
+  setBrowserShellRuntime({ node: browserRuntime.DORMOUSE_NODE, cli: browserRuntime.DORMOUSE_CLI_JS });
 
   const provider = new DormouseViewProvider(context);
 
@@ -100,6 +102,7 @@ export function activate(context: vscode.ExtensionContext) {
   // name appears next to the title via description) and the webview's
   // default-shell slot that split-spawns read from.
   const applyShell = (shell: { name: string; path: string; args: string[] } | undefined) => {
+    setBrowserShellRuntime({ node: browserRuntime.DORMOUSE_NODE, cli: browserRuntime.DORMOUSE_CLI_JS, shell: shell?.path });
     provider.setDescription(shell?.name);
     provider.setSelectedShell(shell ? { shell: shell.path, args: shell.args } : null);
   };

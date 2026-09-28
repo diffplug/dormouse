@@ -44,9 +44,12 @@ import { BrowserView, WEBVIEW_ID, closeSocket, createViewerServer, measuredViewp
  *  a fixed agent-browser argv, or a Playwright client call. */
 export type BrowserAct = Extract<BrowserOp, { op: 'navigate' | 'history' | 'tab' | 'viewport' | 'device' }>;
 
+export { browserLaunchEnv } from './browser-launch-env';
+
 /** The binding a provider runs one request with: the session named, or minted
- *  for a new launch. */
-export type ProviderBinding = BrowserBinding;
+ *  for a new launch. Its environment stays inside the host. */
+
+export type ProviderBinding = BrowserBinding & { env?: NodeJS.ProcessEnv };
 
 /** A browser that is up: its stream — what `view` subscribes to — and
  *  whether it runs headed when the provider can tell. */
@@ -112,6 +115,8 @@ export interface BrowserProvider<B = unknown> {
 }
 
 export interface BrowserHostDeps {
+  /** Trusted host callback; the returned environment is never serialized. */
+  launchEnv?(cwd: string | undefined): Promise<NodeJS.ProcessEnv>;
   /** Write text to the OS clipboard (copy/cut land here). VS Code passes
    *  `vscode.env.clipboard.writeText`; the sidecar shells out (pbcopy/clip/…). */
   writeClipboardText(text: string): void | Promise<void>;
@@ -654,22 +659,45 @@ export function createBrowserHost(deps: BrowserHostDeps) {
 
   // --- dispatch ---
 
+  // One environment per live session, including concurrent first requests.
+  // Restored sessions resolve afresh; no environment is saved with the layout.
+  type LaunchEnv = { promise: Promise<NodeJS.ProcessEnv>; closing: boolean };
+  const launchEnvs = new Map<string, LaunchEnv>();
   async function run(raw: unknown): Promise<BrowserResult> {
     const r = parseBrowserRequest(raw);
     if (typeof r === 'string') return { ok: false, error: r };
+    const requestDeadline = Date.now() + REQUEST_BUDGET_MS;
+    let newEnv: { key: string; entry: LaunchEnv } | undefined;
     try {
       if (closed) throw new Error('the browser host is shutting down');
       // Sent before a close that cancelled it, delivered after: it opens
       // nothing for the Surface that close was for.
       if ((r.op === 'launch' || r.op === 'attach') && wasCancelled(r.requestId)) throw new Error('the browser was closed');
+      if (r.op === 'close') cancelRequests(r.cancels);
       const p = providerFor(r.provider);
-      const b = p.bind({ ...r.binding, session: r.binding.session ?? generateGuiSession() });
+      const binding: ProviderBinding = { ...r.binding, ...(deps.launchEnv ? { cwd: r.binding.cwd ?? process.cwd() } : {}), session: r.binding.session ?? generateGuiSession() };
+      const envKey = JSON.stringify([r.provider, binding.session, binding.cwd]);
+      if (deps.launchEnv) {
+        let entry = launchEnvs.get(envKey);
+        if (!entry) {
+          entry = { promise: deps.launchEnv(binding.cwd), closing: false };
+          launchEnvs.set(envKey, entry);
+          newEnv = { key: envKey, entry };
+          entry.promise.catch(() => { if (launchEnvs.get(envKey) === entry) launchEnvs.delete(envKey); });
+        }
+        if (r.op === 'close') entry.closing = true;
+        binding.env = await entry.promise;
+        if (closed || ((r.op === 'launch' || r.op === 'attach') && (entry.closing || wasCancelled(r.requestId)))) {
+          launchEnvs.delete(envKey);
+          throw new Error('the browser was closed');
+        }
+      }
+      const b = p.bind(binding);
       const bound: Bound = { p, b, id: p.identity(b) };
       const answer = (live: LiveBrowser): BrowserResult => {
         trackHeaded(bound, live.headed);
         return { ok: true, ...p.describe(b), nativeIdentity: bound.id, stream: live.stream, ...(live.headed !== undefined ? { headed: live.headed } : {}) };
       };
-      const requestDeadline = Date.now() + REQUEST_BUDGET_MS;
       const settlingAnswer = { ok: false, error: 'the browser is being relaunched or closed' };
       if (r.op !== 'launch' && r.op !== 'attach' && r.op !== 'close' && settling.has(bound.id)) return settlingAnswer;
       switch (r.op) {
@@ -684,8 +712,8 @@ export function createBrowserHost(deps: BrowserHostDeps) {
           return { ...answer(live), ...(relaunched ? { relaunched } : {}) };
         }
         case 'close':
-          cancelRequests(r.cancels);
-          await closeSession(bound);
+          try { await closeSession(bound); }
+          finally { launchEnvs.delete(envKey); }
           return { ok: true };
         case 'view': {
           const { stream, headed: viewHeaded = false, debug = false } = r;
@@ -716,6 +744,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
           return await p.act(b, r);
       }
     } catch (error) {
+      if (newEnv && launchEnvs.get(newEnv.key) === newEnv.entry) launchEnvs.delete(newEnv.key);
       return { ok: false, error: messageOf(error) };
     }
   }
@@ -729,6 +758,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     close: async () => {
       // Every launch and sweep still pending now finds itself superseded.
       closed = true;
+      launchEnvs.clear();
       sync.close();
       const windows = [...headed.values()];
       headed.clear();
