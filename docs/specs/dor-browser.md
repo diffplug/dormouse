@@ -186,6 +186,8 @@ Source of truth: `lib/src/components/wall/use-dev-server-ports.ts`,
 
 **Must acknowledge a port click with `Opening…` and suppress repeat activation while pending.** For a new automated target, start its controller before creating a Pane; split and focus only after the host confirms startup, without waiting for page load. Failure reports in context without changing layout or focus. Concurrent requests for the same target are serialized. (rationale)
 
+**Must dismiss context after a successful browser placement or reuse, preserving browser focus.** System browser dismisses after dispatch to the OS opener; failed or cancelled launches keep context open. A completed launch must not dismiss a replacement context.
+
 **Must cancel pending placement when its context closes or is replaced, its source disappears or minimizes, or its Workspace deactivates or closes.** Close a browser that arrives after cancellation or cannot be placed. A successful placement adopts the prepared controller and binding without launching or navigating again.
 
 Source of truth: `openContextPort` in `lib/src/components/Wall.tsx`; `prepareForPlacement` in `lib/src/components/wall/agent-browser-surface-controller.ts`; tests in `lib/src/components/Wall.test.tsx`; `listenerUrlsByPort` in `lib/src/components/wall/port-url.ts`; `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`.
