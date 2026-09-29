@@ -66,6 +66,10 @@ export interface TutorialProfile {
   initialSectionId?: string;
 }
 
+const OPEN_COMPASS = 'Touch away from either edge to open the gesture compass.';
+const diagonalHint = (key: string) =>
+  `${OPEN_COMPASS} Drag towards the diagonal that has \`${key}\`, and then drag back in the other direction to choose which \`kind\` of ${key}.`;
+
 const GESTURE_NAVIGATION_SECTION: Section = {
   id: 'gesture',
   title: 'Gesture navigation',
@@ -78,17 +82,17 @@ const GESTURE_NAVIGATION_SECTION: Section = {
     {
       id: 'gn-arrows',
       title: 'Send all four arrow keys',
-      hint: 'Touch away from either edge to open the compass. Drag up, down, left, and right past the circle. Try all four.',
+      hint: `${OPEN_COMPASS} Drag up, down, left, and right past the circle. Try all four.`,
     },
     {
       id: 'gn-enter',
       title: 'Send Enter',
-      hint: 'Touch away from either edge to open the gesture compass. Drag towards the diagonal that has `Enter`, and then drag back in the other direction to choose which `kind` of Enter.',
+      hint: diagonalHint('Enter'),
     },
     {
       id: 'gn-esc',
       title: 'Send Escape',
-      hint: 'Touch away from either edge to open the gesture compass. Drag towards the diagonal that has `Esc`, and then drag back in the other direction to choose which `kind` of Esc.',
+      hint: diagonalHint('Esc'),
     },
   ],
 };

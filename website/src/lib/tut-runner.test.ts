@@ -8,11 +8,14 @@ import {
   type ItemId,
   type TutorialProfile,
 } from "./tut-items";
-import { BUSY_DEMO_INTERVAL_MS, TutRunner } from "./tut-runner";
+import { BUSY_DEMO_INTERVAL_MS, GESTURE_BACKGROUND_PERIOD, GESTURE_BACKGROUND_TICK_MS, TutRunner } from "./tut-runner";
 import { TutorialState } from "./tutorial-state";
 import { BOLD, RESET, fg } from "dormouse-lib/lib/ansi";
 
 type TutRunnerOptions = ConstructorParameters<typeof TutRunner>[0];
+
+const WHEEL_UP = "\x1b[<64;2;2M";
+const WHEEL_DOWN = "\x1b[<65;2;2M";
 
 const FRAME_RESET = "\x1b[H\x1b[2J";
 
@@ -125,12 +128,11 @@ describe("TutRunner snapshots", () => {
 
   it("credits Pocket gestures in order, requiring both scroll directions and all four later arrows", () => {
     const { runner, state, sendKeys, dispose } = mountRunner([], { profile: POCKET_TUTORIAL_PROFILE });
-    const arrows = ["up", "down", "left", "right"] as const;
-    arrows.forEach((key) => runner.handleGestureInput(key));
+    for (const key of ["up", "down", "left", "right"] as const) runner.handleGestureInput(key);
     runner.handleGestureInput("enter");
     runner.handleGestureInput("esc");
     // Wheel/keyboard input alone does not count as a gesture.
-    sendKeys("\x1b[<64;2;2M\x1b[<65;2;2M\x1b[A\x1b[B\x1b[C\x1b[D\r");
+    sendKeys(`${WHEEL_UP}${WHEEL_DOWN}\x1b[A\x1b[B\x1b[C\x1b[D\r`);
     expect(state.sectionProgress("gesture").done).toBe(0);
     runner.handleGestureScroll(3);
     runner.handleGestureScroll(4);
@@ -140,7 +142,7 @@ describe("TutRunner snapshots", () => {
     runner.handleGestureInput("enter");
     runner.handleGestureInput("esc");
     expect(state.sectionProgress("gesture").done).toBe(1);
-    ["up", "up", "down", "left"].forEach((key) => runner.handleGestureInput(key as typeof arrows[number]));
+    for (const key of ["up", "up", "down", "left"] as const) runner.handleGestureInput(key);
     expect(state.isComplete("gn-arrows")).toBe(false);
     runner.handleGestureInput("right");
     expect(state.isComplete("gn-arrows")).toBe(true);
@@ -158,23 +160,23 @@ describe("TutRunner snapshots", () => {
     try {
       const foreground = (frame: string) => frame.slice(frame.indexOf("\x1b[2;1H\x1b[0m"));
       const original = lastFrame();
-      sendKeys("\x1b[<64;2;2M");
+      sendKeys(WHEEL_UP);
       const up = lastFrame();
       expect(up).not.toBe(original);
       expect(foreground(up)).toBe(foreground(original));
-      sendKeys("\x1b[<65;2;2M");
+      sendKeys(WHEEL_DOWN);
       expect(lastFrame()).toBe(original);
       // Wrap the periodic field repeatedly without reaching a scroll boundary.
-      sendKeys("\x1b[<64;2;2M".repeat(512));
+      sendKeys(WHEEL_UP.repeat(2 * GESTURE_BACKGROUND_PERIOD));
       expect(lastFrame()).toBe(original);
-      vi.advanceTimersByTime(160);
+      vi.advanceTimersByTime(GESTURE_BACKGROUND_TICK_MS);
       expect(lastFrame()).not.toBe(original);
       expect(foreground(lastFrame())).toBe(foreground(original));
       sendKeys(ESC);
       const menu = lastFrame();
       vi.advanceTimersByTime(1000);
       expect(lastFrame()).toBe(menu);
-      sendKeys("\x1b[<64;2;2M");
+      sendKeys(WHEEL_UP);
       expect(lastFrame()).toBe(menu);
     } finally {
       dispose();

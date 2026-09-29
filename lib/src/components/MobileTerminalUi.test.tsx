@@ -377,14 +377,14 @@ describe('paneMouseOverride', () => {
   });
 });
 
-
 describe('MobileTerminalUi edge scroll', () => {
   function setup(capturing = false) {
     const onSendInput = vi.fn();
+    const onGestureInput = vi.fn();
     const onGestureScroll = vi.fn();
     const scrollLines = vi.fn();
     const props: Partial<MobileTerminalUiProps> = {
-      onSendInput, onGestureScroll,
+      onSendInput, onGestureInput, onGestureScroll,
       sessions: [{ id: 'scroll-test', title: 'terminal', active: true, episode: null }],
     };
     const ui = renderUi(props);
@@ -400,7 +400,7 @@ describe('MobileTerminalUi edge scroll', () => {
     const pointer = (type: string, x: number, y: number) => act(() => {
       ui.terminal.dispatchEvent(pointerEvent(type, { clientX: x, clientY: y }));
     });
-    return { ...ui, props, onSendInput, onGestureScroll, scrollLines, pointer };
+    return { ...ui, props, onSendInput, onGestureInput, onGestureScroll, scrollLines, pointer };
   }
 
   it.each([10, 380])('scrolls history in both directions from x=%i and keeps an edge drag out of the compass', (edgeX) => {
@@ -438,13 +438,15 @@ describe('MobileTerminalUi edge scroll', () => {
     expect(wheels).toHaveLength(4);
   });
 
-  it('keeps a drag starting away from the edge in the compass', () => {
-    const { pointer, scrollLines, onSendInput } = setup();
+  it('keeps a drag starting away from the edge in the compass, reporting the gesture before sending it', () => {
+    const { pointer, scrollLines, onSendInput, onGestureInput } = setup();
     pointer('pointerdown', 100, 200);
     pointer('pointermove', 380, 200);
     pointer('pointerup', 380, 200);
     expect(scrollLines).not.toHaveBeenCalled();
     expect(onSendInput).toHaveBeenCalledWith('\x1b[C');
+    expect(onGestureInput).toHaveBeenCalledWith('right', '\x1b[C');
+    expect(onGestureInput.mock.invocationCallOrder[0]).toBeLessThan(onSendInput.mock.invocationCallOrder[0]);
   });
 
   it.each<Partial<MobileTerminalUiProps>>([

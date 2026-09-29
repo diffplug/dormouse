@@ -43,14 +43,13 @@ navigation screen**, through `MobileTerminalUi.onGestureScroll` and
 
 ### Pocket gesture opening screen
 
-**Must teach scrolling in both directions, then all four arrows, then Enter,
-then Escape, in that order.** `gn-scroll` requires both edge-scroll directions;
-`gn-arrows` counts each cardinal direction only after scrolling is complete.
+**Must credit both edge-scroll directions (`gn-scroll`), then all four arrows
+(`gn-arrows`), then Enter, then Escape, each only once its predecessor is
+complete**; an arrow sent before scrolling completes does not count.
 **Must render needed arrows bold white with yellow dots; sent arrows normal-weight
-white with green checks, retained after completion.**
-Enter requires arrows complete; Escape requires Enter complete. **Must clear
-partial direction counts on tutorial reset.** Keyboard input and native wheels
-never grant gesture credit.
+white with green checks, retained after completion.** **Must clear partial
+direction counts on tutorial reset.** Keyboard input and native wheels never
+grant gesture credit.
 
 **Must capture the mouse only on this Pocket screen and animate a periodic
 background that scrolls indefinitely in either direction.** Wheel reports move
@@ -113,7 +112,7 @@ Hooks in `dormouse-lib` / `MobileTerminalUi` that exist for tutorial observabili
 - **`FakePtyAdapter.sendOutput(id, data, { skipActivity })`** — pushes data through the real protocol parser as if the PTY produced it (rationale). **Unlike `writePty` it is not suppressed while a scenario is playing.** `TutRunner` passes `skipActivity: true` for every frame.
 - **`FakePtyAdapter.onPtySpawn`** — fires synchronously inside `spawnPty`, before the scenario plays, so a page attaches a shell without racing `TerminalPane`'s mount.
 - **`subscribeToWatchedCommands` / `getWatchedCommands`** (`lib/src/lib/watched-commands.ts`, re-exported from `terminal-registry`) — the WATCHING rule set; **must credit `al-watch-cmd` only once `longtask` is watched**.
-- **`MobileTerminalUi.onGestureInput(input, data)`** — optional, fired before sending radial-menu input, so the final Escape is credited before it leaves the tutorial screen.
+- **`MobileTerminalUi.onGestureInput(input, data)`** — optional, reports radial-menu input only; **must fire before the input is sent**, so the final Escape is credited before it leaves the tutorial screen. Pinned by `lib/src/components/MobileTerminalUi.test.tsx`.
 - **`MobileTerminalUi.onGestureScroll(lines)`** — optional, reports signed line counts only for edge scrolling.
 - **`subscribeToActiveTheme` / `getActiveThemeId`** (`lib/src/lib/themes/`) — the active theme, watched to credit `th-theme`. **Must seed the detector’s previous theme at `start()` and compare consecutive ids**, so boot-time restore cannot grant the item and choosing the startup theme after a reset still can. Pinned by `website/src/lib/tut-detector.test.ts` (rationale).
 

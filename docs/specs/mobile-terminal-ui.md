@@ -126,9 +126,10 @@ follows the finger, with no radial-menu input or native-keyboard focus.
 clamping the reported coordinates inside its terminal screen. **Must otherwise
 scroll the terminal buffer directly**, never synthesize alternate-screen arrow
 keys. **Must stop scrolling when interaction is disabled, the touch mode changes,
-or the active Session changes.** Other touch modes retain their own routing.
+or the active Session changes.**
 
-Source of truth: `scrollMobileTerminal` in `lib/src/lib/mobile-terminal-scroll.ts`;
+Source of truth: `EDGE_SCROLL_WIDTH_PX`, `EDGE_SCROLL_LINE_PX`, and
+`scrollMobileTerminal` in `lib/src/lib/mobile-terminal-scroll.ts`;
 `MobileTerminalUi` in `lib/src/components/MobileTerminalUi.tsx`.
 Tests: `lib/src/components/MobileTerminalUi.test.tsx`.
 

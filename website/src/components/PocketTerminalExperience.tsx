@@ -81,15 +81,11 @@ export function PocketTerminalExperience({
     };
   }, []);
 
-  const publishTouchMode = useCallback((nextMode: MobileTerminalTouchMode) => {
+  const handleTouchModeChange = useCallback((nextMode: MobileTerminalTouchMode) => {
     touchModeRef.current = nextMode;
     for (const listener of touchModeListenersRef.current) listener();
-  }, []);
-
-  const handleTouchModeChange = useCallback((nextMode: MobileTerminalTouchMode) => {
-    publishTouchMode(nextMode);
     setTouchMode(nextMode);
-  }, [publishTouchMode]);
+  }, []);
 
   const handleGestureInput = useCallback((input: MobileGestureInputId) => {
     if (activePaneId === POCKET_TUTORIAL_PANE) tutorialRunnerRef.current?.handleGestureInput(input);

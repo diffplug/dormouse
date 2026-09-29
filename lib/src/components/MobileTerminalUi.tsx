@@ -43,7 +43,7 @@ import { TouchUiContext } from './touch-ui-context';
 import { AlertRingInset, alertRingRow, useAlertRingBurst } from './alert-ring';
 import type { AlertEpisode } from '../lib/alert-episode';
 import { getTerminalInstance, type SessionStatus } from '../lib/terminal-registry';
-import { scrollMobileTerminal, isMobileScrollWheel } from '../lib/mobile-terminal-scroll';
+import { EDGE_SCROLL_LINE_PX, isEdgeScrollOrigin, isMobileScrollWheel, scrollMobileTerminal } from '../lib/mobile-terminal-scroll';
 import { acknowledgeSession } from '../lib/session-activity-store';
 import type { MouseTrackingMode, OverrideState } from '../lib/mouse-selection';
 import { TERMINAL_TAP_EVENT, type TerminalTapDetail } from '../lib/terminal-mouse-router';
@@ -648,6 +648,7 @@ export function MobileTerminalUi({
     if (!action) return;
     if (action.kind === 'input') {
       const data = MOBILE_TERMINAL_KEY_SEQUENCES[action.input];
+      // Before sending: the input may leave the screen that credits it.
       onGestureInput?.(action.input, data);
       sendInput(data);
       return;
@@ -760,9 +761,9 @@ export function MobileTerminalUi({
     // A tap acknowledges the active Session, a drag or swipe never
     // (`docs/specs/alert.md` -> Engagement): judged on release, and tracked in
     // capture on the host, before any mode below consumes the press.
-    const active = interactive ? sessions.find((session) => session.active) : undefined;
-    pendingTapRef.current = active
-      ? { pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY, sessionId: active.id }
+    const sessionId = interactive ? activeSessionId : undefined;
+    pendingTapRef.current = sessionId
+      ? { pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY, sessionId }
       : null;
     blurPaneTextInputs();
     if (interactive && touchMode === 'cursor' && isTouchLikePrimaryPointer(event)) {
@@ -786,17 +787,13 @@ export function MobileTerminalUi({
     const origin = localPointerPoint(event);
     const rect = event.currentTarget.getBoundingClientRect();
     // The starting point owns the whole drag, even if it later leaves the edge.
-    if (active && rect.width > 0 && (origin.x <= 48 || origin.x >= rect.width - 48)) {
-      edgeScrollRef.current = { pointerId: event.pointerId, sessionId: active.id, y: event.clientY, remainder: 0 };
+    if (sessionId && isEdgeScrollOrigin(origin.x, rect.width)) {
+      edgeScrollRef.current = { pointerId: event.pointerId, sessionId, y: event.clientY, remainder: 0 };
       commitGestureState(MOBILE_GESTURE_IDLE_STATE);
       return;
     }
-    commitGestureState(beginMobileGesture(
-      event.pointerId,
-      origin,
-      displayOriginAwayFromThumb(origin, event.currentTarget.getBoundingClientRect()),
-    ));
-  }, [blurPaneTextInputs, clearGestureCompletionTimer, commitGestureState, interactive, sessions, touchMode]);
+    commitGestureState(beginMobileGesture(event.pointerId, origin, displayOriginAwayFromThumb(origin, rect)));
+  }, [activeSessionId, blurPaneTextInputs, clearGestureCompletionTimer, commitGestureState, interactive, touchMode]);
 
   const handlePanePointerMoveCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
     const tap = pendingTapRef.current;
@@ -816,11 +813,11 @@ export function MobileTerminalUi({
       event.stopPropagation();
       scroll.remainder += scroll.y - event.clientY;
       scroll.y = event.clientY;
-      // Natural scrolling: content follows the finger, one line per 18px.
-      const lines = Math.trunc(scroll.remainder / 18);
-      scroll.remainder -= lines * 18;
-      const terminal = getTerminalInstance(scroll.sessionId);
-      if (lines && terminal && sessions.some((session) => session.id === scroll.sessionId && session.active)) {
+      // Natural scrolling: content follows the finger.
+      const lines = Math.trunc(scroll.remainder / EDGE_SCROLL_LINE_PX);
+      scroll.remainder -= lines * EDGE_SCROLL_LINE_PX;
+      const terminal = lines && scroll.sessionId === activeSessionId ? getTerminalInstance(scroll.sessionId) : undefined;
+      if (terminal) {
         scrollMobileTerminal(terminal, lines, event.clientX, event.clientY);
         onGestureScroll?.(lines);
       }
@@ -841,7 +838,16 @@ export function MobileTerminalUi({
       return;
     }
     commitGestureState(nextState);
-  }, [commitGestureState, executeGestureAction, scheduleGestureCompletionClear, touchMode, sessions, onGestureScroll]);
+  }, [activeSessionId, commitGestureState, executeGestureAction, onGestureScroll, scheduleGestureCompletionClear, touchMode]);
+
+  const endEdgeScroll = useCallback((event: PointerEvent<HTMLDivElement>): boolean => {
+    if (edgeScrollRef.current?.pointerId !== event.pointerId) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    edgeScrollRef.current = null;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    return true;
+  }, []);
 
   const handlePanePointerUpCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
     const tap = pendingTapRef.current;
@@ -849,14 +855,7 @@ export function MobileTerminalUi({
       pendingTapRef.current = null;
       if (withinTapSlop(tap, event)) acknowledgeSession(tap.sessionId);
     }
-    if (edgeScrollRef.current?.pointerId === event.pointerId) {
-      event.preventDefault();
-      event.stopPropagation();
-      pendingTapRef.current = null;
-      edgeScrollRef.current = null;
-      event.currentTarget.releasePointerCapture(event.pointerId);
-      return;
-    }
+    if (endEdgeScroll(event)) return;
     if (cursorPointerIdRef.current === event.pointerId && isTouchLikePrimaryPointer(event)) {
       event.preventDefault();
       event.stopPropagation();
@@ -894,22 +893,15 @@ export function MobileTerminalUi({
     commitGestureState(completionState ?? result.state);
     executeGestureAction(result.action);
     if (completionState) scheduleGestureCompletionClear();
-  }, [commitGestureState, executeGestureAction, scheduleGestureCompletionClear]);
+  }, [commitGestureState, endEdgeScroll, executeGestureAction, scheduleGestureCompletionClear]);
 
   const handlePaneFocusStartCapture = useCallback(() => {
     blurPaneTextInputs();
   }, [blurPaneTextInputs]);
 
   const handlePanePointerCancelCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
-    if (edgeScrollRef.current?.pointerId === event.pointerId) {
-      event.preventDefault();
-      event.stopPropagation();
-      pendingTapRef.current = null;
-      edgeScrollRef.current = null;
-      event.currentTarget.releasePointerCapture(event.pointerId);
-      return;
-    }
     if (pendingTapRef.current?.pointerId === event.pointerId) pendingTapRef.current = null;
+    if (endEdgeScroll(event)) return;
     if (cursorPointerIdRef.current === event.pointerId && isTouchLikePrimaryPointer(event)) {
       event.preventDefault();
       event.stopPropagation();
@@ -932,7 +924,7 @@ export function MobileTerminalUi({
     }
     if (state.phase === 'idle' || state.pointerId !== event.pointerId) return;
     commitGestureState(MOBILE_GESTURE_IDLE_STATE);
-  }, [commitGestureState]);
+  }, [commitGestureState, endEdgeScroll]);
 
   return (
     <TouchUiContext.Provider value={true}>
