@@ -23,8 +23,9 @@ import { activateTerminalLink } from '../../lib/terminal-link-activation';
 import type { LathNode } from '../../lib/lath/model';
 import { recordToolAnnounce, resetToolAnnounces } from '../../lib/tool-announce-store';
 import { PREVIEW_READY_FALLBACK_MS, resetPreviewTransitions } from '../../lib/preview-transition-store';
-import { PREVIEW_OUTPUT_QUIET_MS } from './use-dor-control';
+import { PREVIEW_INTERRUPT_GRACE_MS, PREVIEW_OUTPUT_QUIET_MS } from './use-dor-control';
 import { setDevServerResolution } from './agent-browser-ports';
+import * as helpers from '../../lib/helper-terminal';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -362,6 +363,32 @@ describe('dor open --preview', () => {
     expect(await paramsOf('slot')).toMatchObject({ toolTarget: '/repo/a.md', toolPreview: true });
   });
 
+  it.each([
+    ['answers from a pinned Tool', 'b.md'],
+    ['fails its lookup', 'missing.md'],
+  ])('runs the slot\'s own command again when the preview superseding its retarget %s', async (_, file) => {
+    const toolControl = installHost();
+    const answerLookup = toolControl.getMockImplementation()!;
+    toolControl.mockImplementation(async call => call.target === 'missing.md' ? { status: 'error', message: 'no rule matches' } as never : answerLookup(call));
+    await mountWall([{ id: 'slot', params: viewerParams('a.md') }], { doors: [{ id: 'kept', params: viewerParams('b.md', { toolPreview: undefined }) }] });
+    shell('pane-a', null);
+    shell('slot', 'view /repo/a.md', { holdInterrupt: true });
+    shell('kept', 'view /repo/b.md');
+    const first = await request({ file: 'c.md', preview: true });
+    await waitUntil(() => typed.slot.length === 1);
+    const second = await request({ file, preview: true });
+    expect(await answer(first)).toMatchObject({ status: 'superseded', surfaceId: 'slot' });
+    await waitUntil(() => second.mock.calls.length > 0);
+    expect(second.mock.calls[0][0]).toMatchObject(file === 'b.md'
+      ? { ok: true, result: { status: 'existing', surfaceId: 'kept' } } : { ok: false, error: 'no rule matches' });
+    expect(typed.slot).toEqual(['\x03']);
+    // The viewer exits on its interrupt; nothing replaced it, so it runs again.
+    act(() => returnToPrompt('slot'));
+    await waitUntil(() => typed.slot.length === 2);
+    expect(typed.slot).toEqual(['\x03', 'view /repo/a.md\r']);
+    expect(await paramsOf('slot')).toMatchObject({ toolTarget: '/repo/a.md', toolPreview: true });
+  });
+
   it('lets the latest preview win: a queued one and one interrupting the slot report superseded', async () => {
     const toolControl = await mountSlot({ slot: { holdInterrupt: true } });
     const first = await request({ file: 'b.md', preview: true });
@@ -469,6 +496,71 @@ describe('dor open --preview', () => {
     expect(kept).not.toHaveProperty('toolPreview');
     expect(await leafOrder()).toEqual(['pane-a', 'slot', result.surfaceId]);
     startTool(result.surfaceId, result.command);
+  });
+
+  it('restores a slot kept while a preview interrupts it, even once that preview is cancelled', async () => {
+    await mountSlot({ slot: { holdInterrupt: true } });
+    const respond = await request({ file: 'b.md', preview: true });
+    await waitUntil(() => typed.slot.length === 1);
+    keepByHeader();
+    act(() => requests.abort());
+    act(() => returnToPrompt('slot'));
+    await waitUntil(() => respond.mock.calls.length > 0);
+    expect(respond).toHaveBeenCalledWith({ ok: false, error: 'tool launch cancelled' });
+    expect(typed.slot).toEqual(['\x03', 'view /repo/a.md\r']);
+    expect(terminalRegistry.getTerminalPaneState('slot').currentCommand?.rawCommandLine).toBe('view /repo/a.md');
+    expect(await paramsOf('slot')).not.toHaveProperty('toolPreview');
+    expect(leafCount()).toBe(2);
+  });
+
+  it('keeps a slot whose command outlives its interrupt\'s grace, previewing beside it without holding the queue', async () => {
+    await mountSlot({ slot: { holdInterrupt: true } });
+    // Only the host's state polls run on the test's clock.
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      const respond = await request({ file: 'b.md', preview: true });
+      await waitUntil(() => typed.slot.length === 1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(PREVIEW_INTERRUPT_GRACE_MS - 100); });
+      expect(respond).not.toHaveBeenCalled();
+      expect(leafCount()).toBe(2);
+      await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+      const result = await answer(respond);
+      expect(result).toMatchObject({ status: 'created', command: 'view /repo/b.md' });
+      expect(result.surfaceId).not.toBe('slot');
+      // Kept as it stands: its command still runs, and was never typed again.
+      expect(typed.slot).toEqual(['\x03']);
+      expect(terminalRegistry.getTerminalPaneState('slot').currentCommand?.rawCommandLine).toBe('view /repo/a.md');
+      expect(await paramsOf('slot')).not.toHaveProperty('toolPreview');
+      expect(await paramsOf(result.surfaceId)).toMatchObject({ toolPreview: true, toolTarget: '/repo/b.md' });
+      expect(await leafOrder()).toEqual(['pane-a', 'slot', result.surfaceId]);
+      // The launch queue is free once the new slot's command reports.
+      startTool(result.surfaceId, result.command);
+      await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+      expect(await answer(await request({ file: 'b.md', preview: true }))).toMatchObject({ status: 'existing', surfaceId: result.surfaceId });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('leaves one marked slot when a preview arrives during the slot\'s close and the close is refused', async () => {
+    await mountSlot();
+    // Running helper work refuses the close, once the held inspection answers.
+    const helper: helpers.HelperTerminal = { id: 'helper-slot', parentId: 'slot', command: '', status: 'off' };
+    vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'slot' ? helper : undefined);
+    const inspection = Promise.withResolvers<boolean>();
+    vi.spyOn(helpers, 'helperHasWork').mockReturnValue(inspection.promise);
+    const ref = (await listRow('slot'))!.ref;
+    let kill!: ReturnType<typeof vi.fn>;
+    await act(async () => { kill = dispatch(SURFACE_CONTROL_METHODS.kill, { surface: ref, confirmation: { mode: 'dangerously' } }); });
+    const result = await answer(await request({ file: 'b.md', preview: true }));
+    expect(result.status).toBe('created');
+    startTool(result.surfaceId, result.command);
+    await act(async () => inspection.resolve(true));
+    await waitUntil(() => kill.mock.calls.length > 0);
+    expect(kill.mock.calls[0][0]).toMatchObject({ ok: false });
+    expect(container.querySelector('[data-lath-leaf="slot"]')).not.toBeNull();
+    const { leafMeta } = (await saved()).lathLayout;
+    expect(Object.keys(leafMeta).filter(id => leafMeta[id].params?.toolPreview === true)).toEqual([result.surfaceId]);
   });
 
   it('pins the slot for a request from its own Session and splits the new slot from it', async () => {
@@ -584,6 +676,24 @@ describe('pinning the slot', () => {
     keepByHeader();
     expect(await paramsOf('slot')).not.toHaveProperty('toolPreview');
     expect(container.querySelector('[data-lath-leaf="slot"] .italic')).toBeNull();
+  });
+
+  it('pins from Keep open in its terminal context, which only a slot offers', async () => {
+    await mountSlot();
+    const keepOpen = () => container.querySelector<HTMLButtonElement>('[data-terminal-context] button[aria-label="Keep open"]');
+    await act(async () => {
+      container.querySelector('[data-pane-header-for="slot"]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 120, clientY: 15 }));
+    });
+    expect(document.activeElement?.closest('[data-terminal-context]')).not.toBeNull();
+    const keep = keepOpen()!;
+    expect(keep.tabIndex).toBe(0);
+    act(() => keep.focus());
+    await act(async () => keep.click());
+    expect(await paramsOf('slot')).not.toHaveProperty('toolPreview');
+    // Pinned, it is an ordinary Tool, whose open context offers nothing to keep.
+    expect(container.querySelector('[data-terminal-context]')).not.toBeNull();
+    expect(keepOpen()).toBeNull();
+    expect(document.activeElement?.closest('[data-terminal-context]')).not.toBeNull();
   });
 
   it('never lets a marked slot answer a keyed launch of its Tool', async () => {

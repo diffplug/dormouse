@@ -2090,6 +2090,19 @@ test('open --preview asks for the preview slot and prints its retarget', async (
   assert.equal('preview' in plain.requests[0].request, false);
 });
 
+test('open, tool, and tool --list escape control characters in a host error', async () => {
+  const client = fixtureClient();
+  const failure = async () => { throw new Error('ENAMETOOLONG: name too long, realpath \'/tmp/x\u001b]0;pwn\u0007\''); };
+  client.toolSurface = failure;
+  client.toolList = failure;
+  for (const argv of [['open', 'a.md'], ['tool', 'viewer'], ['tool', '--list']]) {
+    const result = await runCli(argv, { client, env: { PWD: '/repo' } });
+    assert.equal(result.exitCode, 1);
+    assert.doesNotMatch(result.stderr, /[\x00-\x09\x0b-\x1f\x7f-\x9f]/);
+    assert.match(result.stderr, /x\\u001b\]0;pwn\\u0007/);
+  }
+});
+
 test('open --preview refuses --fresh and --minimize before asking the host', async () => {
   for (const flag of ['--fresh', '--minimize']) {
     const client = fixtureClient();

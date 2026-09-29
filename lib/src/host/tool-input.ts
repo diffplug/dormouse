@@ -21,6 +21,9 @@ export async function resolveLocalToolTarget(input: string, cwd: string): Promis
   }
   if (!input) throw new ToolFileError('expected a local path, not a URL or Surface handle');
   const local = !isAbsolute(input) && /^[a-z][a-z\d+.-]*:/i.test(input) ? localFileUrlPath(input) : input;
+  // Again once decoded: a `file:` URL's escapes can spell controls, which a
+  // filesystem error below would echo.
+  if (hasShellInputControls(local)) throw new ToolFileError('local paths cannot contain terminal control characters');
   let path: string;
   try {
     path = await realpath(resolve(cwd, local));

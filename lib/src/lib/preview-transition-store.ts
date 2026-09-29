@@ -49,8 +49,12 @@ export interface PreviewSlotView {
 
 interface Entry {
   view: PreviewSlotView;
-  timer?: ReturnType<typeof setTimeout>;
-  stopWatch?: () => void;
+  /** The committed generation whose view is not ready yet, and its armed
+   *  signals. A takeover keeps them: the view still shows once ready. */
+  awaiting?: { generation: number; timer: ReturnType<typeof setTimeout>; stopWatch?: () => void };
+  /** A committed view became ready while a newer owner held the switch. */
+  ready?: boolean;
+  fade?: ReturnType<typeof setTimeout>;
 }
 
 const EMPTY: PreviewSlotView = { generation: 0, transition: null };
@@ -62,11 +66,18 @@ function emit(): void {
   for (const listener of listeners) listener();
 }
 
+function stopAwaiting(entry: Entry): void {
+  if (!entry.awaiting) return;
+  clearTimeout(entry.awaiting.timer);
+  entry.awaiting.stopWatch?.();
+  entry.awaiting = undefined;
+}
+
 function stop(entry: Entry): void {
-  clearTimeout(entry.timer);
-  entry.timer = undefined;
-  entry.stopWatch?.();
-  entry.stopWatch = undefined;
+  stopAwaiting(entry);
+  clearTimeout(entry.fade);
+  entry.fade = undefined;
+  entry.ready = false;
 }
 
 function write(id: string, view: PreviewSlotView): void {
@@ -94,8 +105,9 @@ export function subscribeToPreviewTransitions(listener: () => void): () => void 
 /**
  * Start a switch on `id`, or take over the one in progress — keeping its ghost,
  * which is the last fully shown content, rather than capturing a half-switched
- * pane. Returns the new owner's token, or null when `capture` finds nothing to
- * hold.
+ * pane, and a committed view's ready signals, which the new owner's end falls
+ * back to. Returns the new owner's token, or null when `capture` finds nothing
+ * to hold.
  */
 export function beginPreviewTransition(
   id: string,
@@ -105,7 +117,10 @@ export function beginPreviewTransition(
   const entry = entries.get(id);
   const current = entry?.view.transition;
   if (entry && current) {
-    stop(entry);
+    clearTimeout(entry.fade);
+    entry.fade = undefined;
+    // A view fading in was ready.
+    if (current.phase === 'revealing') entry.ready = true;
     const token = nextToken++;
     write(id, { ...entry.view, transition: { ...current, token, phase: 'holding' } });
     return token;
@@ -135,43 +150,60 @@ export function commitPreviewTransition(
   if (!current) return false;
   const { entry, transition } = current;
   stop(entry);
+  const generation = entry.view.generation + 1;
   write(id, {
-    generation: entry.view.generation + 1,
+    generation,
     transition: { ...transition, phase: 'committed', label: commit.label ?? transition.label },
   });
-  entry.timer = setTimeout(() => revealPreviewTransition(id, token), PREVIEW_READY_FALLBACK_MS);
-  entry.stopWatch = commit.arm(() => revealPreviewTransition(id, token));
+  const ready = () => viewReady(id, generation);
+  entry.awaiting = { generation, timer: setTimeout(ready, PREVIEW_READY_FALLBACK_MS) };
+  const stopWatch = commit.arm(ready);
+  if (entry.awaiting?.generation === generation) entry.awaiting.stopWatch = stopWatch;
+  else stopWatch();
   return true;
 }
 
 /** A browser layer of `generation` has painted its first document or frame. */
 export function previewLayerReady(id: string, generation: number): void {
-  const { generation: current, transition } = getPreviewSlotView(id);
-  if (transition?.phase === 'committed' && current === generation) revealPreviewTransition(id, transition.token);
+  viewReady(id, generation);
 }
 
-function revealPreviewTransition(id: string, token: number): void {
-  const current = owned(id, token);
-  if (!current) return;
-  const { entry, transition } = current;
-  stop(entry);
-  if (transition.instant) {
+/** The view committed as `generation` is ready: it shows now, or, while a
+ *  newer owner holds the switch, once that owner ends without committing. */
+function viewReady(id: string, generation: number): void {
+  const entry = entries.get(id);
+  const transition = entry?.view.transition;
+  if (!entry || !transition || entry.awaiting?.generation !== generation) return;
+  stopAwaiting(entry);
+  if (transition.phase === 'committed') reveal(id, entry);
+  else entry.ready = true;
+}
+
+function reveal(id: string, entry: Entry): void {
+  const transition = entry.view.transition;
+  entry.ready = false;
+  if (!transition || transition.instant) {
     write(id, { ...entry.view, transition: null });
     return;
   }
   write(id, { ...entry.view, transition: { ...transition, phase: 'revealing' } });
-  entry.timer = setTimeout(() => {
-    if (owned(id, token)) write(id, { ...entry.view, transition: null });
+  entry.fade = setTimeout(() => {
+    entry.fade = undefined;
+    if (owned(id, transition.token)) write(id, { ...entry.view, transition: null });
   }, PREVIEW_REVEAL_MS);
 }
 
-/** The owner's request ended without committing: unblur now. A committed
- *  switch, or one a newer request took over, ends nothing. */
+/** The owner's request ended without committing. A switch it took over that
+ *  had committed goes on: waiting for that view, or showing it now if ready.
+ *  Otherwise it unblurs now. A committed switch, or one a newer request took
+ *  over, ends nothing. */
 export function endPreviewTransition(id: string, token: number): void {
   const current = owned(id, token);
   if (current?.transition.phase !== 'holding') return;
-  stop(current.entry);
-  write(id, { ...current.entry.view, transition: null });
+  const { entry, transition } = current;
+  if (entry.awaiting) write(id, { ...entry.view, transition: { ...transition, phase: 'committed' } });
+  else if (entry.ready) reveal(id, entry);
+  else write(id, { ...entry.view, transition: null });
 }
 
 /** Forget a leaf whose Session is gone. */

@@ -226,7 +226,8 @@ export async function dispatchToolSurface(
     writeStdout(context, renderToolResponse(response, json));
     return undefined;
   } catch (error) {
-    return new Error(errorMessage(error));
+    // Host errors can echo paths and repo text.
+    return new Error(printable(errorMessage(error)));
   }
 }
 
@@ -255,7 +256,7 @@ async function listTools(context: DorCommandContext, flags: ToolFlags): Promise<
     writeStdout(context, flags.json === true ? renderPrintableJson(shown) : renderToolList(listing, flags.global === true));
     return undefined;
   } catch (error) {
-    return new Error(errorMessage(error));
+    return new Error(printable(errorMessage(error)));
   }
 }
 

@@ -122,6 +122,9 @@ export interface PreviewSlotPin {
    *  by open, by unsaved state, by a header double-click — goes through here. A
    *  retarget passes the leaf it writes, which is written without the mark. */
   pin: (id: string, next?: LeafMeta) => void;
+  /** Pin every marked Surface but a new `slot`, closing or not, so the
+   *  Workspace keeps one slot whatever becomes of a close in flight. */
+  pinOthers: (slot: string) => void;
   /** The slot this Wall pinned last; runtime only, never persisted. */
   lastPinned: MutableRefObject<string | null>;
 }
@@ -137,6 +140,12 @@ export function usePreviewSlotPin(lath: LathWallEngine): PreviewSlotPin {
     lath.store.setMeta(id, { ...meta, params });
     lastPinned.current = id;
   }, [lath]);
+  const pinOthers = useCallback((slot: string) => {
+    // A snapshot is immutable: each pin commits a new one.
+    for (const [id, meta] of lath.store.getSnapshot().leafMeta) {
+      if (id !== slot && isPreviewSlotParams(meta.params)) pin(id);
+    }
+  }, [lath, pin]);
   useEffect(() => {
     const pinDirty = () => {
       for (const [id, dirty] of getToolDirtySnapshot()) if (dirty) pin(id);
@@ -144,5 +153,5 @@ export function usePreviewSlotPin(lath: LathWallEngine): PreviewSlotPin {
     pinDirty();
     return subscribeToToolDirty(pinDirty);
   }, [pin]);
-  return useMemo(() => ({ pin, lastPinned }), [pin]);
+  return useMemo(() => ({ pin, pinOthers, lastPinned }), [pin, pinOthers]);
 }

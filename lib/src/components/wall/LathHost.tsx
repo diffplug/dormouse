@@ -29,7 +29,7 @@ import { type DragController, createDragController } from './lath-drag-controlle
 import { TerminalPanel } from './TerminalPanel';
 import { BrowserPanel } from './BrowserPanel';
 import { ToolPanel } from './ToolPanel';
-import { isToolParams } from './browser-surface';
+import { isPreviewSlotParams, isToolParams } from './browser-surface';
 import { ToolPaneHeader } from './ToolPaneHeader';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { SurfacePaneHeader } from './SurfacePaneHeader';
@@ -741,7 +741,7 @@ export function LathHost({
 
       {contextSource && (
         <TerminalContextOverlay key={terminalContext!.id} context={terminalContext!}
-          title={contextMeta?.title} tool={isToolParams(contextMeta?.params)}
+          title={contextMeta?.title} tool={isToolParams(contextMeta?.params)} preview={isPreviewSlotParams(contextMeta?.params)}
           lath={lath} wall={rect} source={contextSource}
           multiPane={!snapshot.zoomedId && frames.size > 1} preferences={contextPreferences.current} />
       )}

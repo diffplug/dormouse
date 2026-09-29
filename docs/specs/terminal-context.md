@@ -61,7 +61,7 @@ Source of truth: `TerminalContextView` in `lib/src/components/wall/TerminalConte
 
 ## Tool context
 
-**Must show a Tool's primary Session in Terminal Context instead of creating an auxiliary helper.** Reuse the title, directory, port, and alert presentation, showing Tool command status without helper Modify, Reset, or Promote controls. Pending approval cannot open context.
+**Must show a Tool's primary Session in Terminal Context instead of creating an auxiliary helper.** Reuse the title, directory, port, and alert presentation, showing Tool command status without helper Modify, Reset, or Promote controls; a preview slot's adds Keep open (`docs/specs/layout.md` → Pane header). Pending approval cannot open context.
 
 **Must focus the Tool terminal instance directly**, bypassing its browser Surface focus handle.
 

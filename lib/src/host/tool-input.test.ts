@@ -95,4 +95,14 @@ describe('local file URLs', () => {
   it.each(['https://dev-box.local/x', 'surface:3'])('refuses %s, which is not a file URL', async input => {
     await expect(resolveLocalToolTarget(input, dir)).rejects.toThrow('expected a local path or file: URL');
   });
+
+  it.each([
+    ['whose error would echo it', `${'x'.repeat(300)}%1b]0;pwn%07`],
+    ['that does not exist', 'notes%1b[2J.md'],
+    ['with an encoded NUL', 'notes%00.md'],
+  ])('refuses a file URL decoding to terminal controls, %s', async (_, name) => {
+    const error = await resolveLocalToolTarget(`${pathToFileURL(dir).href}/${name}`, dir).catch((caught: Error) => caught);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe('local paths cannot contain terminal control characters');
+  });
 });
