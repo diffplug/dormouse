@@ -15,6 +15,7 @@ import assert from 'node:assert/strict';
 import {
   CEREMONY_FIELD_LIMIT,
   NoiseTransportSession,
+  ONE_TIME_DENIAL_CODES,
   PAIRING_CODE_LENGTH,
   createNoiseInitiator,
   createNoiseResponder,
@@ -23,6 +24,8 @@ import {
   hashPasskeyPublicKey,
   isConnectionOutcomeV1,
   isConnectionRequestV1,
+  isOneTimeOutcomeV1,
+  isOneTimeRequestV1,
   isPairingCode,
   isPairingOutcomeV1,
   isPairingRequestV1,
@@ -418,6 +421,58 @@ test('isConnectionOutcomeV1 takes a labelled success or one of five fixed denial
   }
 });
 
+// --- One-time connection ---------------------------------------------------
+
+test('isOneTimeRequestV1 wants a code and a bounded label, and no proof', () => {
+  const request = { code: '07', label: 'iPhone Safari' };
+  assert.equal(isOneTimeRequestV1(request), true);
+  assert.equal(isOneTimeRequestV1({ ...request, label: '' }), true);
+  assert.equal(isOneTimeRequestV1({ ...request, label: 'a'.repeat(CEREMONY_FIELD_LIMIT) }), true);
+  // Additive fields are ignored, as on the other requests.
+  assert.equal(isOneTimeRequestV1({ ...request, extra: true }), true);
+  for (const [why, value] of [
+    ['not an object', 'nope'],
+    ['null', null],
+    ['no code', { label: request.label }],
+    ['a three-digit code', { ...request, code: '123' }],
+    ['a numeric code', { ...request, code: 7 }],
+    ['no label', { code: request.code }],
+    ['a non-string label', { ...request, label: 42 }],
+    ['an over-long label', { ...request, label: 'a'.repeat(CEREMONY_FIELD_LIMIT + 1) }],
+  ]) {
+    assert.equal(isOneTimeRequestV1(value), false, why);
+  }
+});
+
+test('isOneTimeOutcomeV1 takes a labelled success or one of four fixed denials', () => {
+  assert.deepEqual(
+    [...ONE_TIME_DENIAL_CODES],
+    ['user-denied', 'confirmation-mismatch', 'link-expired', 'burrow-error'],
+  );
+  // Frozen, so no importer can widen what the guard admits.
+  assert.equal(Object.isFrozen(ONE_TIME_DENIAL_CODES), true);
+  assert.equal(isOneTimeOutcomeV1({ ok: true, burrowLabel: 'Laptop' }), true);
+  assert.equal(isOneTimeOutcomeV1({ ok: true, burrowLabel: '' }), true);
+  for (const code of ONE_TIME_DENIAL_CODES) {
+    assert.equal(isOneTimeOutcomeV1({ ok: false, code }), true, code);
+  }
+  for (const [why, value] of [
+    ['not an object', 'nope'],
+    ['no ok', {}],
+    ['a truthy non-true ok', { ok: 1, burrowLabel: 'Laptop' }],
+    ['a success with no label', { ok: true }],
+    ['a success with an over-long label', { ok: true, burrowLabel: 'a'.repeat(CEREMONY_FIELD_LIMIT + 1) }],
+    ['a denial with no code', { ok: false }],
+    // The other ceremonies' codes have no one-time copy: nothing here is a
+    // presence check, an invitation, or an ACL.
+    ['a pairing code', { ok: false, code: 'invitation-expired' }],
+    ['a presence code', { ok: false, code: 'presence-rejected' }],
+    ['an ACL code', { ok: false, code: 'pairing-required' }],
+  ]) {
+    assert.equal(isOneTimeOutcomeV1(value), false, why);
+  }
+});
+
 // --- Fixed-size outcomes ---------------------------------------------------
 
 /** One established session pair, so control messages are measured on the wire. */
@@ -470,4 +525,14 @@ test('a connection success and every connection denial are the same size on the 
   // every control message pads to the same size, whatever it says.
   const pairing = burrow.sendControl({ ok: false, code: 'user-denied' });
   assert.equal(pairing.length, success.length);
+});
+
+test('a one-time success and every one-time denial are the same size on the wire', async () => {
+  const burrow = await established();
+  const success = burrow.sendControl({ ok: true, burrowLabel: "Ned's MacBook Pro (16-inch, 2025)" });
+  for (const code of ONE_TIME_DENIAL_CODES) {
+    assert.equal(burrow.sendControl({ ok: false, code }).length, success.length, code);
+  }
+  // And the phone's request is the same size as any other control message.
+  assert.equal(burrow.sendControl({ code: '42', label: 'iPhone Safari' }).length, success.length);
 });

@@ -1,8 +1,8 @@
 /**
- * The control messages both end-to-end ceremonies exchange once `Split` has
- * run, and the one presence verifier they share
+ * The control messages the end-to-end ceremonies exchange once `Split` has
+ * run, and the one presence verifier pairing and connection share
  * (`docs/specs/remote-security-model.md` → Presence proofs, Pairing,
- * Connection).
+ * Connection, One-time connection).
  *
  * Every message here travels as a `control` transport plaintext, which is
  * NUL-padded to a fixed size — so an approval and a denial are the same number
@@ -301,6 +301,57 @@ export function isConnectionOutcomeV1(value: unknown): value is ConnectionOutcom
   if (!value || typeof value !== 'object') return false;
   const outcome = value as Record<string, unknown>;
   if (outcome.ok === false) return includesCode(CONNECTION_DENIALS, outcome.code);
+  return outcome.ok === true && bounded(outcome.burrowLabel);
+}
+
+// ---------------------------------------------------------------------------
+// One-time connection (`docs/specs/one-time.md`)
+
+/**
+ * The first phone→Burrow control message of a one-time connection: the pairing
+ * request's confirmation half, and no presence proof — the link and the typed
+ * digits are the whole authorization, and it writes nothing.
+ */
+export interface OneTimeRequestV1 {
+  /** The two digits the phone is displaying; the person types them on the Burrow. */
+  readonly code: string;
+  /** The phone's own name for itself, shown in the approval modal. */
+  readonly label: string;
+}
+
+export function isOneTimeRequestV1(value: unknown): value is OneTimeRequestV1 {
+  if (!value || typeof value !== 'object') return false;
+  const request = value as Record<string, unknown>;
+  return isPairingCode(request.code) && bounded(request.label);
+}
+
+/**
+ * Why a one-time connection ended without a session. Fixed copy on the phone;
+ * the type is derived from the list the guard checks. Frozen and exported, so a
+ * phone can map every code to copy and no importer can widen the guard.
+ */
+export const ONE_TIME_DENIAL_CODES = Object.freeze([
+  'user-denied',
+  'confirmation-mismatch',
+  'link-expired',
+  'burrow-error',
+] as const);
+
+export type OneTimeDenialCode = (typeof ONE_TIME_DENIAL_CODES)[number];
+
+/**
+ * The single Burrow→phone control message that ends the confirmation, either
+ * way. Success carries the label and nothing a phone could keep: no Burrow
+ * static to pin, no `deliveryId`.
+ */
+export type OneTimeOutcomeV1 =
+  | { readonly ok: true; readonly burrowLabel: string }
+  | { readonly ok: false; readonly code: OneTimeDenialCode };
+
+export function isOneTimeOutcomeV1(value: unknown): value is OneTimeOutcomeV1 {
+  if (!value || typeof value !== 'object') return false;
+  const outcome = value as Record<string, unknown>;
+  if (outcome.ok === false) return includesCode(ONE_TIME_DENIAL_CODES, outcome.code);
   return outcome.ok === true && bounded(outcome.burrowLabel);
 }
 

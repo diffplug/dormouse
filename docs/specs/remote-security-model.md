@@ -291,6 +291,36 @@ Source of truth: `BurrowRuntime.#onConnectionInit` / `#onConnectionTransport` /
 established session), `ChallengeIssuer` in
 `remote-lib-common/src/security/challenge.ts`.
 
+## One-time connection
+
+**A third ceremony on the one suite, authorizing one session and writing
+nothing.** `docs/specs/one-time.md` owns the link, the rendezvous wire, and the
+staged runtime; these are the rules the shared contract fixes.
+
+- **IK against the link's one-use key.** The phone is the initiator with a fresh
+  static it **never persists**, the link's `ephPub` as `rs`; both handshake
+  payloads are empty. The link carries no Burrow static, so the phone is left
+  holding nothing to pin.
+- **The prologue binds every link field under its own kind** — the E2E domain,
+  `one-time`, the room id, then `v`, `expiry`, and `ephPub` in link order — so a
+  one-time transcript equals no pairing or connection transcript, and is useless
+  in any other room.
+- **Reverse two-digit confirmation without a presence proof.**
+  `OneTimeRequestV1` carries the phone's code and label and nothing else; the
+  Burrow's one attempt and the carve-out from [Presence proofs](#presence-proofs)
+  are staged with the runtime (`docs/specs/one-time.md` -> "Future").
+- **One padded outcome.** `OneTimeOutcomeV1` success carries only the Burrow
+  label — no Burrow static, no `deliveryId` — and a denial only `user-denied`,
+  `confirmation-mismatch`, `link-expired`, or `burrow-error`, in the same fixed
+  control message as [Pairing](#pairing)'s.
+
+Source of truth: `oneTimeLinkPrologue` in
+`remote-lib-common/src/security/one-time-link.ts`, `e2eOneTimePrologue` in
+`remote-lib-common/src/security/noise-transport.ts`, `OneTimeRequestV1` /
+`OneTimeOutcomeV1` in `remote-lib-common/src/security/e2e-ceremony.ts`. Pinned
+by `remote-lib-common/test/one-time-link.test.mjs` and
+`remote-lib-common/test/e2e-ceremony.test.mjs`.
+
 ## Push sealing
 
 **A push gets its own construction** — no live session exists between the two
@@ -477,8 +507,9 @@ constructs, and by `ClientSessionCore.establish` in
 - **Prologues are canonical and length-prefixed** (`lengthPrefixedConcat`), each
   binding its own ceremony's identifiers so a transcript is useless against
   another Burrow, id, or ceremony ([relay.md](./relay.md) -> E2E framing owns
-  the field order). **Application authentication binds to Noise's final
-  handshake hash** — no parallel transcript, exporter, KDF, or nonce scheme.
+  the field order; `docs/specs/one-time.md` -> "Link" a one-time link's).
+  **Application authentication binds to Noise's final handshake hash** — no
+  parallel transcript, exporter, KDF, or nonce scheme.
   Sessions use the two `CipherState`s from `Split`, each from nonce zero,
   with empty associated data; routing metadata is never authenticated
   application content. **No rekey**: sessions expire on inactivity.

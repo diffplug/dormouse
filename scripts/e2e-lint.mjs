@@ -10,8 +10,9 @@
  * one Noise suite and no way to select another, no JavaScript curve, no
  * plaintext relay route, no legacy frame discriminant left to answer, no
  * Relay-side view of protocol-v1 or of the direct path's signaling, no ICE
- * server, no checked-in service worker shadowing the
- * built one. An absence is exactly what a reviewer stops noticing: nothing in a
+ * server, no checked-in service worker shadowing the built one, no one-time
+ * frame the Relay or `BurrowRuntime` could read. An absence is exactly what a
+ * reviewer stops noticing: nothing in a
  * diff says "a second cipher suite is now reachable", and the nightly audit is
  * thorough but probabilistic. This makes the cheap half deterministic, so
  * re-introducing any of them fails a build.
@@ -71,6 +72,7 @@ const E2E_MODULES = [
   'remote-lib-common/src/security/e2e-ceremony.ts',
   'remote-lib-common/src/security/e2e-bounds.ts',
   'remote-lib-common/src/security/pairing-invitation.ts',
+  'remote-lib-common/src/security/one-time-link.ts',
   'remote-lib-common/src/security/link-url.ts',
   // Presence *derives* a challenge and never verifies an assertion itself —
   // `passkey.ts` does, which is why that one is out of scope and this one is in.
@@ -83,6 +85,7 @@ const E2E_MODULES = [
   'lib/src/remote/direct/direct-endpoint.ts',
   'lib/src/remote/direct/direct-peer.ts',
   'remote-lib-common/src/remote/wire.ts',
+  'remote-lib-common/src/remote/one-time-wire.ts',
   'lib/src/remote/burrow/burrow-runtime.ts',
   'lib/src/remote/burrow/established-session.ts',
   'lib/src/remote/burrow/push-delivery.ts',
@@ -98,15 +101,25 @@ const NOISE_MODULES = [
 ];
 
 /**
- * The four files that decide what a relay frame is. A retired discriminant
- * anywhere here is a path something could still answer.
+ * The five files that decide what a relay or rendezvous frame is. A retired
+ * discriminant anywhere here is a path something could still answer.
  */
 const FRAME_MODULES = [
   'remote-lib-common/src/remote/wire.ts',
+  'remote-lib-common/src/remote/one-time-wire.ts',
   'relay/src/relay.ts',
   'lib/src/remote/burrow/burrow-runtime.ts',
   'lib/src/remote/client/pocket-client.ts',
 ];
+
+/**
+ * Every spelling of the one-time family's names: its types and guards
+ * (`OneTime…`, `isOneTime…`, `oneTime…`), its constants (`ONE_TIME_…`,
+ * `WS_CLOSE_ONE_TIME_…`), and its frame tags as literals. Anchored on the quote
+ * for the tags, since "one-time" is ordinary prose — the enrollment offer's
+ * one-time token among it.
+ */
+const ONE_TIME_NAME = /[Oo]neTime|ONE_TIME_|['"`]one-time/g;
 
 /** The three shipped source trees, scanned whole for the dependency rules. */
 const SOURCE_TREES = ['remote-lib-common/src/', 'lib/src/', 'relay/src/'];
@@ -282,6 +295,52 @@ export const RULES = [
     violation: "\nconst __selftest = { sdp: '' };\n",
   },
   {
+    rule: 'The Relay never names the one-time family',
+    security: 'no one-time name may appear under `relay/src/`',
+    kind: 'forbid',
+    trees: ['relay/src/'],
+    // A one-time room is Hosted's, and carries a handshake the Relay has no part
+    // in. A Relay file that names a one-time frame, guard, or close code has
+    // started to route one — the same leading-indicator reasoning as the
+    // protocol-v1 rule above.
+    pattern: ONE_TIME_NAME,
+    violationFile: 'relay/src/relay.ts',
+    violation: "\nconst __selftest = { t: 'one-time' };\n",
+  },
+  {
+    rule: 'The relay envelope and `BurrowRuntime` never name the one-time family',
+    security: 'no one-time name may appear under `relay/src/`',
+    kind: 'forbid',
+    // `wire.ts` is where the relay's frame unions live, so a one-time frame
+    // added to one would reach the Relay without the Relay naming it.
+    // `BurrowRuntime` is the ACL-holding runtime; a one-time connection is its
+    // own runtime that imports nothing ACL or presence.
+    files: ['remote-lib-common/src/remote/wire.ts', 'lib/src/remote/burrow/burrow-runtime.ts'],
+    pattern: ONE_TIME_NAME,
+    violationFile: 'lib/src/remote/burrow/burrow-runtime.ts',
+    violation: "\nimport { isOneTimeClientFrame } from 'remote-lib-common';\n",
+  },
+  {
+    rule: '`E2eKind` is exactly pairing and connection',
+    security: 'must admit exactly `pairing` and `connection`',
+    kind: 'require',
+    file: 'remote-lib-common/src/remote/wire.ts',
+    // Anchored on the semicolon, so a third member appended to the union stops
+    // matching; `scripts/e2e-lint-selftest.mjs` proves that as well as the
+    // deletion.
+    pattern: /^export type E2eKind = 'pairing' \| 'connection';$/m,
+  },
+  {
+    rule: '`isE2eKind` admits exactly pairing and connection',
+    security: 'must admit exactly `pairing` and `connection`',
+    kind: 'require',
+    file: 'remote-lib-common/src/remote/wire.ts',
+    // The whole function body, so neither a widened return nor a line added
+    // before it keeps matching.
+    pattern:
+      /^export function isE2eKind\(value: unknown\): value is E2eKind \{\n  return value === 'pairing' \|\| value === 'connection';\n\}$/m,
+  },
+  {
     rule: 'No checked-in service worker beside the built one',
     security: 'the worker in `lib/src/remote/pocket-app/sw.ts` is the only thing that opens one',
     kind: 'absent',
@@ -309,7 +368,9 @@ export const RULES = [
     kind: 'forbid',
     files: [
       'remote-lib-common/src/remote/wire.ts',
+      'remote-lib-common/src/remote/one-time-wire.ts',
       'remote-lib-common/src/security/e2e-ceremony.ts',
+      'remote-lib-common/src/security/one-time-link.ts',
       'remote-lib-common/src/security/push-seal.ts',
     ],
     // Every one of these is load-bearing on every message that carries it, so

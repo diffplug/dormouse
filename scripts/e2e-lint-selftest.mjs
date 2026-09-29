@@ -80,6 +80,64 @@ for (const rule of RULES) {
   );
 }
 
+// The two `E2eKind` rules are `require` rules, so the loop above proves only
+// that deleting the declaration reddens. What they exist to catch is a third
+// kind, so widening each one — or guarding a third kind ahead of the shipped
+// return — must redden too. The third kind is not a one-time name, so the
+// one-time `forbid` rule on this file cannot be what goes red.
+const WIRE = 'remote-lib-common/src/remote/wire.ts';
+const wire = readFileSync(join(repoRoot, WIRE), 'utf8');
+for (const [from, to, what] of [
+  [
+    "export type E2eKind = 'pairing' | 'connection';",
+    "export type E2eKind = 'pairing' | 'connection' | 'rendezvous';",
+    'a third member on the E2eKind union',
+  ],
+  [
+    "  return value === 'pairing' || value === 'connection';",
+    "  return value === 'pairing' || value === 'connection' || value === 'rendezvous';",
+    'a third kind in isE2eKind',
+  ],
+  [
+    "  return value === 'pairing' || value === 'connection';",
+    "  if (value === 'rendezvous') return true;\n  return value === 'pairing' || value === 'connection';",
+    'a third kind guarded ahead of the isE2eKind return',
+  ],
+]) {
+  if (!wire.includes(from)) {
+    selftest.weak.push(`${WIRE} no longer contains ${from} — the widening case proves nothing`);
+    continue;
+  }
+  selftest.withMutation(
+    WIRE,
+    (path) => writeFileSync(path, wire.replace(from, to)),
+    `${what} in ${WIRE} stays green`,
+  );
+}
+
+// Each spelling of the one-time family must redden the Relay rule, not just the
+// frame tag the loop appends: a constant or a camel-case helper is the same
+// leak.
+for (const violation of [
+  "\nconst __selftest = WS_CLOSE_ONE_TIME_TAKEN;\n",
+  '\nexport function oneTimeRoutes() {}\n',
+  '\ntype __Selftest = OneTimeRoomFrame;\n',
+  "\nconst __selftest = { t: 'one-time-room' };\n",
+]) {
+  selftest.withAppended(
+    'relay/src/relay.ts',
+    violation,
+    `a one-time name in relay/src/relay.ts stays green: ${violation.trim()}`,
+  );
+}
+// And the relay envelope's own file, the one the runtime rule's loop case does
+// not append to.
+selftest.withAppended(
+  WIRE,
+  '\nexport type __SelftestFrame = E2eClientFrame | OneTimeClientFrame;\n',
+  `a one-time frame in the relay union in ${WIRE} stays green`,
+);
+
 const security = readFileSync(join(repoRoot, SECURITY_SPEC), 'utf8');
 // A file-scoped storage exception must not become a directory-scoped escape.
 selftest.withAppended(

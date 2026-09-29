@@ -8,11 +8,13 @@
  *
  * The `security/` modules implement the primitives of
  * `docs/specs/remote-security-model.md`: the Noise suite and its transport
- * framing, presence proofs, pairing invitations, the two ceremonies' control
- * messages, burrow challenges, passkey assertion verification, and the Burrow ACL.
+ * framing, presence proofs, pairing invitations and one-time links, the
+ * ceremonies' control messages, burrow challenges, passkey assertion
+ * verification, and the Burrow ACL.
  */
 
 export * from './remote/wire.js';
+export * from './remote/one-time-wire.js';
 export * from './remote/enroll-offer.js';
 export * from './remote/origin.js';
 export * from './security/webcrypto.js';
@@ -32,4 +34,5 @@ export * from './security/direct-path.js';
 export * from './security/token-bucket.js';
 export * from './security/link-url.js';
 export * from './security/pairing-invitation.js';
+export * from './security/one-time-link.js';
 export * from './security/e2e-ceremony.js';

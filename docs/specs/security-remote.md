@@ -242,6 +242,16 @@ layer; neither is restated below.
 - **FAIL IF** a switched end waits on its peer without a deadline, or a channel this protocol did not ask for is adopted. `DirectPeer` in `lib/src/remote/direct/direct-peer.ts` must refuse a channel that is not `DIRECT_CHANNEL_LABEL`, one reported unordered or partially reliable, and one whose association reports a per-message limit below `NOISE_MAX_MESSAGE_LENGTH` — all before it reports the open, so each abandons the attempt while the relay still carries the session. **The reliability half is defence in depth against a paired Client, not a boundary control**, and reaches only as far as the implementation reports those flags: on either Burrow it does not, which `lib/src/host/remote/native-direct-peer.test.ts` pins so a version that changes it is noticed (`docs/specs/remote-api.md` -> Transport -> "Direct path"). `DirectEndpoint` must arm `DIRECT_HANDOFF_TIMEOUT_MS` on its own switch, since from there it sends only on the channel. Pinned by `lib/src/remote/direct/direct-peer.test.ts` and `lib/src/remote/direct/direct-endpoint.test.ts`.
 - **FAIL IF** a direct path survives `client-gone`, `burrow-gone`, or a lost relay socket: the Relay stays the lifecycle authority on both paths. Every Burrow bound is path-agnostic, and the idle deadline still moves only on a decrypted Client→Burrow transport message, whichever path carried it (`docs/specs/remote-security-model.md` -> "Burrow bounds").
 
+### One-time connection
+
+**A one-time connection is its own frame family on the one suite, never a third
+`E2eKind`**, so nothing that reads a relay envelope can be driven into it.
+`docs/specs/one-time.md` owns the link and the rendezvous wire;
+`docs/specs/remote-security-model.md` -> "One-time connection" owns the ceremony.
+
+- **FAIL IF** the Relay or `BurrowRuntime` can accept a one-time frame: `E2eKind` and `isE2eKind` in `remote-lib-common/src/remote/wire.ts` must admit exactly `pairing` and `connection`, and no one-time name may appear under `relay/src/`, in `remote-lib-common/src/remote/wire.ts`, or in `lib/src/remote/burrow/burrow-runtime.ts`. `scripts/e2e-lint.mjs` holds both textually.
+- **FAIL IF** the one-time prologue stops binding every link field under its own kind: `oneTimeLinkPrologue` in `remote-lib-common/src/security/one-time-link.ts` must hash, through `e2eOneTimePrologue` in `remote-lib-common/src/security/noise-transport.ts`, the E2E domain, `one-time`, the room id, then the link's version, expiry, and one-use key in link order. Pinned by `remote-lib-common/test/one-time-link.test.mjs`.
+
 ### Revocation and the audit trail
 
 These are the two real gaps in the shipped model, and they are gaps rather than

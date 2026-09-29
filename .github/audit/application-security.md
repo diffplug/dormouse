@@ -25,8 +25,10 @@ in one and quietly absent from another is a finding.
 The end-to-end boundary is where the depth goes. Its modules are
 `remote-lib-common/src/security/noise.ts`, `noise-transport.ts`,
 `e2e-ceremony.ts`, `e2e-bounds.ts`, `token-bucket.ts`, `push-seal.ts`,
-`pairing-invitation.ts`, `link-url.ts`, `presence.ts`, `acl.ts` and `direct-path.ts`;
-`remote-lib-common/src/remote/wire.ts` (the frame shapes and their guards);
+`pairing-invitation.ts`, `one-time-link.ts`, `link-url.ts`, `presence.ts`, `acl.ts` and
+`direct-path.ts`; `remote-lib-common/src/remote/wire.ts` (the frame shapes and their
+guards) and `one-time-wire.ts` (the one-time rendezvous family, which neither the
+Relay nor `BurrowRuntime` may read);
 `lib/src/remote/direct/direct-endpoint.ts` and `direct-peer.ts` (the data
 channel the same session may move onto, and the one switching policy both ends
 run — `docs/specs/security-remote.md` -> "Direct path");
