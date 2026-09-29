@@ -904,7 +904,7 @@ describe('BurrowRuntime bounds', () => {
     const first = await establish('c1');
 
     // Refused before the first `encryptWithAd`, so only a poisoned session is
-    // burrow loss (`BurrowRuntime.#sendApp`).
+    // burrow loss (`EstablishedE2eSession.#sendApp`).
     sessions[0]!.send({ oversize: 'x'.repeat(2 * 1024 * 1024) });
     await settle();
     expect(sessions[0]!.disposed).toBe(false);

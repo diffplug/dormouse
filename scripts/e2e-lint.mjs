@@ -71,6 +71,7 @@ const E2E_MODULES = [
   'remote-lib-common/src/security/e2e-ceremony.ts',
   'remote-lib-common/src/security/e2e-bounds.ts',
   'remote-lib-common/src/security/pairing-invitation.ts',
+  'remote-lib-common/src/security/link-url.ts',
   // Presence *derives* a challenge and never verifies an assertion itself —
   // `passkey.ts` does, which is why that one is out of scope and this one is in.
   'remote-lib-common/src/security/presence.ts',
@@ -83,6 +84,7 @@ const E2E_MODULES = [
   'lib/src/remote/direct/direct-peer.ts',
   'remote-lib-common/src/remote/wire.ts',
   'lib/src/remote/burrow/burrow-runtime.ts',
+  'lib/src/remote/burrow/established-session.ts',
   'lib/src/remote/burrow/push-delivery.ts',
   'lib/src/remote/client/pocket-client.ts',
   'lib/src/remote/pocket-app/sw.ts',

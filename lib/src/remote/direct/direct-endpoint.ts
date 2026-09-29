@@ -58,7 +58,8 @@ export interface DirectEndpointDeps {
   receive(ciphertext: Uint8Array): TransportReceipt | null;
   /**
    * The session is unrecoverable: the endpoint's owner disposes it (the Burrow
-   * through `#disposeEstablished`, the Client through `#loseBurrow`).
+   * through `EstablishedE2eSession`'s `onFatal`, the Client through
+   * `#loseBurrow`).
    */
   fatal(reason: string): void;
   /**

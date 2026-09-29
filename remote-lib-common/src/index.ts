@@ -30,5 +30,6 @@ export * from './security/pairing.js';
 export * from './security/e2e-bounds.js';
 export * from './security/direct-path.js';
 export * from './security/token-bucket.js';
+export * from './security/link-url.js';
 export * from './security/pairing-invitation.js';
 export * from './security/e2e-ceremony.js';

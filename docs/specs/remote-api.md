@@ -57,7 +57,7 @@ Source of truth: the surface model the wire shapes reuse — `dor/src/protocol.t
 
 **A `RemoteApiSession` exists only for an authorized session.** Created at promotion — presence proof and ACL conjunction both passed ([remote-security-model.md](./remote-security-model.md) → Connection) — and disposed when the Client disconnects, when the Burrow reaps the session, and by any promotion that replaces it, so **a re-authorizing Client can never inherit the previous session's attachment**.
 
-Source of truth: `BurrowRuntime.#promoteConnection` in `lib/src/remote/burrow/burrow-runtime.ts`.
+Source of truth: `BurrowRuntime.#promoteConnection` in `lib/src/remote/burrow/burrow-runtime.ts`, `EstablishedE2eSession` in `lib/src/remote/burrow/established-session.ts`.
 
 ### Direct path
 
@@ -180,7 +180,8 @@ their guard, the constants, the `DirectFrameQueue` both queues are, and the
 direct-path policy, one per authorized session; `onRelayFrame` is both ends' only
 way in from the relay and `send` their only way out; constructed at promotion by
 `PocketClient.#directEndpoint` in `lib/src/remote/client/pocket-client.ts` and
-`BurrowRuntime.#promoteConnection` in
+`EstablishedE2eSession` in `lib/src/remote/burrow/established-session.ts`, built
+by `BurrowRuntime.#promoteConnection` in
 `lib/src/remote/burrow/burrow-runtime.ts`); pinned by
 `remote-lib-common/test/direct-path.test.mjs`,
 `lib/src/remote/direct/direct-endpoint.test.ts`,

@@ -287,7 +287,9 @@ the record).
 
 Source of truth: `BurrowRuntime.#onConnectionInit` / `#onConnectionTransport` /
 `#promoteConnection` in `lib/src/remote/burrow/burrow-runtime.ts`,
-`ChallengeIssuer` in `remote-lib-common/src/security/challenge.ts`.
+`EstablishedE2eSession` in `lib/src/remote/burrow/established-session.ts` (the
+established session), `ChallengeIssuer` in
+`remote-lib-common/src/security/challenge.ts`.
 
 ## Push sealing
 
@@ -409,7 +411,9 @@ omits `client-gone`, invents client IDs, or reorders frames.
   **losing the Burrow's own relay socket disposes everything, invitations
   included** (rationale).
 
-Source of truth: `lib/src/remote/burrow/burrow-runtime.ts`, and `TokenBucket` in
+Source of truth: `lib/src/remote/burrow/burrow-runtime.ts`,
+`EstablishedE2eSession` in `lib/src/remote/burrow/established-session.ts` (an
+established session's decrypt and idle clock), and `TokenBucket` in
 `remote-lib-common/src/security/token-bucket.ts` — the same primitive the Relay
 admits Burrow enrollment with ([relay.md](./relay.md#http-api)). Pinned by
 `lib/src/remote/burrow/burrow-bounds.test.ts`,
@@ -454,8 +458,10 @@ Source of truth: `remote-lib-common/src/security/direct-path.ts` (the signals,
 their guard, and `DirectCutover`), `lib/src/remote/direct/direct-peer.ts`
 (`DirectPeer`), `DirectEndpoint` in
 `lib/src/remote/direct/direct-endpoint.ts` (the attempt, the peer, and the
-switch, created at promotion by `BurrowRuntime.#promoteConnection` in
-`lib/src/remote/burrow/burrow-runtime.ts` and `PocketClient.#directEndpoint` in
+switch, created at promotion by `EstablishedE2eSession` in
+`lib/src/remote/burrow/established-session.ts`, which
+`BurrowRuntime.#promoteConnection` in `lib/src/remote/burrow/burrow-runtime.ts`
+constructs, and by `PocketClient.#directEndpoint` in
 `lib/src/remote/client/pocket-client.ts`). The audited rows are
 `docs/specs/security-remote.md` -> "Direct path".
 

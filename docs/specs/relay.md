@@ -404,7 +404,8 @@ Pocket, a fragment being invisible to this Relay. Check order is the function's
 own: cheap before expensive, the X25519 import last, which is what makes it
 asynchronous.
 
-Source of truth: `remote-lib-common/src/security/pairing-invitation.ts`, with
+Source of truth: `remote-lib-common/src/security/pairing-invitation.ts`, its URL
+checks in `parseLinkFragment` in `remote-lib-common/src/security/link-url.ts`, with
 `#setupQr` in `lib/src/host/remote/service.ts` as the emitter; pinned by exact
 encode/parse vectors in `remote-lib-common/test/pairing-invitation.test.mjs`.
 What the invitation half proves is
@@ -887,8 +888,9 @@ exists to honor:
   answer** — `enroll`, `reconnect`, `clearEnrollment` and losing the last
   subscriber each drop the read in flight (rationale).
 
-Source of truth: `RelayChoices`, `useSetupQr` and `ScannableCode` in
-`lib/src/components/RemoteControlSection.tsx` over `lib/src/components/QrCode.tsx`
+Source of truth: `RelayChoices` and `useSetupQr` in
+`lib/src/components/RemoteControlSection.tsx`, `ScannableCode` in
+`lib/src/components/ScannableCode.tsx` over `lib/src/components/QrCode.tsx`
 (`uqr` encodes; that draws, lazily, so the encoder stays out of every main
 bundle); `describePushTargets` in `lib/src/components/SettingsDialog.tsx`;
 `dropInFlightRead` in `lib/src/remote/burrow/burrow-status-store.ts`;
