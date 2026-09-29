@@ -32,6 +32,7 @@ that once rendered it at `/docs` is retained and still runs (see
 | `/self-host` | Running your own Relay | The runbook half of `SELF_HOST.md` |
 | `/hosted` | Prelaunch overview of optional paid managed services | `website/src/pages/Hosted.tsx` |
 | `/security` | What Dormouse guarantees and how it is checked | Every section of `docs/specs/security.md`, minus title and front matter; its rows split across three pages |
+| `/privacy`, `/terms` | Hosted account policies, labeled as drafts until approved | `website/src/pages/Privacy.tsx`, `website/src/pages/Terms.tsx` |
 | GitHub root | Repository overview and contributor entry point | Root `README.md` |
 
 Internal specs remain maintainer references, the one exception being the

@@ -139,6 +139,10 @@ export default function Hosted() {
         </p>
       </section>
 
+      <p className={`mt-10 ${BODY_TEXT_CLASS}`}>
+        The account service has its own <a href={sitePath("/privacy")} className={LINK_CLASS}>privacy policy</a> and <a href={sitePath("/terms")} className={LINK_CLASS}>terms of service</a>.
+      </p>
+
       <section className="mt-10">
         <AnchoredHeading id="updates" spacing="mt-0 mb-3">Follow the launch</AnchoredHeading>
         <p className={`mb-5 max-w-2xl ${BODY_TEXT_CLASS}`}>

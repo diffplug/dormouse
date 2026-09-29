@@ -33,6 +33,8 @@ Source of truth: `hosted/server/providers.js`; `authPolicy` / `providerBindings`
 
 ## Interface
 
+**Must link the account footer to the public Hosted privacy policy and terms.**
+
 **Must show configured sign-in methods only.** Email has send, existing-code, verify, resend, and change-address paths. The account screen lists connected methods and explains recent-login requirements and provider-only recovery limits. Failed callbacks display a recoverable error and remove query parameters from browser history.
 
 **Must check the account on return to the page and serialize submitted actions.** Authenticated data remains in memory; login tokens never enter local storage. Only public identity fields are rendered, without provider images or external assets.
@@ -73,7 +75,7 @@ Source of truth: `.github/workflows/hosted-production.yml`; `verifyPackages` / `
 
 ## Future
 
-1. Complete separate Dormouse OAuth registrations, Postmark sender, Postgres/Hyperdrive provisioning, and real production acceptance. Microsoft callback diagnosis and shared logging are coordinated in pgstencil separately.
+1. Finish OAuth consent branding, publish approved policy pages, enable providers, and pass real production acceptance. Credentials and Postgres/Hyperdrive are provisioned. pgstencil includes the Microsoft fix; personal and work/school callbacks need acceptance.
 2. Add per-browser login listing/revocation, sign-out-everywhere, and account recovery before broad paid use. Revisit the fixed 24-hour login lifetime for daily voice use.
 3. Hosted ElevenLabs: desktop authorization, scoped revocable credentials, quotas, usage accounting, spending bounds, and explicit text/redaction disclosure.
 4. Hosted Relay: follow the **saas-multitenant** scope in `docs/specs/relay.md`; account login never replaces Burrow pairing and authorization. Paid security claims retain the independent-review precondition.

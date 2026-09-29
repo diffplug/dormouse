@@ -1107,6 +1107,8 @@ export default function Home() {
             <a href={sitePath("/self-host")} className="underline hover:opacity-100">How to self-host</a>
             <a href={sitePath("/hosted")} className="underline hover:opacity-100">Dormouse Hosted</a>
             <a href={sitePath("/security")} className="underline hover:opacity-100">Security</a>
+            <a href={sitePath("/privacy")} className="underline hover:opacity-100">Hosted privacy</a>
+            <a href={sitePath("/terms")} className="underline hover:opacity-100">Hosted terms</a>
             <a href={sitePath("/supply-chain")} className="underline hover:opacity-100">Supply Chain</a>
             <a href="https://github.com/diffplug/dormouse/issues" className="underline hover:opacity-100">Report an issue</a>
             <p>
