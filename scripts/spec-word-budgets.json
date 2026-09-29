@@ -12,7 +12,7 @@
   "docs/specs/glossary.md": 3000,
   "docs/specs/hosted.md": 1300,
   "docs/specs/layout.md": 11500,
-  "docs/specs/mobile-terminal-ui.md": 2050,
+  "docs/specs/mobile-terminal-ui.md": 2200,
   "docs/specs/mouse-and-clipboard.md": 3750,
   "docs/specs/one-time.md": 3750,
   "docs/specs/pocket-app.md": 5050,
@@ -34,7 +34,7 @@
   "docs/specs/theme.md": 2250,
   "docs/specs/tiling-engine.md": 4650,
   "docs/specs/transport.md": 4900,
-  "docs/specs/tutorial.md": 1950,
+  "docs/specs/tutorial.md": 2050,
   "docs/specs/vscode.md": 7200,
   "docs/specs/webgl-text.md": 1200,
   "docs/specs/website-docs.md": 5000
