@@ -15,8 +15,9 @@ model exists to make *authorized* hard to reach and impossible to reach by accid
 still applies to it is [One-time connection](#one-time-connection) — the one way in
 without them, one session confirmed at the Burrow and writing nothing — with the
 direct path it runs on and the service→webview checks. Two deployment modes are
-defined (`docs/specs/remote-api.md` -> "Transport"); all of the below is
-**self-hosted**, the only one that ships. Cloud-hosted is staged
+defined (`docs/specs/remote-api.md` -> "Transport"); all of the below but the
+one-time connection, which needs no Relay, is **self-hosted**, the only one that
+ships. Cloud-hosted is staged
 ([Cloud-hosted mode](#cloud-hosted-mode)).
 
 ### Trust boundary

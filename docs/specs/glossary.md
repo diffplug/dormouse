@@ -95,8 +95,10 @@ Remote control has exactly three roles. `docs/specs/remote-security-model.md` ow
 | Role | What it is | What it decides |
 |---|---|---|
 | **Burrow** | The app that owns terminal Surfaces and the processes behind them: the Standalone app, or the VS Code extension. **Two on one machine are two Burrows**, enrolled and paired separately, and Pocket lists them as two rows. | Every remote-access grant. Pairing approval and the ACL live here and nowhere else. |
-| **Client** | What controls a Burrow from somewhere else. **Pocket** is the phone Client (`docs/specs/pocket-app.md`); Canopy is a future one (`## Future`). | Nothing on its own — a Client asks. |
+| **Client** | What controls a Burrow from somewhere else. **Pocket** is the phone Client (`docs/specs/pocket-app.md`); the **one-time page** Hosted serves is a Client for one session (`docs/specs/one-time.md`); Canopy is a future one (`## Future`). | Nothing on its own — a Client asks. |
 | **Relay** | The coordinating server: accounts, presence, push fan-out, and an encrypted byte pipe between Client and Burrow (`docs/specs/relay.md`). **Dormouse Hosted** is the managed Relay; `SELF_HOST.md` runs your own. | Routing. It holds no terminal and no authorization. |
+
+**Hosted's one-time room is a rendezvous, not a fourth role**: it forwards only a one-time connection's handshake frames, then closes (`docs/specs/one-time.md` -> "Hosted rendezvous").
 
 **A Burrow *is* a platform host** — the process behind the webview that owns the PTYs — seen from the side a Client pairs with. *Host* stays the implementation word for that side (`lib/src/host/`, webview↔host messages, `pty-host`, VS Code's extension host) and keeps its `Host`-header, hostname, and self-host senses; **never use *Host* for the remote-control role, or *Server* for the Relay.**
 

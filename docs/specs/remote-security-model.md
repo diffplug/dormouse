@@ -55,9 +55,10 @@ session but a [one-time connection](#one-time-connection)'s
 
 **Exactly two endpoints are trusted: the distributed Burrow binaries and the exact
 served Pocket artifact** — an operator serving modified Pocket code is outside
-the model, as is XSS in the Pocket origin. **The Relay is trusted with
-nothing**: it may drop, delay, reorder, or refuse traffic, and must gain no
-plaintext and no authorization by doing so.
+the model, as is XSS in the Pocket origin. A one-time session trusts a third,
+the page Hosted serves ([One-time connection](#one-time-connection)). **The
+Relay is trusted with nothing**: it may drop, delay, reorder, or refuse
+traffic, and must gain no plaintext and no authorization by doing so.
 
 ## Passkeys
 
@@ -331,6 +332,11 @@ runtime that carries these rules out ("Burrow runtime").
   the lifecycle authority, since no Relay carries it. Both ends close the
   rendezvous at the switch and ignore its loss; channel loss or the idle
   deadline ends the session, and nothing resumes.
+- **The page Hosted serves at `/connect/` is a third trusted endpoint for every
+  session confirmed through it**: the channel ends inside that page, so whoever
+  controls Hosted's deploy pipeline or Cloudflare account can serve one that
+  reads or drives the session, which Noise cannot prevent. **The rendezvous is
+  trusted with nothing**, as the Relay is ([Residual metadata](#residual-metadata)).
 
 Source of truth: `OneTimeRuntime` in
 `lib/src/remote/burrow/one-time-runtime.ts`, `OneTimeClient` in
@@ -637,6 +643,9 @@ established above and pinned by
 * Every connection requires fresh user presence, single-use and bound to that
   connection's own transcript.
 * Every access decision is ultimately made by the Burrow.
+* A one-time session is authorized only by typing, on the Burrow, the two
+  digits its phone shows; it writes nothing at either end and runs only on the
+  direct path (pinned by `lib/src/remote/client/one-time-e2e.test.ts`).
 
 **Never claim this model for paid SaaS before an independent cryptographic
 review** of the Noise integration, the WebAuthn channel binding, key storage,
@@ -660,6 +669,11 @@ until then known only to the Relay — and one
 `deliveryId` one Pocket profile registers across Burrows. A push carries no
 counter, so a Relay that kept an envelope can re-deliver it
 ([Push sealing](#push-sealing)).
+
+**Hosted's one-time rendezvous observes each room's timing, both ends' IP
+addresses, the room id, and the size and count of the handshake frames it
+forwards** — never plaintext, and nothing once the session is direct
+([One-time connection](#one-time-connection)).
 
 ## Future
 

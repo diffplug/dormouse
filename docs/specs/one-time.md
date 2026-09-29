@@ -1,13 +1,37 @@
 # One-time connection
 
 > See `docs/specs/glossary.md` for Burrow, Client, Relay, Pane, and Baseboard vocabulary; this spec uses them bare.
-> Owns the one-time connection: the link a Burrow shows, the Hosted rendezvous that carries only its handshake, and the direct-only session that follows. Defers the ceremony's trust rules to `docs/specs/remote-security-model.md` -> "One-time connection" and the audited checks to `docs/specs/security-remote.md` -> "One-time connection".
-> Everything in the one-time connection is built — the shared contract, the Burrow runtime, the service with its host glue, the phone client and page, the Hosted rendezvous, and the laptop UI; `## Future` holds the **one-time-anywhere** scope.
+> Owns the one-time connection: the link a Burrow shows, the Hosted rendezvous that carries only its handshake, and the direct-only session that follows. Defers the ceremony's trust rules to `docs/specs/remote-security-model.md` -> "One-time connection" and the audited checks to `docs/specs/security-remote.md` -> "One-time connection" and `docs/specs/security-hosted.md` -> "Rendezvous boundary".
 
 A phone reaches a laptop with no account, no Relay, and no passkey: the laptop
 shows a link, the phone opens it, a person types on the laptop the two digits the
 phone shows, and the session runs over a direct WebRTC path on the same network.
 Hosted's rendezvous carries the handshake and nothing after it.
+
+## Flow
+
+1. The laptop's **One-time connection** button runs `oneTimeOpen`
+   ([Service and hosts](#service-and-hosts)).
+2. `OneTimeRuntime` mints a one-use X25519 keypair and opens the Burrow route;
+   the room sends `OneTimeRoomFrame`, and the socket idles, hibernated, until a
+   phone joins ([Hosted rendezvous](#hosted-rendezvous)).
+3. The laptop shows the [link](#link) as a QR code and as copyable text
+   ([Laptop UI](#laptop-ui)).
+4. The phone page takes and erases the fragment, then waits for the Connect
+   tap ([Phone page](#phone-page)).
+5. The tap runs `connectOnce` ([Phone client](#phone-client)), and its first
+   message 1 reserves the link ([Burrow runtime](#burrow-runtime)).
+6. The page shows the two digits; the laptop's approval modal takes the one
+   attempt.
+7. A match promotes the session, and the page shows "Connecting directly…"
+   until both directions have switched to the direct path.
+8. Both ends leave the room, which deletes itself; the direct channel carries
+   the session from then on and decides when it ends.
+
+Source of truth: `OneTimeRuntime` in
+`lib/src/remote/burrow/one-time-runtime.ts`; `OneTimeClient` in
+`lib/src/remote/client/one-time-client.ts`. Pinned end to end by
+`lib/src/remote/client/one-time-e2e.test.ts`.
 
 ## Link
 
@@ -38,6 +62,9 @@ reaches a server.
 - **The prologue binds every link field under its own kind**: `lengthPrefixedConcat`
   of `dormouse/e2e/v1`, `one-time`, `roomId`, then `v`, `expiry`, `ephPub` in link
   order, from one builder both ends call.
+
+Which desktop release may carry a link version: `docs/specs/deploy.md` ->
+"Release checklist".
 
 Source of truth: `formatOneTimeLinkUrl` / `parseOneTimeLinkUrl` /
 `oneTimeLinkExpired` / `oneTimeLinkPrologue` in
@@ -443,9 +470,6 @@ right cluster (`docs/specs/layout.md` -> "Baseboard").
   is dropped. The indicator holds it for the window's life, so the panel
   re-reads on mount.
 
-**Never ship a desktop release with this button before Hosted production
-serves this link version** — its rendezvous routes and its `/connect/` page.
-
 Source of truth: `OneTimeConnection` and `ONE_TIME_ENDED_COPY` in
 `lib/src/components/OneTimeConnection.tsx`; `OneTimeIndicator` in
 `lib/src/components/OneTimeIndicator.tsx`; `subscribeToOneTime` and
@@ -461,27 +485,3 @@ TURN servers for those users alone (the Relay-supplied ICE servers of
 `docs/specs/remote-api.md` -> "8. Direct path"), a budgeted relayed fallback
 when no direct path forms, and a per-IP cap on concurrent rooms beside the mint
 limit.
-
-### Flow
-
-1. The laptop's **One-time connection** button runs `oneTimeOpen`.
-2. `OneTimeRuntime` mints a one-use X25519 keypair and opens the Burrow route;
-   the room sends `OneTimeRoomFrame`, and the socket idles, hibernated, until a
-   phone joins.
-3. The laptop shows the link as a QR code and as copyable text.
-4. The phone page takes and erases the fragment and **opens no socket until the
-   person taps Connect**, so a link-preview crawler cannot spend the one join.
-5. The tap runs `connectOnce` ([Phone client](#phone-client)), and its first
-   message 1 reserves the link ([Burrow runtime](#burrow-runtime)).
-6. The page shows the two digits; the laptop's approval modal takes the one
-   attempt.
-7. A match promotes the session; the page shows "Connecting directly…" until
-   the switch.
-8. After the switch both ends have left the room, and it deletes itself.
-
-
-### Security model remainder
-
-Promoted into `docs/specs/remote-security-model.md` and the security specs as
-the phone page and the rendezvous land: the Hosted page as a third trusted
-endpoint, and what the rendezvous learns.

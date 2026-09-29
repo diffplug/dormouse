@@ -1,8 +1,8 @@
 # Dormouse Hosted
 
 Account frontend and Hono/Cloudflare Worker for `https://hosted.dormouse.sh`,
-which also serves the one-time connection's rendezvous
-([its spec](../docs/specs/one-time.md)). The marketing website is a separate
+which also serves the one-time connection's rendezvous and its `/connect/`
+phone page ([its spec](../docs/specs/one-time.md)). The marketing website is a separate
 application. Hosted voice and the managed Relay are not implemented. See
 [the spec](../docs/specs/hosted.md).
 
@@ -37,6 +37,19 @@ Tests run the production composition in real workerd with disposable Postgres
 clones and a local OAuth simulator. `pnpm --filter dormouse-hosted test:one-time`
 runs the rendezvous suite alone, without Docker. The build includes a Wrangler
 dry-run; it does not deploy.
+
+The one-time rendezvous and `/connect/` page run on their own, without Docker
+or Postgres:
+
+```sh
+dor tool one-time      # outside Dormouse: pnpm dev:one-time
+```
+
+It serves `http://localhost:8787` (or `PORT`) and prints the
+`DORMOUSE_ONE_TIME_ORIGIN` and `DORMOUSE_REMOTE_CONNECT_SRC` values that point a
+local Burrow build at it; `docs/specs/one-time.md` -> "Dev loop" owns what it
+runs. A phone cannot reach a loopback origin, so a real phone tests against a
+PR preview.
 
 ## Update pgstencil
 
@@ -301,9 +314,18 @@ credential pair do and do not enable. Facebook is outside this milestone.
 6. Confirm `/api/dev/emails`, `/dev/emails`, and `/__test/time` are absent, and
    check the live responses against the origin, caching, and cookie rules in
    `docs/specs/security-hosted.md` -> "Origin boundary".
-7. Confirm the release smoke's one-time half passed: it mints a room, is
-   refused with a browser `Origin`, joins from the app origin, crosses a frame
-   each way, and is refused a second phone.
+7. Confirm the release smoke's one-time half passed: `/connect/` answers the
+   page under its own policy with its script beside it, and the rendezvous
+   mints a room, is refused with a browser `Origin`, joins from the app origin,
+   crosses a frame each way, and is refused a second phone. Load `/connect/`
+   in a browser and confirm no injected script or third-party request.
+8. With a desktop build pointed at this origin, open a one-time link on a real
+   iPhone in Safari and a real Android phone in Chrome, each on the same Wi-Fi
+   as the laptop and each by scanning the QR code with the native camera, which
+   must keep the fragment. Connect, type the digits, run a command, and End
+   from the laptop. Then turn the phone's Wi-Fi off mid-session: both ends
+   report the end. On a guest or client-isolated network the attempt ends on
+   the same-Wi-Fi copy.
 
 Do not mark all five login methods complete until email and all four providers
 pass in real browsers; a simulated callback certifies nothing. No real-provider

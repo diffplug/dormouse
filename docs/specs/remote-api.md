@@ -25,7 +25,7 @@ One protocol, two consumption depths: the **phone** (Dormouse Pocket) shipped, a
 * `directory.watch`, snapshot-only (no deltas, no thumbnails), terminal entries only
 * `surface.attach` / `surface.detach`, one attachment per session
 * Terminal: attach-is-the-resize, live data, `terminal.write` / `terminal.resize`, last-attach-wins size authority
-* One implicit grant: every paired session has full input (selfhost is single-user), no layout operations
+* One implicit grant: every authorized session — paired or one-time — has full input (selfhost is single-user), no layout operations
 
 Everything else, browser-surface remoting included, is staged in [Future](#future).
 
@@ -285,7 +285,7 @@ A terminal has one size, and **the most recent size writer owns it**: attaching 
 
 ## Input authority and multiple viewers
 
-**Input authority is flat**: selfhost is single-user, so every paired session is the owner and gets full input (`grants: { input: true, layout: false }`), and no session gets layout operations.
+**Input authority is flat**: selfhost is single-user, so every authorized session, a one-time one included, is the owner and gets full input (`grants: { input: true, layout: false }`), and no session gets layout operations.
 
 Concurrency then needs no arbitration: attach state is per-session and streams fan out per attachment, one PTY subscription and one sink each (rationale). The window lease ([Future](#future)) is the only exclusive resource.
 
