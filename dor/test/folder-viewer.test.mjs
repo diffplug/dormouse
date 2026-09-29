@@ -8,8 +8,10 @@ import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { runInNewContext } from 'node:vm';
 import { afterEach, beforeEach, test } from 'node:test';
 import { startFolderViewer } from '../dist/folder-viewer.js';
+import { folderViewerPage } from '../dist/folder-viewer-page.js';
 
 const require = createRequire(import.meta.url);
 const { createDorControlServer } = require('../../standalone/sidecar/dor-control-server.js');
@@ -257,6 +259,67 @@ test('no route returns file contents', async () => {
   for (const action of ['select', 'activate']) assert.ok(!(await post(viewer, action, { path: 'secret.txt' })).body.includes('TOPSECRET'));
 });
 
+/** Runs the page's script against a stub DOM whose root lists the files
+ * `names`. Each POST it sends waits in `posts` until the test settles it. */
+async function runPage(names) {
+  class Element {
+    constructor() { this.style = {}; this.classList = { toggle() {} }; this.handlers = {}; }
+    setAttribute() {}
+    removeAttribute() {}
+    appendChild(child) { return child; }
+    addEventListener(type, handler) { this.handlers[type] = handler; }
+    scrollIntoView() {}
+    closest() { return this; }
+  }
+  const elements = { tree: new Element(), show: new Element(), status: new Element(), refresh: new Element() };
+  elements.show.checked = true;
+  const items = [];
+  const document = {
+    getElementById: id => elements[id],
+    createElement: tag => { const element = new Element(); if (tag === 'li') items.push(element); return element; },
+  };
+  const answer = body => ({ ok: true, text: async () => JSON.stringify(body) });
+  const posts = [];
+  const fetch = (url, init) => init
+    ? new Promise((resolve, reject) => posts.push({ sent: `${url} ${JSON.parse(init.body).path}`, ok: () => resolve(answer({ ok: true, status: 'created' })), fail: () => reject(new Error('lost')) }))
+    : Promise.resolve(answer({ entries: names.map(name => entry(name, 'file')), truncated: false }));
+  runInNewContext(/<script>([\s\S]*)<\/script>/.exec(folderViewerPage(root))[1], { document, fetch, setTimeout, clearTimeout });
+  await settle();
+  const tree = elements.tree.handlers;
+  return {
+    posts, sent: () => posts.map(post => post.sent),
+    click: (name, detail = 1) => tree.click({ target: items[names.indexOf(name)], detail }),
+    dblclick: name => tree.dblclick({ target: items[names.indexOf(name)] }),
+    key: key => tree.keydown({ key, preventDefault() {} }),
+  };
+}
+const settle = () => new Promise(resolve => setImmediate(resolve));
+
+test('the page sends an activate only once every select in flight has settled', async () => {
+  const page = await runPage(['a.txt', 'b.txt']);
+  page.click('a.txt');
+  page.click('b.txt'); page.click('b.txt', 2); page.dblclick('b.txt');
+  await settle();
+  assert.deepEqual(page.sent(), ['select a.txt', 'select b.txt']); // selects stay concurrent
+  page.posts[1].fail();
+  await settle();
+  assert.deepEqual(page.sent(), ['select a.txt', 'select b.txt']);
+  page.posts[0].ok();
+  await settle();
+  assert.deepEqual(page.sent(), ['select a.txt', 'select b.txt', 'activate b.txt']);
+});
+
+test('the page\'s Enter waits for a select in flight as a double-click does', async () => {
+  const page = await runPage(['a.txt']);
+  page.click('a.txt');
+  page.key('Enter');
+  await settle();
+  assert.deepEqual(page.sent(), ['select a.txt']);
+  page.posts[0].ok();
+  await settle();
+  assert.deepEqual(page.sent(), ['select a.txt', 'activate a.txt']);
+});
+
 async function spawnViewer(env) {
   const child = spawn(process.execPath, [fileURLToPath(new URL('../dist/dor.js', import.meta.url)), '__view-folder', root], { stdio: ['ignore', 'pipe', 'pipe'], env });
   let output = '';
@@ -269,7 +332,7 @@ async function spawnViewer(env) {
       if (match) resolve(JSON.parse(match[1]));
     });
   });
-  return { child, viewer: announce };
+  return { child, viewer: announce, output };
 }
 function withoutControl() {
   const env = { ...process.env };
@@ -277,10 +340,11 @@ function withoutControl() {
   return env;
 }
 
-test('the bundled private entry announces its port and path, then exits on termination', { timeout: 10_000 }, async () => {
+test('the bundled private entry titles itself, announces its port and path, then exits on termination', { timeout: 10_000 }, async () => {
   await files({ 'a.txt': 'a' });
-  const { child, viewer } = await spawnViewer(withoutControl());
+  const { child, viewer, output } = await spawnViewer(withoutControl());
   try {
+    assert.ok(output.startsWith('\x1b]2;root\x07\x1b]367;serve;'), JSON.stringify(output));
     assert.equal(viewer.v, 1);
     assert.deepEqual((await list(viewer)).entries, [entry('a.txt', 'file')]);
     assert.deepEqual(JSON.parse((await post(viewer, 'select', { path: 'a.txt' })).body), { ok: false, error: 'Dormouse control endpoint is not available in this terminal yet.' });

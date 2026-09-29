@@ -107,14 +107,17 @@ function openPopup() {
 }
 
 describe('SurfacePaneHeader — preview slot', () => {
-  it('italicizes a serving slot\'s address and offers a Keep open pill until the minimal tier', () => {
+  it('italicizes a serving slot\'s name and address and offers a Keep open pill until the minimal tier', () => {
     const id = 'preview-tool-header';
     const registration = register(id);
+    // A serving Tool's name is the dev-server chip for its own port.
+    setDevServerResolution(5173, { paneId: id, label: 'README.md' });
     try {
       const onPinPreview = vi.fn();
       renderHeader({ ...headerProps(id, 'viewer'), params: { surfaceType: 'tool', toolPreview: true, url: CHROME.url } }, stubActions({ onPinPreview }), { tool: true });
       const address = container.querySelector<HTMLElement>('[role="button"].italic');
       expect(address?.title).toMatch(/^Preview — /);
+      expect(container.querySelector('button[aria-label^="Focus README.md"] .italic')?.textContent).toBe('README.md');
       const pill = () => container.querySelector<HTMLButtonElement>(`[data-preview-pill-for="${id}"]`);
       expect(pill()?.title).toBe('Keep open');
       act(() => pill()!.click());
@@ -124,6 +127,7 @@ describe('SurfacePaneHeader — preview slot', () => {
       expect(container.querySelector('[role="button"].italic')).not.toBeNull();
     } finally {
       registration.dispose();
+      setDevServerResolution(5173, null);
     }
   });
 
@@ -137,12 +141,15 @@ describe('SurfacePaneHeader — preview slot', () => {
   it('marks nothing on a pinned Tool', () => {
     const id = 'pinned-tool-header';
     const registration = register(id);
+    setDevServerResolution(5173, { paneId: id, label: 'README.md' });
     try {
       renderHeader({ ...headerProps(id, 'viewer'), params: { surfaceType: 'tool', url: CHROME.url } }, stubActions(), { tool: true });
       expect(container.querySelector(`[data-preview-pill-for="${id}"]`)).toBeNull();
+      expect(container.querySelector('button[aria-label^="Focus README.md"]')).not.toBeNull();
       expect(container.querySelector('.italic')).toBeNull();
     } finally {
       registration.dispose();
+      setDevServerResolution(5173, null);
     }
   });
 });

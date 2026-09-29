@@ -48,7 +48,7 @@ Panes are separated by a 7px gap (`PANE_GUTTER_PX`), odd so the 1px selection ri
 
 **Must keep a Tool's unsaved-change dot visible in its Pane header and minimized Door**, across header widths and terminal/browser faces. Use inherited foreground, without animation; label and tooltip it “Unsaved changes”. Never hide it inside browser overflow controls or replace Kill. State semantics belong to `docs/specs/dor-tool.md` → Unsaved changes.
 
-**Must mark the Workspace's preview slot with an italic derived label in its Pane header and Door**, naming it Preview in the label's tooltip and the Door's accessible name, **and a Preview pill whose click pins the slot** ("Keep open"). Slot semantics belong to `docs/specs/dor-tool.md` → Preview slot.
+**Must mark the Workspace's preview slot with an italic derived label in its Pane header and Door** (a serving Tool's dev-server chip label and address), naming it Preview in the label's tooltip and the Door's accessible name, **and a Preview pill whose click pins the slot** ("Keep open"). Slot semantics belong to `docs/specs/dor-tool.md` → Preview slot.
 
 A 30px header doubling as a drag handle: **a `pointerdown` past a 5px threshold begins a Lath pane drag**; below the threshold the header's own click behavior stands. It uses `cursor-grab` / `active:cursor-grabbing`, `select-none`, the shared terminal top radius from `lib/src/components/design.tsx`, and the `--color-header-active-*` / `--color-header-inactive-*` token pairs (VSCode file-tree list colors).
 

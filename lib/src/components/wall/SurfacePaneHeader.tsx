@@ -220,7 +220,7 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
                     title={`localhost served by ${devServer.label}${port != null ? ` (:${port})` : ''} — click to focus`}
                     className="flex h-5 min-w-0 items-center gap-1 rounded px-1.5 text-xs transition-colors hover:bg-current/10"
                   >
-                    <span className="min-w-0 truncate">{devServer.label}</span>
+                    <span className={clsx('min-w-0 truncate', preview && PREVIEW_LABEL_CLASS)}>{devServer.label}</span>
                     {port != null && <span className="min-w-0 truncate text-current/70">:{port}</span>}
                   </button>
                 )}

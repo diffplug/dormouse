@@ -225,7 +225,7 @@ export async function runCli(rawArgv: string[], options: CliOptions = {}): Promi
   }
   // `dor __view-file <file>` is the built-in viewer's private entry
   // (docs/specs/dor-tool.md -> Opening local files). Its server outlives this
-  // call; the announcement is the only output.
+  // call; its title and announcement are the only output.
   if (argv[0] === VIEW_FILE_ARGV && argv.length === 2) {
     return { stdout: await runFileViewer(argv[1]), stderr: '', exitCode: 0 };
   }

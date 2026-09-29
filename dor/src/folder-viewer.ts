@@ -128,7 +128,7 @@ export async function startFolderViewer(input: string, { open }: { open: FolderO
 }
 
 /** The `dor __view-folder <dir>` entry: starts the viewer, which outlives the
- * call, and returns the OSC 367 announcement for the caller to print. Select
+ * call, and returns its title and OSC 367 announcement for the caller to print. Select
  * and activate run `dor open` through the control client, or report why none is available. */
 export async function runFolderViewer(dir: string, client: ControlClient | Error): Promise<string> {
   const viewer = await startFolderViewer(dir, {
@@ -143,5 +143,5 @@ export async function runFolderViewer(dir: string, client: ControlClient | Error
       }
     },
   });
-  return announceViewer(viewer);
+  return announceViewer(viewer, viewer.root);
 }

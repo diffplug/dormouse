@@ -52,7 +52,7 @@ function references(text: string, html: boolean): string[] {
 
 /** One Tool process owns one file grant and its file descriptors. Restarting
  * creates a fresh capability; only the file argument is persisted by Dormouse. */
-export async function startFileViewer(input: string): Promise<{ port: number; path: string; close(): Promise<void> }> {
+export async function startFileViewer(input: string): Promise<{ port: number; path: string; target: string; close(): Promise<void> }> {
   // Loaded on demand: this module is bundled into every `dor` invocation, and this
   // builtin and `node:http` (see `startCapabilityViewer`) cost more to load than everything else the CLI touches.
   const { open, realpath } = await import('node:fs/promises');
@@ -152,12 +152,13 @@ export async function startFileViewer(input: string): Promise<{ port: number; pa
         res.end();
       },
     });
-    return { port: viewer.port, path: `${viewer.prefix}${format.text ? 'view' : `file/${encodeURIComponent(basename(target))}`}`, close: viewer.close };
+    return { port: viewer.port, path: `${viewer.prefix}${format.text ? 'view' : `file/${encodeURIComponent(basename(target))}`}`, target, close: viewer.close };
   } catch (error) { await closeFiles(); throw error; }
 }
 
 /** The `dor __view-file <file>` entry: starts the viewer, which outlives the
- * call, and returns the OSC 367 announcement for the caller to print. */
+ * call, and returns its title and OSC 367 announcement for the caller to print. */
 export async function runFileViewer(file: string): Promise<string> {
-  return announceViewer(await startFileViewer(file));
+  const viewer = await startFileViewer(file);
+  return announceViewer(viewer, viewer.target);
 }

@@ -38,6 +38,7 @@ const SCRIPT = `(function () {
   var nextId = 0;
   var previewTimer = 0;
   var sequence = 0;
+  var selectsSettled = Promise.resolve(); // once every select sent so far has settled; never rejects
 
   function fail(error) { status.textContent = error && error.message ? error.message : String(error); }
   function indent(level) { return (4 + (level - 1) * 12) + 'px'; }
@@ -162,11 +163,24 @@ const SCRIPT = `(function () {
   }
 
   // The latest request alone owns the status line; a superseded preview is not an error.
+  // Each POST is its own control connection, so an activate waits for every
+  // select in flight: sent at once, it could overtake a double-click's select and
+  // open beside the slot instead of pinning it. Selects stay concurrent, so the
+  // newest supersedes.
   function send(action, node) {
     var mine = ++sequence;
-    request(action, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: node.path }) })
-      .catch(function (error) { return { ok: false, error: error.message }; })
-      .then(function (result) { if (mine === sequence) status.textContent = result.ok ? '' : result.error; });
+    function post() {
+      return request(action, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: node.path }) })
+        .catch(function (error) { return { ok: false, error: error.message }; });
+    }
+    var sent;
+    if (action === 'select') {
+      sent = post();
+      selectsSettled = selectsSettled.then(function () { return sent; });
+    } else {
+      sent = selectsSettled.then(post);
+    }
+    sent.then(function (result) { if (mine === sequence) status.textContent = result.ok ? '' : result.error; });
   }
 
   // preview: 'now' (a click), 'settle' (arrowing), or false.

@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, test } from 'node:test';
 import { startFileViewer } from '../dist/file-viewer.js';
 import { fileViewerFormat } from '../dist/file-viewer-format.js';
+import { viewerTitle } from '../dist/viewer-server.js';
 
 let root;
 const viewers = [];
@@ -168,7 +169,15 @@ test('bounds the asset graph and keeps a grant on the opened file after path rep
   await assert.rejects(startFileViewer(html), /256 referenced files/);
 });
 
-test('the bundled private entry announces its port and path, then exits on termination', { timeout: 10_000 }, async () => {
+test('titles a viewer with its target\'s basename, controls stripped and bounded', () => {
+  assert.equal(viewerTitle(join(root, 'README.md')), 'README.md');
+  assert.equal(viewerTitle(process.platform === 'win32' ? 'C:\\' : '/'), process.platform === 'win32' ? 'C:\\' : '/');
+  // C0 (BEL, ESC), DEL, and C1 (NEL, CSI, ST) could end or open a sequence.
+  assert.equal(viewerTitle(join(root, 'a\x07\x1b]2;x\x7f\u0085\u009b\u009cb.txt')), 'a]2;xb.txt');
+  assert.equal(viewerTitle(join(root, `${'😀'.repeat(300)}.txt`)), '😀'.repeat(256));
+});
+
+test('the bundled private entry titles itself, announces its port and path, then exits on termination', { timeout: 10_000 }, async () => {
   const file = join(root, 'cli.txt');
   await writeFile(file, 'cli preview');
   const child = spawn(process.execPath, [fileURLToPath(new URL('../dist/dor.js', import.meta.url)), '__view-file', file], { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -183,6 +192,7 @@ test('the bundled private entry announces its port and path, then exits on termi
         if (match) resolve(JSON.parse(match[1]));
       });
     });
+    assert.ok(output.startsWith('\x1b]2;cli.txt\x07\x1b]367;serve;'), JSON.stringify(output));
     assert.equal((await get(announce)).status, 200);
     const exited = once(child, 'exit');
     child.kill('SIGTERM');
