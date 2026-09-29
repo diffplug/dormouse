@@ -1,31 +1,110 @@
-import { useContext } from 'react';
-import { TerminalIcon } from '@phosphor-icons/react';
-import { chromeButton } from '../design';
-import { SurfacePaneHeader } from './SurfacePaneHeader';
-import { TerminalPaneHeader } from './TerminalPaneHeader';
-import { shownToolFace, usePreviewSlotView } from './preview-transition';
-import { TerminalContextContext } from './wall-context';
+import { useContext, useRef, useSyncExternalStore } from 'react';
+import { clsx } from 'clsx';
+import { ToolDirtyIndicator, useToolDirty } from '../ToolDirtyIndicator';
+import { paneHeader, PREVIEW_LABEL_CLASS } from '../design';
+import { getTerminalPaneStateSnapshot, subscribeToTerminalPaneState } from '../../lib/terminal-registry';
+import { useAgentBrowserDisplayMode, useAgentBrowserScreenController } from './agent-browser-screen';
+import { BROWSER_DISPLAY_SLOT_PX, BrowserDisplayButton } from './BrowserDisplayIcon';
+import { isPreviewSlotParams } from './browser-surface';
+import { HEADER_CONTROL_SLOT_PX, PaneActionGroup, SplitButtons, TerminalContextButton } from './PaneActionButtons';
+import { usePreviewKeep } from './preview-keep';
+import { shownToolFace, useHeldWhile, usePreviewSlotView } from './preview-transition';
+import { TerminalPaneHeader, terminalHeaderTier } from './TerminalPaneHeader';
+import { toolSemanticName } from './tool-name';
+import { useHeaderTier } from './use-header-tier';
+import { usePaneRename } from './use-pane-rename';
+import {
+  ModeContext,
+  SelectedIdContext,
+  TerminalContextContext,
+  WallActionsContext,
+  WindowFocusedContext,
+  ZoomedIdContext,
+} from './wall-context';
 import type { PaneProps } from './pane-props';
 
 export function ToolPaneHeader(props: PaneProps) {
-  const context = useContext(TerminalContextContext);
   // A preview slot switch keeps the face it holds (`docs/specs/layout.md` ->
   // Pane header), so the header neither flips nor remounts.
-  const face = shownToolFace(props.params, usePreviewSlotView(props.id).transition);
-  if (face === 'terminal' || face === 'pending-approval') return <TerminalPaneHeader {...props} />;
+  const { transition } = usePreviewSlotView(props.id);
+  const face = shownToolFace(props.params, transition);
+  if (face === 'browser') return <ToolBrowserHeader {...props} switching={transition !== null} />;
+  // The terminal face shows the terminal Terminal Context would, and pending
+  // approval has none yet.
+  return <TerminalPaneHeader {...props} terminalContext={face === 'port-conflict'} />;
+}
+
+type ToolHeaderTier = 'full' | 'compact' | 'minimal' | 'tiny';
+/** The terminal header's boundaries, each with the leading controls it keeps
+ *  reserved: splits and Display need both, minimize and kill Terminal Context
+ *  alone (`docs/specs/layout.rationale.md`). */
+const toolHeaderTier = (width: number): ToolHeaderTier => {
+  const withDisplay = terminalHeaderTier(width - HEADER_CONTROL_SLOT_PX - BROWSER_DISPLAY_SLOT_PX);
+  if (withDisplay === 'full') return 'full';
+  if (withDisplay !== 'tiny') return 'compact';
+  return terminalHeaderTier(width - HEADER_CONTROL_SLOT_PX) === 'tiny' ? 'tiny' : 'minimal';
+};
+
+/** A serving Tool's header: its semantic name, never a browser's navigation
+ *  or address (`docs/specs/layout.md` -> Pane header). */
+function ToolBrowserHeader({ id, title, params, switching }: PaneProps & { switching: boolean }) {
+  const dirty = useToolDirty(id, params);
+  const preview = isPreviewSlotParams(params);
+  const mode = useContext(ModeContext);
+  const selectedId = useContext(SelectedIdContext);
+  const windowFocused = useContext(WindowFocusedContext);
+  const zoomed = useContext(ZoomedIdContext) === id;
+  const actions = useContext(WallActionsContext);
+  const context = useContext(TerminalContextContext);
+  const isActiveHeader = mode === 'passthrough' && selectedId === id && windowFocused;
+  const userTitle = useSyncExternalStore(subscribeToTerminalPaneState, () => getTerminalPaneStateSnapshot().get(id)?.titleCandidates.user?.title ?? null);
+  const name = toolSemanticName(params, userTitle) ?? title ?? id;
+  const screen = useAgentBrowserScreenController(id);
+  // A switch retires the browser the ghost shows, so the glyph holds too.
+  const displayMode = useHeldWhile(useAgentBrowserDisplayMode(screen), switching);
+  const headerRef = useRef<HTMLDivElement>(null);
+  const tier = useHeaderTier(headerRef, toolHeaderTier);
+  const rename = usePaneRename(id);
+  const keep = usePreviewKeep(id, preview);
+
   return (
-    <div className="flex h-full min-w-0 flex-1 items-center" onContextMenu={event => {
-      event.preventDefault(); event.stopPropagation();
-      context.open(props.id, { origin: { x: event.clientX, y: event.clientY } });
-    }}>
-      <button type="button" className={`${chromeButton()} ml-1 shrink-0`}
-        title="Terminal context" aria-label="Terminal context" aria-expanded={context.id === props.id}
-        onClick={event => {
-          event.stopPropagation();
-          if (context.id === props.id) context.close();
-          else { const rect = event.currentTarget.getBoundingClientRect(); context.open(props.id, { origin: { x: rect.left, y: rect.bottom } }); }
-        }}><TerminalIcon size={14} /></button>
-      {face === 'browser' ? <SurfacePaneHeader {...props} /> : <TerminalPaneHeader {...props} />}
+    <div
+      ref={headerRef}
+      data-pane-header-for={id}
+      className={paneHeader({ state: isActiveHeader ? 'active' : 'inactive' })}
+      onMouseDown={() => actions.onClickPanel(id)}
+      {...keep}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        context.open(id, { origin: { x: e.clientX, y: e.clientY } });
+      }}
+    >
+      {(tier === 'full' || tier === 'compact') && (
+        <BrowserDisplayButton mode={displayMode} onOpen={screen ? () => screen.actions.openModal() : undefined} />
+      )}
+      <TerminalContextButton surfaceId={id} />
+      <div className="flex min-w-0 flex-1 items-center overflow-hidden">
+        {rename.renaming ? rename.editor(name) : (
+          // As on the terminal face, a preview's name is drag area, not a rename.
+          <span
+            data-pane-title-for={id}
+            className={clsx('min-w-0 truncate font-medium', preview ? PREVIEW_LABEL_CLASS : 'cursor-text decoration-current/50 underline-offset-2 hover:underline')}
+            onMouseDown={preview ? undefined : (e) => e.stopPropagation()}
+            onClick={preview ? undefined : (e) => { e.stopPropagation(); actions.onStartRename(id); }}
+            title={preview ? 'Preview' : undefined}
+          >{name}</span>
+        )}
+      </div>
+      {!rename.renaming && (
+        <>
+          {tier === 'full' && <SplitButtons surfaceId={id} />}
+          <PaneActionGroup dirty={dirty} surfaceId={id} zoomed={zoomed} activeHeader={isActiveHeader} showMinimizeKill={tier !== 'tiny'} />
+        </>
+      )}
+      {/* Where the tier or the rename editor hides Kill, the dot it carries sits at the right edge. */}
+      {(tier === 'tiny' || rename.renaming) && <ToolDirtyIndicator dirty={dirty} />}
+      {rename.warning}
     </div>
   );
 }

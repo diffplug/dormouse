@@ -35,15 +35,12 @@ import {
   type NoiseKeyPair,
   type PresenceBinding,
 } from 'remote-lib-common';
-import {
-  BurrowRuntime,
-  MAX_QUEUED_RELAY_FRAMES,
-  MAX_QUEUED_RELAY_FRAME_CHARS,
-  type RemoteApiSessionLike,
-} from './burrow-runtime';
+import { BurrowRuntime, MAX_QUEUED_RELAY_FRAMES, MAX_QUEUED_RELAY_FRAME_CHARS } from './burrow-runtime';
+import type { RemoteApiSessionLike } from './established-session';
 import type { BurrowEnrollment } from './enrollment';
 import type { PendingPairing } from './pairing-approval';
 import { FakeSocket } from '../test-fake-socket';
+import { createTestClock } from '../test-timers';
 import { FakeDirectNetwork } from '../direct/test-fake-peer';
 import type { DirectPeerFactory } from '../direct/direct-peer';
 import {
@@ -68,54 +65,6 @@ import {
 const ORIGIN = 'https://burrow-machine.example';
 const RP_ID = 'burrow.example';
 const START = 1_700_000_000_000;
-
-/**
- * A clock and its one timer, both injected. `advance` fires every timer that
- * comes due, in order, so the Burrow's reaper runs exactly where it would in
- * real time — and the suite does not spend five minutes proving a TTL.
- */
-function createTestClock(start: number) {
-  let now = start;
-  let nextId = 1;
-  const timers = new Map<number, { at: number; run: () => void }>();
-  return {
-    now: () => now,
-    setTimer(run: () => void, delayMs: number): () => void {
-      const id = nextId++;
-      timers.set(id, { at: now + delayMs, run });
-      return () => timers.delete(id);
-    },
-    /** How many timers are armed — what `stop()` has to leave at zero. */
-    get armed(): number {
-      return timers.size;
-    },
-    /** Move the clock backwards, as an NTP correction or a sleeping laptop does. */
-    rewind(ms: number): void {
-      now -= ms;
-    },
-    advance(ms: number): void {
-      const target = now + ms;
-      // Bounded: a reaper that armed for an instant it does not clear would
-      // otherwise spin here rather than fail.
-      for (let guard = 0; guard < 10_000; guard += 1) {
-        let dueId: number | null = null;
-        let dueAt = Number.POSITIVE_INFINITY;
-        for (const [id, timer] of timers) {
-          if (timer.at <= target && timer.at < dueAt) {
-            dueAt = timer.at;
-            dueId = id;
-          }
-        }
-        if (dueId === null) break;
-        const timer = timers.get(dueId)!;
-        timers.delete(dueId);
-        now = timer.at;
-        timer.run();
-      }
-      now = target;
-    },
-  };
-}
 
 /**
  * Counting wrappers over the WebCrypto the security primitives reach for, plus
@@ -161,8 +110,13 @@ describe('BurrowRuntime bounds', () => {
   let clock: ReturnType<typeof createTestClock>;
   let crypto: ReturnType<typeof countCrypto>;
   let approvals: PendingPairing[] = [];
-  let sessions: Array<{ handled: unknown[]; disposed: boolean; send: (payload: unknown) => void }> =
-    [];
+  let sessions: Array<{
+    handled: unknown[];
+    disposed: boolean;
+    send: (payload: unknown) => void;
+    label: string;
+    end: () => void;
+  }> = [];
   let authenticator: TestAuthenticator;
   /** What the injected remote-api does with a message; the real one may reply. */
   let onHandle: ((data: unknown, send: (payload: unknown) => void) => void) | null = null;
@@ -209,8 +163,8 @@ describe('BurrowRuntime bounds', () => {
       saveAcl: () => {},
       requestApproval: (pending) => approvals.push(pending),
       dismissApproval: () => {},
-      createSession: ({ send }) => {
-        const entry = { handled: [] as unknown[], disposed: false, send };
+      createSession: ({ send, label, end }) => {
+        const entry = { handled: [] as unknown[], disposed: false, send, label, end };
         sessions.push(entry);
         return {
           handle: (data) => {
@@ -625,6 +579,40 @@ describe('BurrowRuntime bounds', () => {
     expect(sessions[2]!.disposed).toBe(false);
   });
 
+  it('tells a replaced session’s Client it is over', async () => {
+    // Another tab of the same Pocket is still listening on its own socket, and
+    // would otherwise wait on requests nothing answers.
+    const first = await establish('c1');
+    await establish('c1-again', first.clientStatic);
+    expect(sessions[0]!.disposed).toBe(true);
+    expect(await readOutcome(socket, first.session, 'connection', first.connectionId, 1)).toEqual({
+      v: 1,
+      t: 'session-end',
+    });
+  });
+
+  it('ends a session on purpose through its context: the goodbye, then the dispose', async () => {
+    const first = await establish('c1');
+    await establish('c2');
+    // The ACL record's label, as the pane that session holds names it.
+    expect(sessions[0]!.label).toBe('iPhone Safari');
+
+    sessions[0]!.end();
+    expect(sessions[0]!.disposed).toBe(true);
+    expect(sessions[1]!.disposed).toBe(false);
+    expect(burrow.establishedSessionCount).toBe(1);
+    expect(await readOutcome(socket, first.session, 'connection', first.connectionId, 1)).toEqual({
+      v: 1,
+      t: 'session-end',
+    });
+
+    // A stale end names a session that is gone, and ends nothing that replaced it.
+    const again = await establish('c1', first.clientStatic);
+    sessions[0]!.end();
+    expect(sessions[2]!.disposed).toBe(false);
+    expect(e2eFramesFor(socket, 'connection', again.connectionId, 'transport')).toHaveLength(1);
+  });
+
   it('holds one session per relay clientId, and the cap displaces nobody', async () => {
     // Two authorized phones. A relay that stamps one phone's frames with the
     // other's `clientId` takes down the session it reused — the entry holds
@@ -807,12 +795,20 @@ describe('BurrowRuntime bounds', () => {
   });
 
   it('reaps sixteen silent sessions on the idle timeout, without a restart', async () => {
-    for (let i = 0; i < MAX_ESTABLISHED_E2E_SESSIONS; i += 1) await establish(`z${i}`);
+    const established = [];
+    for (let i = 0; i < MAX_ESTABLISHED_E2E_SESSIONS; i += 1) established.push(await establish(`z${i}`));
     expect(burrow.establishedSessionCount).toBe(MAX_ESTABLISHED_E2E_SESSIONS);
 
     // No frame arrives, and no socket event: only the reaper's own timer runs.
     clock.advance(ESTABLISHED_E2E_IDLE_TIMEOUT_MS + 1);
     expect(burrow.establishedSessionCount).toBe(0);
+    // Each is told, in case it was only quiet.
+    for (const { session, connectionId } of established) {
+      expect(await readOutcome(socket, session, 'connection', connectionId, 1)).toEqual({
+        v: 1,
+        t: 'session-end',
+      });
+    }
     expect(burrow.trackedClientCount).toBe(0);
     expect(sessions.every((s) => s.disposed)).toBe(true);
     // And the Burrow is still the same one: nothing restarted it.
@@ -904,7 +900,7 @@ describe('BurrowRuntime bounds', () => {
     const first = await establish('c1');
 
     // Refused before the first `encryptWithAd`, so only a poisoned session is
-    // burrow loss (`BurrowRuntime.#sendApp`).
+    // burrow loss (`EstablishedE2eSession.#sendApp`).
     sessions[0]!.send({ oversize: 'x'.repeat(2 * 1024 * 1024) });
     await settle();
     expect(sessions[0]!.disposed).toBe(false);

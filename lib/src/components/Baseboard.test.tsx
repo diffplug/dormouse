@@ -29,6 +29,7 @@ import { resetShellStore, seedShellStore } from '../lib/shell-store';
 import { resetPushDevices, setPushDevices, setPushDevicesRefresher } from '../lib/push-devices';
 import { clearTerminalActivity, setTerminalActivity } from '../lib/session-activity-store';
 import { createAlertEpisode } from '../lib/alert-episode';
+import { makeStubBurrowLink } from '../host/remote/test-burrow-link';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -380,6 +381,33 @@ describe('Baseboard settings controls', () => {
 
     expect(getActiveThemeId()).toBe(KIMBIE_DARK);
     expect(document.querySelector('[aria-label="Theme: Kimbie Dark"]')).not.toBeNull();
+  });
+});
+
+describe('Baseboard one-time connection', () => {
+  it('shows a connected phone in the measured right cluster, after the notice', async () => {
+    const platform = await import('../lib/platform');
+    vi.spyOn(platform, 'getPlatform').mockReturnValue({
+      alertPublishSettings: vi.fn(),
+      burrow: makeStubBurrowLink({ oneTime: { status: 'connected', label: 'Pixel 9', since: 1 } }),
+    } as unknown as ReturnType<typeof platform.getPlatform>);
+
+    await act(async () => root.render(
+      <Baseboard items={[]} onReattach={() => {}} notice={<span data-notice>update</span>} />,
+    ));
+
+    const end = container.querySelector('button[aria-label="End the one-time connection"]');
+    expect(end).not.toBeNull();
+    // Inside the cluster the Door fit subtracts, between the host's notice and
+    // the Settings buttons (docs/specs/layout.md -> Baseboard).
+    const notice = container.querySelector('[data-notice]')!;
+    const cluster = notice.parentElement!;
+    expect(cluster.contains(end)).toBe(true);
+    expect(notice.compareDocumentPosition(end!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      end!.compareDocumentPosition(container.querySelector('[data-alarm-setting="speech"]')!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 });
 

@@ -281,6 +281,15 @@ export function useAgentBrowserScreenSnapshot(controller: ScreenController | nul
   );
 }
 
+/** A controller's display identity alone, or null: re-renders only when it
+ *  changes, never for the pane size every resize frame republishes. */
+export function useAgentBrowserDisplayMode(controller: ScreenController | null): BrowserDisplayMode | null {
+  return useSyncExternalStore(
+    controller ? controller.subscribe : NO_SUBSCRIBE,
+    () => { const snapshot = controller?.snapshot(); return snapshot ? browserDisplayMode(snapshot) : null; },
+  );
+}
+
 /** A controller's live browser-chrome snapshot (URL / key), or
  *  null for a non-browser surface. Re-renders only on tab/status changes. */
 export function useAgentBrowserChromeSnapshot(controller: ScreenController | null): ChromeSnapshot | null {

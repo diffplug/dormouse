@@ -6,12 +6,19 @@
  */
 export interface RemoteWebSocket {
   send(data: string): void;
-  close(): void;
+  /** `code` where the caller names one; a real socket defaults to a status-less close. */
+  close(code?: number): void;
   addEventListener(
     type: 'open' | 'message' | 'close' | 'error',
     handler: (ev: unknown) => void,
   ): void;
   readyState: number;
+}
+
+/** The `code` of a `CloseEvent`, or undefined if the socket gave us none. */
+export function closeCode(ev: unknown): number | undefined {
+  const code = (ev as { code?: unknown } | null)?.code;
+  return typeof code === 'number' ? code : undefined;
 }
 
 /**

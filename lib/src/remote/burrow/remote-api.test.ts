@@ -18,7 +18,12 @@ import {
   type RemoteEventMsg,
   type RemoteResponse,
 } from 'remote-lib-common';
-import type { BurrowSurfaceProvider, PtySink, SurfaceHandle } from './burrow-surface-provider';
+import type {
+  BurrowSurfaceProvider,
+  PtySink,
+  SurfaceHandle,
+  SurfaceHold,
+} from './burrow-surface-provider';
 import { RemoteApiSession } from './remote-api';
 
 type SentPayload = RemoteResponse | RemoteEventMsg;
@@ -47,6 +52,12 @@ class FakeProvider implements BurrowSurfaceProvider {
   readonly streamed: string[] = [];
   readonly unstreamed: string[] = [];
   readonly resolved: string[] = [];
+  /** The hold each resolve took, in order — what the owner would record on its pane. */
+  readonly holds: Array<[string, SurfaceHold]> = [];
+  /** Every `handle.release`, as the surface and the hold it gives back. */
+  readonly releases: Array<[string, SurfaceHold]> = [];
+  /** Every `releaseSurface` — a hold given back with no handle to carry it. */
+  readonly unresolvedReleases: Array<[string, SurfaceHold]> = [];
 
   entries: DirectoryEntry[] = [];
   collects = 0;
@@ -86,12 +97,21 @@ class FakeProvider implements BurrowSurfaceProvider {
     };
   };
 
-  resolveSurface = async (surfaceId: string): Promise<SurfaceHandle | null> => {
+  resolveSurface = async (
+    surfaceId: string,
+    _size: { cols?: number; rows?: number },
+    hold: SurfaceHold,
+  ): Promise<SurfaceHandle | null> => {
     this.resolved.push(surfaceId);
+    this.holds.push([surfaceId, hold]);
     const surface = this.surfaces.get(surfaceId);
     await this.resolveGate;
     if (this.resolveError) throw this.resolveError;
-    return surface ? this.#handleFor(surface) : null;
+    return surface ? this.#handleFor(surfaceId, surface, hold) : null;
+  };
+
+  releaseSurface = (surfaceId: string, hold: SurfaceHold): void => {
+    this.unresolvedReleases.push([surfaceId, hold]);
   };
 
   writePty = (ptyId: string, data: string): void => {
@@ -149,8 +169,9 @@ class FakeProvider implements BurrowSurfaceProvider {
     for (const listener of [...this.#onChange]) listener();
   }
 
-  #handleFor(surface: FakeSurface): SurfaceHandle {
+  #handleFor(surfaceId: string, surface: FakeSurface, hold: SurfaceHold): SurfaceHandle {
     return {
+      release: () => void this.releases.push([surfaceId, hold]),
       ptyId: surface.ptyId,
       // Live, and pinned to this surface object rather than to the id it was
       // found under, so a swap behind the id cannot move the attachment.
@@ -186,12 +207,16 @@ function gate(): { promise: Promise<void>; release: () => void } {
   return { promise, release };
 }
 
+/** Who the session under test is to the panes it sizes. */
+const HOLDER = { id: 'holder-1', label: 'iPhone' };
+
 function makeSession(provider: FakeProvider): { session: RemoteApiSession; sent: SentPayload[] } {
   const sent: SentPayload[] = [];
   const session = new RemoteApiSession({
     burrowId: 'burrow-1',
     send: (payload) => void sent.push(payload),
     provider,
+    holder: HOLDER,
   });
   return { session, sent };
 }
@@ -1157,5 +1182,230 @@ describe('RemoteApiSession teardown', () => {
     provider.emitData('pty-1', 'after dispose');
     session.handle({ requestId: 'hello-1', method: REMOTE_METHODS.hello, params: {} });
     expect(sent).toEqual([]);
+  });
+});
+
+describe('RemoteApiSession size holds', () => {
+  /** The hold one attach took, by its request order. */
+  const heldBy = (lease: string): SurfaceHold => ({ holder: HOLDER.id, label: HOLDER.label, lease });
+
+  it('takes each attach’s hold under this session’s holder, with a lease of its own', async () => {
+    const provider = new FakeProvider();
+    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    const { session } = makeSession(provider);
+
+    await attach(session, 100, 30);
+    await attach(session, 90, 30, 'surface-1', 'attach-2');
+
+    expect(provider.holds).toEqual([
+      ['surface-1', heldBy('1')],
+      ['surface-1', heldBy('2')],
+    ]);
+  });
+
+  it('gives the hold back on detach, and only the attachment’s own', async () => {
+    const provider = new FakeProvider();
+    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    const { session } = makeSession(provider);
+    await attach(session, 100, 30);
+
+    session.handle({ requestId: 'detach-other', method: REMOTE_METHODS.surfaceDetach, params: { surfaceId: 'nope' } });
+    expect(provider.releases).toEqual([]);
+    session.handle({ requestId: 'detach-1', method: REMOTE_METHODS.surfaceDetach, params: { surfaceId: 'surface-1' } });
+    expect(provider.releases).toEqual([['surface-1', heldBy('1')]]);
+  });
+
+  it('gives the previous pane back when it attaches another, and keeps the new one', async () => {
+    const provider = new FakeProvider();
+    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.addSurface('surface-2', 'pty-2', 80, 24);
+    const { session } = makeSession(provider);
+    await attach(session, 100, 30);
+    await attach(session, 100, 30, 'surface-2', 'attach-2');
+
+    expect(provider.releases).toEqual([['surface-1', heldBy('1')]]);
+  });
+
+  it('re-attaching the same pane releases the old lease, never the one it just took', async () => {
+    // The owner compares leases, so the release of attachment 1 lands after
+    // attachment 2 took the pane and frees nothing.
+    const provider = new FakeProvider();
+    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    const { session } = makeSession(provider);
+    await attach(session, 100, 30);
+    await attach(session, 90, 30, 'surface-1', 'attach-2');
+
+    expect(provider.releases).toEqual([['surface-1', heldBy('1')]]);
+  });
+
+  it('gives back the hold a superseded attach took, while the newer one keeps its own', async () => {
+    const provider = new FakeProvider();
+    provider.addSurface('surface-slow', 'pty-slow', 80, 24);
+    provider.addSurface('surface-fast', 'pty-fast', 80, 24);
+    const slow = gate();
+    provider.resolveGate = slow.promise;
+    const { session } = makeSession(provider);
+    session.handle({
+      requestId: 'attach-slow',
+      method: REMOTE_METHODS.surfaceAttach,
+      params: { surfaceId: 'surface-slow', cols: 80, rows: 24 },
+    });
+    provider.resolveGate = null;
+    await attach(session, 100, 30, 'surface-fast', 'attach-fast');
+    slow.release();
+    await settle();
+
+    expect(provider.releases).toEqual([['surface-slow', heldBy('1')]]);
+  });
+
+  it('gives back, at every owner, the hold of an attach its owner answered too late', async () => {
+    // A resolve that misses the ask budget answers nothing, but the owner took
+    // the hold inside it all the same: no handle is left to release it through.
+    const provider = new FakeProvider();
+    const { session, sent } = makeSession(provider);
+    await attach(session, 51, 14, 'surface-late');
+
+    expect(reply(sent, 'attach-1').error).toBe('no such surface: surface-late');
+    expect(provider.unresolvedReleases).toEqual([['surface-late', heldBy('1')]]);
+    expect(provider.releases).toEqual([]);
+  });
+
+  it('gives back, at every owner, the hold of an attach whose resolve failed', async () => {
+    const provider = new FakeProvider();
+    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.resolveError = new Error('owner unavailable');
+    const { session, sent } = makeSession(provider);
+    await attach(session, 51, 14);
+
+    expect(reply(sent, 'attach-1').error).toBe('surface attach failed: owner unavailable');
+    expect(provider.unresolvedReleases).toEqual([['surface-1', heldBy('1')]]);
+  });
+
+  it('gives back the hold of a superseded attach its owner answered too late', async () => {
+    const provider = new FakeProvider();
+    provider.addSurface('surface-fast', 'pty-fast', 80, 24);
+    const slow = gate();
+    provider.resolveGate = slow.promise;
+    const { session } = makeSession(provider);
+    session.handle({
+      requestId: 'attach-slow',
+      method: REMOTE_METHODS.surfaceAttach,
+      params: { surfaceId: 'surface-late', cols: 80, rows: 24 },
+    });
+    provider.resolveGate = null;
+    await attach(session, 100, 30, 'surface-fast', 'attach-fast');
+    slow.release();
+    await settle();
+
+    expect(provider.unresolvedReleases).toEqual([['surface-late', heldBy('1')]]);
+    expect(provider.releases).toEqual([]);
+  });
+
+  it('gives no hold back at every owner once a handle carries it', async () => {
+    const provider = new FakeProvider();
+    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    const { session } = makeSession(provider);
+    await attach(session, 100, 30);
+    session.dispose();
+
+    expect(provider.releases).toEqual([['surface-1', heldBy('1')]]);
+    expect(provider.unresolvedReleases).toEqual([]);
+  });
+
+  it('gives back a hold that resolves after dispose', async () => {
+    const provider = new FakeProvider();
+    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    const slow = gate();
+    provider.resolveGate = slow.promise;
+    const { session } = makeSession(provider);
+    session.handle({
+      requestId: 'attach-1',
+      method: REMOTE_METHODS.surfaceAttach,
+      params: { surfaceId: 'surface-1', cols: 80, rows: 24 },
+    });
+    session.dispose();
+    slow.release();
+    await settle();
+
+    expect(provider.releases).toEqual([['surface-1', heldBy('1')]]);
+  });
+
+  it('gives the pane back on dispose, and says so once', async () => {
+    const provider = new FakeProvider();
+    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    const disposed = vi.fn();
+    const session = new RemoteApiSession({
+      burrowId: 'burrow-1',
+      send: () => {},
+      provider,
+      holder: HOLDER,
+      onDispose: disposed,
+    });
+    await attach(session, 100, 30);
+
+    session.dispose();
+    session.dispose();
+    expect(provider.releases).toEqual([['surface-1', heldBy('1')]]);
+    expect(disposed).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives the pane back when its PTY exits', async () => {
+    const provider = new FakeProvider();
+    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    const { session } = makeSession(provider);
+    await attach(session, 100, 30);
+
+    provider.emitExit('pty-1', 0);
+    expect(provider.releases).toEqual([['surface-1', heldBy('1')]]);
+  });
+
+  it('gives back the hold of an attach whose resize the owner refused', async () => {
+    const provider = new FakeProvider();
+    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.resizeError = new Error('owner gone');
+    const { session } = makeSession(provider);
+    await attach(session, 100, 30);
+
+    expect(provider.releases).toEqual([['surface-1', heldBy('1')]]);
+  });
+
+  it('gives back the hold of an attach whose PTY had already exited', async () => {
+    const provider = new FakeProvider();
+    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    // The exit is replayed when the session subscribes: the attach never installs.
+    provider.emitExit('pty-1', 23);
+    const { session, sent } = makeSession(provider);
+    await attach(session, 80, 24);
+
+    expect(reply(sent, 'attach-1').ok).toBe(false);
+    expect(provider.releases).toEqual([['surface-1', heldBy('1')]]);
+  });
+
+  it('gives back the hold of an attach whose stream could not start', async () => {
+    const provider = new FakeProvider();
+    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.streamPty = () => {
+      throw new Error('no such PTY');
+    };
+    const { session, sent } = makeSession(provider);
+    await attach(session, 80, 24);
+
+    expect(reply(sent, 'attach-1').error).toBe('surface attach failed: no such PTY');
+    expect(provider.releases).toEqual([['surface-1', heldBy('1')]]);
+  });
+
+  it('keeps tearing down when a release throws', async () => {
+    const provider = new FakeProvider();
+    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    const { session } = makeSession(provider);
+    await attach(session, 100, 30);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const releases = provider.releases;
+    releases.push = () => {
+      throw new Error('owner exploded');
+    };
+
+    session.dispose();
+    expect(provider.unstreamed).toEqual(['pty-1']);
   });
 });

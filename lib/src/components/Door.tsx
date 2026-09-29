@@ -1,5 +1,5 @@
 import { type PointerEvent as ReactPointerEvent } from 'react';
-import { ToolDirtyIndicator } from './ToolDirtyIndicator';
+import { TOOL_DIRTY_LABEL, ToolDirtyIndicator } from './ToolDirtyIndicator';
 import { clsx } from 'clsx';
 import { SpeakerHighIcon } from '@phosphor-icons/react';
 import type { AlertSpeechState, SessionStatus, TodoState } from '../lib/terminal-registry';
@@ -72,7 +72,7 @@ export function Door({
     preview && 'Preview',
     detail,
     row ? ALERT_RING_LABEL[row].door : undefined,
-    toolDirty && 'Unsaved changes',
+    toolDirty && TOOL_DIRTY_LABEL,
   ].filter(Boolean);
   const nameParts = [title, ...extras];
 

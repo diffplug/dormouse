@@ -120,6 +120,8 @@ export function fakeWindow(
     entries: options.entries ?? [],
     surfaces: options.surfaces ?? {},
     ownPtyIds: new Set(options.ownPtyIds ?? []),
+    /** Every peer request this window answered, in order. */
+    requests: [] as Array<{ op: string; params: unknown }>,
     writes: [] as Array<{ ptyId: string; data: string }>,
     resizes: [] as Array<{ ptyId: string; cols: number; rows: number; repaint?: boolean }>,
     invalidations: 0,
@@ -148,6 +150,7 @@ export function fakeWindow(
         // One generic fan-out covers every peer operation; `op` is opaque to
         // the link, so the window answers zero or more results per request.
         brokerRequest: async (op, params) => {
+          this.requests.push({ op, params });
           if (op === 'directory') return this.entries;
           const { surfaceId } = params as { surfaceId: string };
           const surface = this.surfaces[surfaceId];

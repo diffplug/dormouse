@@ -13,14 +13,20 @@ Dormouse holds shells, source trees, credentials, and local files. Its
 **remote control** admits an authorized phone as a person at the keyboard;
 **loopback listeners** receive requests from pages in the user's browser.
 
-**Only the self-hosted remote-control deployment ships.** Hosted account code is
-implemented with production provisioning pending ([Hosted accounts](./hosted.md));
-it grants no terminal access. The relay runs on hardware the user
-owns and is private to their tailnet by default, but its application boundary
-assumes the HTTPS origin is public ([SELF_HOST.md](../../SELF_HOST.md)).
+**Remote control ships two ways: through a self-hosted Relay, and as a one-time
+connection that needs no Relay.** Hosted account code is implemented with
+production provisioning pending ([Hosted accounts](./hosted.md)); it grants no
+terminal access. Hosted also serves the one-time phone page and forwards a
+one-time connection's handshake ciphertext, authorizing nothing
+([Hosted rendezvous](./one-time.md#hosted-rendezvous)); its deploy pipeline and
+Cloudflare account are part of a one-time session's trust base. The relay
+runs on hardware the user owns and is private to their tailnet by default, but
+its application boundary assumes the HTTPS origin is public
+([SELF_HOST.md](../../SELF_HOST.md)).
 **Nothing about remote control applies to a Burrow (a Standalone or VS Code
-Dormouse) that never enrolls with a Relay**: enrollment is where the relay, the
-phone, and push begin.
+Dormouse) that never enrolls with a Relay and never opens a one-time link**:
+enrollment is where the relay, the phone, and push begin, and a link admits
+one phone for one session.
 Cloud-hosted operation is staged, and its boundary is re-analyzed before that
 code ships ([security-remote.md](./security-remote.md#future)).
 
@@ -39,6 +45,7 @@ last column means nothing cheaper does.
 | **A loopback listener grants a stranger nothing it could not get from the upstream directly.** | [Loopback Listeners](./security-local.md#loopback-listeners) | `scripts/loopback-lint.mjs` |
 | **Current persistence writers never save terminal scrollback.** Standalone snapshots are owner-only; VS Code controls access to its own storage. Older snapshots may contain transcripts. | [Persisted state](./security-local.md#persisted-state) | `cargo test` in `standalone/src-tauri` (the owner-only half); audit |
 | **Nothing but a human at the laptop can authorize a phone.** The only path into a Burrow's ACL is typing, on that Burrow, the two digits the phone shows, and the Burrow makes every access decision. | [Pairing](./remote-security-model.md#pairing), [Burrow Authorization](./remote-security-model.md#burrow-authorization) | `remote-lib-common/test/security-guarantees.test.mjs` |
+| **A one-time connection is one session, confirmed at the laptop.** Only typing, on the laptop, the two digits that phone shows authorizes it; nothing is saved at either end, and its terminal traffic runs only directly between the two devices; Hosted carries the handshake alone. | [One-time connection](./remote-security-model.md#one-time-connection), [its checks](./security-remote.md#one-time-connection) | `lib/src/remote/client/one-time-e2e.test.ts`, `scripts/e2e-lint.mjs` |
 | **The Relay cannot read ceremony or terminal content or grant terminal access.** One end-to-end channel per ceremony carries content under keys the Relay never holds; account data and routing metadata remain visible. | [Trust Model](./remote-security-model.md#trust-model), [Residual metadata](./remote-security-model.md#residual-metadata) | `scripts/e2e-lint.mjs` |
 | **Push notifications are opt-in, and a push is sealed to the one phone that receives it.** | [Push sealing](./remote-security-model.md#push-sealing) | `remote-lib-common/test/push-seal.test.mjs` |
 | **A stolen or synced passkey buys sign-in, not a terminal.** Every connection also needs the phone's own paired key and a fresh presence proof bound to that connection. | [Passkeys](./remote-security-model.md#passkeys), [Presence proofs](./remote-security-model.md#presence-proofs) | `remote-lib-common/test/security-guarantees.test.mjs` |
@@ -74,13 +81,16 @@ run this knows what they are taking on.
   the Pocket origin can use the phone's key and, with encrypted fallback storage,
   extract its private bytes ([Client statics](./remote-security-model.md#client-statics)). Exactly
   two endpoints are trusted: the distributed Burrow binaries and the exact Pocket
-  artifact the origin serves ([Trust Model](./remote-security-model.md#trust-model)).
+  artifact the origin serves ([Trust Model](./remote-security-model.md#trust-model));
+  a one-time session also trusts the page Hosted serves
+  ([One-time connection](./remote-security-model.md#one-time-connection)).
 - **Traffic analysis.** The Relay sees who talks to whom, when, how often, and
   how large each ciphertext is, and keystroke timing, never keystroke values
   ([Residual metadata](./remote-security-model.md#residual-metadata)). An
   authorized session may move onto a direct connection between the two devices,
   after which the Relay sees that the session exists and nothing about its
-  traffic ([Direct path](./remote-security-model.md#direct-path)).
+  traffic ([Direct path](./remote-security-model.md#direct-path)). Hosted's
+  one-time rendezvous sees a handshake's timing, addresses, and frame sizes.
 - **Push replay, when push is enabled.** A push proves confidentiality, not freshness: a Relay that
   kept an envelope can re-deliver it ([Push sealing](./remote-security-model.md#push-sealing)).
 - **Per-Burrow unlinkability, when push is enabled.** One push endpoint per browser lets the Relay see
@@ -154,7 +164,7 @@ packages Hosted consumes in its own repository.
 | Domain | Specs | Covers |
 | --- | --- | --- |
 | `application-security` | [security-local.md](./security-local.md), [security-remote.md](./security-remote.md) | local boundaries, remote control, and everything no other domain claims |
-| `hosted` | [security-hosted.md](./security-hosted.md) | Hosted accounts and the pgstencil provenance link |
+| `hosted` | [security-hosted.md](./security-hosted.md) | Hosted accounts, the one-time rendezvous, and the pgstencil provenance link |
 | `supply-chain` | [security-supply-chain.md](./security-supply-chain.md) | the dependency graph, the lockfile, the disclosure and its generator |
 | `ci-and-secrets` | [security-ci.md](./security-ci.md), [security-audit.md](./security-audit.md), this spec | GitHub Actions, the bot, releases, secrets, and the audit itself |
 

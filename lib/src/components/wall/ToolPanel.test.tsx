@@ -194,7 +194,7 @@ describe('a preview slot switch', () => {
     return token;
   };
   const commit = (token: number) => act(() => {
-    commitPreviewTransition('p1', token, { label: 'b.md', arm: () => () => {} });
+    commitPreviewTransition('p1', token, () => () => {});
   });
 
   beforeEach(() => {

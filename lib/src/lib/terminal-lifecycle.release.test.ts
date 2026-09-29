@@ -20,6 +20,7 @@ vi.mock('./platform', async () => {
 });
 
 import * as platformModule from './platform';
+import { getSizeHolds, holdSize } from './size-hold-store';
 import type { FakePtyAdapter } from './platform';
 import {
   disposeSession,
@@ -64,5 +65,22 @@ describe('releaseSession', () => {
   it('is a no-op for an id the registry does not hold', () => {
     expect(() => releaseSession('never-existed')).not.toThrow();
     expect(killed).toEqual([]);
+  });
+});
+
+describe('a size hold', () => {
+  // A remote session holding a pane that goes away must not leave a strip for a
+  // later Session reusing the id (docs/specs/remote-api.md → "Size authority").
+  it('goes with the Session, however it leaves this webview', () => {
+    const hold = { holder: 'session-a', label: 'iPhone', lease: '1', cols: 51, rows: 14 };
+    getOrCreateTerminal('pane-1');
+    holdSize('pane-1', hold);
+    disposeSession('pane-1');
+    expect(getSizeHolds('pane-1')).toEqual([]);
+
+    getOrCreateTerminal('pane-2');
+    holdSize('pane-2', hold);
+    releaseSession('pane-2');
+    expect(getSizeHolds('pane-2')).toEqual([]);
   });
 });

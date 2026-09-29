@@ -20,11 +20,17 @@ import * as esbuild from 'esbuild';
 import { assertNothingInlined } from '../../scripts/assert-not-inlined.mjs';
 import {
   assertConnectSrcBaked,
+  assertOneTimeOriginBaked,
   CONNECT_SRC_PLACEHOLDER,
+  ONE_TIME_ORIGIN_PLACEHOLDER,
+  resolveOneTimeOrigin,
   resolveRemoteConnectSrc,
 } from '../../scripts/csp-defaults.mjs';
 
 const remoteSrc = resolveRemoteConnectSrc(process.env, 'esbuild');
+// The one-time rendezvous, baked beside the allowlist that fences it
+// (docs/specs/one-time.md): `DORMOUSE_ONE_TIME_ORIGIN`, same as the sidecar's.
+const oneTimeOrigin = resolveOneTimeOrigin(process.env, 'esbuild');
 
 const watch = process.argv.includes('--watch');
 
@@ -33,6 +39,7 @@ const watch = process.argv.includes('--watch');
 const NATIVE_DIRECT = ['node-datachannel'];
 const assertBuilt = ({ metafile }) => {
   assertConnectSrcBaked('dist/extension.js', remoteSrc);
+  assertOneTimeOriginBaked('dist/extension.js', oneTimeOrigin);
   assertNothingInlined(metafile, NATIVE_DIRECT, 'esbuild dist/extension.js');
 };
 
@@ -60,7 +67,10 @@ const builds = [
     ...common,
     entryPoints: ['src/extension.ts'],
     outdir: 'dist',
-    define: { [CONNECT_SRC_PLACEHOLDER]: JSON.stringify(remoteSrc) },
+    define: {
+      [CONNECT_SRC_PLACEHOLDER]: JSON.stringify(remoteSrc),
+      [ONE_TIME_ORIGIN_PLACEHOLDER]: JSON.stringify(oneTimeOrigin),
+    },
     metafile: true,
   },
   {

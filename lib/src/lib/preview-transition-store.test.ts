@@ -18,7 +18,7 @@ import {
 } from './preview-transition-store';
 
 const ghost: PreviewGhost = { kind: 'layer', generation: 0, params: { url: 'http://localhost:6006/' } };
-const commit = { label: 'b.md', arm: () => () => {} };
+const commit = () => () => {};
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -64,16 +64,15 @@ describe('ownership', () => {
     const first = begin();
     const stopWatching = vi.fn();
     const arm = vi.fn<(ready: () => void) => () => void>(() => stopWatching);
-    commitPreviewTransition('slot', first, { ...commit, arm });
+    commitPreviewTransition('slot', first, arm);
     const second = begin();
     expect(stopWatching).not.toHaveBeenCalled();
-    // The header still names the retarget that happened.
-    expect(transition()).toMatchObject({ token: second, phase: 'holding', label: 'b.md' });
+    expect(transition()).toMatchObject({ token: second, phase: 'holding' });
     // Ready while the takeover holds: nothing shows until it ends.
     previewLayerReady('slot', 1);
     expect(transition()?.phase).toBe('holding');
-    expect(commitPreviewTransition('slot', second, { ...commit, label: 'c.md' })).toBe(true);
-    expect(getPreviewSlotView('slot')).toMatchObject({ generation: 2, transition: { phase: 'committed', label: 'c.md' } });
+    expect(commitPreviewTransition('slot', second, commit)).toBe(true);
+    expect(getPreviewSlotView('slot')).toMatchObject({ generation: 2, transition: { phase: 'committed' } });
     // The replaced view's signal reveals nothing.
     arm.mock.calls[0][0]();
     vi.advanceTimersByTime(PREVIEW_READY_FALLBACK_MS - 1);
@@ -83,10 +82,10 @@ describe('ownership', () => {
   it('goes on waiting for a committed view when its takeover ends without committing', () => {
     const first = begin();
     const stopWatching = vi.fn();
-    commitPreviewTransition('slot', first, { ...commit, arm: () => stopWatching });
+    commitPreviewTransition('slot', first, () => stopWatching);
     const second = begin();
     endPreviewTransition('slot', second);
-    expect(transition()).toMatchObject({ token: second, phase: 'committed', label: 'b.md' });
+    expect(transition()).toMatchObject({ token: second, phase: 'committed' });
     previewLayerReady('slot', 1);
     expect(stopWatching).toHaveBeenCalledOnce();
     expect(transition()?.phase).toBe('revealing');
@@ -129,7 +128,7 @@ describe('readiness', () => {
   it('commits a new generation, whose layer alone reveals the new view', () => {
     const token = begin();
     expect(commitPreviewTransition('slot', token, commit)).toBe(true);
-    expect(getPreviewSlotView('slot')).toMatchObject({ generation: 1, transition: { phase: 'committed', label: 'b.md' } });
+    expect(getPreviewSlotView('slot')).toMatchObject({ generation: 1, transition: { phase: 'committed' } });
     previewLayerReady('slot', 0);
     expect(transition()?.phase).toBe('committed');
     previewLayerReady('slot', 1);
@@ -142,7 +141,7 @@ describe('readiness', () => {
 
   it('reveals on the signal its committer armed', () => {
     let ready!: () => void;
-    commitPreviewTransition('slot', begin(), { ...commit, arm: signal => { ready = signal; return () => {}; } });
+    commitPreviewTransition('slot', begin(), signal => { ready = signal; return () => {}; });
     expect(transition()?.phase).toBe('committed');
     ready();
     expect(transition()?.phase).toBe('revealing');
@@ -150,7 +149,7 @@ describe('readiness', () => {
 
   it('reveals at once, and stops its signal, when its committer finds the view already ready', () => {
     const stopWatching = vi.fn();
-    commitPreviewTransition('slot', begin(), { ...commit, arm: ready => { ready(); return stopWatching; } });
+    commitPreviewTransition('slot', begin(), ready => { ready(); return stopWatching; });
     expect(transition()?.phase).toBe('revealing');
     expect(stopWatching).toHaveBeenCalledOnce();
   });

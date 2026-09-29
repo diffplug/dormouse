@@ -4,7 +4,11 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProcessedPtyChunk, PtySink } from '../../remote/burrow/burrow-surface-provider';
+import type {
+  ProcessedPtyChunk,
+  PtySink,
+  SurfaceHold,
+} from '../../remote/burrow/burrow-surface-provider';
 import {
   createSidecarHost,
   createSidecarSurfaceBridge,
@@ -17,6 +21,8 @@ import { AlertManager, type AlertState } from '../../lib/alert-manager';
 import { REPORT } from '../../lib/alert-manager-test-utils';
 import { createAlertClient } from '../alert-client';
 import type { AlertStateDetail } from '../../lib/platform/types';
+
+const HOLD: SurfaceHold = { holder: 'session-a', label: 'iPhone', lease: '1' };
 
 let sent: Array<{ event: string; data: unknown }>;
 let written: Array<{ id: string; data: string }>;
@@ -280,10 +286,10 @@ describe('directory invalidation', () => {
 
 describe('resolveSurface', () => {
   it('attaches at the requested size and reports what the owner settled at', async () => {
-    const pending = bridge.provider.resolveSurface('s1', { cols: 80, rows: 24 });
+    const pending = bridge.provider.resolveSurface('s1', { cols: 80, rows: 24 }, HOLD);
     const ask = asks()[0]!;
     expect(ask.op).toBe('surfaceOp');
-    expect(ask.params).toEqual({ surfaceId: 's1', op: 'attach', cols: 80, rows: 24 });
+    expect(ask.params).toEqual({ surfaceId: 's1', op: 'attach', cols: 80, rows: 24, hold: HOLD });
 
     answer(ask, [{ ptyId: 'pty-1', cols: 80, rows: 24 }]);
     const handle = (await pending)!;
@@ -298,18 +304,30 @@ describe('resolveSurface', () => {
   });
 
   it('resizes through the owner and remembers what it reported', async () => {
-    const attach = bridge.provider.resolveSurface('s1', { cols: 80, rows: 24 });
+    const attach = bridge.provider.resolveSurface('s1', { cols: 80, rows: 24 }, HOLD);
     answer(asks()[0]!, [{ ptyId: 'pty-1', cols: 80, rows: 24 }]);
     const handle = (await attach)!;
 
     const pending = handle.resize(100, 30);
     const ask = asks()[1]!;
-    expect(ask.params).toEqual({ surfaceId: 's1', op: 'resize', cols: 100, rows: 30 });
+    expect(ask.params).toEqual({ surfaceId: 's1', op: 'resize', cols: 100, rows: 30, hold: HOLD });
     // The owner clamped it.
     answer(ask, [{ ptyId: 'pty-1', cols: 100, rows: 28 }]);
 
     expect(await pending).toEqual({ cols: 100, rows: 28 });
     expect([handle.cols, handle.rows]).toEqual([100, 28]);
+  });
+
+  it('releases as an ask naming the Surface, so the host routes it to the owner alone', async () => {
+    const attach = bridge.provider.resolveSurface('s1', { cols: 80, rows: 24 }, HOLD);
+    answer(asks()[0]!, [{ ptyId: 'pty-1', cols: 80, rows: 24 }]);
+    const handle = (await attach)!;
+
+    handle.release();
+    const ask = asks()[1]!;
+    expect(ask.op).toBe('surfaceOp');
+    expect(ask.params).toEqual({ surfaceId: 's1', op: 'release', hold: HOLD });
+    answer(ask, []);
   });
 
   it('fails when nobody answers a resize and retains only the cached dimensions', async () => {
@@ -855,6 +873,30 @@ describe('the sidecar host', () => {
 
     expect(after.seen.get('ringing')).toMatchObject({ status: 'ALERT_RINGING', todo: false });
     expect(after.seen.get('flagged')).toMatchObject({ status: 'WATCHING_DISABLED', todo: true });
+  });
+
+  it('gives its Burrow the baked rendezvous, so a one-time connection is on offer', async () => {
+    host.handleCommand('burrow:command', { burrowRequestId: 'b-1', cmd: 'oneTimeStatus' });
+    await vi.waitFor(() => {
+      expect(out.find((line) => line.event === 'burrow:result')?.data).toEqual({
+        burrowRequestId: 'b-1',
+        result: { status: 'idle' },
+      });
+    });
+  });
+
+  it('gives its Burrow Take back, which answers for a holder no session holds under', async () => {
+    host.handleCommand('burrow:command', {
+      burrowRequestId: 'b-2',
+      cmd: 'takeBack',
+      params: { holder: 'nobody' },
+    });
+    await vi.waitFor(() => {
+      expect(out.find((line) => line.event === 'burrow:result')?.data).toEqual({
+        burrowRequestId: 'b-2',
+        result: { ended: false },
+      });
+    });
   });
 
   it('leaves every other command to main.js', () => {

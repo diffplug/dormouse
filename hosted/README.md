@@ -1,8 +1,10 @@
 # Dormouse Hosted
 
-Account frontend and Hono/Cloudflare Worker for `https://hosted.dormouse.sh`.
-The marketing website is a separate application. Hosted voice and the managed
-Relay are not implemented. See [the spec](../docs/specs/hosted.md).
+Account frontend and Hono/Cloudflare Worker for `https://hosted.dormouse.sh`,
+which also serves the one-time connection's rendezvous and its `/connect/`
+phone page ([its spec](../docs/specs/one-time.md)). The marketing website is a separate
+application. Hosted voice and the managed Relay are not implemented. See
+[the spec](../docs/specs/hosted.md).
 
 This file is the whole operator runbook, in the order an operator works: run
 locally, update packages, set up GitHub, provision previews, provision
@@ -32,8 +34,22 @@ pnpm build:hosted
 ```
 
 Tests run the production composition in real workerd with disposable Postgres
-clones and a local OAuth simulator. The build includes a Wrangler dry-run; it
-does not deploy.
+clones and a local OAuth simulator. `pnpm --filter dormouse-hosted test:one-time`
+runs the rendezvous suite alone, without Docker. The build includes a Wrangler
+dry-run; it does not deploy.
+
+The one-time rendezvous and `/connect/` page run on their own, without Docker
+or Postgres:
+
+```sh
+dor tool one-time      # outside Dormouse: pnpm dev:one-time
+```
+
+It serves `http://localhost:8787` (or `PORT`) and prints the
+`DORMOUSE_ONE_TIME_ORIGIN` and `DORMOUSE_REMOTE_CONNECT_SRC` values that point a
+local Burrow build at it; `docs/specs/one-time.md` -> "Dev loop" owns what it
+runs. A phone cannot reach a loopback origin, so a real phone tests against a
+PR preview.
 
 ## Update pgstencil
 
@@ -55,8 +71,8 @@ branch.
 | Boundary | Resources |
 | --- | --- |
 | Preview | Dedicated test Cloudflare account with a registered workers.dev subdomain; dedicated empty Neon project and parent branch; GitHub `hosted-preview` environment |
-| Each PR | `dormouse-hosted-pr-N` Worker, uncached Hyperdrive, and Neon branch, all reused until close |
-| Production | Dedicated Dormouse Postgres database, separate runtime/migration roles, uncached Hyperdrive, `dormouse-hosted` Worker and `hosted.dormouse.sh` custom domain; GitHub `hosted-production` environment |
+| Each PR | `dormouse-hosted-pr-N` Worker with its own `OneTimeRoom` Durable Object namespace, uncached Hyperdrive, and Neon branch, all reused until close; rate-limit namespaces `1001` and `1002` shared by every preview |
+| Production | Dedicated Dormouse Postgres database, separate runtime/migration roles, uncached Hyperdrive, `dormouse-hosted` Worker with its `OneTimeRoom` Durable Object namespace and rate-limit namespaces `1` and `2`, and `hosted.dormouse.sh` custom domain; GitHub `hosted-production` environment |
 | Email | Dedicated Postmark server, verified `signin@dormouse.sh`, SPF/DKIM/DMARC, Apple Private Email Relay registration |
 | OAuth | Separate Dormouse GitHub, Google, Microsoft, and Apple registrations; exact callbacks below |
 | Release history | `hosted-release-tag` GitHub environment, an admin identity's repository-scoped Contents-write fine-grained PAT, immutable annotated `hosted/` tags |
@@ -89,6 +105,9 @@ separately protected `hosted-release-tag` environment. Apple's private relay
 has the exact sender and the Postmark return-path domain registered. Provisioning
 these registrations does not establish acceptance.
 
+The public policy pages are live. Google is external and in production; its
+branding is verified and published, with only OpenID, email, and profile scopes.
+
 ## GitHub setup
 
 Run once from the repository root with the operator's existing `gh` login:
@@ -106,7 +125,8 @@ tag protections are unchanged.
 
 In Cloudflare, create the dedicated preview account, register its workers.dev
 subdomain, and create a token with **Workers Scripts: Edit** and **Hyperdrive:
-Edit**, scoped only to that account. No zone/DNS access is needed. In Neon,
+Edit**, scoped only to that account; the first also deploys the Durable Object
+and rate-limit bindings. No zone/DNS access is needed. In Neon,
 create a dedicated preview project with an empty parent branch, default `neondb`
 database and `neondb_owner` role. Use a project-scoped API key where supported.
 Record the project and parent branch IDs; never select a production parent.
@@ -245,8 +265,9 @@ gh secret set HOSTED_TAG_TOKEN --repo diffplug/dormouse --env hosted-release-tag
 `DATABASE_URL` is the direct migration-role Postgres URL. Generate the age
 identity with `age-keygen` into private password-manager storage, then enter it
 at the hidden prompt; preserve that independent copy and old keys on rotation.
-Use a production Cloudflare token covering Workers deployment, Hyperdrive read,
-and the custom-domain zone permissions required for that hostname.
+Use a production Cloudflare token covering Workers deployment (which includes
+the Durable Object migration and rate-limit bindings), Hyperdrive read, and the
+custom-domain zone permissions required for that hostname.
 
 The tag PAT belongs to a repository admin and selects only this repository with
 Contents write. It can bypass the existing tag ruleset and can also write code,
@@ -278,7 +299,7 @@ secrets before release; deployment preserves the ones already there.
 
 Configure the sender and enable each ready provider in `OAUTH_PROVIDERS` in
 `wrangler.jsonc`, comma separated, reviewed in a PR. The checked-in file enables
-none; `docs/specs/hosted.md` -> "Identity and login" owns what a name and a
+GitHub, Google, Microsoft, and Apple; `docs/specs/hosted.md` -> "Identity and login" owns what a name and a
 credential pair do and do not enable. Facebook is outside this milestone.
 
 ## Release
@@ -324,6 +345,18 @@ credential pair do and do not enable. Facebook is outside this milestone.
 6. Confirm `/api/dev/emails`, `/dev/emails`, and `/__test/time` are absent, and
    check the live responses against the origin, caching, and cookie rules in
    `docs/specs/security-hosted.md` -> "Origin boundary".
+7. Confirm the release smoke's one-time half passed: `/connect/` answers the
+   page under its own policy with its script beside it, and the rendezvous
+   mints a room, is refused with a browser `Origin`, joins from the app origin,
+   crosses a frame each way, and is refused a second phone. Load `/connect/`
+   in a browser and confirm no injected script or third-party request.
+8. With a desktop build pointed at this origin, open a one-time link on a real
+   iPhone in Safari and a real Android phone in Chrome, each on the same Wi-Fi
+   as the laptop and each by scanning the QR code with the native camera, which
+   must keep the fragment. Connect, type the digits, run a command, and End
+   from the laptop. Then turn the phone's Wi-Fi off mid-session: both ends
+   report the end. On a guest or client-isolated network the attempt ends on
+   the same-Wi-Fi copy.
 
 Do not mark all five login methods complete until email and all four providers
 pass in real browsers; a simulated callback certifies nothing. No real-provider
@@ -335,7 +368,9 @@ A failed migration or deployment may already have changed production state;
 workflow failure does not automatically reverse it. Use the Worker's deployment
 history for code rollback and investigate database compatibility first;
 `docs/specs/hosted.md` -> "Production releases" owns what a code rollback does
-not undo. Restore a backup only after an explicit operator decision, into a
+not undo. Cloudflare refuses a rollback past the deploy that added the
+`OneTimeRoom` migration, and every deploy or rollback drops the one-time links
+still open; established sessions run directly and are unaffected. Restore a backup only after an explicit operator decision, into a
 separate database first.
 
 Current provisioning status is discoverable with `gh secret list --env NAME`,

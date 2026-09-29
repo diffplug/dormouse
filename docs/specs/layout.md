@@ -46,21 +46,21 @@ Panes are separated by a 7px gap (`PANE_GUTTER_PX`), odd so the 1px selection ri
 
 ### Pane header
 
-**Must keep a Tool's unsaved-change dot visible in its Pane header and minimized Door**, across header widths and terminal/browser faces. Use inherited foreground, without animation; label and tooltip it “Unsaved changes”. Never hide it inside browser overflow controls or replace Kill. State semantics belong to `docs/specs/dor-tool.md` → Unsaved changes.
+**Must keep a Tool's unsaved-change dot visible in its Pane header and minimized Door**, across header widths and faces. Use inherited foreground, without animation; label and tooltip it “Unsaved changes”. In a Pane the dot replaces Kill’s glyph on the same button, with an accessible unsaved-state description, until hover or keyboard focus reveals the X; where the header tier or the rename editor hides Kill, it sits at the right edge. State semantics belong to `docs/specs/dor-tool.md` → Unsaved changes.
 
-**Must mark the Workspace's preview slot with an italic derived label alone in its Pane header and Door** (a serving Tool's dev-server chip label and address), naming it Preview in the label's tooltip and the Door's accessible name (rationale). **Must keep the slot on a double-click of its Pane header whose first press lands in the header itself, off its controls** (every button but the dev-server chip, and an open editor); a double-click on the address keeps it and closes the URL editor it opened (rationale). **Must offer Keep open in its terminal context too**, beside the Tool status and only while it is the slot: the keyboard path to the same pin. Slot semantics belong to `docs/specs/dor-tool.md` → Preview slot.
+**Must mark the Workspace's preview slot with an italic label alone in its Pane header and Door**, naming it Preview in the label's tooltip and the Door's accessible name (rationale). **Must keep the slot on a double-click of its Pane header whose first press lands in the header itself, off its controls** (every button, and an open rename; rationale). **Must offer Keep open in its terminal context too**, beside the Tool status and only while it is the slot: the keyboard path to the same pin. Slot semantics belong to `docs/specs/dor-tool.md` → Preview slot.
 
-**Must hold the slot's header while a switch holds its ghost** (`docs/specs/dor-tool.md` → Switching the slot): the ghost's face, dev-server chip, address, and page-title tooltip stay until the new view is ready, the chip never unmounting. The label keeps its name until the retarget, then shows the new target's basename as a built-in viewer titles it, unless the user named the slot; derivation resumes once ready.
+**Must hold the slot's header while a switch holds its ghost** (`docs/specs/dor-tool.md` → Switching the slot): the ghost's face and Display glyph stay until the new view is ready. A terminal face's label keeps its name until the retarget, then shows the Tool's name (`docs/specs/dor-tool.md` → Naming); derivation resumes once ready. A serving Tool's name, read from its params, needs no hold (rationale).
 
 A 30px header doubling as a drag handle: **a `pointerdown` past a 5px threshold begins a Lath pane drag**; below the threshold the header's own click behavior stands. It uses `cursor-grab` / `active:cursor-grabbing`, `select-none`, the shared terminal top radius from `lib/src/components/design.tsx`, and the `--color-header-active-*` / `--color-header-inactive-*` token pairs (VSCode file-tree list colors).
 
-**Must use browser chrome for a serving Tool, with a Terminal Context disclosure for its serving terminal.** Tool composition belongs to `docs/specs/dor-tool.md` → Lifecycle.
+**Never give a Tool navigation, an address, or a dev-server chip** (rationale). **Must keep every Tool header control inside the header's palette**, Terminal Context included. A serving Tool's header, left to right: Display (`docs/specs/dor-browser.md` → Browser Chrome); Terminal Context; its name (`docs/specs/dor-tool.md` → Naming), renamed as a terminal label is; flexible gap; split buttons (full only); the pane-action group. A port conflict's terminal header leads with Terminal Context; the terminal face, which shows that terminal, has none. Tool composition belongs to `docs/specs/dor-tool.md` → Lifecycle.
 
-Elements left to right: derived label; TODO pill (compact+); flexible gap; mouse-reporting override icon (compact+, only while the inside program requests mouse reporting); split left/right, split top/bottom (full only); then the pane-action group: zoom/unzoom, minimize, kill (hover turns error-red).
+A terminal header's elements left to right: derived label; TODO pill (compact+); flexible gap; mouse-reporting override icon (compact+, only while the inside program requests mouse reporting); split left/right, split top/bottom (full only); then the pane-action group: zoom/unzoom, minimize, kill (hover turns error-red).
 
 The label is the `DerivedHeader` from `deriveHeader(...)`; `docs/specs/terminal-state.md` owns the priority chain and disambiguator. Layout renders it: primary truncates with ellipsis, secondary muted beside it, a failed last command appends an error-colored glyph. Click renames, except on a preview slot, whose label is drag area; right-click — or `>` in command mode — opens the header context menu.
 
-Source of truth: `useHeldWhile` in `lib/src/components/wall/preview-transition.ts`; `SurfacePaneHeader` in `lib/src/components/wall/SurfacePaneHeader.tsx`; `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHeader.tsx`; `ToolPaneHeader` in `lib/src/components/wall/ToolPaneHeader.tsx`; `usePreviewKeep` in `lib/src/components/wall/preview-keep.ts`; `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`. Tests: `holds the chip and address through a switch` and `keeps a serving slot on a double-click` in `lib/src/components/wall/SurfacePaneHeader.test.tsx`; `keeps the slot on a double-click` in `lib/src/components/wall/TerminalPaneHeader.test.tsx`; `in its header chip` and `pins from Keep open in its terminal context` in `lib/src/components/wall/preview-slot.test.tsx`; `offers Keep open only for a preview slot` in `lib/src/components/wall/TerminalContext.test.tsx`.
+Source of truth: `useHeldWhile` in `lib/src/components/wall/preview-transition.ts`; `SurfacePaneHeader` in `lib/src/components/wall/SurfacePaneHeader.tsx`; `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHeader.tsx`; `ToolPaneHeader` in `lib/src/components/wall/ToolPaneHeader.tsx`; `TerminalContextButton` in `lib/src/components/wall/PaneActionButtons.tsx`; `usePreviewKeep` in `lib/src/components/wall/preview-keep.ts`; `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`. Tests: `lib/src/components/wall/ToolPaneHeader.test.tsx`; `keeps the slot on a double-click` in `lib/src/components/wall/TerminalPaneHeader.test.tsx`; `in its header, one element in one type` and `pins from Keep open in its terminal context` in `lib/src/components/wall/preview-slot.test.tsx`; `offers Keep open only for a preview slot` in `lib/src/components/wall/TerminalContext.test.tsx`.
 
 #### Header context menu
 
@@ -118,7 +118,9 @@ The pane body paints `--color-terminal-bg` on the React pane wrapper and the `Te
 
 **Must share scroll-safe pane messages across iframe status, Tool approval, and port conflicts**, wrapping long content and keeping all controls reachable in small panes. Center content only when it fits.
 
-Source of truth: `PaneMessage` in `lib/src/components/design.tsx`. Visual regression cases: `lib/src/stories/ToolApproval.stories.tsx`.
+**Must pin a held pane's strip to the body's bottom-right corner** — "Sized for \<label\>" and Take back, as one `PopupButtonRow` at `z-index: 20` that truncates the label within the pane rather than wrapping, and never in the header. Hold and Take back semantics belong to `docs/specs/remote-api.md` → "Size authority: last-attach-wins".
+
+Source of truth: `PaneMessage` in `lib/src/components/design.tsx`; `SizeHoldStrip` in `lib/src/components/wall/SizeHoldStrip.tsx`. Visual regression cases: `lib/src/stories/ToolApproval.stories.tsx`, `SizedForPhone` / `SizedForLongLabel` in `lib/src/stories/TerminalPane.stories.tsx`.
 
 ### Alarm overlay
 
@@ -126,7 +128,7 @@ A ringing terminal Session gets an overlay spanning its whole Lath leaf; browser
 
 **Two layers straddling the header's stacking context** (`.lath-leaf-header` is `position: relative; z-index: 20`):
 
-- **Wash + label at `z-index: 19`** — above terminal content, below the header and the `z-index: 20` pane-corner mouse-override banner, so neither is tinted (rationale). **Never use color-alpha utilities here** — their `color-mix()` is unsupported by the standalone Safari 15 / Chrome 105 targets; the solid alarm color lives on a child whose element opacity supplies those strengths. The label sits `PANE_HEADER_HEIGHT_PX + 4` from the Pane top, centered.
+- **Wash + label at `z-index: 19`** — above terminal content, below the header and the `z-index: 20` pane-corner mouse-override banner and held-pane strip, so none is tinted (rationale). **Never use color-alpha utilities here** — their `color-mix()` is unsupported by the standalone Safari 15 / Chrome 105 targets; the solid alarm color lives on a child whose element opacity supplies those strengths. The label sits `PANE_HEADER_HEIGHT_PX + 4` from the Pane top, centered.
 - **Perimeter ring at `z-index: 25`** — above the header so the treatment reads as one rounded rectangle around the Pane, below the `z-index: 30` sashes (rationale).
 
 Three strengths, by speech state over the latched ring. `SPOKEN` is unbounded, so its wash stays light enough to read text through:
@@ -150,24 +152,34 @@ Both layers wear the leaf's own rounding (header radius on top, terminal radius 
 - **Minimal** (>98px): also hides the TODO pill and the mouse-override icon. The label truncates with ellipsis.
 - **Tiny** (≤98px): minimize and kill go too.
 
-A browser header, including a Tool's (Terminal Context sits outside the measured width), collapses by border-box width:
+A browser header collapses by border-box width:
 
 | Below | Change |
 |---|---|
 | 420px | Split hidden. |
 | 360px | Navigation hidden. |
 | 180px | Chrome moves into a viewport-clamped popover behind one trigger. |
-| 94px (102px with an unsaved-change dot) | Minimize and kill join the popover. |
+| 94px | Minimize and kill join the popover. |
 
-**Must reclamp the popover on content resize and keep it keyboard reachable** (focus enters on open, Tab stays inside, Escape returns it to the trigger) **and dismiss it on resize, when a dirty report moves minimize/kill controls (restoring trigger focus), or when its Surface is hidden (without restoring focus)**; `lib/src/components/wall/use-dismiss-overlay.ts` handles other dismissal, and controls dismiss only after acting. Keys and connection labels truncate before controls, and a connection label only once the URL has given up all its width.
+A serving Tool's header has no popover; each boundary reserves the widest Display glyph (rationale):
 
-Source of truth: `SurfacePaneHeader` in `lib/src/components/wall/SurfacePaneHeader.tsx`; `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHeader.tsx`; `PaneActionGroup` in `lib/src/components/wall/PaneActionButtons.tsx`; `useHeaderTier` in `lib/src/components/wall/use-header-tier.ts`; `lib/src/components/wall/SurfacePaneHeader.test.tsx`; `lib/src/components/wall/TerminalPaneHeader.test.tsx`; `lib/src/stories/BrowserChromeHeader.stories.tsx`.
+| Below | Change |
+|---|---|
+| 356px | Split hidden. |
+| 161px | Display hidden. |
+| 125px | Minimize and kill hidden. |
+
+A port conflict's terminal header adds its Terminal Context button's 26px to each terminal boundary, re-tiering at an unchanged width as the conflict comes and goes.
+
+**Must reclamp the popover on content resize and keep it keyboard reachable** (focus enters on open, Tab stays inside, Escape returns it to the trigger) **and dismiss it on resize, returning focus to the trigger when a focused minimize or kill moves into it, or when its Surface is hidden (without restoring focus)**; `lib/src/components/wall/use-dismiss-overlay.ts` handles other dismissal, and controls dismiss only after acting. Keys and connection labels truncate before controls, and a connection label only once the URL has given up all its width.
+
+Source of truth: `SurfacePaneHeader` in `lib/src/components/wall/SurfacePaneHeader.tsx`; `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHeader.tsx`; `ToolPaneHeader` in `lib/src/components/wall/ToolPaneHeader.tsx`; `PaneActionGroup` in `lib/src/components/wall/PaneActionButtons.tsx`; `useHeaderTier` in `lib/src/components/wall/use-header-tier.ts`; `lib/src/components/wall/SurfacePaneHeader.test.tsx`; `lib/src/components/wall/TerminalPaneHeader.test.tsx`; `lib/src/components/wall/ToolPaneHeader.test.tsx`; `lib/src/stories/BrowserChromeHeader.stories.tsx`.
 
 ## Baseboard
 
 The baseboard (`h-7`, 28px) sits below content, with no top divider. A 2px theme-colored gap preserves pane corners; 7px horizontal padding aligns doors with panes. With no doors above 350px wide, it shows `LCmd → RCmd to enter command mode` on macOS and `LShift → RShift to enter command mode` elsewhere.
 
-**Must group the right-hand controls**: the `N more →` overflow arrow, the host-supplied `notice` slot, then three always-present 24px square Settings buttons with 2px gaps. Their 16px icons are speaker/slashed-speaker for spoken alarms, filled `VibrateIcon`/`DeviceMobileSlashIcon` for push, and sliders for Settings. **Must expose each state through shape and `aria-pressed`.** The status buttons toggle their respective alarm settings; sliders opens Settings (`docs/specs/alert.md` → Settings dialog). **Must use the shared `chromeButton` hover treatment** for Settings and overflow buttons, except a flagged overflow arrow, which like a Door has none.
+**Must group the right-hand controls**: the `N more →` overflow arrow, the host-supplied `notice` slot, the one-time connection indicator (`docs/specs/one-time.md` -> "Laptop UI"), then three always-present 24px square Settings buttons with 2px gaps. Their 16px icons are speaker/slashed-speaker for spoken alarms, filled `VibrateIcon`/`DeviceMobileSlashIcon` for push, and sliders for Settings. **Must expose each state through shape and `aria-pressed`.** The status buttons toggle their respective alarm settings; sliders opens Settings (`docs/specs/alert.md` → Settings dialog). **Must use the shared `chromeButton` hover treatment** for Settings and overflow buttons, except a flagged overflow arrow, which like a Door has none.
 
 A minimized session becomes a **door**, showing its label plus the alert/TODO/speech badge cluster (`docs/specs/alert.md` → Door owns which badge shows when; both speech states also name themselves in the Door's `title` and accessible name). **A Door's label is header-derived only for a terminal-backed Surface** (`hasTerminal`); any other keeps its stored title, and a browser Door adds the display glyphs from `docs/specs/dor-browser.md` → "Browser Chrome". A Door uses the window's bottom edge as its bottom border, with left, top, and right borders taking the shared terminal top radius from `lib/src/components/design.tsx` — a mouse hole matching pane rounding. Dimensions: `min-w-[68px] max-w-[220px] h-6`.
 
@@ -184,7 +196,7 @@ A minimized session becomes a **door**, showing its label plus the alert/TODO/sp
 
 Doors are measured in a hidden off-screen container first, then fitted:
 
-- **Subtract the measured right cluster and its gap before fitting anything** — that space is never available to doors. Measure only its always-present part (notice + the three settings controls): **never the overflow arrow**, whose presence is an *output* of the fit.
+- **Subtract the measured right cluster and its gap before fitting anything** — that space is never available to doors. Measure only its always-present part (notice, one-time indicator, and the three settings controls): **never the overflow arrow**, whose presence is an *output* of the fit.
 - Add doors until no more fit, reserving room for a `N more →` button whenever items remain after the current one. **At least one door is always shown**, even if it overflows.
 - If scrolled, show `← N more` on the left and/or `N more →` on the right. Overflow counts are assumed single-digit (the hidden measurement button is `9 more TODO`).
 - **An arrow hiding a ringing or TODO Door must say so**, since that Door is otherwise gone from the baseboard: it wears the Door shape and ground, a static `door` alarm inset while one rings, and a static TODO pill while one has TODO, and its accessible name counts them (`3 more, 1 ringing, 1 TODO`). **Every arrow must reserve the measured width of the TODO one**, so the fit never depends on which Doors an arrow hides. Pinned by `Baseboard overflow alerts` in `lib/src/components/Baseboard.test.tsx`.
@@ -454,7 +466,7 @@ A door dragged out of the baseboard skips the token entirely and inserts at the 
 
 Triggered by `,` in command mode or by clicking the session name in the pane header.
 
-**Must consume `,` without starting a rename on a Door or browser Surface.** Only a terminal pane mounts the title editor. Pinned by `lib/src/components/wall/keyboard/handle-pane-shortcuts.test.ts`.
+**Must consume `,` without starting a rename on a Door or browser Surface.** Only a terminal or Tool pane, on every face, mounts the title editor. Pinned by `lib/src/components/wall/keyboard/handle-pane-shortcuts.test.ts`.
 
 The name `<span>` is replaced by an `InlineEditInput` (shared with the browser URL editor in `docs/specs/dor-browser.md`): same font (`font-mono font-medium`), `bg-transparent`, no border, seeded from the label with the failure glyph stripped. `Enter` confirms, `Escape` cancels, `blur` confirms — **whichever lands first settles the edit**, so the blur following an Enter/Escape unmount cannot submit a second time. It stops propagation on `mousedown`/`click`/`keydown` so the panel click and the header drag never fire.
 

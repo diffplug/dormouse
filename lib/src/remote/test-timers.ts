@@ -51,3 +51,60 @@ export function fakeTimers(): FakeTimers {
     },
   };
 }
+
+/**
+ * A clock and its one timer, both injected. `advance` fires every timer that
+ * comes due, in order, so a Burrow's reaper runs exactly where it would in
+ * real time — and the suite does not spend five minutes proving a TTL.
+ */
+export function createTestClock(start: number) {
+  let now = start;
+  let nextId = 1;
+  const timers = new Map<number, { at: number; run: () => void }>();
+  return {
+    now: () => now,
+    setTimer(run: () => void, delayMs: number): () => void {
+      const id = nextId++;
+      timers.set(id, { at: now + delayMs, run });
+      return () => timers.delete(id);
+    },
+    /** How many timers are armed — what `stop()` has to leave at zero. */
+    get armed(): number {
+      return timers.size;
+    },
+    /** Move the clock backwards, as an NTP correction or a sleeping laptop does. */
+    rewind(ms: number): void {
+      now -= ms;
+    },
+    /**
+     * Move the clock forwards and fire nothing, as a laptop waking from sleep
+     * reads its new time before any overdue timer has run.
+     */
+    jump(ms: number): void {
+      now += ms;
+    },
+    advance(ms: number): void {
+      const target = now + ms;
+      // Bounded: a reaper that armed for an instant it does not clear would
+      // otherwise spin here rather than fail.
+      for (let guard = 0; guard < 10_000; guard += 1) {
+        let dueId: number | null = null;
+        let dueAt = Number.POSITIVE_INFINITY;
+        for (const [id, timer] of timers) {
+          if (timer.at <= target && timer.at < dueAt) {
+            dueAt = timer.at;
+            dueId = id;
+          }
+        }
+        if (dueId === null) break;
+        const timer = timers.get(dueId)!;
+        timers.delete(dueId);
+        now = timer.at;
+        timer.run();
+      }
+      now = target;
+    },
+  };
+}
+
+export type TestClock = ReturnType<typeof createTestClock>;
