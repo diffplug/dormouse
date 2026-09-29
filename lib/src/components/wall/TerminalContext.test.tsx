@@ -13,6 +13,7 @@ import { ensureResizeObserver } from './wall-test-utils';
 import { setMouseReporting, removeMouseSelectionState } from '../../lib/mouse-selection';
 import { setPlatform } from '../../lib/platform';
 import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
+import { rememberBrowserProvider } from './BrowserProviderPicker';
 import { cfg } from '../../cfg';
 
 vi.mock('../TerminalPane', () => ({ TerminalPane: () => <textarea aria-label="Fake terminal input" /> }));
@@ -23,6 +24,7 @@ let props: TerminalContextViewProps;
 let previousAnimate: boolean;
 const port = (value: number) => ({ port: value, host: 'localhost', url: `http://localhost:${value}/` });
 beforeEach(() => {
+  rememberBrowserProvider('agent-browser');
   previousAnimate = cfg.layout.animate;
   setPlatform(new FakePtyAdapter()); ensureResizeObserver();
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
@@ -103,10 +105,21 @@ it.each(['scanning', 'failed', 'empty'] as const)('distinguishes %s ports', stat
   expect(container.textContent).toContain(state === 'empty' ? 'No listening ports' : state === 'failed' ? 'Port scan failed' : 'Scanning ports');
   expect(button('Open in system browser')).toBeNull();
 });
+it('uses one pair of automated actions and remembers the selected provider on reopening', async () => {
+  render();
+  expect(button('Open in playwright screencast')).toBeNull();
+  act(() => container.querySelector<HTMLInputElement>('input[value="playwright"]')!.click());
+  expect(button('Open in agent-browser screencast')).toBeNull();
+  await click('Open in playwright screencast');
+  expect(props.onPort).toHaveBeenCalledWith(port(5173), 'playwright-screencast');
+  act(() => root.render(null));
+  render();
+  expect(button('Open in playwright popout')).not.toBeNull();
+});
 it('disables unsupported host capabilities with an explanation', () => {
   props.browserProviders = ['playwright']; props.canExplore = false; render();
-  // Both of agent-browser's targets name the provider the host lacks.
-  expect([...container.querySelectorAll<HTMLButtonElement>('button[aria-label="agent-browser unavailable on this host"]')].map(b => b.disabled)).toEqual([true, true]);
+  expect(button('Open in agent-browser popout')).toBeNull();
+  expect(container.querySelector('[role="radiogroup"]')).toBeNull();
   expect(button('Open in playwright popout').disabled).toBe(false);
   expect(button('Directory unavailable on this host').disabled).toBe(true);
 });

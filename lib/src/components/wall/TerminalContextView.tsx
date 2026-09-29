@@ -2,9 +2,10 @@ import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, 
 import { ArrowCounterClockwiseIcon, ArrowLineUpIcon, ArrowSquareOutIcon, BugBeetleIcon, CheckIcon, CircleNotchIcon, CopyIcon, FrameCornersIcon, PauseIcon, SlidersHorizontalIcon, TerminalIcon, WarningIcon, XIcon } from '@phosphor-icons/react';
 import { ELEVATED_PANE_SHADOW, OnOffSwitch, POPUP_SURFACE_CLASS, SUBTLE_ACTION_COLOR_CLASS, SUBTLE_ACTION_INTERACTION_CLASS, SUBTLE_ACTION_REST_COLOR_CLASS, TERMINAL_CONTEXT_SURFACE_CLASS, TERMINAL_CONTEXT_EXIT_MS, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
 import { stepFocus } from '../focus-step';
-import { BROWSER_PROVIDER_IDS, renderModeFor, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
+import { renderModeFor, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
 import { AgentRobotIcon } from './BrowserDisplayIcon';
 import { BROWSER_PROVIDER_GUI } from './browser-automation';
+import { BrowserProviderPicker, preferredBrowserProvider, rememberBrowserProvider } from './BrowserProviderPicker';
 import type { PortUrlEntry } from './port-url';
 import type { RenderMode } from './agent-browser-screen';
 import type { HelperStatus } from '../../lib/helper-terminal';
@@ -33,20 +34,17 @@ const HELPER_STATUS: Record<HelperStatus, { icon: ReactNode; label: (command: st
   exited: { icon: SETTLED, label: () => 'Helper exited', reset: true },
 };
 
-/** The port row's launch targets: the system browser, the embed, then each
- *  provider's screencast and popout. `needs` names what the host must offer. */
-const PORT_ACTIONS: readonly ({ mode: PortMode; label: string; icon: ReactNode; text: string } & ({ needs?: undefined } | { needs: 'iframe' | BrowserAutomationProvider; unavailable: string }))[] = [
-  { mode: 'system', label: 'Open in system browser', icon: <ArrowSquareOutIcon size={15} />, text: 'System browser' },
-  { mode: 'iframe', label: 'Open in iframe embed', needs: 'iframe', unavailable: 'Iframe unavailable on this host', icon: <FrameCornersIcon size={15} />, text: 'Iframe' },
-  ...BROWSER_PROVIDER_IDS.flatMap((provider) => {
-    const { label } = BROWSER_PROVIDER_GUI[provider];
-    const unavailable = `${label} unavailable on this host`;
-    return [
-      { mode: renderModeFor(provider, 'screencast'), label: `Open in ${label} screencast`, needs: provider, unavailable, icon: <AgentRobotIcon size={17} />, text: label },
-      { mode: renderModeFor(provider, 'popout'), label: `Open in ${label} popout`, needs: provider, unavailable, icon: <><AgentRobotIcon size={17} /><ArrowSquareOutIcon size={13} /></>, text: `${label} popout` },
-    ];
-  }),
-];
+/** One set of launch targets for the selected provider. */
+function portActions(provider: BrowserAutomationProvider): readonly ({ mode: PortMode; label: string; icon: ReactNode; text: string } & ({ needs?: undefined } | { needs: 'iframe' | BrowserAutomationProvider; unavailable: string }))[] {
+  const { label } = BROWSER_PROVIDER_GUI[provider];
+  const unavailable = `${label} unavailable on this host`;
+  return [
+    { mode: 'system', label: 'Open in system browser', icon: <ArrowSquareOutIcon size={15} />, text: 'System browser' },
+    { mode: 'iframe', label: 'Open in iframe embed', needs: 'iframe', unavailable: 'Iframe unavailable on this host', icon: <FrameCornersIcon size={15} />, text: 'Iframe' },
+    { mode: renderModeFor(provider, 'screencast'), label: `Open in ${label} screencast`, needs: provider, unavailable, icon: <AgentRobotIcon size={17} />, text: 'Screencast' },
+    { mode: renderModeFor(provider, 'popout'), label: `Open in ${label} popout`, needs: provider, unavailable, icon: <><AgentRobotIcon size={17} /><ArrowSquareOutIcon size={13} /></>, text: 'Popout' },
+  ];
+}
 
 const DETAILS = {
   title: { label: 'Title sources', heading: 'Why this title?' },
@@ -168,6 +166,8 @@ function snapshotExit(surface: HTMLElement, content: HTMLElement | null) {
 }
 
 export function TerminalContextView(p: TerminalContextViewProps) {
+  const [chosenProvider, setChosenProvider] = useState(() => preferredBrowserProvider(p.browserProviders));
+  const provider = p.browserProviders.includes(chosenProvider) ? chosenProvider : preferredBrowserProvider(p.browserProviders);
   const motionClass = motionIsInstant() ? '' : p.closing ? 'terminal-context-exit' : 'terminal-context-enter';
   const surface = useRef<HTMLElement>(null);
   const content = useRef<HTMLDivElement>(null);
@@ -246,8 +246,9 @@ export function TerminalContextView(p: TerminalContextViewProps) {
           <div className="flex min-h-7 flex-wrap items-center gap-2">
             {p.scan.status === 'scanning' ? <span className="text-muted">Scanning ports…</span> : p.scan.status === 'failed' ? <span className="text-error">Port scan failed · Reopen to try again</span> : !selected ? <span className="text-muted">No listening ports</span> : <>
               {entries.length > 1 ? <div className="flex w-full min-w-0 items-center gap-2"><select aria-label="Port" value={selected.port} onChange={e => setPort(Number(e.target.value))} className="h-6 min-w-0 flex-1 rounded border border-input-border bg-input-bg px-1 text-foreground">{entries.map(entry => <option key={entry.port} value={entry.port}>{entry.host}:{entry.port}{entry.processName ? ` · ${entry.processName}` : ''}</option>)}</select><span className="text-muted">{entries.length} ports</span></div> : <><span>{selected.host}:{selected.port}</span><span className="text-muted">{selected.processName}</span></>}
+              <BrowserProviderPicker providers={p.browserProviders} value={provider} onChange={value => { setChosenProvider(value); rememberBrowserProvider(value); }} />
               <div className="ml-1 flex min-w-0 flex-wrap items-center gap-1 border-l border-border pl-2">
-                {PORT_ACTIONS.map(action => {
+                {portActions(provider).map(action => {
                   const offered = action.needs === 'iframe' ? p.canIframe : !action.needs || p.browserProviders.includes(action.needs);
                   const unavailable = action.needs && !offered ? action.unavailable : null;
                   return <ContextOpenAction key={action.mode} label={unavailable ?? action.label} disabled={!!unavailable} fit onOpen={() => attempt(() => p.onPort(selected, action.mode))}>{action.icon}<span className="truncate">{action.text}</span></ContextOpenAction>;

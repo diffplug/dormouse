@@ -57,7 +57,7 @@ function useMockController(args: StoryArgs): ScreenController {
         reload: () => console.log('[story] reload'),
       },
       hostCapable: args.hostCapable,
-      renderModes: ['agent-browser-screencast', ...(args.canPopOut ? ['agent-browser-popout' as const] : []), 'iframe'],
+      renderModes: ['agent-browser-screencast', ...(args.canPopOut ? ['agent-browser-popout' as const] : []), 'playwright-screencast', ...(args.canPopOut ? ['playwright-popout' as const] : []), 'iframe'],
       actions: {
         engageSync: () => console.log('[story] engageSync'),
         applyDevice: (name) => console.log('[story] applyDevice', name),

@@ -33,6 +33,7 @@ import type { RenderMode, ScreenController, ScreenSnapshot } from './agent-brows
 import { browserDisplayMode, useAgentBrowserChromeSnapshot, useAgentBrowserScreenSnapshot } from './agent-browser-screen';
 import { BROWSER_PROVIDER_IDS, parseRenderMode, renderModeFor } from 'dor-lib-common/browser-providers';
 import { BROWSER_PROVIDER_GUI, surfaceProvider } from './browser-automation';
+import { BrowserProviderPicker, preferredBrowserProvider, rememberBrowserProvider } from './BrowserProviderPicker';
 import { iframeRefusal } from './browser-url';
 import {
   AgentRobotIcon,
@@ -138,6 +139,17 @@ export function AgentBrowserScreenModal({
   // The controller declares what this Surface can take (a tool never pops out
   // or changes provider); the current mode always shows so it stays selected.
   const offered = (mode: RenderMode) => mode === currentMode || controller.renderModes.includes(mode);
+  const providers = BROWSER_PROVIDER_IDS.filter(provider => offered(renderModeFor(provider, 'screencast')) || offered(renderModeFor(provider, 'popout')));
+  const [chosenProvider, setChosenProvider] = useState(() => parseRenderMode(currentMode).provider ?? preferredBrowserProvider(providers));
+  const provider = providers.includes(chosenProvider) ? chosenProvider : preferredBrowserProvider(providers);
+  const chooseProvider = (value: typeof provider) => {
+    setChosenProvider(value);
+    const presentation = parseRenderMode(renderMode).presentation;
+    if (presentation !== 'iframe') {
+      const next = renderModeFor(value, presentation);
+      setRenderMode(offered(next) ? next : renderModeFor(value, 'screencast'));
+    }
+  };
   const embedRefusal = currentMode === 'iframe' ? null : iframeRefusal(chrome?.url ?? '');
   // Only the screencast backend has a Dormouse-settable viewport; pop-out is a
   // native OS window and embed renders at the pane size, so both grey it out.
@@ -147,6 +159,9 @@ export function AgentBrowserScreenModal({
   // screencast's viewport). A swap is gated on whether its option is shown, not
   // on the viewport-drive capability below.
   const switchingMode = renderMode !== currentMode;
+  const screencast = renderModeFor(provider, 'screencast');
+  const popout = renderModeFor(provider, 'popout');
+  const popoutDisplay = browserDisplayMode({ renderMode: popout, syncEngaged: false });
   const selectedViewport = (): BrowserViewportSetting => target === 'sync'
     ? { mode: 'pane-sync' }
     : { mode: 'fixed', width: Number(customW), height: Number(customH), ...(explicitDpr ? { dpr: Number(customDpi) } : {}) };
@@ -174,6 +189,8 @@ export function AgentBrowserScreenModal({
 
   const apply = () => {
     if (applyDisabled) return;
+    const appliedProvider = parseRenderMode(renderMode).provider;
+    if (appliedProvider) rememberBrowserProvider(appliedProvider);
     if (switchingMode) {
       // A mode swap; the viewport sub-controls don't apply to the outgoing
       // surface (and are inert on embed/popout controllers anyway).
@@ -260,36 +277,27 @@ export function AgentBrowserScreenModal({
         <div className="mt-4 flex flex-col gap-3">
           {/* Screencast owns the robot capability glyph; its nested resolution
               modes append the presentation glyph. */}
-          {BROWSER_PROVIDER_IDS.map((provider) => {
-            const screencast = renderModeFor(provider, 'screencast');
-            const popout = renderModeFor(provider, 'popout');
-            if (!offered(screencast) && !offered(popout)) return null;
-            const popoutDisplay = browserDisplayMode({ renderMode: popout, syncEngaged: false });
-            return (
-              <div key={provider} className="flex flex-col gap-3">
-                {offered(screencast) && (
-                  <RenderOption
-                    checked={renderMode === screencast}
-                    onSelect={() => setRenderMode(screencast)}
-                    icon={<AgentRobotIcon size={14} className="shrink-0 text-muted" />}
-                    label={`${BROWSER_PROVIDER_GUI[provider].label} screencast`}
-                    features={[[true, 'agents can read/write'], [true, 'any URL'], [false, 'laggy for humans']]}
-                  >
-                    {renderMode === screencast && <div className="ml-6 mt-2">{viewportControls}</div>}
-                  </RenderOption>
-                )}
-                {offered(popout) && (
-                  <RenderOption
-                    checked={renderMode === popout}
-                    onSelect={() => setRenderMode(popout)}
-                    icon={<BrowserDisplayIcon mode={popoutDisplay} size={14} className="text-muted" />}
-                    label={BROWSER_DISPLAY_LABEL[popoutDisplay]}
-                    features={[[true, 'agents can read/write'], [true, 'any URL'], [true, 'native human experience']]}
-                  />
-                )}
-              </div>
-            );
-          })}
+          <BrowserProviderPicker providers={providers} value={provider} onChange={chooseProvider} />
+          {offered(screencast) && (
+            <RenderOption
+              checked={renderMode === screencast}
+              onSelect={() => setRenderMode(screencast)}
+              icon={<AgentRobotIcon size={14} className="shrink-0 text-muted" />}
+              label="Screencast"
+              features={[[true, 'agents can read/write'], [true, 'any URL'], [false, 'laggy for humans']]}
+            >
+              {renderMode === screencast && <div className="ml-6 mt-2">{viewportControls}</div>}
+            </RenderOption>
+          )}
+          {offered(popout) && (
+            <RenderOption
+              checked={renderMode === popout}
+              onSelect={() => setRenderMode(popout)}
+              icon={<BrowserDisplayIcon mode={popoutDisplay} size={14} className="text-muted" />}
+              label="Popout"
+              features={[[true, 'agents can read/write'], [true, 'any URL'], [true, 'native human experience']]}
+            />
+          )}
           {offered('iframe') && (
             <RenderOption
               checked={renderMode === 'iframe'}

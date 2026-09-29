@@ -33,6 +33,10 @@ Source of truth: `lib/src/components/wall/BrowserPanel.tsx`,
 
 ## Providers
 
+**Must share a compact provider radio selector between port actions and the Display modal**, showing it only when multiple providers are available. Remember explicit port-selector choices and applied automated Display choices in renderer-local storage; default to agent-browser, falling back to an available provider. Opening Display selects the current browser's provider before the preference; changing provider preserves presentation when supported, otherwise selects screencast. Cancel does not change the preference.
+
+Source of truth: `BrowserProviderPicker` in `lib/src/components/wall/BrowserProviderPicker.tsx`; `lib/src/components/wall/TerminalContext.test.tsx` and `lib/src/components/wall/AgentBrowserScreenModal.test.tsx`.
+
 An automated renderer belongs to one **provider**, the CLI that drives its
 browser. **Must read every per-provider fact from the one registry** — render
 modes, CLI, binary for `dor`, the hosts and the webview; label
@@ -180,7 +184,7 @@ Source of truth: `lib/src/components/wall/use-dev-server-ports.ts`,
 
 **Must scan once per context opening**, using the shared per-port URL selection in `docs/specs/dor-cli.md` → Browser Open Target Resolution. Zero/one port uses an inline row; multiple ports use a selector. Failed scans are distinct from no listeners.
 
-**Must offer System browser, Iframe, and each automation provider’s screencast and popout for the selected port**, each target named by its provider's label (`agent-browser`, `agent-browser popout`, `playwright`, `playwright popout`) and disabled with a reason when the host does not offer it (`agent-browser unavailable on this host`). Opening a browser from context always preserves the source terminal, including an untouched one.
+**Must offer System browser, Iframe, Screencast, and Popout once for the selected port**, using the provider selector in Providers for automated targets. Disabled targets explain unavailable capabilities. Opening a browser from context always preserves the source terminal, including an untouched one.
 
 **Must reuse targets per source, port, and provider**: each provider’s screencast and popout share a browser session and switch display modes. **A reuse is one intent, `setRenderMode(mode, { url })`, reaching the Surface's controller by id** (`requestBrowserRenderMode`), so a mode switch relaunches at the port's page rather than racing a navigation into it, even in an unmounted Door. Reattach minimized targets and recreate closed ones. System browser follows the OS opener's behavior.
 
@@ -197,7 +201,7 @@ Source of truth: `openContextPort` in `lib/src/components/Wall.tsx`; `prepareFor
 **Must make the Display modal the GUI for render mode and screencast
 resolution**, the pop-out stub's own Pop back in aside. It splits the Browser
 Chrome icon pair across its nesting: the
-robot rides each provider’s screencast parent, each nested resolution row carrying only
+robot rides the selected provider’s single screencast option, each nested resolution row carrying only
 its presentation glyph.
 
 **Must offer only the render modes the Surface's screen controller declares** (`renderModes`), never the host's global capabilities: both presentations of a provider its host drives (`browserProviders`), the running one's screencast even where it does not; always `iframe`; for a Tool, only its declarable renders (`docs/specs/dor-tool.md` → Declaring tools). **`setRenderMode` refuses any other mode.**

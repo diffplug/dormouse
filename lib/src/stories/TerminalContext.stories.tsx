@@ -89,7 +89,7 @@ function TerminalOutput({ scenario }: { scenario: Scenario }) {
   </>;
 }
 
-function ContextPrototype({ scenario, initialDetail = null, paneWidth, paneHeight }: { scenario: Scenario; initialDetail?: 'title' | 'modify' | 'reset' | null; paneWidth: number; paneHeight: number }) {
+function ContextPrototype({ scenario, initialDetail = null, paneWidth, paneHeight, bothProviders = false }: { bothProviders?: boolean; scenario: Scenario; initialDetail?: 'title' | 'modify' | 'reset' | null; paneWidth: number; paneHeight: number }) {
   const [side, setSide] = useState<ContextSide | undefined>();
   const bounds = { x: 0, y: 0, width: paneWidth, height: paneHeight };
   const placement = placeTerminalContext(bounds, bounds, false, side);
@@ -107,7 +107,7 @@ function ContextPrototype({ scenario, initialDetail = null, paneWidth, paneHeigh
         scan={scenario === 'scanFailed' ? { status: 'failed' } : { status: 'loaded', entries: scenario === 'noPorts' ? [] : ports }}
         watchRule="pnpm" watching={watching} todo={todo} notification={scenario === 'notification' ? { title: 'Tests complete', body: '341 passed, 0 failed' } : null}
         status={preserved ? 'preserved' : scenario === 'running' ? 'running' : scenario === 'autorunOff' ? 'off' : 'completed'} command={command}
-        explorerLabel="Open in Finder" canExplore browserProviders={['agent-browser']} canIframe initialDetail={initialDetail}
+        explorerLabel="Open in Finder" canExplore browserProviders={bothProviders ? ['agent-browser', 'playwright'] : ['agent-browser']} canIframe initialDetail={initialDetail}
         onClose={() => {}} onCopyRef={() => {}} onCopyPath={() => {}} onExplore={() => {}} onPort={() => {
           if (scenario === 'launchPending') return new Promise<void>(() => {});
           if (scenario === 'launchFailed') throw new Error("agent-browser binary not found ('agent-browser' was not found)");
@@ -119,7 +119,7 @@ function ContextPrototype({ scenario, initialDetail = null, paneWidth, paneHeigh
   </div>;
 }
 
-function TerminalContextStory({ initialScenario = 'fresh', initialDetail = null, paneWidth = 900, paneHeight = 680 }: { initialScenario?: Scenario; initialDetail?: 'title' | 'modify' | 'reset' | null; paneWidth?: number; paneHeight?: number }) {
+function TerminalContextStory({ initialScenario = 'fresh', initialDetail = null, paneWidth = 900, paneHeight = 680, bothProviders = false }: { bothProviders?: boolean; initialScenario?: Scenario; initialDetail?: 'title' | 'modify' | 'reset' | null; paneWidth?: number; paneHeight?: number }) {
   const [scenario, setScenario] = useState(initialScenario);
   return <main className="min-h-screen bg-app-bg p-5 font-mono text-sm text-foreground">
     <div className="mb-3 w-[900px]">
@@ -128,7 +128,7 @@ function TerminalContextStory({ initialScenario = 'fresh', initialDetail = null,
         {SCENARIOS.map(item => <button key={item.id} type="button" aria-pressed={scenario === item.id} onClick={() => setScenario(item.id)} className={`rounded px-2 py-1 ${scenario === item.id ? 'bg-header-active-bg text-header-active-fg' : 'text-muted hover:bg-foreground/10'}`}>{item.label}</button>)}
       </div>
     </div>
-    <ContextPrototype key={scenario} scenario={scenario} initialDetail={initialDetail} paneWidth={paneWidth} paneHeight={paneHeight} />
+    <ContextPrototype key={scenario} bothProviders={bothProviders} scenario={scenario} initialDetail={initialDetail} paneWidth={paneWidth} paneHeight={paneHeight} />
   </main>;
 }
 
@@ -206,3 +206,5 @@ export const NarrowResetConfirmation: Story = { args: { initialScenario: 'editor
 
 export const OpeningBrowser: Story = { args: { initialScenario: 'launchPending', paneWidth: 380, paneHeight: 520 } };
 export const BrowserLaunchFailed: Story = { args: { initialScenario: 'launchFailed', paneWidth: 480, paneHeight: 520 } };
+
+export const BrowserProviders: Story = { args: { bothProviders: true, paneWidth: 900, paneHeight: 900 } };
