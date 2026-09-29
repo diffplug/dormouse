@@ -23,6 +23,15 @@ export const VIEW_FOLDER_ARGV = '__view-folder';
  * directories, tested as their names suffixed with it. */
 export const FOLDER_MATCH_SUFFIX = '.📁';
 
+/** The built-in handler for a folder or a file (`own`), its result `name` and
+ * argv verb, and the other kind's handler, which never opens it
+ * (docs/specs/dor-tool.md -> Folders). */
+export function builtinFor(folder: boolean) {
+  return folder
+    ? { kind: 'folder', argv: VIEW_FOLDER_ARGV, own: BUILTIN_FOLDER_TOOL, other: BUILTIN_FILE_TOOL } as const
+    : { kind: 'file', argv: VIEW_FILE_ARGV, own: BUILTIN_FILE_TOOL, other: BUILTIN_FOLDER_TOOL } as const;
+}
+
 export function fileViewerFormat(path: string): { mime: string; text: boolean } | null {
   const name = path.replace(/\\/g, '/').split('/').pop()!.toLowerCase();
   const ext = name.includes('.') ? name.split('.').pop()! : '';

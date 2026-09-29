@@ -53,9 +53,9 @@ Source of truth: `surfaceKindFromParams` / `isToolParams` in `lib/src/components
 
 **Must pass named-tool inputs as argument values, never substitute them into a shell-command string.** String `run` accepts no arguments and remains literal shell syntax. List `run` expands `$TARGET`, `$CWD`, and `$PROJECT_ROOT` within elements; a whole `$ARGS` element expands all input arguments. Without `$ARGS` or `$TARGET` in the list, append the inputs. **Must quote argv for the destination Session's shell**, using the current default only for new Sessions; takeover stores that quoted command for reruns.
 
-**Must require exactly one existing local regular file or directory when `$TARGET` appears in the run list or dedupe key.** Resolve relative paths against the invocation CWD and follow symlinks to a canonical absolute path before substitution and reuse. Reject URLs, missing paths, and every other file kind (fifo, socket, device). Validate run and key inputs before showing approval. Pending approval distinguishes the original arguments and invocation CWD; [Trust](#trust) owns re-resolution and recovery. Input control-character restrictions belong to `docs/specs/security-local.md` → Dor Tool configuration.
+**Must require exactly one existing local regular file or directory when `$TARGET` appears in the run list or dedupe key.** Resolve relative paths against the invocation CWD and follow symlinks to a canonical absolute path before substitution and reuse. **Must accept a `file:` URL only when its host is empty, `localhost`, or this machine's name** (case-insensitive, either side in its short form before the first dot), converting it with the host platform's `fileURLToPath`; reject other URLs, missing paths, and every other file kind (fifo, socket, device). Validate run and key inputs before showing approval. Pending approval distinguishes the original arguments and invocation CWD; [Trust](#trust) owns re-resolution and recovery. Input control-character restrictions belong to `docs/specs/security-local.md` → Dor Tool configuration.
 
-Source of truth: `lookupTool` in `lib/src/host/tool-trust.ts`; `parseToolFile` / `resolveDedupeKey` in `lib/src/host/tool-registry.ts`; `resolveToolInput` in `lib/src/host/tool-input.ts`; `readUserToolFile` in `lib/src/host/tool-user-config.ts`; `toolRunCommand` in `lib/src/components/wall/use-dor-control.ts`; `lib/src/host/tool-host.test.ts`, `lib/src/host/tool-trust.test.ts`, `lib/src/host/tool-open.test.ts`, `lib/src/components/Wall.test.tsx`.
+Source of truth: `lookupTool` in `lib/src/host/tool-trust.ts`; `parseToolFile` / `resolveDedupeKey` in `lib/src/host/tool-registry.ts`; `resolveToolInput` / `resolveLocalToolTarget` in `lib/src/host/tool-input.ts`; `readUserToolFile` in `lib/src/host/tool-user-config.ts`; `toolRunCommand` in `lib/src/components/wall/use-dor-control.ts`; `lib/src/host/tool-host.test.ts`, `lib/src/host/tool-trust.test.ts`, `lib/src/host/tool-input.test.ts`, `lib/src/host/tool-open.test.ts`, `lib/src/components/Wall.test.tsx`.
 
 **Must resolve a Tool's initial viewport host-side with its declaration, including after approval.** Iframe Tools accept only `pane-sync`; automated Tools accept a preset or inline dimensions. **Must preserve live user/agent sizing when reusing a Tool**, rather than reapplying its declaration.
 
@@ -108,11 +108,11 @@ Source of truth: `createToolHost` in `lib/src/host/tool-host.ts`; `FileToolTrust
 | Policy | Selection |
 | --- | --- |
 | Announced port present | Match that exact port in the scan; absent match frames nothing |
-| `port: announced`, no announced port | Frame nothing |
-| `port: auto`, no announced port | Wait for one unchanged scan tick; one port frames, several show a conflict, zero keeps waiting |
+| `port: announced`, no announced port | Frame nothing, without scanning |
+| `port: auto`, no announced port | Wait for one unchanged poll; one port frames, several show a conflict, zero keeps waiting |
 | Anonymous command | Uses `auto` |
 
-- **Must scan unbound Tools on each port announcement and every 1.5 seconds while their command runs.** Reset settle memory and retire browser resources when the observed command-run id changes, even when the command text is unchanged; an initial observation preserves an imported live binding. (rationale)
+- **Must scan unbound Tools every 1.5 seconds while their command runs, and a Tool alone at once when its announced port or path changes**; that scan is never an autobind poll. Reset settle memory and retire browser resources when the observed command-run id changes, even when the command text is unchanged; an initial observation preserves an imported live binding. (rationale)
 - **Must let a changed announced port or path override a committed conflict or browser**, but only after a matching scan. An unchanged announcement never undoes URL-bar navigation. (rationale)
 - **Must stop ordinary port scans once a browser or conflict is committed.** An unannounced additional port appearing after settle is not detected.
 - **Must display the browser destination at once and leave the launch to the Surface's controller** (`docs/specs/dor-browser.md` → Browser Connection), in the session the Tool has or else its own `tool.<leafId>`, falling back to the embed. Block Workspace transfer until the session binds.
@@ -175,7 +175,7 @@ Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `listTools` in `li
 
 **Must run the built-in viewer as a Tool-owned `dor` process.** Text/source previews grant only their opened file and skip dependency inspection. (rationale) Oversized HTML and referenced CSS still stream without dependency inspection. **The grant contains at most 256 files** — the opened document and statically referenced relative HTML/CSS assets within its directory tree — and exceeding that bound fails the open without serving a partial grant. **Never expand the grant through root-relative, external, or dynamic references**; requests can read only granted paths.
 
-**Must title the built-in viewers' Session with the canonical target's basename via `OSC 2`, ahead of `serve`**, controls stripped. (rationale)
+**Must title the built-in viewers' Session with the canonical target's basename via `OSC 2`**, controls stripped. (rationale)
 
 **Must require a user Tool for PDFs**, including files named `README.pdf`. (rationale)
 
@@ -226,13 +226,12 @@ Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` 
 
 ### Terminal links
 
-**Must open a local `file:` `OSC 8` link as a `dor open` from the Session showing it**: a click previews, a double-click's second click (`MouseEvent.detail` 2) pins, and later clicks of that burst do nothing (rationale). The request carries the URL marked `fileUri` and the Session's local CWD, else the target's directory.
+**Must open a local `file:` `OSC 8` link as a `dor open` from the Session showing it**: a click previews, a double-click's second click (`MouseEvent.detail` 2) pins, and later clicks of that burst do nothing (rationale). The request carries the URL ([Declaring tools](#declaring-tools)) and the Session's local CWD, else the target's directory.
 
 - **Must send a link to the confirmation dialog unless its display text names its target**: trimmed, with at most one trailing `ls -F` classifier removed, the text equals the decoded path or a whole-component suffix of it, case-sensitively — `x/README.md` names `/x/README.md`, `EADME.md` does not. A host that is not a plain name, or a control character in the decoded path, sends it there too. The dialog belongs to `docs/specs/terminal-escapes.md` -> "OSC 8 hyperlinks".
-- **Must open a `fileUri` target only when its host is empty, `localhost`, or this machine's name** (case-insensitive, either side in its short form before the first dot), converting it with the host platform's `fileURLToPath`; any other host answers `not a local file link`. Resolution then follows [Opening local files](#opening-local-files); `dor` never sends `fileUri`, so a typed URL stays rejected.
 - **Must fall back to the dialog when the open fails**, a superseded preview excepted — its status, or its error while there is no slot. A host without Tool operations sends every link to the dialog.
 
-Source of truth: `localFileLinkPreviewPath` in `lib/src/lib/external-links.ts`; `activateTerminalLink` in `lib/src/lib/terminal-link-activation.ts`; `createXtermHost` in `lib/src/lib/terminal-lifecycle.ts`; `localFileUrlPath` in `lib/src/host/tool-open.ts`. Tests: `lib/src/lib/external-links.test.ts`, `lib/src/lib/terminal-link-activation.test.ts`, `terminal links` in `lib/src/host/tool-open.test.ts`, `a terminal link` in `lib/src/components/wall/preview-slot.test.tsx`.
+Source of truth: `localFileLinkPreviewPath` in `lib/src/lib/external-links.ts`; `activateTerminalLink` in `lib/src/lib/terminal-link-activation.ts`; `createXtermHost` in `lib/src/lib/terminal-lifecycle.ts`; `resolveLocalToolTarget` in `lib/src/host/tool-input.ts`. Tests: `lib/src/lib/external-links.test.ts`, `lib/src/lib/terminal-link-activation.test.ts`, `local file URLs` in `lib/src/host/tool-input.test.ts`, `file URLs` in `lib/src/host/tool-open.test.ts`, `a terminal link` in `lib/src/components/wall/preview-slot.test.tsx`.
 
 ## Take-over
 

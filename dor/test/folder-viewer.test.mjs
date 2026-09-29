@@ -344,7 +344,7 @@ test('the bundled private entry titles itself, announces its port and path, then
   await files({ 'a.txt': 'a' });
   const { child, viewer, output } = await spawnViewer(withoutControl());
   try {
-    assert.ok(output.startsWith('\x1b]2;root\x07\x1b]367;serve;'), JSON.stringify(output));
+    assert.ok(output.includes('\x1b]2;root\x07'), JSON.stringify(output));
     assert.equal(viewer.v, 1);
     assert.deepEqual((await list(viewer)).entries, [entry('a.txt', 'file')]);
     assert.deepEqual(JSON.parse((await post(viewer, 'select', { path: 'a.txt' })).body), { ok: false, error: 'Dormouse control endpoint is not available in this terminal yet.' });

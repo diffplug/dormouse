@@ -578,8 +578,8 @@ describe('a terminal link', () => {
     await click(2);
     await waitUntil(() => container.querySelector('[data-preview-pill-for="slot"]') === null);
     expect(toolControl.mock.calls.map(([request]) => request)).toEqual([
-      { op: 'open', target: 'file:///repo/a.md', cwd: '/repo', tool: undefined, preview: true, fileUri: true },
-      { op: 'open', target: 'file:///repo/a.md', cwd: '/repo', tool: undefined, fileUri: true },
+      { op: 'open', target: 'file:///repo/a.md', cwd: '/repo', tool: undefined, preview: true },
+      { op: 'open', target: 'file:///repo/a.md', cwd: '/repo', tool: undefined },
     ]);
     expect(typed.slot).toEqual([]);
     expect(getExternalLinkConfirmationSnapshot()).toBeNull();

@@ -59,7 +59,7 @@ it.skipIf(process.platform === 'win32')('keys symlink aliases on the same canoni
   expect(second).toEqual(first);
 });
 
-it.each(['https://example.com/file.md', 'file:///etc/passwd', 'surface:3', 'missing.md'])('rejects %s as a local target', async target => {
+it.each(['https://example.com/file.md', 'file://elsewhere.example/etc/passwd', 'surface:3', 'missing.md'])('rejects %s as a local target', async target => {
   expect(await host().handle({ op: 'open', target, cwd: root })).toMatchObject({ status: 'error' });
 });
 
@@ -234,34 +234,23 @@ ${rules.map(rule => `  - ${rule}\n`).join('')}`;
   });
 });
 
-describe('terminal links', () => {
+describe('file URLs', () => {
   let target: string;
-  /** The `file:` URL a terminal link carries for `path`, naming `host`. */
-  const link = (path: string, host: string) => `file://${host}${pathToFileURL(path).pathname}`;
+  /** Open the `file:` URL a terminal link carries for `target`, naming `hostName`. */
+  const openLink = (hostName: string, extra: { preview?: boolean } = {}) =>
+    host().handle({ op: 'open', target: `file://${hostName}${pathToFileURL(target).pathname}`, cwd: root, ...extra });
   beforeEach(async () => {
     await writeConfig(viewerConfig('*.md'));
     target = join(root, 'docs', 'my notes.md');
     await writeFile(target, 'hi');
   });
 
-  it.each(['', 'localhost', 'dev-box.local', 'DEV-BOX.LOCAL', 'dev-box'])('opens the decoded path of a file URL on host %j', async name => {
-    expect(await host().handle({ op: 'open', target: link(target, name), cwd: root, fileUri: true }))
-      .toMatchObject({ status: 'ok', run: ['view', target], target });
+  it('opens a local file URL as its decoded path, through the open rules', async () => {
+    expect(await openLink('')).toMatchObject({ status: 'ok', run: ['view', target], target });
+    expect(await openLink('dev-box.local', { preview: true })).toMatchObject({ status: 'ok', run: ['view', target], target });
   });
 
-  it('accepts this machine\'s full name when it reports only the short one', async () => {
-    hostname.mockReturnValueOnce('dev-box');
-    expect(await host().handle({ op: 'open', target: link(target, 'dev-box.local'), cwd: root, fileUri: true }))
-      .toMatchObject({ status: 'ok', target });
-  });
-
-  it.each(['elsewhere.example', 'dev-box.example', '127.0.0.1'])('refuses a file URL on host %j', async name => {
-    expect(await host().handle({ op: 'open', target: link(target, name), cwd: root, fileUri: true }))
-      .toEqual({ status: 'error', message: 'not a local file link' });
-  });
-
-  it('refuses a link that is not a file URL, even on this machine', async () => {
-    expect(await host().handle({ op: 'open', target: link(target, 'dev-box.local').replace(/^file:/, 'https:'), cwd: root, fileUri: true }))
-      .toEqual({ status: 'error', message: 'not a local file link' });
+  it('refuses a file URL naming another host', async () => {
+    expect(await openLink('elsewhere.example')).toEqual({ status: 'error', message: expect.stringContaining('not a file on this machine') });
   });
 });

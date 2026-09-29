@@ -317,6 +317,10 @@ export interface ToolSurfaceResponse {
   warnings?: string[];
 }
 
+/** The error a preview answers with when a newer one replaced it while no
+ *  slot exists: superseded, as the `superseded` status is, not failed. */
+export const PREVIEW_SUPERSEDED_ERROR = 'superseded by a newer preview';
+
 /** `dor tool --list`: the Tools `dor tool <name>` would resolve from `cwd`. */
 export interface ToolListRequest {
   cwd: string;

@@ -42,7 +42,7 @@ Successive startup listeners can appear in different scan ticks. One unchanged t
 
 A hardcoded Storybook port can disagree with the port it obtains under contention, while Vite with strict-port behavior can fail entirely. Discovery therefore checks the Session process tree. An OSC can cross SSH, but the current host scan still requires a locally discoverable listener.
 
-Every preview-slot retarget of a serving Tool (the built-in file viewer, `builtin:folder`, a web viewer) otherwise waits up to one 1.5-second poll before its browser frames (2026-09). The `serve` announcement already names the port, so scanning when it arrives removes most of that wait without trusting it any further.
+Every preview-slot retarget of a serving Tool (the built-in file viewer, `builtin:folder`, a web viewer) otherwise waits up to one 1.5-second poll before its browser frames (2026-09). The `serve` announcement already names the port, so scanning when it arrives removes most of that wait without trusting it any further. Its first form ran a full tick per announcement (2026-09-28): every unbound Tool was scanned again milliseconds after the poll, which autobind counted as its unchanged tick, so a boot's first listener could frame before the next one bound.
 
 ## Lifecycle
 
@@ -69,7 +69,7 @@ A CSS source preview escapes its contents, so its URLs cannot load assets. Scann
 
 Keeping the built-in viewer in the Tool's process tree reuses port discovery, kill, restart, and Workspace transfer. An OSC path carries the per-run URL capability without saving that secret in the restart command. Holding the selected file descriptors bounds what the server can read after launch; it trades automatic replacement-file refresh for a grant whose contents cannot widen through path replacement.
 
-Without a title, a viewer's header falls back to its running command, `dor __view-file <path>`, where an editor would show the file name. A serving Tool's name is its dev-server chip, whose label is read when its port first resolves and kept until a reload, so the title rides in the same write ahead of `serve`. The title strips controls because a file name can carry an OSC terminator, C1 ST included, that would end the sequence early.
+Without a title, a viewer's header falls back to its running command, `dor __view-file <path>`, where an editor would show the file name. The title strips controls because a file name can carry an OSC terminator, C1 ST included, that would end the sequence early.
 
 The VS Code host supports Node 18, which lacks native glob matching. Bundled picomatch keeps association behavior the same across hosts. Patterns with separators test both the CWD-relative and canonical absolute path: files above the CWD otherwise start with `../` and can miss patterns intended to cover an absolute directory. Canonicalization also gives symlink aliases one matching identity. Canonicalizing only the target mixed physical and logical paths under a symlinked CWD, so relative slash patterns missed files inside that directory. An absolute target can still be opened after its caller's CWD disappears; matching falls back to the supplied directory in that case.
 
@@ -95,7 +95,7 @@ Supersession stops once a retarget has typed its command. A newer preview interr
 
 xterm.js 6.1.0-beta.304 activates a link on every `mouseup` whose press began on that link, passing the `mouseup`. A two-press double-click sent to Chromium over CDP activated with `detail` 1, then 2 (2026-09-28). `agent-browser dblclick` sends a single press with click count 2, so it activates once and cannot probe this. A triple-click's third activation would be another `dor open`, starting an unkeyed Tool twice.
 
-The display-text rule replaces the dialog's consent: the path the click opens is the text clicked. Output that can run `dor open` gains nothing from a link; output that cannot, such as a remote shell over ssh, names its own host in `ls --hyperlink`, which the host check refuses.
+The display-text rule replaces the dialog's consent: the path the click opens is the text clicked. Output that can run `dor open` gains nothing from a link; output that cannot, such as a remote shell over ssh, names its own host in `ls --hyperlink`, which the host check refuses. OSC 7 locality (`isRemoteFileHost` in `lib/src/lib/terminal-state.ts`) differs: it treats every named host as remote, this machine's name included, while a link naming this machine opens, since `ls --hyperlink` names the local host too.
 
 ## Take-over
 

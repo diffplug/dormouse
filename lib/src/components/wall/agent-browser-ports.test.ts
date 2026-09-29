@@ -39,12 +39,12 @@ describe('dev-server port store', () => {
     const notify = vi.fn();
     const unsubscribe = subscribeDevServerResolutions(notify);
 
-    setDevServerResolution(4000, { paneId: 'pane-a', label: 'pnpm dev' });
-    expect(getDevServerResolution(4000)).toEqual({ paneId: 'pane-a', label: 'pnpm dev' });
+    setDevServerResolution(4000, { paneId: 'pane-a', fallbackTitle: 'pnpm dev' });
+    expect(getDevServerResolution(4000)).toEqual({ paneId: 'pane-a', fallbackTitle: 'pnpm dev' });
     expect(notify).toHaveBeenCalledTimes(1);
 
     // An equal match must not re-notify (keeps useSyncExternalStore stable).
-    setDevServerResolution(4000, { paneId: 'pane-a', label: 'pnpm dev' });
+    setDevServerResolution(4000, { paneId: 'pane-a', fallbackTitle: 'pnpm dev' });
     expect(notify).toHaveBeenCalledTimes(1);
 
     setDevServerResolution(4000, null);
@@ -56,7 +56,7 @@ describe('dev-server port store', () => {
 
   it('notifies rescan subscribers without touching resolutions', () => {
     requestDevServerPort(7000);
-    setDevServerResolution(7000, { paneId: 'pane-r', label: 'pnpm dev' });
+    setDevServerResolution(7000, { paneId: 'pane-r', fallbackTitle: 'pnpm dev' });
 
     const notify = vi.fn();
     const unsubscribe = subscribeDevServerRescan(notify);
@@ -65,7 +65,7 @@ describe('dev-server port store', () => {
     expect(notify).toHaveBeenCalledTimes(1);
     // The signal is optimistic: the current match stays put until a rescan
     // actually overwrites it.
-    expect(getDevServerResolution(7000)).toEqual({ paneId: 'pane-r', label: 'pnpm dev' });
+    expect(getDevServerResolution(7000)).toEqual({ paneId: 'pane-r', fallbackTitle: 'pnpm dev' });
 
     unsubscribe();
     triggerDevServerRescan();
@@ -76,7 +76,7 @@ describe('dev-server port store', () => {
 
   it('keeps the cached resolution when the last watcher releases the port', () => {
     requestDevServerPort(9999);
-    setDevServerResolution(9999, { paneId: 'pane-z', label: 'vite' });
+    setDevServerResolution(9999, { paneId: 'pane-z', fallbackTitle: 'vite' });
     expect(getDevServerResolution(9999)).not.toBeNull();
 
     // Releasing drops the "wanted" interest but KEEPS the cached resolution.
@@ -85,6 +85,6 @@ describe('dev-server port store', () => {
     // The Wall owns clearing stale resolutions (it re-validates re-wanted ports).
     releaseDevServerPort(9999);
     expect(getWantedDevServerPorts()).not.toContain(9999);
-    expect(getDevServerResolution(9999)).toEqual({ paneId: 'pane-z', label: 'vite' });
+    expect(getDevServerResolution(9999)).toEqual({ paneId: 'pane-z', fallbackTitle: 'vite' });
   });
 });

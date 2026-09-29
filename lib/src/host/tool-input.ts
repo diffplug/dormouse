@@ -1,5 +1,7 @@
 import { realpath, stat } from 'node:fs/promises';
+import { hostname } from 'node:os';
 import { isAbsolute, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { hasShellInputControls } from 'dor/commands/shell-quote';
 import { resolveDedupeKey, substituteToolTokens, ToolFileError, usesTarget, type ToolEntry } from './tool-registry';
 
@@ -10,18 +12,18 @@ export interface ToolInput {
   readonly key: string[] | null;
 }
 
-/** A target is one existing regular file or directory on this host. Resolve
- * symlinks before keying, so two paths to the same document reveal the same Tool. */
+/** A target is one existing regular file or directory on this host, spelled
+ * as a path or a local `file:` URL. Resolve symlinks before keying, so two
+ * paths to the same document reveal the same Tool. */
 export async function resolveLocalToolTarget(input: string, cwd: string): Promise<{ path: string; directory: boolean }> {
   if (hasShellInputControls(input) || hasShellInputControls(cwd)) {
     throw new ToolFileError('local paths cannot contain terminal control characters');
   }
-  if (!input || (!isAbsolute(input) && /^[a-z][a-z\d+.-]*:/i.test(input))) {
-    throw new ToolFileError('expected a local path, not a URL or Surface handle');
-  }
+  if (!input) throw new ToolFileError('expected a local path, not a URL or Surface handle');
+  const local = !isAbsolute(input) && /^[a-z][a-z\d+.-]*:/i.test(input) ? localFileUrlPath(input) : input;
   let path: string;
   try {
-    path = await realpath(resolve(cwd, input));
+    path = await realpath(resolve(cwd, local));
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === 'ENOENT' || code === 'ENOTDIR') throw new ToolFileError(`no such file or folder: ${input}`);
@@ -31,6 +33,37 @@ export async function resolveLocalToolTarget(input: string, cwd: string): Promis
   const stats = await stat(path);
   if (!stats.isFile() && !stats.isDirectory()) throw new ToolFileError(`not a regular file or folder: ${input}`);
   return { path, directory: stats.isDirectory() };
+}
+
+/** A `file:` URL as a path on this machine: only a URL whose host is empty,
+ * `localhost`, or this machine's name — whole or before its first dot — names
+ * a file here (`docs/specs/dor-tool.md` -> Declaring tools). Every other URL,
+ * and anything else scheme-shaped such as a Surface handle, is refused. */
+function localFileUrlPath(input: string): string {
+  let url: URL | null = null;
+  try {
+    url = new URL(input);
+  } catch {
+    // Not a URL at all: refused below.
+  }
+  if (url?.protocol !== 'file:') throw new ToolFileError('expected a local path or file: URL, not another URL or a Surface handle');
+  if (!namesThisHost(url.hostname)) throw new ToolFileError(`not a file on this machine: ${input}`);
+  url.hostname = '';
+  try {
+    return fileURLToPath(url);
+  } catch {
+    // An encoded separator, or a Windows URL without a drive or share.
+    throw new ToolFileError(`not a local file path: ${input}`);
+  }
+}
+
+/** The URL parser has already lowercased `host` and turned `localhost` into
+ * the empty host. */
+function namesThisHost(host: string): boolean {
+  if (host === '') return true;
+  const own = hostname().toLowerCase();
+  const short = (value: string) => value.split('.')[0];
+  return host === own || host === short(own) || short(host) === own;
 }
 
 export async function resolveToolInput(

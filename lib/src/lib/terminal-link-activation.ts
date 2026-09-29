@@ -1,13 +1,11 @@
+import { PREVIEW_SUPERSEDED_ERROR } from 'dor/commands/types';
 import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { requestExternalLinkConfirmation } from './external-link-confirmation';
 import { localFileLinkPreviewPath } from './external-links';
 import { getPlatform } from './platform';
 import { dispatchDorControlRequest } from './platform/dor-control-dispatch';
+import { normalizeFileUriPath } from './terminal-state';
 import { getInheritableCwd } from './terminal-state-store';
-
-/** How the preview handler answers a preview that a newer one replaced while
- *  no slot exists: superseded, as the `superseded` status is, not failed. */
-export const PREVIEW_SUPERSEDED_ERROR = 'superseded by a newer preview';
 
 /**
  * An `OSC 8` link click in Session `id` (`docs/specs/dor-tool.md` -> Terminal
@@ -34,17 +32,15 @@ export function activateTerminalLink(
     requestId: `link-${crypto.randomUUID()}`,
     surfaceId: id,
     method: SURFACE_CONTROL_METHODS.tool,
-    params: { file: uri, fileUri: true, preview: event.detail < 2, cwd: getInheritableCwd(id) ?? directoryOf(path) },
+    params: { file: uri, preview: event.detail < 2, cwd: getInheritableCwd(id) ?? directoryOf(normalizeFileUriPath(path)) },
   }, (response) => {
     if (!response.ok && response.error !== PREVIEW_SUPERSEDED_ERROR) requestExternalLinkConfirmation(uri, displayText);
   });
 }
 
-/** The directory of a decoded `file:` path, native enough to run in:
- *  `file:///C:/x` decodes to `/C:/x`, whose directory is `C:/`. */
-function directoryOf(path: string): string {
-  const drive = /^\/[A-Za-z]:\//.test(path);
-  const native = drive ? path.slice(1) : path;
-  const slash = native.lastIndexOf('/');
-  return native.slice(0, slash <= (drive ? 2 : 0) ? slash + 1 : slash);
+/** The parent of a native path with `/` separators; a root keeps its slash,
+ *  so the parent of `C:/x` is `C:/` and of `/x` is `/`. */
+function directoryOf(native: string): string {
+  const dir = native.slice(0, native.lastIndexOf('/'));
+  return /^([A-Za-z]:)?$/.test(dir) ? `${dir}/` : dir;
 }

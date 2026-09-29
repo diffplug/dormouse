@@ -150,7 +150,7 @@ function BrowserChromeStory(args: StoryArgs) {
   useEffect(() => {
     if (port == null) return;
     const label = args.devServerLabel.trim();
-    setDevServerResolution(port, label ? { paneId: 'term-dev', label } : null);
+    setDevServerResolution(port, label ? { paneId: 'term-dev', fallbackTitle: label } : null);
   }, [port, args.devServerLabel]);
 
   const Header = args.tool ? ToolPaneHeader : SurfacePaneHeader;

@@ -7,11 +7,12 @@
  * confirmation dialog.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { PREVIEW_SUPERSEDED_ERROR } from 'dor/commands/types';
 import { SURFACE_CONTROL_METHODS, type DorControlResult } from 'dor/protocol';
 import { clearExternalLinkConfirmation, getExternalLinkConfirmationSnapshot } from './external-link-confirmation';
 import { setPlatform } from './platform';
 import type { PlatformAdapter } from './platform/types';
-import { activateTerminalLink, PREVIEW_SUPERSEDED_ERROR } from './terminal-link-activation';
+import { activateTerminalLink } from './terminal-link-activation';
 import { removeTerminalPaneState, seedTerminalManualCwd } from './terminal-state-store';
 
 const SESSION = 'pane-link';
@@ -42,7 +43,7 @@ describe('activateTerminalLink', () => {
     expect(requests).toEqual([expect.objectContaining({
       surfaceId: SESSION,
       method: SURFACE_CONTROL_METHODS.tool,
-      params: { file: URI, fileUri: true, preview: true, cwd: '/work' },
+      params: { file: URI, preview: true, cwd: '/work' },
     })]);
     expect(getExternalLinkConfirmationSnapshot()).toBeNull();
   });

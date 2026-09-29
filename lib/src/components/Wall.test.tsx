@@ -4296,7 +4296,7 @@ describe('engagement', () => {
       initialMode="command"
     />));
     await flush();
-    await act(async () => { setDevServerResolution(5173, { paneId: 'pane-a', label: 'pnpm dev' }); });
+    await act(async () => { setDevServerResolution(5173, { paneId: 'pane-a', fallbackTitle: 'pnpm dev' }); });
     try {
       const chip = container.querySelector<HTMLButtonElement>('button[aria-label^="Focus pnpm dev"]');
       expect(chip).not.toBeNull();

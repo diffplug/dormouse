@@ -171,6 +171,8 @@ it against terminal panes and minimized doors.
   (`0.0.0.0`, `::`), never a specific non-loopback bind.
 - **The scan stays decorative and off the hot path**, so it may never pile onto
   a tab open or poll forever.
+- **Must label the chip from the serving pane's live state**; a settled port is
+  not rescanned when its pane is retitled.
 
 Source of truth: `lib/src/components/wall/use-dev-server-ports.ts`,
 `lib/src/components/wall/port-url.ts` (`servesLoopback`),

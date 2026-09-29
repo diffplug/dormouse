@@ -6,8 +6,6 @@ import { allowsFileViewerRequest } from './file-viewer-loopback-guard.js';
 const TEXT = 'text/plain; charset=utf-8';
 /** C0, DEL, and C1 controls. */
 const CONTROLS = /[\x00-\x1f\x7f-\x9f]/;
-/** Code points, as the terminal parser bounds a title. */
-const TITLE_LIMIT = 256;
 
 /** Thrown by a route to answer with `status` and `message` as plain text. */
 export class HttpError extends Error {
@@ -88,15 +86,14 @@ export async function startCapabilityViewer({ csp, post = false, chunked = false
 
 /** The Session title naming a viewer's canonical `target`: its basename, or
  * the whole path for a filesystem root. Controls are stripped, since a file
- * name can carry an OSC terminator, and the result is bounded. */
+ * name can carry an OSC terminator; the terminal parser bounds its length. */
 export function viewerTitle(target: string): string {
-  return Array.from(basename(target) || target).filter(c => !CONTROLS.test(c)).slice(0, TITLE_LIMIT).join('');
+  return Array.from(basename(target) || target).filter(c => !CONTROLS.test(c)).join('');
 }
 
 /** Stops `viewer` on SIGINT or SIGTERM, and returns what the `dor __view-*`
- * entry prints for its caller: an OSC 2 title naming `target`, then the OSC 367
- * `serve` announcement. The title comes first, so the Session is named by the
- * time serving begins (docs/specs/dor-tool.md -> Opening local files). */
+ * entry prints for its caller: an OSC 2 title naming `target` and the OSC 367
+ * `serve` announcement (docs/specs/dor-tool.md -> Opening local files). */
 export function announceViewer(viewer: { port: number; path: string; close(): Promise<void> }, target: string): string {
   const stop = () => { void viewer.close().then(() => { process.exitCode = 0; }); };
   process.once('SIGINT', stop);

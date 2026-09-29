@@ -14,7 +14,7 @@ import type {
   ParseResult,
   ToolSurfaceResponse,
 } from 'dor/commands/types';
-import { hasBrowser, hasTerminal } from 'dor/commands/types';
+import { hasBrowser, hasTerminal, PREVIEW_SUPERSEDED_ERROR } from 'dor/commands/types';
 import { MAX_AWAIT_TIMEOUT_MS } from '../../lib/alert-manager';
 import type { OpenPort } from '../../lib/platform/types';
 import type { ToolKeyScope, ToolRender } from '../../lib/platform/tool-types';
@@ -68,7 +68,6 @@ import { listenerUrlsByPort } from './port-url';
 import { becomeToolMeta, dorDirectionForEdge, toolLeafMeta, type LathWallEngine } from './lath-wall-engine';
 import type { WallNav } from './keyboard/types';
 import { toolCommandFromParams } from '../../lib/session-save';
-import { PREVIEW_SUPERSEDED_ERROR } from '../../lib/terminal-link-activation';
 import type { LeafMeta } from '../../lib/lath/persistence';
 import type { DooredItem } from './wall-types';
 
@@ -112,7 +111,6 @@ export type DorControlParams = {
   setting?: unknown;
   initialViewport?: unknown;
   preview?: unknown;
-  fileUri?: unknown;
 };
 
 // The webview view of a control request: the shared wire payload, but with
@@ -1101,8 +1099,6 @@ export function useDorControl({
             ? {
               op: 'open', target: openFile, cwd, tool: stringParam(params.tool),
               ...(previewSignal ? { preview: true } : {}),
-              // Only a terminal link sets it (`activateTerminalLink`): the target is its `file:` URL.
-              ...(booleanParam(params.fileUri) ? { fileUri: true } : {}),
             }
             : { op: 'lookup', name: toolName!, cwd, args: toolArgs, global: booleanParam(params.global) });
           if (unavailable() || answeredSuperseded()) return;

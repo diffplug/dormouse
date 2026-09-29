@@ -106,7 +106,9 @@ export function useToolServing({
     if (!platform.getOpenPorts) return;
     let cancelled = false;
 
-    const tick = async () => {
+    /** One scan pass over every tool leaf, or over `only` — the leaves an
+     *  announcement named, leaving every other leaf's settle state alone. */
+    const tick = async (only?: ReadonlySet<string>) => {
       if (paused()) return;
       const leaves = toolLeaves(lath, doorsRef.current);
       // A killed tool never reaches the exit branch below, so prune by absence.
@@ -123,6 +125,7 @@ export function useToolServing({
       // no leaf can be retired out from under a later one.
       const scanning: { leaf: ToolLeaf; run: CommandRun; announcedPort: number | null; announcedPath: string }[] = [];
       for (const leaf of leaves) {
+        if (only && !only.has(leaf.id)) continue;
         const run = getTerminalPaneState(leaf.id).currentCommand;
         const runId = run?.id ?? null;
         const runChanged = observedRuns.current.has(leaf.id) && observedRuns.current.get(leaf.id) !== runId;
@@ -170,6 +173,10 @@ export function useToolServing({
           && (leaf.params.toolAnnouncedPort !== announcedPort || appliedPath !== announcedPath);
         if (!running) continue;
         if ((hasUrl || hasConflict) && !announcementChanged) continue;
+        // `announced` never guesses: no announcement, nothing to scan for. An
+        // announcement's own scan never counts as an autobind settle tick,
+        // which two scans milliseconds apart would make meaningless.
+        if (announcedPort === null && (only || leaf.params.toolPort !== 'auto')) continue;
         scanning.push({ leaf, run, announcedPort, announcedPath });
       }
 
@@ -199,9 +206,6 @@ export function useToolServing({
           // announced port that nothing bound frames nothing.
           entry = entries.find((candidate) => candidate.port === announcedPort);
           if (!entry) continue;
-        } else if (leaf.params.toolPort !== 'auto') {
-          // `announced`: never guess. No announcement, no browser.
-          continue;
         } else {
           // Autobind. Do not commit on first sighting: ports appear one at a
           // time during boot, so framing the first one seen would frame
@@ -254,32 +258,41 @@ export function useToolServing({
     // interval. Without this guard a second tick re-enters a leaf whose `url`
     // is not written yet and frames it twice. A poll that lands mid-tick is
     // dropped; an announcement is not, since the tick in flight decided its
-    // scans before the announcement existed, so it runs one follow-up tick.
+    // scans before the announcement existed: its leaf waits in `pending` for
+    // a run of its own once the tick settles.
     let ticking = false;
-    let followUp = false;
-    const runTick = async () => {
-      if (ticking) return;
+    const pending = new Set<string>();
+    const runTick = async (full: boolean) => {
+      if (ticking || (!full && pending.size === 0)) return;
       ticking = true;
       try {
-        do {
-          followUp = false;
+        if (full) {
+          // A full tick reads every announcement recorded so far.
+          pending.clear();
           await tick();
-        } while (followUp && !cancelled);
+        }
+        while (pending.size > 0 && !cancelled) {
+          const only = new Set(pending);
+          pending.clear();
+          await tick(only);
+        }
       } finally {
         ticking = false;
       }
     };
 
-    // An announcement names the port the next poll would find, so scan now
-    // rather than up to a poll interval later. It still only selects: the
-    // announced port must appear in the scan.
+    // An announcement names the port the next poll would find, so scan that
+    // Tool now rather than up to a poll interval later. It still only selects:
+    // the announced port must appear in the scan. The run waits for a
+    // microtask, since the announcement is recorded mid-chunk and a later event
+    // in that chunk (a command start) can retire it.
     const unsubscribe = subscribeToToolAnnounces((id) => {
       if (!toolLeaves(lath, doorsRef.current).some((leaf) => leaf.id === id)) return;
-      followUp = true;
-      void runTick();
+      pending.add(id);
+      queueMicrotask(() => void runTick(false));
     });
-    void runTick();
-    const timer = setInterval(() => void runTick(), POLL_MS);
+    void runTick(true);
+    const timer = setInterval(() => void runTick(true), POLL_MS);
     return () => {
       cancelled = true;
       unsubscribe();

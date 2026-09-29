@@ -2,9 +2,13 @@ import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { pathToFileURL } from 'node:url';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveLocalToolTarget, resolveToolInput } from './tool-input';
 import { parseToolFile } from './tool-registry';
+
+const hostname = vi.hoisted(() => vi.fn(() => 'Dev-Box.local'));
+vi.mock('node:os', async importOriginal => ({ ...await importOriginal<typeof import('node:os')>(), hostname }));
 
 const context = { cwd: '/repo', projectRoot: '/repo', args: [] as string[] };
 const entry = { name: 'viewer', run: ['viewer', '$ARGS'], dedupeTemplate: null };
@@ -60,5 +64,35 @@ describe('local targets', () => {
       await expect(resolveToolInput({ ...entry, run: ['viewer', '$TARGET'] }, { ...context, cwd: dir, args: ['alias'] }))
         .resolves.toMatchObject({ run: ['viewer', join(dir, 'folder')] });
     } finally { await rm(dir, { recursive: true, force: true }); }
+  });
+});
+
+describe('local file URLs', () => {
+  let dir: string;
+  let target: string;
+  /** Resolve the `file:` URL a terminal link carries for `target`, naming `host`. */
+  const openLink = (host: string) => resolveLocalToolTarget(`file://${host}${pathToFileURL(target).pathname}`, dir);
+  beforeEach(async () => {
+    dir = await realpath(await mkdtemp(join(tmpdir(), 'dor-input-urls-')));
+    target = join(dir, 'my notes.md');
+    await writeFile(target, 'hi');
+  });
+  afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
+
+  it.each(['', 'localhost', 'dev-box.local', 'DEV-BOX.LOCAL', 'dev-box'])('resolves the decoded path of a file URL on host %j', async host => {
+    expect(await openLink(host)).toEqual({ path: target, directory: false });
+  });
+
+  it('accepts this machine\'s full name when it reports only the short one', async () => {
+    hostname.mockReturnValueOnce('dev-box');
+    expect(await openLink('dev-box.local')).toEqual({ path: target, directory: false });
+  });
+
+  it.each(['elsewhere.example', 'dev-box.example', '127.0.0.1'])('refuses a file URL on host %j', async host => {
+    await expect(openLink(host)).rejects.toThrow('not a file on this machine');
+  });
+
+  it.each(['https://dev-box.local/x', 'surface:3'])('refuses %s, which is not a file URL', async input => {
+    await expect(resolveLocalToolTarget(input, dir)).rejects.toThrow('expected a local path or file: URL');
   });
 });

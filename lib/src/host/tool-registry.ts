@@ -7,7 +7,7 @@
  * bundle.
  */
 import { isMap, isScalar, parseDocument as parseYamlDocument, type Document } from 'yaml';
-import { BUILTIN_FILE_TOOL, BUILTIN_FOLDER_TOOL, FOLDER_MATCH_SUFFIX } from 'dor/file-viewer-format';
+import { builtinFor, FOLDER_MATCH_SUFFIX } from 'dor/file-viewer-format';
 import { isRecord } from '../lib/is-record';
 import { truncateText } from '../lib/osc-sanitize';
 import { hasShellInputControls } from 'dor/commands/shell-quote';
@@ -319,17 +319,18 @@ function parseOpenRules(node: unknown, tools: ReadonlyMap<string, ToolEntry>, pa
   if (!Array.isArray(node)) throw new ToolFileError(`${path}: 'open' must be an ordered list`);
   return node.map((rule: unknown) => {
     if (!isRecord(rule) || typeof rule.match !== 'string' || !rule.match) {
-      throw new ToolFileError(`${path}: each open rule needs a match pattern and a tool defined in this user file`);
+      throw new ToolFileError(`${path}: each open rule needs a match pattern`);
     }
     const unknown = Object.keys(rule).find(key => !OPEN_RULE_FIELDS.includes(key));
     if (unknown !== undefined) {
       throw new ToolFileError(`${path}: open rule for '${String(rule.tool)}' has an unknown field '${unknown}' (known: ${OPEN_RULE_FIELDS.join(', ')})`);
     }
     const folder = rule.match.endsWith(FOLDER_MATCH_SUFFIX);
+    const { own, other } = builtinFor(folder);
     const handler = (field: 'tool' | 'preview'): string => {
       const name = rule[field];
-      if (name === BUILTIN_FILE_TOOL || name === BUILTIN_FOLDER_TOOL) {
-        if ((name === BUILTIN_FOLDER_TOOL) === folder) return name;
+      if (name === own) return own;
+      if (name === other) {
         throw new ToolFileError(`${path}: open rule '${rule.match}' names ${name} as its ${field}, which opens ${folder ? 'files' : 'folders'}, `
           + (folder ? `but a pattern ending in ${FOLDER_MATCH_SUFFIX} matches only folders` : `but only a pattern ending in ${FOLDER_MATCH_SUFFIX} matches folders`));
       }

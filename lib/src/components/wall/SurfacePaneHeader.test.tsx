@@ -16,6 +16,7 @@ import {
   type ScreenSnapshot,
 } from './agent-browser-screen';
 import { setDevServerResolution } from './agent-browser-ports';
+import { removeTerminalPaneState, setTerminalUserTitle } from '../../lib/terminal-state-store';
 import {
   ModeContext,
   WorkspaceActiveContext,
@@ -111,7 +112,7 @@ describe('SurfacePaneHeader — preview slot', () => {
     const id = 'preview-tool-header';
     const registration = register(id);
     // A serving Tool's name is the dev-server chip for its own port.
-    setDevServerResolution(5173, { paneId: id, label: 'README.md' });
+    setDevServerResolution(5173, { paneId: id, fallbackTitle: 'README.md' });
     try {
       const onPinPreview = vi.fn();
       renderHeader({ ...headerProps(id, 'viewer'), params: { surfaceType: 'tool', toolPreview: true, url: CHROME.url } }, stubActions({ onPinPreview }), { tool: true });
@@ -141,7 +142,7 @@ describe('SurfacePaneHeader — preview slot', () => {
   it('marks nothing on a pinned Tool', () => {
     const id = 'pinned-tool-header';
     const registration = register(id);
-    setDevServerResolution(5173, { paneId: id, label: 'README.md' });
+    setDevServerResolution(5173, { paneId: id, fallbackTitle: 'README.md' });
     try {
       renderHeader({ ...headerProps(id, 'viewer'), params: { surfaceType: 'tool', url: CHROME.url } }, stubActions(), { tool: true });
       expect(container.querySelector(`[data-preview-pill-for="${id}"]`)).toBeNull();
@@ -513,7 +514,7 @@ describe('SurfacePaneHeader — browser chrome', () => {
 
   it('renders the dev-server chip and focuses the serving pane on click', () => {
     const reg = register('pane-dev');
-    setDevServerResolution(5173, { paneId: 'term-9', label: 'pnpm dev' });
+    setDevServerResolution(5173, { paneId: 'term-9', fallbackTitle: 'pnpm dev' });
     const onFocusPane = vi.fn();
     renderHeader(headerProps('pane-dev', 'x'), stubActions({ onFocusPane }));
 
@@ -532,6 +533,40 @@ describe('SurfacePaneHeader — browser chrome', () => {
     expect(onFocusPane).toHaveBeenCalledWith('term-9');
 
     reg.dispose();
+  });
+
+  it('labels the chip from the serving pane\'s live state, so a retitle shows at once', () => {
+    const reg = register('pane-live');
+    setDevServerResolution(5173, { paneId: 'term-live', fallbackTitle: 'stored' });
+    try {
+      renderHeader(headerProps('pane-live', 'x'), stubActions());
+      const chipLabel = () => container.querySelector('button[aria-label$="serves this localhost port"]')?.getAttribute('aria-label');
+      expect(chipLabel()).toBe('Focus stored — serves this localhost port');
+      act(() => { setTerminalUserTitle('term-live', 'first.md'); });
+      expect(chipLabel()).toBe('Focus first.md — serves this localhost port');
+      act(() => { setTerminalUserTitle('term-live', 'second.md'); });
+      expect(chipLabel()).toBe('Focus second.md — serves this localhost port');
+    } finally {
+      reg.dispose();
+      setDevServerResolution(5173, null);
+      removeTerminalPaneState('term-live');
+    }
+  });
+
+  it('lets the URL give up all its width before the chip truncates', () => {
+    // jsdom has no layout: the URL grows from a zero basis up to its text, and
+    // the space it leaves goes to an auto margin rather than a flexible spacer.
+    const reg = register('pane-width');
+    setDevServerResolution(5173, { paneId: 'term-9', fallbackTitle: 'pnpm dev' });
+    try {
+      renderHeader(headerProps('pane-width', 'x'), stubActions());
+      const url = container.querySelector<HTMLElement>('span[title="Vite + React"]')!;
+      expect([...url.classList]).toEqual(expect.arrayContaining(['basis-0', 'grow', 'max-w-max', 'min-w-0']));
+      expect(url.nextElementSibling?.className).toBe('ml-auto');
+    } finally {
+      reg.dispose();
+      setDevServerResolution(5173, null);
+    }
   });
 
   it('exposes back/forward/reload nav controls', () => {

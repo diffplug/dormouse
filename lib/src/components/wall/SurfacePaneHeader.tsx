@@ -209,8 +209,8 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
               <>
                 {/* Dev-server connection chip — in front of the URL when the port
                     maps to a single pane; click focuses that terminal. The full
-                    command shows by default (no fixed cap); it only truncates
-                    after the URL path has, since the URL shrinks far faster.
+                    label shows by default (no fixed cap); it truncates only once
+                    the URL path, whose flex basis is zero, has none left.
                     Absent ⇒ no chip + full host+path. */}
                 {devServer && (
                   <button
@@ -227,10 +227,11 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
 
                 {/* URL is the path only when a chip fronts it (domain is in the
                     chip), else the full host+path. Click to edit/navigate; HTML
-                    <title> / full URL → tooltip. Gives up width (shrink-[10]) long
-                    before the command does. */}
+                    <title> / full URL → tooltip. Inline it grows from a zero
+                    basis up to its text, so it gives up all its width before the
+                    chip shrinks at all. */}
                 <span
-                  className={clsx(placement === 'popover' && 'basis-full', 'min-w-0 shrink-[10] cursor-text truncate font-medium underline-offset-2 hover:underline', preview && PREVIEW_LABEL_CLASS)}
+                  className={clsx(placement === 'popover' ? 'basis-full' : 'max-w-max grow basis-0', 'min-w-0 cursor-text truncate font-medium underline-offset-2 hover:underline', preview && PREVIEW_LABEL_CLASS)}
                   title={[preview && 'Preview', chrome.title ?? chrome.url].filter(Boolean).join(' — ') || undefined}
                   onMouseDown={(e) => e.stopPropagation()}
                   role="button"
@@ -240,8 +241,10 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
                 >{urlText || title || id}</span>
                 {previewPill}
 
-                {/* Flexible spacer keeps the layout buttons right-aligned. */}
-                {placement !== 'popover' && <div className="min-w-0 flex-1" />}
+                {/* Takes the space the URL leaves, keeping the layout buttons
+                    right-aligned; an auto margin, so it never competes with the
+                    URL for width. */}
+                {placement !== 'popover' && <div className="ml-auto" />}
               </>
             )}
           </>

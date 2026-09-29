@@ -24,11 +24,15 @@ export function recordToolAnnounce(id: string, announce: ToolAnnounce | null): v
     announces.delete(id);
     return;
   }
+  const previous = announces.get(id);
   announces.set(id, announce);
+  // The serving poll retries an unchanged destination; only a new one is news.
+  if ((previous?.port ?? null) === announce.port && previous?.path === announce.path) return;
   for (const listener of listeners) listener(id);
 }
 
-/** Called with the Session id on every recorded announcement, never on a clear. */
+/** Called with the Session id when a recorded announcement names a port or
+ *  path the stored one did not, never on a clear. */
 export function subscribeToToolAnnounces(listener: (id: string) => void): () => void {
   listeners.add(listener);
   return () => { listeners.delete(listener); };

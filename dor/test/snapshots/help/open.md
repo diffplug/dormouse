@@ -7,7 +7,7 @@ USAGE
   dor open [--json] [--minimize] [--fresh] [--surface id|ref] [--workspace ref] [--cwd path] [--tool name] [--preview] <path>
   dor open --help
 
-Opens one existing local file or folder. Relative paths resolve from the caller's directory (or --cwd); symlink aliases resolve to the same path. URLs and Surface handles are not accepted.
+Opens one existing local file or folder. Relative paths resolve from the caller's directory (or --cwd); symlink aliases resolve to the same path. A file: URL naming this machine is accepted as its path; other URLs and Surface handles are not.
 
 The first matching rule in the user dormouse.yml selects a user Tool or a built-in viewer. --tool chooses a handler explicitly. Without a matching rule, the built-in file viewer opens supported HTML, text/source, image, and media files. PDFs require a user Tool association or --tool <name>. Use --tool builtin:file to select it explicitly. Markdown is shown as source text; a user Tool can provide rendered Markdown. Project associations and project Tools never participate in this lookup. The user file is $XDG_CONFIG_HOME/dormouse/dormouse.yml, or ~/.config/dormouse/dormouse.yml.
 

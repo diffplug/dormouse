@@ -714,7 +714,8 @@ function finishedActivity(exitCode: number | undefined): ShellActivity {
   return exitCode === undefined ? { kind: 'finished' } : { kind: 'finished', exitCode };
 }
 
-function normalizeFileUriPath(pathname: string): string {
+/** A decoded `file:` URL path as a native one: `/C:/x` is `C:/x`. */
+export function normalizeFileUriPath(pathname: string): string {
   if (/^\/[A-Za-z]:\//.test(pathname)) return pathname.slice(1);
   return pathname;
 }
