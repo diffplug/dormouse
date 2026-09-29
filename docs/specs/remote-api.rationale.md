@@ -12,6 +12,10 @@
 
 In September 2026, both production installations use `createAskSurfaceProvider`: resolution selects a routing key and applies the requested size, while `streamPty` separately owns the subscription. The former `SurfaceHandle.release` was a no-op in that shared constructor; a test-only release counter suggested a second resource lifetime that neither host had.
 
+## Transport
+
+**Why the goodbye exists.** Before it, a Burrow that disposed a relayed session told the Client nothing: no Burrow→Relay frame drops a client, the Client's requests carry no timeout, and its keepalives keep its own idle clock fresh, so a relayed phone whose session was taken back froze with every keystroke dropped until it was reloaded. A direct session already learned of it, from its channel closing. The goodbye is a control message rather than a protocol-v1 event so it reaches a Client below the remote-api layer, where burrow loss is reported, and so an older Client — which ignores unknown control shapes — is no worse off than before.
+
 ## Direct path
 
 **Why host candidates alone reach.** The shipped deployment is a tailnet: the Burrow's tailnet address is a host candidate the phone can route to, and the phone's own mDNS-obfuscated candidate is learned peer-reflexively from the first packet. A STUN server would buy a public reflexive candidate the deployment does not need, at the price of telling a third party both addresses.
@@ -58,7 +62,11 @@ In September 2026, the Viewer-local 60ms restoration timer could overwrite a lat
 
 ## Size authority: last-attach-wins
 
-**What the pane is left at when a session ends.** A one-time connection run end to end (standalone harness, phone page in Chrome, 2026-09) ended with the laptop's PTY at the phone's 53×28, and typing into that pane on the laptop changed nothing: the owning xterm refits only when its box, its layout, or its mount changes. Taking a pane back on focus or a keystroke would steal it from a phone still attached, which is never told (`terminal.resize` is staged), so it waits on the tethering display that would show the steal.
+**Why a held pane does not re-fit.** A one-time connection run end to end (standalone harness, phone page in Chrome, 2026-09) left the laptop pane at the phone's grid (53×28) in its top-left with the rest empty, unexplained, and still at that size after the phone left. A local refit that took the size back while the phone was attached would re-wrap every line on the phone, which is never told (`terminal.resize` is staged), so a held pane keeps the phone's grid and explains itself with the strip instead; focus and keystrokes are not taken as a request for the size for the same reason.
+
+**Why Take back ends the session.** Chosen by the product owner (2026-09) over re-sizing the phone to the laptop's grid: the phone never resizes, so there is no protocol-v1 event and no phone-side strip, and the person at the laptop — who owns every terminal — gets their pane back in one click. A Pocket session ended this way is not an unpairing; the phone reconnects with one presence prompt.
+
+**Why a release names a lease as well as a holder.** A session's own attachments overlap: re-attaching the pane it already holds, or an attach superseded by one to the same pane, sends the earlier attachment's release after the later one took the hold. With the holder alone that release would free the newer hold and re-fit the pane under a phone still attached.
 
 ## Input authority and multiple viewers
 

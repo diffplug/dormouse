@@ -14,6 +14,7 @@
 
 import {
   ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
+  SESSION_END_V1,
   type DirectPath,
   type DirectRelayCause,
   type DirectSignalV1,
@@ -45,6 +46,29 @@ export function sealControl(session: NoiseTransportSession, value: object): Uint
 export interface RemoteApiSessionLike {
   handle(data: unknown): void;
   dispose(): void;
+}
+
+/**
+ * What an owner hands the remote-api handler it builds for one authorized
+ * session — the argument of both runtimes' `createSession`.
+ */
+export interface RemoteApiSessionContext {
+  /** The Burrow id the hello reports: the enrollment's, or a one-time room's. */
+  readonly burrowId: string;
+  /** Put one remote-api message on this session. */
+  readonly send: (payload: unknown) => void;
+  /**
+   * Who this session is to the person at the Burrow, as plain text: the ACL
+   * record's label, bounded again with `boundedPairingLabel`, or a one-time
+   * phone's member of `ONE_TIME_DEVICE_LABELS`.
+   */
+  readonly label: string;
+  /**
+   * End this session on purpose, the way its owner ends one: the Client hears
+   * the goodbye ({@link EstablishedE2eSession.end}), then everything the
+   * session holds goes. A no-op once the session is over.
+   */
+  readonly end: () => void;
 }
 
 export interface EstablishedE2eSessionDeps {
@@ -152,6 +176,20 @@ export class EstablishedE2eSession {
    */
   onRelayFrame(ct: string): void {
     this.#direct.onRelayFrame(ct);
+  }
+
+  /**
+   * End this session on purpose: tell the Client with the goodbye, on whichever
+   * path it rides, then {@link dispose}. **Only for an ending the Burrow chose
+   * while the cipher is healthy** — a poisoned session has nothing to say, and
+   * {@link sealControl} answers nothing for one, so this degrades to the
+   * dispose. Never a substitute for it: the dispose always follows.
+   */
+  end(): void {
+    if (this.#disposed) return;
+    const goodbye = sealControl(this.#session, SESSION_END_V1);
+    if (goodbye) this.#direct.send(goodbye);
+    this.dispose();
   }
 
   /** Close the direct path, then the remote-api handler. Idempotent. */

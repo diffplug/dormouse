@@ -272,6 +272,21 @@ export interface DenyParams {
   pairingId: string;
 }
 
+/**
+ * A pane strip's Take back (`docs/specs/remote-api.md` → "Size authority"):
+ * end the remote session whose holder id the pane was held under. The id is
+ * opaque and names one live session; knowing one lets a webview end that
+ * session, which its person can already do from the panel, and nothing else.
+ */
+export interface TakeBackParams {
+  holder: string;
+}
+
+/** Whether a session was ended. `false` when none holds under that id any more. */
+export interface TakeBackResult {
+  ended: boolean;
+}
+
 /** Answers an outstanding {@link BurrowAsk}; `burrowRequestId` is the ask's, not a new one. */
 export interface AnswerParams {
   burrowRequestId: string;

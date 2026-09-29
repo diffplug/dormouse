@@ -268,7 +268,7 @@ Use glossary names instead. A left-column term retains meaning only where noted.
 | **face** | Retired — capabilities are named by the kinds: "console face" → **terminal**, "web face" → **browser**. Gate with `hasTerminal` / `hasBrowser`, never a face-set. |
 | **Host** | Retired as the remote-control role → **Burrow** ([Roles](#roles)). Keeps the platform sense — the process behind the webview — plus the `Host` header, hostnames, and "self-host". |
 | **Server** | Retired for the coordinating server → **Relay**. Keeps HTTP servers, `net.Server`, dev servers, and "self-host". |
-| **tether** | Remote-control only (`docs/specs/remote-api.md`): a display showing "tethering to \<device\>" has ceded terminal size authority to a remote viewer — the semantics hold today, the display is staged. Never a layout term, never for Pane/Door relationships. |
+| **tether** | Remote-control only (`docs/specs/remote-api.md`): a pane whose size a remote viewer holds has ceded terminal size authority to it — the Burrow's own pane shows the holder in its strip; another viewer's "tethering to \<device\>" display is staged. Never a layout term, never for Pane/Door relationships. |
 
 Remote-only vocabulary (**Viewer**, and the wire-level `DirectoryEntry` projection of a pane) is defined in `docs/specs/remote-api.md`.
 

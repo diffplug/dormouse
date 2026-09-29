@@ -553,6 +553,29 @@ describe('connecting, end to end', () => {
     await expect(pending).rejects.not.toThrow(/evil\.example/);
   });
 
+  it('leaves the wall when the Burrow ends a relayed session, rather than freezing', async () => {
+    // Take back, or a newer session from this phone: the Burrow disposes the
+    // session, and on the relay nothing else would ever tell the phone — its
+    // requests have no timeout and its keepalives keep its own clock fresh.
+    const harness = await makeE2eHarness();
+    await harness.connectPaired();
+    expect(harness.client.transportPath).toBe('relay');
+    const gone = vi.fn();
+    harness.client.setOnBurrowGone(gone);
+    // The ACL record's label, as the pane this session holds names it.
+    expect(harness.sessions[0]!.label).toBe('iPhone Safari');
+
+    harness.sessions[0]!.end();
+
+    await waitFor(() => gone.mock.calls.length > 0, 'the goodbye to reach the phone');
+    expect(gone).toHaveBeenCalledWith(true);
+    expect(harness.client.connectedBurrowId).toBeNull();
+    expect(harness.burrow.establishedSessionCount).toBe(0);
+    await expect(harness.client.hello()).rejects.toThrow();
+    // Still paired: the next connection is one presence prompt away.
+    expect(await harness.client.connect(harness.burrowId)).toMatchObject({ ok: true });
+  });
+
   it('leaves the phone connected to nothing when the Burrow drops', async () => {
     const harness = await makeE2eHarness();
     await harness.pairAndApprove(await harness.mintInvitation());
@@ -651,11 +674,11 @@ describe('keepalives on an established session', () => {
 
   it('ends a session the Burrow has already reaped, rather than hanging on it', async () => {
     // The Burrow disposes a session it has not decrypted a Client message on for
-    // `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` and sends nothing when it does; the
-    // relay socket is to the *Relay*, so nothing closes. Keepalives pause
-    // while the page is hidden, so a phone in a pocket crosses that line on its
-    // own — and without this it comes back to a wall whose every request hangs
-    // forever with no error.
+    // `ESTABLISHED_E2E_IDLE_TIMEOUT_MS`, and its goodbye goes out while this
+    // page is suspended; the relay socket is to the *Relay*, so nothing closes.
+    // Keepalives pause while the page is hidden, so a phone in a pocket crosses
+    // that line on its own — and without this it comes back to a wall whose
+    // every request hangs forever with no error.
     let now = Date.now();
     const { harness, timers, visibility } = await connected(() => now);
     const gone = vi.fn();
@@ -861,6 +884,20 @@ describe('the direct path, end to end', () => {
     expect(gone).toHaveBeenCalledOnce();
     expect(run.harness.client.connectedBurrowId).toBeNull();
     expect(run.harness.client.transportPath).toBe('relay');
+  });
+
+  it('ends both ends when the Burrow ends a direct session on purpose', async () => {
+    const run = await connectedDirect();
+    await run.cutover();
+    const gone = vi.fn();
+    run.harness.client.setOnBurrowGone(gone);
+
+    run.harness.sessions[0]!.end();
+
+    await waitFor(() => gone.mock.calls.length > 0, 'the phone to leave the wall');
+    expect(gone).toHaveBeenCalledOnce();
+    expect(run.harness.client.connectedBurrowId).toBeNull();
+    expect(run.burrowPeers[0]!.closed).toBe(true);
   });
 
   it('disposes the Client’s session on a relay frame that arrives after the switch', async () => {

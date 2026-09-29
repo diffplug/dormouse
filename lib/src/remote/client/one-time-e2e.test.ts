@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ONE_TIME_DIRECT_DEADLINE_MS,
   fromBase64Url,
+  parseOneTimeLinkUrl,
   toBase64Url,
   utf8Decode,
   utf8Encode,
@@ -54,6 +55,15 @@ import {
   type TestRendezvous,
 } from '../test-rendezvous';
 import { createTestClock, type TestClock } from '../test-timers';
+import { createAskSurfaceProvider } from '../../host/remote/ask-surface-provider';
+import { createEphemeralBurrowStateStore } from '../../host/remote/burrow-state-store';
+import { BurrowService } from '../../host/remote/service';
+import type { OneTimeEvent, PairingQueueEvent } from '../../host/remote/service-protocol';
+import { FakePtyAdapter, setPlatform, type PlatformAdapter } from '../../lib/platform';
+import { clearSizeHold, getSizeHold } from '../../lib/size-hold-store';
+import { registry, type TerminalEntry } from '../../lib/terminal-store';
+import { installPeerSurfaceResponder } from '../burrow/peer-surfaces';
+import { takeBackSize } from '../burrow/take-back';
 
 const ORIGIN = 'https://hosted.example';
 const START = 1_700_000_000_000;
@@ -84,6 +94,7 @@ class OnePaneProvider implements BurrowSurfaceProvider {
     cols: 80,
     rows: 24,
     resize: async (cols, rows) => ({ cols, rows }),
+    release: () => {},
   };
 
   collectDirectory = async (): Promise<DirectoryEntry[]> => [ENTRY];
@@ -134,7 +145,8 @@ function makeRuntime(
   runtime = new OneTimeRuntime({
     origin: ORIGIN,
     createWebSocket: (url) => rendezvous.createBurrowSocket(url),
-    createSession: ({ burrowId, send }) => new RemoteApiSession({ burrowId, send, provider }),
+    createSession: ({ burrowId, send, label }) =>
+      new RemoteApiSession({ burrowId, send, provider, holder: { id: 'holder-1', label } }),
     createDirectPeer:
       options.createDirectPeer === undefined ? () => network.createAnswerer() : options.createDirectPeer,
     burrowLabel: BURROW_LABEL,
@@ -331,6 +343,18 @@ describe('one-time connection, end to end', () => {
     expect(runtime.state.status).toBe('connected');
   });
 
+  it('tells a phone still connecting that the laptop ended it, rather than blaming the Wi-Fi', async () => {
+    makeRuntime({ network: { opening: 'manual' } });
+    const { result, approval, shown } = await tapConnect(makePhone(), await openLink());
+    approval.approve(shown);
+    await settleUntil(() => runtime.state.status === 'connecting' && network.offererChannel !== null);
+
+    // No channel yet: the goodbye rides the room, and only it tells the phone
+    // this was the laptop's End rather than no direct path.
+    runtime.end();
+    expect(await result).toEqual({ ok: false, message: ONE_TIME_ENDED_MESSAGE });
+  });
+
   it('gives the same-Wi-Fi copy when the laptop builds no peer', async () => {
     makeRuntime({ createDirectPeer: null });
     const { result, approval, shown } = await tapConnect(makePhone(), await openLink());
@@ -368,5 +392,173 @@ describe('one-time connection, end to end', () => {
     approval.approve(shown);
     expect(await result).toEqual({ ok: false, message: ONE_TIME_LINK_EXPIRED_MESSAGE });
     expect(oneTimeEndReason(runtime)).toBe('expired');
+  });
+});
+
+/**
+ * Size authority across a one-time connection, with the laptop's real halves:
+ * the `BurrowService` (its approval queue, its Take back), the ask-backed
+ * provider, and this webview's surface responder over a registry pane — the
+ * same chain the sidecar runs, with the bridge in memory
+ * (`docs/specs/remote-api.md` → "Size authority").
+ */
+describe('size authority across a one-time connection, end to end', () => {
+  let service: BurrowService;
+  let toUi: Array<{ event: string; data: unknown }>;
+  let responders: Map<string, (params: unknown) => unknown[]>;
+  let terminal: { cols: number; rows: number; resize: ReturnType<typeof vi.fn> };
+  let commandSeq: number;
+
+  /** One `burrow:command` and the `burrow:result` it produced. */
+  async function command(cmd: string, params?: unknown): Promise<unknown> {
+    const burrowRequestId = `c-${++commandSeq}`;
+    await service.handleCommand({ burrowRequestId, cmd, params });
+    const answer = toUi.find(
+      (line) =>
+        line.event === 'burrow:result' &&
+        (line.data as { burrowRequestId?: string }).burrowRequestId === burrowRequestId,
+    )?.data as { result?: unknown; error?: string } | undefined;
+    if (!answer || answer.error) throw new Error(answer?.error ?? `no result for ${cmd}`);
+    return answer.result;
+  }
+
+  function oneTimeState(): OneTimeState | undefined {
+    return toUi
+      .filter((line) => line.event === 'burrow:event' && (line.data as OneTimeEvent).name === 'one-time')
+      .map((line) => (line.data as OneTimeEvent).state)
+      .at(-1);
+  }
+
+  beforeEach(() => {
+    toUi = [];
+    responders = new Map();
+    commandSeq = 0;
+    terminal = {
+      cols: 80,
+      rows: 24,
+      resize: vi.fn((cols: number, rows: number) => {
+        terminal.cols = cols;
+        terminal.rows = rows;
+      }),
+    };
+    registry.set(SURFACE_ID, { terminal } as unknown as TerminalEntry);
+    const sinks = new Set<PtySink>();
+    const { provider } = createAskSurfaceProvider(
+      async (op, params) => responders.get(op)?.(params) ?? [],
+      {
+        writePty: (_ptyId, data) => {
+          for (const sink of sinks) sink.onData({ data });
+        },
+        resizePty: () => {},
+        streamPty: (_ptyId, sink) => {
+          sinks.add(sink);
+          return { stop: () => void sinks.delete(sink), ready: Promise.resolve() };
+        },
+      },
+    );
+    service = new BurrowService({
+      store: createEphemeralBurrowStateStore(() => {}),
+      provider,
+      kind: 'standalone',
+      sendToUi: (event, data) => void toUi.push({ event, data }),
+      connectSrc: `${ORIGIN} wss://hosted.example`,
+      oneTimeOrigin: ORIGIN,
+      createWebSocket: (url) => rendezvous.createBurrowSocket(url) as never,
+      createDirectPeer: () => network.createAnswerer(),
+      now: clock.now,
+    });
+    // This webview, reaching that service over its link as the sidecar bridge does.
+    const webview = {
+      ...new FakePtyAdapter(),
+      burrow: {
+        command: (cmd: string, params?: unknown) => command(cmd, params),
+        respond: (op: string, handler: (params: unknown) => unknown[]) => void responders.set(op, handler),
+        notify: () => {},
+        on: () => () => {},
+      },
+    };
+    setPlatform(webview as unknown as PlatformAdapter);
+    installPeerSurfaceResponder();
+  });
+
+  afterEach(() => {
+    service.dispose();
+    clearSizeHold(SURFACE_ID);
+    registry.delete(SURFACE_ID);
+    setPlatform(new FakePtyAdapter());
+  });
+
+  /** Open a link on the service, connect a phone through its approval queue, and attach the pane. */
+  async function attachedPhone(): Promise<{ phone: OneTimeClient; ended: string[] }> {
+    const waiting = (await command('oneTimeOpen')) as OneTimeState;
+    if (waiting.status !== 'waiting') throw new Error(`expected waiting, got ${waiting.status}`);
+    const link = await parseOneTimeLinkUrl(waiting.url, ORIGIN, clock.now());
+    if (!link) throw new Error('the phone could not read the link');
+    const phone = makePhone();
+    const ended: string[] = [];
+    phone.setOnEnded((message) => void ended.push(message));
+    let shown: string | null = null;
+    const result = phone.connectOnce(link, PHONE_LABEL, (code) => {
+      shown = code;
+    });
+    await settleUntil(() =>
+      toUi.some(
+        (line) =>
+          line.event === 'burrow:event' &&
+          (line.data as PairingQueueEvent).name === 'pairing-queue' &&
+          (line.data as PairingQueueEvent).queue.length > 0,
+      ),
+    );
+    const queue = toUi
+      .map((line) => line.data as PairingQueueEvent)
+      .filter((event) => event.name === 'pairing-queue')
+      .at(-1)!.queue;
+    await command('approve', { kind: 'one-time', clientId: '', pairingId: queue[0]!.pairingId, code: shown });
+    expect((await result).ok).toBe(true);
+    await settleUntil(() => oneTimeState()?.status === 'connected');
+
+    const attached = await phone.attach(SURFACE_ID, 51, 14, { onData: () => {} });
+    expect(attached.result).toEqual({ cols: 51, rows: 14 });
+    return { phone, ended };
+  }
+
+  it('holds the laptop pane at the phone’s size, and Take back ends the phone and gives it back', async () => {
+    const { ended } = await attachedPhone();
+    // The laptop pane is at the phone's grid and held under the phone's name:
+    // its own box no longer sizes it, so a local refit leaves the phone's
+    // wrapping alone.
+    expect(terminal.resize).toHaveBeenLastCalledWith(51, 14);
+    expect(getSizeHold(SURFACE_ID)).toMatchObject({ label: PHONE_LABEL });
+
+    await takeBackSize(SURFACE_ID);
+    // The whole one-time connection ended, as its End would.
+    expect(oneTimeState()).toEqual({ status: 'ended', reason: 'user-ended' });
+    await settleUntil(() => ended.length > 0);
+    expect(ended).toEqual([ONE_TIME_ENDED_MESSAGE]);
+    // And the pane is its own again, for its next fit.
+    expect(getSizeHold(SURFACE_ID)).toBeNull();
+  });
+
+  it('gives the pane back when the laptop ends the connection', async () => {
+    const { ended } = await attachedPhone();
+    expect(getSizeHold(SURFACE_ID)).not.toBeNull();
+
+    await command('oneTimeEnd');
+    await settleUntil(() => getSizeHold(SURFACE_ID) === null);
+    expect(getSizeHold(SURFACE_ID)).toBeNull();
+    await settleUntil(() => ended.length > 0);
+    expect(ended).toEqual([ONE_TIME_ENDED_MESSAGE]);
+  });
+
+  it('gives the pane back when the phone detaches, and when it attaches another', async () => {
+    registry.set('surface-2', { terminal: { ...terminal, resize: vi.fn() } } as unknown as TerminalEntry);
+    const { phone } = await attachedPhone();
+    await phone.attach('surface-2', 51, 14, { onData: () => {} });
+    await settleUntil(() => getSizeHold(SURFACE_ID) === null);
+    expect(getSizeHold('surface-2')).toMatchObject({ label: PHONE_LABEL });
+
+    await phone.detach('surface-2');
+    await settleUntil(() => getSizeHold('surface-2') === null);
+    registry.delete('surface-2');
   });
 });

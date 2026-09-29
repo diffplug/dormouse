@@ -12,6 +12,23 @@ import type { ProcessedPtyChunk } from '../../lib/processed-pty-stream';
 // `remote-lib-common` itself; vscode-ext's project does not resolve it.
 export type { DirectoryEntry, ProcessedPtyChunk };
 
+/**
+ * Who takes a surface's size when an attach or a resize sets it: one remote
+ * session, as the pane that surface lives in names and compares it
+ * (`docs/specs/remote-api.md` → "Size authority").
+ */
+export interface SurfaceHold {
+  /** The session, opaque to the owner: what Take back names to end it. */
+  readonly holder: string;
+  /** What the pane's strip shows for it, as plain text. */
+  readonly label: string;
+  /**
+   * Which of that session's attachments, opaque too. A release names both, so
+   * one from an attachment the session has since replaced frees nothing.
+   */
+  readonly lease: string;
+}
+
 export interface SurfaceHandle {
   /**
    * Provider-local routing key; a peer-backed handle need not expose its
@@ -21,8 +38,18 @@ export interface SurfaceHandle {
   /** The size the surface stands at now — live for a local pane, last-reported for a peer's. */
   readonly cols: number;
   readonly rows: number;
-  /** Resize through the owner's live xterm, and report what it settled at. */
+  /**
+   * Resize through the owner's live xterm under the hold this handle was
+   * resolved with, and report what it settled at.
+   */
   resize(cols: number, rows: number): Promise<{ cols: number; rows: number }>;
+  /**
+   * Give up the hold this handle was resolved with: the owner re-fits the pane
+   * to its own box if, and only if, this very hold is still the one on it.
+   * Fire and forget — nothing waits on a release, and an owner that is gone
+   * holds nothing.
+   */
+  release(): void;
 }
 
 /**
@@ -62,8 +89,8 @@ export interface BurrowSurfaceProvider {
   watchDirectory(onChange: () => void): () => void;
 
   /**
-   * Resolve `surfaceId` at the size the client asked for, or `null` if
-   * nobody owns it.
+   * Resolve `surfaceId` at the size the client asked for, under `hold`, or
+   * `null` if nobody owns it.
    *
    * The size is part of resolving because attach-is-the-resize
    * (docs/specs/remote-api.md): an owner that is a round trip away has to apply
@@ -71,11 +98,13 @@ export interface BurrowSurfaceProvider {
    * afterwards without a second one. An owner the provider can touch directly
    * is left alone here and resized by the caller, which subscribes to the PTY
    * first so a synchronous repaint is not lost — the resolved handle reports
-   * the size as it stands, and the caller reconciles.
+   * the size as it stands, and the caller reconciles. Either way the owner
+   * records `hold` as the pane's size holder, and the handle releases it.
    */
   resolveSurface(
     surfaceId: string,
     size: { cols?: number; rows?: number },
+    hold: SurfaceHold,
   ): Promise<SurfaceHandle | null>;
 
   /** Feed the PTY's input path; the local echo returns through {@link streamPty}. */

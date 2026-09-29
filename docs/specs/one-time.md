@@ -172,11 +172,13 @@ decides them; a runtime never enters either.
   modal — and the request and the approval each check the expiry again.
 - **`end()` releases everything**: the session and its peer connection, a
   pending approval, the key, queued work, every timer, and the socket. Nothing
-  is written.
+  is written. **A `user-ended` or `idle` ending sends the goodbye first, before
+  the room closes** (`docs/specs/remote-api.md` → Transport), so a phone still
+  connecting hears it over the rendezvous.
 
 | `ended` reason | When |
 | --- | --- |
-| `user-ended` | `end()`: the laptop's End or Cancel, or service disposal |
+| `user-ended` | `end()`: the laptop's End or Cancel, a held pane's Take back, or service disposal |
 | `user-denied`, `confirmation-mismatch` | the modal's Deny, or digits the phone was not showing |
 | `expired` | a link past its expiry, claimed or not; a late request or confirmation; room close `4010` or `4014` |
 | `phone-left` | room close `4013` before the switch; any session failure after it |
@@ -217,8 +219,8 @@ at most one session**, on `ClientSessionCore`, direct or not at all.
 - **Must drop what `isOneTimeBurrowFrame` refuses**, after the
   [length check](#wire-contract).
 - **An outcome already read outranks the room's close behind it.**
-- After the switch (the same carve-out), channel loss, the laptop's End, or the
-  idle deadline reaches `setOnEnded` once; `close()` reports nothing.
+- After the switch (the same carve-out), channel loss, the laptop's goodbye, or
+  the idle deadline reaches `setOnEnded` once; `close()` reports nothing.
 
 Every failure resolves `{ok: false, message}` with fixed copy:
 
@@ -228,6 +230,7 @@ Every failure resolves `{ok: false, message}` with fixed copy:
 | room close `4011` or `4012` | `ONE_TIME_LINK_USED_MESSAGE` |
 | an expired link, room close `4010` or `4014`, any other close before an outcome past the link's expiry, or no answer by the room's deadline | `ONE_TIME_LINK_EXPIRED_MESSAGE` |
 | between an `ok` outcome and the switch: a decline, a lost session, the deadline, or any other close | `ONE_TIME_DIRECT_FAILED_MESSAGE` |
+| between an `ok` outcome and the switch: the laptop's goodbye | `ONE_TIME_ENDED_MESSAGE` |
 | a socket that never opened | `ONE_TIME_UNREACHABLE_MESSAGE` |
 | any other close, `close()`, or a session lost between the switch and the resolve | `ONE_TIME_ENDED_MESSAGE` |
 | a payload on message 2, or an outcome its guard refuses | `ONE_TIME_DENIAL_MESSAGES['burrow-error']` |

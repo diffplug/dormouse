@@ -345,15 +345,17 @@ export const RULES = [
     violation: '\nconst __selftest = { iceServers: [{ urls: [] }] };\n',
   },
   {
-    rule: 'Neither the Relay nor Hosted names a direct-path signal or an SDP',
+    rule: 'Neither the Relay nor Hosted names a session control message or an SDP',
     security: 'any signaling leaves the ciphertext',
     kind: 'forbid',
     trees: ROUTING_TREES,
-    // The signals ride as `control` messages inside the session, so the Relay
-    // and the one-time room route them without knowing they exist. Naming one
-    // is the leading indicator that a route, a guard, or a frame type has
-    // started to care — the same reasoning as the protocol-v1 rule above.
-    pattern: /\b(?:direct-offer|direct-answer|direct-decline|direct-switch|RTCPeerConnection|sdp)\b/gi,
+    // The signals and the Burrow's goodbye ride as `control` messages inside
+    // the session, so the Relay and the one-time room route them without
+    // knowing they exist. Naming one is the leading indicator that a route, a
+    // guard, or a frame type has started to care — the same reasoning as the
+    // protocol-v1 rule above.
+    pattern:
+      /\b(?:direct-offer|direct-answer|direct-decline|direct-switch|session-end|SessionEndV1|RTCPeerConnection|sdp)\b/gi,
     violationFile: 'relay/src/relay.ts',
     violation: "\nconst __selftest = { sdp: '' };\n",
   },

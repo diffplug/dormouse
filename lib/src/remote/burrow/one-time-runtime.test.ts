@@ -77,6 +77,8 @@ const PHONE_LABEL = 'iPhone';
 /** One remote-api handler the runtime built, as the case reads it back. */
 interface ServedApi {
   readonly burrowId: string;
+  readonly label: string;
+  readonly end: () => void;
   readonly handled: unknown[];
   disposed: boolean;
   send(payload: unknown): void;
@@ -125,8 +127,8 @@ function makeRuntime(
   runtime = new OneTimeRuntime({
     origin: ORIGIN,
     createWebSocket: (url) => rendezvous.createBurrowSocket(url),
-    createSession: ({ burrowId, send }) => {
-      const api: ServedApi = { burrowId, handled: [], disposed: false, send };
+    createSession: ({ burrowId, send, label, end }) => {
+      const api: ServedApi = { burrowId, label, end, handled: [], disposed: false, send };
       apis.push(api);
       return {
         handle: (payload) => void api.handled.push(payload),
@@ -576,7 +578,7 @@ describe('OneTimeRuntime: the session', () => {
 
   it('reaps an idle session, and a keepalive on the channel defers it', async () => {
     makeRuntime();
-    const { phone, peer } = await connected();
+    const { phone, peer, inbound } = await connected();
     clock.advance(ESTABLISHED_E2E_IDLE_TIMEOUT_MS - 1_000);
     peer.send(phone.session.sendKeepalive());
     await settle();
@@ -586,6 +588,47 @@ describe('OneTimeRuntime: the session', () => {
     expect(oneTimeEndReason(runtime)).toBe('idle');
     expect(answerers[0]!.closed).toBe(true);
     expect(apis[0]!.disposed).toBe(true);
+    // Told, in case it was only quiet.
+    await settleUntil(() => inbound.length > 0);
+    expect(openReceipt(phone.session, inbound.at(-1)!)).toEqual({ v: 1, t: 'session-end' });
+  });
+
+  it('hands its session the phone’s label, and an end that is this runtime’s End', async () => {
+    makeRuntime();
+    const { phone, inbound } = await connected();
+    expect(apis[0]!.label).toBe(PHONE_LABEL);
+
+    apis[0]!.end();
+    expect(oneTimeEndReason(runtime)).toBe('user-ended');
+    expect(apis[0]!.disposed).toBe(true);
+    // The goodbye rides the channel, the one path left after the switch.
+    await settleUntil(() => inbound.length > 0);
+    expect(openReceipt(phone.session, inbound.at(-1)!)).toEqual({ v: 1, t: 'session-end' });
+
+    // Once over, it ends nothing: a later runtime's session is not its own.
+    const reasons = states.length;
+    apis[0]!.end();
+    expect(states).toHaveLength(reasons);
+  });
+
+  it('tells a phone still connecting that the laptop ended it, over the rendezvous', async () => {
+    makeRuntime();
+    const { phone } = await connecting();
+    runtime.end();
+    expect(await phone.next()).toEqual({ v: 1, t: 'session-end' });
+    expect(oneTimeEndReason(runtime)).toBe('user-ended');
+  });
+
+  it('says nothing when the phone’s own leaving ended it', async () => {
+    makeRuntime();
+    const { phone, inbound } = await connected();
+    network.dropChannels();
+    await settleUntil(() => runtime.state.status === 'ended');
+    await settle();
+    expect(inbound.map((frame) => openReceipt(phone.session, frame))).not.toContainEqual({
+      v: 1,
+      t: 'session-end',
+    });
   });
 });
 

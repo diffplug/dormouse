@@ -170,14 +170,18 @@ export class OneTimeClient implements RemoteAdapterClient {
     this.#core = new ClientSessionCore<OneTimeRoute>({
       // One route for the client's whole life, so the core's is always it.
       sendFrame: (_route, step, ciphertext) => this.#sendFrame(step, ciphertext),
-      messages: { unavailable: ONE_TIME_LINK_EXPIRED_MESSAGE, reaped: ONE_TIME_ENDED_MESSAGE },
+      messages: {
+        unavailable: ONE_TIME_LINK_EXPIRED_MESSAGE,
+        reaped: ONE_TIME_ENDED_MESSAGE,
+        ended: ONE_TIME_ENDED_MESSAGE,
+      },
       now: this.#now,
       setTimer: deps.setTimer,
       visibility: deps.visibility,
       createDirectPeer: deps.createDirectPeer,
     });
     this.#core.setOnTransportChanged((path, cause) => this.#onTransportChanged(path, cause));
-    this.#core.setOnBurrowGone(() => this.#onSessionGone());
+    this.#core.setOnBurrowGone((endedByBurrow) => this.#onSessionGone(endedByBurrow));
   }
 
   /**
@@ -354,12 +358,12 @@ export class OneTimeClient implements RemoteAdapterClient {
 
   /**
    * The session is over at the core — a dead channel, a failed decrypt, a
-   * session the Burrow let go. Before the switch that is no direct path; after
-   * it, the end.
+   * session the Burrow let go. Before the switch that is no direct path, unless
+   * the laptop said it ended the connection; after it, the end.
    */
-  #onSessionGone(): void {
+  #onSessionGone(endedByBurrow: boolean): void {
     if (this.#phase === 'connecting') {
-      this.#fail(ONE_TIME_DIRECT_FAILED_MESSAGE);
+      this.#fail(endedByBurrow ? ONE_TIME_ENDED_MESSAGE : ONE_TIME_DIRECT_FAILED_MESSAGE);
       return;
     }
     if (this.#phase !== 'connected') return;

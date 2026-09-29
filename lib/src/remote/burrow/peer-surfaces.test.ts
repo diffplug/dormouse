@@ -14,7 +14,9 @@ import { FakePtyAdapter, setPlatform, type PlatformAdapter } from '../../lib/pla
 import { setTerminalActivity, clearTerminalActivity } from '../../lib/session-activity-store';
 import { createAlertEpisode } from '../../lib/alert-episode';
 import { registry, type TerminalEntry } from '../../lib/terminal-store';
+import { clearSizeHold, getSizeHold, holdSize } from '../../lib/size-hold-store';
 import { installPeerSurfaceResponder } from './peer-surfaces';
+import { takeBackSize } from './take-back';
 
 interface Responder {
   (params: unknown): unknown[];
@@ -30,11 +32,19 @@ class ServicePlatform {
   /** Absent, as a broker from before one-time connections answers, unless a case sets it. */
   serving: boolean | undefined = undefined;
 
+  /** Every non-`status` command this webview sent, with its params. */
+  readonly commands: Array<{ cmd: string; params: unknown }> = [];
+  /** What a non-`status` command does: answers, by default, or throws. */
+  commandResult: (cmd: string) => unknown = () => undefined;
+
   readonly burrow = {
-    command: async (cmd: string) =>
-      cmd === 'status'
-        ? { enrolled: this.enrolled, ...(this.serving === undefined ? {} : { serving: this.serving }) }
-        : undefined,
+    command: async (cmd: string, params?: unknown) => {
+      if (cmd === 'status') {
+        return { enrolled: this.enrolled, ...(this.serving === undefined ? {} : { serving: this.serving }) };
+      }
+      this.commands.push({ cmd, params });
+      return this.commandResult(cmd);
+    },
     respond: (op: string, handler: Responder) => {
       this.responders.set(op, handler);
     },
@@ -84,6 +94,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  for (const id of registry.keys()) clearSizeHold(id);
+  clearSizeHold('surface-1');
   registry.clear();
   clearTerminalActivity();
   setPlatform(new FakePtyAdapter());
@@ -236,5 +248,124 @@ describe('surface responder', () => {
     // Answering still works: it costs nothing until the Burrow asks.
     registerSurface('surface-2', 'pty-2');
     expect(quiet.answer('directory', {})).toHaveLength(1);
+  });
+});
+
+describe('size holds', () => {
+  const PHONE = { holder: 'session-a', label: 'iPhone', lease: '1' };
+
+  it('records the hold an attach or a resize names, before the size moves', () => {
+    const terminal = registerSurface('surface-1');
+    const heldAtResize: unknown[] = [];
+    terminal.resize.mockImplementation((cols: number, rows: number) => {
+      // The pane must already be held when the xterm resizes, or its own fit
+      // could answer the resize event with the box's size.
+      heldAtResize.push(getSizeHold('surface-1'));
+      terminal.cols = cols;
+      terminal.rows = rows;
+    });
+    platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'attach', cols: 51, rows: 14, hold: PHONE });
+    expect(terminal.resize).toHaveBeenCalledWith(51, 14);
+    expect(getSizeHold('surface-1')).toEqual(PHONE);
+
+    const later = { holder: 'session-b', label: 'Pixel', lease: '4' };
+    platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'resize', cols: 40, rows: 20, hold: later });
+    expect(getSizeHold('surface-1')).toEqual(later);
+    expect(heldAtResize).toEqual([PHONE, later]);
+  });
+
+  it('holds even at the size the pane already has', () => {
+    registerSurface('surface-1', 80, 24);
+    platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'attach', cols: 80, rows: 24, hold: PHONE });
+    expect(getSizeHold('surface-1')).toEqual(PHONE);
+  });
+
+  it('never holds on a resolve, and sizes without holding for a Burrow that names none', () => {
+    const terminal = registerSurface('surface-1');
+    platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'resolve', hold: PHONE });
+    expect(getSizeHold('surface-1')).toBeNull();
+
+    platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'attach', cols: 51, rows: 14 });
+    expect(terminal.resize).toHaveBeenCalledWith(51, 14);
+    expect(getSizeHold('surface-1')).toBeNull();
+    // Nor from a hold of the wrong shape: a peer window is another build.
+    for (const hold of [
+      { holder: 'a', label: 7, lease: '1' },
+      { holder: 'a', label: 'iPhone' },
+      { label: 'iPhone', lease: '1' },
+    ]) {
+      platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'attach', cols: 51, rows: 14, hold });
+      expect(getSizeHold('surface-1')).toBeNull();
+    }
+  });
+
+  it('releases only the hold it names — the same session and the same attachment', () => {
+    registerSurface('surface-1');
+    platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'attach', cols: 51, rows: 14, hold: PHONE });
+
+    // Another session, and this session's earlier attachment, free nothing.
+    for (const other of [{ ...PHONE, holder: 'session-b' }, { ...PHONE, lease: '0' }]) {
+      expect(platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'release', hold: other })).toEqual([]);
+      expect(getSizeHold('surface-1')).toEqual(PHONE);
+    }
+    expect(platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'release', hold: PHONE })).toEqual([]);
+    expect(getSizeHold('surface-1')).toBeNull();
+  });
+
+  it('keeps a later holder’s hold when the earlier one releases', () => {
+    registerSurface('surface-1');
+    platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'attach', cols: 51, rows: 14, hold: PHONE });
+    const later = { holder: 'session-b', label: 'Pixel', lease: '1' };
+    platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'attach', cols: 40, rows: 20, hold: later });
+
+    platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'release', hold: PHONE });
+    expect(getSizeHold('surface-1')).toEqual(later);
+  });
+
+  it('changes nothing and claims nothing for an op this build does not know', () => {
+    const terminal = registerSurface('surface-1');
+    holdSize('surface-1', PHONE);
+    expect(platform.answer('surfaceOp', {
+      surfaceId: 'surface-1', op: 'teleport', cols: 10, rows: 5, hold: { ...PHONE, holder: 'x' },
+    })).toEqual([]);
+    expect(terminal.resize).not.toHaveBeenCalled();
+    expect(getSizeHold('surface-1')).toEqual(PHONE);
+  });
+
+  it('takes a pane back by asking the Burrow to end its holder, then clears the hold', async () => {
+    registerSurface('surface-1');
+    holdSize('surface-1', PHONE);
+    platform.commandResult = () => ({ ended: true });
+
+    await takeBackSize('surface-1');
+    expect(platform.commands).toEqual([{ cmd: 'takeBack', params: { holder: 'session-a' } }]);
+    expect(getSizeHold('surface-1')).toBeNull();
+  });
+
+  it('clears a hold whose holder the Burrow cannot end, and leaves a newer one', async () => {
+    registerSurface('surface-1');
+    holdSize('surface-1', PHONE);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    platform.commandResult = () => {
+      throw new Error('no Burrow is reachable');
+    };
+    await takeBackSize('surface-1');
+    expect(getSizeHold('surface-1')).toBeNull();
+
+    // A newer holder that arrived while the command was in flight keeps the pane.
+    holdSize('surface-1', PHONE);
+    const later = { holder: 'session-b', label: 'Pixel', lease: '1' };
+    platform.commandResult = () => {
+      holdSize('surface-1', later);
+      return { ended: true };
+    };
+    await takeBackSize('surface-1');
+    expect(getSizeHold('surface-1')).toEqual(later);
+  });
+
+  it('sends nothing for a pane nobody holds', async () => {
+    registerSurface('surface-1');
+    await takeBackSize('surface-1');
+    expect(platform.commands).toEqual([]);
   });
 });

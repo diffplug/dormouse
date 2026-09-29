@@ -31,6 +31,7 @@ import {
   type BurrowCommand,
   type BurrowConsoleStatus,
   type BurrowResult,
+  type TakeBackResult,
 } from '../../lib/src/host/remote/service-protocol';
 import type { BurrowSurfaceProvider } from '../../lib/src/remote/burrow/burrow-surface-provider';
 import type {
@@ -529,7 +530,8 @@ function refuse(burrowRequestId: string): void {
  * The sidecar has no such path — it always has a service — so these are exactly
  * what one with no enrollment returns (`lib/src/host/remote/service.ts`). The
  * one-time pair is the same: no service means no connection, so its status is
- * the idle one this build's origin allows, and ending it is already done.
+ * the idle one this build's origin allows, and ending it is already done; and
+ * with no service there is no session to take a pane back from.
  */
 function idleAnswer(cmd: string): { result: unknown } | null {
   switch (cmd) {
@@ -541,6 +543,9 @@ function idleAnswer(cmd: string): { result: unknown } | null {
       return { result: idleOneTimeState(bakedOneTimeOrigin(), bakedConnectSrc()) };
     case 'oneTimeEnd':
       return { result: {} };
+    // No service holds any session, so none holds a pane: the strip clears itself.
+    case 'takeBack':
+      return { result: { ended: false } satisfies TakeBackResult };
     default:
       return null;
   }

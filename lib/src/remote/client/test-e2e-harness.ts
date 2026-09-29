@@ -214,6 +214,8 @@ export interface E2eHarness {
   knownBurrows: MemoryKnownBurrows;
   pendingDeletions: MemoryPendingDeletions;
   approvals: Array<Omit<PendingPairing, 'kind'>>;
+  /** Every remote-api session the Burrow built, with the label and end it handed each. */
+  sessions: Array<{ label: string; end: () => void }>;
   savedAcl: BurrowAclRecord[];
   calls: FetchCall[];
   /** The harness's own `fetch`, for a second client on the same fake Relay. */
@@ -276,6 +278,7 @@ export async function makeE2eHarness(
   const knownBurrows = options.knownBurrows ?? memoryKnownBurrows();
   const pendingDeletions = options.pendingDeletions ?? memoryPendingDeletions();
   const approvals: Array<Omit<PendingPairing, 'kind'>> = [];
+  const sessions: Array<{ label: string; end: () => void }> = [];
   let savedAcl: BurrowAclRecord[] = [];
 
   const enrollment: BurrowEnrollment = {
@@ -300,29 +303,32 @@ export async function makeE2eHarness(
     },
     requestApproval: (pending) => approvals.push(pending),
     dismissApproval: () => {},
-    createSession: ({ send }) => ({
-      // Enough protocol-v1 to prove the byte stream: every request is answered
-      // with its own `requestId`, which is what `hello` correlates on.
-      handle: (data) => {
-        const request = data as { requestId?: unknown; method?: unknown };
-        if (typeof request.requestId !== 'string') return;
-        send({
-          requestId: request.requestId,
-          ok: true,
-          result: { protocolVersion: 1, burrowId, grants: { input: true, layout: false } },
-        });
-        // An attach opens its stream under the request's own id, so one canned
-        // event proves the subscription path as well as the request one.
-        if (request.method === REMOTE_METHODS.surfaceAttach) {
+    createSession: ({ send, label, end }) => {
+      sessions.push({ label, end });
+      return {
+        // Enough protocol-v1 to prove the byte stream: every request is answered
+        // with its own `requestId`, which is what `hello` correlates on.
+        handle: (data) => {
+          const request = data as { requestId?: unknown; method?: unknown };
+          if (typeof request.requestId !== 'string') return;
           send({
-            subId: request.requestId,
-            event: REMOTE_EVENTS.terminalData,
-            data: STREAMED_CHUNK,
+            requestId: request.requestId,
+            ok: true,
+            result: { protocolVersion: 1, burrowId, grants: { input: true, layout: false } },
           });
-        }
-      },
-      dispose: () => {},
-    }),
+          // An attach opens its stream under the request's own id, so one canned
+          // event proves the subscription path as well as the request one.
+          if (request.method === REMOTE_METHODS.surfaceAttach) {
+            send({
+              subId: request.requestId,
+              event: REMOTE_EVENTS.terminalData,
+              data: STREAMED_CHUNK,
+            });
+          }
+        },
+        dispose: () => {},
+      };
+    },
   });
   burrow.start();
   burrowSocket.open();
@@ -426,6 +432,7 @@ export async function makeE2eHarness(
     knownBurrows,
     pendingDeletions,
     approvals,
+    sessions,
     get savedAcl() {
       return savedAcl;
     },

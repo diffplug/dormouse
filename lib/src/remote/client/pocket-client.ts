@@ -170,6 +170,9 @@ export class RelayRefusalError extends Error {
 export const BURROW_SESSION_REAPED_MESSAGE =
   'This phone was away too long, so the computer let the session go. Connect again to resume.';
 
+/** What a request in flight fails with when the computer ends the session on purpose. */
+export const BURROW_SESSION_ENDED_MESSAGE = 'The computer ended this session. Connect again to resume.';
+
 /** Shown when the Relay no longer accepts our session token. */
 export const SESSION_EXPIRED_MESSAGE = 'Your session expired. Sign in again to continue.';
 
@@ -324,7 +327,11 @@ export class PocketClient {
     this.#now = deps.now ?? (() => Date.now());
     this.#core = new ClientSessionCore<E2eRoute>({
       sendFrame: (route, step, ciphertext) => this.#sendE2e(route, step, ciphertext),
-      messages: { unavailable: BURROW_UNAVAILABLE_MESSAGE, reaped: BURROW_SESSION_REAPED_MESSAGE },
+      messages: {
+        unavailable: BURROW_UNAVAILABLE_MESSAGE,
+        reaped: BURROW_SESSION_REAPED_MESSAGE,
+        ended: BURROW_SESSION_ENDED_MESSAGE,
+      },
       now: this.#now,
       setTimer: deps.setTimer,
       visibility: deps.visibility,
@@ -380,8 +387,9 @@ export class PocketClient {
   }
 
   /**
-   * Notified when the Burrow drops: a `burrow-gone` frame, a closed socket, or a
-   * session the Burrow's idle reaper took while this page was hidden.
+   * Notified when the Burrow drops: a `burrow-gone` frame, a closed socket, a
+   * session the Burrow's idle reaper took while this page was hidden, or the
+   * Burrow's goodbye — the person at the computer took a pane back.
    */
   setOnBurrowGone(callback: (() => void) | null): void {
     this.#core.setOnBurrowGone(callback);

@@ -19,6 +19,7 @@ import {
   ONE_TIME_DEVICE_LABELS,
   ONE_TIME_UNKNOWN_DEVICE_LABEL,
   PAIRING_CODE_LENGTH,
+  SESSION_END_V1,
   createNoiseInitiator,
   createNoiseResponder,
   e2eConnectionPrologue,
@@ -32,6 +33,7 @@ import {
   isPairingOutcomeV1,
   isPairingRequestV1,
   isPresenceProofV1,
+  isSessionEndV1,
   knownOneTimeDeviceLabel,
   presenceChallenge,
   samplePairingCode,
@@ -488,6 +490,27 @@ test('isOneTimeOutcomeV1 takes a labelled success or one of four fixed denials',
   }
 });
 
+test('isSessionEndV1 is the exact two-key goodbye and nothing else', () => {
+  assert.equal(isSessionEndV1(SESSION_END_V1), true);
+  assert.equal(isSessionEndV1({ v: 1, t: 'session-end' }), true);
+  // Frozen, so no sender can grow the shared value into a shape the guard refuses.
+  assert.equal(Object.isFrozen(SESSION_END_V1), true);
+  for (const [why, value] of [
+    ['not an object', 'session-end'],
+    ['null', null],
+    ['an array', [{ v: 1, t: 'session-end' }]],
+    ['a future version', { v: 2, t: 'session-end' }],
+    ['no version', { t: 'session-end' }],
+    // It carries nothing, so a field on it is one no reader has — the shape a
+    // smuggler would pick.
+    ['an extra key', { v: 1, t: 'session-end', reason: 'take-back' }],
+    ['a direct-path signal', { v: 1, t: 'direct-switch' }],
+    ['a ceremony outcome', { ok: true, burrowLabel: 'Laptop' }],
+  ]) {
+    assert.equal(isSessionEndV1(value), false, why);
+  }
+});
+
 // --- Fixed-size outcomes ---------------------------------------------------
 
 /** One established session pair, so control messages are measured on the wire. */
@@ -550,4 +573,10 @@ test('a one-time success and every one-time denial are the same size on the wire
   }
   // And the phone's request is the same size as any other control message.
   assert.equal(burrow.sendControl({ code: '42', label: 'iPhone Safari' }).length, success.length);
+});
+
+test('the goodbye is the same size on the wire as every other control message', async () => {
+  const burrow = await established();
+  const outcome = burrow.sendControl({ ok: true, burrowLabel: "Ned's MacBook Pro (16-inch, 2025)" });
+  assert.equal(burrow.sendControl({ ...SESSION_END_V1 }).length, outcome.length);
 });

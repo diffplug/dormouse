@@ -10,6 +10,8 @@ import { createLathWallStore, type LathWallStore } from './wall/lath-wall-store'
 import { leaf, split, tree } from '../lib/lath/test-util';
 import { PANE_HEADER_HEIGHT_PX } from './design';
 import { WorkspaceActiveContext, WorkspaceVisibleContext } from './wall/wall-context';
+import { clearSizeHold, getSizeHold, holdSize, releaseSizeHold } from '../lib/size-hold-store';
+import { setPlatform, type PlatformAdapter } from '../lib/platform';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -92,6 +94,7 @@ beforeEach(() => {
   engine = createLathWallEngine(store, { durationMs: 440 });
 });
 afterEach(() => {
+  for (const id of ['a', 'b', 'standalone']) clearSizeHold(id);
   act(() => root.unmount());
   container.remove();
   vi.restoreAllMocks();
@@ -341,4 +344,98 @@ it('targets xterm when the terminal becomes focused again', () => {
   vi.mocked(focusSession).mockClear();
   act(() => root.render(<TerminalPane id="tool" isFocused />));
   expect(focusSession).toHaveBeenCalledWith('tool', true, 'terminal');
+});
+
+describe('a pane a remote session holds', () => {
+  const PHONE = { holder: 'session-a', label: 'iPhone', lease: '1' };
+
+  /** The phone's attach, as the responder applies it: the hold, then the phone's grid. */
+  function holdAtPhoneSize(id: string) {
+    act(() => holdSize(id, PHONE));
+    Object.assign(registry.entries.get(id)!, { cols: 51, rows: 14 });
+  }
+
+  function strip(): HTMLElement | null {
+    return container.querySelector<HTMLElement>('[role="status"]');
+  }
+
+  it('keeps the phone’s size through box resizes and layout settles', () => {
+    mount();
+    holdAtPhoneSize('b');
+    hostWidth = 1200;
+    notifyResize();
+    settle();
+    expect(registry.fits).not.toHaveBeenCalledWith('b');
+    // Its neighbour is still its own box's.
+    expect(registry.resizes).toEqual([{ id: 'a', cols: 59, rows: 28 }]);
+  });
+
+  it('keeps the phone’s size across a remount', () => {
+    mount();
+    holdAtPhoneSize('b');
+    render(false);
+    settle();
+    render(true);
+    settle();
+    expect(registry.fits).not.toHaveBeenCalledWith('b');
+    expect(registry.entries.get('b')).toMatchObject({ cols: 51, rows: 14 });
+  });
+
+  it('re-fits to its own box the moment the hold goes, and not while a later holder keeps it', () => {
+    mount();
+    holdAtPhoneSize('b');
+    // A later holder took it: the earlier session's release frees nothing.
+    const later = { holder: 'session-b', label: 'Pixel', lease: '1' };
+    act(() => holdSize('b', later));
+    act(() => void releaseSizeHold('b', PHONE));
+    expect(registry.fits).not.toHaveBeenCalledWith('b');
+
+    act(() => void releaseSizeHold('b', later));
+    expect(registry.resizes).toEqual([{ id: 'b', cols: 39, rows: 28 }]);
+  });
+
+  it('shows a strip naming the holder, only while held', () => {
+    mount();
+    expect(strip()).toBeNull();
+    holdAtPhoneSize('b');
+    expect(strip()!.textContent).toContain('Sized for iPhone');
+    expect(strip()!.querySelector('button')!.getAttribute('aria-label')).toBe(
+      'Disconnect iPhone and resize this pane',
+    );
+    act(() => void releaseSizeHold('b', PHONE));
+    expect(strip()).toBeNull();
+  });
+
+  it('renders the label as text, never markup', () => {
+    mount();
+    act(() => holdSize('b', { ...PHONE, label: '<img src=x onerror=alert(1)>' }));
+    expect(strip()!.querySelector('img')).toBeNull();
+    expect(strip()!.textContent).toContain('<img src=x onerror=alert(1)>');
+  });
+
+  it('takes the pane back: ends its holder at the Burrow, then re-fits', async () => {
+    const commands: Array<{ cmd: string; params: unknown }> = [];
+    // Only the Burrow link: Take back reaches for nothing else.
+    setPlatform({
+      burrow: {
+        command: async (cmd: string, params?: unknown) => {
+          commands.push({ cmd, params });
+          return { ended: true };
+        },
+        respond: () => {},
+        notify: () => {},
+        on: () => () => {},
+      },
+    } as unknown as PlatformAdapter);
+    mount();
+    holdAtPhoneSize('b');
+
+    await act(async () => {
+      strip()!.querySelector('button')!.click();
+    });
+    expect(commands).toEqual([{ cmd: 'takeBack', params: { holder: 'session-a' } }]);
+    expect(getSizeHold('b')).toBeNull();
+    expect(strip()).toBeNull();
+    expect(registry.resizes).toEqual([{ id: 'b', cols: 39, rows: 28 }]);
+  });
 });

@@ -8,23 +8,32 @@ import { clampTerminalDimension, type DirectoryEntry } from 'remote-lib-common';
 import { getPlatform } from '../../lib/platform';
 import type { BurrowLink } from '../../lib/platform/types';
 import { subscribeToActivity } from '../../lib/session-activity-store';
+import { holdSize, releaseSizeHold, type SizeHold } from '../../lib/size-hold-store';
 import { isHelperSession, registry } from '../../lib/terminal-store';
 import { subscribeToTerminalPaneState } from '../../lib/terminal-state-store';
+import type { SurfaceHold } from './burrow-surface-provider';
 import { collectDirectorySnapshot } from './directory-collect';
 import { armWhile } from './enrolled-gate';
 
 /**
- * What the Burrow can ask the owner of a surface to do with it. There is no
- * detach: the Burrow stops streaming on its side, and the pane keeps whatever
- * size it was left at — which is what last-attach-wins means.
+ * What the Burrow can ask the owner of a surface to do with it
+ * (`docs/specs/remote-api.md` → "Size authority"). `release` is the one way a
+ * remote session gives a pane's size back; the Burrow's stream stops on its
+ * own side.
  */
-export type PeerSurfaceOp = 'resolve' | 'attach' | 'resize';
+export type PeerSurfaceOp = 'resolve' | 'attach' | 'resize' | 'release';
 
 export interface PeerSurfaceParams {
   surfaceId: string;
   op: PeerSurfaceOp;
   cols?: number;
   rows?: number;
+  /**
+   * Who takes the size (`attach`, `resize`), or which hold to give back
+   * (`release`). Absent from a Burrow older than holds, whose attach then sizes
+   * the pane without holding it.
+   */
+  hold?: SurfaceHold;
 }
 
 /**
@@ -59,6 +68,14 @@ function answerPeers<K extends keyof PeerOps>(
   getPlatform().burrow?.respond(op, (params) => handler(params as PeerOps[K]['params']));
 }
 
+/** A hold as the wire carries it, or `null` for anything else — a peer window is another build. */
+function holdOf(value: unknown): SizeHold | null {
+  const hold = value as Partial<Record<keyof SizeHold, unknown>> | null | undefined;
+  if (typeof hold?.holder !== 'string' || typeof hold.label !== 'string') return null;
+  if (typeof hold.lease !== 'string') return null;
+  return { holder: hold.holder, label: hold.label, lease: hold.lease };
+}
+
 /**
  * Resolve or drive one of this webview's own surfaces on the Burrow's behalf.
  *
@@ -67,22 +84,43 @@ function answerPeers<K extends keyof PeerOps>(
  * operation — attach-is-the-resize
  * (docs/specs/remote-api.md) — and both go through the live xterm rather than
  * the PTY directly, so the owning pane's own view stays consistent with the
- * size the phone asked for.
+ * size the phone asked for; each records its hold first, so the pane stops
+ * fitting itself before the size moves. `release` clears the hold it names,
+ * and the pane re-fits when that empties it (`TerminalPane`). An op this build
+ * does not know — a newer Burrow's — changes nothing and claims nothing.
  */
 function driveOwnSurface({
   surfaceId,
   op,
   cols,
   rows,
+  hold,
 }: PeerSurfaceParams): PeerSurfaceResult[] {
   const entry = isHelperSession(surfaceId) ? undefined : registry.get(surfaceId);
   if (!entry) return [];
 
   const term = entry.terminal;
-  const nextCols = clampTerminalDimension(cols, term.cols);
-  const nextRows = clampTerminalDimension(rows, term.rows);
-  if (op !== 'resolve' && (term.cols !== nextCols || term.rows !== nextRows)) {
-    term.resize(nextCols, nextRows);
+  switch (op) {
+    case 'resolve':
+      break;
+    case 'attach':
+    case 'resize': {
+      const taken = holdOf(hold);
+      if (taken) holdSize(surfaceId, taken);
+      const nextCols = clampTerminalDimension(cols, term.cols);
+      const nextRows = clampTerminalDimension(rows, term.rows);
+      if (term.cols !== nextCols || term.rows !== nextRows) term.resize(nextCols, nextRows);
+      break;
+    }
+    case 'release': {
+      // Answers nothing either way: a release is fire and forget, and a PTY id
+      // in the answer would re-route a handle the Burrow is dropping.
+      const given = holdOf(hold);
+      if (given) releaseSizeHold(surfaceId, given);
+      return [];
+    }
+    default:
+      return [];
   }
   return [{ ptyId: surfaceId, cols: term.cols, rows: term.rows }];
 }

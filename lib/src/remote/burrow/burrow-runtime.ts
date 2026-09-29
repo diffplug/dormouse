@@ -64,6 +64,7 @@ import { loadBurrowAcl } from './acl';
 import {
   EstablishedE2eSession,
   sealControl,
+  type RemoteApiSessionContext,
   type RemoteApiSessionLike,
 } from './established-session';
 import type { PendingPairing } from './pairing-approval';
@@ -239,10 +240,7 @@ export interface BurrowOptions {
   enrollment: BurrowEnrollment;
   createWebSocket?: (url: string) => WebSocketLike;
   /** Build the remote-api handler for an authorized client (see activation.ts). */
-  createSession?: (opts: {
-    burrowId: string;
-    send: (payload: unknown) => void;
-  }) => RemoteApiSessionLike;
+  createSession?: (opts: RemoteApiSessionContext) => RemoteApiSessionLike;
   /**
    * Where the ACL comes from and goes. Required, with no webview-store default:
    * this controller runs in the Tauri sidecar and the VS Code extension host, so
@@ -571,8 +569,8 @@ export class BurrowRuntime {
    * **An expiry emits the applicable outcome only where a transport cipher
    * exists to encrypt one on**, and only where someone is still owed one: a
    * pending connection whose challenge is dead earns the `presence-rejected` a
-   * late request would have, while an idle session's peer stopped waiting long
-   * ago and hears nothing.
+   * late request would have, and an idle session the goodbye, in case its peer
+   * was only quiet.
    *
    * **Clients before invitations**, because a pairing shares its invitation's
    * `expiresAt` and both fall in one sweep: the pairing's own deadline is the
@@ -607,7 +605,10 @@ export class BurrowRuntime {
       if (established) {
         out.push({
           at: established.e2e.idleDeadlineAt,
-          expire: () => this.#disposeEstablished(clientId),
+          // Told, in case it is only quiet: a Client that sent nothing for the
+          // whole deadline most likely stopped listening, but one that did not
+          // would otherwise wait on requests nothing answers.
+          expire: () => this.#disposeEstablished(clientId, { goodbye: true }),
         });
       }
     }
@@ -1360,39 +1361,39 @@ export class BurrowRuntime {
       this.#denyConnection(frame.clientId, pending, 'presence-rejected');
       return;
     }
-    const miss = this.#aclMiss(
+    const authorized = this.#aclRecord(
       binding.passkeyCredentialId,
       pending.clientStaticPublicKey,
       request.presence.accountId,
       proof.passkeyPublicKeyHash,
     );
-    if (miss !== null) {
-      console.warn(`[burrow] connection refused: ${miss}`);
+    if (typeof authorized === 'string') {
+      console.warn(`[burrow] connection refused: ${authorized}`);
       this.#denyConnection(frame.clientId, pending, 'pairing-required');
       return;
     }
-    this.#promoteConnection(frame.clientId, pending);
+    this.#promoteConnection(frame.clientId, pending, authorized.label);
   }
 
   /**
-   * Why the ACL refuses this connection, or `null` if it authorizes it.
+   * The ACL record that authorizes this connection, or why the ACL refuses it.
    *
    * **One record must hold all four identities.** The reason is for the
    * owner-local log only — every miss answers `pairing-required`
    * (`docs/specs/remote-security-model.md` → Connection).
    */
-  #aclMiss(
+  #aclRecord(
     passkeyCredentialId: string,
     clientStaticPublicKey: string,
     accountId: string,
     passkeyPublicKeyHash: string,
-  ): string | null {
+  ): BurrowAclRecord | string {
     const authorization = this.#acl.authorize({ passkeyCredentialId, clientStaticPublicKey });
     const record = authorization.record;
     if (record === null) return authorization.reasons.join(',');
     if (record.accountId !== accountId) return 'account-mismatch';
     if (record.passkeyPublicKeyHash !== passkeyPublicKeyHash) return 'passkey-key-mismatch';
-    return null;
+    return record;
   }
 
   /**
@@ -1404,7 +1405,7 @@ export class BurrowRuntime {
    * point at which the presence proof and the ACL conjunction have both
    * succeeded, so the only thing that can fill the cap is authorized phones.
    */
-  #promoteConnection(clientId: string, pending: PendingConnectionSession): void {
+  #promoteConnection(clientId: string, pending: PendingConnectionSession, label: string): void {
     const { incumbent, others } = this.#establishedFor(
       pending.clientStaticPublicKey,
       clientId,
@@ -1417,7 +1418,11 @@ export class BurrowRuntime {
     state.connection = undefined;
     // The same static under a different relay-chosen key: its predecessor goes
     // before the replacement is promoted, so the cap is never briefly exceeded.
-    if (incumbent !== null && incumbent !== clientId) this.#disposeEstablished(incumbent);
+    // Told so, since its socket may still be open — another tab of the same
+    // Pocket — and would otherwise wait on requests nothing answers.
+    if (incumbent !== null && incumbent !== clientId) {
+      this.#disposeEstablished(incumbent, { goodbye: true });
+    }
     // Cleared with the dispose, not merely overwritten below: without a session
     // factory there is no replacement, and a leftover reference would route the
     // next frame on the old id into a handler that has already been disposed.
@@ -1439,9 +1444,17 @@ export class BurrowRuntime {
     // record, whose handshake hash, Client static and challenge are spent.
     const { connectionId, session, clientStaticPublicKey } = pending;
     const createSession = this.#createSession;
-    const e2e = new EstablishedE2eSession({
+    const e2e: EstablishedE2eSession = new EstablishedE2eSession({
       session,
-      createApi: (send) => createSession({ burrowId: this.#enrollment.burrowId, send }),
+      createApi: (send) =>
+        createSession({
+          burrowId: this.#enrollment.burrowId,
+          send,
+          // Bounded again rather than trusted: a record off disk may have been
+          // written by an older build or by hand, and this is shown on a pane.
+          label: boundedPairingLabel(label),
+          end: () => this.#disposeEstablished(clientId, { goodbye: true, only: e2e }),
+        }),
       createDirectPeer: this.#createDirectPeer,
       sendRelay: (ciphertext) =>
         this.#sendE2e(clientId, 'connection', connectionId, 'transport', ciphertext),
@@ -1538,10 +1551,24 @@ export class BurrowRuntime {
     }
   }
 
-  #disposeEstablished(clientId: string): void {
+  /**
+   * Tear one client's established session down and prune the entry.
+   *
+   * `goodbye` is for an ending this Burrow chose — the idle reap, a replacement
+   * from the same Client static, the person at the Burrow taking a pane back —
+   * where the Client is told with {@link EstablishedE2eSession.end} before the
+   * dispose; every other path (a fatal session, `client-gone`, `stop()`) has no
+   * one listening, or no cipher to say it on. `only` names the session the
+   * caller means, so a stale ending cannot take down the one that replaced it.
+   */
+  #disposeEstablished(
+    clientId: string,
+    options: { goodbye?: boolean; only?: EstablishedE2eSession } = {},
+  ): void {
     const state = this.#clients.get(clientId);
     if (!state?.established) return;
-    this.#clearEstablished(state);
+    if (options.only && state.established.e2e !== options.only) return;
+    this.#clearEstablished(state, options.goodbye === true);
     this.#pruneClient(clientId);
   }
 
@@ -1549,10 +1576,14 @@ export class BurrowRuntime {
    * Tear one established session down and clear the slot, leaving the entry
    * itself to the caller — a promotion is about to fill it, a disposal prunes.
    */
-  #clearEstablished(state: ClientState): void {
+  #clearEstablished(state: ClientState, goodbye = false): void {
     if (!state.established) return;
-    state.established.e2e.dispose();
+    const { e2e } = state.established;
+    // Cleared first: a goodbye the channel refuses reports the session fatal
+    // from inside `end`, and that report must find nothing left to dispose.
     state.established = undefined;
+    if (goodbye) e2e.end();
+    else e2e.dispose();
   }
 
   // --- Shared plumbing -----------------------------------------------------

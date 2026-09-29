@@ -34,6 +34,7 @@ import {
   type TerminalOverlayDims,
 } from './terminal-store';
 import { clearTerminalActivity, notifyActivityListeners } from './session-activity-store';
+import { clearSizeHold } from './size-hold-store';
 import { attachTerminalMouseRouter } from './terminal-mouse-router';
 import {
   inputIsReplayTerminalReport,
@@ -640,6 +641,7 @@ function teardownSession(id: string, { kill }: { kill: boolean }): void {
   clearToolAnnounce(id);
   clearToolDirty(id);
   clearTerminalActivity(id);
+  clearSizeHold(id);
 }
 
 /** End a Session: the process goes with it. */

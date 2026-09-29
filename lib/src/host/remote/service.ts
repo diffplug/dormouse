@@ -32,6 +32,7 @@ import {
   PUSH_TEST_TITLE,
   type AlertPushDeps,
 } from '../../remote/burrow/push-delivery';
+import type { RemoteApiSessionContext } from '../../remote/burrow/established-session';
 import { RemoteApiSession } from '../../remote/burrow/remote-api';
 import {
   BurrowRuntime,
@@ -71,6 +72,8 @@ import {
   type PushSendSummary,
   type BurrowConsoleStatus,
   type SetupQrResult,
+  type TakeBackParams,
+  type TakeBackResult,
 } from './service-protocol';
 
 export interface BurrowServiceOptions {
@@ -202,6 +205,9 @@ function unavailableMessage(reason: OneTimeUnavailableReason, origin: string, co
 /** Bytes of the random ticket a one-time request is answered by, as `pairingId`. */
 const ONE_TIME_TICKET_BYTES = 16;
 
+/** Bytes of the random id a remote session holds a pane's size under. */
+const HOLDER_ID_BYTES = 16;
+
 /** Which app a Burrow is. Standalone and VS Code enroll separately. */
 export type BurrowKind = 'standalone' | 'vscode';
 
@@ -279,6 +285,12 @@ export class BurrowService {
    * asked, so only that runtime's dismissal clears it.
    */
   #oneTimeApproval: { runtime: OneTimeRuntime; pending: PendingPairing } | null = null;
+  /**
+   * Every live remote-api session of either runtime, by the holder id its
+   * attachments hold panes under, to the `end` that runtime handed it — what
+   * Take back runs. Entered at creation, left at disposal.
+   */
+  readonly #holders = new Map<string, () => void>();
 
   constructor(options: BurrowServiceOptions) {
     this.#store = options.store;
@@ -381,6 +393,8 @@ export class BurrowService {
         return this.#pushDevices();
       case 'pairingQueue':
         return this.#queueSnapshot();
+      case 'takeBack':
+        return this.#takeBack(params as TakeBackParams | undefined);
       default:
         throw new Error(`unknown burrow command: ${cmd}`);
     }
@@ -839,9 +853,35 @@ export class BurrowService {
     this.#emitStatus();
   }
 
-  /** The remote-api handler both runtimes serve an authorized session through. */
-  #createApiSession(opts: { burrowId: string; send: (payload: unknown) => void }): RemoteApiSession {
-    return new RemoteApiSession({ burrowId: opts.burrowId, send: opts.send, provider: this.#provider });
+  /**
+   * The remote-api handler both runtimes serve an authorized session through,
+   * under a fresh holder id: what a pane it sizes names it by, and what Take
+   * back ends it by.
+   */
+  #createApiSession(context: RemoteApiSessionContext): RemoteApiSession {
+    const holder = randomBase64Url(HOLDER_ID_BYTES);
+    this.#holders.set(holder, context.end);
+    return new RemoteApiSession({
+      burrowId: context.burrowId,
+      send: context.send,
+      provider: this.#provider,
+      holder: { id: holder, label: context.label },
+      onDispose: () => this.#holders.delete(holder),
+    });
+  }
+
+  /**
+   * A pane strip's Take back: end the session holding that pane's size, as its
+   * runtime ends one — the goodbye, then the dispose, whose release re-fits the
+   * pane (`docs/specs/remote-api.md` → "Size authority"). A one-time session's
+   * end is End itself. Answers whether one was ended: a holder this service
+   * does not know — ended already, or held under a broker that is gone — ends
+   * nothing, and the pane clears its own strip.
+   */
+  #takeBack(params: TakeBackParams | undefined): TakeBackResult {
+    const end = typeof params?.holder === 'string' ? this.#holders.get(params.holder) : undefined;
+    end?.();
+    return { ended: end !== undefined };
   }
 
   /** Enrolled, or a one-time connection holding a socket or a session. */

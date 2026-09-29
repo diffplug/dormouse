@@ -15,11 +15,15 @@ import {
   parsePairingInvitationUrl,
   generateNoiseKeyPair,
   toBase64Url,
+  utf8Encode,
   type EnrollmentOffer,
   type BurrowAclRecord,
 } from 'remote-lib-common';
 import type { BurrowEnrollment } from '../../remote/burrow/enrollment';
-import type { BurrowSurfaceProvider } from '../../remote/burrow/burrow-surface-provider';
+import type {
+  BurrowSurfaceProvider,
+  SurfaceHold,
+} from '../../remote/burrow/burrow-surface-provider';
 import type { OneTimeState } from '../../remote/burrow/one-time-runtime';
 import { FakeDirectNetwork } from '../../remote/direct/test-fake-peer';
 import { FakeSocket } from '../../remote/test-fake-socket';
@@ -27,6 +31,7 @@ import {
   createTestAuthenticator,
   flushUntil,
   openPairingSession,
+  openReceipt,
   pairThroughSocket,
   readOutcome,
   settle,
@@ -1505,6 +1510,52 @@ describe('one-time connection', () => {
 
     relay.resolve({ ok: false, status: 503, text: async () => '' } as Response);
     expect((await enrolling).error).toBeTruthy();
+  });
+
+  it('takes a pane back by ending the one-time session that holds it', async () => {
+    // A provider whose one pane records the hold an attach takes and gives back.
+    const holds: SurfaceHold[] = [];
+    const released: SurfaceHold[] = [];
+    createService(undefined, {
+      provider: {
+        ...fakeProvider(),
+        resolveSurface: async (_surfaceId, _size, hold) => {
+          holds.push(hold);
+          return {
+            ptyId: 'pty-1',
+            cols: 51,
+            rows: 14,
+            resize: async (cols, rows) => ({ cols, rows }),
+            release: () => void released.push(hold),
+          };
+        },
+        streamPty: () => ({ stop: () => {}, ready: Promise.resolve() }),
+      },
+    });
+    const phone = await join((await open()).url);
+    await approve(await request(phone));
+    expect(await phone.next()).toMatchObject({ ok: true });
+    const { peer, inbound } = await negotiateOneTimeDirect(phone, network);
+    phone.sendControl({ v: 1, t: 'direct-switch' });
+    await settleUntil(() => oneTimeStates().at(-1)?.status === 'connected');
+    const attach = { requestId: 'a-1', method: 'surface.attach', params: { surfaceId: 's1', cols: 51, rows: 14 } };
+    for (const ct of phone.session.sendApp(utf8Encode(JSON.stringify(attach)))) peer.send(ct);
+    await settleUntil(() => holds.length > 0);
+    // The pane is held under the phone's own label, and an id only this session has.
+    expect(holds[0]).toMatchObject({ label: 'iPhone' });
+
+    const holder = holds[0]!.holder;
+    expect((await command('takeBack', { holder })).result).toEqual({ ended: true });
+    // End itself: the phone is told, and the pane is given back.
+    expect(oneTimeStates().at(-1)).toEqual({ status: 'ended', reason: 'user-ended' });
+    expect(released).toEqual([holds[0]]);
+    await settleUntil(() => inbound.length >= 2);
+    const received = inbound.map((ct) => openReceipt(phone.session, ct));
+    expect(received.at(-1)).toEqual({ v: 1, t: 'session-end' });
+
+    // Gone with its session: a second Take back ends nothing.
+    expect((await command('takeBack', { holder })).result).toEqual({ ended: false });
+    expect((await command('takeBack', {})).result).toEqual({ ended: false });
   });
 
   it('refuses a new link while a phone holds this one, connecting or connected', async () => {

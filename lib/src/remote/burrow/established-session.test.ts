@@ -233,4 +233,27 @@ describe('EstablishedE2eSession', () => {
     e2e.dispose();
     expect(api.disposals).toBe(1);
   });
+
+  it('ends on purpose with the goodbye on the relay, then disposes', async () => {
+    const { e2e, client, api, relayed, handled, sendFromClient } = await establish();
+    e2e.end();
+    expect(relayed).toHaveLength(1);
+    expect(openReceipt(client, relayed[0]!)).toEqual({ v: 1, t: 'session-end' });
+    expect(api.disposals).toBe(1);
+    sendFromClient({ requestId: '1', method: 'hello' });
+    expect(handled).toEqual([]);
+
+    // Once over, there is nothing left to say.
+    e2e.end();
+    expect(relayed).toHaveLength(1);
+    expect(api.disposals).toBe(1);
+  });
+
+  it('ends a poisoned session with no goodbye, and still disposes it', async () => {
+    const { e2e, api, relayed } = await establish({ disposeOnFatal: false });
+    e2e.onRelayFrame(FORGED_CT);
+    e2e.end();
+    expect(relayed).toEqual([]);
+    expect(api.disposals).toBe(1);
+  });
 });

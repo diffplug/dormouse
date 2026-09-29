@@ -106,7 +106,9 @@ The pane body paints `--color-terminal-bg` on the React pane wrapper and the `Te
 
 **Must share scroll-safe pane messages across iframe status, Tool approval, and port conflicts**, wrapping long content and keeping all controls reachable in small panes. Center content only when it fits.
 
-Source of truth: `PaneMessage` in `lib/src/components/design.tsx`. Visual regression cases: `lib/src/stories/ToolApproval.stories.tsx`.
+**Must pin a held pane's strip to the body's bottom-right corner** — "Sized for \<label\>" and Take back, as one `PopupButtonRow` at `z-index: 20` that truncates the label within the pane rather than wrapping, and never in the header. Hold and Take back semantics belong to `docs/specs/remote-api.md` → "Size authority: last-attach-wins".
+
+Source of truth: `PaneMessage` in `lib/src/components/design.tsx`; `SizeHoldStrip` in `lib/src/components/wall/SizeHoldStrip.tsx`. Visual regression cases: `lib/src/stories/ToolApproval.stories.tsx`, `SizedForPhone` / `SizedForLongLabel` in `lib/src/stories/TerminalPane.stories.tsx`.
 
 ### Alarm overlay
 
@@ -114,7 +116,7 @@ A ringing terminal Session gets an overlay spanning its whole Lath leaf; browser
 
 **Two layers straddling the header's stacking context** (`.lath-leaf-header` is `position: relative; z-index: 20`):
 
-- **Wash + label at `z-index: 19`** — above terminal content, below the header and the `z-index: 20` pane-corner mouse-override banner, so neither is tinted (rationale). **Never use color-alpha utilities here** — their `color-mix()` is unsupported by the standalone Safari 15 / Chrome 105 targets; the solid alarm color lives on a child whose element opacity supplies those strengths. The label sits `PANE_HEADER_HEIGHT_PX + 4` from the Pane top, centered.
+- **Wash + label at `z-index: 19`** — above terminal content, below the header and the `z-index: 20` pane-corner mouse-override banner and held-pane strip, so none is tinted (rationale). **Never use color-alpha utilities here** — their `color-mix()` is unsupported by the standalone Safari 15 / Chrome 105 targets; the solid alarm color lives on a child whose element opacity supplies those strengths. The label sits `PANE_HEADER_HEIGHT_PX + 4` from the Pane top, centered.
 - **Perimeter ring at `z-index: 25`** — above the header so the treatment reads as one rounded rectangle around the Pane, below the `z-index: 30` sashes (rationale).
 
 Three strengths, by speech state over the latched ring. `SPOKEN` is unbounded, so its wash stays light enough to read text through:

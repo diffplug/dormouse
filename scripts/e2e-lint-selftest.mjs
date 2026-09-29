@@ -188,13 +188,27 @@ for (const [file, violation] of [
   selftest.withAppended(file, violation, `a store in ${file} stays green: ${violation.trim()}`);
 }
 
+// The goodbye is a control message like the signals, so naming it — as its
+// tag or as its type — reddens the routing rule on its own, not just the SDP
+// the loop appends.
+for (const violation of [
+  "\nconst __selftest = { v: 1, t: 'session-end' };\n",
+  '\ntype __Selftest = SessionEndV1;\n',
+]) {
+  selftest.withAppended(
+    'relay/src/relay.ts',
+    violation,
+    `the goodbye named in relay/src/relay.ts stays green: ${violation.trim()}`,
+  );
+}
+
 // These rules reach Hosted's server as well as their own trees, and the loop
 // above appends only inside those: each must redden in Hosted too. Named
 // rather than derived from `trees`, so a rule narrowed back is reported.
 const HOSTED_ROUTE = 'hosted/server/one-time.ts';
 for (const name of [
   'Neither the Relay nor Hosted names a protocol-v1 plaintext type',
-  'Neither the Relay nor Hosted names a direct-path signal or an SDP',
+  'Neither the Relay nor Hosted names a session control message or an SDP',
   'No STUN or TURN URL in shipped source',
   'No non-empty `iceServers` list anywhere',
 ]) {

@@ -62,6 +62,7 @@ import { closeCode, realTimer, type RemoteTimer, type RemoteWebSocket } from '..
 import {
   EstablishedE2eSession,
   sealControl,
+  type RemoteApiSessionContext,
   type RemoteApiSessionLike,
 } from './established-session';
 
@@ -152,9 +153,9 @@ export interface OneTimeRuntimeOptions {
   /**
    * Build the remote-api handler for the one authorized session. `burrowId` is
    * the room id, which is what `hello` answers with: this connection has no
-   * enrollment to name.
+   * enrollment to name. Its `end` is this runtime's End.
    */
-  createSession(opts: { burrowId: string; send: (payload: unknown) => void }): RemoteApiSessionLike;
+  createSession(opts: RemoteApiSessionContext): RemoteApiSessionLike;
   /**
    * How this host builds a peer connection for the direct path, or `null` where
    * it has none — then every offer is declined, and the connection ends
@@ -191,6 +192,14 @@ interface ReservedPhone {
 type RendezvousWork =
   | { readonly kind: 'frame'; readonly frame: OneTimeClientFrame }
   | { readonly kind: 'closed'; readonly code: number | undefined };
+
+/**
+ * The endings this laptop chose while the session's cipher is healthy, which
+ * the phone is told of with the goodbye (`EstablishedE2eSession.end`). Every
+ * other ending is the phone's own, the path's, or a failure with nothing sound
+ * left to say it on.
+ */
+const ENDS_WITH_GOODBYE: ReadonlySet<OneTimeEndReason> = new Set(['user-ended', 'idle']);
 
 /** What each denial ends the connection as. */
 const END_REASON_FOR_DENIAL: Record<OneTimeDenialCode, OneTimeEndReason> = {
@@ -583,7 +592,15 @@ export class OneTimeRuntime {
     try {
       const e2e: EstablishedE2eSession = new EstablishedE2eSession({
         session: reserved.session,
-        createApi: (send) => createSession({ burrowId: link.roomId, send }),
+        createApi: (send) =>
+          createSession({
+            burrowId: link.roomId,
+            send,
+            label,
+            end: () => {
+              if (this.#established === e2e) this.#end('user-ended');
+            },
+          }),
         createDirectPeer: this.#createDirectPeer,
         sendRelay: (relayed) => this.#sendFrame('transport', relayed),
         onFatal: (reason) => this.#onSessionFatal(e2e, reason),
@@ -751,9 +768,12 @@ export class OneTimeRuntime {
     this.#state = { status: 'ended', reason };
     this.#clearDeadline();
     this.#work.length = 0;
-    this.#rendezvous.close();
     const e2e = this.#established;
     this.#established = null;
+    // An ending this laptop chose tells the phone, before the room closes: a
+    // session still connecting has its goodbye ride the rendezvous.
+    if (e2e && ENDS_WITH_GOODBYE.has(reason)) e2e.end();
+    this.#rendezvous.close();
     this.#reserved = null;
     this.#keyPair = null;
     e2e?.dispose();

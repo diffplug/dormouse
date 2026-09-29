@@ -167,7 +167,7 @@ in-memory retry, not OS process restoration; the user supplies that evidence.
 
 **Why the Burrow's idle reap is worth a fresh handshake and a WebAuthn prompt.** It is the price of the Burrow reclaiming state that a hostile relay would otherwise never let it reclaim: without a deadline the Burrow holds sessions open at a peer's discretion.
 
-**Why the Client runs the Burrow's deadline against its own last send.** The relay socket is to the Relay and stays open across the reap, so nothing on the wire tells the phone its Burrow session is gone. Without the local check a returning phone holds a session the Burrow has forgotten: every request hangs with no error, and only a reload escapes.
+**Why the Client runs the Burrow's deadline against its own last send.** The relay socket is to the Relay and stays open across the reap, and the Burrow's goodbye goes out while the page is suspended — delivered late, or not at all. Without the local check a returning phone holds a session the Burrow has forgotten: every request hangs with no error, and only a reload escapes.
 
 ## An expired session drops to sign-in
 

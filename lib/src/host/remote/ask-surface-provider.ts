@@ -16,7 +16,7 @@ import type {
   BurrowSurfaceProvider,
   SurfaceHandle,
 } from '../../remote/burrow/burrow-surface-provider';
-import type { PeerSurfaceResult } from '../../remote/burrow/peer-surfaces';
+import type { PeerSurfaceParams, PeerSurfaceResult } from '../../remote/burrow/peer-surfaces';
 
 /**
  * Fan one operation out to whoever can answer it and collect the answers. Who
@@ -73,17 +73,18 @@ export function createAskSurfaceProvider(
       };
     },
 
-    async resolveSurface(surfaceId, size): Promise<SurfaceHandle | null> {
-      // Attach-is-the-resize: the owner applies the size inside this round trip,
-      // because there is no way to reach into its xterm afterwards without a
-      // second one (docs/specs/remote-api.md). One surface has one owner, so the
-      // first answer is the answer.
+    async resolveSurface(surfaceId, size, hold): Promise<SurfaceHandle | null> {
+      // Attach-is-the-resize: the owner applies the size — and records the
+      // hold — inside this round trip, because there is no way to reach into
+      // its xterm afterwards without a second one (docs/specs/remote-api.md).
+      // One surface has one owner, so the first answer is the answer.
       const [owner] = (await ask('surfaceOp', {
         surfaceId,
         op: 'attach',
         cols: size.cols,
         rows: size.rows,
-      })) as PeerSurfaceResult[];
+        hold,
+      } satisfies PeerSurfaceParams)) as PeerSurfaceResult[];
       if (!owner) return null;
 
       let cols = owner.cols;
@@ -106,13 +107,24 @@ export function createAskSurfaceProvider(
               op: 'resize',
               cols: nextCols,
               rows: nextRows,
-            },
+              hold,
+            } satisfies PeerSurfaceParams,
             owner.ptyId,
           )) as PeerSurfaceResult[];
           if (!settled) throw new Error('surface owner unavailable');
           cols = settled.cols;
           rows = settled.rows;
           return { cols, rows };
+        },
+        // Addressed to the owner that took the hold, like a resize. Rejections
+        // are swallowed: nothing waits on a release, and a Burrow process must
+        // never carry an unhandled one.
+        release: () => {
+          void ask(
+            'surfaceOp',
+            { surfaceId, op: 'release', hold } satisfies PeerSurfaceParams,
+            owner.ptyId,
+          ).catch(() => {});
         },
       };
     },

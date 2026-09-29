@@ -19,6 +19,7 @@ import {
   REMOTE_EVENTS,
   REMOTE_METHODS,
   fromBase64Url,
+  isSessionEndV1,
   utf8Decode,
   utf8Encode,
   type DirectPath,
@@ -75,6 +76,8 @@ export interface ClientSessionMessages {
    * request in flight on it, and one made after, fails with.
    */
   readonly reaped: string;
+  /** What a session the Burrow ended on purpose — its goodbye — ends with. */
+  readonly ended: string;
 }
 
 export interface ClientSessionCoreDeps<R extends CeremonyRoute> {
@@ -137,7 +140,7 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
   readonly #createDirectPeer: DirectPeerFactory | null;
 
   #established: EstablishedSession<R> | null = null;
-  #onBurrowGone: (() => void) | null = null;
+  #onBurrowGone: ((endedByBurrow: boolean) => void) | null = null;
   #onTransportChanged:
     | ((path: DirectPath, cause: DirectRelayCause | null) => void)
     | null = null;
@@ -195,9 +198,11 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
   /**
    * Notified when the Burrow drops: every {@link loseBurrow} — a failed
    * decrypt, a dead channel, a session the Burrow's idle reaper took while this
-   * page was hidden — and every {@link endSession} the owner asks to report.
+   * page was hidden, the Burrow's goodbye — and every {@link endSession} the
+   * owner asks to report. `endedByBurrow` is true for the goodbye alone: the
+   * Burrow said it ended the session, which no other loss can tell apart.
    */
-  setOnBurrowGone(callback: (() => void) | null): void {
+  setOnBurrowGone(callback: ((endedByBurrow: boolean) => void) | null): void {
     this.#onBurrowGone = callback;
   }
 
@@ -435,8 +440,8 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
    * owner does next — Pocket reconnects with a fresh handshake over the relay
    * socket already open — is the owner's.
    */
-  loseBurrow(reason: string): void {
-    this.endSession(reason, { notifyGone: true });
+  loseBurrow(reason: string, { endedByBurrow = false }: { endedByBurrow?: boolean } = {}): void {
+    this.endSession(reason, { notifyGone: true, endedByBurrow });
   }
 
   // --- Keepalives ----------------------------------------------------------
@@ -465,12 +470,13 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
    * **A session the Burrow has already reaped, ended here too.**
    *
    * The Burrow disposes an established session it has not decrypted a Client
-   * message on for `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` and sends nothing when it
-   * does — there is no frame to send, and nothing the owner's socket carries
-   * says so. Keepalives pause while the page is hidden, so a phone in a pocket
-   * crosses that line on its own, and without this check it comes back to a
-   * wall whose every request hangs forever with no error and no way out but a
-   * reload ([pocket-app.md](../../../docs/specs/pocket-app.md)).
+   * message on for `ESTABLISHED_E2E_IDLE_TIMEOUT_MS`, and its goodbye goes out
+   * while this page is suspended — delivered late, or not at all, and nothing
+   * the owner's socket carries says so. Keepalives pause while the page is
+   * hidden, so a phone in a pocket crosses that line on its own, and without
+   * this check it comes back to a wall whose every request hangs forever with
+   * no error and no way out but a reload
+   * ([pocket-app.md](../../../docs/specs/pocket-app.md)).
    *
    * The Burrow's deadline runs from the message it last decrypted, which is the
    * one this Client last sent, so the same constant answers the question on
@@ -596,8 +602,16 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
       this.loseBurrow('the end-to-end session failed');
       return null;
     }
-    // A keepalive is accepted and ignored; a control message is one of the
-    // direct path's signals, which the endpoint reads off this receipt.
+    // The Burrow's goodbye: it ended this session on purpose, so nothing in
+    // flight will be answered. Taken here rather than by the endpoint, which
+    // both ends run, because only a Client is ever told.
+    if (receipt.kind === 'control' && isSessionEndV1(receipt.value)) {
+      this.loseBurrow(this.#messages.ended, { endedByBurrow: true });
+      return null;
+    }
+    // A keepalive is accepted and ignored; any other control message is one of
+    // the direct path's signals, which the endpoint reads off this receipt —
+    // and ignores when it is a shape it does not know.
     if (receipt.kind !== 'app') return receipt;
     for (const message of receipt.messages) {
       let payload: unknown;
@@ -633,10 +647,13 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
    * Everything a session's end does short of the owner's socket: dispose it,
    * fail everything in flight, and — where `notifyGone` — report burrow loss.
    */
-  endSession(reason: string, { notifyGone }: { notifyGone: boolean }): void {
+  endSession(
+    reason: string,
+    { notifyGone, endedByBurrow = false }: { notifyGone: boolean; endedByBurrow?: boolean },
+  ): void {
     this.disposeSession();
     this.rejectAll(new Error(reason));
-    if (notifyGone) this.#onBurrowGone?.();
+    if (notifyGone) this.#onBurrowGone?.(endedByBurrow);
   }
 
   /** Erase every session's cipher state; a new ceremony starts from a handshake. */

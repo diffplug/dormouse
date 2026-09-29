@@ -57,7 +57,9 @@ Source of truth: the surface model the wire shapes reuse — `dor/src/protocol.t
 
 **A `RemoteApiSession` exists only for an authorized session.** Created at promotion — presence proof and ACL conjunction both passed ([remote-security-model.md](./remote-security-model.md) → Connection) — and disposed when the Client disconnects, when the Burrow reaps the session, and by any promotion that replaces it, so **a re-authorizing Client can never inherit the previous session's attachment**.
 
-Source of truth: `BurrowRuntime.#promoteConnection` in `lib/src/remote/burrow/burrow-runtime.ts`, `EstablishedE2eSession` in `lib/src/remote/burrow/established-session.ts`.
+**The Burrow says goodbye before an ending it chose**: `SessionEndV1` (`{ v: 1, t: 'session-end' }`, exact keys, no payload), one padded control message on whichever path carries the session, sent by `EstablishedE2eSession.end` just before the dispose — Take back, an idle reap, a one-time End, and a replacement from the same Client static. **Never on a poisoned session, never instead of the dispose.** A Client reports it as burrow loss (`endedByBurrow`); an older one ignores it as an unknown control shape (rationale).
+
+Source of truth: `BurrowRuntime.#promoteConnection` in `lib/src/remote/burrow/burrow-runtime.ts`, `EstablishedE2eSession` in `lib/src/remote/burrow/established-session.ts`, `SessionEndV1` in `remote-lib-common/src/security/e2e-ceremony.ts`, `ClientSessionCore` in `lib/src/remote/client/session-core.ts`.
 
 ### Direct path
 
@@ -281,9 +283,16 @@ Source of truth: `RemoteApiSession.#attach` / `#beginAttach` in `lib/src/remote/
 
 #### Size authority: last-attach-wins
 
-A terminal has one size, and **the most recent size writer owns it**: attaching with dimensions and `terminal.resize` both take authority through the owning xterm, and **only a local refit of the owning pane takes it back** — its box changing size, a layout settling, or the pane mounting again (its Workspace shown, a reload). **Focus and keystrokes never do**; interacting to take a pane back is the staged tethering display ([Future](#future) item 5; rationale). **There is no remote detach at the surface owner** — the Burrow stops streaming on its side and the pane keeps whatever size it was left at, after a session ends too, until a local refit. Authority holds at the PTY level today.
+A terminal has one size, and **the most recent remote size writer holds it**: an attach with dimensions and `terminal.resize` both resize through the owning xterm under a `SurfaceHold` — an opaque per-session holder id, its label, and a per-attachment lease — which the owning webview records before the size moves.
 
-Source of truth: `driveOwnSurface` in `lib/src/remote/burrow/peer-surfaces.ts`; `TerminalPane` in `lib/src/components/TerminalPane.tsx`. Pinned by `lib/src/remote/burrow/peer-surfaces.test.ts` and `lib/src/components/TerminalPane.test.tsx`.
+- **Never re-fit a held pane locally** — box resize, layout settle, remount, focus, or keystroke (rationale).
+- **Must show the strip on a held pane, and only there** ([layout.md](./layout.md) → "Pane body"): the ACL record's label bounded again by `boundedPairingLabel`, or the one-time device label, as text.
+- **Take back ends the holding session**, never resizes the phone: `takeBack { holder }` runs the end the session's runtime supplied — End for a one-time connection, goodbye and dispose for a Pocket session, which stays paired (rationale). **The pane then clears that hold whatever the answer.**
+- **Must release on every end of an attachment** — detach, a newer attach, exit, a failed or superseded attach, disposal. **The owner re-fits only while the released holder and lease are still the pane's hold.**
+- **Must answer `release` with nothing and ignore an unknown op**; an attach naming no hold (an older Burrow) sizes without holding.
+- **Holds live in webview memory**: a reload or a Workspace transfer drops them, and the pane fits its box under a phone still attached.
+
+Source of truth: `RemoteApiSession.#attach` / `#teardownAttachment` in `lib/src/remote/burrow/remote-api.ts`; `driveOwnSurface` in `lib/src/remote/burrow/peer-surfaces.ts`; `lib/src/lib/size-hold-store.ts`; `TerminalPane` in `lib/src/components/TerminalPane.tsx`; `takeBackSize` in `lib/src/remote/burrow/take-back.ts`; `BurrowService.#takeBack` in `lib/src/host/remote/service.ts`. Pinned end to end by `lib/src/remote/client/one-time-e2e.test.ts`.
 
 ## Input authority and multiple viewers
 
@@ -357,7 +366,7 @@ Attach also delivers recent blocks, rendered at the client's own width — colla
 
 ### 5. Tethering display and viewer visibility
 
-While a remote session holds size authority, every other display of that pane — the Burrow's own Wall, other attached viewers — greys out and shows only **"tethering to \<device\>"** (the ACL record's label, e.g. `iPhone Safari`) instead of fighting over `SIGWINCH`; interacting with it takes authority back. Alongside: the Burrow UI lists connected viewers with per-viewer disconnect, and in-flight input is dropped the moment a session is killed.
+The Burrow's own pane already shows its holder ([Size authority](#size-authority-last-attach-wins)); every other attached viewer of a held pane greys out and shows only **"tethering to \<device\>"** instead of fighting over `SIGWINCH`, and interacting with it takes authority back. Alongside: the Burrow UI lists connected viewers with per-viewer disconnect, and in-flight input is dropped the moment a session is killed.
 
 The wire half, as new event names:
 

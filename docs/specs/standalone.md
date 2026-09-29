@@ -197,7 +197,7 @@ pushes the live window labels** (`burrow:windows`) at setup and on every window
 create and destroy, and **dropping one settles the asks that window can no longer
 answer**; an ask in flight is only ever *narrowed*, since a window that opened
 after it never received it. **An ask naming a `surfaceId` goes to that Surface's
-owner alone** — `attach` and `resize` mutate the pane they reach, and fanned out
+owner alone** — `attach`, `resize`, and `release` act on the pane they reach, and fanned out
 they ask every other window to resize one it does not hold — and Rust names the
 window it delivered to (`burrow:askDelivered`) so the collector settles on that
 one answer instead of spending the budget on windows the ask never reached. `ASK_BUDGET_MS` (1s) still bounds the whole fan-out,

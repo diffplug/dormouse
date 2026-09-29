@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest';
 import {
   E2E_KEEPALIVE_INTERVAL_MS,
   ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
+  SESSION_END_V1,
   toBase64Url,
   utf8Encode,
   type E2eClientStep,
@@ -26,7 +27,11 @@ import { fakeTimers } from '../test-timers';
 
 const ROUTE: CeremonyRoute = { kind: 'connection', id: 'route-a' };
 
-const MESSAGES = { unavailable: 'nobody answered', reaped: 'the Burrow let it go' };
+const MESSAGES = {
+  unavailable: 'nobody answered',
+  reaped: 'the Burrow let it go',
+  ended: 'the Burrow ended it',
+};
 
 /** A ceremony deadline no case waits out; the clock starts at 1 000. */
 const LATER = 60_000;
@@ -63,8 +68,12 @@ function makeCore({
     },
     createDirectPeer,
   });
-  core.setOnBurrowGone(() => void (gone.count += 1));
-  return { core, sent, clock, timers, visibilityListeners, gone };
+  const endedByBurrow: boolean[] = [];
+  core.setOnBurrowGone((ended) => {
+    gone.count += 1;
+    endedByBurrow.push(ended);
+  });
+  return { core, sent, clock, timers, visibilityListeners, gone, endedByBurrow };
 }
 
 describe('ceremony waiters', () => {
@@ -233,5 +242,51 @@ describe('an established session', () => {
     await expect(core.hello()).rejects.toThrow(MESSAGES.reaped);
     expect(sent).toHaveLength(sentBefore);
     expect(gone.count).toBe(1);
+  });
+
+  it('ends on the Burrow’s goodbye, failing what is in flight in the owner’s words', async () => {
+    const { core, gone, endedByBurrow } = makeCore();
+    const { client, burrow } = await noiseSessionPair();
+    core.establish(ROUTE, client);
+    const inFlight = core.hello();
+
+    core.onFrame(ROUTE, 'transport', toBase64Url(burrow.sendControl({ ...SESSION_END_V1 })));
+    expect(gone.count).toBe(1);
+    // The one loss the Burrow names: only the goodbye reports it ended the session.
+    expect(endedByBurrow).toEqual([true]);
+    expect(core.establishedRoute).toBeNull();
+    await expect(inFlight).rejects.toThrow(MESSAGES.ended);
+  });
+
+  it('ignores a control shape it does not know, and stays connected', async () => {
+    // What an older Client does with the goodbye, and this one with whatever a
+    // newer Burrow adds: an unknown control message is never a session failure.
+    const { core, gone, sent } = makeCore();
+    const { client, burrow } = await noiseSessionPair();
+    core.establish(ROUTE, client);
+    for (const value of [
+      { v: 1, t: 'session-pause' },
+      { v: 2, t: 'session-end' },
+      { v: 1, t: 'session-end', reason: 'take-back' },
+    ]) {
+      core.onFrame(ROUTE, 'transport', toBase64Url(burrow.sendControl(value)));
+    }
+    expect(gone.count).toBe(0);
+    expect(core.establishedRoute).toBe(ROUTE);
+
+    const hello = core.hello();
+    const [message] = openReceipt(burrow, sent.at(-1)!.ciphertext) as Array<{ requestId: string }>;
+    const response = { requestId: message!.requestId, ok: true, result: { burrowId: 'b' } };
+    for (const ct of burrow.sendApp(utf8Encode(JSON.stringify(response)))) {
+      core.onFrame(ROUTE, 'transport', toBase64Url(ct));
+    }
+    await expect(hello).resolves.toEqual({ burrowId: 'b' });
+  });
+
+  it('reports every other loss as not ended by the Burrow', async () => {
+    const { core, endedByBurrow } = makeCore();
+    core.establish(ROUTE, (await noiseSessionPair()).client);
+    core.onFrame(ROUTE, 'transport', FORGED_CT);
+    expect(endedByBurrow).toEqual([false]);
   });
 });

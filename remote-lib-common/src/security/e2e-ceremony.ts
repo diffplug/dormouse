@@ -384,6 +384,30 @@ export function isOneTimeOutcomeV1(value: unknown): value is OneTimeOutcomeV1 {
   return outcome.ok === true && bounded(outcome.burrowLabel);
 }
 
+// ---------------------------------------------------------------------------
+// An established session
+
+/**
+ * The Burrow's goodbye: it is ending this established session on purpose, so
+ * the Client reports the session over rather than waiting on requests nothing
+ * will answer (`docs/specs/remote-api.md` → Transport). **Exact keys and no
+ * payload**, like the direct path's signals, so nothing can ride on it; a
+ * Client that does not know it ignores it, as it does every unknown control
+ * shape.
+ */
+export interface SessionEndV1 {
+  readonly v: 1;
+  readonly t: 'session-end';
+}
+
+export const SESSION_END_V1: SessionEndV1 = Object.freeze({ v: 1, t: 'session-end' });
+
+export function isSessionEndV1(value: unknown): value is SessionEndV1 {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const message = value as Record<string, unknown>;
+  return message.v === 1 && message.t === 'session-end' && Object.keys(message).length === 2;
+}
+
 /** Membership in a denial list, without widening the list's literal type. */
 function includesCode(codes: readonly string[], value: unknown): boolean {
   return typeof value === 'string' && codes.includes(value);

@@ -33,6 +33,9 @@ import {
 } from './helpers';
 
 type BurrowModule = typeof import('../src/burrow');
+
+/** The hold a remote session's attach takes; opaque to every window it crosses. */
+const HOLD = { holder: 'session-a', label: 'iPhone', lease: '1' };
 type LinkModule = typeof import('../src/peer-link');
 
 /**
@@ -877,6 +880,9 @@ describe('burrow service glue', () => {
     // nothing to end.
     mod.handleBurrowCommand({ burrowRequestId: 'rh-oneTimeStatus', cmd: 'oneTimeStatus' });
     mod.handleBurrowCommand({ burrowRequestId: 'rh-oneTimeEnd', cmd: 'oneTimeEnd' });
+    // No service holds a pane either, so a Take back ends nothing and the
+    // strip clears itself.
+    mod.handleBurrowCommand({ burrowRequestId: 'rh-takeBack', cmd: 'takeBack', params: { holder: 'nobody' } });
     // Everything else still says there is nothing to reach.
     mod.handleBurrowCommand({ burrowRequestId: 'rh-clear', cmd: 'clearEnrollment' });
     expect(results(bound.posted).find((r) => r.burrowRequestId === 'rh-clear')).toEqual({
@@ -907,13 +913,13 @@ describe('burrow service glue', () => {
       oneTimeOrigin: 'https://hosted.dormouse.sh',
     });
     await idle.start();
-    for (const cmd of ['status', 'pushDevices', 'pairingQueue', 'oneTimeStatus', 'oneTimeEnd']) {
-      await idle.handleCommand({ burrowRequestId: `rh-${cmd}`, cmd });
+    for (const cmd of ['status', 'pushDevices', 'pairingQueue', 'oneTimeStatus', 'oneTimeEnd', 'takeBack']) {
+      await idle.handleCommand({ burrowRequestId: `rh-${cmd}`, cmd, params: { holder: 'nobody' } });
     }
     idle.dispose();
     // The glue's `status` is the one idle answer that reads a file, so it
     // settles a tick later than the ones that do not.
-    await waitFor(() => results(bound.posted).length === 6);
+    await waitFor(() => results(bound.posted).length === 7);
 
     const byId = (entries: Array<{ burrowRequestId: string; result?: unknown }>) =>
       Object.fromEntries(
@@ -923,6 +929,7 @@ describe('burrow service glue', () => {
       byId(sent.filter((message) => message.event === 'burrow:result').map((m) => m.data)),
     );
     expect(byId(results(bound.posted))['rh-oneTimeStatus']).toEqual({ status: 'idle' });
+    expect(byId(results(bound.posted))['rh-takeBack']).toEqual({ ended: false });
   });
 
   it('contends when another window enrolls, without a reload', async () => {
@@ -1104,6 +1111,25 @@ describe('burrow provider', () => {
     });
   });
 
+  it('carries the hold on the attach and releases it at the owner that took it', async () => {
+    const mod = await freshBurrow();
+    const bound = fakeDeps();
+    bound.answers.set('surfaceOp', [{ ptyId: 'pty-1', cols: 51, rows: 14 }]);
+    const provider = mod.createBurrowProvider(bound.deps());
+
+    const handle = (await provider.resolveSurface('surface-1', { cols: 51, rows: 14 }, HOLD))!;
+    expect(bound.asked.at(-1)).toEqual({
+      op: 'surfaceOp',
+      params: { surfaceId: 'surface-1', op: 'attach', cols: 51, rows: 14, hold: HOLD },
+    });
+    handle.release();
+    await tick();
+    expect(bound.asked.at(-1)).toEqual({
+      op: 'surfaceOp',
+      params: { surfaceId: 'surface-1', op: 'release', hold: HOLD },
+    });
+  });
+
   it('reports no surface when nobody answers', async () => {
     const mod = await freshBurrow();
     const bound = fakeDeps();
@@ -1229,6 +1255,31 @@ describe('serving the other windows', () => {
     far.emitData('pty-far', 'after the unsubscribe');
     await tick(100);
     expect(sink.data).toEqual(['from the other window']);
+  });
+
+  it('releases a hold in the window whose pane took it', async () => {
+    const far = fakeWindow({
+      entries: [{ surfaceId: 'far-1' }],
+      surfaces: { 'far-1': { ptyId: 'pty-far', cols: 51, rows: 14 } },
+    });
+    const { mod, bound } = await brokerWith(far);
+    const provider = mod.createBurrowProvider(bound.deps());
+    let handle: Awaited<ReturnType<typeof provider.resolveSurface>> = null;
+    await waitFor(async () => {
+      handle = await provider.resolveSurface('far-1', { cols: 51, rows: 14 }, HOLD);
+      return handle !== null;
+    });
+    expect(far.requests).toContainEqual({
+      op: 'surfaceOp',
+      params: { surfaceId: 'far-1', op: 'attach', cols: 51, rows: 14, hold: HOLD },
+    });
+
+    handle!.release();
+    await waitFor(() => far.requests.some((r) => (r.params as { op?: string }).op === 'release'));
+    expect(far.requests.at(-1)).toEqual({
+      op: 'surfaceOp',
+      params: { surfaceId: 'far-1', op: 'release', hold: HOLD },
+    });
   });
 
   it('binds a duplicate restored PTY id to the peer whose surface answer was selected', async () => {

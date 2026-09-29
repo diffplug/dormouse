@@ -521,9 +521,16 @@ suspended for longer than that comes back to no session**, and reconnecting cost
 a fresh Noise handshake and one WebAuthn prompt. (rationale)
 
 **Pocket runs the same deadline against its own last send**, before a keepalive
-and before every request, and reports burrow loss when it passes. **A reap sends
-nothing** — there is no frame to send — and this Client's relay socket is to the
-*Relay*, so it stays open. (rationale)
+and before every request, and reports burrow loss when it passes. **A reap's
+goodbye cannot be relied on** — a suspended page may never read it — and this
+Client's relay socket is to the *Relay*, so it stays open. (rationale)
+
+**The Burrow's goodbye is burrow loss** — its idle reap, a newer session from
+this same Client static, or the person at the computer taking a pane back
+([remote-api.md](./remote-api.md) → Transport): the phone leaves the wall
+exactly as it does for a `burrow-gone`, and stays paired. Pinned by `leaves the
+wall when the Burrow ends a relayed session, rather than freezing` in
+`lib/src/remote/client/pocket-client.test.ts`.
 
 Source of truth: `ClientSessionCore.sendKeepalive` / `#reapedByBurrow` and the
 injected timer, clock, and visibility seams in

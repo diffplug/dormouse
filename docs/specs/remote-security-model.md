@@ -462,7 +462,7 @@ runtime holds the same line against the rendezvous (`docs/specs/one-time.md`
   | --- | --- |
   | Pending pairing | `invitation-expired` |
   | Pending connection (its challenge is now dead) | `presence-rejected` |
-  | Idle established session | nothing |
+  | Idle established session | the goodbye, `SessionEndV1` ([remote-api.md](./remote-api.md) → Transport) |
   | Pending pairing evicted at its cap | `superseded` (rationale) |
   | Pending connection evicted at its cap | nothing (rationale) |
 
