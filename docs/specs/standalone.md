@@ -651,6 +651,8 @@ Source of truth: `standalone/src/window-close.ts`; `request_window_close` /
 
 ### Transfer
 
+Dirty Tool consent: `docs/specs/dor-tool.md` → Editing files.
+
 **A Workspace moves between windows without ending anything.** No process is killed: a move is not a closure.
 
 The protocol and every failure path are §Arrival queue; what a move *is*:

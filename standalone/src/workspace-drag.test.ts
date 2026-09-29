@@ -30,6 +30,9 @@ import { _setWindowLabelForTesting } from "./window-label";
 import { registerWallHandle, resetWallHandles, stubWallHandle } from "dormouse-lib/components/wall/wall-handles";
 import { getWorkspaceUiSnapshot, resetWorkspaceUi } from "dormouse-lib/lib/workspace-ui-store";
 
+import { cancelEditorClose, decideEditorClose, getEditorClosePrompt } from "dormouse-lib/lib/tool-editor";
+import { recordToolDirty, resetToolDirty } from "dormouse-lib/lib/tool-dirty-store";
+
 const settle = () => vi.advanceTimersByTimeAsync(0);
 /** Past the hit-test throttle, so the next move probes again. */
 const throttleElapsed = () => vi.advanceTimersByTimeAsync(100);
@@ -53,6 +56,10 @@ function strip(): void {
 }
 
 beforeEach(() => {
+  cancelEditorClose();
+  resetToolDirty();
+  resetWallHandles();
+  resetWorkspaceUi();
   vi.useFakeTimers();
   vi.clearAllMocks();
   _resetWorkspaceDragForTesting();
@@ -62,7 +69,7 @@ beforeEach(() => {
   strip();
 });
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => { cancelEditorClose(); vi.useRealTimers(); });
 
 describe("hit testing while dragging", () => {
   it("probes at most once per throttle window", async () => {
@@ -168,6 +175,35 @@ describe("hit testing while dragging", () => {
 });
 
 describe("releasing the drag", () => {
+  it.each([true, false])("protects dirty drafts before the iframe gate (existing window: %s)", async (existing) => {
+    recordToolDirty("editor", true);
+    registerWallHandle(stubWallHandle("ws-1", {
+      dirtyToolIds: () => ["editor"], iframeSurfaceRefs: () => ["surface:4"],
+    }));
+    hit = existing ? { label: "ws-2", x: 120, y: 9 } : null;
+    const drop = () => onDropOnOtherWindow("ws-1", { clientX: 900, clientY: 9 }, false);
+    drop();
+    await settle();
+    expect(getEditorClosePrompt()?.items).toMatchObject([{ id: "editor" }]);
+    expect(getWorkspaceUiSnapshot().pendingMove).toBeNull();
+    await decideEditorClose("cancel");
+    await settle();
+    expect(mocks.transferWorkspaceTo).not.toHaveBeenCalled();
+    expect(mocks.tearOutWorkspace).not.toHaveBeenCalled();
+
+    drop();
+    await settle();
+    await decideEditorClose("discard");
+    await settle();
+    const pending = getWorkspaceUiSnapshot().pendingMove;
+    expect(pending).toMatchObject({ iframeCount: 1 });
+    expect(mocks.transferWorkspaceTo).not.toHaveBeenCalled();
+    expect(mocks.tearOutWorkspace).not.toHaveBeenCalled();
+    pending!.proceed();
+    if (existing) expect(mocks.transferWorkspaceTo).toHaveBeenCalledWith("ws-1", "ws-2", { x: 120, y: 9 }, undefined, ["editor"]);
+    else expect(mocks.tearOutWorkspace).toHaveBeenCalledWith("ws-1", expect.any(Object), ["editor"]);
+  });
+
   it("does nothing when released back inside its own strip", async () => {
     // The strip controller owns its own box, so it says so rather than leaving
     // this to re-derive it from the DOM.
@@ -181,7 +217,7 @@ describe("releasing the drag", () => {
     hit = { label: "ws-2", x: 120, y: 9 };
     onDropOnOtherWindow("ws-1", { clientX: 900, clientY: 9 }, false);
     await settle();
-    expect(mocks.transferWorkspaceTo).toHaveBeenCalledWith("ws-1", "ws-2", { x: 120, y: 9 });
+    expect(mocks.transferWorkspaceTo).toHaveBeenCalledWith("ws-1", "ws-2", { x: 120, y: 9 }, undefined, []);
     expect(mocks.tearOutWorkspace).not.toHaveBeenCalled();
   });
 
@@ -198,7 +234,7 @@ describe("releasing the drag", () => {
     expect(pending).toMatchObject({ id: "ws-1", iframeCount: 2 });
     // The strip's key handler settles it; here, the letter's own effect.
     pending!.proceed();
-    expect(mocks.transferWorkspaceTo).toHaveBeenCalledWith("ws-1", "ws-2", { x: 120, y: 9 });
+    expect(mocks.transferWorkspaceTo).toHaveBeenCalledWith("ws-1", "ws-2", { x: 120, y: 9 }, undefined, []);
     resetWallHandles();
     resetWorkspaceUi();
   });
@@ -218,7 +254,7 @@ describe("releasing the drag", () => {
     hit = null;
     onDropOnOtherWindow("ws-1", { clientX: 2000, clientY: 800 }, false);
     await settle();
-    expect(mocks.tearOutWorkspace).toHaveBeenCalledWith("ws-1", expect.objectContaining({ x: 90, y: 12 }));
+    expect(mocks.tearOutWorkspace).toHaveBeenCalledWith("ws-1", expect.objectContaining({ x: 90, y: 12 }), []);
   });
 
   it("tears out when released inside its own window but outside the strip", async () => {

@@ -13,6 +13,7 @@ export const subscribeEditorClosePrompt = (listener: () => void) => { listeners.
 
 /** A close that did not ask, or was cancelled, keeps a dirty Tool open. */
 export const UNSAVED_TOOL_REFUSAL = 'Tool has unsaved changes. Save or discard them, then close it again.';
+export const UNSAVED_TOOL_MOVE_REFUSAL = 'Tool has unsaved changes. Save or discard them before moving this Workspace.';
 
 function finish(answer: boolean): void {
   const resolve = settle;

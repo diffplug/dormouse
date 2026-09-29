@@ -10,7 +10,7 @@ export function ToolEditorCloseModalHost() {
   if (!pending) return null;
   return <ModalFrame titleId="save-tool-title" layer="critical" initialFocusRef={cancel}
     onEscape={() => { void decideEditorClose('cancel'); }} padding="spacious">
-    <h2 id="save-tool-title" className="text-sm font-semibold">Save changes before closing?</h2>
+    <h2 id="save-tool-title" className="text-sm font-semibold">Save changes?</h2>
     <ul className="my-3 max-w-lg break-words text-sm">
       {pending.items.map(({ id, label }) => <li key={id}>{label}</li>)}
     </ul>

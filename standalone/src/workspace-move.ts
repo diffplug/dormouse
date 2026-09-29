@@ -1,4 +1,5 @@
 import { clearToolDirty, recordToolDirty } from 'dormouse-lib/lib/tool-dirty-store';
+import { UNSAVED_TOOL_MOVE_REFUSAL } from 'dormouse-lib/lib/tool-editor';
 import { dismissWorkspaceUi } from 'dormouse-lib/lib/workspace-ui-store';
 import { restoreToolParams } from 'dormouse-lib/components/wall/tool-transfer';
 import { recordToolAnnounce } from 'dormouse-lib/lib/tool-announce-store';
@@ -123,14 +124,22 @@ async function startMove(
   workspaceId: WorkspaceId,
   command: string,
   args: (payload: WorkspaceTransferPayload) => Record<string, unknown>,
+  discardedEditors: readonly string[],
 ): Promise<MoveOutcome> {
   if (isWorkspaceTransferPending(workspaceId)) return { moved: false, reason: "Workspace is already in flight" };
   const handle = getWallHandle(workspaceId);
   if (!handle) return { moved: false, reason: `no mounted Wall for '${workspaceId}'` };
+  const hasUnsaved = () => handle.dirtyToolIds().some(id => !discardedEditors.includes(id));
+  if (hasUnsaved()) return { moved: false, reason: UNSAVED_TOOL_MOVE_REFUSAL };
   setWorkspaceTransferPending(workspaceId, true);
   let prepared: PreparedWorkspaceTransfer;
   try {
     prepared = await handle.prepareWorkspaceTransfer();
+    // Preparation awaits CWD probes; an editor can become dirty during them.
+    if (hasUnsaved()) {
+      setWorkspaceTransferPending(workspaceId, false);
+      return { moved: false, reason: UNSAVED_TOOL_MOVE_REFUSAL };
+    }
   } catch (error) {
     setWorkspaceTransferPending(workspaceId, false);
     return { moved: false, reason: reasonOf(error) };
@@ -248,6 +257,7 @@ export async function transferWorkspaceTo(
   to: string,
   at?: { x: number; y: number },
   index?: number,
+  discardedEditors: readonly string[] = [],
 ): Promise<MoveOutcome> {
   return startMove(workspaceId, "transfer_workspace", (payload) => ({
     to,
@@ -256,7 +266,7 @@ export async function transferWorkspaceTo(
       ...(at ? { at } : {}),
       ...(index === undefined ? {} : { index }),
     } satisfies MovePayload,
-  }));
+  }), discardedEditors);
 }
 
 /** Tear this Workspace out into a new window under the cursor. Resolves once
@@ -264,10 +274,11 @@ export async function transferWorkspaceTo(
 export async function tearOutWorkspace(
   workspaceId: WorkspaceId,
   grab: { x: number; y: number },
+  discardedEditors: readonly string[] = [],
 ): Promise<MoveOutcome> {
   return startMove(workspaceId, "open_workspace_window", (payload) => ({
     payload: { ...payload, grab } satisfies MovePayload,
-  }));
+  }), discardedEditors);
 }
 
 /**
