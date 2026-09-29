@@ -46,7 +46,7 @@ Panes are separated by a 7px gap (`PANE_GUTTER_PX`), odd so the 1px selection ri
 
 ### Pane header
 
-**Must keep a Tool's unsaved-change dot visible in its Pane header and minimized Door**, across header widths and faces. Use inherited foreground, without animation; label and tooltip it “Unsaved changes”. In a Pane, replace Kill’s glyph with the dot, revealing Kill on button hover or keyboard focus. Keep the same action and hit target, with an accessible unsaved-state description. When Kill is hidden by the header tier or rename editor, show the dot at the right edge. State semantics belong to `docs/specs/dor-tool.md` → Unsaved changes.
+**Must keep a Tool's unsaved-change dot visible in its Pane header and minimized Door**, across header widths and faces. Use inherited foreground, without animation; label and tooltip it “Unsaved changes”. In a Pane the dot replaces Kill’s glyph on the same button, with an accessible unsaved-state description, until hover or keyboard focus reveals the X; where the header tier or the rename editor hides Kill, it sits at the right edge. State semantics belong to `docs/specs/dor-tool.md` → Unsaved changes.
 
 **Must mark the Workspace's preview slot with an italic label alone in its Pane header and Door**, naming it Preview in the label's tooltip and the Door's accessible name (rationale). **Must keep the slot on a double-click of its Pane header whose first press lands in the header itself, off its controls** (every button, and an open rename; rationale). **Must offer Keep open in its terminal context too**, beside the Tool status and only while it is the slot: the keyboard path to the same pin. Slot semantics belong to `docs/specs/dor-tool.md` → Preview slot.
 
@@ -161,7 +161,7 @@ A browser header collapses by border-box width:
 | 180px | Chrome moves into a viewport-clamped popover behind one trigger. |
 | 94px | Minimize and kill join the popover. |
 
-A serving Tool's header has no popover; each boundary reserves the widest Display glyph and space for the name (rationale):
+A serving Tool's header has no popover; each boundary reserves the widest Display glyph (rationale):
 
 | Below | Change |
 |---|---|

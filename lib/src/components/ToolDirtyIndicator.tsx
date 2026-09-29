@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { clsx } from 'clsx';
 import { getToolDirty, subscribeToToolDirty } from '../lib/tool-dirty-store';
 import { isToolParams } from './wall/browser-surface';
 
@@ -11,10 +12,13 @@ export function useToolDirty(surfaceId: string, params: unknown): boolean {
   return useSyncExternalStore(tool ? subscribeToToolDirty : noSubscription, () => tool && getToolDirty(surfaceId) === true);
 }
 
+/** The name, tooltip, and description of a Tool's unsaved state, wherever it shows. */
+export const TOOL_DIRTY_LABEL = 'Unsaved changes';
+
 /** The unsaved-state dot in Tool chrome, independent of Activity alarms. */
-export function ToolDirtyIndicator({ dirty }: { dirty: boolean }) {
+export function ToolDirtyIndicator({ dirty, className }: { dirty: boolean; className?: string }) {
   return dirty ? (
-    <span role="img" aria-label="Unsaved changes" title="Unsaved changes"
-      className="size-1.5 shrink-0 rounded-full bg-current" />
+    <span role="img" aria-label={TOOL_DIRTY_LABEL} title={TOOL_DIRTY_LABEL}
+      className={clsx('size-1.5 shrink-0 rounded-full bg-current', className)} />
   ) : null;
 }

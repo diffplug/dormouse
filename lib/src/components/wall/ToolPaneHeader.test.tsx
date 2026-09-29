@@ -262,14 +262,16 @@ describe('ToolPaneHeader — preview slot', () => {
 });
 
 describe('ToolPaneHeader — other faces', () => {
-  it.each([
+  const DIRTY_FACES = [
     ['terminal', {}],
     ['port conflict', { toolPortConflict: [3000, 4000] }],
     ['browser', { url: STUB_CHROME.url }],
-  ])('shows live unsaved changes on the %s face at narrow widths', (_face, params) => {
+  ] as const;
+  const indicator = () => labelled('Unsaved changes');
+
+  it.each(DIRTY_FACES)('shows live unsaved changes on the %s face at narrow widths', (_face, params) => {
     renderHeader({ surfaceType: 'tool', command: 'pnpm dev', ...params });
     act(() => resizeHeader(100));
-    const indicator = () => labelled('Unsaved changes');
     expect(indicator()).toBeNull();
     act(() => recordToolDirty(ID, true));
     expect(indicator()).not.toBeNull();
@@ -281,28 +283,24 @@ describe('ToolPaneHeader — other faces', () => {
     expect(indicator()).toBeNull();
   });
 
-  it.each([
-    ['terminal', {}],
-    ['port conflict', { toolPortConflict: [3000, 4000] }],
-    ['browser', { url: STUB_CHROME.url }],
-  ])('keeps the dirty %s face’s Kill target stable through reports and rename', (_face, params) => {
+  it.each(DIRTY_FACES)('keeps the dirty %s face’s Kill target stable through reports and rename', (_face, params) => {
     const actions = stubActions();
     const toolParams = { surfaceType: 'tool', command: 'pnpm dev', ...params };
     renderHeader(toolParams, actions);
     const kill = labelled('Kill')!;
     act(() => recordToolDirty(ID, true));
     expect(labelled('Kill')).toBe(kill);
-    expect(kill.contains(labelled('Unsaved changes'))).toBe(true);
+    expect(kill.contains(indicator())).toBe(true);
     expect(kill.getAttribute('aria-description')).toBe('Unsaved changes');
     act(() => kill.click());
     expect(actions.onKill).toHaveBeenCalledWith(ID);
     renderHeader(toolParams, actions, { renaming: true });
     expect(labelled('Kill')).toBeNull();
-    expect(labelled('Unsaved changes')).not.toBeNull();
+    expect(indicator()).not.toBeNull();
     renderHeader(toolParams, actions);
     act(() => recordToolDirty(ID, false));
     expect(labelled('Kill')!.getAttribute('aria-description')).toBeNull();
-    expect(labelled('Unsaved changes')).toBeNull();
+    expect(indicator()).toBeNull();
   });
 
   it('leads a port conflict\'s derived label with Terminal Context, inside the header', () => {

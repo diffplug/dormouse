@@ -241,7 +241,8 @@ export function TerminalPaneHeader({ id, title, params, terminalContext = false 
           anchorRect={todoPreviewRect}
         />
       )}
-      {rename.renaming && <ToolDirtyIndicator dirty={dirty} />}
+      {/* Where the tier or the rename editor hides Kill, the dot it carries sits at the right edge. */}
+      {(tiny || rename.renaming) && <ToolDirtyIndicator dirty={dirty} />}
       {rename.warning}
     </div>
   );

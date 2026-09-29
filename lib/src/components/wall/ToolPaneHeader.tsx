@@ -102,7 +102,8 @@ function ToolBrowserHeader({ id, title, params, switching }: PaneProps & { switc
           <PaneActionGroup dirty={dirty} surfaceId={id} zoomed={zoomed} activeHeader={isActiveHeader} showMinimizeKill={tier !== 'tiny'} />
         </>
       )}
-      {rename.renaming && <ToolDirtyIndicator dirty={dirty} />}
+      {/* Where the tier or the rename editor hides Kill, the dot it carries sits at the right edge. */}
+      {(tier === 'tiny' || rename.renaming) && <ToolDirtyIndicator dirty={dirty} />}
       {rename.warning}
     </div>
   );

@@ -1,6 +1,6 @@
 import { useContext } from 'react';
 import { ArrowLineDownIcon, ArrowsInIcon, ArrowsOutIcon, SplitHorizontalIcon, SplitVerticalIcon, TerminalIcon, XIcon } from '@phosphor-icons/react';
-import { ToolDirtyIndicator } from '../ToolDirtyIndicator';
+import { TOOL_DIRTY_LABEL, ToolDirtyIndicator } from '../ToolDirtyIndicator';
 import { HeaderActionButton } from '../HeaderActionButton';
 import { chromeButton, paneZoomButtonClass } from '../design';
 import { TerminalContextContext, WallActionsContext } from './wall-context';
@@ -33,10 +33,10 @@ export function MinimizeKillButtons({ surfaceId, dirty = false, beforeAct, onFoc
         className="group/kill flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-error/10 hover:text-error"
         onClick={(e) => { e.stopPropagation(); beforeAct?.(); actions.onKill(surfaceId); }}
         ariaLabel="Kill"
-        ariaDescription={dirty ? 'Unsaved changes' : undefined}
-        tooltip={dirty ? 'Unsaved changes · Kill [k] or [x]' : 'Kill [k] or [x]'}
+        ariaDescription={dirty ? TOOL_DIRTY_LABEL : undefined}
+        tooltip={`${dirty ? `${TOOL_DIRTY_LABEL} · ` : ''}Kill [k] or [x]`}
       >
-        {dirty && <span className="flex group-hover/kill:hidden group-focus-visible/kill:hidden"><ToolDirtyIndicator dirty /></span>}
+        <ToolDirtyIndicator dirty={dirty} className="group-hover/kill:hidden group-focus-visible/kill:hidden" />
         <XIcon size={14} className={dirty ? 'hidden group-hover/kill:block group-focus-visible/kill:block' : undefined} />
       </HeaderActionButton>
     </div>
@@ -70,7 +70,6 @@ export function PaneActionGroup({
         ariaLabel={zoomed ? 'Unzoom' : 'Zoom'}
         tooltip={zoomed ? 'Unzoom' : 'Zoom [z]'}
       >{zoomed ? <ArrowsInIcon size={14} /> : <ArrowsOutIcon size={14} />}</HeaderActionButton>
-      {!showMinimizeKill && <ToolDirtyIndicator dirty={dirty} />}
       {showMinimizeKill && <MinimizeKillButtons surfaceId={surfaceId} dirty={dirty} beforeAct={beforeAct} {...minimizeKillFocus} />}
     </div>
   );
