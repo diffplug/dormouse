@@ -17,6 +17,7 @@ import {
 } from './agent-browser-screen';
 import { setDevServerResolution } from './agent-browser-ports';
 import { removeTerminalPaneState, setTerminalUserTitle } from '../../lib/terminal-state-store';
+import * as terminalState from '../../lib/terminal-state';
 import {
   ModeContext,
   WorkspaceActiveContext,
@@ -544,12 +545,17 @@ describe('SurfacePaneHeader — browser chrome', () => {
       expect(chipLabel()).toBe('Focus stored — serves this localhost port');
       act(() => { setTerminalUserTitle('term-live', 'first.md'); });
       expect(chipLabel()).toBe('Focus first.md — serves this localhost port');
+      // Another pane's state change leaves the label underived.
+      const derive = vi.spyOn(terminalState, 'deriveSurfaceLabel');
+      act(() => { setTerminalUserTitle('term-other', 'elsewhere'); });
+      expect(derive).not.toHaveBeenCalled();
       act(() => { setTerminalUserTitle('term-live', 'second.md'); });
       expect(chipLabel()).toBe('Focus second.md — serves this localhost port');
     } finally {
       reg.dispose();
       setDevServerResolution(5173, null);
       removeTerminalPaneState('term-live');
+      removeTerminalPaneState('term-other');
     }
   });
 

@@ -193,6 +193,7 @@ A folder viewer is any Tool that selects on single-click and activates on double
 
 - **Must list names and entry types only, loading one directory at a time, and never serve file contents** (rationale). Previews reach files only through the slot, so the one-file grant in [Opening local files](#opening-local-files) is unchanged. The listener's audited rules are `docs/specs/security-local.md` → Local-file viewer.
 - **Must list dotfiles.** Entries git ignores are listed by default, with a show/hide checkbox.
+- **Must cut a listing to its first 5,000 entries in display order**, directories first, from at most 100,000 names read.
 - **Must route the page's select and activate through its own process**: a same-origin POST to its capability listener, which invokes `dor open --preview` or `dor open` over the control socket.
 - **Must hold an activate until every select in flight settles**, keeping selects concurrent. (rationale)
 
@@ -210,17 +211,17 @@ Source of truth: `FOLDER_MATCH_SUFFIX` in `dor/src/file-viewer-format.ts`; `reso
 A preview is answered by the first of:
 
 1. A pinned Tool matching the resolved key is revealed focus-neutrally: `existing`.
-2. A slot given the same Tool (scope, name, run) for the same target is revealed focus-neutrally, without restart: `existing`.
+2. A slot given the same Tool (scope, name, run) for the same target is revealed focus-neutrally, without restart: `existing`. When its command is not running, counting a run a superseded retarget interrupted, it is retargeted to that Tool again: `adopted`.
 3. A slot asked from its own Session is pinned, and a new slot is created, so the `dor` awaiting the answer is never interrupted.
 4. A slot is retargeted: `retargeted`.
 5. Otherwise a new slot is created: `created`.
 
-- **Must retarget in place**: interrupt the slot's command, wait for its prompt, then type the new Tool's command quoted for the slot's shell, in the slot's directory. Retain the Session id, Surface ref, terminal, and a user rename; the new Tool may differ. Retire the old command's browser, announcements, and unsaved state at once ([Serving](#serving)); a Door slot reattaches focus-neutrally.
+- **Must retarget in place**: interrupt the slot's command, wait for its prompt, then type the new Tool's command quoted for the slot's shell, in the slot's directory. Retain the Session id, Surface ref, terminal, and a user rename; the new Tool may differ. Retire the old command's browser, announcements, and unsaved state at once ([Serving](#serving)); a Door slot reattaches focus-neutrally. **Must restore a slot pinned during the interrupt**: type its previous command again, then place the launch as if there were no slot.
 - **Must let the newest preview in a Workspace supersede older ones**: a preview not yet past its lookup, or still interrupting the slot, answers `superseded` with the slot's handle, or an error while there is no slot. Once its command is typed, a retarget holds the launch lock until the command is observed, as [Take-over](#take-over) does (rationale).
 - **Never let a preview take over its caller or become a Door.** A new slot splits focus-neutrally from `--surface` when given, else from the slot pinned last while it is a visible pane of the Workspace, else from the caller (rationale). `--preview` rejects `--fresh` and `--minimize`.
 - **Must exclude a marked slot from keyed dedupe.** It keeps its key, which counts once pinned, so pinning only clears the mark.
 - **Must pin at once when the slot's Tool reports unsaved changes** ([Unsaved changes](#unsaved-changes)); clean and unreported state never pin. The header pill pins too. **Never pin on keyboard input or focus** (rationale).
-- **Must pin without restarting when `dor open` resolves the slot's Tool and target**, revealing it as a keyed match is and reporting `existing`. A different Tool for that target retargets the slot, then pins it. From the slot's own Session, `dor open` pins it and continues as an ordinary open; `--fresh` bypasses the slot.
+- **Must pin without restarting when `dor open` resolves the slot's running Tool and target**, revealing it as a keyed match is and reporting `existing`; a slot not running is re-run as in rule 2, then pinned. A pinned Tool with the resolved key is revealed first, leaving the slot untouched. A different Tool for that target retargets the slot, then pins it. From the slot's own Session, `dor open` pins it and continues as an ordinary open; `--fresh` bypasses the slot.
 
 Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` in `lib/src/host/tool-open.ts`; `surface.tool` in `lib/src/components/wall/use-dor-control.ts`; `decidePreviewSlot` / `retargetToolLeaf` / `usePreviewSlotPin` in `lib/src/components/wall/preview-slot.ts`; `matchesToolKey` / `isPreviewSlotParams` / `TOOL_IDENTITY_PARAMS` in `lib/src/components/wall/browser-surface.ts`; `revealSurface` / `createSplitSurface` in `lib/src/components/Wall.tsx`; `retireToolRun` in `lib/src/components/wall/use-tool-serving.ts`. Tests: `lib/src/components/wall/preview-slot.test.tsx`; `a preview retarget` in `lib/src/components/wall/use-tool-serving.test.tsx`; `lib/src/host/tool-open.test.ts`; `dor/test/cli-output.test.mjs`.
 
@@ -229,7 +230,7 @@ Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` 
 **Must open a local `file:` `OSC 8` link as a `dor open` from the Session showing it**: a click previews, a double-click's second click (`MouseEvent.detail` 2) pins, and later clicks of that burst do nothing (rationale). The request carries the URL ([Declaring tools](#declaring-tools)) and the Session's local CWD, else the target's directory.
 
 - **Must send a link to the confirmation dialog unless its display text names its target**: trimmed, with at most one trailing `ls -F` classifier removed, the text equals the decoded path or a whole-component suffix of it, case-sensitively — `x/README.md` names `/x/README.md`, `EADME.md` does not. A host that is not a plain name, or a control character in the decoded path, sends it there too. The dialog belongs to `docs/specs/terminal-escapes.md` -> "OSC 8 hyperlinks".
-- **Must fall back to the dialog when the open fails**, a superseded preview excepted — its status, or its error while there is no slot. A host without Tool operations sends every link to the dialog.
+- **Must fall back to the dialog when the open fails**, a superseded preview excepted — its status, or its error while there is no slot. A double-click's pin never reopens the dialog its failed preview opened. A host without Tool operations sends every link to the dialog.
 
 Source of truth: `localFileLinkPreviewPath` in `lib/src/lib/external-links.ts`; `activateTerminalLink` in `lib/src/lib/terminal-link-activation.ts`; `createXtermHost` in `lib/src/lib/terminal-lifecycle.ts`; `resolveLocalToolTarget` in `lib/src/host/tool-input.ts`. Tests: `lib/src/lib/external-links.test.ts`, `lib/src/lib/terminal-link-activation.test.ts`, `local file URLs` in `lib/src/host/tool-input.test.ts`, `file URLs` in `lib/src/host/tool-open.test.ts`, `a terminal link` in `lib/src/components/wall/preview-slot.test.tsx`.
 

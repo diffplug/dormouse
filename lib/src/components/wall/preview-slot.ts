@@ -43,8 +43,9 @@ export type PreviewSlotDecision =
   /** Answer with this Surface as it stands, revealed — focus-neutrally when
    *  `quiet` — pinning it first when `pin`. */
   | { kind: 'existing'; id: string; quiet: boolean; pin: boolean }
-  /** Run the resolved Tool in the slot in place. */
-  | { kind: 'retarget'; id: string }
+  /** Run the resolved Tool in the slot in place: `rerun` when it is already
+   *  the slot's Tool and target, whose command is not running. */
+  | { kind: 'retarget'; id: string; rerun: boolean }
   /** Place the launch as usual, after pinning `pin` — the caller's own slot,
    *  whose `dor` awaiting the answer is never interrupted. */
   | { kind: 'place'; pin: string | null };
@@ -56,33 +57,43 @@ export function decidePreviewSlot(launch: {
   tool: ResolvedTool;
   /** The canonical path an `open` resolved. */
   target: string | undefined;
-  /** A pinned Tool with this launch's key; read only for a preview. */
+  /** A pinned Tool with this launch's key; read only when the slot might
+   *  otherwise answer. */
   keyedMatch: () => { id: string } | null;
-  slot: { id: string; params: unknown } | null;
+  /** `live` while its command runs. */
+  slot: { id: string; params: unknown; live: boolean } | null;
 }): PreviewSlotDecision {
   const { slot } = launch;
   const place = (pin: string | null = null): PreviewSlotDecision => ({ kind: 'place', pin });
+  /** The slot already given this Tool for this target: kept as it stands while
+   *  its command runs, else re-run in place. */
+  const showsLaunch = (pin: boolean): PreviewSlotDecision | null => {
+    if (!slot || !runsSameTool(slot.params, launch.tool) || toolTargetFromParams(slot.params) !== launch.target) return null;
+    return slot.live ? { kind: 'existing', id: slot.id, quiet: !pin, pin } : { kind: 'retarget', id: slot.id, rerun: true };
+  };
   if (launch.preview) {
     // A pinned Tool already showing this file is revealed, never replaced.
     const pinned = launch.keyedMatch();
     if (pinned) return { kind: 'existing', id: pinned.id, quiet: true, pin: false };
     if (!slot) return place();
-    if (runsSameTool(slot.params, launch.tool) && toolTargetFromParams(slot.params) === launch.target) {
-      return { kind: 'existing', id: slot.id, quiet: true, pin: false };
-    }
+    const shown = showsLaunch(false);
+    if (shown) return shown;
     // A request from the slot's own Session (a viewer shown in it) keeps the
     // slot: pinned, it is where the new slot splits from. Unsaved changes
     // pinned it already (`usePreviewSlotPin`).
-    return slot.id === launch.callerId ? place(slot.id) : { kind: 'retarget', id: slot.id };
+    return slot.id === launch.callerId ? place(slot.id) : { kind: 'retarget', id: slot.id, rerun: false };
   }
   // Opening the file the slot shows keeps it (pin by open); `--fresh` bypasses it.
   if (launch.target === undefined || launch.fresh || !slot || toolTargetFromParams(slot.params) !== launch.target) return place();
+  // A pinned Tool with the resolved key is the keyed reuse that follows,
+  // leaving the slot untouched.
+  if (launch.keyedMatch()) return place();
   // From the slot's own Session, pinned, it is an ordinary keyed Tool for the
   // reuse that follows, which never interrupts the `dor` asking.
   if (slot.id === launch.callerId) return place(slot.id);
-  if (runsSameTool(slot.params, launch.tool)) return { kind: 'existing', id: slot.id, quiet: false, pin: true };
-  // Another Tool for the same file replaces the slot's, then pins it.
-  return { kind: 'retarget', id: slot.id };
+  // The slot's own Tool is pinned; another Tool for the same file replaces
+  // the slot's, then pins it.
+  return showsLaunch(true) ?? { kind: 'retarget', id: slot.id, rerun: false };
 }
 
 /**

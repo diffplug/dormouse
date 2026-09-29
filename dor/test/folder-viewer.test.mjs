@@ -147,10 +147,16 @@ test('lists names and kinds only, directories first, dotfiles included, one dire
   assert.equal((await call(viewer, `${viewer.path}list`, { method: 'HEAD' })).body, '');
 });
 
-test('caps one directory at 5,000 entries', async () => {
-  await Promise.all(Array.from({ length: 5001 }, (_, i) => writeFile(join(root, `f${i}`), '')));
+test('caps one directory at its first 5,000 entries in display order, directories first', async () => {
+  const names = Array.from({ length: 5001 }, (_, i) => `f${i}`);
+  await Promise.all(names.map(name => writeFile(join(root, name), '')));
+  // Last by name, and wherever readdir puts them.
+  await files({ zdir0: null, zdir1: null, zdir2: null });
   const listing = await list(await start());
-  assert.equal(listing.entries.length, 5000);
+  assert.deepEqual(listing.entries, [
+    ...['zdir0', 'zdir1', 'zdir2'].map(name => entry(name, 'dir')),
+    ...names.sort().slice(0, 4997).map(name => entry(name, 'file')),
+  ]);
   assert.equal(listing.truncated, true);
 });
 

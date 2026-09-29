@@ -2,7 +2,7 @@ import { constants } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import { basename, dirname, relative, resolve, sep } from 'node:path';
 import { fileViewerFormat } from './file-viewer-format.js';
-import { announceViewer, HttpError, isInsideRoot, pathSegments, reply, startCapabilityViewer } from './viewer-server.js';
+import { announceViewer, escapeHtml, HttpError, isInsideRoot, pathSegments, reply, startCapabilityViewer } from './viewer-server.js';
 
 const TEXT_LIMIT = 8 * 1024 * 1024;
 const ASSET_LIMIT = 256;
@@ -11,8 +11,6 @@ const CSP = "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 's
 type Resource = { file: FileHandle; mime: string };
 /** A bound on the grant itself: fatal even when reached through an optional asset. */
 class ViewerLimitError extends Error {}
-const HTML_ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-export const escapeHtml = (s: string) => s.replace(/[&<>"']/g, c => HTML_ESCAPES[c]!);
 
 async function textSize(file: FileHandle): Promise<number> {
   const { size } = await file.stat();

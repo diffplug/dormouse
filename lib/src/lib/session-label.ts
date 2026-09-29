@@ -1,5 +1,5 @@
 import { hasTerminal, type SurfaceKind } from 'dor/commands/types';
-import { getActivitySnapshot } from './session-activity-store';
+import { getActivitySnapshot, type ActivityState } from './session-activity-store';
 import { buildAppTitleResolver, createTerminalPaneState, deriveSurfaceLabel, DEFAULT_IDLE_TITLE, type TerminalPaneState } from './terminal-state';
 import { getTerminalPaneStateSnapshot } from './terminal-state-store';
 
@@ -19,6 +19,23 @@ import { getTerminalPaneStateSnapshot } from './terminal-state-store';
 export function deriveSessionLabel(id: string, fallbackTitle: string | null = null): string {
   const states = getTerminalPaneStateSnapshot();
   return labelOf(states.get(id), buildAppTitleResolver(states, getActivitySnapshot()), fallbackTitle);
+}
+
+/** A {@link deriveSessionLabel} for one caller that asks on every store
+ *  emission, such as a hook's snapshot. It derives again only when the id, the
+ *  fallback, or that Surface's own terminal state or activity changed — the
+ *  only inputs the label reads — so another pane's output costs a lookup. */
+export function createSessionLabelMemo(): (id: string, fallbackTitle?: string | null) => string {
+  let last: { id: string; state?: TerminalPaneState; activity?: ActivityState; fallbackTitle: string | null; label: string } | null = null;
+  return (id, fallbackTitle = null) => {
+    const state = getTerminalPaneStateSnapshot().get(id);
+    const activities = getActivitySnapshot();
+    const activity = activities.get(id);
+    if (last?.id === id && last.state === state && last.activity === activity && last.fallbackTitle === fallbackTitle) return last.label;
+    const label = labelOf(state, buildAppTitleResolver(new Map(state ? [[id, state]] : []), activities), fallbackTitle);
+    last = { id, state, activity, fallbackTitle, label };
+    return label;
+  };
 }
 
 /** The label a Surface's Door and pane header show for it, `<idle>` included:

@@ -82,6 +82,25 @@ describe('activateTerminalLink', () => {
     expect(getExternalLinkConfirmationSnapshot()).toMatchObject({ uri: URI, displayText: 'docs/README.md' });
   });
 
+  it('opens the dialog once for a double-click whose preview and pin both fail', () => {
+    click(1);
+    click(2);
+    requests[0].respond({ ok: false, error: 'no open rule matches' });
+    expect(getExternalLinkConfirmationSnapshot()).toMatchObject({ uri: URI, displayText: 'docs/README.md' });
+    // The user cancels before the pin's answer arrives.
+    clearExternalLinkConfirmation();
+    requests[1].respond({ ok: false, error: 'no open rule matches' });
+    expect(getExternalLinkConfirmationSnapshot()).toBeNull();
+  });
+
+  it('opens the dialog for a pin that fails after its preview succeeded', () => {
+    click(1);
+    click(2);
+    requests[0].respond({ ok: true, result: { status: 'created' } });
+    requests[1].respond({ ok: false, error: 'tool launch cancelled' });
+    expect(getExternalLinkConfirmationSnapshot()).toMatchObject({ uri: URI, displayText: 'docs/README.md' });
+  });
+
   it('leaves a superseded preview alone', () => {
     click(1);
     click(1);

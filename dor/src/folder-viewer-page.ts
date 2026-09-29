@@ -1,5 +1,5 @@
 import { basename } from 'node:path';
-import { escapeHtml } from './file-viewer.js';
+import { escapeHtml } from './viewer-server.js';
 
 const STYLE = `
 :root{color-scheme:light dark}

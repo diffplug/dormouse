@@ -315,6 +315,28 @@ describe('dor open --preview', () => {
     expect(typed.slot).toEqual([]);
   });
 
+  it('re-runs the slot in place when it shows the file but its command exited', async () => {
+    await mountSlot();
+    act(() => returnToPrompt('slot'));
+    expect(await answer(await request({ file: 'a.md', preview: true }))).toMatchObject({ status: 'adopted', surfaceId: 'slot', command: 'view /repo/a.md', minimized: false });
+    expect(typed.slot).toEqual(['\x03', 'view /repo/a.md\r']);
+    expect(focusOf('pane-a')).toBe('true');
+    expect(await paramsOf('slot')).toMatchObject({ toolTarget: '/repo/a.md', toolPreview: true });
+  });
+
+  it('re-runs the slot for its own file when that preview supersedes one still interrupting it', async () => {
+    await mountSlot({ slot: { holdInterrupt: true } });
+    const first = await request({ file: 'b.md', preview: true });
+    await waitUntil(() => typed.slot.length === 1);
+    // The shell still reports a.md's viewer running: the interrupt has not landed.
+    const second = await request({ file: 'a.md', preview: true });
+    expect(await answer(first)).toMatchObject({ status: 'superseded', surfaceId: 'slot' });
+    await waitUntil(() => typed.slot.length === 2);
+    act(() => returnToPrompt('slot'));
+    expect(await answer(second)).toMatchObject({ status: 'adopted', surfaceId: 'slot', command: 'view /repo/a.md' });
+    expect(typed.slot).toEqual(['\x03', '\x03', 'view /repo/a.md\r']);
+  });
+
   it('reveals a pinned keyed match without focus instead of retargeting the slot', async () => {
     installHost();
     await mountWall([{ id: 'slot', params: viewerParams('a.md') }], { doors: [{ id: 'kept', params: viewerParams('b.md', { toolPreview: undefined }) }] });
@@ -419,6 +441,27 @@ describe('dor open --preview', () => {
     startTool(result.surfaceId, result.command);
   });
 
+  it.each([
+    ['its pill', () => container.querySelector<HTMLButtonElement>('[data-preview-pill-for="slot"]')!.click()],
+    ['unsaved changes', () => recordToolDirty('slot', true)],
+  ])('restores a slot kept by %s while a preview interrupts it, and previews in a new slot', async (_, keep) => {
+    await mountSlot({ slot: { holdInterrupt: true } });
+    const respond = await request({ file: 'b.md', preview: true });
+    await waitUntil(() => typed.slot.length === 1);
+    await act(async () => keep());
+    act(() => returnToPrompt('slot'));
+    const result = await answer(respond);
+    expect(result).toMatchObject({ status: 'created', command: 'view /repo/b.md' });
+    expect(result.surfaceId).not.toBe('slot');
+    expect(typed.slot).toEqual(['\x03', 'view /repo/a.md\r']);
+    expect(terminalRegistry.getTerminalPaneState('slot').currentCommand?.rawCommandLine).toBe('view /repo/a.md');
+    const kept = await paramsOf('slot');
+    expect(kept).toMatchObject({ toolTarget: '/repo/a.md' });
+    expect(kept).not.toHaveProperty('toolPreview');
+    expect(await leafOrder()).toEqual(['pane-a', 'slot', result.surfaceId]);
+    startTool(result.surfaceId, result.command);
+  });
+
   it('pins the slot for a request from its own Session and splits the new slot from it', async () => {
     await mountSlot();
     const result = await answer(await request({ file: 'b.md', preview: true }, 'slot'));
@@ -438,6 +481,41 @@ describe('pinning the slot', () => {
     expect(await paramsOf('slot')).toMatchObject({ toolTarget: '/repo/a.md', toolKey: ['viewer', '/repo/a.md'] });
     expect(await paramsOf('slot')).not.toHaveProperty('toolPreview');
     expect(await listRow('slot')).not.toHaveProperty('preview');
+  });
+
+  it('re-runs and pins by open when the slot shows the file but its command exited', async () => {
+    await mountSlot();
+    act(() => returnToPrompt('slot'));
+    expect(await answer(await request({ file: 'a.md' }))).toMatchObject({ status: 'adopted', surfaceId: 'slot', command: 'view /repo/a.md' });
+    expect(typed.slot).toEqual(['\x03', 'view /repo/a.md\r']);
+    expect(await paramsOf('slot')).not.toHaveProperty('toolPreview');
+  });
+
+  it('reveals a pinned Tool with the resolved key, leaving a slot showing the file under another Tool alone', async () => {
+    installHost();
+    const other = viewerParams('a.md', { command: 'other /repo/a.md', toolArgv: ['other', '/repo/a.md'], toolName: 'other', toolKey: undefined });
+    await mountWall([{ id: 'slot', params: other }], { doors: [{ id: 'kept', params: viewerParams('a.md', { toolPreview: undefined }) }] });
+    shell('pane-a', null);
+    shell('slot', 'other /repo/a.md');
+    shell('kept', 'view /repo/a.md');
+    expect(await answer(await request({ file: 'a.md' }))).toMatchObject({ status: 'existing', surfaceId: 'kept', minimized: false });
+    expect(typed.slot).toEqual([]);
+    expect(typed.kept).toEqual([]);
+    expect(await paramsOf('slot')).toMatchObject({ toolName: 'other', toolTarget: '/repo/a.md', toolPreview: true });
+  });
+
+  it('restores a slot kept while an open with another Tool interrupts it, and opens beside it', async () => {
+    await mountSlot({ caller: 'claude', slot: { holdInterrupt: true } });
+    const respond = await request({ file: 'a.md', tool: 'other' });
+    await waitUntil(() => typed.slot.length === 1);
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-preview-pill-for="slot"]')!.click());
+    act(() => returnToPrompt('slot'));
+    await waitUntil(() => leafCount() === 3);
+    const created = newLeaf();
+    startTool(created, 'other /repo/a.md');
+    expect(await answer(respond)).toMatchObject({ status: 'created', surfaceId: created });
+    expect(typed.slot).toEqual(['\x03', 'view /repo/a.md\r']);
+    expect(await paramsOf('slot')).toMatchObject({ toolName: 'viewer', toolTarget: '/repo/a.md' });
   });
 
   it('retargets then pins when open names another Tool for the file the slot shows', async () => {

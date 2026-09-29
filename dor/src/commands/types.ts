@@ -301,8 +301,10 @@ export interface ToolSurfaceResponse {
    * before its own shell is free to run it.
    *
    * `retargeted` is the preview slot running the newly resolved Tool in place,
-   * answered once the command is typed. `superseded` is a preview a newer one
-   * replaced before it ran; the handle is the slot's.
+   * answered once the command is typed; the slot re-running the Tool and
+   * target it already had, after its command exited, is `adopted`.
+   * `superseded` is a preview a newer one replaced before it ran; the handle is
+   * the slot's.
    */
   status: 'created' | 'existing' | 'adopted' | 'pending' | 'takeover' | 'retargeted' | 'superseded';
   surfaceId: string;

@@ -15,10 +15,10 @@
  *   2. "resolutions" — port → match | null (null = resolved, no single owner);
  *      headers read their port's entry.
  */
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useSyncExternalStore } from 'react';
 import { subscribeToActivity } from '../../lib/session-activity-store';
-import { deriveSessionLabel } from '../../lib/session-label';
+import { createSessionLabelMemo } from '../../lib/session-label';
 import { subscribeToTerminalPaneState } from '../../lib/terminal-state-store';
 
 /** What the Wall resolved a port to. A port stays settled while its pane is
@@ -156,9 +156,11 @@ export function useDevServerMatch(port: number | null): DevServerMatch | null {
     subscribeDevServerResolutions,
     () => (port == null ? null : getDevServerResolution(port)),
   );
+  // Every pane's output emits; the label reads only the serving pane's.
+  const [sessionLabel] = useState(createSessionLabelMemo);
   const label = useSyncExternalStore(
     subscribeToSessionLabels,
-    () => (resolution ? deriveSessionLabel(resolution.paneId, resolution.fallbackTitle) : null),
+    () => (resolution ? sessionLabel(resolution.paneId, resolution.fallbackTitle) : null),
   );
   return resolution && label !== null ? { paneId: resolution.paneId, label } : null;
 }

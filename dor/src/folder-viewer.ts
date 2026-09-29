@@ -7,7 +7,10 @@ import type { ControlClient } from './commands/types.js';
 import { folderViewerPage } from './folder-viewer-page.js';
 import { announceViewer, HttpError, isInsideRoot, pathSegments, reply, startCapabilityViewer } from './viewer-server.js';
 
+/** Entries one listing returns. */
 const ENTRY_LIMIT = 5000;
+/** Names one listing reads to choose them: a bound on its memory. */
+const READ_LIMIT = 100_000;
 const BODY_LIMIT = 8 * 1024;
 const GIT_TIMEOUT_MS = 5000;
 const GIT_OUTPUT_LIMIT = 4 * 1024 * 1024;
@@ -20,6 +23,10 @@ export type FolderOpenResult = { ok: true; status: string } | { ok: false; error
 export type FolderOpen = (path: string, preview: boolean) => Promise<FolderOpenResult>;
 
 const compare = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0;
+type Ordered = { dir: boolean; folded: string; entry: { name: string } };
+/** Directories first, then by lowercased name, then by name. */
+const byDisplayOrder = (a: Ordered, b: Ordered): number =>
+  Number(!a.dir) - Number(!b.dir) || compare(a.folded, b.folded) || compare(a.entry.name, b.entry.name);
 
 /** The `names` in `dir` that `git` ignores. Any failure (no git, not a
  * repository, a timeout) answers none: ignore state only dims entries. */
@@ -78,16 +85,18 @@ export async function startFolderViewer(input: string, { open }: { open: FolderO
     const dirents: Dirent[] = [];
     let truncated = false;
     for await (const entry of handle) {
-      if (dirents.length === ENTRY_LIMIT) { truncated = true; break; }
+      if (dirents.length === READ_LIMIT) { truncated = true; break; }
       dirents.push(entry);
     }
+    // Sorted before the cap, on the kind readdir knows without a stat (a
+    // symlink counts as a file here), so a cut listing keeps its head.
+    const kept = dirents.map(entry => ({ entry, dir: entry.isDirectory(), folded: entry.name.toLowerCase() })).sort(byDisplayOrder);
+    if (kept.length > ENTRY_LIMIT) { kept.length = ENTRY_LIMIT; truncated = true; }
     const [kinds, ignored] = await Promise.all([
-      Promise.all(dirents.map(entry => kindOf(dir, entry))), gitIgnored(git, dir, dirents.map(entry => entry.name)),
+      Promise.all(kept.map(item => kindOf(dir, item.entry))), gitIgnored(git, dir, kept.map(item => item.entry.name)),
     ]);
-    // Directories first, then by lowercased name, then by name.
-    const keyed = dirents.map((entry, i) => ({ folded: entry.name.toLowerCase(), entry: { name: entry.name, kind: kinds[i], ignored: ignored.has(entry.name) } }));
-    keyed.sort((a, b) => Number(a.entry.kind !== 'dir') - Number(b.entry.kind !== 'dir') || compare(a.folded, b.folded) || compare(a.entry.name, b.entry.name));
-    return { entries: keyed.map(item => item.entry), truncated };
+    const keyed = kept.map((item, i) => ({ ...item, dir: kinds[i] === 'dir', kind: kinds[i] })).sort(byDisplayOrder);
+    return { entries: keyed.map(({ entry, kind }) => ({ name: entry.name, kind, ignored: ignored.has(entry.name) })), truncated };
   }
 
   async function requestedPath(req: IncomingMessage): Promise<string> {

@@ -803,6 +803,10 @@ export function useDorControl({
     previewTicket.current = ticket;
     return ticket.signal;
   }, []);
+  // Slot id -> the run a retarget interrupted and never replaced, because a
+  // newer preview superseded it or it was cancelled: that run is on its way
+  // out, though its shell may report it running a while longer.
+  const interruptedSlotRuns = useRef(new Map<string, string>());
 
   const ensureBrowserSurface = useCallback<EnsureBrowserSurface>(({
     key,
@@ -1255,15 +1259,30 @@ export function useDorControl({
         /**
          * Run the resolved Tool in the preview slot in place: interrupt it, then
          * type the new command at its prompt, keeping its Session id, ref, and
-         * terminal (docs/specs/dor-tool.md -> Preview slot). A newer preview
-         * supersedes a preview during the interrupt; an open pins the slot.
-         * Answers the request, except when the slot went away or was pinned
-         * during the interrupt — `false` leaves the caller to place the Tool
-         * elsewhere.
+         * terminal (docs/specs/dor-tool.md -> Preview slot). `adopted` re-runs
+         * the slot's own Tool. A newer preview supersedes a preview during the
+         * interrupt; an open pins the slot. Answers the request, except when
+         * the slot went away or was kept during the interrupt — its own Tool
+         * then typed again — where `false` leaves the caller to place the Tool
+         * elsewhere. No await separates the caller's mark check from the
+         * interrupt.
          */
-        const retargetPreviewSlot = async (slotId: string): Promise<boolean> => {
+        const retargetPreviewSlot = async (slotId: string, status: 'retargeted' | 'adopted'): Promise<boolean> => {
           const pin = !previewSignal;
+          const keptCommand = toolCommandFromParams(lath.getMeta(slotId)?.params);
+          const running = getTerminalPaneState(slotId).currentCommand;
+          if (running) interruptedSlotRuns.current.set(slotId, running.id);
           const interrupted = await interruptToPrompt(slotId, previewSignal ?? detail.signal);
+          // Only a cancelled wait leaves the run on its way out; one that
+          // survived the interrupt is live.
+          if (interrupted !== RESTART_CANCELLED) interruptedSlotRuns.current.delete(slotId);
+          const previous = lath.getMeta(slotId)?.params;
+          if (previous && !isPreviewSlotParams(previous)) {
+            // Kept meanwhile — its pill, or unsaved changes: its own Tool runs
+            // again, unless it outlived the interrupt.
+            if (keptCommand && (interrupted.ok || interrupted === RESTART_CANCELLED)) await restoreKeptSlot(slotId, keptCommand);
+            return answeredSuperseded() || unavailable();
+          }
           if (answeredSuperseded()) return true;
           if (!interrupted.ok) {
             detail.respond({ ok: false, error: `surface '${surfaceRefForId(slotId)}' ${interrupted.message}` });
@@ -1274,20 +1293,33 @@ export function useDorControl({
             detail.respond({ ok: false, error: gone });
             return true;
           }
-          const previous = lath.getMeta(slotId)?.params;
-          if (!previous || !isTargetable(slotId) || (!pin && !isPreviewSlotParams(previous))) return false;
+          if (!previous || !isTargetable(slotId)) return false;
           // Quoted for the slot's shell; the caller's directory is not the slot's.
           const slotCommand = toolRunCommand(toolRun, slotId);
           retargetToolLeaf(lath, slotId, { title: toolName ?? slotCommand, identity: { ...identity, command: slotCommand } }, pin ? previewSlot.pin : undefined);
           const visible = revealSurface(slotId, { focusNeutral: true });
           const slotCwd = runDirectory(slotId);
           const started = typeToolCommand(slotId, slotCommand, slotCwd, detail.signal);
-          respondTool('retargeted', { surfaceId: slotId, command: slotCommand, cwd: slotCwd, minimized: !visible });
+          respondTool(status, { surfaceId: slotId, command: slotCommand, cwd: slotCwd, minimized: !visible });
           // Only the request's own cancellation ends this wait: a newer preview
           // interrupting a typed command before its shell reports it would race
           // the shell reading the line.
           await started;
           return true;
+        };
+        /** Type a kept slot's own command again once its shell is back at a
+         *  prompt, holding the launch lock until it is observed. */
+        const restoreKeptSlot = async (id: string, command: string): Promise<void> => {
+          const atPrompt = await waitForTerminalState(id, state => state.currentCommand === null, PROMPT_RETURN_TIMEOUT_MS, detail.signal);
+          if (detail.signal?.aborted || atPrompt !== 'ready' || !lath.getMeta(id) || !isTargetable(id) || workspaceGone()) return;
+          retireToolRun(lath, id);
+          await typeToolCommand(id, command, runDirectory(id), detail.signal);
+        };
+        /** Whether a Surface's command runs: it is not at its prompt, and not
+         *  the run an unfinished retarget interrupted. */
+        const commandRuns = (id: string): boolean => {
+          const current = getTerminalPaneState(id).currentCommand;
+          return current !== null && current.id !== interruptedSlotRuns.current.get(id);
         };
 
         const slot = findPreviewSlot();
@@ -1298,7 +1330,7 @@ export function useDorControl({
           tool: { scope: toolScope, name: toolName, run: toolRun },
           target: openTarget,
           keyedMatch: () => key ? findSurfaceByParams(candidate => matchesToolKey(candidate, toolScope, key)) : null,
-          slot: slot && { id: slot.id, params: lath.getMeta(slot.id)?.params },
+          slot: slot && { id: slot.id, params: lath.getMeta(slot.id)?.params, live: commandRuns(slot.id) },
         });
         if (decision.kind === 'existing') {
           if (decision.pin) previewSlot.pin(decision.id);
@@ -1306,7 +1338,7 @@ export function useDorControl({
           return;
         }
         if (decision.kind === 'retarget') {
-          if (await retargetPreviewSlot(decision.id)) return;
+          if (await retargetPreviewSlot(decision.id, decision.rerun ? 'adopted' : 'retargeted')) return;
         } else if (decision.pin) {
           previewSlot.pin(decision.pin);
         }
