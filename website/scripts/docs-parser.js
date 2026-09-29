@@ -9,7 +9,7 @@
  *
  * Raw HTML is rejected with one exception: a narrow `<img>` allowlist, because
  * the canonical README uses inline 22px alert-state icons and portable Markdown
- * has no image-sizing syntax (docs/specs/website-docs.md -> /docs rendering
+ * has no image-sizing syntax (docs/specs/website-docs.md -> Markdown rendering
  * contract). A block-level HTML comment is dropped, since GitHub and the
  * Marketplace render it as nothing; an inline one is rejected.
  *
@@ -106,7 +106,7 @@ function parseImgTag(raw, line) {
   // GitHub renders it natively) or an absolute https URL. Anything else --
   // http, protocol-relative, data: -- is rejected here; the public-doc lint
   // additionally requires relative files to exist and bans third-party hosts.
-  if (hasScheme(attrs.src) && !/^https:\/\//i.test(attrs.src)) {
+  if ((hasScheme(attrs.src) && !/^https:\/\//i.test(attrs.src)) || isProtocolRelative(attrs.src)) {
     throw new UnsupportedMarkdownError(`<img> src must be relative or https: "${attrs.src}"`, line);
   }
   return {
@@ -607,7 +607,9 @@ function parseList(lines, start, slug) {
       if (SETEXT_UNDERLINE.test(lines[i])) {
         throw new UnsupportedMarkdownError('setext heading underline — use an ATX `#` heading', i + 1);
       }
-      if (THEMATIC_BREAK.test(lines[i])) break;
+      // A fence, heading, quote, table, or HTML line starts a block of its
+      // own, which the indented-body branch above parses as the item's child.
+      if (THEMATIC_BREAK.test(lines[i]) || interruptsParagraph(lines[i].trimStart(), lines[i + 1])) break;
       contentLines.push(lines[i].trim());
       i++;
     }
