@@ -1,4 +1,3 @@
-import { isHelperSession } from '../../lib/terminal-store';
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { clsx } from 'clsx';
@@ -37,9 +36,9 @@ import {
   buildAppTitleResolver,
   createTerminalPaneState,
   COMMAND_FAIL_GLYPH,
-  deriveHeader,
-  resolveDisplayPrimary,
 } from '../../lib/terminal-state';
+import { useHeldHeader } from './preview-transition';
+import { headerPeerStates, terminalHeaderLabel } from './terminal-header-label';
 import {
   TerminalContextContext,
   ModeContext,
@@ -95,22 +94,15 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
   const actions = useContext(WallActionsContext);
   const activity = activityStates.get(id) ?? DEFAULT_ACTIVITY_STATE;
   const paneState = terminalStates.get(id) ?? createTerminalPaneState();
-  const allPaneStates = useMemo(() => [...terminalStates].filter(([surfaceId]) => !isHelperSession(surfaceId)).map(([, state]) => state), [terminalStates]);
-  const visiblePaneStates = allPaneStates.length > 0 ? allPaneStates : [paneState];
+  const allPaneStates = useMemo(() => headerPeerStates(terminalStates), [terminalStates]);
   const appTitleForPane = useMemo(
     () => buildAppTitleResolver(terminalStates, activityStates),
     [terminalStates, activityStates],
   );
-  const derivedHeader = deriveHeader(paneState, visiblePaneStates, { appTitleForPane });
-  const displayTitle = resolveDisplayPrimary(derivedHeader.primary, title);
-  // The failure glyph rides at the end of the title string (so tabs/OS titles
-  // carry it too). `lastCommandFailed` tells us authoritatively that it's there,
-  // so we can color it red and strip it from the editing/rename base without
-  // guessing from the string (a user title ending in "✗" would fool a match).
-  const showsFailGlyph = derivedHeader.lastCommandFailed === true;
-  const displayTitleBase = showsFailGlyph
-    ? displayTitle.slice(0, -` ${COMMAND_FAIL_GLYPH}`.length)
-    : displayTitle;
+  // A preview slot switch on this face holds the label it showed
+  // (`docs/specs/layout.md` -> Pane header).
+  const held = useHeldHeader(id, 'terminal');
+  const label = held ?? terminalHeaderLabel(paneState, allPaneStates, appTitleForPane, title);
   const inOverride = mouseOverride !== 'off';
   const mouseIconTooltip: string | null = mouseOverride === 'permanent'
     ? "You're overriding the TUI's mouse capture. Click to restore."
@@ -172,7 +164,7 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
           <InlineEditInput
             data-renaming-input-for={id}
             className="bg-transparent outline-none border-none text-inherit font-medium font-mono w-full min-w-0 p-0 m-0"
-            initialValue={displayTitleBase}
+            initialValue={label.primary}
             blurAction="submit"
             onSubmit={submitRename}
             onCancel={actions.onCancelRename}
@@ -185,12 +177,12 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
             onClick={(e) => { e.stopPropagation(); actions.onStartRename(id); }}
             title={preview ? 'Preview' : undefined}
           >
-            <span className={clsx('min-w-0 shrink truncate', preview && PREVIEW_LABEL_CLASS)}>{displayTitleBase}</span>
-            {showsFailGlyph && (
+            <span className={clsx('min-w-0 shrink truncate', preview && PREVIEW_LABEL_CLASS)}>{label.primary}</span>
+            {label.failed && (
               <span className="ml-1 shrink-0 text-error" aria-label="last command failed">{COMMAND_FAIL_GLYPH}</span>
             )}
-            {derivedHeader.secondary && (
-              <span className="ml-1 min-w-0 shrink truncate opacity-70">{derivedHeader.secondary}</span>
+            {label.secondary && (
+              <span className="ml-1 min-w-0 shrink truncate opacity-70">{label.secondary}</span>
             )}
           </span>
         )}

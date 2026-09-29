@@ -153,6 +153,36 @@ body {
   .terminal-context-enter .terminal-context-content { animation: none; }
 }
 
+/* Preview slot switch (docs/specs/dor-tool.md → "Switching the slot"). The ghost of the
+ * slot's last view blurs at once and eases deeper, never dimming; the new view
+ * fades in over it. `motionIsInstant` picks the static blur and skips the fade. */
+.preview-ghost {
+  animation: preview-ghost-blur 600ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.preview-ghost-static {
+  filter: blur(8px);
+}
+
+.preview-reveal {
+  animation: preview-reveal 120ms ease-out both;
+}
+
+@keyframes preview-ghost-blur {
+  from { filter: blur(2px); }
+  to { filter: blur(8px); }
+}
+
+@keyframes preview-reveal {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .preview-ghost { animation: none; filter: blur(8px); }
+  .preview-reveal { animation: none; }
+}
+
 /* TODO dismiss flourish. Sequence across 500ms:
  *   0–30%  letters fade out while the check springs in (with a small overshoot)
  *  30–55%  check settles, pill is visually still

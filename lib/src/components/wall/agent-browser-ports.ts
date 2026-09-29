@@ -142,6 +142,13 @@ function subscribeToSessionLabels(listener: () => void): () => void {
   };
 }
 
+/** What `useDevServerMatch` answers for `port` now, read outside React: the
+ *  chip a preview slot switch holds (`docs/specs/layout.md` -> Pane header). */
+export function devServerMatchNow(port: number): DevServerMatch | null {
+  const resolution = getDevServerResolution(port);
+  return resolution ? { paneId: resolution.paneId, label: createSessionLabelMemo()(resolution.paneId, resolution.fallbackTitle) } : null;
+}
+
 /** Header hook: register interest in a loopback `port` (or none) and return the
  *  pane currently serving it, labelled as it is now, or null while unresolved /
  *  unmatched. */

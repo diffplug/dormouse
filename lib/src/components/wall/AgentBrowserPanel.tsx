@@ -17,6 +17,7 @@ import {
 // park delay from here even though it now lives on the controller.
 export { HIDDEN_PARK_DELAY_MS } from './agent-browser-surface-controller';
 import type { PaneProps } from './pane-props';
+import { SCREENCAST_CANVAS_ATTRIBUTE } from './preview-transition';
 import { usePaneChrome } from './use-pane-chrome';
 import { useSurfaceVisibility } from './use-surface-visibility';
 import {
@@ -29,7 +30,11 @@ import {
 
 type AgentBrowserPanelParams = AgentBrowserSurfaceParams;
 
-export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: renderModeProp }: PaneProps & { renderMode?: RenderMode }) {
+export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: renderModeProp, onReady }: PaneProps & {
+  renderMode?: RenderMode;
+  /** A frame after its session's first frame is drawn. */
+  onReady?: () => void;
+}) {
   // The engine-tracked `title` prop is unused here: the live title is derived
   // from the stream (controller → paneWrite.setTitle), never read back.
   const params = rawParams as AgentBrowserPanelParams | undefined;
@@ -76,6 +81,11 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
 
   const snapshot = useSyncExternalStore(controller.subscribe, controller.snapshot);
   const { tabs, status, hasFrame, poppedOut, phase, error } = snapshot;
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
+  useEffect(() => {
+    if (hasFrame) requestAnimationFrame(() => onReadyRef.current?.());
+  }, [hasFrame]);
 
   // Gated on the same Workspace-aware visibility the streaming body reads, so a
   // Workspace left in passthrough on a browser pane stops forwarding (and
@@ -403,6 +413,8 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
             — just hidden under the stub while a headed window renders instead. */}
         <canvas
           ref={canvasRef}
+          // A preview slot switch snapshots it (`capturePreviewGhost`).
+          {...{ [SCREENCAST_CANVAS_ATTRIBUTE]: id }}
           className={clsx('block max-h-full max-w-full select-none', (!hasFrame || poppedOut) && 'hidden')}
           onMouseDown={onCanvasMouseDown}
           onMouseUp={onCanvasMouseUp}

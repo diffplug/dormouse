@@ -1,5 +1,6 @@
 import { clearToolAnnounce } from './tool-announce-store';
 import { clearToolDirty } from './tool-dirty-store';
+import { clearPreviewTransition } from './preview-transition-store';
 import { serializeTransferTerminal, type TerminalGrid } from './terminal-transfer';
 import { Terminal, type IBufferRange } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -640,6 +641,7 @@ function teardownSession(id: string, { kill }: { kill: boolean }): void {
   removeMouseSelectionState(id);
   clearToolAnnounce(id);
   clearToolDirty(id);
+  clearPreviewTransition(id);
   clearTerminalActivity(id);
 }
 

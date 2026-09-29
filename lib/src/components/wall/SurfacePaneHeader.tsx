@@ -19,6 +19,7 @@ import { HeaderActionButton } from '../HeaderActionButton';
 import { chromeButton, HEADER_PALETTE_TRANSITION_CLASS, OVERLAY_MAX_HEIGHT, POPUP_SURFACE_CLASS, PREVIEW_LABEL_CLASS, TERMINAL_TOP_RADIUS_CLASS } from '../design';
 import { isPreviewSlotParams } from './browser-surface';
 import { PreviewPill } from './PreviewPill';
+import { useHeldHeader } from './preview-transition';
 import { MinimizeKillButtons, PaneActionGroup } from './PaneActionButtons';
 import {
   useAgentBrowserChromeSnapshot,
@@ -68,18 +69,24 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
   // whole browser chrome (nav + URL + connection) is strictly scoped to it.
   const screen = useAgentBrowserScreenController(id);
   const screenSnapshot = useAgentBrowserScreenSnapshot(screen);
-  const chrome = useAgentBrowserChromeSnapshot(screen);
+  const liveChrome = useAgentBrowserChromeSnapshot(screen);
+  // A preview slot switch holds what this header showed until the next view
+  // is ready (`docs/specs/layout.md` -> Pane header).
+  const held = useHeldHeader(id, 'browser');
+  const chrome = held?.chrome ?? liveChrome;
   // The far-left chip uses the same capability-first identity as the Display
   // modal and minimized Door, keyed once so its visible and accessible meanings
   // cannot drift.
-  const displayMode = screenSnapshot ? browserDisplayMode(screenSnapshot) : null;
+  const displayMode = held ? held.displayMode : screenSnapshot ? browserDisplayMode(screenSnapshot) : null;
   const displayLabel = displayMode ? `${BROWSER_DISPLAY_LABEL[displayMode]} — change display` : undefined;
 
   // Dev-server connection: when the active tab is loopback, correlate its port
   // to the Dormouse terminal pane serving it (resolved Wall-side). Hooks run
   // unconditionally; a non-loopback/no-screen surface just yields null.
-  const port = chrome ? loopbackPort(chrome.url) : null;
-  const devServer = useDevServerMatch(port);
+  const livePort = liveChrome ? loopbackPort(liveChrome.url) : null;
+  const liveDevServer = useDevServerMatch(livePort);
+  const port = held ? held.port : livePort;
+  const devServer = held ? held.devServer : liveDevServer;
 
   // With a dev-server chip in front, the chip already shows host:port, so the
   // URL collapses to just the path; otherwise it's the full host+path.

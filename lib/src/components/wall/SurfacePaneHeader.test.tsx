@@ -16,7 +16,7 @@ import {
   type ScreenSnapshot,
 } from './agent-browser-screen';
 import { setDevServerResolution } from './agent-browser-ports';
-import { removeTerminalPaneState, setTerminalUserTitle } from '../../lib/terminal-state-store';
+import { applyTerminalSemanticEvents, removeTerminalPaneState, setTerminalUserTitle } from '../../lib/terminal-state-store';
 import * as terminalState from '../../lib/terminal-state';
 import {
   ModeContext,
@@ -29,6 +29,8 @@ import {
 } from './wall-context';
 import { registerStubScreen, STUB_CHROME, STUB_SCREEN, stubResizeObserver, stubWallActions as stubActions } from './wall-test-utils';
 import { setNativeFieldValue } from '../../lib/dom';
+import { commitPreviewTransition, resetPreviewTransitions } from '../../lib/preview-transition-store';
+import { beginSlotSwitch } from './preview-transition';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -65,6 +67,7 @@ afterEach(() => {
   container.remove();
   vi.unstubAllGlobals();
   resetToolDirty();
+  resetPreviewTransitions();
   vi.restoreAllMocks();
 });
 
@@ -138,6 +141,63 @@ describe('SurfacePaneHeader — preview slot', () => {
     renderHeader({ ...headerProps(id, 'viewer'), params: { surfaceType: 'tool', toolPreview: true, url: CHROME.url } }, stubActions(), { tool: true });
     expect(container.querySelector('span.italic')?.getAttribute('title')).toBe('Preview');
     expect(container.querySelector(`[data-preview-pill-for="${id}"]`)).not.toBeNull();
+  });
+
+  it('holds the chip and address through a switch, naming the new target once it commits', () => {
+    const id = 'switching-slot-header';
+    const serving = { surfaceType: 'tool', toolPreview: true, url: CHROME.url, renderMode: 'iframe' };
+    let registration = register(id);
+    setDevServerResolution(5173, { paneId: id, fallbackTitle: 'a.md' });
+    try {
+      renderHeader({ ...headerProps(id, 'viewer'), params: serving }, stubActions(), { tool: true });
+      const chip = () => container.querySelector<HTMLButtonElement>('button[aria-label$="serves this localhost port"]');
+      const address = () => container.querySelector<HTMLElement>('[role="button"].italic');
+      const shown = chip();
+      expect(shown?.textContent).toBe('a.md:5173');
+      const token = beginSlotSwitch(id, () => ({ params: serving, title: 'viewer' }))!;
+      // Retired: the browser re-registers empty, and the slot has no URL.
+      act(() => {
+        registration.dispose();
+        registration = register(id, { url: '', displayUrl: '', title: null, key: null });
+      });
+      renderHeader({ ...headerProps(id, 'viewer'), params: { surfaceType: 'tool', toolPreview: true } }, stubActions(), { tool: true });
+      expect(chip()).toBe(shown);
+      expect(chip()?.textContent).toBe('a.md:5173');
+      expect(address()?.textContent).toBe('/app');
+      expect(address()?.title).toBe(`Preview — ${CHROME.title}`);
+      act(() => { commitPreviewTransition(id, token, { label: 'b.md', command: 'view b.md', terminalFace: () => false }); });
+      expect(chip()).toBe(shown);
+      expect(chip()?.textContent).toBe('b.md:5173');
+      expect(address()?.textContent).toBe('/app');
+      act(() => resetPreviewTransitions());
+      expect(chip()).toBeNull();
+    } finally {
+      registration.dispose();
+      setDevServerResolution(5173, null);
+    }
+  });
+
+  it('holds a terminal face\'s label through a switch, then names the new target', () => {
+    const id = 'switching-terminal-header';
+    const params = { surfaceType: 'tool', toolPreview: true };
+    act(() => applyTerminalSemanticEvents(id, [
+      { type: 'commandLine', commandLine: 'less a.md' }, { type: 'commandStart', source: 'osc633_boundaries' },
+    ]));
+    try {
+      renderHeader({ ...headerProps(id, 'viewer'), params }, stubActions(), { tool: true });
+      const label = () => container.querySelector(`[data-pane-title-for="${id}"]`)?.textContent;
+      const shown = label();
+      expect(shown).toContain('less a.md');
+      const token = beginSlotSwitch(id, () => ({ params, title: 'viewer' }))!;
+      act(() => applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 130 }, { type: 'promptStart' }]));
+      expect(label()).toBe(shown);
+      act(() => { commitPreviewTransition(id, token, { label: 'b.md', command: 'less b.md', terminalFace: () => true }); });
+      expect(label()).toBe('b.md');
+      act(() => resetPreviewTransitions());
+      expect(label()).not.toBe('b.md');
+    } finally {
+      removeTerminalPaneState(id);
+    }
   });
 
   it('marks nothing on a pinned Tool', () => {

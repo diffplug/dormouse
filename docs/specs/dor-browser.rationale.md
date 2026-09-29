@@ -202,6 +202,8 @@ The built-in local-file viewer supplies its own content boundary and permits the
 
 **Why a grant gets its own origin instead of a path token.** A dedicated origin keeps root-relative resources and client-side routers working with no body URL rewriting; a path token would have to survive every link, redirect and `fetch` the page makes.
 
+**Why a frame is transparent until its first load.** An iframe paints its `bg-white` before its document arrives, so a new frame flashed white in a dark theme for as long as its server took to answer (observed on preview slot switches, 2026-09-28). Opacity leaves the frame laid out and loading, and no shim or uninstrumented-document check reads visibility. The 1s fallback shows a document whose `load` never fires.
+
 ## Iframe Shim
 
 **Why the uninstrumented check waits for a first report.** The proxy instruments `text/html` only, and the parent cannot read a cross-origin frame's content type. A frame judged from its first load flagged every working non-HTML page — `dor iframe …/health.json`, and every image or PDF the file-viewer Tool frames directly. Waiting for one report means the frame has shown it carries the shim, so a later silent load is a real change; a link from an instrumented page to a PDF still flags, which the banner's wording ("not HTML, …") admits.

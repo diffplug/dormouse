@@ -93,6 +93,16 @@ Splitting the pinned pane keeps a double-clicked file visible, the intent of the
 
 Supersession stops once a retarget has typed its command. A newer preview interrupting a line the shell has not yet reported could send its Ctrl+C before the shell reads that line, and its own command would then be typed into the old command's input (reasoned 2026-09-28, not reproduced). The wait it keeps is the command's startup report, normally milliseconds.
 
+## Switching the slot
+
+Observed live in the innerdogfood harness (2026-09-28), a retarget without a hold went: the old browser retired at once, the pane flipped to its terminal face (`^C`, a prompt, the typed command), the new frame appeared as a white blank, then the new document painted, while the header label passed through the terminal's derived titles and the dev-server chip came and went.
+
+A screenshot of the old view is not the ghost for an iframe: a cross-origin frame's pixels cannot be read from the parent. None is needed either, since a loaded document stays painted after its server exits and CSS `filter` blurs a cross-origin frame. A screencast's frames are the stream's own bytes on a canvas, so its snapshot is readable; keeping its live view would hold a session the retarget has closed.
+
+Dimming was rejected (Ned, 2026-09-28): a dim reads differently on light and dark themes, and on a dark theme a dimmed page barely changes. Blur alone reads the same on both.
+
+A built-in viewer prints only its `OSC 2` title and `OSC 367 serve`, so OSC-only output never ends a switch before its browser paints. The shell's echo of the typed command can arrive in the chunk that starts it, so the echo does not count as output either.
+
 ## Terminal links
 
 xterm.js 6.1.0-beta.304 activates a link on every `mouseup` whose press began on that link, passing the `mouseup`. A two-press double-click sent to Chromium over CDP activated with `detail` 1, then 2 (2026-09-28). `agent-browser dblclick` sends a single press with click count 2, so it activates once and cannot probe this. A triple-click's third activation would be another `dor open`, starting an unkeyed Tool twice.

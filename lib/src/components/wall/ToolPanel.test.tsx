@@ -3,6 +3,10 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolPanel } from './ToolPanel';
+import { setPlatform } from '../../lib/platform';
+import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
+import { commitPreviewTransition, PREVIEW_READY_FALLBACK_MS, PREVIEW_REVEAL_MS, resetPreviewTransitions } from '../../lib/preview-transition-store';
+import { beginSlotSwitch } from './preview-transition';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -10,8 +14,12 @@ vi.mock('./TerminalPanel', () => ({
   TerminalPanel: () => <div data-testid="terminal">terminal</div>,
 }));
 vi.mock('./BrowserPanel', () => ({
-  BrowserPanel: ({ parked }: { parked?: boolean }) => (
-    <div data-testid="browser" data-parked={String(parked === true)}>browser</div>
+  BrowserPanel: ({ id, parked, params, onReady }: { id: string; parked?: boolean; params?: Record<string, unknown>; onReady?: () => void }) => (
+    // A click stands in for the renderer's first paint.
+    <div data-testid="browser" data-parked={String(parked === true)} data-url={String(params?.url ?? '')} onClick={() => onReady?.()}>
+      {params?.renderMode === 'agent-browser-screencast' && <canvas data-screencast-canvas-for={id} />}
+      browser
+    </div>
   ),
 }));
 
@@ -40,9 +48,9 @@ function show(params: Record<string, unknown>) {
 
 /** The wrapper the visibility is applied to. */
 function half(testId: string): HTMLElement {
-  const el = container.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
-  if (!el?.parentElement) throw new Error(`no ${testId}`);
-  return el.parentElement;
+  const el = container.querySelector<HTMLElement>(`[data-testid="${testId}"]`)?.closest<HTMLElement>('[data-tool-half]');
+  if (!el) throw new Error(`no ${testId}`);
+  return el;
 }
 
 describe('ToolPanel', () => {
@@ -170,5 +178,99 @@ describe('the pending-approval face', () => {
     const labels = [...container.querySelectorAll('button')].map((b) => b.textContent ?? '');
     expect(labels.some((l) => l.includes('upstream'))).toBe(false);
     expect(labels.some((l) => l.includes('folder'))).toBe(true);
+  });
+});
+
+describe('a preview slot switch', () => {
+  const next = { ...serving, url: 'http://localhost:7007/' };
+  const browsers = () => Array.from(container.querySelectorAll<HTMLElement>('[data-testid="browser"]'));
+  const layerOf = (element: Element) => element.closest<HTMLElement>('[data-browser-layer]')!;
+  /** Begin on what `params` shows, with motion that is not instant. */
+  const begin = (params: Record<string, unknown>) => {
+    let token!: number;
+    act(() => { token = beginSlotSwitch('p1', () => ({ params, title: 't' }))!; });
+    return token;
+  };
+  const commit = (token: number) => act(() => {
+    commitPreviewTransition('p1', token, { label: 'b.md', command: 'view b.md', terminalFace: () => true });
+  });
+
+  beforeEach(() => {
+    setPlatform(new FakePtyAdapter());
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    act(() => resetPreviewTransitions());
+    vi.useRealTimers();
+  });
+
+  it('ramps the ghost\'s blur, then fades the new layer in over it', () => {
+    show(serving);
+    const [old] = browsers();
+    const token = begin(serving);
+    expect(layerOf(old).className).toContain('preview-ghost');
+    expect(layerOf(old).className).not.toContain('preview-ghost-static');
+    commit(token);
+    show(booting);
+    // Retired, the ghost keeps its frozen params and the terminal stays hidden.
+    expect(old.dataset.url).toBe(serving.url);
+    expect(half('terminal').style.visibility).toBe('hidden');
+    show(next);
+    const [ghost, incoming] = browsers();
+    expect(ghost).toBe(old);
+    expect(layerOf(incoming).className).toContain('opacity-0');
+    act(() => incoming.click());
+    expect(layerOf(incoming).className).toContain('preview-reveal');
+    expect(old.isConnected).toBe(true);
+    act(() => { vi.advanceTimersByTime(PREVIEW_REVEAL_MS); });
+    expect(browsers()).toEqual([incoming]);
+    expect(layerOf(incoming).className).not.toMatch(/opacity-0|preview-reveal/);
+  });
+
+  it('blurs the terminal face in place and fades a new browser in over it', () => {
+    show(booting);
+    const token = begin(booting);
+    expect(half('terminal').className).toContain('preview-ghost');
+    expect(half('terminal').hasAttribute('inert')).toBe(true);
+    commit(token);
+    show(next);
+    expect(half('terminal').style.visibility).toBe('');
+    expect(half('browser').style.visibility).toBe('');
+    const [incoming] = browsers();
+    expect(layerOf(incoming).className).toContain('opacity-0');
+    act(() => incoming.click());
+    act(() => { vi.advanceTimersByTime(PREVIEW_REVEAL_MS); });
+    expect(half('terminal').style.visibility).toBe('hidden');
+    expect(half('terminal').className).not.toContain('preview-ghost');
+  });
+
+  it('reveals the terminal over a browser ghost when the fallback ends a switch that never served', () => {
+    show(serving);
+    const [old] = browsers();
+    commit(begin(serving));
+    show(booting);
+    act(() => { vi.advanceTimersByTime(PREVIEW_READY_FALLBACK_MS); });
+    expect(half('terminal').className).toContain('preview-reveal');
+    expect(half('terminal').style.visibility).toBe('');
+    expect(old.isConnected).toBe(true);
+    act(() => { vi.advanceTimersByTime(PREVIEW_REVEAL_MS); });
+    expect(old.isConnected).toBe(false);
+    expect(half('browser').style.visibility).toBe('hidden');
+  });
+
+  it('holds a screencast as a blurred snapshot of its canvas', () => {
+    const screencast = { ...serving, renderMode: 'agent-browser-screencast' };
+    show(screencast);
+    const canvas = container.querySelector('canvas')!;
+    Object.assign(canvas, { width: 640, height: 360 });
+    canvas.toDataURL = vi.fn(() => 'data:image/jpeg;base64,AAAA');
+    canvas.getBoundingClientRect = () => ({ left: 10, top: 20, width: 320, height: 180 }) as DOMRect;
+    begin(screencast);
+    const img = container.querySelector('img')!;
+    expect(img.getAttribute('src')).toBe('data:image/jpeg;base64,AAAA');
+    expect(img.style.width).toBe('320px');
+    expect(img.parentElement!.className).toContain('preview-ghost');
+    // The live screencast is hidden beneath it, not kept as the ghost.
+    expect(layerOf(canvas).className).toContain('opacity-0');
   });
 });

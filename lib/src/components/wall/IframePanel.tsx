@@ -45,6 +45,10 @@ const IFRAME_ALLOW = 'autoplay; clipboard-write; fullscreen';
 // from the start is working, not lost.
 const SHIM_REPORT_TIMEOUT_MS = 1000;
 const SHIM_REPORT_LEAD_MS = 250;
+// A frame is hidden until its first document loads, so the pane's themed
+// background shows instead of the frame's white canvas; one whose load never
+// fires shows after this (docs/specs/dor-browser.md → "Iframe Renderer").
+const FIRST_PAINT_FALLBACK_MS = 1000;
 
 type Resolution =
   | { kind: 'empty' }
@@ -100,7 +104,10 @@ function upstreamUrlFromFrameLocation(frameUrl: unknown, targetUrl: string, prox
   }
 }
 
-export function IframePanel({ id, title, params }: PaneProps) {
+export function IframePanel({ id, title, params, onReady }: PaneProps & {
+  /** A frame after a document loads. */
+  onReady?: () => void;
+}) {
   const actions = useContext(WallActionsContext);
   const paneWrite = useContext(PaneWriteContext);
   const elRef = useRef<HTMLDivElement>(null);
@@ -398,6 +405,26 @@ export function IframePanel({ id, title, params }: PaneProps) {
 
   const src = resolution.kind === 'proxied' || resolution.kind === 'raw' ? resolution.src : '';
 
+  // Shown from the first load on: navigation, reload, and history re-resolve
+  // the proxy and mount a new frame, which must not hide again. Only losing the
+  // URL starts over.
+  const [painted, setPainted] = useState(false);
+  useEffect(() => {
+    if (!sourceUrl) setPainted(false);
+  }, [sourceUrl]);
+  useEffect(() => {
+    if (painted || !src) return;
+    const timer = setTimeout(() => setPainted(true), FIRST_PAINT_FALLBACK_MS);
+    return () => clearTimeout(timer);
+  }, [painted, src]);
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
+  const onLoad = useCallback(() => {
+    onFrameLoad();
+    setPainted(true);
+    requestAnimationFrame(() => onReadyRef.current?.());
+  }, [onFrameLoad]);
+
   return (
     <div
       ref={elRef}
@@ -417,14 +444,15 @@ export function IframePanel({ id, title, params }: PaneProps) {
       {src ? (
         <iframe
           ref={iframeRef}
-          className="block h-full w-full border-0 bg-white"
+          // White for pages that assume a white canvas, once one has loaded.
+          className={`block h-full w-full border-0 bg-white${painted ? '' : ' opacity-0'}`}
           src={src}
           title={title ?? liveUrl}
           allow={IFRAME_ALLOW}
           sandbox={IFRAME_SANDBOX}
           {...(resolution.kind === 'proxied' ? { 'data-dormouse-proxy': 'true' } : {})}
           referrerPolicy="strict-origin-when-cross-origin"
-          onLoad={onFrameLoad}
+          onLoad={onLoad}
         />
       ) : (
         <PanelMessage resolution={resolution} url={sourceUrl} onOpenInAgentBrowser={openInAgentBrowser} />

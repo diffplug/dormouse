@@ -21,6 +21,9 @@ import { mountWallHarness, reportRunning, waitUntil, type WallHarness } from './
 import { getExternalLinkConfirmationSnapshot } from '../../lib/external-link-confirmation';
 import { activateTerminalLink } from '../../lib/terminal-link-activation';
 import type { LathNode } from '../../lib/lath/model';
+import { recordToolAnnounce, resetToolAnnounces } from '../../lib/tool-announce-store';
+import { PREVIEW_OUTPUT_QUIET_MS, PREVIEW_READY_FALLBACK_MS, resetPreviewTransitions } from '../../lib/preview-transition-store';
+import { setDevServerResolution } from './agent-browser-ports';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -61,6 +64,8 @@ afterEach(async () => {
   }
   sessions.clear();
   resetToolDirty();
+  resetToolAnnounces();
+  resetPreviewTransitions();
   vi.restoreAllMocks();
 });
 
@@ -662,4 +667,204 @@ describe('a terminal link', () => {
     expect(typed.slot).toEqual([]);
     expect(getExternalLinkConfirmationSnapshot()).toBeNull();
   });
+});
+
+describe('a switching slot', () => {
+  /** a.md's viewer serving at 6006, framed before mount so the serving poll
+   *  finds its command current. */
+  async function mountServingSlot(options: ShellOptions = {}) {
+    const toolControl = installHost();
+    shell('pane-a', null);
+    shell('slot', 'view /repo/a.md', options);
+    await mountWall([{ id: 'slot', params: viewerParams('a.md', {
+      url: 'http://localhost:6006/', renderMode: 'iframe', toolAnnouncedPort: 6006, toolAnnouncedPath: '/',
+    }) }]);
+    return toolControl;
+  }
+
+  const inSlot = <T extends Element>(selector: string) => Array.from(container.querySelectorAll<T>(`[data-lath-leaf="slot"] ${selector}`));
+  const frames = () => inSlot<HTMLIFrameElement>('iframe');
+  const layerOf = (element: Element) => element.closest<HTMLElement>('[data-browser-layer]')!;
+  const terminalHalf = () => inSlot<HTMLElement>('[data-tool-half="terminal"]')[0];
+  const browserHalf = () => inSlot<HTMLElement>('[data-tool-half="browser"]')[0];
+  const ghosted = (element: Element) => /\bpreview-ghost(-static)?\b/.test(element.className);
+  /** The slot's new command serves at `port`, as a viewer announces it. */
+  const serve = (port: number) => {
+    fake.setOpenPorts('slot', [{ protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port, pid: 1 }]);
+    act(() => recordToolAnnounce('slot', { port, path: '/', name: null, key: null, dehydrate: false, persist: null }));
+  };
+  const runs = (line: string) => () => terminalRegistry.getTerminalPaneState('slot').currentCommand?.rawCommandLine === line;
+  const sleep = (ms: number) => act(async () => { await new Promise(resolve => setTimeout(resolve, ms)); });
+
+  it('holds the old frame as a blurred ghost until the new one loads, remounting neither', async () => {
+    await mountServingSlot();
+    const [old] = frames();
+    expect(ghosted(layerOf(old))).toBe(false);
+    const respond = await request({ file: 'b.md', preview: true });
+    // The same frame, blurred and inert; reduced motion holds a static blur.
+    expect(layerOf(old).className).toContain('preview-ghost-static');
+    expect(layerOf(old).hasAttribute('inert')).toBe(true);
+    expect(await answer(respond)).toMatchObject({ status: 'retargeted' });
+    await waitUntil(runs('view /repo/b.md'));
+    // Retired, the Tool has no URL, yet its terminal face never shows.
+    expect((await paramsOf('slot'))?.url).toBeUndefined();
+    expect(terminalHalf().style.visibility).toBe('hidden');
+    expect(browserHalf().style.visibility).toBe('');
+    expect(container.querySelector('[data-lath-leaf="slot"] [data-browser-display-trigger]')).not.toBeNull();
+    expect(frames()).toEqual([old]);
+
+    serve(7007);
+    await waitUntil(() => frames().length === 2);
+    const [ghost, next] = frames();
+    expect(ghost).toBe(old);
+    expect(layerOf(next).getAttribute('data-browser-layer')).toBe('incoming');
+    expect(layerOf(next).className).toContain('opacity-0');
+    await act(async () => { next.dispatchEvent(new Event('load')); });
+    await harness.flushFrame();
+    // Reduced motion swaps at once: the ghost goes, the new frame is kept.
+    expect(frames()).toEqual([next]);
+    expect(old.isConnected).toBe(false);
+    expect(layerOf(next).getAttribute('data-browser-layer')).toBe('live');
+    expect(layerOf(next).className).not.toContain('opacity-0');
+    expect(layerOf(next).hasAttribute('inert')).toBe(false);
+  });
+
+  it('blurs the slot as the preview arrives, before its lookup answers', async () => {
+    const toolControl = await mountServingSlot();
+    const lookup = Promise.withResolvers<void>();
+    const answerLookup = toolControl.getMockImplementation()!;
+    toolControl.mockImplementationOnce(async (call) => { await lookup.promise; return answerLookup(call); });
+    const respond = await request({ file: 'b.md', preview: true });
+    // Read before the lookup is released, which a failed expect would never do.
+    const early = { answered: respond.mock.calls.length > 0, blurred: ghosted(layerOf(frames()[0])) };
+    await act(async () => lookup.resolve());
+    expect(early).toEqual({ answered: false, blurred: true });
+    expect(await answer(respond)).toMatchObject({ status: 'retargeted' });
+  });
+
+  it('unblurs at once for a preview that does not retarget the slot', async () => {
+    await mountServingSlot();
+    const [old] = frames();
+    expect(await answer(await request({ file: 'a.md', preview: true }))).toMatchObject({ status: 'existing' });
+    expect(ghosted(layerOf(old))).toBe(false);
+    expect(layerOf(old).hasAttribute('inert')).toBe(false);
+    expect(frames()).toEqual([old]);
+  });
+
+  it('keeps the ghost through a superseded preview, never capturing the half-switched pane', async () => {
+    await mountServingSlot({ holdInterrupt: true });
+    const [old] = frames();
+    const first = await request({ file: 'b.md', preview: true });
+    await waitUntil(() => typed.slot.length === 1);
+    const second = await request({ file: 'c.md', preview: true });
+    expect(await answer(first)).toMatchObject({ status: 'superseded' });
+    expect(ghosted(layerOf(old))).toBe(true);
+    await waitUntil(() => typed.slot.length === 2);
+    act(() => returnToPrompt('slot'));
+    expect(await answer(second)).toMatchObject({ status: 'retargeted', command: 'view /repo/c.md' });
+    expect(frames()[0]).toBe(old);
+    expect(ghosted(layerOf(old))).toBe(true);
+  });
+
+  it('holds nothing for a preview from the slot\'s own Session, which it never retargets', async () => {
+    const toolControl = await mountServingSlot();
+    const lookup = Promise.withResolvers<void>();
+    const answerLookup = toolControl.getMockImplementation()!;
+    toolControl.mockImplementationOnce(async (call) => { await lookup.promise; return answerLookup(call); });
+    const respond = await request({ file: 'b.md', preview: true }, 'slot');
+    const blurred = ghosted(layerOf(frames()[0]));
+    await act(async () => lookup.resolve());
+    expect(blurred).toBe(false);
+    const result = await answer(respond);
+    expect(result.status).toBe('created');
+    startTool(result.surfaceId, result.command);
+  });
+
+  it('keeps the first ghost when a preview takes over a committed switch', async () => {
+    await mountServingSlot();
+    const [old] = frames();
+    expect(await answer(await request({ file: 'b.md', preview: true }))).toMatchObject({ status: 'retargeted' });
+    await waitUntil(runs('view /repo/b.md'));
+    // b.md's viewer has not served: the pane itself now holds only a terminal.
+    expect(await answer(await request({ file: 'c.md', preview: true }))).toMatchObject({ status: 'retargeted' });
+    await waitUntil(runs('view /repo/c.md'));
+    expect(frames()[0]).toBe(old);
+    expect(ghosted(layerOf(old))).toBe(true);
+    expect(terminalHalf().style.visibility).toBe('hidden');
+  });
+
+  it('ends the hold once the slot is kept during its interrupt, before the new slot answers', async () => {
+    let integrated = false;
+    vi.mocked(terminalRegistry.isPaneOscDriven).mockImplementation(id => id === 'pane-a' || id === 'slot' || integrated);
+    await mountServingSlot({ holdInterrupt: true });
+    const respond = await request({ file: 'b.md', preview: true });
+    await waitUntil(() => typed.slot.length === 1);
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-preview-pill-for="slot"]')!.click());
+    act(() => returnToPrompt('slot'));
+    await waitUntil(() => leafCount() === 3);
+    const ghostsWhileWaiting = inSlot('.preview-ghost-static').length;
+    integrated = true;
+    const created = newLeaf();
+    startTool(created, 'view /repo/b.md');
+    expect(await answer(respond)).toMatchObject({ status: 'created', surfaceId: created });
+    expect(ghostsWhileWaiting).toBe(0);
+  });
+
+  it('shows a terminal-only Tool once its output goes quiet, not on its echo', async () => {
+    await mountSlot();
+    const respond = await request({ file: 'b.md', preview: true });
+    expect(terminalHalf().className).toContain('preview-ghost-static');
+    expect(terminalHalf().hasAttribute('inert')).toBe(true);
+    expect(await answer(respond)).toMatchObject({ status: 'retargeted' });
+    await waitUntil(runs('view /repo/b.md'));
+    act(() => fake.sendOutput('slot', 'view /repo/b.md\r\n\x1b]2;b.md\x07'));
+    await sleep(PREVIEW_OUTPUT_QUIET_MS + 50);
+    expect(ghosted(terminalHalf())).toBe(true);
+    act(() => fake.sendOutput('slot', '# b\r\n'));
+    await sleep(PREVIEW_OUTPUT_QUIET_MS / 2);
+    expect(ghosted(terminalHalf())).toBe(true);
+    await sleep(PREVIEW_OUTPUT_QUIET_MS);
+    expect(ghosted(terminalHalf())).toBe(false);
+    expect(terminalHalf().hasAttribute('inert')).toBe(false);
+  });
+
+  it('shows the terminal when the new command finishes before serving, so a failure stays visible', async () => {
+    await mountServingSlot();
+    expect(await answer(await request({ file: 'b.md', preview: true }))).toMatchObject({ status: 'retargeted' });
+    await waitUntil(runs('view /repo/b.md'));
+    act(() => terminalRegistry.applyTerminalSemanticEvents('slot', [{ type: 'commandFinish', exitCode: 1 }]));
+    expect(frames()).toHaveLength(0);
+    expect(terminalHalf().style.visibility).toBe('');
+  });
+
+  it.each([
+    ['names the new target at once', null, 'b.md'],
+    ['keeps the name a user gave the slot', 'notes', 'notes'],
+  ])('%s in its header chip', async (_, rename, expected) => {
+    await mountServingSlot();
+    act(() => setDevServerResolution(6006, { paneId: 'slot', fallbackTitle: null }));
+    try {
+      if (rename) act(() => { terminalRegistry.setTerminalUserTitle('slot', rename); });
+      const chip = () => inSlot<HTMLButtonElement>('button[aria-label$="serves this localhost port"]')[0];
+      const shown = chip();
+      if (rename) expect(shown.textContent).toBe(`${rename}:6006`);
+      expect(await answer(await request({ file: 'b.md', preview: true }))).toMatchObject({ status: 'retargeted' });
+      await waitUntil(runs('view /repo/b.md'));
+      expect(chip()).toBe(shown);
+      expect(chip().textContent).toBe(`${expected}:6006`);
+    } finally {
+      setDevServerResolution(6006, null);
+    }
+  });
+
+  it('ends the switch after its fallback when the new view never reports ready', async () => {
+    await mountServingSlot();
+    const [old] = frames();
+    expect(await answer(await request({ file: 'b.md', preview: true }))).toMatchObject({ status: 'retargeted' });
+    await sleep(PREVIEW_READY_FALLBACK_MS - 500);
+    expect(old.isConnected).toBe(true);
+    await sleep(600);
+    expect(old.isConnected).toBe(false);
+    expect(terminalHalf().style.visibility).toBe('');
+  }, 10_000);
 });
