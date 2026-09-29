@@ -55,7 +55,7 @@ Source of truth: `allowedDevRequest` in `hosted/server/dev-host-guard.ts`; `host
 
 **Must deploy only verified same-repository PR merge revisions touching Hosted or its shared build inputs.** Drafts qualify; forks receive no deployment credentials. Changed paths include rename sources and all API pages. Deployment runs serialize per PR without cancellation; close/merge cleanup ignores path filtering and tolerates absent resources.
 
-**Must isolate each PR in a persistent Worker, uncached Hyperdrive, and Neon branch from an empty dedicated preview project.** Reuse `dormouse-hosted-pr-N` until close. The preview config excludes production routes and credentials; runtime bindings cannot enable OAuth or Postmark.
+**Must isolate each PR in a persistent Worker, uncached Hyperdrive, and Neon branch from an empty dedicated preview project.** Reuse `dormouse-hosted-pr-N` until close. The preview config excludes production routes and credentials; runtime bindings cannot enable OAuth or Postmark. **Must give each preview its own Durable Object namespace and preview-only rate-limit namespaces**, and delete its Worker with `force` so the namespace goes with it.
 
 **Must run cleanup from the base branch's checkout, never the closed PR's.**
 

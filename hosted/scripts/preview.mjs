@@ -41,7 +41,28 @@ export function previewConfig(base, env, hyperdriveId) {
       BUILD_SHA: required(env, "BUILD_SHA"),
     },
     hyperdrive: [{ binding: "HYPERDRIVE", id: hyperdriveId }],
+    // A Durable Object namespace belongs to the Worker that implements it, so
+    // the preview's is its own; rate-limit counters are account-wide, so the
+    // preview's move to their own namespace ids.
+    durable_objects: base.durable_objects,
+    migrations: base.migrations,
+    ratelimits: base.ratelimits?.map((limit) => ({
+      ...limit,
+      namespace_id: previewRatelimitNamespace(limit.namespace_id),
+    })),
   };
+}
+
+/** Production rate-limit namespace ids stay below this; previews use id + offset. */
+export const PREVIEW_RATELIMIT_OFFSET = 1000;
+
+export function previewRatelimitNamespace(id) {
+  const n = Number(id);
+  if (!/^\d+$/.test(String(id)) || n <= 0 || n >= PREVIEW_RATELIMIT_OFFSET)
+    throw new Error(
+      `Rate-limit namespace_id ${id} must be a positive integer below ${PREVIEW_RATELIMIT_OFFSET}`,
+    );
+  return String(n + PREVIEW_RATELIMIT_OFFSET);
 }
 
 export function hyperdriveOrigin(connectionString) {
@@ -167,7 +188,9 @@ export async function cleanup(env = process.env) {
   required(env, "NEON_PROJECT_ID");
   required(env, "NEON_API_KEY");
   const api = cloudflare(env);
-  await api(`workers/scripts/${name}`, "DELETE");
+  // `force`: a Worker that implements a Durable Object namespace is deleted
+  // with it rather than refused.
+  await api(`workers/scripts/${name}?force=true`, "DELETE");
   for (const item of await findHyperdrives(api, name))
     await api(`hyperdrive/configs/${item.id}`, "DELETE");
   // The official create action reuses branches; cleanup must also tolerate retries.
