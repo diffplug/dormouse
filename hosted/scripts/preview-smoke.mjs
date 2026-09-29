@@ -9,10 +9,11 @@ import { oneTimeSmoke } from "./one-time-smoke.mjs";
 export const codeFrom = (email) => email.text.match(/\b\d{8}\b/)?.[0];
 
 // Only the initial health GET can retry a transport failure while a new custom
-// domain becomes reachable. OAuth starts may retry one explicit rejection after
+// domain becomes reachable, or a healthy older revision during rollout.
+// OAuth starts may retry one explicit rejection after
 // Retry-After (or Better Auth's X-Retry-After); never replay a POST whose
 // transport outcome is unknown.
-export async function smokeRequest(fetcher, url, options, wait = delay) {
+export async function smokeRequest(fetcher, url, options, wait = delay, expectedRevision) {
   const path = new URL(url).pathname;
   const health = path === "/api/health" && !options.method;
   const social = path === "/api/auth/sign-in/social" && options.method === "POST";
@@ -33,6 +34,17 @@ export async function smokeRequest(fetcher, url, options, wait = delay) {
         throw error;
       await wait(5_000);
       continue;
+    }
+    if (health && expectedRevision && response.status === 200) {
+      const body = await response.clone().json();
+      assert.deepEqual(body, { ok: true, revision: body?.revision });
+      assert.match(body.revision, /^[a-f0-9]{40}$/);
+      if (body.revision !== expectedRevision && attempt < 6) {
+        await response.body?.cancel();
+        await wait(5_000);
+        continue;
+      }
+      assert.equal(body.revision, expectedRevision, "Deployed revision must become live");
     }
     if (social && attempt === 0 && response.status === 429) {
       const value =
@@ -67,7 +79,7 @@ export async function smoke(
     smokeRequest(fetcher, origin + path, {
       redirect: "manual",
       ...options,
-    });
+    }, delay, sha);
   const health = await request("/api/health");
   assert.equal(health.status, 200);
   assert.deepEqual(await health.json(), {

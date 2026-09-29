@@ -106,3 +106,46 @@ test("HTTP failures and programmer errors fail immediately", async () => {
     /fixture error/,
   );
 });
+
+const oldRevision = "a".repeat(40);
+const newRevision = "b".repeat(40);
+
+test("deployment waits for the selected revision before continuing", async () => {
+  const waits = [];
+  let calls = 0;
+  const response = await smokeRequest(async () => {
+    calls++;
+    if (calls === 1) throw unavailable();
+    return Response.json({ ok: true, revision: calls < 4 ? oldRevision : newRevision });
+  }, origin + "/api/health", {}, async (ms) => waits.push(ms), newRevision);
+  assert.deepEqual(await response.json(), { ok: true, revision: newRevision });
+  assert.equal(calls, 4);
+  assert.deepEqual(waits, [5000, 5000, 5000]);
+});
+
+test("transport and stale revisions share one bounded retry budget", async () => {
+  let calls = 0;
+  const waits = [];
+  await assert.rejects(smokeRequest(async () => {
+    if (++calls % 2 === 0) throw unavailable();
+    return Response.json({ ok: true, revision: oldRevision });
+  }, origin + "/api/health", {}, async (ms) => waits.push(ms), newRevision),
+  /Deployed revision must become live/);
+  assert.equal(calls, 7);
+  assert.deepEqual(waits, Array(6).fill(5000));
+});
+
+test("unhealthy or malformed revision responses fail without rollout retries", async () => {
+  for (const body of [
+    { ok: false, revision: oldRevision },
+    { ok: true },
+    { ok: true, revision: "invalid" },
+    { ok: true, revision: oldRevision, unexpected: true },
+    null,
+  ]) {
+    await assert.rejects(smokeRequest(async () => Response.json(body),
+      origin + "/api/health", {}, neverWait, newRevision));
+  }
+  await assert.rejects(smokeRequest(async () => new Response("not JSON"),
+    origin + "/api/health", {}, neverWait, newRevision), SyntaxError);
+});
