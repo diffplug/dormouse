@@ -312,6 +312,8 @@ describe('the gate', () => {
       ],
       // Where `userAgentData` answers, the user agent is not asked.
       [{ userAgentData: { platform: 'Linux' }, userAgent: 'Android' }, 'Phone browser'],
+      // An empty `userAgentData.platform` (a user-agent override) falls through.
+      [{ platform: 'iPhone', userAgentData: { platform: '' } }, 'iPhone'],
       [{ platform: 'Linux aarch64' }, 'Phone browser'],
       [{}, 'Phone browser'],
     ];

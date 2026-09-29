@@ -83,7 +83,9 @@ export interface DeviceHints {
 export function oneTimeDeviceLabel(
   hints: DeviceHints = typeof navigator === 'undefined' ? {} : navigator,
 ): OneTimeDeviceLabel {
-  const platform = hints.userAgentData?.platform ?? hints.platform ?? '';
+  // `||`, not `??`: an empty `userAgentData.platform` (a user-agent override)
+  // says nothing, and must not hide `navigator.platform`.
+  const platform = hints.userAgentData?.platform || hints.platform || '';
   if (/iPhone/i.test(platform)) return 'iPhone';
   // iPadOS Safari reports a Mac; only the touch screen tells them apart.
   if (/iPad/i.test(platform) || (platform === 'MacIntel' && (hints.maxTouchPoints ?? 0) > 1)) {

@@ -40,6 +40,10 @@ never reaches `webSocketClose`, which would otherwise end the room it was
 refused from. The same lag applies to the end an ending closes from the other
 end's event (4013, 4014, 4015); production behavior is unverified. The suite
 reads close frames over a bare socket for this reason.
+Local `wrangler dev` also logs `Uncaught Error: Network connection lost.` once
+per refused join; it appears for any socket accepted outside hibernation, even
+one the client closes cleanly, so it is workerd noise rather than a room fault
+(reproduced 2026-09-28; production logging unverified).
 
 **Cost** (Cloudflare Durable Object pricing, checked 2026-09-28). Waiting for a
 phone costs nothing: the Burrow socket is hibernated and pings are answered
