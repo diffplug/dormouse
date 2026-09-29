@@ -31,6 +31,40 @@
       "id": "5bfbeba081b4456f9c3cf36edbb20c1d"
     }
   ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "ONE_TIME_ROOM",
+        "class_name": "OneTimeRoom"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "OneTimeRoom"
+      ]
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "ONE_TIME_MINT_LIMIT",
+      "namespace_id": "1",
+      "simple": {
+        "limit": 10,
+        "period": 60
+      }
+    },
+    {
+      "name": "ONE_TIME_JOIN_LIMIT",
+      "namespace_id": "2",
+      "simple": {
+        "limit": 30,
+        "period": 60
+      }
+    }
+  ],
   "observability": {
     "enabled": false
   }

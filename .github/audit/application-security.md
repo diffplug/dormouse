@@ -25,17 +25,32 @@ in one and quietly absent from another is a finding.
 The end-to-end boundary is where the depth goes. Its modules are
 `remote-lib-common/src/security/noise.ts`, `noise-transport.ts`,
 `e2e-ceremony.ts`, `e2e-bounds.ts`, `token-bucket.ts`, `push-seal.ts`,
-`pairing-invitation.ts`, `presence.ts`, `acl.ts` and `direct-path.ts`;
-`remote-lib-common/src/remote/wire.ts` (the frame shapes and their guards);
+`pairing-invitation.ts`, `one-time-link.ts`, `link-url.ts`, `presence.ts`, `acl.ts` and
+`direct-path.ts`; `remote-lib-common/src/remote/wire.ts` (the frame shapes and their
+guards) and `one-time-wire.ts` (the one-time rendezvous family, which neither the
+Relay nor `BurrowRuntime` may read);
 `lib/src/remote/direct/direct-endpoint.ts` and `direct-peer.ts` (the data
 channel the same session may move onto, and the one switching policy both ends
 run — `docs/specs/security-remote.md` -> "Direct path");
-`lib/src/remote/burrow/burrow-runtime.ts` (both ceremonies, every Burrow bound);
+`lib/src/remote/burrow/burrow-runtime.ts` (both ceremonies, every Burrow bound),
+`established-session.ts` (an authorized session's decrypt, idle clock, and
+direct path), and `one-time-runtime.ts` (the one-time ceremony, which grants
+nothing and must reach the direct path — `docs/specs/security-remote.md` ->
+"One-time connection"); `lib/src/host/remote/one-time-origin.ts` and the
+one-time half of `service.ts` (the baked rendezvous origin, its gate before any
+socket, the single runtime, and the approval routed by `kind`);
 `lib/src/remote/burrow/push-delivery.ts`; `lib/src/remote/client/pocket-client.ts`
-and `lib/src/remote/pocket-app/sw.ts` (the phone, and the render sink);
+and `session-core.ts` (the phone's ceremonies, and the established session they
+promote), `one-time-client.ts` (the one-time phone, which keeps nothing and
+sends no protocol-v1 before the direct switch), and
+`lib/src/remote/one-time-rendezvous.ts` (the frame bound both one-time ends
+read the room under); `lib/src/remote/pocket-app/sw.ts` (the render sink);
 `relay/src/relay.ts` and `relay/src/app.ts` (which must know none of it). The
 harnesses that already exercise this are
 `lib/src/remote/burrow/burrow-bounds.test.ts`,
+`lib/src/remote/burrow/one-time-runtime.test.ts`,
+`lib/src/remote/client/one-time-e2e.test.ts`,
+`lib/src/host/remote/service.test.ts`,
 `relay/test/malicious-relay.test.mjs`,
 `remote-lib-common/test/security-guarantees.test.mjs`,
 `remote-lib-common/test/noise.test.mjs`, and `remote-lib-common/test/push-seal.test.mjs`

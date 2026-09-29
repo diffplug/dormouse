@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useLayoutEffect, useMemo } from 'react';
 import { encode } from 'uqr';
 
 /**
@@ -62,14 +62,27 @@ function modulesToPath(matrix: readonly (readonly boolean[])[]): string {
 export function QrCode({
   value,
   label,
+  onShown,
 }: {
   value: string;
   /** Accessible name; the code itself is an image with no text in it. */
   label: string;
+  /**
+   * Called once each code is in the document, before it paints: the one moment
+   * its panel has its full height, since this component arrives as a lazy chunk
+   * (`ScannableCode`).
+   */
+  onShown?: () => void;
 }) {
   const { modules, path } = useMemo(() => {
     const qr = encode(value, { border: QUIET_ZONE_MODULES, ecc: ERROR_CORRECTION });
     return { modules: qr.size, path: modulesToPath(qr.data) };
+  }, [value]);
+
+  // Keyed on the code alone: a caller re-rendering with a fresh callback has
+  // drawn nothing new.
+  useLayoutEffect(() => {
+    onShown?.();
   }, [value]);
 
   return (

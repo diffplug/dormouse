@@ -25,7 +25,7 @@ One protocol, two consumption depths: the **phone** (Dormouse Pocket) shipped, a
 * `directory.watch`, snapshot-only (no deltas, no thumbnails), terminal entries only
 * `surface.attach` / `surface.detach`, one attachment per session
 * Terminal: attach-is-the-resize, live data, `terminal.write` / `terminal.resize`, last-attach-wins size authority
-* One implicit grant: every paired session has full input (selfhost is single-user), no layout operations
+* One implicit grant: every authorized session — paired or one-time — has full input (selfhost is single-user), no layout operations
 
 Everything else, browser-surface remoting included, is staged in [Future](#future).
 
@@ -35,7 +35,7 @@ Source of truth: `remote-lib-common/src/remote/wire.ts` (the fixed wire contract
 
 **The Burrow runs in the process that owns the PTYs, never a webview** (`docs/specs/relay.md` → "Burrow side"). Within it, `RemoteApiSession` speaks this protocol and nothing else: surface ids, PTY ids, sizes, bytes.
 
-**Every environment-specific answer sits behind `BurrowSurfaceProvider`** — `collectDirectory` / `watchDirectory`, `resolveSurface` returning a `SurfaceHandle`, `writePty` / `resizePty` / `streamPty` — because *where* a named surface lives is a deployment fact, not a protocol concept. **The session imports no platform adapter, no store, and no `document`**, and both installations share the ask-backed half, so an attach cannot be answered differently in one burrow than the other.
+**Every environment-specific answer sits behind `BurrowSurfaceProvider`** — `collectDirectory` / `watchDirectory`, `resolveSurface` returning a `SurfaceHandle`, `releaseSurface`, `writePty` / `resizePty` / `streamPty` — because *where* a named surface lives is a deployment fact, not a protocol concept. **The session imports no platform adapter, no store, and no `document`**, and both installations share the ask-backed half, so an attach cannot be answered differently in one burrow than the other.
 
 **`SurfaceHandle.ptyId` is a provider-local routing key**, not necessarily the PTY process's own id — the VS Code provider mints an opaque per-peer handle. (rationale)
 
@@ -57,7 +57,9 @@ Source of truth: the surface model the wire shapes reuse — `dor/src/protocol.t
 
 **A `RemoteApiSession` exists only for an authorized session.** Created at promotion — presence proof and ACL conjunction both passed ([remote-security-model.md](./remote-security-model.md) → Connection) — and disposed when the Client disconnects, when the Burrow reaps the session, and by any promotion that replaces it, so **a re-authorizing Client can never inherit the previous session's attachment**.
 
-Source of truth: `BurrowRuntime.#promoteConnection` in `lib/src/remote/burrow/burrow-runtime.ts`.
+**The Burrow says goodbye before an ending it chose**: `SessionEndV1` (`{ v: 1, t: 'session-end' }`, exact keys, no payload), one padded control message on whichever path carries the session, sent by `EstablishedE2eSession.end` — Take back, an idle reap, a one-time End, and a replacement from the same Client static. **Never on a poisoned session, never instead of the dispose.** **The session is over at the goodbye**: nothing after it is read, and the remote-api handler goes with it. **A switched channel closes only once the goodbye has left it** — the sender's queue empty and `bufferedAmount` zero — **or after `SESSION_END_FLUSH_MS` (500 ms)**, sending nothing more meanwhile; the relay send is synchronous onto the socket, and the dispose follows at once (rationale). A Client reports it as burrow loss (`endedByBurrow`); an older one ignores it as an unknown control shape (rationale).
+
+Source of truth: `BurrowRuntime.#promoteConnection` in `lib/src/remote/burrow/burrow-runtime.ts`, `EstablishedE2eSession` in `lib/src/remote/burrow/established-session.ts`, `DirectEndpoint.disposeAfterFlush` in `lib/src/remote/direct/direct-endpoint.ts`, `SessionEndV1` in `remote-lib-common/src/security/e2e-ceremony.ts`, `ClientSessionCore` in `lib/src/remote/client/session-core.ts`.
 
 ### Direct path
 
@@ -161,12 +163,15 @@ either relay socket closing dispose the session, channel included, exactly as
 they do relayed; the idle deadline, keepalives, and every Burrow bound are
 path-agnostic — a keepalive decrypted off the channel refreshes the deadline
 like any other ([remote-security-model.md](./remote-security-model.md) → Burrow
-bounds).
+bounds). A one-time session has no Relay, and its authority after the switch is
+the channel ([remote-security-model.md](./remote-security-model.md) → One-time
+connection).
 
 **One peer connection per session**, created at the offer, closed on every
 disposal path, never existing before promotion. **Both ends build it through an
-injected factory** — `PocketClientDeps.createDirectPeer`,
-`BurrowOptions.createDirectPeer`, threaded through `BurrowServiceOptions` —
+injected factory** — `ClientSessionCoreDeps.createDirectPeer` (Pocket's through `PocketClientDeps`, the one-time phone's through `OneTimeClientDeps`),
+`BurrowOptions.createDirectPeer`, threaded through `BurrowServiceOptions`, and
+`OneTimeRuntimeOptions.createDirectPeer` —
 `null` where a runtime has none, so neither end reaches a WebRTC global.
 **Pocket shows which path carries the session**, and where it stayed relayed
 which of the three `DirectRelayCause`s it was — **a closed set, never an
@@ -179,9 +184,11 @@ their guard, the constants, the `DirectFrameQueue` both queues are, and the
 `DirectEndpoint` in `lib/src/remote/direct/direct-endpoint.ts` (the whole
 direct-path policy, one per authorized session; `onRelayFrame` is both ends' only
 way in from the relay and `send` their only way out; constructed at promotion by
-`PocketClient.#directEndpoint` in `lib/src/remote/client/pocket-client.ts` and
-`BurrowRuntime.#promoteConnection` in
-`lib/src/remote/burrow/burrow-runtime.ts`); pinned by
+`ClientSessionCore.establish` in `lib/src/remote/client/session-core.ts` and
+`EstablishedE2eSession` in `lib/src/remote/burrow/established-session.ts`, built
+by `BurrowRuntime.#promoteConnection` in
+`lib/src/remote/burrow/burrow-runtime.ts` and `OneTimeRuntime.#promote` in
+`lib/src/remote/burrow/one-time-runtime.ts`); pinned by
 `remote-lib-common/test/direct-path.test.mjs`,
 `lib/src/remote/direct/direct-endpoint.test.ts`,
 `lib/src/remote/direct/direct-peer.test.ts`, and the end-to-end cases in
@@ -276,11 +283,21 @@ Source of truth: `RemoteApiSession.#attach` / `#beginAttach` in `lib/src/remote/
 
 #### Size authority: last-attach-wins
 
-A terminal has one size, and **the most recent size writer owns it**: attaching with dimensions and `terminal.resize` both take authority, and the Burrow user interacting with the pane locally reclaims it. **There is no remote detach at the surface owner** — the Burrow stops streaming on its side and the pane keeps whatever size it was left at. Authority holds at the PTY level today; the Burrow-side tethering display is staged ([Future](#future) item 5).
+A terminal has one size, and **the most recent remote size writer holds it**: an attach with dimensions and `terminal.resize` both resize through the owning xterm under a `SurfaceHold` — an opaque per-session holder id, its label, and a per-attachment lease — which the owning webview records, with the size, before the size moves. **A pane keeps one hold per holder**, the newest writer's last; another viewer's release leaves the rest. **A held pane stands at its newest hold's size**: when that hold goes first, the pane takes the size the holder now newest last set (rationale).
+
+- **Never re-fit a held pane locally** — box resize, layout settle, remount, focus, or keystroke (rationale).
+- **Must show the strip on a held pane, and only there** ([layout.md](./layout.md) → "Pane body"): the newest holder's label — the ACL record's, bounded again by `boundedPairingLabel`, or the one-time device label — as text, with `+N` for the other holders.
+- **Take back ends every session holding the pane**, never resizes a phone: one `takeBack { holder }` per hold runs the end that session's runtime supplied — End for a one-time connection, goodbye and dispose for a Pocket session, which stays paired (rationale). **The pane then clears each hold it asked about whatever the answer.**
+- **Must release on every end of an attachment** — detach, a newer attach, exit, a failed or superseded attach, disposal. **An attach whose resolve answered nothing or failed releases at every owner** (`releaseSurface`), since an owner answering past `ASK_BUDGET_MS` holds the pane anyway. **A release clears only its holder's hold, and only while its lease is still that hold's; the owner re-fits once no hold remains.**
+- **Must answer `release` with nothing and ignore an unknown op**; an attach naming no hold (an older Burrow) sizes without holding.
+- **Must drop every hold another service instance took** once a `status` event names another `serviceId` — a VS Code broker window closed, a sidecar restarted — since no release will come. Each `BurrowService` mints one, names it in every `status` event (once at start too), and stamps it on its sessions' holds; naming none (an older build) drops nothing (rationale).
+- **Holds live in webview memory**: a reload or a Workspace transfer drops them, and the pane fits its box under a phone still attached.
+
+Source of truth: `RemoteApiSession.#attach` / `#teardownAttachment` in `lib/src/remote/burrow/remote-api.ts`; `driveOwnSurface` / `standAtNewestHolds` / `installPeerSurfaceResponder` in `lib/src/remote/burrow/peer-surfaces.ts`; `holdSize` / `releaseSizeHold` / `dropSizeHoldsFromOtherServices` in `lib/src/lib/size-hold-store.ts`; `TerminalPane` in `lib/src/components/TerminalPane.tsx`; `takeBackSize` in `lib/src/remote/burrow/take-back.ts`; `BurrowService.#takeBack` / `statusEvent` in `lib/src/host/remote/service.ts`. Pinned end to end by `lib/src/remote/client/one-time-e2e.test.ts`.
 
 ## Input authority and multiple viewers
 
-**Input authority is flat**: selfhost is single-user, so every paired session is the owner and gets full input (`grants: { input: true, layout: false }`), and no session gets layout operations.
+**Input authority is flat**: selfhost is single-user, so every authorized session, a one-time one included, is the owner and gets full input (`grants: { input: true, layout: false }`), and no session gets layout operations.
 
 Concurrency then needs no arbitration: attach state is per-session and streams fan out per attachment, one PTY subscription and one sink each (rationale). The window lease ([Future](#future)) is the only exclusive resource.
 
@@ -350,7 +367,7 @@ Attach also delivers recent blocks, rendered at the client's own width — colla
 
 ### 5. Tethering display and viewer visibility
 
-While a remote session holds size authority, every other display of that pane — the Burrow's own Wall, other attached viewers — greys out and shows only **"tethering to \<device\>"** (the ACL record's label, e.g. `iPhone Safari`) instead of fighting over `SIGWINCH`; interacting with it takes authority back. Alongside: the Burrow UI lists connected viewers with per-viewer disconnect, and in-flight input is dropped the moment a session is killed.
+The Burrow's own pane already shows its holder ([Size authority](#size-authority-last-attach-wins)); every other attached viewer of a held pane greys out and shows only **"tethering to \<device\>"** instead of fighting over `SIGWINCH`, and interacting with it takes authority back. Alongside: the Burrow UI lists connected viewers with per-viewer disconnect, and in-flight input is dropped the moment a session is killed.
 
 The wire half, as new event names:
 

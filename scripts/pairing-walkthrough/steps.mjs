@@ -63,7 +63,7 @@ const RELAY_LISTENING_LINE = /relay listening on .* \(origin (http:\/\/localhost
  * anchor where they do: the copy around it is under review and the name is a
  * contract.
  *
- * Mirrors `PAIRING_CODE_LABEL` in `lib/src/remote/pocket-app/App.tsx`; pinned by
+ * Mirrors `PAIRING_CODE_LABEL` in `lib/src/remote/pocket-app/views.tsx`; pinned by
  * `lib/src/lib/mirrored-constants.test.ts`.
  */
 const PAIRING_CODE_REGION = '[role="status"][aria-label="Pairing code"]';

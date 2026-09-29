@@ -404,7 +404,8 @@ Pocket, a fragment being invisible to this Relay. Check order is the function's
 own: cheap before expensive, the X25519 import last, which is what makes it
 asynchronous.
 
-Source of truth: `remote-lib-common/src/security/pairing-invitation.ts`, with
+Source of truth: `remote-lib-common/src/security/pairing-invitation.ts`, its URL
+checks in `parseLinkFragment` in `remote-lib-common/src/security/link-url.ts`, with
 `#setupQr` in `lib/src/host/remote/service.ts` as the emitter; pinned by exact
 encode/parse vectors in `remote-lib-common/test/pairing-invitation.test.mjs`.
 What the invitation half proves is
@@ -655,8 +656,9 @@ framed as application messages on the Noise session (below).
   reorder (which Noise's counter turns into a decrypt failure), or a framing
   violation destroys it and every later call throws — there is no
   resynchronization point in a stream cipher.
-- **The control messages are the two ceremonies' outcomes and the direct path's
-  four signals** ([remote-api.md](./remote-api.md) → Direct path), which the
+- **The control messages are the two ceremonies' outcomes, the direct path's
+  four signals** ([remote-api.md](./remote-api.md) → Direct path), **and the
+  Burrow's goodbye** ([remote-api.md](./remote-api.md) → Transport), which the
   Relay routes without reading, like every other ciphertext.
 - **Prologues are `lengthPrefixedConcat`** of `dormouse/e2e/v1`, the ceremony
   kind, the `burrowId`, and — for a connection — the connection id; for a
@@ -733,7 +735,7 @@ memo invalidation — live in that burrow's spec.
   **Order matters, and the store goes first**: the `burrowToken` exists nowhere
   else and cannot be re-minted from the same exchange, so the save is awaited
   before any Burrow is stopped (rationale). Replacing a *running* Burrow emits
-  `{ name: 'status', enrolled: false }` between the two, since that webview gate
+  a `status` event with `enrolled: false` between the two, since that webview gate
   is edge-triggered and everything it holds — the mirrored pairing queue, the
   push device list — belongs to the Relay being left. **`clearEnrollment` is the
   same rule backwards**: the delete is awaited first and nothing else happens
@@ -773,9 +775,12 @@ memo invalidation — live in that burrow's spec.
   **passes its own timeout**; [remote-security-model.md](./remote-security-model.md)
   owns what an invitation proves.
 * **Pairing confirmation modal**: the queue is service-side; webviews mirror a
-  serializable projection (`{ clientId, pairingId, label, requestedAt }[]`,
-  pushed whole on every change) and echo both ids plus the **typed digits** on
-  Confirm, so the approve/deny closures never leave the Burrow's process. **A
+  serializable projection (`{ kind, clientId, pairingId, label, requestedAt }[]`,
+  pushed whole on every change) and echo the kind, both ids, and the **typed
+  digits** on Confirm, so the approve/deny closures never leave the Burrow's
+  process. `kind` is `pairing` here; a one-time connection's request rides the
+  same queue under its own kind ([one-time.md](./one-time.md) -> "Service and
+  hosts"). **A
   confirmation is bound to the displayed `pairingId`, not whichever ceremony
   currently occupies `clientId`**: a re-sent pairing replaces its predecessor,
   and an old modal action whose immutable id no longer matches is rejected; the
@@ -786,6 +791,8 @@ memo invalidation — live in that burrow's spec.
   after the invitation expires answers `invitation-expired` and dismisses, ACL
   untouched.** In VS Code the queue is broadcast to every window, any of which
   may be in front of the user.
+* **One-time connection**: runs beside the enrollment and needs none
+  ([one-time.md](./one-time.md) -> "Service and hosts").
 * **Terminal bridge**: served through a `BurrowSurfaceProvider`
   ([remote-api.md](./remote-api.md)). `directory.watch` snapshots come from the
   webviews that own the panes; `surface.attach` resizes through the owning
@@ -820,10 +827,10 @@ a build with no Burrow service at all ([alert.md](./alert.md) -> Push
 notifications). Only the first has a section beneath it, so only the first says
 "below"; the `PushNoBurrow` / `PushNotEnrolled` story pair holds the two apart.
 
-**Two buttons: One-time connection (disabled until built) and Persistent
-Relay**, which un-enrolled discloses a disabled "Use hosted.dormouse.sh" and
-the enroll view, **folded until clicked, offer or not — hidden, never
-unmounted**.
+**Two choices: One-time connection (`docs/specs/one-time.md` -> "Laptop UI")
+and Persistent Relay**, which un-enrolled discloses a disabled "Use
+hosted.dormouse.sh" and the enroll view, **folded until clicked, offer or not —
+hidden, never unmounted**.
 
 The enroll view is a three-field form (Relay, setup password,
 Burrow name — prefilled with the `suggestedLabel` `status` carries) calling the
@@ -864,6 +871,8 @@ exists to honor:
   - **Must clamp refresh delay to `[30 s, DEFAULT_PAIRING_TTL_MS - 20 s]`.**
   - **The code being replaced stays on screen** until its replacement lands;
     only a first mint blanks.
+  - **Scroll the panel into view when a code draws where none showed**; a
+    re-mint never moves the dialog.
   - **An invitation state change flips only the panel showing that `inviteId`**,
     and **the panel stays subscribed past the QR**: `reserved` spends the code,
     `consumed` says the request it produced has been answered.
@@ -878,7 +887,7 @@ exists to honor:
 - **Disconnect asks first**: clearing the enrollment drops every paired phone
   until each pairs again.
 - **Status is re-read, not patched**: the service's `status` event carries only
-  `{ enrolled }`, so every event triggers a full `status` command, and the dialog
+  `{ enrolled, serving, serviceId }`, so every event triggers a full `status` command, and the dialog
   re-reads on open since another window may have enrolled meanwhile. **The
   connection is polled every 2 s while something is subscribed**, never as a
   standing timer in every window, comparing field-wise before publishing
@@ -887,8 +896,9 @@ exists to honor:
   answer** — `enroll`, `reconnect`, `clearEnrollment` and losing the last
   subscriber each drop the read in flight (rationale).
 
-Source of truth: `RelayChoices`, `useSetupQr` and `ScannableCode` in
-`lib/src/components/RemoteControlSection.tsx` over `lib/src/components/QrCode.tsx`
+Source of truth: `RelayChoices` and `useSetupQr` in
+`lib/src/components/RemoteControlSection.tsx`, `ScannableCode` in
+`lib/src/components/ScannableCode.tsx` over `lib/src/components/QrCode.tsx`
 (`uqr` encodes; that draws, lazily, so the encoder stays out of every main
 bundle); `describePushTargets` in `lib/src/components/SettingsDialog.tsx`;
 `dropInFlightRead` in `lib/src/remote/burrow/burrow-status-store.ts`;
@@ -900,7 +910,9 @@ five enrollment commands: `enroll(relayUrl, password, label)`,
 `enrollOffer(origin, label)` (its origin from `status().offer.origin`), `status`,
 `reconnect`, `clearEnrollment`. **Pairing confirmation is never here**: it is a
 modal because it must interrupt, and because the digits it takes are read off a
-phone ([remote-security-model.md](./remote-security-model.md) -> Pairing).
+phone ([remote-security-model.md](./remote-security-model.md) -> Pairing). The
+one-time commands are not on the hook either; `status()` prints `serving`
+beside `enrolled`.
 
 `docs/stories/pairing.mdx` is a narrative Storybook page walking this section and
 the pairing modal in sequence with the rest of the setup, rendering the real

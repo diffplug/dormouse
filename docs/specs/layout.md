@@ -118,7 +118,9 @@ The pane body paints `--color-terminal-bg` on the React pane wrapper and the `Te
 
 **Must share scroll-safe pane messages across iframe status, Tool approval, and port conflicts**, wrapping long content and keeping all controls reachable in small panes. Center content only when it fits.
 
-Source of truth: `PaneMessage` in `lib/src/components/design.tsx`. Visual regression cases: `lib/src/stories/ToolApproval.stories.tsx`.
+**Must pin a held pane's strip to the body's bottom-right corner** — "Sized for \<label\>" and Take back, as one `PopupButtonRow` at `z-index: 20` that truncates the label within the pane rather than wrapping, and never in the header. Hold and Take back semantics belong to `docs/specs/remote-api.md` → "Size authority: last-attach-wins".
+
+Source of truth: `PaneMessage` in `lib/src/components/design.tsx`; `SizeHoldStrip` in `lib/src/components/wall/SizeHoldStrip.tsx`. Visual regression cases: `lib/src/stories/ToolApproval.stories.tsx`, `SizedForPhone` / `SizedForLongLabel` in `lib/src/stories/TerminalPane.stories.tsx`.
 
 ### Alarm overlay
 
@@ -126,7 +128,7 @@ A ringing terminal Session gets an overlay spanning its whole Lath leaf; browser
 
 **Two layers straddling the header's stacking context** (`.lath-leaf-header` is `position: relative; z-index: 20`):
 
-- **Wash + label at `z-index: 19`** — above terminal content, below the header and the `z-index: 20` pane-corner mouse-override banner, so neither is tinted (rationale). **Never use color-alpha utilities here** — their `color-mix()` is unsupported by the standalone Safari 15 / Chrome 105 targets; the solid alarm color lives on a child whose element opacity supplies those strengths. The label sits `PANE_HEADER_HEIGHT_PX + 4` from the Pane top, centered.
+- **Wash + label at `z-index: 19`** — above terminal content, below the header and the `z-index: 20` pane-corner mouse-override banner and held-pane strip, so none is tinted (rationale). **Never use color-alpha utilities here** — their `color-mix()` is unsupported by the standalone Safari 15 / Chrome 105 targets; the solid alarm color lives on a child whose element opacity supplies those strengths. The label sits `PANE_HEADER_HEIGHT_PX + 4` from the Pane top, centered.
 - **Perimeter ring at `z-index: 25`** — above the header so the treatment reads as one rounded rectangle around the Pane, below the `z-index: 30` sashes (rationale).
 
 Three strengths, by speech state over the latched ring. `SPOKEN` is unbounded, so its wash stays light enough to read text through:
@@ -167,7 +169,7 @@ Source of truth: `SurfacePaneHeader` in `lib/src/components/wall/SurfacePaneHead
 
 The baseboard (`h-7`, 28px) sits below content, with no top divider. A 2px theme-colored gap preserves pane corners; 7px horizontal padding aligns doors with panes. With no doors above 350px wide, it shows `LCmd → RCmd to enter command mode` on macOS and `LShift → RShift to enter command mode` elsewhere.
 
-**Must group the right-hand controls**: the `N more →` overflow arrow, the host-supplied `notice` slot, then three always-present 24px square Settings buttons with 2px gaps. Their 16px icons are speaker/slashed-speaker for spoken alarms, filled `VibrateIcon`/`DeviceMobileSlashIcon` for push, and sliders for Settings. **Must expose each state through shape and `aria-pressed`.** The status buttons toggle their respective alarm settings; sliders opens Settings (`docs/specs/alert.md` → Settings dialog). **Must use the shared `chromeButton` hover treatment** for Settings and overflow buttons, except a flagged overflow arrow, which like a Door has none.
+**Must group the right-hand controls**: the `N more →` overflow arrow, the host-supplied `notice` slot, the one-time connection indicator (`docs/specs/one-time.md` -> "Laptop UI"), then three always-present 24px square Settings buttons with 2px gaps. Their 16px icons are speaker/slashed-speaker for spoken alarms, filled `VibrateIcon`/`DeviceMobileSlashIcon` for push, and sliders for Settings. **Must expose each state through shape and `aria-pressed`.** The status buttons toggle their respective alarm settings; sliders opens Settings (`docs/specs/alert.md` → Settings dialog). **Must use the shared `chromeButton` hover treatment** for Settings and overflow buttons, except a flagged overflow arrow, which like a Door has none.
 
 A minimized session becomes a **door**, showing its label plus the alert/TODO/speech badge cluster (`docs/specs/alert.md` → Door owns which badge shows when; both speech states also name themselves in the Door's `title` and accessible name). **A Door's label is header-derived only for a terminal-backed Surface** (`hasTerminal`); any other keeps its stored title, and a browser Door adds the display glyphs from `docs/specs/dor-browser.md` → "Browser Chrome". A Door uses the window's bottom edge as its bottom border, with left, top, and right borders taking the shared terminal top radius from `lib/src/components/design.tsx` — a mouse hole matching pane rounding. Dimensions: `min-w-[68px] max-w-[220px] h-6`.
 
@@ -184,7 +186,7 @@ A minimized session becomes a **door**, showing its label plus the alert/TODO/sp
 
 Doors are measured in a hidden off-screen container first, then fitted:
 
-- **Subtract the measured right cluster and its gap before fitting anything** — that space is never available to doors. Measure only its always-present part (notice + the three settings controls): **never the overflow arrow**, whose presence is an *output* of the fit.
+- **Subtract the measured right cluster and its gap before fitting anything** — that space is never available to doors. Measure only its always-present part (notice, one-time indicator, and the three settings controls): **never the overflow arrow**, whose presence is an *output* of the fit.
 - Add doors until no more fit, reserving room for a `N more →` button whenever items remain after the current one. **At least one door is always shown**, even if it overflows.
 - If scrolled, show `← N more` on the left and/or `N more →` on the right. Overflow counts are assumed single-digit (the hidden measurement button is `9 more TODO`).
 - **An arrow hiding a ringing or TODO Door must say so**, since that Door is otherwise gone from the baseboard: it wears the Door shape and ground, a static `door` alarm inset while one rings, and a static TODO pill while one has TODO, and its accessible name counts them (`3 more, 1 ringing, 1 TODO`). **Every arrow must reserve the measured width of the TODO one**, so the fit never depends on which Doors an arrow hides. Pinned by `Baseboard overflow alerts` in `lib/src/components/Baseboard.test.tsx`.

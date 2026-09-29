@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react';
+import type { ApprovalKind } from '../host/remote/service-protocol';
 import { RemotePairingModal } from '../remote/burrow/RemotePairingModal';
 
-function RemotePairingModalStory({ label }: { label: string }) {
+function RemotePairingModalStory({ label, kind }: { label: string; kind?: ApprovalKind }) {
   return (
     <div className="relative h-[360px] w-[680px] overflow-hidden rounded bg-app-bg font-mono text-terminal-fg">
       {/* Simulated terminal content behind the viewport-scoped modal. */}
@@ -9,7 +10,7 @@ function RemotePairingModalStory({ label }: { label: string }) {
         <div>dev@dormouse:~/repo$ dormouse remote enroll</div>
         <div className="text-muted">Waiting for a device to pair…</div>
       </div>
-      <RemotePairingModal label={label} onApprove={() => {}} onDeny={() => {}} />
+      <RemotePairingModal kind={kind} label={label} onApprove={() => {}} onDeny={() => {}} />
     </div>
   );
 }
@@ -38,4 +39,10 @@ export const LongValues: Story = {
     label:
       'Ned’s work iPhone 15 Pro Max in the downstairs office by the window (personal profile)',
   },
+};
+
+// A one-time connection's request: the same warning, and what it grants in
+// place of what pairing adds (docs/specs/one-time.md).
+export const OneTime: Story = {
+  args: { label: 'iPhone', kind: 'one-time' },
 };

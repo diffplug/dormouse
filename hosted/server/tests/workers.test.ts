@@ -1,6 +1,4 @@
 import { test, expect } from "vitest";
-import { build } from "esbuild";
-import { builtinModules } from "node:module";
 import { fileURLToPath } from "node:url";
 import {
   Miniflare,
@@ -20,39 +18,24 @@ import {
   mockOAuthServer,
 } from "./oauth-server";
 import type { Session } from "../../src/api";
+import { bundleWorker, wrangler } from "./bundle";
 
 const origin = "https://hosted.dormouse.sh";
 const bundle = (production: boolean | "preview") =>
-  build({
-    entryPoints: [
-      production === "preview"
-        ? "server/preview-worker.ts"
-        : production
-          ? "server/worker.ts"
-          : "server/tests/worker-entry.ts",
-    ],
-    inject: production
+  bundleWorker(
+    production === "preview"
+      ? "server/preview-worker.ts"
+      : production
+        ? "server/worker.ts"
+        : "server/tests/worker-entry.ts",
+    production
       ? []
       : [
           fileURLToPath(
             import.meta.resolve("@pgstencil/auth/better-auth-testing"),
           ),
         ],
-    bundle: true,
-    write: false,
-    format: "esm",
-    platform: "node",
-    conditions: ["workerd", "worker"],
-    external: ["node:*", "cloudflare:*"],
-    alias: Object.fromEntries(
-      builtinModules
-        .filter((name) => !name.startsWith("node:"))
-        .map((name) => [name, `node:${name}`]),
-    ),
-    banner: {
-      js: "import { createRequire } from 'node:module'; const require = createRequire('/worker.js');",
-    },
-  });
+  );
 const testBundle = bundle(false);
 const productionBundle = bundle(true);
 const previewBundle = bundle("preview");
@@ -93,8 +76,8 @@ async function fixture(
             ? productionBundle
             : testBundle)
       ).outputFiles![0].text,
-      compatibilityDate: "2026-09-08",
-      compatibilityFlags: ["nodejs_compat"],
+      compatibilityDate: wrangler.compatibility_date,
+      compatibilityFlags: wrangler.compatibility_flags,
       bindings,
       hyperdrives: { HYPERDRIVE: context.database.url },
       serviceBindings: {

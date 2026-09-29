@@ -147,6 +147,11 @@ nothing to type:
 
 <Canvas of={RemoteControl.OfferAvailable} />
 
+> The other button, **One-time connection**, needs none of this walkthrough —
+> no Relay, no enrollment, no passkey, no pairing. It shows a link good for one
+> phone on the same Wi-Fi, for one session, confirmed with the same two digits
+> and saving nothing; `docs/specs/one-time.md` owns it.
+
 The installer left a `run/enroll-offer.json` next to its state — this install's
 origin plus a one-time token the Relay redeems in place of the setup password
 — and the Burrow reads that same file from the well-known path for the platform.

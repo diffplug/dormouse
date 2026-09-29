@@ -9,10 +9,13 @@
  */
 
 import {
+  applyTheme,
   getAppliedThemeSnapshot,
+  getBundledThemes,
   restoreActiveTheme,
   setDefaultThemeId,
   useRestoredTheme,
+  type DormouseTheme,
 } from '../../lib/themes';
 
 /** Same default theme the website playground restores, unless the user picked one. */
@@ -23,15 +26,35 @@ export function restorePocketTheme(): void {
   // it declares the fallback rather than assuming the hook ran first.
   setDefaultThemeId(POCKET_THEME_ID);
   const theme = restoreActiveTheme();
+  if (theme) syncDocumentChrome(theme);
+}
+
+/**
+ * Pocket's default theme for a page that keeps nothing — the one-time page
+ * (`docs/specs/one-time.md` -> "Phone page"): applied and synced as
+ * {@link restorePocketTheme} does it, but from the bundled set alone, with no
+ * stored pick read and no active theme written back.
+ */
+export function applyPocketTheme(): void {
+  const theme = getBundledThemes().find(({ id }) => id === POCKET_THEME_ID);
   if (!theme || typeof document === 'undefined') return;
-  // Browser chrome outside the body: form-control palette and the
-  // address-bar / status-bar tint follow the applied theme.
+  applyTheme(theme);
+  syncDocumentChrome(theme);
+}
+
+/**
+ * Browser chrome outside the body: the form-control palette and the address-bar
+ * / status-bar tint follow the applied theme.
+ */
+function syncDocumentChrome(theme: DormouseTheme): void {
+  if (typeof document === 'undefined') return;
   document.documentElement.style.colorScheme = theme.type;
   const appBg = getAppliedThemeSnapshot()?.resolvedVars['--vscode-sideBar-background'];
   const meta = document.querySelector('meta[name="theme-color"]');
   if (appBg && meta) meta.setAttribute('content', appBg);
 }
 
-export function usePocketTheme() {
-  useRestoredTheme(POCKET_THEME_ID, restorePocketTheme);
+/** Restore the theme before first paint and after commit; `restore` picks how. */
+export function usePocketTheme(restore: () => void = restorePocketTheme) {
+  useRestoredTheme(POCKET_THEME_ID, restore);
 }

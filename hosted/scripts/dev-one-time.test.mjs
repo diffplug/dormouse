@@ -1,0 +1,45 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { DEFAULT_PORT, devConfig, devOrigin, devPort } from "./dev-one-time.mjs";
+
+const base = JSON.parse(
+  await readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8"),
+);
+
+test("the dev config runs the production entry on loopback, with the rendezvous and nothing of production's", () => {
+  const config = devConfig(
+    {
+      ...base,
+      vars: { ...base.vars, GOOGLE_CLIENT_SECRET: "do-not-copy" },
+      d1_databases: [{ production: true }],
+    },
+    8787,
+  );
+  assert.equal(config.main, "../../server/worker.ts");
+  assert.notEqual(config.name, base.name);
+  assert.deepEqual(config.vars, {
+    APP_ORIGIN: "http://localhost:8787",
+    OAUTH_PROVIDERS: "",
+  });
+  for (const key of ["routes", "hyperdrive", "d1_databases", "workers_dev"])
+    assert.equal(config[key], undefined, key);
+  assert.deepEqual(config.durable_objects, base.durable_objects);
+  assert.deepEqual(config.migrations, base.migrations);
+  // The production namespaces: `wrangler dev --local` simulates them in memory.
+  assert.deepEqual(config.ratelimits, base.ratelimits);
+  assert.deepEqual(config.assets, { ...base.assets, directory: "./assets" });
+  assert.equal(config.assets.run_worker_first, true);
+  assert.equal(config.compatibility_date, base.compatibility_date);
+  assert.deepEqual(config.compatibility_flags, base.compatibility_flags);
+});
+
+test("the origin is loopback HTTP on the chosen port, which PORT names", () => {
+  assert.equal(devPort({}), DEFAULT_PORT);
+  assert.equal(devPort({ PORT: "" }), DEFAULT_PORT);
+  assert.equal(devPort({ PORT: "9000" }), 9000);
+  for (const bad of ["0", "65536", "80a", "-1", "1e3", " 80"])
+    assert.throws(() => devPort({ PORT: bad }), /TCP port/, bad);
+  assert.equal(devOrigin(9000), "http://localhost:9000");
+  assert.equal(devConfig(base, 9000).vars.APP_ORIGIN, "http://localhost:9000");
+});

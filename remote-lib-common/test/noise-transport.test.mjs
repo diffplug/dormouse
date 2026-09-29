@@ -28,6 +28,7 @@ import {
   createNoiseResponder,
   decodeTransportPlaintext,
   e2eConnectionPrologue,
+  e2eOneTimePrologue,
   e2ePairingPrologue,
   encodeTransportPlaintext,
   generateNoiseKeyPair,
@@ -350,6 +351,18 @@ test('the pairing prologue binds every invitation field, positionally', () => {
   assert.notDeepEqual(e2ePairingPrologue('h', ['ab', 'c']), e2ePairingPrologue('h', ['a', 'bc']));
   // The kind is bound, so a pairing transcript cannot be replayed as a connection.
   assert.notDeepEqual(e2ePairingPrologue('h', ['x']), e2eConnectionPrologue('h', 'x'));
+});
+
+test('the one-time prologue binds its own kind, the room id, and every link field', () => {
+  assert.deepEqual(
+    e2eOneTimePrologue('room-1', ['1', 'exp', 'key']),
+    lengthPrefixedConcat(
+      [E2E_PROLOGUE_DOMAIN, 'one-time', 'room-1', '1', 'exp', 'key'].map((f) => utf8Encode(f)),
+    ),
+  );
+  // A third kind, so a one-time transcript is neither of the other two.
+  assert.notDeepEqual(e2eOneTimePrologue('h', ['x']), e2ePairingPrologue('h', ['x']));
+  assert.notDeepEqual(e2eOneTimePrologue('h', ['x']), e2eConnectionPrologue('h', 'x'));
 });
 
 // --- The session -----------------------------------------------------------

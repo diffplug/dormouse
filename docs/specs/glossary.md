@@ -95,8 +95,10 @@ Remote control has exactly three roles. `docs/specs/remote-security-model.md` ow
 | Role | What it is | What it decides |
 |---|---|---|
 | **Burrow** | The app that owns terminal Surfaces and the processes behind them: the Standalone app, or the VS Code extension. **Two on one machine are two Burrows**, enrolled and paired separately, and Pocket lists them as two rows. | Every remote-access grant. Pairing approval and the ACL live here and nowhere else. |
-| **Client** | What controls a Burrow from somewhere else. **Pocket** is the phone Client (`docs/specs/pocket-app.md`); Canopy is a future one (`## Future`). | Nothing on its own — a Client asks. |
+| **Client** | What controls a Burrow from somewhere else. **Pocket** is the phone Client (`docs/specs/pocket-app.md`); the **one-time page** Hosted serves is a Client for one session (`docs/specs/one-time.md`); Canopy is a future one (`## Future`). | Nothing on its own — a Client asks. |
 | **Relay** | The coordinating server: accounts, presence, push fan-out, and an encrypted byte pipe between Client and Burrow (`docs/specs/relay.md`). **Dormouse Hosted** is the managed Relay; `SELF_HOST.md` runs your own. | Routing. It holds no terminal and no authorization. |
+
+**Hosted's one-time room is a rendezvous, not a fourth role**: it forwards only a one-time connection's handshake frames, then closes (`docs/specs/one-time.md` -> "Hosted rendezvous").
 
 **A Burrow *is* a platform host** — the process behind the webview that owns the PTYs — seen from the side a Client pairs with. *Host* stays the implementation word for that side (`lib/src/host/`, webview↔host messages, `pty-host`, VS Code's extension host) and keeps its `Host`-header, hostname, and self-host senses; **never use *Host* for the remote-control role, or *Server* for the Relay.**
 
@@ -266,7 +268,7 @@ Use glossary names instead. A left-column term retains meaning only where noted.
 | **face** | Retired — capabilities are named by the kinds: "console face" → **terminal**, "web face" → **browser**. Gate with `hasTerminal` / `hasBrowser`, never a face-set. |
 | **Host** | Retired as the remote-control role → **Burrow** ([Roles](#roles)). Keeps the platform sense — the process behind the webview — plus the `Host` header, hostnames, and "self-host". |
 | **Server** | Retired for the coordinating server → **Relay**. Keeps HTTP servers, `net.Server`, dev servers, and "self-host". |
-| **tether** | Remote-control only (`docs/specs/remote-api.md`): a display showing "tethering to \<device\>" has ceded terminal size authority to a remote viewer — the semantics hold today, the display is staged. Never a layout term, never for Pane/Door relationships. |
+| **tether** | Remote-control only (`docs/specs/remote-api.md`): a pane whose size a remote viewer holds has ceded terminal size authority to it — the Burrow's own pane shows the holder in its strip; another viewer's "tethering to \<device\>" display is staged. Never a layout term, never for Pane/Door relationships. |
 
 Remote-only vocabulary (**Viewer**, and the wire-level `DirectoryEntry` projection of a pane) is defined in `docs/specs/remote-api.md`.
 

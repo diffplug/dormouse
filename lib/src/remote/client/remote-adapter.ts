@@ -17,11 +17,20 @@ import {
 import type { AwaitHandle, AwaitOutcome } from '../../lib/alert-manager';
 import type { PlatformAdapter, PtyDataDetail, PtyInfo, OpenPort } from '../../lib/platform/types';
 import { inputIsReplayTerminalReport } from '../../lib/terminal-report-filter';
-import type { TerminalHandlers } from './pocket-client';
+
+/** Terminal stream callbacks for {@link RemoteAdapterClient.attach}. */
+export interface TerminalHandlers {
+  /** One `terminal.data` payload: the renderer projection, and the text one
+   *  when it differs. Passed whole rather than as bytes so the pair cannot be
+   *  split here (`docs/specs/remote-api.md` → "Terminal surfaces"). */
+  onData(event: TerminalDataEvent): void;
+  onClosed?(exitCode?: number): void;
+}
 
 /**
- * The slice of {@link PocketClient} the adapter drives. A connected
- * `PocketClient` satisfies it structurally; tests pass a network-free fake.
+ * The slice of an established session the adapter drives. `ClientSessionCore`
+ * implements it, a connected `PocketClient` satisfies it structurally, and
+ * tests pass a network-free fake.
  */
 export interface RemoteAdapterClient {
   watchDirectory(onSnapshot: (entries: DirectoryEntry[]) => void): Promise<string>;
@@ -45,6 +54,13 @@ interface Attachment {
 interface Size {
   cols: number;
   rows: number;
+}
+
+/** A `setActivePane` whose attach has not landed, and the latest size asked of it since. */
+interface PendingAttach {
+  surfaceId: string;
+  generation: number;
+  size: Size;
 }
 
 const DEFAULT_SIZE: Size = { cols: 80, rows: 24 };
@@ -79,6 +95,8 @@ export class RemotePtyAdapter implements PlatformAdapter {
   #attachQueue: Promise<void> = Promise.resolve();
   /** Last size seen, so a re-attach can reuse it if the caller omits one. */
   #lastSize: Size = DEFAULT_SIZE;
+  /** The latest {@link setActivePane}'s attach until it lands or is superseded. */
+  #pending: PendingAttach | null = null;
 
   #savedState: unknown = null;
 
@@ -101,6 +119,7 @@ export class RemotePtyAdapter implements PlatformAdapter {
     this.#disposed = true;
     const attached = this.#attached;
     this.#attached = null;
+    this.#pending = null;
     this.#activeGeneration++;
     if (this.#directorySubId) {
       this.#client.unsubscribe(this.#directorySubId);
@@ -197,18 +216,21 @@ export class RemotePtyAdapter implements PlatformAdapter {
     if (this.#disposed) return;
     const size = normalizeSize(cols, rows, this.#lastSize);
     this.#lastSize = size;
-    const generation = ++this.#activeGeneration;
-    const activation = this.#attachQueue.then(() => this.#activatePane(id, size, generation));
+    const pending: PendingAttach = { surfaceId: id, generation: ++this.#activeGeneration, size };
+    this.#pending = pending;
+    const activation = this.#attachQueue.then(() => this.#activatePane(pending));
     this.#attachQueue = activation.catch(() => {});
     await activation;
   }
 
-  async #activatePane(id: string, size: Size, generation: number): Promise<void> {
+  async #activatePane(pending: PendingAttach): Promise<void> {
+    const { surfaceId: id, generation } = pending;
     if (generation !== this.#activeGeneration) return;
 
     if (this.#attached?.surfaceId === id) {
+      this.#settle(pending);
       // Already the active surface — a size change is just a resize.
-      await this.#client.resize(id, size.cols, size.rows);
+      await this.#client.resize(id, pending.size.cols, pending.size.rows);
       return;
     }
 
@@ -231,14 +253,33 @@ export class RemotePtyAdapter implements PlatformAdapter {
         this.#emitExit(id, exitCode);
       },
     };
+    // Read here rather than at `setActivePane`: a resize that landed while the
+    // previous pane detached is carried by the attach itself.
+    const size = pending.size;
     const { subId } = await this.#client.attach(id, size.cols, size.rows, handlers);
     if (closed || generation !== this.#activeGeneration) {
+      this.#settle(pending);
       // Superseded or closed before its response: never resurrect this attach.
       this.#client.unsubscribe(subId);
       await this.#client.detach(id, subId).catch(() => {});
       return;
     }
     this.#attached = { surfaceId: id, subId };
+    this.#settle(pending);
+    // The wall fits a new pane's xterm while its attach is in flight, and the
+    // attach carried the size from before the fit: without this the Burrow's
+    // PTY stays there, and every line the phone shows wraps at the wrong width.
+    // Best effort, as `resizePty` is: the attach landed, and a resize the Burrow
+    // refuses — a terminal that exited just after it — must not end the session.
+    const latest = pending.size;
+    if (latest.cols !== size.cols || latest.rows !== size.rows) {
+      await this.#client.resize(id, latest.cols, latest.rows).catch(() => {});
+    }
+  }
+
+  /** Stop routing resizes to `pending`, unless a later `setActivePane` already has. */
+  #settle(pending: PendingAttach): void {
+    if (this.#pending === pending) this.#pending = null;
   }
 
   /** The currently attached surfaceId, or null. */
@@ -257,9 +298,15 @@ export class RemotePtyAdapter implements PlatformAdapter {
   }
 
   resizePty(id: string, cols: number, rows: number): void {
-    if (this.#attached?.surfaceId !== id) return;
+    const attached = this.#attached?.surfaceId === id;
+    const pending = this.#pending?.surfaceId === id ? this.#pending : null;
+    // Burrow only accepts the attached pane, and the one being attached gets
+    // this size from its activation.
+    if (!attached && !pending) return;
     const size = normalizeSize(cols, rows, this.#lastSize);
     this.#lastSize = size;
+    if (pending) pending.size = size;
+    if (!attached) return;
     void this.#client.resize(id, size.cols, size.rows).catch(() => {});
   }
 

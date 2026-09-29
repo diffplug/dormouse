@@ -10,6 +10,7 @@
     "prebuild": "pnpm --filter dor-lib-common build && pnpm --filter remote-lib-common build",
     "build": "tsc -b && vite build",
     "build:pocket": "vite build --config vite.pocket.config.ts && vite build --config vite.sw.config.ts && node scripts/assert-pocket-worker.mjs",
+    "build:one-time": "vite build --config vite.one-time.config.ts && node scripts/assert-pocket-worker.mjs --one-time",
     "preview": "vite preview",
     "pretest": "pnpm --filter dor-lib-common build && pnpm --filter remote-lib-common build",
     "test": "pnpm typecheck && vitest run",

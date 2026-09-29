@@ -8,7 +8,7 @@ import {
 } from '../components/RemoteControlSection';
 import { enrollmentOfferPath } from '../host/remote/enroll-offer';
 import { SETUP_CODE_DEAD_MESSAGE } from '../remote/client/pocket-client';
-import { PAIRING_CODE_LABEL } from '../remote/pocket-app/App';
+import { PAIRING_CODE_LABEL } from '../remote/pocket-app/views';
 import { SCAN_REJECTED_MESSAGE } from '../remote/pocket-app/ScanInvitation';
 import { SCAN_LABEL } from '../remote/setup-copy';
 import { DEFAULT_HELPER_COMMAND } from './terminal-context-types';

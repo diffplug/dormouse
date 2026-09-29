@@ -11,7 +11,10 @@
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "allowJs": true,
-    "types": ["node", "vite/client"]
+    "types": ["node", "vite/client"],
+    "paths": {
+      "remote-lib-common": ["../remote-lib-common/src/index.ts"]
+    }
   },
   "include": ["src", "server", "vite.config.ts", "vitest.config.ts"]
 }

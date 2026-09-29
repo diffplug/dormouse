@@ -1,8 +1,8 @@
 /**
- * The control messages both end-to-end ceremonies exchange once `Split` has
- * run, and the one presence verifier they share
+ * The control messages the end-to-end ceremonies exchange once `Split` has
+ * run, and the one presence verifier pairing and connection share
  * (`docs/specs/remote-security-model.md` → Presence proofs, Pairing,
- * Connection).
+ * Connection, One-time connection).
  *
  * Every message here travels as a `control` transport plaintext, which is
  * NUL-padded to a fixed size — so an approval and a denial are the same number
@@ -302,6 +302,110 @@ export function isConnectionOutcomeV1(value: unknown): value is ConnectionOutcom
   const outcome = value as Record<string, unknown>;
   if (outcome.ok === false) return includesCode(CONNECTION_DENIALS, outcome.code);
   return outcome.ok === true && bounded(outcome.burrowLabel);
+}
+
+// ---------------------------------------------------------------------------
+// One-time connection (`docs/specs/one-time.md`)
+
+/**
+ * The first phone→Burrow control message of a one-time connection: the pairing
+ * request's confirmation half, and no presence proof — the link and the typed
+ * digits are the whole authorization, and it writes nothing.
+ */
+export interface OneTimeRequestV1 {
+  /** The two digits the phone is displaying; the person types them on the Burrow. */
+  readonly code: string;
+  /**
+   * The page's name for the device, one of {@link ONE_TIME_DEVICE_LABELS}. The
+   * guard admits any bounded string; the Burrow shows only a member.
+   */
+  readonly label: string;
+}
+
+export function isOneTimeRequestV1(value: unknown): value is OneTimeRequestV1 {
+  if (!value || typeof value !== 'object') return false;
+  const request = value as Record<string, unknown>;
+  return isPairingCode(request.code) && bounded(request.label);
+}
+
+/**
+ * Every label the one-time phone page sends, and the only ones a Burrow shows
+ * (`docs/specs/remote-security-model.md` -> "One-time connection"). **The phone
+ * chooses both the digits and the label**, and the approval modal draws the
+ * label right above the input the digits go in, so free text there could tell
+ * the person which digits to type. Frozen, so no importer can widen it.
+ */
+export const ONE_TIME_DEVICE_LABELS = Object.freeze([
+  'iPhone',
+  'iPad',
+  'Android phone',
+  'Phone browser',
+] as const);
+
+export type OneTimeDeviceLabel = (typeof ONE_TIME_DEVICE_LABELS)[number];
+
+/** A device the page cannot name, and what a Burrow shows for any label outside the set. */
+export const ONE_TIME_UNKNOWN_DEVICE_LABEL: OneTimeDeviceLabel = 'Phone browser';
+
+/** `label` when it is exactly a member of {@link ONE_TIME_DEVICE_LABELS}, else {@link ONE_TIME_UNKNOWN_DEVICE_LABEL}. */
+export function knownOneTimeDeviceLabel(label: unknown): OneTimeDeviceLabel {
+  return includesCode(ONE_TIME_DEVICE_LABELS, label)
+    ? (label as OneTimeDeviceLabel)
+    : ONE_TIME_UNKNOWN_DEVICE_LABEL;
+}
+
+/**
+ * Why a one-time connection ended without a session. Fixed copy on the phone;
+ * the type is derived from the list the guard checks. Frozen and exported, so a
+ * phone can map every code to copy and no importer can widen the guard.
+ */
+export const ONE_TIME_DENIAL_CODES = Object.freeze([
+  'user-denied',
+  'confirmation-mismatch',
+  'link-expired',
+  'burrow-error',
+] as const);
+
+export type OneTimeDenialCode = (typeof ONE_TIME_DENIAL_CODES)[number];
+
+/**
+ * The single Burrow→phone control message that ends the confirmation, either
+ * way. Success carries the label and nothing a phone could keep: no Burrow
+ * static to pin, no `deliveryId`.
+ */
+export type OneTimeOutcomeV1 =
+  | { readonly ok: true; readonly burrowLabel: string }
+  | { readonly ok: false; readonly code: OneTimeDenialCode };
+
+export function isOneTimeOutcomeV1(value: unknown): value is OneTimeOutcomeV1 {
+  if (!value || typeof value !== 'object') return false;
+  const outcome = value as Record<string, unknown>;
+  if (outcome.ok === false) return includesCode(ONE_TIME_DENIAL_CODES, outcome.code);
+  return outcome.ok === true && bounded(outcome.burrowLabel);
+}
+
+// ---------------------------------------------------------------------------
+// An established session
+
+/**
+ * The Burrow's goodbye: it is ending this established session on purpose, so
+ * the Client reports the session over rather than waiting on requests nothing
+ * will answer (`docs/specs/remote-api.md` → Transport). **Exact keys and no
+ * payload**, like the direct path's signals, so nothing can ride on it; a
+ * Client that does not know it ignores it, as it does every unknown control
+ * shape.
+ */
+export interface SessionEndV1 {
+  readonly v: 1;
+  readonly t: 'session-end';
+}
+
+export const SESSION_END_V1: SessionEndV1 = Object.freeze({ v: 1, t: 'session-end' });
+
+export function isSessionEndV1(value: unknown): value is SessionEndV1 {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const message = value as Record<string, unknown>;
+  return message.v === 1 && message.t === 'session-end' && Object.keys(message).length === 2;
 }
 
 /** Membership in a denial list, without widening the list's literal type. */

@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react';
-// Importing from App.tsx runs `pocket-chrome`'s `index.css` side-effect import,
+// Importing from views.tsx runs `pocket-chrome`'s `index.css` side-effect import,
 // so Tailwind's utilities load for these stories.
-import { PairingCodeView } from '../remote/pocket-app/App';
+import { PairingCodeView } from '../remote/pocket-app/views';
 import { PhoneFrame } from './PhoneFrame';
 
 const meta: Meta<typeof PairingCodeView> = {

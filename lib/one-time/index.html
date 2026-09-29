@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no"
+    />
+    <meta name="robots" content="noindex, nofollow" />
+    <!-- Pre-boot defaults for Kimbie Dark (Pocket's default theme); pocket-theme.ts
+         re-syncs both to the applied theme at runtime, before first paint. -->
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#362712" />
+    <title>Dormouse one-time connection</title>
+    <!-- No inline script: Hosted serves this page `script-src` from its own
+         /connect/assets/ alone, and `assertPocketShell` fails the build on one
+         (docs/specs/one-time.md -> "Phone page"). -->
+    <style>
+      /* Theme-agnostic viewport plumbing, as Pocket's shell has it. Colors and
+         fonts come from the shared theme system applied to <body> by main.tsx;
+         the dark fallback shows only before the theme applies. */
+      html,
+      body {
+        height: 100%;
+        -webkit-text-size-adjust: 100%;
+        overscroll-behavior: none;
+        background: var(--color-app-bg, #362712);
+        color: var(--color-app-fg, #d3af86);
+      }
+      #one-time-root {
+        height: 100dvh;
+        display: flex;
+        flex-direction: column;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="one-time-root"></div>
+    <script type="module" src="../src/remote/one-time-app/main.tsx"></script>
+  </body>
+</html>

@@ -93,10 +93,26 @@ export function e2ePairingPrologue(
   return e2ePrologue('pairing', burrowId, invitationFields);
 }
 
-// `kind` is the `E2eKind` of the envelope this transcript binds; spelled as a
-// literal union because `remote/wire.ts` imports this layer, not the reverse.
+/**
+ * The one-time prologue: the version, the kind, the room id, and every other
+ * link field in the order the link carries them.
+ *
+ * Its own kind, so a one-time transcript equals no pairing or connection
+ * transcript whatever the fields hold. The order is `oneTimeLinkFields`' to say
+ * (`security/one-time-link.ts`), for the reason the pairing prologue defers to
+ * its grammar.
+ */
+export function e2eOneTimePrologue(roomId: string, linkFields: readonly string[]): Uint8Array {
+  return e2ePrologue('one-time', roomId, linkFields);
+}
+
+// `kind` is the `E2eKind` of the envelope a pairing or connection transcript
+// binds, or `one-time`, which is never an `E2eKind`: a one-time room carries
+// its own frame family (`remote/one-time-wire.ts`), so no relay envelope can
+// name it. Spelled as a literal union because `remote/wire.ts` imports this
+// layer, not the reverse.
 function e2ePrologue(
-  kind: 'connection' | 'pairing',
+  kind: 'connection' | 'pairing' | 'one-time',
   burrowId: string,
   extra: readonly string[],
 ): Uint8Array {

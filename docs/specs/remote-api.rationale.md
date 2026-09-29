@@ -12,6 +12,12 @@
 
 In September 2026, both production installations use `createAskSurfaceProvider`: resolution selects a routing key and applies the requested size, while `streamPty` separately owns the subscription. The former `SurfaceHandle.release` was a no-op in that shared constructor; a test-only release counter suggested a second resource lifetime that neither host had.
 
+## Transport
+
+**Why the goodbye exists.** Before it, a Burrow that disposed a relayed session told the Client nothing: no Burrow→Relay frame drops a client, the Client's requests carry no timeout, and its keepalives keep its own idle clock fresh, so a relayed phone whose session was taken back froze with every keystroke dropped until it was reloaded. A direct session already learned of it, from its channel closing. The goodbye is a control message rather than a protocol-v1 event so it reaches a Client below the remote-api layer, where burrow loss is reported, and so an older Client — which ignores unknown control shapes — is no worse off than before.
+
+**Why a switched channel waits for the goodbye.** A channel closed in the tick that sent the goodbye takes the association down with whatever was still queued or buffered — `RTCPeerConnection.close()` flushes nothing — so behind a burst of output the goodbye was dropped (review, 2026-09) and the phone read channel loss: Pocket's "connection lost" rather than "The computer ended this session", a one-time phone still connecting `ONE_TIME_DIRECT_FAILED_MESSAGE` rather than its ended copy. The wait is bounded because a goodbye stuck behind that much output only costs the phone the wording; the relay needs none, since its send lands on the socket before the dispose.
+
 ## Direct path
 
 **Why host candidates alone reach.** The shipped deployment is a tailnet: the Burrow's tailnet address is a host candidate the phone can route to, and the phone's own mDNS-obfuscated candidate is learned peer-reflexively from the first packet. A STUN server would buy a public reflexive candidate the deployment does not need, at the price of telling a third party both addresses.
@@ -55,6 +61,20 @@ In September 2026, the Viewer-local 60ms restoration timer could overwrite a lat
 ## Attachment invariants
 
 **Why an in-flight resolution is invalidated rather than allowed to finish.** The two resolve paths differ by orders of magnitude: a sibling window's pane is a round trip away, a local one settles on the next microtask. With one shared epoch the older, slower attach would land last and take the attachment.
+
+## Size authority: last-attach-wins
+
+**Why a held pane does not re-fit.** A one-time connection run end to end (standalone harness, phone page in Chrome, 2026-09) left the laptop pane at the phone's grid (53×28) in its top-left with the rest empty, unexplained, and still at that size after the phone left. A local refit that took the size back while the phone was attached would re-wrap every line on the phone, which is never told (`terminal.resize` is staged), so a held pane keeps the phone's grid and explains itself with the strip instead; focus and keystrokes are not taken as a request for the size for the same reason.
+
+**Why Take back ends the session.** Chosen by the product owner (2026-09) over re-sizing the phone to the laptop's grid: the phone never resizes, so there is no protocol-v1 event and no phone-side strip, and the person at the laptop — who owns every terminal — gets their pane back in one click. A Pocket session ended this way is not an unpairing; the phone reconnects with one presence prompt. With two viewers on a pane it ends both (product owner, 2026-09): Take back means the laptop has the size again, which no remaining viewer can share.
+
+**Why a hold names its service instance.** A hold is released only by the session that took it, and a VS Code broker window that closes, or a sidecar that restarts, takes its sessions with it: no release ever arrives, and surviving webviews kept their strips — and their phone-sized panes — until someone clicked Take back (review, 2026-09). Only the instance that replaced it can say so, and saying "I am a different service" needs no list of what the old one held.
+
+**Why a pane keeps a hold per holder.** With one hold per pane (review of the first cut, 2026-09), a second viewer's attach replaced the first's, so the second leaving re-fit the pane under the first phone still attached, and Take back ended only the second.
+
+**Why each hold records its size.** With a hold per holder but no size (review, 2026-09), phone A attached at 51×14, phone B at 40×20, and B leaving left the pane at B's grid under a strip naming A — A's PTY running at a grid A never asked for until A resized. Nothing else carries A's size back: the phone is never told of a resize, and a local re-fit would re-wrap A's screen.
+
+**Why a release names a lease as well as a holder.** A session's own attachments overlap: re-attaching the pane it already holds, or an attach superseded by one to the same pane, sends the earlier attachment's release after the later one took the hold. With the holder alone that release would free the newer hold and re-fit the pane under a phone still attached.
 
 ## Input authority and multiple viewers
 

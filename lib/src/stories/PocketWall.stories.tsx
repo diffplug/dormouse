@@ -2,10 +2,13 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { useEffect, useRef } from 'react';
 import { toBase64Url, utf8Encode, type DirectoryEntry } from 'remote-lib-common';
 import { ConnectedView } from '../remote/pocket-app/App';
-import { RemotePtyAdapter, type RemoteAdapterClient } from '../remote/client/remote-adapter';
-import type { TerminalHandlers } from '../remote/client/pocket-client';
-import { setPlatform } from '../lib/platform';
-import { disposeAllSessions, initAlertStateReceiver } from '../lib/terminal-registry';
+import type {
+  RemoteAdapterClient,
+  RemotePtyAdapter,
+  TerminalHandlers,
+} from '../remote/client/remote-adapter';
+import { installRemoteAdapter } from '../remote/pocket-app/remote-wall';
+import { disposeAllSessions } from '../lib/terminal-registry';
 import { settleTerminals } from './settle-terminals';
 
 // The adapter decodes `terminal.data` as base64url UTF-8, so encode splash text
@@ -73,12 +76,8 @@ class FakeRemoteClient implements RemoteAdapterClient {
 function PocketWallStory() {
   const adapterRef = useRef<RemotePtyAdapter | null>(null);
   if (!adapterRef.current) {
-    // Mirror App.tsx's onConnect: stand up the adapter as the platform, prep a
-    // clean registry, then start the directory watch.
-    const adapter = new RemotePtyAdapter(new FakeRemoteClient(SINGLE_SESSION));
-    setPlatform(adapter);
-    disposeAllSessions();
-    initAlertStateReceiver();
+    // `mountRemoteWall` minus its `hello`, and without awaiting the start.
+    const adapter = installRemoteAdapter(new FakeRemoteClient(SINGLE_SESSION));
     void adapter.init();
     adapterRef.current = adapter;
   }
