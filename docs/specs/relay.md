@@ -735,7 +735,7 @@ memo invalidation — live in that burrow's spec.
   **Order matters, and the store goes first**: the `burrowToken` exists nowhere
   else and cannot be re-minted from the same exchange, so the save is awaited
   before any Burrow is stopped (rationale). Replacing a *running* Burrow emits
-  `{ name: 'status', enrolled: false }` between the two, since that webview gate
+  a `status` event with `enrolled: false` between the two, since that webview gate
   is edge-triggered and everything it holds — the mirrored pairing queue, the
   push device list — belongs to the Relay being left. **`clearEnrollment` is the
   same rule backwards**: the delete is awaited first and nothing else happens

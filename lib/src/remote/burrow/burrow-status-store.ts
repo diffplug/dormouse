@@ -10,7 +10,7 @@
  * subscribe to the same service events, and `link.on` supports either arriving
  * first, so the dialog works whether or not the pairing chunk has loaded.
  *
- * The service's `status` event carries only `{ enrolled, serving }`
+ * The service's `status` event carries only `{ enrolled, serving, serviceId }`
  * (`service-protocol.ts` -> `BurrowStatusEvent`), which is enough to know the
  * answer changed but not what it changed to — so every event re-reads the full
  * status rather than patching a field.
@@ -48,8 +48,9 @@ let refreshInFlight: Promise<void> | null = null;
 let refreshAgain = false;
 
 /**
- * The service's `status` event fires only when `enrolled` or `serving` changes,
- * because those are the edges its webview gate arms on. The *connection* moves underneath it
+ * The service's `status` event fires only when `enrolled` or `serving` changes —
+ * the edges its webview gate arms on — and once as the service starts, to name
+ * the instance's `serviceId`. The *connection* moves underneath it
  * with no event at all: `connecting -> connected` on a normal start,
  * `connected -> disconnected` on a dropped relay, `-> displaced` when another
  * instance takes the slot. Without a poll the dialog would show whichever state

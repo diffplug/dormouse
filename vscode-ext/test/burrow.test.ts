@@ -725,6 +725,46 @@ describe('burrow service glue', () => {
     await waitFor(() => !store.secrets.has(ONE_TIME_SERVING_KEY));
   });
 
+  it('tells its own webviews the one-time connection is gone when it takes the broker over', async () => {
+    // The broker window closing takes its phone with it, and this window's
+    // webviews last heard of that connection from it: without the new
+    // service's word they would offer End on nothing until someone clicked it.
+    stubRendezvous();
+    const oneTime = (posted: ExtensionMessage[]) =>
+      posted
+        .filter((message) => message.type === 'burrow:event')
+        .map((message) => (message as { payload: { name?: string; state?: { status: string } } }).payload)
+        .filter((payload) => payload.name === 'one-time')
+        .map((payload) => payload.state!.status);
+
+    const broker = await freshBurrow();
+    const brokerLink = opened!;
+    const brokerSide = fakeDeps();
+    broker.configureBurrow(brokerSide.deps());
+    bridgeLinkToBurrow(broker, brokerLink, brokerSide);
+    const brokerActivation = broker.initBurrow(fakeContext().context);
+    broker.handleBurrowCommand({ burrowRequestId: 'rh-1', cmd: 'oneTimeOpen' });
+    await waitFor(() => results(brokerSide.posted).length > 0);
+    expect(brokerLink.isPeerBroker()).toBe(true);
+
+    const mod = await freshBurrow();
+    const link = opened!;
+    const bound = fakeDeps();
+    mod.configureBurrow(bound.deps());
+    bridgeLinkToBurrow(mod, link, bound);
+    // The mark the broker wrote, as `SecretStorage` shares it across windows.
+    const { context, store } = fakeContext();
+    store.secrets.set(ONE_TIME_SERVING_KEY, '1');
+    mod.initBurrow(context);
+    await waitFor(() => oneTime(bound.posted).at(-1) === 'waiting');
+    expect(link.isPeerBroker()).toBe(false);
+
+    brokerActivation.dispose();
+    await brokerLink.disposePeerLink();
+    await waitFor(() => link.isPeerBroker(), 10_000);
+    await waitFor(() => oneTime(bound.posted).at(-1) === 'idle');
+  });
+
   it('forwards a command to the window that holds the Burrow', async () => {
     const squat = await otherWindowHoldsTheBurrow();
     const mod = await freshBurrow();

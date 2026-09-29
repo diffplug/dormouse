@@ -320,10 +320,15 @@ export class BurrowService {
   /**
    * Start from a persisted enrollment, if there is one this build may reach —
    * and announce this instance either way, since a webview that outlived the
-   * one before it holds panes under sessions that are gone.
+   * one before it holds panes under sessions that are gone, and shows that
+   * one's one-time connection: a VS Code window that takes the broker over from
+   * one with a phone connected, or a restarted sidecar.
    */
   start(): Promise<void> {
     if (this.#disposed) return Promise.resolve();
+    // At once, since it needs no enrollment: the panel stops offering End on a
+    // connection that is gone before the keychain read below answers.
+    this.#emitOneTime();
     return this.#serialize(async () => {
       try {
         await this.#start();

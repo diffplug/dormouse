@@ -674,7 +674,10 @@ describe('start', () => {
     await starting;
 
     expect(sockets).toEqual([]);
-    expect(sent).toEqual([]);
+    // Only what a start says at once, before the disposal: its one-time state.
+    expect(sent.map((message) => message.data)).toEqual([
+      { name: 'one-time', state: { status: 'idle' } },
+    ]);
   });
 
   it('clearEnrollment stops the Burrow and forgets it, keeping the records', async () => {
@@ -726,14 +729,37 @@ describe('status events', () => {
   });
 
   it('says only that nothing runs when there is no Burrow to run', async () => {
-    // Its instance, for a webview that outlived the one before it; nothing
-    // arms on it.
+    // Its one-time state and its instance, for a webview that outlived the one
+    // before it; nothing arms on either.
     createService();
     await service.start();
     await command('status');
     expect(uiEvents()).toEqual([
+      { name: 'one-time', state: { status: 'idle' } },
       { name: 'status', enrolled: false, serving: false, serviceId: service.statusEvent().serviceId },
     ]);
+  });
+
+  it('announces its one-time state as it starts, before its enrollment is read', async () => {
+    // A webview that outlived the instance before this one — a VS Code window
+    // taking the broker over from one with a phone connected — shows that
+    // one's connection, with End, until it is told otherwise.
+    createService({ enrollment: ENROLLMENT });
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const load = store.loadEnrollment;
+    store.loadEnrollment = async () => {
+      await gate;
+      return load();
+    };
+
+    const starting = service.start();
+    expect(uiEvents()).toEqual([{ name: 'one-time', state: { status: 'idle' } }]);
+    release();
+    await starting;
+    expect(statusEvents()).toEqual([true]);
   });
 
   it('names its own instance in every status event, a new one for each service', async () => {
@@ -1370,7 +1396,8 @@ describe('one-time connection', () => {
     expect(sockets).toEqual([]);
     expect(requests).toEqual([]);
 
-    expect(oneTimeStates().map((state) => state.status)).toEqual(['opening', 'waiting']);
+    // The start's announcement, then the open.
+    expect(oneTimeStates().map((state) => state.status)).toEqual(['idle', 'opening', 'waiting']);
     expect((await command('oneTimeStatus')).result).toEqual(waiting);
     expect(service.oneTimeEvent().state).toEqual(waiting);
   });

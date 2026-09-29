@@ -402,7 +402,8 @@ enrolled runtime's.
   It joins an open in flight, replaces a waiting, confirming, or ended
   connection (ending it unannounced), and is **refused while `connecting` or
   `connected`**, and while `unavailable`.
-- **Every state change is a `{ name: 'one-time', state }` event.**
+- **Every state change is a `{ name: 'one-time', state }` event, and so is a
+  service's start**, ahead of its enrollment read (rationale).
 - **`status` and its event carry `serving`**: `enrolled`, or a one-time status
   of `opening`, `waiting`, `confirming`, `connecting`, or `connected`; a flip
   emits `status`. **A reader missing `serving` takes `enrolled`** (an older VS

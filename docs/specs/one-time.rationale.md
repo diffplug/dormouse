@@ -85,6 +85,15 @@ and Firefox for Android has no `userAgentData` and reports a `Linux` platform,
 while its user agent names Android. A device none of these name falls to "Phone
 browser", which is also what the Burrow shows for any label outside the set.
 
+## Service and hosts
+
+**Why a service announces its one-time state as it starts.** A UI can outlive
+the service instance it heard from: a VS Code window that takes the broker
+over from one with a phone connected, or a restarted sidecar. Its panel kept
+showing that phone with End, on a connection gone with its window, until
+someone pressed End (review, 2026-09). The state needs no enrollment, so it
+goes out before the keychain read.
+
 ## Laptop UI
 
 **Why nothing re-opens on a timer.** The Relay's "Set up a phone" panel

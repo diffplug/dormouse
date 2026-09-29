@@ -131,9 +131,10 @@ export interface PairingQueueEvent {
 
 /**
  * service → webview, whenever the Burrow's lifecycle changes whether there is one
- * at all. What a webview does for the Burrow costs a crossing per pane-state,
- * activity, and focus change, so an installation that never enrolled must pay
- * none of it (`lib/src/remote/burrow/enrolled-gate.ts`).
+ * at all, and once as the service starts. What a webview does for the Burrow
+ * costs a crossing per pane-state, activity, and focus change, so an
+ * installation that never enrolled must pay none of it
+ * (`lib/src/remote/burrow/enrolled-gate.ts`).
  */
 export interface BurrowStatusEvent {
   name: 'status';
@@ -178,9 +179,10 @@ export function serviceIdOf(status: { serviceId?: unknown } | null | undefined):
 }
 
 /**
- * service → webview: the one-time connection moved (`docs/specs/one-time.md`).
- * The state is complete every time, so a panel replaces rather than merges;
- * `oneTimeStatus` answers the same state, for a panel that opens after it.
+ * service → webview: the one-time connection moved, or the service started
+ * (`docs/specs/one-time.md`). The state is complete every time, so a panel
+ * replaces rather than merges; `oneTimeStatus` answers the same state, for a
+ * panel that opens after it.
  *
  * **Its `waiting.url` is the link itself** — the room id and the one-use
  * public key, a capability to ask for the one confirmation — and crosses for the
