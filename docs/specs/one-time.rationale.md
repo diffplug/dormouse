@@ -64,3 +64,26 @@ route and a WebAssembly compile both ran.
 showing `/connect/` changes only the fragment, which a browser treats as a
 same-document jump: measured in agent-browser's Chrome, 2026-09-28, the page
 stayed on its "invalid" screen with the new link left in the address bar.
+
+## Laptop UI
+
+**Why nothing re-opens on a timer.** The Relay's "Set up a phone" panel
+re-mints shortly before its code expires, because a setup code is replaced
+without anyone noticing. A one-time link cannot be: each open mints a room and a
+one-use key, and a link someone already sent to their phone would die under
+them. An expired link waits for New link instead, and the runtime ends it
+`expired` on its own clock.
+
+**Why `ended {user-ended}` renders as idle.** Only this machine produces that
+reason — End, Cancel, or the service shutting down; a replaced runtime ends
+unannounced — so there is nothing to tell the person who did it. Reporting it
+would make Cancel two clicks, Cancel then Done, and sending that second
+`oneTimeEnd` on the user's behalf could, in VS Code, end a link another window
+opened between the two commands.
+
+**Why the indicator starts at `connecting`.** The modal has been answered by
+then, so the phone is authorized, and with Settings closed the Baseboard is the
+only place to stop it during the direct deadline. The label is a tooltip because
+it is the phone's own choice, up to the pairing label limit, and the right
+cluster's width comes out of the Doors' budget. It carries no phone glyph, which
+would read as the push toggle's slashed phone beside it.

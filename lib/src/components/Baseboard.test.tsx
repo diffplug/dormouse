@@ -383,6 +383,39 @@ describe('Baseboard settings controls', () => {
   });
 });
 
+describe('Baseboard one-time connection', () => {
+  it('shows a connected phone in the measured right cluster, after the notice', async () => {
+    const platform = await import('../lib/platform');
+    vi.spyOn(platform, 'getPlatform').mockReturnValue({
+      alertPublishSettings: vi.fn(),
+      burrow: {
+        command: async (cmd: string) =>
+          cmd === 'oneTimeStatus' ? { status: 'connected', label: 'Pixel 9', since: 1 } : {},
+        respond: () => {},
+        notify: () => {},
+        on: () => () => {},
+      },
+    } as unknown as ReturnType<typeof platform.getPlatform>);
+
+    await act(async () => root.render(
+      <Baseboard items={[]} onReattach={() => {}} notice={<span data-notice>update</span>} />,
+    ));
+
+    const end = container.querySelector('button[aria-label="End the one-time connection"]');
+    expect(end).not.toBeNull();
+    // Inside the cluster the Door fit subtracts, between the host's notice and
+    // the Settings buttons (docs/specs/layout.md -> Baseboard).
+    const notice = container.querySelector('[data-notice]')!;
+    const cluster = notice.parentElement!;
+    expect(cluster.contains(end)).toBe(true);
+    expect(notice.compareDocumentPosition(end!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      end!.compareDocumentPosition(container.querySelector('[data-alarm-setting="speech"]')!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+});
+
 describe('Baseboard browser Doors', () => {
   it('keeps the browser display icon and page label instead of deriving a terminal idle title', () => {
     act(() => root.render(

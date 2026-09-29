@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import { DEFAULT_PAIRING_TTL_MS } from 'remote-lib-common';
 import { ModalReviewBlock, TextInput, modalActionButton } from './design';
 import { ExternalTextLink } from './ExternalTextLink';
+import { OneTimeConnection } from './OneTimeConnection';
+import { FIELD_HINT, FIELD_LABEL, own, useMinutesLeft } from './remote-control-shared';
 import { ScannableCode } from './ScannableCode';
 import type { BurrowConsoleStatus, SetupQrResult } from '../host/remote/service-protocol';
 import type {
@@ -53,8 +55,6 @@ const TONE_CLASS = {
   muted: 'text-muted',
 } as const;
 
-const FIELD_LABEL = 'text-xs text-muted';
-const FIELD_HINT = `${FIELD_LABEL} mt-1 block`;
 const HOSTED_REMOTE_URL = 'https://dormouse.sh/hosted/#remote-control';
 const SELF_HOST_URL = 'https://dormouse.sh/self-host/';
 
@@ -90,11 +90,6 @@ function refreshDelay(expiresAt: number, now: number): number {
     Math.max(expiresAt - now - SETUP_QR_REFRESH_LEAD_MS, SETUP_QR_MIN_REFRESH_MS),
     SETUP_QR_MAX_REFRESH_MS,
   );
-}
-
-/** Whole minutes until a setup code stops redeeming; never negative. */
-function minutesUntil(expiresAt: number, now: number): number {
-  return Math.max(0, Math.ceil((expiresAt - now) / 60_000));
 }
 
 /**
@@ -188,23 +183,6 @@ const TERMINAL_COPY: Record<TerminalPhase, { headline: string; detail: string }>
     detail: 'Get a new one.',
   },
 };
-
-/**
- * A lookup into one of this panel's copy tables, answering only for a key the
- * table actually holds.
- *
- * **Never the `in` operator.** Every one of these tables is keyed by a string
- * the Burrow chose and a bridge relayed, and `in` walks the prototype chain — so
- * `'toString'` would answer "yes, there is copy for that" and hand back
- * `Object.prototype.toString` to render. The store checks that those fields are
- * strings and deliberately *not* that they are members of the closed set
- * (`burrow-status-store.ts`), so this is where a stranger stops.
- * `hasOwnProperty.call` rather than `Object.hasOwn`, which is ES2022 and this
- * build's lib is ES2020.
- */
-function own<T>(table: Record<string, T>, key: string): T | undefined {
-  return Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined;
-}
 
 /** The terminal copy for a state, or `undefined` while the panel is still live. */
 function terminalCopy(state: SetupQrState): { headline: string; detail: string } | undefined {
@@ -534,8 +512,8 @@ export function RemoteControlSection() {
 }
 
 /**
- * One-time connection and Persistent Relay, as two buttons. Only the Relay is
- * built; the one-time button stays disabled until it is.
+ * One-time connection and Persistent Relay, as two choices. The one-time panel
+ * is the same whether or not this machine enrolled (`OneTimeConnection.tsx`).
  *
  * **Enrolled, the Relay's view is always shown.** Un-enrolled, Persistent Relay
  * is a disclosure that **stays folded until clicked**, installer's offer or not.
@@ -549,15 +527,7 @@ function RelayChoices({ status }: { status: BurrowConsoleStatus }) {
     <div className="mt-1.5 text-sm leading-relaxed">
       <div className="text-muted">Control this Dormouse from your phone.</div>
 
-      <div className="mt-2">
-        <button type="button" disabled className={modalActionButton({ tone: 'primary' })}>
-          One-time connection
-        </button>
-        <div className={FIELD_HINT}>
-          Coming soon · Generate a link to open on your phone for a one-off connection. No
-          account needed.
-        </div>
-      </div>
+      <OneTimeConnection />
 
       <div className="mt-3">
         {status.enrolled ? (
@@ -893,26 +863,7 @@ function SetupPhonePanel({
 }) {
   const shown = displayedQr(state);
   const terminal = terminalCopy(state);
-  const expiresAt = shown?.expiresAt ?? null;
-  const [now, setNow] = useState(() => Date.now());
-
-  // The copy names whole minutes, so re-render on the minute rather than on a
-  // clock tick: a 1 Hz interval bought ~300 renders per code for five numbers,
-  // and left Storybook repainting forever after the code expired.
-  useEffect(() => {
-    if (expiresAt === null) return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const arm = (): void => {
-      const at = Date.now();
-      setNow(at);
-      const remaining = expiresAt - at;
-      // Expired: the number cannot change again, so nothing re-arms.
-      if (remaining <= 0) return;
-      timer = setTimeout(arm, remaining % 60_000 || 60_000);
-    };
-    arm();
-    return () => clearTimeout(timer);
-  }, [expiresAt]);
+  const minutesLeft = useMinutesLeft(shown?.expiresAt ?? null);
 
   return (
     <div className="mt-2 rounded border border-border p-2">
@@ -940,8 +891,8 @@ function SetupPhonePanel({
             <ScannableCode url={shown.url} label="Setup code for this machine" />
           </div>
           <div className="mt-1.5 text-center text-xs text-muted">
-            {minutesUntil(shown.expiresAt, now) > 0
-              ? `Good for one phone. Expires in ${minutesUntil(shown.expiresAt, now)} min.`
+            {(minutesLeft ?? 0) > 0
+              ? `Good for one phone. Expires in ${minutesLeft} min.`
               : 'This code has expired — get a new one.'}
           </div>
         </>

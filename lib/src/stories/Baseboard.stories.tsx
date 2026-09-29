@@ -239,3 +239,31 @@ export const ExtremeTitleWithBothIndicators: Story = {
     ),
   ],
 };
+
+/**
+ * A phone on a one-time connection: "Phone connected · End" joins the measured
+ * right cluster, so the Doors fit around it, and End needs no trip to Settings
+ * (`docs/specs/one-time.md` -> "Laptop UI"). Its own frame on a docs page: the
+ * indicator reads a module store that captures the stub link on its first
+ * subscriber, which inline siblings with no Burrow would otherwise share.
+ */
+export const OneTimePhoneConnected: Story = {
+  args: { items: overflowWithRingingDoorItems },
+  parameters: {
+    ...withState(overflowWithRingingDoorItems, {}),
+    primedBurrow: { oneTime: { status: 'connected', label: 'Pixel 9', since: BASE_TIME } },
+    docs: { story: { inline: false, height: '80px' } },
+  },
+  decorators: [
+    (Story) => (
+      <div style={{ width: 640 }}>
+        <Story />
+      </div>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await canvas.findByText('Phone connected');
+    await expect(canvas.getByRole('button', { name: 'End the one-time connection' })).toBeVisible();
+  },
+};

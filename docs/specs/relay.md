@@ -827,10 +827,10 @@ a build with no Burrow service at all ([alert.md](./alert.md) -> Push
 notifications). Only the first has a section beneath it, so only the first says
 "below"; the `PushNoBurrow` / `PushNotEnrolled` story pair holds the two apart.
 
-**Two buttons: One-time connection (disabled until built) and Persistent
-Relay**, which un-enrolled discloses a disabled "Use hosted.dormouse.sh" and
-the enroll view, **folded until clicked, offer or not — hidden, never
-unmounted**.
+**Two choices: One-time connection (`docs/specs/one-time.md` -> "Laptop UI")
+and Persistent Relay**, which un-enrolled discloses a disabled "Use
+hosted.dormouse.sh" and the enroll view, **folded until clicked, offer or not —
+hidden, never unmounted**.
 
 The enroll view is a three-field form (Relay, setup password,
 Burrow name — prefilled with the `suggestedLabel` `status` carries) calling the

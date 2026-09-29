@@ -17,15 +17,23 @@ vi.mock('../lib/platform', () => ({
   getPlatform: () => platform,
 }));
 
+import { ONE_TIME_ENDED_COPY, ONE_TIME_OUTCOME_LABEL } from './OneTimeConnection';
 import { PAIRING_OUTCOME_LABEL, RemoteControlSection } from './RemoteControlSection';
-import type { BurrowConsoleStatus, SetupQrResult } from '../host/remote/service-protocol';
+import {
+  isOneTimeState,
+  type BurrowConsoleStatus,
+  type SetupQrResult,
+} from '../host/remote/service-protocol';
 import {
   enrolledStatus,
   makeStubBurrowLink,
   OFFER_STATUS,
+  oneTimeWaiting,
   setupQrResult,
   UNENROLLED_STATUS as NOT_ENROLLED,
 } from '../host/remote/test-burrow-link';
+import type { OneTimeEndReason, OneTimeState } from '../remote/burrow/one-time-runtime';
+import { getOneTimeSnapshot, subscribeToOneTime } from '../remote/burrow/one-time-store';
 import { TEST_SETUP_PASSWORD } from '../remote/test-setup-password';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -35,7 +43,13 @@ type Handler = (data: unknown) => void;
 function makeLink(command: (cmd: string, params?: unknown) => Promise<unknown>) {
   const listeners = new Map<string, Set<Handler>>();
   return {
-    command: vi.fn(command),
+    command: vi.fn(async (cmd: string, params?: unknown) => {
+      const answer = await command(cmd, params);
+      // Every service answers `oneTimeStatus`. A case about the Relay answers
+      // every command with one status, so that reads as a machine with no
+      // one-time connection rather than as a bridge answering nonsense.
+      return cmd === 'oneTimeStatus' && !isOneTimeState(answer) ? { status: 'idle' } : answer;
+    }),
     on: vi.fn((name: string, listener: Handler) => {
       const set = listeners.get(name) ?? new Set<Handler>();
       set.add(listener);
@@ -205,9 +219,11 @@ describe('RemoteControlSection', () => {
     const openExternal = vi.fn();
     platform = { burrow: makeLink(async () => NOT_ENROLLED), openExternal };
     await render();
-    // Not built yet, so it says so rather than doing nothing on a click.
-    expect(buttonLabelled('One-time connection')!.disabled).toBe(true);
-    expect(text()).toContain('Coming soon · Generate a link to open on your phone');
+    expect(buttonLabelled('One-time connection')!.disabled).toBe(false);
+    expect(text()).toContain(
+      'Open a link on your phone for a one-off connection. Phone and computer must be on the ' +
+        'same Wi-Fi. No account needed.',
+    );
     expect(buttonLabelled('Persistent Relay')!.getAttribute('aria-expanded')).toBe('false');
     expect(persistentPanel().hidden).toBe(true);
 
@@ -249,7 +265,7 @@ describe('RemoteControlSection', () => {
     expect(text()).toContain('Persistent Relay');
     expect(text()).not.toContain('Enroll this Dormouse');
     expect(buttonLabelled('Set up a phone')).toBeTruthy();
-    expect(buttonLabelled('One-time connection')).toBeTruthy();
+    expect(buttonLabelled('One-time connection')!.disabled).toBe(false);
   });
 
   it('keeps what was typed through folding Persistent Relay', async () => {
@@ -1300,5 +1316,346 @@ describe('RemoteControlSection', () => {
     });
     expect(text()).toContain('https://laptop.tailnet.ts.net');
     expect(buttonLabelled('Persistent Relay')).toBeUndefined();
+  });
+});
+
+/**
+ * A link whose one-time half answers the way the service does
+ * (`docs/specs/one-time.md` -> "Service and hosts"): `oneTimeOpen` moves
+ * through `opening` to `waiting` and answers the settled state, `oneTimeEnd`
+ * ends a live connection `user-ended` and returns an ended one to `idle`, and
+ * every change is an event that arrives before the command's answer.
+ */
+function oneTimeService(
+  initial: OneTimeState = { status: 'idle' },
+  { status = NOT_ENROLLED, openError }: { status?: BurrowConsoleStatus; openError?: string } = {},
+) {
+  let state = initial;
+  let links = 0;
+  const service = {
+    get state() {
+      return state;
+    },
+    /** Move the connection as the runtime would, announcing it. */
+    set(next: OneTimeState) {
+      state = next;
+      link.emit('one-time', { name: 'one-time', state });
+    },
+  };
+  const link = makeLink(async (cmd) => {
+    switch (cmd) {
+      case 'oneTimeStatus':
+        return state;
+      case 'oneTimeOpen':
+        if (openError) throw new Error(openError);
+        service.set({ status: 'opening' });
+        links += 1;
+        service.set(oneTimeWaiting({ url: `https://hosted.dormouse.sh/connect/#link-${links}` }));
+        return state;
+      case 'oneTimeEnd':
+        if (state.status === 'ended') service.set({ status: 'idle' });
+        else if (state.status !== 'idle' && state.status !== 'unavailable') {
+          service.set({ status: 'ended', reason: 'user-ended' });
+        }
+        return {};
+      default:
+        return status;
+    }
+  });
+  return Object.assign(service, { link });
+}
+
+/** Mount the section over `service` and let its one-time read land. */
+async function renderOneTime(service: ReturnType<typeof oneTimeService>) {
+  platform = { burrow: service.link };
+  await render();
+  await settleQrChunk();
+}
+
+function oneTimeCalls(link: ReturnType<typeof makeLink>, cmd: 'oneTimeOpen' | 'oneTimeEnd') {
+  return link.command.mock.calls.filter(([name]) => name === cmd);
+}
+
+/** The region reporting how a one-time connection ended. */
+function oneTimeOutcome(): HTMLElement | null {
+  return container.querySelector<HTMLElement>(
+    `[role="status"][aria-label="${ONE_TIME_OUTCOME_LABEL}"]`,
+  );
+}
+
+function oneTimeCode(): Element | null {
+  return container.querySelector('svg[role="img"][aria-label="One-time link for this machine"]');
+}
+
+describe('One-time connection', () => {
+  it('opens a link from the button with no parameters, un-enrolled', async () => {
+    const service = oneTimeService();
+    await renderOneTime(service);
+
+    await act(async () => buttonLabelled('One-time connection')!.click());
+    await settleQrChunk();
+
+    // The origin is this build's, never the webview's to name.
+    expect(oneTimeCalls(service.link, 'oneTimeOpen')).toEqual([['oneTimeOpen']]);
+    expect(oneTimeCode()).toBeTruthy();
+    expect(text()).toContain('https://hosted.dormouse.sh/connect/#link-1');
+    expect(text()).toContain('Good for one phone. Expires in 5 min.');
+    expect(buttonLabelled('Copy link')).toBeTruthy();
+    expect(buttonLabelled('New link')).toBeTruthy();
+    expect(buttonLabelled('Cancel')).toBeTruthy();
+    expect(buttonLabelled('One-time connection')).toBeUndefined();
+  });
+
+  it('opens the same panel on an enrolled machine, beside Set up a phone', async () => {
+    const service = oneTimeService({ status: 'idle' }, { status: enrolled() });
+    await renderOneTime(service);
+    expect(buttonLabelled('Set up a phone')).toBeTruthy();
+
+    await act(async () => buttonLabelled('One-time connection')!.click());
+    await settleQrChunk();
+    expect(oneTimeCode()).toBeTruthy();
+    expect(buttonLabelled('Set up a phone')).toBeTruthy();
+  });
+
+  it('shows a link another window opened, and keeps it when Settings closes', async () => {
+    const service = oneTimeService(oneTimeWaiting());
+    await renderOneTime(service);
+    expect(oneTimeCode()).toBeTruthy();
+
+    // Closing the dialog unmounts the section; the link lives in the service.
+    await act(async () => root.unmount());
+    expect(oneTimeCalls(service.link, 'oneTimeEnd')).toEqual([]);
+    root = createRoot(container);
+  });
+
+  it('shows the open in flight before any event, and lets Cancel end it', async () => {
+    // A VS Code window that must first become the broker hears nothing until
+    // the service exists, so the panel cannot wait on an event to say so.
+    let release: (state: OneTimeState) => void = () => {};
+    const link = makeLink(async (cmd) => {
+      if (cmd === 'oneTimeOpen') return new Promise((resolve) => (release = resolve));
+      if (cmd === 'oneTimeStatus') return { status: 'idle' };
+      return NOT_ENROLLED;
+    });
+    platform = { burrow: link };
+    await render();
+
+    await act(async () => buttonLabelled('One-time connection')!.click());
+    expect(text()).toContain('Getting a link…');
+    expect(buttonLabelled('Cancel')!.disabled).toBe(false);
+    await act(async () => buttonLabelled('Cancel')!.click());
+    expect(oneTimeCalls(link, 'oneTimeEnd')).toHaveLength(1);
+
+    await act(async () => release({ status: 'ended', reason: 'user-ended' }));
+    expect(buttonLabelled('One-time connection')).toBeTruthy();
+  });
+
+  it('renders a refused open inline, under the button', async () => {
+    const service = oneTimeService(
+      { status: 'idle' },
+      { openError: 'A phone is already connected through a one-time link. End it before opening another.' },
+    );
+    await renderOneTime(service);
+
+    await act(async () => buttonLabelled('One-time connection')!.click());
+    expect(text()).toContain('A phone is already connected through a one-time link.');
+    expect(buttonLabelled('One-time connection')!.disabled).toBe(false);
+  });
+
+  it('counts down on the minute and never opens another link on its own', async () => {
+    vi.useFakeTimers();
+    try {
+      // Single-use: a replacement would be a second link nobody asked for, and
+      // the service ends the first one `expired` on its own clock.
+      const service = oneTimeService(oneTimeWaiting({ expiresAt: Date.now() + 300_000 }));
+      await renderOneTime(service);
+      expect(text()).toContain('Expires in 5 min.');
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(text()).toContain('Expires in 4 min.');
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(600_000);
+      });
+      expect(text()).toContain('This link has expired — get a new one.');
+      expect(oneTimeCalls(service.link, 'oneTimeOpen')).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('replaces a waiting link only on New link', async () => {
+    const service = oneTimeService(oneTimeWaiting({ url: 'https://hosted.dormouse.sh/connect/#old' }));
+    await renderOneTime(service);
+
+    await act(async () => buttonLabelled('New link')!.click());
+    await settleQrChunk();
+    expect(oneTimeCalls(service.link, 'oneTimeOpen')).toHaveLength(1);
+    expect(text()).toContain('https://hosted.dormouse.sh/connect/#link-1');
+    expect(text()).not.toContain('#old');
+  });
+
+  it('goes straight back to the button on Cancel, with nothing to report', async () => {
+    const service = oneTimeService(oneTimeWaiting());
+    await renderOneTime(service);
+
+    await act(async () => buttonLabelled('Cancel')!.click());
+    expect(oneTimeCalls(service.link, 'oneTimeEnd')).toHaveLength(1);
+    expect(service.state).toEqual({ status: 'ended', reason: 'user-ended' });
+    expect(oneTimeCode()).toBeNull();
+    expect(oneTimeOutcome()).toBeNull();
+    expect(buttonLabelled('One-time connection')!.disabled).toBe(false);
+  });
+
+  it('copies the link, and says when the clipboard refuses', async () => {
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    try {
+      const waiting = oneTimeWaiting();
+      await renderOneTime(oneTimeService(waiting));
+
+      await act(async () => buttonLabelled('Copy link')!.click());
+      expect(writeText).toHaveBeenCalledWith(waiting.url);
+      expect(buttonLabelled('Copied')).toBeTruthy();
+
+      writeText.mockRejectedValueOnce(new Error('denied'));
+      await act(async () => buttonLabelled('Copied')!.click());
+      expect(buttonLabelled('Couldn’t copy')).toBeTruthy();
+    } finally {
+      Reflect.deleteProperty(navigator, 'clipboard');
+    }
+  });
+
+  it('follows the connection through the service’s events', async () => {
+    const service = oneTimeService(oneTimeWaiting());
+    await renderOneTime(service);
+
+    await act(async () => service.set({ status: 'confirming', label: 'Pixel 9', expiresAt: NOW + 60_000 }));
+    expect(text()).toContain('Type the two digits your phone shows into the dialog.');
+    expect(oneTimeCode()).toBeNull();
+
+    await act(async () => service.set({ status: 'connecting', label: 'Pixel 9' }));
+    expect(text()).toContain('Connecting directly…');
+    expect(buttonLabelled('Cancel')).toBeTruthy();
+
+    await act(async () => service.set({ status: 'connected', label: 'Pixel 9', since: NOW }));
+    expect(text()).toContain('Pixel 9 has full control of your terminals.');
+
+    // A bridge relaying something else under the name is not a state.
+    await act(async () => {
+      service.link.emit('one-time', { name: 'one-time', state: { status: 'connected' } });
+    });
+    expect(text()).toContain('Pixel 9 has full control of your terminals.');
+  });
+
+  it('ends a live connection from End', async () => {
+    const service = oneTimeService({ status: 'connected', label: 'Pixel 9', since: NOW });
+    await renderOneTime(service);
+
+    await act(async () => buttonLabelled('End')!.click());
+    expect(oneTimeCalls(service.link, 'oneTimeEnd')).toHaveLength(1);
+    expect(text()).not.toContain('has full control');
+    expect(buttonLabelled('One-time connection')).toBeTruthy();
+  });
+
+  it('cancels a pending confirmation, which dismisses the modal with it', async () => {
+    const service = oneTimeService({ status: 'confirming', label: 'Pixel 9', expiresAt: NOW + 60_000 });
+    await renderOneTime(service);
+
+    await act(async () => buttonLabelled('Cancel')!.click());
+    expect(oneTimeCalls(service.link, 'oneTimeEnd')).toHaveLength(1);
+    expect(buttonLabelled('One-time connection')).toBeTruthy();
+  });
+
+  it('reports every other ending in its own fixed sentence', async () => {
+    const reasons = Object.keys(ONE_TIME_ENDED_COPY) as Array<Exclude<OneTimeEndReason, 'user-ended'>>;
+    expect(new Set(Object.values(ONE_TIME_ENDED_COPY)).size).toBe(reasons.length);
+    for (const reason of reasons) {
+      const service = oneTimeService({ status: 'ended', reason });
+      await renderOneTime(service);
+      expect(oneTimeOutcome()?.textContent).toBe(ONE_TIME_ENDED_COPY[reason]);
+      expect(buttonLabelled('New link')).toBeTruthy();
+      expect(buttonLabelled('Done')).toBeTruthy();
+      await act(async () => root.unmount());
+      root = createRoot(container);
+    }
+    // The failure this whole feature is most likely to hit names its fix.
+    expect(ONE_TIME_ENDED_COPY['direct-failed']).toContain('same Wi-Fi');
+  });
+
+  it('falls back for a reason this build has no sentence for, prototype names included', async () => {
+    for (const reason of ['a-newer-reason', 'toString']) {
+      const service = oneTimeService({ status: 'ended', reason } as unknown as OneTimeState);
+      await renderOneTime(service);
+      expect(oneTimeOutcome()?.textContent).toBe('The one-time connection ended.');
+      await act(async () => root.unmount());
+      root = createRoot(container);
+    }
+  });
+
+  it('returns an ended connection to the button on Done', async () => {
+    const service = oneTimeService({ status: 'ended', reason: 'direct-failed' });
+    await renderOneTime(service);
+
+    await act(async () => buttonLabelled('Done')!.click());
+    expect(oneTimeCalls(service.link, 'oneTimeEnd')).toHaveLength(1);
+    expect(service.state).toEqual({ status: 'idle' });
+    expect(oneTimeOutcome()).toBeNull();
+    expect(buttonLabelled('One-time connection')).toBeTruthy();
+  });
+
+  it('opens another link from an ended one', async () => {
+    const service = oneTimeService({ status: 'ended', reason: 'phone-left' });
+    await renderOneTime(service);
+
+    await act(async () => buttonLabelled('New link')!.click());
+    await settleQrChunk();
+    expect(oneTimeCalls(service.link, 'oneTimeOpen')).toHaveLength(1);
+    expect(oneTimeCode()).toBeTruthy();
+  });
+
+  it('disables the button on a build that cannot reach its rendezvous, saying why', async () => {
+    await renderOneTime(oneTimeService({ status: 'unavailable', reason: 'origin-not-allowed' }));
+    expect(buttonLabelled('One-time connection')!.disabled).toBe(true);
+    expect(text()).toContain('it isn’t allowed to reach hosted.dormouse.sh');
+    expect(text()).not.toContain('Open a link on your phone');
+  });
+
+  it('re-reads on open, past a first read the Baseboard is still holding', async () => {
+    // The Baseboard's indicator keeps the store subscribed for the window's
+    // life, so a read that failed at boot is still the store's answer when
+    // Settings opens — unless the panel asks again.
+    let booting = true;
+    const link = makeLink(async (cmd) => {
+      if (cmd === 'oneTimeStatus' && booting) throw new Error('the sidecar is not up yet');
+      return NOT_ENROLLED;
+    });
+    platform = { burrow: link };
+    const baseboard = subscribeToOneTime(() => {});
+    try {
+      await act(async () => {});
+      expect(getOneTimeSnapshot().kind).toBe('error');
+
+      booting = false;
+      await render();
+      expect(text()).not.toContain('the sidecar is not up yet');
+      expect(buttonLabelled('One-time connection')!.disabled).toBe(false);
+    } finally {
+      baseboard();
+    }
+  });
+
+  it('says so when the service will not report the connection', async () => {
+    const link = makeLink(async (cmd) => {
+      if (cmd === 'oneTimeStatus') throw new Error('unknown burrow command: oneTimeStatus');
+      return NOT_ENROLLED;
+    });
+    platform = { burrow: link };
+    await render();
+    expect(text()).toContain(
+      'Could not check this machine’s one-time connection: unknown burrow command: oneTimeStatus',
+    );
   });
 });

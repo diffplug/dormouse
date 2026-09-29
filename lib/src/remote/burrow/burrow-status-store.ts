@@ -133,7 +133,7 @@ function sameState(a: BurrowStatusState, b: BurrowStatusState): boolean {
  * `getPlatform` throws before `initPlatform`, and a host may simply have no
  * service. Both mean the same thing here: nothing to ask.
  */
-function link(): BurrowLink | undefined {
+export function burrowLink(): BurrowLink | undefined {
   try {
     return getPlatform().burrow;
   } catch {
@@ -148,7 +148,7 @@ export function getBurrowStatusSnapshot(): BurrowStatusState {
 export function subscribeToBurrowStatus(listener: () => void): () => void {
   listeners.add(listener);
   if (listeners.size === 1) {
-    const active = link();
+    const active = burrowLink();
     if (active) {
       unsubscribeFromLink = active.on('status', () => void refreshBurrowStatus());
       pollTimer = setInterval(() => void refreshBurrowStatus(), POLL_MS);
@@ -245,7 +245,7 @@ function normalizeStatus(status: BurrowConsoleStatus): BurrowConsoleStatus {
 }
 
 async function readBurrowStatus(): Promise<void> {
-  const active = link();
+  const active = burrowLink();
   if (!active) {
     setState(UNSUPPORTED);
     return;
@@ -257,7 +257,7 @@ async function readBurrowStatus(): Promise<void> {
     setState(status ? { kind: 'ready', status: normalizeStatus(status) } : UNSUPPORTED);
   } catch (error) {
     if (mine !== generation) return;
-    setState({ kind: 'error', message: describeError(error) });
+    setState({ kind: 'error', message: describeBurrowError(error) });
   }
 }
 
@@ -276,7 +276,7 @@ export async function enrollBurrow(
   password: string,
   label: string,
 ): Promise<void> {
-  const active = link();
+  const active = burrowLink();
   if (!active) throw new Error('This build has no Burrow service.');
   await active.command('enroll', { relayUrl, password, label });
   await refreshAfterMutation();
@@ -296,7 +296,7 @@ export async function enrollBurrow(
  * build was not compiled to reach.
  */
 export async function enrollOfferBurrow(origin: string, label: string): Promise<void> {
-  const active = link();
+  const active = burrowLink();
   if (!active) throw new Error('This build has no Burrow service.');
   await active.command('enrollOffer', { origin, label });
   await refreshAfterMutation();
@@ -308,7 +308,7 @@ export async function enrollOfferBurrow(origin: string, label: string): Promise<
  * (`docs/specs/relay.md`, "Relay socket policy").
  */
 export async function reconnectBurrow(): Promise<void> {
-  const active = link();
+  const active = burrowLink();
   if (!active) throw new Error('This build has no Burrow service.');
   await active.command('reconnect');
   await refreshAfterMutation();
@@ -320,7 +320,7 @@ export async function reconnectBurrow(): Promise<void> {
  * claiming otherwise while the credential is still on disk.
  */
 export async function clearBurrowEnrollment(): Promise<void> {
-  const active = link();
+  const active = burrowLink();
   if (!active) throw new Error('This build has no Burrow service.');
   await active.command('clearEnrollment');
   await refreshAfterMutation();
@@ -337,7 +337,7 @@ export async function clearBurrowEnrollment(): Promise<void> {
  * Relay that refuses both have to read as themselves.
  */
 export async function mintSetupQr(): Promise<SetupQrResult> {
-  const active = link();
+  const active = burrowLink();
   if (!active) throw new Error('This build has no Burrow service.');
   return (await active.command('setupQr')) as SetupQrResult;
 }
@@ -369,7 +369,7 @@ export function subscribeToInvitation(
   ) => void,
 ): () => void {
   return (
-    link()?.on('invitation', (data) => {
+    burrowLink()?.on('invitation', (data) => {
       const event = data as InvitationEvent | undefined;
       if (typeof event?.inviteId === 'string' && typeof event.state === 'string') {
         const outcome = typeof event.outcome === 'string' ? event.outcome : undefined;
@@ -395,12 +395,12 @@ export function subscribeToInvitation(
  * Burrow stack into the main bundle on every host.
  */
 export async function sendTestPush(): Promise<PushSendSummary> {
-  const active = link();
+  const active = burrowLink();
   if (!active) throw new Error('This build has no Burrow service.');
   return (await active.command('pushTest')) as PushSendSummary;
 }
 
-function describeError(error: unknown): string {
+export function describeBurrowError(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === 'string' && error) return error;
   // Completes the section's own sentence — "Could not reach this machine's

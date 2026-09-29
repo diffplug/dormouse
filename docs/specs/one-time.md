@@ -2,7 +2,7 @@
 
 > See `docs/specs/glossary.md` for Burrow, Client, Relay, Pane, and Baseboard vocabulary; this spec uses them bare.
 > Owns the one-time connection: the link a Burrow shows, the Hosted rendezvous that carries only its handshake, and the direct-only session that follows. Defers the ceremony's trust rules to `docs/specs/remote-security-model.md` -> "One-time connection" and the audited checks to `docs/specs/security-remote.md` -> "One-time connection".
-> The shared contract, the Burrow runtime, the service with its host glue, the phone client and page, and the Hosted rendezvous are built; the laptop's interface is the **one-time-connection** scope under `## Future`.
+> Everything in the one-time connection is built — the shared contract, the Burrow runtime, the service with its host glue, the phone client and page, the Hosted rendezvous, and the laptop UI; `## Future` holds the **one-time-anywhere** scope.
 
 A phone reaches a laptop with no account, no Relay, and no passkey: the laptop
 shows a link, the phone opens it, a person types on the laptop the two digits the
@@ -407,13 +407,54 @@ Source of truth: `BurrowService`, `idleOneTimeState`, and `oneTimeServing` in
 `lib/src/host/remote/service.test.ts` and
 `lib/src/host/remote/one-time-origin.test.ts`.
 
+## Laptop UI
+
+**`OneTimeConnection` sits in Settings' Remote control choices, above
+Persistent Relay, enrolled or not**; `OneTimeIndicator` sits in the Baseboard's
+right cluster (`docs/specs/layout.md` -> "Baseboard").
+
+| State | The panel shows | Actions |
+| --- | --- | --- |
+| `idle` | the **One-time connection** button; "Open a link on your phone for a one-off connection. Phone and computer must be on the same Wi-Fi. No account needed." | the button opens |
+| `unavailable` | the button disabled, the reason's copy for the hint | — |
+| `opening` | "Getting a link…" | Cancel |
+| `waiting` | the link as a QR code and as selectable text; "Good for one phone. Expires in N min." | Copy link, New link, Cancel |
+| `confirming` | "Type the two digits your phone shows into the dialog." | Cancel |
+| `connecting` | "Connecting directly…" | Cancel |
+| `connected` | the phone's label, then "has full control of your terminals." | End |
+| `ended` | one fixed sentence per reason, `direct-failed`'s naming the same Wi-Fi | New link, Done |
+
+- **The panel renders the service's state and owns only its busy and error**; a
+  refused `oneTimeOpen` renders inline. **Closing Settings changes nothing**:
+  the link keeps waiting, and reopening re-reads `oneTimeStatus`.
+- **Never open a link on a timer**: only New link replaces one, and the
+  countdown re-renders on the minute (rationale).
+- **Cancel and End send `oneTimeEnd`; Done sends the one that returns `ended`
+  to `idle`. `ended {user-ended}` renders as `idle`** (rationale).
+- **An open the panel started shows as `opening` before any event**, with
+  Cancel live through it.
+- **End copy is fixed per reason**, looked up own-property only, with a
+  fallback for a reason a newer broker knows.
+- **The indicator shows only while `connecting` or `connected`**: "Phone
+  connecting…" or "Phone connected", then End; the phone's label is its
+  tooltip (rationale).
+- **The store seeds from `oneTimeStatus` and replaces its state with every
+  `one-time` event that passes `isOneTimeState`**; an answer an event overtook
+  is dropped. The indicator holds it for the window's life, so the panel
+  re-reads on mount.
+
+**Never ship a desktop release with this button before Hosted production
+serves this link version** — its rendezvous routes and its `/connect/` page.
+
+Source of truth: `OneTimeConnection` and `ONE_TIME_ENDED_COPY` in
+`lib/src/components/OneTimeConnection.tsx`; `OneTimeIndicator` in
+`lib/src/components/OneTimeIndicator.tsx`; `subscribeToOneTime` and
+`openOneTime` in `lib/src/remote/burrow/one-time-store.ts`. Pinned by
+`lib/src/components/RemoteControlSection.test.tsx`,
+`lib/src/components/OneTimeIndicator.test.tsx`, and
+`lib/src/remote/burrow/one-time-store.test.ts`.
+
 ## Future
-
-**Scope: one-time-connection** — the feature on top of the contract, in build
-order, each stage promoting its part above the fold:
-
-1. **Laptop UI** — the Settings panel and the Baseboard indicator; the button
-   enabled.
 
 **Scope: one-time-anywhere** — reach past one network, for paid users: STUN and
 TURN servers for those users alone (the Relay-supplied ICE servers of
@@ -438,21 +479,6 @@ limit.
    the switch.
 8. After the switch both ends have left the room, and it deletes itself.
 
-
-### Laptop UI
-
-- **`OneTimeConnection` in Settings' Remote control choices, enrolled or not**:
-  idle (hint "…open on your phone. Phone and computer must be on the same Wi-Fi.
-  No account needed.") · unavailable (disabled, with the reason) · opening ·
-  waiting (QR, link, Copy link, "Good for one phone. Expires in N min.", New
-  link, Cancel; no auto-refresh) · confirming · connecting · connected ("<label>
-  has full control of your terminals." and End) · ended (reason copy, the
-  same-Wi-Fi hint for `direct-failed`, New link, Done). Closing Settings keeps
-  it running.
-- **`OneTimeIndicator` in the Baseboard's right cluster** reads "Phone connected
-  · End" while connected.
-- **A desktop release enabling the button ships only after Hosted production
-  serves this link version.**
 
 ### Security model remainder
 
