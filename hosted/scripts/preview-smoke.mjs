@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { setTimeout as delay } from "node:timers/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { providerAuthorizationOrigins } from "../server/providers.js";
@@ -6,6 +7,47 @@ import { oneTimeSmoke } from "./one-time-smoke.mjs";
 
 /** @param {{ text: string }} email */
 export const codeFrom = (email) => email.text.match(/\b\d{8}\b/)?.[0];
+
+// Only the initial health GET can retry a transport failure while a new custom
+// domain becomes reachable. OAuth starts may retry one explicit rejection after
+// Retry-After (or Better Auth's X-Retry-After); never replay a POST whose
+// transport outcome is unknown.
+export async function smokeRequest(fetcher, url, options, wait = delay) {
+  const path = new URL(url).pathname;
+  const health = path === "/api/health" && !options.method;
+  const social = path === "/api/auth/sign-in/social" && options.method === "POST";
+  for (let attempt = 0; ; attempt++) {
+    let response;
+    try {
+      response = await fetcher(url, {
+        ...options,
+        signal: AbortSignal.timeout(30_000),
+      });
+    } catch (error) {
+      if (
+        !health ||
+        attempt >= 6 ||
+        !(error instanceof TypeError) ||
+        error.message !== "fetch failed"
+      )
+        throw error;
+      await wait(5_000);
+      continue;
+    }
+    if (social && attempt === 0 && response.status === 429) {
+      const value =
+        response.headers.get("retry-after") ??
+        response.headers.get("x-retry-after");
+      const seconds = value && /^\d+$/.test(value) ? Number(value) : 0;
+      if (seconds >= 1 && seconds <= 60) {
+        await response.body?.cancel();
+        await wait(seconds * 1_000);
+        continue;
+      }
+    }
+    return response;
+  }
+}
 
 export async function smoke(
   origin,
@@ -22,9 +64,8 @@ export async function smoke(
   );
   assert.equal(new URL(origin).protocol, "https:");
   const request = (path, options = {}) =>
-    fetcher(origin + path, {
+    smokeRequest(fetcher, origin + path, {
       redirect: "manual",
-      signal: AbortSignal.timeout(30_000),
       ...options,
     });
   const health = await request("/api/health");
