@@ -13,6 +13,7 @@ import { ensureResizeObserver } from './wall-test-utils';
 import { setMouseReporting, removeMouseSelectionState } from '../../lib/mouse-selection';
 import { setPlatform } from '../../lib/platform';
 import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
+import { rememberBrowserProvider } from './BrowserProviderSwitch';
 import { cfg } from '../../cfg';
 
 vi.mock('../TerminalPane', () => ({ TerminalPane: () => <textarea aria-label="Fake terminal input" /> }));
@@ -23,6 +24,7 @@ let props: TerminalContextViewProps;
 let previousAnimate: boolean;
 const port = (value: number) => ({ port: value, host: 'localhost', url: `http://localhost:${value}/` });
 beforeEach(() => {
+  rememberBrowserProvider('agent-browser');
   previousAnimate = cfg.layout.animate;
   setPlatform(new FakePtyAdapter()); ensureResizeObserver();
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
@@ -74,7 +76,7 @@ it('keeps a pending port action focused, blocks repeats, and clears feedback on 
   const open = button('Open in agent-browser screencast');
   act(() => open.focus());
   await click('Open in agent-browser screencast');
-  expect(open.textContent).toContain('Opening…');
+  expect(open.textContent).toContain('opening…');
   expect(open.getAttribute('aria-busy')).toBe('true');
   expect(open.disabled).toBe(false);
   expect(document.activeElement).toBe(open);
@@ -103,10 +105,163 @@ it.each(['scanning', 'failed', 'empty'] as const)('distinguishes %s ports', stat
   expect(container.textContent).toContain(state === 'empty' ? 'No listening ports' : state === 'failed' ? 'Port scan failed' : 'Scanning ports');
   expect(button('Open in system browser')).toBeNull();
 });
+it('moves trailing actions into the dropdown on resize and dispatches hidden actions', async () => {
+  let width = 250;
+  const observers = new Set<() => void>();
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(callback: () => void) { observers.add(callback); }
+    observe() {} disconnect() {} unobserve() {}
+  });
+  const client = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function(this: HTMLElement) { return this.hasAttribute('data-port-actions') ? width : 0; });
+  const offset = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(100);
+  try {
+    render();
+    const dropdown = () => container.querySelector<HTMLSelectElement>('[aria-label="More browser actions"]');
+    expect(button('Open in system browser')).not.toBeNull();
+    expect(button('Open in agent-browser screencast')).toBeNull();
+    expect([...dropdown()!.options].map(option => option.value)).toContain('agent-browser-screencast');
+    const launch = Promise.withResolvers<void>();
+    props.onPort = vi.fn(() => launch.promise); render();
+    await act(async () => { dropdown()!.value = 'agent-browser-screencast'; dropdown()!.dispatchEvent(new Event('change', { bubbles: true })); });
+    expect(props.onPort).toHaveBeenCalledWith(port(5173), 'agent-browser-screencast');
+    expect(dropdown()!.getAttribute('aria-busy')).toBe('true');
+    await act(async () => launch.reject(new Error('Launch failed')));
+    expect(container.querySelector('[data-context-diagnostic]')?.textContent).toBe('Launch failed');
+    act(() => { width = 80; observers.forEach(notify => notify()); });
+    expect(button('Open in system browser')).toBeNull();
+    expect(dropdown()!.options).toHaveLength(6);
+    act(() => { width = 600; observers.forEach(notify => notify()); });
+    expect(dropdown()).toBeNull();
+    expect(button('Open in agent-browser popout')).not.toBeNull();
+  } finally { client.mockRestore(); offset.mockRestore(); vi.unstubAllGlobals(); }
+});
+
+it('drops the explain label, then the Surface ref text, as the title row narrows', () => {
+  let width = 320;
+  const observers = new Set<() => void>();
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(callback: () => void) { observers.add(callback); }
+    observe() {} disconnect() {} unobserve() {}
+  });
+  const client = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function(this: HTMLElement) { return this.hasAttribute('data-context-title') ? width : 0; });
+  // Ten pixels a character, twenty an icon, 8ch as eighty: the title is 80, explain 90 or 20, the ref 110, close 20.
+  const offset = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function(this: HTMLElement) {
+    return (this.textContent?.length ?? 0) * 10 + this.querySelectorAll('svg').length * 20 + (this.classList.contains('w-[8ch]') ? 80 : 0);
+  });
+  const resize = (next: number) => act(() => { width = next; observers.forEach(notify => notify()); });
+  try {
+    render();
+    expect(button('Explain this title').textContent).toBe('explain');
+    expect(button('Copy surface:3').textContent).toBe('surface:3');
+    resize(260);
+    expect(button('Explain this title').textContent).toBe('');
+    expect(button('Copy surface:3').textContent).toBe('surface:3');
+    resize(200);
+    expect(button('Copy surface:3').textContent).toBe('');
+    resize(320);
+    expect(button('Explain this title').textContent).toBe('explain');
+    expect(button('Copy surface:3').textContent).toBe('surface:3');
+  } finally { client.mockRestore(); offset.mockRestore(); vi.unstubAllGlobals(); }
+});
+
+it('re-fits the title row when its helper placement buttons change', () => {
+  // Observers here see only the elements they observe, so an unobserved group cannot trigger a re-fit.
+  const observed = new Map<Element, Set<() => void>>();
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(private callback: () => void) {}
+    observe(element: Element) { observed.set(element, (observed.get(element) ?? new Set()).add(this.callback)); }
+    disconnect() { for (const callbacks of observed.values()) callbacks.delete(this.callback); }
+    unobserve() {}
+  });
+  const client = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function(this: HTMLElement) { return this.hasAttribute('data-context-title') ? 260 : 0; });
+  // As above; each placement side and the close add a twenty-pixel icon to the actions group.
+  const offset = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function(this: HTMLElement) {
+    return (this.textContent?.length ?? 0) * 10 + this.querySelectorAll('svg').length * 20 + (this.classList.contains('w-[8ch]') ? 80 : 0);
+  });
+  try {
+    props.placement = { side: 'bottom', available: ['bottom'], onChange: vi.fn() };
+    render();
+    expect(button('Copy surface:3').textContent).toBe('surface:3');
+    props.placement = { side: 'bottom', available: ['bottom', 'top'], onChange: vi.fn() };
+    render();
+    const actions = container.querySelector('[data-context-header-actions]')!;
+    act(() => observed.get(actions)?.forEach(notify => notify()));
+    expect(button('Copy surface:3').textContent).toBe('');
+  } finally { client.mockRestore(); offset.mockRestore(); vi.unstubAllGlobals(); }
+});
+
+it('drops the explorer label, and its busy text, before truncating the directory', async () => {
+  let width = 400;
+  const observers = new Set<() => void>();
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(callback: () => void) { observers.add(callback); }
+    observe() {} disconnect() {} unobserve() {}
+  });
+  const client = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function(this: HTMLElement) { return this.hasAttribute('data-context-dir') ? width : 0; });
+  const offset = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(100);
+  const resize = (next: number) => act(() => { width = next; observers.forEach(notify => notify()); });
+  try {
+    render();
+    expect(button('Open in Finder').textContent).toContain('open in Finder');
+    resize(250);
+    expect(button('Open in Finder').textContent).not.toContain('open in Finder');
+    props.onExplore = vi.fn(() => new Promise<void>(() => {}));
+    render();
+    await click('Open in Finder');
+    expect(button('Open in Finder').getAttribute('aria-busy')).toBe('true');
+    expect(button('Open in Finder').textContent).toBe('');
+    resize(300);
+    expect(button('Open in Finder').textContent).toContain('open in Finder');
+  } finally { client.mockRestore(); offset.mockRestore(); vi.unstubAllGlobals(); }
+});
+
+it('confirms the unlabeled path copy with the check alone, keeping its width', async () => {
+  props.onCopyPath = vi.fn(async () => {});
+  render();
+  await click('Copy absolute path');
+  const copy = button('Copy absolute path');
+  expect(copy.querySelector('[role="status"] svg')).not.toBeNull();
+  expect(copy.textContent).toBe('');
+});
+
+it('opens the overflow list from the keyboard rather than letting keys pick its first entry', () => {
+  const client = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function(this: HTMLElement) { return this.hasAttribute('data-port-actions') ? 80 : 0; });
+  const offset = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(100);
+  try {
+    render();
+    const more = container.querySelector<HTMLSelectElement>('[aria-label="More browser actions"]')!;
+    const showPicker = vi.fn();
+    more.showPicker = showPicker;
+    const cancels = (key: string) => {
+      const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+      act(() => { more.dispatchEvent(event); });
+      return event.defaultPrevented;
+    };
+    expect(cancels('ArrowDown')).toBe(true);
+    expect(showPicker).toHaveBeenCalledTimes(1);
+    expect(cancels('s')).toBe(true);
+    expect(cancels('End')).toBe(true);
+    expect(showPicker).toHaveBeenCalledTimes(1);
+    expect(cancels(' ')).toBe(false);
+    expect(cancels('Tab')).toBe(false);
+  } finally { client.mockRestore(); offset.mockRestore(); }
+});
+
+it('uses one pair of automated actions and remembers the selected provider on reopening', async () => {
+  render();
+  expect(button('Open in playwright screencast')).toBeNull();
+  act(() => button('switch to playwright').click());
+  expect(button('Open in agent-browser screencast')).toBeNull();
+  await click('Open in playwright screencast');
+  expect(props.onPort).toHaveBeenCalledWith(port(5173), 'playwright-screencast');
+  act(() => root.render(null));
+  render();
+  expect(button('Open in playwright popout')).not.toBeNull();
+});
 it('disables unsupported host capabilities with an explanation', () => {
   props.browserProviders = ['playwright']; props.canExplore = false; render();
-  // Both of agent-browser's targets name the provider the host lacks.
-  expect([...container.querySelectorAll<HTMLButtonElement>('button[aria-label="agent-browser unavailable on this host"]')].map(b => b.disabled)).toEqual([true, true]);
+  expect(button('Open in agent-browser popout')).toBeNull();
+  expect(button('switch to agent-browser')).toBeNull();
   expect(button('Open in playwright popout').disabled).toBe(false);
   expect(button('Directory unavailable on this host').disabled).toBe(true);
 });

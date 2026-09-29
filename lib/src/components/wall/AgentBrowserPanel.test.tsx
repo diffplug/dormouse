@@ -35,7 +35,7 @@ type TestPanelParams = {
 const DEFAULT_PARAMS: TestPanelParams = { surfaceType: 'agent-browser', session: 'browser-session' };
 
 /** The operations that drive a live browser, rather than bind or view one. */
-const DRIVES = new Set(['navigate', 'history', 'tab', 'viewport', 'device', 'close']);
+const DRIVES = new Set(['navigate', 'history', 'tab', 'viewport', 'close']);
 
 class ResizeObserverMock {
   observe() {}

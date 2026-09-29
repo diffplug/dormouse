@@ -742,7 +742,7 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
-  async function openPortContext() {
+  async function openPortContext(provider = 'agent-browser') {
     // The mocked TerminalPane registers no terminal, so a real helper would
     // report its parent closed — an alert the context shows ahead of a port error.
     vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'context-helper', parentId: 'pane-a', command: '', status: 'preserved' });
@@ -754,6 +754,7 @@ describe('Wall on the Lath engine', () => {
       }));
     });
     await flush();
+    await act(async () => document.querySelector<HTMLButtonElement>(`[data-terminal-context] button[aria-label="switch to ${provider}"]`)?.click());
   }
   const contextButton = (label: string) => document.querySelector<HTMLButtonElement>(`[data-terminal-context] button[aria-label="${label}"]`)!;
 
@@ -861,7 +862,7 @@ describe('Wall on the Lath engine', () => {
         root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
       });
       await flush();
-      await openPortContext();
+      await openPortContext('playwright');
       await act(async () => contextButton('Open in playwright screencast').click());
       await flush();
 
@@ -882,12 +883,12 @@ describe('Wall on the Lath engine', () => {
     const events = vi.fn();
     await act(async () => { root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" onEvent={events} />); });
     await flush();
-    await openPortContext();
+    await openPortContext(provider);
     const button = contextButton(`Open in ${provider} ${presentation}`);
     events.mockClear();
     await act(async () => { button.focus(); button.click(); });
     await flush();
-    expect(button.textContent).toContain('Opening…');
+    expect(button.textContent).toContain('opening…');
     expect(button.getAttribute('aria-busy')).toBe('true');
     expect(document.activeElement).toBe(button);
     expect(leafCount()).toBe(1);
@@ -912,7 +913,7 @@ describe('Wall on the Lath engine', () => {
     const events = vi.fn();
     await act(async () => { root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" onEvent={events} />); });
     await flush();
-    await openPortContext();
+    await openPortContext(provider);
     const button = contextButton(`Open in ${provider} screencast`);
     events.mockClear();
     await act(async () => { button.focus(); button.click(); });

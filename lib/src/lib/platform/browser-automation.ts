@@ -42,7 +42,6 @@ export type BrowserOp =
   /** `endsSync` cancels this pane's engagement even before its first socket
    *  intent reaches the host. */
   | { op: 'viewport'; width: number; height: number; dpr?: number; endsSync?: string }
-  | { op: 'device'; name: string; endsSync?: string }
   /** Read the active page's CSS viewport and effective device pixel ratio. */
   | { op: 'measure' }
   /** Close the session — after the launch or attach of it running now — and

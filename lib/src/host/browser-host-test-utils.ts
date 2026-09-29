@@ -49,8 +49,7 @@ export function fakeProvider() {
     closeTab: async (b, tabId) => { calls.push(`tab ${b.session} close ${tabId}`); },
     act: async (b, act) => {
       const args = act.op === 'tab' ? ` ${act.action} ${act.tabId}`
-        : act.op === 'viewport' ? ` ${act.width}x${act.height}@${act.dpr}`
-        : act.op === 'device' ? ` ${act.name}` : '';
+        : act.op === 'viewport' ? ` ${act.width}x${act.height}@${act.dpr}` : '';
       await step(`${act.op} ${b.session}${args}`);
       return { ok: true };
     },

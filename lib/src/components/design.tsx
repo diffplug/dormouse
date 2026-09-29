@@ -482,6 +482,9 @@ export const UNDER_SWITCH_INDENT = 'ml-18';
 export const SUBTLE_ACTION_REST_COLOR_CLASS = 'text-[color:color-mix(in_srgb,var(--color-link)_35%,var(--color-muted))]';
 export const SUBTLE_ACTION_COLOR_CLASS = `${SUBTLE_ACTION_REST_COLOR_CLASS} enabled:not-aria-disabled:hover:text-link enabled:focus-visible:text-link`;
 export const SUBTLE_ACTION_INTERACTION_CLASS = 'enabled:not-aria-disabled:hover:bg-current/10 focus-visible:outline focus-visible:outline-focus-ring';
+/** Both of the above, hover and focus included, for a wrapper whose focusable control is a
+ *  transparent child (a native `<select>` over a label). The caller drops it while busy. */
+export const SUBTLE_ACTION_WRAPPER_INTERACTION_CLASS = 'hover:bg-current/10 hover:text-link has-[:focus-visible]:text-link has-[:focus-visible]:outline has-[:focus-visible]:outline-focus-ring';
 
 /**
  * The app's boolean control: compact track (off left, on right) and one state

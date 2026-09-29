@@ -52,7 +52,6 @@ function actArgv(act: BrowserAct): string[] | null {
       if (TAB_VERBS.has(act.tabId)) return null;
       return act.action === 'select' ? ['tab', act.tabId] : ['tab', 'close', act.tabId];
     case 'viewport': return ['set', 'viewport', String(act.width), String(act.height), ...(act.dpr === undefined ? [] : [String(act.dpr)])];
-    case 'device': return ['set', 'device', act.name];
   }
 }
 

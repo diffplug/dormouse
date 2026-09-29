@@ -42,7 +42,7 @@ import { BrowserView, WEBVIEW_ID, closeSocket, createViewerServer, measuredViewp
 
 /** An operation on a live browser that each provider maps to its own call:
  *  a fixed agent-browser argv, or a Playwright client call. */
-export type BrowserAct = Extract<BrowserOp, { op: 'navigate' | 'history' | 'tab' | 'viewport' | 'device' }>;
+export type BrowserAct = Extract<BrowserOp, { op: 'navigate' | 'history' | 'tab' | 'viewport' }>;
 
 // For the sidecar, which loads each host module as its own bundle.
 export { browserLaunchEnv } from './browser-launch-env';
@@ -158,7 +158,6 @@ function generateGuiSession(): string {
 }
 
 const TAB_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
-const DEVICE_NAME = /^[A-Za-z0-9][A-Za-z0-9 ()._-]{0,63}$/;
 
 /** `value` as an optional request id: absent, valid, or `null` when invalid. */
 function optionalRequestId(value: unknown): { requestId?: string } | null {
@@ -205,9 +204,6 @@ function parseBrowserRequest(raw: unknown): BrowserRequest | string {
 }
 
 function parseOp(r: Record<string, unknown>): BrowserOp | string {
-  if ((r.op === 'viewport' || r.op === 'device') && r.endsSync !== undefined
-    && (typeof r.endsSync !== 'string' || !WEBVIEW_ID.test(r.endsSync))) return 'invalid sync engagement';
-  const endsSync = typeof r.endsSync === 'string' ? { endsSync: r.endsSync } : {};
   switch (r.op) {
     case 'launch':
     case 'attach': {
@@ -237,6 +233,8 @@ function parseOp(r: Record<string, unknown>): BrowserOp | string {
       return { op: 'tab', action, tabId };
     }
     case 'viewport': {
+      if (r.endsSync !== undefined && (typeof r.endsSync !== 'string' || !WEBVIEW_ID.test(r.endsSync))) return 'invalid sync engagement';
+      const endsSync = typeof r.endsSync === 'string' ? { endsSync: r.endsSync } : {};
       const [width, height, dpr] = [dimension(r.width, VIEWPORT_MAX_SIDE), dimension(r.height, VIEWPORT_MAX_SIDE), r.dpr === undefined ? undefined : dimension(r.dpr, VIEWPORT_MAX_DPR)];
       if (dpr === null) return 'invalid viewport';
       return width && Number.isInteger(width) && height && Number.isInteger(height) && (r.dpr === undefined || dpr)
@@ -244,8 +242,6 @@ function parseOp(r: Record<string, unknown>): BrowserOp | string {
         : 'invalid viewport';
     }
     case 'measure': return { op: 'measure' };
-    case 'device':
-      return typeof r.name === 'string' && DEVICE_NAME.test(r.name) ? { op: 'device', name: r.name, ...endsSync } : 'invalid device name';
     case 'close': {
       const cancels = r.cancels;
       if (cancels === undefined) return { op: 'close' };
@@ -377,7 +373,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   // running must leave the newer pane size last. Recheck lifecycle at execution,
   // since a queued write belongs to the browser that existed at arrival.
   const viewportWrites = new Map<string, Promise<BrowserResult>>();
-  function writeViewport({ p, b, id }: Bound, act: Extract<BrowserAct, { op: 'viewport' | 'device' }>, options: { isCurrent?: () => boolean; onSuccess?: () => void } = {}): Promise<BrowserResult> {
+  function writeViewport({ p, b, id }: Bound, act: Extract<BrowserAct, { op: 'viewport' }>, options: { isCurrent?: () => boolean; onSuccess?: () => void } = {}): Promise<BrowserResult> {
     const generation = generations.get(id);
     const writing = (viewportWrites.get(id) ?? Promise.resolve()).catch(() => {}).then(async () => {
       if (closed) throw new Error('the browser host is shutting down');
@@ -744,8 +740,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
           if (!measured) throw new Error('the browser did not report a viewport');
           return { ok: true, viewport: { width: measured.viewportWidth, height: measured.viewportHeight, dpr: measured.devicePixelRatio } };
         }
-        case 'viewport':
-        case 'device': {
+        case 'viewport': {
           const engagement = r.endsSync ?? sync.current(bound.id);
           return await writeViewport(bound, r, { onSuccess: () => sync.fixed(bound.id, engagement) });
         }

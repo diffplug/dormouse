@@ -2,7 +2,7 @@
  * The browser-automation providers, as `dor`, the Node hosts and the webview
  * all need them: each one's persisted render modes, its CLI, and what may be
  * spawned as that CLI (docs/specs/dor-browser.md → "Providers"). The GUI half
- * of the registry — labels, device lists — lives in lib
+ * of the registry — labels, viewport hints — lives in lib
  * (`lib/src/components/wall/browser-automation.ts`).
  *
  * Free of Node dependencies (no `node:path`), so the same module runs in the
