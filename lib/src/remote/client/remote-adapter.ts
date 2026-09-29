@@ -269,9 +269,11 @@ export class RemotePtyAdapter implements PlatformAdapter {
     // The wall fits a new pane's xterm while its attach is in flight, and the
     // attach carried the size from before the fit: without this the Burrow's
     // PTY stays there, and every line the phone shows wraps at the wrong width.
+    // Best effort, as `resizePty` is: the attach landed, and a resize the Burrow
+    // refuses — a terminal that exited just after it — must not end the session.
     const latest = pending.size;
     if (latest.cols !== size.cols || latest.rows !== size.rows) {
-      await this.#client.resize(id, latest.cols, latest.rows);
+      await this.#client.resize(id, latest.cols, latest.rows).catch(() => {});
     }
   }
 

@@ -114,8 +114,9 @@ one attachment per session, so pane switching is detach → attach, whose repain
 (resize) redraws the screen. **Writes and resizes for a non-attached pane are
 dropped**, since the Burrow rejects them, **but the latest resize for a pane
 being attached is kept**: its attach or a `terminal.resize` after it carries
-that size (rationale). Badges for non-attached panes come from `directory.watch`
-without attaching.
+that size (rationale). **A refused `terminal.resize` after the attach never
+fails `setActivePane`**: the wall ends the session on a failed one. Badges for
+non-attached panes come from `directory.watch` without attaching.
 
 **Must normalize dimensions before sending or caching them.** **Must settle
 fire-and-forget PTY failures and release subscriptions that arrive after

@@ -333,6 +333,30 @@ describe('RemotePtyAdapter attach / active pane', () => {
     expect(client.resizes).toEqual([{ surfaceId: 's1', cols: 53, rows: 28 }]);
   });
 
+  it('keeps the attach when the Burrow refuses its catch-up resize', async () => {
+    // `PocketWall` ends the session on a rejected activation; a resize lost
+    // to a terminal that exited just after attaching must not do that.
+    const client = new FakeClient();
+    const adapter = new RemotePtyAdapter(client);
+    const originalAttach = client.attach.bind(client);
+    let finishAttach!: () => void;
+    const landed = new Promise<void>((resolve) => { finishAttach = resolve; });
+    vi.spyOn(client, 'attach').mockImplementationOnce(async (...args) => {
+      const result = await originalAttach(...args);
+      await landed;
+      return result;
+    });
+    const resize = vi.spyOn(client, 'resize').mockRejectedValue(new Error('surface is not attached'));
+    const activation = adapter.setActivePane('s1', 80, 24);
+    await Promise.resolve();
+    adapter.resizePty('s1', 53, 28);
+    finishAttach();
+
+    await expect(activation).resolves.toBeUndefined();
+    expect(resize).toHaveBeenCalledWith('s1', 53, 28);
+    expect(adapter.activeSurfaceId).toBe('s1');
+  });
+
   it('attaches at a size asked of the pane while the previous one detached', async () => {
     const client = new FakeClient();
     const adapter = new RemotePtyAdapter(client);
