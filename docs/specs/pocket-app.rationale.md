@@ -22,6 +22,8 @@
 
 **Why a refused `POST /api/setup/retire` aborts the ceremony.** The Relay refusing to retire the code means the code is already dead, and the Burrow would refuse the pairing that follows for the same reason. Continuing spends a WebAuthn prompt and a Noise handshake to reach that refusal further from the recovery.
 
+**Why a resize for the pane being attached is kept.** The wall attaches a new pane with its xterm's pre-fit default (80×24) and fits it a few milliseconds later, while the attach is still in flight; the refit after the attach then finds nothing to change. Dropping that resize left the Burrow's PTY at 80×24 under a 53×28 phone, so the shell wrapped every line at the wrong width (one-time connection end to end, standalone harness, 2026-09).
+
 **Why Pocket hides `MobileWall`'s Kill button.** Closing a local xterm view without a Burrow-side close leaves the Burrow attachment live: the pane vanishes on the phone and stays open on the laptop.
 
 **Why the Burrows view is titled "Burrows".** It was "Computers", the word the rest of Pocket used for the machine on the other end. One computer runs two Burrows — standalone and the VS Code extension enroll separately — so "Computers" named the wrong thing as soon as both were listed, and the two rows had to be told apart by something. `suggestedBurrowLabel` names the app beside the hostname for the same reason.

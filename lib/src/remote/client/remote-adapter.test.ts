@@ -309,6 +309,47 @@ describe('RemotePtyAdapter attach / active pane', () => {
     expect(client.writes).toEqual([{ surfaceId: 's1', bytes: toBase64Url(utf8Encode('ls\r')) }]);
   });
 
+  it('follows an attach with the size its pane was fitted to while the attach was in flight', async () => {
+    const client = new FakeClient();
+    const adapter = new RemotePtyAdapter(client);
+    const originalAttach = client.attach.bind(client);
+    let finishAttach!: () => void;
+    const landed = new Promise<void>((resolve) => { finishAttach = resolve; });
+    vi.spyOn(client, 'attach').mockImplementationOnce(async (...args) => {
+      const result = await originalAttach(...args);
+      await landed;
+      return result;
+    });
+    // The wall attaches with the xterm's pre-fit default, then fits it mid-flight.
+    const activation = adapter.setActivePane('s1', 80, 24);
+    await Promise.resolve();
+    adapter.resizePty('s1', 53, 28);
+    adapter.resizePty('s2', 10, 10); // neither attached nor being attached → dropped
+    expect(client.resizes).toEqual([]);
+    finishAttach();
+    await activation;
+
+    expect(client.lastAttach()).toMatchObject({ surfaceId: 's1', cols: 80, rows: 24 });
+    expect(client.resizes).toEqual([{ surfaceId: 's1', cols: 53, rows: 28 }]);
+  });
+
+  it('attaches at a size asked of the pane while the previous one detached', async () => {
+    const client = new FakeClient();
+    const adapter = new RemotePtyAdapter(client);
+    await adapter.setActivePane('s1', 80, 24);
+    let finishDetach!: () => void;
+    const detached = new Promise<void>((resolve) => { finishDetach = resolve; });
+    vi.spyOn(client, 'detach').mockImplementationOnce(async () => { await detached; });
+    const activation = adapter.setActivePane('s2', 80, 24);
+    await Promise.resolve();
+    adapter.resizePty('s2', 53, 28);
+    finishDetach();
+    await activation;
+
+    expect(client.lastAttach()).toMatchObject({ surfaceId: 's2', cols: 53, rows: 28 });
+    expect(client.resizes).toEqual([]);
+  });
+
   it('normalizes resizes before caching dimensions for the next attachment', async () => {
     const client = new FakeClient();
     const adapter = new RemotePtyAdapter(client);
