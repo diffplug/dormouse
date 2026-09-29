@@ -136,6 +136,29 @@ it('moves trailing actions into the dropdown on resize and dispatches hidden act
   } finally { client.mockRestore(); offset.mockRestore(); vi.unstubAllGlobals(); }
 });
 
+it('opens the overflow list from the keyboard rather than letting keys pick its first entry', () => {
+  const client = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function(this: HTMLElement) { return this.hasAttribute('data-port-actions') ? 80 : 0; });
+  const offset = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(100);
+  try {
+    render();
+    const more = container.querySelector<HTMLSelectElement>('[aria-label="More browser actions"]')!;
+    const showPicker = vi.fn();
+    more.showPicker = showPicker;
+    const cancels = (key: string) => {
+      const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+      act(() => { more.dispatchEvent(event); });
+      return event.defaultPrevented;
+    };
+    expect(cancels('ArrowDown')).toBe(true);
+    expect(showPicker).toHaveBeenCalledTimes(1);
+    expect(cancels('s')).toBe(true);
+    expect(cancels('End')).toBe(true);
+    expect(showPicker).toHaveBeenCalledTimes(1);
+    expect(cancels(' ')).toBe(false);
+    expect(cancels('Tab')).toBe(false);
+  } finally { client.mockRestore(); offset.mockRestore(); }
+});
+
 it('uses one pair of automated actions and remembers the selected provider on reopening', async () => {
   render();
   expect(button('Open in playwright screencast')).toBeNull();

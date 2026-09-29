@@ -147,6 +147,9 @@ function ContextOpenAction({ children, label, disabled, onOpen }: { children: Re
 }
 
 const MORE = <span className="inline-flex items-center gap-1">more…<CaretDownIcon size={10} weight="fill" /></span>;
+/** Keys that open, close, or leave a closed select. Chromium on Windows and Linux
+ *  lets any other key change a closed select's value, which here would launch. */
+const SELECT_PASSTHROUGH_KEYS = new Set(['Enter', ' ', 'Tab', 'Escape', 'F4']);
 
 /** Measure natural action widths so overflow follows this row, not the window.
  * The native dropdown escapes the context's scroll/animation clipping and owns
@@ -220,10 +223,18 @@ function PortLaunchActions({ providers, canIframe, onPort }: {
       </ContextAction>;
     })}
     {/* A transparent native select over a link-styled label, like the other actions. */}
-    {visible < actions.length && <span className={`relative ${ACTION_BOX_CLASS} ${SUBTLE_ACTION_REST_COLOR_CLASS} ${windowFocused && pending === null ? SUBTLE_ACTION_WRAPPER_INTERACTION_CLASS : ''}`}>
+    {visible < actions.length && <span className={`relative overflow-hidden ${ACTION_BOX_CLASS} ${SUBTLE_ACTION_REST_COLOR_CLASS} ${windowFocused && pending === null ? SUBTLE_ACTION_WRAPPER_INTERACTION_CLASS : ''}`}>
       {hiddenPending ? OPENING : MORE}
       <select aria-label="More browser actions" title="More browser actions" value="" aria-busy={pending !== null || undefined} aria-disabled={pending !== null || undefined}
         className="absolute inset-0 cursor-pointer appearance-none opacity-0"
+        onKeyDown={event => {
+          if (SELECT_PASSTHROUGH_KEYS.has(event.key) || event.altKey || event.ctrlKey || event.metaKey) return;
+          // Only a choice from the open list launches; arrows open it instead.
+          event.preventDefault();
+          if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            try { event.currentTarget.showPicker(); } catch { /* Space and Alt+↓ still open it */ }
+          }
+        }}
         onChange={event => { const action = actions.find(item => key(item) === event.target.value); if (action) void run(action); }}>
         <option value="">More browser actions</option>
         {actions.slice(visible).map(action => <option key={key(action)} value={key(action)} disabled={action.disabled}>{action.disabled ? action.label : action.text}</option>)}

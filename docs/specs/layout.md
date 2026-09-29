@@ -88,7 +88,7 @@ Popups share the zoomed pane’s app-background halo.
 | Alerts | Source Watch and TODO controls; notification details directly below |
 | Helper | Remaining space; one-line status, Modify/Reset and Promote; hide its name below 48rem container width |
 
-**Must keep port actions on one line to the right of the port display**, moving trailing actions into a dropdown as measured available width shrinks; all targets remain reachable.
+**Must keep port actions on one line to the right of the port display**, moving trailing actions into a dropdown as measured available width shrinks; all targets remain reachable. **Must launch from that dropdown only on a choice from its open list**: arrow keys open it, since Chromium on Windows and Linux otherwise changes a closed select's value.
 
 **Must write visible action text in the Title, Dir, and Ports rows in lowercase**, since `iframe` and `agent-browser` cannot be capitalized; proper nouns such as Finder, tooltips, and accessible names keep their case.
 
