@@ -3,8 +3,7 @@
 > See `docs/specs/glossary.md` for canonical Surface / Session / Pane
 > vocabulary used by the public product guide and browser workflow.
 
-Dormouse publishes specialized references and a hosted-services preview
-on the marketing site. Each reference is generated from its canonical source.
+The following references are generated from canonical sources.
 
 ```text
 /dor                dor CLI reference
@@ -32,7 +31,7 @@ that once rendered it at `/docs` is retained and still runs (see
 | `/self-host` | Running your own Relay | The runbook half of `SELF_HOST.md` |
 | `/hosted` | Account-service introduction and prelaunch managed services | `website/src/pages/Hosted.tsx` |
 | `/security` | What Dormouse guarantees and how it is checked | Every section of `docs/specs/security.md`, minus title and front matter; its rows split across three pages |
-| `/privacy`, `/terms` | Hosted account policies, labeled as drafts until approved | `website/src/pages/Privacy.tsx`, `website/src/pages/Terms.tsx` |
+| `/privacy`, `/terms` | Standalone Hosted account policy drafts outside Docs | `website/src/pages/Privacy.tsx`, `website/src/pages/Terms.tsx` |
 | GitHub root | Repository overview and contributor entry point | Root `README.md` |
 
 Internal specs remain maintainer references, the one exception being the
@@ -264,8 +263,7 @@ Exempt: `/` with its anchors, and the `/docs` entrypoint, which names no page.
 ## Reference page chrome
 
 `DOCS_PAGES` pages use `DocsLayout` for header, rail, `h1`, intro, and
-prev/next. `/hosted` follows `/self-host`. **Must place privacy and terms directly
-after Hosted.** **Must place “Compatible agents”
+prev/next. `/hosted` follows `/self-host`. **Must place “Compatible agents”
 immediately after “dor CLI reference”.**
 
 **Each page's `linkedFrom` names every document owing it a link** — the two
@@ -352,6 +350,12 @@ discloses metadata, and links the model.
 
 **Must also link the preview from** Pocket marketing/tutorial, self-host docs,
 and the speech and remote-control settings; `linkedFrom` owns the rest.
+
+## Hosted policies
+
+**Must prerender `/privacy` and `/terms` outside Docs navigation with standalone marketing chrome and draft labels until approved.**
+
+Source of truth: `HostedPolicyLayout` in `website/src/components/HostedPolicyLayout.tsx`.
 
 ## `/dor` reference
 
