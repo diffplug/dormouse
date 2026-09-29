@@ -282,6 +282,13 @@ Source of truth: `PersistedToolMetadata` in `lib/src/lib/session-types.ts`; `sav
   terminal flash grates. `--has terminal` / `--has browser` *filter flags* for
   `dor list`, whose rows already carry the fields.
 
+**Scope: open-folder** — folders and the Workspace preview slot, in implementation order; the design is [Folders and the preview slot](#folders-and-the-preview-slot).
+
+1. `dor open --preview` and the preview slot: in-place retarget, latest-wins supersession, pin by open, pin on unsaved state, placement.
+2. Directory open rules and `builtin:folder`.
+3. Local `OSC 8` file links: click previews, double-click pins.
+4. Speed within the open rules: an announce-triggered port scan, an optional per-rule `preview:` Tool, and opt-in retarget without restart (built-in viewer first).
+
 ### Dehydrate and rehydrate
 
 **Reap a tool announcing `dehydrate: true` on an idle threshold while
@@ -312,3 +319,32 @@ default; whether `persist` belongs in the announce or the file (currently the
 announce — self-knowledge, like a runtime re-key); the final marketing noun
 ("Dor Tools" carries the LLM-tool-use collision-avoidance; the spec says
 "tool" throughout).
+
+### Folders and the preview slot
+
+**Must resolve every preview through the user's ordered `open` list**, as `dor open` does; no gesture falls back to a faster built-in-only renderer (rationale). A folder viewer is any Tool that selects and activates files through two invocations:
+
+| Gesture | Invocation | Result |
+| --- | --- | --- |
+| Select (single-click) | `dor open --preview <file>` | Retarget the Workspace's preview slot |
+| Activate (double-click) | `dor open <file>` | Pin the slot when it shows that file; otherwise the ordinary open |
+
+**The preview slot.**
+
+- **Must keep at most one preview slot per Workspace**: a Tool Surface carrying a provisional mark on its Pane header and Door. Placement of the mark belongs to `docs/specs/layout.md` → Pane header.
+- **Must persist the mark with Tool metadata**, so the slot remains the preview slot after cold restore. A slot transferred into a Workspace that already has one arrives pinned.
+- **Must create a missing slot as a focus-neutral split of the most recently pinned slot** while it remains in the Workspace, else of the invoking Surface (rationale).
+- **Must retarget in place**: interrupt the slot's command, then run the newly resolved Tool through the [Take-over](#take-over) handshake, retaining the Session id, Surface ref, and terminal. The new Tool may differ from the old one.
+- **Must reveal a pinned keyed match focus-neutrally instead of retargeting.**
+- **Must let a newer preview supersede a pending retarget**, rather than queueing one restart per selection behind the Tool launch lock; the superseded invocation reports that it was superseded.
+- **Never retarget a slot whose Tool reports unsaved changes** ([Unsaved changes](#unsaved-changes)): pin it and create a new slot. Clean and unreported state retarget. **Never pin on keyboard input or focus** (rationale).
+- **Must pin without restarting** when `dor open` resolves to the slot's current Tool and target: clear the mark, adopt the Tool key for [Identity and dedupe](#identity-and-dedupe), and report `existing`.
+
+**Folders.** **Must accept a directory in `dor open`**, matched against the same `open` list and passed to a user Tool as the canonical `$TARGET`; without a match it opens `builtin:folder`.
+
+- **Must match a directory as its name suffixed with `.📁` (U+1F4C1)**, in both the filename and path forms: `*.📁` selects every directory. **A pattern ending in `.📁` matches only directories, and a directory matches only such patterns**, so a catch-all file rule never captures one (rationale). Dot-directories follow the dotfile rule: `.*.📁` names them.
+- **`builtin:folder` must list names and entry types only, loading one directory at a time, and never serve file contents** (rationale). Previews reach files only through the slot, so the one-file viewer grant in [Opening local files](#opening-local-files) is unchanged.
+- **Must list dotfiles.** Entries git ignores are listed by default, with a show/hide checkbox.
+- **Must route the page's select and activate through its own process**: a same-origin POST to its capability listener, which invokes `dor open` over the control socket. The listener's audited rules join `docs/specs/security-local.md` → Local-file viewer when built.
+
+**Terminal links.** A local `file://` `OSC 8` link previews on click and pins on a second click within the double-click interval. **Must keep the confirmation dialog when the link's path-shaped display text is not a suffix of its target path**, and for non-local hosts. The dialog contract belongs to `docs/specs/terminal-escapes.md` → OSC 8 hyperlinks.
