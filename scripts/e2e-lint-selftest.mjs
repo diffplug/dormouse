@@ -160,11 +160,14 @@ for (const violation of [
 }
 
 // Every name the one-time phone's store rule lists must redden it on its own,
-// in the client and in the session core it shares with Pocket — the loop case
-// appends one import to the client alone. A dynamic import and a re-export are
-// the same reach.
+// in the client, in the session core it shares with Pocket, and in the page —
+// the loop case appends one import to the client alone. A dynamic import and a
+// re-export are the same reach. The page's cases also prove the rule's
+// directory scope still resolves to its files.
 const ONE_TIME_CLIENT = 'lib/src/remote/client/one-time-client.ts';
 const SESSION_CORE = 'lib/src/remote/client/session-core.ts';
+const ONE_TIME_PAGE = 'lib/src/remote/one-time-app/OneTimeApp.tsx';
+const ONE_TIME_PAGE_ENTRY = 'lib/src/remote/one-time-app/main.tsx';
 for (const [file, violation] of [
   [ONE_TIME_CLIENT, '\nconst __selftest = globalThis.indexedDB;\n'],
   [ONE_TIME_CLIENT, '\nconst __selftest = globalThis.localStorage;\n'],
@@ -177,6 +180,10 @@ for (const [file, violation] of [
   [ONE_TIME_CLIENT, "\nconst __selftest = import('../pocket-app/service-worker');\n"],
   [SESSION_CORE, "\nimport type { KnownBurrowStore } from './pocket-db';\n"],
   [SESSION_CORE, '\nconst __selftest = globalThis.indexedDB;\n'],
+  [ONE_TIME_PAGE, '\nconst __selftest = globalThis.localStorage;\n'],
+  [ONE_TIME_PAGE, "\nimport { indexedDbKnownBurrowStore } from '../client/pocket-db';\n"],
+  [ONE_TIME_PAGE_ENTRY, "\nimport { registerPushServiceWorker } from '../pocket-app/service-worker';\n"],
+  [ONE_TIME_PAGE_ENTRY, '\nconst __selftest = navigator.serviceWorker;\n'],
 ]) {
   selftest.withAppended(file, violation, `a store in ${file} stays green: ${violation.trim()}`);
 }

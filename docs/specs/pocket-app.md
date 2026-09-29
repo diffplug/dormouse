@@ -169,7 +169,7 @@ re-skins auth screens and wall together.
 **The theme is restored before first paint** by `main.tsx` calling
 `restorePocketTheme()` (rationale), defaulting to Kimbie Dark, the homepage brand
 theme; `PocketWall` repeats it idempotently through `usePocketTheme()` for
-isolated consumers (stories). **That default is one shared `POCKET_THEME_ID`**
+isolated consumers (stories), or repeats the restore its caller hands it. **That default is one shared `POCKET_THEME_ID`**
 the website playground imports, so it cannot drift. Restoring also syncs
 document-level chrome no in-app burrow needs — root `color-scheme` and the
 `<meta name="theme-color">` tint — from the applied theme's type and resolved
@@ -560,7 +560,8 @@ fresh handshake and one WebAuthn prompt. Before the switch a failed channel
 costs nothing.
 
 Source of truth: `PocketClient.connect` in
-`lib/src/remote/client/pocket-client.ts`; `ClientSessionCore.transportPath` /
+`lib/src/remote/client/pocket-client.ts`; `browserDirectPeer` in
+`lib/src/remote/client/browser-direct-peer.ts`; `ClientSessionCore.transportPath` /
 `setOnTransportChanged` in `lib/src/remote/client/session-core.ts`; `TRANSPORT_PATH_LABELS` /
 `TRANSPORT_RELAY_CAUSES` / `transportTitle` in
 `lib/src/remote/pocket-app/views.tsx`.
@@ -601,7 +602,9 @@ rationale); the Relay emits no cross-origin grant
 ([security-remote.md](./security-remote.md#cross-origin-access)). **The bundle
 mounts at the origin root, never under a path prefix**: the manifest's
 `start_url`/`scope`, the worker's registration scope, and the shell's
-manifest/icon links are all root-absolute.
+manifest/icon links are all root-absolute. The one-time page reuses Pocket's
+screens and wall but not this rule: it has no manifest or worker, and mounts at
+Hosted's `/connect/` (`docs/specs/one-time.md` -> "Phone page").
 
 **The origin is served with a Content-Security-Policy**, the defense in depth
 around the active XSS `docs/specs/security.md` -> "What is not defended" names (rationale).

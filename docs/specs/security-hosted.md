@@ -8,7 +8,7 @@
 
 - **FAIL IF** Hosted accepts a request URL outside configured `APP_ORIGIN`, grants marketing-origin credentialed CORS, or permits a state-changing auth request without exact Origin and CSRF checks; inspect `hosted/server/worker-app.ts` and the packed adapter.
 - **FAIL IF** authentication cookies have a Domain attribute, lack `__Host-`, Secure, HttpOnly, or Path=/ in HTTPS, or session tokens appear in browser JSON or persistent browser storage; inspect the adapter and `hosted/src/api.ts`.
-- **FAIL IF** the production HTML permits third-party scripts, framing, inline script execution, or any worker (`worker-src 'none'` origin-wide), any response but a 101 WebSocket upgrade bypasses `secureHeaders` including a misconfigured deployment's error, or anything but a content-hashed `/assets/` file is cacheable, the SPA fallback's shell included; inspect `secureHeaders` in `hosted/server/headers.ts`, binding resolution in `hosted/server/worker-app.ts`, and asset routing in `hosted/wrangler.jsonc`.
+- **FAIL IF** the production HTML permits third-party scripts, framing, inline script execution, or any worker (`worker-src 'none'` origin-wide), any response but a 101 WebSocket upgrade bypasses `secureHeaders` including a misconfigured deployment's error, or anything but a content-hashed file under `/assets/` or `/connect/assets/` is cacheable, the SPA fallback's shell included; inspect `secureHeaders` in `hosted/server/headers.ts`, binding resolution in `hosted/server/worker-app.ts`, and asset routing in `hosted/wrangler.jsonc`.
 - **FAIL IF** marketing scripts, analytics, provider avatars, or remote fonts enter the Hosted frontend; inspect the frontend import graph and deployed response when available.
 
 Pinned by `hosted/server/tests/workers.test.ts`.
@@ -23,7 +23,7 @@ Pinned by `hosted/server/tests/workers.test.ts` and `hosted/server/tests/policy.
 
 ## Rendezvous boundary
 
-**The one-time room is a counter with two sockets**: `docs/specs/one-time.md` -> "Hosted rendezvous" owns its routes and lifecycle; these are the checks on them.
+**The one-time room is a counter with two sockets**: `docs/specs/one-time.md` -> "Hosted rendezvous" owns its routes and lifecycle, and "Phone page" the page beside them; these are the checks on them.
 
 - **FAIL IF** `OneTimeRoom` in `hosted/server/one-time-room.ts` parses, decodes, stores, or logs a forwarded frame; it bounds one by raw length and count alone. `scripts/e2e-lint.mjs` holds it textually.
 - **FAIL IF** a binary frame, one longer than `MAX_ONE_TIME_FRAME_LENGTH`, or one past `MAX_ONE_TIME_FORWARDED` is forwarded rather than closing both ends with 4015, the count omits a frame the room received, or either bound is redeclared rather than imported from `remote-lib-common`.
@@ -33,8 +33,10 @@ Pinned by `hosted/server/tests/workers.test.ts` and `hosted/server/tests/policy.
 - **FAIL IF** a room id comes from anything but 16 fresh random bytes the Worker mints per Burrow socket, the Burrow route takes a room from the request, or a room opens twice.
 - **FAIL IF** either route reaches the room before its per-address rate limit (`cf-connecting-ip`, IPv6 by /64), or a production rate-limit `namespace_id` reaches `PREVIEW_RATELIMIT_OFFSET` in `hosted/scripts/preview.mjs`.
 - **FAIL IF** a one-time route or the room reads a cookie, reaches Hyperdrive or auth, mounts ahead of the 421 gate, or hands the room any header of the caller's but the upgrade.
+- **FAIL IF** the `/connect/` page's policy admits a source outside `APP_ORIGIN`'s `/connect/`, a script outside `/connect/assets/`, or a connection but the client route; permits inline or off-origin script, framing, forms, or popups; or takes an `APP_ORIGIN` that is not exactly an origin. Inspect `contentSecurityPolicy` in `hosted/server/headers.ts`.
+- **FAIL IF** a path under `/connect/` is served but the page and its hashed assets, a missing asset gets the SPA shell, or a shell failing `assertPocketShell`'s one-time mode can ship; `build:one-time` in `lib/package.json` and `stageOneTime` in `hosted/scripts/stage-one-time.mjs` each run it. Inspect `oneTimePageRoutes` in `hosted/server/one-time.ts`.
 
-`scripts/e2e-lint.mjs` also holds `hosted/server/` to the Relay's absences: no protocol-v1 type, no direct-path signal or SDP, no ICE server (`docs/specs/security-remote.md` -> "Direct path"). Pinned by `hosted/server/tests/one-time.test.ts` and `hosted/scripts/production.test.mjs`.
+`scripts/e2e-lint.mjs` also holds `hosted/server/` to the Relay's absences: no protocol-v1 type, no direct-path signal or SDP, no ICE server (`docs/specs/security-remote.md` -> "Direct path"). Pinned by `hosted/server/tests/one-time.test.ts`, `hosted/scripts/stage-one-time.test.mjs`, `lib/src/remote/pocket-app/assert-pocket-worker.test.ts`, and `hosted/scripts/production.test.mjs`.
 
 ## Deployment boundary
 

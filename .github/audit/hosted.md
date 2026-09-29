@@ -13,9 +13,12 @@ GitHub API, but only a public repository, which the workflow's default
 `GITHUB_TOKEN` and the operator's own `gh` login both reach; if that API is
 unreachable, report those two checks as `UNVERIFIABLE`.
 
-Read `docs/specs/hosted.md`, `docs/specs/one-time.md` (its "Wire contract" and
-"Hosted rendezvous"), `hosted/server/`, `hosted/src/`, `hosted/scripts/`,
-`hosted/wrangler.jsonc`, `remote-lib-common/src/remote/one-time-wire.ts`, and
+Read `docs/specs/hosted.md`, `docs/specs/one-time.md` (its "Wire contract",
+"Hosted rendezvous", and "Phone page"), `hosted/server/`, `hosted/src/`,
+`hosted/scripts/`, `hosted/wrangler.jsonc`,
+`remote-lib-common/src/remote/one-time-wire.ts`, the phone page Hosted serves —
+`lib/vite.one-time.config.ts`, `lib/one-time/`, `lib/src/remote/one-time-app/`,
+and `lib/scripts/assert-pocket-worker.mjs` — and
 `.github/workflows/hosted-preview.yml` and
 `.github/workflows/hosted-production.yml` — `docs/specs/security-hosted.md`'s
 Deployment boundary quantifies over the preview and production paths, which

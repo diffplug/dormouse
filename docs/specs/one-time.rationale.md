@@ -46,3 +46,21 @@ of connections a day; Workers Paid's 400,000 GB-s and one million requests a
 month cover about 100,000 a month. One room's worst case is bounded by the
 message cap and the deadline (about 40 GB-s, about $0.0005), and the number of
 rooms by the per-address mint limit.
+
+## Phone page
+
+**Why the sandbox keeps `allow-same-origin`.** Without it the page runs in an
+opaque origin, so its WebSocket handshake carries `Origin: null`, which the
+client route refuses.
+Chrome logs "An iframe which has both allow-scripts and allow-same-origin for
+its sandbox attribute can escape its sandboxing" for the pair even on a
+top-level document (measured in agent-browser's Chrome, 2026-09-28); a
+top-level document has no parent to escape through, and the sandbox still
+withholds popups, forms, modals, and downloads. It was the one console entry on the ready, expired, and invalid
+screens; no directive reported a violation, and a tap's socket to the client
+route and a WebAssembly compile both ran.
+
+**Why the page reloads on `hashchange`.** Opening a link in the tab already
+showing `/connect/` changes only the fragment, which a browser treats as a
+same-document jump: measured in agent-browser's Chrome, 2026-09-28, the page
+stayed on its "invalid" screen with the new link left in the address bar.

@@ -25,6 +25,7 @@ import {
   type PocketSocket,
 } from '../client/pocket-client';
 import { PasskeyAlreadyRegisteredError, browserWebAuthn } from '../client/webauthn';
+import { browserDirectPeer } from '../client/browser-direct-peer';
 import { BURROW_IS_AN_APP, SCAN_LABEL } from '../setup-copy';
 import { probeNoiseSupport, type PairingInvitation } from 'remote-lib-common';
 import {
@@ -112,14 +113,7 @@ export default function App({
         fetch: window.fetch.bind(window),
         webauthn: browserWebAuthn,
         createWebSocket: (url) => new WebSocket(url) as unknown as PocketSocket,
-        // **No ICE servers**: a public STUN or TURN default would hand a third
-        // party this phone's address, and the shipped deployment is a tailnet
-        // where host candidates reach (`docs/specs/remote-api.md` → Transport →
-        // "Direct path"). A browser without WebRTC keeps its session relayed.
-        createDirectPeer: () =>
-          typeof RTCPeerConnection === 'undefined'
-            ? null
-            : new RTCPeerConnection({ iceServers: [] }),
+        createDirectPeer: browserDirectPeer,
         knownBurrows: indexedDbKnownBurrowStore(),
         pendingDeletions: indexedDbPendingDeletionStore(),
       }),

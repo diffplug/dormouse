@@ -2,6 +2,7 @@ import type { Context, Hono } from "hono";
 import {
   E2E_ID_BYTE_LENGTH,
   isE2eId,
+  ONE_TIME_PAGE_PATH,
   ONE_TIME_ROOM_PARAM,
   ONE_TIME_WS_ROUTES,
   toBase64Url,
@@ -40,6 +41,27 @@ export function oneTimeRoutes(app: Hono<{ Bindings: Env }>) {
     if (!(await allowed(c, c.env.ONE_TIME_JOIN_LIMIT))) return tooMany(c);
     return forward(c, ONE_TIME_WS_ROUTES.client, room);
   });
+}
+
+/**
+ * The one-time phone page (`docs/specs/one-time.md` -> "Phone page"), staged
+ * into the assets under `/connect/`: its shell and its content-hashed assets,
+ * and nothing else under the path, so the SPA fallback never answers there.
+ * Mounted ahead of that fallback.
+ */
+export function oneTimePageRoutes(app: Hono<{ Bindings: Env }>) {
+  const assets = (c: OneTimeContext) => c.env.ASSETS.fetch(c.req.raw);
+  app.get(ONE_TIME_PAGE_PATH.slice(0, -1), assets);
+  app.get(ONE_TIME_PAGE_PATH, assets);
+  app.get(`${ONE_TIME_PAGE_PATH}assets/*`, async (c) => {
+    const response = await assets(c);
+    // A missing file comes back as the SPA fallback's shell, which is never an
+    // answer to a script or stylesheet request.
+    return (response.headers.get("content-type") ?? "").includes("text/html")
+      ? c.notFound()
+      : response;
+  });
+  app.get(`${ONE_TIME_PAGE_PATH}*`, (c) => c.notFound());
 }
 
 function upgrade(c: OneTimeContext) {

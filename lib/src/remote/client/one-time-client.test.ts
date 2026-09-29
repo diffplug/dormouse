@@ -378,6 +378,36 @@ describe('OneTimeClient: the confirmation', () => {
     }
   });
 
+  it('tells the page once an ok outcome is read, before its peer exists, and never on a denial', async () => {
+    const confirmed: number[] = [];
+    const client = makeClient();
+    const burrow = await ScriptedBurrow.create();
+    const result = client.connectOnce(burrow.link, LABEL, () => {}, () => {
+      confirmed.push(offerers.length);
+    });
+    await burrow.answerInit();
+    await burrow.next();
+    expect(confirmed).toEqual([]);
+    burrow.sendControl({ ok: true, burrowLabel: 'Ned’s laptop' });
+    expect(((await burrow.next()) as Record<string, unknown>).t).toBe('direct-offer');
+    expect(confirmed).toEqual([0]);
+    client.close();
+    await result;
+    expect(confirmed).toEqual([0]);
+
+    sockets = [];
+    const denied = makeClient();
+    const second = await ScriptedBurrow.create();
+    const deniedResult = denied.connectOnce(second.link, LABEL, () => {}, () => {
+      confirmed.push(-1);
+    });
+    await second.answerInit();
+    await second.next();
+    second.sendControl({ ok: false, code: 'user-denied' });
+    expect(await deniedResult).toEqual({ ok: false, message: ONE_TIME_DENIAL_MESSAGES['user-denied'] });
+    expect(confirmed).toEqual([0]);
+  });
+
   it('refuses a message 2 that carries a payload, and sends no request', async () => {
     const client = makeClient();
     const burrow = await ScriptedBurrow.create();

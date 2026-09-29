@@ -2,14 +2,24 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// Shared build inputs can change Hosted without editing its directory.
+// Shared build inputs can change Hosted without editing its directory: the
+// theme the account frontend imports, and the one-time phone page it stages
+// (whose Vite config takes Pocket's resolution).
 export function touchesHosted(paths) {
   return paths.some(
     (path) =>
-      /^(hosted\/|remote-lib-common\/src\/|lib\/src\/(theme|lib\/(themes\/|(?:local-json-store|is-record|css-color)\.ts$))|\.github\/workflows\/hosted-[^/]+\.yml$)/.test(
+      /^(hosted\/|remote-lib-common\/src\/|lib\/src\/(theme|remote\/|lib\/(themes\/|(?:local-json-store|is-record|css-color)\.ts$))|lib\/one-time\/|\.github\/workflows\/hosted-[^/]+\.yml$)/.test(
         path,
       ) ||
-      ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"].includes(path),
+      [
+        "package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        "lib/package.json",
+        "lib/vite.one-time.config.ts",
+        "lib/vite.pocket.config.ts",
+        "lib/scripts/assert-pocket-worker.mjs",
+      ].includes(path),
   );
 }
 if (

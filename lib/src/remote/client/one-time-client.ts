@@ -206,13 +206,16 @@ export class OneTimeClient implements RemoteAdapterClient {
    * **Resolves `ok` only once the direct path carries both directions** and the
    * rendezvous is closed, so a page that mounts its wall on the result sends no
    * protocol-v1 before the switch. `onCode` fires the moment the two digits
-   * exist, because the screen has to show them while the outcome is pending.
-   * Every failure resolves with fixed copy; nothing throws but a second call.
+   * exist, because the screen has to show them while the outcome is pending;
+   * `onConfirmed` fires once, when an `ok` outcome is read and the direct path
+   * is about to be tried. Every failure resolves with fixed copy; nothing
+   * throws but a second call.
    */
   async connectOnce(
     link: OneTimeLink,
     label: string,
     onCode: (code: string) => void,
+    onConfirmed?: () => void,
   ): Promise<OneTimeResult> {
     if (this.#phase !== 'idle') throw new Error('a one-time client connects once');
     this.#phase = 'confirming';
@@ -244,6 +247,8 @@ export class OneTimeClient implements RemoteAdapterClient {
       if (!outcome.ok) return this.#finish(ONE_TIME_DENIAL_MESSAGES[outcome.code]);
       // An approval the room closed behind: no peer for a room that is gone.
       if (this.#failure !== null) throw new Error(this.#failure);
+      // The digits have done their job: the screen moves on to the direct path.
+      onConfirmed?.();
       // Armed before `establish`, whose offer can give up synchronously.
       const switched = this.#awaitSwitch();
       // After the outcome and never before: `establish` builds the direct

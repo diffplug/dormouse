@@ -10,6 +10,7 @@ import {
   MAX_ONE_TIME_FORWARDED,
   MAX_ONE_TIME_FRAME_LENGTH,
   ONE_TIME_LINK_TTL_MS,
+  ONE_TIME_PAGE_PATH,
   ONE_TIME_PING,
   ONE_TIME_PONG,
   ONE_TIME_ROOM_PARAM,
@@ -29,15 +30,19 @@ import {
   type OneTimeRoomFrame,
 } from "remote-lib-common";
 import * as smoke from "../../scripts/one-time-smoke.mjs";
+import { contentSecurityPolicy, oneTimePagePolicy } from "../headers";
 import { rateLimitKey } from "../one-time";
 import { bundleWorker, wrangler } from "./bundle";
 import { TEST_ROOM_LIMITS } from "./one-time-limits";
 import { rawUpgrade, type RawSocket } from "./raw-socket";
 
-// The rendezvous in real workerd, without Postgres: the one-time routes never
-// reach Hyperdrive, so this suite runs in the root `pnpm test`.
+// The rendezvous and the phone page in real workerd, without Postgres: the
+// one-time routes never reach Hyperdrive, so this suite runs in the root
+// `pnpm test`.
 
 const origin = "https://hosted.dormouse.sh";
+const PAGE_SCRIPT = `${ONE_TIME_PAGE_PATH}assets/page-abc123.js`;
+const PAGE_SHELL = `<!doctype html><script type="module" crossorigin src="${PAGE_SCRIPT}"></script>`;
 
 async function start(entry: string) {
   const mf = new Miniflare(
@@ -62,10 +67,20 @@ async function start(entry: string) {
         wrangler.ratelimits.map(({ name, ...limit }) => [name, limit]),
       ),
       serviceBindings: {
-        ASSETS: () =>
-          new WorkerResponse("<!doctype html>", {
-            headers: { "content-type": "text/html" },
-          }),
+        // The staged page and its hashed script, with the SPA fallback answering
+        // every other path — an unknown one under /connect/assets/ included —
+        // with the account shell.
+        ASSETS: (request) => {
+          const { pathname } = new URL(request.url);
+          if (pathname === PAGE_SCRIPT)
+            return new WorkerResponse("export const page = 1;\n", {
+              headers: { "content-type": "text/javascript" },
+            });
+          return new WorkerResponse(
+            pathname === ONE_TIME_PAGE_PATH ? PAGE_SHELL : "<!doctype html>",
+            { headers: { "content-type": "text/html" } },
+          );
+        },
       },
     }),
   );
@@ -439,14 +454,19 @@ test("the preview Worker serves the room, and the deployment smoke passes agains
   try {
     const local = preview.url.href.replace(/^http/, "ws");
     // Node's own WebSocket, as the smoke runs in CI, aimed at Miniflare.
-    await smoke.oneTimeSmoke(origin, (url: string, headers: Record<string, string>) => {
-      const { pathname, search } = new URL(url);
-      // Node's WebSocket takes an init with headers, which the DOM typing lacks.
-      const init = {
-        headers: { ...headers, "mf-original-url": url.replace(/^ws/, "http") },
-      } as unknown as string[];
-      return new WebSocket(new URL(pathname + search, local), init);
-    });
+    await smoke.oneTimeSmoke(
+      origin,
+      (url: string, headers: Record<string, string>) => {
+        const { pathname, search } = new URL(url);
+        // Node's WebSocket takes an init with headers, which the DOM typing lacks.
+        const init = {
+          headers: { ...headers, "mf-original-url": url.replace(/^ws/, "http") },
+        } as unknown as string[];
+        return new WebSocket(new URL(pathname + search, local), init);
+      },
+      // Miniflare's own Response, which the smoke reads the way it reads fetch's.
+      ((url: string) => preview.mf.dispatchFetch(url)) as unknown as typeof fetch,
+    );
   } finally {
     await preview.mf.dispose();
   }
@@ -456,4 +476,99 @@ test("the smoke's copies of the contract match remote-lib-common", () => {
   expect(smoke.ONE_TIME_WS_ROUTES).toEqual(ONE_TIME_WS_ROUTES);
   expect(smoke.ONE_TIME_ROOM_PARAM).toBe(ONE_TIME_ROOM_PARAM);
   expect(smoke.WS_CLOSE_ONE_TIME_TAKEN).toBe(WS_CLOSE_ONE_TIME_TAKEN);
+  expect(smoke.ONE_TIME_PAGE_PATH).toBe(ONE_TIME_PAGE_PATH);
+});
+
+/** The page's policy for production, spelled out whole so any widening shows here. */
+const PAGE_POLICY =
+  "default-src 'none'; " +
+  "script-src https://hosted.dormouse.sh/connect/assets/ 'wasm-unsafe-eval'; " +
+  "style-src 'self' 'unsafe-inline'; " +
+  "img-src https://hosted.dormouse.sh/connect/ data: blob:; " +
+  "font-src https://hosted.dormouse.sh/connect/; " +
+  "media-src blob:; " +
+  "connect-src wss://hosted.dormouse.sh/api/one-time/client; " +
+  "worker-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'; " +
+  "object-src 'none'; sandbox allow-scripts allow-same-origin";
+
+const get = (path: string, init?: { method: string }) =>
+  production.mf.dispatchFetch(origin + path, init);
+
+test("the phone page is served under its own policy, and uncached", async () => {
+  expect(oneTimePagePolicy(origin)).toBe(PAGE_POLICY);
+  for (const path of ["/connect", ONE_TIME_PAGE_PATH, `${ONE_TIME_PAGE_PATH}?x=1`]) {
+    const page = await get(path);
+    expect(page.status, path).toBe(200);
+    expect(page.headers.get("content-security-policy"), path).toBe(PAGE_POLICY);
+    expect(page.headers.get("cache-control"), path).toBe("no-store");
+    expect(page.headers.get("x-frame-options"), path).toBe("DENY");
+    expect(page.headers.get("permissions-policy"), path).toBe(
+      "camera=(), microphone=(), geolocation=()",
+    );
+  }
+  expect(await (await get(ONE_TIME_PAGE_PATH)).text()).toBe(PAGE_SHELL);
+});
+
+test("the page's hashed assets are immutable, and a missing one is a 404, not the shell", async () => {
+  const script = await get(PAGE_SCRIPT);
+  expect(script.status).toBe(200);
+  expect(script.headers.get("cache-control")).toBe(
+    "public, max-age=31536000, immutable",
+  );
+  expect(script.headers.get("content-security-policy")).toBe(PAGE_POLICY);
+  for (const path of [
+    `${ONE_TIME_PAGE_PATH}assets/missing-abc123.js`,
+    `${ONE_TIME_PAGE_PATH}assets/`,
+  ]) {
+    const missing = await get(path);
+    expect(missing.status, path).toBe(404);
+    expect(missing.headers.get("content-type") ?? "", path).not.toContain("text/html");
+    expect(missing.headers.get("cache-control"), path).toBe("no-store");
+  }
+});
+
+test("nothing else under /connect/ is served, and the rest of the origin keeps its policy", async () => {
+  for (const path of [
+    `${ONE_TIME_PAGE_PATH}index.html`,
+    `${ONE_TIME_PAGE_PATH}other`,
+    `${ONE_TIME_PAGE_PATH}x/y`,
+  ]) {
+    const response = await get(path);
+    expect(response.status, path).toBe(404);
+    expect(response.headers.get("content-security-policy"), path).toBe(PAGE_POLICY);
+  }
+  expect((await get(ONE_TIME_PAGE_PATH, { method: "POST" })).status).toBe(404);
+  for (const path of ["/", "/connected", "/assets/connect/x.js"]) {
+    const response = await get(path);
+    expect(response.headers.get("content-security-policy"), path).toContain(
+      "script-src 'self'",
+    );
+    expect(response.headers.get("content-security-policy"), path).not.toContain(
+      "sandbox",
+    );
+  }
+});
+
+test("a malformed APP_ORIGIN falls back to the origin's policy on the page", () => {
+  expect(contentSecurityPolicy("/connect/", "http://localhost:8787")).toBe(
+    oneTimePagePolicy("http://localhost:8787"),
+  );
+  expect(oneTimePagePolicy("http://localhost:8787")).toContain(
+    "connect-src ws://localhost:8787/api/one-time/client;",
+  );
+  for (const bad of [
+    undefined,
+    "",
+    "https://hosted.dormouse.sh/",
+    "https://hosted.dormouse.sh; script-src *",
+    "https://hosted.dormouse.sh 'unsafe-inline'",
+    // Each is its own origin by the URL parser's rule, and a directive in the header.
+    "https://evil.example;script-src",
+    "https://evil.example,x",
+    "https://evil.example'x",
+    "javascript:alert(1)",
+  ])
+    expect(contentSecurityPolicy("/connect/", bad), String(bad)).toBe(
+      contentSecurityPolicy("/", origin),
+    );
 });

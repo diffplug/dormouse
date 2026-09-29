@@ -64,3 +64,16 @@ tools:
     # Docker, outside this process tree.
     port: auto
     prespawn_dedupe: [hosted, $PROJECT_ROOT]
+
+  # The one-time rendezvous and phone page on loopback, for trying a one-time
+  # connection end to end: build a Burrow with the variables it prints, then
+  # open a link from its Settings. Port 8787 (or PORT), fixed because that
+  # Burrow build bakes the origin in, so one checkout at a time.
+  one-time:
+    run: pnpm dev:one-time
+    # A real browser, so an agent can drive the phone page at a phone viewport.
+    render: agent-browser-screencast
+    # Wrangler's inspector binds a second port in the same tree, so the loop
+    # announces the page's port and path via OSC 367 once the Worker answers.
+    port: announced
+    prespawn_dedupe: [one-time, $PROJECT_ROOT]

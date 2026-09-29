@@ -12,6 +12,7 @@
   },
   "scripts": {
     "dev:hosted": "pnpm --filter dormouse-hosted dev",
+    "dev:one-time": "node hosted/scripts/dev-one-time.mjs",
     "build:hosted": "pnpm --filter dormouse-hosted build",
     "test:hosted": "pnpm --filter dormouse-hosted test",
     "build": "pnpm run build:vscode && pnpm --filter dormouse-lib build:pocket && pnpm --filter dormouse-website build && pnpm build:hosted",

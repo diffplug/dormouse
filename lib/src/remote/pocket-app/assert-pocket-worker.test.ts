@@ -13,18 +13,23 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
+import { ONE_TIME_PAGE_PATH } from 'remote-lib-common';
 
 // @ts-expect-error -- a plain build script, deliberately not part of the app's
 // TypeScript program; the shapes it takes and returns are exercised below.
 import {
   assertPocketShell,
   assertPocketWorker,
+  ONE_TIME_BASE,
+  ONE_TIME_SHELL,
   SHELL_FILE,
   WORKER_FILE,
 } from '../../../scripts/assert-pocket-worker.mjs';
 
+type ShellBases = { base: string; scriptBase: string };
 const check = assertPocketWorker as (outDir: string) => number;
-const checkShell = assertPocketShell as (outDir: string) => number;
+const checkShell = assertPocketShell as (outDir: string, bases?: ShellBases) => number;
+const oneTimeShell = ONE_TIME_SHELL as ShellBases;
 
 /** A `dist-pocket` holding whatever root files a case needs. */
 function fixture(files: Record<string, string>): string {
@@ -136,5 +141,48 @@ describe('assertPocketShell', () => {
 
   it('fails when the shell is missing', () => {
     expect(() => checkShell(join(tmpdir(), 'no-such-pocket-build'))).toThrow(/does not exist/);
+  });
+});
+
+describe('assertPocketShell for the one-time page', () => {
+  const checkOneTime = (dir: string) => checkShell(dir, oneTimeShell);
+
+  it('keeps its copy of the page path equal to the link grammar’s', () => {
+    expect(ONE_TIME_BASE).toBe(ONE_TIME_PAGE_PATH);
+  });
+
+  it('accepts the shape `build:one-time` emits', () => {
+    const dir = shell(
+      '<style>html{height:100%}</style>' +
+        '<script type="module" crossorigin src="/connect/assets/index-CfO_bf48.js"></script>' +
+        '<link rel="stylesheet" crossorigin href="/connect/assets/index-jbiwRWCc.css">',
+    );
+    expect(checkOneTime(dir)).toBe(1);
+  });
+
+  it('fails on a script outside /connect/assets/, which the page’s policy refuses', () => {
+    // Same-origin, and so fine for Pocket — but Hosted serves the page
+    // `script-src <origin>/connect/assets/`, so each would be blocked there.
+    for (const src of ['/assets/index-abc.js', '/connect/index-abc.js', '/connect/assetsx/a.js']) {
+      expect(() => checkOneTime(shell(`<script type="module" src="${src}"></script>`)), src).toThrow(
+        /outside \/connect\/assets\//,
+      );
+    }
+    expect(checkShell(shell('<script type="module" src="/assets/index-abc.js"></script>'))).toBe(1);
+  });
+
+  it('fails on a link outside /connect/', () => {
+    expect(() => checkOneTime(shell('<link rel="manifest" href="/manifest.webmanifest">'))).toThrow(
+      /outside \/connect\//,
+    );
+  });
+
+  it('still fails on an inline or off-origin script', () => {
+    expect(() => checkOneTime(shell('<script type="module">!function(){}();</script>'))).toThrow(
+      /inline script/,
+    );
+    expect(() =>
+      checkOneTime(shell('<script src="//cdn.example.com/connect/assets/x.js"></script>')),
+    ).toThrow(/not same-origin/);
   });
 });

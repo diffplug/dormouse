@@ -229,18 +229,28 @@ describe("this repo's own dormouse.yml", () => {
   });
 
   it('declares the shipped tools', () => {
-    expect([...file.tools.keys()].sort()).toEqual(['hosted', 'innerdogfood', 'relay', 'storybook', 'website']);
+    expect([...file.tools.keys()].sort()).toEqual([
+      'hosted',
+      'innerdogfood',
+      'one-time',
+      'relay',
+      'storybook',
+      'website',
+    ]);
     expect(file.tools.get('storybook')?.run).toBe('pnpm storybook');
     expect(file.tools.get('innerdogfood')?.run).toBe('pnpm innerdogfood');
     // storybook only needs framing; the rest are agent-drivable, and the
     // Relay and Hosted sign-ins need the cookies an iframe drops.
     expect(file.tools.get('storybook')?.render).toBe('iframe');
-    for (const name of ['innerdogfood', 'website', 'relay', 'hosted']) {
+    for (const name of ['innerdogfood', 'website', 'relay', 'hosted', 'one-time']) {
       expect(file.tools.get(name)?.render).toBe('agent-browser-screencast');
     }
-    // innerdogfood announces, because its dev bridge binds before vite; the
-    // rest autobind the one port they open.
-    expect(file.tools.get('innerdogfood')?.port).toBe('announced');
+    // innerdogfood announces, because its dev bridge binds before vite, and
+    // one-time because Wrangler's inspector binds beside its Worker; the rest
+    // autobind the one port they open.
+    for (const name of ['innerdogfood', 'one-time']) {
+      expect(file.tools.get(name)?.port).toBe('announced');
+    }
     for (const name of ['storybook', 'website', 'relay', 'hosted']) {
       expect(file.tools.get(name)?.port).toBe('auto');
     }

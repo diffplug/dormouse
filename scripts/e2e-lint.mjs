@@ -137,6 +137,9 @@ const ONE_TIME_PHONE_MODULES = [
   'lib/src/remote/client/session-core.ts',
 ];
 
+/** The one-time phone page, served from an origin Hosted's accounts share: every module in it. */
+const ONE_TIME_PAGE_TREE = 'lib/src/remote/one-time-app/';
+
 /**
  * Every way a phone module could keep something past its page: the browser's
  * stores and its worker registry by name, or an import of Pocket's own —
@@ -398,12 +401,13 @@ export const RULES = [
     violation: "\nimport { BurrowAcl } from 'remote-lib-common';\n",
   },
   {
-    rule: 'The one-time phone and its session core name no store',
+    rule: 'The one-time phone, its page, and its session core name no store',
     security: 'may name no browser store or service worker',
     kind: 'forbid',
-    files: ONE_TIME_PHONE_MODULES,
+    files: [...ONE_TIME_PHONE_MODULES, ...sourceFilesUnder([ONE_TIME_PAGE_TREE])],
     // A one-time phone keeps nothing: its static is minted for one handshake
-    // and dropped with the session. A store or a Pocket module in either file
+    // and dropped with the session, and its page persists nothing on an origin
+    // it shares with accounts. A store or a Pocket module in any of these files
     // is the leading indicator that something has started to outlive it — the
     // same reasoning as the runtime's grant rule above.
     pattern: PHONE_PERSISTENCE,
@@ -483,7 +487,10 @@ export const RULES = [
     security: 'the worker in `lib/src/remote/pocket-app/sw.ts` is the only thing that opens one',
     kind: 'require',
     file: 'lib/package.json',
-    pattern: /node scripts\/assert-pocket-worker\.mjs/,
+    // Anchored inside `build:pocket`, in its worker-checking form: `build:one-time`
+    // runs the same script with `--one-time`, which checks a shell and no
+    // worker, so a bare match stayed green after `build:pocket` dropped it.
+    pattern: /"build:pocket":\s*"[^"]*&& node scripts\/assert-pocket-worker\.mjs"/,
   },
   {
     rule: 'The root build runs the Pocket build, so CI sees a real bundler output',

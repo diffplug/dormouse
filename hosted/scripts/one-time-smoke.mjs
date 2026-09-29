@@ -10,6 +10,7 @@ export const ONE_TIME_WS_ROUTES = {
 };
 export const ONE_TIME_ROOM_PARAM = "room";
 export const WS_CLOSE_ONE_TIME_TAKEN = 4011;
+export const ONE_TIME_PAGE_PATH = "/connect/";
 
 const TIMEOUT_MS = 15_000;
 
@@ -17,11 +18,13 @@ const TIMEOUT_MS = 15_000;
 const open = (url, headers) => new WebSocket(url, { headers });
 
 /**
- * The live rendezvous: a Burrow can mint, a browser Origin cannot, a phone
- * from `origin` joins and a frame crosses each way unchanged, and a second
- * phone is refused as taken. `connect` stands in for the socket in tests.
+ * The live rendezvous: the phone page is served under its own policy with its
+ * script beside it, a Burrow can mint, a browser Origin cannot, a phone from
+ * `origin` joins and a frame crosses each way unchanged, and a second phone is
+ * refused as taken. `connect` and `fetchPage` stand in for the network in tests.
  */
-export async function oneTimeSmoke(origin, connect = open) {
+export async function oneTimeSmoke(origin, connect = open, fetchPage = fetch) {
+  await pageSmoke(origin, fetchPage);
   const base = origin.replace(/^http/, "ws");
   const burrowUrl = base + ONE_TIME_WS_ROUTES.burrow;
   const burrow = watch(connect(burrowUrl, {}));
@@ -63,6 +66,36 @@ export async function oneTimeSmoke(origin, connect = open) {
   } finally {
     burrow.socket.close(1000);
   }
+}
+
+/**
+ * `/connect/` answers the page under its path-scoped policy — scripts from its
+ * own assets, the client route its one socket — and the script the shell names
+ * is there, as a content-hashed asset rather than the SPA fallback.
+ */
+async function pageSmoke(origin, fetchPage) {
+  const page = await fetchPage(origin + ONE_TIME_PAGE_PATH);
+  assert.equal(page.status, 200, "Hosted serves the one-time page");
+  assert.match(page.headers.get("content-type") ?? "", /text\/html/);
+  const policy = page.headers.get("content-security-policy") ?? "";
+  for (const directive of [
+    `script-src ${origin}${ONE_TIME_PAGE_PATH}assets/ 'wasm-unsafe-eval'`,
+    `connect-src ${origin.replace(/^http/, "ws")}${ONE_TIME_WS_ROUTES.client}`,
+    "sandbox allow-scripts allow-same-origin",
+  ])
+    assert.ok(
+      policy.split("; ").includes(directive),
+      `The one-time page's policy carries ${directive}`,
+    );
+  const script = /<script\b[^>]*\ssrc="([^"]+)"/.exec(await page.text())?.[1];
+  assert.ok(
+    script?.startsWith(`${ONE_TIME_PAGE_PATH}assets/`),
+    "The one-time shell loads its script from its own assets",
+  );
+  const asset = await fetchPage(origin + script);
+  assert.equal(asset.status, 200, "The one-time page's script is served");
+  assert.doesNotMatch(asset.headers.get("content-type") ?? "", /text\/html/);
+  assert.match(asset.headers.get("cache-control") ?? "", /immutable/);
 }
 
 /**

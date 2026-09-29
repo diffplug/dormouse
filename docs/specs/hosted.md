@@ -7,7 +7,7 @@
 
 **Must serve the account frontend and its API from `https://hosted.dormouse.sh`.** The Hono Worker serves Vite assets and pgstencil's request-scoped Better Auth adapter. Requests addressed to another origin receive 421. Marketing remains a separate bundle and deployment; no marketing component is imported.
 
-**Must mount the one-time rendezvous routes after the bindings mapper and the 421 gate and before the account API**, sharing the origin gate and headers and nothing of auth. Both bindings mappers pass its Durable Object and rate-limit bindings; `remote-lib-common` is compiled in from source through `hosted/tsconfig.json` `paths`, which every esbuild bundle and Wrangler honor.
+**Must mount the one-time rendezvous routes after the bindings mapper and the 421 gate and before the account API**, sharing the origin gate and headers and nothing of auth. **Must serve the one-time phone page under `/connect/` ahead of the SPA fallback**; `build` stages it (`docs/specs/one-time.md` -> "Phone page"). Both bindings mappers pass its Durable Object and rate-limit bindings; `remote-lib-common` is compiled in from source through `hosted/tsconfig.json` `paths`, which every esbuild bundle and Wrangler honor.
 
 **Must run committed Better Auth migrations before deploying code that needs them, never during a Worker request.** Postgres is reached through an uncached Hyperdrive binding. The runtime creates and closes its database pool within each request.
 
@@ -15,7 +15,7 @@
 
 **Must declare every peer dependency of the installed packages in `hosted/package.json`**, so they share Hosted's copy and Renovate updates them.
 
-Source of truth: `auth` in `hosted/server/worker.ts`; `workerApp` in `hosted/server/worker-app.ts`; `oneTimeRoutes` in `hosted/server/one-time.ts`; `migrations` in `hosted/server/migrations.ts`; `verifyPackages` in `hosted/scripts/production.mjs`. Pinned by `hosted/server/tests/artifacts.test.ts` and `hosted/server/tests/one-time.test.ts`.
+Source of truth: `auth` in `hosted/server/worker.ts`; `workerApp` in `hosted/server/worker-app.ts`; `oneTimeRoutes` / `oneTimePageRoutes` in `hosted/server/one-time.ts`; `stageOneTime` in `hosted/scripts/stage-one-time.mjs`; `migrations` in `hosted/server/migrations.ts`; `verifyPackages` in `hosted/scripts/production.mjs`. Pinned by `hosted/server/tests/artifacts.test.ts` and `hosted/server/tests/one-time.test.ts`.
 
 ## Identity and login
 
@@ -45,7 +45,7 @@ Source of truth: `App` in `hosted/src/App.tsx`; `restoreTheme` in `hosted/src/ma
 
 ## Development and release
 
-**Must run local development with `dor tool hosted` inside Dormouse.** A single `http://localhost:<port>` origin, bound to loopback on an OS-assigned port unless `PORT` pins one, serves Vite and Node auth, with a disposable development database. Host, Origin, and Fetch Metadata checks guard the local captured-email inbox; the production entry imports no inbox or test-control handler.
+**Must run local development with `dor tool hosted` inside Dormouse.** A single `http://localhost:<port>` origin, bound to loopback on an OS-assigned port unless `PORT` pins one, serves Vite and Node auth, with a disposable development database. Host, Origin, and Fetch Metadata checks guard the local captured-email inbox; the production entry imports no inbox or test-control handler. `dor tool one-time` runs the rendezvous and phone page on loopback, without a database (`docs/specs/one-time.md` -> "Dev loop").
 
 **Must verify the production Worker bundle and run the consumer's integration suite before release.** Root `pnpm test` runs the `hosted/scripts/*.test.mjs` deploy suites and `test:one-time`, the rendezvous's Miniflare suite, which needs no Docker; the rest of `pnpm test:hosted`'s vitest half needs Docker and is skipped there. The test entry alone injects the packed Better Auth deterministic module. Simulated callbacks do not certify provider registrations; production acceptance requires real browser login with each enabled provider and email delivery.
 

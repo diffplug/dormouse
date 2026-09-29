@@ -44,17 +44,26 @@ export const UNSUPPORTED_BROWSER_BODY =
  * The whole of what a runtime without X25519 gets. **No action, and no remote
  * operation behind it**: every ceremony this app has needs the primitive this
  * browser lacks, so an offer here would be one that cannot work
- * (`docs/specs/remote-security-model.md` → Burrow identity).
+ * (`docs/specs/remote-security-model.md` → Burrow identity). The copy defaults
+ * to Pocket's; another phone page names itself and what it needs.
  */
-export function UnsupportedBrowser(): React.ReactElement {
+export function UnsupportedBrowser({
+  heading = 'Dormouse Pocket',
+  title = UNSUPPORTED_BROWSER_TITLE,
+  body = UNSUPPORTED_BROWSER_BODY,
+}: {
+  heading?: string;
+  title?: string;
+  body?: string;
+}): React.ReactElement {
   return (
     <div className={PK.app}>
       <header className={PK.header}>
-        <h1 className={PK.headerTitle}>Dormouse Pocket</h1>
+        <h1 className={PK.headerTitle}>{heading}</h1>
       </header>
       <div className={clsx(PK.body, PK.bodyCenter)}>
-        <p className={PK.title}>{UNSUPPORTED_BROWSER_TITLE}</p>
-        <p className={PK.lead}>{UNSUPPORTED_BROWSER_BODY}</p>
+        <p className={PK.title}>{title}</p>
+        <p className={PK.lead}>{body}</p>
       </div>
     </div>
   );
@@ -77,15 +86,20 @@ export const PAIRING_CODE_LABEL = 'Pairing code';
 export function PairingCodeView({
   code,
   onCancel,
+  heading = 'Pairing',
+  instruction = 'Type these digits on the computer to approve.',
 }: {
   /** Null for the moment between the handshake and the sampled code. */
   code: string | null;
   onCancel: () => void;
+  /** The header, and what to do with the digits; Pocket's pairing copy by default. */
+  heading?: string;
+  instruction?: string;
 }): React.ReactElement {
   return (
     <div className={PK.app}>
       <header className={PK.header}>
-        <h1 className={PK.headerTitle}>Pairing</h1>
+        <h1 className={PK.headerTitle}>{heading}</h1>
       </header>
       <div className={clsx(PK.body, PK.bodyCenter)}>
         {/* Named and announced structurally, so what identifies this screen — to
@@ -94,9 +108,7 @@ export function PairingCodeView({
         <p className={PK.code} role="status" aria-label={PAIRING_CODE_LABEL} aria-live="polite">
           {code ?? '··'}
         </p>
-        <p className={clsx(PK.lead, 'text-center')}>
-          Type these digits on the computer to approve.
-        </p>
+        <p className={clsx(PK.lead, 'text-center')}>{instruction}</p>
         <button
           type="button"
           className={pkButton({ tone: 'outline', block: true })}

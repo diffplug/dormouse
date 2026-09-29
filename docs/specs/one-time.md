@@ -2,7 +2,7 @@
 
 > See `docs/specs/glossary.md` for Burrow, Client, Relay, Pane, and Baseboard vocabulary; this spec uses them bare.
 > Owns the one-time connection: the link a Burrow shows, the Hosted rendezvous that carries only its handshake, and the direct-only session that follows. Defers the ceremony's trust rules to `docs/specs/remote-security-model.md` -> "One-time connection" and the audited checks to `docs/specs/security-remote.md` -> "One-time connection".
-> The shared contract, the Burrow runtime, the phone client, and the Hosted rendezvous are built; the service commands and both interfaces are the **one-time-connection** scope under `## Future`.
+> The shared contract, the Burrow runtime, the phone client and page, and the Hosted rendezvous are built; the service commands and the laptop's interface are the **one-time-connection** scope under `## Future`.
 
 A phone reaches a laptop with no account, no Relay, and no passkey: the laptop
 shows a link, the phone opens it, a person types on the laptop the two digits the
@@ -163,14 +163,15 @@ Noise initiator through the in-memory room `lib/src/remote/test-rendezvous.ts`.
 
 **`OneTimeClient` is single-use: one `connectOnce`, one rendezvous socket, and
 at most one session**, on `ClientSessionCore`, direct or not at all.
-`connectOnce(link, label, onCode)`:
+`connectOnce(link, label, onCode, onConfirmed?)`:
 
 1. Mints a static with `generateNoiseKeyPair`, writes message 1, then joins the
    link's room on the client route and completes IK; both payloads are empty.
 2. Hands the two digits to `onCode`, sends `OneTimeRequestV1 {code, label}`,
    and reads one outcome.
-3. On `ok`, establishes the session and offers the direct path, which has
-   `ONE_TIME_DIRECT_DEADLINE_MS` to carry both directions.
+3. On `ok`, calls `onConfirmed`, establishes the session, and offers the
+   direct path, which has `ONE_TIME_DIRECT_DEADLINE_MS` to carry both
+   directions.
 4. At the switch, closes the rendezvous normally and resolves
    `{ok: true, burrowLabel}`.
 
@@ -258,6 +259,94 @@ Source of truth: `oneTimeRoutes` / `rateLimitKey` in
 `hosted/server/one-time.ts`; `OneTimeRoom` in `hosted/server/one-time-room.ts`;
 `hosted/wrangler.jsonc`. Pinned by `hosted/server/tests/one-time.test.ts`.
 
+## Phone page
+
+Hosted serves the phone's half at `ONE_TIME_PAGE_PATH` (`/connect/`): `OneTimeApp`
+on Pocket's screens, chrome, and mobile wall.
+
+| Screen | When |
+| --- | --- |
+| unsupported | `probeNoiseSupport` fails, or there is no `RTCPeerConnection` |
+| invalid | no fragment, or one `parseOneTimeLinkUrl` refuses at the epoch |
+| ready | a live link: the time left, and Connect |
+| code | from the tap: the two digits, and Cancel |
+| connecting | from `onConfirmed`: "Connecting directly…", and Cancel |
+| wall | from an `ok` result: the computer's label, `direct`, End, over `PocketWall` |
+| not connected | an expired link, a failed attempt, or any ending: the client's fixed copy, no action |
+
+- **Must take the fragment and erase it with `history.replaceState` before the
+  first render**, parsed or not, and reload on `hashchange`, so a link opened in
+  a tab already on the page is taken the same way.
+- **Never open a socket before the Connect tap**: the tap builds the client and
+  runs `connectOnce`, so a link-preview crawler spends nothing.
+- **Never persist anything** on an origin Hosted's accounts share: no storage,
+  IndexedDB, worker, push, or cookie. `applyPocketTheme` applies Pocket's
+  default theme without reading or writing a stored pick, for the page and its
+  `PocketWall`. `scripts/e2e-lint.mjs` holds the page to the client's store rule.
+- **Mounts the wall only on `ok`**, through `mountRemoteWall`. End, Cancel, a
+  reported ending, a failed mount, or a failed attachment closes the client and
+  releases the adapter; the first ending's copy stays.
+
+**Build.** `build:one-time` in `lib/package.json` builds `lib/one-time/` with
+`lib/vite.one-time.config.ts` (base `ONE_TIME_PAGE_PATH`, Pocket's resolution,
+no module-preload polyfill) into `lib/dist-one-time`, then runs
+`assertPocketShell --one-time`: scripts under `/connect/assets/`, links under
+`/connect/`, nothing inline. Hosted's `build` runs it first, and
+`hosted/scripts/stage-one-time.mjs`, after Hosted's Vite build, copies it to
+`dist/connect/` and checks the copy.
+
+**Serving.** The Worker answers `/connect`, `/connect/`, and
+`/connect/assets/*` from its assets ahead of the SPA fallback; an HTML answer
+under `/connect/assets/` and any other `/connect/*` path is a 404. A hashed
+file there is cached as `/assets/` is. Everything under `/connect` carries this
+policy, from `APP_ORIGIN` (`<o>`; `<ws-o>` with `http` replaced by `ws`):
+
+```
+default-src 'none'; script-src <o>/connect/assets/ 'wasm-unsafe-eval';
+style-src 'self' 'unsafe-inline'; img-src <o>/connect/ data: blob:;
+font-src <o>/connect/; media-src blob:; connect-src <ws-o>/api/one-time/client;
+worker-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'none';
+object-src 'none'; sandbox allow-scripts allow-same-origin
+```
+
+- **An `APP_ORIGIN` that is not exactly `scheme://host[:port]` of plain host
+  characters gets the origin-wide policy instead**: the URL parser admits `;`,
+  `,`, and `'` in a host.
+- **The sandbox keeps `allow-same-origin`**, and Chrome's warning about the pair
+  stands (rationale).
+
+`docs/specs/security-hosted.md` -> "Rendezvous boundary" holds the audited checks.
+
+Source of truth: `OneTimeApp` in `lib/src/remote/one-time-app/OneTimeApp.tsx`;
+`takeOneTimeLinkUrl` / `reloadOnNewLink` in
+`lib/src/remote/one-time-app/take-link.ts`; `applyPocketTheme` in
+`lib/src/remote/pocket-app/pocket-theme.ts`; `assertPocketShell` in
+`lib/scripts/assert-pocket-worker.mjs`; `stageOneTime` in
+`hosted/scripts/stage-one-time.mjs`; `oneTimePageRoutes` in
+`hosted/server/one-time.ts`; `contentSecurityPolicy` in
+`hosted/server/headers.ts`. Pinned by
+`lib/src/remote/one-time-app/OneTimeApp.test.tsx`,
+`lib/src/remote/pocket-app/assert-pocket-worker.test.ts`,
+`hosted/scripts/stage-one-time.test.mjs`, and
+`hosted/server/tests/one-time.test.ts`; `oneTimeSmoke` in
+`hosted/scripts/one-time-smoke.mjs` checks a deployment's page and script.
+
+## Dev loop
+
+**`dor tool one-time` (root `pnpm dev:one-time`) runs the rendezvous and page
+on loopback, without Postgres**: the production entry under `wrangler dev
+--local`, bound to `127.0.0.1` on `PORT` or 8787 — fixed, since a Burrow build
+bakes the origin in. `devConfig` sets `APP_ORIGIN` to `http://localhost:<port>`,
+the host a Dor Tool frames, copies the Durable Object, migration, and rate
+limits, and carries no route, Hyperdrive, or secret; `vite build --watch`
+rebuilds the page into the folder Wrangler serves. Once the page answers, the
+loop prints the origin and the Burrow build variables
+(`DORMOUSE_ONE_TIME_ORIGIN`, `DORMOUSE_REMOTE_CONNECT_SRC`) and announces the
+page over OSC 367, since Wrangler's inspector binds a second port.
+
+Source of truth: `devConfig` in `hosted/scripts/dev-one-time.mjs`. Pinned by
+`hosted/scripts/dev-one-time.test.mjs`.
+
 ## Future
 
 **Scope: one-time-connection** — the feature on top of the contract, in build
@@ -265,9 +354,7 @@ order, each stage promoting its part above the fold:
 
 1. **Service commands and host glue** — `BurrowService` commands and event, the
    baked origin, the `serving` gate, approval `kind`, standalone and VS Code.
-2. **Phone page** — Pocket's shared views and wall mount moved out of its App,
-   the `/connect/` entry, its build, staging, and CSP, the dev loop.
-3. **Laptop UI** — the Settings panel and the Baseboard indicator; the button
+2. **Laptop UI** — the Settings panel and the Baseboard indicator; the button
    enabled.
 
 **Scope: one-time-anywhere** — reach past one network, for paid users: STUN and
@@ -320,16 +407,6 @@ limit.
   `oneTimeEnd` idly from a non-broker window, and while a one-time connection is
   active keeps a SecretStorage serving marker so sibling windows join the peer
   net and their terminals reach the phone.
-
-### Phone
-
-- **The page** (lib/src/remote/one-time-app/, built to Hosted's `/connect/`):
-  invalid, expired, or unsupported → Connect → code → "Connecting directly…" →
-  the wall with the laptop's label and End → ended. **It persists nothing**; its
-  origin is shared with accounts.
-- **`/connect/` gets its own CSP** — scripts from its own assets, `connect-src`
-  the client route only, sandboxed. `dev:one-time` runs the rendezvous on
-  loopback as a `one-time` Dor Tool.
 
 ### Laptop UI
 
